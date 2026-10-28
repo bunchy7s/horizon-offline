@@ -1,13 +1,13 @@
 name: launcher-fork-build
-# Builds this fork's launcher for Windows (and Linux and macOS) by hand and uploads the
-# archives as workflow artifacts. With `publish` set, it also attaches them to a release
-# tagged `launcher-offline-<tag input>`. The upstream release pipeline (launcher.yml) needs
-# signing secrets this fork doesn't have, so it never publishes here.
+# Builds this fork's launcher on Windows and Linux by hand (the upstream launcher.yml needs this
+# fork's missing signing secrets and its own macOS runner, so it never publishes here). The
+# archives are uploaded as workflow artifacts; with `publish` and a tag they are also attached
+# to a release with that tag.
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag when publishing (empty: artifacts only)
+        description: "Release tag when publishing (empty: artifacts only)"
         required: false
         default: ""
       publish:
@@ -18,37 +18,52 @@ on:
 permissions:
   contents: write
 
+env:
+  # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
+  HORIZON_TELEMETRY_URL: "off"
+
 jobs:
   build:
+    name: build ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
         include:
+          - name: linux
+            os: ubuntu-22.04
+            asset: horizon-launcher-linux-x86_64.tar.gz
+            binary: horizon-launcher
           - name: windows
             os: windows-latest
-            binary: horizon-launcher.exe
             asset: horizon-launcher-windows-x64.zip
-          - name: linux
-            os: ubuntu-latest
-            binary: horizon-launcher
-            asset: horizon-launcher-linux-x86_64.tar.gz
-          - name: macos
-            os: macos-latest
-            binary: horizon-launcher
-            asset: horizon-launcher-macos-arm64.zip
+            binary: horizon-launcher.exe
+            # The C runtime linked in: without it the launcher asks for VCRUNTIME140.dll,
+            # which only the Visual C++ redistributable installs.
+            rustflags: -C target-feature=+crt-static
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 40
     env:
-      HORIZON_TELEMETRY_URL: "off"
+      RUSTFLAGS: ${{ matrix.rustflags }}
+    defaults:
+      run:
+        working-directory: launcher
+        shell: bash
     steps:
       - uses: actions/checkout@v4
-      - name: Build
-        working-directory: launcher
-        run: cargo build --release -p horizon-launcher
-      - name: Package
-        shell: bash
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher
+          shared-key: launcher-${{ matrix.name }}
+      - name: Linux libraries GPUI links to
+        if: runner.os == 'Linux'
         run: |
-          cd launcher
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev
+      - run: cargo test --release --locked
+      - run: cargo build --release --locked
+      - name: Package
+        run: |
           rm -rf dist out && mkdir -p dist out
           cp target/release/${{ matrix.binary }} dist/
           if [[ "${{ matrix.asset }}" == *.tar.gz ]]; then
@@ -56,15 +71,27 @@ jobs:
           else
             (cd dist && 7z a ../out/${{ matrix.asset }} ${{ matrix.binary }})
           fi
+          ls -l out
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
           path: launcher/out/*
+          retention-days: 7
+
+  release:
+    needs: build
+    if: inputs.publish && inputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
       - name: Publish
-        if: inputs.publish && inputs.tag != ''
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ inputs.tag }}" --title "First test" --notes "" --target "$GITHUB_SHA" || true
-          gh release upload "${{ inputs.tag }}" launcher/out/${{ matrix.asset }} --clobber
+          gh release create "${{ inputs.tag }}" --target "$GITHUB_SHA" \
+            --title "First test" --notes "" || true
+          gh release upload "${{ inputs.tag }}" dist/horizon-launcher-* --clobber
