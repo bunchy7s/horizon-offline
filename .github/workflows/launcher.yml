@@ -14,23 +14,9 @@ name: launcher
 #   gh workflow run launcher --ref <branch>                    # dry run: builds everything, publishes nothing
 #   gh workflow run launcher --ref main -f dry_run=false -f force=true
 
+# This fork: never runs on its own. The upstream triggers (pushes to main and the 10-minute
+# release train) are removed; run it by hand from the Actions tab if you want a dry-run build.
 on:
-  push:
-    branches: [main, launcher, 'launcher-*']
-    paths:
-      # Every crate the launcher builds in, as tools/release_train.py's LAUNCHER_PATHS.
-      - 'launcher/**'
-      - 'crates/horizon-bench/**'
-      - 'crates/horizon-friends/**'
-      - 'crates/horizon-mods/**'
-      - 'crates/horizon-port-pack/**'
-      - 'crates/horizon-prepare/**'
-      - 'crates/horizon-release-sign/**'
-      - 'crates/horizon-telemetry/**'
-      - 'crates/horizon-theme/**'
-      - '.github/workflows/launcher.yml'
-  schedule:
-    - cron: '7-59/10 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
