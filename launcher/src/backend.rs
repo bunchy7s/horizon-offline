@@ -1216,12 +1216,11 @@ fn download_for_owner(
         &mut accounts,
     );
     let _ = accounts.save();
-    let name = pass
-        .ok()
-        .and_then(|p| p.owner)
-        .map(|(owner, _)| owner.name);
+    let name = pass.ok().and_then(|p| p.owner).map(|(owner, _)| owner.name);
     match &name {
-        Some(name) => log(format!("{name} owns Minecraft: downloading {v} from Mojang")),
+        Some(name) => log(format!(
+            "{name} owns Minecraft: downloading {v} from Mojang"
+        )),
         None => log(format!("Downloading {v} from Mojang")),
     }
     let os = match sources::Os::current() {
@@ -1230,7 +1229,9 @@ fn download_for_owner(
         sources::Os::Windows => "windows",
     };
     mojang::download(pins, dir, os, 8, fetch, &mojang::CANCEL, log).map_err(|e| match name {
-        Some(name) => format!("\n  • Horizon tried to download {v} from Mojang for {name}, but: {e}"),
+        Some(name) => {
+            format!("\n  • Horizon tried to download {v} from Mojang for {name}, but: {e}")
+        }
         None => format!("\n  • Horizon tried to download {v} from Mojang, but: {e}"),
     })
 }

@@ -231,7 +231,7 @@ class ReleaseTrainTests(unittest.TestCase):
         # GitHub's latest is a game release: whoever lands on it is sent to the launcher first (#1647).
         _, body = train.notes("game", "v0.2.50", [pr(1)], ["- Sound cuts out after an hour."])
         self.assertTrue(body.startswith('<h3>Want to play? Download the <a href="https://playhorizon.dev">Horizon launcher'))
-        self.assertIn('href="https://github.com/horizon-rust/horizon/releases?q=launcher&amp;expanded=true"', body)
+        self.assertIn(f'href="https://github.com/{train.REPO}/releases?q=launcher&amp;expanded=true"', body)
         self.assertNotIn("\n", train.PLAYERS, "one line: one HTML block, which ends at the blank line after it")
         self.assertEqual(body.count("playhorizon.dev"), 1, "said once, at the top")
         _, body = train.notes("game", "v0.2.51", [], [])

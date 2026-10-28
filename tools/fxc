@@ -1,0 +1,4 @@
+#!/bin/sh
+# fxc.exe for cross-compiles: gpui's Windows shader build step runs this (GPUI_FXC_PATH);
+# it drives the D3DCompile shim under Wine (tools/fxc_shim.c).
+exec wine "$(dirname "$0")/fxc_shim.exe" "$@"

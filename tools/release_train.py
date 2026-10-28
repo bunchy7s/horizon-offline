@@ -39,7 +39,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-REPO = os.environ.get("GITHUB_REPOSITORY", "horizon-rust/horizon")
+REPO = os.environ.get("GITHUB_REPOSITORY", "bunchy7s/horizon-offline")
 # The maintainer, left out of the notes' thanks (the repository's owner is the horizon-rust organization).
 MAINTAINER = "ludovic111"
 # Releases ship in batches, so players get a few releases a day rather than one per merge: BATCH player-facing pull
