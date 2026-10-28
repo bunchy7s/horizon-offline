@@ -97,8 +97,8 @@ fn trash_stopped_server(
     }
     let state = dir.join(".horizon");
     fs::create_dir_all(&state).map_err(|e| e.to_string())?;
-    // The supervisor holds this same lock throughout starting, running and stopping.
-    // Hold it through the move so a stale UI/API status cannot delete a live server.
+    // The supervisor holds this same lock throughout starting, running and stopping. Taking it
+    // proves no supervisor is running, so a stale UI/API status cannot delete a live server.
     let lock = fs::File::options()
         .create(true)
         .truncate(false)
@@ -107,6 +107,9 @@ fn trash_stopped_server(
         .map_err(|e| e.to_string())?;
     lock.try_lock()
         .map_err(|_| "Stop the server before deleting it.".to_string())?;
+    // The lock proved no supervisor holds it (it holds the same one while it runs). It is
+    // released before the move: Windows refuses to rename a folder with a file in it open.
+    drop(lock);
     trash(dir).map_err(|e| format!("Could not move the server to the trash: {e}"))
 }
 
