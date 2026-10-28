@@ -204,6 +204,8 @@ pub struct Memories {
     pub nearest_hostile: Slot<Who>,
     pub hiding_place: Slot<[i32; 3]>,
     pub heard_bell_time: Slot<i64>,
+    /// `NEAREST_VISIBLE_WANTED_ITEM`: where the item entity lies.
+    pub nearest_wanted_item: Slot<[f64; 3]>,
     pub cant_reach_walk_target_since: Slot<i64>,
     pub golem_detected_recently: Slot<bool>,
     pub last_slept: Slot<i64>,
@@ -236,6 +238,7 @@ impl Memories {
         self.nearest_hostile.tick();
         self.hiding_place.tick();
         self.heard_bell_time.tick();
+        self.nearest_wanted_item.tick();
         self.cant_reach_walk_target_since.tick();
         self.golem_detected_recently.tick();
         self.last_slept.tick();
@@ -322,6 +325,8 @@ pub struct Brain {
     baby: bool,
     /// Whether the nearest-bed sensor's batch cache is used (`NearestBedSensor`).
     bed_cache: Vec<([i32; 3], i64)>,
+    /// `NearestItemSensor` is due; the game, which knows the items, answers.
+    scan_items: bool,
 }
 #[derive(Clone, Debug)]
 struct Entry {
@@ -362,6 +367,7 @@ impl Brain {
             shuffle_seed,
             baby,
             bed_cache: Vec::new(),
+            scan_items: false,
         };
         b.list = packages(baby, shuffle_seed, farmer);
         b
@@ -556,7 +562,7 @@ fn tick_sensors(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom) {
         match i {
             0 => sense_living(m, w),
             1 => sense_players(m, w),
-            2 => {}
+            2 => brain_mut(m).scan_items = true,
             3 => sense_bed(m, w, lr),
             4 => sense_hurt(m, w),
             5 => sense_hostiles(m, w),
@@ -1245,7 +1251,16 @@ enum B {
         valid: Vec<[i32; 3]>,
         worked: i32,
     },
-    UseBonemeal(Timed),
+    UseBonemeal {
+        t: Timed,
+        next_work: i64,
+        last_session: i64,
+        worked: i32,
+        crop: Option<[i32; 3]>,
+        /// The next crop is picked on the next tick, when the level shows the
+        /// age the meal gave (vanilla grows the crop at once).
+        repick: bool,
+    },
     WalkToBlockMemory {
         running: bool,
         which: PoiMem,
@@ -1347,13 +1362,13 @@ impl B {
             | B::GoToPotentialJobSite(t)
             | B::DoNothing(t)
             | B::TradeWithVillager(t)
-            | B::UseBonemeal(t)
             | B::Celebrate(t) => t.running,
             B::MoveToTargetSink { t, .. }
             | B::GiveGiftToHero { t, .. }
             | B::ShowTrades { t, .. }
             | B::WorkAtPoi { t, .. }
             | B::HarvestFarmland { t, .. }
+            | B::UseBonemeal { t, .. }
             | B::JumpOnBed { t, .. }
             | B::MakeLove { t, .. }
             | B::SleepInBed { t, .. } => t.running,
@@ -1679,17 +1694,38 @@ impl B {
                 }
                 true
             }
-            B::UseBonemeal(t) => {
+            B::UseBonemeal {
+                t,
+                next_work,
+                last_session,
+                worked,
+                crop,
+                repick,
+            } => {
                 let mm = mem(m);
                 if mm.look_target.present() || mm.walk_target.present() {
                     return false;
                 }
-                // Bone meal in the inventory is needed; checked every 10 ticks.
-                let has = super::villager::ext(m)
-                    .is_some_and(|e| e.count_item("minecraft:bone_meal") > 0);
-                let _ = t;
-                let _ = has;
-                false
+                // Checked every 10 ticks, and not within 160 ticks of the last session.
+                let age = i64::from(m.age);
+                if age % 10 != 0 || (*last_session != 0 && *last_session + 160 > age) {
+                    return false;
+                }
+                if super::villager::ext(m).is_none_or(|e| e.count_item("minecraft:bone_meal") == 0)
+                {
+                    return false;
+                }
+                *crop = pick_bonemeal_crop(m, cx);
+                if crop.is_none() {
+                    return false;
+                }
+                t.begin(cx.lr, cx.now);
+                bonemeal_target(m, *crop);
+                m.extra.main_hand = Some("minecraft:bone_meal".into());
+                *next_work = cx.now;
+                *worked = 0;
+                *repick = false;
+                true
             }
             // -- OneShots.
             B::InteractWithDoor {
@@ -1824,7 +1860,32 @@ impl B {
                 },
                 r,
             ),
-            B::GoToWantedItem(_) => false,
+            B::GoToWantedItem(r) => one(
+                || {
+                    let mm = mem(m);
+                    if mm.walk_target.present() {
+                        return false;
+                    }
+                    let Some(at) = mm.nearest_wanted_item.value() else {
+                        return false;
+                    };
+                    // item.closerThan(body, 4); a villager can pick up loot.
+                    if m.position.distance_squared(Vec3::new(at[0], at[1], at[2])) >= 16.0 {
+                        return false;
+                    }
+                    let mm = mem(m);
+                    // The item's eye height is 0.2125.
+                    mm.look_target
+                        .set(Tracker::Point([at[0], at[1] + 0.2125, at[2]]));
+                    mm.walk_target.set(WalkTarget {
+                        target: Tracker::Point(at),
+                        speed: 0.5,
+                        close: 0,
+                    });
+                    true
+                },
+                r,
+            ),
             B::AcquirePoi {
                 running,
                 filter,
@@ -2494,16 +2555,7 @@ impl B {
                     if dist_sqr(bell, block_of(m.position)) < 9
                         && cx.w.block_name(bell[0], bell[1], bell[2]) == "minecraft:bell"
                     {
-                        cx.events.push(MobEvent::SoundId(
-                            "minecraft:block.bell.use".into(),
-                            [
-                                f64::from(bell[0]) + 0.5,
-                                f64::from(bell[1]) + 0.5,
-                                f64::from(bell[2]) + 0.5,
-                            ],
-                            2.0,
-                            1.0,
-                        ));
+                        cx.events.push(MobEvent::RingBell { bell });
                     }
                     true
                 },
@@ -2649,17 +2701,61 @@ impl B {
                     if cx.lr.next_int_bound(10).unwrap_or(0) != 0 {
                         return false;
                     }
-                    // Who chases whom is in the other kids' brains: chase the
-                    // first friend.
-                    if let Some(&kid) = friends.first() {
-                        let mm = mem(m);
-                        mm.interaction_target.set(kid);
-                        mm.look_target.set(Tracker::Entity(kid, true));
-                        mm.walk_target.set(WalkTarget {
-                            target: Tracker::Entity(kid, false),
-                            speed: 0.6,
-                            close: 1,
-                        });
+                    // What a friend chases is its INTERACTION_TARGET.
+                    let chasing = |who: Who| match who {
+                        Who::Mob(id) => {
+                            cx.w.seen(id)
+                                .and_then(|s| s.villager.as_ref())
+                                .and_then(|v| v.interaction_target)
+                        }
+                        Who::Player => None,
+                    };
+                    let me = Who::Mob(m.id);
+                    if !friends.iter().any(|&f| chasing(f) == Some(me)) {
+                        // The kid chased by the fewest (one to five) chasers, else any friend.
+                        let mut chased: Vec<(Who, i32)> = Vec::new();
+                        for &f in &friends {
+                            if let Some(c) = chasing(f) {
+                                match chased.iter_mut().find(|(k, _)| *k == c) {
+                                    Some(e) => e.1 += 1,
+                                    None => chased.push((c, 1)),
+                                }
+                            }
+                        }
+                        let target = chased
+                            .iter()
+                            .filter(|(_, n)| *n > 0 && *n <= 5)
+                            .min_by_key(|(_, n)| *n)
+                            .map(|&(k, _)| k)
+                            .or_else(|| friends.first().copied());
+                        if let Some(kid) = target {
+                            let mm = mem(m);
+                            mm.interaction_target.set(kid);
+                            mm.look_target.set(Tracker::Entity(kid, true));
+                            mm.walk_target.set(WalkTarget {
+                                target: Tracker::Entity(kid, false),
+                                speed: 0.6,
+                                close: 1,
+                            });
+                        }
+                    } else {
+                        // Chased: run to a spot inside the village.
+                        let villages = village_sections(m, cx.w);
+                        for _ in 0..10 {
+                            let Some(p) = m.land_random_pos(cx.w, 20, 8) else {
+                                continue;
+                            };
+                            let at = [
+                                p[0].floor() as i32,
+                                p[1].floor() as i32,
+                                p[2].floor() as i32,
+                            ];
+                            let section = [at[0] >> 4, at[1] >> 4, at[2] >> 4];
+                            if sections_to_village(&villages, section) <= 1 {
+                                mem(m).walk_target.set(WalkTarget::point(p, 0.6, 0));
+                                break;
+                            }
+                        }
                     }
                     true
                 },
@@ -2974,7 +3070,45 @@ impl B {
                     });
                 }
             }
-            B::UseBonemeal(_) => self.do_stop(m, cx),
+            B::UseBonemeal {
+                t,
+                next_work,
+                worked,
+                crop,
+                repick,
+                ..
+            } => {
+                if *repick {
+                    *repick = false;
+                    *crop = pick_bonemeal_crop(m, cx);
+                    bonemeal_target(m, *crop);
+                }
+                // canStillUse: fewer than 80 work cycles and a crop to work on.
+                if now > t.end || *worked >= 80 || crop.is_none() {
+                    self.do_stop(m, cx);
+                    return;
+                }
+                let Some(p) = *crop else { return };
+                if now >= *next_work && closer_to_center(p, m.position, 1.0) {
+                    let e = super::villager::ext_mut(m);
+                    // BoneMealItem.growCrop: a CropBlock below max age takes the meal.
+                    if let Some(slot) = e
+                        .inventory
+                        .iter()
+                        .position(|s| s.count > 0 && &*s.item == "minecraft:bone_meal")
+                        && bonemeal_valid(cx.w, p)
+                    {
+                        e.inventory[slot].count -= 1;
+                        if e.inventory[slot].count == 0 {
+                            e.inventory.remove(slot);
+                        }
+                        cx.events.push(MobEvent::Bonemeal { pos: p });
+                        *repick = true;
+                        *next_work = now + 40;
+                    }
+                    *worked += 1;
+                }
+            }
             _ => {}
         }
     }
@@ -3062,7 +3196,13 @@ impl B {
                 t.running = false;
                 mem(m).breed_target.clear();
             }
-            B::UseBonemeal(t) => t.running = false,
+            B::UseBonemeal {
+                t, last_session, ..
+            } => {
+                t.running = false;
+                m.extra.main_hand = None;
+                *last_session = i64::from(m.age);
+            }
             B::WorkAtPoi { t, .. } => t.running = false,
             B::HarvestFarmland {
                 t, next_ok, worked, ..
@@ -3328,6 +3468,39 @@ fn harvest_tick(
             mm.walk_target.set(WalkTarget::block(q, 0.5, 1));
             mm.look_target.set(Tracker::Block(q));
         }
+    }
+}
+/// `UseBonemeal.validPos`: a `CropBlock` below its max age.
+fn bonemeal_valid(w: &MobWorld, p: [i32; 3]) -> bool {
+    super::villager::crop(w, p) && !super::villager::ripe_crop(w, p)
+}
+/// `UseBonemeal.pickNextTarget`: one of the valid blocks around the villager,
+/// each equally likely (reservoir sampling with the level random).
+fn pick_bonemeal_crop(m: &Mob, cx: &mut Bx) -> Option<[i32; 3]> {
+    let c = block_of(m.position);
+    let mut result = None;
+    let mut count = 0;
+    for x in -1..=1 {
+        for y in -1..=1 {
+            for z in -1..=1 {
+                let p = [c[0] + x, c[1] + y, c[2] + z];
+                if bonemeal_valid(cx.w, p) {
+                    count += 1;
+                    if cx.lr.next_int_bound(count).unwrap_or(1) == 0 {
+                        result = Some(p);
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+/// `UseBonemeal.setCurrentCropAsTarget`.
+fn bonemeal_target(m: &mut Mob, crop: Option<[i32; 3]>) {
+    if let Some(p) = crop {
+        let mm = mem(m);
+        mm.look_target.set(Tracker::Block(p));
+        mm.walk_target.set(WalkTarget::block(p, 0.5, 1));
     }
 }
 /// The remembered POI positions a behaviour reads.
@@ -3825,7 +3998,17 @@ fn packages(baby: bool, seed: i64, farmer: bool) -> Vec<Entry> {
                         },
                         if farmer { 2 } else { 5 },
                     ),
-                    (B::UseBonemeal(timed(60, 60)), if farmer { 4 } else { 7 }),
+                    (
+                        B::UseBonemeal {
+                            t: timed(60, 60),
+                            next_work: 0,
+                            last_session: 0,
+                            worked: 0,
+                            crop: None,
+                            repick: false,
+                        },
+                        if farmer { 4 } else { 7 },
+                    ),
                 ],
             ),
         );
@@ -4207,6 +4390,21 @@ pub fn woken(m: &mut Mob, now: i64) {
     if brain(m).is_some() {
         mem(m).last_woken.set(now);
     }
+}
+/// `BellBlockEntity.updateEntities`: a bell rung within 32 blocks sets
+/// `HEARD_BELL_TIME` to the game time.
+pub fn heard_bell(m: &mut Mob, now: i64) {
+    if brain(m).is_some() {
+        mem(m).heard_bell_time.set(now);
+    }
+}
+/// Whether `NearestItemSensor` is due for this villager (it is then reset).
+pub fn take_item_scan(m: &mut Mob) -> bool {
+    brain(m).is_some() && std::mem::take(&mut brain_mut(m).scan_items)
+}
+/// `NearestItemSensor.doTick`: the nearest wanted item in sight, or none.
+pub fn set_wanted_item(m: &mut Mob, at: Option<[f64; 3]>) {
+    mem(m).nearest_wanted_item.set_opt(at);
 }
 /// What other villagers see of this one's brain.
 pub fn potential_job_site(m: &Mob) -> Option<[i32; 3]> {

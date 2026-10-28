@@ -65,14 +65,13 @@ impl Game<'_> {
             .unwrap_or_default();
         self.spawners.entity_types = Some(types);
     }
-    /// The server tick of the spawner at `key`, if its block is still a
-    /// spawner. Its client tick comes after every block entity's
-    /// (`client_tick_spawners`).
+    /// The server tick of the spawner at `key`. Its client tick comes after
+    /// every block entity's (`client_tick_spawners`).
+    ///
+    /// The caller only reaches this for a `BlockEntity::Spawner`, and changing
+    /// the block removes or replaces that entity, so the block is not read
+    /// again here.
     pub(super) fn tick_spawner(&mut self, key: Pos) -> Result<()> {
-        let state = self.world.block(key.0, key.1, key.2);
-        if &*self.res.facts().get(state).name != "minecraft:spawner" {
-            return Ok(());
-        }
         let Some(BlockEntity::Spawner(mut spawner)) = self.world.block_entities.take(&key) else {
             return Ok(());
         };

@@ -124,8 +124,23 @@ def prepare_local(root, version, found, store):
         run([python(), "tools/lab.py", "prepare", "--minecraft-dir", tree, "--server-jar", found["server"]], root)
 
 
+_PYTHON = None
+
+
 def python():
-    return shutil.which("python3") or "python3"
+    """The interpreter to run the other tools with. Git for Windows puts a
+    `python3` on PATH that is only the Store stub: it prints "Python" and exits
+    49, so probe the names and keep the first one that runs Python 3."""
+    global _PYTHON
+    if _PYTHON is None:
+        _PYTHON = "python3"
+        for name in ("python3", "python", "py"):
+            found = shutil.which(name)
+            probe = [found, "-c", "import sys; sys.exit(sys.version_info < (3,))"] if found else None
+            if probe and subprocess.run(probe, capture_output=True).returncode == 0:
+                _PYTHON = found
+                break
+    return _PYTHON
 
 
 class Failed(RuntimeError):

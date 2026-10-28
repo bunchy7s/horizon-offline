@@ -327,6 +327,11 @@ def entities():
         cmd('/data get entity @e[tag=attr,limit=1] Health'),
         cmd('/attribute @e[tag=attr,limit=1] minecraft:attack_damage base get'),
         cmd('/kill @e[tag=attr]'),
+        # A summoned mob is not persistent: vanilla never calls
+        # `Mob.setPersistenceRequired` for a mob it spawns (#2787).
+        cmd('/summon minecraft:zombie 4.5 210 12.5'),
+        cmd('/execute if entity @e[type=minecraft:zombie,nbt={PersistenceRequired:1b}]'),
+        cmd('/kill @e[type=minecraft:zombie]'),
         # An End crystal is an entity of its own: a type selector finds it,
         # reads it and kills it (#1531).
         cmd('/summon minecraft:end_crystal 4.5 210 8.5'),

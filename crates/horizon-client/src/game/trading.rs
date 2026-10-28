@@ -137,7 +137,9 @@ impl Game<'_> {
                 horizon_world::nbt::Tag::Int(horizon_world::DATA_VERSION),
             ),
         ]);
-        let _ = horizon_client::save::write_dat(&self.random_sequences_path(), tag);
+        if let Err(e) = horizon_client::save::write_dat(&self.random_sequences_path(), tag) {
+            log::warn!("the villager random sequences were not written: {e}");
+        }
     }
     /// `AbstractVillager.addOffersFromTradeSet` with the world's random
     /// sequence of the set, at the merchant's position.
@@ -783,7 +785,7 @@ impl Game<'_> {
         for i in slots {
             let (sx, sy) = self.slot_position(i);
             let stack = self.slot_mut(i).clone();
-            self.draw_slot_item(batch, drag.as_ref(), i, stack, ox + sx, oy + sy);
+            self.draw_slot_item(batch, drag.as_ref(), i, &stack, ox + sx, oy + sy);
         }
         if let Some(slot) = self.slot_at(batch, self.cursor.0, self.cursor.1) {
             let (sx, sy) = self.slot_position(slot);

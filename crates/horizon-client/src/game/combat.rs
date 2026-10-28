@@ -39,6 +39,11 @@ pub(super) struct CombatTracker {
     pub(super) last_hurt_mob: Option<(u32, i64)>,
     /// The mob whose projectile is hitting the player now.
     pub(super) projectile_owner: Option<u32>,
+    /// The display name of the projectile hitting the player now: the
+    /// `DamageSource.directEntity` the death message names when no owner is
+    /// known (`AbstractArrow.onHitEntity` makes an ownerless arrow its own
+    /// cause).
+    pub(super) projectile_direct: Option<Text>,
     /// The projectile hitting the player now is another player's that
     /// `ServerPlayer.canHarmPlayer` refuses (the `pvp` rule, an ally).
     pub(super) refuse_player_hit: bool,
@@ -208,6 +213,7 @@ impl Game<'_> {
         }
         self.combat.pending.clear();
         self.combat.pending_direct.clear();
+        self.combat.projectile_direct = None;
         self.combat.fall_before = self.player.as_ref().map_or(0.0, |p| p.fall_distance);
     }
     /// `FallLocation.getCurrentFallLocation` and the fall distance so far.

@@ -9,7 +9,7 @@ A comment by Ludovic or by a login in .github/trusted-reviewers.txt, on any issu
     /nightly 2640 2642     the set becomes these pull requests, merged onto main in this order; builds now
     /nightly add 2650      adds one, or takes its newest head again; builds now
     /nightly remove 2640   drops one; builds now. Ludovic's remove also keeps reviewers from adding it back
-    /nightly clear         empties the set: the Nightly is the proven union or main again; builds now
+    /nightly clear         empties the set: the Nightly is main alone again; builds now
     /nightly status        what the set holds
     /nightly dry-run 2640  builds main + these and signs with a throwaway key; publishes nothing, the set stays
 
@@ -194,7 +194,7 @@ def plain(text: str) -> str:
 
 def describe(prs: list[dict], heading: str = "The set") -> str:
     if not prs:
-        return "The set is empty: the Nightly is the newest proven union, or main."
+        return "The set is empty: the Nightly is main alone."
     lines = [f"{heading} ({len(prs)}), merged onto main in this order:"]
     lines += [f"- #{e['number']} {plain(e['title'])} (by {e['author']}, at {e['head'][:7]}, asked by "
               f"{e['asked_by']})" for e in prs]

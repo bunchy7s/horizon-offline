@@ -20,12 +20,32 @@ pub type Atlas<'a> = &'a dyn Fn(&str) -> Option<[f32; 4]>;
 /// the model UV and reads `enchanted_glint_armor`.
 pub const ARMOR_GLINT: u32 = 13;
 
+/// `RenderTypes.breezeWind`: the texture of the breeze's wind layer scrolls
+/// by 0.02 of the texture per tick.
+pub const BREEZE_WIND_SCROLL: f32 = 0.02;
+/// `WindChargeRenderer.xOffset`: the wind charge's texture scrolls by 0.03 of
+/// the texture per tick.
+pub const WIND_CHARGE_SCROLL: f32 = 0.03;
+/// The offset of a scrolling texture: `RenderTypes.breezeWind` takes the
+/// texture's age times the speed, modulo one.
+pub fn scroll_offset(age: f32, speed: f32) -> f32 {
+    (age * speed) % 1.0
+}
+/// The vertex's U with the scroll: the texture matrix of
+/// `RenderTypes.breezeWind` moves the texture under the model, so the U
+/// moves by the offset and wraps around the texture.
+fn scroll_u(u: f32, scroll: f32) -> f32 {
+    if scroll == 0.0 { u } else { (u + scroll) % 1.0 }
+}
+
 /// One draw of a model with a texture.
 pub struct Layer {
     pub model: String,
     pub texture: String,
     pub color: u32,
     pub full_bright: bool,
+    /// `RenderTypes.breezeWind`: the texture scrolls with the entity's age.
+    pub scroll: f32,
 }
 /// DyeColor.getTextureDiffuseColor (RGB).
 pub const DYE: [u32; 16] = [
@@ -437,6 +457,7 @@ pub fn layers(m: &Mob) -> Vec<Layer> {
             texture: texture.into(),
             color,
             full_bright,
+            scroll: 0.0,
         })
     };
     match m.species() {
@@ -490,16 +511,17 @@ pub fn layers(m: &Mob) -> Vec<Layer> {
                 push(&mut v, "happy_ghast_harness#main", &texture, white, false);
             }
         }
-        // BreezeWindLayer (the scroll is not reproduced: atlas sprites do
-        // not wrap) and BreezeEyesLayer.
+        // BreezeWindLayer and BreezeEyesLayer. The wind layer's texture
+        // scrolls (`RenderTypes.breezeWind`): the offset is taken inside the
+        // sprite, so the atlas does not have to wrap.
         S::Breeze => {
-            push(
-                &mut v,
-                "breeze#wind",
-                "entity/breeze/breeze_wind",
-                white,
-                false,
-            );
+            v.push(Layer {
+                model: "breeze#wind".into(),
+                texture: "entity/breeze/breeze_wind".into(),
+                color: white,
+                full_bright: false,
+                scroll: scroll_offset(m.age as f32, BREEZE_WIND_SCROLL),
+            });
             push(
                 &mut v,
                 "breeze#eyes",
@@ -827,6 +849,7 @@ fn humanoid_armor(m: &Mob, v: &mut Vec<Layer>) {
             texture: format!("entity/equipment/{folder}/{asset}"),
             color: tint,
             full_bright: false,
+            scroll: 0.0,
         });
         if asset == "leather" {
             v.push(Layer {
@@ -834,6 +857,7 @@ fn humanoid_armor(m: &Mob, v: &mut Vec<Layer>) {
                 texture: format!("entity/equipment/{folder}/leather_overlay"),
                 color: 0xFFFF_FFFF,
                 full_bright: false,
+                scroll: 0.0,
             });
         }
     }
@@ -1047,12 +1071,30 @@ pub fn draw(
     overlay: u32,
     out: &mut Vec<Vertex>,
 ) {
+    draw_scrolled(part, base, poses, uv, 0.0, color, light, overlay, out);
+}
+/// `draw` for a texture that scrolls: the vertex's U is moved by the offset
+/// and wraps inside the texture, as the texture matrix of
+/// `RenderTypes.breezeWind` does.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_scrolled(
+    part: &Part,
+    base: glam::Mat4,
+    poses: &Poses,
+    uv: [f32; 4],
+    scroll: f32,
+    color: u32,
+    light: u32,
+    overlay: u32,
+    out: &mut Vec<Vertex>,
+) {
     draw_normals(
         part,
         base,
         ModelNormals::new(base),
         poses,
         uv,
+        scroll,
         color,
         light,
         overlay,
@@ -1066,6 +1108,7 @@ fn draw_normals(
     normals: ModelNormals,
     poses: &Poses,
     uv: [f32; 4],
+    scroll: f32,
     color: u32,
     light: u32,
     overlay: u32,
@@ -1103,7 +1146,7 @@ fn draw_normals(
                     normal,
                     pos: pos.to_array(),
                     uv: [
-                        uv[0] + (uv[2] - uv[0]) * v[3],
+                        uv[0] + (uv[2] - uv[0]) * scroll_u(v[3], scroll),
                         uv[1] + (uv[3] - uv[1]) * v[4],
                     ],
                     layer: overlay,
@@ -1115,7 +1158,7 @@ fn draw_normals(
         }
     }
     for c in &part.children {
-        draw_normals(c, m, normals, poses, uv, color, light, overlay, out);
+        draw_normals(c, m, normals, poses, uv, scroll, color, light, overlay, out);
     }
 }
 /// Render a mob with its variant model, texture and layers.
@@ -1236,6 +1279,7 @@ fn render_visible(
                     texture: texture.into(),
                     color: ((a.clamp(0.0, 1.0) * 255.0) as u32) << 24 | 0x00FF_FFFF,
                     full_bright: true,
+                    scroll: 0.0,
                 });
             }
         }
@@ -1277,11 +1321,12 @@ fn render_visible(
             None => overlay,
         };
         let start = out.len();
-        draw(
+        draw_scrolled(
             &part,
             base,
             &layer_poses,
             uv,
+            layer.scroll,
             layer.color,
             light,
             overlay,
@@ -1669,5 +1714,32 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod scroll_tests {
+    use super::*;
+
+    #[test]
+    fn the_scrolling_texture_wraps_around() {
+        // RenderTypes.breezeWind: the breeze's wind layer's texture scrolls
+        // by 0.02 of the texture per tick, the wind charge's by 0.03.
+        assert_eq!(scroll_offset(0.0, BREEZE_WIND_SCROLL), 0.0);
+        assert!((scroll_offset(25.0, BREEZE_WIND_SCROLL) - 0.5).abs() < 1e-6);
+        assert!((scroll_offset(50.0, BREEZE_WIND_SCROLL) - 0.0).abs() < 1e-6);
+        assert!((scroll_offset(50.0, WIND_CHARGE_SCROLL) - 0.5).abs() < 1e-6);
+        assert!((scroll_offset(100.0, WIND_CHARGE_SCROLL) - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_scrolled_u_wraps_inside_the_texture() {
+        // Without a scroll the U is the vertex's own.
+        assert_eq!(scroll_u(0.25, 0.0), 0.25);
+        assert_eq!(scroll_u(1.0, 0.0), 1.0);
+        // With one, it moves and wraps around the texture.
+        assert!((scroll_u(0.25, 0.5) - 0.75).abs() < 1e-6);
+        assert!((scroll_u(0.75, 0.5) - 0.25).abs() < 1e-6);
+        assert!((scroll_u(1.0, 0.5) - 0.5).abs() < 1e-6);
     }
 }

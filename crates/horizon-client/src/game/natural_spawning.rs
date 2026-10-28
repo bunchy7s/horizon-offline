@@ -24,6 +24,15 @@ use horizon_core::{
 use horizon_world::registry::BlockStateId;
 use std::collections::HashMap;
 
+/// Reused buffers for one pass over the spawning chunks: the candidate chunks
+/// and the set that keeps each one once. The buffers keep their capacity
+/// between ticks.
+#[derive(Default)]
+pub(super) struct SpawnScratch {
+    pub(super) candidates: Vec<(i32, i32)>,
+    pub(super) seen: horizon_client::fast_hash::FxHashSet<(i32, i32)>,
+}
+
 /// A player in the level in place, as spawning and despawning see it.
 pub(super) struct LevelPlayer {
     pub(super) position: Vec3,
@@ -445,9 +454,17 @@ impl<'a> Game<'a> {
     /// chunks (within 8 chunks of a player, `getSpawnCandidateChunks`) that
     /// are ticking and within 128 blocks of a non-spectator. Also returns how
     /// many chunks the tracker holds (`getNaturalSpawnChunkCount`).
-    pub(super) fn spawning_chunks(&self, players: &[LevelPlayer]) -> (i32, Vec<(i32, i32)>) {
-        let mut candidates: Vec<(i32, i32)> = Vec::with_capacity(289 * players.len());
-        let mut seen = horizon_client::fast_hash::FxHashSet::default();
+    pub(super) fn spawning_chunks(
+        &self,
+        players: &[LevelPlayer],
+        scratch: &mut SpawnScratch,
+    ) -> i32 {
+        let candidates = &mut scratch.candidates;
+        candidates.clear();
+        candidates.reserve(289 * players.len());
+        let seen = &mut scratch.seen;
+        seen.clear();
+        seen.reserve(289 * players.len());
         for p in players {
             let (pcx, pcz) = (
                 p.position.x.floor() as i32 >> 4,
@@ -471,7 +488,7 @@ impl<'a> Game<'a> {
                     .iter()
                     .any(|p| close_enough_for_spawning(p, (cx, cz)))
         });
-        (count, candidates)
+        count
     }
     /// `ServerChunkCache.tickChunks`: the spawn state over the loaded mobs,
     /// the categories under their global caps (creatures every 400 ticks),
@@ -482,8 +499,9 @@ impl<'a> Game<'a> {
         if players.is_empty() {
             return;
         }
-        let (spawnable, mut chunks) = self.spawning_chunks(&players);
-        for &key in &chunks {
+        let mut scratch = std::mem::take(&mut self.spawn_scratch);
+        let spawnable = self.spawning_chunks(&players, &mut scratch);
+        for &key in &scratch.candidates {
             *self.world.inhabited.entry(key).or_insert(0) += 1;
         }
         let spawn_mobs = self.ui.rules.bool("spawn_mobs");
@@ -524,12 +542,12 @@ impl<'a> Game<'a> {
                 Vec::new()
             };
             // Util.shuffle.
-            for i in (1..chunks.len()).rev() {
+            for i in (1..scratch.candidates.len()).rev() {
                 let j = random.next_int_bound(i as i32 + 1).unwrap_or(0) as usize;
-                chunks.swap(i, j);
+                scratch.candidates.swap(i, j);
             }
             if !categories.is_empty() {
-                for chunk in chunks {
+                for chunk in scratch.candidates.drain(..) {
                     let mut spawn = |l: &GameLevel, r: &SpawnRequest| {
                         let spawned = l.game.finalize_spawned(r, &mut pending);
                         if let Some(s) = &spawned {
@@ -551,6 +569,7 @@ impl<'a> Game<'a> {
         }
         self.world.random = random;
         self.add_spawned(pending, false);
+        self.spawn_scratch = scratch;
     }
     /// `NoiseBasedChunkGenerator.spawnOriginalMobs`: creature packs for a
     /// freshly generated chunk, from the biome at its corner column's top,

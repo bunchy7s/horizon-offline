@@ -163,7 +163,7 @@ impl Game<'_> {
     }
 
     /// A `show_dialog` click event's dialog: a registry id or the dialog itself.
-    fn show_dialog_ref(&mut self, dialog: &Tag) {
+    pub(super) fn show_dialog_ref(&mut self, dialog: &Tag) {
         match dialog {
             Tag::String(id) => {
                 let id = id.to_string_lossy();

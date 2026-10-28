@@ -1,3 +1,4 @@
+import subprocess
 import unittest
 
 from tools import port_regen as regen
@@ -46,6 +47,14 @@ class CompileErrorTests(unittest.TestCase):
 
     def test_nothing_from_other_failures(self):
         self.assertEqual(regen.compile_errors("expected the root's order to differ"), [])
+
+
+class InterpreterTests(unittest.TestCase):
+    def test_python_is_an_interpreter_that_runs(self):
+        found = regen.python()
+        done = subprocess.run([found, "-c", "import sys; sys.exit(sys.version_info < (3,))"],
+                              capture_output=True)
+        self.assertEqual(done.returncode, 0, f"{found} is not a Python 3 that runs")
 
 
 if __name__ == "__main__":

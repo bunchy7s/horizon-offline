@@ -120,7 +120,8 @@ impl Game<'_> {
         Ok(())
     }
     /// `WitherSkull.onHitEntity` / `onHit`: 8 damage (healing the wither 5
-    /// when it kills), withering for 10 seconds, then a power 1 blast.
+    /// when it kills), withering on a hit (10 seconds on Normal, 40 on Hard,
+    /// none on Easy), then a power 1 blast.
     pub(super) fn wither_skull_hit(
         &mut self,
         p: &Projectile,
@@ -132,17 +133,24 @@ impl Game<'_> {
             _ => None,
         };
         let amount = if owner.is_some() { 8.0 } else { 5.0 };
+        let wither_ticks = match self.difficulty_id() {
+            2 => 200,
+            3 => 800,
+            _ => 0,
+        };
         match who {
             Some(Who::Player) => {
                 if !self.creative {
                     // WitherSkull.onHitEntity's source: the wither launched it.
                     self.combat.projectile_owner = owner;
-                    self.mob_hits_player_kind(
+                    let hit = self.mob_hits_player(
                         amount,
                         [p.previous.x, p.previous.y, p.previous.z],
                         "minecraft:wither_skull",
                     );
-                    self.give_player_effect("minecraft:wither", 200, 1);
+                    if hit && wither_ticks > 0 {
+                        self.give_player_effect("minecraft:wither", wither_ticks, 1);
+                    }
                 }
             }
             Some(Who::Mob(id)) => {
@@ -154,8 +162,8 @@ impl Game<'_> {
                 let killed = match self.mobs.iter_mut().find(|m| m.id == id) {
                     Some(m) => {
                         let hit = m.damage(amount, source);
-                        if hit && m.alive() && m.species() != Species::Wither {
-                            m.add_effect("minecraft:wither", 200, 1);
+                        if hit && m.alive() && m.species() != Species::Wither && wither_ticks > 0 {
+                            m.add_effect("minecraft:wither", wither_ticks, 1);
                         }
                         hit && !m.alive()
                     }

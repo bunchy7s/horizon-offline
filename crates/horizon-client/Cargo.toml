@@ -70,6 +70,8 @@ unicode-bidi = "0.3.18"
 rustix = { version = "1", default-features = false, features = ["std", "time"] }
 
 [target.'cfg(windows)'.dependencies]
+# Use the registered URI handler without routing links through Explorer/cmd.
+open = { version = "5.4.5", features = ["shellexecute-on-windows"] }
 # DirectX 12, where Vulkan has no adapter or device, or by choice (`graphicsApi`, graphics.rs).
 # Shaders compile with FXC (d3dcompiler_47.dll, part of Windows), or DXC when dxcompiler.dll is
 # on the PATH.

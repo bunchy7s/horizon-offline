@@ -1,2 +1,11 @@
 #!/bin/sh
-exec python3 tools/check_public_tree.py
+# Git for Windows puts a `python3` on PATH that is only the Microsoft Store
+# stub: it prints "Python" and exits non-zero, so the hook fails with no other
+# output. Use the first name that actually runs Python 3.
+for py in python3 python py; do
+    if "$py" -c "import sys; sys.exit(sys.version_info < (3,))" >/dev/null 2>&1; then
+        exec "$py" tools/check_public_tree.py
+    fi
+done
+echo "check_public_tree: no working Python 3 found" >&2
+exit 1

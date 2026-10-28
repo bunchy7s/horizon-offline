@@ -25,12 +25,26 @@ pub const TRANSLUCENT_ITEM_OVERLAY: u32 = 32;
 /// A translucent item with an enchantment glint.
 pub const TRANSLUCENT_GLINT_ITEM_OVERLAY: u32 = 33;
 
+/// The material of a quad by its overlay (`MATERIALS` order).
+fn material(layer: u32) -> usize {
+    match layer {
+        11 => 1,
+        12 => 2,
+        WATER_MASK_OVERLAY => 3,
+        ENERGY_SWIRL_OVERLAY => 4,
+        SHADOW_OVERLAY => 5,
+        TRANSLUCENT_PARTICLE_OVERLAY => 6,
+        TRANSLUCENT_ITEM_OVERLAY | TRANSLUCENT_GLINT_ITEM_OVERLAY => 7,
+        _ => 0,
+    }
+}
+
 #[derive(Default)]
 pub(super) struct EntityBatch {
-    // Quad indices avoid copying vertices twice while grouping materials.
-    // Keep initialized high-water storage; local counts delimit active entries.
-    // Each bucket can hold all quads, removing per-quad Vec growth checks.
-    buckets: [Vec<usize>; MATERIALS],
+    // Runs of consecutive quads of one material (first quad, quad count): a
+    // model's quads share one, so whole runs are copied at once. Cleared each
+    // frame, keeping their storage.
+    runs: [Vec<(usize, usize)>; MATERIALS],
     pub(super) combined: Vec<Vertex>,
 }
 
@@ -43,50 +57,29 @@ impl EntityBatch {
         see_through: &[Vertex],
     ) -> [u32; MATERIALS] {
         let quads = entities.as_chunks::<4>().0;
-        for bucket in &mut self.buckets {
-            if bucket.len() < quads.len() {
-                bucket.resize(quads.len(), 0);
-            }
+        for runs in &mut self.runs {
+            runs.clear();
         }
         let mut counts = [0usize; MATERIALS];
-        for (index, quad) in quads.iter().enumerate() {
-            let material = match quad[0].layer {
-                11 => 1,
-                12 => 2,
-                WATER_MASK_OVERLAY => 3,
-                ENERGY_SWIRL_OVERLAY => 4,
-                SHADOW_OVERLAY => 5,
-                TRANSLUCENT_PARTICLE_OVERLAY => 6,
-                TRANSLUCENT_ITEM_OVERLAY | TRANSLUCENT_GLINT_ITEM_OVERLAY => 7,
-                _ => 0,
-            };
-            self.buckets[material][counts[material]] = index;
-            counts[material] += 1;
+        let mut start = 0;
+        while start < quads.len() {
+            let kind = material(quads[start][0].layer);
+            let end = quads[start + 1..]
+                .iter()
+                .position(|quad| material(quad[0].layer) != kind)
+                .map_or(quads.len(), |n| start + 1 + n);
+            self.runs[kind].push((start, end - start));
+            counts[kind] += end - start;
+            start = end;
         }
         let entity_vertices = quads.len() * 4;
-        self.combined.reserve(
-            (entity_vertices + additive.len() + hand.len() + see_through.len())
-                .saturating_sub(self.combined.len()),
-        );
+        self.combined.clear();
         self.combined
-            .resize(entity_vertices, bytemuck::Zeroable::zeroed());
-        if counts.contains(&quads.len()) {
-            // Uniform materials are already ordered; copy the whole batch.
-            self.combined.copy_from_slice(&entities[..entity_vertices]);
-        } else {
-            let mut offset = 0;
-            for (bucket, &count) in self.buckets.iter().zip(&counts) {
-                let bucket = &bucket[..count];
-                let end = offset + count * 4;
-                for (output, &index) in self.combined[offset..end]
-                    .as_chunks_mut::<4>()
-                    .0
-                    .iter_mut()
-                    .zip(bucket)
-                {
-                    *output = quads[index];
-                }
-                offset = end;
+            .reserve(entity_vertices + additive.len() + hand.len() + see_through.len());
+        for runs in &self.runs {
+            for &(first, count) in runs {
+                self.combined
+                    .extend_from_slice(&entities[first * 4..(first + count) * 4]);
             }
         }
         self.combined.extend_from_slice(additive);
@@ -174,12 +167,12 @@ mod tests {
         let hand = geometry(2, false);
         // Warm every bucket and the combined buffer to their maximum sizes.
         equivalent(&mut batch, &entities, &additive, &hand);
-        let capacities = batch.buckets.each_ref().map(|b| b.capacity());
+        let capacities = batch.runs.each_ref().map(|b| b.capacity());
         let capacity = batch.combined.capacity();
         let pointer = batch.combined.as_ptr();
         for length in [0, 1, 3, 4, 511, entities.len(), 17, 0, entities.len()] {
             equivalent(&mut batch, &entities[..length], &additive[..5], &hand[..3]);
-            assert_eq!(batch.buckets.each_ref().map(|b| b.capacity()), capacities);
+            assert_eq!(batch.runs.each_ref().map(|b| b.capacity()), capacities);
             assert_eq!(batch.combined.capacity(), capacity);
             assert_eq!(batch.combined.as_ptr(), pointer);
         }
@@ -188,11 +181,11 @@ mod tests {
         // Grow again, then confirm empty/small frames retain the new storage.
         let larger = geometry(8192, true);
         equivalent(&mut batch, &larger, &additive, &hand);
-        let capacities = batch.buckets.each_ref().map(|b| b.capacity());
+        let capacities = batch.runs.each_ref().map(|b| b.capacity());
         let capacity = batch.combined.capacity();
         for entities in [&larger[..7], &larger[..], &[]] {
             equivalent(&mut batch, entities, &[], &[]);
-            assert_eq!(batch.buckets.each_ref().map(|b| b.capacity()), capacities);
+            assert_eq!(batch.runs.each_ref().map(|b| b.capacity()), capacities);
             assert_eq!(batch.combined.capacity(), capacity);
         }
     }
@@ -255,9 +248,9 @@ mod tests {
                 before[7] as f64 / after[7] as f64,
                 batch.combined.capacity() * std::mem::size_of::<Vertex>()
                     + batch
-                        .buckets
+                        .runs
                         .iter()
-                        .map(|b| b.capacity() * std::mem::size_of::<usize>())
+                        .map(|b| b.capacity() * std::mem::size_of::<(usize, usize)>())
                         .sum::<usize>()
             );
         }

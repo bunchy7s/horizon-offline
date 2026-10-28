@@ -960,7 +960,8 @@ impl Game<'_> {
                             let amount =
                                 |base: i32| (0.5 * f64::from(base << amp) + 0.5) as i32 as f32;
                             if (*id == "instant_damage") != inverted {
-                                m.hurt(amount(6), Some(at), &mut self.world.random);
+                                let harm = m.potion_harm(amount(6));
+                                m.hurt(harm, Some(at), &mut self.world.random);
                             } else {
                                 m.health = (m.health + amount(4)).min(m.kind.max_health);
                             }
@@ -1228,11 +1229,8 @@ impl Game<'_> {
                 };
                 let m = &mut self.mobs[i];
                 if harm {
-                    m.hurt(
-                        (intensity * f64::from(6 << amp) + 0.5) as i32 as f32,
-                        Some([at.x, at.y, at.z]),
-                        &mut self.world.random,
-                    );
+                    let harm = m.potion_harm((intensity * f64::from(6 << amp) + 0.5) as i32 as f32);
+                    m.hurt(harm, Some([at.x, at.y, at.z]), &mut self.world.random);
                 } else {
                     m.health = (m.health + (intensity * f64::from(4 << amp) + 0.5) as i32 as f32)
                         .min(m.kind.max_health);

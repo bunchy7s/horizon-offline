@@ -5,13 +5,15 @@
     "accepted_manifest_sha1": [
       "4fe1aa1ef8da1cb95c5bad1fb98890ca56dd8ca3",
       "702fe59163c6ee6578607daa85811d9bc9c7cc40",
-      "61fff1316bd50312624a858bbb5eb18fa45208ed"
+      "61fff1316bd50312624a858bbb5eb18fa45208ed",
+      "5df1795e16eea19d75b923d66ecca9ce183353c5"
     ],
     "accepted_manifest_note": "Other 26.3 version JSONs Mojang republished: only assetIndex differs (non-English translations), jars and libraries are identical. A launcher may still hold any of them.",
     "accepted_asset_index_sha1": [
       "abfaa525f923f807df8b4e4d29c1b5e3a104adbe",
       "1e4e4a68dece1c0f51b8f93b45da8fe8da51bcd3",
-      "0c8f43b28f837869c1e54a6aeb22c396a1548946"
+      "0c8f43b28f837869c1e54a6aeb22c396a1548946",
+      "917ff6d74b9f635c46bac0d28857206bbcc1ffe4"
     ],
     "accepted_asset_index_note": "The asset indexes (id 34) of those republished version JSONs: a launcher keeps one 34.json, the last it downloaded, whichever version JSON it reads.",
     "client_sha1": "e877b6a07acd633fb3bb475002175cec036e7b87",

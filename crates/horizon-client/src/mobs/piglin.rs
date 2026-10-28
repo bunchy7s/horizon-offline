@@ -169,7 +169,8 @@ pub fn register_hoglin(m: &mut Mob) {
     let g = &mut m.ai.goals;
     g.add(0, Float);
     g.add(1, BabyPanic(super::goals::Panic::new(1.25)));
-    g.add(2, MeleeAttack::new(1.0, true));
+    // HoglinAi: MeleeAttack.create(40) for adults, 15 for babies.
+    g.add(2, MeleeAttack::new(1.0, true).intervals(40, 15));
     g.add(3, super::goals::Breed::new(1.0));
     g.add(3, HoglinAvoidRepellent);
     g.add(4, super::goals::FollowParent::new(1.1));
@@ -185,7 +186,8 @@ pub fn register_hoglin(m: &mut Mob) {
 pub fn register_zoglin(m: &mut Mob) {
     let g = &mut m.ai.goals;
     g.add(0, Float);
-    g.add(2, MeleeAttack::new(1.0, true));
+    // Zoglin.initMemories: MeleeAttack.create(40) for adults, 15 for babies.
+    g.add(2, MeleeAttack::new(1.0, true).intervals(40, 15));
     g.add(5, Stroll::avoiding_water(0.4));
     g.add(6, LookAtPlayer::new(8.0));
     m.ai.targets.add(1, HurtByTarget::new());

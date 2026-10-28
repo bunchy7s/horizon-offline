@@ -167,6 +167,7 @@ impl StartupMenu {
         }
         match event.physical_key {
             PhysicalKey::Code(KeyCode::Escape) => title.escape(),
+            PhysicalKey::Code(KeyCode::F5) => title.refresh_servers(),
             PhysicalKey::Code(KeyCode::Tab) => title.tab(),
             PhysicalKey::Code(KeyCode::Enter | KeyCode::NumpadEnter) => title.confirm_edit(),
             PhysicalKey::Code(

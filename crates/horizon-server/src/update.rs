@@ -1,9 +1,10 @@
 //! Updates and rollbacks (docs/server.md, section 7) for a `horizon-server` installed by install.sh or
 //! install.ps1: each release in `<dir>/releases/<tag>`, `<dir>/current` pointing at the one in use, and
-//! `<dir>/previous` naming the one before it. An update downloads the newest stable release from GitHub, checks it
-//! against the SHA-256 in the release's signed SHA256SUMS (docs/security.md), unpacks it beside the others and
-//! switches `current`; the supervisor then restarts the game on it and switches back by itself if the new game
-//! doesn't come up.
+//! `<dir>/previous` naming the one before it. An update downloads the current Nightly from GitHub (the only build
+//! Horizon ships since 2026-10-28; GitHub's latest release while there is none), checks it against the SHA-256 in
+//! its signed SHA256SUMS (docs/security.md), unpacks it beside the others as `nightly-<date>-<commit>` and switches
+//! `current`; the supervisor then restarts the game on it and switches back by itself if the new game doesn't come
+//! up.
 
 use crate::{api::Client, backup, config::Config, engine, supervisor};
 use serde_json::{Value, json};
@@ -222,9 +223,10 @@ fn point(link: &Path, target: &Path) -> std::io::Result<()> {
     }
 }
 
-/// A release on GitHub: its tag and the archive for this computer.
+/// A release on GitHub: its name here and the archive for this computer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Release {
+    /// The release's tag, or for a Nightly the version it installs as (`nightly-2026-10-28-0c02067`).
     pub tag: String,
     pub asset: String,
     pub url: String,
@@ -249,14 +251,21 @@ fn fetch(url: &str) -> Result<Vec<u8>, String> {
     Ok(body)
 }
 
-/// The newest stable release (or `tag`), from GitHub's API, with the SHA-256 its signed checksums
-/// give for this computer's archive.
+/// The current Nightly (or `tag`: a release, `nightly` or a dated `nightly-<date>`), from GitHub's
+/// API, with the SHA-256 its signed checksums give for this computer's archive. With no Nightly
+/// published, GitHub's latest release.
 pub fn release(tag: Option<&str>) -> Result<Release, String> {
-    let url = match tag {
-        Some(tag) => format!("https://api.github.com/repos/{REPO}/releases/tags/{tag}"),
-        None => format!("https://api.github.com/repos/{REPO}/releases/latest"),
-    };
-    let text = fetch(&url).map_err(|e| match e.as_str() {
+    let api = |tag: &str| format!("https://api.github.com/repos/{REPO}/releases/tags/{tag}");
+    let text = match tag {
+        Some(tag) => fetch(&api(tag)),
+        None => match fetch(&api(horizon_release_sign::NIGHTLY)) {
+            Err(e) if e == "404" => fetch(&format!(
+                "https://api.github.com/repos/{REPO}/releases/latest"
+            )),
+            found => found,
+        },
+    }
+    .map_err(|e| match e.as_str() {
         "404" => format!("no release {} on GitHub", tag.unwrap_or("")),
         _ => e,
     })?;
@@ -310,15 +319,31 @@ fn pick(
     let sums = attached(horizon_release_sign::SUMS)?;
     let signature = attached(horizon_release_sign::SIGNATURE)?
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
-    let sha256 = horizon_release_sign::signed_digest(
-        tag,
-        name,
-        sums.as_deref(),
-        signature.as_deref(),
-        keys,
-    )?;
+    // A Nightly is signed for its channel, never for a tag, and installs under its date and commit.
+    let (tag, sha256) = if horizon_release_sign::is_nightly(tag) {
+        let version = horizon_release_sign::nightly_version(
+            release["name"].as_str().unwrap_or_default(),
+            release["published_at"].as_str().unwrap_or_default(),
+        );
+        let sha256 = horizon_release_sign::nightly_digest(
+            name,
+            sums.as_deref(),
+            signature.as_deref(),
+            keys,
+        )?;
+        (version, sha256)
+    } else {
+        let sha256 = horizon_release_sign::signed_digest(
+            tag,
+            name,
+            sums.as_deref(),
+            signature.as_deref(),
+            keys,
+        )?;
+        (tag.to_owned(), sha256)
+    };
     Ok(Release {
-        tag: tag.to_owned(),
+        tag,
         asset: name.to_owned(),
         url: asset["browser_download_url"]
             .as_str()
@@ -332,10 +357,12 @@ fn pick(
 /// tagged `vYYYY.MM.DD[.N]` (any `v` and numbers: `Dated`), compared number by number; from 0.2 they are
 /// `vMAJOR.MINOR.PATCH[-PRE]` (`Semver`), and every one of those is newer than every dated one, so
 /// v0.2.0 follows v2026.10.19.15. A pre-release (`v0.3.0-rc.1`) comes before its release, as in semver.
+/// Nightlies (`nightly-<date>-<commit>`, the only builds since 2026-10-28) follow every release, by date.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum TagOrder {
     Dated(Vec<u64>),
     Semver([u64; 3], Prerelease),
+    Nightly(String),
 }
 
 /// A pre-release's place: (is a release, its identifiers). A release has none and follows every
@@ -353,6 +380,9 @@ enum Identifier {
 const FIRST_YEAR: u64 = 1000;
 
 fn tag_order(tag: &str) -> Option<TagOrder> {
+    if let Some(date) = horizon_release_sign::nightly_date(tag) {
+        return Some(TagOrder::Nightly(date.to_owned()));
+    }
     let rest = tag.strip_prefix('v')?;
     let (core, pre) = match rest.split_once('-') {
         Some((core, pre)) => (core, Some(pre)),
@@ -397,6 +427,13 @@ pub fn newer(tag: &str, than: &str) -> bool {
         (Some(_), None) => true,
         _ => false,
     }
+}
+
+/// Whether `tag`, the newest build on GitHub, is an update for a server running `current`: a
+/// different build that isn't older. Two Nightlies of one day are equal by [`newer`], so the one
+/// on GitHub is taken.
+pub fn update_available(tag: &str, current: &str) -> bool {
+    tag != current && tag_order(tag).is_some() && !newer(current, tag)
 }
 
 /// Downloads a release's archive into `<root>/downloads/` and checks its SHA-256; the archive's path.
@@ -599,14 +636,14 @@ pub fn command(dir: &Path, args: &[String]) -> Result<(), String> {
                     json!({
                         "installed": current,
                         "newest": release.tag,
-                        "available": newer(&release.tag, &current),
+                        "available": update_available(&release.tag, &current),
                         "previous": install.previous(),
                     })
                 );
                 return Ok(());
             }
             if check {
-                if newer(&release.tag, &current) {
+                if update_available(&release.tag, &current) {
                     println!(
                         "Horizon {} is out; this server runs {current}. `horizon-server update` installs it.",
                         release.tag
@@ -619,7 +656,7 @@ pub fn command(dir: &Path, args: &[String]) -> Result<(), String> {
                 }
                 return Ok(());
             }
-            if version.is_none() && !newer(&release.tag, &current) {
+            if version.is_none() && !update_available(&release.tag, &current) {
                 println!("Already on the newest release ({current}).");
                 return Ok(());
             }
@@ -854,6 +891,59 @@ mod tests {
         assert!(newer("v0.2.0", "v2026.10.21-x"));
         assert!(newer("v0.2.0", "v0.3.0-"));
         assert!(newer("v0.2.0", "v0.3.0-rc..1"));
+    }
+
+    #[test]
+    fn nightlies_follow_every_release() {
+        let today = "nightly-2026-10-28-0c02067";
+        assert!(newer(today, "v0.2.95"));
+        assert!(newer(today, "v2026.10.21"));
+        assert!(newer(today, "nightly-2026-10-27-1a2b3c4"));
+        assert!(!newer("v0.2.95", today));
+        assert!(newer(today, "local"));
+        // Two builds of one day: neither is newer, but the one on GitHub is the update.
+        let later = "nightly-2026-10-28-9b772b2";
+        assert!(!newer(later, today) && !newer(today, later));
+        assert!(update_available(later, today));
+        assert!(update_available(today, "v0.2.95"));
+        assert!(!update_available(today, today));
+        assert!(!update_available("v0.2.95", today));
+        assert!(!update_available("nightly-2026-10-27-1a2b3c4", today));
+        assert!(update_available("v0.2.96", "v0.2.95"));
+        assert!(!update_available("v0.2.94", "v0.2.95"));
+    }
+
+    #[test]
+    fn a_nightly_is_picked_with_its_channel_signature_and_named_by_its_build() {
+        use horizon_release_sign::{SigningKey, sha256_hex, sums_file};
+        let Some(first) = ASSETS.first() else { return };
+        let asset = |name: &str| json!({ "name": name, "browser_download_url": format!("https://example.invalid/{name}") });
+        let (key, _) = SigningKey::generate().unwrap();
+        let sums = sums_file(&[(first.to_string(), sha256_hex(b"server"))]);
+        let serving = |signed_for: &str| {
+            let (sums, signature) = (sums.clone(), key.sign(signed_for, sums.as_bytes()));
+            move |url: &str| -> Result<Vec<u8>, String> {
+                match url.rsplit('/').next() {
+                    Some("SHA256SUMS") => Ok(sums.clone().into_bytes()),
+                    Some("SHA256SUMS.sig") => Ok(signature.clone().into_bytes()),
+                    _ => Err("404".into()),
+                }
+            }
+        };
+        let nightly = json!({
+            "tag_name": "nightly", "name": "Nightly 2026-10-28 · 0c02067",
+            "published_at": "2026-10-28T20:40:00Z",
+            "assets": [asset(first), asset("SHA256SUMS"), asset("SHA256SUMS.sig")],
+        });
+        let picked = pick(&nightly, serving("nightly"), &[key.public()]).unwrap();
+        assert_eq!(picked.tag, "nightly-2026-10-28-0c02067");
+        assert_eq!(picked.sha256, sha256_hex(b"server"));
+        // A release's signed list served as the Nightly: refused.
+        assert!(pick(&nightly, serving("v0.2.95"), &[key.public()]).is_err());
+        // A Nightly's signed list served as a release: refused.
+        let mut release = nightly.clone();
+        release["tag_name"] = json!("v0.2.95");
+        assert!(pick(&release, serving("nightly"), &[key.public()]).is_err());
     }
 
     #[test]

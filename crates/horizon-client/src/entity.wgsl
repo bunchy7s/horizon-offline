@@ -263,6 +263,16 @@ fn crumbling_uv(uv: vec2<f32>, packed_origin: vec2<f32>, sprite_size: vec2<f32>,
 
 // rendertype_outline.fsh: the vertex colour (the team colour; outline vertices carry no
 // normal, so no cardinal light) wherever the texture is not fully clear.
+// rendertype_entity_shadow.fsh: the shadow texture times the vertex colour,
+// then fog, with no alpha cutout, so a faint shadow in dim light still draws.
+@fragment fn fs_entity_shadow(in: Out) -> @location(0) vec4<f32> {
+    var color = textureSample(atlas, atlas_sampler, in.uv) * in.color;
+    color *= in.light_color;
+    let f = max(linear_fog(in.spherical, globals.fog.x, globals.fog.y),
+                linear_fog(in.cylindrical, globals.fog.z, globals.fog.w));
+    return vec4(mix(color.rgb, globals.fog_color.rgb, f * globals.fog_color.a), color.a);
+}
+
 @fragment fn fs_outline(in: Out) -> @location(0) vec4<f32> {
     if textureSample(atlas, atlas_sampler, in.uv).a == 0.0 { discard; }
     return vec4(in.color.rgb, 1.0);

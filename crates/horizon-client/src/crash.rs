@@ -326,16 +326,18 @@ fn panic_message(info: &std::panic::PanicHookInfo) -> String {
 /// frames go. Paths inside the workspace lose the build machine's prefix.
 pub fn stack_lines(backtrace: &str, from_panic: bool) -> String {
     // The workspace as it was on the machine that built this binary (it need not exist here).
-    let manifest = env!("CARGO_MANIFEST_DIR");
+    // A report names workspace files the same way on every host, whatever
+    // separator the build machine used.
+    let manifest = env!("CARGO_MANIFEST_DIR").replace('\\', "/");
     let root = manifest
         .strip_suffix("crates/horizon-client")
-        .unwrap_or(manifest);
+        .unwrap_or(&manifest);
     let mut frames: Vec<(String, Option<String>)> = Vec::new();
     for line in backtrace.lines() {
         let line = line.trim();
         if let Some(at) = line.strip_prefix("at ") {
             if let Some(frame) = frames.last_mut() {
-                frame.1 = Some(short_path(at, root).to_owned());
+                frame.1 = Some(short_path(&at.replace('\\', "/"), root).to_owned());
             }
         } else if let Some((n, name)) = line.split_once(": ")
             && n.chars().all(|c| c.is_ascii_digit())

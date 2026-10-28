@@ -1459,6 +1459,7 @@ impl Game<'_> {
             banner: &|_| Vec::new(),
             skull: &|_| None,
             glyph: &|c| self.gui.atlas.glyph_cell(c),
+            glyphs: self.gui.atlas.font.epoch(),
         };
         self.res
             .block_entity_render()

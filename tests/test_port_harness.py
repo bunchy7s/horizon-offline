@@ -65,7 +65,10 @@ class AssetTests(unittest.TestCase):
             (store / "minecraft").mkdir(parents=True)
             reports = root / ".local" / "datagen" / "out" / "reports"
             reports.parent.mkdir(parents=True)
-            reports.symlink_to(store)
+            try:
+                reports.symlink_to(store)
+            except OSError as e:
+                self.skipTest(f"this host cannot create symlinks: {e}")
             harness.own_reports(root)
             self.assertFalse(reports.exists() or reports.is_symlink())
             self.assertTrue((store / "minecraft").is_dir())

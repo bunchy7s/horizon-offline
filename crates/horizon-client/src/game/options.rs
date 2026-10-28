@@ -273,6 +273,7 @@ impl Game<'_> {
                 s.horizon.hdr,
                 s.horizon.hdr_paper_white as f32,
                 s.horizon.hdr_peak as f32,
+                &Self::options_path().with_file_name(horizon_client::graphics::HDR_MARKER),
             );
         }
         // Window.updateFullscreenIfChanged: only a changed option asks the

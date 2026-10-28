@@ -91,7 +91,7 @@ fn format_double(v: f64) -> String {
 impl Game<'_> {
     /// Commands.performCommand for a line without its slash.
     pub(super) fn run_command(&mut self, command: &str) -> bool {
-        if self.mod_command(command) {
+        if self.client_mod_command(command) {
             return true;
         }
         let d = vanilla::game_dispatcher();
@@ -1851,7 +1851,7 @@ impl Game<'_> {
             if self.ui.difficulty == 0 && t.category == "monster" {
                 return Err(err("commands.summon.failed.peaceful", &[]));
             }
-            self.spawn_mob(&short, pos, true);
+            self.spawn_mob_spawned(&short, pos);
             name = Text::translate(&format!("entity.minecraft.{short}"), &[]);
         } else {
             match short.as_str() {

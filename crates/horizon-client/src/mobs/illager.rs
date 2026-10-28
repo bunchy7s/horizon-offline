@@ -542,12 +542,12 @@ fn shoot_crossbow(m: &mut Mob, who: Who, cx: &mut Cx) {
         Some(Who::Mob(m.id)),
     );
     p.set_bonus(super::gear::arrow_bonus(m));
-    // rangedAttackUncertainty at normal difficulty: 14 - 2 * 4.
+    // rangedAttackUncertainty: 14 - 4 * difficulty.
     p.shoot(
         &mut crate::projectiles::own_random(m),
         [dx, dy, dz],
         1.6,
-        6.0,
+        (14 - i32::from(cx.w.difficulty.id) * 4) as f32,
     );
     cx.events.push(MobEvent::Projectile(p));
     let pitch = 1.0 / (m.random.next_float() * 0.5 + 1.8) + 0.53;

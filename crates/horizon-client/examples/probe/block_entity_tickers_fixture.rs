@@ -87,7 +87,11 @@ pub fn main() {
             }
             "tick" => {
                 out.push_str("tick");
-                for (p, _) in entities.tickers(|p| states.get(&p).copied().unwrap_or(0)) {
+                for (p, _) in entities
+                    .tickers(|p| states.get(&p).copied().unwrap_or(0))
+                    .iter()
+                    .copied()
+                {
                     out.push_str(&format!(" {},{},{}", p.0, p.1, p.2));
                 }
                 out.push('\n');

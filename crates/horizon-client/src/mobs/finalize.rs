@@ -821,6 +821,22 @@ fn age_boundary_reached(m: &mut Mob) {
         _ => {}
     }
 }
+/// `SpawnEggItem.spawnsEntity`: the spawn egg is for the mob's own kind, so
+/// it is used on it (`Mob.checkAndHandleImportantInteractions`).
+pub fn spawn_egg_is_for(egg: &str, kind: &str) -> bool {
+    egg.strip_suffix("_spawn_egg") == Some(kind)
+}
+
+/// `SpawnEggItem.spawnOffspringFromSpawnEgg`: the offspring of a spawn egg
+/// used on a mob of the same kind is a baby of that kind: it starts with
+/// the age of a baby and keeps the parent's variant and colour.
+pub fn spawn_egg_offspring(child: &mut Mob, species: Species, variant: u8, color: u8) {
+    set_baby(child, true);
+    child.extra.variant = variant;
+    if species == Species::Sheep {
+        child.extra.color = color;
+    }
+}
 /// `setBaby`: AgeableMob through its age, zombies, piglins and zoglins.
 pub fn set_baby(m: &mut Mob, baby: bool) {
     let s = m.species();
@@ -2046,6 +2062,46 @@ pub fn sound_variants(s: Species) -> &'static [&'static str] {
         _ => &[],
     }
 }
+/// A sound of the mob's `*_sound_variant` set (`Pig.getSoundSet`,
+/// `Wolf.getSoundSet`, `Cat.getSoundSet`, ...): `kind` is the sound's key
+/// (`ambient`, `hurt`, `step`, `growl`, `purreow`...). Babies use the species'
+/// baby set (cows have none); an adult's set is `entity.<species>.*` for
+/// `classic` and `entity.<species>_<variant>.*` otherwise, except the
+/// footsteps that every variant shares (not the cow's). None for a species
+/// without sound variants.
+pub fn variant_sound(m: &Mob, kind: &str) -> Option<&'static str> {
+    use std::{collections::HashMap, sync::Mutex};
+    let species = m.species();
+    let name = match species {
+        Species::Pig => "pig",
+        Species::Cow => "cow",
+        Species::Chicken => "chicken",
+        Species::Wolf => "wolf",
+        Species::Cat => "cat",
+        _ => return None,
+    };
+    let variant = m
+        .extra
+        .sound_variant
+        .and_then(|i| sound_variants(species).get(i as usize))
+        .copied()
+        .unwrap_or("classic");
+    let id = if m.is_baby() && species != Species::Cow {
+        format!("entity.baby_{name}.{kind}")
+    } else if variant == "classic" || (kind == "step" && species != Species::Cow) {
+        format!("entity.{name}.{kind}")
+    } else {
+        format!("entity.{name}_{variant}.{kind}")
+    };
+    // A handful of ids in all: keep each one as a `&'static str`.
+    static IDS: Mutex<Option<HashMap<String, &'static str>>> = Mutex::new(None);
+    let mut ids = IDS.lock().ok()?;
+    let ids = ids.get_or_insert_with(HashMap::new);
+    Some(
+        *ids.entry(id)
+            .or_insert_with_key(|k| Box::leak(k.clone().into_boxed_str())),
+    )
+}
 /// The registry name of the game's variant index.
 pub fn variant_name(s: Species, index: u8) -> &'static str {
     let i = index as usize;
@@ -2097,6 +2153,39 @@ mod tests {
         assert_eq!(panda_variant(4, 0), 0);
         assert_eq!(panda_variant(4, 4), 4);
         assert_eq!(panda_variant(6, 0), 6);
+    }
+    /// #2269: the offspring of a spawn egg used on a mob is a baby of that
+    /// kind (`SpawnEggItem.spawnOffspringFromSpawnEgg`), and only the mob's
+    /// own kind takes the egg.
+    #[test]
+    fn a_spawn_egg_offspring_is_a_baby() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return;
+        }
+        let data = crate::mobs::MobTypes::load(&root).unwrap();
+        let kind = std::sync::Arc::new(data.types.get("minecraft:cow").unwrap().clone());
+        let mut child = crate::mobs::Mob::new(
+            2,
+            kind,
+            horizon_core::geometry::Vec3::new(0.0, 4.0, 0.0),
+            0.0,
+        );
+        assert!(!child.is_baby());
+        spawn_egg_offspring(&mut child, Species::Cow, 3, 0);
+        // The offspring is a baby of the mob's kind.
+        assert!(child.is_baby());
+        // It keeps the parent's variant.
+        assert_eq!(child.extra.variant, 3);
+        // The egg is for the mob's own kind.
+        assert!(spawn_egg_is_for("minecraft:cow_spawn_egg", "minecraft:cow"));
+        assert!(!spawn_egg_is_for(
+            "minecraft:pig_spawn_egg",
+            "minecraft:cow"
+        ));
+        assert!(!spawn_egg_is_for("minecraft:stick", "minecraft:cow"));
     }
     #[test]
     fn reasons_round_trip() {

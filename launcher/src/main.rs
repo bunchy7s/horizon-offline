@@ -13,6 +13,7 @@ mod console;
 mod console_page;
 mod cull;
 mod datapacks_page;
+mod dev_options;
 mod export_page;
 mod game_tools;
 mod import_page;
@@ -54,7 +55,6 @@ use horizon_launcher::backend::{self, Job, Msg, Release, Running, Settings, Upda
 use horizon_launcher::i18n::{self, tr, trf};
 use horizon_launcher::instances;
 use horizon_launcher::native_mods;
-use horizon_launcher::nightly;
 use horizon_launcher::telemetry;
 use scrollbar::Scrollbar;
 use std::borrow::Cow;
@@ -171,12 +171,6 @@ struct Launcher {
     /// nothing can launch, select or prepare it, and its row can't install or remove it again.
     removing: Option<String>,
     install_error: Option<(String, String)>,
-    /// Nightly (`horizon_launcher::nightly`): how far the nightly being installed is, and why the
-    /// last check or install failed.
-    nightly_progress: Option<f32>,
-    nightly_error: Option<String>,
-    /// Play the Nightly instance once its first install ends: the player just turned Nightly on.
-    nightly_select: bool,
     /// Native mods (`native_mods`): the build's step while it runs, why it failed, and the
     /// warning before a build while it is open, with the mods it names.
     native_step: Option<String>,
@@ -219,6 +213,10 @@ struct Launcher {
     owner: Option<bool>,
     /// Play was refused (or Home's Sign in pressed): the owner gate's screen is open.
     owner_screen_open: bool,
+    /// Clicks on the sidebar's launcher version, and whether they revealed the developer options
+    /// (`dev_options`) for this run.
+    dev_clicks: u8,
+    dev_options: bool,
     /// The game is waiting for its session (a token renewal) before it starts.
     starting_client: Option<String>,
     /// Join a friend: the code typed on the Play page, and the one the game
@@ -392,9 +390,6 @@ impl Launcher {
             installing: None,
             removing: None,
             install_error: None,
-            nightly_progress: None,
-            nightly_error: None,
-            nightly_select: false,
             native_step: None,
             native_error: None,
             native_confirm: None,
@@ -428,6 +423,8 @@ impl Launcher {
             keychain: true,
             owner: None,
             owner_screen_open: false,
+            dev_clicks: 0,
+            dev_options: false,
             starting_client: None,
             friend_code: String::new(),
             friend_focused: false,
@@ -522,7 +519,7 @@ impl Launcher {
         self.checked = Some(Instant::now());
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(Msg::Updates(backend::check_updates()));
+            let _ = tx.send(Msg::Updates(backend::check_updates().map(Box::new)));
         });
     }
 
@@ -565,30 +562,6 @@ impl Launcher {
         self.install(&release);
     }
 
-    /// With Nightly on, installs the current nightly in the Nightly instance if it is new.
-    fn update_nightly(&mut self) {
-        if !self.settings.nightly || self.nightly_progress.is_some() {
-            return;
-        }
-        self.nightly_progress = Some(0.);
-        self.nightly_error = None;
-        let (tx, installed) = (self.tx.clone(), self.installed.clone());
-        std::thread::spawn(move || {
-            let result = nightly::latest().and_then(|latest| {
-                let Some(release) = nightly::update(latest, &installed) else {
-                    return Ok(None);
-                };
-                let progress = |p| {
-                    let _ = tx.send(Msg::NightlyProgress(p));
-                };
-                nightly::install(&release, progress).map(|_| Some(nightly::version_of(&release)))
-            });
-            let _ = tx.send(Msg::Nightly(result));
-        });
-    }
-
-    /// Turns Nightly on (install it, then play its instance) or off (play the release again; the
-    /// Nightly instance and its worlds stay).
     /// The native mods turned on in the instance Play starts, unpacked and checked, with their
     /// bundles: what the warning names and the build compiles.
     fn native_mods_to_build(
@@ -639,17 +612,6 @@ impl Launcher {
         });
     }
 
-    fn set_nightly(&mut self, on: bool) {
-        self.settings.nightly = on;
-        if on {
-            self.nightly_select = true;
-        } else if self.settings.instance.as_deref() == Some(nightly::INSTANCE) {
-            self.settings.instance = None;
-        }
-        self.settings.save();
-        self.update_nightly();
-    }
-
     fn fetch_releases(&mut self) {
         self.releases = Load::Loading;
         let tx = self.tx.clone();
@@ -665,7 +627,7 @@ impl Launcher {
             let updates = backend::releases_and_updates(|releases| {
                 let _ = tx.send(Msg::Releases(releases));
             });
-            let _ = tx.send(Msg::Updates(updates));
+            let _ = tx.send(Msg::Updates(updates.map(Box::new)));
         });
     }
 
@@ -721,7 +683,10 @@ impl Launcher {
                                 continue;
                             }
                         };
-                        self.owner = Some(true);
+                        // Past the gate by the developer option alone is no owner.
+                        if !self.settings.dev_offline {
+                            self.owner = Some(true);
+                        }
                         if let Some(file) = file {
                             cmd.arg("--session-file").arg(file);
                         }
@@ -826,17 +791,15 @@ impl Launcher {
                 }
                 Msg::Updates(Ok(updates)) => {
                     self.update_error = None;
-                    self.updates = updates;
+                    self.updates = *updates;
                     if self.settings.auto_install() {
                         self.install_update();
                     }
                     if let Some(release) = self.updates.launcher.clone() {
                         self.update_launcher(release);
                     }
-                    self.update_nightly();
                 }
                 Msg::Updates(Err(e)) => self.update_error = Some(e),
-                Msg::NightlyProgress(p) => self.nightly_progress = Some(p),
                 Msg::NativeProgress(step) => self.native_step = Some(step),
                 Msg::Native(result) => {
                     self.native_step = None;
@@ -844,28 +807,6 @@ impl Launcher {
                     self.reload_instances();
                     if let Err(e) = result {
                         self.native_error = Some(e);
-                    }
-                }
-                Msg::Nightly(result) => {
-                    self.nightly_progress = None;
-                    self.installed = backend::installed();
-                    self.reload_instances();
-                    match result {
-                        Ok(_)
-                            if self.nightly_select
-                                && self.settings.nightly
-                                && self
-                                    .instances
-                                    .list
-                                    .iter()
-                                    .any(|i| i.id == nightly::INSTANCE) =>
-                        {
-                            self.nightly_select = false;
-                            self.settings.instance = Some(nightly::INSTANCE.into());
-                            self.settings.save();
-                        }
-                        Ok(_) => {}
-                        Err(e) => self.nightly_error = Some(e),
                     }
                 }
                 Msg::LauncherProgress(p) => {
@@ -1164,9 +1105,10 @@ impl Launcher {
         self.starting_client = Some(tag.clone());
         self.play_pressed = Some(Instant::now());
         let tx = self.tx.clone();
+        let offline_without_owner = self.settings.dev_offline;
         std::thread::spawn(move || {
             backend::complete_assets(&tag);
-            let session = account::session_for_game(&backend::game_home());
+            let session = account::session_for_game(&backend::game_home(), offline_without_owner);
             let _ = tx.send(Msg::Session(session));
         });
     }
@@ -1567,6 +1509,15 @@ fn page_header(title: &str, description: &str, t: &Theme) -> Div {
 /// One row of a list, as its own panel: a name in the pixel face with an optional detail under
 /// it, then a value or a control on the right. Rows were numbered in the quiet look; `_n` keeps
 /// the call sites as they are.
+/// How an available update is named: a Nightly by its title ("Nightly 2026-10-28 · 0c02067"), a
+/// release by its tag.
+fn update_name(release: &Release) -> &str {
+    match release.nightly {
+        Some(_) => &release.name,
+        None => &release.tag,
+    }
+}
+
 fn index_row(
     _n: usize,
     name: impl IntoElement,
@@ -1972,7 +1923,7 @@ impl Launcher {
                             .child(sub(tr(if up { "Running" } else { "Stopped" }).into())),
                     )
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.servers.open = Some(dir.clone());
+                        this.open_server(dir.clone());
                         this.go(Page::Servers);
                         cx.notify();
                     })),
@@ -2098,9 +2049,14 @@ impl Launcher {
         }
         foot = foot.child(
             caps(format!("Launcher {}", backend::VERSION))
+                .id("launcher-version")
                 .px(px(8.))
                 .pt(px(6.))
-                .text_color(t.muted),
+                .text_color(t.muted)
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.version_clicked();
+                    cx.notify();
+                })),
         );
         div()
             .id("sidebar")
@@ -2320,7 +2276,7 @@ impl Launcher {
         // Not prepared: Horizon can download Minecraft from Mojang (no account needed in this
         // fork), or use the player's own install.
         let first = (!prepared && !self.preparing)
-            .then_some(self.owner)
+            .then_some(self.owner_shown())
             .flatten();
         let resources_value = match first {
             _ if self.preparing => tr("Preparing…").to_string(),
@@ -2418,7 +2374,7 @@ impl Launcher {
             rows = rows.child(self.join_friend_row(prepared && !running, cx));
             // The top bar shows who plays; a row only when there is something to do about it:
             // no account that owns the game (Play needs one), or offline.
-            if self.owner == Some(false) {
+            if self.owner_shown() == Some(false) {
                 rows = rows.child(index_row(
                     5,
                     tr("Microsoft account"),
@@ -2770,7 +2726,7 @@ impl Launcher {
                 .text_size(px(theme::CAPTION.px))
                 .text_color(t.muted)
                 .child(div().size(px(6.)).rounded_full().bg(t.accent))
-                .child(format!("{} available", release.tag));
+                .child(format!("{} available", update_name(release)));
             hero = hero.child(match installing {
                 Some((_, p)) => line
                     .child(
@@ -2871,7 +2827,7 @@ impl Launcher {
             }),
         );
         let horizon = match (&self.updates.horizon, &self.update_error) {
-            (Some(r), _) => trf("{version} available", &[("version", &r.tag)]),
+            (Some(r), _) => trf("{version} available", &[("version", update_name(r))]),
             (None, Some(e)) => e.clone(),
             (None, None) if self.checked.is_some() => tr("Up to date").to_string(),
             _ => tr("Checking…").to_string(),
@@ -2999,7 +2955,6 @@ impl Launcher {
                         Some(toggle.into_any_element()),
                         &t,
                     ))
-                    .child(self.nightly_row(n + 2, cx))
                     .child(group("Launcher", "monitor"))
                     .child(index_row(
                         n + 3,
@@ -3077,57 +3032,7 @@ impl Launcher {
             )
             .child(self.collection_section(cx))
             .children(self.agents_section(cx))
-    }
-
-    /// Settings' Nightly row: off by default; on, the nightly build installs and updates in its
-    /// own instance, and the release stays one click away (the Horizon instance).
-    fn nightly_row(&self, n: usize, cx: &mut Context<Self>) -> Div {
-        let t = self.theme;
-        let on = self.settings.nightly;
-        let toggle =
-            switch("nightly", on, &t).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                this.set_nightly(!this.settings.nightly);
-                cx.notify();
-            }));
-        let what = tr(
-            "Can include pull requests not reviewed yet, picked by trusted reviewers; may break.",
-        );
-        let status = match (&self.nightly_progress, &self.nightly_error) {
-            _ if !on => tr("Plays in its own Nightly instance: your worlds and the release stay as they are.")
-                .to_string(),
-            (Some(p), _) => trf(
-                "Installing the nightly, {percent}%",
-                &[("percent", &format!("{:.0}", p * 100.))],
-            ),
-            (None, Some(e)) => trf("The nightly could not be installed: {error}", &[("error", e)]),
-            (None, None) => match self
-                .instances
-                .list
-                .iter()
-                .find(|i| i.id == nightly::INSTANCE)
-                .and_then(|i| i.version.clone())
-            {
-                Some(version) => trf(
-                    "{version} in the Nightly instance. Choose Horizon in the sidebar to play the release.",
-                    &[("version", &version)],
-                ),
-                None => tr("No nightly build yet.").to_string(),
-            },
-        };
-        index_row(
-            n,
-            tr("Nightly builds"),
-            Some(
-                div()
-                    .flex()
-                    .flex_col()
-                    .child(what.to_string())
-                    .child(status)
-                    .into_any_element(),
-            ),
-            Some(toggle.into_any_element()),
-            &t,
-        )
+            .children(self.dev_options_section(cx))
     }
 
     /// Settings' Game arguments row: the extra arguments the game starts with, kept in

@@ -44,8 +44,16 @@ impl Game<'_> {
     }
 
     /// `ServerPlayer.getKnownMovement` of the acting player: what they moved
-    /// in the last tick. A guest's comes with their moves.
+    /// in the last tick. A guest's comes with their moves. A rider's is its
+    /// mount's move (`getKnownSpeed`: the vehicle's, or the move the driver's
+    /// client sent for it), so a charge on horseback carries the horse's speed.
     fn known_player_movement(&self) -> Vec3 {
+        if let Some(i) = self
+            .riding
+            .and_then(|v| self.mobs.iter().position(|m| m.id == v))
+        {
+            return self.mob_speed(i).scale(1.0 / 20.0);
+        }
         if self.lan_acting.is_some() {
             return self.known_movement;
         }
@@ -193,6 +201,9 @@ impl Game<'_> {
             }
             let who = actor.map_or(OWN, |conn| conn as i32);
             self.kinetic_hit_feedback(who, &kinetic, [feet.x, feet.y, feet.z]);
+            // SPEAR_MOBS_TRIGGER: the living entities stabbed in this use.
+            let stabbed = self.stabbed.keys().filter(|(who, _)| *who == actor).count();
+            self.trigger_spear_mobs(stabbed);
         }
     }
 
@@ -239,6 +250,8 @@ impl Game<'_> {
             self.mobs[index].knockback(0.4, xd, zd);
             let (strength, _) = self.extra_knockback(&kind, 0.0);
             self.mobs[index].knockback(f64::from(strength), xd, zd);
+            // ...and the attacker stops sprinting.
+            self.stop_sprint_after_extra_knockback();
         }
         let dismounted = dismounts && self.mobs[index].extra.mount.is_some();
         if dismounted {

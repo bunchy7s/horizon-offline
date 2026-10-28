@@ -1,6 +1,7 @@
 #!/bin/sh
-# Installs horizon-server (docs/server.md) on Linux or macOS: the latest Horizon release for this computer,
-# downloaded from GitHub Releases and checked against the SHA-256 GitHub publishes for it. On Linux that is
+# Installs horizon-server (docs/server.md) on Linux or macOS: the current Horizon Nightly for this computer (the
+# only build Horizon ships; GitHub's latest release while there is none), downloaded from GitHub Releases and
+# checked against the SHA-256 GitHub publishes for it. On Linux that is
 # the server build (horizon-server-linux-x86_64.tar.gz), which needs neither ALSA nor udev.
 #
 #   curl -fsSL https://raw.githubusercontent.com/horizon-rust/horizon/main/packaging/server/install.sh | sh
@@ -53,12 +54,22 @@ else
   elif command -v shasum >/dev/null; then SHA="shasum -a 256"
   else die "sha256sum or shasum is needed"; fi
 
-  if [ "$VERSION" = latest ]; then API="https://api.github.com/repos/$REPO/releases/latest"
-  else API="https://api.github.com/repos/$REPO/releases/tags/$VERSION"; fi
-  JSON=$(curl -fsSL -H "Accept: application/vnd.github+json" "$API") || die "no release $VERSION on GitHub"
+  api() { curl -fsSL -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/releases/$1"; }
+  if [ "$VERSION" = latest ]; then
+    JSON=$(api tags/nightly) || JSON=$(api latest) || die "no release on GitHub"
+  else
+    JSON=$(api "tags/$VERSION") || die "no release $VERSION on GitHub"
+  fi
 
   TAG=$(printf '%s\n' "$JSON" | sed -n 's/^  "tag_name": "\([^"]*\)".*/\1/p' | head -n 1)
   [ -n "$TAG" ] || die "could not read the release's tag"
+  # A Nightly installs under its date and commit, as `horizon-server update` names it:
+  # "Nightly 2026-10-28 · 0c02067" is nightly-2026-10-28-0c02067.
+  case "$TAG" in
+    nightly|nightly-*)
+      NAME=$(printf '%s\n' "$JSON" | sed -n 's/^  "name": "Nightly \([0-9-]\{10\}\) · \([0-9a-f]\{1,40\}\)".*/nightly-\1-\2/p' | head -n 1)
+      [ -z "$NAME" ] || TAG=$NAME ;;
+  esac
   # The first asset the release has: its download address and digest, from its block in the release's JSON.
   for ASSET in $ASSETS; do
     FIELDS=$(printf '%s\n' "$JSON" | awk -v asset="$ASSET" '

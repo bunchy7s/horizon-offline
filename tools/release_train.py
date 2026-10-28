@@ -417,13 +417,18 @@ def gather(kind, head, releases=None):
     releases = published_releases() if releases is None else releases
     last = last_release(releases, kind)
     base = last["tag_name"] if last else run("git", "rev-list", "--max-parents=0", head).split()[0]
+    return last, merged_between(kind, base, head)
+
+
+def merged_between(kind, base, head):
+    """The pull requests merged into main between base and head, with their player-facing paths ("paths")."""
     exporter_paths = exporters()
     prs = []
     for number, commit in merged_pull_requests(base, head):
         pr = pull_request(number)
         pr["paths"] = [path for path in changed_paths(commit) if player_facing(path, kind, exporter_paths)]
         prs.append(pr)
-    return last, prs
+    return prs
 
 
 def passed_on(workflow, sha):

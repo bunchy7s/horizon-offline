@@ -40,9 +40,13 @@ pub struct Release {
     pub body: String,
     pub date: String,
     pub asset: Option<(String, u64)>,
-    /// A GitHub pre-release: the Alpha builds from before every release went out as the release
-    /// (v0.2.1 on, docs/release-flow.md). Listed and installed by hand, never as an update.
+    /// Listed and installed by hand, never as an update: a GitHub pre-release of the old Alpha
+    /// channel (v0.2.1 on), or a Nightly older than the current one.
     pub prerelease: bool,
+    /// A Nightly's GitHub tag (`nightly`, or `nightly-<date>` for the last week's): its files and
+    /// signature are there, while `tag` is the version it installs as (`nightly-2026-10-28-0c02067`).
+    /// None for a release.
+    pub nightly: Option<String>,
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -157,6 +161,9 @@ pub enum ReleaseOrder {
     /// Numbers without trailing zeros, so 1.2 and 1.2.0 are equal.
     Before02(Vec<u64>),
     Semver([u64; 3], Prerelease),
+    /// A Nightly (`nightly-<date>-<commit>`), by its date: newer than every release, since the
+    /// Nightly is the only build Horizon ships.
+    Nightly(String),
 }
 
 /// (is a release, the pre-release's identifiers): a release follows every pre-release of its
@@ -173,6 +180,9 @@ pub enum Identifier {
 const FIRST_YEAR: u64 = 1000;
 
 pub fn release_order(tag: &str) -> ReleaseOrder {
+    if let Some(date) = crate::nightly::date_of(tag) {
+        return ReleaseOrder::Nightly(date.to_owned());
+    }
     let semver = tag
         .strip_prefix(LAUNCHER_TAG_PREFIX)
         .or_else(|| tag.strip_prefix('v'))
@@ -273,6 +283,7 @@ pub(crate) fn parse_releases(
                 .collect(),
             asset: found,
             prerelease: r["prerelease"].as_bool().unwrap_or(false),
+            nightly: None,
         });
     }
     out.sort_by(|a, b| compare_versions(&b.tag, &a.tag));
@@ -283,10 +294,30 @@ fn is_launcher_tag(tag: &str) -> bool {
     launcher_version(tag).is_some()
 }
 
-/// Published Horizon releases, newest first. Drafts never reach the anonymous API, and launcher
-/// releases are left out.
+/// Published Horizon builds, newest first: the current Nightly (the only build Horizon ships since
+/// 2026-10-28, docs/release-flow.md), the last week's Nightlies, then the releases from before.
+/// Drafts never reach the anonymous API, and launcher releases are left out.
 pub fn releases() -> Result<Vec<Release>, String> {
-    Ok(parse_releases(&release_list()?, ASSET, is_game_tag))
+    Ok(game_releases(&release_list()?))
+}
+
+/// The game's builds in `list`, newest first. A Nightly is listed under the version it installs as
+/// ([`crate::nightly::version_of`]); only the current one (`nightly`) is an update.
+pub(crate) fn game_releases(list: &serde_json::Value) -> Vec<Release> {
+    let mut out = parse_releases(list, ASSET, |tag| {
+        is_game_tag(tag) || horizon_release_sign::is_nightly(tag)
+    });
+    for r in &mut out {
+        if horizon_release_sign::is_nightly(&r.tag) {
+            let version = crate::nightly::version_of(r);
+            let tag = std::mem::replace(&mut r.tag, version);
+            r.prerelease = tag != horizon_release_sign::NIGHTLY;
+            r.nightly = Some(tag);
+        }
+    }
+    // Two Nightlies of one day: the current one first (the dated one is the day's earlier build).
+    out.sort_by(|a, b| compare_versions(&b.tag, &a.tag).then(a.prerelease.cmp(&b.prerelease)));
+    out
 }
 
 /// The launcher releases in `list` (the newest 100 releases). Game releases come out several times
@@ -559,10 +590,17 @@ fn unpack(archive: &Path, url: &str, to: &Path) -> Result<(), String> {
 /// the fraction done.
 pub fn install(release: &Release, progress: impl Fn(f32)) -> Result<(), String> {
     let tag = release.tag.as_str();
-    if !is_game_tag(tag) {
-        return Err(format!("{tag} is not a Horizon release."));
-    }
-    let sha256 = signed_digest(tag, ASSET.unwrap_or_default())?;
+    let sha256 = match &release.nightly {
+        // Signed for the Nightly channel, served under its own GitHub tag.
+        Some(published) => crate::signed::nightly_digest(
+            published,
+            ASSET.unwrap_or_default(),
+            &horizon_release_sign::trusted_keys(),
+            fetch_small,
+        )?,
+        None if is_game_tag(tag) => signed_digest(tag, ASSET.unwrap_or_default())?,
+        None => return Err(format!("{tag} is not a Horizon release.")),
+    };
     install_as(release, tag, &sha256, progress)
 }
 
@@ -1216,7 +1254,6 @@ fn download_for_owner(
     fetch: sources::Fetch,
     log: &dyn Fn(String),
 ) -> Result<(), String> {
-    let v = &pins.version;
     let mut accounts = account::Accounts::load();
     let pass = account::launch(
         &account::Endpoints::live(),
@@ -1225,6 +1262,7 @@ fn download_for_owner(
         &mut accounts,
     );
     let _ = accounts.save();
+    let v = &pins.version;
     let name = pass.ok().and_then(|p| p.owner).map(|(owner, _)| owner.name);
     match &name {
         Some(name) => log(format!(
@@ -1911,7 +1949,7 @@ pub fn need_prepared(tag: &str) -> Result<(), String> {
 /// the gate, a sign-in that can't be renewed (no network, expired) still lets the game start,
 /// offline.
 pub fn client(tag: &str) -> Result<Command, String> {
-    let (session, offline) = account::session_for_game(&game_home())
+    let (session, offline) = account::session_for_game(&game_home(), false)
         .map_err(|refused| format!("{refused} Sign in with `horizon-launcher account sign-in`."))?;
     need_prepared(tag)?;
     complete_assets(tag);
@@ -2041,12 +2079,15 @@ pub struct Updates {
     pub launcher: Option<Release>,
 }
 
-/// The newest Horizon release with a build here, if it is newer than every installed version.
+/// The newest Horizon build with a build here (the current Nightly), if it isn't installed and
+/// no installed version is newer. Two Nightlies of one day compare equal: the one on GitHub is
+/// the update.
 pub fn horizon_update(releases: &[Release], installed: &[String]) -> Option<Release> {
     let newest = latest(releases)?;
-    let newer = installed
-        .iter()
-        .all(|t| compare_versions(&newest.tag, t).is_gt());
+    let newer = !installed.contains(&newest.tag)
+        && installed
+            .iter()
+            .all(|t| compare_versions(&newest.tag, t).is_ge());
     newer.then(|| newest.clone())
 }
 
@@ -2086,7 +2127,7 @@ fn releases_and_updates_with(
             return Err(e);
         }
     };
-    let releases = parse_releases(&list, ASSET, is_game_tag);
+    let releases = game_releases(&list);
     let horizon = horizon_update(&installable_updates(&releases), &installed());
     on_releases(Ok(releases));
     Ok(Updates {
@@ -2100,12 +2141,18 @@ pub fn check_updates() -> Result<Updates, String> {
     releases_and_updates(|_| {})
 }
 
-/// Whether a version installed as an update becomes the selected one: only when the player was
-/// on the newest installed version before (or had none).
+/// Whether a version installed as an update becomes the selected one: when the player had none,
+/// was on a Nightly, or on the newest installed release (so a player of the release channel moves
+/// to the Nightly at the first check, docs/release-flow.md). An older release picked by hand
+/// stays; an instance pinned to a version keeps it either way.
 pub fn select_after_update(selected: Option<&str>, installed_before: &[String]) -> bool {
     match selected {
         None => true,
-        Some(s) => installed_before.first().is_none_or(|newest| newest == s),
+        Some(s) if crate::nightly::date_of(s).is_some() => true,
+        Some(s) => installed_before
+            .iter()
+            .find(|t| is_game_tag(t))
+            .is_none_or(|newest| newest == s),
     }
 }
 
@@ -2133,6 +2180,9 @@ pub fn install_tag(tag: &str, as_update: bool, progress: impl Fn(f32)) -> Result
     if !as_update || select_after_update(settings.selected.as_deref(), &before) {
         settings.selected = Some(release.tag.clone());
         settings.save();
+    }
+    if as_update && release.nightly.is_some() {
+        crate::nightly::after_update(&release.tag);
     }
     Ok(release.tag.clone())
 }
@@ -2461,7 +2511,8 @@ pub enum Msg {
     Removed(String, Result<(), String>),
     Line(Job, String),
     Exit(Job, Result<(), String>),
-    Updates(Result<Updates, String>),
+    /// Boxed: two releases, the largest message by far.
+    Updates(Result<Box<Updates>, String>),
     LauncherProgress(f32),
     LauncherUpdated(Result<(), String>),
     /// `reuse_prepared_everywhere` prepared these versions.
@@ -2479,10 +2530,6 @@ pub enum Msg {
     PackDone(Result<Box<crate::modpacks::Imported>, String>),
     /// How many play Horizon now, or none when the server can't be reached (`telemetry`).
     Playing(Option<u64>),
-    /// The nightly being installed, done this far (`nightly`).
-    NightlyProgress(f32),
-    /// A nightly check ended: the version installed (None: already up to date), or why not.
-    Nightly(Result<Option<String>, String>),
     /// Where the native-mods build is (`native_mods::Step::label`).
     NativeProgress(String),
     /// The native-mods build ended: the version built, or why not.
@@ -2669,14 +2716,16 @@ pub struct Settings {
     /// The window's language. Unset follows the system's (`i18n::Language::system`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<crate::i18n::Language>,
-    /// The player turned Nightly on (`nightly`): the nightly build installs and updates in its own
-    /// instance. Off by default.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub nightly: bool,
     /// The player turned Native mods (experimental) on (`native_mods`): mixin mods compiled into
     /// a game of their own. Off by default.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub native_mods: bool,
+    /// Developer options (hidden: seven clicks on the sidebar's launcher version reveal them):
+    /// offline names play without an account that owns the game, in the window only
+    /// (`account::Accounts::play_as_with`, `account::launch_for_game`). Never a download: the game still
+    /// comes from the player's own install. Off by default, and absent from the file while off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dev_offline: bool,
 }
 
 impl Settings {
@@ -2765,6 +2814,88 @@ mod tests {
         assert_eq!(program_mod_api_level(&old), 0);
         assert_eq!(program_mod_api_level(&dir.join("missing")), 0);
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The launcher downloads Mojang's game files (client jar, libraries, assets) whatever
+    /// accounts are signed in: this fork needs no Microsoft account for it. A signed-in owner
+    /// is only named in the log.
+    #[test]
+    fn mojang_downloads_whatever_is_signed_in() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-owner-free-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let pins = sources::Pins::read(&serde_json::json!({ "minecraft": {
+            "version": "26.3",
+            "client_sha1": "00",
+            "manifest_sha1": "00",
+        }}))
+        .unwrap();
+        let asked = std::sync::Mutex::new(Vec::<String>::new());
+        let fetch = |url: &str| -> Result<Vec<u8>, String> {
+            asked.lock().unwrap().push(url.to_string());
+            Err("no network in tests".into())
+        };
+        let said = std::sync::Mutex::new(Vec::<String>::new());
+        let log = |s: String| said.lock().unwrap().push(s);
+        // No signed-in accounts: `account::launch` asks nothing, and the download still goes
+        // ahead (and fails here, without network). The log says so without any account.
+        assert!(download_for_owner(&pins, &dir, &fetch, &log).is_err());
+        assert!(!asked.lock().unwrap().is_empty());
+        assert!(said
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|s| s == "Downloading 26.3 from Mojang"));
+        let _ = fs::remove_dir_all(&dir);
+
+        // In the sources: one function downloads the game, `download_for_owner`, which never
+        // refuses for want of an owner. Game-file hosts appear nowhere else.
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = vec![src.clone()];
+        let mut sources = Vec::new();
+        while let Some(path) = files.pop() {
+            if path.is_dir() {
+                files.extend(fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                let name = path.file_name().unwrap().to_string_lossy().to_string();
+                let in_tests = name.contains("tests") || path.parent().unwrap() != src;
+                // The code alone: test modules (this one included) come after it.
+                let mut text = fs::read_to_string(&path).unwrap();
+                text.truncate(text.find("#[cfg(test)]").unwrap_or(text.len()));
+                sources.push((name, in_tests, text));
+            }
+        }
+        let calls: Vec<_> = sources
+            .iter()
+            .filter(|(_, tests, _)| !tests)
+            .flat_map(|(name, _, text)| {
+                text.matches("mojang::download(")
+                    .map(move |_| name.as_str())
+            })
+            .collect();
+        assert_eq!(calls, ["backend.rs"]);
+        let backend = &sources.iter().find(|(n, ..)| n == "backend.rs").unwrap().2;
+        let body = |f: &str| {
+            let start = backend.find(&format!("\nfn {f}(")).unwrap();
+            &backend[start..start + backend[start + 1..].find("\n}\n").unwrap()]
+        };
+        assert!(body("download_for_owner").contains("mojang::download("));
+        assert!(body("download_for_owner").contains("account::launch("));
+        assert!(!body("download_for_owner").contains("launch_for_game("));
+        // `download_for_owner` is defined once and called twice (direct and after a not-found).
+        assert_eq!(backend.matches("download_for_owner(").count(), 3);
+        for host in [
+            "piston-data",
+            "libraries.minecraft.net",
+            "resources.download.minecraft.net",
+        ] {
+            for (name, tests, text) in &sources {
+                assert!(
+                    *tests || name == "mojang.rs" || !text.contains(host),
+                    "{name} names {host}"
+                );
+            }
+        }
     }
 
     /// A preparation that reuses the imported game files still reads the assets from the
@@ -3136,6 +3267,7 @@ mod tests {
             date: String::new(),
             asset: Some(("u".into(), 1)),
             prerelease: false,
+            nightly: None,
         };
         assert!(launcher_update(&[r(own_tag())]).is_none());
         assert_eq!(launcher_version(&own_tag()), Some(VERSION));
@@ -3176,6 +3308,7 @@ mod tests {
             date: String::new(),
             asset: Some(("u".into(), 1)),
             prerelease: false,
+            nightly: None,
         };
         let mut list = vec![
             r("launcher-v0.16.0"),
@@ -3342,6 +3475,7 @@ mod tests {
             date: String::new(),
             asset: Some(("u".into(), 1)),
             prerelease: false,
+            nightly: None,
         };
         let releases = [r("v2026.10.13"), r("v2026.10.12")];
         assert_eq!(
@@ -3356,6 +3490,83 @@ mod tests {
         assert!(select_after_update(Some("v2026.10.12"), &installed));
         assert!(!select_after_update(Some("v2026.10.1"), &installed));
         assert!(select_after_update(None, &installed));
+    }
+
+    /// The Nightly is the only build Horizon ships (docs/release-flow.md): every launcher takes the
+    /// current one as its update, over every release; the last week's are listed, never offered.
+    #[test]
+    fn every_launcher_updates_to_the_current_nightly() {
+        let asset = ASSET.unwrap_or("horizon-linux-x86_64.tar.gz");
+        let build = |url: &str| serde_json::json!([{"name": asset, "browser_download_url": url, "size": 1}]);
+        let list = serde_json::json!([
+            {"tag_name": "nightly", "name": "Nightly 2026-10-28 · 9b772b2", "prerelease": true,
+             "published_at": "2026-10-28T09:58:01Z", "assets": build("n")},
+            {"tag_name": "launcher@0.2.21", "assets": []},
+            {"tag_name": "v0.2.95", "assets": build("r")},
+            {"tag_name": "nightly-2026-10-28", "name": "Nightly 2026-10-28 · 83f15fa", "prerelease": true,
+             "published_at": "2026-10-28T07:54:57Z", "assets": build("d")},
+            {"tag_name": "nightly-2026-10-27", "name": "Nightly 2026-10-27 · 7954902", "prerelease": true,
+             "published_at": "2026-10-28T00:15:40Z", "assets": build("e")},
+        ]);
+        let releases = game_releases(&list);
+        let listed: Vec<_> = releases
+            .iter()
+            .map(|r| (r.tag.as_str(), r.nightly.as_deref(), r.prerelease))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("nightly-2026-10-28-9b772b2", Some("nightly"), false),
+                (
+                    "nightly-2026-10-28-83f15fa",
+                    Some("nightly-2026-10-28"),
+                    true
+                ),
+                (
+                    "nightly-2026-10-27-7954902",
+                    Some("nightly-2026-10-27"),
+                    true
+                ),
+                ("v0.2.95", None, false),
+            ]
+        );
+        let offered = |installed: &[&str]| {
+            let installed: Vec<String> = installed.iter().map(|t| t.to_string()).collect();
+            horizon_update(&installable_updates(&releases), &installed).map(|r| r.tag)
+        };
+        let current = Some("nightly-2026-10-28-9b772b2".to_string());
+        // A player of the release channel, a new player, one on an older Nightly of the same day.
+        assert_eq!(offered(&["v0.2.95", "v0.2.94"]), current);
+        assert_eq!(offered(&[]), current);
+        assert_eq!(offered(&["nightly-2026-10-28-83f15fa", "v0.2.95"]), current);
+        assert_eq!(offered(&["nightly-2026-10-28-9b772b2"]), None);
+        // Nightlies come after every release in every list.
+        assert!(compare_versions("nightly-2026-10-27-7954902", "v0.2.95").is_gt());
+        assert!(
+            compare_versions("nightly-2026-10-28-9b772b2", "nightly-2026-10-27-7954902").is_gt()
+        );
+    }
+
+    /// Players move to the Nightly at their next check: whoever was on the newest release, on a
+    /// Nightly, or on nothing. A release picked by hand stays picked.
+    #[test]
+    fn players_of_the_newest_release_move_to_the_nightly() {
+        let installed = [
+            "nightly-2026-10-27-7954902".to_string(),
+            "v0.2.95".into(),
+            "v0.2.90".into(),
+        ];
+        assert!(select_after_update(Some("v0.2.95"), &installed));
+        assert!(select_after_update(
+            Some("nightly-2026-10-27-7954902"),
+            &installed
+        ));
+        assert!(select_after_update(None, &installed));
+        assert!(!select_after_update(Some("v0.2.90"), &installed));
+        assert!(select_after_update(
+            Some("v0.2.95"),
+            &["v0.2.95".to_string()]
+        ));
     }
 
     #[test]

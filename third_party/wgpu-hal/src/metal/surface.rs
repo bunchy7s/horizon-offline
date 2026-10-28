@@ -228,9 +228,12 @@ static COLOR_SPACES: LazyLock<Result<ColorSpaces, crate::SurfaceError>> = LazyLo
         lib: &libloading::Library,
         name: &[u8],
     ) -> Result<&'static CFString, crate::SurfaceError> {
-        let sym = unsafe { lib.get(name) }
+        // The symbols are `CFStringRef` globals, so `dlsym` returns the address of the
+        // global and the symbol's type is a pointer to the reference. Typing it as
+        // the reference itself would hand CoreGraphics that address as the string.
+        let sym = unsafe { lib.get::<*const &'static CFString>(name) }
             .map_err(|_| crate::SurfaceError::Other("error resolving symbol in CoreGraphics"))?;
-        Ok(*sym)
+        Ok(unsafe { **sym })
     }
     let extended_display_p3 = lookup(&lib, b"kCGColorSpaceExtendedDisplayP3\0")?;
     let itur_bt2100_pq = lookup(&lib, b"kCGColorSpaceITUR_2100_PQ\0")?;

@@ -240,6 +240,67 @@ impl Game<'_> {
         }
     }
 
+    /// `NearestItemSensor.doTick` for the villagers whose sensor is due: the
+    /// nearest dropped item within 32 blocks that `Villager.wantsToPickUp`
+    /// accepts and the villager sees, or none.
+    pub(super) fn villager_item_sense(&mut self) {
+        if self.dropped.is_empty() {
+            for m in &mut self.mobs {
+                if m.species() == Species::Villager && villager_brain::take_item_scan(m) {
+                    villager_brain::set_wanted_item(m, None);
+                }
+            }
+            return;
+        }
+        let picks_up = self
+            .res
+            .items()
+            .item_tags
+            .get("minecraft:villager_picks_up")
+            .cloned();
+        let mut due = Vec::new();
+        for (i, m) in self.mobs.iter_mut().enumerate() {
+            if m.species() == Species::Villager && villager_brain::take_item_scan(m) {
+                due.push(i);
+            }
+        }
+        if due.is_empty() {
+            return;
+        }
+        let w = self.mob_world_base(&[]);
+        let mut found = Vec::new();
+        for i in due {
+            let m = &self.mobs[i];
+            let area = m.bounds().inflate(Vec3::new(32.0, 16.0, 32.0));
+            let requested = villager::requested_items(m);
+            let eye = Vec3::new(m.position.x, m.eye_y(), m.position.z);
+            let mut best: Option<(f64, Vec3)> = None;
+            for e in &self.dropped {
+                let d = e.position.distance_squared(m.position);
+                if best.is_some_and(|(b, _)| d >= b)
+                    || !e.bounds().intersects(area)
+                    || d >= 32.0 * 32.0
+                {
+                    continue;
+                }
+                let item = &e.stack.item;
+                let wants = villager::food_points(item) > 0
+                    || picks_up.as_ref().is_some_and(|t| t.contains(&**item))
+                    || requested.contains(&&**item);
+                let fits =
+                    villager::ext(m).is_none_or(|x| x.can_add(&e.stack, self.item_max_stack(item)));
+                // ItemEntity's eye height is 0.2125.
+                let at = Vec3::new(e.position.x, e.position.y + 0.2125, e.position.z);
+                if wants && fits && w.line_of_sight(eye, at) {
+                    best = Some((d, e.position));
+                }
+            }
+            found.push((i, best.map(|(_, p)| [p.x, p.y, p.z])));
+        }
+        for (i, at) in found {
+            villager_brain::set_wanted_item(&mut self.mobs[i], at);
+        }
+    }
     /// `Mob.aiStep` item pickup for villagers (`InventoryCarrier`): food,
     /// seeds and what their profession wants, from within a block.
     pub(super) fn villager_pickups(&mut self) {

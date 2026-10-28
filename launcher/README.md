@@ -12,8 +12,9 @@ The opening, then Play ([clip](docs/opening.webm)):
 
 ## What it does
 
-- **Versions**: lists the published releases of horizon-rust/horizon, installs the build for
-  this platform into its own folder, and removes it again.
+- **Versions**: lists the published builds of horizon-rust/horizon (the current Nightly, the last
+  week's, then the releases from before), installs the build for this platform into its own
+  folder, and removes it again.
 - **Play**: prepares resources as `PLAY.txt` describes (your launcher's 26.3 install, the
   26.3 server jar from that version's own json, and Java 25) and copies its sounds from your
   launcher's asset store (`horizon-prepare sounds`; a launcher install without them only
@@ -212,11 +213,16 @@ page `servers.json` (the list), `servers/<name>/` (the servers created there) an
   when the game starts and brings it back to the front when the game closes; `settings
   while-playing stay|minimize|hide`), the game's extra command-line arguments, an HTTP proxy for
   downloads, and the launcher's own version and update state.
-- **Updates**: there is one channel. Every release is published as the release, GitHub's latest,
-  once its smoke test passed (docs/release-flow.md), and the launcher installs it. The game
-  pre-releases of the old Alpha channel (v0.2.1 on) stay on the Versions page to install
-  by hand, but are never installed as an update. The `update_channel` and `beta_builds` keys
-  older launchers wrote in `settings.json` are ignored and dropped on the next save.
+- **Updates**: Horizon ships only the Nightly (since 2026-10-28, docs/release-flow.md). The
+  launcher installs the current one (the `nightly` pre-release, checksums signed for the Nightly
+  channel) as `nightly-<date>-<commit>` and selects it when the player was on a Nightly, on the
+  newest release or on nothing; a version picked by hand or pinned by an instance stays. Older
+  Nightlies are removed once nothing plays them. Worlds are never touched: they live in the game's
+  folder, not in a version's. The last week's Nightlies (`nightly-<date>`), the `vX.Y.Z`
+  releases and the old Alpha pre-releases stay on the Versions page to install by hand, never as
+  an update. The "Nightly builds" setting and its `nightly` key are gone (an old key is ignored);
+  its "Nightly" instance stays and keeps following the Nightly. The `update_channel` and
+  `beta_builds` keys older launchers wrote are ignored and dropped on the next save.
 - **Game arguments**: extra arguments added to the game's command line (for example
   `--server-thread`), one line where quotes group a word with spaces. They are appended after the
   launcher's own arguments, kept as `game_args` in `settings.json`, and apply the next time the
@@ -244,11 +250,11 @@ minimize, maximize/restore and close; macOS and Linux keep their system title ba
 
 ## Updates
 
-The launcher looks for a newer Horizon release when it starts and every 30 minutes while it
-is open, and shows a small "available, Install" line on Play.
+The launcher looks for a newer Nightly when it starts and every 30 minutes while it is open, and
+shows a small "available, Install" line on Play.
 
-It also updates itself from GitHub releases tagged `launcher@X.Y.Z` (Horizon's own are `vX.Y.Z`;
-neither is ever taken for the other). Before 0.2 they were `launcher-vX.Y.Z` and `vYYYY.MM.DD`:
+It also updates itself from GitHub releases tagged `launcher@X.Y.Z` (the game's are `nightly`, and
+`vX.Y.Z` before 2026-10-28; neither is ever taken for the other). Before 0.2 they were `launcher-vX.Y.Z` and `vYYYY.MM.DD`:
 every 0.2 tag counts as newer than all of those (docs/versioning.md). It downloads the new build, replaces its
 own binary, and offers "Restart" in the footer. Development builds and
 `HORIZON_LAUNCHER_NO_SELF_UPDATE=1` never replace themselves.

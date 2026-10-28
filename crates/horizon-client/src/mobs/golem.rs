@@ -6,7 +6,7 @@ use super::{
     anim::{Poses, State},
     goals::{
         Cx, Goal, HurtByTarget, LOOK, LookAtPlayer, MOVE, MeleeAttack, NearestTarget, Prey,
-        RandomLookAround, Stroll, goal_clone,
+        RandomLookAround, Stroll, goal_clone, reduced,
     },
 };
 use crate::projectiles::{Projectile, ProjectileKind};
@@ -158,7 +158,8 @@ impl Goal for OfferFlower {
         self.ticks > 0
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
-        self.ticks = 400;
+        // adjustedTickDelay(400): the goal ticks every other game tick.
+        self.ticks = reduced(400);
         m.extra.counter = 400;
         // IronGolem.offerFlower(true): entity event 11.
         entity_event(m, 11, cx);

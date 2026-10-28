@@ -2,10 +2,10 @@ name: nightly build
 run-name: nightly build${{ inputs.request && format(' (request {0})', inputs.request) || '' }}
 # The opt-in Nightly channel (docs/release-flow.md "Nightly"; Ludovic, 2026-10-27). Once a night, and when a trusted
 # reviewer asks (`/nightly 2640 2642`, nightly-command.yml), it builds main plus the pull requests the reviewers
-# picked, merged in order (tools/ci/nightly_set.py). With none picked, it builds the newest union branch on origin
-# (union/<agent>-<name>: main plus pull requests the contribution gate proved together), or main when no union is
-# newer. It publishes the result as the `nightly` pre-release. Launchers install it only for players who turn Nightly
-# on. The previous nightly stays a week as nightly-<date>.
+# picked, merged in order (tools/ci/nightly_set.py), or main alone with none picked. Main is its newest commit where
+# checks and parity-main passed (or the `base` input), as for a release, and no Nightly is published while a
+# release-blocker is open. It publishes the result as the `nightly` pre-release. Launchers install it only for players
+# who turn Nightly on. The previous nightly stays a week as nightly-<date>.
 #
 # Why the signing key never meets the pull requests' code:
 # - `pick` merges the picked heads onto main with `git merge-tree --write-tree`: git objects only, no working tree,
@@ -13,11 +13,11 @@ run-name: nightly build${{ inputs.request && format(' (request {0})', inputs.req
 #   request that changes a path CODEOWNERS gives to Ludovic (this folder, tools/ci/, the signing and update code),
 #   pushes the merge as nightly/build-<date>-<n> and saves the set on the nightly-state branch.
 # - This file, game-build.yml and every script below run from main's copy: a schedule runs the default branch, and
-#   `uses: ./…` takes the caller's commit. The union's own .github/ is never read.
+#   `uses: ./…` takes the caller's commit. A picked pull request's own .github/ is never read.
 # - `build` (game-build.yml, `trusted: false`) never reaches a release's tools: its macOS jobs run on the runner
 #   that already runs pull requests' parity jobs, never the release runner; its Rust cache has its own key and is
 #   never saved; and releases don't read the machine's shared sccache.
-# - `build` (game-build.yml) checks out and compiles the merge (or the union) with no secrets: its token reads contents only and
+# - `build` (game-build.yml) checks out and compiles the merge with no secrets: its token reads contents only and
 #   isn't kept in the checkout; the macOS programs are signed ad hoc (Developer ID needs the runner's keychain,
 #   which stays locked for nightlies).
 # - `sign` is the only job with RELEASE_SIGNING_KEY. It checks out nothing but main's tools/ci/sign_release.sh, which
@@ -56,6 +56,10 @@ on:
         description: A dry run's own set, `2640@<head> 2642@<head>` (the saved set stays)
         type: string
         default: ''
+      base:
+        description: The commit of main to build on (default main's newest with green checks and parity-main)
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -71,6 +75,7 @@ jobs:
       contents: write       # nightly/build-<date>-<n> and the nightly-state branch (main is protected)
       issues: write         # says in the thread when the picked pull requests conflict
       pull-requests: write
+      actions: read         # main's newest green checks and parity-main runs (the base)
     outputs:
       build: ${{ steps.pick.outputs.build }}
       sha: ${{ steps.pick.outputs.sha }}
@@ -96,6 +101,7 @@ jobs:
           DRY_RUN: ${{ steps.mode.outputs.dry_run }}
           NIGHTLY_ISSUE: ${{ inputs.issue }}
           NIGHTLY_PRS: ${{ inputs.prs }}
+          NIGHTLY_BASE: ${{ inputs.base }}
         run: |
           python3 tools/ci/nightly.py pick ${FORCE:+--force} | tee -a "$GITHUB_STEP_SUMMARY"
           { echo; cat nightly-notes.md; } >> "$GITHUB_STEP_SUMMARY"
@@ -180,6 +186,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+      issues: read          # the open release-blocker issues (gate)
     steps:
       - uses: actions/checkout@v4
         with:
@@ -194,9 +201,17 @@ jobs:
         run: |
           key=(); [[ -n "$EPHEMERAL" ]] && key=(--key "$(cat dist/ephemeral.pub)")
           cargo run --locked --quiet -p horizon-release-sign -- verify --tag nightly --publishing "${key[@]}" dist
-      - name: The smoke test drew a world
-        # No release-blocker check: a nightly is how blockers get tested.
-        run: python3 tools/release_train.py gate --kind game --smoke dist/smoke-test.json
+      - name: Ready to publish (the smoke test drew a world, no release-blocker is open)
+        # Right before publishing, as for a release: an issue labelled while the builds ran still holds it. A dry run
+        # only reports what a real run would do (that is how a blocker's fix is tried).
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ needs.pick.outputs.dry_run }}
+        run: |
+          if ! python3 tools/release_train.py gate --kind game --smoke dist/smoke-test.json --blockers; then
+            [[ "$DRY_RUN" == true ]] || { echo "::error::Nothing published"; exit 1; }
+            echo "::warning::A real run would publish nothing"
+          fi
       - name: Publish as the `nightly` pre-release
         if: needs.pick.outputs.dry_run != 'true'
         env:

@@ -7,6 +7,7 @@ use super::Game;
 use horizon_client::{
     block_entity_anim::{
         BellEntity, ConduitServer, ConduitTarget, EndGateway, Shulker, ShulkerStatus, Ticker,
+        closer_to_center_than,
     },
     block_entity_render::BlockAnim,
     collisions::{SceneCollisions, no_collision_empty},
@@ -49,11 +50,16 @@ impl Game<'_> {
             }
             Some(Ticker::Bell) => {
                 let gathered = self.bell_gather(pos);
-                self.be_anims
-                    .bells
-                    .entry(pos)
-                    .or_default()
-                    .trigger_event(a, b, time, || gathered);
+                let rung =
+                    self.be_anims
+                        .bells
+                        .entry(pos)
+                        .or_default()
+                        .trigger_event(a, b, time, || gathered);
+                // The server's copy tells the living entities within 32 blocks.
+                if rung && self.remote.is_none() {
+                    self.bell_heard(pos, time);
+                }
             }
             Some(Ticker::Gateway) => {
                 let initial = self.gateway_loaded(pos);
@@ -199,6 +205,26 @@ impl Game<'_> {
             }
         }
         out
+    }
+    /// `BellBlockEntity.updateEntities`: every gathered entity alive within 32
+    /// blocks of the bell's centre gets `HEARD_BELL_TIME` (only villagers
+    /// have a brain that reads it).
+    fn bell_heard(&mut self, pos: [i32; 3], now: i64) {
+        let nearby = self
+            .be_anims
+            .bells
+            .get(&pos)
+            .and_then(|b| b.nearby.clone())
+            .unwrap_or_default();
+        for m in &mut self.mobs {
+            if m.alive()
+                && !m.removed
+                && nearby.contains(&u64::from(m.id))
+                && closer_to_center_than(pos, [m.position.x, m.position.y, m.position.z], 32.0)
+            {
+                horizon_client::mobs::villager_brain::heard_bell(m, now);
+            }
+        }
     }
     /// `ShulkerBoxBlock.canOpen`: a closed box opens only when its lid has
     /// room to rise (`level.noCollision` of the half-open lid box).

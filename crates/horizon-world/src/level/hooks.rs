@@ -1,7 +1,7 @@
 //! `neighborChanged`, `onPlace`, `affectNeighborsAfterRemoval` and
 //! `updateIndirectNeighbourShapes` for the overriding vanilla classes.
 use super::{
-    LevelAccess, Sim,
+    LevelAccess, LevelEvent, Sim,
     classes::Class,
     states::BlockId,
     update::{below, rel},
@@ -189,6 +189,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     self.schedule_tick(pos, block, 1);
                 }
                 Class::Shelf => self.shelf_on_place(pos, state, old),
+                // CarvedPumpkinBlock.onPlace: a pumpkin placed by any means may
+                // complete a golem; the caller builds it.
+                Class::CarvedPumpkin if !same => self.emit(LevelEvent::BlockEvent {
+                    pos,
+                    state,
+                    kind: "golem",
+                }),
                 Class::SnifferEgg => {
                     let boosted = b.is_block(self.below_state(pos), b.named.moss_block);
                     if boosted {
@@ -386,7 +393,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 
     /// `ServerPlayerGameMode.destroyBlock`: `playerWillDestroy` then
     /// `removeBlock`. Drops are the caller's (tool-dependent loot).
-    pub(crate) fn player_destroy(&mut self, pos: BlockPos, creative: bool) -> bool {
+    pub(crate) fn player_destroy(
+        &mut self,
+        pos: BlockPos,
+        creative: bool,
+        correct_tool: bool,
+    ) -> bool {
         let b = self.b;
         let p = b.props;
         let state = self.state(pos);
@@ -394,8 +406,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             return false;
         }
         let data = b.data(state);
-        if creative
-            && (data.is(Class::DoublePlant) || data.is(Class::Door))
+        // DoorBlock also clears the bottom half when the tool would not drop it.
+        if ((creative && data.is(Class::DoublePlant))
+            || (data.is(Class::Door) && (creative || !correct_tool)))
             && b.table.text(state, p.half) == "upper"
         {
             let bottom = below(pos);

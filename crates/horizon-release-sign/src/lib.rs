@@ -124,6 +124,45 @@ pub fn is_nightly(tag: &str) -> bool {
     tag == NIGHTLY || tag.starts_with("nightly-")
 }
 
+/// The version a nightly installs as, from its release title ("Nightly 2026-10-28 · 0c02067"):
+/// `nightly-2026-10-28-0c02067`. `published` (GitHub's `published_at`) dates a title without one.
+/// The launcher and `horizon-server` name it the same way, and native mods read the commit back.
+pub fn nightly_version(title: &str, published: &str) -> String {
+    let mut words = title
+        .strip_prefix("Nightly ")
+        .unwrap_or_default()
+        .split(" · ");
+    let date = words
+        .next()
+        .filter(|d| is_date(d))
+        .unwrap_or_else(|| published.get(..10).unwrap_or(published));
+    let commit = words
+        .next()
+        .filter(|c| !c.is_empty() && c.chars().all(|c| c.is_ascii_hexdigit()));
+    match commit {
+        Some(commit) => format!("{NIGHTLY}-{date}-{commit}"),
+        None => format!("{NIGHTLY}-{date}"),
+    }
+}
+
+/// The date of a nightly's version or tag (`nightly-2026-10-28-0c02067`, `nightly-2026-10-28`):
+/// nightlies follow every release and each other by it.
+pub fn nightly_date(version: &str) -> Option<&str> {
+    let date = version.strip_prefix("nightly-")?.get(..10)?;
+    is_date(date).then_some(date)
+}
+
+fn is_date(text: &str) -> bool {
+    text.len() == 10
+        && text.chars().enumerate().all(|(i, c)| {
+            if i == 4 || i == 7 {
+                c == '-'
+            } else {
+                c.is_ascii_digit()
+            }
+        })
+}
+
 /// The signed SHA-256 of `asset` in release `tag`, or why the download must be refused.
 /// `sums` and `signature` are the release's SHA256SUMS and SHA256SUMS.sig, None when it has none.
 /// A nightly is never a release: its tags are refused here, whatever their signature
@@ -387,6 +426,21 @@ mod tests {
         assert!(nightly_digest(asset, Some(sums.as_bytes()), Some(&signature), &keys).is_err());
         assert!(nightly_digest(asset, Some(sums.as_bytes()), None, &keys).is_err());
         assert!(is_nightly("nightly-2026-10-27") && !is_nightly("v0.2.81"));
+    }
+
+    #[test]
+    fn a_nightly_is_named_by_its_date_and_commit() {
+        let v = nightly_version("Nightly 2026-10-28 · 0c02067", "2026-10-28T20:40:00Z");
+        assert_eq!(v, "nightly-2026-10-28-0c02067");
+        assert_eq!(
+            nightly_version("Something else", "2026-10-29T01:00:00Z"),
+            "nightly-2026-10-29"
+        );
+        assert_eq!(nightly_date(&v), Some("2026-10-28"));
+        assert_eq!(nightly_date("nightly-2026-10-27"), Some("2026-10-27"));
+        assert_eq!(nightly_date("nightly"), None);
+        assert_eq!(nightly_date("v0.2.95"), None);
+        assert!(is_nightly(&v));
     }
 
     #[test]

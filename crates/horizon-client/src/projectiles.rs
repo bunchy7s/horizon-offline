@@ -767,9 +767,10 @@ impl Projectile {
             }
             ProjectileKind::Potion { .. } => "item/splash_potion",
             ProjectileKind::LlamaSpit => "entity/llama/llama_spit",
-            ProjectileKind::ShulkerBullet { .. } => "entity/shulker/spark",
-            // Drawn as `WindChargeModel` by the game.
-            ProjectileKind::WindCharge | ProjectileKind::BreezeWindCharge => return None,
+            // Drawn as `WindChargeModel` and `ShulkerBulletModel` by the game.
+            ProjectileKind::WindCharge
+            | ProjectileKind::BreezeWindCharge
+            | ProjectileKind::ShulkerBullet { .. } => return None,
             ProjectileKind::WitherSkull { dangerous: false } => "entity/wither/wither",
             ProjectileKind::WitherSkull { dangerous: true } => "entity/wither/wither_invulnerable",
             // Drawn as their models by the game.

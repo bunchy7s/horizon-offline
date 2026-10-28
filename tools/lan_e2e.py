@@ -176,6 +176,8 @@ address. The script then checks, from both sides, what a guest's game used to ge
 - riding:    the host and the guest each saddle and ride a horse (walk, jump), a pig and a strider
              (with their sticks), a camel and a donkey, sit on a llama and fly a happy ghast, and
              get off by sneaking; the other side sees the animal move.
+- portal_rider: (--server-thread) a survival guest rides a horse into a Nether portal: the horse goes
+             through at once and carries it, so it arrives in the Nether still riding the same horse.
 - riding_teleport: the host and the guest each /tp through chat while riding a horse; after 60
              ticks each stays dismounted at the destination and both sides see the horse left
              behind. The host also teleports a mounted guest by name.
@@ -6521,6 +6523,86 @@ def check_riding_teleport(host, guest, out):
 
 CHECKS += ['riding_teleport']
 CHECK_FNS.update(riding_teleport=check_riding_teleport)
+
+
+def check_portal_rider(host, guest, out):
+    """#1486 (--server-thread): a survival guest rides a horse into a Nether portal. The horse goes
+    through at once (NetherPortalBlock.getPortalTransitionTime is 0 for an entity that isn't a
+    player; a passenger has no portal process of its own, Entity.canUsePortal) and carries its rider
+    (Entity.teleportCrossDimension): the guest leaves well before a player's own 80 ticks and
+    arrives in the Nether still on the same horse."""
+    if not SERVER_THREAD:
+        return 'skipped (needs --server-thread)'
+    x, y, z = apart(host, guest)['guest']
+    horse_at = (x + 1.0, y, z + 2.5)
+    # The portal's plane crosses the horse's box (z + 1.8 to z + 3.2), the rider's too.
+    pz = z + 2
+    tag = 'portal_rider'
+    home = 'execute in minecraft:overworld run'
+    try:
+        guest('command', command='clear @s')
+        guest('command', command='gamemode survival')
+        guest('command', command='gamerule players_nether_portal_default_delay 80')
+        guest('command', command='item replace entity @s weapon.mainhand with minecraft:saddle')
+        guest('command', command=f'summon minecraft:horse {horse_at[0]} {y} {horse_at[2]} '
+                                 f'{{Tame:1b,NoAI:1b,Tags:["{tag}"]}}')
+        guest.wait(5)
+        horses = [m for m in guest.raw('mobs', 16)['near'] if m['kind'] == 'minecraft:horse' and m['health'] > 0]
+        horse = next((m for m in horses if math.dist(m['pos'], horse_at) < 0.1), None)
+        assert horse, f'no live horse at {horse_at}: {horses}'
+        guest.raw('look-at', horse_at[0], y + 0.8, horse_at[2])
+        guest.raw('mouse', 'right', 'click')
+        guest.wait(5)
+        guest('command', command='item replace entity @s weapon.mainhand with minecraft:air')
+        guest.wait(2)
+        guest.raw('mouse', 'right', 'click')
+        guest.wait(5)
+        assert guest('status').get('riding') == horse['id'], 'the guest is not riding the horse'
+        # The frame around the horse and its rider, then the portal inside it.
+        for corner in (f'{x - 1} {y - 1} {pz} {x + 2} {y - 1} {pz}', f'{x - 1} {y + 3} {pz} {x + 2} {y + 3} {pz}',
+                       f'{x - 1} {y} {pz} {x - 1} {y + 2} {pz}', f'{x + 2} {y} {pz} {x + 2} {y + 2} {pz}'):
+            guest('command', command=f'fill {corner} minecraft:obsidian')
+        guest('command', command=f'fill {x} {y} {pz} {x + 1} {y + 2} {pz} minecraft:nether_portal[axis=x]')
+        guest.shot(out, 'portal-rider-in')
+        left = None
+        for waited in range(0, 120, 5):
+            if guest('state').get('dimension') == NETHER:
+                left = waited
+                break
+            guest.wait(5)
+        assert left is not None, 'the guest on its horse did not go through the portal in 120 ticks'
+        assert left < 40, f'the guest left after {left} ticks: its own delay (80), not the horse\'s (0)'
+        # The server holds the guest until the chunks around the exit are lit, then places it there.
+        there = wait_dimension(guest, NETHER, 600)
+        seen = None
+        for _ in range(30):
+            guest.wait(20)
+            seen = {'riding': guest('status').get('riding'), 'horse': mob_seen(guest, horse['id']),
+                    'at': pos_of(guest)}
+            if seen['horse'] and math.dist(seen['horse']['pos'], seen['at']) < 3:
+                break
+        guest.wait(40)
+        seen = {'riding': guest('status').get('riding'), 'horse': mob_seen(guest, horse['id']), 'at': pos_of(guest)}
+        guest.shot(out, 'portal-rider-nether')
+        assert there.get('dimension') == NETHER, f'the guest is in {there.get("dimension")}'
+        assert seen['horse'], f'the horse {horse["id"]} did not come to the Nether with its rider: {seen}'
+        assert seen['riding'] == horse['id'], f'the guest arrived on foot: {seen}'
+        assert math.dist(seen['horse']['pos'], seen['at']) < 3, f'the horse is not under its rider: {seen}'
+        host_dim = host('state').get('dimension')
+        assert host_dim == OVERWORLD, f'the host went to {host_dim} with the guest'
+        return {'left_after_ticks': left, 'riding': seen['riding'], 'horse': seen['horse']['pos'], 'guest': seen['at']}
+    finally:
+        back_to_game(guest)
+        guest('command', command=f'kill @e[tag={tag}]')
+        guest('command', command=f'{home} fill {x - 1} {y - 1} {pz} {x + 2} {y + 3} {pz} minecraft:air')
+        guest('command', command=f'{home} fill {x - 1} {y - 1} {pz} {x + 2} {y - 1} {pz} minecraft:stone')
+        guest('command', command=f'{home} tp @s {x + 0.5} {y} {z + 0.5} 0 0')
+        wait_dimension(guest, OVERWORLD, 600)
+        guest.wait(20)
+
+
+CHECKS += ['portal_rider']
+CHECK_FNS.update(portal_rider=check_portal_rider)
 
 
 def check_recipe_removal(host, guest, out):

@@ -623,6 +623,18 @@ impl Game<'_> {
             SculkKind::Shrieker => sculk::shrieker_can_listen(event),
             _ => sculk::is_vibration(event),
         };
+        // VibrationSystem.User.isValidVibration: a player sneaking past a
+        // sensor, whose step it ignores, is AVOID_VIBRATION (sensors only;
+        // a shrieker cannot trigger it).
+        if listens
+            && matches!(kind, SculkKind::Sensor | SculkKind::Calibrated)
+            && ctx.source == Some(Who::Player)
+            && !ctx.spectator
+            && ctx.stepping_carefully
+            && sculk::ignored_when_sneaking(event)
+        {
+            self.trigger_player("minecraft:avoid_vibration");
+        }
         if !sculk::valid_vibration(listens, event, ctx) {
             return;
         }
@@ -693,12 +705,15 @@ impl Game<'_> {
     fn warden_listen(&mut self, index: usize, event: &'static str, pos: [f64; 3], ctx: &Context) {
         let now = self.world.game_time;
         let (occludes, world) = (&self.sculk.tables.occludes, &self.world);
-        warden::listen(&mut self.mobs[index], now, event, pos, ctx, |a, b| {
+        let avoided = warden::listen(&mut self.mobs[index], now, event, pos, ctx, |a, b| {
             sculk::is_occluded(a, b, |p| {
                 let state = world.block(p.x, p.y, p.z);
                 occludes.get(state.0 as usize).copied().unwrap_or(false)
             })
         });
+        if avoided {
+            self.trigger_player("minecraft:avoid_vibration");
+        }
     }
 
     // ---- ticking ----
@@ -1575,6 +1590,30 @@ impl Game<'_> {
         ) {
             let _ = self.attack_block(pos);
         }
+    }
+
+    /// `RedStoneOreBlock.useItemOn`: a right-click lights the ore whatever the
+    /// hand holds. False (PASS) when the hand holds a block item, which goes on
+    /// to be placed; true (SUCCESS) otherwise.
+    pub(super) fn use_redstone_ore(
+        &mut self,
+        pos: [i32; 3],
+        held: Option<&horizon_client::items::ItemStack>,
+    ) -> Result<bool> {
+        if !matches!(
+            &*self.block_name(pos),
+            "minecraft:redstone_ore" | "minecraft:deepslate_redstone_ore"
+        ) {
+            return Ok(false);
+        }
+        self.attack_block(pos)?;
+        let block_item = held.is_some_and(|s| {
+            self.res
+                .items()
+                .get(&s.item)
+                .is_some_and(|i| i.block.is_some())
+        });
+        Ok(!block_item)
     }
 
     fn tick_mob_sculk_events(&mut self) {

@@ -409,10 +409,12 @@ runtime or new dependency. Server-sent events can replace the polling later if a
   newer release a minute after it starts and then every 6 hours, and only says so, in its log, in `status`
   and in the panel (`HORIZON_NO_UPDATE_CHECK=1` turns the check off). `update --check` asks GitHub once.
   `update`:
-  1. downloads the newest stable release's archive for this computer (on Linux the server build; `--version`
-     picks another, a beta included) and checks it against the release's SHA256SUMS, whose Ed25519 signature
-     must check with a key built into `horizon-server` (docs/release-flow.md, "Signed checksums"): an unsigned
-     or tampered release is refused;
+  1. downloads the current Nightly's archive for this computer (the only build Horizon ships since 2026-10-28;
+     GitHub's latest release while there is none; on Linux the server build; `--version` picks another: a
+     `vX.Y.Z` release, or a `nightly-<date>` of the last 7 days) and checks it against its SHA256SUMS, whose Ed25519
+     signature must check with a key built into `horizon-server` (docs/release-flow.md, "Signed checksums"),
+     signed for the Nightly channel: an unsigned or tampered build is refused. A Nightly installs as
+     `nightly-<date>-<commit>`, newer than every `vX.Y.Z`; another build of the same day is an update too;
   2. unpacks it into `<dir>/releases/<tag>`, beside the others, with its game files linked to
      `<dir>/game-files` as the installers do;
   3. stops the game, backs up the world (`backups/<time>-before-<tag>.zip`), records the release in use in

@@ -53,8 +53,8 @@ Windows (x64), in PowerShell:
 irm https://raw.githubusercontent.com/horizon-rust/horizon/main/packaging/server/install.ps1 | iex
 ```
 
-The script downloads the latest Horizon release for your computer from GitHub, checks it against the SHA-256
-GitHub publishes, and never asks for sudo or administrator rights. It installs:
+The script downloads the current Horizon Nightly for your computer from GitHub (the only build Horizon ships;
+`--version` picks another), checks it against the SHA-256 GitHub publishes, and never asks for sudo or administrator rights. It installs:
 
 - the release in `~/.local/share/horizon/releases/<version>` (Windows: `%LOCALAPPDATA%\Horizon`), with
   `current` pointing at the one in use;
@@ -236,7 +236,7 @@ minutes. It keeps the crash report and gives up after 5 crashes in 10 minutes, a
 after it starts and every 6 hours after, and says so in its log, in `status` and in the panel; it never
 updates by itself. `horizon-server update --check` asks once. `horizon-server update`:
 
-1. downloads the newest release and checks it against the SHA-256 GitHub publishes for it;
+1. downloads the current Nightly and checks it against its signed SHA-256;
 2. stops the game, backs up the world (`backups/<time>-before-<release>.zip`) and switches to the new
    release;
 3. starts the game on it and waits up to 5 minutes (`--timeout SECONDS`) for it to come up.

@@ -5,6 +5,9 @@
 use std::{fs, path::Path};
 
 pub const FILE: &str = "horizon-graphics.txt";
+/// Written beside it before HDR output is switched on and removed once the first HDR frame is
+/// presented. Found at the next start, it means HDR output took the game down, so HDR starts off.
+pub const HDR_MARKER: &str = "horizon-hdr-pending";
 
 /// Simple-level presets. `Custom` leaves every option as the player set it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -310,9 +313,17 @@ fn bool_text(v: bool) -> &'static str {
 }
 impl Graphics {
     pub fn load(dir: &Path) -> Self {
-        fs::read_to_string(dir.join(FILE))
+        let mut g: Self = fs::read_to_string(dir.join(FILE))
             .map(|t| Self::parse(&t))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if fs::remove_file(dir.join(HDR_MARKER)).is_ok() && g.hdr {
+            g.hdr = false;
+            g.save(dir);
+            log::warn!(
+                "the last start ended before HDR output showed a frame; HDR is off now (graphics option hdr, in {FILE})"
+            );
+        }
+        g
     }
     pub fn parse(text: &str) -> Self {
         let mut g = Self::default();

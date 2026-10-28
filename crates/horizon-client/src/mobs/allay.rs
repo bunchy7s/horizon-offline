@@ -95,7 +95,8 @@ impl Goal for Deliver {
         }
     }
 }
-/// `StayCloseToTarget`: back within 4 blocks of the deposit.
+/// `StayCloseToTarget.create(.., 4, 16, 2.25)`: acts only once the deposit is
+/// 16 blocks away or more, then walks until within 4.
 #[derive(Clone, Debug)]
 struct StayClose;
 impl Goal for StayClose {
@@ -109,7 +110,19 @@ impl Goal for StayClose {
                 let d = (p[0] - m.position.x).powi(2)
                     + (p[1] - m.position.y).powi(2)
                     + (p[2] - m.position.z).powi(2);
-                d > 16.0
+                d >= 256.0
+            })
+    }
+    /// `MoveToTargetSink.reachedTarget`: the walk target it set is reached
+    /// within a Manhattan block distance of 4 (`closeEnough`).
+    fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
+        m.extra.point.is_none()
+            && deposit(m, cx).is_some_and(|p| {
+                let at = [m.position.x, m.position.y, m.position.z];
+                (0..3)
+                    .map(|i| (p[i].floor() as i32 - at[i].floor() as i32).abs())
+                    .sum::<i32>()
+                    > 4
             })
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {

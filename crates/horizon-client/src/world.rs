@@ -355,7 +355,9 @@ impl World {
         false
     }
     /// The block entities to tick this tick, in order (`BlockEntities::tickers`).
-    pub fn block_entity_tickers(&mut self) -> Vec<(crate::block_entities::Pos, u32)> {
+    pub fn block_entity_tickers(
+        &mut self,
+    ) -> std::sync::Arc<Vec<(crate::block_entities::Pos, u32)>> {
         let (chunks, air) = (&self.chunks, self.air);
         self.block_entities.tickers(|(x, y, z)| {
             chunks

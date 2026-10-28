@@ -254,7 +254,7 @@ How releases are numbered, and how installs from before 0.2 reach it: [versionin
 | `run-parity` | Runs the parity job once on a fork's pull request |
 | `full-parity` | Runs the pull request's parity job on playhorizon's runner only (a change every harness reaches) |
 | `parity-regression` | Opened by the nightly audit for a harness that fails on main |
-| `release-blocker` | On an issue: no game release is published while it is open ([One channel](#one-channel)) |
+| `release-blocker` | On an issue: no game release or Nightly is published while it is open ([One channel](#one-channel)) |
 
 Pull requests without `feature` are listed under **Fixed**. Titles are written for players, since they become
 the notes.
@@ -442,11 +442,10 @@ launcher and the website read: both then look the newest launcher tags up one by
 ## Nightly channel
 
 `.github/workflows/nightly-build.yml` publishes an opt-in build once a night (20:17 UTC) and when a trusted
-reviewer asks, for players who want fixes before they are released (#2681). It builds main plus the pull requests the
-trusted reviewers picked, merged in their order. With none picked, it builds the newest `union/<agent>-<name>` branch
-on origin (main plus the pull requests the contribution gate proved together in one wave) when that union is newer
-than main's head and holds something main lacks, otherwise main (`tools/ci/nightly.py pick`). A night with nothing
-new publishes nothing. A Nightly can include pull requests not reviewed yet: that is what it is for, playing them
+reviewer asks, for players who want fixes before they are released (#2681). It builds main's newest commit where
+`checks` and `parity-main` passed, as a release does (or the `base` input), plus the pull requests the trusted
+reviewers picked, merged in their order; with none picked, that commit alone (`tools/ci/nightly.py pick`). No green
+commit (main's newest `checks` or `parity-main` run failed) builds nothing. A night with nothing new publishes nothing. A Nightly can include pull requests not reviewed yet: that is what it is for, playing them
 before the gate.
 
 Every Nightly ships its exact source. Its notes name the commit; `horizon-source.tar.gz` on the release is that
@@ -491,7 +490,7 @@ comment on any issue or pull request (`.github/workflows/nightly-command.yml`, `
 /nightly 2640 2642     the set becomes these pull requests, merged onto main in this order; builds now
 /nightly add 2650      adds one, or takes its newest head again; builds now
 /nightly remove 2640   drops one; builds now
-/nightly clear         empties the set: back to the proven union or main; builds now
+/nightly clear         empties the set: back to main alone; builds now
 /nightly status        what the set holds
 /nightly dry-run 2640  builds main + these and signs with a throwaway key; publishes nothing, the set stays
 ```
@@ -524,12 +523,14 @@ comment on any issue or pull request (`.github/workflows/nightly-command.yml`, `
   - A line `paused` in that file stops every reviewer's `/nightly` (and triage commands); his own still work.
   - Main, the gate and releases don't change: picks reach only players who turned Nightly on.
 
-- **Jobs.** `pick` chooses or assembles the commit and writes the notes (each pull request in it with its title,
-  author and who picked it, or for a union the open pull requests it holds beyond main). `build` is
+- **Jobs.** `pick` assembles the commit and writes the notes: what reached main since the previous Nightly (New and
+  Fixed, as a release's notes), then each picked pull request with its title, author and who picked it, the known
+  issues and the thanks. `build` is
   `game-build.yml`, the same builds and smoke test as a release, with the version `nightly-<date>` and
   `HORIZON_NIGHTLY="<date> <short sha>"` built in, macOS signed ad hoc. `sign` signs SHA256SUMS for the channel
   (the message says `horizon release nightly`, so a nightly's signature never passes for a release's). `publish`
-  checks the signature and the smoke test (not `release-blocker`: a nightly is how blockers get tested), renames the
+  checks the signature, the smoke test and that no `release-blocker` is open (as a release; a dry run only warns, so
+  `/nightly dry-run <pr>` still tries a blocker's fix), renames the
   previous `nightly` pre-release to `nightly-<its date>`, publishes the new one as the `nightly` pre-release (never
   GitHub's latest), and deletes the `nightly-<date>` pre-releases and tags older than 7 days, nothing else.
 - **The signing key never meets the pull requests' code.** Every workflow file and script runs from main's copy (a

@@ -130,6 +130,8 @@ pub struct Font {
     atlas: (u32, u32),
     region: (u32, u32),
     cache: RefCell<Cache>,
+    /// Set anew for each font and each `reset_cache` (see `epoch`).
+    generation: std::cell::Cell<u64>,
     /// "Force Unicode Font": the `uniform` filter option.
     pub uniform: bool,
     /// "Japanese Glyph Variants": the `jp` filter option.
@@ -559,6 +561,11 @@ impl Region {
         Some((ax, ay))
     }
 }
+/// A value no font has had yet (`Font::epoch`).
+fn next_generation() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
 impl Font {
     /// Build from the atlas holding the bitmap font sheets (`sprites`, of
     /// `atlas` size) with `region` the reserved rows.
@@ -603,6 +610,7 @@ impl Font {
                         .map_or(0, |d| d.as_nanos() as i64),
                 ),
             }),
+            generation: std::cell::Cell::new(next_generation()),
             uniform: false,
             japanese: false,
         };
@@ -661,6 +669,13 @@ impl Font {
         }
         cache.region.cursor = (0, 0);
         cache.region.row = 0;
+        self.generation.set(next_generation());
+    }
+    /// Changes whenever a glyph may come out different: another font, a
+    /// cache reset (glyphs move in the atlas) or other font options. Text laid
+    /// out under one epoch can be kept until it changes.
+    pub fn epoch(&self) -> u64 {
+        self.generation.get() << 2 | u64::from(self.uniform) << 1 | u64::from(self.japanese)
     }
     /// The glyph for a character in the default font (FontSet.getGlyph).
     pub fn glyph(&self, c: char) -> Glyph {

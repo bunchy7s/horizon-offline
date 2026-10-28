@@ -435,7 +435,8 @@ pub struct BellTick {
     pub ended: Option<(Vec<([f64; 3], i32)>, Vec<u64>)>,
 }
 
-fn closer_to_center_than(pos: [i32; 3], p: [f64; 3], distance: f64) -> bool {
+/// `Vec3i.closerToCenterThan`: `p` is within `distance` of the block's centre.
+pub fn closer_to_center_than(pos: [i32; 3], p: [f64; 3], distance: f64) -> bool {
     let dx = f64::from(pos[0]) + 0.5 - p[0];
     let dy = f64::from(pos[1]) + 0.5 - p[1];
     let dz = f64::from(pos[2]) + 0.5 - p[2];

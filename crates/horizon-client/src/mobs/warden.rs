@@ -489,7 +489,8 @@ pub fn can_receive_vibration(m: &Mob, _now: i64, ctx: &Context) -> bool {
 }
 /// `VibrationSystem.Listener.handleGameEvent` for the warden: a free
 /// listener within 16 blocks of its eyes schedules what it can hear.
-/// `occluded` is `VibrationSystem.Listener.isOccluded`.
+/// `occluded` is `VibrationSystem.Listener.isOccluded`. Returns true when a
+/// sneaking player's step was avoided (AVOID_VIBRATION) instead.
 pub fn listen(
     m: &mut Mob,
     now: i64,
@@ -497,23 +498,35 @@ pub fn listen(
     pos: [f64; 3],
     ctx: &Context,
     occluded: impl Fn([f64; 3], [f64; 3]) -> bool,
-) {
+) -> bool {
     let eye = [m.position.x, m.position.y + m.kind.eye_height, m.position.z];
     let Some(st) = m.extra.warden.as_ref() else {
-        return;
+        return false;
     };
     if st.vibration.current.is_some() {
-        return;
+        return false;
     }
     let block = |p: [f64; 3]| p.map(|v| i64::from(v.floor() as i32));
     let (source, listener) = (block(pos), block(eye));
     let d = [0, 1, 2].map(|i| source[i] - listener[i]);
-    if d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 256
-        || !sculk::valid_vibration(sculk::warden_can_listen(event), event, ctx)
+    if d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 256 {
+        return false;
+    }
+    // isValidVibration: the warden can trigger avoid vibration.
+    let listens = sculk::warden_can_listen(event);
+    if listens
+        && ctx.source == Some(Who::Player)
+        && !ctx.spectator
+        && ctx.stepping_carefully
+        && sculk::ignored_when_sneaking(event)
+    {
+        return true;
+    }
+    if !sculk::valid_vibration(listens, event, ctx)
         || !can_receive_vibration(m, i64::from(m.age), ctx)
         || occluded(pos, eye)
     {
-        return;
+        return false;
     }
     let d = [pos[0] - eye[0], pos[1] - eye[1], pos[2] - eye[2]];
     let distance = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() as f32;
@@ -529,6 +542,7 @@ pub fn listen(
             now,
         );
     }
+    false
 }
 /// `Level.gameEvent` for the mobs' own movement events from `from` on, as
 /// the mob AI probe has no sculk layer: every warden's listener hears them.

@@ -195,6 +195,11 @@ fn object_style(o: &serde_json::Map<String, Value>) -> Style {
             Some("copy_to_clipboard") => {
                 text("value").map(crate::text::ClickEvent::CopyToClipboard)
             }
+            // ClickEvent.ShowDialog.CODEC: a `minecraft:dialog` registry id or
+            // the dialog itself; the server may send it (isAllowedFromServer).
+            Some("show_dialog") => e.get("dialog").map(|dialog| {
+                crate::text::ClickEvent::ShowDialog(crate::scoreboard::json_to_tag(dialog))
+            }),
             _ => None,
         };
     }

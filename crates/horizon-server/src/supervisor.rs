@@ -401,7 +401,8 @@ fn check_updates(shared: Arc<Shared>) {
             thread::sleep(Duration::from_secs(60));
             loop {
                 if let (Ok(release), Some(current)) = (update::release(None), install.current()) {
-                    let newer = update::newer(&release.tag, &current).then_some(release.tag);
+                    let newer = update::update_available(&release.tag, &current)
+                        .then_some(release.tag);
                     let told = shared.update.lock().unwrap().available.clone();
                     if let Some(tag) = newer.as_ref().filter(|t| told.as_ref() != Some(*t)) {
                         note(

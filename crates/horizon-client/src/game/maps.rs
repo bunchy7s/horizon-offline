@@ -739,6 +739,7 @@ impl Game<'_> {
             return false;
         }
         let at = [x, y, z].map(|v| f64::from(v) + 0.5);
+        self.trigger_block("minecraft:item_used_on_block", hit.pos, stack);
         self.audio
             .play("minecraft:item.lodestone_compass.lock", Some(at), 1.0, 1.0);
         let target = Tag::compound([(

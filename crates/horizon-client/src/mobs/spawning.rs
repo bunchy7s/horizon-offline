@@ -168,6 +168,12 @@ pub fn finalize(m: &mut Mob, biome: &BiomeFacts, difficulty: &LocalDifficulty) {
         Climate::Warm => 1,
         Climate::Cold => 2,
     };
+    // `Registry.getRandom` of the `*_sound_variant` registry (pig, cow,
+    // chicken, cat and wolf), drawn by their finalizeSpawn.
+    let sounds = super::finalize::sound_variants(m.species()).len();
+    if sounds > 0 {
+        m.extra.sound_variant = Some(m.random.next_int_bound(sounds as i32).unwrap_or(0) as u8);
+    }
     match m.species() {
         // Warden.finalizeSpawn: a minute before it digs back down.
         S::Warden => super::warden::finalize(m, false, &mut Vec::new()),
@@ -301,6 +307,17 @@ pub fn finalize(m: &mut Mob, biome: &BiomeFacts, difficulty: &LocalDifficulty) {
         }
         S::Fox | S::Panda | S::Dolphin => m.extra.pick_up_loot = true,
         S::TropicalFish => super::aquatic::finalize(m),
+        // Salmon.finalizeSpawn: a weighted size (small 30, medium 50, large 15).
+        S::Salmon => {
+            let r = m.random.next_int_bound(95).unwrap_or(0);
+            m.extra.variant = if r < 30 {
+                0
+            } else if r < 80 {
+                1
+            } else {
+                2
+            };
+        }
         S::Slime | S::MagmaCube => super::cube::finalize(m),
         _ => {}
     }

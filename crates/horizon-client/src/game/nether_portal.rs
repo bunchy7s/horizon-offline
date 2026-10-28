@@ -44,7 +44,7 @@ pub(super) struct Plan {
     height: f32,
     /// Through an End portal: `approximate` is the End's spawn point, or the
     /// Overworld's shared spawn.
-    end: bool,
+    pub(super) end: bool,
 }
 
 impl Plan {
@@ -91,6 +91,10 @@ pub(super) struct Portals {
     /// Positions before this tick's moves, by entity id.
     before: HashMap<u32, Vec3>,
     arrivals: Vec<Arrival>,
+    /// The vehicles server players ride that went through a portal this
+    /// tick, in their level, with their entry: they carry their riders
+    /// (`tick_server_travel`).
+    carrying: Vec<(Dim, u32, BlockPos)>,
     loaded: bool,
     dirty: bool,
     /// Per-chunk portal palette masks, kept across ticks (portal_sections).
@@ -628,7 +632,7 @@ impl Game<'_> {
                     .iter()
                     .map(|b| b.id)
                     .chain(self.carts.iter().map(|c| c.id))
-                    .map(|id| (id, !self.vehicle_occupied(id))),
+                    .map(|id| (id, self.vehicle_can_use_portal(id))),
             )
             .collect();
         let present: std::collections::HashSet<u32> = ids.iter().map(|(id, _)| *id).collect();
@@ -645,7 +649,13 @@ impl Game<'_> {
             }
         }
         for (id, entry) in leaving {
-            self.send_through_portal(id, entry);
+            // `Entity.teleportCrossDimension` carries the passengers: a
+            // vehicle server players ride takes them along.
+            if self.guest_rides(id) {
+                self.portals.carrying.push((self.dim, id, entry));
+            } else {
+                self.send_through_portal(id, entry);
+            }
         }
     }
     /// `Entity.load`: the saved `PortalCooldown` (an entity that just came
@@ -681,7 +691,50 @@ impl Game<'_> {
         m.alive()
             && m.extra.mount.is_none()
             && self.riding != Some(m.id)
+            && (!self.guest_rides(m.id) || self.carries_riders())
             && m.species() != Species::Wither
+    }
+    /// `canUsePortal(false)` of a boat or minecart: empty, or ridden by
+    /// server players only, whom it carries along.
+    fn vehicle_can_use_portal(&self, id: u32) -> bool {
+        if !self.vehicle_occupied(id) {
+            return true;
+        }
+        self.carries_riders()
+            && self.riding != Some(id)
+            && !self.mobs.iter().any(|m| m.extra.mount == Some(id))
+    }
+    /// Whether a vehicle can take the server players riding it through a
+    /// portal: only a server moves players between its levels. Elsewhere a
+    /// ridden vehicle stays, rather than leave its rider behind.
+    fn carries_riders(&self) -> bool {
+        self.options.dedicated.is_some()
+    }
+    /// The vehicles that went through a portal in `dim` with server players
+    /// on them.
+    pub(super) fn take_carrying(&mut self, dim: Dim) -> Vec<(u32, BlockPos)> {
+        let (here, other) = std::mem::take(&mut self.portals.carrying)
+            .into_iter()
+            .partition(|(d, ..)| *d == dim);
+        self.portals.carrying = other;
+        here.into_iter().map(|(_, id, entry)| (id, entry)).collect()
+    }
+    /// The plan of vehicle `id` through the portal at `entry`: from its own
+    /// position and size (`getPortalDestination(level, vehicle)`).
+    pub(super) fn vehicle_plan(&self, id: u32, entry: BlockPos) -> Option<Plan> {
+        if let Some(m) = self.mobs.iter().find(|m| m.id == id) {
+            return Some(self.entity_plan(entry, m.position, m.width(), m.height(), true));
+        }
+        if let Some(b) = self.boats.iter().find(|b| b.id == id) {
+            let (width, height) = (super::boats::WIDTH as f32, super::boats::HEIGHT as f32);
+            return Some(self.entity_plan(entry, b.position, width, height, false));
+        }
+        let c = self.carts.iter().find(|c| c.id == id)?;
+        let (width, height) = (
+            super::minecarts::WIDTH as f32,
+            super::minecarts::HEIGHT as f32,
+        );
+        Some(self.entity_plan(entry, c.position, width, height, false))
     }
     /// Whether the player, a server player or a mob rides vehicle `id`.
     fn vehicle_occupied(&self, id: u32) -> bool {
@@ -721,7 +774,7 @@ impl Game<'_> {
                     super::minecarts::HEIGHT,
                 )
             }))
-            .filter(|(id, ..)| !self.vehicle_occupied(*id))
+            .filter(|(id, ..)| self.vehicle_can_use_portal(*id))
             .map(|(id, at, w, h)| (id, at, w as f32, h as f32))
             .collect();
         let mut portal_sections = std::mem::take(&mut self.portals.sections);

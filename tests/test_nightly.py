@@ -24,28 +24,18 @@ def run(state, text, login="kacpherek", *prs):
 T = dt.datetime(2026, 10, 28, 12, 0, tzinfo=dt.timezone.utc)
 
 
-def ref(name, sha, hours):
-    return nightly.Ref(name, sha, T + dt.timedelta(hours=hours))
+def merged_pr(n, title, labels, issues=(), paths=("crates/horizon-world/src/lib.rs",)):
+    return {"number": n, "title": title, "labels": labels, "issues": list(issues), "author": f"dev{n}",
+            "paths": list(paths)}
+
+
+def notes(chosen=None, picked=(), left_out=(), merged=(), issues=()):
+    chosen = chosen or nightly.Ref("main", "b" * 40, T)
+    return nightly.notes("2026-10-28", chosen, nightly.Ref("main", "m" * 40, T), list(picked), list(left_out),
+                         list(merged), list(issues))
 
 
 class NightlyTests(unittest.TestCase):
-    def test_the_newest_union_newer_than_main_is_built(self):
-        main = ref("main", "m", 0)
-        unions = [ref("union/a", "a", 1), ref("union/b", "b", 3), ref("union/c", "c", -2)]
-        self.assertEqual(nightly.choose(main, unions, contains=lambda a, b: False).name, "union/b")
-
-    def test_main_when_no_union_is_newer(self):
-        main = ref("main", "m", 5)
-        unions = [ref("union/a", "a", 1), ref("union/b", "b", 3)]
-        self.assertEqual(nightly.choose(main, unions, contains=lambda a, b: False).name, "main")
-        self.assertEqual(nightly.choose(main, [], contains=lambda a, b: False).name, "main")
-
-    def test_a_union_main_already_holds_is_skipped(self):
-        main = ref("main", "m", 0)
-        unions = [ref("union/landed", "l", 2), ref("union/open", "o", 1)]
-        landed = lambda a, b: a == "l"  # noqa: E731
-        self.assertEqual(nightly.choose(main, unions, contains=landed).name, "union/open")
-
     def test_only_old_dated_nightlies_are_pruned(self):
         tags = [{"tagName": "nightly", "isPrerelease": True},
                 {"tagName": "nightly-2026-10-20", "isPrerelease": True},
@@ -55,20 +45,24 @@ class NightlyTests(unittest.TestCase):
                 {"tagName": "nightly-2026-10-15-extra", "isPrerelease": True}]
         self.assertEqual(nightly.stale(tags, dt.date(2026, 10, 28), 7), ["nightly-2026-10-20"])
 
-    def test_notes_list_what_is_not_on_main(self):
-        text = nightly.notes("2026-10-28", ref("union/a", "0c0206714abc", 1),
-                             [{"number": 2476, "title": "Fix pistons", "headRefOid": "x"}])
-        self.assertIn("Nightly 2026-10-28 · 0c02067", text)
-        self.assertIn("- Fix pistons (#2476)", text)
-        self.assertIn("Everything in it is on main.", nightly.notes("2026-10-28", ref("main", "m" * 40, 0), []))
+    def test_notes_list_what_reached_main_as_a_release_did(self):
+        merged = [merged_pr(1, "Fix pistons", ["feature"], issues=[7]), merged_pr(2, "Water flows", []),
+                  merged_pr(3, "CI only", ["skip-release"]), merged_pr(4, "Docs", [], paths=[])]
+        text = notes(merged=merged, issues=["- Known thing"])
+        self.assertIn("Nightly 2026-10-28 · bbbbbbb: main (mmmmmmm), built from `main`", text)
+        self.assertIn("### New\n- Fix pistons (#1, fixes #7)", text)
+        self.assertIn("### Fixed\n- Water flows (#2)", text)
+        self.assertNotIn("CI only", text)
+        self.assertNotIn("Docs", text)
+        self.assertIn("### Known issues\n- Known thing", text)
+        self.assertIn("Thanks to @dev1, @dev2.", text)
+        self.assertNotIn("### Not merged yet", text)
+        self.assertIn("Nothing new for players on main", notes())
 
     def test_notes_name_the_commit_and_its_permanent_source_tag(self):
         sha = "0c0206714abc" + "0" * 28
-        text = nightly.notes("2026-10-28", ref("union/a", sha, 1), [])
+        text = notes(chosen=nightly.Ref("main", sha, None))
         self.assertIn(f"Source: commit {sha}, kept for good as the tag `nightly-source/2026-10-28-0c02067`", text)
-        main = nightly.Ref("main", "m" * 40, None)
-        self.assertIn("`nightly-source/2026-10-28-bbbbbbb`",
-                      nightly.set_notes("2026-10-28", nightly.Ref("b", "b" * 40, None), main, [], []))
 
     def test_the_source_tag_outlives_every_prune(self):
         tag = nightly.source_tag("2026-10-20", "a" * 40)
@@ -89,11 +83,10 @@ class ScheduledTests(unittest.TestCase):
 
     def test_notes_list_each_pull_request_and_who_picked_it(self):
         prs = run({}, "/nightly 1 2", "kacpherek", pr(1), pr(2)).state["prs"]
-        main = nightly.Ref("main", "m" * 40, None)
-        text = nightly.set_notes("2026-10-28", nightly.Ref("nightly/build-2026-10-28-1", "b" * 40, None), main, prs,
-                                 ["#3 Fix 3: closed, left out"])
-        self.assertIn("can include pull requests not reviewed yet, picked by trusted reviewers", text)
-        self.assertIn("- Fix 1 (#1) by dev1, at h1, picked by kacpherek", text)
+        text = notes(chosen=nightly.Ref("nightly/build-2026-10-28-1", "b" * 40, None), picked=prs,
+                     left_out=["#3 Fix 3: closed, left out"])
+        self.assertIn("main (mmmmmmm) with 2 pull requests merged in", text)
+        self.assertIn("### Not merged yet (2)\n- Fix 1 (#1) by dev1, at h1, picked by kacpherek", text)
         self.assertIn("### Left out (1)", text)
 
 if __name__ == "__main__":

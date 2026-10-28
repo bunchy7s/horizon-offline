@@ -1807,6 +1807,14 @@ impl Title {
             _ => self.mode = Mode::Main,
         }
     }
+    /// `JoinMultiplayerScreen.keyPressed`: F5 refreshes the server list as
+    /// Refresh does (`refreshServerList`).
+    pub fn refresh_servers(&mut self) {
+        if let Mode::Multiplayer(screen @ crate::multiplayer::Screen::List { .. }) = &mut self.mode
+        {
+            *screen = crate::multiplayer::Screen::list(&self.saves);
+        }
+    }
 }
 fn centered(atlas: &HudAtlas, batch: &mut HudBatch, text: &str, y: f32, color: u32) {
     batch.text(

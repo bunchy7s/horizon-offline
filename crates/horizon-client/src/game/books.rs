@@ -151,6 +151,9 @@ impl Game<'_> {
                 use horizon_client::clipboard::Clipboard;
                 self.clipboard.set(&value);
             }
+            // BookViewScreen.handleClickEvent: the rest is
+            // Screen.defaultHandleGameClickEvent's.
+            ClickEvent::ShowDialog(dialog) => self.show_dialog_ref(&dialog),
             _ => {}
         }
     }

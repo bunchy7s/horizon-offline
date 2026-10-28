@@ -533,9 +533,9 @@ pub fn tick(
     true
 }
 /// `LivingEntity.aiStep` -> `Entity.applyEffectsFromBlocks` for the blocks
-/// that hurt or hold a mob: the cactus (`CactusBlock.entityInside`, 1) and the
-/// sweet berry bush (`SweetBerryBushBlock.entityInside`: stuck at 0.8, 0.75,
-/// 0.8, and a grown bush pricks for 1 when the mob moved at least 0.003 on X
+/// that hurt or hold a mob: the cactus (`CactusBlock.entityInside`, 1), the
+/// cobweb (stuck at 0.25, 0.05, 0.25) and the sweet berry bush
+/// (`SweetBerryBushBlock.entityInside`: stuck at 0.8, 0.75, 0.8, and a grown bush pricks for 1 when the mob moved at least 0.003 on X
 /// or Z this tick). The blocks are those the mob's box touches anywhere along
 /// its move this tick, from where it started to where it ended.
 fn effects_from_blocks(m: &mut Mob, w: &MobWorld) {
@@ -561,6 +561,21 @@ fn effects_from_blocks(m: &mut Mob, w: &MobWorld) {
                     match w.block_name(x, y, z) {
                         "minecraft:cactus" => {
                             m.damage(1.0, Damage::of(DamageKind::Cactus));
+                        }
+                        // WebBlock.entityInside -> makeStuckInBlock, which a
+                        // spider ignores for cobwebs and a wither always.
+                        "minecraft:cobweb"
+                            if !matches!(
+                                m.species(),
+                                Species::Spider | Species::CaveSpider | Species::Wither
+                            ) =>
+                        {
+                            m.fall_distance = 0.0;
+                            m.stuck_multiplier = if m.has_effect("minecraft:weaving") {
+                                Vec3::new(0.5, 0.25, 0.5)
+                            } else {
+                                Vec3::new(0.25, f64::from(0.05_f32), 0.25)
+                            };
                         }
                         "minecraft:sweet_berry_bush"
                             if !matches!(m.species(), Species::Fox | Species::Bee) =>
@@ -828,17 +843,28 @@ fn play_ambient(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         // Nautilus/ZombieNautilus.getAmbientSound: by age, under water or on land.
         Species::Nautilus | Species::ZombieNautilus => super::nautilus::sounds(m)[0],
         Species::Enderman if m.ai.target.is_some() => "entity.enderman.scream",
-        Species::Wolf if m.ai.target.is_some() => "entity.wolf.growl",
+        Species::Wolf if m.ai.target.is_some() => {
+            super::finalize::variant_sound(m, "growl").unwrap_or("entity.wolf.growl")
+        }
         Species::Wolf if m.random.next_int_bound(3).unwrap_or(1) == 0 => {
-            if m.extra.tame && m.health < m.attrs.max_health / 2.0 {
-                "entity.wolf.whine"
+            let kind = if m.extra.tame && m.health < m.attrs.max_health / 2.0 {
+                "whine"
             } else {
-                "entity.wolf.pant"
-            }
+                "pant"
+            };
+            super::finalize::variant_sound(m, kind).unwrap_or("entity.wolf.pant")
         }
         Species::Parrot => super::parrot::ambient(m, w),
-        Species::Cat if m.extra.tame && m.extra.in_love > 0 => "entity.cat.purr",
-        Species::Cat if !m.extra.tame => "entity.cat.stray_ambient",
+        // Cat.getAmbientSound: purr in love, purreow one time in four, else ambient.
+        Species::Cat if m.extra.tame && m.extra.in_love > 0 => {
+            super::finalize::variant_sound(m, "purr").unwrap_or("entity.cat.purr")
+        }
+        Species::Cat if m.extra.tame && m.random.next_int_bound(4).unwrap_or(1) == 0 => {
+            super::finalize::variant_sound(m, "purreow").unwrap_or("entity.cat.purreow")
+        }
+        Species::Cat if !m.extra.tame => {
+            super::finalize::variant_sound(m, "stray_ambient").unwrap_or("entity.cat.stray_ambient")
+        }
         Species::PolarBear if m.is_baby() => "entity.polar_bear.ambient_baby",
         Species::Dolphin if !m.fluids.in_water => "entity.dolphin.ambient",
         Species::Guardian if !m.fluids.in_water => "entity.guardian.ambient_land",
@@ -1058,7 +1084,8 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         && m.species() != Species::Shulker
         && !on_climbable(m, w)
         && (m.species() != Species::Creaking || super::creaking::can_move(m));
-    let mut targets: Vec<(Who, Vec3)> = Vec::new();
+    // Each with whether it rides a vehicle (`Entity.isPassenger`).
+    let mut targets: Vec<(Who, Vec3, bool)> = Vec::new();
     if let Some(p) = &w.player
         // Entity.push: passengers of the same vehicle never push each other.
         && m.rider.is_none()
@@ -1066,21 +1093,27 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         && !p.spectator
         && p.bounds.intersects(bounds)
     {
-        targets.push((Who::Player, p.position));
+        targets.push((Who::Player, p.position, p.passenger));
     }
     for o in w.others_near(bounds) {
         if o.id != m.id && o.alive && o.pushable && o.bounds.intersects(bounds) {
-            targets.push((Who::Mob(o.id), o.position));
+            targets.push((Who::Mob(o.id), o.position, o.passenger));
         }
     }
     // EntitySelector.pushableBy(this): the teams' collision rules.
     let own = w.teams.of(Who::Mob(m.id));
-    targets.retain(|(who, _)| crate::scoreboard::pushable_by(own, w.teams.of(*who), true));
-    // Cramming (maxEntityCramming 24).
-    if targets.len() > 23 {
-        let _ = m.random.next_int_bound(4);
+    targets.retain(|(who, ..)| crate::scoreboard::pushable_by(own, w.teams.of(*who), true));
+    // Cramming: a quarter of the ticks spent with `maxEntityCramming` or more
+    // others around that are not riding anything hurts it by 6.
+    let limit = w.max_entity_cramming;
+    if limit > 0
+        && targets.len() as i64 > i64::from(limit) - 1
+        && m.random.next_int_bound(4).unwrap_or(1) == 0
+        && targets.iter().filter(|t| !t.2).count() as i64 > i64::from(limit) - 1
+    {
+        m.damage(6.0, Damage::of(DamageKind::Cramming));
     }
-    for (who, at) in targets {
+    for (who, at, _) in targets {
         // Warden.doPush: touching it angers it, then the push itself.
         if m.species() == Species::Warden {
             super::warden::do_push(m, w, who, events);
@@ -1455,17 +1488,66 @@ pub fn voice_sounds(m: &Mob) -> [&'static str; 3] {
             };
             [ambient, m.kind.sounds[1], m.kind.sounds[2]]
         }
-        // The sound variant's baby_sounds (classic sets, like the rest here).
-        Species::Pig if m.is_baby() => [
-            "entity.baby_pig.ambient",
-            "entity.baby_pig.hurt",
-            "entity.baby_pig.death",
+        // Horse.getAmbientSound, getHurtSound and getDeathSound by age.
+        Species::Horse if m.is_baby() => [
+            "entity.baby_horse.ambient",
+            "entity.baby_horse.hurt",
+            "entity.baby_horse.death",
         ],
-        Species::Chicken if m.is_baby() => [
-            "entity.baby_chicken.ambient",
-            "entity.baby_chicken.hurt",
-            "entity.baby_chicken.death",
+        // Drowned, Guardian and ElderGuardian: the hurt and death sounds by
+        // water or land.
+        Species::Drowned if m.fluids.in_water => [
+            "entity.drowned.ambient_water",
+            "entity.drowned.hurt_water",
+            "entity.drowned.death_water",
         ],
+        Species::Guardian if !m.fluids.in_water => [
+            m.kind.sounds[0],
+            "entity.guardian.hurt_land",
+            "entity.guardian.death_land",
+        ],
+        Species::ElderGuardian if !m.fluids.in_water => [
+            m.kind.sounds[0],
+            "entity.elder_guardian.hurt_land",
+            "entity.elder_guardian.death_land",
+        ],
+        // Slime and MagmaCube.getHurtSound and getDeathSound: tiny ones.
+        Species::Slime if m.extra.size <= 1 => [
+            m.kind.sounds[0],
+            "entity.slime.hurt_small",
+            "entity.slime.death_small",
+        ],
+        Species::MagmaCube if m.extra.size <= 1 => [
+            m.kind.sounds[0],
+            "entity.magma_cube.hurt_small",
+            "entity.magma_cube.death_small",
+        ],
+        // Shulker.getHurtSound: a closed shell.
+        Species::Shulker if m.extra.counter == 0 => [
+            m.kind.sounds[0],
+            "entity.shulker.hurt_closed",
+            m.kind.sounds[2],
+        ],
+        // Turtle.getHurtSound and getDeathSound by age.
+        Species::Turtle if m.is_baby() => [
+            m.kind.sounds[0],
+            "entity.turtle.hurt_baby",
+            "entity.turtle.death_baby",
+        ],
+        // SkeletonHorse.getAmbientSound: its own under water.
+        Species::SkeletonHorse if m.fluids.eye_in_water => [
+            "entity.skeleton_horse.ambient_water",
+            m.kind.sounds[1],
+            m.kind.sounds[2],
+        ],
+        // The mob's sound variant set, the baby one for a baby.
+        Species::Pig | Species::Cow | Species::Chicken | Species::Wolf | Species::Cat => {
+            use super::finalize::variant_sound as v;
+            match (v(m, "ambient"), v(m, "hurt"), v(m, "death")) {
+                (Some(a), Some(h), Some(d)) => [a, h, d],
+                _ => m.kind.sounds,
+            }
+        }
         _ => m.kind.sounds,
     }
 }
@@ -1514,13 +1596,12 @@ pub fn age_up(m: &mut Mob, seconds: i32, forced: bool) {
     }
 }
 /// `Animal.playEatingSound` (empty) and its overrides, as (sound, volume,
-/// pitch); `level` is the level's random. Pigs and cats use the classic sound
-/// set, like their other sounds here.
+/// pitch); `level` is the level's random. Pigs and cats play their sound
+/// variant's set.
 pub fn eating_sound(
     m: &mut Mob,
     level: &mut impl RandomSource,
 ) -> Option<(&'static str, f32, f32)> {
-    let baby = m.is_baby();
     // Mth.randomBetween(level.getRandom(), 0.8, 1.2).
     let mut between = || level.next_float() * 0.4 + 0.8;
     let (sound, volume, pitch, entity_sound) = match m.species() {
@@ -1528,16 +1609,21 @@ pub fn eating_sound(
         Species::Armadillo | Species::Pig | Species::SulfurCube => {
             let sound = match m.species() {
                 Species::Armadillo => "entity.armadillo.eat",
-                Species::Pig if baby => "entity.baby_pig.eat",
-                Species::Pig => "entity.pig.eat",
+                Species::Pig => {
+                    super::finalize::variant_sound(m, "eat").unwrap_or("entity.pig.eat")
+                }
                 _ => "entity.small_sulfur_cube.eat",
             };
             let pitch = m.voice_pitch();
             (sound, sound_volume(m), pitch, true)
         }
         // playSound(sound, 1, 1).
-        Species::Cat if baby => ("entity.baby_cat.eat", 1.0, 1.0, true),
-        Species::Cat => ("entity.cat.eat", 1.0, 1.0, true),
+        Species::Cat => (
+            super::finalize::variant_sound(m, "eat").unwrap_or("entity.cat.eat"),
+            1.0,
+            1.0,
+            true,
+        ),
         Species::Fox => ("entity.fox.eat", 1.0, 1.0, true),
         // level().playSound(null, this, sound, NEUTRAL, volume, pitch).
         Species::Frog => ("entity.frog.eat", 2.0, 1.0, false),
@@ -2013,12 +2099,10 @@ pub fn step_sound(
         | S::ElderGuardian
         | S::Breeze => None,
         S::Armadillo => quiet("entity.armadillo.step"),
-        S::Chicken if baby => quiet("entity.baby_chicken.step"),
-        S::Chicken => quiet("entity.chicken.step"),
-        S::Cow | S::Mooshroom => quiet("entity.cow.step"),
-        S::Pig if baby => quiet("entity.baby_pig.step"),
-        S::Pig => quiet("entity.pig.step"),
-        S::Wolf => quiet("entity.wolf.step"),
+        S::Chicken | S::Cow | S::Pig | S::Wolf => {
+            super::finalize::variant_sound(m, "step").and_then(quiet)
+        }
+        S::Mooshroom => quiet("entity.cow.step"),
         S::Llama | S::TraderLlama => quiet("entity.llama.step"),
         S::Frog => quiet("entity.frog.step"),
         S::Goat => quiet("entity.goat.step"),
@@ -2103,6 +2187,8 @@ pub fn swim_sound(m: &Mob) -> &'static str {
         Species::Nautilus => "entity.nautilus.swim",
         Species::ZombieNautilus => "entity.zombie_nautilus.swim",
         Species::Turtle => "entity.turtle.swim",
+        // Monster.getSwimSound, and Hoglin's own override of it.
+        s if s == Species::Hoglin || is_monster(s) => "entity.hostile.swim",
         _ => "entity.generic.swim",
     }
 }

@@ -80,7 +80,7 @@
 //! behaviours.place_block(&mut level, &mut ticks, &PlaceContext { clicked_pos, face, hit, inside: false,
 //!     yaw, pitch, sneaking, item: "minecraft:oak_stairs".into(), can_use_game_master_blocks: false });
 //! behaviours.use_without_item(&mut level, &mut ticks, pos, face, hit, player_context);
-//! behaviours.player_destroy_block(&mut level, &mut ticks, pos, creative);
+//! behaviours.player_destroy_block(&mut level, &mut ticks, pos, creative, correct_tool);
 //! // Falling-block entity landed:
 //! behaviours.falling_block_landed(&mut level, &mut ticks, landing_pos, carried_state, false);
 //! ```
@@ -183,6 +183,7 @@ pub struct GameRules {
     pub spawn_monsters: bool,
     /// `fire_spread_radius_around_player`: -1 spreads everywhere.
     pub fire_spread_radius_around_player: i32,
+    pub spread_vines: bool,
 }
 impl Default for GameRules {
     fn default() -> Self {
@@ -196,6 +197,7 @@ impl Default for GameRules {
             spawn_mobs: true,
             spawn_monsters: true,
             fire_spread_radius_around_player: 128,
+            spread_vines: true,
         }
     }
 }
@@ -262,7 +264,9 @@ pub enum LevelEvent {
     /// block's scheduled tick: `checkReset`), `"hatch"` (frogspawn
     /// hatched into tadpoles; the block is already destroyed), `"portal_spawn"`
     /// (a nether portal won its zombified piglin roll; the caller checks
-    /// `anyPlayerCloseEnoughForSpawning` and spawns below the portal).
+    /// `anyPlayerCloseEnoughForSpawning` and spawns below the portal),
+    /// `"golem"` (a carved pumpkin was placed; the caller builds the golem
+    /// its blocks complete).
     BlockEvent {
         pos: BlockPos,
         state: BlockStateId,
@@ -657,8 +661,10 @@ impl Behaviours {
         ticks: &mut Ticks,
         pos: BlockPos,
         creative: bool,
+        correct_tool: bool,
     ) -> bool {
-        self.sim(level, ticks).player_destroy(pos, creative)
+        self.sim(level, ticks)
+            .player_destroy(pos, creative, correct_tool)
     }
     /// `IceBlock.playerDestroy` after the drops: mined ice melts into water
     /// unless the tool prevents ice melting (silk touch). `destroyed` is the
@@ -837,6 +843,23 @@ impl Behaviours {
         let state = sim.state(pos);
         self.data(state).is(classes::Class::Bell)
             && sim.bell_hit(pos, state, face, hit_y - f64::from(pos.y))
+    }
+    /// `BellBlock.attemptToRing(entity, level, pos, null)`: a mob rings the
+    /// bell from its facing. False when the block at `pos` is not a bell.
+    pub fn bell_attempt_to_ring<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+    ) -> bool {
+        let mut sim = self.sim(level, ticks);
+        let state = sim.state(pos);
+        if !self.data(state).is(classes::Class::Bell) {
+            return false;
+        }
+        let facing = sim.b.facing(state);
+        sim.bell_ring(pos, state, facing);
+        true
     }
     /// Redstone signal queries (`SignalGetter`).
     pub fn has_neighbor_signal<L: LevelAccess + ?Sized>(

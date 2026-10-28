@@ -90,6 +90,14 @@ impl Game<'_> {
                 .any(|g| Some(g.conn) != self.lan_acting && g.vehicle == Some(vehicle))
         })
     }
+    /// Whether a server player rides `vehicle` (`Entity.isPassenger`: a
+    /// passenger does not use a portal on its own, the vehicle carries it
+    /// across, `Entity.teleportCrossDimension`).
+    pub(super) fn guest_rides(&self, vehicle: u32) -> bool {
+        self.lan
+            .as_ref()
+            .is_some_and(|h| h.hub.guests.iter().any(|g| g.vehicle == Some(vehicle)))
+    }
 
     /// `Player.rideTick` for a server player, before its moves this tick:
     /// it stays in its seat, steers its minecart, or gets out.

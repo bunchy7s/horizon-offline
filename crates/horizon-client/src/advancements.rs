@@ -444,6 +444,8 @@ pub struct EntityView {
     pub gamemode: Option<String>,
     /// Lightning: entities it struck.
     pub struck: Vec<EntityView>,
+    /// Lightning: blocks it set on fire (`LightningBolt.blocksSetOnFire`).
+    pub blocks_set_on_fire: i32,
     pub fishing_open_water: Option<bool>,
     pub variant: Option<String>,
     /// The data components the entity reports (`Entity.get`): id and value.
@@ -535,6 +537,11 @@ pub fn item(v: &Value, it: &ItemView, w: &dyn World) -> bool {
     let comps = &v["components"];
     if let Some(p) = comps["minecraft:potion_contents"].as_str()
         && it.potion.as_deref() != Some(p)
+    {
+        return false;
+    }
+    if let Some(d) = comps["minecraft:damage"].as_u64()
+        && u64::from(it.damage) != d
     {
         return false;
     }
@@ -734,7 +741,7 @@ pub fn entity(v: &Value, e: &EntityView, w: &dyn World, origin: [f64; 3]) -> boo
                         .is_some_and(|t| entity(&p["looking_at"], t, w, origin)))
             }
             "minecraft:type_specific/lightning" => {
-                range_i(&p["blocks_set_on_fire"], 0)
+                range_i(&p["blocks_set_on_fire"], i64::from(e.blocks_set_on_fire))
                     && (p["entity_struck"].is_null()
                         || e.struck
                             .iter()
@@ -818,7 +825,13 @@ pub fn damage(v: &Value, d: &DamageView, w: &dyn World, origin: [f64; 3]) -> boo
     {
         return false;
     }
-    let ty = &v["type"];
+    damage_source(&v["type"], d, w, origin)
+}
+/// `DamageSourcePredicate`: the damage type's tags and the entities behind it.
+pub fn damage_source(ty: &Value, d: &DamageView, w: &dyn World, origin: [f64; 3]) -> bool {
+    if ty.is_null() {
+        return true;
+    }
     let tags_ok = ty["tags"].as_array().into_iter().flatten().all(|t| {
         let tag = t["id"].as_str().unwrap_or("");
         let tag = tag.strip_prefix('#').unwrap_or(tag);
@@ -1326,7 +1339,46 @@ mod tests {
         fn in_tag(&self, _: &str, tag: &str, id: &str) -> bool {
             (tag == "minecraft:stone_tool_materials" && id == "minecraft:cobblestone")
                 || (tag == "minecraft:sulfur_cube_archetype/explosive" && id == "minecraft:tnt")
+                || (tag == "minecraft:is_projectile"
+                    && matches!(id, "minecraft:fireball" | "minecraft:arrow"))
         }
+    }
+    /// Return to Sender's `killing_blow`: only the ghast's own fireball, as a
+    /// projectile, kills it for the advancement; a sword or an arrow does not.
+    #[test]
+    fn killing_blow_needs_the_fireball() {
+        let blow = serde_json::json!({
+            "direct_entity": {"minecraft:entity_type": "minecraft:fireball"},
+            "tags": [{"expected": true, "id": "#minecraft:is_projectile"}]
+        });
+        let entity = |kind: &str| EntityView {
+            kind: kind.into(),
+            ..Default::default()
+        };
+        let player = entity("minecraft:player");
+        let fireball = DamageView {
+            kind: "minecraft:fireball".into(),
+            direct: Some(entity("minecraft:fireball")),
+            source: Some(player.clone()),
+            ..Default::default()
+        };
+        assert!(damage_source(&blow, &fireball, &Flat, [0.0; 3]));
+        let sword = DamageView {
+            kind: "minecraft:player_attack".into(),
+            direct: Some(player.clone()),
+            source: Some(player.clone()),
+            is_direct: true,
+            ..Default::default()
+        };
+        assert!(!damage_source(&blow, &sword, &Flat, [0.0; 3]));
+        let arrow = DamageView {
+            kind: "minecraft:arrow".into(),
+            direct: Some(entity("minecraft:arrow")),
+            source: Some(player),
+            ..Default::default()
+        };
+        assert!(!damage_source(&blow, &arrow, &Flat, [0.0; 3]));
+        assert!(damage_source(&Value::Null, &sword, &Flat, [0.0; 3]));
     }
     #[test]
     fn uh_oh_accepts_either_tnt_event_only_for_adult_sulfur_cubes() {

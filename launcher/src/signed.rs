@@ -30,14 +30,15 @@ pub fn digest(
     horizon_release_sign::signed_digest(tag, asset, sums.as_deref(), signature.as_deref(), keys)
 }
 
-/// The signed SHA-256 of `asset` in the current nightly build (the `nightly` pre-release): its
-/// checksums must be signed for the nightly channel (`horizon_release_sign::nightly_digest`).
+/// The signed SHA-256 of `asset` in the Nightly published under `tag` (`nightly`, or a dated
+/// `nightly-<date>`): its checksums must be signed for the nightly channel
+/// (`horizon_release_sign::nightly_digest`), whatever tag serves them.
 pub fn nightly_digest(
+    tag: &str,
     asset: &str,
     keys: &[PublicKey],
     fetch: impl Fn(&str) -> Result<Option<Vec<u8>>, String>,
 ) -> Result<String, String> {
-    let tag = horizon_release_sign::NIGHTLY;
     let sums = fetch(&asset_url(tag, SUMS))?;
     let signature = fetch(&asset_url(tag, SIGNATURE))?
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
@@ -132,7 +133,7 @@ mod tests {
         };
         let nightly = serving(horizon_release_sign::NIGHTLY);
         assert_eq!(
-            nightly_digest("horizon.zip", &keys, &nightly),
+            nightly_digest("nightly", "horizon.zip", &keys, &nightly),
             Ok(sha256_hex(b"game"))
         );
         for tag in ["v0.2.81", "nightly", "nightly-2026-10-27"] {
@@ -143,6 +144,6 @@ mod tests {
         }
         let release = serving("v0.2.81");
         assert!(digest("v0.2.81", "horizon.zip", &keys, &release).is_ok());
-        assert!(nightly_digest("horizon.zip", &keys, &release).is_err());
+        assert!(nightly_digest("nightly", "horizon.zip", &keys, &release).is_err());
     }
 }

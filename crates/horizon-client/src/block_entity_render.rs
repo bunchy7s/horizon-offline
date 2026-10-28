@@ -597,6 +597,18 @@ fn first_line(line: &str, max_width: f32, advance: &dyn Fn(char) -> f32) -> Stri
     line.to_owned()
 }
 
+/// `AbstractSignRenderer.isOutlineVisible`: the camera within 16 blocks of
+/// the sign's centre.
+fn sign_text_near(pos: [i32; 3], camera: DVec3) -> bool {
+    DVec3::new(
+        f64::from(pos[0]) + 0.5,
+        f64::from(pos[1]) + 0.5,
+        f64::from(pos[2]) + 0.5,
+    )
+    .distance_squared(camera)
+        < 256.0
+}
+
 /// `AbstractSignRenderer.submitSignText`: four centred lines, glowing text
 /// full-bright with an 8x outline in the dark colour.
 fn sign_text_calls(
@@ -757,6 +769,9 @@ pub struct Scene<'a> {
     pub skull: &'a dyn Fn([i32; 3]) -> Option<String>,
     /// Font glyph cell (none for blank glyphs such as the space) and advance.
     pub glyph: &'a dyn Fn(char) -> (Option<Rect>, f32),
+    /// Changes whenever `glyph` may answer differently (`Font::epoch`): sign
+    /// text laid out under another value is laid out again.
+    pub glyphs: u64,
 }
 
 pub struct BlockEntityRenderer {
@@ -768,7 +783,30 @@ pub struct BlockEntityRenderer {
     pot_patterns: HashMap<String, String>,
     /// `Block.shouldRenderFace` for End gateway faces (its occlusion pair cache needs a lock).
     visibility: Option<Mutex<FaceVisibility>>,
+    sign_texts: Mutex<SignTexts>,
 }
+/// Laid-out sign text by position. `AbstractSignRenderer` lays the text out
+/// again each frame, glyph by glyph; its vertices only change with what is
+/// in the key, so they are kept relative to the block and moved to the camera.
+#[derive(Default)]
+struct SignTexts {
+    signs: crate::fast_hash::FxHashMap<[i32; 3], SignTextEntry>,
+    /// Game time of the last sweep of signs out of view.
+    swept: i64,
+}
+struct SignTextEntry {
+    state: u32,
+    data: crate::signs::SignData,
+    packed: u8,
+    /// Within the glowing text outline's distance (only kept for glowing text).
+    near: bool,
+    glyphs: u64,
+    /// Game time it was last drawn.
+    used: i64,
+    vertices: Vec<Vertex>,
+}
+/// Game ticks a sign's text is kept after it was last drawn.
+const SIGN_TEXT_KEEP: i64 = 100;
 const MODELS: [(&str, &str); 27] = [
     ("chest", "minecraft:chest#main"),
     ("double_chest_left", "minecraft:double_chest_left#main"),
@@ -898,6 +936,7 @@ impl BlockEntityRenderer {
             closed_chests,
             pot_patterns: HashMap::new(),
             visibility: None,
+            sign_texts: Mutex::default(),
         }
     }
     fn kind(&self, state: u32) -> &Kind {
@@ -932,10 +971,80 @@ impl BlockEntityRenderer {
             let origin = (DVec3::new(f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]))
                 - scene.camera)
                 .as_vec3();
-            let base = Mat4::from_translation(origin);
             let packed = scene.world.light(pos[0], pos[1], pos[2]);
+            if matches!(kind, Kind::Sign { .. }) && scene.texts.is_none() {
+                self.sign_text(scene, *pos, *state, origin, packed, out);
+                continue;
+            }
+            let base = Mat4::from_translation(origin);
             self.render_one(scene, *pos, kind, base, packed, lights, false, true, out);
         }
+    }
+    /// A sign's text from the cache, laid out again when its data, light,
+    /// state, outline or font changed.
+    fn sign_text(
+        &self,
+        scene: &Scene,
+        pos: [i32; 3],
+        state: u32,
+        origin: Vec3,
+        packed: u8,
+        out: &mut Vec<Vertex>,
+    ) {
+        let Some(data) = (scene.sign)(pos) else {
+            return;
+        };
+        let near = (data.front.glowing || data.back.glowing) && sign_text_near(pos, scene.camera);
+        let Ok(mut cache) = self.sign_texts.lock() else {
+            return;
+        };
+        let now = scene.game_time;
+        if (now - cache.swept).abs() >= SIGN_TEXT_KEEP {
+            cache.swept = now;
+            cache
+                .signs
+                .retain(|_, e| (now - SIGN_TEXT_KEEP..=now).contains(&e.used));
+        }
+        let glyphs = scene.glyphs;
+        let signs = &mut cache.signs;
+        if !signs.get(&pos).is_some_and(|e| {
+            (e.state, e.packed, e.near, e.glyphs) == (state, packed, near, glyphs)
+                && e.data == *data
+        }) {
+            let mut vertices = signs.remove(&pos).map_or_else(Vec::new, |e| e.vertices);
+            vertices.clear();
+            self.render_one(
+                scene,
+                pos,
+                self.kind(state),
+                Mat4::IDENTITY,
+                packed,
+                diffuse_lights(scene.nether),
+                false,
+                true,
+                &mut vertices,
+            );
+            signs.insert(
+                pos,
+                SignTextEntry {
+                    state,
+                    data: data.clone(),
+                    packed,
+                    near,
+                    glyphs,
+                    used: now,
+                    vertices,
+                },
+            );
+        }
+        let Some(entry) = signs.get_mut(&pos) else {
+            return;
+        };
+        entry.used = now;
+        out.extend(entry.vertices.iter().map(|v| Vertex {
+            pos: (Vec3::from_array(v.pos) + origin).to_array(),
+            ..*v
+        }));
     }
     /// One block entity at `pos` drawn under `base` with the given packed light
     /// (the parity fixture's entry point).
@@ -1168,13 +1277,7 @@ impl BlockEntityRenderer {
                         m *= Mat4::from_translation(Vec3::new(0.0, 1.0 / 3.0, 0.046_666_667))
                             * Mat4::from_scale(s * 0.010_416_667);
                     }
-                    let near = DVec3::new(
-                        f64::from(pos[0]) + 0.5,
-                        f64::from(pos[1]) + 0.5,
-                        f64::from(pos[2]) + 0.5,
-                    )
-                    .distance_squared(scene.camera)
-                        < 256.0;
+                    let near = sign_text_near(pos, scene.camera);
                     let calls = sign_text_calls(scene, data, text, m, packed, near);
                     match scene.texts {
                         Some(sink) => sink.borrow_mut().extend(calls),
@@ -1954,6 +2057,7 @@ mod tests {
             banner: &|_| Vec::new(),
             skull: &|_| None,
             glyph: &|_| (None, 0.0),
+            glyphs: 0,
         };
         // Compare the cached world path with the original model renderer,
         // including atlas replacement, current light and animated fallback.
@@ -2155,6 +2259,128 @@ mod tests {
     }
 
     #[test]
+    fn cached_sign_text_matches_and_follows_changes() {
+        let renderer = BlockEntityRenderer {
+            models: HashMap::new(),
+            kinds: vec![
+                Kind::Sign {
+                    hanging: false,
+                    wall: false,
+                    angle: 180.0,
+                },
+                Kind::Sign {
+                    hanging: true,
+                    wall: true,
+                    angle: 90.0,
+                },
+            ],
+            closed_chests: Default::default(),
+            pot_patterns: HashMap::new(),
+            visibility: None,
+            sign_texts: Mutex::default(),
+        };
+        let world = World::new(BlockStateId(0), 1);
+        let sprites = HashMap::new();
+        let text = |line: &str, glowing| crate::signs::SignText {
+            lines: [line.into(), "two".into(), String::new(), "four".into()],
+            color: 3,
+            glowing,
+        };
+        let first_text = crate::signs::SignData {
+            front: text("one", false),
+            ..Default::default()
+        };
+        let changed = crate::signs::SignData {
+            front: text("changed", false),
+            ..Default::default()
+        };
+        let glowing = crate::signs::SignData {
+            back: text("glow", true),
+            ..changed.clone()
+        };
+        let wide = std::cell::Cell::new(6.0);
+        let glyph = |c: char| {
+            let u = f32::from(c as u8 % 16) / 16.0;
+            let rect = Rect {
+                u0: u,
+                v0: 0.0,
+                u1: u + 0.0625,
+                v1: 0.0625,
+                w: 8,
+                h: 8,
+            };
+            ((c != ' ').then_some(rect), wide.get())
+        };
+        let (first_sign, changed_sign, glowing_sign) = (
+            |_| Some(&first_text),
+            |_| Some(&changed),
+            |_| Some(&glowing),
+        );
+        let mut scene = Scene {
+            camera: DVec3::new(3.25, 70.5, -4.75),
+            orientation: Quat::IDENTITY,
+            anim: &|_| BlockAnim::default(),
+            texts: None,
+            partial: 0.0,
+            game_time: 0,
+            max_y: 320,
+            world: &world,
+            sprites: &sprites,
+            nether: false,
+            lid: &|_| 0.0,
+            sign: &first_sign,
+            banner: &|_| Vec::new(),
+            skull: &|_| None,
+            glyph: &glyph,
+            glyphs: 0,
+        };
+        let check = |scene: &Scene, pos: [i32; 3], state: u32| {
+            let mut cached = Vec::new();
+            renderer.render(scene, [(pos, state)].iter(), &mut cached);
+            let corner = DVec3::new(f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]));
+            let mut original = Vec::new();
+            renderer.render_one(
+                scene,
+                pos,
+                renderer.kind(state),
+                Mat4::from_translation((corner - scene.camera).as_vec3()),
+                world.light(pos[0], pos[1], pos[2]),
+                diffuse_lights(false),
+                false,
+                true,
+                &mut original,
+            );
+            assert!(!cached.is_empty());
+            assert_eq!(cached.len(), original.len());
+            for (a, b) in cached.iter().zip(&original) {
+                assert!((Vec3::from_array(a.pos) - Vec3::from_array(b.pos)).length() < 1e-5);
+                assert_eq!((a.uv, a.color, a.light), (b.uv, b.color, b.light));
+            }
+            cached.len()
+        };
+        let (pos, other) = ([1, 70, 2], [-3, 64, 9]);
+        let first = check(&scene, pos, 0);
+        // The camera moves: the same text, moved.
+        scene.camera.x += 0.5;
+        check(&scene, pos, 0);
+        // New text, glowing text near and far, another state, other glyphs.
+        scene.sign = &changed_sign;
+        assert_ne!(check(&scene, pos, 0), first);
+        scene.sign = &glowing_sign;
+        check(&scene, pos, 0);
+        scene.camera.z -= 20.0;
+        check(&scene, pos, 0);
+        check(&scene, pos, 1);
+        check(&scene, other, 1);
+        wide.set(5.0);
+        scene.glyphs = 1;
+        check(&scene, pos, 1);
+        // Signs out of view for a while are dropped.
+        scene.game_time = 2 * SIGN_TEXT_KEEP;
+        check(&scene, pos, 0);
+        assert_eq!(renderer.sign_texts.lock().unwrap().signs.len(), 1);
+    }
+    #[test]
     fn first_line_wraps_on_bytes_without_splitting_a_char() {
         let advance = |c: char| if c == ' ' { 4.0 } else { 6.0 };
         assert_eq!(first_line("ab cd ef", 13.0, &advance), "ab");
@@ -2214,6 +2440,7 @@ mod tests {
             banner: &|_| Vec::new(),
             skull: &|_| None,
             glyph: &|_| (None, 0.0),
+            glyphs: 0,
         };
         let mut verts = Vec::new();
         renderer.render_block(&scene, [0; 3], state.0, Mat4::IDENTITY, 0xff, &mut verts);

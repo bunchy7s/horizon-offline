@@ -801,6 +801,8 @@ impl HealthHud {
 /// nausea blits (their blending needs the screen-effect pipeline).
 pub fn paint(batch: &mut crate::hud::HudBatch, atlas: &crate::hud::HudAtlas, draws: &[GuiDraw]) {
     let mut stack = vec![IDENTITY];
+    // One buffer for the sprite keys, instead of a string per drawn sprite.
+    let mut name = String::new();
     for d in draws {
         let start = batch.vertices.len();
         let pose = *stack.last().unwrap_or(&IDENTITY);
@@ -817,12 +819,14 @@ pub fn paint(batch: &mut crate::hud::HudBatch, atlas: &crate::hud::HudAtlas, dra
             } => {
                 // Effect sprites belong to the mob_effect atlas directory;
                 // the other blitSprite ids refer to GUI sprites.
-                let name = if sprite.starts_with("mob_effect/") {
-                    sprite.to_string()
+                name.clear();
+                if sprite.starts_with("mob_effect/") {
+                    name.push_str(sprite);
                 } else {
-                    format!("gui/sprites/{sprite}")
-                };
-                let Some(mut r) = atlas.sprites.get(&name).copied() else {
+                    name.push_str("gui/sprites/");
+                    name.push_str(sprite);
+                }
+                let Some(mut r) = atlas.sprites.get(name.as_str()).copied() else {
                     continue;
                 };
                 if let Some([sw, sh, u, v]) = *region {

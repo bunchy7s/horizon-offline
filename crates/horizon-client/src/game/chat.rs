@@ -675,7 +675,7 @@ impl Game<'_> {
         // unless a client mod owns the command.
         if self.remote.is_some() {
             if let Some(command) = message.strip_prefix('/')
-                && self.mod_command(command)
+                && self.client_mod_command(command)
             {
                 return;
             }
@@ -684,7 +684,7 @@ impl Game<'_> {
         }
         if let Some(command) = message.strip_prefix('/') {
             // A client mod's command first, then a server mod's, as on a server.
-            if !self.mod_command(command) && !self.local_server_mod_command(command) {
+            if !self.client_mod_command(command) && !self.local_server_mod_command(command) {
                 self.run_command(command);
             }
         } else {
@@ -786,6 +786,9 @@ impl Game<'_> {
                 }
             }
             Some(ClickEvent::RunCommand(command)) => self.click_command(&command),
+            // Screen.defaultHandleGameClickEvent: the dialog opens over the
+            // screen, and closes back to it.
+            Some(ClickEvent::ShowDialog(dialog)) => self.show_dialog_ref(&dialog),
             // Screen.defaultHandleClickEvent: a page link means nothing in chat.
             Some(ClickEvent::ChangePage(_)) | None => {}
         }
@@ -808,16 +811,19 @@ impl Game<'_> {
         &self,
         url: &str,
         size: (f32, f32),
-    ) -> horizon_client::confirm_screen::Confirm {
+    ) -> horizon_client::confirm_screen::Choice {
         let warning = Text::translate("chat.link.warning", &[]).with_color(0xFF_CCCC);
         let message = Text::literal(url)
             .append(Text::literal("\n"))
             .append(warning);
-        horizon_client::confirm_screen::Confirm::new(
+        // ConfirmLinkScreen.addButtons: yes, copy and no, 100 wide each.
+        horizon_client::confirm_screen::Choice::new(
             &self.gui.atlas.font,
             size,
             &Text::translate("chat.link.confirm", &[]),
             &message,
+            3,
+            100.0,
         )
     }
     pub(super) fn draw_link_prompt(&self, batch: &mut HudBatch) {
@@ -827,12 +833,13 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         let (w, h) = (batch.width, batch.height);
         horizon_client::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, true);
-        let (yes, no) = (
+        let labels = [
             Text::translate("gui.yes", &[]),
+            Text::translate("chat.copy", &[]),
             Text::translate("gui.no", &[]),
-        );
+        ];
         self.link_prompt_layout(url, (w, h))
-            .draw(batch, atlas, self.cursor, [&yes, &no]);
+            .draw(batch, atlas, self.cursor, &labels);
     }
     /// The prompt's answer: the link opens on yes; either way the chat is back.
     pub(super) fn answer_link_prompt(&mut self, yes: bool) {
@@ -843,15 +850,20 @@ impl Game<'_> {
         }
     }
     pub(super) fn link_prompt_click(&mut self) {
-        let Some(url) = &self.link_prompt else {
+        let Some(url) = self.link_prompt.clone() else {
             return;
         };
-        let answer = self
-            .link_prompt_layout(url, self.gui_size())
-            .answer_at(self.cursor);
-        if let Some(yes) = answer {
+        let pressed = self
+            .link_prompt_layout(&url, self.gui_size())
+            .pressed_at(self.cursor);
+        if let Some(button) = pressed {
             self.audio.play_button_click();
-            self.answer_link_prompt(yes);
+            if button == LINK_COPY {
+                // ConfirmLinkScreen.copyToClipboard, then the callback's no.
+                use horizon_client::clipboard::Clipboard;
+                self.clipboard.set(&url);
+            }
+            self.answer_link_prompt(button == LINK_YES);
         }
     }
     /// `Screen.clickCommandAction`: run a clicked command as the player
@@ -861,7 +873,7 @@ impl Game<'_> {
     /// parse; here the server answers it.)
     pub(super) fn click_command(&mut self, command: &str) {
         let command = command.strip_prefix('/').unwrap_or(command);
-        if self.mod_command(command) {
+        if self.client_mod_command(command) {
             return;
         }
         if self.remote.is_some() {
@@ -992,6 +1004,7 @@ impl Game<'_> {
             spawn_mobs: r.bool("spawn_mobs"),
             spawn_monsters: r.bool("spawn_monsters"),
             fire_spread_radius_around_player: r.int("fire_spread_radius_around_player"),
+            spread_vines: r.bool("spread_vines"),
         }
     }
     /// Apply rules mirrored in other state (natural regeneration, difficulty).
@@ -1210,3 +1223,7 @@ pub fn screenshot_name(dir: &std::path::Path) -> String {
 fn owner_permission(allow_commands: bool) -> u8 {
     if allow_commands { 4 } else { 0 }
 }
+
+/// `ConfirmLinkScreen`'s buttons, left to right: yes, copy, no.
+const LINK_YES: usize = 0;
+const LINK_COPY: usize = 1;

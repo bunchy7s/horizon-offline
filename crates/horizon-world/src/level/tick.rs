@@ -1152,7 +1152,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let b = self.b;
         let p = b.props;
         let block = b.block(state);
-        if self.rand_int(4) != 0 {
+        // The spread_vines rule, checked before the roll.
+        if !self.level.game_rules().spread_vines || self.rand_int(4) != 0 {
             return;
         }
         let direction = Direction::ALL[self.rand_int(6) as usize];

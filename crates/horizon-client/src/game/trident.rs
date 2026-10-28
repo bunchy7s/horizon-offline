@@ -225,7 +225,7 @@ impl Game<'_> {
     /// The `summon_entity` and `play_sound` effects of `channeling.json`: in a
     /// thunderstorm (`weather_check`) a spot that sees the sky (`can_see_sky`)
     /// gets a lightning bolt and the thunder sound.
-    fn channel_lightning(&mut self, at: [f64; 3]) {
+    fn channel_lightning(&mut self, at: [f64; 3], guest: Option<u32>) {
         // Level.isThundering: the thunder level, in dimensions with weather.
         if self.dim != super::Dim::Overworld || self.world.weather.levels(1.0).1 <= 0.9 {
             return;
@@ -240,13 +240,17 @@ impl Game<'_> {
             return;
         }
         self.spawn_bolt(at, false);
+        // The summon effect's owner is the thrower: LightningBolt.setCause.
+        if let Some(bolt) = self.bolts.last_mut() {
+            bolt.cause = Some(guest);
+        }
         self.audio
             .play("minecraft:item.trident.thunder", Some(at), 5.0, 1.0);
     }
     /// `minecraft:hit_block` of Channeling (`AbstractArrow.hitBlockEnchantmentEffects`):
     /// the block the trident's path first hits, if it is a lightning rod, with
     /// the hit location clamped into the block (`BlockPos.clampLocationWithin`).
-    fn channel_rod_hit(&mut self, from: Vec3, velocity: Vec3) {
+    fn channel_rod_hit(&mut self, from: Vec3, velocity: Vec3, guest: Option<u32>) {
         let to = Vec3::new(
             from.x + velocity.x,
             from.y + velocity.y,
@@ -279,11 +283,14 @@ impl Game<'_> {
         let edge = f64::from(1.0e-5f32);
         let clamp =
             |v: f64, origin: i32| v.clamp(f64::from(origin) + edge, f64::from(origin) + 1.0 - edge);
-        self.channel_lightning([
-            clamp(hit.location.x, hit.block.x),
-            clamp(hit.location.y, hit.block.y),
-            clamp(hit.location.z, hit.block.z),
-        ]);
+        self.channel_lightning(
+            [
+                clamp(hit.location.x, hit.block.x),
+                clamp(hit.location.y, hit.block.y),
+                clamp(hit.location.z, hit.block.z),
+            ],
+            guest,
+        );
     }
     /// `TridentItem.releaseUsing`.
     pub(super) fn release_trident(&mut self, ticks: u32) {
@@ -514,7 +521,7 @@ impl Game<'_> {
                     if let Some(at) = hurt_at
                         && t.stack.enchantment_level("minecraft:channeling") > 0
                     {
-                        self.channel_lightning(at);
+                        self.channel_lightning(at, t.guest);
                     }
                     if hurt_at.is_some()
                         && let Some(m) = self.mobs.iter().find(|m| m.id == id)
@@ -558,7 +565,7 @@ impl Game<'_> {
                         );
                         if blocked {
                             if t.stack.enchantment_level("minecraft:channeling") > 0 {
-                                self.channel_rod_hit(from, flight);
+                                self.channel_rod_hit(from, flight, t.guest);
                             }
                             t.in_ground = true;
                             t.velocity = Vec3::ZERO;

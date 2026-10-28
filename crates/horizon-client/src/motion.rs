@@ -1257,6 +1257,19 @@ impl MotionWorld<'_, '_, '_> {
             if magma && !self.player.shift_key_down {
                 self.environment_hurt("minecraft:hot_floor", 1.0)?;
             }
+            // TurtleEggBlock.stepOn: a step that is not careful may break an egg.
+            if !self.player.shift_key_down {
+                let state = self.block(on);
+                self.resources
+                    .landing
+                    .step_on(
+                        self,
+                        state,
+                        on,
+                        horizon_world::block_landing::LandingEntityKind::Player,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
             // SlimeBlock.stepOn: a slow walk on slime drags the horizontal
             // speed (the client moves its own player, so not the server's copy).
             if slime && !damage_only && !self.player.shift_key_down {

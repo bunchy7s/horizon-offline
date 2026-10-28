@@ -595,6 +595,18 @@ impl Game<'_> {
     /// `HopperBlockEntity.pushItemsTick` of the hopper at `pos`, if its block
     /// is still a hopper (`BlockEntityType.isValid`).
     pub(super) fn tick_hopper(&mut self, pos: Pos) {
+        let time = self.world.game_time;
+        let waiting = {
+            let state = self.hoppers.entry(pos).or_default();
+            state.cooldown -= 1;
+            state.ticked = time;
+            state.cooldown > 0
+        };
+        if waiting {
+            return;
+        }
+        // Most ticks only advance the cooldown: the block is checked when the
+        // hopper is about to move, not on every tick it waits.
         let hopper = self
             .res
             .facts()
@@ -606,14 +618,10 @@ impl Game<'_> {
             self.hoppers.remove(&pos);
             return;
         }
-        let time = self.world.game_time;
-        let state = self.hoppers.entry(pos).or_default();
-        state.cooldown -= 1;
-        state.ticked = time;
-        if state.cooldown <= 0 {
+        if let Some(state) = self.hoppers.get_mut(&pos) {
             state.cooldown = 0;
-            self.hopper_try_move_items(pos);
         }
+        self.hopper_try_move_items(pos);
     }
     /// Drops the cooldowns of hoppers whose block entity is gone.
     pub(super) fn forget_gone_hoppers(&mut self) {

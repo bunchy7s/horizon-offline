@@ -529,15 +529,14 @@ struct Beg {
     ticks: i32,
 }
 impl Beg {
-    fn interesting(&self, m: &Mob, w: &MobWorld) -> bool {
+    fn interesting(&self, w: &MobWorld) -> bool {
         let Some(p) = &w.player else {
             return false;
         };
         let held = |i: &Option<std::sync::Arc<str>>| {
-            i.as_deref().is_some_and(|i| {
-                (!m.extra.tame && i == "minecraft:bone")
-                    || (m.extra.tame && self.food.iter().any(|f| f == i))
-            })
+            // `BegGoal.playerHoldingInteresting`: a bone or food, tame or not.
+            i.as_deref()
+                .is_some_and(|i| i == "minecraft:bone" || self.food.iter().any(|f| f == i))
         };
         p.alive && !p.spectator && (held(&p.main_hand) || held(&p.off_hand))
     }
@@ -551,14 +550,14 @@ impl Goal for Beg {
         cx.w.player
             .as_ref()
             .is_some_and(|p| m.distance_sqr(p.position) <= 64.0)
-            && self.interesting(m, cx.w)
+            && self.interesting(cx.w)
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         cx.w.player
             .as_ref()
             .is_some_and(|p| p.alive && m.distance_sqr(p.position) <= 64.0)
             && self.ticks > 0
-            && self.interesting(m, cx.w)
+            && self.interesting(cx.w)
     }
     fn start(&mut self, m: &mut Mob, _: &mut Cx) {
         m.extra.flag = true;
@@ -829,7 +828,8 @@ impl Goal for CatTempt {
         // Cat.tick: a wild cat being tempted begs every 100 ticks.
         if m.age.is_multiple_of(100) {
             cx.events.push(MobEvent::Sound(
-                "entity.cat.beg_for_food",
+                super::finalize::variant_sound(m, "beg_for_food")
+                    .unwrap_or("entity.cat.beg_for_food"),
                 m.center(),
                 1.0,
                 1.0,
@@ -1197,7 +1197,8 @@ pub fn cat_ai_step(m: &mut Mob, events: &mut Vec<MobEvent>) {
     cat_amounts(m);
     if (m.extra.flag || m.extra.relax_one) && m.age.is_multiple_of(5) {
         let volume = 0.6 + 0.4 * (m.random.next_float() - m.random.next_float());
-        events.push(MobEvent::Sound("entity.cat.purr", m.center(), volume, 1.0));
+        let sound = super::finalize::variant_sound(m, "purr").unwrap_or("entity.cat.purr");
+        events.push(MobEvent::Sound(sound, m.center(), volume, 1.0));
     }
 }
 /// The lying and relaxing amounts of `Cat.tick` (also a client's, from the

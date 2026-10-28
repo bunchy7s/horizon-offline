@@ -26,6 +26,7 @@
 use crate::chunk::block_entity::BlockEntity;
 use crate::fast_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub type Pos = (i32, i32, i32);
 
@@ -46,7 +47,7 @@ pub enum Ticking {
 pub struct BlockEntities {
     map: HashMap<Pos, BlockEntity>,
     /// `Level.blockEntityTickers`: positions and the slot each was given.
-    tickers: Vec<(Pos, u32)>,
+    tickers: Arc<Vec<(Pos, u32)>>,
     /// `LevelChunk.tickersInLevel`: the live slot of each ticking position.
     live: FxHashMap<Pos, u32>,
     /// Positions that may need a slot, in the order vanilla would have made
@@ -233,7 +234,7 @@ impl BlockEntities {
     }
     pub fn clear(&mut self) {
         self.map.clear();
-        self.tickers.clear();
+        self.tickers = Arc::default();
         self.live.clear();
         self.added.clear();
         self.pending.clear();
@@ -274,7 +275,7 @@ impl BlockEntities {
     /// and freed ones leave it. `state` reads the block state at a position.
     /// Returns the slots to tick, in order; check each with `is_live` before
     /// ticking it, as the ticks before it can free it.
-    pub fn tickers(&mut self, state: impl Fn(Pos) -> u32) -> Vec<(Pos, u32)> {
+    pub fn tickers(&mut self, state: impl Fn(Pos) -> u32) -> Arc<Vec<(Pos, u32)>> {
         for (pos, token) in std::mem::take(&mut self.added) {
             if self.pending.get(&pos) != Some(&token) {
                 continue;
@@ -288,21 +289,21 @@ impl BlockEntities {
             }
             let slot = self.next();
             self.live.insert(pos, slot);
-            self.tickers.push((pos, slot));
+            Arc::make_mut(&mut self.tickers).push((pos, slot));
         }
         if !std::mem::take(&mut self.freed) && self.out.is_empty() {
-            return self.tickers.clone();
+            return Arc::clone(&self.tickers);
         }
         self.out.clear();
         let (live, map) = (&mut self.live, &self.map);
-        self.tickers.retain(|(p, slot)| {
+        Arc::make_mut(&mut self.tickers).retain(|(p, slot)| {
             let mine = live.get(p) == Some(slot);
             if mine && !map.contains_key(p) {
                 live.remove(p);
             }
             mine && map.contains_key(p)
         });
-        self.tickers.clone()
+        Arc::clone(&self.tickers)
     }
     /// Whether a slot from `tickers` still ticks.
     pub fn is_live(&self, (pos, slot): (Pos, u32)) -> bool {
@@ -329,8 +330,8 @@ mod tests {
     }
     fn order(b: &mut BlockEntities, states: &HashMap<Pos, u32>) -> Vec<Pos> {
         b.tickers(|p| states.get(&p).copied().unwrap_or(0))
-            .into_iter()
-            .map(|(p, _)| p)
+            .iter()
+            .map(|(p, _)| *p)
             .collect()
     }
 

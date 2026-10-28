@@ -25,6 +25,8 @@ pub struct Steps {
     pub move_dist: f32,
     pub fly_dist: f32,
     pub next_step: f32,
+    /// `AbstractHorse.gallopSoundCounter`.
+    pub gallop: i32,
 }
 impl Default for Steps {
     fn default() -> Self {
@@ -32,6 +34,7 @@ impl Default for Steps {
             move_dist: 0.0,
             fly_dist: 0.0,
             next_step: 1.0,
+            gallop: 0,
         }
     }
 }
@@ -706,7 +709,11 @@ impl Mob {
                 && (self.on_ground || climbable)
                 && !self.fluids_swimming();
             if produced {
-                if let Some((sound, volume, pitch)) =
+                if super::equine::hoof_steps(self.species()) {
+                    if !self.silent {
+                        super::equine::play_step(self, w, legacy, legacy_state, events);
+                    }
+                } else if let Some((sound, volume, pitch)) =
                     super::ai::step_sound(self, w, legacy, legacy_state)
                     && !self.silent
                 {
@@ -863,10 +870,13 @@ impl Mob {
         }
         if damage > 0.0 {
             let at = [self.position.x, self.position.y, self.position.z];
-            let sound = if damage > 4.0 {
-                "entity.generic.big_fall"
-            } else {
-                "entity.generic.small_fall"
+            // Monster.getFallSounds: the hostile pair.
+            let monster = super::ai::is_monster(self.species());
+            let sound = match (monster, damage > 4.0) {
+                (true, true) => "entity.hostile.big_fall",
+                (true, false) => "entity.hostile.small_fall",
+                (false, true) => "entity.generic.big_fall",
+                (false, false) => "entity.generic.small_fall",
             };
             events.push(MobEvent::Sound(sound, at, 1.0, 1.0));
             self.damage(damage as f32, super::Damage::fall());

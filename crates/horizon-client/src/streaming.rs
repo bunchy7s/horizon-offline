@@ -221,6 +221,10 @@ pub struct Streaming {
     results: mpsc::Receiver<Done>,
     threads: Vec<thread::JoinHandle<()>>,
     order: u64,
+    /// Ticks since the columns and protos that fell out of range were swept.
+    scan_age: u8,
+    /// The centre and radius the sweep was last reset for.
+    scan_area: ((i32, i32), i32),
     generating: FxHashSet<(i32, i32)>,
     generation_scan: GenerationScan,
     /// Proto chunks: `None` while checked out to a decoration or save job.
@@ -555,6 +559,8 @@ impl Streaming {
             results,
             threads,
             order: 0,
+            scan_age: 0,
+            scan_area: ((i32::MIN, i32::MIN), i32::MIN),
             generating: Default::default(),
             generation_scan: GenerationScan::default(),
             protos: Default::default(),
@@ -893,6 +899,13 @@ impl Streaming {
             return (uploads, Vec::new());
         }
         ExtraCover::refresh(&mut self.cover, &self.extra);
+        // The sweeps below walk every loaded column and proto chunk. Run them
+        // at once when the view moves and every eighth tick otherwise: a
+        // column can stay a little past the edge without anyone noticing.
+        let area = (self.center, self.radius);
+        let sweep = area != self.scan_area || self.scan_age >= 8;
+        self.scan_area = area;
+        self.scan_age = if sweep { 0 } else { self.scan_age + 1 };
         self.requeue();
         self.relight_edits(world);
         let deferred = std::mem::take(&mut self.deferred);
@@ -967,66 +980,69 @@ impl Streaming {
                 }
             }
         }
-        // Unload far columns.
-        let far: Vec<_> = world
-            .chunks
-            .keys()
-            .copied()
-            .filter(|&(x, z)| !self.remote && self.ranges().unloaded(x, z, self.decorates))
-            .collect();
-        for key in &far {
-            self.decorated.remove(key);
-        }
-        let mut removed = Vec::with_capacity(far.len());
-        for key in &far {
-            if let Some(chunk) = world.chunks.remove(key) {
-                removed.push(chunk);
+        let mut removed = Vec::new();
+        if sweep {
+            // Unload far columns.
+            let far: Vec<_> = world
+                .chunks
+                .keys()
+                .copied()
+                .filter(|&(x, z)| !self.remote && self.ranges().unloaded(x, z, self.decorates))
+                .collect();
+            for key in &far {
+                self.decorated.remove(key);
             }
-            self.lit.remove(key);
-            self.meshed.remove(key);
-            self.lighting.remove(key);
-            self.light_snapshots.remove(key);
-        }
-        if !far.is_empty() {
-            let far: HashSet<(i32, i32)> = far.iter().copied().collect();
-            self.meshing.retain(|k, _| !far.contains(&(k.0, k.2)));
-            self.waiting.retain(|k| !far.contains(&(k.0, k.2)));
-            world
-                .dirty_sections
-                .retain_columns(|x, z| !far.contains(&(x, z)));
-        }
-        // Drop far proto chunks that are not checked out.
-        let (center, r4) = (self.center, i64::from(self.radius + 4));
-        let ranges = self.ranges();
-        let far: Vec<(i32, i32)> = self
-            .protos
-            .iter()
-            .filter(|&(&(x, z), p)| {
-                p.is_some()
-                    && i64::from(x - center.0).pow(2) + i64::from(z - center.1).pow(2) > r4 * r4
-                    && !ranges.in_extra(x, z, 4)
-                    && !ranges.in_band(x, z, 4)
-                    && !ranges
-                        .forced
-                        .iter()
-                        .any(|f| (x - f.0).abs() <= 3 && (z - f.1).abs() <= 3)
-            })
-            .map(|(k, _)| *k)
-            .collect();
-        if !far.is_empty() {
-            self.generation_scan.exhausted = false;
-        }
-        // Those decoration wrote to are saved first (see
-        // `ChunkGenerator::save_protos`), and dropped once back.
-        let mut written = Vec::new();
-        for key in far {
-            if self.written.remove(&key) {
-                written.push(key);
-            } else {
-                self.protos.remove(&key);
+            removed.reserve(far.len());
+            for key in &far {
+                if let Some(chunk) = world.chunks.remove(key) {
+                    removed.push(chunk);
+                }
+                self.lit.remove(key);
+                self.meshed.remove(key);
+                self.lighting.remove(key);
+                self.light_snapshots.remove(key);
             }
+            if !far.is_empty() {
+                let far: HashSet<(i32, i32)> = far.iter().copied().collect();
+                self.meshing.retain(|k, _| !far.contains(&(k.0, k.2)));
+                self.waiting.retain(|k| !far.contains(&(k.0, k.2)));
+                world
+                    .dirty_sections
+                    .retain_columns(|x, z| !far.contains(&(x, z)));
+            }
+            // Drop far proto chunks that are not checked out.
+            let (center, r4) = (self.center, i64::from(self.radius + 4));
+            let ranges = self.ranges();
+            let far: Vec<(i32, i32)> = self
+                .protos
+                .iter()
+                .filter(|&(&(x, z), p)| {
+                    p.is_some()
+                        && i64::from(x - center.0).pow(2) + i64::from(z - center.1).pow(2) > r4 * r4
+                        && !ranges.in_extra(x, z, 4)
+                        && !ranges.in_band(x, z, 4)
+                        && !ranges
+                            .forced
+                            .iter()
+                            .any(|f| (x - f.0).abs() <= 3 && (z - f.1).abs() <= 3)
+                })
+                .map(|(k, _)| *k)
+                .collect();
+            if !far.is_empty() {
+                self.generation_scan.exhausted = false;
+            }
+            // Those decoration wrote to are saved first (see
+            // `ChunkGenerator::save_protos`), and dropped once back.
+            let mut written = Vec::new();
+            for key in far {
+                if self.written.remove(&key) {
+                    written.push(key);
+                } else {
+                    self.protos.remove(&key);
+                }
+            }
+            self.save_checked_out(written);
         }
-        self.save_checked_out(written);
         let (protos, finishing) = (&self.protos, &self.finishing);
         self.decorated.retain(|k| {
             protos.contains_key(k) || finishing.contains(k) || world.chunks.contains_key(k)

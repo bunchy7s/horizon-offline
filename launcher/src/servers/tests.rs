@@ -226,3 +226,54 @@ fn the_api_sends_the_token() {
     // Nothing answers: stopped.
     assert_eq!(status(Path::new("/nonexistent")).phase, "stopped");
 }
+
+#[test]
+fn deleting_a_stopped_server_moves_its_world_and_backups_to_trash() {
+    let root = scratch("delete-stopped");
+    let dir = root.join("server");
+    let trash = root.join("trash");
+    fs::create_dir_all(dir.join("world/region")).unwrap();
+    fs::create_dir_all(dir.join("backups")).unwrap();
+    fs::write(dir.join("server.toml"), "[server]\n").unwrap();
+    fs::write(dir.join("world/region/region.mca"), b"world").unwrap();
+    fs::write(dir.join("backups/backup.zip"), b"backup").unwrap();
+    trash_stopped_server(&dir, |path| crate::desktop_seams::to_folder(path, &trash)).unwrap();
+    assert!(!dir.exists());
+    assert_eq!(
+        fs::read(trash.join("server/world/region/region.mca")).unwrap(),
+        b"world"
+    );
+    assert_eq!(
+        fs::read(trash.join("server/backups/backup.zip")).unwrap(),
+        b"backup"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn deleting_refuses_a_live_supervisor_even_when_its_api_is_unavailable() {
+    let root = scratch("delete-running");
+    fs::create_dir_all(root.join(".horizon")).unwrap();
+    fs::write(root.join("server.toml"), "[server]\n").unwrap();
+    let lock = fs::File::create(root.join(".horizon/lock")).unwrap();
+    lock.try_lock().unwrap();
+    let result = trash_stopped_server(&root, |_| panic!("must not move a running server"));
+    assert!(result.unwrap_err().contains("Stop the server"));
+    assert!(root.join("server.toml").exists());
+    drop(lock);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn deleting_refuses_an_unrecognized_folder_and_keeps_files_on_trash_failure() {
+    let root = scratch("delete-invalid");
+    assert!(trash_stopped_server(&root, |_| panic!("not a server")).is_err());
+    fs::write(root.join("server.toml"), "[server]\n").unwrap();
+    assert!(
+        trash_stopped_server(&root, |_| Err("trash unavailable".into()))
+            .unwrap_err()
+            .contains("trash unavailable")
+    );
+    assert!(root.join("server.toml").exists());
+    fs::remove_dir_all(root).unwrap();
+}

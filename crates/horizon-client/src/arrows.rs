@@ -130,6 +130,8 @@ pub enum ArrowSound {
     Splash,
     /// The arrow's `soundEvent` (`entity.arrow.hit`), for blocks and entities.
     HitGround,
+    /// An arrow shot from a crossbow: `item.crossbow.hit`.
+    CrossbowHit,
     /// `entity.generic.extinguish_fire`.
     Extinguish,
     /// A thrown trident's `getDefaultHitGroundSoundEvent` (`item.trident.hit_ground`).
@@ -782,8 +784,16 @@ impl Ticker<'_, '_, '_, '_> {
     /// `playSound(soundEvent, 1, 1.2 / (random * 0.2 + 0.9))`.
     fn hit_sound(&mut self) {
         let pitch = 1.2 / (self.st.random.next_float() * 0.2 + 0.9);
+        // CrossbowItem.createProjectile: its arrows hit with the crossbow's sound.
+        let crossbow = self
+            .st
+            .fired_from_weapon
+            .as_ref()
+            .is_some_and(|s| &*s.item == "minecraft:crossbow");
         let sound = if self.trident() {
             ArrowSound::TridentHitGround
+        } else if crossbow {
+            ArrowSound::CrossbowHit
         } else {
             ArrowSound::HitGround
         };

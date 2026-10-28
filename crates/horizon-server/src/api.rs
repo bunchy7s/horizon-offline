@@ -305,7 +305,7 @@ impl Shared {
                 let fetched = (|| {
                     let current = install.current().unwrap_or_default();
                     let release = update::release(None)?;
-                    if !update::newer(&release.tag, &current) {
+                    if !update::update_available(&release.tag, &current) {
                         return Ok(None);
                     }
                     shared.update.lock().unwrap().busy =

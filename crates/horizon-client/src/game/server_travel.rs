@@ -10,7 +10,7 @@
 use super::end::GatewayJob;
 use super::nether_portal::{PLAYER_DELAY, Plan};
 use super::respawn_anchor::RespawnConfig;
-use super::{Dim, Game, lan::LanHost};
+use super::{Dim, Game, Mob, boats, lan::LanHost, minecarts};
 use horizon_client::{lan::hub::TickCtx, text::Text, world_spawn::PlayerSpawnFinder};
 use horizon_core::{geometry::Vec3, position::BlockPos};
 use horizon_protocol::packets::play::{self, Clientbound as C};
@@ -20,11 +20,17 @@ use horizon_protocol::packets::play::{self, Clientbound as C};
 pub(super) struct Trip {
     conn: u32,
     dim: Dim,
+    /// The level the player came from: the vehicle it rides waits there
+    /// until the exit is found.
+    source: Dim,
     target: Vec3,
     /// Through an End portal.
     end: bool,
     /// The Nether portal plan, whose exit is found or built on arrival.
     plan: Option<Plan>,
+    /// The vehicle the player rides, which travels with it
+    /// (`Entity.teleportCrossDimension` carries the passengers).
+    vehicle: Option<u32>,
     /// Through an End gateway, within the level: its exit, found or built
     /// on arrival.
     gateway: Option<GatewayJob>,
@@ -38,6 +44,66 @@ pub(super) struct Trip {
     finder: Option<PlayerSpawnFinder>,
     /// Sent by a command: the player is already where it goes.
     placed: bool,
+}
+
+/// A vehicle a player rides: an animal, a boat or a minecart. It travels
+/// with the player through a portal (`Entity.teleportCrossDimension` carries
+/// the passengers, and they ride the vehicle that is recreated in the other
+/// dimension).
+trait Rideable {
+    fn id(&self) -> u32;
+    /// The vehicle stands where its rider arrives, with no motion.
+    fn arrive(&mut self, at: Vec3, yaw: f32);
+}
+
+impl Rideable for Mob {
+    fn id(&self) -> u32 {
+        self.id
+    }
+    fn arrive(&mut self, at: Vec3, yaw: f32) {
+        self.position = at;
+        self.previous = at;
+        self.velocity = Vec3::ZERO;
+        self.yaw = yaw;
+        self.previous_yaw = yaw;
+        self.fall_distance = 0.0;
+    }
+}
+
+impl Rideable for boats::Boat {
+    fn id(&self) -> u32 {
+        self.id
+    }
+    fn arrive(&mut self, at: Vec3, yaw: f32) {
+        self.position = at;
+        self.previous = at;
+        self.velocity = Vec3::ZERO;
+        self.yaw = yaw;
+        self.previous_yaw = yaw;
+        self.delta_rotation = 0.0;
+    }
+}
+
+impl Rideable for minecarts::Minecart {
+    fn id(&self) -> u32 {
+        self.id
+    }
+    fn arrive(&mut self, at: Vec3, yaw: f32) {
+        self.position = at;
+        self.previous = at;
+        self.velocity = Vec3::ZERO;
+        self.yaw = yaw;
+        self.previous_yaw = yaw;
+    }
+}
+
+/// The vehicle `id` leaves the level it is in, at the point its rider
+/// arrives. It keeps its entity id, so the ride is never broken.
+fn take_vehicle<T: Rideable>(list: &mut Vec<T>, id: u32, at: Vec3, yaw: f32) -> Option<T> {
+    let i = list.iter().position(|v| v.id() == id)?;
+    let mut v = list.remove(i);
+    v.arrive(at, yaw);
+    Some(v)
 }
 
 /// `TeleportCommand` into another level for a server's player: where, and
@@ -66,6 +132,14 @@ impl Game<'_> {
         self.server_trips.iter().any(|t| t.conn == conn)
     }
 
+    /// Whether a vehicle waits in `dim` for its rider to arrive elsewhere:
+    /// that level stays open until it has moved.
+    pub(super) fn vehicle_waits_in(&self, dim: Dim) -> bool {
+        self.server_trips
+            .iter()
+            .any(|t| t.vehicle.is_some() && t.source == dim)
+    }
+
     /// Per server tick in each level, after the guests' own: the arrivals of
     /// the trips into this level, then `Entity.handlePortal` for each player
     /// in it (Nether portals count up their transition time, End portals
@@ -76,6 +150,7 @@ impl Game<'_> {
         if self.options.dedicated.is_none() {
             return;
         }
+        self.carry_riders_through_portals(host);
         let conns: Vec<u32> = host
             .hub
             .guests
@@ -101,13 +176,16 @@ impl Game<'_> {
         let Some(g) = host.hub.guest(conn) else {
             return;
         };
-        let (at, invulnerable, sleeping) = (
+        let (at, invulnerable, sleeping, riding) = (
             Vec3::new(g.position[0], g.position[1], g.position[2]),
             g.creative(),
             g.sleeping,
+            g.vehicle.is_some(),
         );
         // Entity.checkInsideBlocks: the Nether portal blocks the box is in.
-        if let Some(pos) = self.nether_portal_inside(at) {
+        // `canUsePortal(false)` is false for a passenger: its vehicle goes
+        // through and carries it (`carry_riders_through_portals`).
+        if !riding && let Some(pos) = self.nether_portal_inside(at) {
             self.portals.player.set_inside(pos, PLAYER_DELAY);
         }
         // `ServerPlayer.showEndCredits`: the player stays out of the world while the
@@ -122,7 +200,7 @@ impl Game<'_> {
             return;
         }
         let (end_portal, gateway) = self.inside_end_portals(at, WIDTH, HEIGHT);
-        if end_portal {
+        if end_portal && !riding {
             // EndPortalBlock.entityInside: the first exit from the End shows the credits.
             if self.dim == Dim::End && !host.hub.guest(conn).is_some_and(|g| g.seen_credits) {
                 if let Some(g) = host.hub.guests.iter_mut().find(|g| g.conn == conn) {
@@ -184,6 +262,44 @@ impl Game<'_> {
         self.start_server_trip(host, conn, plan.dim, Some(plan));
     }
 
+    /// `Entity.handlePortal` of a vehicle server players ride, once through
+    /// a portal (a vehicle's transition time is 0): the riders travel with
+    /// it and ride it again on arrival (`Entity.teleportCrossDimension`), so
+    /// a rider never waits for its own portal delay.
+    fn carry_riders_through_portals(&mut self, host: &mut LanHost) {
+        for (vehicle, entry) in self.take_carrying(self.dim) {
+            let Some(plan) = self.vehicle_plan(vehicle, entry) else {
+                continue;
+            };
+            if !self.may_enter(plan.dim) {
+                continue;
+            }
+            let riders: Vec<u32> = host
+                .hub
+                .guests
+                .iter()
+                .filter(|g| g.vehicle == Some(vehicle) && !self.on_server_trip(g.conn))
+                .map(|g| g.conn)
+                .collect();
+            // Entity.canTeleport: out of the End, every rider has seen the
+            // credits.
+            if plan.end
+                && self.dim == Dim::End
+                && riders
+                    .iter()
+                    .any(|c| !host.hub.guest(*c).is_some_and(|g| g.seen_credits))
+            {
+                continue;
+            }
+            // An End portal's exit is found as a player's (its own respawn
+            // point out of the End).
+            let (target, plan) = (plan.dim, (!plan.end).then_some(plan));
+            for conn in riders {
+                self.start_server_trip(host, conn, target, plan);
+            }
+        }
+    }
+
     /// A Nether portal block a player's box is in.
     fn nether_portal_inside(&self, at: Vec3) -> Option<BlockPos> {
         let w = WIDTH / 2.0 - 1.0e-5;
@@ -217,6 +333,15 @@ impl Game<'_> {
         let g = &host.hub.guests[i];
         let from = Vec3::new(g.position[0], g.position[1], g.position[2]);
         let yaw = g.yaw;
+        // The vehicle the player rides travels with it: the player is its
+        // passenger, and the vehicle is recreated in the other dimension,
+        // where they ride it again (`Entity.teleportCrossDimension`). It
+        // keeps its entity id, so the ride is never broken.
+        let vehicle = g.vehicle.filter(|id| {
+            self.mobs.iter().any(|m| m.id == *id)
+                || self.boats.iter().any(|b| b.id == *id)
+                || self.carts.iter().any(|c| c.id == *id)
+        });
         let source = self.dim;
         let end = plan.is_none();
         // Coordinates scale by 8 between the Overworld and the Nether; an
@@ -254,9 +379,11 @@ impl Game<'_> {
         self.server_trips.push(Trip {
             conn,
             dim: target,
+            source,
             target: destination,
             end,
             plan,
+            vehicle,
             gateway: None,
             respawn: None,
             world_spawn: false,
@@ -275,9 +402,11 @@ impl Game<'_> {
         self.server_trips.push(Trip {
             conn,
             dim: config.dim,
+            source: self.dim,
             target: Vec3::new(f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5),
             end: false,
             plan: None,
+            vehicle: None,
             gateway: None,
             respawn: Some(config),
             world_spawn: false,
@@ -325,9 +454,11 @@ impl Game<'_> {
         self.server_trips.push(Trip {
             conn,
             dim: Dim::Overworld,
+            source: self.dim,
             target: Vec3::new(f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5),
             end: false,
             plan: None,
+            vehicle: None,
             gateway: None,
             respawn: None,
             world_spawn: true,
@@ -371,9 +502,11 @@ impl Game<'_> {
         self.server_trips.push(Trip {
             conn,
             dim: self.dim,
+            source: self.dim,
             target: destination,
             end: false,
             plan: None,
+            vehicle: None,
             gateway: Some(job),
             respawn: None,
             world_spawn: false,
@@ -474,6 +607,12 @@ impl Game<'_> {
                     _ => (trip.target, yaw),
                 }
             };
+            // The vehicle the player rode comes with it, and waits for it
+            // where it arrives (`Entity.teleportCrossDimension` carries the
+            // passengers).
+            if let Some(vehicle) = trip.vehicle {
+                self.arrive_vehicle(trip.source, vehicle, position, yaw);
+            }
             // Player.getDimensionChangingDelay.
             host.play.entry(trip.conn).or_default().portal.cooldown = 10;
             let g = &mut host.hub.guests[i];
@@ -483,6 +622,31 @@ impl Game<'_> {
             host.hub
                 .teleport(i, Some([position.x, position.y, position.z]));
         }
+    }
+
+    /// The vehicle the player rode arrives with it, at the point the player
+    /// arrives: it keeps its entity id, so the ride is never broken
+    /// (`Entity.teleportCrossDimension` recreates the vehicle in the other
+    /// dimension, and its passengers ride it again).
+    fn arrive_vehicle(&mut self, source: Dim, id: u32, at: Vec3, yaw: f32) {
+        let Some(parked) = self.levels.parked_mut(source) else {
+            return;
+        };
+        if let Some(b) = take_vehicle(&mut parked.boats, id, at, yaw) {
+            self.boats.push(b);
+        } else if let Some(c) = take_vehicle(&mut parked.carts, id, at, yaw) {
+            self.carts.push(c);
+        } else if let Some(m) = take_vehicle(&mut parked.mobs, id, at, yaw) {
+            self.mobs.push(m);
+        } else {
+            return;
+        }
+        // Its memory (its UUID and the compound it was loaded with) moves
+        // with it, so it is saved in this level as it was in the other.
+        self.move_entity_memory(source, id);
+        // The vehicle that came through a portal does not go back through it
+        // for a while (`Entity.setPortalCooldown`).
+        self.set_portal_cooldown(id);
     }
 
     /// The players the command just run sends to another level
@@ -511,9 +675,13 @@ impl Game<'_> {
             self.server_trips.push(Trip {
                 conn: t.conn,
                 dim: t.dim,
+                source,
                 target: Vec3::new(t.at[0], t.at[1], t.at[2]),
                 end: false,
                 plan: None,
+                // A command teleports the player alone: it is not a
+                // passenger any more (`ServerPlayer.teleport`).
+                vehicle: None,
                 gateway: None,
                 respawn: None,
                 world_spawn: false,
@@ -545,5 +713,44 @@ impl Game<'_> {
             collision: Some(self.collision),
             border: &self.border,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    /// The vehicle a player rides travels with it through a portal: it
+    /// leaves the level the player came from, keeps its entity id (so the
+    /// ride is never broken) and stands where its rider arrives
+    /// (`Entity.teleportCrossDimension` carries the passengers, and they
+    /// ride the vehicle that is recreated in the other dimension).
+    #[test]
+    fn the_vehicle_a_player_rides_travels_with_it() {
+        let mut boats = vec![boats::Boat::new(
+            7,
+            Arc::from("oak"),
+            Vec3::new(0.0, 64.0, 0.0),
+            0.0,
+        )];
+        let mut carts: Vec<minecarts::Minecart> = Vec::new();
+        let mut mobs: Vec<Mob> = Vec::new();
+        let at = Vec3::new(1.5, 65.0, -2.5);
+        let boat = take_vehicle(&mut boats, 7, at, 90.0)
+            .expect("the vehicle the player rides travels with it");
+        assert!(
+            boats.is_empty(),
+            "the vehicle left the level the player came from"
+        );
+        assert_eq!(boat.id, 7, "the vehicle keeps its entity id");
+        assert_eq!(boat.position, at, "it stands where its rider arrives");
+        assert_eq!(boat.yaw, 90.0, "it looks where its rider looks");
+        assert_eq!(boat.velocity, Vec3::ZERO, "it comes with no motion");
+        // A vehicle that is not in the level does not travel.
+        assert!(take_vehicle(&mut carts, 9, at, 0.0).is_none());
+        assert!(carts.is_empty());
+        assert!(take_vehicle(&mut mobs, 9, at, 0.0).is_none());
+        assert!(mobs.is_empty());
     }
 }

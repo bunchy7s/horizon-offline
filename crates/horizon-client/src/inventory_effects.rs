@@ -1,5 +1,7 @@
 //! `EffectsInInventory`: active effect panels beside survival and creative
 //! inventories, with compact icons when there is little room on the right.
+use std::borrow::Cow;
+
 use crate::{
     effects::EffectInstance,
     hud::{HudAtlas, HudBatch},
@@ -123,17 +125,19 @@ pub fn paint(
     cursor: [i32; 2],
 ) -> Option<[(String, u32); 2]> {
     let mut tooltip = None;
+    let mut icon = String::new();
     for panel in panels {
         background(batch, atlas, panel);
         let text_width = panel.width - 39;
         let clipped = atlas.font.width(&panel.name).ceil() as i32 > text_width;
         if text_width > 0 {
-            let shown = if clipped {
+            let shown: Cow<'_, str> = if clipped {
                 let available = text_width as f32 - atlas.font.width("...");
                 let count = atlas.font.fit(&panel.name, available);
-                format!("{}...", panel.name.chars().take(count).collect::<String>())
+                let text: String = panel.name.chars().take(count).collect();
+                Cow::Owned(format!("{text}..."))
             } else {
-                panel.name.clone()
+                Cow::Borrowed(panel.name.as_str())
             };
             batch.text(
                 atlas,
@@ -152,9 +156,12 @@ pub fn paint(
                 true,
             );
         }
+        icon.clear();
+        icon.push_str("mob_effect/");
+        icon.push_str(&panel.icon.id);
         batch.sprite_scaled(
             atlas,
-            &format!("mob_effect/{}", panel.icon.id),
+            &icon,
             (panel.x + 7) as f32,
             (panel.y + 7) as f32,
             18.0,

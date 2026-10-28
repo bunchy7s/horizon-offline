@@ -408,6 +408,14 @@ impl Game<'_> {
             equipment[4] = slot(&m.extra.legs);
             equipment[5] = slot(&m.extra.feet);
         }
+        // A wolf's armor is its body slot, with its durability.
+        if m.species() == horizon_client::mobs::Species::Wolf {
+            equipment[6] = m.extra.head.as_ref().map(|id| {
+                let mut armor = ItemStack::new(id, 1);
+                armor.damage = m.extra.body_damage.max(0) as u32;
+                item_view(&armor)
+            });
+        }
         EntityView {
             kind: m.kind.id.clone(),
             position: [m.position.x, m.position.y, m.position.z],
@@ -719,6 +727,32 @@ impl Game<'_> {
             adv::conditions(&c["player"], &pctx, w) && adv::conditions(&c[&key], &ectx, w)
         });
     }
+    /// `KilledTrigger` (`player_killed_entity`): the entity killed and the
+    /// killing blow's damage source (none: any `killing_blow` fails).
+    pub(super) fn trigger_killed(&mut self, target: &EntityView, blow: Option<&adv::DamageView>) {
+        let me = self.player_entity();
+        let target = target.clone();
+        let blow = blow.cloned();
+        self.trigger("minecraft:player_killed_entity", move |c, w| {
+            let pctx = adv::Entities {
+                this: Some(&me),
+                origin: me.position,
+                tool: None,
+                block_pos: None,
+            };
+            let ectx = adv::Entities {
+                this: Some(&target),
+                ..pctx
+            };
+            let blow_ok = c["killing_blow"].is_null()
+                || blow
+                    .as_ref()
+                    .is_some_and(|d| adv::damage_source(&c["killing_blow"], d, w, me.position));
+            adv::conditions(&c["player"], &pctx, w)
+                && adv::conditions(&c["entity"], &ectx, w)
+                && blow_ok
+        });
+    }
     /// `KilledByArrowTrigger`: what the arrow killed and the weapon it came from.
     pub(super) fn trigger_killed_by_arrow(
         &mut self,
@@ -869,9 +903,6 @@ impl Game<'_> {
         stack: &ItemStack,
         target: &EntityView,
     ) {
-        if self.lan_acting.is_some() {
-            return;
-        }
         let me = self.player_entity();
         let it = item_view(stack);
         self.trigger(name, |c, w| adv::item_entity(c, &me, target, &it, w));
@@ -1041,6 +1072,110 @@ impl Game<'_> {
                 block_pos: Some(pos),
             };
             adv::conditions(&c["location"], &ctx, w)
+        });
+    }
+    /// `LightningStrikeTrigger`: the bolt, and the mobs around it that it did
+    /// not hit (`bystander`), each tested from this player's position.
+    pub(super) fn trigger_lightning_strike(&mut self, bolt: &EntityView, viewers: &[EntityView]) {
+        let me = self.player_entity();
+        let (bolt, viewers) = (bolt.clone(), viewers.to_vec());
+        self.trigger("minecraft:lightning_strike", move |c, w| {
+            let pctx = adv::Entities {
+                this: Some(&me),
+                origin: me.position,
+                tool: None,
+                block_pos: None,
+            };
+            let bctx = adv::Entities {
+                this: Some(&bolt),
+                ..pctx
+            };
+            adv::conditions(&c["player"], &pctx, w)
+                && adv::conditions(&c["lightning"], &bctx, w)
+                && (c["bystander"].is_null()
+                    || viewers.iter().any(|v| {
+                        adv::conditions(
+                            &c["bystander"],
+                            &adv::Entities {
+                                this: Some(v),
+                                ..pctx
+                            },
+                            w,
+                        )
+                    }))
+        });
+    }
+    /// `ChanneledLightningTrigger`: each victim condition matched by some
+    /// mob the bolt hit, from the player who channelled it.
+    pub(super) fn trigger_channeled_lightning(&mut self, victims: &[EntityView]) {
+        let me = self.player_entity();
+        let victims = victims.to_vec();
+        self.trigger("minecraft:channeled_lightning", move |c, w| {
+            let pctx = adv::Entities {
+                this: Some(&me),
+                origin: me.position,
+                tool: None,
+                block_pos: None,
+            };
+            adv::conditions(&c["player"], &pctx, w)
+                && c["victims"].as_array().into_iter().flatten().all(|want| {
+                    victims.iter().any(|v| {
+                        adv::conditions(
+                            want,
+                            &adv::Entities {
+                                this: Some(v),
+                                ..pctx
+                            },
+                            w,
+                        )
+                    })
+                })
+        });
+    }
+    /// `SpearMobsTrigger`: the living entities the spear stabbed in this use.
+    pub(super) fn trigger_spear_mobs(&mut self, stabbed: usize) {
+        let me = self.player_entity();
+        self.trigger("minecraft:spear_mobs", move |c, w| {
+            let pctx = adv::Entities {
+                this: Some(&me),
+                origin: me.position,
+                tool: None,
+                block_pos: None,
+            };
+            adv::conditions(&c["player"], &pctx, w)
+                && c["count"].as_u64().is_none_or(|n| stabbed as u64 >= n)
+        });
+    }
+    /// `BeeNestDestroyedTrigger`: the nest's block state, the tool that broke
+    /// it and the bees left inside.
+    pub(super) fn trigger_bee_nest_destroyed(
+        &mut self,
+        state: horizon_world::registry::BlockStateId,
+        tool: Option<&ItemStack>,
+        bees: i64,
+    ) {
+        let Some(definition) = self.pack.assets.registry.state(state).cloned() else {
+            return;
+        };
+        let me = self.player_entity();
+        let tool = tool.map(item_view).unwrap_or_default();
+        self.trigger("minecraft:bee_nest_destroyed", move |c, w| {
+            let pctx = adv::Entities {
+                this: Some(&me),
+                origin: me.position,
+                tool: None,
+                block_pos: None,
+            };
+            let state_ok = c["state"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .all(|(k, v)| definition.properties.get(k).map(String::as_str) == v.as_str());
+            adv::id_matches(&c["blocks"], "block", &definition.name, w)
+                && state_ok
+                && adv::item(&c["item"], &tool, w)
+                && adv::range_i(&c["num_bees_inside"], bees)
+                && adv::conditions(&c["player"], &pctx, w)
         });
     }
     /// A trigger with only the player condition (slept_in_bed, started_riding).

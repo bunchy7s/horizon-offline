@@ -122,6 +122,7 @@ mod moved_extras;
 mod moving_pistons;
 mod music;
 mod names;
+mod native_hooks;
 mod native_shaders;
 mod natural_spawning;
 mod nautili;
@@ -274,6 +275,7 @@ use std::{
 };
 use winit::{
     application::ApplicationHandler,
+    error::EventLoopError,
     event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
@@ -1792,6 +1794,8 @@ struct Game<'a> {
     creaking: creaking::CreakingState,
     /// Monster spawners' display mobs (`game/spawner.rs`).
     spawners: spawner::SpawnerState,
+    /// Reused candidate buffers for natural spawning.
+    spawn_scratch: natural_spawning::SpawnScratch,
     trident_model: Option<horizon_client::mobs::Part>,
     arrow_model: Option<horizon_client::mobs::Part>,
     tnts: Vec<tnt::PrimedTnt>,
@@ -2330,12 +2334,19 @@ impl Game<'_> {
             .items()
             .get(&stack.item)
             .map_or(64, |i| i.max_stack);
-        // Prefer the selected slot, then the hotbar, then the main inventory.
+        // getSlotWithRemainingSpace: the selected slot, the off hand, then
+        // the hotbar and the main inventory.
         let order: Vec<usize> = std::iter::once(self.selected)
+            .chain(std::iter::once(shield::OFFHAND_SLOT))
             .chain((0..36).filter(|&i| i != self.selected))
             .collect();
         for &i in &order {
-            if let Some(slot) = &mut self.inventory[i]
+            let slot = if i == shield::OFFHAND_SLOT {
+                &mut self.offhand
+            } else {
+                &mut self.inventory[i]
+            };
+            if let Some(slot) = slot
                 && slot.same_item_same_components(&stack)
                 && slot.count < max
             {
@@ -3554,6 +3565,9 @@ impl Game<'_> {
                     kind: "dispense",
                 } => self.dispense_from(pos, state)?,
                 LevelEvent::BlockEvent {
+                    pos, kind: "golem", ..
+                } => self.check_golem_spawn([pos.x, pos.y, pos.z])?,
+                LevelEvent::BlockEvent {
                     pos,
                     kind: "command_block",
                     ..
@@ -3686,6 +3700,7 @@ impl Game<'_> {
             self.open_ender_chest(key);
             // EnderChestBlock.useWithoutItem
             self.stats.custom("open_enderchest", 1);
+            self.anger_piglins(true);
             if self.container_opener_event(key, true) {
                 self.container_edge_sound(key, true);
             }
@@ -4013,12 +4028,36 @@ impl Game<'_> {
         // library: the block entity's side effects (containers spill), neighbour
         // and shape updates, and the destroy event (particles, sound).
         let creative = self.creative;
+        // TripWireBlock.playerWillDestroy: shears disarm the string first (flags
+        // 260), so taking it down does not trip the hook.
+        if &*facts.name == "minecraft:tripwire"
+            && self.held().is_some_and(|s| &*s.item == "minecraft:shears")
+            && let Some(disarmed) = self.with_props(state, &[("disarmed", "true")])
+        {
+            let at = BlockPos::new(pos[0], pos[1], pos[2]);
+            self.with_level(|b, level, ticks| b.set_block(level, ticks, at, disarmed, 260));
+            self.post_block_game_event("minecraft:shear", pos, self.sculk_actor(), None);
+        }
+        // BeehiveBlock.playerWillDestroy: a creative break still drops the hive
+        // with its bees and honey level.
+        if creative
+            && self.ui.rules.bool("block_drops")
+            && let Some((h, (honey, _))) = &hive
+            && (!h.bees.is_empty() || honey.is_some_and(|l| l > 0))
+            && let Some(stack) = self.picked_stack(pos, true)
+        {
+            let at = pos.map(f64::from);
+            self.spawn_item(stack, at, dispenser::new_item_motion(), 10);
+        }
+        let correct_tool =
+            !facts.requires_tool || self.res.items().correct_for_drops(self.held(), &facts.name);
         let removed = self.with_level(|b, level, ticks| {
             b.player_destroy_block(
                 level,
                 ticks,
                 BlockPos::new(pos[0], pos[1], pos[2]),
                 creative,
+                correct_tool,
             )
         });
         if removed {
@@ -4047,11 +4086,14 @@ impl Game<'_> {
                         self.pop_resource(pos, d);
                     }
                 }
-                // BeehiveBlock.playerDestroy: silk touch keeps the bees in.
-                if let Some((hive, (honey, facing))) = hive
-                    && !silk
-                {
-                    self.hive_broken_by_player(pos, hive, honey, facing);
+                // BeehiveBlock.playerDestroy: silk touch keeps the bees in, so
+                // the trigger counts them; otherwise they are out already.
+                if let Some((hive, (honey, facing))) = hive {
+                    let bees = if silk { hive.bees.len() as i64 } else { 0 };
+                    if !silk {
+                        self.hive_broken_by_player(pos, hive, honey, facing);
+                    }
+                    self.trigger_bee_nest_destroyed(broken, held.as_ref(), bees);
                 }
                 // InfestedBlock.spawnAfterBreak: its silverfish comes out unless the
                 // tool has silk touch (#prevents_infested_spawns) or blocks don't drop.
@@ -4245,6 +4287,10 @@ impl Game<'_> {
                 self.swing_arm();
                 return Ok(true);
             }
+            if self.use_redstone_ore(hit.pos, held.as_ref())? {
+                self.swing_arm();
+                return Ok(true);
+            }
             match self.use_respawn_anchor(hit.pos, held.as_ref())? {
                 respawn_anchor::AnchorUse::Charged => {
                     self.swing_arm();
@@ -4254,9 +4300,30 @@ impl Game<'_> {
                 respawn_anchor::AnchorUse::Pass => anchor_passed = true,
                 respawn_anchor::AnchorUse::Other => {}
             }
+            // CeilingHangingSignBlock.useItemOn: a hanging sign aimed at the
+            // underside passes, so the next sign chains below instead of
+            // opening the editor (signs here carry no click commands).
+            let chains_sign = hit.face == [0, -1, 0]
+                && held
+                    .as_ref()
+                    .is_some_and(|s| s.item.ends_with("_hanging_sign"))
+                && {
+                    let name = &self
+                        .res
+                        .facts()
+                        .get(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
+                        .name;
+                    name.ends_with("_hanging_sign") && !name.contains("_wall_")
+                }
+                && matches!(
+                    self.world
+                        .block_entities
+                        .get(&(hit.pos[0], hit.pos[1], hit.pos[2])),
+                    Some(BlockEntity::Sign(_))
+                );
             // TRY_WITH_EMPTY_HAND: only the main hand's turn uses the block
             // itself (useWithoutItem).
-            if !anchor_passed && self.hand == Hand::Main {
+            if !anchor_passed && !chains_sign && self.hand == Hand::Main {
                 let face = match hit.face {
                     [0, 1, 0] => Direction::Up,
                     [0, -1, 0] => Direction::Down,
@@ -5083,6 +5150,7 @@ impl Game<'_> {
         self.update_totem_ready();
         self.tick_command_extras();
         self.tick_mods();
+        self.native_tick();
         self.tick_server_mods();
         let camera_eye = self.camera_eye_height();
         let stick = self.pad_move();
@@ -5625,6 +5693,16 @@ impl Game<'_> {
             rotation.turn(xo * zoom, yo * zoom);
             self.yaw = rotation.y_rot;
             self.pitch = rotation.x_rot;
+            // Entity.turn ends in AbstractBoat.onPassengerTurned: clampRotation
+            // keeps the view within 105 degrees of the boat at every turn, not
+            // only at the tick, so it never swings past and back.
+            if let Some(b) = self
+                .riding
+                .and_then(|id| self.boats.iter().find(|b| b.id == id))
+            {
+                let delta = (self.yaw - b.yaw + 180.0).rem_euclid(360.0) - 180.0;
+                self.yaw += delta.clamp(-105.0, 105.0) - delta;
+            }
         }
     }
     /// `Minecraft.pause`: a single-player game with a pausing screen open.
@@ -5779,30 +5857,31 @@ impl Game<'_> {
     /// highlight (its count yellow when the slot caps it), and hides while
     /// it is the drag's only slot.
     fn draw_slot_item(
-        &mut self,
+        &self,
         batch: &mut HudBatch,
         drag: Option<&DragView>,
         slot: usize,
-        stack: Option<ItemStack>,
+        stack: &Option<ItemStack>,
         x: f32,
         y: f32,
     ) {
+        let carried;
         let (stack, capped) = match drag.and_then(|d| d.slots.get(&slot)) {
             Some(None) => return,
             Some(Some((count, capped))) => {
                 batch.fill(&self.gui.atlas, x, y, 16.0, 16.0, rgba(255, 255, 255, 128));
-                let carried = self
+                carried = self
                     .carried
                     .clone()
                     .map(|c| ItemStack { count: *count, ..c });
-                (carried, *capped)
+                (carried.as_ref(), *capped)
             }
-            None => (stack, false),
+            None => (stack.as_ref(), false),
         };
         if let Some(stack) = stack {
-            self.draw_item_model(batch, &stack, x, y);
+            self.draw_item_model(batch, stack, x, y);
             let text = capped.then(|| format!("\u{a7}e{}", stack.count));
-            self.draw_item_decorations(batch, &stack, x, y, text);
+            self.draw_item_decorations(batch, stack, x, y, text);
         }
     }
     /// `extractCarriedItem`: the carried stack at the cursor, showing what a
@@ -6420,7 +6499,7 @@ impl Game<'_> {
                 );
             }
             let stack = self.slot_view(i);
-            self.draw_slot_item(batch, drag.as_ref(), i, stack, ox + sx, oy + sy);
+            self.draw_slot_item(batch, drag.as_ref(), i, &stack, ox + sx, oy + sy);
         }
     }
     fn draw_inventory(&mut self, batch: &mut HudBatch) {
@@ -8029,7 +8108,12 @@ impl Game<'_> {
             .then(|| self.gui.atlas.sprites.get("misc/shadow").copied())
             .flatten();
         if let Some(sprite) = shadow_sprite {
-            let ambient = if self.dim == Dim::Nether { 0.1 } else { 0.0 };
+            // DimensionType.ambientLight: the_nether 0.1, the_end 0.25.
+            let ambient = match self.dim {
+                Dim::Nether => 0.1,
+                Dim::End => 0.25,
+                Dim::Overworld => 0.0,
+            };
             let darken = self.sky_darken();
             let a = alpha;
             let lerp = |p: Vec3, q: Vec3| {
@@ -8093,6 +8177,7 @@ impl Game<'_> {
                 banner: &|p| self.banner_layers_at(p),
                 skull: &|p| self.skull_skin_at(p),
                 glyph: &|c| self.gui.atlas.glyph_cell(c),
+                glyphs: self.gui.atlas.font.epoch(),
             };
             // Block entities outside the view frustum are skipped (with a
             // block of margin for models larger than their block).
@@ -8414,7 +8499,9 @@ impl Game<'_> {
         let reach: f64 = if self.creative { 5.0 } else { 3.0 };
         let mut best: Option<(usize, f64)> = None;
         for (i, m) in self.mobs.iter().enumerate() {
-            if !m.alive() {
+            // ProjectileUtil.getEntityHitResult: the mob the player rides
+            // shares its root vehicle and is never the hit.
+            if !m.alive() || Some(m.id) == self.riding {
                 continue;
             }
             if let Some(t) = ray_box(eye, dir, reach, m.bounds())
@@ -10969,7 +11056,11 @@ impl Game<'_> {
         // Creative players skip the monster check (`!this.isCreative()`).
         let monsters = !self.creative
             && self.mobs.iter().any(|m| {
-                m.hostile()
+                // `Monster.class` entities that `isPreventingPlayerRest`: a
+                // zombified piglin only while it is angry.
+                horizon_client::mobs::ai::is_monster(m.species())
+                    && (m.species() != horizon_client::mobs::Species::ZombifiedPiglin
+                        || (m.extra.anger > 0 && m.ai.target.is_some()))
                     && m.alive()
                     && (m.position.x - position.x).abs() < 8.0
                     && (m.position.y - position.y).abs() < 5.0
@@ -11079,7 +11170,7 @@ impl Game<'_> {
         let selected = self.creative_screen.selected;
         // Only what is drawn of the tabs: their stacks stay where they are.
         let tabs = self.creative_screen.tab_headers();
-        let tab = tabs[selected.min(tabs.len() - 1)].clone();
+        let tab = &tabs[selected.min(tabs.len() - 1)];
         let tab_sprite = |t: &horizon_client::creative::Tab, on: bool| {
             format!(
                 "gui/sprites/container/creative_inventory/tab_{}_{}_{}",
@@ -11115,8 +11206,8 @@ impl Game<'_> {
             r.v1 = r.v0 + (r.v1 - r.v0) * Creative::HEIGHT / r.h as f32;
             batch.rect_uv(ox, oy, Creative::WIDTH, Creative::HEIGHT, r, u32::MAX);
         }
-        let (tx, ty) = Creative::tab_position(&tab);
-        batch.sprite(&self.gui.atlas, &tab_sprite(&tab, true), ox + tx, oy + ty);
+        let (tx, ty) = Creative::tab_position(tab);
+        batch.sprite(&self.gui.atlas, &tab_sprite(tab, true), ox + tx, oy + ty);
         for t in &tabs {
             let (tx, ty) = Creative::tab_position(t);
             let stack = ItemStack {
@@ -11134,7 +11225,7 @@ impl Game<'_> {
         }
         let atlas = &self.gui.atlas;
         if !tab.inventory {
-            let title = self.creative_tab_title(&tab);
+            let title = self.creative_tab_title(tab);
             batch.text(
                 atlas,
                 &title,
@@ -11213,15 +11304,14 @@ impl Game<'_> {
             let drag = self.drag_view();
             for c in 0..9 {
                 let (x, y) = (ox + 9.0 + c as f32 * 18.0, oy + 112.0);
-                let stack = self.inventory[c].clone();
-                self.draw_slot_item(batch, drag.as_ref(), c, stack.clone(), x, y);
+                self.draw_slot_item(batch, drag.as_ref(), c, &self.inventory[c], x, y);
                 if self.cursor.0 >= x
                     && self.cursor.0 < x + 16.0
                     && self.cursor.1 >= y
                     && self.cursor.1 < y + 16.0
                 {
                     batch.fill(&self.gui.atlas, x, y, 16.0, 16.0, rgba(255, 255, 255, 128));
-                    hovered = stack;
+                    hovered = self.inventory[c].clone();
                 }
             }
             let scrollable = self.creative_screen.rows(&self.pack.names) > 5;
@@ -12144,7 +12234,8 @@ impl Game<'_> {
             KeyCode::KeyL if self.screen == Screen::Playing => self.open_advancements(false),
             KeyCode::KeyL if self.screen == Screen::Advancements => self.close_advancements(),
             KeyCode::Slash if self.screen == Screen::Playing => self.open_chat("/"),
-            KeyCode::F1 => self.toggle_hide_gui(),
+            // key.toggleGui is a KeyMapping: it clicks only with no screen open.
+            KeyCode::F1 if self.screen == Screen::Playing => self.toggle_hide_gui(),
             KeyCode::F11 => self.toggle_fullscreen(),
             KeyCode::F2 => self.take_screenshot(),
             KeyCode::F5 if self.screen == Screen::Playing => self.cycle_camera(),
@@ -12820,6 +12911,7 @@ impl ApplicationHandler for Game<'_> {
                     if self.screen == Screen::Playing
                         && self.sleeping.is_none()
                         && self.player.is_some()
+                        && !self.native_wheel_event(d)
                         && !self.mod_wheel(d)
                         && let Some((wheel, (_, vertical_steps))) =
                             self.mouse
@@ -13008,6 +13100,12 @@ impl ApplicationHandler for Game<'_> {
                             }
                             self.extras_mouse(button, pressed);
                             self.mod_mouse_key(button, pressed);
+                            if pressed
+                                && self.settings.keys.get("key.smoothCamera")
+                                    == horizon_client::keybinds::mouse_name(button)
+                            {
+                                self.smooth_camera = !self.smooth_camera;
+                            }
                             for mapped in self.settings.keys.translate_mouse_all(button) {
                                 match mapped {
                                     Err(b) => self.play_mouse(b, pressed)?,
@@ -13286,6 +13384,11 @@ impl ApplicationHandler for Game<'_> {
                                 }
                                 self.save_title_options();
                             }
+                            PhysicalKey::Code(KeyCode::F5) => {
+                                if let Some(t) = self.title.as_mut() {
+                                    t.refresh_servers();
+                                }
+                            }
                             _ => self.title_edit(event.text.as_deref(), false),
                         }
                     }
@@ -13295,6 +13398,7 @@ impl ApplicationHandler for Game<'_> {
                         return Ok(());
                     };
                     self.mod_key(key, event.state == ElementState::Pressed, event.repeat);
+                    self.native_key_event(key, event.state == ElementState::Pressed, event.repeat);
                     // key.smoothCamera toggles the cinematic camera.
                     if self.screen == Screen::Playing
                         && event.state == ElementState::Pressed
@@ -13919,6 +14023,7 @@ impl<'a> Game<'a> {
             ominous_spawners: Vec::new(),
             creaking: Default::default(),
             spawners: Default::default(),
+            spawn_scratch: Default::default(),
             trident_model: prepared.trident_model,
             arrow_model: prepared.arrow_model,
             tnts: Vec::new(),
@@ -14952,8 +15057,26 @@ fn write_report(game: &Game<'_>) -> Result<()> {
     Ok(())
 }
 
+/// The window system ended the event loop with a failure (on Linux, a compositor dropping the
+/// connection after a protocol error) while fullscreen was on: the next start opens windowed, so a
+/// fullscreen the system can't show doesn't crash every launch (#2904).
+fn leave_fullscreen_after(
+    result: &std::result::Result<(), EventLoopError>,
+    settings: &mut Settings,
+) {
+    if matches!(result, Err(EventLoopError::ExitFailure(_))) && settings.fullscreen {
+        settings.fullscreen = false;
+        settings.save(&Game::options_path());
+        log::warn!(
+            "the window system closed the game in fullscreen; the next start opens windowed"
+        );
+    }
+}
+
 fn run_event_loop(mut game: Game<'_>) -> Result<()> {
-    EventLoop::new()?.run_app(&mut game)?;
+    let result = EventLoop::new()?.run_app(&mut game);
+    leave_fullscreen_after(&result, &mut game.settings);
+    result?;
     horizon_client::discord_presence::stop();
     write_report(&game)?;
     if let Some(e) = game.error.take() {
@@ -15310,7 +15433,12 @@ fn run_loading(
         error: None,
     };
     let mut app = App::Loading(Box::new(loading));
-    EventLoop::new()?.run_app(&mut app)?;
+    let result = EventLoop::new()?.run_app(&mut app);
+    match &mut app {
+        App::Ready(game) => leave_fullscreen_after(&result, &mut game.settings),
+        App::Loading(loading) => leave_fullscreen_after(&result, &mut loading.settings),
+    }
+    result?;
     horizon_client::discord_presence::stop();
     match app {
         App::Ready(mut game) => {

@@ -1083,7 +1083,7 @@ impl Game<'_> {
         self.stats.add("killed", "minecraft:ender_dragon", 1);
         self.stats.custom("mob_kills", 1);
         self.score_player_killed(super::commands::Target::Mob(id));
-        self.trigger_entity("minecraft:player_killed_entity", "entity", view);
+        self.trigger_killed(view, None);
     }
     /// Player melee on the dragon's parts or a crystal under the crosshair.
     /// The dragon part under the crosshair within reach: its id and distance.
@@ -2230,11 +2230,19 @@ impl Game<'_> {
             .filter(|p| p.alive && !p.creative && !p.spectator)
             .collect();
         let mut harmed: Vec<(FightWho, f32)> = Vec::new();
+        // DragonSittingFlamingPhase.end discards the flame cloud.
+        let flame_over = self
+            .dragon
+            .as_ref()
+            .is_some_and(|d| !matches!(d.phase, Phase::Flaming { .. }));
         let mut clouds = std::mem::take(&mut self.breath_clouds);
         clouds.retain_mut(|c| {
             // Lingering potions' clouds tick with the potions.
             if c.potion.is_some() {
                 return true;
+            }
+            if c.from_dragon && flame_over {
+                return false;
             }
             c.age += 1;
             if c.age >= c.duration {

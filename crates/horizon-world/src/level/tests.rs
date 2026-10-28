@@ -1361,7 +1361,7 @@ fn player_breaks_fire_with_extinguish_not_generic_break_event() {
         w.level.events.clear();
         assert!(
             w.f.behaviours
-                .player_destroy_block(&mut w.level, &mut w.ticks, pos, false)
+                .player_destroy_block(&mut w.level, &mut w.ticks, pos, false, true)
         );
         let is_fire = name != "white_wool";
         assert_eq!(

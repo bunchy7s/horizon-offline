@@ -50,6 +50,9 @@ pub enum ClickEvent {
     /// `ClickEvent.RunCommand`: the command, with or without its `/`.
     RunCommand(String),
     CopyToClipboard(String),
+    /// `ClickEvent.ShowDialog`: a `minecraft:dialog` registry id, or the
+    /// dialog itself as the component carried it.
+    ShowDialog(horizon_world::nbt::Tag),
     /// A local file to open with the system handler.
     /// Only allow this in locally constructed messages, never server/LAN text.
     OpenFile(String),
@@ -557,6 +560,11 @@ fn style_json(style: &Style) -> Vec<(String, Value)> {
             ClickEvent::RunCommand(command) => {
                 json!({ "action": "run_command", "command": command })
             }
+            // ClickEvent.ShowDialog.CODEC: the dialog the server sent it with.
+            ClickEvent::ShowDialog(dialog) => json!({
+                "action": "show_dialog",
+                "dialog": crate::scoreboard::tag_to_json(dialog),
+            }),
             ClickEvent::OpenFile(path) => json!({ "action": "open_file", "path": path }),
         };
         out.push(("click_event".to_owned(), event));
