@@ -430,3 +430,5 @@ launcher-v0.13.0 horizon-launcher-windows-x64.zip e9fa8aaab4aa788ca6d7858335fd94
 # GitHub computed them at upload (this fork's launcher-fork-build.yml). Add a line per new release.
 launcher@0.2.0-offline.2 horizon-launcher-linux-x86_64.tar.gz 5bf2dcd96ebe9842b7d3b918a3019df86eff7927255a0af4951c2c72d87d5285
 launcher@0.2.0-offline.2 horizon-launcher-windows-x64.zip e69e72fa1e51dc2384f2834c04b755928e6f096b4f14e49c067a8216c19e8470
+launcher@0.2.1 horizon-launcher-linux-x86_64.tar.gz 94563aa18aacb74965784b4bd40cde5fee1cb1eac5ddb34be1972d8cd827d33c
+launcher@0.2.1 horizon-launcher-windows-x64.zip 10d5d6c63041ab4174fdc6ccff08e78f1bc8a2c390613b2c12ee4285622913fe
