@@ -1,0 +1,4 @@
+# The Azure app (client ID) Microsoft sign-in uses, baked into the build
+# (option_env!("HORIZON_MSA_CLIENT_ID") in src/account.rs).
+[env]
+HORIZON_MSA_CLIENT_ID = "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb"

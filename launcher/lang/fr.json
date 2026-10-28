@@ -174,7 +174,6 @@
   "Open {link} in your browser and enter this code:": "Ouvrez {link} dans votre navigateur et entrez ce code :",
   "From my install": "Depuis mon installation",
   "Download and prepare": "Télécharger et préparer",
-  "Not prepared. Horizon can download Minecraft {version} from Mojang for your account, or use your own install.": "Pas préparé. Horizon peut télécharger Minecraft {version} depuis Mojang pour votre compte, ou utiliser votre propre installation.",
-  "Not prepared. Sign in with the Microsoft account that owns Minecraft {version} first.": "Pas préparé. Connectez-vous d'abord avec le compte Microsoft qui possède Minecraft {version}.",
+  "Not prepared. Horizon can download Minecraft {version} from Mojang, or use your own install.": "Pas préparé. Horizon peut télécharger Minecraft {version} depuis Mojang, ou utiliser votre propre installation.",
   "Cancel": "Annuler"
 }

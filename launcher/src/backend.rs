@@ -1195,9 +1195,9 @@ fn preparer_binary(dir: &Path) -> Option<PathBuf> {
     binary.is_file().then_some(binary)
 }
 
-/// Downloads the pinned version from Mojang into `dir` when an account in the launcher owns
-/// Minecraft (asked again now), else says what signing in would do, as the last line of the
-/// not-found error.
+/// Downloads the pinned version from Mojang into `dir`. This fork needs no Microsoft account
+/// for it: Mojang's version manifest and file downloads are public, so the game files are
+/// fetched whatever accounts are signed in (a signed-in owner is only named in the log).
 fn download_for_owner(
     pins: &sources::Pins,
     dir: &Path,
@@ -1213,39 +1213,23 @@ fn download_for_owner(
         &mut accounts,
     );
     let _ = accounts.save();
-    match pass {
-        Ok(account::Launch {
-            owner: Some((owner, _)),
-            ..
-        }) => {
-            let name = owner.name;
-            log(format!(
-                "{name} owns Minecraft: downloading {v} from Mojang"
-            ));
-            let os = match sources::Os::current() {
-                sources::Os::Linux => "linux",
-                sources::Os::MacOs => "osx",
-                sources::Os::Windows => "windows",
-            };
-            mojang::download(pins, dir, os, 8, fetch, &mojang::CANCEL, log).map_err(|e| {
-                format!("\n  • Horizon tried to download {v} from Mojang for {name}, but: {e}")
-            })
-        }
-        // An owner by its last answer, who can't be asked now.
-        Ok(pass) => Err(format!(
-            "\n  • Downloading {v} from Mojang needs your Microsoft account, which could not be \
-             checked: {}",
-            pass.offline.unwrap_or_default()
-        )),
-        Err(_) if !accounts.accounts.is_empty() => Err(
-            "\n  • No signed-in account owns Minecraft: Java Edition, so Horizon can't download it."
-                .into(),
-        ),
-        Err(_) => Err(format!(
-            "\n  • Or sign in with the Microsoft account that owns Minecraft: Horizon then \
-             downloads {v} from Mojang itself."
-        )),
+    let name = pass
+        .ok()
+        .and_then(|p| p.owner)
+        .map(|(owner, _)| owner.name);
+    match &name {
+        Some(name) => log(format!("{name} owns Minecraft: downloading {v} from Mojang")),
+        None => log(format!("Downloading {v} from Mojang")),
     }
+    let os = match sources::Os::current() {
+        sources::Os::Linux => "linux",
+        sources::Os::MacOs => "osx",
+        sources::Os::Windows => "windows",
+    };
+    mojang::download(pins, dir, os, 8, fetch, &mojang::CANCEL, log).map_err(|e| match name {
+        Some(name) => format!("\n  • Horizon tried to download {v} from Mojang for {name}, but: {e}"),
+        None => format!("\n  • Horizon tried to download {v} from Mojang, but: {e}"),
+    })
 }
 
 /// The Java home for this version: a runtime for precompiled exporters, a JDK for older
@@ -1355,10 +1339,10 @@ fn assets_folder(
 /// Where the preparation takes Minecraft's files from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MinecraftFrom {
-    /// The player's own install (any launcher's); Mojang only when none has the version and an
-    /// account that owns the game is signed in.
+    /// The player's own install (any launcher's); Mojang when none has the version.
     Install,
-    /// Mojang, for the signed-in account that owns the game ("Download and prepare").
+    /// Mojang, straight from its public downloads ("Download and prepare"; no account needed
+    /// in this fork).
     Mojang,
 }
 

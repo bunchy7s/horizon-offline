@@ -2235,19 +2235,15 @@ impl Launcher {
                     .child(play),
             );
 
-        // Not prepared: an owner can have Horizon download Minecraft from Mojang; without an
-        // owner there is nothing to play, so signing in comes first.
+        // Not prepared: Horizon can download Minecraft from Mojang (no account needed in this
+        // fork), or use the player's own install.
         let first = (!prepared && !self.preparing)
             .then_some(self.owner)
             .flatten();
         let resources_value = match first {
             _ if self.preparing => tr("Preparing…").to_string(),
-            Some(true) => trf(
-                "Not prepared. Horizon can download Minecraft {version} from Mojang for your account, or use your own install.",
-                &[("version", &version)],
-            ),
-            Some(false) => trf(
-                "Not prepared. Sign in with the Microsoft account that owns Minecraft {version} first.",
+            Some(_) => trf(
+                "Not prepared. Horizon can download Minecraft {version} from Mojang, or use your own install.",
                 &[("version", &version)],
             ),
             None => backend::resources_summary(prepared, !silent, &version),
@@ -2271,7 +2267,7 @@ impl Launcher {
             }));
         }
         let prepare = match first {
-            Some(true) => div()
+            Some(_) => div()
                 .flex()
                 .gap(px(8.))
                 .child(
@@ -2294,14 +2290,6 @@ impl Launcher {
                         cx.notify();
                     })),
                 ),
-            Some(false) => div().child(
-                button("prepare-sign-in", "Sign in", Kind::Secondary, &t).on_click(cx.listener(
-                    |this, _: &ClickEvent, _, cx| {
-                        this.sign_in_to_play();
-                        cx.notify();
-                    },
-                )),
-            ),
             None => div().child(prepare),
         };
         let minecraft = self.settings.minecraft_dir.as_deref().map_or_else(
