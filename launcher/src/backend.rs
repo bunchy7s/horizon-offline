@@ -42,6 +42,9 @@ pub struct Release {
     pub name: String,
     pub body: String,
     pub date: String,
+    /// The full publish timestamp (`2026-10-28T09:58:01Z`), for ordering releases by when they
+    /// actually came out.
+    pub published: String,
     pub asset: Option<(String, u64)>,
     /// Listed and installed by hand, never as an update: a GitHub pre-release of the old Alpha
     /// channel (v0.2.1 on), or a Nightly older than the current one.
@@ -292,6 +295,7 @@ pub(crate) fn parse_releases(
                 .chars()
                 .take(10)
                 .collect(),
+            published: r["published_at"].as_str().unwrap_or_default().into(),
             asset: found,
             prerelease: r["prerelease"].as_bool().unwrap_or(false),
             nightly: None,
@@ -314,20 +318,15 @@ pub fn releases() -> Result<Vec<Release>, String> {
 
 /// The game's builds in `list`, newest first. A Nightly is listed under the version it installs as
 /// ([`crate::nightly::version_of`]); only the current one (`nightly`) is an update.
+/// This fork's game builds: upstream's numbered releases only, newest first by when they were
+/// actually published. Nightlies are left out: a fork player updates to releases, and the Nightly
+/// channel (which upstream's launcher prefers) would always outrank them.
 pub(crate) fn game_releases(list: &serde_json::Value) -> Vec<Release> {
-    let mut out = parse_releases(list, ASSET, |tag| {
-        is_game_tag(tag) || horizon_release_sign::is_nightly(tag)
-    });
-    for r in &mut out {
-        if horizon_release_sign::is_nightly(&r.tag) {
-            let version = crate::nightly::version_of(r);
-            let tag = std::mem::replace(&mut r.tag, version);
-            r.prerelease = tag != horizon_release_sign::NIGHTLY;
-            r.nightly = Some(tag);
-        }
-    }
-    // Two Nightlies of one day: the current one first (the dated one is the day's earlier build).
-    out.sort_by(|a, b| compare_versions(&b.tag, &a.tag).then(a.prerelease.cmp(&b.prerelease)));
+    let mut out: Vec<Release> = parse_releases(list, ASSET, is_game_tag)
+        .into_iter()
+        .filter(|r| r.nightly.is_none())
+        .collect();
+    out.sort_by(|a, b| b.published.cmp(&a.published).then(compare_versions(&b.tag, &a.tag)));
     out
 }
 
@@ -2103,10 +2102,12 @@ pub struct Updates {
 /// the update.
 pub fn horizon_update(releases: &[Release], installed: &[String]) -> Option<Release> {
     let newest = latest(releases)?;
+    // Nightly installs don't block a release update: this fork ranks releases by publish time,
+    // and a Nightly tag would always outrank them.
     let newer = !installed.contains(&newest.tag)
         && installed
             .iter()
-            .all(|t| compare_versions(&newest.tag, t).is_ge());
+            .all(|t| crate::nightly::date_of(t).is_some() || compare_versions(&newest.tag, t).is_ge());
     newer.then(|| newest.clone())
 }
 
@@ -3292,6 +3293,7 @@ mod tests {
             name: String::new(),
             body: String::new(),
             date: String::new(),
+            published: String::new(),
             asset: Some(("u".into(), 1)),
             prerelease: false,
             nightly: None,
@@ -3333,6 +3335,7 @@ mod tests {
             name: String::new(),
             body: String::new(),
             date: String::new(),
+            published: String::new(),
             asset: Some(("u".into(), 1)),
             prerelease: false,
             nightly: None,
@@ -3500,6 +3503,7 @@ mod tests {
             name: String::new(),
             body: String::new(),
             date: String::new(),
+            published: String::new(),
             asset: Some(("u".into(), 1)),
             prerelease: false,
             nightly: None,
@@ -3519,59 +3523,38 @@ mod tests {
         assert!(select_after_update(None, &installed));
     }
 
-    /// The Nightly is the only build Horizon ships (docs/release-flow.md): every launcher takes the
-    /// current one as its update, over every release; the last week's are listed, never offered.
+    /// This fork ignores the Nightly: its launcher offers the newest numbered release, by publish
+    /// time, and lists no Nightly at all.
     #[test]
-    fn every_launcher_updates_to_the_current_nightly() {
+    fn the_launcher_offers_the_newest_release_and_ignores_nightlies() {
         let asset = ASSET.unwrap_or("horizon-linux-x86_64.tar.gz");
         let build = |url: &str| serde_json::json!([{"name": asset, "browser_download_url": url, "size": 1}]);
         let list = serde_json::json!([
             {"tag_name": "nightly", "name": "Nightly 2026-10-28 · 9b772b2", "prerelease": true,
              "published_at": "2026-10-28T09:58:01Z", "assets": build("n")},
             {"tag_name": "launcher@0.2.21", "assets": []},
-            {"tag_name": "v0.2.95", "assets": build("r")},
+            {"tag_name": "v0.2.95", "published_at": "2026-10-28T10:00:00Z", "assets": build("r")},
             {"tag_name": "nightly-2026-10-28", "name": "Nightly 2026-10-28 · 83f15fa", "prerelease": true,
              "published_at": "2026-10-28T07:54:57Z", "assets": build("d")},
             {"tag_name": "nightly-2026-10-27", "name": "Nightly 2026-10-27 · 7954902", "prerelease": true,
              "published_at": "2026-10-28T00:15:40Z", "assets": build("e")},
+            {"tag_name": "v2026.10.21", "published_at": "2026-10-21T12:00:00Z", "assets": build("o")},
         ]);
         let releases = game_releases(&list);
-        let listed: Vec<_> = releases
-            .iter()
-            .map(|r| (r.tag.as_str(), r.nightly.as_deref(), r.prerelease))
-            .collect();
-        assert_eq!(
-            listed,
-            [
-                ("nightly-2026-10-28-9b772b2", Some("nightly"), false),
-                (
-                    "nightly-2026-10-28-83f15fa",
-                    Some("nightly-2026-10-28"),
-                    true
-                ),
-                (
-                    "nightly-2026-10-27-7954902",
-                    Some("nightly-2026-10-27"),
-                    true
-                ),
-                ("v0.2.95", None, false),
-            ]
-        );
+        let listed: Vec<_> = releases.iter().map(|r| r.tag.as_str()).collect();
+        assert_eq!(listed, ["v0.2.95", "v2026.10.21"]);
         let offered = |installed: &[&str]| {
             let installed: Vec<String> = installed.iter().map(|t| t.to_string()).collect();
             horizon_update(&installable_updates(&releases), &installed).map(|r| r.tag)
         };
-        let current = Some("nightly-2026-10-28-9b772b2".to_string());
-        // A player of the release channel, a new player, one on an older Nightly of the same day.
-        assert_eq!(offered(&["v0.2.95", "v0.2.94"]), current);
-        assert_eq!(offered(&[]), current);
-        assert_eq!(offered(&["nightly-2026-10-28-83f15fa", "v0.2.95"]), current);
-        assert_eq!(offered(&["nightly-2026-10-28-9b772b2"]), None);
-        // Nightlies come after every release in every list.
-        assert!(compare_versions("nightly-2026-10-27-7954902", "v0.2.95").is_gt());
-        assert!(
-            compare_versions("nightly-2026-10-28-9b772b2", "nightly-2026-10-27-7954902").is_gt()
+        // The newest release is the update, for a player of an older release, a Nightly, or nobody.
+        assert_eq!(offered(&["v2026.10.21"]), Some("v0.2.95".to_string()));
+        assert_eq!(offered(&[]), Some("v0.2.95".to_string()));
+        assert_eq!(
+            offered(&["nightly-2026-10-28-9b772b2"]),
+            Some("v0.2.95".to_string())
         );
+        assert_eq!(offered(&["v0.2.95"]), None);
     }
 
     /// Players move to the Nightly at their next check: whoever was on the newest release, on a

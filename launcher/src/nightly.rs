@@ -94,6 +94,7 @@ mod tests {
             name: name.into(),
             body: String::new(),
             date: date.into(),
+            published: format!("{date}T00:00:00Z"),
             asset: Some(("https://example/horizon.zip".into(), 1)),
             prerelease: true,
             nightly: None,
