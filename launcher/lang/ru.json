@@ -175,5 +175,15 @@
   "From my install": "Из моей установки",
   "Download and prepare": "Скачать и подготовить",
   "Not prepared. Horizon can download Minecraft {version} from Mojang, or use your own install.": "Не подготовлено. Horizon может скачать Minecraft {version} у Mojang или взять вашу установку.",
-  "Cancel": "Отмена"
+  "Cancel": "Отмена",
+  "Sponsor": "Поддержать",
+  "Native mods (experimental)": "Нативные моды (экспериментально)",
+  "Native mods from the Mods page compile into the game with the launcher's own Rust. Not sandboxed: they can do anything you can on this computer.": "Нативные моды со страницы «Моды» компилируются в игру собственным Rust лаунчера. Без песочницы: они могут делать на этом компьютере всё, что можете вы.",
+  "{version} plays in this instance.": "В этой сборке запускается {version}.",
+  "Install Horizon first.": "Сначала установите Horizon.",
+  "Starting the build": "Начало сборки",
+  "These mods will run with full access to your computer": "Эти моды получат полный доступ к вашему компьютеру",
+  "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "Они могут читать, изменять и удалять ваши файлы, использовать ваши аккаунты и сеть, как любая запущенная вами программа. Собирайте их, только если доверяете авторам: они указаны на странице «Моды».",
+  "Mods: {mods}": "Моды: {mods}",
+  "The build compiles the game: about ten minutes and a few GB of disk the first time, a few minutes after that.": "Сборка компилирует игру: около десяти минут и несколько ГБ на диске в первый раз, потом несколько минут."
 }

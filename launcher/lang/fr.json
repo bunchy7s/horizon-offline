@@ -175,5 +175,15 @@
   "From my install": "Depuis mon installation",
   "Download and prepare": "Télécharger et préparer",
   "Not prepared. Horizon can download Minecraft {version} from Mojang, or use your own install.": "Pas préparé. Horizon peut télécharger Minecraft {version} depuis Mojang, ou utiliser votre propre installation.",
-  "Cancel": "Annuler"
+  "Cancel": "Annuler",
+  "Sponsor": "Soutenir",
+  "Native mods (experimental)": "Mods natifs (expérimental)",
+  "Native mods from the Mods page compile into the game with the launcher's own Rust. Not sandboxed: they can do anything you can on this computer.": "Les mods natifs de la page Mods sont compilés dans le jeu avec le Rust du launcher. Sans bac à sable : ils peuvent faire tout ce que vous pouvez faire sur cet ordinateur.",
+  "{version} plays in this instance.": "Cette instance joue {version}.",
+  "Install Horizon first.": "Installez d'abord Horizon.",
+  "Starting the build": "Début de la compilation",
+  "These mods will run with full access to your computer": "Ces mods auront un accès complet à votre ordinateur",
+  "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "Ils peuvent lire, modifier ou supprimer vos fichiers, et utiliser vos comptes et votre réseau, comme tout programme que vous lancez. Ne les compilez que si vous faites confiance à leurs auteurs : la page Mods les nomme.",
+  "Mods: {mods}": "Mods : {mods}",
+  "The build compiles the game: about ten minutes and a few GB of disk the first time, a few minutes after that.": "La compilation construit le jeu : une dizaine de minutes et quelques Go de disque la première fois, quelques minutes ensuite."
 }
