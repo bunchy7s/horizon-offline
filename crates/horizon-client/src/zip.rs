@@ -10,11 +10,17 @@ use std::{
 };
 use zip::{CompressionMethod, ZipArchive};
 
+/// The most one entry inflates to: far above any real pack file, but a zip
+/// bomb stops here.
+const MAX_ENTRY: usize = 1 << 30;
+
 /// One archive with its entries indexed by name (`\` read as `/`, folders
 /// left out).
 pub struct Zip {
     archive: ZipArchive<Cursor<Arc<[u8]>>>,
     entries: BTreeMap<String, usize>,
+    /// The archive's length: no size an entry claims can be bigger.
+    len: usize,
 }
 fn invalid(e: impl std::fmt::Display) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, e.to_string())
@@ -25,12 +31,17 @@ impl Zip {
     }
     pub fn from_bytes(mut data: Vec<u8>) -> io::Result<Self> {
         normalize_end(&mut data);
+        let len = data.len();
         let archive = ZipArchive::new(Cursor::new(Arc::from(data))).map_err(invalid)?;
         let entries = (0..archive.len())
             .filter_map(|i| Some((archive.name_for_index(i)?.replace('\\', "/"), i)))
             .filter(|(name, _)| !name.ends_with('/'))
             .collect();
-        Ok(Self { archive, entries })
+        Ok(Self {
+            archive,
+            entries,
+            len,
+        })
     }
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.entries.keys().map(String::as_str)
@@ -47,14 +58,18 @@ impl Zip {
         let mut archive = self.archive.clone();
         let mut entry = archive.by_index_raw(index).map_err(invalid)?;
         let (method, size) = (entry.compression(), entry.size() as usize);
-        let mut raw = Vec::with_capacity(entry.compressed_size() as usize);
+        let mut raw = Vec::with_capacity((entry.compressed_size() as usize).min(self.len));
         entry.read_to_end(&mut raw)?;
         match method {
             CompressionMethod::Stored => Ok(raw),
-            CompressionMethod::Deflated => {
-                miniz_oxide::inflate::decompress_to_vec_with_limit(&raw, size.max(1) * 2 + 1024)
-                    .map_err(|_| invalid("corrupt deflate stream"))
-            }
+            CompressionMethod::Deflated => miniz_oxide::inflate::decompress_to_vec_with_limit(
+                &raw,
+                size.max(1)
+                    .saturating_mul(2)
+                    .saturating_add(1024)
+                    .min(MAX_ENTRY),
+            )
+            .map_err(|_| invalid("corrupt deflate stream")),
             _ => Err(invalid("unsupported zip compression")),
         }
     }
@@ -316,6 +331,53 @@ mod tests {
             assert_eq!(zip.names().collect::<Vec<_>>(), ["a/b.txt", "pack.mcmeta"]);
             assert_eq!(zip.read("pack.mcmeta").unwrap(), b"{\"pack\":{}}");
             assert_eq!(zip.read("a/b.txt").unwrap(), b"streamed entry");
+        }
+    }
+
+    /// A streamed archive whose zip64 extra lies: both sizes claimed are
+    /// u64::MAX / 2. `Zip::from_bytes` may refuse it; if not, `read` errs or reads
+    /// instead of dying on a capacity that no archive could hold.
+    #[test]
+    fn declared_sizes_past_the_archive_do_not_abort() {
+        let name = "a/b.txt";
+        let body = b"streamed entry";
+        let data = miniz_oxide::deflate::compress_to_vec(body, 6);
+        let mut out = Vec::new();
+        let mut central = Vec::new();
+        let offset = out.len() as u32;
+        out.extend(0x0403_4b50u32.to_le_bytes());
+        out.extend([0; 26]);
+        out.extend(&data);
+        // Both directory sizes 0xFFFFFFFF so the zip64 extra's uncompressed,
+        // then compressed, sizes are the ones read.
+        let extra: Vec<u8> = [1u16, 16]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .chain((u64::MAX / 2).to_le_bytes())
+            .chain((u64::MAX / 2).to_le_bytes())
+            .collect();
+        central.extend(0x0201_4b50u32.to_le_bytes());
+        central.extend([20, 0, 20, 0, 0, 0]);
+        central.extend(8u16.to_le_bytes());
+        central.extend([0; 8]);
+        central.extend(u32::MAX.to_le_bytes());
+        central.extend(u32::MAX.to_le_bytes());
+        central.extend((name.len() as u16).to_le_bytes());
+        central.extend((extra.len() as u16).to_le_bytes());
+        central.extend([0; 10]);
+        central.extend(offset.to_le_bytes());
+        central.extend(name.as_bytes());
+        central.extend(extra);
+        let start = out.len() as u32;
+        out.extend(&central);
+        out.extend(0x0605_4b50u32.to_le_bytes());
+        out.extend(u16::MAX.to_le_bytes());
+        out.extend([0; 6]);
+        out.extend((central.len() as u32).to_le_bytes());
+        out.extend(start.to_le_bytes());
+        out.extend([0; 2]);
+        if let Ok(zip) = Zip::from_bytes(out) {
+            let _ = zip.read(name);
         }
     }
 }
