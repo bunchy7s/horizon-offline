@@ -25,6 +25,9 @@ run-name: nightly build${{ inputs.request && format(' (request {0})', inputs.req
 #   names the channel ("horizon release nightly"), so a nightly's signature can't pass for a release's.
 # - `publish` verifies the signature with main's horizon-release-sign, checks the smoke test, and only then moves
 #   the tag. Like sign, it never executes what build produced.
+# - The source ships with the build: `pick` writes horizon-source.tar.gz with `git archive` (git objects again, nothing
+#   run), `sign` signs it with the builds, and `publish` attaches it and tags the commit nightly-source/<date>-<short>
+#   for good (the dated release and the build branch go after 7 days; native mods pin the commit: docs/native-mods.md).
 #   gh workflow run "nightly build"                     # now (skips when the pick is the same commit as last night's)
 #   gh workflow run "nightly build" -f force=true       # build and publish even if unchanged
 #   gh workflow run "nightly build" -f dry_run=true     # build and sign with a throwaway key, publish nothing
@@ -76,6 +79,7 @@ jobs:
       date: ${{ steps.pick.outputs.date }}
       version: ${{ steps.pick.outputs.version }}
       nightly: ${{ steps.pick.outputs.nightly }}
+      source_tag: ${{ steps.pick.outputs.source_tag }}
       dry_run: ${{ steps.mode.outputs.dry_run }}
     steps:
       - uses: actions/checkout@v4
@@ -103,6 +107,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           { echo "### nightly/build-* branches"; python3 tools/ci/nightly.py prune-builds --days 7; } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: The source of the build (horizon-source.tar.gz)
+        if: steps.pick.outputs.build == 'true'
+        env:
+          SHA: ${{ steps.pick.outputs.sha }}
+        run: git archive --format=tar.gz --prefix="horizon-${SHA:0:7}/" -o horizon-source.tar.gz "$SHA"
+      - uses: actions/upload-artifact@v4
+        if: steps.pick.outputs.build == 'true'
+        with:
+          name: horizon-source
+          path: horizon-source.tar.gz
+          if-no-files-found: error
+          retention-days: 3
       - uses: actions/upload-artifact@v4
         with:
           name: nightly-notes
@@ -144,7 +160,7 @@ jobs:
           EPHEMERAL: ${{ needs.pick.outputs.dry_run == 'true' && 'yes' || '' }}
         run: |
           bash tools/ci/sign_release.sh nightly dist/horizon-linux-x86_64.tar.gz dist/horizon-windows-x64.zip \
-            dist/horizon-macos-arm64.zip dist/horizon-server-linux-x86_64.tar.gz
+            dist/horizon-macos-arm64.zip dist/horizon-server-linux-x86_64.tar.gz dist/horizon-source.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: signature
@@ -187,6 +203,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ needs.pick.outputs.sha }}
           DATE: ${{ needs.pick.outputs.date }}
+          SOURCE_TAG: ${{ needs.pick.outputs.source_tag }}
         run: |
           set -euo pipefail
           python3 tools/ci/nightly.py rotate
@@ -198,7 +215,9 @@ jobs:
             "dist/horizon-windows-x64.zip#Nightly game files: Windows (horizon-windows-x64.zip)" \
             "dist/horizon-macos-arm64.zip#Nightly game files: macOS (horizon-macos-arm64.zip)" \
             "dist/horizon-server-linux-x86_64.tar.gz#Nightly dedicated server for Linux (horizon-server-linux-x86_64.tar.gz)" \
+            "dist/horizon-source.tar.gz#Source of this Nightly, commit ${SHA:0:7} (horizon-source.tar.gz; kept for good as the tag $SOURCE_TAG)" \
             dist/SHA256SUMS "${signature[@]}" dist/smoke-test.json
+          python3 tools/ci/nightly.py keep-source "$SHA" "$DATE"
           python3 tools/ci/nightly.py prune --days 7
       - name: Dry run, the nightly that would be published
         if: needs.pick.outputs.dry_run == 'true'

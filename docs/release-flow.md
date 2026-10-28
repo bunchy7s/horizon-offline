@@ -449,6 +449,12 @@ than main's head and holds something main lacks, otherwise main (`tools/ci/night
 new publishes nothing. A Nightly can include pull requests not reviewed yet: that is what it is for, playing them
 before the gate.
 
+Every Nightly ships its exact source. Its notes name the commit; `horizon-source.tar.gz` on the release is that
+commit's `git archive`, signed with the builds in `SHA256SUMS`; and `nightly.py keep-source` tags the commit
+`nightly-source/<date>-<short>`. That tag is never pruned, unlike the `nightly-<date>` release and the
+`nightly/build-*` branch (7 days each), because native mods pin a Nightly's commit and the launcher downloads that
+commit's source to build them ([native-mods.md](native-mods.md)).
+
 ### Trusted reviewers
 
 One list, `.github/trusted-reviewers.txt`, governs two things for the people on it (kacpherek, rdbtCVS and
@@ -507,7 +513,7 @@ comment on any issue or pull request (`.github/workflows/nightly-command.yml`, `
   `nightly-<date>` release points to, or any other branch (`nightly.py prune-builds`).
 - **Refused.** A pull request that changes a path CODEOWNERS gives to Ludovic (`.github/`, `tools/ci/`, the
   signing and update code, `launcher/src/backend.rs`, `launcher/links.json`…), more than 30 in a set, and more than
-  6 builds a day (the scheduled one always runs).
+  12 builds a day (the scheduled one always runs; 6 until 2026-10-28).
 - **No repository role.** Reviewers need no permission on the repository: the list file and the workflow are the
   whole of it.
 - **Ludovic stays in charge.**

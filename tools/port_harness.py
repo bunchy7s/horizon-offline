@@ -96,7 +96,8 @@ def prepare_resources(root, version, store):
 def named_logs(output):
     """The logs horizon-prepare's errors point to ("…; see /path/export.log"): its javac errors are there."""
     text = ""
-    for name in sorted(set(re.findall(r"see (/\S+\.log)", output))):
+    # A log path is absolute on every host: "/tmp/x.log" or "C:\tmp\x.log".
+    for name in sorted(set(re.findall(r"see ((?:/|[A-Za-z]:[\\/])\S+\.log)", output))):
         path = Path(name)
         if path.is_file():
             text += path.read_text(errors="replace")[-(1 << 20):]

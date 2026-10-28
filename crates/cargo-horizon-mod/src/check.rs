@@ -97,6 +97,9 @@ impl Report {
         for r in &f.requires {
             out += &format!("  needs {} {} ({})\n", r.id, r.version, &r.sha256[..12]);
         }
+        if self.kind == Kind::NativeMod {
+            out += "  native source: unsandboxed; not executed by the registry check. Compile and test against the exact pinned Horizon and Mixins revisions before review.\n";
+        }
         if self.kind == Kind::Mod && !self.code {
             out += "  no code: content only, nothing to run\n";
         } else if self.kind == Kind::Mod {
@@ -118,6 +121,7 @@ impl Report {
 pub fn kind_of(path: &Path) -> Option<Kind> {
     match path.extension()?.to_str()? {
         "hmod" => Some(Kind::Mod),
+        "hnmod" => Some(Kind::NativeMod),
         "hpack" => Some(Kind::Modpack),
         "zip" => Some(Kind::ResourcePack),
         "hshader" => Some(Kind::Shader),

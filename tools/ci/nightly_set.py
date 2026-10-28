@@ -43,7 +43,7 @@ ALWAYS_GUARDED = ["/.github/", "/tools/ci/", "/crates/horizon-release-sign/", "/
 STATE_BRANCH = "nightly-state"
 BUILD_PREFIX = "nightly/build-"
 MAX_PRS = 30
-MAX_BUILDS_PER_DAY = 6
+MAX_BUILDS_PER_DAY = 12
 BOT = ("github-actions[bot]", "41898283+github-actions[bot]@users.noreply.github.com")
 # Git never runs anything of the merged commits; these make sure nothing of the runner's either.
 SAFE_GIT = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "merge.renormalize=false"]

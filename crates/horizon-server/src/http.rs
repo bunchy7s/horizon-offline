@@ -10,6 +10,8 @@ use std::{
 
 /// The largest request body the API takes (a console command, a settings change).
 const MAX_BODY: usize = 1 << 20;
+/// The longest request line or header line taken.
+const MAX_LINE: usize = 8 << 10;
 
 pub struct Request {
     pub method: String,
@@ -91,11 +93,33 @@ fn reason(status: u16) -> &'static str {
     }
 }
 
+/// `read_line` under a limit: more than MAX_LINE without a '\n' is an error
+/// (InvalidInput), not a line that grows for as long as the client streams.
+fn read_line_bounded(reader: &mut impl BufRead, line: &mut String) -> std::io::Result<usize> {
+    let n = reader.by_ref().take(MAX_LINE as u64 + 1).read_line(line)?;
+    if n > MAX_LINE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "line too long",
+        ));
+    }
+    Ok(n)
+}
+
 fn read_request(stream: &TcpStream) -> Result<Request, Response> {
     let bad = |m: &str| Response::error(400, m);
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
-    reader.read_line(&mut line).map_err(|_| bad("no request"))?;
+    let read_line = |reader: &mut BufReader<&TcpStream>, line: &mut String, what: &str| {
+        read_line_bounded(reader, line).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::InvalidInput {
+                bad("line too long")
+            } else {
+                bad(what)
+            }
+        })
+    };
+    read_line(&mut reader, &mut line, "no request")?;
     let mut parts = line.split_whitespace();
     let (Some(method), Some(target)) = (parts.next(), parts.next()) else {
         return Err(bad("malformed request line"));
@@ -104,7 +128,7 @@ fn read_request(stream: &TcpStream) -> Result<Request, Response> {
     let mut headers = Vec::new();
     loop {
         let mut line = String::new();
-        if reader.read_line(&mut line).map_err(|_| bad("headers"))? == 0 || line.trim().is_empty() {
+        if read_line(&mut reader, &mut line, "headers")? == 0 || line.trim().is_empty() {
             break;
         }
         if headers.len() > 64 {
@@ -245,5 +269,25 @@ mod tests {
         assert_eq!(v["since"], "7");
         assert_eq!(v["auth"], "Bearer t0k");
         assert_eq!(v["body"], r#"{"line":"list"}"#);
+    }
+
+    #[test]
+    fn a_line_past_the_limit_is_a_400() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        serve(listener, |_| Response::text(200, "text/plain", "ok")).unwrap();
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        // A request line that never ends, sent at once so the refused reply
+        // (and the close) can't reset the write side first.
+        let mut flood = b"GET /".to_vec();
+        flood.extend_from_slice(&[b'a'; 100_000]);
+        let _ = stream.write_all(&flood);
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let mut text = String::new();
+        let _ = stream.read_to_string(&mut text);
+        assert!(text.starts_with("HTTP/1.1 400"), "{text}");
     }
 }

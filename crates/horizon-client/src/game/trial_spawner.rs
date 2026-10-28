@@ -272,7 +272,7 @@ impl Game<'_> {
         Ok(())
     }
     /// `setState` (and `removeOminous`): the block's state and ominous flag.
-    fn set_trial_spawner_state(
+    pub(super) fn set_trial_spawner_state(
         &mut self,
         key: Pos,
         state: TrialState,

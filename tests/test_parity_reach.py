@@ -60,7 +60,7 @@ class ReachTests(unittest.TestCase):
                 pub fn main() { println!("{} {} {}", helper(), Thing.method(), Thing); }
             """,
         })
-        self.dependencies = sorted(str(path.relative_to(self.root)) for path in self.root.rglob("*") if path.is_file())
+        self.dependencies = sorted(path.relative_to(self.root).as_posix() for path in self.root.rglob("*") if path.is_file())
         self.dependencies.remove("crates/a/examples/probe/main.rs")  # parity.only_probes_run leaves it out
 
     def tearDown(self):

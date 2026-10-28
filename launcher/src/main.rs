@@ -53,6 +53,7 @@ use horizon_launcher::account::{self, Accounts, SignIn, SignInState};
 use horizon_launcher::backend::{self, Job, Msg, Release, Running, Settings, Updates};
 use horizon_launcher::i18n::{self, tr, trf};
 use horizon_launcher::instances;
+use horizon_launcher::native_mods;
 use horizon_launcher::nightly;
 use horizon_launcher::telemetry;
 use scrollbar::Scrollbar;
@@ -176,6 +177,11 @@ struct Launcher {
     nightly_error: Option<String>,
     /// Play the Nightly instance once its first install ends: the player just turned Nightly on.
     nightly_select: bool,
+    /// Native mods (`native_mods`): the build's step while it runs, why it failed, and the
+    /// warning before a build while it is open, with the mods it names.
+    native_step: Option<String>,
+    native_error: Option<String>,
+    native_confirm: Option<Result<Vec<native_mods::Bundle>, String>>,
     confirm_remove: Option<String>,
     picker_open: bool,
     /// The top bar's quick switch of who plays (`switch_page.rs`).
@@ -389,6 +395,9 @@ impl Launcher {
             nightly_progress: None,
             nightly_error: None,
             nightly_select: false,
+            native_step: None,
+            native_error: None,
+            native_confirm: None,
             confirm_remove: None,
             picker_open: false,
             account_menu: false,
@@ -492,8 +501,10 @@ impl Launcher {
     }
 
     fn go(&mut self, page: Page) {
-        // The game may have made up a name since: read it again (a small file, once a switch).
+        // The game may have made up a name since, and the CLI or another window may have
+        // changed the accounts: read them again (small files, once a switch).
         self.offline_name = offline_name();
+        self.accounts = Accounts::load();
         if page != self.page {
             self.page = page;
             self.switches += 1;
@@ -578,6 +589,56 @@ impl Launcher {
 
     /// Turns Nightly on (install it, then play its instance) or off (play the release again; the
     /// Nightly instance and its worlds stay).
+    /// The native mods turned on in the instance Play starts, unpacked and checked, with their
+    /// bundles: what the warning names and the build compiles.
+    fn native_mods_to_build(
+        &self,
+    ) -> Result<(std::path::PathBuf, Vec<native_mods::Bundle>), String> {
+        let folder = native_mods::installed_mods(&instances::selected().home)?;
+        let found = native_mods::bundles(&folder)?;
+        Ok((folder, found))
+    }
+
+    /// Builds the selected instance's native mods, once the player accepted the warning. The
+    /// build reuses the game files of the version the instance plays, else the newest installed.
+    fn build_native(&mut self) {
+        if self.native_step.is_some() {
+            return;
+        }
+        self.native_confirm = None;
+        self.native_error = None;
+        let instance = instances::selected();
+        let base = instance
+            .version
+            .clone()
+            .filter(|v| !native_mods::is_native(v))
+            .or_else(|| {
+                self.installed
+                    .iter()
+                    .find(|t| backend::is_game_tag(t) || t.starts_with("nightly-"))
+                    .cloned()
+            });
+        let Some(base) = base else {
+            self.native_error = Some(tr("Install Horizon first.").into());
+            return;
+        };
+        let folder = match self.native_mods_to_build() {
+            Ok((folder, _)) => folder,
+            Err(e) => {
+                self.native_error = Some(e);
+                return;
+            }
+        };
+        self.native_step = Some(tr("Starting the build").into());
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = native_mods::build(&base, &folder, Some(&instance), |step| {
+                let _ = tx.send(Msg::NativeProgress(step.label()));
+            });
+            let _ = tx.send(Msg::Native(result));
+        });
+    }
+
     fn set_nightly(&mut self, on: bool) {
         self.settings.nightly = on;
         if on {
@@ -776,6 +837,15 @@ impl Launcher {
                 }
                 Msg::Updates(Err(e)) => self.update_error = Some(e),
                 Msg::NightlyProgress(p) => self.nightly_progress = Some(p),
+                Msg::NativeProgress(step) => self.native_step = Some(step),
+                Msg::Native(result) => {
+                    self.native_step = None;
+                    self.installed = backend::installed();
+                    self.reload_instances();
+                    if let Err(e) = result {
+                        self.native_error = Some(e);
+                    }
+                }
                 Msg::Nightly(result) => {
                     self.nightly_progress = None;
                     self.installed = backend::installed();
@@ -1723,6 +1793,10 @@ impl Launcher {
             )
             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                 this.account_menu = !this.account_menu;
+                if this.account_menu {
+                    // Who can play may have changed elsewhere since the window opened.
+                    this.accounts = Accounts::load();
+                }
                 cx.notify();
             }));
         let account = div()
@@ -1997,6 +2071,14 @@ impl Launcher {
                 side = side.child(keyboard(hide, &t));
             }
             foot = foot.child(side);
+        }
+        if !self.links.sponsor.is_empty() {
+            foot = foot.child(link(
+                "sponsor",
+                tr("Sponsor"),
+                "heart",
+                self.links.sponsor.clone(),
+            ));
         }
         if !self.links.discord.is_empty() {
             foot = foot.child(link(
@@ -2941,6 +3023,7 @@ impl Launcher {
                     .child(self.proxy_row(n + 4, cx))
                     .child(group("Game", "gamepad"))
                     .child(self.game_args_row(n + 5, cx))
+                    .child(self.native_mods_row(n + 5, cx))
                     .child(group("AI", "terminal"))
                     .child(self.no_ai_row(n + 6, cx))
                     .child(group("About", "info-box"))
@@ -3049,6 +3132,109 @@ impl Launcher {
 
     /// Settings' Game arguments row: the extra arguments the game starts with, kept in
     /// `settings.json` and appended to the launcher's own (quotes group a word with spaces).
+    /// Settings' Native mods row (docs/native-mods.md): off by default. On, Build compiles the
+    /// native mods installed in the instance Play starts, after a warning that names them, and
+    /// that instance then plays the build.
+    fn native_mods_row(&self, n: usize, cx: &mut Context<Self>) -> Div {
+        let t = self.theme;
+        let on = self.settings.native_mods;
+        let toggle =
+            switch("native-mods", on, &t).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.settings.native_mods = !this.settings.native_mods;
+                this.native_confirm = None;
+                this.settings.save();
+                cx.notify();
+            }));
+        let mut detail = div().flex().flex_col().gap(px(4.)).child(
+            tr("Native mods from the Mods page compile into the game with the launcher's own Rust. Not sandboxed: they can do anything you can on this computer.").to_string(),
+        );
+        if on {
+            let status = match (&self.native_step, &self.native_error) {
+                (Some(step), _) => Some(div().child(step.clone())),
+                (None, Some(e)) => Some(div().text_color(t.danger).child(e.clone())),
+                (None, None) => instances::selected()
+                    .version
+                    .filter(|v| native_mods::is_native(v))
+                    .map(|v| {
+                        div().child(trf("{version} plays in this instance.", &[("version", &v)]))
+                    }),
+            };
+            detail = detail.children(status);
+            if self.native_step.is_none() && self.native_confirm.is_none() {
+                detail = detail.child(div().flex().gap(px(8.)).mt(px(4.)).child(
+                    button("native-build", "Build", Kind::Primary, &t).on_click(cx.listener(
+                        |this, _: &ClickEvent, _, cx| {
+                            this.native_confirm = Some(this.native_mods_to_build().map(|(_, b)| b));
+                            cx.notify();
+                        },
+                    )),
+                ));
+            }
+            if let Some(mods) = &self.native_confirm {
+                detail = detail.child(self.native_warning(mods, cx));
+            }
+        }
+        index_row(
+            n,
+            tr("Native mods (experimental)"),
+            Some(detail.into_any_element()),
+            Some(toggle.into_any_element()),
+            &t,
+        )
+    }
+
+    /// The warning before a native build: what the mods can do and which mods. The build starts
+    /// only from its button.
+    fn native_warning(
+        &self,
+        mods: &Result<Vec<native_mods::Bundle>, String>,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let t = self.theme;
+        let list = match mods {
+            Ok(found) => found
+                .iter()
+                .map(|b| format!("{} {}", b.id, b.version))
+                .collect::<Vec<_>>()
+                .join(", "),
+            Err(e) => e.clone(),
+        };
+        let panel = div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .mt(px(8.))
+            .p(px(12.))
+            .bg(t.well)
+            .child(div().text_color(t.danger).child(tr("These mods will run with full access to your computer").to_string()))
+            .child(tr("They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.").to_string())
+            .child(trf("Mods: {mods}", &[("mods", &list)]))
+            .child(tr("The build compiles the game: about ten minutes and a few GB of disk the first time, a few minutes after that.").to_string());
+        let mut buttons = div().flex().gap(px(8.)).mt(px(4.));
+        if mods.is_ok() {
+            buttons = buttons.child(
+                button(
+                    "native-trust",
+                    "I trust these mods: build",
+                    Kind::Primary,
+                    &t,
+                )
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.build_native();
+                    cx.notify();
+                })),
+            );
+        }
+        panel.child(buttons.child(
+            button("native-cancel", "Cancel", Kind::Secondary, &t).on_click(cx.listener(
+                |this, _: &ClickEvent, _, cx| {
+                    this.native_confirm = None;
+                    cx.notify();
+                },
+            )),
+        ))
+    }
+
     fn game_args_row(&self, n: usize, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let focused = self.args_focused;
@@ -3208,8 +3394,11 @@ impl Launcher {
                 actions = actions.child(
                     button(format!("offline-{i}"), "Play offline", Kind::Ghost, &t).on_click(
                         cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.accounts.selected = None;
-                            let _ = this.accounts.save();
+                            let mut accounts = Accounts::load();
+                            accounts.selected = None;
+                            if accounts.save().is_ok() {
+                                this.accounts = accounts;
+                            }
                             cx.notify();
                         }),
                     ),
@@ -3219,8 +3408,7 @@ impl Launcher {
                 actions = actions.child(
                     button(format!("select-{i}"), "Play as", Kind::Secondary, &t).on_click(
                         cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.accounts.selected = Some(uuid.clone());
-                            let _ = this.accounts.save();
+                            this.play_as(account::Player::Microsoft(uuid.clone()));
                             cx.notify();
                         }),
                     ),
@@ -3229,12 +3417,15 @@ impl Launcher {
             actions = actions.child(
                 button(format!("sign-out-{i}"), "Sign out", Kind::Ghost, &t).on_click(cx.listener(
                     move |this, _: &ClickEvent, _, cx| {
-                        let store = account::store();
-                        if let Err(e) = this.accounts.remove(store, &uuid) {
-                            this.sign_in_state = Some(SignInState::Done(Err(e)));
+                        let mut accounts = Accounts::load();
+                        match accounts
+                            .remove(account::store(), &uuid)
+                            .and_then(|()| accounts.save())
+                        {
+                            Ok(()) => this.accounts = accounts,
+                            Err(e) => this.sign_in_state = Some(SignInState::Done(Err(e))),
                         }
-                        let _ = this.accounts.save();
-                        this.owner = Some(this.accounts.has_owner(store));
+                        this.owner = Some(this.accounts.has_owner(account::store()));
                         cx.notify();
                     },
                 )),

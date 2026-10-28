@@ -38,6 +38,14 @@ impl Launcher {
             return Ok(());
         };
         let mut accounts = Accounts::load();
+        // The name may have been forgotten while a file dialog was open: keep nothing for it.
+        if !accounts
+            .offline
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(&name))
+        {
+            return Ok(());
+        }
         let mut look = accounts.look(&name);
         change(&mut look);
         accounts.looks.insert(name.to_ascii_lowercase(), look);
@@ -75,6 +83,14 @@ impl Launcher {
         let Some(name) = self.skin.as_ref().map(|p| p.name.clone()) else {
             return;
         };
+        // The name may have been forgotten while the file dialog was open.
+        if !Accounts::load()
+            .offline
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(&name))
+        {
+            return;
+        }
         let done = skins::keep(&skins::dir(), &name, &path, cape).and_then(|()| {
             self.save_look(|l| match cape {
                 false => l.skin = true,

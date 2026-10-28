@@ -324,6 +324,24 @@ pub fn ease_in_out(t: f64) -> f64 {
     0.5 - 0.5 * (std::f64::consts::PI * t).cos()
 }
 
+/// `MouseHandler.grabMouse` / `releaseMouse`: the mouse position is the
+/// window's centre whenever the pointer's grab state changes, so a screen
+/// opened from gameplay starts with the cursor in the middle. A release of
+/// an already free pointer (or a grab of an already grabbed one) leaves the
+/// position where it is, as vanilla does.
+pub fn mouse_position_after_grab_change(
+    grab: bool,
+    was_grabbed: bool,
+    size: [u32; 2],
+    scale: f32,
+) -> Option<(f32, f32)> {
+    if grab == was_grabbed {
+        None
+    } else {
+        Some((size[0] as f32 / 2.0 / scale, size[1] as f32 / 2.0 / scale))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,5 +502,28 @@ mod tests {
         let mut look = MouseLook::default();
         assert_eq!(look.on_scroll(0.0, 0.4, false, 1.0), None);
         assert_eq!(look.on_scroll(0.0, 0.7, false, 1.0), Some((1, (0, 1))));
+    }
+    #[test]
+    fn the_mouse_position_is_the_centre_when_the_grab_changes() {
+        // A grab of a free pointer and a release of a grabbed one both put
+        // the position at the window's centre (`MouseHandler.grabMouse`,
+        // `MouseHandler.releaseMouse`).
+        assert_eq!(
+            mouse_position_after_grab_change(true, false, [1920, 1080], 1.0),
+            Some((960.0, 540.0))
+        );
+        assert_eq!(
+            mouse_position_after_grab_change(false, true, [1920, 1080], 2.0),
+            Some((480.0, 270.0))
+        );
+        // Without a change of the grab state the position stays where it is.
+        assert_eq!(
+            mouse_position_after_grab_change(false, false, [1920, 1080], 1.0),
+            None
+        );
+        assert_eq!(
+            mouse_position_after_grab_change(true, true, [1920, 1080], 1.0),
+            None
+        );
     }
 }

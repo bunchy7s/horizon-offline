@@ -498,6 +498,14 @@ fn make_link(target: &Path, link: &Path) -> std::io::Result<()> {
     if !target.is_dir() {
         return fs::hard_link(target, link).or_else(|_| fs::copy(target, link).map(|_| ()));
     }
+    junction(target, link)
+}
+
+/// Makes `link` a junction to the folder `target` (no admin rights needed, unlike a symlink). The
+/// error carries cmd's own message ("Access is denied", "The system cannot find the path…").
+#[cfg(windows)]
+pub(crate) fn junction(target: &Path, link: &Path) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
     // Always quoted: cmd reads `&`, `^` or `(` in an unquoted path (a user folder may have
     // them) as its own syntax. A Windows path never holds a quote.
     let quoted = |path: &Path| {
@@ -506,16 +514,19 @@ fn make_link(target: &Path, link: &Path) -> std::io::Result<()> {
         arg.push("\"");
         arg
     };
-    let status = crate::process::command("cmd")
+    let out = crate::process::command("cmd")
         .args(["/C", "mklink", "/J"])
         .raw_arg(quoted(link))
         .raw_arg(quoted(target))
-        .stdout(std::process::Stdio::null())
-        .status()?;
-    match status.success() {
-        true => Ok(()),
-        false => Err(std::io::Error::other("mklink /J failed")),
+        .output()?;
+    if out.status.success() {
+        return Ok(());
     }
+    let why = String::from_utf8_lossy(&out.stderr);
+    Err(std::io::Error::other(match why.trim() {
+        "" => "mklink /J failed".to_string(),
+        why => format!("mklink /J failed: {why}"),
+    }))
 }
 
 #[cfg(test)]

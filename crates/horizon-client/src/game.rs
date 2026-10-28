@@ -222,6 +222,7 @@ use horizon_client::{
     entities::{Experience, ExperienceOrb, ItemEntity},
     environment::Environment,
     first_person::{Hand, SwingAnimation},
+    furnace::FurnaceCooking,
     gfx::{Frame, Renderer},
     hud::{HudAtlas, HudBatch, rgba},
     hud_layout, hud_overlays,
@@ -5686,6 +5687,8 @@ impl Game<'_> {
         let warp = |window: &Window| {
             let _ = window.set_cursor_position(centre);
         };
+        let scale = HudBatch::new(size).scale;
+        let was_grabbed = self.captured;
         if capture {
             self.mouse.set_ignore_first_move();
             // macOS warps by re-associating the mouse with the pointer,
@@ -5716,12 +5719,22 @@ impl Game<'_> {
                 if self.focused {
                     warp(window);
                 }
-                let scale = HudBatch::new(size).scale;
-                self.cursor = (size[0] as f32 / 2.0 / scale, size[1] as f32 / 2.0 / scale);
             } else {
                 let _ = window.set_cursor_grab(CursorGrabMode::None);
             }
             self.captured = false;
+        }
+        // MouseHandler.grabMouse and releaseMouse: the mouse position is
+        // the window's centre whenever the pointer's grab state changes, so
+        // a screen opened from gameplay starts with the cursor in the middle
+        // and the game starts with it away from the screen's last spot.
+        if let Some(pos) = horizon_client::mouse::mouse_position_after_grab_change(
+            capture,
+            was_grabbed,
+            size,
+            scale,
+        ) {
+            self.cursor = pos;
         }
         window.set_cursor_visible(!self.captured);
     }

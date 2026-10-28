@@ -188,10 +188,17 @@ pub struct GeneratorData {
     /// Concentric ring positions by seed and dimension generator (see
     /// `rings_for`), most recent last.
     ring_cache: Mutex<Vec<RingCacheEntry>>,
+    /// Placed-feature decoration by biome source (see `decoration_for`),
+    /// most recent last.
+    decorations: Mutex<Vec<(String, DecorationSlot)>>,
 }
 type RingCacheEntry = ((i64, String), Arc<OnceLock<super::structure::start::Rings>>);
 /// Generators whose ring positions are kept: the dimensions of a few worlds.
 const RING_CACHE_LIMIT: usize = 8;
+type DecorationSlot =
+    Arc<OnceLock<Result<Option<Arc<super::generator_decoration::Decoration>>, String>>>;
+/// Biome sources whose decoration is kept: the three dimensions and a spare.
+const DECORATION_CACHE_LIMIT: usize = 4;
 type Bundle = BTreeMap<String, String>;
 fn read_bundle(dir: &Path, name: &str) -> Result<Bundle, GeneratorError> {
     let path = dir.join(format!("{name}.json"));
@@ -490,6 +497,7 @@ impl GeneratorData {
             biome_tags,
             feature_resources,
             ring_cache: Mutex::new(Vec::new()),
+            decorations: Mutex::new(Vec::new()),
         }))
     }
     /// The concentric ring positions (strongholds) of the generator for
@@ -512,6 +520,59 @@ impl GeneratorData {
         }
         cache.push((key, rings.clone()));
         rings
+    }
+    /// The placed-feature decoration of the biome source `source_json`
+    /// (resolved: `source`), shared by every generator that uses it. It
+    /// depends on these resources and the source alone, not on the seed, and
+    /// building it (decoding the placed features of every biome the source
+    /// can place) took about 140 ms of each world opening. A caller that
+    /// arrives while another builds it waits for that build.
+    pub(super) fn decoration_for(
+        self: &Arc<Self>,
+        source_json: &str,
+        source: &ResolvedBiomeSource,
+    ) -> Result<Option<Arc<super::generator_decoration::Decoration>>, GeneratorError> {
+        let slot = {
+            let mut cache = self.decorations.lock().unwrap_or_else(|e| e.into_inner());
+            let slot = match cache.iter().position(|(k, _)| k == source_json) {
+                Some(i) => cache.remove(i).1,
+                None => Arc::new(OnceLock::new()),
+            };
+            if cache.len() >= DECORATION_CACHE_LIMIT {
+                cache.remove(0);
+            }
+            cache.push((source_json.to_owned(), slot.clone()));
+            slot
+        };
+        slot.get_or_init(|| {
+            super::generator_decoration::Decoration::new(self, source)
+                .map(|d| d.map(Arc::new))
+                .map_err(|e| e.to_string())
+        })
+        .clone()
+        .map_err(resource)
+    }
+    /// Builds the decoration of `preset`'s `dimension` generator before a
+    /// world needs it (the world screens' preload), so opening the world
+    /// finds it ready.
+    pub fn prepare_decoration(
+        self: &Arc<Self>,
+        preset: &str,
+        dimension: &str,
+    ) -> Result<(), GeneratorError> {
+        let preset_json: Value = serde_json::from_str(
+            self.world_presets
+                .get(preset)
+                .ok_or_else(|| resource(format!("missing world preset {preset}")))?,
+        )?;
+        let source_json =
+            preset_json["dimensions"][dimension]["generator"]["biome_source"].to_string();
+        let source = self
+            .source_catalog
+            .decode(&source_json)?
+            .resolve(&self.presets)
+            .map_err(|e| resource(format!("biome source: {e}")))?;
+        self.decoration_for(&source_json, &source).map(drop)
     }
     pub fn registry(&self) -> &'static BlockRegistry {
         self.registry
@@ -683,7 +744,7 @@ struct Pipeline<R: RandomSource> {
     biome_cache: BiomeCache,
     biome_work: ChunkWork,
     carver_cache: Mutex<HashMap<(i32, i32), BiomeId>>,
-    pub(super) decoration: Option<super::generator_decoration::Decoration>,
+    pub(super) decoration: Option<Arc<super::generator_decoration::Decoration>>,
     pub(super) structures: Option<super::generator_structures::StructureState>,
     /// The noise settings' `spawn_target` points.
     spawn_target: Vec<SpawnTargetPoint>,
@@ -831,9 +892,10 @@ where
                 .collect::<Result<_, GeneratorError>>()?,
             _ => Vec::new(),
         };
+        let source_json = generator["biome_source"].to_string();
         let source = data
             .source_catalog
-            .decode(&generator["biome_source"].to_string())?
+            .decode(&source_json)?
             .resolve(&data.presets)
             .map_err(|e| resource(format!("biome source: {e}")))?;
         let climate = router.climate_sampler();
@@ -912,8 +974,9 @@ where
             spawn_target,
             spawn_position: std::sync::OnceLock::new(),
         };
-        pipeline.decoration =
-            super::generator_decoration::Decoration::new(&pipeline.data, &pipeline.source)?;
+        pipeline.decoration = pipeline
+            .data
+            .decoration_for(&source_json, &pipeline.source)?;
         if with_structures {
             let possible = pipeline
                 .source
@@ -1803,7 +1866,7 @@ where
     fn unsupported_features(&self) -> Vec<(String, String)> {
         self.decoration
             .as_ref()
-            .map(super::generator_decoration::Decoration::unsupported)
+            .map(|decoration| decoration.unsupported())
             .unwrap_or_default()
     }
     fn use_saved_start(
@@ -3089,6 +3152,40 @@ mod tests {
             &a,
             &data.rings_for(1, &serde_json::json!({ "settings": "a" }))
         ));
+    }
+
+    /// Generators of every seed share their biome source's decoration, the
+    /// one the world screens' preload built; another dimension gets its own.
+    #[test]
+    fn decoration_is_shared_by_biome_source() {
+        let Some(data) = prepared_data() else {
+            return;
+        };
+        data.prepare_decoration("minecraft:normal", "minecraft:overworld")
+            .expect("decoration");
+        let built = |i: usize| {
+            let cache = data.decorations.lock().unwrap();
+            let slot = cache[i].1.get().expect("built").clone();
+            slot.expect("decoration").expect("feature resources")
+        };
+        let prepared = built(0);
+        // The cache's handle and ours.
+        assert_eq!(Arc::strong_count(&prepared), 2);
+        let first = OverworldGenerator::new(data.clone(), 1234).expect("generator");
+        let other = OverworldGenerator::new(data.clone(), -7).expect("generator");
+        assert_eq!(Arc::strong_count(&prepared), 4);
+        assert_eq!(data.decorations.lock().unwrap().len(), 1);
+        let nether = OverworldGenerator::for_dimension(
+            data.clone(),
+            1234,
+            "minecraft:normal",
+            "minecraft:the_nether",
+        )
+        .expect("generator");
+        assert_eq!(data.decorations.lock().unwrap().len(), 2);
+        assert!(!Arc::ptr_eq(&prepared, &built(1)));
+        drop((first, other, nether));
+        assert_eq!(Arc::strong_count(&prepared), 2);
     }
 
     #[test]

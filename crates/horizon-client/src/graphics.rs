@@ -589,6 +589,21 @@ mod tests {
     }
 
     #[test]
+    fn every_preset_keeps_the_animated_textures_on() {
+        // The Performance preset used to turn them off, which froze the fire,
+        // the water, the lava and the portals (#2064).
+        assert!(Graphics::default().animated_textures);
+        for preset in Preset::ALL {
+            let mut s = crate::settings::Settings::default();
+            apply_preset(preset, &mut s);
+            assert!(
+                s.horizon.animated_textures,
+                "{preset:?} turned the animated textures off"
+            );
+        }
+    }
+
+    #[test]
     fn automatic_workers_leave_a_core_as_vanilla_does() {
         let g = Graphics::default();
         assert_eq!(g.workers, 0);

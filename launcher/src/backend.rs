@@ -77,7 +77,7 @@ const LAUNCHER_BINARY: &str = if cfg!(windows) {
     "horizon-launcher"
 };
 
-const CLIENT: &str = if cfg!(windows) {
+pub(crate) const CLIENT: &str = if cfg!(windows) {
     "horizon-client.exe"
 } else {
     "horizon-client"
@@ -503,15 +503,24 @@ fn signed_digest(tag: &str, asset: &str) -> Result<String, String> {
     )
 }
 
-/// Downloads `url` into `to`; the file is kept only if its SHA-256 is `sha256`, the signed one.
-fn download(
+/// Downloads `url` into `to`; the file is kept only if its SHA-256 is `sha256`, the signed (or
+/// pinned) one. A `size` of 0 takes the server's Content-Length for the progress.
+pub(crate) fn download(
     url: &str,
     size: u64,
     sha256: &str,
     to: &Path,
     progress: &impl Fn(f32),
 ) -> Result<(), String> {
-    let mut reader = get(url)?.into_reader();
+    let response = get(url)?;
+    let size = match size {
+        0 => response
+            .header("Content-Length")
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0),
+        n => n,
+    };
+    let mut reader = response.into_reader();
     let mut file = fs::File::create(to).map_err(|e| e.to_string())?;
     let mut hash = horizon_release_sign::Sha256::default();
     let (mut done, mut buf) = (0u64, vec![0u8; 1 << 16]);
@@ -861,7 +870,7 @@ fn files_under(dir: &Path, relative: &Path) -> Vec<PathBuf> {
     files
 }
 
-fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;
@@ -2474,6 +2483,10 @@ pub enum Msg {
     NightlyProgress(f32),
     /// A nightly check ended: the version installed (None: already up to date), or why not.
     Nightly(Result<Option<String>, String>),
+    /// Where the native-mods build is (`native_mods::Step::label`).
+    NativeProgress(String),
+    /// The native-mods build ended: the version built, or why not.
+    Native(Result<String, String>),
 }
 
 /// A running process; its output arrives as `Msg::Line`, its end as `Msg::Exit`.
@@ -2660,6 +2673,10 @@ pub struct Settings {
     /// instance. Off by default.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub nightly: bool,
+    /// The player turned Native mods (experimental) on (`native_mods`): mixin mods compiled into
+    /// a game of their own. Off by default.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub native_mods: bool,
 }
 
 impl Settings {

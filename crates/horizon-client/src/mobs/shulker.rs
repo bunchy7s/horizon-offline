@@ -593,3 +593,65 @@ pub fn anim(m: &Mob, s: &State, p: &mut Poses) {
     p.xrot("head", s.x_rot.to_radians());
     p.yrot("head", (s.y_rot - 180.0).to_radians());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mobs::sensor_scan_tests::kind;
+    use std::sync::Arc;
+
+    /// A shulker fixed to a block face.
+    fn shulker() -> Mob {
+        let mut kind = kind();
+        let k = Arc::make_mut(&mut kind);
+        k.id = "minecraft:shulker".into();
+        k.species = Species::Shulker;
+        k.max_head_y_rot = 180.0;
+        let mut m = Mob::new(1, kind, Vec3::ZERO, 0.0);
+        m.extra.variant3 = 2;
+        m
+    }
+
+    #[test]
+    fn the_body_stays_square_while_the_head_turns() {
+        // Shulker.recreateFromPacket sets the body rotation to 0 and
+        // Shulker.ShulkerBodyRotationControl.clientTick is empty, so the
+        // shulker's body never turns: it stays square to the block it is
+        // fixed to and only its head turns (#1661).
+        let mut m = shulker();
+        m.yaw = 90.0;
+        m.head_yaw = 90.0;
+        // It moved, so a body that follows the mob would turn with it.
+        m.previous = Vec3::new(1.0, 0.0, 0.0);
+        m.body_rotation_tick();
+        assert_eq!(
+            m.body_yaw, 0.0,
+            "the shulker's body stays square to the block"
+        );
+        assert_eq!(m.previous_body_yaw, 0.0);
+        // A mob that moves turns its body to where it goes.
+        let mut other = Mob::new(2, kind(), Vec3::ZERO, 0.0);
+        other.yaw = 90.0;
+        other.previous = Vec3::new(1.0, 0.0, 0.0);
+        other.body_rotation_tick();
+        assert_eq!(other.body_yaw, 90.0);
+    }
+
+    #[test]
+    fn the_head_turns_to_its_target() {
+        // ShulkerLookControl.clampHeadRotationToBody does nothing, so the
+        // head is not clamped to the square body: it turns to the target.
+        let mut m = shulker();
+        m.ai.look.kind = LookKind::Shulker;
+        for _ in 0..20 {
+            // A goal keeps the look up to date every tick.
+            m.ai.look.set_look_at([5.0, 0.0, 0.0], 10.0, 10.0);
+            m.look_control_tick();
+        }
+        assert!(
+            m.head_yaw.abs() > 45.0,
+            "the head turns to the target, not back to the square body"
+        );
+        assert_eq!(m.body_yaw, 0.0);
+    }
+}

@@ -288,10 +288,35 @@ fn delete_requires_confirmation_and_both_cancel_paths_preserve_world() {
     assert_eq!((delete.x, delete.y, delete.w), (88.0, 146.0, 150.0));
     f.click("Delete");
     assert!(!f.title.saves.join("World").exists());
-    assert!(matches!(&f.title.mode, Mode::Select { worlds, selected: None } if worlds.is_empty()));
-    f.click("Back");
+    // The last world gone, vanilla opens a fresh Create New World, not an empty list.
+    assert!(matches!(&f.title.mode, Mode::Create { name, .. } if name == "New World"));
+    f.click("Cancel");
+    assert!(matches!(f.title.mode, Mode::Main));
     f.click("Singleplayer");
     assert!(matches!(f.title.mode, Mode::Create { .. }));
+}
+
+#[test]
+fn deleting_one_of_two_worlds_keeps_the_list() {
+    let mut f = Fixture::new();
+    f.world("One", "One");
+    f.world("Two", "Two");
+    f.select();
+    f.click("Delete");
+    f.click("Delete");
+    assert!(matches!(&f.title.mode, Mode::Select { worlds, .. } if worlds.len() == 1));
+}
+
+#[test]
+fn a_list_emptied_elsewhere_opens_create_world() {
+    let mut f = Fixture::new();
+    f.world("World", "World");
+    f.title.enter_singleplayer();
+    world_management::delete(&f.title.saves, "World").unwrap();
+    f.title.worlds_changed();
+    assert!(matches!(f.title.mode, Mode::Create { .. }));
+    f.title.escape();
+    assert!(matches!(f.title.mode, Mode::Main));
 }
 
 #[test]
@@ -600,7 +625,7 @@ fn world_management_buttons_sound_when_enabled() {
     assert_eq!(f.click_with_sound("Cancel"), (Action::None, true));
     assert_eq!(f.click_with_sound("Delete"), (Action::None, true));
     assert_eq!(f.click_with_sound("Delete"), (Action::None, true));
-    assert!(matches!(f.title.mode, Mode::Select { .. }));
+    assert!(matches!(f.title.mode, Mode::Create { .. }));
 }
 
 #[test]

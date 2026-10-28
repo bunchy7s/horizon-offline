@@ -6,6 +6,7 @@
     nightly.py prune [--days 7]    deletes the nightly-<date> pre-releases and tags older than that, nothing else
     nightly.py prune-builds [--days 7]   deletes the nightly/build-<date>-<n> branches older than that, but the
                                    newest and any a published nightly points to (Ludovic, 2026-10-27)
+    nightly.py keep-source <sha> <date>  tags the nightly's commit nightly-source/<date>-<short>, for good
 
 A nightly builds main plus the pull requests the trusted reviewers picked (the set: tools/ci/nightly_set.py), merged
 in their order and pushed as nightly/build-<date>-<n>. With no set it builds the newest union branch on origin
@@ -13,6 +14,10 @@ in their order and pushed as nightly/build-<date>-<n>. With no set it builds the
 newer than main's head. It is published as the `nightly` pre-release; the previous one stays a week as
 nightly-<date>. Runs from main's checkout with `gh`; it reads and merges the branches with git and never runs
 anything from them.
+
+Each nightly ships its exact source: horizon-source.tar.gz (`git archive` of the commit, signed with the builds) on
+the release, and the tag nightly-source/<date>-<short>, which no prune deletes. Native mods pin a nightly's commit
+(docs/native-mods.md), so that commit must stay downloadable after its release and build branch are gone.
 """
 from __future__ import annotations
 
@@ -33,6 +38,7 @@ else:  # run as tools/ci/nightly.py: its folder is on the path
 
 DATED = re.compile(r"^nightly-(\d{4}-\d{2}-\d{2})$")
 TITLE_DATE = re.compile(r"Nightly (\d{4}-\d{2}-\d{2})")
+SOURCE_TAG = "nightly-source/"
 
 
 @dataclass
@@ -84,10 +90,20 @@ OPT_IN = ("**Opt-in, not a release.** A Nightly can include pull requests not re
           "as they are. Report bugs with the version the game shows (\"Nightly <date> · <commit>\").")
 
 
+def source_tag(today: str, sha: str) -> str:
+    """The permanent tag of a nightly's commit: neither `prune` (nightly-<date> only) nor `prune-builds` touches it."""
+    return f"{SOURCE_TAG}{today}-{sha[:7]}"
+
+
+def source_line(today: str, sha: str) -> str:
+    return (f"Source: commit {sha}, kept for good as the tag `{source_tag(today, sha)}`; horizon-source.tar.gz is "
+            "its tree. Native mods built for this Nightly pin that commit.")
+
+
 def set_notes(today: str, chosen: Ref, main: Ref, prs: list[dict], left_out: list[str]) -> str:
     """The notes of a build of main plus the reviewers' set."""
     lines = [f"Nightly {today} · {chosen.sha[:7]}: main ({main.sha[:7]}) with {len(prs)} pull requests merged in, "
-             f"built from `{chosen.name}` ({chosen.sha}).", "", OPT_IN, "",
+             f"built from `{chosen.name}` ({chosen.sha}).", "", source_line(today, chosen.sha), "", OPT_IN, "",
              f"### Pull requests in this Nightly ({len(prs)})", ""]
     lines += [f"- {ns.plain(e['title'])} (#{e['number']}) by {e['author']}, at {e['head'][:7]}, picked by "
               f"{e['asked_by']}" for e in prs]
@@ -97,7 +113,8 @@ def set_notes(today: str, chosen: Ref, main: Ref, prs: list[dict], left_out: lis
 
 
 def notes(today: str, chosen: Ref, held: list[dict], left_out: list[str] | None = None) -> str:
-    lines = [f"Nightly {today} · {chosen.sha[:7]}: built from `{chosen.name}` ({chosen.sha}).", "", OPT_IN, ""]
+    lines = [f"Nightly {today} · {chosen.sha[:7]}: built from `{chosen.name}` ({chosen.sha}).", "",
+             source_line(today, chosen.sha), "", OPT_IN, ""]
     if left_out:
         lines += [f"The reviewers' set had nothing left to build: {'; '.join(ns.plain(w) for w in left_out)}.", ""]
     if held:
@@ -184,7 +201,7 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
     with open("nightly-notes.md", "w") as f:
         f.write(set_notes(today, chosen, main, kept, left_out))
     output(build=str(build).lower(), sha=sha, short=sha[:7], source=name, date=today, version=f"nightly-{today}",
-           nightly=f"{today} {sha[:7]}")
+           nightly=f"{today} {sha[:7]}", source_tag=source_tag(today, sha))
     print(f"{'build' if build else 'skip (unchanged since the last nightly)'}: {name} {sha}, main {main.sha[:7]} + "
           + ", ".join(f"#{e['number']}" for e in kept))
 
@@ -233,7 +250,7 @@ def build_union(main: Ref, today: str, force: bool, left_out: list[str] | None =
     with open("nightly-notes.md", "w") as f:
         f.write(notes(today, chosen, held, left_out))
     output(build=str(build).lower(), sha=chosen.sha, short=chosen.sha[:7], source=chosen.name, date=today,
-           version=f"nightly-{today}", nightly=f"{today} {chosen.sha[:7]}")
+           version=f"nightly-{today}", nightly=f"{today} {chosen.sha[:7]}", source_tag=source_tag(today, chosen.sha))
     print(f"{'build' if build else 'skip (unchanged since the last nightly)'}: {chosen.name} {chosen.sha}, "
           f"{len(held)} open pull requests beyond main")
 
@@ -309,6 +326,19 @@ def prune_builds(days: int) -> None:
           f"nightlies' and the last {days} days')")
 
 
+def keep_source(sha: str, today: str) -> None:
+    """Tags the published nightly's commit for good (source_tag); a rerun of the same build finds it there."""
+    tag = source_tag(today, sha)
+    there = remote_refs(f"refs/tags/{tag}").get(tag)
+    if there == sha:
+        print(f"`{tag}` already names {sha[:7]}")
+        return
+    if there:
+        raise SystemExit(f"`{tag}` names {there[:7]}, not {sha[:7]}")
+    gh("api", f"repos/{os.environ['GITHUB_REPOSITORY']}/git/refs", "-f", f"ref=refs/tags/{tag}", "-f", f"sha={sha}")
+    print(f"tagged {sha[:7]} `{tag}`")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -316,6 +346,9 @@ def main() -> None:
     sub.add_parser("rotate")
     sub.add_parser("prune").add_argument("--days", type=int, default=7)
     sub.add_parser("prune-builds").add_argument("--days", type=int, default=7)
+    keep = sub.add_parser("keep-source")
+    keep.add_argument("sha")
+    keep.add_argument("date")
     args = ap.parse_args()
     if args.cmd == "pick":
         pick(args.force)
@@ -323,6 +356,8 @@ def main() -> None:
         rotate()
     elif args.cmd == "prune-builds":
         prune_builds(args.days)
+    elif args.cmd == "keep-source":
+        keep_source(args.sha, args.date)
     else:
         prune(args.days)
 

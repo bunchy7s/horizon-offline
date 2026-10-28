@@ -7,6 +7,7 @@
 use horizon_client::{
     containers::{Furnace, FurnaceKind},
     crafting::Recipes,
+    furnace::FurnaceCooking,
     item_data::{canon_stack, parse_stack},
     items::Items,
     menu::{Env, Input, Kind, Menu},

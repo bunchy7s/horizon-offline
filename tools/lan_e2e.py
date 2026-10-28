@@ -7852,5 +7852,45 @@ CHECKS += ['dig_stop']
 CHECK_FNS['dig_stop'] = check_dig_stop
 
 
+def check_dig_sounds(host, guest, out):
+    """#2277: the mining sound plays once per cadence, for everyone.
+
+    Vanilla plays the block's hit sound from the server's destroy progress
+    level events (2019 and 2020), so the digger and the players around hear
+    the same hits. Horizon's digger heard every hit twice: once from its own
+    client and once from the server, which is what the report called a sound
+    played too often.
+    """
+    result = {}
+    spots = apart(host, guest)
+    for label, player in (('host', host), ('guest', guest)):
+        other = guest if label == 'host' else host
+        x, y, z = spots[label]
+        cell = (x, y + 1, z + 2)
+        player('command', command='gamemode survival')
+        player('command', command='clear @s')
+        host('command', command=f'fill {x - 1} {y} {z + 1} {x + 1} {y + 3} {z + 4} minecraft:air')
+        host('command', command=f'setblock {cell[0]} {cell[1]} {cell[2]} minecraft:stone')
+        player.wait(10)
+        before = {g.name: heard(g, 'minecraft:block.stone.hit') for g in (host, guest)}
+        player.raw('look-at', f'{cell[0] + 0.5:.2f}', f'{cell[1] + 0.5:.2f}', f'{cell[2] + 0.5:.2f}')
+        player.raw('mouse', 'left', 'down')
+        player.wait(40)
+        player.raw('mouse', 'left', 'up')
+        player.wait(5)
+        hits = {g.name: heard(g, 'minecraft:block.stone.hit') - before[g.name] for g in (host, guest)}
+        result[label] = hits
+        assert host.raw('block', *cell).get('block') == 'minecraft:stone', f'{label}: the stone broke: {result}'
+        assert hits[other.name] >= 3, f'{label}: the player nearby heard no mining sound: {result}'
+        assert hits[player.name] <= hits[other.name] + 3, \
+            f'{label}: the digger heard the mining sound twice: {result}'
+        host('command', command=f'setblock {cell[0]} {cell[1]} {cell[2]} minecraft:air')
+    return result
+
+
+CHECKS += ['dig_sounds']
+CHECK_FNS['dig_sounds'] = check_dig_sounds
+
+
 if __name__ == '__main__':
     main()

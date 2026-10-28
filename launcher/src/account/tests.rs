@@ -618,9 +618,26 @@ fn offline_names_switch_with_accounts() {
     assert!(a.play_as(&store, Player::Microsoft("zzz".into())).is_err());
     a.play_as(&store, Player::Offline("Builder_1".into()))
         .unwrap();
-    a.remove_offline("BUILDER_1").unwrap();
+    // Forgetting drops the look and the name's skin and cape files too.
+    let dir = std::env::temp_dir().join(format!("horizon-accounts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (skin, cape) = crate::skins::files(&dir, "builder_1");
+    std::fs::write(&skin, b"skin").unwrap();
+    std::fs::write(&cape, b"cape").unwrap();
+    a.looks.insert(
+        "builder_1".into(),
+        crate::skins::Look {
+            skin: true,
+            cape: true,
+            ..crate::skins::Look::default()
+        },
+    );
+    a.remove_offline("BUILDER_1", &dir).unwrap();
     assert_eq!(a.player(), Player::GameName);
-    assert!(a.remove_offline("Builder_1").is_err());
+    assert!(a.looks.is_empty() && !skin.exists() && !cape.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(a.remove_offline("Builder_1", &dir).is_err());
     // An accounts.json from before offline names reads as it was, and writes nothing new.
     let old: Accounts = serde_json::from_str(r#"{"accounts":[],"selected":null}"#).unwrap();
     assert_eq!(old.player(), Player::GameName);

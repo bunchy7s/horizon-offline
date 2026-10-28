@@ -23,61 +23,7 @@ use horizon_core::{
 use serde_json::Value;
 use std::{collections::HashMap, fs, path::Path};
 
-/// A `natural_mob_spawns` / `spawn_overrides` entry list.
-pub fn parse_entries(list: &Value) -> Vec<SpawnEntry> {
-    list.as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|e| {
-            let count = &e["count"];
-            let (min, max, constant) = match count {
-                Value::Number(n) => {
-                    let n = n.as_u64().unwrap_or(1) as u32;
-                    (n, n, true)
-                }
-                c if c["type"].as_str() == Some("minecraft:constant") => {
-                    let n = c["value"].as_u64().unwrap_or(1) as u32;
-                    (n, n, true)
-                }
-                c => (
-                    c["min_inclusive"].as_u64().unwrap_or(1) as u32,
-                    c["max_inclusive"].as_u64().unwrap_or(1) as u32,
-                    false,
-                ),
-            };
-            Some(SpawnEntry {
-                entity: e["type"].as_str()?.to_owned(),
-                weight: e["weight"].as_u64().unwrap_or(1) as u32,
-                min,
-                max,
-                constant,
-            })
-        })
-        .collect()
-}
-/// `MobSpawnSettings.MobSpawnCost`.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SpawnCost {
-    pub energy_budget: f64,
-    pub charge: f64,
-}
-/// The `spawn_costs` of a `natural_mob_spawns` value.
-pub fn parse_costs(costs: &Value) -> HashMap<String, SpawnCost> {
-    costs
-        .as_object()
-        .into_iter()
-        .flatten()
-        .map(|(k, c)| {
-            (
-                k.clone(),
-                SpawnCost {
-                    energy_budget: c["energy_budget"].as_f64().unwrap_or(0.0),
-                    charge: c["charge"].as_f64().unwrap_or(0.0),
-                },
-            )
-        })
-        .collect()
-}
+pub use crate::biome::{SpawnCost, parse_costs, parse_entries};
 
 /// `MobCategory`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

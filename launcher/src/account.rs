@@ -902,14 +902,16 @@ impl Accounts {
         Ok(name.to_string())
     }
 
-    /// Forgets an offline name; if it was playing, the game's own name plays.
-    pub fn remove_offline(&mut self, name: &str) -> Result<(), String> {
+    /// Forgets an offline name: its look and its skin and cape files (`skins`) go with it; if
+    /// it was playing, the game's own name plays.
+    pub fn remove_offline(&mut self, name: &str, skins_dir: &Path) -> Result<(), String> {
         let before = self.offline.len();
         self.offline.retain(|n| !n.eq_ignore_ascii_case(name));
         self.looks.remove(&name.to_ascii_lowercase());
         if self.offline.len() == before {
             return Err(format!("No offline name {name}."));
         }
+        crate::skins::forget(skins_dir, name);
         if self
             .offline_selected
             .as_ref()

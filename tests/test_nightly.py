@@ -62,6 +62,19 @@ class NightlyTests(unittest.TestCase):
         self.assertIn("- Fix pistons (#2476)", text)
         self.assertIn("Everything in it is on main.", nightly.notes("2026-10-28", ref("main", "m" * 40, 0), []))
 
+    def test_notes_name_the_commit_and_its_permanent_source_tag(self):
+        sha = "0c0206714abc" + "0" * 28
+        text = nightly.notes("2026-10-28", ref("union/a", sha, 1), [])
+        self.assertIn(f"Source: commit {sha}, kept for good as the tag `nightly-source/2026-10-28-0c02067`", text)
+        main = nightly.Ref("main", "m" * 40, None)
+        self.assertIn("`nightly-source/2026-10-28-bbbbbbb`",
+                      nightly.set_notes("2026-10-28", nightly.Ref("b", "b" * 40, None), main, [], []))
+
+    def test_the_source_tag_outlives_every_prune(self):
+        tag = nightly.source_tag("2026-10-20", "a" * 40)
+        self.assertEqual(nightly.stale([{"tagName": tag, "isPrerelease": True}], dt.date(2026, 11, 28), 7), [])
+        self.assertIsNone(nightly.DATED.match(tag))
+
 
 
 class ScheduledTests(unittest.TestCase):
@@ -148,6 +161,17 @@ class PruneBuildsTests(unittest.TestCase):
         branches = {"nightly-state": "s", "nightly/build-x": "x", "main": "m", "nightly/build-2026-10-01-1-fix": "f",
                     "feature/nightly/build-2026-10-01-1": "g", "nightly/build-2026-10-02-1": "n"}
         self.assertEqual(nightly.stale_builds(branches, set(), self.TODAY, 7), [])
+
+    def test_the_source_is_archived_from_git_signed_attached_and_tagged(self):
+        build = (WORKFLOWS / "nightly-build.yml").read_text()
+        pick = build.split("\n  build:", 1)[0]
+        self.assertIn('git archive --format=tar.gz --prefix="horizon-${SHA:0:7}/" -o horizon-source.tar.gz "$SHA"',
+                      pick)
+        sign = build.split("\n  sign:", 1)[1].split("\n  publish:", 1)[0]
+        self.assertIn("dist/horizon-source.tar.gz", sign.split("sign_release.sh nightly", 1)[1])
+        publish = build.split("\n  publish:", 1)[1].split("\n  answer:", 1)[0]
+        self.assertIn('"dist/horizon-source.tar.gz#Source of this Nightly', publish)
+        self.assertIn('nightly.py keep-source "$SHA" "$DATE"', publish)
 
     def test_the_workflow_prunes_on_schedule_only(self):
         build = (WORKFLOWS / "nightly-build.yml").read_text()

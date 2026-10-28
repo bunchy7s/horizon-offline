@@ -157,6 +157,13 @@ pub fn keep(dir: &Path, name: &str, file: &Path, cape: bool) -> Result<(), Strin
     std::fs::write(&to, bytes).map_err(|e| format!("{}: {e}", to.display()))
 }
 
+/// Drops a forgotten name's files (`Accounts::remove_offline`); missing files are fine.
+pub fn forget(dir: &Path, name: &str) {
+    let (skin, cape) = files(dir, name);
+    let _ = std::fs::remove_file(skin);
+    let _ = std::fs::remove_file(cape);
+}
+
 /// The variables the game gets for `name`'s look.
 pub fn env(dir: &Path, name: &str, look: &Look) -> Vec<(&'static str, String)> {
     let (skin, cape) = files(dir, name);

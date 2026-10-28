@@ -7,6 +7,7 @@ use super::{Game, GameLevel, Screen, dispenser::new_item_motion, storage::is_shu
 use horizon_client::{
     block_entity_item, block_entity_nbt,
     containers::{Banner, BlockEntity},
+    furnace::FurnaceCooking,
     item_data,
     items::ItemStack,
     save,

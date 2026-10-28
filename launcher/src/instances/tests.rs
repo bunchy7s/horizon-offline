@@ -68,6 +68,33 @@ fn player_home(home: &Path) {
 }
 
 #[test]
+fn a_new_player_name_replaces_the_kept_one_everywhere() {
+    let root = scratch("newname");
+    let (home, data) = (root.join("horizon"), root.join("launcher"));
+    player_home(&home);
+    // An own instance that has the old name, and one with no file yet.
+    put(
+        &home.join("instances/one/horizon-player.txt"),
+        "name:Player123\n",
+    );
+    fs::create_dir_all(home.join("instances/two")).unwrap();
+    let name = new_player_name_in(&home, &data).unwrap();
+    assert_ne!(name, "Player123");
+    assert!(name.starts_with("Player") && name.len() == 11);
+    let kept = |home: &Path| fs::read_to_string(home.join("horizon-player.txt")).unwrap();
+    for h in [
+        &home,
+        &home.join("instances/one"),
+        &home.join("instances/two"),
+        &home.join("ports/small-pack/home"),
+        &home.join("horizon-packs/cozy/home"),
+    ] {
+        assert_eq!(kept(h), format!("name:{name}\n"), "{}", h.display());
+    }
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn existing_worlds_stay_where_they_are_and_every_folder_becomes_an_instance() {
     let root = scratch("migrate");
     let (home, data) = (root.join("horizon"), root.join("launcher"));

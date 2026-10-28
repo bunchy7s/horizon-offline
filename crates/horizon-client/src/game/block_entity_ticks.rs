@@ -9,6 +9,7 @@ use horizon_client::{
     Result,
     block_entities::{Pos, Ticking},
     containers::{BlockEntity, FurnaceKind, HOPPER_SLOTS},
+    furnace::FurnaceCooking,
 };
 use horizon_core::position::BlockPos;
 use horizon_world::registry::BlockStateId;

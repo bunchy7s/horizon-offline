@@ -71,6 +71,18 @@ Run a dedicated server here; type commands into its console.
 
 MCP: `server`, `server_command`, `server_log`, `server_stop`.
 
+## `horizon-launcher native-build`
+
+Native mods (experimental, docs/native-mods.md): compile mixin bundles on the Horizon revision they pin, with the launcher's own Rust, as the version the "Native mods" instance plays. Not sandboxed: the mods' code runs with your rights.
+
+    horizon-launcher native-build [FOLDER]
+
+- `FOLDER`: A mod folder (horizon-mixin.toml, or an unpacked .hnmod), or a folder of them (default: the native mods installed and turned on in the instance)
+- `--instance`: The instance whose installed native mods to build, and which then plays the build (default: the selected one; the game's own home builds into the Native mods instance)
+- `--trust-native-code`: You read the mods' source and trust it with full access to this computer
+
+MCP: none: the player's switch.
+
 ## `horizon-launcher notes`
 
 Show a release's patch notes (default: the newest).
@@ -137,7 +149,7 @@ MCP: `account_offline`.
 
 ## `horizon-launcher account forget-offline`
 
-Forget one of your offline names.
+Forget one of your offline names; its skin and cape go with it.
 
     horizon-launcher account forget-offline <NAME>
 
@@ -762,6 +774,30 @@ Turn off a mod the browser installed; it stays installed.
 - `--instance`: The instance (default: the selected one)
 
 MCP: `mods_disable`.
+
+## `horizon-launcher rust status`
+
+Whether it is installed, its version and whether this computer can link with it.
+
+    horizon-launcher rust status
+
+MCP: `rust_status`.
+
+## `horizon-launcher rust install`
+
+Download the pinned toolchain from static.rust-lang.org (once), checked by SHA-256.
+
+    horizon-launcher rust install
+
+MCP: `rust_install`.
+
+## `horizon-launcher rust remove`
+
+Delete the toolchain and the native builds' Cargo home.
+
+    horizon-launcher rust remove
+
+MCP: `rust_remove`.
 
 ## `horizon-launcher servers list`
 

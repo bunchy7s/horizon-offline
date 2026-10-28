@@ -102,3 +102,23 @@ fn a_kept_look_reaches_the_game_only_with_its_files() {
     );
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn forgetting_a_name_drops_its_files() {
+    let root = std::env::temp_dir().join(format!("horizon-skins-forget-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let (src, cape_src) = (root.join("alex.png"), root.join("cape.png"));
+    std::fs::write(&src, png(&mapped(64))).unwrap();
+    std::fs::write(&cape_src, png(&mapped(32))).unwrap();
+    let dir = root.join("skins");
+    keep(&dir, "Alex", &src, false).unwrap();
+    keep(&dir, "Alex", &cape_src, true).unwrap();
+    let (skin, cape) = files(&dir, "Alex");
+    assert!(skin.is_file() && cape.is_file());
+    forget(&dir, "ALEX");
+    assert!(!skin.exists() && !cape.exists());
+    // A name that never had files is forgotten all the same.
+    forget(&dir, "Alex");
+    std::fs::remove_dir_all(&root).unwrap();
+}

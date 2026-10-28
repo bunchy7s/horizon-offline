@@ -408,9 +408,9 @@ impl Game<'_> {
         }
         *next += self.clock.tick_duration();
         if *next > now {
-            // A `/pregen` task or force-loaded chunks keep the workers fed
-            // until the next tick.
-            self.pump_pregen(*next);
+            // The chunks loading (the players', force-loaded ones, a
+            // `/pregen` task) keep the workers fed until the next tick.
+            self.pump_chunks(*next, paused);
             let now = Instant::now();
             if *next > now {
                 std::thread::sleep(*next - now);

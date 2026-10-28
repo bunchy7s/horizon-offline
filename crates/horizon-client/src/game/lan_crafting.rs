@@ -7,6 +7,7 @@
 use super::{Game, lan::LanHost};
 use horizon_client::{
     containers::BlockEntity,
+    furnace::FurnaceCooking,
     items::ItemStack,
     lan::{guest::Guest, menu::Slots},
     menu::{Env, Input, Kind, Menu},

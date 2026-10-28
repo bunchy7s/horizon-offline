@@ -552,6 +552,7 @@ def main():
     oracle = lab.ROOT / 'mods/horizon/src/test/java/dev/horizonlab/parity/VanillaNaturalSpawnOracle.java'
     sources = [oracle, Path(__file__), lab.ROOT / 'crates/horizon-client/examples/probe/natural_spawn_fixture.rs',
                lab.ROOT / 'crates/horizon-client/src/mobs/spawn_selection.rs',
+               lab.ROOT / 'crates/horizon-client/src/biome.rs',
                lab.ROOT / 'crates/horizon-client/src/mobs/spawn_rules.rs']
     tested = base.source_hashes(sources)
     inputs = build / 'inputs.txt'

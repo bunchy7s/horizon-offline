@@ -136,8 +136,9 @@ The opening, then Play ([clip](docs/opening.webm)):
   made up (`horizon-player.txt`). Picking one plays as it from the next Play. Offline names play
   only while an account that owns the game is signed in ([Microsoft accounts](#microsoft-accounts));
   signing the last one out keeps them, unplayable until one is back. Settings > Account
-  adds offline names (3 to 16 letters, digits or `_`; the game gets `--name`) and forgets them;
-  the Console's Share log takes them out of the log too. `horizon-launcher account offline
+  adds offline names (3 to 16 letters, digits or `_`; the game gets `--name`) and forgets them,
+  skin and cape files included, and rolls the game's made-up name for a new one; the Console's
+  Share log takes the names out of the log too. `horizon-launcher account offline
   [NAME]`, `account select <name>` (an account or an offline name), `account forget-offline
   <name>`.
 - **Accent and Home background**: on top of Dark, Light or System, Settings > Launcher picks an
@@ -197,7 +198,7 @@ The opening, then Play ([clip](docs/opening.webm)):
   keeping every field the launcher doesn't show and the servers joined with Direct Connection. The
   same from the command line: `horizon-launcher multiplayer [list|add|remove] [--instance <name>]`
   and `horizon-launcher play --server <address or name>`.
-- **Patch notes**: each release's notes, newest first, with a link to GitHub Sponsors. Quiet "Discord" and "Website" links sit in the footer.
+- **Patch notes**: each release's notes, newest first, with a link to GitHub Sponsors. Quiet "Sponsor", "Discord" and "Website" links sit in the sidebar footer.
 
 Data lives in the platform's data directory (`~/.local/share/horizon-launcher` on Linux,
 `~/Library/Application Support/horizon-launcher` on macOS, `%APPDATA%\horizon-launcher` on

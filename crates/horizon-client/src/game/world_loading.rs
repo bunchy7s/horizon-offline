@@ -246,10 +246,14 @@ pub(super) fn preload_world_data(
                 .spawn(move || {
                     horizon_threads::behind_server();
                     // Errors are left for the world opening to report.
-                    let _ = horizon_client::vanillagen::shared_data(
+                    if let Ok(data) = horizon_client::vanillagen::shared_data(
                         &resources.join("worldgen"),
                         registry,
-                    );
+                    ) {
+                        // The Overworld's feature decoration, which every
+                        // seed shares: about 140 ms off opening the world.
+                        let _ = data.prepare_decoration("minecraft:normal", "minecraft:overworld");
+                    }
                     let _ = horizon_client::structure_blocks::loot_data(&resources);
                     let _ = super::lan::sync_data(&resources);
                 });

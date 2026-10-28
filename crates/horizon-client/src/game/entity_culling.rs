@@ -71,8 +71,16 @@ impl Game<'_> {
             Some(r) => self.settings.render_distance.min(r.view_distance),
             None => self.settings.render_distance,
         };
-        (f64::from(distance) / 8.0).clamp(1.0, 2.5) * f64::from(self.settings.entity_distance)
+        entity_view_scale(distance, self.settings.entity_distance)
     }
+}
+
+/// Entity.setViewScale: `Mth.clamp(renderDistance / 8, 1, 2.5) *
+/// entityDistanceScaling`. Every entity's draw distance is scaled by it, so
+/// a small mob is drawn nearer than a big one and a longer render distance
+/// draws both further away.
+pub(super) fn entity_view_scale(render_distance: i32, entity_distance: f32) -> f64 {
+    (f64::from(render_distance) / 8.0).clamp(1.0, 2.5) * f64::from(entity_distance)
 }
 
 /// Entity.shouldRenderAtSqrDistance's default range: 64 times the bounding
@@ -133,5 +141,43 @@ impl Game<'_> {
         let lo = p - half;
         let hi = p + glam::DVec3::new(half.x, height + grow, half.z);
         self.entity_in_view(camera, position, range, lo, hi)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Entity.setViewScale`: the entity distance option times the render
+    /// distance's boost — 1 at eight chunks, 1.5 at twelve, 2.5 at twenty.
+    #[test]
+    fn the_view_scale_follows_the_render_distance() {
+        assert_eq!(entity_view_scale(4, 1.0), 1.0);
+        assert_eq!(entity_view_scale(8, 1.0), 1.0);
+        assert_eq!(entity_view_scale(12, 1.0), 1.5);
+        assert_eq!(entity_view_scale(20, 1.0), 2.5);
+        assert_eq!(entity_view_scale(32, 1.0), 2.5);
+        // The entity distance option scales it down.
+        assert_eq!(entity_view_scale(12, 0.5), 0.75);
+    }
+
+    /// `Entity.shouldRenderAtSqrDistance`: a chicken's box (0.4 by 0.7 by
+    /// 0.4) is drawn up to 48 blocks away at the vanilla defaults, not the
+    /// 32 blocks a missing view scale leaves (#2273).
+    #[test]
+    fn a_chicken_is_drawn_forty_eight_blocks_away() {
+        let range = default_range(glam::DVec3::new(0.4, 0.7, 0.4), entity_view_scale(12, 1.0));
+        assert_eq!(range, 48.0);
+    }
+
+    /// `Entity.shouldRenderAtSqrDistance` on a broken box: the size falls
+    /// back to one block.
+    #[test]
+    fn a_broken_bounding_box_falls_back_to_one_block() {
+        let range = default_range(
+            glam::DVec3::new(f64::NAN, 0.7, 0.4),
+            entity_view_scale(12, 1.0),
+        );
+        assert_eq!(range, 96.0);
     }
 }
