@@ -9,8 +9,11 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-pub const REPO: &str = "horizon-rust/horizon";
-pub const README_URL: &str = "https://github.com/horizon-rust/horizon/blob/main/launcher/README.md";
+/// This fork: update checks and release downloads come from here, never from upstream, so a
+/// launcher never rewrites itself with upstream's build (which would put the account gate back).
+pub const REPO: &str = "bunchy7s/horizon-offline";
+pub const README_URL: &str =
+    "https://github.com/bunchy7s/horizon-offline/blob/main/launcher/README.md";
 /// The players' page on connecting an AI agent (the website's docs/agents.md).
 pub const AGENT_DOCS_URL: &str = "https://playhorizon.dev/docs/agents";
 /// This launcher's version: the release workflow sets `HORIZON_LAUNCHER_VERSION` from the

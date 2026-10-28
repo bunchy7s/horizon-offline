@@ -1,0 +1,70 @@
+name: launcher-fork-build
+# Builds this fork's launcher for Windows (and Linux and macOS) by hand and uploads the
+# archives as workflow artifacts. With `publish` set, it also attaches them to a release
+# tagged `launcher-offline-<tag input>`. The upstream release pipeline (launcher.yml) needs
+# signing secrets this fork doesn't have, so it never publishes here.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag when publishing (empty: artifacts only)
+        required: false
+        default: ""
+      publish:
+        description: Attach the archives to a release
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+            binary: horizon-launcher.exe
+            asset: horizon-launcher-windows-x64.zip
+          - name: linux
+            os: ubuntu-latest
+            binary: horizon-launcher
+            asset: horizon-launcher-linux-x86_64.tar.gz
+          - name: macos
+            os: macos-latest
+            binary: horizon-launcher
+            asset: horizon-launcher-macos-arm64.zip
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      HORIZON_TELEMETRY_URL: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        working-directory: launcher
+        run: cargo build --release -p horizon-launcher
+      - name: Package
+        shell: bash
+        run: |
+          cd launcher
+          rm -rf dist out && mkdir -p dist out
+          cp target/release/${{ matrix.binary }} dist/
+          if [[ "${{ matrix.asset }}" == *.tar.gz ]]; then
+            (cd dist && tar czf ../out/${{ matrix.asset }} ${{ matrix.binary }})
+          else
+            (cd dist && 7z a ../out/${{ matrix.asset }} ${{ matrix.binary }})
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: launcher/out/*
+      - name: Publish
+        if: inputs.publish && inputs.tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.tag }}" --title "First test" --notes "" --target "$GITHUB_SHA" || true
+          gh release upload "${{ inputs.tag }}" launcher/out/${{ matrix.asset }} --clobber

@@ -34,3 +34,6 @@
 
 # Release-only compiled original exporter bundle.
 /exporters/
+
+launcher/dist/
+launcher/out/
