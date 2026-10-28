@@ -425,3 +425,8 @@ launcher-v0.13.0 horizon-launcher-linux-x86_64.tar.gz bfd3143935f2d23ad5f5199b05
 launcher-v0.13.0 horizon-launcher-macos-arm64.dmg 2f8faf67a083a58320dddc743223adf638b1100c1d6063cf426d72456bb3a8d7
 launcher-v0.13.0 horizon-launcher-macos-arm64.zip e46fa15d71652f19165e7fa572b57a41371005cd0b97753f1bac40e9fe6881bc
 launcher-v0.13.0 horizon-launcher-windows-x64.zip e9fa8aaab4aa788ca6d7858335fd94a8307fc992140f900dcf05e7a9b0d8a562
+
+# This fork's launcher releases, which build without signing secrets: their archives' SHA-256 as
+# GitHub computed them at upload (this fork's launcher-fork-build.yml). Add a line per new release.
+launcher@0.2.0-offline.2 horizon-launcher-linux-x86_64.tar.gz 5bf2dcd96ebe9842b7d3b918a3019df86eff7927255a0af4951c2c72d87d5285
+launcher@0.2.0-offline.2 horizon-launcher-windows-x64.zip e69e72fa1e51dc2384f2834c04b755928e6f096b4f14e49c067a8216c19e8470

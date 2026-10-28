@@ -9,9 +9,12 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-/// This fork: update checks and release downloads come from here, never from upstream, so a
+/// This fork: update checks for the launcher itself come from here, never from upstream, so a
 /// launcher never rewrites itself with upstream's build (which would put the account gate back).
 pub const REPO: &str = "bunchy7s/horizon-offline";
+/// Upstream's repository: the game's builds (the official client) are published and signed there,
+/// so this fork's launcher installs them as they are, checksums and all.
+pub const GAME_REPO: &str = "horizon-rust/horizon";
 pub const README_URL: &str =
     "https://github.com/bunchy7s/horizon-offline/blob/main/launcher/README.md";
 /// The players' page on connecting an AI agent (the website's docs/agents.md).
@@ -245,8 +248,16 @@ pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
     release_order(a).cmp(&release_order(b))
 }
 
-/// Every published release of the repository, both kinds, as GitHub's JSON.
+/// Every published release of upstream's repository (the game's builds), both kinds, as GitHub's
+/// JSON.
 fn release_list() -> Result<serde_json::Value, String> {
+    let url = format!("https://api.github.com/repos/{GAME_REPO}/releases?per_page=100");
+    get(&url)?.into_json().map_err(|e| e.to_string())
+}
+
+/// Every published release of this fork's repository (the launcher's own releases), as GitHub's
+/// JSON.
+fn launcher_release_list() -> Result<serde_json::Value, String> {
     let url = format!("https://api.github.com/repos/{REPO}/releases?per_page=100");
     get(&url)?.into_json().map_err(|e| e.to_string())
 }
@@ -318,6 +329,14 @@ pub(crate) fn game_releases(list: &serde_json::Value) -> Vec<Release> {
     // Two Nightlies of one day: the current one first (the dated one is the day's earlier build).
     out.sort_by(|a, b| compare_versions(&b.tag, &a.tag).then(a.prerelease.cmp(&b.prerelease)));
     out
+}
+
+/// The launcher's own releases, from this fork's repository (the game's builds come from
+/// upstream's). A failed fetch gives none: the launcher then offers no update of itself.
+pub fn launcher_releases() -> Vec<Release> {
+    launcher_release_list()
+        .map(|list| launcher_releases_in(&list))
+        .unwrap_or_default()
 }
 
 /// The launcher releases in `list` (the newest 100 releases). Game releases come out several times
@@ -2111,7 +2130,15 @@ fn launcher_update_from(releases: &[Release], own: &str) -> Option<Release> {
 pub fn releases_and_updates(
     on_releases: impl FnOnce(Result<Vec<Release>, String>),
 ) -> Result<Updates, String> {
-    releases_and_updates_with(release_list, installed, launcher_releases_in, on_releases)
+    releases_and_updates_with(
+        release_list,
+        installed,
+        // The game's builds come from upstream's repository (the list above); the launcher's own
+        // releases from this fork's, fetched separately. A failed fork fetch gives none: then the
+        // launcher offers no update of itself, but game releases still show.
+        |_| launcher_releases(),
+        on_releases,
+    )
 }
 
 fn releases_and_updates_with(

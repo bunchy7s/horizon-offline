@@ -4,12 +4,23 @@
 //! with the SHA-256 pinned for it in legacy-releases.txt (a rollback). Anything else is refused
 //! with a message saying why.
 
-use crate::backend::REPO;
+use crate::backend;
 use horizon_release_sign::{PublicKey, SIGNATURE, SUMS};
 
-/// Where a release's attached file downloads from (GitHub's fixed address for it).
+/// Where a release's attached file downloads from (GitHub's fixed address for it). The game's
+/// builds live in upstream's repository; the launcher's own releases in this fork's.
 pub fn asset_url(tag: &str, name: &str) -> String {
-    format!("https://github.com/{REPO}/releases/download/{tag}/{name}")
+    format!("https://github.com/{}/releases/download/{tag}/{name}", repo_of(tag))
+}
+
+/// The repository a release's files come from: the launcher's own releases from this fork's
+/// (`launcher@…`/`launcher-v…` tags), everything else (game builds, Nightlies) from upstream's.
+pub fn repo_of(tag: &str) -> &'static str {
+    if backend::launcher_version(tag).is_some() {
+        backend::REPO
+    } else {
+        backend::GAME_REPO
+    }
 }
 
 /// The signed SHA-256 of `asset` in release `tag`, fetching its SHA256SUMS and SHA256SUMS.sig
@@ -74,14 +85,32 @@ mod tests {
     }
 
     #[test]
+    fn the_forks_releases_come_from_the_fork_and_the_games_from_upstream() {
+        assert_eq!(repo_of("v2099.01.01"), crate::backend::GAME_REPO);
+        assert_eq!(repo_of("nightly"), crate::backend::GAME_REPO);
+        assert_eq!(repo_of("nightly-2026-10-28-0c02067"), crate::backend::GAME_REPO);
+        assert_eq!(repo_of("launcher@0.2.0-offline.2"), crate::backend::REPO);
+        assert_eq!(repo_of("launcher-v0.2.0"), crate::backend::REPO);
+        assert_eq!(asset_url("v2099.01.01", "horizon.zip"), format!(
+            "https://github.com/{}/releases/download/v2099.01.01/horizon.zip",
+            crate::backend::GAME_REPO
+        ));
+    }
+
+    #[test]
     fn only_archives_signed_by_a_built_in_key_install() {
         let (key, _) = SigningKey::generate().unwrap();
         let sums = sums_file(&[("horizon.zip".into(), sha256_hex(b"game"))]);
         let signature = key.sign("v2099.01.01", sums.as_bytes());
         // GitHub as it answers for a signed release (any tag: the files are what a replay would serve).
         let signed = |url: &str| -> Result<Option<Vec<u8>>, String> {
-            let repo = crate::backend::REPO;
-            assert!(url.starts_with(&format!("https://github.com/{repo}/releases/download/")));
+            assert!(
+                url.starts_with(&format!(
+                    "https://github.com/{}/releases/download/",
+                    repo_of("v2099.01.01")
+                )),
+                "{url}"
+            );
             Ok(Some(
                 if url.ends_with(".sig") {
                     signature.clone()
