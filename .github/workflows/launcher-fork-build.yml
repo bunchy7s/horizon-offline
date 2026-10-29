@@ -63,7 +63,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASES_PAUSED: ${{ vars.RELEASES_PAUSED }}
           HEAD_SHA: ${{ (github.event_name == 'push' || steps.mode.outputs.dry_run == 'true') && github.sha || '' }}
-          FORCE: ${{ inputs.force && 'yes' || '' }}
+          # A push here already matched the launcher paths, so release that exact commit:
+          # there is no pull request for release_train to find on a fork's direct merge.
+          FORCE: ${{ (github.event_name == 'push' || inputs.force) && 'yes' || '' }}
         run: |
           python3 tools/release_train.py decide --kind launcher ${HEAD_SHA:+--head "$HEAD_SHA"} ${FORCE:+--force} | tee decision.json
           echo "### $(jq -r '.reason' decision.json)" >> "$GITHUB_STEP_SUMMARY"
