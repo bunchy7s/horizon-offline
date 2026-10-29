@@ -123,7 +123,6 @@ fn trash_stopped_server(
     // move fails instead of taking a live server.
     #[cfg(windows)]
     drop(lock);
-    drop(lock);
     trash(dir).map_err(|e| format!("Could not move the server to the trash: {e}"))
 }
 

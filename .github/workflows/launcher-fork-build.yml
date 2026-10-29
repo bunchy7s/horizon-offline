@@ -1,5 +1,5 @@
 name: launcher-fork-build
-# Builds and publishes this fork's launcher on Linux, macOS and Windows. The upstream launcher.yml
+# Builds and publishes this fork's launcher on Linux and Windows. The upstream launcher.yml
 # expects upstream's Mac mini and release environment; this workflow uses GitHub-hosted runners and
 # the fork's own RELEASE_SIGNING_KEY repository secret. Releases are signed checksum releases that
 # this fork's launcher accepts and updates itself from (launcher/src/backend.rs REPO).
@@ -90,10 +90,6 @@ jobs:
             os: ubuntu-22.04
             asset: horizon-launcher-linux-x86_64.tar.gz
             binary: horizon-launcher
-          - name: macos
-            os: macos-14
-            asset: horizon-launcher-macos-arm64.zip
-            binary: horizon-launcher
           - name: windows
             os: windows-latest
             asset: horizon-launcher-windows-x64.zip
@@ -102,7 +98,7 @@ jobs:
             # which only the Visual C++ redistributable installs.
             rustflags: -C target-feature=+crt-static
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.name == 'macos' && 60 || 40 }}
+    timeout-minutes: 40
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
       HORIZON_LAUNCHER_VERSION: ${{ needs.decide.outputs.version }}
