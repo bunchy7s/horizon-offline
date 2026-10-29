@@ -1,0 +1,150 @@
+CloudRenderer.getSizeForCloudDistance	skip:java		GPU ring-buffer capacity for the cloud face buffer; Horizon sizes its vertex buffer from the built mesh
+CloudRenderer.packCellData	inline	crates/horizon-client/src/clouds.rs::Mesh::prepare	cell presence is a bool test on the texture grid; no packed long
+CloudRenderer.isNorthEmpty	inline	crates/horizon-client/src/clouds.rs::Mesh::prepare	neighbour-empty flags passed to face_mask in N,E,S,W order
+CloudRenderer.isEastEmpty	inline	crates/horizon-client/src/clouds.rs::Mesh::prepare	neighbour-empty flags passed to face_mask in N,E,S,W order
+CloudRenderer.isSouthEmpty	inline	crates/horizon-client/src/clouds.rs::Mesh::prepare	neighbour-empty flags passed to face_mask in N,E,S,W order
+CloudRenderer.isWestEmpty	inline	crates/horizon-client/src/clouds.rs::Mesh::prepare	neighbour-empty flags passed to face_mask in N,E,S,W order
+CloudRenderer.render	port	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	gap: minor: one cloud pipeline; fancy vs flat is chosen by the mesh fast flag, not by pipeline
+CloudRenderer.renderOit	missing		player: with Improved transparency on, clouds keep the classic blend; no OIT pass exists and the option is only saved
+CloudRenderer.buildMesh	port	crates/horizon-client/src/clouds.rs::Mesh::prepare	cell ring walk via cells(radius), nearest first
+CloudRenderer.tryBuildCell	inline	crates/horizon-client/src/clouds.rs::Mesh::prepare	skip empty cells, then build the cell's faces
+CloudRenderer.encodeFace	inline	crates/horizon-client/src/clouds.rs::Mesh::prepare	3-byte face records replaced by vertex quads
+CloudRenderer.buildExtrudedCell	port	crates/horizon-client/src/clouds.rs::face_mask	top, bottom and side visibility; quads emitted in Mesh::prepare via faces()
+CubeMap.initializeVertices	port	crates/horizon-client/src/gfx/panorama.rs::Panorama::new	24-corner cube; Horizon draws 36 vertices from the shader in the pipeline built here
+DebugCrosshairRenderer.<init>	skip:debug		F3 3D axis gizmo at the view; Horizon has no debug crosshair
+DynamicGpuData.reset	skip:other		GPU per-frame ring reset; wgpu staging in Horizon's Uploads belt
+DynamicGpuData.close	skip:other		GPU buffer release; Rust drops the wgpu buffers
+DynamicGpuData.writeTransform	skip:other		per-draw uniform staging; Horizon writes its uniforms directly with queue writes
+DynamicGpuData.writeChunkSections	port	crates/horizon-client/src/gfx.rs::section_instance	gap: player: section fade-in (vanilla default 0.75 s) is not sent; Horizon writes a fixed fourth value
+DynamicGpuData.writeChunkSectionsInstanced	port	crates/horizon-client/src/gfx.rs::section_instance	gap: player: section fade-in (vanilla default 0.75 s) is not sent; same instance record as writeChunkSections
+DynamicGpuData.writeChunkSectionCommands	port	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	IndexedDraw records built and uploaded into the indirect buffer
+DynamicGpuData.ChunkSectionInfo.write	port	crates/horizon-client/src/gfx.rs::section_instance	gap: player: packs origin only; the fade-in visibility float (default 0.75 s) is not in the record
+DynamicGpuData.IndexedDraw.write	skip:other		indirect draw args; Horizon keeps them as [u32;5] words uploaded in one copy
+DynamicGpuData.TerrainTransform.write	skip:other		terrain UBO layout; Horizon's terrain pass uses its own uniforms
+DynamicGpuData.Transform.write	skip:other		std140 layout of the transform UBO; wgpu bindings in Horizon
+DynamicGpuDataStorageMapped.endFrame	skip:other		GPU ring buffer frame bookkeeping
+DynamicGpuDataStorageMapped.resizeBuffers	skip:other		GPU buffer growth; Horizon grows its wgpu buffers when a draw needs more space
+DynamicGpuDataStorageMapped.writeData	skip:other		GPU staging ring for mapped buffers
+DynamicGpuDataStorageMapped.writeDataBatched	skip:other		GPU staging ring for mapped buffers
+DynamicGpuDataStorageMapped.writeDataBatchedMultiple	skip:other		GPU staging ring for mapped buffers
+DynamicGpuDataStorageMapped.close	skip:other		GPU buffer release
+DynamicGpuDataStorageNonMapped.endFrame	skip:other		GPU staging bookkeeping; Horizon uses queue writes for uploads
+DynamicGpuDataStorageNonMapped.writeData	skip:other		GPU staging for non-mapped buffers
+DynamicGpuDataStorageNonMapped.resizeBuffers	skip:other		GPU buffer growth
+DynamicGpuDataStorageNonMapped.writeDataBatched	skip:other		GPU staging for non-mapped buffers
+DynamicGpuDataStorageNonMapped.writeDataBatchedMultiple	skip:other		GPU staging for non-mapped buffers
+DynamicGpuDataStorageNonMapped.close	skip:other		GPU buffer release
+EndFlashState.calculateIntensity	port	crates/horizon-client/src/game/end.rs::EndFlash::tick	intensity sine over offset..offset+duration, computed on each tick
+EndFlashState.flashStartedThisTick	inline	crates/horizon-client/src/game/end.rs::EndFlash::tick	sound_in is armed on the same rising edge (intensity above 0, previous at or below 0)
+FaceInfo.Extent.select	skip:data		corner selection; Horizon's unit-cube corner table PORTAL_FACES in block_entity_render.rs has the same order
+FaceInfo.VertexInfo.select	skip:data		corner selection; Horizon's unit-cube corner table PORTAL_FACES in block_entity_render.rs has the same order
+FirstPersonHandsAndItemsRenderer.calculateMapTilt	inline	crates/horizon-client/src/game/maps.rs::Game::two_handed_map_geometry	tilt computed inline with the calculateMapTilt comment
+FirstPersonHandsAndItemsRenderer.renderPlayerHand	port	crates/horizon-client/src/game.rs::Game::hand_geometry	empty main hand's arm model with the player skin
+FirstPersonHandsAndItemsRenderer.renderMapHand	missing		player: holding a map in both hands, neither arm is drawn behind it (vanilla draws both arms)
+FirstPersonHandsAndItemsRenderer.renderOneHandedMap	port	crates/horizon-client/src/first_person.rs::one_handed_map_pose	gap: player: the arm holding a map is not drawn; the map hand branch skips the arm
+FirstPersonHandsAndItemsRenderer.renderTwoHandedMap	port	crates/horizon-client/src/game/maps.rs::Game::two_handed_map_geometry	gap: player: the arms that hold a two-handed map are not drawn
+FirstPersonHandsAndItemsRenderer.renderMap	port	crates/horizon-client/src/game/maps.rs::Game::held_map	map background with its 7-pixel border, then the map contents
+FirstPersonHandsAndItemsRenderer.applyEatTransform	port	crates/horizon-client/src/first_person.rs::item_pose	ItemPose::Eat: bob and jiggle while eating or drinking
+FirstPersonHandsAndItemsRenderer.applyBrushTransform	missing		player: a brush in use is held still; it does not sweep back and forth while brushing
+FirstPersonHandsAndItemsRenderer.applyItemArmAttackTransform	port	crates/horizon-client/src/first_person.rs::item_pose	attack swing rotation in the Swing pose
+FirstPersonHandsAndItemsRenderer.applyItemArmTransform	port	crates/horizon-client/src/first_person.rs::item_pose	base item-in-arm translation
+FirstPersonHandsAndItemsRenderer.submitHandsWithItems	port	crates/horizon-client/src/game.rs::Game::hand_geometry	sway, both hands, empty-hand arm and item pose
+FirstPersonHandsAndItemsRenderer.swingArm	port	crates/horizon-client/src/first_person.rs::item_pose	attack swing translation and arm rotation
+GameRenderer.<init>	port	crates/horizon-client/src/gfx.rs::Renderer::new	lightmap, hand target, debug crosshair and screen effects are built here
+GameRenderer.close	skip:other		GPU resource teardown; wgpu drops the renderer's objects
+GameRenderer.checkEntityPostEffect	missing		player: spectating a creeper, spider or enderman does not put their overlay shader on the screen
+GameRenderer.processBlurEffect	port	crates/horizon-client/src/menu_blur.rs::MenuBlur::apply	menu background blur pass
+GameRenderer.preloadUiShader	skip:other		GPU pipeline precompile at load; Horizon builds its pipelines in Renderer::new
+GameRenderer.update	port	crates/horizon-client/src/camera.rs::AvatarBob::update_bob	gap: minor: the requested post-effect list (from /postEffect) is not built
+GameRenderer.extract	skip:other		render-state copy for the vanilla render thread; Horizon renders from game state
+GameRenderer.preparePostEffects	missing		minor: vanilla post chains from requested effects are not applied; shader packs use pack_post
+GameRenderer.applyPostEffects	missing		minor: vanilla post chains are not run; shader packs use pack_post
+GameRenderer.tryTakeScreenshotIfNeeded	missing		player: a new singleplayer world gets no icon.png, so the world list shows no preview picture
+GameRenderer.takeAutoScreenshot	missing		player: no icon.png is written from the first rendered frame; the world list keeps a blank picture
+GameRenderer.integrate3DHudDepth	missing		minor: only runs when a post effect is applied (consistentDepthRequired); Horizon applies none
+GameRenderer.extractWindow	skip:other		render-state copy of the window size; Horizon reads the window directly
+GameRenderer.extractOptions	skip:other		render-state copy of options; Horizon reads settings directly
+GameRenderer.extractCamera	skip:other		render-state copy of camera and fog; Horizon computes them in camera.rs and fog.rs
+GameRenderer.resetData	inline	crates/horizon-client/src/game.rs::Game::finish_close_world	boss overlay reset on world close; camera and map-texture resets not verified here
+GameRenderer.projectPointToScreen	skip:other		no callers in vanilla 26.3
+GameRenderer.useImprovedTransparency	missing		player: the Improved transparency option is saved and listed but nothing it gates exists in the renderer
+GlobalSettingsUniform.update	skip:other		global uniform (window size, time, gamma, glint) written per pass; Horizon sets its own uniforms
+GpuWarnlistManager.getAllWarnings	missing		minor: no GPU driver warnlist; Horizon does not check the driver against known-bad lists
+GpuWarnlistManager.compilePatterns	missing		minor: no GPU driver warnlist patterns
+GpuWarnlistManager.parseJson	missing		minor: no GPU driver warnlist JSON
+GpuWarnlistManager.Preparations.matchAny	missing		minor: no GPU driver warnlist matching
+LevelEventHandler.playJukeboxSong	port	crates/horizon-client/src/game/jukebox.rs::Game::start_song	song starts and the now-playing overlay is shown
+LevelEventHandler.stopJukeboxSong	port	crates/horizon-client/src/game/jukebox.rs::Game::stop_song	song sound stops for that jukebox
+LevelRenderer.<init>	port	crates/horizon-client/src/gfx.rs::Renderer::new	targets, pipelines and buffers built once
+LevelRenderer.submitFeatures	port	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	entities, block entities, crumbling, particles, outline and gizmos are submitted and drawn in the frame
+LevelRenderer.repositionCamera	port	crates/horizon-client/src/gfx/resident.rs::camera_column	camera section column that the section grid is centred on; gap: minor: world border invalidation is not part of it
+LevelRenderer.addMainPass	port	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	gap: minor: the Improved transparency targets (depth bounds, transmittance, accumulate) are not created
+LevelRenderer.executeAlwaysOnTop	port	crates/horizon-client/src/game.rs::Game::render	always-on-top debug lines and crosshair drawn over the world
+LevelRenderer.executeSolid	port	crates/horizon-client/src/gfx.rs::Renderer::draw_sections	solid section draws in arena page order
+LevelRenderer.prepareTranslucents	port	crates/horizon-client/src/gfx/translucency.rs::Sorter::sort	translucent quads sorted from the camera each frame
+LevelRenderer.executeOit	missing		player: with Improved transparency on, translucent blocks and water blend order-independently; Horizon has no OIT pass and the option does nothing
+LevelRenderer.executeDepthBoundsCull	missing		player: part of Improved transparency's pass; no depth-bounds cull exists in Horizon
+LevelRenderer.executeOitWaterMask	missing		player: part of Improved transparency; no water mask pass exists in Horizon
+LevelRenderer.extractSectionDrawGroups	port	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	section draws grouped per layer and arena page from the visible sections
+LevelRenderer.prepareChunkRenders	port	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	per-layer draw list built for the frame, reversed for translucent layers
+LevelRenderer.performTransientBlockRemovals	missing		minor: removes transient blocks when their section recompiles; Horizon has no transient blocks
+LevelRenderer.prepareChunkRendersIndirect	port	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	indirect draw arguments written and multi-draw issued
+LevelRenderer.compileSections	port	crates/horizon-client/src/streaming.rs::Streaming::update	section meshing jobs queued for dirty sections nearest the camera
+LevelRenderer.submitEntities	port	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	entity models drawn with their batches
+LevelRenderer.submitBlockEntities	port	crates/horizon-client/src/gfx.rs::Renderer::block_entities	block entity list submitted for drawing
+LevelRenderer.submitBlockDestroyAnimation	port	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	crumbling overlay drawn on the block being broken
+LevelRenderer.submitTransientBlocks	missing		player: a block the server sends as temporary (ClientboundAddTransientBlockPacket) does not appear; the packet is not handled
+LevelRenderer.submitHitOutline	port	crates/horizon-client/src/game.rs::Game::outline_boxes	outline of the block under the crosshair
+LevelRenderer.close	skip:other		GPU resource teardown
+LevelRenderer.invalidateCompiledGeometry	port	crates/horizon-client/src/gfx.rs::Renderer::clear_sections	all section meshes dropped and rebuilt when settings are applied
+LevelRenderer.scheduleTranslucentSectionResort	port	crates/horizon-client/src/gfx/translucency.rs::SortState::update	resort scheduled when the camera point of view changes
+LevelRenderer.scheduleResort	port	crates/horizon-client/src/gfx/translucency.rs::SortState::update	per-section resort gated by point-of-view change and translucent geometry
+LevelRenderer.resetLevelRenderData	port	crates/horizon-client/src/gfx.rs::Renderer::clear_sections	section data released when a level is left
+LevelRenderer.hasRenderedAllSections	missing		minor: only the world icon screenshot asks this, and that screenshot is missing
+LevelRenderer.isSectionCompiledAndVisible	port	crates/horizon-client/src/gfx/resident.rs::Resident::contains	gap: minor: no section fade-in, so the 0.3 visibility threshold is not checked
+LevelRenderer.finalizeGizmoCollection	port	crates/horizon-client/src/game/debug_keys.rs::Game::debug_gizmos	debug gizmos collected for the frame
+LevelTargetBundle.replace	skip:other		render-target bundle for post chains; Horizon has no frame graph
+LevelTargetBundle.get	skip:other		render-target bundle for post chains; Horizon has no frame graph
+Lightmap.render	port	crates/horizon-client/src/gfx.rs::Renderer::update_lightmap	lightmap pass from sky, block, darkness, gamma, night vision, flicker and boss darkening
+LightmapRenderStateExtractor.calculateDarknessScale	port	crates/horizon-client/src/game/sculk.rs::Game::darkness_lighting	pulsing darkness scale from the darkness blend and the option
+LightmapRenderStateExtractor.extract	port	crates/horizon-client/src/game.rs::Game::render	lightmap inputs gathered into the frame; the end flash is added to sky_light_factor in end.rs::end_flash_sky
+MapRenderer.extractRenderState	port	crates/horizon-client/src/game/maps.rs::Game::map_vertices	map texture and decorations gathered for drawing
+MapRenderer.extractDecorationRenderState	port	crates/horizon-client/src/game/maps.rs::Game::map_vertices	decoration sprite, position and rotation drawn per map
+MappableRingBuffer.currentBuffer	skip:other		GPU ring buffer bookkeeping
+MappableRingBuffer.rotate	skip:other		GPU ring buffer bookkeeping
+MappableRingBuffer.close	skip:other		GPU buffer release
+MultiblockChestResources.select	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	single, left and right chest sprite chosen by ChestPart
+MultiblockChestResources.map	skip:java		record mapping of the three sprites
+Octree.isClose	missing		unsure: vanilla flags sections next to the camera so the occlusion walk keeps them; not traced in Horizon's occlusion path
+Octree.AxisSorting.getAxisSorting	skip:java		traversal-order helper; Resident::visible sorts visible sections by distance
+Octree.Branch.<init>	skip:other		octree node; Horizon keeps sections in a resident grid instead
+Octree.Branch.add	skip:other		octree insert; Horizon keeps sections in a resident grid instead
+Octree.Branch.getNodeIndex	skip:other		octree child index; Horizon keeps sections in a resident grid instead
+Octree.Branch.createChildBoundingBox	skip:other		octree child bounds; Horizon keeps sections in a resident grid instead
+Octree.Branch.visitNodes	port	crates/horizon-client/src/gfx/resident.rs::Resident::visible	frustum and distance visit of sections, nearest first
+Octree.Branch.getAABB	skip:java		no callers in vanilla 26.3
+Octree.Leaf.visitNodes	port	crates/horizon-client/src/gfx/resident.rs::Resident::visible	leaf sections visited in the same frustum and distance walk
+OrderedSubmitNodeCollector.submitModel	skip:other		submit queue of vanilla's render thread; Horizon draws each model in place
+OrderedSubmitNodeCollector.submitCrumblingOverlay	port	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	crumbling overlay drawn on the block being broken
+OrderedSubmitNodeCollector.submitModelPart	skip:other		submit queue of vanilla's render thread; Horizon draws each model part in place
+Panorama.extractRenderState	port	crates/horizon-client/src/gfx/panorama.rs::Rotation::update	spin accumulated from the panorama speed option; overlay blit is drawn by the title screen
+PlayerSkinRenderCache.createLookup	port	crates/horizon-client/src/skins.rs::lookup	skin texture chosen from the profile, falling back to the default skin
+PlayerSkinRenderCache.RenderInfo.renderType	port	crates/horizon-client/src/game/item_draw.rs::Host::player_skin	skin texture path a head is drawn with; no separate render type in Horizon
+PlayerSkinRenderCache.RenderInfo.textureView	skip:other		GPU texture view cache; Horizon binds skin textures by atlas name
+PlayerSkinRenderCache.RenderInfo.glyphRenderTypes	skip:other		font render types for name tags; Horizon's text uses its own glyph pipeline
+PlayerSkinRenderCache.RenderInfo.equals	skip:java		value equality for a cache key
+PlayerSkinRenderCache.RenderInfo.hashCode	skip:java		hash for a cache key
+PostChain.load	missing		minor: no data-driven post chain loader; only the blur and entity outline chains exist, hard-coded
+PostChain.getReferencedExternalTargets	skip:other		config validation for data-driven post chains
+PostChain.createPass	missing		minor: no data-driven post pass creation; the outline and blur passes are fixed
+PostChain.addToFrame	port	crates/horizon-client/src/gfx/entity_outline.rs::EntityOutline::draw	gap: minor: runs the entity outline chain only; other chains are not built
+PostChain.process	port	crates/horizon-client/src/menu_blur.rs::MenuBlur::apply	gap: minor: runs the menu blur only; other chains are not run
+PostChain.getOrCreatePersistentTarget	skip:other		GPU persistent target cache
+PostChain.close	skip:other		GPU resource teardown
+PostChain.TargetBundle.getOrThrow	skip:other		frame-graph target lookup; Horizon has no frame graph
+PostChainConfig.Pass.referencedTargets	skip:data		config accessor for post chain JSON
+PostPass.<init>	skip:other		GPU pipeline creation for a post pass
+PostPass.addToFrame	port	crates/horizon-client/src/gfx/entity_outline.rs::EntityOutline::draw	gap: minor: the pass runs inside the entity outline draw only
+PostPass.close	skip:other		GPU resource teardown
+PostPass.TargetInput.getHandle	skip:other		frame-graph input handle
+PostPass.TargetInput.texture	skip:other		frame-graph input texture view

@@ -1,0 +1,150 @@
+ConfirmLinkScreen.confirmMessage	port	crates/horizon-client/src/game/server_links.rs::confirm_link_layout	gap: minor: no separate trusted text; the untrusted text is always used
+ConfirmLinkScreen.addAdditionalText	port	crates/horizon-client/src/game/server_links.rs::confirm_link_layout	gap: minor: the red warning is always drawn, vanilla draws it only for untrusted links
+ConfirmLinkScreen.addButtons	port	crates/horizon-client/src/game/server_links.rs::Game::confirm_link_click	Yes opens the browser, Copy Link copies, No goes back; 100 wide
+ConfirmLinkScreen.confirmLinkNow	port	crates/horizon-client/src/game/server_links.rs::Game::click_link	opens the prompt when Prompt on Links is on; gap: minor: the trusted flag is not passed
+ConfirmLinkScreen.confirmLink	inline	crates/horizon-client/src/game/server_links.rs::Game::click_link	the button's action, folded into click_link
+ConfirmScreen.getNarrationMessage	skip:other		screen-reader narration; Horizon has no narrator
+ConfirmScreen.addMessage	port	crates/horizon-client/src/confirm_screen.rs::Confirm::new	message wrapped to width - 50, 15 rows at most, centred
+ConfirmScreen.addButtons	port	crates/horizon-client/src/confirm_screen.rs::Confirm::answer_at	Yes and No buttons; the answer comes from the click position
+ConfirmScreen.tick	inline	crates/horizon-client/src/confirm_screen.rs::Confirm::draw_active	the 20-tick delay is a 1000 ms timer kept by the caller; buttons are greyed while it runs
+ConnectScreen.connect	port	crates/horizon-client/src/net.rs::Session::connect	background connect on its own thread (Session::start)
+ConnectScreen.tick	port	crates/horizon-client/src/game/remote.rs::Game::tick_remote	ticks the pending session while it opens; game.rs tick sends remote sessions here
+ConnectScreen.init	missing		player: no Cancel button while connecting, only the status line; unsure whether Escape aborts the join
+ConnectScreen.extractRenderState	port	crates/horizon-client/src/game/remote.rs::Game::remote_overlay	gap: minor: also draws the address line, vanilla draws only the status
+CreateBuffetWorldScreen.init	missing		minor: the buffet biome picker is not in Horizon's create-world flow
+CreateBuffetWorldScreen.repositionElements	missing		minor: layout of the buffet biome picker, which Horizon lacks
+CreateBuffetWorldScreen.updateButtonValidity	missing		minor: Done needs a biome in the buffet picker, which Horizon lacks
+CreateBuffetWorldScreen.BiomeList.filterEntries	missing		minor: biome search of the buffet picker, which Horizon lacks
+CreateBuffetWorldScreen.BiomeList.setSelected	missing		minor: biome selection of the buffet picker, which Horizon lacks
+CreateBuffetWorldScreen.BiomeList.Entry.extractContent	missing		minor: biome row of the buffet picker, which Horizon lacks
+CreateFlatWorldScreen.setConfig	port	crates/horizon-client/src/title/flat.rs::State::apply_share	applies the preset or typed share text as the layers; gap: minor: the rows are not rebuilt separately
+CreateFlatWorldScreen.init	port	crates/horizon-client/src/title/flat.rs::buttons	Remove Layer, Presets, Done and Cancel buttons
+CreateFlatWorldScreen.repositionElements	skip:ui		layout only; the list is laid out each frame in flat.rs::list_area
+CreateFlatWorldScreen.hasValidSelection	inline	crates/horizon-client/src/title/flat.rs::buttons	Remove Layer is enabled only with a layer selected
+CreateFlatWorldScreen.DetailsList.populateList	inline	crates/horizon-client/src/title/flat.rs::draw_layers	the layer rows are read from the settings each frame
+CreateFlatWorldScreen.DetailsList.resetRows	inline	crates/horizon-client/src/title/flat.rs::draw_layers	nothing to rebuild; rows are drawn from the settings each frame
+CreateFlatWorldScreen.DetailsList.deleteLayer	port	crates/horizon-client/src/title/flat.rs::State::remove_selected	removes the selected layer; gap: minor: the next selection after a delete is not checked
+CreateFlatWorldScreen.DetailsList.HeaderEntry.extractContent	port	crates/horizon-client/src/title/flat.rs::draw_layers	Layer and Height column titles
+CreateFlatWorldScreen.DetailsList.HeaderEntry.getNarration	skip:other		narration text; Horizon has no narrator
+CreateFlatWorldScreen.DetailsList.LayerEntry.extractContent	port	crates/horizon-client/src/title/flat.rs::draw_layers	slot, block name and the Top, Bottom or height label
+CreateFlatWorldScreen.DetailsList.LayerEntry.getDisplayItem	port	crates/horizon-client/src/title/flat.rs::layer_icon	water and lava use the bucket sprites
+CreateFlatWorldScreen.DetailsList.LayerEntry.blitSlot	port	crates/horizon-client/src/title/flat.rs::slot	slot frame and icon
+CreditsAndAttributionScreen.init	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	Credits page: Credits, Attribution and Licenses buttons; gap: unsure whether Attribution and Licenses open links here
+CreditsAndAttributionScreen.openCreditsScreen	port	crates/horizon-client/src/game/win.rs::Game::open_win_screen	rolls the credits without the poem, then returns here
+DatapackLoadFailureScreen.init	missing		minor: Horizon loads no data packs, so there is no datapack failure screen
+DatapackLoadFailureScreen.extractRenderState	missing		minor: same as init, no datapack failure screen
+DeathScreen.exitToTitleScreen	port	crates/horizon-client/src/game/screens.rs::Game::death_confirm_answer	Yes leaves the world; gap: minor: the leave and title hand-off is one close_world call
+DeathScreen.extractRenderState	port	crates/horizon-client/src/game/screens.rs::Game::draw_death_screen	gap: minor: no draft-report badge on the title button (reporting service)
+DeathScreen.visitText	port	crates/horizon-client/src/game/screens.rs::Game::draw_death_screen	title at double size, cause and score lines
+DeathScreen.mouseClicked	port	crates/horizon-client/src/game/screens.rs::Game::death_click	buttons and the title confirm; gap: minor: a click on a link in the death text does nothing
+DeathScreen.tick	inline	crates/horizon-client/src/game/screens.rs::Game::draw_death_screen	the 20-tick delay is checked as 1000 ms since death, on draw and on click
+DeathScreen.setButtonsActive	inline	crates/horizon-client/src/game/screens.rs::Game::draw_death_screen	buttons are active once the 1000 ms delay has passed
+DirectJoinServerScreen.keyPressed	port	crates/horizon-client/src/game/startup_menu.rs::StartupMenu::title_key	gap: player: Enter in the Direct Connection field does not join; title_key only confirms a rename
+DirectJoinServerScreen.init	port	crates/horizon-client/src/multiplayer.rs::Screen::buttons	Direct Connection field with Join and Cancel (Screen::Direct arm)
+DirectJoinServerScreen.resize	skip:ui		layout only; Screen::Direct keeps the typed address
+DirectJoinServerScreen.onSelect	port	crates/horizon-client/src/multiplayer.rs::Screen::click	Join returns the typed address as Outcome::Connect
+DirectJoinServerScreen.removed	port	crates/horizon-client/src/title.rs::Title::remember_direct_address	saves the address to last_server; gap: minor: the options file write is not in this fn
+DirectJoinServerScreen.extractRenderState	port	crates/horizon-client/src/multiplayer.rs::Screen::draw	title, label and address field (Screen::Direct arm)
+DisconnectedScreen.init	port	crates/horizon-client/src/multiplayer.rs::Screen::buttons	reason text and the disconnected buttons; gap: minor: no Report to Server or open-report-folder button
+DisconnectedScreen.getNarrationMessage	skip:other		narration text; Horizon has no narrator
+ErrorScreen.init	port	crates/horizon-client/src/title.rs::Title::buttons	Cancel button of the error mode (Mode::Error arm)
+ErrorScreen.extractRenderState	port	crates/horizon-client/src/title.rs::Title::draw	the error title and message (Mode::Error arm)
+ErrorScreen.extractBackground	port	crates/horizon-client/src/title.rs::Title::draw	gap: minor: the flat gradient is replaced by the title background
+FaviconTexture.forWorld	port	crates/horizon-client/src/title.rs::Title::icon	the world row's icon texture
+FaviconTexture.forServer	port	crates/horizon-client/src/multiplayer.rs::ping_all	server icon keyed by address, from the ping
+FaviconTexture.clear	inline	crates/horizon-client/src/multiplayer.rs::ping_all	icon dropped when the ping has no favicon
+FileFixerAbortedScreen.getNarrationMessage	skip:other		narration text; Horizon has no narrator
+FileFixerAbortedScreen.init	missing		minor: no upgrade-aborted screen; Horizon has no world-fixer cancel flow
+FileFixerAbortedScreen.addButtons	missing		minor: Back and Report Bug buttons of the aborted-upgrade screen
+FileFixerAbortedScreen.keyPressed	missing		minor: Escape on the aborted-upgrade screen
+GenericMessageScreen.init	port	crates/horizon-client/src/level_loading.rs::draw_progress	centred message line while a world opens; gap: minor: no progress bar, the text is the loader's stage line
+GenericMessageScreen.repositionElements	skip:ui		layout only
+GenericMessageScreen.extractBackground	port	crates/horizon-client/src/ui.rs::menu_background	the menu background behind the message
+GenericWaitingScreen.createWaitingWithoutButton	port	crates/horizon-client/src/title.rs::Title::start_backup	backup runs in the background; gap: minor: no waiting screen blocks input while it runs
+GenericWaitingScreen.createWaiting	skip:service		waiting screen while a report is sent (reporting)
+GenericWaitingScreen.createCompleted	skip:service		result screen after a report (reporting)
+GenericWaitingScreen.init	skip:service		layout of the report waiting screen (reporting)
+GenericWaitingScreen.tick	skip:service		the report button's delay (reporting)
+GenericWaitingScreen.extractRenderState	missing		minor: no waiting text while a backup runs; Horizon shows a toast (title.rs::Title::update_toast)
+GenericWaitingScreen.shouldCloseOnEsc	skip:service		Escape on the report waiting screen (reporting)
+GenericWaitingScreen.getNarrationMessage	skip:other		narration text; Horizon has no narrator
+InBedChatScreen.init	port	crates/horizon-client/src/game/chat.rs::Game::draw_chat_screen	Leave Bed button over the chat; its click is in chat_click
+InBedChatScreen.onPlayerWokeUp	port	crates/horizon-client/src/game/chat.rs::Game::tick_in_bed_chat	closes the chat, or turns it into the plain chat if text was typed; gap: minor: polled each tick, not on the wake event
+LevelLoadingScreen.updateNarratedWidget	skip:other		narration text; Horizon has no narrator
+LevelLoadingScreen.extractChunksForRendering	port	crates/horizon-client/src/level_loading.rs::draw	chunk status colours; gap: minor: the debug red centre square is not drawn
+LevelLoadingScreen.getNetherPortalSprite	port	crates/horizon-client/src/hud_overlays.rs::portal_overlay	draws the block/nether_portal sprite
+LoadingOverlay.extractRenderState	port	crates/horizon-client/src/game.rs::Game::render	the reload screen's progress bar; gap: player: no Mojang logo and no fade in or out
+LoadingOverlay.tick	port	crates/horizon-client/src/game/server_packs.rs::Game::tick_server_packs	finishes the reload; gap: minor: no fade-out before it finishes
+LoadingOverlay.isReadyToFadeOut	missing		minor: no one-second fade-in before the reload can finish
+LoadingOverlay.extractProgressBar	port	crates/horizon-client/src/level_loading.rs::draw_progress	200 by 2 bar; gap: minor: no fade alpha
+LoadingOverlay.LogoTexture.loadContents	skip:other		Horizon ships no Mojang logo (title_edition.rs)
+ManageServerScreen.init	port	crates/horizon-client/src/multiplayer.rs::Screen::buttons	name and address fields, resource packs cycle, Done and Cancel (Screen::Edit arm)
+ManageServerScreen.resize	skip:ui		layout only; Screen::Edit keeps its fields
+ManageServerScreen.onAdd	port	crates/horizon-client/src/multiplayer.rs::Screen::click	Done saves the name (default if empty) and the address
+ManageServerScreen.extractRenderState	port	crates/horizon-client/src/multiplayer.rs::Screen::draw	labels and fields (Screen::Edit arm)
+MenuScreens.create	port	crates/horizon-client/src/game/remote.rs::Game::remote_open_screen	server-opened menus; gap: minor: the screen is built from the packet title
+MenuScreens.register	skip:data		registry of menu types; Horizon reads them from tables
+MenuScreens.selfTest	skip:debug		startup check that every menu has a screen
+MenuScreens.ScreenConstructor.fromPacket	port	crates/horizon-client/src/game/remote.rs::Game::remote_open_screen	builds the screen from the open-screen packet and sets the container menu
+NoticeWithLinkScreen.init	missing		minor: no symlink warning when a world or pack folder is a symlink
+NoticeWithLinkScreen.getNarrationMessage	skip:other		narration text; Horizon has no narrator
+OutOfMemoryScreen.init	missing		minor: unsure: no out-of-memory screen; Horizon does not handle allocation failures this way
+PauseScreen.added	skip:service		friend list listener on the pause screen (social)
+PauseScreen.init	port	crates/horizon-client/src/game/screens.rs::pause_buttons	button layout; the title is drawn in draw_pause_menu
+PauseScreen.createPauseMenu	port	crates/horizon-client/src/game/screens.rs::pause_buttons	gap: player: Report Bugs, Feedback and Player Reporting icons are inactive, and no Mods button
+PauseScreen.getCustomAdditions	port	crates/horizon-client/src/game/screens.rs::pause_buttons	the server links row (links flag); gap: minor: only the server links dialog, the pause_screen_additions tag is not read
+PauseScreen.addCustomDialogButtons	port	crates/horizon-client/src/game/screens.rs::Game::pause_click	Server Links button (id 11) opens the links screen
+PauseScreen.extractRenderState	port	crates/horizon-client/src/game/screens.rs::Game::draw_pause_menu	gap: minor: no now-playing toast and no draft-report badge
+PauseScreen.rendersNowPlayingToast	missing		minor: unsure: no check of the music-toast option on the pause screen
+PauseScreen.openScreenButton	inline	crates/horizon-client/src/game/screens.rs::Game::pause_click	the Advancements, Stats, Options and World Options actions
+PresetFlatWorldScreen.getLayerInfoFromString	inline	crates/horizon-client/src/title/flat.rs::FlatSettings::parse	one layer of the share text, parsed in the same loop
+PresetFlatWorldScreen.getLayersInfoFromString	port	crates/horizon-client/src/title/flat.rs::FlatSettings::parse	the share text's layers and biome; malformed text gives None
+PresetFlatWorldScreen.save	port	crates/horizon-client/src/title/flat.rs::FlatSettings::to_share	the share text
+PresetFlatWorldScreen.init	inline	crates/horizon-client/src/title/flat.rs::buttons	the share box and Select and Cancel buttons
+PresetFlatWorldScreen.resize	skip:ui		layout only; the screen keeps its state
+PresetFlatWorldScreen.extractRenderState	port	crates/horizon-client/src/title/flat.rs::draw_presets	title, labels and share box
+PresetFlatWorldScreen.updateButtonValidity	inline	crates/horizon-client/src/title/flat.rs::buttons	Select is enabled with a preset or a share text longer than 1
+PresetFlatWorldScreen.PresetsList.setSelected	inline	crates/horizon-client/src/title/flat.rs::State::select_preset	selecting a preset fills the share text
+PresetFlatWorldScreen.PresetsList.keyPressed	missing		minor: unsure: no keyboard selection of a preset found in title/flat.rs
+PresetFlatWorldScreen.PresetsList.Entry.extractContent	port	crates/horizon-client/src/title/flat.rs::draw_presets	preset icon and name
+PresetFlatWorldScreen.PresetsList.Entry.select	port	crates/horizon-client/src/title/flat.rs::State::select_preset	fills the share text with the preset's layers
+PresetFlatWorldScreen.PresetsList.Entry.blitSlot	port	crates/horizon-client/src/title/flat.rs::slot	slot frame and icon
+PrivacyConfirmLinkScreen.init	skip:service		privacy link confirm from the friends and online settings (social)
+PrivacyConfirmLinkScreen.addAdditionalText	skip:service		privacy link confirm from the friends and online settings (social)
+PrivacyConfirmLinkScreen.confirmLinkNow	skip:service		opens privacy links from the friends and online settings (social)
+ProgressScreen.extractRenderState	port	crates/horizon-client/src/game/saving.rs::Game::render_closing_save	stage line and bar while the world saves; gap: minor: no header or percent text
+RecoverWorldDataScreen.<init>	missing		minor: no Recover World screen; save.rs only reads level.dat_old as a fallback
+RecoverWorldDataScreen.attemptRestore	missing		minor: no restore from level.dat_old in the menu
+RecoverWorldDataScreen.buildInfo	missing		minor: no issue summary for level.dat and level.dat_old
+RecoverWorldDataScreen.collectIssue	missing		minor: no issue check for level.dat and level.dat_old in the menu
+RecoverWorldDataScreen.repositionElements	missing		minor: layout of the Recover World screen, which Horizon lacks
+RecoverWorldDataScreen.getNarrationMessage	skip:other		narration text; Horizon has no narrator
+Screen.extractRenderStateWithTooltipAndSubtitles	port	crates/horizon-client/src/game.rs::Game::hud_layers	draws the current screen's layer and tooltips; unsure about subtitles
+Screen.setInitialFocus	skip:ui		keyboard focus starts on the first widget; Horizon draws its own focus
+Screen.isInputCaptured	port	crates/horizon-client/src/title.rs::Title::has_caret_field	gap: minor: only the title screen's text fields
+Screen.addWidget	skip:ui		widget list plumbing; Horizon draws each screen from its own state
+Screen.removeWidget	skip:ui		widget list plumbing; Horizon draws each screen from its own state
+Screen.getTooltipFromItem	port	crates/horizon-client/src/item_tooltip.rs::lines	tooltip lines for an item
+Screen.defaultHandleGameClickEvent	port	crates/horizon-client/src/game/books.rs::Game::book_follow_link	gap: minor: ShowDialog and custom click events are not handled here
+Screen.fadeWidgets	missing		minor: unsure: no fade of widgets found in title.rs
+Screen.extractPanorama	port	crates/horizon-client/src/gfx/panorama.rs::Panorama::draw	the title panorama cube, drawn in the render pass
+Screen.extractMenuBackground	port	crates/horizon-client/src/ui.rs::menu_background	the dirt background with blur
+Screen.extractMenuBackgroundTexture	port	crates/horizon-client/src/ui.rs::menu_background	gap: minor: only the standard background texture
+Screen.isValidCharacterForName	missing		minor: only the structure block name field uses it, and Horizon has no structure block editor
+Screen.scheduleNarration	skip:other		narration timing; Horizon has no narrator
+Screen.shouldRunNarration	skip:other		narration gate; Horizon has no narrator
+Screen.handleDelayedNarration	skip:other		narration timing; Horizon has no narrator
+Screen.runNarration	skip:other		narration output; Horizon has no narrator
+Screen.updateNarratedWidget	skip:other		narration of widgets; Horizon has no narrator
+Screen.findNarratableWidget	skip:other		narration focus search; Horizon has no narrator
+Screen.updateNarratorStatus	skip:other		narrator option toggle only; Horizon has no narrator output
+TitleScreen.tick	skip:service		Realms notifications and the friend request count (social)
+TitleScreen.init	port	crates/horizon-client/src/title.rs::Title::buttons	main menu buttons; the splash text is chosen at load (choose_splash)
+TitleScreen.getHorizontalPosition	skip:ui		layout of the icon row only
+TitleScreen.createNormalMenuOptions	port	crates/horizon-client/src/title.rs::Title::buttons	gap: player: Minecraft Realms button is greyed out (service)
+TitleScreen.getMultiplayerDisabledReason	missing		minor: unsure: no ban check; Multiplayer is always enabled in title.rs
+TitleScreen.createDemoMenuOptions	skip:other		demo build only (isDemo); Horizon has no demo mode
+TitleScreen.checkDemoWorldPresence	skip:other		demo world only
+TitleScreen.extractRenderState	port	crates/horizon-client/src/title.rs::Title::draw	version line and buttons
+TitleScreen.mouseClicked	port	crates/horizon-client/src/title.rs::Title::click	gap: minor: no Realms notification popup to click
+TitleScreen.confirmDemo	skip:other		demo world reset only

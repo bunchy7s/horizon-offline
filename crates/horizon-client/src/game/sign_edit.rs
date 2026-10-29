@@ -34,6 +34,15 @@ fn sign_box() -> EditBox {
     edit
 }
 
+/// AbstractSignEditScreen.init's Done button: `width / 2 - 100`,
+/// `height / 4 + 144`, int GUI pixels.
+fn done_button(w: f32, h: f32) -> (f32, f32) {
+    (
+        (w.ceil() / 2.0).floor() - 100.0,
+        (h.ceil() / 4.0).floor() + 144.0,
+    )
+}
+
 impl Game<'_> {
     /// `SignBlockEntity.getSlotPlayerIsFacing`: whether the player stands in
     /// front of the sign's text (within 90 degrees of its facing).
@@ -464,7 +473,7 @@ impl Game<'_> {
     /// or a click on a line (`EditBox.onClick`).
     pub(super) fn sign_edit_click(&mut self, size: [u32; 2]) {
         let b = HudBatch::new(size);
-        let (x, y) = (b.width / 2.0 - 100.0, b.height / 4.0 + 144.0);
+        let (x, y) = done_button(b.width, b.height);
         let (mx, my) = self.cursor;
         if mx >= x && mx < x + 200.0 && my >= y && my < y + 20.0 {
             self.audio.play_button_click();
@@ -628,7 +637,7 @@ impl Game<'_> {
                 );
             }
         }
-        let (bx, by) = (w / 2.0 - 100.0, h / 4.0 + 144.0);
+        let (bx, by) = done_button(w, h);
         batch.sprite_scaled(
             atlas,
             "gui/sprites/widget/button",
@@ -642,10 +651,20 @@ impl Game<'_> {
         batch.text(
             atlas,
             "Done",
-            bx + (200.0 - tw) / 2.0,
+            bx + 100.0 - (tw / 2.0).floor(),
             by + 6.0,
             u32::MAX,
             true,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn done_button_sits_on_whole_gui_pixels() {
+        // `width / 2 - 100, height / 4 + 144` in ints: 334 high is 83 + 144.
+        assert_eq!(super::done_button(427.0, 334.0), (113.0, 227.0));
+        assert_eq!(super::done_button(320.0, 240.0), (60.0, 204.0));
     }
 }

@@ -93,14 +93,21 @@ pub fn activity_at(baby: bool, day_time: i64) -> Activity {
 pub fn sleeping(m: &Mob) -> bool {
     matches!(m.species(), Species::Villager | Species::WanderingTrader) && m.extra.ints[1] != 0
 }
-/// `LivingEntity.startSleeping`: lie in the bed (`setPosToBed`).
-pub fn start_sleeping(m: &mut Mob, p: [i32; 3], w: &MobWorld) -> bool {
+/// `LivingEntity.startSleeping`: lie in the bed (`setPosToBed`), whose
+/// head becomes `occupied`.
+pub fn start_sleeping(m: &mut Mob, p: [i32; 3], w: &MobWorld, events: &mut Vec<MobEvent>) -> bool {
     if w.prop(p[0], p[1], p[2], "occupied") == Some("true") {
         return false;
     }
     m.extra.ints[1] = bed_facing_code(w.prop(p[0], p[1], p[2], "facing"));
     m.nav_stop();
-    ext_mut(m).last_slept = Some(w.game_time);
+    let e = ext_mut(m);
+    e.last_slept = Some(w.game_time);
+    e.sleeping_pos = Some(p);
+    events.push(MobEvent::BedOccupied {
+        pos: p,
+        occupied: true,
+    });
     m.velocity = horizon_core::geometry::Vec3::ZERO;
     m.position = horizon_core::geometry::Vec3::new(
         f64::from(p[0]) + 0.5,
@@ -109,11 +116,24 @@ pub fn start_sleeping(m: &mut Mob, p: [i32; 3], w: &MobWorld) -> bool {
     );
     true
 }
-/// `LivingEntity.stopSleeping` with `BedBlock.findStandUpPosition`: beside
-/// the bed where there is room, else on top of it.
-pub fn stop_sleeping(m: &mut Mob, w: &MobWorld) {
+/// `LivingEntity.stopSleeping` with `BedBlock.findStandUpPosition`: the bed
+/// is no longer `occupied`, and the sleeper stands beside it where there is
+/// room, else on top of it.
+pub fn stop_sleeping(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     m.extra.ints[1] = 0;
-    let Some(p) = m.extra.bed else { return };
+    let bed = m
+        .extra
+        .villager
+        .as_deref_mut()
+        .and_then(|e| e.sleeping_pos.take());
+    let Some(p) = bed else { return };
+    if !w.block_name(p[0], p[1], p[2]).ends_with("_bed") {
+        return;
+    }
+    events.push(MobEvent::BedOccupied {
+        pos: p,
+        occupied: false,
+    });
     for (dx, dz) in [
         (1, 0),
         (-1, 0),
@@ -137,6 +157,10 @@ pub fn stop_sleeping(m: &mut Mob, w: &MobWorld) {
     }
     m.position.y = f64::from(p[1]) + 0.5625;
 }
+/// `LivingEntity.getSleepingPos`: the bed head a sleeper lies in.
+pub fn sleeping_pos(m: &Mob) -> Option<[i32; 3]> {
+    ext(m).and_then(|e| e.sleeping_pos).filter(|_| sleeping(m))
+}
 /// `LivingEntityRenderer.sleepDirectionToRotation` and the bed's direction
 /// (the body is shifted back from the pillow by the standing eye height).
 /// A bed's `facing` as `sleep_pose` keeps it in `ints[1]`.
@@ -159,8 +183,9 @@ pub fn sleep_pose(m: &Mob) -> Option<(f32, [f32; 2])> {
 }
 /// `Villager.tick`: the unhappy counter and the gossip decay; a sleeper
 /// hurt or without its bed wakes up (`LivingEntity.hurtServer`,
-/// `LivingEntity.checkBedExists`). The brain does the rest.
-pub fn ai_step(m: &mut Mob, w: &MobWorld) {
+/// `LivingEntity.checkBedExists`), and lies the way its bed faces
+/// (`getBedOrientation`). The brain does the rest.
+pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if m.extra.ints[0] > 0 {
         m.extra.ints[0] -= 1;
     }
@@ -168,12 +193,12 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld) {
         ext_mut(m).maybe_decay(w.game_time);
     }
     if sleeping(m) {
-        let bed_gone = m
-            .extra
-            .bed
-            .is_none_or(|p| !w.block_name(p[0], p[1], p[2]).ends_with("_bed"));
-        if m.hurt_time > 0 || bed_gone {
-            stop_sleeping(m, w);
+        let bed = sleeping_pos(m).filter(|p| w.block_name(p[0], p[1], p[2]).ends_with("_bed"));
+        if let Some(p) = bed {
+            m.extra.ints[1] = bed_facing_code(w.prop(p[0], p[1], p[2], "facing"));
+        }
+        if m.hurt_time > 0 || bed.is_none() {
+            stop_sleeping(m, w, events);
             super::villager_brain::woken(m, w.game_time);
         }
     }
@@ -246,6 +271,9 @@ pub struct Ext {
     pub inventory: Vec<ItemStack>,
     /// `LAST_SLEPT` memory.
     pub last_slept: Option<i64>,
+    /// `LivingEntity.getSleepingPos`: the bed head it lies in, saved as
+    /// `sleeping_pos`.
+    pub sleeping_pos: Option<[i32; 3]>,
     /// `GOLEM_DETECTED_RECENTLY` expires at this game time.
     pub golem_until: i64,
     /// The `last_hurt_by_time` of the player's hit already counted.
@@ -782,10 +810,13 @@ pub fn can_breed(m: &Mob) -> bool {
         && ext(m).map_or(0, |e| e.food_level + e.food_in_inventory()) >= 12
 }
 
-/// The saved fields (`FoodLevel`, `Gossips`, `LastGossipDecay`, `Inventory`
-/// and the sleep and golem memories).
+/// The saved fields (`FoodLevel`, `Gossips`, `LastGossipDecay`, `Inventory`,
+/// `LivingEntity`'s `sleeping_pos` and the sleep and golem memories).
 pub fn write_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
     use horizon_world::nbt::Tag;
+    if let Some(p) = sleeping_pos(m) {
+        map.insert("sleeping_pos".into(), Tag::IntArray(p.to_vec()));
+    }
     let Some(e) = ext(m) else { return };
     map.insert(
         "FoodLevel".into(),
@@ -831,12 +862,23 @@ pub fn read_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
         .unwrap_or_default();
     e.last_gossip_decay = int(tag.get("LastGossipDecay")).unwrap_or(0);
     e.last_slept = last_slept;
+    // LivingEntity.readAdditionalSaveData: asleep in the bed again (the
+    // pose; `ai_step` turns it the way the bed faces, or wakes it when the
+    // bed is gone, as `baseTick`'s first tick does).
+    e.sleeping_pos = match tag.get("sleeping_pos") {
+        Some(Tag::IntArray(a)) if a.len() == 3 => Some([a[0], a[1], a[2]]),
+        _ => None,
+    };
+    let asleep = e.sleeping_pos.is_some();
     if let Some(Tag::List(items)) = tag.get("Inventory") {
         e.inventory = items
             .iter()
             .filter_map(crate::save::item_from_nbt)
             .take(INVENTORY_SLOTS)
             .collect();
+    }
+    if asleep {
+        m.extra.ints[1] = bed_facing_code(None);
     }
 }
 
@@ -889,6 +931,37 @@ mod tests {
             tempt: Arc::default(),
         });
         Mob::new(1, kind, horizon_core::geometry::Vec3::ZERO, 0.0)
+    }
+    /// A sleeper's box is 0.2 high, but `LivingEntityRenderer` moves it
+    /// toward the foot of the bed by its standing eye height, so its head
+    /// lies on the pillow.
+    #[test]
+    fn a_sleeper_lies_by_its_standing_eye_height() {
+        let mut m = villager();
+        m.extra.ints[1] = bed_facing_code(Some("east"));
+        assert!(sleeping(&m));
+        assert_eq!(m.eye_height(), f64::from(0.2_f32));
+        assert_eq!(m.awake_dims().2, f64::from(1.62_f32));
+    }
+    /// `LivingEntity.add/readAdditionalSaveData`: a sleeper is saved with
+    /// its bed (`sleeping_pos`) and loads asleep in it.
+    #[test]
+    fn a_sleeper_is_saved_asleep_in_its_bed() {
+        let mut m = villager();
+        m.extra.ints[1] = bed_facing_code(Some("north"));
+        ext_mut(&mut m).sleeping_pos = Some([3, 64, -7]);
+        let mut map = horizon_world::nbt::Compound::new();
+        write_nbt(&m, &mut map);
+        let mut loaded = villager();
+        read_nbt(&mut loaded, &horizon_world::nbt::Tag::Compound(map));
+        assert!(sleeping(&loaded));
+        assert_eq!(sleeping_pos(&loaded), Some([3, 64, -7]));
+        let mut awake = villager();
+        let mut map = horizon_world::nbt::Compound::new();
+        write_nbt(&awake, &mut map);
+        assert!(!map.contains_key(&"sleeping_pos".into()));
+        read_nbt(&mut awake, &horizon_world::nbt::Tag::Compound(map));
+        assert!(!sleeping(&awake));
     }
     #[test]
     fn a_new_profession_rolls_new_offers() {

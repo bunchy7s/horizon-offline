@@ -801,10 +801,7 @@ impl Game<'_> {
             }
             if !self.fight.killed {
                 if self.dragon.is_none() {
-                    // createNewDragon: over the podium, holding pattern, a random yaw.
-                    let yaw = self.world.random.next_float() * 360.0;
-                    let seed = self.world.random.next_long();
-                    self.dragon = Some(Dragon::new(Vec3::new(0.0, 128.0, 0.0), yaw, seed));
+                    self.create_new_dragon();
                 }
                 self.fight.crystal_scan += 1;
                 if self.fight.crystal_scan >= 100 {
@@ -912,8 +909,9 @@ impl Game<'_> {
             // The blast's damage source carries the player, so the dragon
             // remembers them before the blast can kill it.
             self.fight.blast_by = by;
-            let _ =
-                self.server_explode(at, 6.0, super::explosion::BlockInteraction::Destroy, false);
+            // EndCrystal.hurtServer: ExplosionInteraction.BLOCK.
+            let interaction = self.destroy_type("block_explosion_drop_decay");
+            let _ = self.server_explode(at, 6.0, interaction, false);
             self.fight.blast_by = None;
         }
         if respawn_crystal {
@@ -1088,8 +1086,7 @@ impl Game<'_> {
     /// Player melee on the dragon's parts or a crystal under the crosshair.
     /// The dragon part under the crosshair within reach: its id and distance.
     pub(super) fn dragon_hit(&self) -> Option<(u32, f64)> {
-        let eye = self.eye_position()?;
-        let dir = super::view_vector(self.yaw, self.pitch);
+        let (eye, dir) = self.aim()?;
         let reach: f64 = if self.creative { 5.0 } else { 3.0 };
         let mut best: Option<(u32, f64)> = None;
         for (id, b) in self.special_targets() {
@@ -1122,22 +1119,21 @@ impl Game<'_> {
         if !self.before_block(d) || self.mob_hit().is_some_and(|m| m.1 < d) {
             return false;
         }
-        let hand_damage = self.attack_item_info().map_or(0.0, |i| i.attack_damage);
-        let delay = horizon_client::attack_strength::delay(self.main_hand_attack_speed());
-        let scale = ((self.attack_ticks as f32 + 0.5) / delay).clamp(0.0, 1.0);
-        let mut amount =
-            (1.0 + hand_damage + self.effect_attack_bonus()) * (0.2 + scale * scale * 0.8);
-        let falling = self
-            .player
-            .as_ref()
-            .is_some_and(|p| !p.ground.on_ground && p.velocity.y < 0.0 && !p.sprinting);
-        if scale > 0.9 && falling {
-            amount *= 1.5;
-        }
-        amount += self.enchant_damage_bonus("minecraft:ender_dragon") * scale;
-        self.attack_ticks = 0;
+        // A dragon part is no LivingEntity: `canCriticalAttack` is false.
+        let (amount, _, _, _) = self.melee_damage("minecraft:ender_dragon", false);
         self.swing_arm();
-        self.hit_special(id, amount, true, false);
+        // The part's box.
+        let area = self
+            .special_targets()
+            .into_iter()
+            .find(|(part, _)| *part == id)
+            .map(|(_, b)| b);
+        let hurt = self.hit_special(id, amount, true, false);
+        // The sweep and the sounds read the charge, which the hit then spends.
+        if let (Some(area), Hurt::Landed { .. }) = (area, hurt) {
+            self.attack_effects(area, None, super::mace::Spared::Nothing, None);
+        }
+        self.attack_ticks = 0;
         true
     }
     /// The 24 nodes (`findClosestNode` builds them on first use).
@@ -2104,6 +2100,7 @@ impl Game<'_> {
                 75,
                 (96.0 * a.sin()).floor() as i32,
             ];
+            self.level_event_at(3000, pos, 0);
             let _ = self.place_gateway_at(pos);
         }
         if !self.fight.previously_killed
@@ -2593,54 +2590,9 @@ impl Game<'_> {
             self.crystal_beam(pos, to - pos, self.ticks as f32 + a, camera, out);
         }
     }
-    /// `submitRays`: the death rays from a fixed seed, fading in white to magenta.
+    /// `EnderDragonRenderer.submitRays`: untextured, additive death rays.
     fn dragon_rays(&self, base: glam::Mat4, t: f32, out: &mut Vec<Vertex>) {
-        let white = self.gui.atlas.font.white();
-        let uv = [white.u0, white.v0];
-        let over = if t > 0.8 {
-            ((t - 0.8) / 0.2).min(1.0)
-        } else {
-            0.0
-        };
-        let inner = (((1.0 - over) * 255.0) as u32) << 24 | 0x00FF_FFFF;
-        let outer = 0x00FF_00FF;
-        let mut random = LegacyRandom::new(432);
-        let mut m = base;
-        let count = ((t + t * t) / 2.0 * 60.0).floor() as i32;
-        let half_sqrt3 = 3f32.sqrt() / 2.0;
-        let tau = std::f32::consts::TAU;
-        for _ in 0..count {
-            let mut f = || random.next_float() * tau;
-            let q1 = glam::Quat::from_rotation_x(f())
-                * glam::Quat::from_rotation_y(f())
-                * glam::Quat::from_rotation_z(f());
-            let (a, b, c) = (f(), f(), f());
-            let q2 = glam::Quat::from_rotation_x(a)
-                * glam::Quat::from_rotation_y(b)
-                * glam::Quat::from_rotation_z(c + t * std::f32::consts::FRAC_PI_2);
-            m *= glam::Mat4::from_quat(q1 * q2);
-            let length = random.next_float() * 20.0 + 5.0 + over * 10.0;
-            let width = random.next_float() * 2.0 + 1.0 + over * 2.0;
-            let o = glam::Vec3::ZERO;
-            let left = glam::Vec3::new(-half_sqrt3 * width, length, -0.5 * width);
-            let right = glam::Vec3::new(half_sqrt3 * width, length, -0.5 * width);
-            let bottom = glam::Vec3::new(0.0, length, width);
-            for (p1, p2) in [(left, right), (right, bottom), (bottom, left)] {
-                // A triangle as a quad with its last corner repeated.
-                for (p, c) in [(o, inner), (p1, outer), (p2, outer), (p2, outer)] {
-                    out.push(Vertex {
-                        normal: [0; 4],
-                        pos: m.transform_point3(p).to_array(),
-                        uv,
-                        layer: 2,
-                        color: c,
-                        light: 0,
-
-                        glint_uv: [0.0, 0.0],
-                    });
-                }
-            }
-        }
+        dragon_rays(base, t, self.gui.atlas.font.white(), out);
     }
     /// `submitCrystalBeams`: an eight-sided tube from `from` (+2 up) along
     /// `delta`, the beam texture scrolling along it.
@@ -3022,10 +2974,17 @@ impl Game<'_> {
     }
     /// `EnderDragon.kill` (`/kill`): `Entity.kill` removes the entity, it
     /// does not hurt it (the dragon flies its death flight when its health
-    /// runs out).
+    /// runs out). The fight's dragon ends the fight there and then
+    /// (`dragonFight.setDragonKilled`): the exit portal, a gateway and the
+    /// first dragon's egg, and no new dragon. No experience: `tickDeath`
+    /// drops it, and a killed dragon never gets there.
     pub(super) fn kill_dragon(&mut self, id: u32) {
         if self.dragon.as_ref().is_some_and(|d| d.id == id) {
             self.dragon = None;
+            // ServerLevel.getDragonFight: only the End has a fight.
+            if self.dim == Dim::End {
+                self.dragon_killed();
+            }
         }
     }
     /// Any entity touching `room` (`Level.getEntities(null, box)`).
@@ -3221,10 +3180,12 @@ impl Game<'_> {
                 }
             }
         }
+        // DragonRespawnStage.SUMMONING_PILLARS: ExplosionInteraction.BLOCK.
+        let interaction = self.destroy_type("block_explosion_drop_decay");
         let _ = self.server_explode(
             [f64::from(cx) + 0.5, f64::from(h), f64::from(cz) + 0.5],
             5.0,
-            super::explosion::BlockInteraction::Destroy,
+            interaction,
             false,
         );
         // EndSpikeFeature.placeSpike with crystal_invulnerable and the beam.
@@ -3315,6 +3276,12 @@ impl Game<'_> {
             }
         }
     }
+    /// `EnderDragonFight.createNewDragon`: over the podium, holding pattern, a random yaw.
+    fn create_new_dragon(&mut self) {
+        let yaw = self.world.random.next_float() * 360.0;
+        let seed = self.world.random.next_long();
+        self.dragon = Some(Dragon::new(Vec3::new(0.0, 128.0, 0.0), yaw, seed));
+    }
     /// The END stage: the portal crystals blow up (no block damage) and a
     /// new dragon takes over.
     fn finish_respawn(&mut self) {
@@ -3341,6 +3308,31 @@ impl Game<'_> {
             }
         }
         self.fight.killed = false;
+        // setRespawnStage(END): the new dragon is summoned for every player
+        // of the fight (the boss bar's players: alive within 192 blocks).
+        self.create_new_dragon();
+        let view = self
+            .dragon
+            .as_ref()
+            .map(|d| horizon_client::advancements::EntityView {
+                kind: "minecraft:ender_dragon".to_owned(),
+                position: [d.position.x, d.position.y, d.position.z],
+                ..Default::default()
+            });
+        if let Some(view) = view {
+            self.for_each_player(|g| {
+                let near = g.player.as_ref().is_some_and(|p| {
+                    !p.health.dead_or_dying()
+                        && p.position.x.powi(2)
+                            + (p.position.y - 128.0).powi(2)
+                            + p.position.z.powi(2)
+                            <= 192.0 * 192.0
+                });
+                if near {
+                    g.trigger_entity("minecraft:summoned_entity", "entity", &view);
+                }
+            });
+        }
         self.fight.dirty = true;
         self.count_crystals();
     }
@@ -3560,9 +3552,92 @@ impl Game<'_> {
     }
 }
 
+/// `submitRays`: the death rays from a fixed seed, fading in white to magenta.
+fn dragon_rays(base: glam::Mat4, t: f32, white: horizon_client::hud::Rect, out: &mut Vec<Vertex>) {
+    // Vanilla's dragonRays has no texture. Sample inside the white sprite:
+    // its border can round into transparent neighbours during interpolation.
+    let uv = [(white.u0 + white.u1) / 2.0, (white.v0 + white.v1) / 2.0];
+    let over = if t > 0.8 {
+        ((t - 0.8) / 0.2).min(1.0)
+    } else {
+        0.0
+    };
+    let inner = (((1.0 - over) * 255.0) as u32) << 24 | 0x00FF_FFFF;
+    let outer = 0x00FF_00FF;
+    let mut random = LegacyRandom::new(432);
+    let mut m = base;
+    let count = ((t + t * t) / 2.0 * 60.0).floor() as i32;
+    let half_sqrt3 = 3f32.sqrt() / 2.0;
+    let tau = std::f32::consts::TAU;
+    for _ in 0..count {
+        let mut f = || random.next_float() * tau;
+        let q1 = glam::Quat::from_rotation_x(f())
+            * glam::Quat::from_rotation_y(f())
+            * glam::Quat::from_rotation_z(f());
+        let (a, b, c) = (f(), f(), f());
+        let q2 = glam::Quat::from_rotation_x(a)
+            * glam::Quat::from_rotation_y(b)
+            * glam::Quat::from_rotation_z(c + t * std::f32::consts::FRAC_PI_2);
+        m *= glam::Mat4::from_quat(q1 * q2);
+        let length = random.next_float() * 20.0 + 5.0 + over * 10.0;
+        let width = random.next_float() * 2.0 + 1.0 + over * 2.0;
+        let o = glam::Vec3::ZERO;
+        let left = glam::Vec3::new(-half_sqrt3 * width, length, -0.5 * width);
+        let right = glam::Vec3::new(half_sqrt3 * width, length, -0.5 * width);
+        let bottom = glam::Vec3::new(0.0, length, width);
+        for (p1, p2) in [(left, right), (right, bottom), (bottom, left)] {
+            // A triangle as a quad with its last corner repeated.
+            for (p, c) in [(o, inner), (p1, outer), (p2, outer), (p2, outer)] {
+                out.push(Vertex {
+                    normal: [0; 4],
+                    pos: m.transform_point3(p).to_array(),
+                    uv,
+                    layer: 2,
+                    color: c,
+                    light: 0,
+
+                    glint_uv: [0.0, 0.0],
+                });
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn death_rays_sample_inside_the_white_sprite() {
+        // A four-texel white sprite surrounded by transparent atlas pixels.
+        // A border UV can round outside it during perspective interpolation.
+        let size = 1024.0;
+        let white = horizon_client::hud::Rect {
+            u0: 20.0 / size,
+            v0: 60.0 / size,
+            u1: 24.0 / size,
+            v1: 64.0 / size,
+            w: 4,
+            h: 4,
+        };
+        for t in [0.25, 0.8, 0.95, 1.0] {
+            let mut vertices = Vec::new();
+            dragon_rays(glam::Mat4::IDENTITY, t, white, &mut vertices);
+            assert!(!vertices.is_empty());
+            for v in &vertices {
+                assert!(
+                    v.uv[0] > white.u0 + 0.5 / size && v.uv[0] < white.u1 - 0.5 / size,
+                    "death-ray U touches the atlas border: {}",
+                    v.uv[0]
+                );
+                assert!(
+                    v.uv[1] > white.v0 + 0.5 / size && v.uv[1] < white.v1 - 0.5 / size,
+                    "death-ray V touches the atlas border: {}",
+                    v.uv[1]
+                );
+            }
+        }
+    }
 
     fn dragon(phase: Phase) -> Dragon {
         let mut d = Dragon::new(Vec3::new(0.0, 70.0, 0.0), 0.0, 1);

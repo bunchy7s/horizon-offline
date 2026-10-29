@@ -1,0 +1,150 @@
+Axis.rotateDegrees	skip:other		degrees overload of rotate; Horizon converts degrees to radians at each call site
+Divisor.nextInt	skip:ui		even-spacing helper for GridLayout and EqualSpacingLayout; Horizon lays out its UI with its own code
+GivensParameters.fromUnnormalized	skip:other		Givens rotation helper for the SVD split used by Transformation.ensureDecomposed only
+GivensParameters.fromPositiveAngle	skip:other		Givens rotation helper for the SVD split (builds MatrixUtil PI_4) only
+GivensParameters.aroundX	skip:other		Givens rotation helper for the SVD split only
+GivensParameters.aroundY	skip:other		Givens rotation helper for the SVD split only
+GivensParameters.aroundZ	skip:other		Givens rotation helper for the SVD split only
+GivensParameters.cos	skip:other		Givens helper for the SVD split only
+MatrixUtil.mulComponentWise	missing		minor: unsure: the 0.5 GUI and 0.75 first-person foil decal scale of ItemFeatureRenderer.computeFoilDecalPose is not found; glint scale is per context in item_render.rs Glint (see client2-004.tsv:15)
+MatrixUtil.approxGivensQuat	skip:other		Jacobi step helper for the SVD split only
+MatrixUtil.qrGivensQuat	skip:other		QR Givens helper for the SVD split only
+MatrixUtil.similarityTransform	skip:other		Jacobi step helper for the SVD split only
+MatrixUtil.stepJacobi	skip:other		Jacobi eigen step for the SVD split only
+MatrixUtil.eigenvalueJacobi	skip:other		Jacobi eigen solver for the SVD split only
+MatrixUtil.svdDecompose	skip:other		SVD of a matrix-built Transformation; Horizon's display data arrives decomposed (text_display.rs) and item transforms stay matrices (item_model.rs::transformation)
+MatrixUtil.checkProperty	skip:java		JOML matrix property cache check; Horizon's affine matrices are plain values
+OctahedralGroup.trace	skip:java		group enumeration index for the Cayley table; Horizon indexes block rotations by quarter turns
+OctahedralGroup.rotate	port	crates/horizon-assets/src/bake/transform.rs::BlockModelTransform::direction	rotates a face direction through the blockstate's quarter-turn matrix (nearest axis)
+OctahedralGroup.inverts	inline	crates/horizon-assets/src/bake/transform.rs::BlockModelTransform::direction	the axis sign is read from the matrix inside direction()
+Quadrant.parseJson	port	crates/horizon-assets/src/model.rs::Face::decode	face rotation must be a multiple of 90, reduced mod 360 to quarter turns
+SymmetricGroup3.permute	inline	crates/horizon-assets/src/bake/transform.rs::BlockModelTransform::position	signed axis permutation is held as the matrix applied by position()
+SymmetricGroup3.permuteVector	inline	crates/horizon-assets/src/bake/transform.rs::BlockModelTransform::position	applies the axis permutation to float vectors; the Vector3i overload has no separate port
+Transformation.compose	port	crates/horizon-assets/src/bake/transform.rs::Affine::mul	matrix product of two transforms
+Transformation.inverse	port	crates/horizon-assets/src/bake/transform.rs::Affine::inverse	gap: minor: no null result for a non-finite inverse
+Transformation.ensureDecomposed	skip:other		SVD split of a matrix-built transform; Horizon never needs it (text displays store decomposed parts)
+Transformation.equals	skip:java		value equality of a Java wrapper
+Transformation.slerp	port	crates/horizon-client/src/text_display.rs::TextDisplayData::blend	gap: player: only text displays ease their transform; item and block displays have no renderer here, so their transform changes snap
+CharPredicate.and	skip:java		Java functional combinator
+CharPredicate.or	skip:java		Java functional combinator
+ChatFormatting.getByCode	inline	crates/horizon-client-core/src/text.rs::Text::legacy	colour codes come from COLORS, format codes from the k-o and r arms, both in the legacy parser
+CrashReport.getDetails	inline	crates/horizon-client/src/crash.rs::Report::text	the report body (details, system section) is built in Report::text
+CrashReport.getExceptionMessage	port	crates/horizon-client/src/crash.rs::stack_lines	enhanced stack text for the error
+CrashReport.copyProperties	skip:debug		rebuilds a Throwable for a message rewrite; Rust panics keep their own message
+CrashReport.replaceMessage	skip:debug		rewrites a null NPE, SOE or OOM message to the title; Rust panics carry messages
+CrashReport.getFriendlyReport	port	crates/horizon-client/src/crash.rs::Report::text	the friendly report: header, time, description, exception, details
+CrashReport.saveToFile	port	crates/horizon-client/src/crash.rs::Report::save	writes the report under crash-reports/
+CrashReport.addCategory	skip:debug		crash-report category sections; Horizon's report is a flat detail list (crash.rs set_detail)
+CrashReport.forThrowable	port	crates/horizon-client/src/crash.rs::report_error	gap: minor: report_error also writes and delivers the file; forThrowable only builds the object
+CrashReport.preload	skip:java		reserves memory and warms the report code so a later crash can be written; Horizon's panic path needs no reserve
+CrashReportCategory.formatLocation	missing		minor: crash details never print world coordinates or chunk and region locations
+CrashReportCategory.setDetail	port	crates/horizon-client/src/crash.rs::set_detail	gap: minor: flat detail list with no category section
+CrashReportCategory.fillInStackTrace	skip:debug		stack trimming for a crash category; Rust panic backtraces are filtered in stack_lines
+CrashReportCategory.validateStackTrace	skip:debug		stack trimming for a crash category; see stack_lines
+CrashReportCategory.getDetails	inline	crates/horizon-client/src/crash.rs::Report::text	category sections are not kept; Report::text writes the details
+CrashReportCategory.populateBlockDetails	missing		minor: crash details never record the block state or its location
+DetectedVersion.createBuiltIn	skip:data		version constants come from horizon_core::VANILLA_VERSION and the generated tables
+DetectedVersion.createFromJson	skip:data		version.json is not read; version data is compiled in
+DetectedVersion.tryDetectVersion	skip:data		version.json is not read; version data is compiled in
+Optionull.first	skip:java		null-safe Java helper
+Optionull.firstOrDefault	skip:java		null-safe Java helper
+Optionull.firstOrElse	skip:java		null-safe Java helper
+Optionull.isNullOrEmpty	skip:java		null-safe Java helper
+net/minecraft/ReportType#getErrorComment	inline	crates/horizon-client/src/crash.rs::Report::text	the header comment is picked from COMMENTS inside Report::text
+net/minecraft/ReportType#appendHeader	port	crates/horizon-client/src/crash.rs::Report::text	writes the report header and comment
+SharedConstants.booleanProperty	skip:debug		reads a JVM system property for debug flags
+SharedConstants.debugFlag	skip:debug		debug flag reader
+SharedConstants.debugIntValue	skip:debug		debug value reader
+SharedConstants.setVersion	skip:data		version is a compiled constant
+SharedConstants.debugVoidTerrain	skip:debug		debug world generation switch
+SystemReport.<init>	port	crates/horizon-client/src/crash.rs::system_details	gap: minor: no GPU, storage, process or JVM lines
+SystemReport.printMemoryUsage	skip:other		JVM heap usage text; a Rust build has no JVM heap
+SystemReport.printJvmFlags	skip:other		JVM input arguments; a Rust build has none
+SystemReport.setDetail	port	crates/horizon-client/src/crash.rs::set_detail	gap: minor: flat detail list
+SystemReport.putHardware	inline	crates/horizon-client/src/crash.rs::system_details	gap: minor: CPU and memory are the only hardware lines kept
+SystemReport.putSoftware	port	crates/horizon-client/src/crash.rs::operating_system	gap: minor: OS name only; no elevated flag or process details
+SystemReport.ignoreErrors	skip:debug		error isolation for diagnostic collection
+SystemReport.putPhysicalMemory	port	crates/horizon-client/src/crash.rs::memory	gap: minor: no per-module memory lines
+SystemReport.putVirtualMemory	missing		minor: no virtual or swap memory lines in the crash details
+SystemReport.putMemory	port	crates/horizon-client/src/crash.rs::memory	gap: minor: memory summary only
+SystemReport.putGraphics	missing		minor: no GPU enumeration in the crash details
+SystemReport.putProcessor	port	crates/horizon-client/src/crash.rs::cpu	gap: minor: CPU name and thread count only; no frequency or package counts
+SystemReport.putStorage	missing		minor: no free-space lines for the storage paths
+SystemReport.putProcessDetails	missing		minor: no process load or memory lines in the crash details
+SystemReport.putSpaceForPath	missing		minor: no free-space lines for the storage paths
+SystemReport.appendToCrashReportString	inline	crates/horizon-client/src/crash.rs::Report::text	the system section is written by Report::text
+SystemReport.toLineSeparatedString	skip:debug		plain-text dump of the system section
+TracingExecutor.forName	skip:debug		Tracy zone and thread naming
+TracingExecutor.shutdownAndAwait	skip:debug		executor shutdown for the profiler wrapper
+TracingExecutor.wrapUnnamed	skip:debug		Tracy zone wrapper
+WorldVersion.Simple.packVersion	skip:data		pack format per pack type; the version tables carry it
+Advancement.validate	missing		minor: shipped advancement JSON is already valid; no validation of background or requirements
+Advancement.Builder.parent	skip:data		datagen builder; Horizon reads advancement JSON in Tree::load and parse
+Advancement.Builder.rootDisplay	skip:data		datagen builder; Horizon reads advancement JSON
+Advancement.Builder.display	skip:data		datagen builder; Horizon reads advancement JSON
+Advancement.Builder.rewards	skip:data		datagen builder; Horizon reads advancement JSON
+Advancement.Builder.requirements	skip:data		datagen builder; Horizon reads advancement JSON
+AdvancementHolder.equals	skip:java		Java equality by id
+AdvancementNode.getRoot	skip:other		no upward root walk: Horizon walks down from each root (Tree::visible, Tree::layout, advancements_screen tabs)
+AdvancementNode.equals	skip:java		Java equality by holder
+AdvancementProgress.hasProgress	inline	crates/horizon-client/src/advancements.rs::Progress::to_json	the save keeps only advancements with a criterion obtained (empty entries are skipped)
+AdvancementProgress.grantProgress	port	crates/horizon-client/src/advancements.rs::Progress::grant	records the criterion date; false when already obtained
+AdvancementProgress.revokeProgress	port	crates/horizon-client/src/advancements.rs::Progress::revoke	removes the criterion; false when not obtained
+AdvancementProgress.isCriterionDone	port	crates/horizon-client/src/advancements.rs::Progress::has	criterion obtained
+AdvancementProgress.getPercent	port	crates/horizon-client/src/game/advancements_screen.rs::Game::adv_draw_hover	obtained over total requirement groups, drives the progress bar and icon frame
+AdvancementProgress.getProgressText	port	crates/horizon-client/src/game/advancements_screen.rs::Game::adv_draw_hover	advancements.progress text, only when there are more than one group
+AdvancementProgress.getRemainingCriteria	missing		minor: /advancement test is not implemented; cmd_advancement only grants and revokes
+AdvancementProgress.getCompletedCriteria	missing		minor: /advancement test is not implemented; cmd_advancement only grants and revokes
+AdvancementProgress.getFirstProgressDate	skip:java		used only by compareTo, which has no caller
+AdvancementProgress.compareTo	skip:java		Comparable with no vanilla caller
+AdvancementRequirements.test	port	crates/horizon-client/src/advancements.rs::Progress::done	every requirement group has a criterion obtained
+AdvancementRequirements.count	port	crates/horizon-client/src/advancements.rs::Progress::counts	groups with a criterion obtained
+AdvancementRequirements.anyMatch	inline	crates/horizon-client/src/advancements.rs::Progress::done	the any() over one group
+AdvancementRequirements.validate	missing		minor: shipped advancement requirements are already valid
+AdvancementRequirements.names	skip:java		builds a name set to pre-create progress entries; Horizon creates them on grant
+AdvancementRewards.Builder.build	skip:data		datagen builder; rewards come from advancement JSON
+AdvancementTree.remove	inline	crates/horizon-client/src/game/advancements.rs::Game::remote_advancements	gap: minor: removes the ids the server lists; children are not walked here
+AdvancementTree.tryInsert	inline	crates/horizon-client/src/advancements.rs::Tree::children	the pass that inserts an advancement once its parent is in
+AdvancementTree.get	port	crates/horizon-client/src/advancements.rs::Tree::get	lookup by id
+AdvancementType.createAnnouncement	inline	crates/horizon-client/src/game/advancements.rs::Game::award	the chat line is built in award from the frame's key
+DisplayInfo.serializeToNetwork	port	crates/horizon-client/src/lan/advancements.rs::ServerAdvancements::write_advancement	writes title, description, icon, frame, flags and background
+DisplayInfo.fromNetwork	port	crates/horizon-protocol/src/packets/play.rs::UpdateAdvancements::read	reads the display and its flags
+TreeNodePosition.addChild	port	crates/horizon-client/src/advancements.rs::Layout::add_child	adds visible children in order
+TreeNodePosition.firstWalk	port	crates/horizon-client/src/advancements.rs::Layout::first_walk	first pass of the tree layout
+TreeNodePosition.secondWalk	port	crates/horizon-client/src/advancements.rs::Layout::second_walk	second pass: absolute positions and minimum
+TreeNodePosition.thirdWalk	port	crates/horizon-client/src/advancements.rs::Layout::third_walk	third pass: shift to non-negative
+TreeNodePosition.executeShifts	port	crates/horizon-client/src/advancements.rs::Layout::execute_shifts	shifts of the children
+TreeNodePosition.previousOrThread	port	crates/horizon-client/src/advancements.rs::Layout::previous_or_thread	previous node or thread
+TreeNodePosition.nextOrThread	port	crates/horizon-client/src/advancements.rs::Layout::next_or_thread	next node or thread
+TreeNodePosition.apportion	port	crates/horizon-client/src/advancements.rs::Layout::apportion	subtree separation
+TreeNodePosition.moveSubtree	port	crates/horizon-client/src/advancements.rs::Layout::move_subtree	moves a subtree right
+TreeNodePosition.getAncestor	port	crates/horizon-client/src/advancements.rs::Layout::ancestor_of	ancestor among the siblings
+TreeNodePosition.finalizePosition	inline	crates/horizon-client/src/advancements.rs::Tree::layout	positions are copied out in layout's final loop
+TreeNodePosition.run	port	crates/horizon-client/src/advancements.rs::Tree::layout	the whole layout for one root
+net/minecraft/advancements/predicates/BlockPredicate#matches	port	crates/horizon-client/src/advancements.rs::block	gap: minor: block-entity nbt and components are not checked; no vanilla advancement uses them
+net/minecraft/advancements/predicates/BlockPredicate#willMatchBlockEntity	missing		minor: block-entity nbt and components predicates are not read; no vanilla advancement uses them
+net/minecraft/advancements/predicates/BlockPredicate#matchesState	inline	crates/horizon-client/src/advancements.rs::block	block id and state properties
+net/minecraft/advancements/predicates/BlockPredicate#matchesBlockEntity	missing		minor: block-entity nbt and components are not read; no vanilla advancement uses them
+net/minecraft/advancements/predicates/BlockPredicate#matchesBlockEntityData	missing		minor: block-entity nbt is not read; no vanilla advancement uses it
+net/minecraft/advancements/predicates/BlockPredicate#matchesComponents	missing		minor: block-entity components are not read; no vanilla advancement uses them
+BlockPredicate.Builder.of	skip:data		datagen builder
+BlockPredicate.Builder.build	skip:data		datagen builder
+CollectionContentsPredicate.of	skip:java		factory that picks a Zero, Single or Multiple strategy; Horizon checks the JSON in potions()
+CollectionContentsPredicate.Multiple.test	port	crates/horizon-client/src/advancements.rs::potions	contains: each listed predicate matched by an effect
+CollectionCountsPredicate.of	skip:java		factory that picks a strategy class
+CollectionCountsPredicate.Entry.codec	skip:data		codec
+CollectionCountsPredicate.Multiple.test	port	crates/horizon-client/src/advancements.rs::potions	count entries: each count bound checked against the effects
+CollectionPredicate.codec	skip:data		codec
+CollectionPredicate.test	port	crates/horizon-client/src/advancements.rs::potions	gap: minor: only the potion effect list is checked; item container and bundle contents are not
+net/minecraft/advancements/predicates/DamagePredicate#matches	port	crates/horizon-client/src/advancements.rs::damage	dealt and taken bounds, source entity, blocked and type
+DamagePredicate.Builder.type	skip:data		datagen builder
+DamagePredicate.Builder.build	skip:data		datagen builder
+DamageSourcePredicate.matches	port	crates/horizon-client/src/advancements.rs::damage	the type part: damage type tags, direct and source entity, is_direct
+DataComponentMatchers.test	port	crates/horizon-client/src/advancements.rs::components	gap: minor: exact component matches only; partial predicates are not read
+DataComponentMatchers.isEmpty	inline	crates/horizon-client/src/advancements.rs::components	an empty expectation passes every component check
+DataComponentMatchers.Builder.any	skip:data		datagen builder
+EnchantmentPredicate.containedIn	port	crates/horizon-client/src/advancements.rs::item	the enchantments list and level bounds of the item predicate
+EnchantmentPredicate.matchesEnchantment	inline	crates/horizon-client/src/advancements.rs::item	one enchantment and its level
+FluidPredicate.matches	port	crates/horizon-client/src/advancements.rs::location	gap: minor: the fluid id and tags only; fluid state properties are not checked; no vanilla advancement uses fluid
+FluidPredicate.Builder.of	skip:data		datagen builder
+FoodPredicate.matches	missing		minor: no food level or saturation condition; no vanilla advancement uses one

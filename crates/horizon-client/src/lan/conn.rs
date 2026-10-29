@@ -32,9 +32,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// ServerCommonPacketListenerImpl.KEEPALIVE_TIME and the disconnect timeout.
+/// ServerCommonPacketListenerImpl.keepConnectionAlive: a keep-alive every 15 s,
+/// and a client that has not answered the last one by the next is dropped.
 const KEEP_ALIVE_EVERY: Duration = Duration::from_secs(15);
-const KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(30);
+/// ReadTimeoutHandler(30) in ServerConnectionListener: a connection that sends
+/// nothing for 30 s.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// Packets queued for one client beyond this many bytes disconnect it.
 const MAX_PENDING: usize = 96 << 20;
 /// Vanilla's server-side disconnect during login is a JSON component.
@@ -381,7 +384,7 @@ fn serve_legacy(mut stream: TcpStream, shared: &Shared) -> Result<(), String> {
     let body = if data.len() == 1 {
         format!("{motd}\u{a7}{online}\u{a7}{max}")
     } else {
-        if data[1] != 1 {
+        if data.get(1) != Some(&1) {
             return Ok(());
         }
         if data.len() > 2 {
@@ -677,9 +680,16 @@ fn serve_login(
         _ => return Err("expected a login hello".into()),
     };
     if !valid_name(&hello.name) {
+        // handleHello's validState throws; Connection.exceptionCaught sends the
+        // exception as the login disconnect.
         login_disconnect(
             &mut c,
-            &translatable("multiplayer.disconnect.invalid_name", &[]),
+            &translatable(
+                "disconnect.genericReason",
+                &[
+                    "Internal Exception: java.lang.IllegalStateException: Invalid characters in username",
+                ],
+            ),
         );
         return Ok(());
     }
@@ -893,6 +903,23 @@ fn pack_rejected(shared: &Shared, name: &str, pack: u128) -> (horizon_world::nbt
     (reason, text)
 }
 
+/// RateKickingConnection: a player whose packets a second passed rate-limit
+/// is disconnected ("disconnect.exceeded_packet_rate") with a WARN, as
+/// vanilla's kick logs it.
+fn rate_exceeded(shared: &Shared, average: f32) -> (horizon_world::nbt::Tag, String) {
+    let reason = translatable("disconnect.exceeded_packet_rate", &[]);
+    let Some(log) = &shared.config.log else {
+        return (reason, String::new());
+    };
+    let line = format!(
+        "Player exceeded rate-limit (sent {} packets per second)",
+        crate::java_text::float_to_string(average)
+    );
+    (log.write)("Server thread", "WARN", &line);
+    let text = horizon_protocol::text::plain(&reason, &log.lang);
+    (reason, text)
+}
+
 /// ServerResourcePackConfigurationTask: offer the server's pack, then wait
 /// for the client's final answer (`Action.isTerminal`: anything but
 /// ACCEPTED or DOWNLOADED). The player may take a while to answer the
@@ -950,7 +977,7 @@ fn offer_pack(
 fn play(c: Connection, shared: &Arc<Shared>, parts: Parts, address: std::net::SocketAddr) {
     let conn_id = shared.next_id();
     let events = shared.events.clone();
-    let _ = c.reader.set_read_timeout(Some(KEEP_ALIVE_TIMEOUT));
+    let _ = c.reader.set_read_timeout(Some(READ_TIMEOUT));
     let (mut reader, writer) = c.split();
     let (tx, rx) = channel();
     let pending = Arc::new(AtomicUsize::new(0));
@@ -986,10 +1013,22 @@ fn play(c: Connection, shared: &Arc<Shared>, parts: Parts, address: std::net::So
         .as_ref()
         .is_some_and(|p| p.required);
     let reason = if events.send(NetEvent::Joined(Box::new(joined))).is_ok() {
-        match read_loop(&mut reader, conn_id, &events, &alive, required_pack) {
-            Ok(reason) => reason,
-            Err(rejected) => {
+        match read_loop(
+            &mut reader,
+            conn_id,
+            &events,
+            &alive,
+            required_pack,
+            shared.config.rate_limit,
+        ) {
+            Ended::Closed(reason) => reason,
+            Ended::PackDeclined(rejected) => {
                 let (reason, text) = pack_rejected(shared, &name, rejected);
+                let _ = tx.send(Out::Disconnect(reason));
+                text
+            }
+            Ended::RateExceeded(average) => {
+                let (reason, text) = rate_exceeded(shared, average);
                 let _ = tx.send(Out::Disconnect(reason));
                 text
             }
@@ -1005,16 +1044,69 @@ fn play(c: Connection, shared: &Arc<Shared>, parts: Parts, address: std::net::So
     shared.release(parts.uuid);
 }
 
-/// Forward the player's packets until the connection ends: why it did, or
-/// the id of a required resource pack the player declined (with
-/// `required_pack`), which disconnects them.
+/// RateKickingConnection: the packets a second a connection averages, as
+/// Connection.tickSecond keeps it, against server.properties' rate-limit.
+struct PacketRate {
+    limit: f32,
+    received: u32,
+    average: f32,
+    next: Instant,
+}
+impl PacketRate {
+    /// The tracker of a connection, or none when the limit is off (0 or less).
+    fn new(limit: i32, now: Instant) -> Option<Self> {
+        (limit > 0).then(|| Self {
+            limit: limit as f32,
+            received: 0,
+            average: 0.0,
+            next: now + Duration::from_secs(1),
+        })
+    }
+    /// A packet arrived. Every whole second the average updates
+    /// (Mth.lerp(0.75F, received, average)): over the limit, Some of it.
+    fn received(&mut self, now: Instant) -> Option<f32> {
+        let exceeded = if now >= self.next {
+            // One tick with the count, then a packetless tick's 0.75 decay
+            // for each further whole second already gone.
+            let first = self.received as f32 + 0.75 * (self.average - self.received as f32);
+            self.average = first;
+            self.received = 0;
+            let elapsed = (now - self.next).as_secs() + 1;
+            if elapsed > 1 {
+                self.average *= 0.75f32.powi((elapsed - 1) as i32);
+            }
+            self.next += Duration::from_secs(elapsed);
+            (first > self.limit).then_some(first)
+        } else {
+            None
+        };
+        self.received = self.received.saturating_add(1);
+        exceeded
+    }
+}
+
+/// Why a play connection's read loop ended.
+enum Ended {
+    /// The connection closed (the reason for the log).
+    Closed(String),
+    /// The player declined the required resource pack (its id).
+    PackDeclined(u128),
+    /// The average packets a second passed rate-limit (the average).
+    RateExceeded(f32),
+}
+
+/// Forward the player's packets until the connection ends: why it did, the
+/// id of a required resource pack the player declined (with
+/// `required_pack`), or a rate-limit excess, which disconnects them.
 fn read_loop(
     reader: &mut ConnReader,
     conn: u32,
     events: &Sender<NetEvent>,
     alive: &AtomicI64,
     required_pack: bool,
-) -> Result<String, u128> {
+    rate_limit: i32,
+) -> Ended {
+    let mut rate = PacketRate::new(rate_limit, Instant::now());
     loop {
         let (id, payload) = match reader.recv() {
             Ok(p) => p,
@@ -1025,24 +1117,27 @@ fn read_loop(
                     || e.0.contains("reset by peer")
                     || e.0.contains("aborted") =>
             {
-                return Ok("Disconnected".to_owned());
+                return Ended::Closed("Disconnected".to_owned());
             }
-            Err(e) => return Ok(e.to_string()),
+            Err(e) => return Ended::Closed(e.to_string()),
         };
+        if let Some(average) = rate.as_mut().and_then(|r| r.received(Instant::now())) {
+            return Ended::RateExceeded(average);
+        }
         match play::Serverbound::decode(id, &payload) {
             Ok(play::Serverbound::KeepAlive(k)) => alive.store(k.id, Ordering::Relaxed),
             Ok(play::Serverbound::ResourcePack(r))
                 if r.action == PACK_DECLINED && required_pack =>
             {
-                return Err(r.id);
+                return Ended::PackDeclined(r.id);
             }
             Ok(p) => {
                 if events.send(NetEvent::Packet(conn, Box::new(p))).is_err() {
-                    return Ok("server closed".to_owned());
+                    return Ended::Closed("server closed".to_owned());
                 }
             }
             // A malformed packet disconnects like vanilla's decoder exception.
-            Err(e) => return Ok(format!("Invalid packet {id}: {e}")),
+            Err(e) => return Ended::Closed(format!("Invalid packet {id}: {e}")),
         }
     }
 }
@@ -1165,7 +1260,7 @@ fn write_loop(
                 let old = latency.load(Ordering::Relaxed);
                 latency.store((old * 3 + ms) / 4, Ordering::Relaxed);
                 sent_at = None;
-            } else if at.elapsed() > KEEP_ALIVE_TIMEOUT {
+            } else if at.elapsed() >= KEEP_ALIVE_EVERY {
                 let _ = writer.send(
                     &play::Clientbound::Disconnect(cfg::Disconnect {
                         reason: translatable("disconnect.timeout", &[]),
@@ -1319,5 +1414,42 @@ mod tests {
         sender.flush();
         assert_eq!(bodies(&rx), [vec![vec![5]], vec![b"disconnect".to_vec()]]);
         assert_eq!(sender.pending.load(Ordering::Relaxed), 5);
+    }
+
+    #[test]
+    fn a_rate_over_the_limit_kicks() {
+        let t0 = Instant::now();
+        let second = Duration::from_secs(1);
+        // Off at 0 (and below).
+        assert!(PacketRate::new(0, t0).is_none());
+        assert!(PacketRate::new(-1, t0).is_none());
+        let mut rate = PacketRate::new(10, t0).unwrap();
+        // 15 packets inside the first second average 3.75 at the tick.
+        for _ in 0..15 {
+            assert_eq!(rate.received(t0), None);
+        }
+        assert_eq!(rate.received(t0 + second), None);
+        // 50 a second averages 12.5: over a limit of 10 at the first tick.
+        let mut rate = PacketRate::new(10, t0).unwrap();
+        for _ in 0..50 {
+            rate.received(t0);
+        }
+        assert_eq!(rate.received(t0 + second), Some(12.5));
+    }
+
+    #[test]
+    fn an_idle_gap_decays_without_a_loop() {
+        let t0 = Instant::now();
+        let mut rate = PacketRate {
+            limit: 100.0,
+            received: 0,
+            average: 40.0,
+            next: t0,
+        };
+        // Ten seconds later: one tick (0 packets: 40 * 0.75 = 30), then ten
+        // more packetless decays — ~1.69 — with `next` past now.
+        assert_eq!(rate.received(t0 + Duration::from_secs(10)), None);
+        assert!(rate.average > 1.5 && rate.average < 2.0, "{}", rate.average);
+        assert!(rate.next > t0 + Duration::from_secs(10));
     }
 }

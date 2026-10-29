@@ -36,11 +36,14 @@ use horizon_client::{
             SpawnPlayer, SpawnRequest, SpawnState, Spawned, StructureAt, StructureSpawns,
             spawn_box,
         },
-        spawner::{Spawner, SpawnerAdded, SpawnerEvent, SpawnerLevel, SpawnerSpawn},
+        spawner::{
+            SpawnDataExt, Spawner, SpawnerAdded, SpawnerEvent, SpawnerExt, SpawnerLevel,
+            SpawnerSpawn,
+        },
         species::{self, Baby},
         trial_spawner::{
             Omen, TRIAL_OMEN_TICKS_PER_LEVEL, TrialEvent, TrialPlayer, TrialSpawner,
-            TrialSpawnerLevel, TrialState,
+            TrialSpawnerExt, TrialSpawnerLevel, TrialState,
         },
     },
     vault::{Vault, VaultEvent, VaultLevel, VaultPlayer, VaultState},

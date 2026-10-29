@@ -112,8 +112,8 @@ fn existing_worlds_stay_where_they_are_and_every_folder_becomes_an_instance() {
     assert_eq!(all[2].home, home.join("ports/small-pack/home"));
 
     // Everything the player can do with instances, then not one byte of theirs has moved.
-    let empty = create_in(&home, &data, "Survival", None).unwrap();
-    let copy = create_in(&home, &data, "My copy", Some(&all[0])).unwrap();
+    let empty = create_in(&home, &data, "Survival", None, None).unwrap();
+    let copy = create_in(&home, &data, "My copy", Some(&all[0]), None).unwrap();
     edit_in(&home, &data, DEFAULT, |m| m.name = Some("Main".into())).unwrap();
     edit_in(&home, &data, "Small Pack", |m| {
         m.icon = Some(Icon::Texture("diamond".into()));
@@ -160,18 +160,18 @@ fn names_stay_unique_and_packs_are_not_copied() {
     let root = scratch("names");
     let (home, data) = (root.join("horizon"), root.join("launcher"));
     player_home(&home);
-    create_in(&home, &data, "Survival", None).unwrap();
-    assert!(create_in(&home, &data, "survival", None).is_err());
-    assert!(create_in(&home, &data, "  ", None).is_err());
+    create_in(&home, &data, "Survival", None, None).unwrap();
+    assert!(create_in(&home, &data, "survival", None, None).is_err());
+    assert!(create_in(&home, &data, "  ", None, None).is_err());
     // Another name with the same folder name gets the next free folder.
-    let second = create_in(&home, &data, "Survival!", None).unwrap();
+    let second = create_in(&home, &data, "Survival!", None, None).unwrap();
     assert_eq!(second.id, "survival-2");
     assert_eq!(second.name, "Survival!");
     assert!(edit_in(&home, &data, "survival-2", |m| m.name =
         Some("SURVIVAL".into()))
     .is_err());
     let port = find_in(&list_in(&home, &data), "small-pack").unwrap();
-    assert!(create_in(&home, &data, "Pack copy", Some(&port)).is_err());
+    assert!(create_in(&home, &data, "Pack copy", Some(&port), None).is_err());
     assert!(!home.join("instances/pack-copy").exists());
     // An empty group is no group.
     let grouped = edit_in(&home, &data, "Survival", |m| m.group = Some(" ".into())).unwrap();
@@ -246,7 +246,7 @@ fn an_instance_keeps_its_own_version_until_it_follows_updates_again() {
     let root = scratch("version");
     let (home, data) = (root.join("horizon"), root.join("launcher"));
     player_home(&home);
-    create_in(&home, &data, "Old world", None).unwrap();
+    create_in(&home, &data, "Old world", None, None).unwrap();
     let pinned = edit_in(&home, &data, "Old world", |m| {
         m.version = Some("v0.1.0".into())
     })
@@ -296,4 +296,103 @@ fn play_time_reads_as_minutes_then_hours() {
     assert_eq!(t(12 * 60 + 59), "12 min");
     assert_eq!(t(3 * 3600 + 5 * 60), "3 h 05 min");
     assert_eq!(t(140 * 3600 + 7 * 60), "140 h");
+}
+
+/// A Java instance: an empty folder of its own (the real game keeps its own options), its
+/// version in instances.json, kept by a copy, and refused by Play until the launcher starts
+/// the real game; Horizon instances' entries stay as they were.
+#[test]
+fn a_java_instance_plays_one_minecraft_version_in_its_own_folder() {
+    let root = scratch("java");
+    let (home, data) = (root.join("horizon"), root.join("launcher"));
+    player_home(&home);
+    let java = create_in(&home, &data, "Vanilla 1.21.4", None, Some("1.21.4")).unwrap();
+    assert_eq!(java.home, home.join(OWN).join("vanilla-1-21-4"));
+    assert_eq!(fs::read_dir(&java.home).unwrap().count(), 0);
+    assert_eq!(java.java.as_ref().unwrap().minecraft, "1.21.4");
+    let copy = create_in(&home, &data, "Second", Some(&java), None).unwrap();
+    assert_eq!(copy.java, java.java);
+    let horizon = create_in(&home, &data, "Horizon two", None, None).unwrap();
+    assert_eq!(horizon.java, None);
+    let store = fs::read_to_string(data.join(FILE)).unwrap();
+    assert_eq!(
+        store.matches("\"minecraft\": \"1.21.4\"").count(),
+        2,
+        "{store}"
+    );
+    let mut cmd = Command::new("game");
+    let refused = apply(&mut cmd, &java).unwrap_err();
+    assert!(
+        refused.contains("plays Minecraft 1.21.4 (Java Edition)"),
+        "{refused}"
+    );
+    edit_in(&home, &data, &java.id, |m| {
+        m.java.as_mut().unwrap().memory_mb = Some(6144)
+    })
+    .unwrap();
+    let edited = find_in(&list_in(&home, &data), &java.id).unwrap();
+    assert_eq!(edited.java.unwrap().memory_mb, Some(6144));
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// Delete moves an instance's folder to the Trash and forgets it; one deleted outside the
+/// launcher is forgotten when the list is next read (#horizon-bugs: an instance that stayed).
+#[test]
+fn deleted_instances_go_to_the_trash_and_are_forgotten() {
+    let root = scratch("delete");
+    let (home, data, trash) = (root.join("home"), root.join("data"), root.join("trash"));
+    player_home(&home);
+    let to_trash = |p: &Path| crate::desktop_seams::to_folder(p, &trash);
+    let survival = create_in(&home, &data, "Survival", None, None).unwrap();
+    put(&survival.home.join("saves/Base/level.dat"), "base");
+    edit_in(&home, &data, "Survival", |m| m.group = Some("Mine".into())).unwrap();
+    let gone = delete_in(&home, &data, "Survival", &to_trash).unwrap();
+    assert_eq!(gone.id, "survival");
+    assert_eq!(
+        fs::read(trash.join("survival/saves/Base/level.dat")).unwrap(),
+        b"base"
+    );
+    assert!(find_in(&list_in(&home, &data), "Survival").is_err());
+    assert!(!Store::load(&data).instances.contains_key("survival"));
+    // The game's home stays; an imported pack goes like an instance.
+    assert!(delete_in(&home, &data, DEFAULT, &to_trash)
+        .unwrap_err()
+        .contains("can't be deleted"));
+    assert!(home.join("saves/World/level.dat").is_file());
+    delete_in(&home, &data, "small-pack", &to_trash).unwrap();
+    assert!(trash
+        .join("small-pack/home/saves/Modded/level.dat")
+        .is_file());
+    // A folder removed by hand: its choices are dropped, a new one of that name starts clean.
+    create_in(&home, &data, "Skyblock", None, None).unwrap();
+    edit_in(&home, &data, "Skyblock", |m| m.group = Some("Old".into())).unwrap();
+    fs::remove_dir_all(home.join(OWN).join("skyblock")).unwrap();
+    assert!(find_in(&list_in(&home, &data), "Skyblock").is_err());
+    assert!(!Store::load(&data).instances.contains_key("skyblock"));
+    let again = create_in(&home, &data, "Skyblock", None, None).unwrap();
+    assert_eq!(again.group, None);
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn the_mod_browser_installs_for_the_instance_loader() {
+    let vanilla = JavaGame {
+        minecraft: "1.21.1".into(),
+        ..JavaGame::default()
+    };
+    assert_eq!(vanilla.target().loader, None);
+    let quilt = JavaGame {
+        loader: Some(crate::loaders::Loader {
+            kind: crate::loaders::Kind::Quilt,
+            version: "0.30.1".into(),
+        }),
+        ..vanilla
+    };
+    let target = quilt.target();
+    assert_eq!(
+        (target.minecraft.as_str(), target.loader.as_deref()),
+        ("1.21.1", Some("quilt"))
+    );
+    // A Quilt instance takes Fabric mods too.
+    assert!(target.accepts("fabric") && !target.accepts("neoforge"));
 }

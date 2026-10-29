@@ -36,6 +36,9 @@ pub struct LootStack {
     pub stew_effects: Vec<(String, i32)>,
     /// Set by set_name: (`custom_name` or `item_name`, the text component).
     pub names: Vec<(String, Value)>,
+    /// Set by set_components: (component id, its JSON value; null removes
+    /// it), a later patch of the same id replacing an earlier one.
+    pub components: Vec<(String, Value)>,
 }
 /// `ExplorationMapFunction`'s settings.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -81,6 +84,7 @@ impl LootStack {
             ominous_amplifier: None,
             stew_effects: Vec::new(),
             names: Vec::new(),
+            components: Vec::new(),
         }
     }
     pub fn is_empty(&self) -> bool {
@@ -888,6 +892,8 @@ impl<R: RandomSource> Context<'_, R> {
             _ => false,
         })
     }
+    /// A number provider. An unknown type gives 0, as in items.rs `number`
+    /// (a data pack's typo yields nothing rather than a full roll).
     fn int(&mut self, v: &Value) -> i32 {
         match v {
             Value::Number(_) => int_value(v).unwrap_or(0) as i32,
@@ -1023,6 +1029,7 @@ impl<R: RandomSource> Context<'_, R> {
                         _ => false,
                     }
                 }
+                // An unknown type fails, as in items.rs `condition`.
                 _ => false,
             },
             _ => false,
@@ -1236,7 +1243,15 @@ impl<R: RandomSource> Context<'_, R> {
                 stack.names.retain(|(k, _)| *k != id);
                 stack.names.push((id, f["name"].clone()));
             }
-            // Lore, components and other data without random draws.
+            // SetComponentsFunction: the patch's components, applied when the
+            // stack becomes an item (trim on worn armour, see `mobs::finalize`).
+            "minecraft:set_components" => {
+                for (id, value) in f["components"].as_object().into_iter().flatten() {
+                    stack.components.retain(|(k, _)| k != id);
+                    stack.components.push((id.clone(), value.clone()));
+                }
+            }
+            // Lore and other data without random draws.
             _ => {}
         }
         stack

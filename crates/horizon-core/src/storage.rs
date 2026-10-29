@@ -1,5 +1,46 @@
 //! Palette indices packed into padded 64-bit words, not a continuous bitstream.
 
+/// `n / per_word` for `n < MAGIC_LEN` by multiplication: `MAGIC[bits].0 =
+/// ceil(2^20 / (64 / bits))` is exact while `n * (64 / bits) < 2^20`. `.1` is
+/// the bits a word's entries fill (`64 / bits * bits`): looked up, not divided
+/// for, as a division by a run-time value costs tens of cycles on x86.
+pub(crate) const MAGIC: [(u32, u32); 33] = {
+    let mut table = [(0, 0); 33];
+    let mut bits = 1;
+    while bits <= 32 {
+        let per = 64 / bits as u32;
+        table[bits] = ((1u32 << 20).div_ceil(per), per * bits as u32);
+        bits += 1;
+    }
+    table
+};
+/// Entries `locate` handles exactly for every width: the smallest width (1 bit,
+/// 64 per word) gives the bound `2^20 / 64`.
+pub(crate) const MAGIC_LEN: usize = 1 << 14;
+/// The multiply-shift replaces a ~20-26 cycle x86 divide, but arm64's divider
+/// is as cheap as the table lookup: measured on an Apple M-series CPU, 65k
+/// reads took 1.5 ms with the division and 2.5 ms with the table (bits 4-16),
+/// so only the x86 targets take the table.
+const MAGIC_BEATS_DIVISION: bool = cfg!(any(target_arch = "x86", target_arch = "x86_64"));
+/// The word and bit shift of entry `i`; exact for `i < MAGIC_LEN`.
+#[inline]
+pub(crate) fn locate(bits: u8, i: usize) -> (usize, u32) {
+    if bits.is_power_of_two() {
+        // 64 / bits is a power of two: shifts instead of the multiplication.
+        let log = bits.trailing_zeros();
+        let word = i >> (6 - log);
+        (word, ((i & ((64 >> log) - 1)) as u32) << log)
+    } else {
+        let (magic, filled) = MAGIC[usize::from(bits)];
+        let word = (i as u32 * magic) >> 20;
+        (word as usize, i as u32 * u32::from(bits) - word * filled)
+    }
+}
+#[inline]
+pub(crate) fn mask(bits: u8) -> u64 {
+    (1u64 << bits) - 1
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StorageError {
     InvalidBits(u8),
@@ -22,6 +63,9 @@ pub struct PackedStorage {
     len: usize,
     per_word: usize,
     mask: u64,
+    /// Whether `len` is past what [`locate`] handles exactly; such a storage
+    /// falls back to division.
+    wide: bool,
     words: Vec<u64>,
 }
 
@@ -46,6 +90,7 @@ impl PackedStorage {
             len,
             per_word,
             mask: (1_u64 << bits) - 1,
+            wide: len > MAGIC_LEN,
             words,
         })
     }
@@ -70,17 +115,27 @@ impl PackedStorage {
         &self.words
     }
 
-    fn location(&self, index: usize) -> Result<(usize, usize), StorageError> {
+    /// The word and bit shift of an in-range index.
+    #[inline]
+    fn slot(&self, index: usize) -> (usize, u32) {
+        if self.wide || !MAGIC_BEATS_DIVISION {
+            (
+                index / self.per_word,
+                ((index % self.per_word) * usize::from(self.bits)) as u32,
+            )
+        } else {
+            locate(self.bits, index)
+        }
+    }
+
+    fn location(&self, index: usize) -> Result<(usize, u32), StorageError> {
         if index >= self.len {
             return Err(StorageError::OutOfBounds {
                 index,
                 len: self.len,
             });
         }
-        Ok((
-            index / self.per_word,
-            (index % self.per_word) * usize::from(self.bits),
-        ))
+        Ok(self.slot(index))
     }
 
     pub fn get(&self, index: usize) -> Result<u32, StorageError> {
@@ -93,8 +148,7 @@ impl PackedStorage {
     /// `index` must be less than `len`.
     pub fn read(&self, index: usize) -> u32 {
         debug_assert!(index < self.len);
-        let word = index / self.per_word;
-        let shift = (index % self.per_word) * usize::from(self.bits);
+        let (word, shift) = self.slot(index);
         ((self.words[word] >> shift) & self.mask) as u32
     }
 
@@ -103,8 +157,7 @@ impl PackedStorage {
     /// palette index from the same container. Returns the previous value.
     pub fn write(&mut self, index: usize, value: u32) -> u32 {
         debug_assert!(index < self.len && u64::from(value) <= self.mask);
-        let word = index / self.per_word;
-        let shift = (index % self.per_word) * usize::from(self.bits);
+        let (word, shift) = self.slot(index);
         let old = ((self.words[word] >> shift) & self.mask) as u32;
         self.words[word] = (self.words[word] & !(self.mask << shift)) | (u64::from(value) << shift);
         old
@@ -175,6 +228,37 @@ mod tests {
                 assert_eq!(storage.unpack(), expected);
             }
         }
+    }
+
+    /// The shared multiply-shift index equals division for every width at the
+    /// sizes that use `PackedStorage`: 4,096-cell sections and 256-cell
+    /// heightmaps. A storage past the exact bound keeps the division path.
+    #[test]
+    fn multiply_shift_matches_division_at_section_and_heightmap_sizes() {
+        for bits in 1..=32u8 {
+            for len in [256usize, 4096] {
+                let per = 64 / usize::from(bits);
+                let mut storage = PackedStorage::new(bits, len).unwrap();
+                assert!(!storage.wide);
+                let mask = storage.mask;
+                for i in 0..len {
+                    assert_eq!(
+                        storage.slot(i),
+                        (i / per, ((i % per) * usize::from(bits)) as u32),
+                        "bits {bits} len {len} index {i}"
+                    );
+                    let value = (i as u64 & mask) as u32;
+                    assert_eq!(storage.write(i, value), 0);
+                    assert_eq!(storage.read(i), value);
+                    assert_eq!(storage.get(i).unwrap(), value);
+                }
+            }
+        }
+        let mut wide = PackedStorage::new(1, MAGIC_LEN + 1).unwrap();
+        assert!(wide.wide);
+        wide.write(MAGIC_LEN, 1);
+        assert_eq!(wide.read(MAGIC_LEN), 1);
+        assert_eq!(wide.get(MAGIC_LEN).unwrap(), 1);
     }
 
     #[test]

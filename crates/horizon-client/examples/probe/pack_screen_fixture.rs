@@ -126,6 +126,7 @@ pub fn main() -> horizon_client::Result<()> {
             .collect();
         let mut screen = PackScreen::new(
             &m,
+            Text::translate(c["title"].as_str().unwrap_or("resourcePack.title"), &[]),
             int(&c["width"]),
             int(&c["height"]),
             c["inWorld"] == true,

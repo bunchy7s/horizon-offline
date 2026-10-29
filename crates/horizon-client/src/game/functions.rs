@@ -36,6 +36,8 @@ pub(super) struct FnState {
     load_pending: bool,
     pub schedule: Vec<Scheduled>,
     next_seq: u64,
+    /// A dedicated server's `function-permission-level`.
+    pub permission: Option<u8>,
 }
 /// What a function reported through `return`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +45,16 @@ pub(super) enum Outcome {
     NoReturn,
     Value(i32),
     Fail,
+}
+
+impl FnState {
+    /// The level function files compile at (`ServerFunctionLibrary`'s
+    /// `functionCompilationPermissions`): `function-permission-level` on a
+    /// dedicated server, game master (2) otherwise. Whoever runs a function,
+    /// its commands need no more than this.
+    fn command_level(&self) -> u8 {
+        self.permission.unwrap_or(2)
+    }
 }
 
 impl Game<'_> {
@@ -278,6 +290,7 @@ impl Game<'_> {
         }
         self.exec.function_depth += 1;
         let outer = self.exec.returned.take();
+        let level = std::mem::replace(&mut self.ui.registries.permission, self.fns.command_level());
         let inner = Source {
             silent: true,
             store: None,
@@ -292,6 +305,7 @@ impl Game<'_> {
                 break;
             }
         }
+        self.ui.registries.permission = level;
         let returned = std::mem::replace(&mut self.exec.returned, outer);
         self.exec.function_depth -= 1;
         Ok(match returned {
@@ -572,6 +586,75 @@ impl Game<'_> {
             .chain(self.fns.enabled.iter().cloned())
             .collect()
     }
+    /// `FileUtil.isPathPartPortable`: no trailing dot and no Windows device
+    /// name (CON, PRN, AUX, NUL, COM and LPT with a digit from 1 to 9).
+    fn is_portable_name(name: &str) -> bool {
+        let stem = name.split('.').next().unwrap_or_default();
+        let device = match stem.len() {
+            3 => matches!(stem, "com" | "con" | "prn" | "aux" | "nul"),
+            4 => matches!(&stem[..3], "com" | "lpt") && matches!(stem.as_bytes()[3], b'1'..=b'9'),
+            _ => false,
+        };
+        !device && !name.ends_with('.')
+    }
+    /// `DataPackCommand.createPack`: a pack folder with its `data` folder and a
+    /// `pack.mcmeta` in the world's datapacks folder.
+    fn create_pack(&mut self, ctx: &Context) -> R<i32> {
+        let id = match ctx.get("id") {
+            Some(Arg::Str(s)) => s.clone(),
+            _ => String::new(),
+        };
+        let description = self.component_arg(ctx, "description")?;
+        // FileUtil.isValidPathSegment: lowercase letters, digits, '-', '.' and '_'.
+        let valid = !id.is_empty()
+            && id != "."
+            && id != ".."
+            && id
+                .chars()
+                .all(|c| matches!(c, 'a'..='z' | '0'..='9' | '-' | '.' | '_'));
+        if !valid {
+            return Err(err("commands.datapack.create.invalid_name", &[&id]));
+        }
+        if !Self::is_portable_name(&id) {
+            return Err(err("commands.datapack.create.invalid_full_name", &[&id]));
+        }
+        // Without a world there is no datapacks folder to write to.
+        if self.world_root.as_os_str().is_empty() {
+            return Err(err("commands.datapack.create.io_failure", &[&id]));
+        }
+        let datapacks = self.world_root.join("datapacks");
+        let pack = datapacks.join(&id);
+        if pack.exists() {
+            return Err(err("commands.datapack.create.already_exists", &[&id]));
+        }
+        // The data pack version (SharedConstants), written as a bare major
+        // number for both bounds, as vanilla does.
+        let pack_format = horizon_core::version::DATA_PACK_FORMAT.0;
+        let mcmeta = serde_json::json!({
+            "pack": {
+                "description": description.component(),
+                "min_format": pack_format,
+                "max_format": pack_format,
+            }
+        });
+        let written = std::fs::create_dir_all(&datapacks)
+            .and_then(|()| std::fs::create_dir(&pack))
+            .and_then(|()| std::fs::create_dir(pack.join("data")))
+            .and_then(|()| {
+                std::fs::write(
+                    pack.join("pack.mcmeta"),
+                    serde_json::to_string_pretty(&mcmeta).unwrap_or_default(),
+                )
+            });
+        if written.is_err() {
+            return Err(err("commands.datapack.create.io_failure", &[&id]));
+        }
+        self.feedback(Text::translate(
+            "commands.datapack.create.success",
+            &[Text::literal(id)],
+        ));
+        Ok(1)
+    }
     pub(super) fn cmd_datapack(&mut self, id: &str, ctx: &Context) -> R<i32> {
         self.ensure_datapacks();
         let name = match ctx.get("name") {
@@ -590,6 +673,7 @@ impl Game<'_> {
                 || g.fns.packs.iter().any(|p| p.id == n)
         };
         match id {
+            "datapack.create" => self.create_pack(ctx),
             "datapack.list" => {
                 let want_enabled = ctx.has("enabled") || (!ctx.has("available"));
                 let want_available = ctx.has("available") || (!ctx.has("enabled"));

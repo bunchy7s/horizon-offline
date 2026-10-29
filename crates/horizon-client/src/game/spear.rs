@@ -47,7 +47,7 @@ impl Game<'_> {
     /// in the last tick. A guest's comes with their moves. A rider's is its
     /// mount's move (`getKnownSpeed`: the vehicle's, or the move the driver's
     /// client sent for it), so a charge on horseback carries the horse's speed.
-    fn known_player_movement(&self) -> Vec3 {
+    pub(super) fn known_player_movement(&self) -> Vec3 {
         if let Some(i) = self
             .riding
             .and_then(|v| self.mobs.iter().position(|m| m.id == v))
@@ -99,36 +99,16 @@ impl Game<'_> {
         .flatten()
     }
 
-    /// `ProjectileUtil.getHitEntitiesAlong` for the mobs: those whose box the
-    /// segment `from`..`to` meets, or comes within the margin of with no
-    /// block between.
-    fn mobs_along(&self, from: Vec3, to: Vec3, margin: f64) -> Vec<usize> {
-        let grow = Vec3::new(margin, margin, margin);
-        let mut hits = Vec::new();
-        for (i, m) in self.mobs.iter().enumerate() {
-            // PiercingWeapon.canHitEntity: alive, and not the vehicle ridden.
-            if !m.alive() || m.removed || self.riding == Some(m.id) {
-                continue;
-            }
-            let bounds: Aabb = m.bounds();
-            let hit = bounds.contains(from)
-                || bounds.clip(from, to).is_some()
-                || (margin > 0.0
-                    && bounds.inflate(grow).clip(from, to).is_some_and(|outside| {
-                        let centre = bounds.center();
-                        let toward = self.clip_collider(outside, centre).unwrap_or(centre);
-                        bounds.clip(outside, toward).is_some()
-                    }));
-            if hit {
-                hits.push(i);
-            }
-        }
-        hits
+    /// The boxes of the mobs a spear can hit: alive, and not the vehicle
+    /// ridden (`PiercingWeapon.canHitEntity`), with their index.
+    pub(super) fn hittable_mob_boxes(&self) -> Vec<(usize, Aabb)> {
+        (self.mobs.iter().enumerate())
+            .filter(|(_, m)| m.alive() && !m.removed && self.riding != Some(m.id))
+            .map(|(i, m)| (i, m.bounds()))
+            .collect()
     }
 
-    /// `ProjectileUtil.getHitEntitiesAlong` with the spear's `AttackRange`: the
-    /// mobs along the view from the minimum reach to the maximum plus the
-    /// attacker's own movement, none when a block is closer than the minimum.
+    /// `ProjectileUtil.getHitEntitiesAlong` with the spear's `AttackRange`.
     fn stab_targets(&self, eye: Vec3, look: Vec3, movement: Vec3) -> Vec<usize> {
         // AttackRange.effectiveMinRange and effectiveMaxRange for a player.
         let (min, max) = if self.creative {
@@ -136,16 +116,13 @@ impl Game<'_> {
         } else {
             (REACH.min, REACH.max)
         };
-        let from = eye.add_vector(look.scale(f64::from(min)));
-        let mut to = eye.add_vector(look.scale(f64::from(max) + movement.dot(look).max(0.0)));
-        // A block closer than the minimum reach takes the whole stab.
-        if let Some(block) = self.clip_collider(eye, to) {
-            to = block;
-            if eye.distance_squared(to) < eye.distance_squared(from) {
-                return Vec::new();
-            }
-        }
-        self.mobs_along(from, to, f64::from(REACH.hitbox_margin))
+        let reach = (min, max, REACH.hitbox_margin);
+        let clip = |from, to| self.clip_collider(from, to);
+        let boxes = self.hittable_mob_boxes();
+        hits_in_reach(&boxes, eye, look, movement, reach, clip)
+            .into_iter()
+            .map(|(i, _)| i)
+            .collect()
     }
 
     /// `KineticWeapon.damageEntities`: one tick of the spear in use, `ticks`
@@ -410,4 +387,61 @@ impl Game<'_> {
             self.kinetic_hit_feedback(if own { OWN } else { id }, &kinetic, [at.x, at.y, at.z]);
         }
     }
+}
+
+/// `ProjectileUtil.getManyEntityHitResult` over `boxes`: those the segment
+/// `from`..`to` meets, or comes within the margin of with no block between
+/// (`clip`: where a segment first meets a block), each with where it is hit.
+fn hits_along(
+    boxes: &[(usize, Aabb)],
+    from: Vec3,
+    to: Vec3,
+    margin: f64,
+    clip: &impl Fn(Vec3, Vec3) -> Option<Vec3>,
+) -> Vec<(usize, Vec3)> {
+    let grow = Vec3::new(margin, margin, margin);
+    let mut hits = Vec::new();
+    for &(i, bounds) in boxes {
+        let hit = if bounds.contains(from) {
+            Some(from)
+        } else if let Some(at) = bounds.clip(from, to) {
+            Some(at)
+        } else if margin > 0.0 {
+            bounds.inflate(grow).clip(from, to).and_then(|outside| {
+                let centre = bounds.center();
+                let toward = clip(outside, centre).unwrap_or(centre);
+                bounds.clip(outside, toward)
+            })
+        } else {
+            None
+        };
+        if let Some(at) = hit {
+            hits.push((i, at));
+        }
+    }
+    hits
+}
+
+/// `ProjectileUtil.getHitEntitiesAlong` with an `AttackRange` of `reach` (its
+/// effective min and max range and hitbox margin): the boxes along `look`
+/// from the minimum reach to the maximum plus the attacker's own movement,
+/// none when a block (`clip`) is closer than the minimum.
+pub(super) fn hits_in_reach(
+    boxes: &[(usize, Aabb)],
+    eye: Vec3,
+    look: Vec3,
+    movement: Vec3,
+    (min, max, margin): (f32, f32, f32),
+    clip: impl Fn(Vec3, Vec3) -> Option<Vec3>,
+) -> Vec<(usize, Vec3)> {
+    let from = eye.add_vector(look.scale(f64::from(min)));
+    let mut to = eye.add_vector(look.scale(f64::from(max) + movement.dot(look).max(0.0)));
+    // A block closer than the minimum reach takes the whole stab.
+    if let Some(block) = clip(eye, to) {
+        to = block;
+        if eye.distance_squared(to) < eye.distance_squared(from) {
+            return Vec::new();
+        }
+    }
+    hits_along(boxes, from, to, f64::from(margin), &clip)
 }

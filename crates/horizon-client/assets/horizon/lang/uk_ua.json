@@ -1,0 +1,15 @@
+{
+  "horizon.options.controller": "Геймпад",
+  "horizon.options.vibration": "Вібрація",
+  "horizon.options.adaptive_triggers": "Адаптивні тригери",
+  "horizon.options.lightbar": "Світлова панель",
+  "horizon.options.look_sensitivity": "Чутливість огляду",
+  "horizon.options.invert_x": "Інвертувати огляд по X",
+  "horizon.options.invert_y": "Інвертувати огляд по Y",
+  "horizon.options.sneak_button": "Кнопка присідання",
+  "horizon.options.move_deadzone": "Мертва зона руху",
+  "horizon.options.look_deadzone": "Мертва зона огляду",
+  "horizon.options.button_glyphs": "Значки кнопок",
+  "horizon.options.menu_navigation": "Навігація в меню",
+  "horizon.options.on_screen_keyboard": "Екранна клавіатура"
+}

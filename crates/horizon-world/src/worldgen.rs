@@ -51,6 +51,7 @@ pub mod material_extensions;
 pub mod material_stage;
 pub mod material_surface;
 pub mod ore_feature;
+pub mod overrides;
 pub mod placement;
 pub mod projected;
 pub mod replace_blobs;

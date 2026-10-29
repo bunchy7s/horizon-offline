@@ -18,7 +18,10 @@ const FIREWORK_ROCKET: &str = "minecraft:firework_rocket";
 
 /// `ProjectileWeaponItem.ARROW_ONLY`, for the arrows Horizon shoots.
 fn is_arrow(stack: &ItemStack) -> bool {
-    &*stack.item == "minecraft:arrow"
+    matches!(
+        &*stack.item,
+        "minecraft:arrow" | "minecraft:spectral_arrow" | "minecraft:tipped_arrow"
+    )
 }
 
 /// `Player.getProjectile`: what `weapon` supports in the off hand, then in
@@ -203,13 +206,17 @@ impl Game<'_> {
                     power,
                     1.0,
                 );
-                self.launch_angled_rocket(at, shot.velocity, ammo);
+                self.launch_angled_rocket(at, shot.velocity, ammo, Some(Who::Player));
             }
             if !rocket {
+                let effect = super::dispenser::tipped_effect(ammo).or_else(|| {
+                    (&*ammo.item == "minecraft:spectral_arrow")
+                        .then_some(("minecraft:glowing", 200))
+                });
                 let kind = ProjectileKind::Arrow {
                     base_damage: 2.0,
                     critical: true,
-                    effect: None,
+                    effect,
                 };
                 let mut arrow = Projectile::new(
                     kind,
@@ -277,5 +284,17 @@ mod tests {
         // The main hand's rocket, with the crossbow in the off hand.
         let hands = [(OFFHAND_SLOT, crossbow.as_ref()), (3, rocket.as_ref())];
         assert_eq!(projectile_slot(CROSSBOW, hands, &inventory), Some(3));
+
+        // Spectral and tipped arrows in off hand or inventory are recognized.
+        let spectral = stack("minecraft:spectral_arrow");
+        let tipped = stack("minecraft:tipped_arrow");
+        inventory[7] = spectral.clone();
+        assert_eq!(slot("minecraft:bow", &None, &inventory), Some(7));
+        assert_eq!(
+            slot("minecraft:bow", &tipped, &inventory),
+            Some(OFFHAND_SLOT)
+        );
+        inventory[7] = None;
+        assert_eq!(slot("minecraft:bow", &None, &inventory), None);
     }
 }

@@ -83,6 +83,12 @@ impl Fetched {
     }
 }
 
+/// A file name from a pack's index that stays inside `jars/`: one plain part, with no separator
+/// of any platform, no drive and not `.` or `..`.
+fn plain_file_name(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', ':', '\0'])
+}
+
 /// The jars of the records `want` picks that the work folder lacks.
 pub fn fetch(
     work: &Path,
@@ -110,6 +116,13 @@ pub fn fetch(
             how,
             detail,
         };
+        if !plain_file_name(name) {
+            // A name like `..\..\x.dll` or `C:\x` would write outside jars/ on Windows.
+            let o = outcome(How::Failed, format!("{name:?} is not a plain file name"));
+            log(format!("{}: {} ({})", o.key, o.how.label(), o.detail));
+            fetched.files.push(o);
+            continue;
+        }
         let dest = jars.join(name);
         let sha1 = file.sha1.as_deref();
         let o = if r.jar.is_some() || matches(&dest, sha1) {
@@ -298,6 +311,14 @@ pub fn curseforge_names(instance: &Value) -> HashMap<(u64, u64), String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_pack_index_name_must_stay_inside_jars() {
+        assert!(plain_file_name("sodium-0.6.jar"));
+        for name in ["", ".", "..", "..\\..\\evil.dll", "C:evil.jar", "a/b.jar"] {
+            assert!(!plain_file_name(name), "{name:?}");
+        }
+    }
 
     fn file(sha1: Option<&str>, downloads: &[&str]) -> PackFile {
         PackFile {

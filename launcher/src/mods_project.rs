@@ -419,12 +419,7 @@ impl Launcher {
         let icon = self.mods_icon(&p, 72.);
         let busy = self.mods.busy.as_ref().map(|b| b.0.clone());
         let installed = self.mods.entry(&p).is_some();
-        let checking = matches!(
-            self.mods.checks.get(&(p.source, p.id.clone())),
-            None | Some(Checking::Running)
-        ) && p.kind == PackKind::Mod
-            && p.source != SourceId::Horizon
-            && p.support().installable();
+        let checking = self.mods.checking(&p);
         let mut action = div().flex().items_center().gap(px(8.)).child(
             caps(if checking {
                 "Checking"

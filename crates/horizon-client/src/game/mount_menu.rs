@@ -1,7 +1,9 @@
 //! The horse inventory (`HorseInventoryMenu`, `HorseInventoryScreen`): the
-//! saddle and body armour slots (a llama's carpet), the chest of donkeys,
-//! mules and llamas and the mount drawn following the cursor. It opens with
-//! E while riding a tamed mount or with shift + use on a tamed one. On a
+//! saddle and body armour slots (a llama's carpet, a nautilus's armour), the
+//! chest of donkeys, mules and llamas and the mount drawn following the
+//! cursor. A nautilus has the same two slots and no chest
+//! (`NautilusInventoryMenu`). It opens with E while riding a tamed mount or
+//! with shift + use on a tamed one. On a
 //! server the screen shows the server's menu (`ClientboundMountScreenOpenPacket`)
 //! and its clicks go out as container clicks; a server's players get theirs
 //! from game/lan_mount_menu.rs.
@@ -9,7 +11,7 @@ use super::{Game, Screen};
 use horizon_client::{
     hud::{HudBatch, rgba},
     items::ItemStack,
-    mobs::{Mob, Species, equine, llama},
+    mobs::{Mob, Species, equine, llama, nautilus},
 };
 
 /// Menu slot ids: the saddle, the body armour and the chest from 710.
@@ -32,18 +34,18 @@ pub(super) fn mount_columns(m: &Mob) -> usize {
         0
     }
 }
-/// Whether the mount has a horse inventory (`AbstractHorse`).
+/// Whether the mount has a horse inventory (`AbstractHorse`, `AbstractNautilus`).
 pub(super) fn has_mount_menu(species: Species) -> bool {
-    equine::is_equine(species) || llama::is_llama(species)
+    equine::is_equine(species) || llama::is_llama(species) || nautilus::is_nautilus(species)
 }
 /// The saddle slot is active (`canUseSlot(SADDLE)` and `CAN_EQUIP_SADDLE`):
 /// not on llamas.
 fn shows_saddle(species: Species) -> bool {
     !llama::is_llama(species)
 }
-/// The body slot is active: horse armour, or a llama's carpet.
+/// The body slot is active: horse armour, a llama's carpet, or nautilus armour.
 fn shows_body(species: Species) -> bool {
-    can_wear_horse_armor(species) || llama::is_llama(species)
+    can_wear_horse_armor(species) || llama::is_llama(species) || nautilus::is_nautilus(species)
 }
 
 /// The open mount menu: copies of the mount's slots, written back on every change.
@@ -77,6 +79,10 @@ fn can_wear_horse_armor(species: Species) -> bool {
 fn body_armor_fits(species: Species, item: &str) -> bool {
     if llama::is_llama(species) {
         return item.ends_with("_carpet");
+    }
+    // EntityTypeTags.CAN_WEAR_NAUTILUS_ARMOR: the nautilus armours.
+    if nautilus::is_nautilus(species) {
+        return item.ends_with("_nautilus_armor");
     }
     can_wear_horse_armor(species) && item.ends_with("_horse_armor")
 }
@@ -262,20 +268,26 @@ impl Game<'_> {
     ) {
         let m = &self.mobs[index];
         let at = m.center();
-        let put_on = if saddle.is_some() && !m.extra.saddled {
+        let saddle_put_on = saddle.is_some() && !m.extra.saddled;
+        let put_on = if saddle_put_on {
             saddle.as_ref()
         } else {
             body.as_ref()
                 .and_then(Option::as_ref)
                 .filter(|_| m.extra.head.is_none())
         };
-        let sound = put_on.map(|s| {
-            self.res
-                .items()
-                .get(&s.item)
-                .and_then(|i| i.equip_sound.clone())
-                .unwrap_or_else(|| "minecraft:item.armor.equip_generic".into())
-        });
+        let sound = if saddle_put_on && nautilus::is_nautilus(m.species()) {
+            // AbstractNautilus.getEquipSound: its own saddle sounds.
+            Some(format!("minecraft:{}", nautilus::saddle_sound(m)))
+        } else {
+            put_on.map(|s| {
+                self.res
+                    .items()
+                    .get(&s.item)
+                    .and_then(|i| i.equip_sound.clone())
+                    .unwrap_or_else(|| "minecraft:item.armor.equip_generic".into())
+            })
+        };
         let m = &mut self.mobs[index];
         m.set_saddle(saddle);
         if let Some(body) = body {
@@ -420,13 +432,13 @@ impl Game<'_> {
             return;
         };
         let atlas = &self.gui.atlas;
-        batch.sprite_region(
-            atlas,
-            "gui/container/horse",
-            [ox, oy, 176.0, 166.0],
-            256.0,
-            256.0,
-        );
+        // NautilusInventoryScreen draws its own background.
+        let background = if nautilus::is_nautilus(open.species) {
+            "gui/container/nautilus"
+        } else {
+            "gui/container/horse"
+        };
+        batch.sprite_region(atlas, background, [ox, oy, 176.0, 166.0], 256.0, 256.0);
         if open.columns > 0 {
             batch.sprite_region(
                 atlas,
@@ -452,6 +464,8 @@ impl Game<'_> {
             if open.armor.is_none() {
                 let sprite = if llama::is_llama(open.species) {
                     "gui/sprites/container/slot/llama_armor"
+                } else if nautilus::is_nautilus(open.species) {
+                    "gui/sprites/container/slot/nautilus_armor_inventory"
                 } else {
                     "gui/sprites/container/slot/horse_armor"
                 };

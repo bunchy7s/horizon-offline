@@ -10,7 +10,11 @@ use horizon_client::{
     mobs::{Damage, Mob, Species},
     particles::{ParticleOptions, ParticleType},
 };
-use horizon_core::{geometry::Vec3, position::BlockPos, random::RandomSource};
+use horizon_core::{
+    geometry::{Aabb, Vec3},
+    position::BlockPos,
+    random::RandomSource,
+};
 use horizon_world::registry::BlockStateId;
 
 /// `MaceItem.SMASH_ATTACK_FALL_THRESHOLD`.
@@ -38,6 +42,22 @@ pub(super) fn ally_of_player(m: &Mob, player: Option<[i32; 4]>) -> bool {
         || m.species() == Species::Allay && m.extra.tame
 }
 
+/// The entity a sweep leaves out: the one the attack hit (`target` of
+/// `Player.doSweepAttack`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Spared {
+    Nothing,
+    Mob(u32),
+    Stand(u32),
+    /// A player of the open world, by entity id.
+    Player(i32),
+}
+
+/// `Player.doSweepAttack`'s `1 + ratio * f`, where `f` is the attack damage
+/// after `baseDamageScaleFactor` (0.2 + strength^2 * 0.8).
+fn sweep_base_damage(ratio: f32, attack_damage: f32, scale: f32) -> f32 {
+    1.0 + ratio * attack_damage * (0.2 + scale * scale * 0.8)
+}
 /// A smash's knockback on the players, put off while a guest's turn holds
 /// the other players.
 pub(super) struct SmashPush {
@@ -209,7 +229,7 @@ impl Game<'_> {
             && max > 0
             && !self.creative
         {
-            let loss = self.durability_loss(stack, per_attack);
+            let loss = self.wear(stack, per_attack);
             let cell = self.held_mut();
             if let Some(held) = cell.as_mut() {
                 held.damage += loss;
@@ -340,6 +360,136 @@ impl Game<'_> {
             resistance,
         );
     }
+    /// `Player.doSweepAttack`'s victims: every other living mob and every
+    /// armor stand (but a marker one) in `target`'s box inflated by
+    /// (1, 0.25, 1) and under three blocks from the player takes
+    /// `getEnchantedDamage(1 + sweeping ratio * attack damage) * strength`,
+    /// knocked back 0.4 along the player's yaw. The player's allies and the
+    /// target (`spared`) are spared.
+    pub(super) fn sweep_damage(&mut self, target: Aabb, spared: Spared, scale: f32) {
+        let Some(player) = self.player.as_ref() else {
+            return;
+        };
+        let from = [player.position.x, player.position.y, player.position.z];
+        let area = target.inflate(Vec3::new(1.0, 0.25, 1.0));
+        let near = |at: Vec3| {
+            (0..3)
+                .map(|a| [at.x, at.y, at.z][a] - from[a])
+                .map(|d| d * d)
+                .sum::<f64>()
+                < 9.0
+        };
+        // The enchantment's `sweeping_damage_ratio` attribute modifier (level /
+        // (level + 1)) on the attribute's 0 to 1 range.
+        let ratio = self
+            .res
+            .stations()
+            .enchantments
+            .attribute_add(
+                self.inventory[self.selected].as_ref(),
+                "minecraft:sweeping_damage_ratio",
+            )
+            .clamp(0.0, 1.0) as f32;
+        // `f` of doSweepAttack: the attack damage attribute after
+        // baseDamageScaleFactor (a sweep is never a smash or a critical hit).
+        let spin = self.player.as_ref().map_or(0.0, |p| p.auto_spin_attack_dmg);
+        let attribute = if spin > 0.0 {
+            spin
+        } else {
+            1.0 + self.attack_item_info().map_or(0.0, |i| i.attack_damage)
+                + self.effect_attack_bonus()
+        };
+        let base = sweep_base_damage(ratio, attribute, scale);
+        let (xd, zd) = self.extra_knockback_direction();
+        let uuid = self.level.player_uuid.or(Some([0, 0, 0, 1]));
+        let allies = self.player_allies();
+        // getEntitiesOfClass walks the entity sections (x, then z, then y)
+        // under the box, each in the order its entities were added.
+        let section = |at: Vec3| {
+            (
+                (at.x.floor() as i32) >> 4,
+                (at.z.floor() as i32) >> 4,
+                (at.y.floor() as i32) >> 4,
+            )
+        };
+        let mut victims: Vec<((i32, i32, i32), u32, bool)> = Vec::new();
+        for m in &self.mobs {
+            if spared != Spared::Mob(m.id)
+                && m.alive()
+                && !m.removed
+                && !allies.contains(&m.id)
+                && !ally_of_player(m, uuid)
+                && m.bounds().intersects(area)
+                && near(m.position)
+            {
+                victims.push((section(m.position), m.id, false));
+            }
+        }
+        for s in &self.armor_stands {
+            if !s.marker
+                && spared != Spared::Stand(s.id)
+                && s.bounds().intersects(area)
+                && near(s.position)
+            {
+                victims.push((section(s.position), s.id, true));
+            }
+        }
+        victims.sort_by_key(|&(key, id, _)| (key, id));
+        for (_, id, is_stand) in victims {
+            if is_stand {
+                let Some(i) = self.armor_stands.iter().position(|s| s.id == id) else {
+                    continue;
+                };
+                // knockback(0.4, ..) follows a hurtServer that landed, on a
+                // stand that is still there (LivingEntity.knockback).
+                if !self.punch_armor_stand(i) {
+                    continue;
+                }
+                let (mut kx, mut kz) = (xd, zd);
+                while kx * kx + kz * kz < f64::from(1.0e-5_f32) {
+                    let r = &mut self.world.random;
+                    kx = (r.next_double() - r.next_double()) * 0.01;
+                    kz = (r.next_double() - r.next_double()) * 0.01;
+                }
+                let len = (kx * kx + kz * kz).sqrt();
+                if let Some(s) = self.armor_stands.iter_mut().find(|s| s.id == id) {
+                    s.velocity = Vec3::new(
+                        s.velocity.x / 2.0 - kx / len * 0.4,
+                        if s.on_ground {
+                            (s.velocity.y / 2.0 + 0.4).min(0.4)
+                        } else {
+                            s.velocity.y
+                        },
+                        s.velocity.z / 2.0 - kz / len * 0.4,
+                    );
+                }
+                continue;
+            }
+            let Some(i) = self.mobs.iter().position(|m| m.id == id) else {
+                continue;
+            };
+            let kind = self.mobs[i].kind.id.clone();
+            let kind = format!("minecraft:{}", kind.trim_start_matches("minecraft:"));
+            let amount = self.enchanted_damage(&kind, base) * scale;
+            let source = self.attack_source(from);
+            // hurtServer first; the knockback and post-attack effects follow
+            // only when it landed.
+            if self.hurt_by_player(i, amount, source) {
+                self.mobs[i].knockback(0.4, xd, zd);
+                self.last_hurt_by_player
+                    .insert(self.mobs[i].id, self.lan_acting);
+                self.post_attack(i);
+            }
+        }
+        // `getEntitiesOfClass(LivingEntity.class)` takes the other players too.
+        let mut sweep = self.player_sweep(base, scale);
+        sweep.hit_box = area;
+        sweep.skip = match spared {
+            Spared::Player(id) => Some(id),
+            _ => None,
+        };
+        self.sweep_other_players(sweep);
+    }
     /// `ServerPlayer.checkFallDamage` after a smash on a grounded target:
     /// the landing block's particles, 50 for every block fallen (200 at most).
     pub(super) fn smash_landing_particles(
@@ -407,5 +557,21 @@ impl Game<'_> {
             self.particles.add(&options, [x, center[1], z], v);
             i += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sweep_damage_is_one_without_the_enchantment() {
+        // A fully charged diamond sword (8 attack damage): neighbours take 1.
+        assert_eq!(sweep_base_damage(0.0, 8.0, 1.0), 1.0);
+        // Sweeping Edge III adds the ratio of the (charged) attack damage.
+        assert_eq!(sweep_base_damage(0.75, 8.0, 1.0), 7.0);
+        // baseDamageScaleFactor at 0.95 strength.
+        let scaled = sweep_base_damage(0.5, 8.0, 0.95);
+        assert!((scaled - (1.0 + 0.5 * 8.0 * (0.2 + 0.95 * 0.95 * 0.8))).abs() < 1e-6);
     }
 }

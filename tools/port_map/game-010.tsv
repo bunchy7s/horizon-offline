@@ -1,0 +1,131 @@
+MemoryMap.equals	skip:java		map equality of a built memory set
+MemoryMap.iterator	skip:java		iteration over a built memory set, used for the brain's debug and save output
+MemoryModuleType.register	skip:data		registry of memory types; Horizon declares each memory as a field of the brain's Memories struct
+MemorySlot.set	port	crates/horizon-client/src/mobs/villager_brain.rs::Slot::set	Slot::set and set_ttl store the value with the time to live (NEVER when none)
+MemorySlot.toString	skip:debug		text for the brain debug dump
+MemorySlot.visit	skip:debug		Brain.Visitor feeds the debug screen only
+NearestVisibleLivingEntities.findAll	inline	crates/horizon-client/src/mobs/villager_brain.rs::sense_babies	walks the visible list with the cached line-of-sight test; only the villager babies sensor needs the whole list here
+NearestVisibleLivingEntities.find	skip:java		Stream view of findAll, no caller in the game code
+AmphibiousPathNavigation.createPathFinder	inline	crates/horizon-client/src/mobs/nav.rs::Navigation::evaluator	NavKind::Amphibious picks Evaluator::Amphibious (prefers_shallow false)
+AmphibiousPathNavigation.getTempMobPos	port	crates/horizon-client/src/mobs/nav.rs::Mob::temp_mob_pos	x, half the height up, z
+AmphibiousPathNavigation.canMoveDirectly	port	crates/horizon-client/src/mobs/nav.rs::Mob::can_move_directly	only while in liquid, clear to the target without fluid blocking
+AmphibiousPathNavigation.isStableDestination	inline	crates/horizon-client/src/mobs/nav.rs::Mob::stable_destination	Amphibious arm: the block below is not air
+FlyingPathNavigation.createPathFinder	inline	crates/horizon-client/src/mobs/nav.rs::Navigation::evaluator	NavKind::Flying picks Evaluator::Fly
+FlyingPathNavigation.canUpdatePath	port	crates/horizon-client/src/mobs/nav.rs::Mob::can_update_path	gap: minor: always true, vanilla is false for a flier that rides something
+GroundPathNavigation.createPathFinder	inline	crates/horizon-client/src/mobs/nav.rs::Navigation::evaluator	NavKind::Ground picks Evaluator::Walk
+GroundPathNavigation.canUpdatePath	port	crates/horizon-client/src/mobs/nav.rs::Mob::can_update_path	gap: minor: on ground or in liquid, the isPassenger case is missing
+GroundPathNavigation.getTempMobPos	port	crates/horizon-client/src/mobs/nav.rs::Mob::temp_mob_pos	x, surface_y, z
+GroundPathNavigation.createPath	port	crates/horizon-client/src/mobs/nav.rs::Mob::create_path_to	unloaded chunk gives no path, then the surface search (surface_position) unless below_surface
+GroundPathNavigation.getSurfaceY	port	crates/horizon-client/src/mobs/nav.rs::Mob::surface_y	floats up through water up to 16 blocks when the mob can float, else floor(y + 0.5)
+GroundPathNavigation.trimPath	missing		player: avoid_sun is set by the skeleton's RestrictSun goal but nothing truncates the path at the first sunlit node, so skeletons chasing you by day walk out into the sun instead of stopping in the shade
+PathNavigation.getGroundY	inline	crates/horizon-client/src/mobs/nav.rs::Mob::nav_tick	target y is the floor level under the node unless the block below is air
+PathNavigation.shouldTargetNextNodeInDirection	port	crates/horizon-client/src/mobs/nav.rs::Mob::should_target_next_node	
+PathNavigation.trimPath	missing		minor: path nodes on a cauldron are not raised one block, so a route ending on a cauldron (leatherworker job site) aims into the block
+PathNavigation.isClearForMovementBetween	port	crates/horizon-client/src/mobs/world.rs::MobWorld::clear_between	collider clip from start to the target raised by half the height, optionally stopped by fluids
+PathNavigation.shouldRecomputePath	missing		player: nothing asks a mob to re-path when a block changes near its route (recompute_path is only reached after its own delay flag), so a mob keeps walking an old path into a wall you just placed or past one you removed
+WallClimberNavigation.createPath	port	crates/horizon-client/src/mobs/nav.rs::Mob::create_path_to	WallClimber kind remembers climb_to before the ground path
+WallClimberNavigation.tick	inline	crates/horizon-client/src/mobs/nav.rs::Mob::nav_tick	WallClimber branch: with no path it keeps steering at climb_to until within the body width
+WaterBoundPathNavigation.createPathFinder	inline	crates/horizon-client/src/mobs/nav.rs::Navigation::evaluator	Evaluator::Swim with breach for the dolphin; can_pass_doors stays true (minor)
+WaterBoundPathNavigation.canUpdatePath	port	crates/horizon-client/src/mobs/nav.rs::Mob::can_update_path	breach (dolphin) or in liquid
+WaterBoundPathNavigation.getTempMobPos	port	crates/horizon-client/src/mobs/nav.rs::Mob::temp_mob_pos	x, half the height up, z
+AdultSensor.doTick	inline	crates/horizon-client/src/mobs/animal_brain.rs::tick_sensors	gap: player: Sensor::AdultSameType arm (axolotl only); goats, camels, hoglins and farm animals follow parents through FollowParent goals, but baby armadillos have no follow-the-adult behaviour
+AdultSensor.setNearestVisibleAdult	inline	crates/horizon-client/src/mobs/animal_brain.rs::tick_sensors	closest visible adult of the same species into nearest_visible_adult
+AdultSensorAnyType.setNearestVisibleAdult	port	crates/horizon-client/src/mobs/animal_brain.rs::sense_adult	closest visible adult of a #followable_friendly_mobs species (happy ghast)
+AxolotlAttackablesSensor.isMatchingEntity	port	crates/horizon-client/src/mobs/animal_brain.rs::sense_axolotl_attackables	within 8 blocks, in water, always-hostile or hunt target tag, alive and not playing dead
+AxolotlAttackablesSensor.isHuntTarget	inline	crates/horizon-client/src/mobs/animal_brain.rs::sense_axolotl_attackables	hunt target tag only while there is no hunting cooldown
+BreezeAttackEntitySensor.doTick	port	crates/horizon-client/src/mobs/monster_brain.rs::sense_breeze_attack	nearest living entity that is not a creative or spectator player and is attackable
+FrogAttackablesSensor.isMatchingEntity	port	crates/horizon-client/src/mobs/frog.rs::server_ai_step	every 20 ticks: nearest size-1 slime or magma cube within 10 blocks in line of sight
+FrogAttackablesSensor.isUnreachableAttackTarget	inline	crates/horizon-client/src/mobs/frog.rs::server_ai_step	skips ids in the unreachable list (up to five, 100 ticks each)
+GolemSensor.checkForNearbyGolem	port	crates/horizon-client/src/mobs/villager_brain.rs::sense_golem	an iron golem in the nearby list sets golem_detected_recently for 599 ticks
+HoglinSpecificSensor.doTick	inline	crates/horizon-client/src/mobs/piglin.rs::hoglin_repellent	gap: player: only the repellent scan is kept; adult piglin and adult hoglin counts are not sensed, so adult hoglins do not keep 8 blocks from adult piglins and do not flee them when outnumbered
+HurtBySensor.doTick	port	crates/horizon-client/src/mobs/villager_brain.rs::sense_hurt	last damage source forgotten after 40 ticks, attacker kept while alive
+IsInWaterSensor.doTick	inline	crates/horizon-client/src/mobs/frog.rs::Croak::can_use	no IS_IN_WATER memory; frog goals read fluids.in_water directly
+MobSensor.doTick	inline	crates/horizon-client/src/mobs/armadillo.rs::server_ai_step	armadillo scare sensor every fifth tick: cannot stay rolled up clears the danger, else scan
+MobSensor.checkForMobsNearby	port	crates/horizon-client/src/mobs/armadillo.rs::scared_by_someone	undead, last attacker or a sprinting or riding player within 7 by 2 blocks
+MobSensor.mobDetected	inline	crates/horizon-client/src/mobs/armadillo.rs::server_ai_step	danger = 80 ticks
+NearestBedSensor.doTick	port	crates/horizon-client/src/mobs/villager_brain.rs::sense_bed	babies only, at most four new beds per scan, 40 tick cache, path must reach the bed
+NearestItemSensor.doTick	port	crates/horizon-client/src/game/piglins.rs::Game::piglin_pickups	gap: player: villagers never walk to dropped food or seeds (only what lands within a block is picked up) and piglins and allays scan their own items without the line-of-sight test
+NearestLivingEntitySensor.doTick	port	crates/horizon-client/src/mobs/brain.rs::living_near	alive entities within the follow range box, nearest first, stored with a fresh visible list
+NearestVisibleLivingEntitySensor.getNearestEntity	inline	crates/horizon-client/src/mobs/animal_brain.rs::sense_axolotl_attackables	find_closest over the visible list with the sensor's own test
+PiglinBruteSpecificSensor.doTick	inline	crates/horizon-client/src/mobs/piglin.rs::register_brute	gap: minor: nemesis is a NearestTarget on wither skeletons only, the wither boss is not one; alerting nearby adult piglins is HurtByTarget alert
+PiglinSpecificSensor.requires	skip:java		declares which memories the sensor fills
+PiglinSpecificSensor.doTick	inline	crates/horizon-client/src/mobs/piglin.rs::ai_step	gap: minor: only the repellent scan (every 20 ticks) is a sensor; nemesis, baby hoglin or piglin, player holding gold and adult counts are not remembered, so piglins do not attack wither skeletons or look at a player holding gold from 14 blocks
+PiglinSpecificSensor.isValidRepellent	port	crates/horizon-client/src/mobs/piglin.rs::find_piglin_repellent	#piglin_repellents, a soul campfire only while lit
+PlayerSensor.doTick	port	crates/horizon-client/src/mobs/villager_brain.rs::sense_players	gap: minor: one player only, no other players of a shared level
+SecondaryPoiSensor.doTick	port	crates/horizon-client/src/mobs/villager_brain.rs::sense_secondary	farmer: farmland within 4 by 2 blocks; no other profession has secondary blocks
+Sensor.updateTargetingConditionRanges	inline	crates/horizon-client/src/mobs/monster_brain.rs::targetable	each test reads the mob's follow range at call time, so no shared range needs updating
+Sensor.isEntityAttackableIgnoringLineOfSight	inline	crates/horizon-client/src/mobs/goals.rs::Mob::can_target_player	check_sight false for the player; mob targets are tested per goal
+Sensor.rememberPositives	inline	crates/horizon-client/src/mobs/monster_brain.rs::B::try_start	positives_left counter of the breeze's StopAttackingIfTargetInvalid (100 ticks after the last attackable moment)
+TemptingSensor.doTick	port	crates/horizon-client/src/mobs/animal_brain.rs::sense_tempting	gap: minor: range test ignores the visibility scaling (sneaking), a rider of any kind blocks the tempt
+TemptingSensor.playerHoldingTemptation	inline	crates/horizon-client/src/mobs/animal_brain.rs::sense_tempting	main or off hand holds food of the animal
+VillagerBabiesSensor.isVillagerBaby	inline	crates/horizon-client/src/mobs/villager_brain.rs::sense_babies	visible baby villagers
+VillagerHostilesSensor.isMatchingEntity	port	crates/horizon-client/src/mobs/villager_brain.rs::sense_hostiles	closest visible hostile within its own acceptable distance
+VillagerHostilesSensor.isClose	port	crates/horizon-client/src/mobs/villager_brain.rs::hostile_distance	the acceptable distance table (8, 10, 12, 15 blocks)
+WardenEntitySensor.doTick	port	crates/horizon-client/src/mobs/warden_brain.rs::sense_entities	living list then nearest attackable: a player first, else another entity
+WardenEntitySensor.getClosest	inline	crates/horizon-client/src/mobs/warden_brain.rs::sense_entities	two passes over the sorted list with warden::can_target
+TargetingConditions.copy	skip:java		clone of a builder object
+TargetingConditions.test	port	crates/horizon-client/src/mobs/goals.rs::Mob::player_in_range	gap: minor: the player case (range scaled by visibility, line of sight, ally and creative checks); mob targets are tested in NearestTarget and each brain's targetable and attackable
+DefaultRandomPos.generateRandomPosTowardDirection	port	crates/horizon-client/src/mobs/goals.rs::Mob::default_check	Mob::toward builds the position, default_check does limits, home, stable and malus
+GoalUtils.mobRestricted	port	crates/horizon-client/src/mobs/goals.rs::Mob::restricted	home within radius + distance + 1, then isRestricted
+GoalUtils.hasMalus	inline	crates/horizon-client/src/mobs/goals.rs::Mob::default_check	path type malus must be 0, also in land_up_out_of_solid
+LandRandomPos.getPosTowards	missing		player: iron golems wander anywhere; GolemRandomStrollInVillageGoal and MoveBackToVillageGoal are not registered, so a golem does not drift toward villagers who want it or back to the village
+LandRandomPos.getPosInDirection	inline	crates/horizon-client/src/mobs/goals.rs::Mob::land_random_pos_away	only the away direction is wired; the toward call has no user
+LandRandomPos.movePosUpOutOfSolid	port	crates/horizon-client/src/mobs/goals.rs::Mob::land_up_out_of_solid	up out of solid, then no water and no malus
+RandomPos.generateRandomDirection	port	crates/horizon-client/src/mobs/goals.rs::Mob::random_direction	
+RandomPos.generateRandomDirectionWithinRadians	port	crates/horizon-client/src/mobs/goals.rs::Mob::random_direction_within	
+RandomPos.generateRandomPos	port	crates/horizon-client/src/mobs/goals.rs::Mob::pick_best	best of ten by walk target value
+PoiManager.remove	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	no stored records: a section's POI list is rebuilt from its blocks after an edit
+PoiManager.findAll	port	crates/horizon-client/src/mobs/villager_brain.rs::pois_in_range	square then sphere filter over the sections' POI blocks, nearest first, with a caller filter
+PoiManager.findAllWithType	port	crates/horizon-client/src/mobs/villager_brain.rs::pois_in_range	returns (type, pos) pairs; only HAS_SPACE occupancy (any-occupancy searches use homes_in_range)
+PoiManager.findAllClosestFirstWithType	port	crates/horizon-client/src/mobs/villager_brain.rs::pois_in_range	sorted by squared distance
+PoiManager.getRandom	inline	crates/horizon-client/src/mobs/raider.rs::MoveThroughVillage::can_use	random home within 48 blocks not visited lately (the raider's village walk); the villager's hiding place picks its own home
+PoiManager.release	inline	crates/horizon-client/src/mobs/villager_brain.rs::PoiMem::clear	tickets are derived from the villagers' job, potential job, home and meeting memories, so clearing the memory frees the ticket
+PoiManager.getType	port	crates/horizon-client/src/mobs/villager_brain.rs::poi_at	POI kind of the block at a position, from the per-state table
+PoiManager.getDebugPoiInfo	skip:debug		debug screen data
+PoiManager.setDirty	inline	crates/horizon-client/src/mobs/villager_brain.rs::village_sections	village distances are recomputed per query from the taken village POIs, no dirty tracking
+PoiManager.checkConsistencyWithBlocks	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	the list is always built from the blocks, so it cannot drift
+PoiManager.updateFromSection	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	scans the section's blocks for POI states
+PoiManager.ensureLoadedAndValid	skip:other		no separate POI storage: POIs come from the loaded chunks' blocks
+PoiManager.DistanceTracker.setLevel	inline	crates/horizon-client/src/mobs/villager_brain.rs::sections_to_village	Chebyshev distance in sections to a village section (max 7), computed when asked
+PoiRecord.acquireTicket	inline	crates/horizon-client/src/mobs/villager_brain.rs::tickets	a taken ticket is a villager memory pointing at the POI, counted per search
+PoiRecord.releaseTicket	inline	crates/horizon-client/src/mobs/villager_brain.rs::tickets	see PoiManager.release
+PoiRecord.isOccupied	inline	crates/horizon-client/src/mobs/villager_brain.rs::village_sections	a POI counts as occupied (village centre) when a villager memory holds it
+PoiRecord.equals	skip:java		position equality
+PoiRecord.Packed.unpack	skip:other		POI files are not loaded into records; keep_claims reads free_tickets only to carry claims across a save
+PoiSection.pack	port	crates/horizon-client/src/save.rs::encode_poi	Valid and Records with free_tickets at the max (claims kept by keep_claims)
+PoiSection.getRecords	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	per-section POI list, type filter done by poi_matches
+PoiSection.add	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	list rebuilt from the blocks
+PoiSection.remove	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	list rebuilt from the blocks
+PoiSection.getFreeTickets	skip:debug		deprecated, debug only
+PoiSection.release	inline	crates/horizon-client/src/mobs/villager_brain.rs::tickets	see PoiManager.release
+PoiSection.refresh	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	invalid sections need no refresh, the list is rebuilt from blocks
+PoiSection.Packed.unpack	skip:other		POI files are not loaded into sections
+PoiTypes.registerBlockStates	inline	crates/horizon-client/src/save.rs::poi_type	state to POI type and max tickets in one match
+PoiTypes.bootstrap	port	crates/horizon-client/src/save.rs::poi_type	every POI type with its tickets (bed heads of the sixteen colours only, cauldrons, bell 32); villagers use villager_brain::state_poi for jobs, beds and bell
+Bat.isFlapping	missing		minor: a flying bat's wing beat (every 10 ticks) sends no FLAP vibration, so sculk sensors do not hear it
+Bat.getAmbientSound	inline	crates/horizon-client/src/mobs/ai.rs::play_ambient	Species::Bat arm: a resting bat is silent three times in four
+Bat.isResting	port	crates/horizon-client/src/mobs/bat.rs::resting	
+Bat.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	BatFlags byte, bit 0 resting
+Bat.checkBatSpawnRules	inline	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Bat arm: below the surface, coin flip, light against nextInt(4), bats_spawnable_on, mob rules
+Dolphin.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	S::Dolphin arm: full air, pitch 0, baby chance 0.1
+Dolphin.defineSynchedData	skip:java		synched fields: got_fish is extra.flag and moistness extra.counter
+Dolphin.addAdditionalSaveData	missing		minor: GotFish and Moistness are not written, a saved dolphin forgets the fish it was fed
+Dolphin.readAdditionalSaveData	missing		minor: GotFish and Moistness are not read, a loaded dolphin starts with no fish and full moistness
+Dolphin.registerGoals	port	crates/horizon-client/src/mobs/aquatic.rs::register	gap: player: no MoveToItemGoal and PlayWithItemsGoal (dolphins ignore items thrown in the water), no FollowPlayerRiddenEntityGoal for boats or nautiluses, no AvoidEntity of guardians, and HurtByTarget does not skip guardians
+Dolphin.createAttributes	skip:data		attributes come from the entity tables
+Dolphin.canAttack	missing		minor: a baby dolphin that is hurt can still pick the attacker as target
+Dolphin.pickUpItem	missing		player: a dolphin never picks up an item dropped in the water (pick_up_loot is set but nothing takes the item)
+Dolphin.handleEntityEvent	port	crates/horizon-client/src/particles.rs::entity_event_burst	event 38: seven happy villager particles about the dolphin
+Dolphin.closeToNextPos	inline	crates/horizon-client/src/mobs/dolphin.rs::SwimToTreasure::tick	nav target within 12 blocks (144 squared) of the dolphin
+Dolphin.DolphinSwimWithPlayerGoal.canContinueToUse	port	crates/horizon-client/src/mobs/dolphin.rs::SwimWithPlayer::can_continue	player still swimming and within 16 blocks
+Dolphin.ItemGoal.drop	missing		player: a dolphin holding an item (from a dispenser) never throws it back with the 40 tick pickup delay
+Dolphin.ItemGoal.dropItem	missing		player: the held item is never dropped by the dolphin
+Dolphin.MoveToItemGoal.canUse	missing		player: dolphins do not notice items floating within 8 blocks
+Dolphin.MoveToItemGoal.stop	missing		player: no item to drop after playing, no cooldown
+Dolphin.MoveToItemGoal.start	missing		player: dolphins do not swim to floating items or play the play sound
+AbstractChestedHorse.dropEquipment	port	crates/horizon-client/src/mobs/drops.rs::die	the stored items and then a chest drop, chested cleared
+AbstractChestedHorse.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	ChestedHorse and Items for llamas, donkeys and mules
+AbstractChestedHorse.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	ChestedHorse and Items, 15 slots
+AbstractChestedHorse.getSlot	missing		minor: slot 499 (horse.chest) is not mapped for mobs, so /item replace entity ... horse.chest does nothing
+AbstractChestedHorse.equipChest	port	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	tamed donkey or mule takes a held chest with the sound; llamas do it in game/llamas.rs interact_llama
+AbstractChestedHorse.playChestEquipsSound	inline	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	entity.donkey.chest with the random pitch; llamas play entity.llama.chest in llama_sound

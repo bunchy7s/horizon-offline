@@ -40,6 +40,10 @@ static BIDIRECTIONAL: AtomicBool = AtomicBool::new(false);
 /// A source of resource files: the prepared root plus packs, highest priority last.
 pub trait ResourceSource {
     fn read(&self, path: &str) -> Option<Vec<u8>>;
+    /// Whether `path` is there, without reading it where the source can tell.
+    fn exists(&self, path: &str) -> bool {
+        self.read(path).is_some()
+    }
     /// The namespaces under `assets/` (resource packs may add their own).
     fn namespaces(&self) -> Vec<String> {
         vec!["minecraft".into()]
@@ -56,6 +60,9 @@ impl ResourceSource for Bundled {
             "assets/horizon/lang/ru_ru.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ru_ru.json")
             }
+            "assets/horizon/lang/uk_ua.json" => {
+                include_str!("../../horizon-client/assets/horizon/lang/uk_ua.json")
+            }
             _ => return None,
         };
         Some(body.as_bytes().to_vec())
@@ -67,6 +74,9 @@ impl ResourceSource for Bundled {
 impl ResourceSource for std::path::PathBuf {
     fn read(&self, path: &str) -> Option<Vec<u8>> {
         std::fs::read(self.join(path)).ok()
+    }
+    fn exists(&self, path: &str) -> bool {
+        self.join(path).is_file()
     }
     fn namespaces(&self) -> Vec<String> {
         std::fs::read_dir(self.join("assets"))
@@ -190,7 +200,7 @@ pub fn available(sources: &[&dyn ResourceSource]) -> Vec<LanguageInfo> {
             for (code, info) in value["language"].as_object().into_iter().flatten() {
                 // Only languages whose file exists somewhere are selectable.
                 let file = format!("assets/minecraft/lang/{code}.json");
-                if code != DEFAULT && !sources.iter().any(|s| s.read(&file).is_some()) {
+                if code != DEFAULT && !sources.iter().any(|s| s.exists(&file)) {
                     continue;
                 }
                 found.insert(
@@ -259,6 +269,11 @@ mod tests {
         assert_eq!(en.get("horizon.options.controller"), Some("Controller"));
         let ru = Language::load(&[&empty], "ru_ru");
         assert_eq!(ru.get("horizon.options.controller"), Some("Геймпад"));
+        let uk = Language::load(&[&empty], "uk_ua");
+        assert_eq!(
+            uk.get("horizon.options.on_screen_keyboard"),
+            Some("Екранна клавіатура")
+        );
     }
 
     #[test]
@@ -283,5 +298,27 @@ mod tests {
             ["en_us", "fr_fr"]
         );
         assert_eq!(langs[1].label(), "Français (France)");
+    }
+
+    #[test]
+    fn languages_are_listed_without_reading_their_files() {
+        struct NoLangReads;
+        impl ResourceSource for NoLangReads {
+            fn read(&self, path: &str) -> Option<Vec<u8>> {
+                assert!(!path.contains("/lang/"), "read {path}");
+                (path == "assets/pack.mcmeta").then(|| {
+                    br#"{"language":{"fr_fr":{"name":"French"},"de_de":{"name":"German"}}}"#
+                        .to_vec()
+                })
+            }
+            fn exists(&self, path: &str) -> bool {
+                path == "assets/minecraft/lang/fr_fr.json"
+            }
+        }
+        let langs = available(&[&NoLangReads]);
+        assert_eq!(
+            langs.iter().map(|l| l.code.as_str()).collect::<Vec<_>>(),
+            ["en_us", "fr_fr"]
+        );
     }
 }

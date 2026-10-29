@@ -186,8 +186,8 @@ public final class VanillaMobAiOracle {
         boolean spawning;
         /** The player hits a mob for 1 at the start of a tick: {tick, mob index}. */
         List<int[]> hurts = new ArrayList<>();
-        /** The player feeds an animal at the start of a tick (Animal.mobInteract with the item in
-         *  its main hand): {tick, mob index, item id}. */
+        /** The player feeds an animal, or uses another item on it, at the start of a tick
+         *  (Animal.mobInteract with the item in its main hand): {tick, mob index, item id}. */
         List<Object[]> feeds = new ArrayList<>();
     }
 
@@ -226,7 +226,7 @@ public final class VanillaMobAiOracle {
                 }
                 case "heart" -> s.hearts.add(f);
                 case "hurt" -> s.hurts.add(new int[] {Integer.parseInt(f[1]), Integer.parseInt(f[2])});
-                case "feed" -> s.feeds.add(new Object[] {Integer.parseInt(f[1]), Integer.parseInt(f[2]), f[3]});
+                case "feed", "interact" -> s.feeds.add(new Object[] {Integer.parseInt(f[1]), Integer.parseInt(f[2]), f[3]});
                 case "player" -> {
                     s.player = new double[] {Double.parseDouble(f[1]), Double.parseDouble(f[2]), Double.parseDouble(f[3])};
                     for (int i = 4; i < f.length; i++) {
@@ -1071,6 +1071,11 @@ public final class VanillaMobAiOracle {
                 Object opened = get(golem, "openedChestPos");
                 sb.append("\tcg ").append(golem.getState().ordinal()).append(' ').append(stack(golem.getMainHandItem())).append(' ')
                     .append(opened == null ? "-" : pos((BlockPos) opened));
+            }
+            if (m instanceof net.minecraft.world.entity.animal.wolf.Wolf wolf) {
+                // NeutralMob anger left (the angry texture), -1 when calm.
+                long end = wolf.getPersistentAngerEndTime();
+                sb.append("	wolf ").append(end > 0 ? end - wolf.level().getGameTime() : -1);
             }
             if (m instanceof net.minecraft.world.entity.animal.bee.Bee bee) {
                 // Flags (roll 2, stung 4, nectar 8), anger left, ticks without nectar, flower cooldown, flower.

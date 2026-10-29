@@ -408,6 +408,54 @@ fn sprint_commands_survive_keyboard_input_changes() {
 }
 
 #[test]
+fn a_move_behind_a_dig_and_its_swing_waits_for_the_next_tick() {
+    let Some(resources) = resources() else {
+        return;
+    };
+    let mut s = server(&resources);
+    let port = s.hub.lan.port;
+    let _bot = run(&mut s, move || connect(port, "Digger", true));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while s.hub.guests.is_empty() {
+        s.tick(&[]);
+        assert!(Instant::now() < deadline, "guest did not join");
+        thread::yield_now();
+    }
+    s.hub.guests[0].loaded = true;
+    let at = s.hub.guests[0].position;
+    let below = [
+        at[0].floor() as i32,
+        at[1].floor() as i32 - 1,
+        at[2].floor() as i32,
+    ];
+    // A creative break as the client sends it in one tick: the dig, the arm swing,
+    // then the move into the block it predicted gone.
+    let inbox = &mut s.hub.guests[0].inbox;
+    inbox.push_back(S::PlayerAction(play::PlayerAction {
+        action: 0,
+        pos: below,
+        direction: 1,
+        sequence: 1,
+    }));
+    inbox.push_back(S::Punch(Empty));
+    inbox.push_back(S::MovePlayerPos(play::MovePlayerPos {
+        x: at[0],
+        y: at[1] - 0.0784,
+        z: at[2],
+        flags: 0,
+    }));
+    s.tick(&[]);
+    // The game breaks the block after the hub's pass: the move waits, or it would be
+    // checked against the block and sent back.
+    let g = &s.hub.guests[0];
+    assert_eq!(g.position, at, "the move was handled before the dig");
+    assert!(
+        matches!(g.inbox.back(), Some(S::MovePlayerPos(_))),
+        "the move left the queue"
+    );
+}
+
+#[test]
 fn status_and_join() {
     let Some(resources) = resources() else {
         return;
@@ -660,4 +708,98 @@ fn guests_see_each_other_and_the_world_entities() {
     }
     first.join().unwrap().unwrap();
     drop(second);
+}
+
+/// `ServerGamePacketListenerImpl.handleContainerClick`: a spectator looks
+/// into a chest but its clicks change nothing, and `sendAllDataToRemote`
+/// takes back what its client predicted.
+#[test]
+fn a_spectators_container_click_is_taken_back() {
+    use horizon_client::{containers::BlockEntity, items::ItemStack, lan::menu::Slots};
+    struct NoRules;
+    impl horizon_client::lan::menu::Rules for NoRules {
+        fn items(&self) -> &horizon_client::items::Items {
+            unreachable!("a spectator's click never reaches the menu")
+        }
+        fn max_stack(&self, _: &str) -> u32 {
+            64
+        }
+        fn armor_index(&self, _: &str) -> Option<usize> {
+            None
+        }
+    }
+    let Some(resources) = resources() else {
+        return;
+    };
+    let mut s = server(&resources);
+    let port = s.hub.lan.port;
+    let mut bot = run(&mut s, move || connect(port, "Watcher", true));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while s.hub.guests.is_empty() {
+        s.tick(&[]);
+        assert!(Instant::now() < deadline, "guest did not join");
+        thread::yield_now();
+    }
+    let conn = s.hub.guests[0].conn;
+    s.hub.set_game_mode(conn, 3);
+    let at = s.hub.guests[0].position;
+    let key = (
+        at[0].floor() as i32,
+        at[1].floor() as i32,
+        at[2].floor() as i32 + 2,
+    );
+    s.world.set(key.0, key.1, key.2, BlockStateId(2)).unwrap();
+    let mut items = vec![None; 27];
+    items[0] = Some(ItemStack::new("minecraft:diamond", 5));
+    s.world
+        .block_entities
+        .insert(key, BlockEntity::Chest(items.clone()));
+    s.hub.open_container(
+        conn,
+        "minecraft:generic_9x3",
+        horizon_protocol::text::translatable("container.chest", &[]),
+        key,
+        Slots::Block(key),
+        items.clone(),
+    );
+    let window = s.hub.guests[0].menu.as_ref().unwrap().window;
+    // The menu's own contents, as the client first sees them.
+    bot.c
+        .reader
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let content = move |bot: &mut Bot| -> Result<(), String> {
+        loop {
+            if let C::ContainerSetContent(p) = bot.recv_play()?
+                && p.container == window
+            {
+                assert!(p.items[0].is_some(), "the diamonds are still in slot 0");
+                assert!(p.carried.is_none(), "nothing is carried");
+                return Ok(());
+            }
+        }
+    };
+    let mut bot = run(&mut s, move || content(&mut bot).map(|()| bot));
+    // The client predicted picking up the diamonds.
+    let click = play::ContainerClick {
+        container: window,
+        state: 1,
+        slot: 0,
+        button: 0,
+        input: 0,
+        changed: vec![(0, None)],
+        carried: None,
+    };
+    let drops = s.hub.container_click(conn, &click, &mut s.world, &NoRules);
+    assert!(drops.is_empty());
+    assert_eq!(
+        s.world
+            .block_entities
+            .get(&key)
+            .map(|b| b.slots()[0].clone()),
+        Some(items[0].clone()),
+        "the chest keeps its diamonds"
+    );
+    assert!(s.hub.guests[0].carried.is_none());
+    run(&mut s, move || content(&mut bot));
 }

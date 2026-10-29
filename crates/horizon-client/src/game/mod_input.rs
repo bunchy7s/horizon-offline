@@ -130,6 +130,7 @@ impl Game<'_> {
             && let Some(name) = horizon_client::keybinds::key_name(key)
             && let Some(stack) = self.mod_browser_pointed()
         {
+            let stack = super::mod_panel::browser_stack(stack);
             self.mods.mods.browser_key(name, &stack);
             return;
         }

@@ -658,16 +658,30 @@ impl Game<'_> {
     }
     /// `BoatItem.use`: aim at a block or the water surface.
     pub(super) fn place_boat(&mut self, stack: &ItemStack) -> bool {
-        let Some((wood, chest)) = any_boat_wood(&stack.item) else {
+        let Some(boat) = self.boat_to_place(stack) else {
             return false;
         };
-        if !self.boat_models.has(wood, chest) {
-            return false;
+        self.next_entity += 1;
+        let key = (
+            boat.position.x.floor() as i32 >> 4,
+            boat.position.z.floor() as i32 >> 4,
+        );
+        self.world.modified.insert(key);
+        self.boats.push(boat);
+        if !self.creative {
+            self.consume_held();
         }
-        let Some(eye) = self.eye_position() else {
-            return false;
-        };
-        let dir = view_vector(self.yaw, self.pitch);
+        self.swing_arm();
+        true
+    }
+    /// The boat `BoatItem.use` would place for `stack` (its SUCCESS), or
+    /// None when it aims at nothing (PASS) or the spot is taken (FAIL).
+    pub(super) fn boat_to_place(&self, stack: &ItemStack) -> Option<Boat> {
+        let (wood, chest) = any_boat_wood(&stack.item)?;
+        if !self.boat_models.has(wood, chest) {
+            return None;
+        }
+        let (eye, dir) = self.aim()?;
         let reach = self.reach();
         // ClipContext.Fluid.ANY: the first fluid surface (water or lava) or
         // block along the ray.
@@ -707,7 +721,7 @@ impl Game<'_> {
             }
             (Some(b), None) => b.0,
             (None, Some(w)) => w.0,
-            (None, None) => return false,
+            (None, None) => return None,
         };
         let mut boat = Boat::new(
             self.next_entity + 1,
@@ -731,21 +745,12 @@ impl Game<'_> {
             subject: None,
         };
         if !scene.unobstructed(inner).unwrap_or(false) || self.boat_entity_collision(bb) {
-            return false;
+            return None;
         }
-        self.next_entity += 1;
-        let key = (hit[0].floor() as i32 >> 4, hit[2].floor() as i32 >> 4);
-        self.world.modified.insert(key);
-        self.boats.push(boat);
-        if !self.creative {
-            self.consume_held();
-        }
-        self.swing_arm();
-        true
+        Some(boat)
     }
     pub(super) fn boat_hit(&self) -> Option<(usize, f64)> {
-        let eye = self.eye_position()?;
-        let dir = view_vector(self.yaw, self.pitch);
+        let (eye, dir) = self.aim()?;
         let reach: f64 = if self.creative { 5.0 } else { 3.0 };
         let mut best: Option<(usize, f64)> = None;
         for (i, b) in self.boats.iter().enumerate() {
@@ -811,15 +816,19 @@ impl Game<'_> {
         true
     }
     /// `VehicleEntity.hurtServer` from the player's attack.
-    pub(super) fn attack_boat(&mut self, damage: f32) -> bool {
+    pub(super) fn attack_boat(&mut self) -> bool {
         let Some((i, d)) = self.boat_hit() else {
             return false;
         };
         if !self.before_block(d) || self.mob_hit().is_some_and(|m| m.1 < d) {
             return false;
         }
-        self.vehicle_attack_sounds();
+        let area = self.boats[i].bounds();
+        // Player.attack's full damage against the boat's entity type.
+        let (kind, id) = (self.boats[i].entity_type(), self.boats[i].id as i32);
+        let (damage, _, _, magic) = self.melee_damage(&kind, false);
         self.hurt_boat(i, damage, self.creative);
+        self.vehicle_attack_sounds(area, magic.then_some(id));
         self.swing_arm();
         true
     }

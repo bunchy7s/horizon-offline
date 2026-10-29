@@ -50,5 +50,5 @@ if __name__ == '__main__':
                     'MipmapGenerator.generateMipLevels (solidify, fillEmptyAreasWithDarkColor, meanLinear, '
                     'darkenedAlphaBlend, alphaTestCoverage, scaleAlphaToCoverage) on static 16x16 block and item sprites '
                     'with their .mcmeta texture settings',
-                    sources=[oh.lab.ROOT / 'crates/horizon-client/src/mipmap.rs',
-                             oh.lab.ROOT / 'crates/horizon-client/src/sprites.rs'])
+                    sources=[oh.lab.ROOT / 'crates/horizon-client-render/src/mipmap.rs',
+                             oh.lab.ROOT / 'crates/horizon-client-render/src/sprites.rs'])

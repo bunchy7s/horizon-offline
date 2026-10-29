@@ -142,9 +142,11 @@ impl Game<'_> {
         let Some(mut tag) = spill::saved_entity(&self.world, pos) else {
             return;
         };
-        if tag.get("LootTable").is_none() {
+        let Some(horizon_world::nbt::Tag::String(table)) = tag.get("LootTable") else {
             return;
-        }
+        };
+        let table = table.to_string_lossy();
+        self.trigger_loot_table(&table);
         let loot = horizon_client::structure_blocks::loot_data(&self.options.resources);
         decorated_pot::unpack_loot(
             &mut tag,

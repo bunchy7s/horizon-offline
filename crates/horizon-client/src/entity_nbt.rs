@@ -129,6 +129,27 @@ fn is_animal(id: &str) -> bool {
             | "zombie_nautilus"
     )
 }
+/// The `NeutralMob`s whose anger is `Extra::anger`: they write and read
+/// `anger_end_time` and `angry_at`. The bee keeps its own anger, and a
+/// piglin's is a brain memory, not `NeutralMob`'s.
+fn persistent_anger(s: crate::mobs::Species) -> bool {
+    use crate::mobs::Species as S;
+    matches!(
+        s,
+        S::Wolf | S::IronGolem | S::PolarBear | S::Enderman | S::ZombifiedPiglin
+    )
+}
+/// The single player's UUID (`offline_uuid("Player")`): the entity the
+/// neutral mobs are angry at.
+fn player_uuid() -> [i32; 4] {
+    let u = horizon_protocol::crypto::offline_uuid("Player");
+    [
+        (u >> 96) as u32 as i32,
+        (u >> 64) as u32 as i32,
+        (u >> 32) as u32 as i32,
+        u as u32 as i32,
+    ]
+}
 pub fn mob_to_nbt(m: &Mob, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
     let base = Base {
         id: &m.kind.id,
@@ -158,6 +179,22 @@ pub fn mob_to_nbt(m: &Mob, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
         ("PersistenceRequired", Tag::Byte(i8::from(m.persistent))),
     ] {
         put(&mut tag, key, value);
+    }
+    // `NeutralMob.addPersistentAngerSaveData`: the anger ends at an
+    // absolute game time, and the target is the entity the mob is angry at.
+    if persistent_anger(m.species()) {
+        put(
+            &mut tag,
+            "anger_end_time",
+            Tag::Long(if m.extra.anger_end > 0 {
+                m.extra.anger_end
+            } else {
+                -1
+            }),
+        );
+        if m.extra.angry_at == Some(crate::mobs::Who::Player) {
+            put(&mut tag, "angry_at", Tag::IntArray(player_uuid().to_vec()));
+        }
     }
     // `Entity.saveWithoutId` writes the flag only when set.
     if m.name_visible {
@@ -592,6 +629,13 @@ pub fn mob_to_nbt(m: &Mob, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
         "minecraft:wither" => {
             map.insert("Invul".into(), Tag::Int(m.extra.counter));
         }
+        // IronGolem.addAdditionalSaveData.
+        "minecraft:iron_golem" => {
+            map.insert(
+                "PlayerCreated".into(),
+                Tag::Byte(i8::from(m.extra.player_created)),
+            );
+        }
         "minecraft:warden" => {
             if let Some(st) = &m.extra.warden {
                 map.insert("listener".into(), st.vibration.to_nbt());
@@ -715,12 +759,13 @@ pub fn mob_to_nbt(m: &Mob, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
         .into_iter()
         .enumerate()
         {
-            // Enchanted gear is saved with its `minecraft:enchantments`.
+            // Enchanted or trimmed gear is saved with its components.
             if let (Some(id), Some(g)) = (item, crate::mobs::gear::gear(m))
-                && !g.slots[index].is_empty()
+                && (!g.slots[index].is_empty() || g.trims[index].is_some())
             {
                 let mut stack = crate::items::ItemStack::new(id, 1);
                 stack.data_mut().enchantments = g.slots[index].clone();
+                stack.data_mut().trim = g.trims[index].clone();
                 equipment.insert(slot.into(), crate::save::item_to_nbt(&stack));
                 continue;
             }
@@ -908,7 +953,20 @@ pub fn mob_from_nbt(tag: &Tag, types: &HashMap<String, Arc<MobType>>, id: u32) -
                 continue;
             };
             let v = f64::from_bits(*bits);
+            // A mount's rolled health and speed stay attribute bases, which
+            // the server syncs (its hearts over the rider's hotbar).
+            let equine = crate::mobs::equine::is_equine(m.species());
             match id.as_str() {
+                "minecraft:max_health" if equine => crate::mobs::finalize::set_base(
+                    &mut m,
+                    crate::mobs::finalize::Attr::MaxHealth,
+                    v,
+                ),
+                "minecraft:movement_speed" if equine => crate::mobs::finalize::set_base(
+                    &mut m,
+                    crate::mobs::finalize::Attr::MovementSpeed,
+                    v,
+                ),
                 "minecraft:max_health" => m.attrs.max_health = v as f32,
                 "minecraft:movement_speed" => m.attrs.speed = v,
                 "minecraft:attack_damage" => m.attrs.attack_damage = v as f32,
@@ -950,10 +1008,12 @@ pub fn mob_from_nbt(tag: &Tag, types: &HashMap<String, Arc<MobType>>, id: u32) -
             m.extra.legs = slot("legs");
             m.extra.feet = slot("feet");
         }
-        // Their enchantments.
+        // Their enchantments and trims.
         for (index, key) in crate::mobs::gear::KEYS.iter().enumerate() {
             if let Some(stack) = eq.get(key).and_then(crate::save::item_from_nbt) {
                 crate::mobs::gear::set(&mut m, index, stack.enchantments().to_vec());
+                let trim = stack.data().and_then(|d| d.trim.clone());
+                crate::mobs::gear::set_trim(&mut m, index, trim);
             }
         }
     } else {
@@ -965,6 +1025,17 @@ pub fn mob_from_nbt(tag: &Tag, types: &HashMap<String, Arc<MobType>>, id: u32) -
     // Mob.readAdditionalSaveData overrides what the constructor set (copper
     // golems and elder guardians start persistent).
     m.persistent = flag(tag, "PersistenceRequired");
+    // `NeutralMob.readPersistentAngerSaveData`: the anger end time and the
+    // target come back with the mob.
+    if persistent_anger(m.species()) {
+        m.extra.anger_end = number(tag.get("anger_end_time")).unwrap_or(-1);
+        if tag
+            .get("angry_at")
+            .is_some_and(|t| uuid_from_tag(Some(t)) == Some(player_uuid()))
+        {
+            m.extra.angry_at = Some(crate::mobs::Who::Player);
+        }
+    }
     m.extra.pick_up_loot = flag(tag, "CanPickUpLoot");
     m.custom_name = custom_name(tag);
     m.custom_name_text = tag.get("CustomName").map(name_text);
@@ -1276,6 +1347,10 @@ pub fn mob_from_nbt(tag: &Tag, types: &HashMap<String, Arc<MobType>>, id: u32) -
         m.extra.color = number(tag.get("Color")).map_or(0, |c| (c as u8) & 15);
         m.extra.sheared = flag(tag, "Sheared");
     }
+    // IronGolem.readAdditionalSaveData: not player created when absent.
+    if m.species() == crate::mobs::Species::IronGolem {
+        m.extra.player_created = flag(tag, "PlayerCreated");
+    }
     if m.species() == crate::mobs::Species::Shulker {
         m.extra.variant3 = number(tag.get("AttachFace")).unwrap_or(0).clamp(0, 5) as u8;
         m.extra.counter = number(tag.get("Peek")).unwrap_or(0).clamp(0, 100) as i32;
@@ -1509,6 +1584,10 @@ pub fn arrow_to_nbt(
         // Projectile: LeftOwner only when set; Owner as the UUID.
         map.remove(&"LeftOwner".into());
         map.remove(&"inBlockState".into());
+        map.remove(&"weapon".into());
+    }
+    if let Some(weapon) = &a.fired_from_weapon {
+        put(&mut tag, "weapon", item_to_nbt(weapon));
     }
     if p.left_owner {
         put(&mut tag, "LeftOwner", Tag::Byte(1));
@@ -1555,6 +1634,7 @@ pub fn arrow_from_nbt(
     a.fire_ticks = number(tag.get("Fire")).unwrap_or(0) as i16 as i32;
     a.fall_distance = float(tag.get("fall_distance")).unwrap_or(0.0);
     a.pickup_item = item;
+    a.fired_from_weapon = tag.get("weapon").and_then(item_from_nbt);
     p.stuck = a.in_ground;
     Some((p, tag.get("inBlockState").cloned()))
 }
@@ -1623,6 +1703,33 @@ pub fn fireball_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<Projecti
     p.left_owner = flag(tag, "LeftOwner");
     p.acceleration = float(tag.get("acceleration_power")).unwrap_or(0.1);
     Some(p)
+}
+
+/// `FireworkRocketEntity.readAdditionalSaveData`: Life, LifeTime (0 when
+/// absent: a bare `/summon` explodes at once), FireworksItem and
+/// ShotAtAngle, with `Projectile`'s Owner and LeftOwner.
+pub struct RocketNbt {
+    pub position: Vec3,
+    pub motion: Vec3,
+    pub life: i32,
+    pub lifetime: i32,
+    pub item: Option<crate::items::ItemStack>,
+    pub angled: bool,
+    pub owner: Option<Who>,
+    pub left_owner: bool,
+}
+pub fn firework_rocket_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<RocketNbt> {
+    let owner = uuid_from_tag(tag.get("Owner"));
+    Some(RocketNbt {
+        position: position(tag)?,
+        motion: motion(tag),
+        life: number(tag.get("Life")).unwrap_or(0) as i32,
+        lifetime: number(tag.get("LifeTime")).unwrap_or(0) as i32,
+        item: tag.get("FireworksItem").and_then(item_from_nbt),
+        angled: flag(tag, "ShotAtAngle"),
+        owner: (player.is_some() && owner == player).then_some(Who::Player),
+        left_owner: flag(tag, "LeftOwner"),
+    })
 }
 
 /// `FallingBlockEntity`: BlockState, Time, DropItem, HurtEntities.
@@ -2978,5 +3085,51 @@ mod fireball_nbt_tests {
             (p.kind, p.acceleration),
             (ProjectileKind::LargeFireball { power: 1 }, 0.1)
         );
+    }
+}
+
+#[cfg(test)]
+mod neutral_anger_tests {
+    use super::*;
+
+    /// #2784: a neutral mob's anger survives the save: the anger ends at an
+    /// absolute game time and the target comes back with it
+    /// (`NeutralMob.addPersistentAngerSaveData` / `readPersistentAngerSaveData`).
+    #[test]
+    fn a_neutral_mobs_anger_survives_the_save() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return;
+        }
+        let data = crate::mobs::MobTypes::load(&root).unwrap();
+        let types: HashMap<String, Arc<MobType>> = data
+            .types
+            .iter()
+            .map(|(k, v)| (k.clone(), Arc::new(v.clone())))
+            .collect();
+        let mut m = Mob::new(
+            1,
+            types["minecraft:wolf"].clone(),
+            Vec3::new(0.0, 64.0, 0.0),
+            0.0,
+        );
+        m.extra.anger = 400;
+        m.extra.anger_end = 3000;
+        m.extra.angry_at = Some(crate::mobs::Who::Player);
+        let tag = mob_to_nbt(&m, [1, 2, 3, 4], None);
+        assert_eq!(number(tag.get("anger_end_time")), Some(3000));
+        assert!(tag.get("angry_at").is_some());
+        let back = mob_from_nbt(&tag, &types, 2).unwrap();
+        assert_eq!(back.extra.anger_end, 3000);
+        assert_eq!(back.extra.angry_at, Some(crate::mobs::Who::Player));
+        // A mob that is no NeutralMob writes no anger.
+        let pig = Mob::new(3, types["minecraft:pig"].clone(), Vec3::ZERO, 0.0);
+        let tag = mob_to_nbt(&pig, [1, 2, 3, 5], None);
+        assert!(tag.get("anger_end_time").is_none());
+        // The anger that is left when the mob comes back.
+        assert_eq!(crate::mobs::anger_left(3000, 1000), 2000);
+        assert_eq!(crate::mobs::anger_left(3000, 4000), 0);
     }
 }

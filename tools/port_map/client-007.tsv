@@ -1,0 +1,149 @@
+PiglinModel.setupAttackAnimation	port	crates/horizon-client/src/mobs/anim.rs::humanoid	melee swing branch via weapon_swing, which piglin_pose sets
+PiglinModel.holdWeaponHigh	port	crates/horizon-client/src/mobs/piglin.rs::piglin_pose	holdWeaponHigh arm pose when the swing is at rest
+ZombifiedPiglinModel.setupAttackAnimation	port	crates/horizon-client/src/mobs/anim.rs::humanoid	zombie arm raise via the zombie flag (Anim::ZombifiedPiglin)
+RavagerModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+ShulkerModel.createShellMesh	skip:data		layer baked into entity-models.json, loaded by key
+ShulkerModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+SilverfishModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+BoggedModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+BoggedModel.setupAnim	missing		player: a sheared bogged keeps its mushrooms on its head; Bogged shearing sets sheared but nothing hides the mushrooms part
+SkeletonModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+SkeletonModel.createDefaultSkeletonMesh	skip:data		layer baked into entity-models.json, loaded by key
+SkeletonModel.createSingleModelDualBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+SkeletonModel.setupAnim	port	crates/horizon-client/src/mobs/anim.rs::setup	skeleton melee pose in the Skeleton branch of setup
+SkeletonModel.translateToHand	port	crates/horizon-client/src/mobs/render.rs::hand_base	held item hand offset for skeletons (plus or minus one pixel)
+MagmaCubeModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+SlimeModel.createOuterBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+SlimeModel.createInnerBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+SmallSulfurCubeModel.createOuterBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+SmallSulfurCubeModel.createInnerBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+SulfurCubeModel.createOuterBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+SulfurCubeModel.createInnerBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+SpiderModel.createSpiderBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+SpiderModel.setupAnim	port	crates/horizon-client/src/mobs/anim.rs::setup	Spider branch of setup: four leg pairs swing and step
+AdultStriderModel.customAnimations	port	crates/horizon-client/src/mobs/body_anim.rs::strider	adult bristles on z, body and leg bob, shared with the baby
+BabyStriderModel.customAnimations	port	crates/horizon-client/src/mobs/body_anim.rs::strider	baby bristles on x, body and leg bob, ridden flag not used
+VexModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+VexModel.setArmsCharging	inline	crates/horizon-client/src/mobs/vex.rs::anim	charging arm pose inside the flag branch of vex anim
+WardenModel.createBioluminescentLayer	skip:data		layer baked into entity-models.json, loaded by key
+WardenModel.createPulsatingSpotsLayer	skip:data		layer baked into entity-models.json, loaded by key
+WardenModel.animateHeadLookTarget	inline	crates/horizon-client/src/mobs/warden.rs::anim	head yaw and pitch set first in warden anim
+WardenModel.animateIdlePose	inline	crates/horizon-client/src/mobs/warden.rs::anim	head and body wobble in warden anim
+WardenModel.animateWalk	inline	crates/horizon-client/src/mobs/warden.rs::anim	walk swing, arm and body tilt in warden anim
+WardenModel.resetArmPoses	inline	crates/horizon-client/src/mobs/warden.rs::anim	arm rest positions reset in warden anim
+WardenModel.animateTendrils	inline	crates/horizon-client/src/mobs/warden.rs::anim	tendril sway from the tendril animation value
+WitchModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+WitherBossModel.setupHeadRotation	inline	crates/horizon-client/src/mobs/wither.rs::anim	side head yaw minus body yaw in wither anim
+BabyZombieModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+BabyZombieVillagerModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+BabyZombieVillagerModel.createNoHatLayer	skip:data		layer baked into entity-models.json, loaded by key
+DrownedModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+DrownedModel.setupAttackAnimation	port	crates/horizon-client/src/mobs/anim.rs::humanoid	zombie arm raise via the zombie flag (Anim::Drowned)
+GiantZombieModel.setupAttackAnimation	port	crates/horizon-client/src/mobs/anim.rs::humanoid	giant is Humanoid with zombie_arms, same zombie arm raise
+ZombieVillagerModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+ZombieVillagerModel.createNoHatLayer	skip:data		layer baked into entity-models.json, loaded by key
+ZombieVillagerModel.createArmorLayerSet	skip:data		layer baked into entity-models.json, loaded by key
+ZombieVillagerModel.createBaseArmorMesh	skip:data		layer baked into entity-models.json, loaded by key
+ZombieVillagerModel.setupAttackAnimation	port	crates/horizon-client/src/mobs/anim.rs::humanoid	zombie arm raise via the zombie flag (Anim::ZombieVillager)
+BabyVillagerModel.createBodyModel	skip:data		layer baked into entity-models.json, loaded by key
+VillagerModel.createBodyModel	skip:data		layer baked into entity-models.json, loaded by key
+ArmorStandArmorModel.createArmorLayerSet	skip:data		layer baked into entity-models.json, loaded by key
+ArmorStandArmorModel.createBaseMesh	skip:data		layer baked into entity-models.json, loaded by key
+ArmorStandModel.translateToHand	port	crates/horizon-client/src/game/armor_stands.rs::Game::armor_stand_items	held items drawn from the posed arms even when ShowArms hides them
+BannerFlagModel.createFlagLayer	skip:data		layer baked into entity-models.json, loaded by key
+BannerModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+BellModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+AbstractBoatModel.setupAnim	port	crates/horizon-client/src/game/boats.rs::Game::boat_geometry	paddle pose from rowing time, in the boat draw
+BoatModel.createBoatModel	skip:data		layer baked into entity-models.json, loaded by key
+BoatModel.createChestBoatModel	skip:data		layer baked into entity-models.json, loaded by key
+BoatModel.createWaterPatch	skip:data		layer baked into entity-models.json, loaded by key
+RaftModel.createRaftModel	skip:data		bamboo raft is boat/bamboo#main in entity-models.json
+RaftModel.createChestRaftModel	skip:data		bamboo chest raft is chest_boat/bamboo#main in entity-models.json
+BookModel.State.forAnimation	port	crates/horizon-client/src/block_entity_anim.rs::EnchantingBook::render	openness and page flips computed in EnchantingBook::render
+MinecartModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+ChestModel.createSingleBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+ChestModel.createDoubleBodyRightLayer	skip:data		layer baked into entity-models.json, loaded by key
+ChestModel.createDoubleBodyLeftLayer	skip:data		layer baked into entity-models.json, loaded by key
+CushionModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+ElytraModel.createLayer	skip:data		layer baked into entity-models.json, loaded by key
+ElytraModel.setupAnim	port	crates/horizon-client/src/game/perspective.rs::Game::player_elytra_geometry	wing angles, crouch drop and mirrored right wing
+ShieldModel.createLayer	skip:data		layer baked into entity-models.json, loaded by key
+LeashKnotModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+ArrowModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+ArrowModel.setupAnim	missing		player: an arrow that lands in a block does not wobble for 7 ticks; arrows.rs sets shake but the arrow draw has no roll
+ShulkerBulletModel.createBodyLayer	missing		player: shulker bullets draw as a flat spark sprite, not the tumbling 3D orb; the baked shulker_bullet model is never loaded
+ShulkerBulletModel.setupAnim	missing		player: the bullet's spin and facing toward its flight are absent, since no model is drawn
+TridentModel.createLayer	skip:data		layer baked into entity-models.json, loaded by key
+WindChargeModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
+WindChargeModel.setupAnim	port	crates/horizon-client/src/game/wind.rs::Game::wind_charge_geometry	wind and wind_charge parts spin in opposite directions
+DragonHeadModel.createHeadLayer	skip:data		layer baked into entity-models.json, loaded by key
+DragonHeadModel.setupAnim	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	jaw animation in the skull branch of render_one
+PiglinHeadModel.setupAnim	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	ear flap in the skull branch of render_one
+SkullModel.createHeadModel	skip:data		layer baked into entity-models.json, loaded by key
+SkullModel.createHumanoidHeadLayer	skip:data		layer baked into entity-models.json, loaded by key
+SkullModel.setupAnim	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	head yaw and pitch in the skull branch of render_one
+PlayerCapeModel.createCapeLayer	missing		player: capes never draw; skins.rs downloads the cape texture but nothing draws the cape layer
+PlayerCapeModel.setupAnim	missing		player: the cape does not lean or flap with movement, since no cape is drawn
+PlayerEarsModel.createEarsLayer	missing		minor: extra ears (showExtraEars accounts) are not drawn
+PlayerModel.createMesh	skip:data		layer baked into entity-models.json, loaded by key
+PlayerModel.createArmorMeshSet	skip:data		layer baked into entity-models.json, loaded by key
+PlayerModel.setupAnim	port	crates/horizon-client/src/mobs/anim.rs::setup	gap: player: hat, jacket, sleeve and pant toggles (modelPart options) are not read, so a hidden layer still draws; humanoid pose is in the Humanoid branch
+PlayerModel.translateToHand	port	crates/horizon-client/src/mobs/render.rs::hand_base	gap: minor: slim-arm 0.5 pixel hand offset not applied
+BlockModelLighter.prepareQuadAmbientOcclusion	port	crates/horizon-client/src/mesher/lighting.rs::ambient_occlusion	per-vertex AO brightness and smooth light from the corner samples
+BlockModelLighter.prepareQuadFlat	port	crates/horizon-client/src/mesher/lighting.rs::flat	light only; the directional colour is applied in Mesher::face
+BlockModelLighter.prepareQuadShape	port	crates/horizon-client/src/mesher/lighting.rs::shape	face bounds, partial and cubic flags
+BlockModelLighter.getDirectionalBrightness	port	crates/horizon-client/src/mesher/lighting.rs::cardinal	face shade; the shade direction override is read in Mesher::face
+BlockModelLighter.Cache.getLightCoords	port	crates/horizon-client/src/mesher/lighting.rs::coords	packed light for a position
+BlockModelLighter.Cache.getShadeBrightness	port	crates/horizon-client/src/mesher.rs::MeshTables::new	shade per block state (Info.shade), not cached per position
+BlockModelRenderState.clear	skip:java		reuse of a pooled render state object
+BlockModelRenderState.tintLayers	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	gap: minor: the caller tints every face with one sprite tint, not per tint index
+BlockModelRenderState.setupModel	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	model parts with the transform matrix
+BlockModelRenderState.submit	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	faces written to the vertex list
+BlockModelRenderState.submitModel	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	faces written to the vertex list
+BlockModelRenderState.scratchRandomSource	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	seeded variant choice through collect_seeded
+BlockModelResolver.update	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	resolves the seeded model for a block state; light is passed in by the caller
+BlockModelSet.createFallbackModel	port	crates/horizon-client/src/mesher.rs::MeshTables::new	per-state tint sources (Info.tints) and the plain model
+BuiltInBlockModels.special	port	crates/horizon-client/src/block_entity_render.rs::classify	special model name to Kind
+BuiltInBlockModels.createMobHead	port	crates/horizon-client/src/block_entity_render.rs::classify	Skull kind for mob heads
+BuiltInBlockModels.createMobWallHead	port	crates/horizon-client/src/block_entity_render.rs::classify	Skull kind for wall mob heads
+BuiltInBlockModels.createMobHeads	port	crates/horizon-client/src/block_entity_render.rs::classify	Skull kind for the head set
+BuiltInBlockModels.createPlayerHead	port	crates/horizon-client/src/block_entity_render.rs::classify	Skull kind for player heads
+BuiltInBlockModels.createPlayerWallHead	port	crates/horizon-client/src/block_entity_render.rs::classify	Skull kind for wall player heads
+BuiltInBlockModels.createBanner	port	crates/horizon-client/src/block_entity_render.rs::classify	Banner kind
+BuiltInBlockModels.createWallBanner	port	crates/horizon-client/src/block_entity_render.rs::classify	Banner kind for wall banners
+BuiltInBlockModels.createDyedShulkerBox	port	crates/horizon-client/src/block_entity_render.rs::classify	Shulker kind for dyed boxes
+BuiltInBlockModels.createChest	port	crates/horizon-client/src/block_entity_render.rs::classify	Chest kind
+BuiltInBlockModels.createSingletonChest	port	crates/horizon-client/src/block_entity_render.rs::classify	Chest kind, single chest
+BuiltInBlockModels.createXmasChest	port	crates/horizon-client/src/block_entity_render.rs::classify	Chest kind with the Christmas texture
+BuiltInBlockModels.createCopperGolem	port	crates/horizon-client/src/block_entity_render.rs::classify	CopperGolem kind
+BuiltInBlockModels.createFlowerBedModel	missing		minor: the 0.25 block shift for a flower bed shown by a copper golem is not applied
+BuiltInBlockModels.createEnchantingTable	port	crates/horizon-client/src/block_entity_render.rs::classify	EnchantingTable kind
+BuiltInBlockModels.specialModelWithPropertyDispatch	port	crates/horizon-client/src/block_entity_render.rs::classify	property dispatch by block state values
+BuiltInBlockModels.Builder.put	skip:java		builder map of special models
+FluidModel.Unbaked.bake	port	crates/horizon-client/src/mesher.rs::MeshTables::new	gap: minor: water and lava layers hard-wired; translucency picked in fluid tesselate
+FluidModel.Unbaked.getAndValidateMaterial	port	crates/horizon-client/src/mesher.rs::MeshTables::new	sprite lookup through layer(); no separate atlas check
+FluidRenderer.isFaceOccludedByState	port	crates/horizon-client/src/mesher/fluid.rs::occluded_by	fluid face occlusion by the neighbour's face shape
+FluidRenderer.shouldRenderFace	port	crates/horizon-client/src/mesher/fluid.rs::tesselate	render_up, render_down and side checks, neighbour-same-fluid and self occlusion
+FluidRenderer.addFace	inline	crates/horizon-client/src/mesher/fluid.rs::tesselate	quad closure in tesselate
+FluidRenderer.calculateAverageHeight	inline	crates/horizon-client/src/mesher/fluid.rs::tesselate	average closure in tesselate
+FluidRenderer.addWeightedHeight	inline	crates/horizon-client/src/mesher/fluid.rs::tesselate	weighted sum inside the average closure
+FluidRenderer.vertex	inline	crates/horizon-client/src/mesher/fluid.rs::tesselate	vertex built in the quad closure
+FluidStateModelSet.bake	port	crates/horizon-client/src/mesher.rs::MeshTables::new	fluid layers and tints baked per fluid
+LoadedBlockModels.bake	port	crates/horizon-assets/src/bake.rs::bake_block_model	bakes each block model; the loop over the set is the caller's
+ModelBlockRenderer.tesselateBlock	port	crates/horizon-client/src/mesher.rs::Mesher::mesh	per block: fluids, models, smooth-light choice
+ModelBlockRenderer.configureTintCache	port	crates/horizon-client/src/mesher.rs::Tints::new	per section tint tables
+ModelBlockRenderer.resetTintCache	inline	crates/horizon-client/src/mesher.rs::Tints::new	tables are built fresh per section, no reset
+ModelBlockRenderer.tesselateAmbientOcclusion	port	crates/horizon-client/src/mesher.rs::Mesher::face	AO branch of face
+ModelBlockRenderer.tesselateFlat	port	crates/horizon-client/src/mesher.rs::Mesher::face	flat branch of face
+ModelBlockRenderer.shouldRenderFace	port	crates/horizon-world/src/block_render.rs::FaceVisibility::should_render_face	per face visibility, called from Mesher::mesh
+ModelBlockRenderer.putQuadWithTint	port	crates/horizon-client/src/mesher.rs::Mesher::face	tinted vertex write
+ModelBlockRenderer.getTintColor	port	crates/horizon-client/src/mesher.rs::Mesher::tint	tint source index to colour
+ModelBlockRenderer.computeTintColor	port	crates/horizon-client/src/mesher.rs::Tints::get	biome colour average over the blend radius
+MovingBlockRenderState.getBlockTint	port	crates/horizon-client/src/game/moving_pistons.rs::Game::moving_block_vertices	gap: minor: tint is the particle colour at the source position, not the biome tint at the moved spot
+MovingBlockRenderState.getBlockState	port	crates/horizon-client/src/game/moving_pistons.rs::Game::moving_piston_blocks	moved block and piston base
+SelectBlockModel.update	missing		minor: display-context switch (copper golem hand, flower bed) is not applied; block items use the normal transform
+SelectBlockModel.Unbaked.bake	missing		minor: same display-context switch, not baked
+SelectBlockModel.UnbakedSwitch.bake	missing		minor: same display-context switch, not baked
+BlockStateModelDispatcher.instantiate	port	crates/horizon-assets/src/blockstate/bind.rs::BlockStateDefinition::bind	variant selection per block state
+BlockStateModelDispatcher.MultiPartDefinition.instantiate	port	crates/horizon-assets/src/blockstate/bind.rs::BlockStateDefinition::bind	multipart selectors bound per state
+BlockStateModelDispatcher.SimpleModelSelectors.instantiate	port	crates/horizon-assets/src/blockstate/bind.rs::BlockStateDefinition::bind	variant predicates bound per state

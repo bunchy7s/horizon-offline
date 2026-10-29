@@ -1,14 +1,19 @@
 //! Apply ordered carving-mask intervals to pre-lighting terrain.
 use super::{
-    material_condition::{MaterialRule, MaterialSurfaceQueries},
-    material_stage::{SurfaceError, TopMaterialInputs, top_material},
+    material_condition::{
+        MaterialConditions, MaterialDensitySources, MaterialRule, MaterialSurfaceQueries,
+    },
+    material_stage::{SurfaceError, TopMaterialInputs, top_material_cell},
     terrain::{TerrainAquifer, TerrainBlockStates, TerrainChunk, TerrainError},
 };
 use crate::{
     heightmap::HeightmapState,
     registry::{BlockRegistry, BlockStateId},
 };
-use horizon_core::{carving::CarvingMask, position::BlockPos, random::RandomSource};
+use horizon_core::{
+    carving::CarvingMask, density::SamplerContext, noise::DensityVolume, position::BlockPos,
+    random::RandomSource,
+};
 use std::collections::BTreeSet;
 
 /// Per-state predicates resolved once from the world's block registry and
@@ -60,7 +65,7 @@ pub fn apply_carving_mask<R: RandomSource, S: MaterialSurfaceQueries, B: Terrain
     chunk: &mut TerrainChunk<'_, B>,
     mask: &CarvingMask,
     rule: MaterialRule,
-    mut inputs: TopMaterialInputs<'_, R, S>,
+    inputs: TopMaterialInputs<'_, R, S>,
     aquifer: &mut (impl TerrainAquifer + ?Sized),
     blocks: &CarvingBlocks,
     mut filter: impl FnMut([i32; 3]) -> bool,
@@ -68,6 +73,27 @@ pub fn apply_carving_mask<R: RandomSource, S: MaterialSurfaceQueries, B: Terrain
 where
     R::Positional: Clone,
 {
+    // Restoring the dirt under a carved cell used to build a fresh material
+    // worker, compile the whole surface rule and allocate its bindings for every
+    // cell. One worker now serves the pass; only the 1x1x1 bindings move.
+    let TopMaterialInputs {
+        generation,
+        root,
+        surface,
+        preliminary_surface,
+        density_context,
+    } = inputs;
+    let volume =
+        DensityVolume::new([1; 3], [0; 3], [1; 3]).map_err(|_| SurfaceError::InvalidVolume)?;
+    let sources = MaterialDensitySources::new(
+        surface,
+        volume,
+        preliminary_surface,
+        SamplerContext::default(),
+    )?;
+    let mut worker =
+        MaterialConditions::<R, _>::with_possible_biomes(generation, root, sources, None);
+    let rule = worker.add_rule(rule)?;
     let cx = chunk.position().x.wrapping_shl(4);
     let cz = chunk.position().z.wrapping_shl(4);
     for column in mask.columns() {
@@ -84,7 +110,7 @@ where
             }
             found_surface |= flags & 2 != 0;
             let Some(state) = aquifer
-                .compute_substance(inputs.density_context, [x, y, z], 0.)
+                .compute_substance(density_context, [x, y, z], 0.)
                 .map_err(TerrainError::from)?
             else {
                 continue;
@@ -96,16 +122,11 @@ where
             let below = y.wrapping_sub(1);
             if found_surface && blocks.flags(chunk.block(x, below, z))? & 4 != 0 {
                 let submerged = chunk.block_properties(state).has_fluid();
-                let replacement = top_material(
+                worker.retarget_surface_densities([x, below, z])?;
+                let replacement = top_material_cell(
+                    &mut worker,
                     chunk,
-                    rule.clone(),
-                    TopMaterialInputs::<R, _> {
-                        generation: inputs.generation,
-                        root: inputs.root.clone(),
-                        surface: &mut inputs.surface,
-                        preliminary_surface: inputs.preliminary_surface.clone(),
-                        density_context: inputs.density_context,
-                    },
+                    rule,
                     BlockPos::new(x, below, z),
                     submerged,
                 )?;

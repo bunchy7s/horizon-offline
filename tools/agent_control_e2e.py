@@ -8,12 +8,12 @@ small JSON-RPC client, and saves a screenshot of each run. The ui scenario drive
 widget id instead: the title screen, the options (a slider set by id) and the inventory's slots;
 the options scenario reads and sets options.txt values by key; the events scenario waits for
 states (wait-for) and reads the event log; the consume scenario eats and drinks consumables (a
-golden apple, milk, honey, chorus fruit) and checks their effects, remainders and teleport; the
-pick scenario middle-clicks slots (AbstractContainerScreen's cloning): a full stack in creative, from
-the hotbar and from an item tab, and nothing in survival; the suggestions scenario checks
-slash-command Tab completion on single player's connected client after a fresh launch; the no-ai
-scenario turns No AI on in a scratch game home and checks that horizon-ctl, its MCP server and the
-game's control socket all refuse.
+golden apple, milk, honey, chorus fruit) and checks their effects, remainders and teleport, then
+holds an eye of ender in use; the pick scenario middle-clicks slots (AbstractContainerScreen's
+cloning): a full stack in creative, from the hotbar and from an item tab, and nothing in survival;
+the suggestions scenario checks slash-command Tab completion on single player's connected client
+after a fresh launch; the no-ai scenario turns No AI on in a scratch game home and checks that
+horizon-ctl, its MCP server and the game's control socket all refuse.
 
     python3 tools/agent_control_e2e.py                 # both modes
     python3 tools/agent_control_e2e.py --mode mcp      # one of them
@@ -57,7 +57,7 @@ POSITIONAL = {
     'wait_for': ['condition', 'value'], 'open': ['world', 'seed', 'mode'], 'select': ['slot'],
     'summon': ['kind', 'x', 'y', 'z'], 'interact_entity': ['id'], 'effect': ['id', 'seconds', 'amplifier'],
     'xp': ['levels'], 'options': ['page'], 'lan': ['action'], 'world_backup': ['folder'],
-    'world_rename': ['folder', 'name'], 'world_delete': ['folder'],
+    'world_rename': ['folder', 'name'], 'world_delete': ['folder'], 'mouse': ['button', 'action'],
 }
 # Booleans the game takes as bare words.
 BARE = {'click_slot': ['right', 'shift'], 'click': ['right', 'middle', 'shift'], 'summon': ['baby']}
@@ -305,6 +305,15 @@ def scenario(d, out):
         (out / f'{d.name}.png').write_bytes(shot['_image'])
     seen = d('looking_at')
     assert seen['kind'] == 'block' and seen['block']['pos'] == list(target), seen
+
+    # 6. Drop a plank: on a client of a server (single player's server thread) the server must
+    # throw it, not only the window's own world, so ask the server how many planks are left.
+    d('select', slot=planks_id)
+    planks_before = d('inventory')['counts'].get(planks_id, 0)
+    d('drop')
+    d('wait', ticks=5)
+    found = d('command', command=f'clear @s {planks_id} 0')['chat']
+    assert any(f'Found {planks_before - 1} ' in line for line in found), (planks_before, found)
     return {'tree': base, 'log': log_id, 'placed': target}
 
 
@@ -476,7 +485,21 @@ def consume_scenario(d, out):
     assert held(state) is None, state['held']
     assert moved != [0, 0, 0] and abs(moved[0]) <= 8 and abs(moved[2]) <= 8, moved
     d('screenshot', path=str(out / f'consume-{d.name}.png'))
-    return {'teleported': [round(m, 2) for m in moved]}
+    # EnderEyeItem.use: startUsingItem (getUseDuration 0) whether or not a stronghold is found, so a held
+    # button keeps the eye in use, slowing the player, and throws at most one eye until it lets go.
+    d('command', command='clear @s')
+    d('give', item='ender_eye', count=3)
+    d('command', command='tp @s ~ ~ ~ ~ -90')
+    d('mouse', button='right', action='down')
+    d('wait', ticks=12)
+    eye = d('state')
+    d('mouse', button='right', action='up')
+    d('wait', ticks=3)
+    released = d('state')
+    assert eye['using'] is not None, eye['using']
+    assert held(eye) == 'minecraft:ender_eye' and eye['held']['count'] >= 2, eye['held']
+    assert released['using'] is None, released['using']
+    return {'teleported': [round(m, 2) for m in moved], 'eye_use_ticks': eye['using']['ticks']}
 
 
 def pick_scenario(d, out):
@@ -622,9 +645,32 @@ def manage_scenario(d, out):
     return {'worlds': len(worlds)}
 
 
+def pause_save_scenario(d, out):
+    # IntegratedServer.tickServer: the tick single player pauses saves everything ("Saving and pausing
+    # game...", #3280), so the world is on disk while the pause menu is open.
+    d('open', world='Paused', seed=7)
+    d('wait_for', condition='loaded', timeout=400)
+    d('wait_ready', seconds=400)
+    level = d.cwd / 'saves/Paused/level.dat'
+    d('wait', ticks=40)
+    playing = level.stat().st_mtime_ns
+    d('wait', ticks=40)
+    assert level.stat().st_mtime_ns == playing, 'level.dat was saved without a pause'
+    d('pause')
+    deadline = time.time() + 15
+    while level.stat().st_mtime_ns == playing and time.time() < deadline:
+        time.sleep(0.25)
+    saved = level.stat().st_mtime_ns != playing
+    shot = d('screenshot', path=str(out / f'{d.name}-pause-save.png'))
+    if '_image' in shot:
+        (out / f'{d.name}-pause-save.png').write_bytes(shot['_image'])
+    assert saved, 'pausing single player did not save level.dat'
+    return {'saved_on_pause': saved}
+
+
 SCENARIOS = {'survival': scenario, 'ui': ui_scenario, 'options': options_scenario, 'events': events_scenario,
              'consume': consume_scenario, 'pick': pick_scenario, 'suggestions': suggestions_scenario,
-             'manage': manage_scenario}
+             'manage': manage_scenario, 'pause-save': pause_save_scenario}
 
 
 REFUSAL = "AI features are off: turn off No AI in the launcher's settings"

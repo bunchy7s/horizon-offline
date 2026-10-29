@@ -258,6 +258,8 @@ impl Game<'_> {
         if dist > 1.0 || p.health.dead_or_dying() {
             return;
         }
+        // ServerPlayer.onExplosionHit: the blast that hit the player is theirs.
+        self.adv.marks.blast = Some((feet, false));
         let w = f64::from(p.dimensions.width) / 2.0;
         let h = f64::from(p.dimensions.height);
         let eye = [
@@ -380,9 +382,14 @@ impl Game<'_> {
             }
             self.lan = Some(host);
         }
-        // Mobs.
+        // Mobs, but not the one exploding (`getEntities(source, box)`): a
+        // wither's spawn blast neither hurts nor pushes it.
+        let spared = exploding.filter(|_| self.combat.explosion_source_named);
         let mut mobs = std::mem::take(&mut self.mobs);
-        for m in mobs.iter_mut().filter(|m| m.alive()) {
+        for m in mobs
+            .iter_mut()
+            .filter(|m| m.alive() && spared != Some(m.id))
+        {
             let hurtable = teams_allow(self, self.mob_team(m.id));
             let feet = [m.position.x, m.position.y, m.position.z];
             let dist = distance(feet) / diameter;
@@ -501,6 +508,15 @@ impl Game<'_> {
                 c.velocity.y + dir[1] * power,
                 c.velocity.z + dir[2] * power,
             );
+        }
+    }
+    /// `ServerLevel.getDestroyType`: a drop decay rule picks between decaying
+    /// and plain destruction.
+    pub(super) fn destroy_type(&self, rule: &str) -> BlockInteraction {
+        if self.ui.rules.bool(rule) {
+            BlockInteraction::DestroyWithDecay
+        } else {
+            BlockInteraction::Destroy
         }
     }
     /// Runs an explosion whose source empties the hives it destroys

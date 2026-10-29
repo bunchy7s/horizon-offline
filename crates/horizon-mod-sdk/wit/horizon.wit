@@ -314,7 +314,10 @@ interface render {
     record sprite-shape {
         /// One of the game's GUI sprites, as `gui/sprites/` names them
         /// (`hud/heart/full`, `widget/button`), the resource packs' versions
-        /// included. An unknown one draws nothing.
+        /// included, drawn over `rect` as vanilla draws it: nine-sliced when
+        /// its `gui.scaling` says so (`tooltip/frame`, `widget/button`: the
+        /// borders keep their size), stretched otherwise. An unknown one
+        /// draws nothing.
         sprite: string,
         rect: rect,
         /// A tint, 0xAARRGGBB: 0xFFFFFFFF draws it as it is.

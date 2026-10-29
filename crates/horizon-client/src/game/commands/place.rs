@@ -246,9 +246,9 @@ impl Game<'_> {
                     c.insert("z".into(), Tag::Int(at[2]));
                 }
                 if let Some((_, entity)) = save::decode_block_entity(&tag) {
-                    self.world
-                        .block_entities
-                        .insert((at[0], at[1], at[2]), entity);
+                    let key = (at[0], at[1], at[2]);
+                    self.world.block_entities.insert(key, entity);
+                    self.update_spawner_display(key);
                 }
             }
         }

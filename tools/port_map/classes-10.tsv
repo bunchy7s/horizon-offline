@@ -1,0 +1,18 @@
+SubShape.clampToShape	inline	crates/horizon-core/src/geometry/shape/face.rs::VoxelShape::calculate_face	clamps the parent's discrete extrema to the slice (face.rs:43-46)
+SubShape.fill	skip:other		write path on a read-only slice; vanilla calls fill only on fresh BitSetDiscreteVoxelShape (Shapes.java:25, DiscreteVoxelShape.java:43), never on a SubShape; Horizon shapes are immutable
+SubShape.isFull	inline	crates/horizon-core/src/geometry/shape/face.rs::VoxelShape::calculate_face	slice occupancy is copied from the parent plane when the face is built (face.rs:61-68)
+PlayerScores.getOrCreate	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::score_mut	creates the score and tracks the holder (holder_order.insert)
+PlayerScores.listScores	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::holder_scores	one holder's (objective, value) pairs
+ScoreboardSaveData.setData	inline	crates/horizon-client/src/game/scoreboard.rs::Game::save_scoreboard	gap: minor: no in-memory save-data copy and no equality/dirty check; the file is rewritten from board.pack() on each save
+LevelChunkTicks.count	port	crates/horizon-core/src/ticks/mod.rs::ChunkTicks::count	
+LevelChunkTicks.pack	port	crates/horizon-core/src/ticks/mod.rs::ChunkTicks::pack	
+LevelChunkTicks.poll	port	crates/horizon-core/src/ticks/mod.rs::ChunkTicks::poll	
+LevelChunkTicks.removeIf	port	crates/horizon-core/src/ticks/mod.rs::ChunkTicks::remove_if	
+LevelChunkTicks.scheduleUnchecked	inline	crates/horizon-core/src/ticks/mod.rs::ChunkTicks::schedule	gap: minor: push only, no duplicate check (the unpack path is in ChunkTicks::unpack); the onTickAdded deadline update is in LevelTicks::schedule
+LevelChunkTicks.unpack	port	crates/horizon-core/src/ticks/mod.rs::ChunkTicks::unpack	gap: minor: the deadline refresh is in LevelTicks::unpack_chunk
+AttributeTrack.bakeSampler	inline	crates/horizon-client/src/environment.rs::Environment::load_dimension	gap: minor: builds the day timeline's tracks only (keyframes, easing, multiply); the clock holder is implicit
+AttributeTrack.createCodec	skip:java		codec; Horizon parses the timeline JSON in Environment::load_dimension and patrol.rs GameplayAttributes::load
+AttributeTrack.createCodecWithModifier	skip:java		codec; same parsing as createCodec
+AttributeTrack.validatePeriod	skip:data		load-time check of keyframes against period_ticks; Horizon reads the vanilla timeline files without it
+AttributeTrackSampler.applyTimeBased	port	crates/horizon-client/src/environment.rs::Environment::value	gap: minor: multiply and override only; star_brightness 'maximum' reads as override (same value at base 0); booleans are in patrol.rs BoolTrack or hardcoded per consumer; no per-tick cache
+Timelines.bootstrap	skip:data		registers the timelines in code; Horizon reads data/minecraft/timeline/*.json, and the few day-cycle numbers it needs are in level/timeline.rs

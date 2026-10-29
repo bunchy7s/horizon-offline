@@ -64,6 +64,17 @@ pub(in crate::game) struct ExecState {
     pub function_depth: u32,
 }
 
+/// A modifier that brings the sources to `max_command_forks` ends the chain
+/// (`BuildContexts.ERROR_FORK_LIMIT_REACHED`); the error is only shown when
+/// no fork came before it (`CommandSourceStack.handleError`).
+fn fork_limit_reached(forked: bool, limit: usize) -> R<i32> {
+    if forked {
+        Ok(0)
+    } else {
+        Err(err("command.forkLimit", &[&limit]))
+    }
+}
+
 /// Java's `(int)`/`(short)`/`(byte)` narrowing of a double.
 fn java_int(v: f64) -> i32 {
     v as i32
@@ -303,6 +314,8 @@ impl Game<'_> {
 
     /// ExecuteCommand: `ctx` is the context holding the `execute` literal.
     pub(in crate::game) fn run_execute(&mut self, ctx: &Context) -> R<i32> {
+        // BuildContexts: a modifier may not bring the sources to this many.
+        let fork_limit = self.ui.rules.int("max_command_forks") as usize;
         let mut sources = vec![self.command_source.unwrap_or_else(|| self.player_source())];
         let mut c = ctx;
         // A fork modifier (as, at, positioned as, rotated as, facing entity,
@@ -354,6 +367,9 @@ impl Game<'_> {
                     let mut kept = Vec::new();
                     for s in sources {
                         let (keep, _) = self.with_source(s, |g| g.condition(c, want))?;
+                        if kept.len() + usize::from(keep) >= fork_limit {
+                            return fork_limit_reached(forked, fork_limit);
+                        }
                         if keep {
                             kept.push(s);
                         }
@@ -369,7 +385,11 @@ impl Game<'_> {
                     };
                     let mut next = Vec::new();
                     for s in sources {
-                        next.extend(self.with_source(s, |g| g.modify(word, c, s))?);
+                        let new = self.with_source(s, |g| g.modify(word, c, s))?;
+                        if next.len() + new.len() >= fork_limit {
+                            return fork_limit_reached(forked, fork_limit);
+                        }
+                        next.extend(new);
                     }
                     sources = next;
                 }

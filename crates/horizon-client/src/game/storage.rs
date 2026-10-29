@@ -2,13 +2,62 @@
 //! kept in the dropped item's `container` component) and ender chests (the
 //! player's `PlayerEnderChestContainer`, saved as `EnderItems`).
 use super::Game;
-use horizon_client::{containers::BlockEntity, items::ItemStack, text::Text};
+use horizon_client::{
+    containers::{BlockEntity, ChestHalf, is_chest_block},
+    items::ItemStack,
+    text::Text,
+};
 use horizon_core::random::RandomSource;
 
 pub(super) fn is_shulker_box(name: &str) -> bool {
     name.ends_with("shulker_box")
 }
 impl Game<'_> {
+    /// `ServerPlayerGameMode.useItemOn` for a spectator: the block's menu
+    /// (`BlockState.getMenuProvider`) opens, and nothing else happens. The
+    /// lid, its sound and the `container_open` game event come from
+    /// `ContainerOpenersCounter`, which spectators never join
+    /// (`ChestBlockEntity.startOpen`); the stat, the piglins' anger and the
+    /// shulker box's room check are `useWithoutItem`'s, which is not called.
+    /// Only the block containers whose clicks the server takes back from a
+    /// spectator (`handleContainerClick`) open here: storage, the furnaces,
+    /// the brewing stand and the crafter.
+    pub(super) fn spectator_open_menu(&mut self, pos: [i32; 3]) {
+        let key = (pos[0], pos[1], pos[2]);
+        let name = self
+            .res
+            .facts()
+            .get(self.world.block(pos[0], pos[1], pos[2]))
+            .name
+            .clone();
+        let container = is_shulker_box(&name)
+            || matches!(
+                name.trim_start_matches("minecraft:"),
+                "chest"
+                    | "trapped_chest"
+                    | "barrel"
+                    | "hopper"
+                    | "dispenser"
+                    | "dropper"
+                    | "furnace"
+                    | "blast_furnace"
+                    | "smoker"
+                    | "brewing_stand"
+                    | "crafter"
+            );
+        // ChestBlock.getMenuProvider: none while either half is blocked.
+        if !container || self.chest_menu_blocked(key, &name) {
+            return;
+        }
+        let Some(entity) = BlockEntity::for_block(&name) else {
+            return;
+        };
+        self.world.block_entities.get_or_insert_with(key, || entity);
+        self.container = Some(key);
+        self.screen = super::Screen::Inventory;
+        self.capture(false);
+        self.right = false;
+    }
     /// The custom name of the open container, or its default title
     /// (a double chest is named by whichever half has a name).
     pub(super) fn container_title(&self, default: String) -> String {
@@ -72,7 +121,7 @@ impl Game<'_> {
     /// with either half blocked, opens no menu.
     pub(super) fn chest_menu_blocked(&self, key: (i32, i32, i32), name: &str) -> bool {
         match name {
-            "minecraft:chest" | "minecraft:trapped_chest" => {
+            n if is_chest_block(n) => {
                 self.chest_blocked_at(key)
                     || self
                         .chest_partner(key)
@@ -96,22 +145,13 @@ impl Game<'_> {
 
 // ---- chest menus: double chests, titles and shift-click ----
 
-/// `Direction.getClockWise` for horizontal facings.
-fn clockwise(facing: &str) -> &'static str {
-    match facing {
-        "north" => "east",
-        "east" => "south",
-        "south" => "west",
-        _ => "north",
-    }
-}
-fn counter_clockwise(facing: &str) -> &'static str {
-    match clockwise(facing) {
-        "east" => "west",
-        "south" => "north",
-        "west" => "east",
-        _ => "south",
-    }
+/// A chest block state's half: its block, `type` and `facing`.
+fn chest_half(state: &horizon_world::chunk::BlockState) -> Option<ChestHalf<'_>> {
+    Some(ChestHalf {
+        block: &state.name,
+        kind: state.properties.get("type")?,
+        facing: state.properties.get("facing")?,
+    })
 }
 fn facing_step(facing: &str) -> (i32, i32) {
     match facing {
@@ -128,34 +168,19 @@ impl Game<'_> {
     pub(super) fn chest_partner(&self, key: (i32, i32, i32)) -> Option<((i32, i32, i32), bool)> {
         let registry = self.pack.assets.registry;
         let state = registry.state(self.world.block(key.0, key.1, key.2))?;
-        if !matches!(
-            state.name.as_str(),
-            "minecraft:chest" | "minecraft:trapped_chest"
-        ) {
+        if !is_chest_block(&state.name) {
             return None;
         }
-        let kind = state.properties.get("type")?.as_str();
-        if kind == "single" {
-            return None;
-        }
-        let facing = state.properties.get("facing")?.as_str();
-        let dir = if kind == "left" {
-            clockwise(facing)
-        } else {
-            counter_clockwise(facing)
-        };
-        let (dx, dz) = facing_step(dir);
+        let own = chest_half(state)?;
+        let (dx, dz) = own.connected_step()?;
         let other = (key.0 + dx, key.1, key.2 + dz);
         let other_state = registry.state(self.world.block(other.0, other.1, other.2))?;
-        let other_kind = other_state.properties.get("type")?.as_str();
-        let paired = other_state.name == state.name
-            && other_kind != "single"
-            && other_kind != kind
+        let paired = own.pairs_with(&chest_half(other_state)?)
             && matches!(
                 self.world.block_entities.get(&other),
                 Some(BlockEntity::Chest(items)) if items.len() == 27
             );
-        paired.then_some((other, kind == "right"))
+        paired.then_some((other, own.kind == "right"))
     }
     /// The open or close sound of a container block (`ChestBlockEntity.playSound`,
     /// `BarrelBlockEntity.playSound`, `ShulkerBoxBlockEntity.startOpen`): volume
@@ -345,12 +370,8 @@ impl Game<'_> {
             return None;
         }
         let generic = match self.container_block().as_deref() {
-            Some(
-                "minecraft:chest"
-                | "minecraft:trapped_chest"
-                | "minecraft:barrel"
-                | "minecraft:ender_chest",
-            ) => true,
+            Some("minecraft:barrel" | "minecraft:ender_chest") => true,
+            Some(n) if is_chest_block(n) => true,
             _ => self.open_cart_kind() == Some(super::minecarts::CartKind::Chest),
         };
         generic.then(|| self.container_size() / 9)
@@ -394,8 +415,15 @@ impl Game<'_> {
                 256.0,
                 256.0,
             );
-            let title = self.translate("container.shulkerBox", "Shulker Box");
-            batch.text(atlas, &title, ox + 8.0, oy + 6.0, grey, false);
+            // ShulkerBoxScreen draws the menu's title: the box's custom name
+            // (BaseContainerBlockEntity.getDisplayName) or its default name.
+            let title = self.remote_menu_title().unwrap_or_else(|| {
+                Text::literal(
+                    self.container_title(self.translate("container.shulkerBox", "Shulker Box")),
+                )
+                .resolve_legacy()
+            });
+            batch.text_styled(atlas, &title, ox + 8.0, oy + 6.0, grey, false);
             let inventory = self.translate("container.inventory", "Inventory");
             batch.text(atlas, &inventory, ox + 8.0, oy + 73.0, grey, false);
             return;
@@ -452,11 +480,38 @@ mod tests {
 
     #[test]
     fn double_chest_halves_connect_around_the_facing() {
+        let half = |kind, facing| ChestHalf {
+            block: "minecraft:chest",
+            kind,
+            facing,
+        };
         // A left half facing north connects east, a right half west.
-        assert_eq!(facing_step(clockwise("north")), (1, 0));
-        assert_eq!(facing_step(counter_clockwise("north")), (-1, 0));
-        assert_eq!(facing_step(clockwise("south")), (-1, 0));
-        assert_eq!(facing_step(counter_clockwise("east")), (0, -1));
+        assert_eq!(half("left", "north").connected_step(), Some((1, 0)));
+        assert_eq!(half("right", "north").connected_step(), Some((-1, 0)));
+        assert_eq!(half("left", "south").connected_step(), Some((-1, 0)));
+        assert_eq!(half("right", "east").connected_step(), Some((0, -1)));
+        assert_eq!(half("single", "east").connected_step(), None);
+    }
+    #[test]
+    fn copper_chests_join_like_chests() {
+        let half = |block, kind| ChestHalf {
+            block,
+            kind,
+            facing: "north",
+        };
+        for block in [
+            "minecraft:chest",
+            "minecraft:trapped_chest",
+            "minecraft:copper_chest",
+            "minecraft:waxed_weathered_copper_chest",
+        ] {
+            assert!(is_chest_block(block));
+            assert!(half(block, "left").pairs_with(&half(block, "right")));
+        }
+        // ChestBlock.combine needs the same block on both halves.
+        let copper = half("minecraft:copper_chest", "left");
+        assert!(!copper.pairs_with(&half("minecraft:exposed_copper_chest", "right")));
+        assert!(!is_chest_block("minecraft:ender_chest"));
     }
     #[test]
     fn shulker_boxes_are_recognised_by_name() {

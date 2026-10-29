@@ -33,6 +33,16 @@ impl Pins {
         })
     }
 
+    /// Any version from Mojang's version list, by its id and its version file's sha1 (the
+    /// list's): the client's sha1 then comes from that checked version file.
+    pub fn for_version(id: &str, manifest_sha1: &str) -> Pins {
+        Pins {
+            version: id.to_string(),
+            client_sha1: String::new(),
+            manifests: vec![manifest_sha1.to_string()],
+        }
+    }
+
     fn manifest_accepted(&self, path: &Path) -> bool {
         sha1_file(path).is_some_and(|sha1| self.manifests.contains(&sha1))
     }
@@ -494,7 +504,6 @@ fn make_link(target: &Path, link: &Path) -> std::io::Result<()> {
 /// copy on another volume).
 #[cfg(windows)]
 fn make_link(target: &Path, link: &Path) -> std::io::Result<()> {
-    use std::os::windows::process::CommandExt;
     if !target.is_dir() {
         return fs::hard_link(target, link).or_else(|_| fs::copy(target, link).map(|_| ()));
     }

@@ -61,6 +61,10 @@ pub enum Event {
     ShowDialog(horizon_world::nbt::Tag),
     /// `clear_dialog` in configuration.
     ClearDialog,
+    /// ClientboundCodeOfConductPacket: the game shows it and answers with
+    /// `Session::accept_code_of_conduct` or a disconnect; until then the
+    /// server waits in configuration.
+    CodeOfConduct(String),
     /// `ClientboundTransferPacket`: the server sent us to another address.
     /// The connection ends right after; the game reconnects there with the
     /// stored cookies.
@@ -262,13 +266,25 @@ impl Session {
             w.shutdown();
         }
     }
+    /// ServerboundAcceptCodeOfConductPacket, sent in configuration.
+    pub fn accept_code_of_conduct(&self) {
+        let mut writer = self.writer.lock().unwrap();
+        if let Some(w) = writer.as_mut()
+            && w.send(&cfg::Serverbound::AcceptCodeOfConduct(Empty).encode())
+                .is_err()
+        {
+            w.shutdown();
+        }
+    }
+    /// `Connection.disconnect`: the socket closes and the game goes on at once.
+    /// The reader thread is left to end on its own: on Windows a shutdown
+    /// doesn't wake a read already waiting, so joining it held the window until
+    /// the server dropped the connection, many seconds later.
     pub fn disconnect(&mut self) {
         if let Some(w) = self.writer.lock().unwrap().take() {
             w.shutdown();
         }
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
+        drop(self.thread.take());
     }
 }
 impl Drop for Session {
@@ -623,8 +639,9 @@ fn configure(
                 }))?
             }
             cfg::Clientbound::RegistryData(r) => registries.add(r),
-            cfg::Clientbound::CodeOfConduct(_) => {
-                reply(cfg::Serverbound::AcceptCodeOfConduct(Empty))?
+            cfg::Clientbound::UpdateTags(t) => registries.add_tags(&t),
+            cfg::Clientbound::CodeOfConduct(c) => {
+                let _ = send.send(Event::CodeOfConduct(c.text));
             }
             // The game answers: it may prompt the player first.
             cfg::Clientbound::ResourcePackPush(p) => {
@@ -782,6 +799,63 @@ pub fn ping(address: &str, timeout: Duration) -> Result<(serde_json::Value, u128
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disconnect_and_drop_do_not_wait_for_a_stalled_reader() {
+        // A reader can remain stalled after Windows socket shutdown. It must
+        // not delay either an explicit leave or Session's Drop on the UI thread.
+        for explicit_disconnect in [true, false] {
+            let (client, _server) = horizon_protocol::connection::Pipe::pair();
+            let (_reader, writer) = Connection::local(client).split();
+            let writer = Arc::new(Mutex::new(Some(writer)));
+            let (_send, events) = channel();
+            let (release, stalled) = channel();
+            let (finished, completed) = channel();
+            let thread = std::thread::spawn(move || {
+                let _ = stalled.recv_timeout(std::time::Duration::from_secs(3));
+                let _ = finished.send(());
+            });
+            let mut session = Session {
+                events,
+                writer: writer.clone(),
+                configuring: Arc::new(AtomicBool::new(false)),
+                thread: Some(thread),
+                address: "local".into(),
+                name: "TestPlayer".into(),
+                counters: Arc::new(Mutex::new(None)),
+                cookies: Cookies::default(),
+                debug: false,
+            };
+            let started = std::time::Instant::now();
+            if explicit_disconnect {
+                session.disconnect();
+                session.disconnect(); // Repeated cleanup is harmless.
+            }
+            drop(session);
+            let elapsed = started.elapsed();
+            let reader_still_pending = completed.try_recv().is_err();
+            // Always release the synthetic reader before asserting, even if
+            // a future regression restores the blocking join.
+            let _ = release.send(());
+            if reader_still_pending {
+                completed
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .unwrap();
+            }
+            assert!(
+                writer.lock().unwrap().is_none(),
+                "connection was not closed"
+            );
+            assert!(
+                reader_still_pending,
+                "disconnect waited for the stalled reader"
+            );
+            assert!(
+                elapsed < std::time::Duration::from_secs(1),
+                "disconnect took {elapsed:?}"
+            );
+        }
+    }
 
     #[test]
     fn pings_wait_behind_teleports_but_keepalives_do_not_wait_for_the_game() {

@@ -94,6 +94,8 @@ pub struct SamplerContext {
     caches: Option<Vec<cache::CacheCell>>,
     fields: WorldFields,
     sparse: bool,
+    /// Planes of y-fixed slices already sampled (`with_planes`).
+    planes: Option<std::collections::HashMap<slice::PlaneKey, Vec<f32>>>,
 }
 impl SamplerContext {
     fn with_buffer<T>(
@@ -113,6 +115,9 @@ impl SamplerContext {
     pub fn reset(&mut self) {
         self.caches = self.caches.as_ref().map(|_| Vec::new());
         self.fields = WorldFields::default();
+        if let Some(planes) = &mut self.planes {
+            planes.clear();
+        }
     }
     /// Release retained storage between worlds or after unusually large work.
     pub fn clear_scratch(&mut self) {

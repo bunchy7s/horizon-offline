@@ -67,6 +67,12 @@ pub(super) struct LineEdit {
     dragging: bool,
 }
 
+impl Default for LineEdit {
+    fn default() -> Self {
+        LineEdit::new(String::new(), 256, 60)
+    }
+}
+
 const HISTORY: usize = 100;
 
 impl LineEdit {
@@ -91,6 +97,24 @@ impl LineEdit {
 
     pub(super) fn text(&self) -> &str {
         &self.text
+    }
+
+    /// Replaces the text from outside (not an edit: no undo), the caret at its end.
+    pub(super) fn set(&mut self, text: String) {
+        *self = LineEdit::new(text, self.max, self.visible);
+    }
+
+    /// The text, leaving the field empty.
+    pub(super) fn take(&mut self) -> String {
+        let text = self.text.clone();
+        self.set(String::new());
+        text
+    }
+
+    /// How many characters the box shows.
+    pub(super) fn show(&mut self, visible: usize) {
+        self.visible = visible;
+        self.reveal();
     }
 
     pub(super) fn select_all(&mut self) {
@@ -659,11 +683,16 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_text_is_replaced_by_what_is_typed() {
+    fn set_resets_the_history_and_a_selected_suggestion_is_replaced() {
         let mut e = edit("My server");
         e.select_all();
         e.key("f", Some("F"), false, false);
         assert_eq!(e.text(), "F");
+        e.set("Other".into());
+        e.key("z", None, true, false);
+        assert_eq!(e.text(), "Other");
+        assert_eq!(e.take(), "Other");
+        assert_eq!(e.text(), "");
     }
 
     #[test]

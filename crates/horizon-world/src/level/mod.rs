@@ -238,7 +238,12 @@ pub enum LevelEvent {
     /// fluid's legacy block; the caller spawns and simulates a falling-block
     /// entity carrying `state` and calls [`Behaviours::falling_block_landed`]
     /// (or drops the item) when it lands.
-    FallingBlock { pos: BlockPos, state: BlockStateId },
+    FallingBlock {
+        pos: BlockPos,
+        state: BlockStateId,
+        /// Tip damage configured by `SpeleothemBlock.spawnFallingStalactite`.
+        hurt_per_distance: Option<f32>,
+    },
     /// A sapling reached stage 1 and tried to grow (`TreeGrower.growTree`).
     /// The caller runs the grower's configured feature and, on success,
     /// replaces the sapling (vanilla leaves the sapling on failure).

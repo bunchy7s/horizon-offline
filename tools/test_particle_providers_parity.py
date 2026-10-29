@@ -196,7 +196,7 @@ def main():
     sources = [lab.ROOT / p for p in [
         'tools/test_particle_providers_parity.py', 'tools/oracle_harness.py', 'tools/test_rust_parity.py', 'tools/lab.py',
         f'mods/horizon/src/test/java/dev/horizonlab/parity/{oracle}.java', 'Cargo.toml', 'Cargo.lock',
-        'crates/horizon-client/Cargo.toml', 'crates/horizon-client/src/particles.rs',
+        'crates/horizon-client/Cargo.toml', 'crates/horizon-client-render/src/particles.rs',
         f'crates/horizon-client/examples/probe/{probe}.rs', 'crates/horizon-core/src/random.rs']]
     tested = base.source_hashes(sources)
     cases_path, units = make_cases(build)

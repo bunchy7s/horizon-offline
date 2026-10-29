@@ -1,6 +1,6 @@
 # Horizon extras
 
-Optional conveniences built into the client: fullbright, dynamic lights, auto-reconnect,
+Optional conveniences built into the client: fullbright, dynamic lights, your own name tag, auto-reconnect,
 Mouse Tweaks-style inventory controls and inventory sorting. **Every one is off by default**: a fresh
 install looks and behaves exactly like vanilla 26.3, and turning an extra off
 again restores vanilla's behaviour completely.
@@ -9,11 +9,11 @@ again restores vanilla's behaviour completely.
 
 | Part | Code |
 |---|---|
-| Settings, parsing and saving | `crates/horizon-client/src/extras.rs` |
+| Settings, parsing and saving | `crates/horizon-client-render/src/extras.rs` |
 | FPS and click counters (for mods) | `extras.rs` (pure logic, unit tested) |
-| Dynamic lights: item glow, nearest sources | `crates/horizon-client/src/dynamic_light.rs` (unit tested), `game/dynamic_lights.rs`, `terrain.wgsl` and `entity.wgsl` (`dynamic_block_light`) |
+| Dynamic lights: item glow, nearest sources | `crates/horizon-client-render/src/dynamic_light.rs` (unit tested), `game/dynamic_lights.rs`, `terrain.wgsl` and `entity.wgsl` (`dynamic_block_light`) |
 | HUD drawing (a mod's minimap, corner stacking) | `crates/horizon-client/src/extras_hud.rs` |
-| Minimap colours, tiles and image (for `render.set-minimap`) | `crates/horizon-client/src/minimap.rs` |
+| Minimap colours, tiles and image (for `render.set-minimap`) | `crates/horizon-client-render/src/minimap.rs` |
 | Reconnect policy and backoff | `crates/horizon-client/src/reconnect.rs` |
 | Game glue (input hooks, per-frame update) | `crates/horizon-client/src/game/extras.rs` |
 | Mouse Tweaks-style controls, sort buttons | `crates/horizon-client/src/game/tweaks.rs` |
@@ -79,6 +79,16 @@ The game still draws the minimap, for the mod (`render.set-minimap`, [mods.md](m
 - one cached 16x16 tile per loaded chunk (packed map colour and height), filled nearest first and refreshed when
   blocks change within 0.3 ms a frame; the 128x128 image is recomposed only when the view moved or a tile changed, and
   uploaded into a dedicated atlas slot. With no mod showing a map, nothing runs.
+
+### Own name tag (`ownNameTag`, default off)
+- In third person (F5, either view), the player's own name shows above its head,
+  as other players see it: the profile name in its team's prefix, suffix and
+  colour, the below-name score under it within 10 blocks, faded and without the
+  see-through copy while crouching. Vanilla never names the camera entity
+  (`LivingEntityRenderer.shouldShowName`).
+- Hidden in first person, while sleeping, in spectator mode, while invisible, and
+  whenever the team's name tag visibility would hide it, exactly as the other
+  players' tags (`game/names.rs`, `own_name_tag`). Client-only: nothing is sent.
 
 ### Auto-reconnect (`autoReconnect`, default off)
 - On the "Connection lost" screen after a multiplayer connection drops, a

@@ -1,0 +1,5 @@
+{
+  "type": "minecraft:add",
+  "left": "minecraft:overworld/final_density",
+  "right": "horizon_test:hills"
+}

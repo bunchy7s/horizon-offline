@@ -120,6 +120,9 @@ pub struct NetConfig {
     pub max_players: usize,
     /// network-compression-threshold; negative disables compression.
     pub compression_threshold: i32,
+    /// rate-limit: packets a second a player may average before being kicked
+    /// (RateKickingConnection); 0 is off.
+    pub rate_limit: i32,
     /// enable-status: answer status pings.
     pub enable_status: bool,
     pub hide_online_players: bool,
@@ -160,6 +163,7 @@ impl NetConfig {
             motd,
             max_players,
             compression_threshold: 256,
+            rate_limit: 0,
             enable_status: true,
             hide_online_players: false,
             favicon: None,

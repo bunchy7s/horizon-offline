@@ -149,7 +149,7 @@ impl Game<'_> {
             (base + factor * outcome.blocked).floor() as i32
         };
         if item_damage > 0 && !self.creative {
-            let loss = self.durability_loss(&stack, item_damage as u32);
+            let loss = self.wear(&stack, item_damage as u32);
             let max = self
                 .res
                 .items()

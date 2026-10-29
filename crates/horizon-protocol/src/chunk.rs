@@ -2,7 +2,7 @@
 //! serialized LevelChunkSections with their PalettedContainers, block
 //! entities) and ClientboundLightUpdatePacketData (sky/block DataLayers).
 use crate::{
-    Result,
+    Error, Result,
     buf::{BitSet, Bytes, Codec, Longs, Reader, VarInt, Writer},
     packet,
 };
@@ -83,6 +83,11 @@ impl Paletted {
     pub fn read(r: &mut Reader, strategy: Strategy, global_bits: u8) -> Result<Self> {
         let wire = r.u8()?;
         let (has_palette, bits) = strategy.configuration(wire, global_bits);
+        // SimpleBitStorage holds 1 to 32 bits; wider wire values would
+        // divide by zero or overflow a shift.
+        if bits > 32 {
+            return Err(Error::new(format!("{bits} bits per entry, more than 32")));
+        }
         let palette = if !has_palette {
             Vec::new()
         } else if bits == 0 {
@@ -423,6 +428,23 @@ mod tests {
         let g = Paletted::from_values(&wide, Strategy::Blocks, 16);
         assert!(g.palette.is_empty() && g.bits == 16);
         assert_eq!(g.get(4095), 4095 * 7);
+    }
+
+    #[test]
+    fn wire_bits_wider_than_storage_are_rejected() {
+        for wire in [33u8, 200] {
+            let data = [wire];
+            let mut r = Reader::new(&data);
+            assert!(Paletted::read(&mut r, Strategy::Blocks, 16).is_err());
+        }
+        // 15- and 16-bit global palettes still read (1024 longs of zeroes).
+        for (wire, global) in [(15u8, 15u8), (16, 16)] {
+            let mut data = vec![wire];
+            data.resize(1 + 1024 * 8, 0);
+            let mut r = Reader::new(&data);
+            let p = Paletted::read(&mut r, Strategy::Blocks, global).unwrap();
+            assert_eq!(p.bits, wire);
+        }
     }
 
     #[test]

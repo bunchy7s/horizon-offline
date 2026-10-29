@@ -1,6 +1,7 @@
 //! The selected instance's server list on Home (`horizon_launcher::server_list`, the game's own
 //! `servers.dat`): each server with the picture the game last saw, Join (the game starts straight
-//! into it), Remove after a confirmation, and a line to add one.
+//! into it), Remove after a confirmation, and a line to add one. The official server is put on top
+//! once, as the game does (`server_list::add_official`).
 use super::*;
 use gpui::{Image, ImageFormat};
 use horizon_launcher::server_list::{self, Server};
@@ -37,6 +38,8 @@ impl Launcher {
         if self.multiplayer.fresh {
             return;
         }
+        // A list that can't be read is the game's to report: the page shows it empty.
+        let _ = server_list::add_official(&home);
         // A few servers and their 64×64 pictures: small enough to read while drawing.
         self.multiplayer.list = server_list::List::load(&home)
             .servers()
@@ -68,8 +71,8 @@ impl Launcher {
         let address = self.servers.value(Field::ServerAddress).to_string();
         self.edit_servers(|list| list.add(&name, &address));
         if self.multiplayer.error.is_none() {
-            self.servers.text(Field::ServerName).clear();
-            self.servers.text(Field::ServerAddress).clear();
+            self.servers.text(Field::ServerName).set(String::new());
+            self.servers.text(Field::ServerAddress).set(String::new());
             self.multiplayer.adding = false;
         }
     }
@@ -190,7 +193,7 @@ impl Launcher {
                 );
         } else {
             let ip = server.ip.clone();
-            let busy = self.client.is_some() || self.starting_client.is_some();
+            let busy = !self.can_join_selected();
             let join = button(
                 SharedString::from(format!("server-join-{i}")),
                 "Join",

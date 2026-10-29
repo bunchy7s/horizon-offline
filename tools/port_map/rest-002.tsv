@@ -1,0 +1,149 @@
+InputPredicate.matches	missing		minor: the player predicate's input key (forward, back, jump, sneak, sprint) is not read; no vanilla advancement uses it
+ItemPredicate.Builder.of	skip:java		builder for item predicates in code
+LightPredicate.matches	inline	crates/horizon-client/src/advancements.rs::location	the light range inside location()
+LocationPredicate.PositionPredicate.of	skip:java		factory: empty when no bound is set; location() reads the position key directly
+LocationPredicate.PositionPredicate.matches	inline	crates/horizon-client/src/advancements.rs::location	the x, y and z ranges inside location()
+MinMaxBounds.validateContainedInRange	skip:java		codec validation that one range lies inside another
+MinMaxBounds.Bounds.isAny	inline	crates/horizon-client/src/advancements.rs::range_f	an empty bound matches any value; range_f treats a missing min or max as open
+MinMaxBounds.Bounds.validateSwappedBoundsInCodec	skip:java		codec check rejecting min above max when data loads
+MinMaxBounds.Bounds.areSwapped	skip:java		helper of the codec check for min above max
+MinMaxBounds.Bounds.asRange	inline	crates/horizon-client/src/advancements.rs::range_f	range_f tests min and max directly instead of building a range
+MinMaxBounds.Bounds.asPoint	skip:java		codec writer: a single exact value
+MinMaxBounds.Bounds.map	skip:java		converts bounds between number types in Java
+MinMaxBounds.Bounds.createCodec	skip:java		codec for a number or a min/max object; range_f reads the JSON directly
+MinMaxBounds.Bounds.readNumber	port	crates/horizon-command/src/args.rs::read_bounds	reads one number of a range argument
+MinMaxBounds.Bounds.isAllowedInputChar	inline	crates/horizon-command/src/args.rs::read_bounds	the digit, minus and single dot test inside read_bounds
+MinMaxBounds.Doubles.matchesSqr	inline	crates/horizon-client/src/advancements.rs::distance	takes the square root and tests the range; same result as the squared bounds
+MinMaxBounds.Ints.matchesSqr	skip:other		no caller in vanilla 26.3
+MobEffectsPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	gap: minor: ambient and visible flags are not checked; no vanilla advancement uses them
+MobEffectsPredicate.Builder.and	skip:java		builder for effect predicates in code
+MobEffectsPredicate.MobEffectInstancePredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	gap: minor: ambient and visible flags are not checked; amplifier and duration are
+NbtPredicate.matches	missing		minor: custom_data and entity NBT predicates are not read; no vanilla advancement uses them
+SingleComponentItemPredicate.matches	inline	crates/horizon-client/src/advancements.rs::item	gap: minor: only enchantments, damage and potion contents are read; other components are ignored
+SlotsPredicate.matches	missing		minor: slot-range item test is not read; no vanilla advancement uses it
+SlotsPredicate.matchSlots	missing		minor: helper of SlotsPredicate.matches; not read
+StatePropertiesPredicate.matches	port	crates/horizon-client/src/advancements.rs::block	the state property test of block()
+StatePropertiesPredicate.checkState	skip:data		load-time check that property names exist
+StatePropertiesPredicate.Builder.hasProperty	skip:java		builder
+StatePropertiesPredicate.ExactMatcher.match	inline	crates/horizon-client/src/advancements.rs::block	exact value compare of the state map
+StatePropertiesPredicate.PropertyMatcher.match	inline	crates/horizon-client/src/advancements.rs::block	present property compared by block()
+StatePropertiesPredicate.PropertyMatcher.checkState	skip:data		load-time check that the property exists
+StatePropertiesPredicate.RangedMatcher.match	inline	crates/horizon-client/src/advancements.rs::block	gap: minor: ranges compare numeric property values only
+TagPredicate.codec	skip:java		codec
+TagPredicate.is	skip:java		builder
+TagPredicate.isNot	skip:java		builder
+TagPredicate.matches	inline	crates/horizon-client/src/advancements.rs::id_matches	gap: minor: the #tag form is read; the negated expected=false form is not kept
+CubeMobPredicate.matches	missing		minor: type_specific/cube_mob (slime size) is not read; no vanilla advancement uses it
+DistanceToPlayerPredicate.matches	port	crates/horizon-client/src/advancements.rs::distance	the distance key of entity(): from the player to the entity
+EntityEquipmentPredicate.captainPredicate	skip:data		datagen builder for the raid captain predicate (VanillaAdventureAdvancements)
+EntityEquipmentPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	the equipment key: the seven slots
+EntityEquipmentPredicate.Builder.build	skip:java		builder
+EntityFlagsPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	gap: minor: is_in_water and is_fall_flying are not read; vanilla advancements only use is_baby
+EntityFlagsPredicate.Builder.build	skip:java		builder
+EntityLocationPredicate.matches	port	crates/horizon-client/src/advancements.rs::location	the location key of entity()
+EntityPartialComponentsPredicate.matches	missing		minor: the predicates key is accepted and ignored (entity() returns true); no vanilla advancement uses it
+EntityPredicate.wrap	skip:java		wraps a builder into a loot condition
+EntityPredicate.createContext	inline	crates/horizon-client/src/game/advancements.rs::Game::trigger_entity	the entity context (this entity, origin at the player) built in each trigger
+EntityPredicate.equals	skip:java		Java equality
+EntityPredicate.combine	inline	crates/horizon-client/src/advancements.rs::entity	the AND of the sub-predicates; entity() tests every key in turn
+EntityPredicate.Builder.of	skip:java		builder
+EntityPredicate.Builder.equipment	skip:java		builder
+EntitySubPredicate.and	inline	crates/horizon-client/src/advancements.rs::entity	the AND of two sub-predicates; entity() tests every key
+EntityTagPredicate.matches	missing		minor: entity_tags key is not read; no vanilla advancement uses it
+EntityTagPredicate.containsAtLeastOne	missing		minor: helper of entity_tags; not read
+EntityTagPredicate.containsAllOf	missing		minor: helper of entity_tags; not read
+EntityTypePredicate.of	skip:java		builder from an entity type or tag
+EntityTypePredicate.matches	port	crates/horizon-client/src/advancements.rs::id_matches	the type key of entity(): an id or #tag
+FishingHookPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	the type_specific/fishing_hook arm: open-water test
+LightningBoltPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	gap: minor: blocks_set_on_fire is checked against 0, not the bolt's own count; the lightning trigger never fires
+MovementAffectedByPredicate.matches	missing		minor: movement_affected_by key is not read; no vanilla advancement uses it
+MovementPredicate.matches	missing		minor: movement key (speed, fall distance) is not read; no vanilla advancement uses it
+PassengerPredicate.matches	missing		player: husbandry/ride_a_boat_with_a_goat cannot complete: the passenger key inside vehicle falls through entity() to false
+PlayerPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	gap: minor: only gamemode and looking_at are read; level, food, stats, recipes, advancements and input are not
+PlayerPredicate.AdvancementCriterionsPredicate.test	missing		minor: the advancements key of a player predicate is not read; no vanilla advancement uses it
+PlayerPredicate.Builder.addStat	skip:java		builder
+PlayerPredicate.Builder.checkAdvancementDone	skip:java		builder
+PlayerPredicate.Builder.checkAdvancementCriterions	skip:java		builder
+PlayerPredicate.Builder.build	skip:java		builder
+PlayerPredicate.StatMatcher.createTypedCodec	skip:java		codec
+RaiderPredicate.matches	missing		minor: type_specific/raider is not read in entity(); no vanilla advancement uses it
+SheepPredicate.matches	missing		minor: type_specific/sheep is not read; no vanilla advancement uses it
+SteppingOnPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	gap: minor: no on-ground test; the block is read 0.5 below the feet
+TargetedEntityPredicate.matches	missing		minor: targeted_entity key is not read; no vanilla advancement uses it
+TeamPredicate.matches	missing		minor: team key is not read though scoreboard teams exist; no vanilla advancement uses it
+AnyBlockInteractionTrigger.trigger	missing		minor: any_block_use never fires; no vanilla advancement uses it
+AnyBlockInteractionTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_block	the location test; only the firing of the trigger is missing
+AnyBlockInteractionTrigger.TriggerInstance.validate	skip:data		load-time validation of the location
+BeeNestDestroyedTrigger.trigger	missing		player: breaking a bee nest with bees never fires the criterion; husbandry/silk_touch_nest cannot complete
+BeeNestDestroyedTrigger.TriggerInstance.destroyedBeeNest	skip:java		builder
+BeeNestDestroyedTrigger.TriggerInstance.matches	missing		player: the bee nest test is never run because the trigger never fires
+BredAnimalsTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_bred	parent, partner and child contexts
+BredAnimalsTrigger.TriggerInstance.bredAnimals	skip:java		builder
+BredAnimalsTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_bred	parent and partner in either order, then child
+BredAnimalsTrigger.TriggerInstance.validate	skip:data		load-time validation
+BrewedPotionTrigger.TriggerInstance.matches	port	crates/horizon-client/src/advancements.rs::potions	the potion test
+ChangeDimensionTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_dimension	from and to dimensions
+ChangeDimensionTrigger.TriggerInstance.changedDimension	skip:java		builder
+ChangeDimensionTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_dimension	from and to test
+ChanneledLightningTrigger.trigger	missing		player: Channeling strikes lightning (channel_lightning) but the channeled-lightning criterion never fires; adventure/very_very_frightening cannot complete
+ChanneledLightningTrigger.TriggerInstance.matches	missing		player: never run, the trigger never fires
+ConstructBeaconTrigger.TriggerInstance.constructedBeacon	skip:java		builder
+ConsumeItemTrigger.TriggerInstance.usedItem	skip:java		builder
+ConsumeItemTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_item	the item test; consume.rs passes the stack
+Criterion.criterionCodec	skip:java		codec
+CuredZombieVillagerTrigger.trigger	port	crates/horizon-client/src/game/zombie_villagers.rs::Game::trigger_cured_zombie_villager	zombie and villager contexts
+CuredZombieVillagerTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/zombie_villagers.rs::Game::trigger_cured_zombie_villager	zombie then villager test
+CuredZombieVillagerTrigger.TriggerInstance.validate	skip:data		load-time validation
+DefaultBlockInteractionTrigger.trigger	missing		minor: default_block_use (block use with an empty hand) never fires; no vanilla advancement uses it
+DefaultBlockInteractionTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_block	the location test
+DefaultBlockInteractionTrigger.TriggerInstance.validate	skip:data		load-time validation
+DistanceTrigger.trigger	missing		player: fall_from_height and ride_entity_in_lava never fire (no fall or lava-ride tracking); ride_strider_in_overworld_lava and fall_from_world_height cannot complete
+DistanceTrigger.TriggerInstance.fallFromHeight	skip:java		builder
+DistanceTrigger.TriggerInstance.rideEntityInLava	skip:java		builder
+DistanceTrigger.TriggerInstance.matches	missing		player: the start-position and distance test is never run; the trigger never fires
+EffectsChangedTrigger.trigger	missing		player: effects_changed never fires; nether/all_effects, nether/all_potions and husbandry/kill_axolotl_target cannot complete
+EffectsChangedTrigger.TriggerInstance.hasEffects	skip:java		builder
+EffectsChangedTrigger.TriggerInstance.gotEffectsFrom	skip:java		builder
+EffectsChangedTrigger.TriggerInstance.matches	missing		player: never run; the effects and source tests are not in Horizon
+EnchantedItemTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_enchanted_item	the enchanted item and its levels
+EnchantedItemTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_enchanted_item	item and levels test
+EnterBlockTrigger.TriggerInstance.entersBlock	skip:java		builder
+EnterBlockTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_enter_block	block and state test
+EntityHurtPlayerTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_entity_hurt_player	the player and the damage it took
+EntityHurtPlayerTrigger.TriggerInstance.matches	port	crates/horizon-client/src/advancements.rs::damage	the damage predicate
+FallAfterExplosionTrigger.trigger	missing		player: fall_after_explosion never fires; adventure/who_needs_rockets cannot complete
+FallAfterExplosionTrigger.TriggerInstance.fallAfterExplosion	skip:java		builder
+FallAfterExplosionTrigger.TriggerInstance.matches	missing		player: never run; the trigger never fires
+FilledBucketTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_item	the item test; filled_bucket is fired through trigger_item
+FishingRodHookedTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_fishing_rod_hooked	the hook as the hooked entity and the caught stacks
+FishingRodHookedTrigger.TriggerInstance.fishedItem	skip:java		builder
+FishingRodHookedTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_fishing_rod_hooked	gap: minor: the stack of a hooked item entity is not tested; only caught stacks are
+InventoryChangeTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::check_inventory_trigger	slot counts, then the inventory index
+InventoryChangeTrigger.TriggerInstance.hasItems	skip:java		builder
+InventoryChangeTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::check_inventory_trigger	item predicates: each matched by some stack
+InventoryChangeTrigger.TriggerInstance.Slots.matches	port	crates/horizon-client/src/game/advancements.rs::Game::check_inventory_trigger	occupied, full and empty ranges
+ItemDurabilityTrigger.trigger	missing		player: item_durability_changed never fires; nether/ride_strider cannot complete
+ItemDurabilityTrigger.TriggerInstance.changedDurability	skip:java		builder
+ItemDurabilityTrigger.TriggerInstance.matches	missing		player: never run; the trigger never fires
+ItemUsedOnLocationTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_block	gap: minor: no block entity in the context
+ItemUsedOnLocationTrigger.TriggerInstance.placedBlock	skip:java		builder
+ItemUsedOnLocationTrigger.TriggerInstance.placedBlockWithProperties	skip:java		builder
+ItemUsedOnLocationTrigger.TriggerInstance.itemUsedOnLocation	skip:java		builder
+ItemUsedOnLocationTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_block	the location test
+ItemUsedOnLocationTrigger.TriggerInstance.validate	skip:data		load-time validation
+KilledByArrowTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_killed_by_arrow	victims and the weapon
+KilledByArrowTrigger.TriggerInstance.crossbowKilled	skip:java		builder
+KilledTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_entity	gap: player: the killing_blow condition is never tested; sniper_duel, blowback and return_to_sender complete on any matching kill
+KilledTrigger.TriggerInstance.playerKilledEntity	skip:java		builder
+KilledTrigger.TriggerInstance.entityKilledPlayer	skip:java		builder
+KilledTrigger.TriggerInstance.matches	inline	crates/horizon-client/src/game/advancements.rs::Game::trigger_entity	gap: player: killing_blow not tested (see KilledTrigger.trigger)
+LevitationTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_levitation	start, duration and the player
+LevitationTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_levitation	distance and duration tests
+LightningStrikeTrigger.trigger	missing		player: lightning_strike never fires; adventure/lightning_rod_with_villager_no_fire cannot complete
+LightningStrikeTrigger.TriggerInstance.lightningStrike	skip:java		builder
+LightningStrikeTrigger.TriggerInstance.matches	missing		player: never run; the bystander test is not in Horizon
+LightningStrikeTrigger.TriggerInstance.validate	skip:data		load-time validation
+LootTableTrigger.TriggerInstance.lootTableUsed	skip:java		builder
+PickedUpItemTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_item_entity	gap: player: only the sulfur cube absorb fires the entity variant; thrown_item_picked_up_by_player never fires (husbandry/allay_deliver_item_to_player)
+PickedUpItemTrigger.TriggerInstance.matches	port	crates/horizon-client/src/advancements.rs::item_entity	player, entity and item tests
+PlayerHurtEntityTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_player_hurt_entity	the victim, the damage and the player

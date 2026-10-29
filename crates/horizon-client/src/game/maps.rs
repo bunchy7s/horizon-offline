@@ -66,6 +66,10 @@ pub(super) struct MapData {
     pub unlimited: bool,
     pub colors: Vec<u8>,
     pub decorations: Vec<Decoration>,
+    /// `MapBanner` and `MapFrame` entries as saved (`banners`, `frames`), kept
+    /// so a save does not drop them.
+    pub banners: Vec<Tag>,
+    frames: Vec<Tag>,
     holders: Vec<Holder>,
     /// Changed since the last save / texture upload.
     dirty: bool,
@@ -85,6 +89,8 @@ impl MapData {
             unlimited: false,
             colors: vec![0; 128 * 128],
             decorations: Vec::new(),
+            banners: Vec::new(),
+            frames: Vec::new(),
             holders: Vec::new(),
             dirty: true,
             texture_dirty: true,
@@ -234,8 +240,8 @@ impl MapData {
                     ("trackingPosition", flag(self.tracking)),
                     ("unlimitedTracking", flag(self.unlimited)),
                     ("colors", Tag::ByteArray(self.colors.clone())),
-                    ("banners", Tag::List(Vec::new())),
-                    ("frames", Tag::List(Vec::new())),
+                    ("banners", Tag::List(self.banners.clone())),
+                    ("frames", Tag::List(self.frames.clone())),
                 ]),
             ),
             ("DataVersion", Tag::Int(horizon_world::DATA_VERSION)),
@@ -257,6 +263,10 @@ impl MapData {
             _ => Vec::new(),
         };
         colors.resize(128 * 128, 0);
+        let list = |k: &str| match d.get(k) {
+            Some(Tag::List(l)) => l.clone(),
+            _ => Vec::new(),
+        };
         Some(Self {
             center: [int("xCenter")?, int("zCenter")?],
             scale: int("scale").unwrap_or(0).clamp(0, 4) as u8,
@@ -266,6 +276,8 @@ impl MapData {
             unlimited: int("unlimitedTracking").unwrap_or(0) != 0,
             colors,
             decorations: Vec::new(),
+            banners: list("banners"),
+            frames: list("frames"),
             holders: Vec::new(),
             dirty: false,
             texture_dirty: true,
@@ -1296,7 +1308,7 @@ impl Game<'_> {
         }
     }
     /// `renderTwoHandedMap`: map `id` held in both hands, in view space (the
-    /// arms under it are not drawn).
+    /// arms under it: `first_person::map_arm_poses`).
     pub(super) fn two_handed_map_geometry(
         &mut self,
         to_world: glam::Mat4,
@@ -1306,22 +1318,11 @@ impl Game<'_> {
         light: u32,
         out: &mut Vec<Vertex>,
     ) {
+        use horizon_core::geometry::trig::Mth;
         let deg = |d: f32| d.to_radians();
-        let sqrt_attack = attack.sqrt();
-        let y_swing = -0.2 * (attack * std::f32::consts::PI).sin();
-        let z_swing = -0.4 * (sqrt_attack * std::f32::consts::PI).sin();
-        // calculateMapTilt
-        let tilt = (1.0 - self.pitch / 45.0 + 0.1).clamp(0.0, 1.0);
-        let tilt = -(tilt * std::f32::consts::PI).cos() * 0.5 + 0.5;
         let base = to_world
-            * glam::Mat4::from_translation(glam::Vec3::new(0.0, -y_swing / 2.0, z_swing))
-            * glam::Mat4::from_translation(glam::Vec3::new(
-                0.0,
-                0.04 + inverse_height * -1.2 + tilt * -0.5,
-                -0.72,
-            ))
-            * glam::Mat4::from_rotation_x(deg(tilt * -85.0));
-        let swing = (sqrt_attack * std::f32::consts::PI).sin();
+            * horizon_client::first_person::two_handed_map_base(self.pitch, inverse_height, attack);
+        let swing = (attack.sqrt() * std::f32::consts::PI).msin();
         let m = base
             * glam::Mat4::from_rotation_x(deg(swing * 20.0))
             * glam::Mat4::from_scale(glam::Vec3::splat(2.0));

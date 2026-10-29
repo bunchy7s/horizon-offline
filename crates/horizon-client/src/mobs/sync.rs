@@ -23,6 +23,7 @@ use super::{
 // `Pose.id` of the poses mobs take.
 pub const STANDING: u8 = 0;
 pub const SLEEPING: u8 = 2;
+pub const CROUCHING: u8 = 5;
 pub const LONG_JUMPING: u8 = 6;
 pub const CROAKING: u8 = 8;
 pub const USING_TONGUE: u8 = 9;
@@ -42,7 +43,7 @@ pub fn pose_id(m: &Mob) -> u8 {
         Species::Warden => warden::pose_id(m),
         Species::Breeze => breeze::pose_id(m),
         Species::Camel | Species::CamelHusk if camel::sitting(m) => SITTING,
-        Species::Frog => m.extra.pose,
+        Species::Frog | Species::Cat | Species::Ocelot => m.extra.pose,
         // LivingEntity.startSleeping: the pose, with the bed in index 14.
         Species::Villager if villager::sleeping(m) => SLEEPING,
         _ => STANDING,

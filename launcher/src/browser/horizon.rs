@@ -60,6 +60,14 @@ pub fn known_index() -> Option<Arc<Index>> {
         .map(|(_, index)| index.clone())
 }
 
+/// Whether the registry's project `id` is a native mod, by the index already read (never the
+/// network); false when none was read.
+pub fn is_native_mod(id: &str) -> bool {
+    known_index()
+        .and_then(|index| Some(index.project(id)?.kind == index::Kind::NativeMod))
+        .unwrap_or(false)
+}
+
 /// The index: the one fetched in the last ten minutes, else fetched again (and kept in the game
 /// folder), else the copy kept last time.
 pub fn index() -> Result<Arc<Index>, String> {
@@ -646,7 +654,10 @@ fn install_version(
         fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     fs::rename(&path, &target).map_err(|e| format!("{}: {e}", target.display()))?;
-    if let Some(old) = old.as_ref().filter(|o| o.file != relative) {
+    if let Some(old) = old
+        .as_ref()
+        .filter(|o| o.file != relative && !stays(native, &o.file))
+    {
         let _ = fs::remove_file(home.join(&old.file));
     }
     if project.kind == Kind::Mod {
@@ -672,6 +683,13 @@ fn install_version(
     list.entries.push(entry.clone());
     list.save(home)?;
     Ok(entry)
+}
+
+/// Whether an update to a native version keeps the old file `old`: a mod that turned native
+/// keeps its `.hmod` until the player builds the game with the new version. The game runs it
+/// meanwhile and skips it once the native one is built in; removing the mod removes both.
+fn stays(native: bool, old: &str) -> bool {
+    native && old.ends_with(".hmod")
 }
 
 /// The mod id of an installed mod (`horizon-mods/<id>`, `horizon-mods/<id>.hmod` or

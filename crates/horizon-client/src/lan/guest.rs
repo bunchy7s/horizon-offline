@@ -378,6 +378,22 @@ impl Guest {
     pub fn send(&self, packet: &play::Clientbound) {
         self.sender.send(packet.encode());
     }
+    /// `Entity.stopRiding`: out of the vehicle it rode.
+    pub fn stop_riding(&mut self) {
+        (self.vehicle, self.vehicle_good) = (None, None);
+    }
+    /// `LivingEntity.tickDeath` for a dead player: true once its body is
+    /// removed, 20 ticks after it died (`remove(KILLED)`, whose
+    /// `Entity.setRemoved` stops its riding). The body sits in its vehicle
+    /// until then.
+    pub fn tick_death(&mut self) -> bool {
+        self.death_time += 1;
+        let removed = self.death_time >= 20;
+        if removed {
+            self.stop_riding();
+        }
+        removed
+    }
     pub fn send_all(&self, packets: &[play::Clientbound]) {
         for p in packets {
             self.send(p);
@@ -459,6 +475,22 @@ impl Guest {
         let range = if self.creative() { 5.0 } else { 4.5 };
         within_block_range(eye, range + buffer, pos)
     }
+    /// `Player.isWithinBlockInteractionRange(pos, 1.0)`, which the server
+    /// checks a block action against (ServerPlayerGameMode.handleBlockBreakAction,
+    /// ServerGamePacketListenerImpl.handleUseItemOn): from the eyes of the
+    /// guest's body in its pose (crouching, swimming, gliding).
+    pub fn may_reach_block(&self, pos: [i32; 3]) -> bool {
+        let eye = self
+            .motion
+            .as_ref()
+            .map_or_else(|| self.eye_height(), |m| f64::from(m.dimensions.eye_height));
+        let range = if self.creative() { 5.0 } else { 4.5 };
+        within_block_range(
+            [self.position[0], self.position[1] + eye, self.position[2]],
+            range + 1.0,
+            pos,
+        )
+    }
     /// The inventory menu's 46 slots (ServerPlayer.inventoryMenu): 0 crafting
     /// result, 1..=4 crafting grid, 5..=8 armor, 9..=35 main, 36..=44 hotbar,
     /// 45 off hand.
@@ -521,6 +553,14 @@ pub fn firework_components(
         ));
     }
     out
+}
+
+/// `DyeColor.getId` of a dye's name.
+fn dye_id(name: &str) -> Option<i32> {
+    crate::block_entity_render::DYES
+        .iter()
+        .position(|d| d.0 == name)
+        .map(|i| i as i32)
 }
 
 /// The off hand slot is conventionally 40 in saves and 45 in the menu.
@@ -595,6 +635,36 @@ fn network_stack(
                 ));
             }
         }
+        // BannerPatternLayers: each pattern a reference into the synced registry;
+        // a layer that has none leaves the stack without the component.
+        let layers: Option<Vec<(i32, i32)>> = d
+            .banner_patterns
+            .iter()
+            .map(|layer| {
+                let name = if layer.pattern.contains(':') {
+                    layer.pattern.to_string()
+                } else {
+                    format!("minecraft:{}", layer.pattern)
+                };
+                Some((
+                    synced_id("minecraft:banner_pattern", &name)?,
+                    dye_id(&layer.color)?,
+                ))
+            })
+            .collect();
+        if let Some(layers) = layers.filter(|layers| !layers.is_empty()) {
+            stack.added.push((
+                horizon_protocol::item::component::BANNER_PATTERNS,
+                horizon_protocol::item::Component::BannerPatterns(layers),
+            ));
+        }
+        // A shield's `base_color`.
+        if let Some(id) = d.base_color.as_deref().and_then(dye_id) {
+            stack.added.push((
+                horizon_protocol::item::component::BASE_COLOR,
+                horizon_protocol::item::Component::Int(id),
+            ));
+        }
         if let Some(id) = d.map_id {
             stack.added.push((
                 horizon_protocol::item::component::MAP_ID,
@@ -613,7 +683,29 @@ fn network_stack(
                 horizon_protocol::item::Component::Int(i32::from(mode)),
             ));
         }
+        if let Some(amplifier) = d.ominous_amplifier {
+            stack.added.push((
+                horizon_protocol::item::component::OMINOUS_BOTTLE_AMPLIFIER,
+                horizon_protocol::item::Component::Int(i32::from(amplifier)),
+            ));
+        }
         stack.added.extend(firework_components(d));
+        // A goat horn's instrument, by its `minecraft:instrument` id.
+        if let Some(id) = d
+            .other("minecraft:instrument")
+            .and_then(|t| crate::save::text(Some(t)))
+            .and_then(|name| {
+                synced_id(
+                    "minecraft:instrument",
+                    &horizon_world::datafix::dynamic::namespaced(&name),
+                )
+            })
+        {
+            stack.added.push((
+                horizon_protocol::item::component::INSTRUMENT,
+                horizon_protocol::item::Component::Instrument(id),
+            ));
+        }
         // The compass's lodestone target.
         if let Some(t) = d.other("minecraft:lodestone_tracker") {
             let target = t.get("target").and_then(|g| {
@@ -770,5 +862,79 @@ mod tests {
         chestplate.data_mut().trim = Some(("minecraft:x".into(), "coast".into()));
         let stack = stack_to_network(|_| 7, synced_id, &Some(chestplate)).unwrap();
         assert_eq!(stack.component(component::TRIM), None);
+    }
+
+    #[test]
+    fn goat_horns_send_their_instrument_by_registry_id() {
+        let mut horn = ItemStack::new("minecraft:goat_horn", 1);
+        horn.data_mut().other.push((
+            "minecraft:instrument".into(),
+            horizon_world::nbt::Tag::String("minecraft:sing_goat_horn".into()),
+        ));
+        let synced_id = |registry: &str, name: &str| match (registry, name) {
+            ("minecraft:instrument", "minecraft:sing_goat_horn") => Some(1),
+            _ => None,
+        };
+        let stack = stack_to_network(|_| 7, synced_id, &Some(horn)).unwrap();
+        assert_eq!(
+            stack.component(component::INSTRUMENT),
+            Some(&Component::Instrument(1))
+        );
+    }
+
+    fn guest_at(position: [f64; 3]) -> Guest {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        Guest::new(
+            Joined {
+                conn: 0,
+                uuid: 0,
+                name: "guest".into(),
+                properties: Vec::new(),
+                info: ClientInformation::new(8),
+                brand: String::new(),
+                sender: PlayerSender::new(tx, Arc::new(std::sync::atomic::AtomicUsize::new(0))),
+                latency: Arc::new(AtomicI32::new(0)),
+                address: "127.0.0.1:1".parse().unwrap(),
+            },
+            1,
+            position,
+            10,
+        )
+    }
+
+    #[test]
+    fn a_dead_player_leaves_its_vehicle_when_its_body_is_removed() {
+        let mut g = guest_at([0.5, -120.0, 0.5]);
+        g.vehicle = Some(7);
+        g.vehicle_good = Some([0.5, -120.0, 0.5]);
+        g.dead = true;
+        // LivingEntity.tickDeath: the body sits in the boat for 19 ticks...
+        for tick in 1..20 {
+            assert!(!g.tick_death(), "tick {tick}");
+            assert_eq!(g.vehicle, Some(7), "tick {tick}");
+        }
+        // ...then remove(KILLED)'s setRemoved stops its riding, so the
+        // respawned player is not put back into the boat.
+        assert!(g.tick_death());
+        assert_eq!((g.vehicle, g.vehicle_good), (None, None));
+    }
+
+    #[test]
+    fn a_block_action_must_be_within_reach() {
+        let mut g = guest_at([0.5, 64.0, 0.5]);
+        // Survival (4.5 + 1 from the eyes): five blocks off horizontally,
+        // not one further.
+        assert!(g.may_reach_block([5, 64, 0]));
+        assert!(!g.may_reach_block([6, 64, 0]));
+        // Creative's 5.0 reaches one block further.
+        g.game_mode = CREATIVE;
+        assert!(g.may_reach_block([6, 64, 0]));
+        assert!(!g.may_reach_block([7, 64, 0]));
+        // With no body yet the sneak flag gives the eye height: a block at
+        // the edge above is gone once crouched.
+        g.game_mode = SURVIVAL;
+        assert!(g.may_reach_block([0, 71, 0]));
+        g.sneaking = true;
+        assert!(!g.may_reach_block([0, 71, 0]));
     }
 }

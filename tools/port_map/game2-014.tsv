@@ -1,0 +1,144 @@
+HoneyBlock.doesEntityDoHoneyBlockSlideEffects	inline	crates/horizon-client/src/motion.rs::MotionWorld::honey_block_inside	gap: minor: only the player slides here; boats, minecarts, TNT and mobs get no slide sound or event
+HoneyBlock.fallOn	port	crates/horizon-world/src/block_landing.rs::BlockLandingRegistry::fall_on	honey rule: slide sound, entity event 54, fall damage 0.2, fall sound
+HoneyBlock.isSlidingDown	inline	crates/horizon-client/src/motion.rs::MotionWorld::honey_block_inside	gap: player: mobs and other entities do not slide down honey, only the player does
+HoneyBlock.maybeDoSlideAchievement	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_honey_slide	gap: minor: the every-20-ticks check sits in the caller, Game::tick
+HoneyBlock.doSlideMovement	inline	crates/horizon-client/src/motion.rs::MotionWorld::honey_block_inside	velocity damping and fall distance reset
+HoneyBlock.showParticles	port	crates/horizon-client/src/game.rs::Game::honey_slide_particles	five honey block particles at the entity
+IceBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	melts through Sim::ice_melt when block light is above 11 minus dampening
+InfestedBlock.spawnInfestation	inline	crates/horizon-client/src/game.rs::Game::break_block_as_player	silverfish at the broken block's bottom centre when blocks drop and there is no silk touch; poof via mob_poof
+InfestedBlock.infestedStateByHost	inline	crates/horizon-client/src/game/creatures.rs::Game::handle_mob_events	the name swap minecraft:X to minecraft:infested_X in MobEvent::Infest; the host list is checked by the silverfish goals
+InfestedBlock.getNewStateWithProperties	inline	crates/horizon-client/src/game/creatures.rs::Game::handle_mob_events	property copy is the same name swap; the map cache is java
+IronBarsBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	arms per horizontal side and waterlogged from the replaced fluid
+IronBarsBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	waterlogged tick and side attachment
+IronBarsBlock.skipRendering	port	crates/horizon-world/src/block_render.rs::FaceVisibility::skips	bars face culling for the mesher
+IronBarsBlock.createBlockStateDefinition	skip:data	-	state properties come from the data tables
+JigsawBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	orientation property through the rotate table
+JigsawBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	orientation property through the mirror table
+JigsawBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	orientation from clicked face and horizontal facing
+JigsawBlock.useWithoutItem	missing	-	player: a game master right-clicking a jigsaw block gets no jigsaw editor; the client has no jigsaw screen
+JukeboxBlock.setPlacedBy	missing	-	minor: a jukebox item carrying a disc (creative Ctrl+pick) fills the block entity in Game::apply_placed_item but HAS_RECORD stays false, so no disc model shows
+JukeboxBlock.useWithoutItem	port	crates/horizon-client/src/game/jukebox.rs::Game::use_jukebox	takes the disc out through eject_record when one is in
+JukeboxBlock.ownSignal	port	crates/horizon-client/src/game/jukebox.rs::jukebox_signals	15 while a song plays
+JukeboxBlock.getAnalogOutputSignal	port	crates/horizon-client/src/game/jukebox.rs::jukebox_signals	comparator output of the song
+JukeboxBlock.getTicker	port	crates/horizon-client/src/game/jukebox.rs::Game::tick_jukebox	ticks only while a song plays
+LayeredCauldronBlock.isFull	inline	crates/horizon-client/src/cauldron.rs::interact	the level 3 test that gates bucket filling
+LayeredCauldronBlock.canReceiveStalactiteDrip	port	crates/horizon-world/src/level/speleothem.rs::Sim::cauldron_can_receive	the water cauldron is the rain type here
+LayeredCauldronBlock.handlePrecipitation	port	crates/horizon-world/src/level/tick.rs::Sim::precipitation_tick	rain or snow chance, cycles the level below 3
+LayeredCauldronBlock.receiveStalactiteDrip	port	crates/horizon-world/src/level/speleothem.rs::Sim::cauldron_tick	adds one level below full with level event 1047
+LeavesBlock.isRandomlyTicking	inline	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	the same distance 7 and not persistent test gates the leaf arm
+LeavesBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	drops resources and removes decaying leaves
+LeavesBlock.decaying	inline	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	not persistent and distance 7 test
+LeavesBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	waterlogged tick and distance schedule
+LeavesBlock.updateDistance	port	crates/horizon-world/src/level/tick.rs::Sim::leaves_update_distance	
+LeavesBlock.getFluidState	port	crates/horizon-world/src/level/update.rs::Sim::fluid_at	waterlogged fluid from block data
+LeavesBlock.createBlockStateDefinition	skip:data	-	state properties come from the data tables
+LeavesBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	persistent and waterlogged, then distance
+LecternBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	gap: minor: a Book in the placed item's data does not set HAS_BOOK here; apply_placed_item fills the block entity only
+LecternBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	facing through the rotate table
+LecternBlock.createBlockStateDefinition	skip:data	-	state properties come from the data tables
+LecternBlock.tryPlaceBook	port	crates/horizon-client/src/game/books.rs::Game::use_lectern	a book goes onto an empty lectern
+LecternBlock.placeBook	inline	crates/horizon-client/src/game/books.rs::Game::use_lectern	consumes the held book, sets has_book, plays the put sound
+LecternBlock.resetBookState	port	crates/horizon-client/src/game/books.rs::Game::lectern_menu_done	book removal clears powered and has_book
+LecternBlock.changePowered	port	crates/horizon-client/src/game/books.rs::Game::set_lectern_powered	
+LecternBlock.updateBelow	inline	crates/horizon-client/src/game/books.rs::Game::set_lectern_powered	neighbour update below the lectern
+LecternBlock.affectNeighborsAfterRemoval	port	crates/horizon-world/src/level/hooks.rs::Sim::affect_neighbors_after_removal	powered lectern updates the block below on removal
+LecternBlock.getDirectSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::state_direct_signal	gap: minor: no Lectern arm; the power of a powered lectern comes from the data table's strong value
+LecternBlock.getAnalogOutputSignal	port	crates/horizon-client/src/game/books.rs::lectern_signal	page-based comparator signal, 0 without a book
+LecternBlock.useWithoutItem	port	crates/horizon-client/src/game/books.rs::Game::open_lectern	opens the book view when a book is on the lectern
+LecternBlock.getMenuProvider	port	crates/horizon-client/src/game/books.rs::Game::lectern_menu	the lectern menu over the block entity's book and page
+LeverBlock.makeShapes	skip:data	-	collision and outline shapes are precomputed from the data
+LeverBlock.useWithoutItem	port	crates/horizon-world/src/level/redstone.rs::Sim::lever_pull	gap: player: powering a lever on shows no redstone dust puff at the lever (makeParticle)
+LeverBlock.onExplosionHit	missing	-	player: an explosion that can trigger blocks does not toggle a lever; explosion.rs has no lever case
+LeverBlock.playSound	inline	crates/horizon-world/src/level/redstone.rs::Sim::lever_pull	click sound at volume 0.3 and pitch 0.6 on or 0.5 off
+LeverBlock.affectNeighborsAfterRemoval	port	crates/horizon-world/src/level/hooks.rs::Sim::affect_neighbors_after_removal	powered lever updates neighbours on removal unless moved by a piston
+LeverBlock.getDirectSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::state_direct_signal	powered lever's strong power from the data table
+LeverBlock.createBlockStateDefinition	skip:data	-	state properties come from the data tables
+LightBlock.createBlockStateDefinition	skip:data	-	state properties come from the data tables
+LightBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	game masters cycle the light level
+LightBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	waterlogged tick
+LightBlock.getFluidState	port	crates/horizon-world/src/level/update.rs::Sim::fluid_at	waterlogged fluid from block data
+LightBlock.getCloneItemStack	missing	-	player: creative pick-block on a light block gives a light at level 0; Game::picked_stack writes no block state for light
+LightBlock.setLightOnStack	missing	-	player: the light level is never put on a picked light item, so pick-block loses the level
+LightningRodBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	facing from clicked face, waterlogged from the replaced fluid
+LightningRodBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	waterlogged tick
+LightningRodBlock.getFluidState	port	crates/horizon-world/src/level/update.rs::Sim::fluid_at	waterlogged fluid from block data
+LightningRodBlock.getDirectSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::state_direct_signal	powered rod's strong power on its facing side
+LightningRodBlock.updateNeighbours	inline	crates/horizon-world/src/level/tick.rs::Sim::tick_block	the unpowering tick updates the block in front; the removal path does the same in affect_neighbors_after_removal
+LightningRodBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	unpowers after 8 ticks and updates the block in front
+LightningRodBlock.affectNeighborsAfterRemoval	port	crates/horizon-world/src/level/hooks.rs::Sim::affect_neighbors_after_removal	powered rod updates the block in front on removal
+LightningRodBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	schedules the 8-tick unpower when placed powered
+LightningRodBlock.createBlockStateDefinition	skip:data	-	state properties come from the data tables
+LiquidBlock.getCollisionShape	port	crates/horizon-world/src/liquid_collision.rs::LiquidCollision::shape	still source blocks are solid for living entities standing on them
+LiquidBlock.ifMobIsColliding	inline	crates/horizon-world/src/liquid_collision.rs::LiquidCollision::shape	the living entity check
+LiquidBlock.getFluidState	port	crates/horizon-world/src/level/update.rs::Sim::fluid_at	fluid from block data (level to fluid state)
+LiquidBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	bubble column schedule below
+LiquidBlock.neighborChanged	port	crates/horizon-world/src/level/fluids.rs::Sim::liquid_block_changed	gap: minor: spread and bubble-column tick only; the Neo fluid interaction check is not ported here
+LiquidBlock.pickupBlock	port	crates/horizon-world/src/level/fluids.rs::Sim::pickup_block	source blocks only, leaves air and yields the bucket
+LoomBlock.useWithoutItem	port	crates/horizon-client/src/game/stations.rs::Game::open_station	opens the loom station
+LoomBlock.getMenuProvider	port	crates/horizon-client/src/game/stations.rs::Game::open_station	the loom menu over the block position
+Mirror.mirror	missing	-	minor: unsure: integer rotation mirror for 16-step rotations (banners, heads) not found; template transform works on positions only
+Mirror.getRotation	missing	-	minor: unsure: the 180 degree turn that a mirror implies is not found; template transform applies mirror to positions only
+MossyCarpetBlock.makeShapes	skip:data	-	collision and outline shapes are precomputed from the data
+MossyCarpetBlock.getCollisionShape	skip:data	-	collision shape per state comes from the data table
+MossyCarpetBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	base needs a non-air block below; a topper needs a moss carpet below
+MossyCarpetBlock.hasFaces	port	crates/horizon-world/src/level/shapes.rs::Sim::mossy_carpet_has_faces	
+MossyCarpetBlock.placeAt	port	crates/horizon-world/src/block_placement.rs::BlockPlacement::topper	carpet and topper placement for worldgen; the topper rule is shared
+MossyCarpetBlock.setPlacedBy	port	crates/horizon-world/src/level/place.rs::Sim::set_placed_by	gap: minor: the topper is placed above a new carpet; the placed-carpet update path is the same
+MossyCarpetBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+MossyCarpetBlock.createBlockStateDefinition	skip:data	-	state properties come from the data tables
+MossyCarpetBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	side properties through the rotate table
+MossyCarpetBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	side properties through the mirror table
+MossyCarpetBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	
+MossyCarpetBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	
+MultifaceBlock.makeShapes	skip:data	-	collision and outline shapes are precomputed from the data
+MultifaceBlock.createBlockStateDefinition	skip:data	-	state properties come from the data tables
+MultifaceBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	removes a face that lost its neighbour, air when none left
+MultifaceBlock.getFluidState	port	crates/horizon-world/src/level/update.rs::Sim::fluid_at	waterlogged fluid from block data
+MultifaceBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	every face needs an attachable neighbour
+MultifaceBlock.canBeReplaced	port	crates/horizon-world/src/level/place.rs::Sim::can_be_replaced	replaceable by the same item only with a vacant face
+MultifaceBlock.isValidStateForPlacement	port	crates/horizon-world/src/level/sculk.rs::Sim::sculk_valid_for_placement	gap: minor: sculk vein form only; the supported-face check is not repeated
+MultifaceBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	face properties through the rotate table
+MultifaceBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	face properties through the mirror table
+MultifaceBlock.mapDirections	inline	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	face property permutation is folded into the rotate table
+MultifaceBlock.hasFace	port	crates/horizon-world/src/level/survive.rs::Sim::multiface_has_face	
+MultifaceBlock.removeFace	port	crates/horizon-world/src/level/sculk.rs::Sim::vein_with_face	gap: minor: clears the face only; the air result when no face is left is not here
+MultifaceBlock.getDefaultMultifaceState	skip:data	-	default state comes from the data tables
+MultifaceBlock.hasAnyFace	port	crates/horizon-world/src/level/sculk.rs::Sim::available_faces	the caller tests the list for emptiness
+MultifaceBlock.hasAnyVacantFace	inline	crates/horizon-world/src/level/sculk.rs::Sim::available_faces	vacancy is the list length below six at the caller
+MultifaceSpreader.canSpreadInAnyDirection	port	crates/horizon-world/src/level/bonemeal.rs::Sim::lichen_can_spread_in_any_direction	
+MultifaceSpreader.spreadFromFaceTowardRandomDirection	port	crates/horizon-world/src/level/bonemeal.rs::Sim::lichen_spread_random	gap: minor: loops every starting face too; no fixed-face entry point
+MultifaceSpreader.spreadFromFaceTowardAllDirections	port	crates/horizon-world/src/level/sculk.rs::Sim::sculk_spread_all	gap: minor: sculk veins only; the lichen form is in lichen_spread_random
+MultifaceSpreader.spreadFromFaceTowardDirection	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::lichen_spread_random	target search and placement folded into the lichen loop
+MultifaceSpreader.spreadToFace	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::lichen_spread_random	placement by getStateForPlacement and setBlock folded into the lichen loop
+MultifaceSpreader.DefaultSpreaderConfig.stateCanBeReplaced	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::lichen_can_spread_into	air, same block or water source test folded into the lichen target check
+MultifaceSpreader.SpreadConfig.canSpreadFrom	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::lichen_spread_target	from-face test folded into the lichen target search; the sculk form is worldgen/sculk.rs::SculkPatchFeature::can_spread_from
+MultifaceSpreader.SpreadConfig.placeBlock	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::lichen_spread_random	placement folded into the lichen loop; the post-process mark is not kept
+MushroomBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::mushroom_random_tick	
+MushroomBlock.canSpread	inline	crates/horizon-world/src/level/tick.rs::Sim::mushroom_random_tick	at most four of the same mushroom in the 9x3x9 box, counted in the tick
+MushroomBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	mushroom arm
+NetherPortalBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	portal breaks when the frame is incomplete
+NetherPortalBlock.getPortalTransitionTime	port	crates/horizon-client/src/game/nether_portal.rs::Game::tick_nether_portal	gap: minor: creative and default delay rules by invulnerability; the delay counter is in the same fn
+NetherPortalBlock.getExitPortal	port	crates/horizon-client/src/game/nether_portal.rs::Game::nether_exit_portal	gap: minor: the Nether exit only; the End variant is Game::end_portal_exit
+NetherPortalBlock.getDimensionTransitionFromExit	port	crates/horizon-client/src/game/nether_portal.rs::Game::portal_plan	
+NetherPortalBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	portal ambient sound and particles
+NetherPortalBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	axis swap through the rotate table
+NoteBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	instrument follows the block below
+NoteBlock.neighborChanged	port	crates/horizon-world/src/level/redstone.rs::Sim::note_neighbor_changed	
+NoteBlock.getCustomSoundId	missing	-	player: a player head on top of a note block does not change its sound; the head's sound is stored but the note play never reads it
+NoteBlock.createBlockStateDefinition	skip:data	-	state properties come from the data tables
+PathBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	pushes entities up when the path would not survive
+PathBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	schedules a tick when the block above changes
+PathBlock.turnToBaseBlock	port	crates/horizon-world/src/level/tick.rs::Sim::turn_to_base_block	
+PathBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	solid block above turns the path back to dirt
+PitcherCropBlock.makeShapes	skip:data	-	collision and outline shapes are precomputed from the data
+PitcherCropBlock.getCollisionShape	skip:data	-	collision shape per state comes from the data table
+PitcherCropBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+PitcherCropBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
+PitcherCropBlock.createBlockStateDefinition	skip:data	-	state properties come from the data tables
+PitcherCropBlock.entityInside	missing	-	player: a ravager walking through a pitcher crop does not break it when mob griefing is on
+PitcherCropBlock.isRandomlyTicking	inline	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	the lower half and not max age test gates the pitcher arm
+PitcherCropBlock.canGrowInto	port	crates/horizon-world/src/level/bonemeal.rs::Sim::pitcher_can_grow	
+PitcherCropBlock.isLower	inline	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	lower-half test used by the survival check
+PitcherCropBlock.isMaxAge	port	crates/horizon-world/src/level/bonemeal.rs::Sim::crop_max_age	
+PitcherCropBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	pitcher arm
+PitcherCropBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	pitcher growth

@@ -12,6 +12,8 @@
 #[derive(Clone, Copy, Debug)]
 pub enum ItemPose {
     Swing,
+    /// A STAB swing (`SwingAnimationType` 2): a spear's jab.
+    Stab,
     Using,
     Eat {
         remaining: f32,
@@ -85,6 +87,9 @@ pub fn item_pose(left: bool, inverse_height: f32, attack: f32, pose: ItemPose) -
     {
         return Mat4::from_translation(Vec3::new(invert * 0.56, -0.52, -0.72))
             * crate::spear::first_person_use(&kinetic, ticks_since_hit, time_held, !left);
+    }
+    if matches!(pose, ItemPose::Stab) {
+        return m * crate::spear::first_person_attack(attack, !left);
     }
     if matches!(pose, ItemPose::SpinAttack) {
         return m
@@ -172,8 +177,94 @@ impl MapHold {
     }
 }
 
+/// `renderPlayerArm` up to `renderPlayerHand`: the pose of the bare `left`
+/// or right arm.
+pub fn player_arm_pose(left: bool, inverse_height: f32, attack: f32) -> glam::Mat4 {
+    use glam::{Mat4, Vec3};
+    use horizon_core::geometry::trig::Mth;
+    let f = if left { -1.0 } else { 1.0 };
+    let pi = std::f32::consts::PI;
+    let root = attack.sqrt();
+    let x = -0.3 * (root * pi).msin();
+    let y = 0.4 * (root * std::f32::consts::TAU).msin();
+    let z = -0.4 * (attack * pi).msin();
+    let z_rot = (attack * attack * pi).msin();
+    let y_rot = (root * pi).msin();
+    let deg = |d: f32| d.to_radians();
+    Mat4::from_translation(Vec3::new(
+        f * (x + 0.640_000_05),
+        y - 0.6 + inverse_height * -0.6,
+        z + -0.719_999_97,
+    )) * Mat4::from_rotation_y(deg(f * 45.0))
+        * Mat4::from_rotation_y(deg(f * y_rot * 70.0))
+        * Mat4::from_rotation_z(deg(f * z_rot * -20.0))
+        * Mat4::from_translation(Vec3::new(-f, 3.6, 3.5))
+        * Mat4::from_rotation_z(deg(f * 120.0))
+        * Mat4::from_rotation_x(deg(200.0))
+        * Mat4::from_rotation_y(deg(f * -135.0))
+        * Mat4::from_translation(Vec3::new(f * 5.6, 0.0, 0.0))
+}
+
+/// `renderTwoHandedMap` up to its arms: the swing, the tilt from the view
+/// pitch (`calculateMapTilt`) and the turn towards the player.
+pub fn two_handed_map_base(pitch: f32, inverse_height: f32, attack: f32) -> glam::Mat4 {
+    use glam::{Mat4, Vec3};
+    use horizon_core::geometry::trig::Mth;
+    let pi = std::f32::consts::PI;
+    let y_swing = -0.2 * (attack * pi).msin();
+    let z_swing = -0.4 * (attack.sqrt() * pi).msin();
+    let tilt = (1.0 - pitch / 45.0 + 0.1).clamp(0.0, 1.0);
+    let tilt = -(tilt * pi).mcos() * 0.5 + 0.5;
+    Mat4::from_translation(Vec3::new(0.0, -y_swing / 2.0, z_swing))
+        * Mat4::from_translation(Vec3::new(
+            0.0,
+            0.04 + inverse_height * -1.2 + tilt * -0.5,
+            -0.72,
+        ))
+        * Mat4::from_rotation_x((tilt * -85.0).to_radians())
+}
+
+/// The arms under a held map, as (left arm, pose before `renderPlayerHand`):
+/// `renderOneHandedMap`'s arm turned 10 degrees outwards, or
+/// `renderTwoHandedMap`'s two `renderMapHand` arms under the map's
+/// `two_handed_map_base`. Vanilla skips them for an invisible player.
+pub fn map_arm_poses(
+    hold: MapHold,
+    left: bool,
+    pitch: f32,
+    inverse_height: f32,
+    attack: f32,
+) -> Vec<(bool, glam::Mat4)> {
+    use glam::{Mat4, Vec3};
+    let deg = |d: f32| d.to_radians();
+    match hold {
+        MapHold::OneHanded => {
+            let f = if left { -1.0 } else { 1.0 };
+            let m = Mat4::from_translation(Vec3::new(f * 0.125, -0.125, 0.0))
+                * Mat4::from_rotation_z(deg(f * 10.0))
+                * player_arm_pose(left, inverse_height, attack);
+            vec![(left, m)]
+        }
+        MapHold::TwoHanded => {
+            let base = two_handed_map_base(pitch, inverse_height, attack)
+                * Mat4::from_rotation_y(deg(90.0));
+            [false, true]
+                .into_iter()
+                .map(|left| {
+                    let f = if left { -1.0 } else { 1.0 };
+                    let hand = Mat4::from_rotation_y(deg(92.0))
+                        * Mat4::from_rotation_x(deg(45.0))
+                        * Mat4::from_rotation_z(deg(f * -41.0))
+                        * Mat4::from_translation(Vec3::new(f * 0.3, -1.1, 0.45));
+                    (left, base * hand)
+                })
+                .collect()
+        }
+    }
+}
+
 /// `renderOneHandedMap` up to `renderMap`: the pose of a map in the hand on
-/// the `left` or right arm (the arm under it is not drawn).
+/// the `left` or right arm (its arm: [`map_arm_poses`]).
 pub fn one_handed_map_pose(left: bool, inverse_height: f32, attack: f32) -> glam::Mat4 {
     use glam::{Mat4, Vec3};
     use horizon_core::geometry::trig::Mth;
@@ -942,6 +1033,83 @@ mod item_pose_tests {
                     "{left} {inverse_height} {attack}: {got:?}"
                 );
             }
+        }
+    }
+    #[test]
+    fn maps_draw_the_arms_under_them_as_vanilla() {
+        // PoseStack.last().pose() (column-major) where renderOneHandedMap's
+        // renderPlayerArm and renderTwoHandedMap's renderMapHand call
+        // renderPlayerHand, replayed with vanilla's PoseStack, Axis and Mth.
+        let near = |got: glam::Mat4, want: [f32; 16], what: &str| {
+            let got = got.to_cols_array();
+            for (g, w) in got.iter().zip(want) {
+                assert!((g - w).abs() < 1e-5, "{what}: {got:?}");
+            }
+        };
+        // (left, inverse height, attack, arm)
+        #[rustfmt::skip]
+        let one: [(bool, f32, f32, [f32; 16]); 3] = [
+            (false, 0.0, 0.0, [
+                -0.2350201, -0.7860474, -0.5717472, 0.0,
+                0.24694103, 0.52063686, -0.8172866, 0.0,
+                0.9400987, -0.33326668, 0.07174723, 0.0,
+                0.65913033, -1.1543381, -0.73980355, 1.0,
+            ]),
+            (true, 0.25, 0.3, [
+                -0.4967606, 0.84289914, -0.20676011, 0.0,
+                0.7202682, 0.2674863, -0.6400506, 0.0,
+                -0.4841926, -0.46687466, -0.7399901, 0.0,
+                -0.59715486, -1.4160433, -0.7328731, 1.0,
+            ]),
+            (false, 0.6, 0.85, [
+                -0.47358897, -0.8403256, -0.2637542, 0.0,
+                0.081554025, 0.25634, -0.96313995, 0.0,
+                0.87696207, -0.47764266, -0.052867785, 0.0,
+                0.61887383, -1.6482887, -0.7229744, 1.0,
+            ]),
+        ];
+        for (left, inverse_height, attack, want) in one {
+            let arms = map_arm_poses(MapHold::OneHanded, left, 0.0, inverse_height, attack);
+            assert_eq!(arms.len(), 1, "one arm under a one-handed map");
+            assert_eq!(arms[0].0, left, "the arm of the hand holding it");
+            near(
+                arms[0].1,
+                want,
+                &format!("one {left} {inverse_height} {attack}"),
+            );
+        }
+        // (pitch, inverse height, attack, right arm, left arm)
+        #[rustfmt::skip]
+        let two: [(f32, f32, f32, [f32; 16], [f32; 16]); 2] = [
+            (0.0, 0.0, 0.0, [
+                -0.7380599, 0.44766384, 0.50484115, 0.0,
+                -0.67428374, -0.46198538, -0.57611704, 0.0,
+                -0.024677532, -0.76561517, 0.64282537, 0.0,
+                0.5091893, -0.16204369, 0.3544525, 1.0,
+            ], [
+                -0.77043974, -0.3951866, -0.50025004, 0.0,
+                0.637035, -0.5076031, -0.58010805, 0.0,
+                -0.024677532, -0.76561517, 0.64282537, 0.0,
+                -0.48071152, -0.12760738, 0.35746527, 1.0,
+            ]),
+            (30.0, 0.2, 0.5, [
+                -0.7380599, -0.11453738, 0.6649426, 0.0,
+                -0.67428374, 0.16124588, -0.72065324, 0.0,
+                -0.024677532, -0.98024535, -0.1962398, 0.0,
+                0.5091893, -0.9508533, -0.13439482, 1.0,
+            ], [
+                -0.77043974, 0.14373614, -0.6210978, 0.0,
+                0.637035, 0.13586378, -0.75876695, 0.0,
+                -0.024677532, -0.98024535, -0.1962398, 0.0,
+                -0.48071152, -0.9316926, -0.1056232, 1.0,
+            ]),
+        ];
+        for (pitch, inverse_height, attack, right, left) in two {
+            let arms = map_arm_poses(MapHold::TwoHanded, false, pitch, inverse_height, attack);
+            assert_eq!(arms.len(), 2, "both arms under a two-handed map");
+            assert_eq!((arms[0].0, arms[1].0), (false, true), "right, then left");
+            near(arms[0].1, right, &format!("two right {pitch}"));
+            near(arms[1].1, left, &format!("two left {pitch}"));
         }
     }
     #[test]

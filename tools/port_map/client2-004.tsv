@@ -1,0 +1,118 @@
+FeatureRenderDispatcher.PreparedFrame	skip:other		render-pass order and draw-group plumbing of vanilla's feature renderer; Horizon orders its own passes
+FeatureRenderDispatcher.PreparedGroup	skip:other		runs one feature group through its renderer; the per-feature draws are mapped by their own renderers
+FeatureRendererMap	skip:java		type-indexed lookup table of feature renderers
+FlameFeatureRenderer.buildGroup	port	crates/horizon-client/src/fire_render.rs::flames	loop over burning entities
+FlameFeatureRenderer.prepare	port	crates/horizon-client/src/fire_render.rs::flames	two alternating fire sprites stacked up the entity
+FlameFeatureRenderer.fireVertex	inline	crates/horizon-client/src/fire_render.rs::flames	vertex push folded into flames
+GizmoFeatureRenderer.buildGroup	port	crates/horizon-client/src/gizmos.rs::camera_relative	gap: minor: only lines are drawn; quads, triangle fans, points and texts are not
+GizmoFeatureRenderer.buildTexts	missing		minor: debug gizmo text labels are not drawn; Gizmos has no text kind
+GizmoFeatureRenderer.buildTriangleFans	missing		minor: debug triangle fans are not drawn; Gizmos has no fan kind
+GizmoFeatureRenderer.buildQuads	missing		minor: debug filled quads are not drawn; cuboid gizmos are edges only
+GizmoFeatureRenderer.buildPoints	missing		minor: debug points are not drawn; Gizmos has no point kind
+ItemFeatureRenderer.buildGroup	port	crates/horizon-client/src/item_render.rs::ItemRenderState::submit	loop over item submits
+ItemFeatureRenderer.prepareSubmit	port	crates/horizon-client/src/item_render.rs::ItemRenderState::submit	layer loop, quads or special model
+ItemFeatureRenderer.prepareOutlineSubmit	port	crates/horizon-client/src/game/glowing.rs::Game::mark_outline	gap: minor: outline colour is only applied to dropped items (item_draw.rs dropped_item_geometry); held-item outlines not checked
+ItemFeatureRenderer.computeFoilDecalPose	missing		minor: unsure: the 0.5 GUI and 0.75 first-person foil decal scale is not found; glint scale is per context in item_render.rs Glint
+ItemFeatureRenderer.getLayerColorSafe	port	crates/horizon-client/src/item_render.rs::submit_quads	tint index past the tints draws white, both overloads
+LeashFeatureRenderer.buildGroup	port	crates/horizon-client/src/game/leads.rs::Game::leash_geometry	loop over leash submits
+LeashFeatureRenderer.prepare	port	crates/horizon-client/src/game/leads.rs::Game::leash_geometry	gap: player: rope never sags when slack (vanilla droops the rope); no slack state in the leash render
+LeashFeatureRenderer.addVertexPair	inline	crates/horizon-client/src/game/leads.rs::Game::leash_geometry	vertex pair with block and sky light lerp folded into leash_geometry
+ModelFeatureRenderer.buildGroup	port	crates/horizon-client/src/mobs.rs::render_model	loop over model submits
+ModelFeatureRenderer.prepareModel	port	crates/horizon-client/src/mobs.rs::render_model	gap: minor: setupAnim is done by the mob code, and the sheeted decal and uv wrap are not checked
+MovingBlockFeatureRenderer.buildGroup	port	crates/horizon-client/src/game/moving_pistons.rs::Game::moving_piston_geometry	moving piston block and base geometry
+MovingBlockFeatureRenderer.putBakedQuad	port	crates/horizon-client/src/game/moving_pistons.rs::Game::moving_block_vertices	quad placed at the moving offset
+QuadParticleFeatureRenderer	skip:other		GPU batching and draw plumbing of particle quads; Horizon's particle pass lives in particles.rs and gfx/pack_entities.rs
+RenderTypeFeatureRenderer	skip:other		GPU render-type batching; Horizon batches its own draws in gfx/entity_batch.rs
+RenderTypeFeatureRenderer.Group	skip:other		GPU render-type batching, as above
+ShadowFeatureRenderer.buildGroup	port	crates/horizon-client/src/shadows.rs::shadow	loop over shadow submits
+ShadowFeatureRenderer.prepare	port	crates/horizon-client/src/shadows.rs::shadow	shadow quads per piece, clamped by the block below
+ShadowFeatureRenderer.shadowVertex	inline	crates/horizon-client/src/shadows.rs::shadow	vertex push folded into shadow
+ShapeOutlineFeatureRenderer.buildGroup	port	crates/horizon-client/src/gfx.rs::outline_vertices	block selection outline edges as line vertices
+TextFeatureRenderer.buildGroup	skip:other		dispatch over text and background submits; each kind is covered below or by Horizon's text draw
+TextFeatureRenderer.renderText	missing		minor: unsure: no outlined-text path found (font.rs, hud.rs, names.rs); the outline colour of a text submit is not drawn
+TextFeatureRenderer.GlyphRenderer.acceptRenderable	skip:other		glyph sink for the text pass; Horizon's font pass draws the glyphs
+FeatureRenderPhase.Output.acceptFeatureGroup	skip:other		phase plumbing: hands sorted groups to the renderer pass
+SimpleFeatureRenderPhase	skip:other		submit, sort, shuffle (debug only) and clear of feature submits; Horizon sorts its own draws
+SimpleFeatureRenderPhase.FeatureSubmits	skip:other		batching bookkeeping of feature submits
+TranslucentFeatureRenderPhase.submit	inline	crates/horizon-client/src/gfx/translucency.rs::Sorter::sort	collects submits; distances are taken in sort
+TranslucentFeatureRenderPhase.sortInto	port	crates/horizon-client/src/gfx/translucency.rs::Sorter::sort	back-to-front by distance, equal distances keep submit order
+TranslucentFeatureRenderPhase.sortIndices	port	crates/horizon-client/src/gfx/translucency.rs::Sorter::sort	far to near, stable on ties
+TranslucentSubmit.computeDistanceToCameraSq	inline	crates/horizon-client/src/gfx/translucency.rs::Sorter::sort	distance from the quad centre to the camera, computed inside sort
+FogRenderer.getBuffer	skip:other		selects the fog uniform slice; Horizon hands its fog values to its own shader per frame
+FogRenderer.updateBuffer	skip:other		writes the fog uniform buffer; Horizon's frame_fog passes FogData to its own shader
+AtmosphericFogEnvironment.getBaseColor	port	crates/horizon-client/src/fog.rs::setup_fog	gap: minor: sky fog end uses constant 512 instead of the SKY_FOG_END_DISTANCE attribute
+AtmosphericFogEnvironment.applyWeatherDarken	inline	crates/horizon-client/src/fog.rs::setup_fog	rain and thunder darkening folded into the atmospheric colour
+BlindnessFogEnvironment.setupFog	port	crates/horizon-client/src/fog.rs::setup_fog	blindness distance and sky/cloud ends
+BlindnessFogEnvironment.getModifiedDarkness	inline	crates/horizon-client/src/fog.rs::setup_fog	blindness darkness folded into setup_fog
+LavaFogEnvironment.setupFog	port	crates/horizon-client/src/fog.rs::setup_fog	gap: player: spectator (-8 start, half render distance) and fire resistance (0 to 5) are not applied in lava
+MobEffectFogEnvironment.isApplicable	inline	crates/horizon-client/src/game/render_tick.rs::Game::frame_fog	effect gate is where frame_fog builds the blindness and darkness inputs
+PowderedSnowFogEnvironment.setupFog	port	crates/horizon-client/src/fog.rs::setup_fog	gap: player: spectator case (-8 start, half render distance) is not applied
+WaterFogEnvironment.setupFog	port	crates/horizon-client/src/fog.rs::setup_fog	gap: minor: water fog start is fixed at -8; vanilla reads the WATER_FOG_START_DISTANCE attribute
+DrawableGizmoPrimitives.addPoint	missing		minor: debug points are not drawn; Gizmos has no point kind
+DrawableGizmoPrimitives.addLine	port	crates/horizon-client/src/gizmos.rs::Gizmos::line	
+DrawableGizmoPrimitives.addTriangleFan	missing		minor: debug triangle fans are not drawn
+DrawableGizmoPrimitives.addQuad	missing		minor: debug filled quads are not drawn
+DrawableGizmoPrimitives.addText	missing		minor: debug gizmo text labels are not drawn
+DrawableGizmoPrimitives.submit	port	crates/horizon-client/src/game.rs::Game::render	gap: minor: lines of both lists go to camera_relative in Game::render; only lines are drawn
+BundleSelectedItemSpecialRenderer.update	port	crates/horizon-assets/src/item_model.rs::Resolve::node	bundle selected item layers via the BundleSelectedItem arm
+CompositeModel.update	port	crates/horizon-assets/src/item_model.rs::Resolve::node	composite arm: each child in order
+CompositeModel.Unbaked.resolveDependencies	port	crates/horizon-assets/src/item_model.rs::ItemModelNode::dependencies	
+CompositeModel.Unbaked.bake	inline	crates/horizon-assets/src/item_model.rs::Resolve::node	child transform composed in the composite arm
+ConditionalItemModel.update	port	crates/horizon-assets/src/item_model.rs::Resolve::node	condition arm picks the branch
+ConditionalItemModel.Unbaked.bake	inline	crates/horizon-assets/src/item_model.rs::Resolve::node	child transform composed in the condition arm
+ConditionalItemModel.Unbaked.adaptProperty	skip:java		per-level cache of a registry-remapped property; Horizon resolves properties from its own tables
+ConditionalItemModel.Unbaked.swapContext	skip:data		registry remap of a property for a new level; Horizon reads item definitions as data
+CuboidItemModelWrapper.update	port	crates/horizon-assets/src/item_model.rs::Resolve::node	model layer: foil, tints, transform and quads
+CuboidItemModelWrapper.validateAtlasUsage	skip:other		load-time check that a model uses only the item and block atlases; throws on bad data, nothing at play time
+CuboidItemModelWrapper.hasSpecialAnimatedTexture	inline	crates/horizon-assets/src/item_model.rs::Resolve::node	clock and compass tag give special foil, folded into the model arm
+ItemModelResolver.updateForLiving	port	crates/horizon-client/src/item_render.rs::ItemRenderer::resolve	gap: minor: the seed is passed in by the caller; the entity id plus display ordinal seed is not checked here
+ItemModelResolver.updateForNonLiving	port	crates/horizon-client/src/item_render.rs::ItemRenderer::resolve	gap: minor: the seed is passed in by the caller; the entity id seed is not checked here
+ItemStackRenderState.ensureCapacity	skip:java		layer array capacity; Horizon builds layer lists per frame
+ItemStackRenderState.newLayer	skip:java		layer array allocation
+ItemStackRenderState.clear	skip:java		resets the per-frame layer list
+ItemStackRenderState.visitExtents	port	crates/horizon-client/src/item_render.rs::ItemRenderState::bounding_box	extents transformed per layer
+ItemStackRenderState.getModelBoundingBox	port	crates/horizon-client/src/item_render.rs::ItemRenderState::bounding_box	bounding box from the layer extents
+ItemStackRenderState.LayerRenderState.clear	skip:java		resets one layer's fields
+ItemStackRenderState.LayerRenderState.tintLayers	skip:java		lazy list allocation for tint values
+ItemStackRenderState.LayerRenderState.submit	port	crates/horizon-client/src/item_render.rs::ItemRenderState::submit	special renderer or quads per layer
+MissingItemModel.update	port	crates/horizon-assets/src/item_model.rs::Resolve::missing	missing-model layer
+MissingItemModel.withTransform	port	crates/horizon-assets/src/item_model.rs::Resolve::missing	missing-model layer under the given transform
+ModelRenderProperties.fromResolvedModel	port	crates/horizon-assets/src/item_bake.rs::bake_item_model	particle sprite and GUI light taken at bake
+ModelRenderProperties.applyToLayer	port	crates/horizon-client/src/item_render.rs::ItemRenderer::resolve	uses block light, particle and display transform on the layer
+RangeSelectItemModel.update	port	crates/horizon-assets/src/item_model.rs::Resolve::node	range dispatch arm picks the entry
+RangeSelectItemModel.Unbaked.bake	port	crates/horizon-assets/src/item_model.rs::ItemModelNode::decode	entries built at load time
+SelectItemModel.update	port	crates/horizon-assets/src/item_model.rs::Resolve::node	select arm picks the case
+SelectItemModel.SwitchCase.codec	port	crates/horizon-assets/src/item_model.rs::SwitchCase::decode	case decode from JSON
+SelectItemModel.Unbaked.bake	port	crates/horizon-assets/src/item_model.rs::ItemModelNode::decode	cases built at load time
+SelectItemModel.Unbaked.resolveDependencies	port	crates/horizon-assets/src/item_model.rs::ItemModelNode::dependencies	
+SelectItemModel.UnbakedSwitch.bake	port	crates/horizon-assets/src/item_model.rs::ItemModelNode::decode	switch cases built at load time
+SelectItemModel.UnbakedSwitch.createModelGetter	port	crates/horizon-assets/src/item_model.rs::Resolve::node	case lookup by value in the select arm
+SelectItemModel.UnbakedSwitch.resolveDependencies	port	crates/horizon-assets/src/item_model.rs::ItemModelNode::dependencies	
+SpecialModelWrapper.update	port	crates/horizon-assets/src/item_model.rs::Resolve::node	special arm: model argument from components
+SpecialModelWrapper.Unbaked.bake	port	crates/horizon-assets/src/item_model.rs::ItemModelNode::decode	special node built at load time
+SpecialModelWrapper.Unbaked.getProperties	port	crates/horizon-assets/src/item_model.rs::ItemModels::properties	hand animation, GUI oversize and swap scale
+properties/conditional/CustomModelDataProperty.get	port	crates/horizon-assets/src/item_model.rs::Resolve::condition	conditional property: custom model data flag
+FishingRodCast.get	port	crates/horizon-assets/src/item_model.rs::Resolve::condition	owner is casting this item
+HasComponent.get	port	crates/horizon-assets/src/item_model.rs::Resolve::condition	component present, default ignored when asked
+IsCarried.get	port	crates/horizon-assets/src/item_model.rs::Resolve::condition	local player carrying the stack on the cursor
+IsSelected.get	port	crates/horizon-assets/src/item_model.rs::Resolve::condition	local player's selected slot
+IsUsingItem.get	port	crates/horizon-assets/src/item_model.rs::Resolve::condition	owner using this item
+IsViewEntity.get	port	crates/horizon-assets/src/item_model.rs::Resolve::condition	owner is the camera entity
+CompassAngleState.getRandomlySpinningRotation	port	crates/horizon-assets/src/item_model.rs::Resolve::compass	no-target spin, with the no-target wobbler
+CompassAngleState.getRotationTowardsCompassTarget	port	crates/horizon-assets/src/item_model.rs::Resolve::compass	target angle and local-player wobble
+CompassAngleState.isValidCompassTargetPos	inline	crates/horizon-assets/src/item_model.rs::Resolve::compass	dimension and distance check folded into compass
+CompassAngleState.getAngleFromEntityToPos	inline	crates/horizon-assets/src/item_model.rs::Resolve::compass	atan2 folded into compass
+Cooldown.get	port	crates/horizon-assets/src/item_model.rs::Resolve::numeric	owner cooldown percent
+Count.get	port	crates/horizon-assets/src/item_model.rs::Resolve::numeric	count, normalised or clamped
+CrossbowPull.get	port	crates/horizon-assets/src/item_model.rs::Resolve::numeric	charge progress, zero while loaded
+properties/numeric/CustomModelDataProperty.get	port	crates/horizon-assets/src/item_model.rs::Resolve::numeric	custom model data float
+Damage.get	port	crates/horizon-assets/src/item_model.rs::Resolve::numeric	damage, normalised or clamped
+UseCycle.get	port	crates/horizon-assets/src/item_model.rs::Resolve::numeric	remaining use ticks modulo the period
+UseDuration.get	port	crates/horizon-assets/src/item_model.rs::Resolve::numeric	remaining or elapsed use ticks
+Charge.get	port	crates/horizon-assets/src/item_model.rs::Resolve::select_value	none, arrow or rocket
+properties/select/ComponentContents.createType	skip:data		codec for a component-keyed select; Horizon decodes select cases in item_model.rs
+ContextEntityType.get	port	crates/horizon-assets/src/item_model.rs::Resolve::select_value	owner entity type
+properties/select/CustomModelDataProperty.get	port	crates/horizon-assets/src/item_model.rs::Resolve::select_value	custom model data string
+ItemBlockState.get	port	crates/horizon-assets/src/item_model.rs::Resolve::select_value	block state property of the stack
+LocalTime.create	port	crates/horizon-client/src/game/item_draw.rs::local_time	gap: minor: locale and time zone are ignored; only the pattern letters M d y H m s are formatted
+LocalTime.get	port	crates/horizon-client/src/game/item_draw.rs::local_time	gap: minor: same as create; formatted on every call, no 1-second cache

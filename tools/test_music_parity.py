@@ -95,6 +95,19 @@ def scripted(s):
     s.tick(5)
     s.add('stopall')
     s.tick(5)
+    # Joining a world: the menu-like track plays, Minecraft.setLevel stops every
+    # sound, and the game music (not replacing) waits its own delay; a respawn
+    # into another dimension then stops the music manager's track too.
+    s.add('start', 11, 'DEFAULT')
+    s.situation(end, 20, 600, 1)
+    s.tick(110)
+    s.add('stopall')
+    s.situation(water, 12000, 24000, 0)
+    s.tick(3, loading=1)
+    s.tick(5)
+    s.add('stopall')
+    s.add('stop')
+    s.tick(5)
     # Events that cannot play.
     for event in ODD:
         s.add('start', 7, 'DEFAULT')

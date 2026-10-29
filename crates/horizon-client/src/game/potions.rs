@@ -469,7 +469,7 @@ impl Game<'_> {
                     (f64::from(dir[1]) / l + jitter()) * power,
                     (f64::from(dir[2]) / l + jitter()) * power,
                 );
-                let pv = self.player.as_ref().map_or(Vec3::ZERO, |p| p.velocity);
+                let pv = self.known_player_movement();
                 let on_ground = self.player.as_ref().is_some_and(|p| p.ground.on_ground);
                 let v = Vec3::new(
                     v.x + pv.x,

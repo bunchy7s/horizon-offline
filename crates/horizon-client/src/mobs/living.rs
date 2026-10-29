@@ -388,6 +388,12 @@ impl Mob {
         if super::villager::sleeping(self) {
             return (f64::from(0.2_f32), f64::from(0.2_f32), f64::from(0.2_f32));
         }
+        self.awake_dims()
+    }
+    /// `dims` without the sleeping box: a sleeping villager's
+    /// `getDimensions(Pose.STANDING)`, whose eye height lays it in the bed
+    /// (`LivingEntityRenderer.submit`).
+    pub fn awake_dims(&self) -> (f64, f64, f64) {
         let k = &self.kind;
         // Avatar.POSES: a player's or mannequin's box follows its pose.
         if matches!(&*k.id, "minecraft:player" | "minecraft:mannequin") {
@@ -935,12 +941,33 @@ impl Mob {
         } else {
             0.02
         };
+        self.travel_flying_speeds(
+            w,
+            input,
+            events,
+            fluid_speed,
+            fluid_speed,
+            self.kind.air_speed,
+        );
+    }
+    /// `LivingEntity.travelFlying(input, waterSpeed, lavaSpeed, airSpeed)`:
+    /// the speeds vary per mob (an allay flies at the speed its move control
+    /// set, `Allay.travel`).
+    pub fn travel_flying_speeds(
+        &mut self,
+        w: &MobWorld,
+        input: Vec3,
+        events: &mut Vec<MobEvent>,
+        water_speed: f32,
+        lava_speed: f32,
+        air_speed: f32,
+    ) {
         let (speed, drag) = if self.fluids.in_water {
-            (fluid_speed, f64::from(0.8_f32))
+            (water_speed, f64::from(0.8_f32))
         } else if self.fluids.in_lava {
-            (fluid_speed, 0.5)
+            (lava_speed, 0.5)
         } else {
-            (self.kind.air_speed, f64::from(0.91_f32))
+            (air_speed, f64::from(0.91_f32))
         };
         self.move_relative(speed, input);
         self.do_move(w, events);
@@ -1018,8 +1045,8 @@ impl Mob {
         } else {
             y -= self.gravity();
         }
-        // LivingEntity.shouldDiscardFriction (a breeze's long jump).
-        if super::breeze::discards_friction(self) {
+        // LivingEntity.shouldDiscardFriction (a breeze's or a frog's long jump).
+        if super::breeze::discards_friction(self) || self.extra.frog.discard_friction {
             self.velocity = Vec3::new(movement.x, y, movement.z);
             return;
         }
@@ -1042,7 +1069,11 @@ impl Mob {
         let old_y = self.position.y;
         let gravity = self.gravity();
         if self.fluids.in_water {
-            let mut slow = self.kind.water_slowdown;
+            let mut slow = if self.extra.sprinting {
+                0.9
+            } else {
+                self.kind.water_slowdown
+            };
             let mut speed = 0.02f32;
             let mut efficiency = self.kind.water_efficiency as f32;
             if !self.on_ground {
@@ -1063,7 +1094,7 @@ impl Mob {
                 m.y * f64::from(0.8_f32),
                 m.z * f64::from(slow),
             );
-            self.velocity = fluid_falling(gravity, falling, m);
+            self.velocity = fluid_falling(gravity, falling, self.extra.sprinting, m);
         } else {
             self.move_relative(0.02, input);
             self.do_move(w, events);
@@ -1073,7 +1104,8 @@ impl Mob {
                     self.velocity.y * f64::from(0.8_f32),
                     self.velocity.z * 0.5,
                 );
-                self.velocity = fluid_falling(gravity, falling, self.velocity);
+                self.velocity =
+                    fluid_falling(gravity, falling, self.extra.sprinting, self.velocity);
             } else {
                 self.velocity = Vec3::new(
                     self.velocity.x * 0.5,
@@ -1173,6 +1205,12 @@ impl Mob {
         let power = self.jump_power();
         if power > 1.0e-5 {
             self.velocity.y = f64::from(power).max(self.velocity.y);
+            // A sprint jump (a dashing cat or ocelot) adds 0.2 along its yaw.
+            if self.extra.sprinting {
+                let angle = f64::from(self.yaw * trig::DEG_TO_RAD);
+                self.velocity.x += f64::from(-trig::sin(angle)) * 0.2;
+                self.velocity.z += f64::from(trig::cos(angle)) * 0.2;
+            }
         }
     }
     pub fn jump_power(&self) -> f32 {
@@ -1204,8 +1242,8 @@ impl Mob {
     }
 }
 /// LivingEntity.getFluidFallingAdjustedMovement.
-fn fluid_falling(gravity: f64, falling: bool, m: Vec3) -> Vec3 {
-    if gravity != 0.0 {
+fn fluid_falling(gravity: f64, falling: bool, sprinting: bool, m: Vec3) -> Vec3 {
+    if gravity != 0.0 && !sprinting {
         let y = if falling && (m.y - 0.005).abs() >= 0.003 && (m.y - gravity / 16.0).abs() < 0.003 {
             -0.003
         } else {

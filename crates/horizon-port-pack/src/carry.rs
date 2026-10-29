@@ -735,7 +735,9 @@ pub fn carry(
         let Some(keep) = place(&name, &owned) else {
             continue;
         };
-        if name.split('/').any(|p| p == ".." || p.is_empty()) {
+        // `..` or an empty part escapes on every platform; `\` or `:` (a drive or
+        // a separator) escapes on Windows.
+        if name.split('/').any(|p| p == ".." || p.is_empty()) || name.contains(['\\', ':']) {
             continue;
         }
         let mut bytes = Vec::new();
@@ -1730,6 +1732,41 @@ mod tests {
         )
         .unwrap();
         assert_eq!(tag, json!({"values": ["minecraft:plains"]}));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A jar entry whose name escapes through a Windows separator writes
+    /// nothing: not into `carry`, not into `outside`, nowhere.
+    #[test]
+    fn entry_names_cannot_escape_the_output() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-port-pack-esc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let jar = dir.join("evil-1.0.jar");
+        let mut zip = zip::ZipWriter::new(fs::File::create(&jar).unwrap());
+        for (name, text) in [
+            (
+                "META-INF/neoforge.mods.toml",
+                "license = \"MIT\"\n[[mods]]\nmodId = \"evil\"\nversion = \"1.0\"\n",
+            ),
+            ("data/evil/recipe/..\\..\\..\\evil.json", "{}"),
+        ] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(text.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+        let info = crate::jar::read(&jar).unwrap();
+        let out = dir.join("work/mods/evil");
+        let pack = Pack {
+            loaded: &|_| true,
+            mods: &|_| false,
+        };
+        let report = carry(&jar, &info, &out, None, &|_| true, &pack, &BTreeMap::new()).unwrap();
+        assert_eq!(report.copied, 0);
+        assert!(report.outside.is_empty());
+        assert!(!dir.join("evil.json").exists());
         fs::remove_dir_all(&dir).unwrap();
     }
 }

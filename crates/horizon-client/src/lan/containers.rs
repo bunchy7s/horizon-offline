@@ -311,6 +311,24 @@ impl Hub {
         g.send(&packet);
     }
 
+    /// `AbstractContainerMenu.sendAllDataToRemote` for the guest's open
+    /// block container `window`: every slot and the carried stack again.
+    pub fn resend_menu(&mut self, conn: u32, window: i32, world: &World) {
+        let Some(i) = self.guests.iter().position(|g| g.conn == conn) else {
+            return;
+        };
+        let g = &self.guests[i];
+        let Some(items) = g
+            .menu
+            .as_ref()
+            .filter(|m| window != 0 && m.window == window)
+            .and_then(|m| m.slots.read(world, g))
+        else {
+            return;
+        };
+        self.send_menu_content(i, items);
+    }
+
     fn close_container_at(&mut self, i: usize) {
         let g = &mut self.guests[i];
         if let Some(menu) = g.menu.take() {
@@ -378,7 +396,13 @@ impl Hub {
                 .menu
                 .as_ref()
                 .is_some_and(|m| m.window == p.container);
-        if !window_ok || self.guests[i].spectator() {
+        if !window_ok {
+            return Vec::new();
+        }
+        if self.guests[i].spectator() {
+            // A spectator's click changes nothing, and sendAllDataToRemote
+            // takes back what its client predicted.
+            self.resend_menu(conn, p.container, world);
             return Vec::new();
         }
         // A menu that is no longer valid takes no clicks.

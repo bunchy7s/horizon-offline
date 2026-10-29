@@ -1,0 +1,148 @@
+BellBlock.neighborChanged	port	crates/horizon-world/src/level/redstone.rs::Sim::bell_neighbor_changed	Rings on a new signal and stores POWERED.
+BellBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	Class::Bell arm calls bell_hit.
+BellBlock.isProperHit	inline	crates/horizon-world/src/level/redstone.rs::Sim::bell_hit	Proper-hit test is folded into bell_hit.
+BellBlock.getVoxelShape	skip:data		Shape precomputed from the extracted block shapes (level/data.rs).
+BellBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Class::Bell arm picks attachment and facing.
+BellBlock.onExplosionHit	port	crates/horizon-client/src/game/wind.rs::Game::wind_trigger_block	gap: player: a wind charge burst that hits a bell should ring it; Horizon sends an Up-face use that bell_hit rejects, so it stays silent. TNT does not reach this (canTriggerBlocks is false).
+BellBlock.getConnectedDirection	port	crates/horizon-world/src/level/survive.rs::Sim::bell_connected_direction	Same floor/ceiling/wall mapping.
+BellBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
+BellBlock.rotate	skip:data		Rotation is a precomputed table from extracted data (worldgen/structure.rs rotate).
+BigDripleafBlock.makeShapes	skip:data		Shape precomputed from the extracted block shapes (level/data.rs).
+BigDripleafBlock.canReplace	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::dripleaf_can_grow_into	Only used by canGrowInto; folded into dripleaf_can_grow_into.
+BigDripleafBlock.place	port	crates/horizon-world/src/level/bonemeal.rs::Sim::dripleaf_place	Sets big dripleaf with waterlogged and facing.
+BigDripleafBlock.getFluidState	port	crates/horizon-world/src/level/mod.rs::Behaviours::fluid	Waterlogged fluid is read from per-state facts.
+BigDripleafBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	Kind::BigDripleaf arm places the stem and the leaf above.
+BigDripleafBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::big_dripleaf_tick	Signal resets tilt; UNSTABLE to PARTIAL (10 ticks) to FULL (100 ticks) with sound.
+BigDripleafBlock.playTiltSound	inline	crates/horizon-world/src/level/tick.rs::Sim::big_dripleaf_tick	Random pitch sound is inside the tick.
+BigDripleafBlock.setTiltAndScheduleTick	inline	crates/horizon-world/src/level/tick.rs::Sim::big_dripleaf_tick	Tick path schedules the next tilt; the UNSTABLE entity path is big_dripleaf_entity_inside in hooks.rs.
+BigDripleafBlock.setTilt	inline	crates/horizon-world/src/level/tick.rs::Sim::big_dripleaf_tick	Tilt write plus block_change game event folded into the tick.
+BigDripleafBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Class::BigDripleaf arm takes facing from the part below.
+BigDripleafBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
+Block.getId	skip:data		Block state ids are the extracted registry indices.
+Block.stateById	skip:data		State lookup by id over the registry built from extracted data.
+Block.byItem	skip:data		Item to block link comes from the item table (info.block in horizon-items/src/items.rs).
+Block.box	skip:data		Shape builder; Horizon reads precomputed shapes from extracted data.
+Block.boxes	skip:data		Shape array builder; shapes come from extracted data.
+Block.cube	skip:data		Shape builder; shapes come from extracted data.
+Block.boxZ	skip:data		Shape builder; shapes come from extracted data.
+Block.dropFromLootTable	inline	crates/horizon-client/src/game/spill.rs::GameLevel::drop_interact_loot	gap: minor: returns nothing, where vanilla returns whether anything dropped; folded into the interact-loot drop.
+Block.popExperience	port	crates/horizon-client/src/game.rs::Game::spawn_orbs	gap: minor: popExperience checks the block_drops rule, and the ore XP in break_block_as_player does not.
+Block.fallOn	port	crates/horizon-world/src/block_landing.rs::BlockLandingRegistry::fall_on	Default and hay rules apply fall damage with the block's reduction.
+Block.getShapeForEachState	skip:java		Shape lookup cache over the state table; Horizon precomputes shapes per state.
+Block.tryDropExperience	inline	crates/horizon-client/src/game.rs::Game::break_block_as_player	Sampled block XP and pop folded into the break path; silk touch zeroes it as in vanilla (hard-coded check).
+Block.ShapePairKey.equals	skip:java		Hash key for the shape cache.
+Blocks.ocelotOrParrot	port	crates/horizon-client/src/mobs/spawn_rules.rs::is_valid_spawn	Leaves spawn rule for ocelots and parrots (VALID_SPAWN_LEAVES).
+Blocks.logProperties	skip:data		Block.Properties builder; the values come from extracted block data.
+Blocks.netherStemProperties	skip:data		Block.Properties builder; the values come from extracted block data.
+Blocks.leavesProperties	skip:data		Block.Properties builder; the values come from extracted block data.
+Blocks.shulkerBoxProperties	skip:data		Block.Properties builder; the values come from extracted block data.
+Blocks.pistonProperties	skip:data		Block.Properties builder; the values come from extracted block data.
+Blocks.candleProperties	skip:data		Block.Properties builder; the values come from extracted block data.
+Blocks.registerLegacyStair	skip:data		Registry bootstrap; Horizon reads block definitions from extracted data.
+Blocks.registerStair	skip:data		Registry bootstrap; Horizon reads block definitions from extracted data.
+Blocks.registerSlab	skip:data		Registry bootstrap; Horizon reads block definitions from extracted data.
+Blocks.register	skip:data		Registry bootstrap; Horizon reads block definitions from extracted data.
+BrushableBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Class::Brushable arm schedules the 2-tick update.
+BubbleColumnBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	Bubble and current particles plus whirlpool and upwards ambient sounds.
+BubbleColumnBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Class::BubbleColumn arm schedules the water tick and the 5-tick recheck.
+BubbleColumnBlock.pickupBlock	missing		player: an empty bucket on a bubble column should scoop a water bucket and remove the column; Horizon's bucket_pickup takes only liquids and waterlogged blocks, so nothing happens.
+ButtonBlock.makeShapes	skip:data		Shape precomputed from the extracted block shapes (level/data.rs).
+ButtonBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	Class::Button arm presses it, or consumes when already pressed.
+ButtonBlock.onExplosionHit	port	crates/horizon-client/src/game/wind.rs::Game::wind_trigger_block	Wind charge bursts use the button like a player use; TNT does not reach it.
+ButtonBlock.playSound	port	crates/horizon-world/src/level/redstone.rs::Sim::button_press	Press sound; the release sound is in button_check_pressed.
+ButtonBlock.affectNeighborsAfterRemoval	port	crates/horizon-world/src/level/hooks.rs::Sim::affect_neighbors_after_removal	Button and lever arm updates neighbours when powered and not moved.
+ButtonBlock.getDirectSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::state_direct_signal	Strong power read from the per-state facts.
+ButtonBlock.updateNeighbours	port	crates/horizon-world/src/level/redstone.rs::Sim::attached_update_neighbours	Updates the button and the block it is attached to.
+ButtonBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
+CactusBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::cactus_random_tick	Growth, cactus flower chance and reset at age 15.
+CactusBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Class::Cactus arm schedules a 1-tick survival check.
+CactusBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Solid or lava side neighbours block it; needs cactus or support tag below and no liquid above.
+CampfireBlock.entityInside	port	crates/horizon-client/src/motion.rs::MotionWorld::check_inside_blocks	Lit campfire hurts living entities through environment_hurt.
+CampfireBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Waterlogged, lit, signal fire from hay below, facing from the player.
+CampfireBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Waterlogged tick and signal fire from the block below.
+CampfireBlock.placeLiquid	port	crates/horizon-world/src/level/fluids.rs::Sim::place_liquid	Water puts it out with the extinguish sound and sets waterlogged.
+CampfireBlock.onProjectileHit	missing		player: a burning arrow (Flame bow) that hits an unlit campfire should light it; Horizon's projectile_hit only dispatches bells and targets.
+CampfireBlock.getFluidState	port	crates/horizon-world/src/level/mod.rs::Behaviours::fluid	Waterlogged fluid is read from per-state facts.
+CampfireBlock.rotate	skip:data		Rotation is a precomputed table from extracted data.
+CampfireBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
+CampfireBlock.getTicker	port	crates/horizon-client/src/game/campfire.rs::Game::tick_campfire	Cooking tick when lit, cooldown tick when unlit.
+CandleBlock.useItemOn	missing		player: an empty hand on a lit candle should snuff it out with the extinguish sound; Horizon has no snuff path (candles only light from arrows).
+CandleBlock.canBeReplaced	port	crates/horizon-world/src/level/place.rs::Sim::can_be_replaced	Adding a candle to a candle with fewer than four is allowed.
+CandleBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Class::Candle arm cycles the candle count when placed on a candle.
+CandleBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Waterlogged water tick.
+CandleBlock.getFluidState	port	crates/horizon-world/src/level/mod.rs::Behaviours::fluid	Waterlogged fluid is read from per-state facts.
+CandleBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
+CandleBlock.placeLiquid	port	crates/horizon-world/src/level/fluids.rs::Sim::place_liquid	Water waterlogs the candle and puts out a lit one.
+CandleCakeBlock.useItemOn	missing		player: an empty hand on a lit candle cake should snuff the candle; Horizon has no snuff path.
+CandleCakeBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	CandleCake arm eats the cake and drops the candle.
+CandleCakeBlock.candleHit	missing		player: the hit-on-candle check for the missing candle-cake snuff.
+CandleCakeBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Candle cake drops to air when unsupported below.
+CarvedPumpkinBlock.getWeatherStateFromPattern	inline	crates/horizon-client/src/game/golems.rs::Game::try_spawn_copper_golem	Weathering comes from the copper block below; waxed blocks count as unwaxed.
+CarvedPumpkinBlock.getOrCreateSnowGolemBase	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	Snow column under the head; the lazy pattern cache is not needed.
+CarvedPumpkinBlock.getOrCreateSnowGolemFull	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	Snow golem with a pumpkin head on the snow column.
+CarvedPumpkinBlock.getOrCreateIronGolemBase	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	Iron arms and body under the head.
+CarvedPumpkinBlock.getOrCreateIronGolemFull	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	Iron golem pattern with air cells.
+CarvedPumpkinBlock.getOrCreateCopperGolemBase	port	crates/horizon-client/src/game/golems.rs::Game::copper_golem_base	Copper block under the head.
+CarvedPumpkinBlock.getOrCreateCopperGolemFull	inline	crates/horizon-client/src/game/golems.rs::Game::try_spawn_copper_golem	Copper golem spawn with the pumpkin head; the head check is in is_golem_head.
+CarvedPumpkinBlock.replaceCopperBlockWithChest	inline	crates/horizon-client/src/game/golems.rs::Game::try_spawn_copper_golem	Copper block becomes its chest with flag 2 through copper_chest_from_block.
+CauldronBlock.shouldHandlePrecipitation	inline	crates/horizon-world/src/level/tick.rs::Sim::precipitation_tick	The 5 percent rain and 10 percent snow chances are inside the precipitation tick.
+CauldronBlock.handlePrecipitation	port	crates/horizon-world/src/level/tick.rs::Sim::precipitation_tick	Rain fills to water cauldron, snow to powder snow cauldron.
+CauldronBlock.receiveStalactiteDrip	port	crates/horizon-world/src/level/speleothem.rs::Sim::cauldron_tick	Water and lava drips fill the cauldron with level events 1047 and 1046.
+ChainBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Chain takes the default placement, waterlogged from the fluid.
+ChainBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Waterlogged water tick, then the default update.
+ChainBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
+ChainBlock.getFluidState	port	crates/horizon-world/src/level/mod.rs::Behaviours::fluid	Waterlogged fluid is read from per-state facts.
+ChangeOverTimeBlock.getNextState	port	crates/horizon-world/src/level/tick.rs::Sim::copper_change_over_time	Counts weathering neighbours within 4 and rolls the chance, 0.75 for unaffected.
+ChangeOverTimeBlock.isSameAgeingType	inline	crates/horizon-world/src/level/tick.rs::Sim::copper_change_over_time	Same weathering family is the WeatheringCopper check in the neighbour loop.
+ChiseledBookShelfBlock.useItemOn	port	crates/horizon-client/src/game/chiseled_bookshelf.rs::Game::use_chiseled_bookshelf	Holding a book inserts it into the hit slot.
+ChiseledBookShelfBlock.useWithoutItem	port	crates/horizon-client/src/game/chiseled_bookshelf.rs::Game::use_chiseled_bookshelf	Empty hand takes the book out of the hit slot.
+ChiseledBookShelfBlock.addBook	inline	crates/horizon-client/src/game/chiseled_bookshelf.rs::Game::use_chiseled_bookshelf	Used stat, insert sound (enchanted variant), slot update folded in.
+ChiseledBookShelfBlock.removeBook	inline	crates/horizon-client/src/game/chiseled_bookshelf.rs::Game::use_chiseled_bookshelf	Pickup sound, book given or dropped, block_change event folded in.
+ChiseledBookShelfBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
+ChiseledBookShelfBlock.rotate	skip:data		Rotation is a precomputed table from extracted data.
+ChorusFlowerBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	Destroys the flower when it cannot survive.
+ChorusFlowerBlock.isRandomlyTicking	skip:data		Random tick flag per state comes from extracted data.
+ChorusFlowerBlock.placeGrownFlower	inline	crates/horizon-world/src/level/tick.rs::Sim::chorus_flower_random_tick	Sets the age and level event 1033 inside the random tick.
+ChorusFlowerBlock.placeDeadFlower	inline	crates/horizon-world/src/level/tick.rs::Sim::chorus_flower_random_tick	Sets age 5 and level event 1034 inside the random tick.
+ChorusFlowerBlock.allNeighborsEmpty	inline	crates/horizon-world/src/level/tick.rs::Sim::chorus_flower_random_tick	The all_empty check of the random tick; the worldgen copy is ChorusPlantFeature::neighbors_empty.
+ChorusFlowerBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Class::ChorusFlower arm schedules a survival check when the side or below changes.
+ChorusFlowerBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Needs a chorus plant or support tag below, or a single plant neighbour in the air.
+ChorusFlowerBlock.generatePlant	port	crates/horizon-world/src/worldgen/chorus_plant.rs::ChorusPlantFeature::place	Connects the base plant and grows the tree.
+ChorusFlowerBlock.growTreeRecursive	port	crates/horizon-world/src/worldgen/chorus_plant.rs::ChorusPlantFeature::grow	Random height, stems and flowers at the tips.
+ChorusFlowerBlock.onProjectileHit	missing		player: an arrow or other breakable projectile hitting a chorus flower should break it and drop it; Horizon's projectile_hit only dispatches bells and targets.
+ChorusPlantBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Class::ChorusPlant arm updates the side connection and schedules the survival check.
+ChorusPlantBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	Destroys the plant when it cannot survive.
+ChorusPlantBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Plant or support tag below, or a plant neighbour with support under it.
+ChorusPlantBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
+CommandBlock.neighborChanged	port	crates/horizon-client/src/game/command_blocks.rs::set_powered	Stores the redstone power and marks the condition when it turns on.
+CommandBlock.getAnalogOutputSignal	port	crates/horizon-client/src/game/command_blocks.rs::analog_signal	Success count of the command block.
+CommandBlock.rotate	skip:data		Rotation is a precomputed table from extracted data.
+CommandBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
+ComparatorBlock.getOutputSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::comparator_output	Stored output signal of the comparator.
+ComparatorBlock.calculateOutputSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::comparator_calculate_output	Compare and subtract modes against the side input.
+ComparatorBlock.shouldTurnOn	port	crates/horizon-world/src/level/redstone.rs::Sim::diode_should_turn_on	Input against side input in compare or subtract mode.
+ComparatorBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	Class::Comparator arm cycles the mode with the click sound and refreshes output.
+ComparatorBlock.checkTickOnNeighbor	port	crates/horizon-world/src/level/redstone.rs::Sim::diode_check_tick_on_neighbor	Schedules the 2-tick refresh when output or power would change.
+ComparatorBlock.refreshOutputState	port	crates/horizon-world/src/level/redstone.rs::Sim::comparator_refresh	Updates the output, powered state and neighbours in front.
+ComparatorBlock.triggerEvent	skip:other		No effect: vanilla BlockEntity.triggerEvent returns false and the comparator entity does not override it.
+ComparatorBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
+ComposterBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	A full composter schedules its ready tick in 20 ticks.
+ComposterBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	Full composter becomes ready (level 8) with the ready sound.
+ComposterBlock.getContainer	port	crates/horizon-client/src/game/machines.rs::Containers::view	Composter level picks the input, output or empty view.
+ComposterBlock.InputContainer.getSlotsForFace	port	crates/horizon-client/src/game/machines.rs::View::slots_for_face	Up face, slot 0 while the level is under 7.
+ComposterBlock.InputContainer.canPlaceItemThroughFace	port	crates/horizon-client/src/game/composter.rs::Game::composter_container_insert	Only from above, below level 7, and compostable.
+ComposterBlock.InputContainer.setChanged	port	crates/horizon-client/src/game/composter.rs::Game::composter_container_insert	Composts the item at once through addLayer.
+ComposterBlock.OutputContainer.getSlotsForFace	port	crates/horizon-client/src/game/machines.rs::View::slots_for_face	Down face, slot 0 at level 8.
+ComposterBlock.OutputContainer.setChanged	port	crates/horizon-world/src/level/interact.rs::Behaviours::composter_empty	Empties the composter to level 0.
+ChestBlock.getBlockType	port	crates/horizon-client/src/game/storage.rs::Game::chest_partner	Partner half and right-half flag give the single, first or second combine type.
+ChestBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Class::Chest arm joins or splits a double chest with the neighbour.
+ChestBlock.getShape	skip:data		Outline shape per state comes from extracted block shapes.
+ChestBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Class::Chest arm sets facing, double type and waterlogged.
+ChestBlock.getChestType	inline	crates/horizon-world/src/level/place.rs::Sim::placement_class	Left or right partner check folded into the Chest placement arm.
+ChestBlock.getFluidState	port	crates/horizon-world/src/level/mod.rs::Behaviours::fluid	Waterlogged fluid is read from per-state facts.
+ChestBlock.candidatePartnerFacing	port	crates/horizon-world/src/level/place.rs::Sim::chest_candidate_partner_facing	Facing of a single chest on the side, when it can connect.
+ChestBlock.useWithoutItem	port	crates/horizon-client/src/game.rs::Game::open_menu	Opens the chest menu, with the open stat and piglin anger.
+ChestBlock.getTicker	port	crates/horizon-client/src/block_entity_anim.rs::ticker	Client-side lid animation ticker.
+ChestBlock.isCatSittingOnChest	port	crates/horizon-client/src/game/storage.rs::Game::chest_blocked_at	A sitting cat above blocks the chest.
+ChestBlock.rotate	skip:data		Rotation is a precomputed table from extracted data.
+ChestBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.

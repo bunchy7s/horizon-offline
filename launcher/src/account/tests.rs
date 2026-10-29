@@ -15,6 +15,8 @@ struct Mock {
     xerr: Option<u64>,
     owns_game: bool,
     no_profile: bool,
+    /// What `launcher/login` answers instead of a token (an older service, an outage).
+    launcher_login_refused: Option<u16>,
     /// Every request: method, path and body.
     log: Vec<(String, String, String)>,
 }
@@ -80,6 +82,21 @@ fn route(mock: &mut Mock, method: &str, path: &str, auth: &str, body: &str) -> (
                 None => reply(
                     200,
                     json!({"Token": "xsts-token", "DisplayClaims": {"xui": [{"uhs": "uhs-1", "xid": "2535400000000000"}]}}),
+                ),
+            }
+        }
+        ("POST", "/mc/launcher/login") => {
+            let v: Value = serde_json::from_str(body).unwrap();
+            assert_eq!(v["xtoken"], "XBL3.0 x=uhs-1;xsts-token");
+            assert_eq!(v["platform"], "PC_LAUNCHER");
+            match mock.launcher_login_refused {
+                Some(status) => reply(
+                    status,
+                    json!({"path": "/launcher/login", "error": "UNAUTHORIZED"}),
+                ),
+                None => reply(
+                    200,
+                    json!({"access_token": "mc-token", "token_type": "Bearer", "expires_in": 86400}),
                 ),
             }
         }
@@ -154,7 +171,11 @@ fn serve(mock: Arc<Mutex<Mock>>) -> Endpoints {
             let body = String::from_utf8(body).unwrap();
             let (status, text) = {
                 let mut m = mock.lock().unwrap();
-                m.log.push((method.clone(), path.clone(), body.clone()));
+                // A bare `GET /` is a local tool probing every new port (T3 Code does, on the Mac
+                // mini), not the launcher: no endpoint here is the root.
+                if (method.as_str(), path.as_str()) != ("GET", "/") {
+                    m.log.push((method.clone(), path.clone(), body.clone()));
+                }
                 route(&mut m, &method, &path, &auth, &body)
             };
             let _ = write!(
@@ -225,12 +246,54 @@ fn the_whole_chain() {
             "/ms/token",
             "/xbl",
             "/xsts",
-            "/mc/authentication/login_with_xbox",
+            "/mc/launcher/login",
             "/mc/entitlements/mcstore",
             "/mc/minecraft/profile"
         ]
     );
     assert!(!format!("{secrets:?}").contains("mc-token"));
+}
+
+#[test]
+fn login_with_xbox_signs_in_when_launcher_login_refuses() {
+    for status in [401, 404, 503] {
+        let (m, ep) = mock(|m| m.launcher_login_refused = Some(status));
+        let ms = MsTokens {
+            access: "ms-access-1".into(),
+            refresh: "r".into(),
+        };
+        let (account, secrets) = finish_sign_in(&ep, ms).unwrap();
+        assert_eq!(account.uuid, UUID);
+        assert_eq!(secrets.minecraft_token, "mc-token");
+        // The same owner check follows, with the token login_with_xbox gave.
+        assert!(secrets.owns);
+        let paths: Vec<String> = m
+            .lock()
+            .unwrap()
+            .log
+            .iter()
+            .map(|(_, p, _)| p.clone())
+            .collect();
+        assert_eq!(
+            paths[2..],
+            [
+                "/mc/launcher/login",
+                "/mc/authentication/login_with_xbox",
+                "/mc/entitlements/mcstore",
+                "/mc/minecraft/profile"
+            ]
+        );
+    }
+    // Either way, an account that doesn't own the game is refused.
+    let (_, ep) = mock(|m| {
+        m.launcher_login_refused = Some(503);
+        m.owns_game = false;
+    });
+    let ms = MsTokens {
+        access: "ms-access-1".into(),
+        refresh: "r".into(),
+    };
+    assert_eq!(finish_sign_in(&ep, ms).unwrap_err(), DOES_NOT_OWN);
 }
 
 fn notch() -> Account {
@@ -329,6 +392,46 @@ fn an_owner_plays_with_a_session() {
     assert!(pass.owner.is_some() && pass.offline.is_none());
     // The profile as the services have it now (the skin is new).
     assert!(accounts.selected().unwrap().skin.is_some());
+}
+
+/// A keychain that reads but refuses to keep anything new (#3249).
+struct Refusing(MemoryStore);
+impl SecretStore for Refusing {
+    fn get(&self, key: &str) -> Result<Option<String>, String> {
+        self.0.get(key)
+    }
+    fn set(&self, _: &str, _: &str) -> Result<(), String> {
+        Err("the keyring is locked".into())
+    }
+    fn delete(&self, key: &str) -> Result<(), String> {
+        self.0.delete(key)
+    }
+    fn persistent(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn a_renewed_sign_in_the_keychain_refuses_still_plays_and_says_so() {
+    let (_, ep) = mock(|_| {});
+    let store = MemoryStore::default();
+    let stale = Secrets {
+        minecraft_expires_at: now() + 60,
+        ..secrets("old-token", true)
+    };
+    let mut accounts = signed_in(&store, &stale);
+    let refusing = Refusing(store);
+    let pass = launch(&ep, Some("test-client"), &refusing, &mut accounts).unwrap();
+    assert_eq!(pass.session.unwrap().1.minecraft_token, "mc-token");
+    let said = "Notch's renewed sign-in couldn't be saved in the keychain (the keyring is \
+                locked): you may have to sign in again next time.";
+    assert_eq!(pass.unsaved.as_deref(), Some(said));
+    assert_eq!(take_unsaved().as_deref(), Some(said));
+    assert_eq!(take_unsaved(), None, "said once");
+    // Nothing to save, nothing to say.
+    let mut accounts = signed_in(&refusing.0, &secrets("mc-token", true));
+    let pass = launch(&ep, Some("test-client"), &refusing, &mut accounts).unwrap();
+    assert!(pass.unsaved.is_none());
 }
 
 #[test]
@@ -644,5 +747,30 @@ fn offline_names_switch_with_accounts() {
     assert_eq!(
         serde_json::to_string(&old).unwrap(),
         r#"{"accounts":[],"selected":null}"#
+    );
+}
+
+#[test]
+fn the_java_edition_plays_as_an_owner_even_offline() {
+    let (_, ep) = mock(|_| {});
+    let store = MemoryStore::default();
+    let mut accounts = signed_in(&store, &secrets("mc-token", true));
+    let player = java_player_with(&ep, Some("test-client"), &store, &mut accounts).unwrap();
+    assert_eq!(
+        (
+            player.name.as_str(),
+            player.uuid.as_str(),
+            player.token.as_str()
+        ),
+        ("Notch", UUID, "mc-token")
+    );
+    // No network: the last token of an account that owned the game.
+    let player = java_player_with(&offline(), Some("test-client"), &store, &mut accounts).unwrap();
+    assert_eq!(player.token, "mc-token");
+    // Never for an account that doesn't own it.
+    let mut accounts = signed_in(&store, &secrets("mc-token", false));
+    assert_eq!(
+        java_player_with(&offline(), Some("test-client"), &store, &mut accounts).unwrap_err(),
+        NoOwner.to_string()
     );
 }

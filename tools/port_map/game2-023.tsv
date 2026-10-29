@@ -1,0 +1,150 @@
+FlowingFluid.getFlow	port	crates/horizon-world/src/fluid_flow.rs::flow_at	neighbour currents and falling wall deflection
+FlowingFluid.affectsFlow	port	crates/horizon-world/src/fluid_flow.rs::affects_flow	-
+FlowingFluid.isSolidFace	port	crates/horizon-world/src/fluid_flow.rs::solid_face	-
+FlowingFluid.getFlowing	port	crates/horizon-world/src/fluid.rs::FluidState::new	kind chosen by flowing_of (level/fluids.rs) at the call sites; this builds the state from amount and falling
+FlowingFluid.isSourceBlockOfThisType	port	crates/horizon-world/src/level/fluids.rs::Sim::is_source_of	-
+FlowingFluid.sourceNeighborCount	port	crates/horizon-world/src/level/fluids.rs::Sim::source_neighbour_count	-
+FlowingFluid.getLegacyLevel	inline	crates/horizon-world/src/fluid.rs::FluidBlockBindings::block	the level number (0 for sources, else 8 minus amount plus 8 when falling) is computed inline when picking the liquid block
+FlowingFluid.getShape	port	crates/horizon-world/src/fluid_shape.rs::FluidShapeCache::shape	gap: minor: no full-block branch for amount 9 with the same fluid above; the pinned registry has no amount-nine state
+FlowingFluid.BlockStatePairKey.equals	skip:java	-	cache key record equality
+FlowingFluid.BlockStatePairKey.hashCode	skip:java	-	cache key record hash
+FlowingFluid.SpreadContext.getBlockState	port	crates/horizon-world/src/level/fluids.rs::Sim::context_state	-
+FlowingFluid.SpreadContext.isHole	port	crates/horizon-world/src/level/fluids.rs::Sim::context_is_hole	-
+Fluid.getAABB	inline	crates/horizon-client/src/arrows.rs::Ticker::collided_with_fluid	the fluid box (block to block plus height) is built inside collided_with_fluid for the sweep test
+FluidState.isSourceOfType	port	crates/horizon-world/src/level/fluids.rs::Sim::is_source_of	family comparison instead of owner identity; same result for source states
+LavaFluid.hasFlammableNeighbours	inline	crates/horizon-world/src/level/fluids.rs::Sim::lava_random_tick	the six-neighbour check is folded into the random tick; uses the plain IGNITED_BY_LAVA flag, no face argument
+LavaFluid.isFlammable	port	crates/horizon-world/src/level/fluids.rs::Sim::lava_flammable	deprecated no-face overload; same build-height and chunk check and flag
+LavaFluid.canBeReplacedWith	port	crates/horizon-world/src/level/fluids.rs::Sim::can_be_replaced_with	-
+LavaFluid.getSpreadDelay	port	crates/horizon-world/src/level/fluids.rs::Sim::spread_delay	-
+LavaFluid.spreadTo	port	crates/horizon-world/src/level/fluids.rs::Sim::spread_to	includes the lava-into-water stone conversion and fizz event
+LavaFluid.Flowing.createFluidStateDefinition	skip:data	-	state property list, read from data tables
+WaterFluid.beforeDestroyingBlock	port	crates/horizon-world/src/level/update.rs::Sim::drop_resources	called from spread_to for water only
+WaterFluid.canBeReplacedWith	port	crates/horizon-world/src/level/fluids.rs::Sim::can_be_replaced_with	-
+WaterFluid.Flowing.createFluidStateDefinition	skip:data	-	state property list, read from data tables
+MapColor.calculateARGBColor	port	crates/horizon-client/src/game/maps.rs::packed_rgba	packed id with brightness in, ARGB out; id 0 is transparent as in vanilla NONE
+MapColor.getPackedId	inline	crates/horizon-client/src/game/maps.rs::Game::render_biome_preview	the packed id (color << 2 | brightness) is built where map pixels are written (maps.rs:682 and in update_map)
+AmphibiousNodeEvaluator.done	skip:other	-	vanilla sets the mob malus for WATER, WALKABLE and WATER_BORDER in prepare and restores it here; Horizon never writes the mob malus, Finder::malus applies the amphibious values per search
+AmphibiousNodeEvaluator.isVerticalNeighborValid	inline	crates/horizon-client/src/mobs/path.rs::Finder::walk_neighbors	the amphibious up and down neighbours need a valid node that is WATER; folded into the amphibious branch
+BinaryHeap.remove	skip:other	-	no vanilla caller: the search only uses insert, pop and changeCost, Horizon has heap_insert, heap_pop and change_cost
+FlyNodeEvaluator.getNeighbors	port	crates/horizon-client/src/mobs/path.rs::Finder::fly_neighbors	fly neighbours
+FlyNodeEvaluator.hasMalus	inline	crates/horizon-client/src/mobs/path.rs::Finder::fly_neighbors	the cost_malus >= 0 test is a closure inside fly_neighbors
+FlyNodeEvaluator.getCachedPathType	port	crates/horizon-client/src/mobs/path.rs::Finder::fly_path_type	-
+FlyNodeEvaluator.iteratePathfindingStartNodeCandidatePositions	inline	crates/horizon-client/src/mobs/path.rs::Finder::start	gap: minor: flying start candidates are the four corners only; the small-mob branch (ten random positions in the inflated box) is not ported
+pathfinder/Node.createDebugStreamCodec	skip:debug	-	stream codec for the debug path overlay
+pathfinder/Node.cloneAndMove	missing	-	minor: only used by PathNavigation.trimPath to raise path nodes over cauldrons by one block; that trim is not ported, so mobs may bump on cauldron rims
+pathfinder/Node.createHash	skip:java	-	Java map key; Horizon indexes nodes inside Finder
+pathfinder/Node.distanceTo	port	crates/horizon-client/src/mobs/path.rs::Node::distance	both overloads: node to node and node to block position
+pathfinder/Node.distanceToXZ	missing	-	minor: only the Warden path finder uses horizontal distance as its cost; Horizon costs use 3D distance everywhere (Finder::find)
+pathfinder/Node.distanceToSqr	skip:other	-	no vanilla caller in pathfinding or navigation; Horizon has no squared node distance
+pathfinder/Node.distanceManhattan	port	crates/horizon-client/src/mobs/path.rs::Node::manhattan	-
+pathfinder/Node.asVec3	skip:debug	-	only the pathfinding debug renderer calls it
+pathfinder/Node.equals	port	crates/horizon-client/src/mobs/path.rs::Path::same_as	compares the node lists; Horizon nodes are PathNode values that also compare kind, vanilla compares position only
+Path.getEndNode	port	crates/horizon-client/src/mobs/path.rs::Path::end	-
+Path.truncateNodes	missing	-	player: RestrictSun sets avoid_sun (goals.rs) and undead use it (undead.rs), but nothing cuts the path at the first sunlit node, so undead wander into sunlight while it is bright
+Path.getPreviousNode	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	path.nodes[path.next - 1] is read directly for the door check (InteractWithDoor)
+Path.equals	skip:java	-	Java equals; Path derives PartialEq and navigation compares paths with same_as
+Path.copy	skip:java	-	Path derives Clone
+PathFinder.reconstructPath	inline	crates/horizon-client/src/mobs/path.rs::Finder::find	the came_from walk is the build closure inside find
+Target.updateBest	port	crates/horizon-client/src/mobs/path.rs::Finder::best_h	keeps the best heuristic per target
+WalkNodeEvaluator.done	inline	crates/horizon-client/src/mobs/sniffer.rs::ai_step	gap: minor: the per-search caches need no clearing (Horizon caches live in one search); the Sniffer water malus is set from the wet state each tick, while vanilla also sets it to -1 right after each search in onPathfindingDone
+WalkNodeEvaluator.doesBlockHavePartialCollision	port	crates/horizon-client/src/mobs/path.rs::Finder::partial_collision	-
+WalkNodeEvaluator.getCachedPathType	port	crates/horizon-client/src/mobs/path.rs::Finder::path_type	-
+WalkNodeEvaluator.getPathTypeWithinMobBB	port	crates/horizon-client/src/mobs/path.rs::Finder::within_bb	-
+MapItemSavedData.type	skip:data	-	saved-data type and codec; Horizon saves map files in save_maps
+MapItemSavedData.<init>	port	crates/horizon-client/src/game/maps.rs::MapData::fresh	gap: minor: sets the grid cell, scale and dimension; locked and the tracking flags are set by the caller or the NBT load
+MapItemSavedData.createForClient	port	crates/horizon-client/src/game/maps.rs::Game::remote_map_item_data	the client map is created from the packet (fresh map, locked flag from the packet)
+MapItemSavedData.mapMatcher	inline	crates/horizon-client/src/game/maps.rs::Game::tick_maps	the carried maps are the map ids in the inventory and offhand, which is what the matcher finds
+MapItemSavedData.tickCarriedBy	port	crates/horizon-client/src/game/maps.rs::Game::tick_maps	gap: player: no framed-map marker when the map hangs in an item frame, and no removal of a player who wears map-invisibility gear
+MapItemSavedData.hasMapInvisibilityItemEquipped	missing	-	player: a player wearing map-invisibility gear (ItemTags.MAP_INVISIBILITY_EQUIPMENT) is still drawn on other players maps
+MapItemSavedData.removeDecoration	inline	crates/horizon-client/src/game/maps.rs::Game::tick_maps	decorations are rebuilt each tick (holder markers kept, the rest replaced) instead of removed by key
+MapItemSavedData.addDecoration	inline	crates/horizon-client/src/game/maps.rs::Game::tick_maps	gap: player: only the item target decorations go through here; banner and frame markers never reach it
+MapItemSavedData.calculateDecorationLocationAndType	inline	crates/horizon-client/src/game/maps.rs::Game::tick_maps	player branch and item branch both done inline, with clamping
+MapItemSavedData.playerDecorationTypeAndRotation	inline	crates/horizon-client/src/game/maps.rs::Game::tick_maps	player marker sprite and rotation chosen inline (decoration_rotation for the rotation)
+MapItemSavedData.isInsideMap	inline	crates/horizon-client/src/game/maps.rs::Game::tick_maps	the plus or minus 63 range test is inline
+MapItemSavedData.decorationTypeForPlayerOutsideMap	inline	crates/horizon-client/src/game/maps.rs::Game::tick_maps	off-map and off-limits sprite choice inline
+MapItemSavedData.setColorsDirty	inline	crates/horizon-client/src/game/maps.rs::MapData::update_color	the holders dirty rectangle is updated in update_color
+MapItemSavedData.getHoldingPlayer	port	crates/horizon-client/src/game/maps.rs::MapData::holder	-
+MapItemSavedData.toggleBanner	missing	-	player: placing a banner inside a map area does not add a marker to the map (banners saved as an empty list)
+MapItemSavedData.checkBanners	missing	-	player: banner markers are not tracked, so a marker would not disappear when its banner is broken
+MapItemSavedData.removedFromFrame	missing	-	player: framed-map markers are never added, so breaking an item frame leaves no marker to clear (frames saved as an empty list)
+MapItemSavedData.setColor	port	crates/horizon-client/src/game/maps.rs::MapData::update_color	-
+MapItemSavedData.addClientSideDecorations	port	crates/horizon-client/src/game/maps.rs::Game::remote_map_item_data	decorations are replaced from the packet list
+MapItemSavedData.HoldingPlayer.createPatch	port	crates/horizon-client/src/game/maps.rs::MapData::update_packet	the dirty rectangle is copied into the patch
+MapItemSavedData.HoldingPlayer.markColorsDirty	inline	crates/horizon-client/src/game/maps.rs::MapData::update_color	the holder dirty rectangle is widened in update_color
+MapItemSavedData.MapPatch.applyToMap	port	crates/horizon-client/src/game/maps.rs::Game::remote_map_item_data	the patch loop writes each colour through update_color
+LootContext.createVisitedEntry	inline	crates/horizon-world/src/loot.rs::Context::table_raw	gap: minor: only the loot-table cycle guard (visited list); predicates and modifiers are not tracked
+LootContext.EntityTarget.getByName	port	crates/horizon-world/src/loot.rs::Context::target	-
+LootPool.addRandomItems	inline	crates/horizon-world/src/loot.rs::Context::table_raw	pool condition, bonus rolls, the rolls loop and the pool modifier are in table_raw
+LootPool.validate	skip:data	-	validation of references in datagen tables
+LootPool.Builder.addAll	skip:java	-	builder
+LootPool.Builder.build	skip:java	-	builder
+LootTable.validate	skip:data	-	validation of references in datagen tables
+LootTable.getAvailableSlots	inline	crates/horizon-world/src/loot.rs::LootData::fill_with	gap: minor: every slot index is shuffled, not only the empty ones; the callers fill empty containers
+LootTable.Builder.build	skip:java	-	builder
+LootItem.lootTableItem	skip:java	-	builder factory for a loot entry
+LootPoolEntryContainer.commonFields	skip:java	-	codec field group
+LootPoolEntryContainer.validate	skip:data	-	validation of references in datagen tables
+LootPoolEntryContainer.adjustOutput	inline	crates/horizon-world/src/loot.rs::Context::create	the entry modifier is applied to each created stack
+LootPoolEntryContainer.canRun	inline	crates/horizon-world/src/loot.rs::Context::expand	the entry condition check is the first step of expand
+LootPoolEntryContainer.Builder.otherwise	skip:java	-	builder
+LootPoolEntryContainer.Builder.append	skip:java	-	builder, no vanilla caller
+LootPoolEntryContainer.Builder.then	skip:java	-	builder, no vanilla caller
+entries/TagEntry.addExpandedEntries	port	crates/horizon-world/src/loot.rs::Context::expand	one choice per tag member when expand is set
+entries/TagEntry.tagContents	skip:java	-	builder
+entries/TagEntry.expandTag	skip:java	-	builder
+EnchantRandomlyFunction.run	inline	crates/horizon-items/src/items.rs::LootContext::modifiers	gap: minor: no ADDITIONAL_TRADE_COST component when includeAdditionalCostComponent is set
+EnchantRandomlyFunction.enchantItem	inline	crates/horizon-items/src/items.rs::LootContext::modifiers	gap: minor: book conversion, level roll and enchant are inline; no ADDITIONAL_TRADE_COST component
+EnchantRandomlyFunction.Builder.withEnchantment	skip:java	-	builder
+EnchantRandomlyFunction.Builder.build	skip:java	-	builder
+EnchantWithLevelsFunction.run	inline	crates/horizon-items/src/items.rs::LootContext::modifiers	gap: minor: no ADDITIONAL_TRADE_COST component when the parameter is present
+EnchantWithLevelsFunction.Builder.withOptions	skip:java	-	builder
+EnchantWithLevelsFunction.Builder.build	skip:java	-	builder
+ExplorationMapFunction.claimStructureAt	missing	-	minor: no structure reference is added for the explored structure when the map is filled; Horizon keeps chunk references only (vanillagen.rs)
+ExplorationMapFunction.Builder.build	skip:java	-	builder
+ListOperation.codec	skip:data	-	codec
+ListOperation.Append.apply	inline	crates/horizon-client/src/game/commands/items.rs::list_operation	gap: minor: an append over 256 entries is truncated to 256, vanilla logs an error and keeps the original list
+CommandStorage.get	port	crates/horizon-client/src/command_storage.rs::CommandStorage::get	-
+CommandStorage.getContainer	inline	crates/horizon-client/src/command_storage.rs::CommandStorage::get	namespace lookup; Horizon keeps every namespace in one map, so no container load
+CommandStorage.getOrCreateContainer	inline	crates/horizon-client/src/command_storage.rs::CommandStorage::set	the namespace entry is created on write
+CommandStorage.Container.get	port	crates/horizon-client/src/command_storage.rs::CommandStorage::get	-
+CommandStorage.Container.put	port	crates/horizon-client/src/command_storage.rs::CommandStorage::set	empty contents remove the entry
+CommandStorage.Container.getKeys	port	crates/horizon-client/src/command_storage.rs::CommandStorage::keys	-
+LevelStorageSource.LevelStorageAccess.releaseTemporarilyAndRun	skip:other	-	used only by the external datafixer tool (FileFixerUpper); Horizon does not run it
+LevelStorageSource.LevelStorageAccess.safeClose	skip:other	-	closes the session lock and logs a failure; Horizon releases its lock when the session drops
+LevelStorageSource.LevelStorageAccess.getLevelPath	skip:other	-	path helper for level resources; Horizon builds these paths where they are used (save.rs::saved_data_path)
+LevelStorageSource.LevelStorageAccess.collectIssues	missing	-	player: a world with a damaged level.dat gets no recovery screen listing its data-fix issues (RecoverWorldDataScreen)
+LevelStorageSource.LevelStorageAccess.fixAndGetSummaryFromTag	port	crates/horizon-client/src/title.rs::list_worlds	gap: minor: the world list reads name and last played directly, without a data fix first
+LevelStorageSource.LevelStorageAccess.getUnfixedDataTagWithFallback	missing	-	player: when level.dat is unreadable, the level.dat_old copy is not used as a fallback; the world does not load
+LevelStorageSource.LevelStorageAccess.getUnfixedDataTag	inline	crates/horizon-client/src/save.rs::Level::read	the Data compound of level.dat is read inside Level::read
+LevelStorageSource.LevelStorageAccess.saveDataTag	inline	crates/horizon-client/src/save.rs::Level::write	level.dat is written inside Level::write
+LevelStorageSource.LevelStorageAccess.saveLevelData	port	crates/horizon-client/src/save.rs::write_dat	the temp file, the level.dat_old swap and the write are in write_dat
+LevelStorageSource.LevelStorageAccess.getIconFile	port	crates/horizon-client/src/title.rs::Title::icon	gap: minor: no session-lock check; Horizon reads icon.png whenever it is there
+LevelStorageSource.LevelStorageAccess.renameLevel	port	crates/horizon-client/src/title/world_management.rs::rename	-
+LevelStorageSource.LevelStorageAccess.renameAndDropPlayer	skip:other	-	no caller in the decompiled sources
+LevelStorageSource.LevelStorageAccess.modifyLevelDataWithoutDatafix	inline	crates/horizon-client/src/title/world_management.rs::rename	read, change the Data compound and write back; rename is the only edit Horizon makes
+LevelStorageSource.LevelStorageAccess.makeWorldBackup	port	crates/horizon-client/src/title/world_management.rs::backup	-
+LevelStorageSource.LevelStorageAccess.hasWorldData	inline	crates/horizon-client/src/title.rs::list_worlds	gap: minor: a folder counts as a world only when its level.dat reads; level.dat_old is not checked
+LevelStorageSource.LevelStorageAccess.restoreLevelDataFromOld	missing	-	player: the recovery that moves a damaged level.dat aside and puts level.dat_old back is not offered (RecoverWorldDataScreen)
+PlayerDataStorage.backup	missing	-	minor: a player file that fails to load is not copied to a _corrupted_ backup first; Horizon leaves it in place
+SavedDataStorage.getDataFile	port	crates/horizon-client/src/save.rs::saved_data_path	gap: minor: no check that the path stays inside the data folder; the names come from fixed callers
+SavedDataStorage.computeIfAbsent	inline	crates/horizon-client/src/save.rs::compound_or_empty	the default is an empty compound when the file is absent
+SavedDataStorage.get	port	crates/horizon-client/src/save.rs::read_saved_data	gap: minor: reads the file on each call; vanilla caches the read per type
+SavedDataStorage.isGzip	inline	crates/horizon-world/src/datafix/files.rs::read_saved_dat	the gzip magic test is inline
+SavedDataStorage.collectDirtyTagsToSave	skip:other	-	Horizon writes each saved-data file when its owner saves; there is no dirty set
+SavedDataStorage.encodeUnchecked	inline	crates/horizon-client/src/save.rs::write_saved_data	DataVersion is added in write_saved_data; callers encode the data
+SavedDataStorage.tryWrite	port	crates/horizon-client/src/save.rs::write_saved_data	-
+SavedDataStorage.close	inline	crates/horizon-client/src/save.rs::Level::write	the final save of the saved data happens in Level::write
+TagValueInput.DecodeFromListFailedProblem.description	skip:debug	-	error text for logs only
+TagValueInput.UnexpectedListElementTypeProblem.description	skip:debug	-	error text for logs only
+PortalShape.findPortalShape	port	crates/horizon-world/src/level/portal.rs::Sim::find_empty_portal_shape	preferred axis first, then the other; here the predicate is an empty frame with no portal block
+PortalShape.calculateBottomLeft	inline	crates/horizon-world/src/level/portal.rs::Sim::find_portal_shape	the fall to the bottom row and the left edge search are inline
+PortalShape.calculateWidth	inline	crates/horizon-world/src/level/portal.rs::Sim::find_portal_shape	width check between 2 and 21 is inline
+PortalShape.getDistanceUntilEdgeAboveFrame	port	crates/horizon-world/src/level/portal.rs::Sim::portal_distance_until_edge_above_frame	-
+PortalShape.calculateHeight	inline	crates/horizon-world/src/level/portal.rs::Sim::find_portal_shape	height rows loop and the 3 to 21 check are inline
+PortalShape.hasTopFrame	inline	crates/horizon-world/src/level/portal.rs::Sim::find_portal_shape	the top frame row check is inline
+PortalShape.getDistanceUntilTop	inline	crates/horizon-world/src/level/portal.rs::Sim::find_portal_shape	rows loop counts portal blocks as it goes, inline
+TeleportTransition.playPortalSound	inline	crates/horizon-client/src/game/nether_portal.rs::Game::arrive_through_nether_portal	level event 1032 is sent on arrival
+TeleportTransition.withRotation	inline	crates/horizon-client/src/game/nether_portal.rs::Game::arrive_through_nether_portal	the turned yaw and motion are applied on arrival
+TeleportTransition.withPosition	inline	crates/horizon-client/src/game/nether_portal.rs::Game::arrive_through_nether_portal	the exit position is applied on arrival
+TeleportTransition.transitionAsPassenger	missing	-	player: a player riding a vehicle cannot use a nether portal here (riding blocks it), while vanilla carries the rider through with the vehicle
+DefaultRedstoneWireEvaluator.calculateTargetStrength	inline	crates/horizon-world/src/level/redstone.rs::Sim::wire_update_power	the 15 shortcut and the max with the incoming signal are inline

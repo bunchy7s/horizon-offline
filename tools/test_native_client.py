@@ -47,6 +47,8 @@ def main():
     sources = [lab.ROOT / 'Cargo.toml', lab.ROOT / 'Cargo.lock', Path(__file__).resolve(),
                lab.ROOT / 'crates/horizon-client/Cargo.toml', lab.ROOT / 'crates/horizon-assets/Cargo.toml',
                *sorted((lab.ROOT / 'crates/horizon-client/src').rglob('*')),
+               lab.ROOT / 'crates/horizon-client-render/Cargo.toml',
+               *sorted((lab.ROOT / 'crates/horizon-client-render/src').rglob('*')),
                *sorted((lab.ROOT / 'crates/horizon-assets/src').rglob('*.rs'))]
     oracle = lab.ROOT / 'mods/horizon/src/test/java/dev/horizonlab/parity/VanillaGallerySelectionOracle.java'
     helper = oracle.with_name('VanillaCuboidModelOracle.java')

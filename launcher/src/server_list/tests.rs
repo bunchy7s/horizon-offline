@@ -141,3 +141,70 @@ fn a_server_without_a_name_gets_the_games_default() {
         "Minecraft Server"
     );
 }
+
+#[test]
+fn the_official_server_is_put_on_top_once() {
+    let (name, address) = OFFICIAL;
+    let ips = |home: &Path| -> Vec<String> {
+        List::load(home)
+            .servers()
+            .into_iter()
+            .map(|s| s.ip)
+            .collect()
+    };
+    // A fresh list: just the official server.
+    let home = scratch("official-fresh");
+    add_official(&home).unwrap();
+    let shown = List::load(&home).servers();
+    assert_eq!(
+        shown
+            .iter()
+            .map(|s| (s.name.as_str(), s.ip.as_str()))
+            .collect::<Vec<_>>(),
+        [(name, address)]
+    );
+    // An existing list: on top of the shown ones, every entry and field kept.
+    let home = scratch("official-existing");
+    let before = entries_of(&vanilla_file(&home));
+    add_official(&home).unwrap();
+    assert_eq!(ips(&home), [address, "friends.example:25570"]);
+    assert_eq!(
+        entries(&home)[1..],
+        before[..],
+        "the player's entries stay as they were"
+    );
+    // Once only.
+    add_official(&home).unwrap();
+    assert_eq!(ips(&home), [address, "friends.example:25570"]);
+    // Removed by the player: never back.
+    let mut list = List::load(&home);
+    list.remove(0).unwrap();
+    list.save(&home).unwrap();
+    add_official(&home).unwrap();
+    assert_eq!(ips(&home), ["friends.example:25570"]);
+    // Already there under the player's own name and spelling: not duplicated.
+    let home = scratch("official-present");
+    let mut list = List::load(&home);
+    list.add("SMP", "Horizon.Bunchy7s.dev:25565").unwrap();
+    list.save(&home).unwrap();
+    add_official(&home).unwrap();
+    assert_eq!(ips(&home), ["Horizon.Bunchy7s.dev:25565"]);
+    // A list that can't be read is left alone, and offered again once it can be.
+    let home = scratch("official-broken");
+    fs::write(home.join(FILE), b"not nbt").unwrap();
+    assert!(add_official(&home).is_err());
+    assert_eq!(fs::read(home.join(FILE)).unwrap(), b"not nbt");
+    assert!(!home.join(OFFICIAL_MARKER).exists());
+}
+
+fn entries_of(bytes: &[u8]) -> Vec<Tag> {
+    match nbt::read_named(bytes, Limits::default())
+        .unwrap()
+        .0
+        .tag
+        .get("servers")
+    {
+        Some(Tag::List(list)) => list.clone(),
+        other => panic!("no servers list: {other:?}"),
+    }
+}

@@ -7,10 +7,12 @@ use horizon_assets::item_model::DisplayContext;
 use horizon_client::{
     block_entity_render::vertex_light,
     collisions::SceneCollisions,
+    entity_nbt::RocketNbt,
     items::ItemStack,
     mesher::Vertex,
-    mobs::{Damage, DamageKind},
+    mobs::{Damage, DamageKind, Species, Who},
     particles::{FireworkExplosion, ParticleOptions, ParticleType},
+    projectiles::ProjectileWorld,
 };
 use horizon_core::{
     geometry::{Aabb, Vec3},
@@ -30,9 +32,14 @@ pub(super) struct Rocket {
     pub(super) explosions: Vec<FireworkExplosion>,
     /// Boosting the player (attachedToEntity).
     pub(super) attached: bool,
-    /// On a server, the player it boosts when not this game's own: a guest's
-    /// connection.
+    /// On a server, the guest (by connection) who launched it, or whom it
+    /// boosts: `owner`'s `Who::Player` then means them, not the host.
     pub(super) guest: Option<u32>,
+    /// `Projectile.getOwner`: the player who launched it, credited with
+    /// what its blast hurts.
+    pub(super) owner: Option<Who>,
+    /// `Projectile.leftOwner`: until then it can't hit its owner.
+    left_owner: bool,
     /// `DATA_ATTACHED_TO_TARGET`: the server entity the rocket follows;
     /// boosting happens when it is the local player.
     pub(super) attached_to: Option<u32>,
@@ -57,8 +64,33 @@ impl Rocket {
             explosions,
             attached: false,
             guest: None,
+            owner: None,
+            left_owner: false,
             attached_to: None,
             angled: false,
+            item,
+        }
+    }
+    /// A rocket loaded from its NBT (`/summon`, a saved chunk).
+    pub(super) fn from_nbt(r: RocketNbt) -> Self {
+        let item = r
+            .item
+            .unwrap_or_else(|| ItemStack::new("minecraft:firework_rocket", 1));
+        let (_, explosions) = fireworks_of(&item);
+        Self {
+            id: 0,
+            position: r.position,
+            previous: r.position,
+            velocity: r.motion,
+            life: r.life,
+            lifetime: r.lifetime,
+            explosions,
+            attached: false,
+            guest: None,
+            owner: r.owner,
+            left_owner: r.left_owner,
+            attached_to: None,
+            angled: r.angled,
             item,
         }
     }
@@ -71,6 +103,19 @@ impl Rocket {
             self.free_flight(scene);
         }
         self.life += 1;
+    }
+    /// The move of a rocket attached to no entity: sped up and rising, or an
+    /// angled one's own motion.
+    fn next_motion(&self) -> Vec3 {
+        if self.angled {
+            self.velocity
+        } else {
+            Vec3::new(
+                self.velocity.x * 1.15,
+                self.velocity.y + 0.04,
+                self.velocity.z * 1.15,
+            )
+        }
     }
     /// `FireworkRocketEntity.tick` for a rocket attached to no entity: speed
     /// up (an angled one keeps its motion) and rise, then move. True when a
@@ -85,15 +130,7 @@ impl Rocket {
                 self.position.z + h,
             ),
         );
-        let wanted = if self.angled {
-            self.velocity
-        } else {
-            Vec3::new(
-                self.velocity.x * 1.15,
-                self.velocity.y + 0.04,
-                self.velocity.z * 1.15,
-            )
-        };
+        let wanted = self.next_motion();
         let Ok(moved) = scene.resolve(bounds, wanted, 0.0, false) else {
             return false;
         };
@@ -157,6 +194,8 @@ impl Game<'_> {
             explosions,
             attached,
             guest: None,
+            owner: None,
+            left_owner: false,
             attached_to: None,
             angled: false,
             item: stack.clone(),
@@ -172,7 +211,9 @@ impl Game<'_> {
             hit.point[1] + f64::from(hit.face[1]) * 0.15,
             hit.point[2] + f64::from(hit.face[2]) * 0.15,
         );
-        let rocket = self.new_rocket(at, stack, false);
+        let mut rocket = self.new_rocket(at, stack, false);
+        rocket.owner = Some(Who::Player);
+        rocket.guest = self.lan_acting;
         self.rockets.push(rocket);
         if !self.creative {
             self.consume_held();
@@ -182,10 +223,18 @@ impl Game<'_> {
     }
     /// A rocket shot at an angle (`DATA_SHOT_AT_ANGLE`): out of a dispenser
     /// (`FireworkRocketItem.asProjectile`) or a crossbow.
-    pub(super) fn launch_angled_rocket(&mut self, at: Vec3, velocity: Vec3, stack: &ItemStack) {
+    pub(super) fn launch_angled_rocket(
+        &mut self,
+        at: Vec3,
+        velocity: Vec3,
+        stack: &ItemStack,
+        owner: Option<Who>,
+    ) {
         let mut rocket = self.new_rocket(at, stack, false);
         rocket.velocity = velocity;
         rocket.angled = true;
+        rocket.owner = owner;
+        rocket.guest = self.lan_acting.filter(|_| owner == Some(Who::Player));
         self.rockets.push(rocket);
     }
     /// `FireworkRocketItem.use` while gliding: a rocket attached to the player.
@@ -197,6 +246,7 @@ impl Game<'_> {
         }
         let at = self.player.as_ref().map_or(Vec3::ZERO, |p| p.position);
         let mut rocket = self.new_rocket(at, stack, true);
+        rocket.owner = Some(Who::Player);
         rocket.guest = self.lan_acting;
         self.rockets.push(rocket);
         if !self.creative {
@@ -206,10 +256,33 @@ impl Game<'_> {
         true
     }
     pub(super) fn tick_rockets(&mut self) {
+        let targets = if self.rockets.is_empty() {
+            Vec::new()
+        } else {
+            self.rocket_targets()
+        };
         let mut i = 0;
         while i < self.rockets.len() {
             let mut r = self.rockets.remove(i);
             r.previous = r.position;
+            // Projectile.tick: whether it has left its owner, before it moves.
+            let owner = self.rocket_owner(&r);
+            if !r.left_owner {
+                let h = 0.125;
+                let reach = Aabb::new(
+                    Vec3::new(r.position.x - h, r.position.y, r.position.z - h),
+                    Vec3::new(r.position.x + h, r.position.y + 2.0 * h, r.position.z + h),
+                )
+                .expand_towards(r.velocity)
+                .inflate(Vec3::new(1.0, 1.0, 1.0));
+                r.left_owner = owner.is_none_or(|o| {
+                    !targets
+                        .iter()
+                        .any(|(who, b)| *who == o && b.intersects(reach))
+                });
+            }
+            let skip = owner.filter(|_| !r.left_owner);
+            let mut hit = None;
             if r.attached
                 && let Some(conn) = r.guest
             {
@@ -235,7 +308,10 @@ impl Game<'_> {
                     r.position = p.position;
                     r.velocity = p.velocity;
                 }
+                hit = self.rocket_struck(&targets, &r, r.velocity, skip);
             } else {
+                // getHitResultOnMoveVector before the move.
+                hit = self.rocket_struck(&targets, &r, r.next_motion(), skip);
                 let mut scene = SceneCollisions {
                     world: &self.world,
                     binding: self.collision,
@@ -245,6 +321,20 @@ impl Game<'_> {
                     // hitTargetOrDeflectSelf: explode on the block.
                     r.life = r.lifetime;
                 }
+            }
+            // hitTargetOrDeflectSelf on an entity: a breeze turns it back
+            // (ProjectileDeflection.REVERSE), anything else sets it off.
+            match hit {
+                Some(Who::Mob(id))
+                    if self
+                        .mobs
+                        .iter()
+                        .any(|m| m.id == id && m.species() == Species::Breeze) =>
+                {
+                    r.velocity = r.velocity.scale(-0.5);
+                }
+                Some(_) => r.life = r.lifetime,
+                None => {}
             }
             let at = [r.position.x, r.position.y, r.position.z];
             if r.life == 0 {
@@ -327,23 +417,115 @@ impl Game<'_> {
                     })
                     .collect()
             };
-            for (id, amount) in hits {
-                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                    m.damage(
-                        amount,
-                        Damage {
-                            kind: DamageKind::Explosion,
-                            attacker: None,
-                            from: Some(at),
-                        },
-                    );
+            // damageSources().fireworks(this, getOwner()): a guest's rocket
+            // hurts as theirs, and the mobs it hit answer to them.
+            let owner = r.owner;
+            if let Some(conn) = r.guest.filter(|_| owner.is_some())
+                && let Some(mut host) = self.lan.take()
+            {
+                let ran = self
+                    .as_guest(&mut host, conn, |g| g.rocket_hurt_mobs(&hits, owner, at))
+                    .is_some();
+                if ran {
+                    for (id, _) in &hits {
+                        if self.mobs.iter().any(|m| m.id == *id) {
+                            host.mob_players.insert(*id, conn);
+                        }
+                    }
                 }
+                self.lan = Some(host);
+                if !ran {
+                    self.rocket_hurt_mobs(&hits, owner, at);
+                }
+            } else {
+                self.rocket_hurt_mobs(&hits, owner, at);
             }
         }
         let camera = self.eye_position().unwrap_or(at);
         let v = [r.velocity.x, r.velocity.y, r.velocity.z];
         self.particles
             .fireworks(at, v, r.explosions.clone(), camera);
+    }
+    fn rocket_hurt_mobs(&mut self, hits: &[(u32, f32)], attacker: Option<Who>, at: [f64; 3]) {
+        for &(id, amount) in hits {
+            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
+                m.damage(
+                    amount,
+                    Damage {
+                        kind: DamageKind::Explosion,
+                        attacker,
+                        from: Some(at),
+                    },
+                );
+            }
+        }
+    }
+    /// The owner as `rocket_targets` names it: a guest by their entity id.
+    fn rocket_owner(&self, r: &Rocket) -> Option<Who> {
+        let owner = r.owner?;
+        let Some(conn) = r.guest.filter(|_| owner == Who::Player) else {
+            return Some(owner);
+        };
+        let host = self.lan.as_ref()?;
+        let g = host.hub.guests.iter().find(|g| g.conn == conn)?;
+        Some(Who::Mob(g.entity_id as u32))
+    }
+    /// What a rocket can hit (`Projectile.canHitEntity`): living mobs, the
+    /// dragon's parts and crystals, the player and the guests.
+    fn rocket_targets(&self) -> Vec<(Who, Aabb)> {
+        let mut targets: Vec<(Who, Aabb)> = self
+            .mobs
+            .iter()
+            .filter(|m| m.alive())
+            .map(|m| (Who::Mob(m.id), m.bounds()))
+            .collect();
+        if let Some(p) = self.player_view()
+            && p.alive
+            && !self.spectator()
+        {
+            targets.push((Who::Player, p.bounds));
+        }
+        targets.extend(
+            self.special_targets()
+                .into_iter()
+                .map(|(id, b)| (Who::Mob(id), b)),
+        );
+        targets.extend(self.lan_projectile_targets());
+        targets
+    }
+    /// `ProjectileUtil.getHitResultOnMoveVector`'s entity half: the nearest
+    /// target on the move, short of the block it clips, each box grown by
+    /// `computeMargin` (`tickCount` is the rocket's life plus one).
+    fn rocket_struck(
+        &self,
+        targets: &[(Who, Aabb)],
+        r: &Rocket,
+        motion: Vec3,
+        skip: Option<Who>,
+    ) -> Option<Who> {
+        let from = r.position;
+        let mut to = from.add_vector(motion);
+        let w = self.mob_world_base(&[]);
+        if let Some((at, ..)) = (super::creatures::ProjWorld {
+            w: &w,
+            targets: Vec::new(),
+        })
+        .clip(from, to)
+        {
+            to = at;
+        }
+        let margin = (f64::from(r.life - 1) / 20.0).clamp(0.0, 0.3);
+        targets
+            .iter()
+            .filter(|(who, _)| Some(*who) != skip)
+            .filter_map(|(who, b)| {
+                let at = b
+                    .inflate(Vec3::new(margin, margin, margin))
+                    .clip(from, to)?;
+                Some((*who, from.distance_squared(at)))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(who, _)| who)
     }
     /// FireworkRocketEntity.handleEntityEvent: use the synchronized item data.
     pub(super) fn remote_firework_explosion(&mut self, id: i32) {

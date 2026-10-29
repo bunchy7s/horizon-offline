@@ -228,6 +228,11 @@ impl Game<'_> {
                             });
                         }
                     }
+                    "minecraft:firework_rocket" => {
+                        if let Some(r) = entity_nbt::firework_rocket_from_nbt(&tag, player_uuid) {
+                            self.rockets.push(super::fireworks::Rocket::from_nbt(r));
+                        }
+                    }
                     // PrimedTnt.readAdditionalSaveData: its fuse (80 when absent) and motion.
                     "minecraft:tnt" => {
                         if let Some(position) = entity_nbt::position(&tag) {
@@ -374,6 +379,12 @@ impl Game<'_> {
         }
         let riders = self.take_mob_passengers(&mut tag);
         let mut m = entity_nbt::mob_from_nbt(&tag, self.res.mob_types(), self.next_entity)?;
+        // `NeutralMob.readPersistentAngerSaveData`: the anger runs until its
+        // end time, and the mob is angry at the target again.
+        m.extra.anger = horizon_client::mobs::anger_left(m.extra.anger_end, self.world.game_time);
+        if m.extra.anger > 0 && m.extra.angry_at.is_some() {
+            m.ai.target = Some(horizon_client::mobs::Who::Player);
+        }
         m.extra.mount = mount;
         m.extra.passenger = mount.is_some();
         if finalize {
@@ -531,6 +542,26 @@ impl Game<'_> {
     pub(super) fn mob_tree_nbt(&mut self, i: usize) -> Tag {
         let id = self.mobs[i].id;
         let uuid = self.uuid_for(id);
+        // `NeutralMob.addPersistentAngerSaveData`: the anger ends at an
+        // absolute game time, so it goes on while the chunk is unloaded, and
+        // the target is the entity the mob is angry at.
+        let anger = self.mobs[i].extra.anger;
+        self.mobs[i].extra.anger_end = if anger > 0 {
+            self.world.game_time + i64::from(anger)
+        } else {
+            -1
+        };
+        self.mobs[i].extra.angry_at = if anger > 0 {
+            // A wolf keeps its anger's target itself, also once the target
+            // is gone (`tame::update_persistent_anger`).
+            if self.mobs[i].species() == horizon_client::mobs::Species::Wolf {
+                self.mobs[i].extra.angry_at
+            } else {
+                self.mobs[i].ai.target
+            }
+        } else {
+            None
+        };
         let mut tag = entity_nbt::mob_to_nbt(&self.mobs[i], uuid, self.persist.raw.get(&id));
         self.write_leash(&mut tag, i);
         self.put_mob_passengers(&mut tag, id);

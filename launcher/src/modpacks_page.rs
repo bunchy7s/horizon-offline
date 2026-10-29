@@ -125,7 +125,7 @@ impl Launcher {
         else {
             return;
         };
-        if self.client.is_some() || self.starting_client.is_some() {
+        if !self.can_start(&tag) {
             return;
         }
         self.starting_pack = Some(work);
@@ -349,8 +349,8 @@ impl Launcher {
                     .child(caps(*label).text_color(t.muted)),
             );
         }
-        let can_play = self.selected().is_some_and(|tag| backend::is_prepared(tag));
-        let running = self.client.is_some() || self.starting_client.is_some();
+        // Prepared, nothing preparing or running (`play_pack` checks the same).
+        let can_play = self.can_start_selected();
         let mut buttons = div().flex().flex_wrap().items_center().gap(px(8.));
         let play_label = if p.mods.is_empty() {
             "Play".to_string()
@@ -358,7 +358,7 @@ impl Launcher {
             format!("Play with {} mods", p.mods.len())
         };
         let mut play = button("pack-play", play_label, Kind::Primary, &t);
-        if p.mods.is_empty() || !can_play || running || self.pack_busy {
+        if p.mods.is_empty() || !can_play || self.pack_busy {
             play = disabled(play);
         } else {
             let work = p.work.clone();

@@ -391,6 +391,27 @@ blocks and items by declaring them in `data/<id>/horizon/block/*.json` and
   "item": true }
 ```
 
+An item copies its template's data components, with `max_stack_size` and
+`rarity` changed, and any other 26.3 component set or removed in
+`components`, written as a data component patch is: `minecraft:<type>` sets
+one, `!minecraft:<type>` with `{}` removes it. That is how a modded sword
+gets its own damage and durability, or a tool its mining speed:
+
+```json
+{ "template": "minecraft:iron_sword",
+  "components": {
+    "minecraft:max_damage": 900,
+    "minecraft:attribute_modifiers": [{ "type": "minecraft:attack_damage",
+      "id": "minecraft:base_attack_damage", "amount": 7.0,
+      "operation": "add_value", "slot": "mainhand" }],
+    "!minecraft:repairable": {} } }
+```
+
+A component type no vanilla item has is refused, so a misspelt one fails
+the load instead of doing nothing. Behaviour the game ties to a vanilla
+item's id doesn't come along yet: a copy of the trident doesn't throw
+([#3305](https://github.com/horizon-rust/horizon/issues/3305)).
+
 The fence: files go in the mod's own namespaces (`assets/<id>/`,
 `data/<id>/`, and those its manifest lists), plus additions to vanilla tags
 (`data/minecraft/tags/`) and to the convention tags NeoForge and Fabric mods

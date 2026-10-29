@@ -1,7 +1,7 @@
 # Section meshing parity
 
 `tools/test_section_mesh_parity.py` compares the vertices Horizon's section
-mesher (`crates/horizon-client/src/mesher.rs`, with `mesher/lighting.rs` and
+mesher (`crates/horizon-client-render/src/mesher.rs`, with `mesher/lighting.rs` and
 `mesher/fluid.rs`) emits with the vertices the pinned client's own renderers
 emit for the same scenes.
 

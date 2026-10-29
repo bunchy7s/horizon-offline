@@ -1,0 +1,142 @@
+DelegatingOps.DelegateListBuilder.build	skip:java		forwards to the original ListBuilder; codec plumbing
+DelegatingOps.DelegateListBuilder.add	skip:java		forwards to the original ListBuilder; codec plumbing
+DelegatingOps.DelegateListBuilder.addAll	skip:java		encodes values into the original ListBuilder; codec plumbing
+DelegatingOps.DelegateRecordBuilder.add	skip:java		forwards to the original RecordBuilder; codec plumbing
+DelegatingOps.DelegateRecordBuilder.build	skip:java		forwards to the original RecordBuilder; codec plumbing
+FileToIdConverter.fileToId	port	crates/horizon-client/src/datapack.rs::resource_id	resource path to id with the folder prefix and extension stripped
+FileToIdConverter.matches	inline	crates/horizon-client/src/datapack.rs::resource_id	prefix and extension test is inside resource_id
+Identifier.tryBuild	port	crates/horizon-world/src/identifier.rs::Identifier::from_parts	validated constructor; Err instead of null
+Identifier.tryBySeparator	port	crates/horizon-world/src/identifier.rs::Identifier::parse	splits on ':'; minecraft namespace when it is empty or missing
+Identifier.withPath	port	crates/horizon-world/src/identifier.rs::Identifier::from_parts	no helper; callers rebuild the id with from_parts(namespace, path)
+Identifier.equals	skip:java		derived PartialEq on namespace and path
+Identifier.compareTo	port	crates/horizon-world/src/identifier.rs::Identifier::cmp	path first, then namespace
+Identifier.resolveAgainst	missing		unsure: no identifier-to-file-path guard found; callers join paths directly
+Identifier.toLanguageKey	skip:other		string helper; translation keys are built where a Text is made
+Identifier.toShortLanguageKey	skip:other		string helper; translation keys are built where a Text is made
+Identifier.toShortString	skip:other		string helper; the minecraft: prefix is stripped at each display site
+Identifier.readGreedy	port	crates/horizon-command/src/args.rs::read_identifier	reads id characters while they are allowed
+Identifier.isAllowedInIdentifier	port	crates/horizon-command/src/args.rs::is_id_char	same character set
+Identifier.isValidPath	inline	crates/horizon-world/src/identifier.rs::Identifier::from_parts	path check inside from_parts; '/' is allowed
+Identifier.isValidNamespace	port	crates/horizon-world/src/identifier.rs::Identifier::from_parts	gap: minor: vanilla rejects the namespace '..'; from_parts accepts it (horizon-client-core parse_identifier has that check)
+Identifier.assertValidNamespace	inline	crates/horizon-world/src/identifier.rs::Identifier::from_parts	returns Err(Namespace) instead of throwing
+Identifier.validPathChar	inline	crates/horizon-world/src/identifier.rs::Identifier::from_parts	path bytes: valid() or '/'
+Identifier.validNamespaceChar	port	crates/horizon-world/src/identifier.rs::valid	same character set for namespaces
+Identifier.assertValidPath	inline	crates/horizon-world/src/identifier.rs::Identifier::from_parts	returns Err(Path) instead of throwing
+NetworkRegistryLoadTask.load	port	crates/horizon-protocol/src/registry.rs::Dynamic::add	gap: minor: keeps the raw entries of a RegistryData packet; no codec decode, no known-pack fallback, no tag binding
+RegistryDataLoader.load	skip:data		loads registries from resources; Horizon reads its data from tables and files
+RegistryDataLoader.createContext	skip:data		registry lookup context for data loading
+RegistryDataLoader.printFullDetailsToLog	skip:debug		logs registry load errors
+RegistryDataLoader.createReportWithBriefInfo	skip:debug		crash report text for registry load errors
+RegistryLoadTask.readOnlyRegistry	skip:data		registry loading step; Horizon builds its registries from tables
+RegistryLoadTask.registerElements	skip:data		registry loading step; Horizon builds its registries from tables
+RegistryLoadTask.registerTags	skip:data		registry loading step; Horizon builds its registries from tables
+RegistryLoadTask.freezeRegistry	skip:data		registry loading step; Horizon builds its registries from tables
+RegistryLoadTask.validateRegistry	skip:data		registry loading step; Horizon builds its registries from tables
+RegistryLoadTask.PendingRegistration.loadFromResource	skip:data		parses one registry entry during loading; Horizon reads its data from tables
+RegistryLoadTask.PendingRegistration.findAndLoadFromResource	skip:data		parses one registry entry during loading; Horizon reads its data from tables
+RegistryLoadTask.PendingRegistration.loadFromNetwork	skip:data		parses one registry entry during loading; Horizon reads its data from tables
+RegistryOps.create	skip:data		codec context for registry lookups during data decoding
+RegistryOps.withParent	skip:data		codec context for registry lookups during data decoding
+RegistryOps.equals	skip:data		codec context for registry lookups during data decoding
+RegistryOps.retrieveGetter	skip:data		codec context for registry lookups during data decoding
+RegistryOps.retrieveElement	skip:data		codec context for registry lookups during data decoding
+RegistryOps.HolderLookupAdapter.lookup	skip:data		registry lookup adapter for data decoding
+RegistryOps.HolderLookupAdapter.equals	skip:data		registry lookup adapter for data decoding
+ResourceKey.create	skip:java		interned key; Horizon uses plain identifiers
+ResourceKey.dependent	skip:data		derived registry key; the ids come from Horizon's tables
+ResourceManagerRegistryLoadTask.load	skip:data		registry loading from the resource manager
+Bootstrap.bootStrap	skip:data		startup bootstrap of the registries and data
+Bootstrap.checkTranslations	skip:debug		IDE-only translation check
+Bootstrap.checkGameruleTranslations	skip:debug		IDE-only game rule translation check
+Bootstrap.getMissingTranslations	skip:debug		IDE-only missing translation report
+Bootstrap.createBootstrapException	skip:debug		error text for a call before bootstrap
+Bootstrap.validate	skip:debug		IDE-only validation
+Bootstrap.wrapStreams	skip:debug		wraps stdout and stderr for logging
+ChainedJsonException.setFilenameAndFlush	skip:data		JSON error path messages for data-pack parse errors
+ChainedJsonException.getMessage	skip:data		JSON error path messages for data-pack parse errors
+ChainedJsonException.forException	skip:data		JSON error path messages for data-pack parse errors
+ChainedJsonException.Entry.toString	skip:data		JSON error path entry for data-pack parse errors
+DebugLoggedPrintStream.logLine	skip:debug		debug-only stream logging
+Eula.saveDefaults	port	crates/horizon-server-files/src/eula.rs::default_file	default eula.txt content; the write happens in agreed()
+net/minecraft/server/Main#createNewWorldData	port	crates/horizon-client/src/game/dedicated.rs::Game::write_world_gen	gap: minor: writes the world gen settings for a new world; --bonusChest is accepted and ignored (preflight); level settings come from the save code
+net/minecraft/server/Main#writePidFile	port	crates/horizon-client/src/game/dedicated.rs::preflight	--pidFile writes the process id while the options are read
+net/minecraft/server/Main#loadOrCreateConfig	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: reads the saved datapack settings; no feature-flag check and no new-world default config
+net/minecraft/server/Main#forceUpgrade	missing		minor: --forceUpgrade is accepted and ignored (dedicated.rs preflight); worlds are upgraded on open (save.rs upgrade_older_world)
+MinecraftServer.<init>	inline	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	gap: minor: setup is spread over run_dedicated and the Game fields
+MinecraftServer.loadLevel	inline	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	gap: minor: the world is opened in run_dedicated; no JFR load profiling
+MinecraftServer.setupDebugLevel	skip:debug		debug world preset is not offered
+MinecraftServer.prepareLevels	port	crates/horizon-client/src/game/initial_spawn.rs::Game::find_world_spawn	gap: minor: waits only for the spawn chunks (find_world_spawn returns None while one loads); no progress stage for other levels, no mob-spawn flag update here
+MinecraftServer.saveEverything	port	crates/horizon-client/src/game.rs::Game::save_game_with	gap: minor: no low-disk warning
+MinecraftServer.finishMeasuringTaskExecutionTime	skip:server		tick timing for the profiler
+MinecraftServer.constructOrExtractCrashReport	skip:debug		crash report wrapping
+MinecraftServer.haveTime	inline	crates/horizon-client/src/game/levels.rs::Game::wait_for_next_server_tick	gap: minor: no time budget for queued tasks
+MinecraftServer.waitUntilNextTick	port	crates/horizon-client/src/game/levels.rs::Game::wait_for_next_server_tick	gap: minor: queued tasks are not run before the wait
+MinecraftServer.waitForTasks	inline	crates/horizon-client/src/game/levels.rs::Game::wait_for_next_server_tick	idle sleep until the next tick
+MinecraftServer.shouldRun	missing		minor: no per-task deferral; queued tasks run in one pass
+MinecraftServer.pollTaskInternal	inline	crates/horizon-client/src/game/integrated.rs::Game::run_tasks	gap: minor: only the task queue; chunk-source tasks are not polled here
+MinecraftServer.loadStatusIcon	inline	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	gap: minor: only server-icon.png; no world icon fallback
+MinecraftServer.processPacketsAndTick	port	crates/horizon-client/src/game/levels.rs::Game::tick_server	reads the network, then ticks the levels
+MinecraftServer.autoSave	inline	crates/horizon-client/src/game.rs::Game::tick	gap: minor: the save runs every 6000 ticks; /save-off is checked in the dedicated loop, where the check does nothing, so it does not stop the save
+MinecraftServer.logTickMethodTime	skip:server		tick timing log for the profiler
+MinecraftServer.computeNextAutosaveInterval	missing		minor: the save runs every 6000 ticks (game.rs tick), not 300 s scaled by the tick rate
+MinecraftServer.onTickRateChanged	missing		minor: the autosave interval does not follow /tick rate
+MinecraftServer.buildPlayerStatus	port	crates/horizon-client/src/lan/mod.rs::Shared::status_json	up to 12 sampled player names in the status JSON
+MinecraftServer.updateEffectiveRespawnData	inline	crates/horizon-client/src/game/initial_spawn.rs::Game::spawn_finder	gap: minor: no cached respawn data; the radius is clamped to the border when the spawn is found
+MinecraftServer.forceGameTimeSynchronization	port	crates/horizon-client/src/lan/hub.rs::Hub::sync_world	game time sent to guests with SetTime
+MinecraftServer.fillSystemReport	skip:debug		system report for crash and debug output
+MinecraftServer.setDifficulty	port	crates/horizon-client/src/game/commands.rs::Game::cmd_difficulty	gap: player: LAN guests are not sent ChangeDifficulty when /difficulty changes; they get it on join, respawn or dimension change
+MinecraftServer.updateMobSpawningFlags	inline	crates/horizon-client/src/game/natural_spawning.rs::Game::spawn_natural	rules are read at each spawn; no cached spawn flag
+MinecraftServer.sendDifficultyUpdate	inline	crates/horizon-client/src/lan/hub.rs::Hub::place_new_player	gap: player: sent when a guest joins, respawns or changes dimension; see setDifficulty
+MinecraftServer.enforceGameTypeForPlayers	inline	crates/horizon-client/src/game/lan.rs::Game::lan_apply_settings	gap: player: guests already online keep their mode when force changes; the default applies at join (lan_guest_joined)
+MinecraftServer.executeIfPossible	skip:java		rejects tasks during shutdown
+MinecraftServer.reloadResources	port	crates/horizon-client/src/game/functions.rs::Game::cmd_reload	gap: minor: data packs only, via reload_datapacks
+MinecraftServer.configurePackRepository	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: picks the enabled packs and adds new ones; no feature-flag check and no safe mode
+MinecraftServer.configureRepositoryWithSelection	inline	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: sets the enabled list only; no forced features
+MinecraftServer.enableForcedFeaturePacks	missing		minor: Horizon's datapacks have no feature flags; a pack for a required feature is never forced on
+MinecraftServer.getSelectedPacks	port	crates/horizon-client/src/game/functions.rs::Game::save_datapack_settings	gap: minor: writes the enabled and disabled lists; no feature check
+MinecraftServer.findRespawnDimension	inline	crates/horizon-client/src/game/server_travel.rs::Game::world_spawn_trip	gap: minor: always the Overworld; /setworldspawn keeps no dimension
+MinecraftServer.setRespawnData	port	crates/horizon-client/src/game/commands.rs::Game::cmd_setworldspawn	gap: minor: the new spawn is not sent to guests here; they get it on join
+MinecraftServer.getCommandStorage	skip:java		getter for the command storage
+MinecraftServer.getStopwatches	skip:java		getter for the stopwatches
+MinecraftServer.setWeatherParameters	port	crates/horizon-client/src/game/commands.rs::Game::cmd_weather	sets the weather timers and state
+MinecraftServer.getAverageTickTimeNanos	port	crates/horizon-client/src/clock.rs::FixedStep::average_nanos	average of the recent tick times
+MinecraftServer.saveDebugReport	skip:debug		debug report output
+MinecraftServer.dumpMiscStats	skip:debug		debug report output
+MinecraftServer.dumpGameRules	skip:debug		debug report output
+MinecraftServer.dumpClasspath	skip:debug		debug report output
+MinecraftServer.dumpThreads	skip:debug		debug report output
+MinecraftServer.dumpNativeModules	skip:debug		debug report output
+MinecraftServer.createProfiler	skip:server		profiler setup
+MinecraftServer.startRecordingMetrics	skip:server		metrics recording for the profiler
+MinecraftServer.createGameModeForPlayer	missing		minor: demo mode is not implemented; --demo is accepted and ignored (dedicated.rs preflight)
+MinecraftServer.stopTimeProfiler	skip:debug		debug profiler stop
+MinecraftServer.setAutoSave	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	gap: minor: the save-on/save-off flag is kept, but the tick's autosave does not read it
+MinecraftServer.isAutoSave	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	reads the same flag for the save-on reply only
+MinecraftServer.storeChunkIoError	skip:debug		writes a chunk IO crash report
+MinecraftServer.reportChunkLoadFailure	missing		unsure: no chunk-load failure log or report found in save.rs or streaming.rs
+MinecraftServer.reportChunkSaveFailure	port	crates/horizon-client/src/save.rs::Persistent::save_finished	gap: minor: logs only; no debug report and no low-disk warning
+PlayerAdvancements.reload	missing		minor: /reload rebuilds datapack functions and settings only (cmd_reload); the advancement tree is kept for the session
+PlayerAdvancements.registerListeners	skip:other		no per-criterion listener map; trigger() tests every criterion when an event fires
+PlayerAdvancements.checkForAutomaticTriggers	missing		minor: criteria-less advancements from data packs are not granted when a player loads
+PlayerAdvancements.asData	inline	crates/horizon-client/src/game/advancements.rs::Game::save_advancements	writes the progress that has any progress
+PlayerAdvancements.revoke	port	crates/horizon-client/src/game/advancements.rs::Game::revoke_advancement	revokes one criterion or all of them
+PlayerAdvancements.markForVisibilityUpdate	inline	crates/horizon-client/src/lan/advancements.rs::ServerAdvancements::update	visibility is recomputed for the whole tree on each update
+PlayerAdvancements.unregisterListeners	skip:other		no per-criterion listener map; trigger() tests every criterion when an event fires
+PlayerAdvancements.setSelectedTab	missing		unsure: the server keeps no selected advancement tab and sends no select-tab packet (only the SELECT_ADVANCEMENTS_TAB id exists)
+PlayerAdvancements.getOrStartProgress	skip:java		map get-or-create
+PlayerAdvancements.startProgress	skip:java		initialises progress for an advancement
+PlayerAdvancements.updateTreeVisibility	port	crates/horizon-client/src/advancements.rs::Tree::visible	gap: minor: returns the visible flags; the added and removed lists are built in lan/advancements.rs
+PlayerAdvancements.removeListener	skip:other		no per-criterion listener map; trigger() tests every criterion when an event fires
+PlayerAdvancements.Data.forEach	skip:java		sorted iteration over loaded progress; no game behaviour of its own
+RegistryLayer.createRegistryAccess	skip:data		registry layers; Horizon's registries come from its tables
+ReloadableServerRegistries.reload	skip:data		reloadable registry loading; Horizon's data comes from tables and files
+ReloadableServerRegistries.createAndValidateFullContext	skip:data		registry context assembly and validation at load
+ReloadableServerRegistries.validateLootRegistries	skip:data		loot table validation at load
+ReloadableServerResources.loadResources	skip:data		server resource loading
+ServerAdvancementManager.validate	skip:data		advancement validation logging at load
+ServerFunctionLibrary.reload	port	crates/horizon-client/src/game/functions.rs::Game::rebuild_store	rebuilds the function store from the data packs
+ServerFunctionLibrary.readLines	inline	crates/horizon-client/src/datapack.rs::parse_function	splits the function text into lines
+ServerFunctionManager.executeTagFunctions	port	crates/horizon-client/src/game/functions.rs::Game::tick_functions	runs the functions of a tag
+ServerFunctionManager.execute	port	crates/horizon-client/src/game/functions.rs::Game::run_function	runs one function as the sender
+ServerLinks.findKnownType	missing		minor: no lookup by known link type; only the bug-report link is sent (dedicated.rs)
+ServerLinks.untrust	inline	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	links are built as ServerLink entries for the net config, after valid_untrusted_uri

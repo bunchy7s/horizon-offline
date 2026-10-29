@@ -60,6 +60,19 @@ pub fn edit_shortcut(
     })
 }
 
+/// Windows reports AltGr as Ctrl plus Alt: the system presses a left Control
+/// in front of the right Alt.
+pub const ALTGR_IS_CTRL_ALT: bool = cfg!(windows);
+
+/// Whether a key's text reaches the screen (`KeyboardHandler.textInput`, then
+/// `charTyped` per code point). The edit modifier's shortcuts type nothing,
+/// but `textInput` takes no modifiers: with AltGr held (Ctrl plus Alt where
+/// `altgr_is_ctrl_alt`) the layout's third-level characters are text, as `/`
+/// on ABNT2, `@`, `{` and `[` on German or the Polish letters.
+pub fn types_text(edit_modifier: bool, alt: bool, altgr_is_ctrl_alt: bool) -> bool {
+    !edit_modifier || (altgr_is_ctrl_alt && alt)
+}
+
 /// `StringUtil.isAllowedChatCharacter`.
 pub fn is_allowed_chat_character(c: char) -> bool {
     c != '§' && c >= ' ' && c != '\u{7f}'
@@ -302,6 +315,22 @@ pub fn append_limited(value: &mut String, text: &str, max_chars: usize) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn altgr_types_text_where_it_is_ctrl_alt() {
+        // Plain keys and Shift type.
+        assert!(types_text(false, false, true));
+        assert!(types_text(false, false, false));
+        // Ctrl (Cmd) shortcuts do not.
+        assert!(!types_text(true, false, true));
+        assert!(!types_text(true, false, false));
+        // AltGr on Windows is Ctrl+Alt: ABNT2 `/`, German `@` type.
+        assert!(types_text(true, true, true));
+        // Where AltGr is its own modifier, Ctrl+Alt is a shortcut.
+        assert!(!types_text(true, true, false));
+        // Alt alone (macOS Option, Linux AltGr) types.
+        assert!(types_text(false, true, false));
+    }
 
     #[test]
     fn shortcuts_need_the_edit_modifier_alone() {

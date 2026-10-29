@@ -370,3 +370,65 @@ pub fn third_person_use_item(
         Vec3::new(0.0, 0.0, 0.125),
     )
 }
+
+/// `SpearAnimations.firstPersonAttack`, after `applyItemArmTransform`: the
+/// jab (a STAB swing), `attack` into the swing.
+pub fn first_person_attack(attack: f32, right: bool) -> Mat4 {
+    let invert = if right { 1.0 } else { -1.0 };
+    let start = in_out_sine(progress(attack, 0.0, 0.05));
+    let middle = out_back(progress(attack, 0.05, 0.2));
+    let end = in_out_expo(progress(attack, 0.4, 1.0));
+    Mat4::from_translation(Vec3::new(
+        invert * 0.1 * (start - middle),
+        -0.075 * (start - end),
+        0.65 * (start - middle),
+    )) * Mat4::from_rotation_x((-70.0 * (start - end)).to_radians())
+        * Mat4::from_translation(Vec3::new(0.0, 0.0, -0.25 * (end - middle)))
+}
+
+/// `SpearAnimations.thirdPersonAttackHand`: what a STAB swing adds to the
+/// swinging arm's `xRot`, `swing` into the swing.
+pub fn third_person_attack_arm(swing: f32) -> f32 {
+    let prepare = in_out_sine(progress(swing, 0.0, 0.05));
+    let attack = in_quad(progress(swing, 0.05, 0.2));
+    let retract = in_out_expo(progress(swing, 0.4, 1.0));
+    (90.0 * prepare - 120.0 * attack + 30.0 * retract).to_radians()
+}
+
+/// `SpearAnimations.thirdPersonAttackItem`: the item in the swinging hand
+/// thrust out by a STAB swing, `forward` the main hand's `forward_movement`
+/// (0 without a kinetic weapon there).
+pub fn third_person_attack_item(swing: f32, forward: f32) -> Mat4 {
+    if swing <= 0.0 {
+        return Mat4::IDENTITY;
+    }
+    let attack = in_quad(progress(swing, 0.05, 0.2));
+    let retract = in_out_expo(progress(swing, 0.4, 1.0));
+    rotate_around(
+        Mat4::from_rotation_x((-70.0 * (attack - retract)).to_radians()),
+        Vec3::new(0.0, -0.125, 0.125),
+    ) * Mat4::from_translation(Vec3::new(0.0, forward * (attack - retract), 0.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_jab_starts_and_ends_at_rest() {
+        assert_eq!(first_person_attack(0.0, true), Mat4::IDENTITY);
+        assert!(first_person_attack(1.0, true).abs_diff_eq(Mat4::IDENTITY, 1e-5));
+        // Thrust out and turned mid-jab, mirrored in the left hand.
+        let right = first_person_attack(0.2, true);
+        assert!(!right.abs_diff_eq(Mat4::IDENTITY, 1e-3));
+        let left = first_person_attack(0.2, false);
+        assert!((left.w_axis.x + right.w_axis.x).abs() < 1e-6);
+        assert_eq!(third_person_attack_item(0.0, 0.38), Mat4::IDENTITY);
+        assert!(third_person_attack_item(1.0, 0.38).abs_diff_eq(Mat4::IDENTITY, 1e-5));
+        // The arm draws back, thrusts forward, then returns.
+        assert_eq!(third_person_attack_arm(0.0), 0.0);
+        assert!((third_person_attack_arm(0.05) - 90f32.to_radians()).abs() < 1e-5);
+        assert!(third_person_attack_arm(0.2) < 0.0);
+        assert!(third_person_attack_arm(1.0).abs() < 1e-5);
+    }
+}

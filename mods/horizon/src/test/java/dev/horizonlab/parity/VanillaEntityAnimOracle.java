@@ -258,8 +258,12 @@ public final class VanillaEntityAnimOracle {
         field.setAccessible(true);
         var bat = (AnimationBat) allocator.getMethod("allocateInstance", Class.class).invoke(field.get(null), AnimationBat.class);
         var type = net.minecraft.world.entity.ambient.Bat.class;
-        type.getField("flyAnimationState").set(bat, new net.minecraft.world.entity.AnimationState());
-        type.getField("restAnimationState").set(bat, new net.minecraft.world.entity.AnimationState());
+        // The animation states are final fields that allocateInstance left null: only an accessible Field may set them.
+        for (var name : new String[] {"flyAnimationState", "restAnimationState"}) {
+            var animation = type.getDeclaredField(name);
+            animation.setAccessible(true);
+            animation.set(bat, new net.minecraft.world.entity.AnimationState());
+        }
         var setup = type.getDeclaredMethod("setupAnimationStates");
         setup.setAccessible(true);
         for (var flags : ticks) {

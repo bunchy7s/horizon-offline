@@ -4,10 +4,11 @@
 //! mob is under the crosshair within 64 blocks, as its team's name tag
 //! visibility allows, in the team's colours, with its score in the
 //! objective displayed below names. Other players' names (on a LAN host
-//! or a server) show whenever `LivingEntityRenderer.shouldShowName` allows.
+//! or a server) show whenever `LivingEntityRenderer.shouldShowName` allows,
+//! and the player's own in third person with the `ownNameTag` extra.
 use super::{Game, view_vector};
 use horizon_client::{
-    block_entity_render::vertex_light, mesher::Vertex, mobs::Mob, save::uuid_text,
+    block_entity_render::vertex_light, hud::HudBatch, mesher::Vertex, mobs::Mob, save::uuid_text,
     scoreboard as sb, text::Text,
 };
 
@@ -68,6 +69,27 @@ impl Game<'_> {
         }
         out
     }
+    /// Horizon's own name tag extra (`ownNameTag`): the player's own model and
+    /// name, while that model shows in third person. Vanilla never names the
+    /// camera entity (`LivingEntityRenderer.shouldShowName`).
+    fn own_name_tag(&self) -> Option<(&Mob, String)> {
+        if !self.settings.extras.own_name_tag
+            || self.camera_type.first_person()
+            || self.sleeping.is_some()
+            || self.spectator()
+            || self.potions.effects.get("invisibility").is_some()
+        {
+            return None;
+        }
+        let m = self.player_model.as_ref()?;
+        // The name others see: the profile's on a server (single player's
+        // server thread included), else the local player's.
+        let name = match self.remote.as_ref() {
+            Some(r) if !r.profile_name.is_empty() => r.profile_name.clone(),
+            _ => self.acting_player_name().to_owned(),
+        };
+        Some((m, name))
+    }
     /// The names the name tags show this frame (the control socket's status).
     pub(super) fn shown_name_tags(&self, camera: glam::DVec3) -> Vec<String> {
         self.name_tags(camera, 1.0)
@@ -88,7 +110,10 @@ impl Game<'_> {
             let at = glam::DVec3::new(m.position.x, m.position.y, m.position.z);
             (at.distance_squared(camera) < 64.0 * 64.0).then(|| (m, name.clone(), false))
         });
-        let players = players.into_iter().map(|(m, name)| (m, name, true));
+        let players = players
+            .into_iter()
+            .chain(self.own_name_tag())
+            .map(|(m, name)| (m, name, true));
         // Who is riding whom: asked once per tag below, and rescanning every mob
         // for each tag made this quadratic in the number of loaded mobs.
         let ridden: std::collections::HashSet<u32> =
@@ -289,7 +314,7 @@ impl Game<'_> {
     /// faded, on its background; any other in full over the world, its faded
     /// copy and background in `see_through`, over everything.
     pub(super) fn name_tag_geometry(
-        &self,
+        &mut self,
         camera: glam::DVec3,
         alpha: f64,
         out: &mut Vec<Vertex>,
@@ -298,26 +323,31 @@ impl Game<'_> {
         // The text alpha that goes with getBackgroundOpacity(0.25):
         // max((0.25 + 0.75) / 2, 0.5), as ARGB.color (the floor of 255 times it).
         const FADED: u32 = 0x7F;
+        let mut patches = Vec::new();
         for tag in self.name_tags(camera, alpha) {
             let o = tag.at - camera;
             // `gbuffers_entities` draws name tag text (2.3); a sneaking player's faded tag, on its
             // background, blends.
             if tag.discrete {
                 self.mark_translucent_entity(out.len(), "minecraft:name_tag");
-                self.name_tag_quads(o, &tag.lines, FADED, true, 0, vertex_light(tag.light), out);
+                let light = vertex_light(tag.light);
+                patches.extend(self.name_tag_quads(o, &tag.lines, FADED, true, 0, light, out));
                 continue;
             }
             // LightCoordsUtil.lightCoordsWithEmission(lightCoords, 2).
             let lit = (tag.light >> 4).max(2) << 4 | (tag.light & 15).max(2);
             self.mark_entity(out.len(), "minecraft:name_tag");
-            self.name_tag_quads(o, &tag.lines, 0xFF, false, 0, vertex_light(lit), out);
+            let light = vertex_light(lit);
+            patches.extend(self.name_tag_quads(o, &tag.lines, 0xFF, false, 0, light, out));
             // RenderPipelines.TEXT_SEE_THROUGH: no depth test, no lightmap.
-            self.name_tag_quads(o, &tag.lines, FADED, true, 2, 0, see_through);
+            patches.extend(self.name_tag_quads(o, &tag.lines, FADED, true, 2, 0, see_through));
         }
+        self.map_patches.extend(patches);
     }
     /// The lines of one name tag, `o` from the camera: the text at
     /// `text_alpha` in its layer, on the translucent black background
     /// (in `text_layer` like the glyphs, a hair behind) when `background`.
+    /// Returns the glyph pixels the atlas still needs.
     #[allow(clippy::too_many_arguments)]
     fn name_tag_quads(
         &self,
@@ -328,7 +358,7 @@ impl Game<'_> {
         text_layer: u32,
         light: u32,
         out: &mut Vec<Vertex>,
-    ) {
+    ) -> Vec<horizon_client::font::Patch> {
         // Options.getBackgroundOpacity(0.25) black, as ARGB.color.
         const BACKGROUND: u32 = 0x3F00_0000;
         // The camera's facing (Camera.rotation()), turned round in third-person
@@ -342,85 +372,50 @@ impl Game<'_> {
         let forward = glam::DVec3::from_array(view_vector(view_yaw, view_pitch));
         let right = forward.cross(glam::DVec3::Y).normalize_or_zero();
         let up = right.cross(forward).normalize_or_zero();
-        let white = self.gui.atlas.font.white();
         let away = forward.as_vec3() * 0.002;
+        let mut batch = HudBatch::new([1, 1]);
         for (text, lift) in lines {
             let o = (o + glam::DVec3::new(0.0, *lift, 0.0)).as_vec3();
             let (r, u) = (right.as_vec3() * 0.025, up.as_vec3() * 0.025);
             // Text space: x right, y down (scale 0.025, -0.025).
             let at = |x: f32, y: f32| o + r * x - u * y;
-            // Component.getVisualOrderText.
-            let shown = horizon_client::bidi::visual(text);
-            let chars: Vec<(char, u32)> = shown
-                .spans
-                .iter()
-                .flat_map(|s| {
-                    let rgb = s.style.color.unwrap_or(0xFF_FF_FF);
-                    // RGBA8, alpha in the top byte.
-                    let color = text_alpha << 24
-                        | ((rgb & 0xFF) << 16)
-                        | (rgb & 0xFF00)
-                        | ((rgb >> 16) & 0xFF);
-                    s.text.chars().map(move |c| (c, color))
-                })
-                .collect();
-            let width: f32 = chars
-                .iter()
-                .map(|(c, _)| self.gui.atlas.glyph(*c).map_or(6.0, |g| g.1))
-                .sum();
-            let x0 = -(width / 2.0).trunc();
             let y0 = if text.plain() == "deadmau5" {
                 -10.0
             } else {
                 0.0
             };
-            let mut quad = |a: [f32; 4], uv: [f32; 4], color: u32, behind: bool, layer: u32| {
-                let corners = [(a[0], a[3]), (a[2], a[3]), (a[2], a[1]), (a[0], a[1])];
-                let uvs = [
-                    [uv[0], uv[3]],
-                    [uv[2], uv[3]],
-                    [uv[2], uv[1]],
-                    [uv[0], uv[1]],
-                ];
-                for ((x, y), uv) in corners.into_iter().zip(uvs) {
+            batch.vertices.clear();
+            // Font.prepareText, as any text: bold, italic, fonts and each
+            // glyph's own box (accented.png's are 12 pixels tall).
+            let behind = batch.name_tag(
+                &self.gui.atlas,
+                text,
+                y0,
+                text_alpha << 24 | 0xFF_FFFF,
+                if background { BACKGROUND } else { 0 },
+            );
+            for (i, quad) in batch.vertices.as_chunks::<6>().0.iter().enumerate() {
+                let shift = if i * 6 < behind {
+                    away
+                } else {
+                    glam::Vec3::ZERO
+                };
+                // The corners from the bottom left, as the world draws quads.
+                for v in [quad[5], quad[2], quad[1], quad[0]] {
                     out.push(Vertex {
                         normal: [0; 4],
-                        pos: (at(x, y) + if behind { away } else { glam::Vec3::ZERO }).to_array(),
-                        uv,
-                        layer,
-                        color,
+                        pos: (at(v.pos[0], v.pos[1]) + shift).to_array(),
+                        uv: v.uv,
+                        layer: text_layer,
+                        color: v.color,
                         light,
                         glint_uv: [0.0, 0.0],
                     });
                 }
-            };
-            if background {
-                quad(
-                    [x0 - 1.0, y0 - 1.0, x0 + width, y0 + 8.0],
-                    [white.u0, white.v0, white.u1, white.v1],
-                    BACKGROUND,
-                    true,
-                    text_layer,
-                );
-            }
-            let mut x = x0;
-            for (ch, color) in chars {
-                let Some((g, advance)) = self.gui.atlas.glyph(ch) else {
-                    x += 6.0;
-                    continue;
-                };
-                if ch != ' ' {
-                    quad(
-                        [x, y0, x + 8.0, y0 + 8.0],
-                        [g.u0, g.v0, g.u1, g.v1],
-                        color,
-                        false,
-                        text_layer,
-                    );
-                }
-                x += advance;
             }
         }
+        // Glyphs rasterized on first use (Unifont's) upload with the frame.
+        batch.patches
     }
 }
 

@@ -135,6 +135,7 @@ impl Game<'_> {
                     continue;
                 };
                 match (index, value) {
+                    (0, Value::Byte(flags)) => f.invisible = (*flags as u8 & 0x20) != 0,
                     (8, Value::Id(d)) => f.facing = (*d).clamp(0, 5) as u8,
                     (10, Value::Int(r)) => f.rotation = r.rem_euclid(8) as u8,
                     _ => {}

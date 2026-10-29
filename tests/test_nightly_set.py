@@ -8,11 +8,15 @@ from tools.ci import nightly_set as ns
 
 ROOT = Path(__file__).resolve().parents[1]
 NOW = "2026-10-28T12:00:00+00:00"
+TEAM = {"kacpherek", "rdbtcvs", "online5277", "levzzz5154"}
 PATTERNS = ns.guarded_patterns((ROOT / ".github/CODEOWNERS").read_text())
 
 
-def pr(n, head="h", state="open", files=("crates/horizon-world/src/lib.rs",), base="main"):
-    return ns.PullRequest(n, state, f"{head}{n}", f"Fix {n}", f"dev{n}", base, list(files))
+def pr(n, head="h", state="open", files=("crates/horizon-world/src/lib.rs",), base="main", approved_by=("rdbtcvs",),
+       approved_at=None):
+    sha = f"{head}{n}"
+    return ns.PullRequest(n, state, sha, f"Fix {n}", f"dev{n}", base, list(files),
+                          {who: approved_at or sha for who in approved_by})
 
 
 def lookup(*prs):
@@ -21,7 +25,30 @@ def lookup(*prs):
 
 
 def run(state, text, login="kacpherek", *prs):
-    return ns.apply(state, ns.parse(text), login, NOW, lookup(*prs), PATTERNS)
+    return ns.apply(state, ns.parse(text), login, NOW, lookup(*prs), PATTERNS, TEAM)
+
+
+class ApprovalTests(unittest.TestCase):
+    """A Nightly reaches every player: only pull requests the Team or Ludovic's agents approved at that head."""
+
+    def test_an_unreviewed_pull_request_is_refused(self):
+        with self.assertRaisesRegex(ns.Refused, "no approving review"):
+            run({}, "/nightly add 1", "kacpherek", pr(1, approved_by=()))
+
+    def test_the_authors_own_approval_and_outsiders_dont_count(self):
+        with self.assertRaisesRegex(ns.Refused, "no approving review"):
+            run({}, "/nightly add 1", "kacpherek", pr(1, approved_by=("dev1", "someone")))
+
+    def test_ludovics_agents_and_the_team_count(self):
+        for who in ("ludovic111", "levzzz5154"):
+            self.assertEqual(run({}, "/nightly add 1", "kacpherek", pr(1, approved_by=(who,))).state["prs"][0]["number"], 1)
+
+    def test_an_approval_on_an_older_head_doesnt_count(self):
+        with self.assertRaisesRegex(ns.Refused, "no approving review"):
+            run({}, "/nightly add 1", "kacpherek", pr(1, approved_at="old1"))
+
+    def test_a_dry_run_needs_no_approval(self):
+        self.assertTrue(run({}, "/nightly dry-run 1", "kacpherek", pr(1, approved_by=())).dry_run)
 
 
 class ParseTests(unittest.TestCase):

@@ -1,0 +1,104 @@
+Aquifer.NoiseBasedAquifer.<init>	port	crates/horizon-world/src/worldgen/aquifer/noise_based.rs::NoiseBasedAquifer::new	grid bounds, max surface level, skip-above-Y
+Aquifer.NoiseBasedAquifer.getIndex	port	crates/horizon-world/src/worldgen/aquifer/noise_based.rs::NoiseBasedAquifer::grid_index	
+Aquifer.NoiseBasedAquifer.similarity	port	crates/horizon-world/src/worldgen/aquifer/noise_based.rs::similarity	
+Aquifer.NoiseBasedAquifer.calculatePressure	port	crates/horizon-world/src/worldgen/aquifer/noise_based.rs::NoiseBasedAquifer::pressure	
+Aquifer.NoiseBasedAquifer.getAquiferStatus	port	crates/horizon-world/src/worldgen/aquifer/noise_based.rs::NoiseBasedAquifer::status	
+Aquifer.NoiseBasedAquifer.computeRandomizedFluidSurfaceLevel	inline	crates/horizon-world/src/worldgen/aquifer/noise_based.rs::NoiseBasedAquifer::compute_surface_level	the spread-noise branch
+Aquifer.NoiseBasedAquifer.computeFluidType	inline	crates/horizon-world/src/worldgen/aquifer/noise_based.rs::NoiseBasedAquifer::compute_fluid	the lava-noise swap at the end
+Beardifier.getBuryContribution	port	crates/horizon-core/src/density/beardifier.rs::bury	
+Beardifier.getBeardContribution	port	crates/horizon-core/src/density/beardifier.rs::beard	
+Beardifier.computeBeardContribution	inline	crates/horizon-core/src/density/beardifier.rs::kernel	fills the beard kernel table
+BelowZeroRetrogen.getBiomeResolver	port	crates/horizon-world/src/retrogen.rs::RetrogenBiomeResolver::sample	keeps lush caves, dripstone caves and deep dark, else the old column biome
+BitRandomSource.nextInt	port	crates/horizon-core/src/random.rs::LegacyRandom::next_int_bound	bounded and unbounded forms; only the legacy source is bit based
+BitRandomSource.nextDouble	port	crates/horizon-core/src/random.rs::LegacyRandom::next_double	
+Column.create	inline	crates/horizon-world/src/worldgen/dripstone.rs::Speleothem::scan	the Column struct holds optional floor and ceiling
+Column.scan	port	crates/horizon-world/src/worldgen/dripstone.rs::Speleothem::scan	
+Column.scanDirection	inline	crates/horizon-world/src/worldgen/dripstone.rs::Speleothem::scan	the up and down walks are one closure
+Column.Ray.toString	skip:debug		debug text
+DebugLevelSource	missing		debug_all_block_states preset falls back to a normal world (dedicated.rs warns); no block-state grid at y 70 with a barrier floor at y 60
+FlatLevelSource.createState	missing		flat worlds get no structure state: the default Superflat villages and strongholds (structure_overrides) never generate
+FlatLevelSource.buildTerrain	port	crates/horizon-client/src/flatgen.rs::FlatTerrain::proto	stacks the layers from the minimum Y
+FlatLevelSource.getBaseHeight	missing		no flat base-height query; nothing needs it while flat has no structures
+FlatLevelSource.getBaseColumn	missing		no flat base-column query; same as getBaseHeight
+LegacyRandomSource.setSeed	port	crates/horizon-core/src/random.rs::LegacyRandom::set_seed	also drops the cached gaussian
+LegacyRandomSource.next	port	crates/horizon-core/src/random.rs::LegacyRandom::bits	
+LegacyRandomSource.LegacyPositionalRandomFactory.at	port	crates/horizon-core/src/random/positional.rs::LegacyPositionalRandom::at	
+LegacyRandomSource.LegacyPositionalRandomFactory.fromHashOf	port	crates/horizon-core/src/random/positional.rs::LegacyPositionalRandom::from_hash_of	
+NoiseBasedChunkGenerator.createFluidPicker	port	crates/horizon-world/src/worldgen/aquifer.rs::GlobalFluidPicker::new	lava below -54 or sea level, else the default fluid
+NoiseBasedChunkGenerator.createNoiseChunk	inline	crates/horizon-world/src/worldgen/generator.rs::Pipeline::generate_with_context	beardifier field, density volume and aquifer built inline
+NoiseBasedChunkGenerator.chunkVolume	inline	crates/horizon-world/src/worldgen/generator.rs::Pipeline::generate_with_context	DensityVolume 16 x height x 16
+NoiseBasedChunkGenerator.addDebugScreenInfo	missing		F3 has no Density line (N, T, V, C, E, D, W, PV, PS values at the feet)
+NoiseBasedChunkGenerator.iterateNoiseColumn	port	crates/horizon-world/src/worldgen/generator.rs::Pipeline::noise_column	base_height and base_column are built on it
+NoiseBasedChunkGenerator.buildSurface	port	crates/horizon-world/src/worldgen/material_stage.rs::build_surface	
+NoiseBasedChunkGenerator.generateCarvers	port	crates/horizon-world/src/worldgen/carver/generation.rs::generate_carving_mask	the mask is applied by apply_carving_mask; no old-chunk filter
+NoiseBasedChunkGenerator.applyCarvingMask	port	crates/horizon-world/src/worldgen/carving.rs::apply_carving_mask	
+NoiseBasedChunkGenerator.getBiomeGenerationSettingsForCarver	port	crates/horizon-world/src/worldgen/generator.rs::Pipeline::carver_biome	biome at the source chunk's minimum quart, then its carvers
+NoiseBasedChunkGenerator.buildTerrain	port	crates/horizon-world/src/worldgen/generator.rs::Pipeline::generate_with_context	fill, surface, carvers in order
+NoiseBasedChunkGenerator.doFill	port	crates/horizon-world/src/worldgen/terrain.rs::fill_noise	
+NoiseBasedChunkGenerator.debugPreliminarySurfaceLevel	skip:debug		DEBUG_AQUIFERS slime and honey markers
+NoiseGeneratorSettings	skip:data		Horizon reads worldgen/noise_settings JSON
+NoiseRouter.createClimateSampler	port	crates/horizon-world/src/worldgen/router.rs::RouterSamplers::climate_sampler	
+NoiseRouterData	skip:data		density function and router bootstraps; Horizon reads worldgen/density_function JSON
+NoiseRouterData.QuantizedSpaghettiRarity	skip:data		builds density functions for the density_function JSON
+NoiseSettings.guardY	inline	crates/horizon-world/src/worldgen/settings.rs::NoiseSettings::create	upper bound, height and min Y multiples of 16
+Noises.instantiate	inline	crates/horizon-core/src/density/graph/seeded.rs::SeededContext::noise	noise created from the hash of its name
+OverworldFunctionSet.map	skip:data		bootstrap helper
+RandomState.create	port	crates/horizon-core/src/density/graph/seeded.rs::SeededContext::new	seed, legacy or Xoroshiro root factory, noise cache
+RandomState.getOrCreateNoise	port	crates/horizon-core/src/density/graph/seeded.rs::SeededContext::noise	
+RandomState.getOrCreateRandomFactory	inline	crates/horizon-world/src/worldgen/generator.rs::Pipeline::generate_with_context	root.from_hash_of(name).fork_positional() at each use (aquifer, ore), not cached
+RandomState.acquireDensityBufferPool	skip:java		buffer pool
+RandomState.releaseDensityBufferPool	skip:java		buffer pool
+RandomState.garbageCollect	skip:java		buffer pool
+RandomSupport.mixStafford13	port	crates/horizon-core/src/random.rs::mix_stafford13	
+RandomSupport.upgradeSeedTo128bitUnmixed	inline	crates/horizon-core/src/random.rs::XoroshiroRandom::new	seed ^ silver ratio, then + golden ratio
+RandomSupport.seedFromHashOf	port	crates/horizon-core/src/random/hash.rs::seed_from_hash	MD5 of the name
+RandomSupport.Seed128bit.xor	inline	crates/horizon-core/src/random/positional.rs::XoroshiroPositionalRandom::from_hash_of	lo and hi xored with the factory seed
+SingleThreadedRandomSource.setSeed	port	crates/horizon-core/src/random.rs::LegacyRandom::set_seed	same LCG; Rust's LegacyRandom is single threaded
+SingleThreadedRandomSource.next	port	crates/horizon-core/src/random.rs::LegacyRandom::bits	
+SingleThreadedRandomSource.nextGaussian	port	crates/horizon-core/src/random.rs::LegacyRandom::next_gaussian	
+ThreadSafeLegacyRandomSource.next	skip:java		atomic copy of LegacyRandom::bits; deprecated, no callers, Rust owns its random
+VerticalAnchor.merge	skip:java		codec glue; VerticalAnchor::from_json decodes
+VerticalAnchor.split	skip:java		codec glue
+VerticalAnchor.BelowTop.resolveY	port	crates/horizon-world/src/worldgen/anchor.rs::VerticalAnchor::resolve	BelowTop arm
+WorldDimensions.keysInOrder	skip:other		orders the dimension registry; Horizon has the preset's fixed overworld, nether and end
+WorldDimensions.replaceOverworldGenerator	inline	crates/horizon-client/src/save.rs::write_world_gen_settings_with	a flat generator replaces the overworld when world_gen_settings is written
+WorldDimensions.withOverworld	inline	crates/horizon-client/src/save.rs::write_world_gen_settings_with	same as replaceOverworldGenerator
+WorldDimensions.overworld	inline	crates/horizon-client/src/flatgen.rs::FlatTerrain::from_settings	reads the overworld generator from world_gen_settings; a normal one is OverworldGenerator::for_world
+WorldDimensions.specialWorldProperty	inline	crates/horizon-client/src/save.rs::WorldGen::read	flat flag only; there is no debug world
+WorldDimensions.isVanillaLike	skip:other		stability only picks the experimental-settings warning; Horizon's preset dimensions are stable
+WorldDimensions.isStableOverworld	skip:other		same as isVanillaLike
+WorldDimensions.isStableNether	skip:other		same as isVanillaLike
+WorldDimensions.isStableEnd	skip:other		same as isVanillaLike
+WorldDimensions.bake	skip:other		builds the dimension registry; Horizon has the preset's fixed dimensions
+WorldGenSettings.of	inline	crates/horizon-client/src/save.rs::write_world_gen_settings_with	seed, options and dimensions written together
+WorldGenSettings.hashCode	skip:java		
+WorldGenerationContext.of	port	crates/horizon-world/src/worldgen/anchor.rs::WorldGenerationContext::with_generator	the plain-level branch is WorldGenerationContext::new
+WorldOptions.withBonusChest	inline	crates/horizon-client/src/title/create_world.rs::WorldOptions::world_gen	never in Hardcore
+WorldOptions.withStructures	inline	crates/horizon-client/src/title/create_world.rs::WorldOptions::world_gen	
+WorldOptions.withSeed	inline	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	parse_seed in title.rs reads the text; a random seed fills an empty one here
+Xoroshiro128PlusPlus.nextLong	port	crates/horizon-core/src/random.rs::XoroshiroRandom::next_long	
+XoroshiroRandomSource.setSeed	port	crates/horizon-core/src/random.rs::XoroshiroRandom::set_seed	
+XoroshiroRandomSource.nextInt	port	crates/horizon-core/src/random.rs::XoroshiroRandom::next_int_bound	bounded form; next_int is the unbounded one
+XoroshiroRandomSource.nextBoolean	port	crates/horizon-core/src/random.rs::XoroshiroRandom::next_boolean	
+XoroshiroRandomSource.consumeCount	port	crates/horizon-core/src/random.rs::RandomSource::consume_count	default trait method
+XoroshiroRandomSource.XoroshiroPositionalRandomFactory.at	port	crates/horizon-core/src/random/positional.rs::XoroshiroPositionalRandom::at	
+XoroshiroRandomSource.XoroshiroPositionalRandomFactory.fromHashOf	port	crates/horizon-core/src/random/positional.rs::XoroshiroPositionalRandom::from_hash_of	
+XoroshiroRandomSource.XoroshiroPositionalRandomFactory.fromSeed	port	crates/horizon-core/src/random/positional.rs::XoroshiroPositionalRandom::from_seed	
+XoroshiroRandomSource.XoroshiroPositionalRandomFactory.parityConfigString	skip:debug		test helper
+Blender.of	missing		no old-chunk blending: worlds upgraded from before 1.18 show terrain seams where old chunks meet new ones
+Blender.isEmpty	port	crates/horizon-core/src/density/world_fields.rs::EmptyBlender::is_empty	only the empty blender exists
+Blender.blendOffsetAndFactor	missing		old-chunk height blending not implemented; the empty case is alpha 1, offset 0 (WorldField::fallback)
+Blender.heightToOffset	missing		part of old-chunk height blending
+Blender.blendDensity	missing		DensityBlender::blend_density hook exists but only EmptyBlender (returns the input) implements it
+Blender.getBlendingDataValue	missing		no BlendingData is read or kept
+Blender.getBiomeResolver	missing		no biome blending next to old chunks
+Blender.blendBiome	missing		no biome blending next to old chunks
+Blender.generateBorderTicks	missing		no leaf or fluid post-processing at the old/new chunk border
+Blender.generateBorderTick	missing		part of generateBorderTicks
+Blender.createAroundOldChunksCarvingMaskFilter	missing		carvers run unfiltered next to old chunks (apply_carving_mask gets |_| true)
+Blender.makeOldChunkDistanceGetter	missing		part of the carving filter
+Blender.makeOffsetOldChunkDistanceGetter	missing		part of the carving filter
+Blender.distanceToCube	missing		part of the carving filter
+Blender.OutputBuffer.getAlpha	missing		only the empty-blender value exists (alpha 1 via WorldField::fallback)
+Blender.OutputBuffer.getOffset	missing		only the empty-blender value exists (offset 0 via WorldField::fallback)
+Blender.OutputBuffer.getIndex	missing		part of the blend output buffer

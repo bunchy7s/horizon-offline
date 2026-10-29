@@ -2,7 +2,7 @@
 //! zlib compression above a threshold (CompressionEncoder / CompressionDecoder).
 use crate::{
     Error, Result,
-    buf::{Reader, varint_size, write_varint},
+    buf::{Reader, write_varint},
 };
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use std::io::{Read, Write};
@@ -65,6 +65,11 @@ pub fn split(buffer: &mut Vec<u8>) -> Result<Option<Vec<u8>>> {
         };
         len |= usize::from(b & 0x7F) << (7 * i);
         if b & 0x80 == 0 {
+            if len == 0 {
+                // Varint21FrameDecoder: a frame with no bytes is a
+                // corrupted frame, not an empty packet.
+                return Err(Error::new("Frame length cannot be zero"));
+            }
             let start = i + 1;
             if buffer.len() < start + len {
                 return Ok(None);
@@ -85,7 +90,7 @@ pub fn decompress(frame: Vec<u8>, threshold: Option<usize>) -> Result<Vec<u8>> {
     let mut r = Reader::new(&frame);
     let size = r.varint()?;
     if size == 0 {
-        return Ok(frame[1..].to_vec());
+        return Ok(frame[r.position()..].to_vec());
     }
     let size = usize::try_from(size).map_err(|_| Error::new("negative uncompressed length"))?;
     if size < threshold {
@@ -98,7 +103,7 @@ pub fn decompress(frame: Vec<u8>, threshold: Option<usize>) -> Result<Vec<u8>> {
             "Badly compressed packet - size of {size} is larger than protocol maximum"
         )));
     }
-    let start = varint_size(size as i32);
+    let start = r.position();
     let mut out = Vec::with_capacity(size);
     ZlibDecoder::new(&frame[start..])
         .take(size as u64 + 1)
@@ -162,5 +167,21 @@ mod tests {
         z.write_all(&[1; 299]).unwrap();
         frame.extend(z.finish().unwrap());
         assert!(decompress(frame, Some(256)).is_err());
+    }
+
+    #[test]
+    fn a_noncanonical_length_prefix_still_reads() {
+        // The data-length VarInt is read, not measured: zero as `0x80 0x00`.
+        assert_eq!(
+            decompress(vec![0x80, 0x00, 7, 1, 2], Some(256)).unwrap(),
+            [7, 1, 2]
+        );
+        // And a compressed packet whose size was written wide: 300.
+        let body = vec![9; 300];
+        let mut frame = vec![0xAC, 0x82, 0x00];
+        let mut z = ZlibEncoder::new(Vec::new(), Compression::default());
+        z.write_all(&body).unwrap();
+        frame.extend(z.finish().unwrap());
+        assert_eq!(decompress(frame, Some(256)).unwrap(), body);
     }
 }

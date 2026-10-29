@@ -4,7 +4,7 @@
 use super::Game;
 use horizon_client::{
     Result,
-    beehive::{self, Beehive, HiveHost, Release},
+    beehive::{self, Beehive, BeehiveExt, HiveHost, Release},
     containers::BlockEntity,
     items::ItemStack,
     mobs::{Mob, Who, bee},

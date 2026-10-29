@@ -1,0 +1,231 @@
+RodBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	rod facing mirrored through the state table
+RodBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	rod facing turned through the state table
+RootedDirtBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	needs air below
+RotatedPillarBlock.rotatePillar	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	axis swap is in the rotate table
+SandBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	desert sand ambient sound
+SeagrassBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+SeagrassBlock.mayPlaceOn	port	crates/horizon-world/src/level/survive.rs::Sim::may_place_on	
+SeagrassBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	
+SeagrassBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+SegmentableBlock.canBeReplaced	port	crates/horizon-world/src/level/place.rs::Sim::can_be_replaced	leaf litter and flower bed segments
+SegmentableBlock.getShapeCalculator	port	crates/horizon-world/src/interaction_shapes.rs::InteractionShapes::shape	shape per state from the table
+SegmentableBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+ShelfMushroomBlock.bounceOn	port	crates/horizon-world/src/block_landing.rs::BlockLandingRegistry::fall_on	shelf bounce flag of the landing rule
+ShelfMushroomBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
+ShelfMushroomBlock.createBlockStateDefinition	skip:data		states come from the generated block state table
+ShelfMushroomBlock.getShape	port	crates/horizon-world/src/interaction_shapes.rs::InteractionShapes::shape	shape per state from the table
+ShelfMushroomBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+ShelfMushroomBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	
+ShelfMushroomBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	
+ShelfMushroomBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+SimpleWaterloggedBlock.pickupBlock	port	crates/horizon-world/src/level/fluids.rs::Sim::pickup_block	
+SimpleWaterloggedBlock.placeLiquid	port	crates/horizon-world/src/level/fluids.rs::Sim::place_liquid	
+SkullBlock.createBlockStateDefinition	skip:data		states come from the generated block state table
+SkullBlock.getShape	port	crates/horizon-world/src/interaction_shapes.rs::InteractionShapes::shape	shape per state from the table
+SkullBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+SkullBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	
+SkullBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+SlabBlock.canBeReplaced	port	crates/horizon-world/src/level/place.rs::Sim::can_be_replaced	
+SlabBlock.canPlaceLiquid	port	crates/horizon-world/src/level/fluids.rs::Sim::can_place_liquid	
+SlabBlock.createBlockStateDefinition	skip:data		states come from the generated block state table
+SlabBlock.getFluidState	port	crates/horizon-world/src/fluid.rs::FluidStateTable::get	
+SlabBlock.getShape	port	crates/horizon-world/src/interaction_shapes.rs::InteractionShapes::shape	shape per state from the table
+SlabBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+SlabBlock.isPathfindable	skip:data		per-state path type is exported state data (StateData.path)
+SlabBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+SlimeBlock.fallOn	port	crates/horizon-world/src/block_landing.rs::BlockLandingRegistry::fall_on	slime landing rule
+SmallDripleafBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
+SmallDripleafBlock.createBlockStateDefinition	skip:data		states come from the generated block state table
+SmallDripleafBlock.getFluidState	port	crates/horizon-world/src/fluid.rs::FluidStateTable::get	
+SmallDripleafBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+SmallDripleafBlock.mayPlaceOn	port	crates/horizon-world/src/level/survive.rs::Sim::may_place_on	
+SmallDripleafBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	
+SmallDripleafBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+SmallDripleafBlock.setPlacedBy	port	crates/horizon-world/src/level/place.rs::Sim::set_placed_by	
+SmallDripleafBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+SmithingTableBlock.getMenuProvider	inline	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	station menu is opened by the use arm
+SmithingTableBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	
+SmokerBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	lit smoker smoke
+SmokerBlock.openContainer	inline	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	furnace-family arm, which the smoker shares
+SnowyBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+SnowyBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+SoulFireBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+SporeBlossomBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	
+SporeBlossomBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
+SporeBlossomBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+SpreadingSnowyBlock.canPropagate	inline	crates/horizon-world/src/level/tick.rs::Sim::spreading_snowy_tick	spread test folded into the tick
+SpreadingSnowyBlock.canStayAlive	inline	crates/horizon-world/src/level/tick.rs::Sim::spreading_snowy_tick	survival test folded into the tick
+SpreadingSnowyBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::spreading_snowy_tick	
+StandingSignBlock.createBlockStateDefinition	skip:data		states come from the generated block state table
+StandingSignBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+StandingSignBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	
+StandingSignBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+StandingSignBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+StemBlock.getCloneItemStack	missing		unsure: minor: middle-click on a stem may not return its seed item; no stem case found in the pick code
+StemBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	
+StemBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	
+StemBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::stem_random_tick	
+StonecutterBlock.getMenuProvider	inline	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	station menu opened by the use arm
+StonecutterBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+StonecutterBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	
+SugarCaneBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	growth arm of the random tick
+SugarCaneBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	
+SugarCaneBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+SuspiciousEffectHolder.tryGet	skip:data		the effect comes from the item's stew effects data (item_data.rs)
+TallSeagrassBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
+TallSeagrassBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+TallSeagrassBlock.mayPlaceOn	port	crates/horizon-world/src/level/survive.rs::Sim::may_place_on	
+TestBlock	missing		minor: game-test block for operators; Horizon keeps only its NBT
+TestInstanceBlock	missing		minor: game-test instance block; Horizon keeps only its NBT
+TintedParticleLeavesBlock.spawnFallingLeavesParticle	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	falling tinted leaf particle
+TorchBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	torch flame
+TorchflowerCropBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	growth arm
+TrapDoorBlock.createBlockStateDefinition	skip:data		states come from the generated block state table
+TrapDoorBlock.getFluidState	port	crates/horizon-world/src/fluid.rs::FluidStateTable::get	
+TrapDoorBlock.getShape	port	crates/horizon-world/src/interaction_shapes.rs::InteractionShapes::shape	shape per state from the table
+TrapDoorBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+TrapDoorBlock.isPathfindable	skip:data		per-state path type is exported state data (StateData.path)
+TrapDoorBlock.neighborChanged	port	crates/horizon-world/src/level/hooks.rs::Sim::neighbor_changed	redstone update arm for trapdoors
+TrapDoorBlock.onExplosionHit	missing		player: a wind burst or explosion that could open a trapdoor leaves it shut; the explosion code has no trapdoor case
+TrapDoorBlock.playSound	port	crates/horizon-world/src/level/redstone.rs::Sim::trapdoor_sound	
+TrapDoorBlock.toggle	inline	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	the trapdoor arm cycles the open state
+TrapDoorBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+TrapDoorBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	
+TrappedChestBlock.getDirectSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::state_direct_signal	
+WallBannerBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
+WallBannerBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+WallBannerBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+WallBannerBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+WallHangingSignBlock.canAttachTo	inline	crates/horizon-world/src/level/place.rs::Sim::wall_hanging_sign_can_place	attach test folded into the placement check
+WallHangingSignBlock.canPlace	port	crates/horizon-world/src/level/place.rs::Sim::wall_hanging_sign_can_place	
+WallHangingSignBlock.createBlockStateDefinition	skip:data		states come from the generated block state table
+WallHangingSignBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+WallHangingSignBlock.isHittingEditableSide	missing		unsure: player: a hanging sign clicked on its side may not chain onto a wall hanging sign
+WallHangingSignBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+WallHangingSignBlock.shouldTryToChainAnotherHangingSign	missing		unsure: player: a second hanging sign used on a wall sign may not chain on
+WallHangingSignBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+WallHangingSignBlock.useItemOn	port	crates/horizon-world/src/level/interact.rs::Behaviours::use_item_on	gap: player: chaining a hanging sign onto a wall hanging sign is not ported here
+WallSignBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
+WallSignBlock.createBlockStateDefinition	skip:data		states come from the generated block state table
+WallSignBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+WallSignBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+WallSignBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+WallSkullBlock.createBlockStateDefinition	skip:data		states come from the generated block state table
+WallSkullBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+WallSkullBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+WallTorchBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	wall torch flame
+WallTorchBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
+WallTorchBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+WallTorchBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+WallTorchBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+WaterloggedTransparentBlock.getFluidState	port	crates/horizon-world/src/fluid.rs::FluidStateTable::get	
+WaterloggedTransparentBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
+WaterloggedTransparentBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+WeatheringCopperChestBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	oxidation through the weathering interface branch
+WeatheringCopperCollection	skip:data		block family registry; oxidation links come from the block data
+WeatheringCopperCollection.ByState	skip:data		helper over the oxidation stages of the block family registry
+WeatheringCopperDoorBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	oxidation through the weathering interface branch
+WeightedPressurePlateBlock.getSignalStrength	port	crates/horizon-world/src/level/redstone.rs::Sim::plate_signal_strength	
+WetSpongeBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	wet sponge drip
+WetSpongeBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	wet sponge drying arm
+BannerPatternLayers.removeLast	inline	crates/horizon-client/src/cauldron.rs::interact	banner wash pops the last pattern in its arm
+BannerPatternLayers.Builder	skip:java		builder for banner pattern layers
+BannerPatterns	skip:data		registry bootstrap
+BarrelBlockEntity.loadAdditional	port	crates/horizon-client-core/src/block_entity_nbt.rs::canonical	gap: minor: canonical NBT form only, no load step of its own
+BarrelBlockEntity.recheckOpen	missing		unsure: player: a barrel lid may stay open after a player walks away; only golem openers are rechecked on a timer
+BarrelBlockEntity.saveAdditional	port	crates/horizon-client-core/src/block_entity_nbt.rs::canonical	gap: minor: canonical NBT form only
+BarrelBlockEntity.startOpen	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::barrel_openers_changed	
+BarrelBlockEntity.stopOpen	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::barrel_openers_changed	
+BarrelBlockEntity.updateBlockState	inline	crates/horizon-client/src/game/block_entity_anims.rs::Game::barrel_openers_changed	sets the open property when the count crosses zero
+BlockEntityTicker	skip:java		ticker combinator; Horizon ticks each block entity directly
+BlockEntityType.getBlockEntity	skip:java		factory that makes the block entity object for a state
+BlockEntityTypes	skip:data		registry
+BoundingBoxRenderable.RenderableBox	skip:debug		test box outline renderer
+CopperGolemStatueBlockEntity.createStatue	port	crates/horizon-client/src/game/copper_golems.rs::Game::golem_turn_to_statue	gap: minor: the golem's custom name is not copied onto the statue
+CopperGolemStatueBlockEntity.getItem	port	crates/horizon-client/src/game/block_items.rs::Game::picked_stack	statue pose on the picked item
+CopperGolemStatueBlockEntity.initCopperGolem	port	crates/horizon-client/src/game/copper_golems.rs::Game::use_golem_statue	axe on an unaffected statue brings the golem back
+DecoratedPotPatterns	skip:data		bootstrap and asset registration
+EnchantingTableBlockEntity.bookAnimationTick	port	crates/horizon-client/src/block_entity_anim.rs::EnchantingBook::tick	
+ListBackedContainer	skip:java		slot helpers over a plain list
+PotDecorations.addSideDetailsToTooltip	port	crates/horizon-client/src/item_tooltip.rs::TooltipDisplay::detail_lines	sherd lines of the decorated pot tooltip
+PotDecorations.allBrick	skip:data		constant brick decoration set
+PotentSulfurBlockEntity.applyNauseaEffect	missing		player: standing in potent sulfur gas gives no nausea, since the geyser never erupts
+PotentSulfurBlockEntity.canBeReachedByNoxiousGas	missing		player: gas from a potent sulfur geyser never reaches players
+PotentSulfurBlockEntity.findNoxiousGasSourceBlock	missing		minor: helper of the geyser gas, not ported
+PotentSulfurBlockEntity.getNearbyLivingEntities	missing		minor: helper of the geyser gas, not ported
+PotentSulfurBlockEntity.getUnobstructedBlockCount	missing		minor: helper of the geyser gas, not ported
+PotentSulfurBlockEntity.geyserPositional	missing		player: no potent sulfur geyser eruption, so no geyser plume or sound
+PotentSulfurBlockEntity.haveLineOfSight	missing		minor: helper of the geyser gas, not ported
+PotentSulfurBlockEntity.isGeyserPassableBlock	missing		minor: helper of the geyser, not ported
+PotentSulfurBlockEntity.loadAdditional	missing		minor: the eruption timer is not loaded; Horizon keeps only the countdown in NBT
+PotentSulfurBlockEntity.setLevel	missing		minor: the eruption timer is not started on load
+PotentSulfurBlockEntity.spawnGeyserParticle	missing		player: no geyser particles over a potent sulfur block
+PotentSulfurBlockEntity.spawnNoxiousGasCloudParticle	missing		player: no noxious gas cloud particles over a potent sulfur block
+RandomizableContainerBlockEntity.applyImplicitComponents	missing		minor: a chest item does not hand its loot table back to the block
+RandomizableContainerBlockEntity.canOpen	missing		unsure: minor: the spectator and loot-table open checks were not found
+RandomizableContainerBlockEntity.collectImplicitComponents	missing		minor: a container does not save its loot table onto the item it drops
+RandomizableContainerBlockEntity.createMenu	port	crates/horizon-client/src/game.rs::Game::open_menu	gap: minor: the spectator and loot-table checks are not ported here
+SculkSensorBlockEntity.loadAdditional	port	crates/horizon-client/src/sculk.rs::SculkEntity::load	
+SculkSensorBlockEntity.saveAdditional	port	crates/horizon-client/src/sculk.rs::SculkEntity::to_nbt	
+SculkSensorBlockEntity.VibrationUser.canReceiveVibration	port	crates/horizon-client/src/sculk.rs::valid_vibration	
+SculkSensorBlockEntity.VibrationUser.onReceiveVibration	port	crates/horizon-client/src/sculk.rs::Data::schedule	
+TestBlockEntity	missing		minor: game-test block entity; reset, trigger and logging are not ported, NBT only
+TestInstanceBlockEntity	missing		minor: game-test structure tooling; export and chunk forcing are not ported
+TrialSpawnerConfig.calculateTargetSimultaneousMobs	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialConfig::target_simultaneous_mobs	
+TrialSpawnerConfig.calculateTargetTotalMobs	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialConfig::target_total_mobs	
+TrialSpawnerConfig.withSpawning	skip:java		builder-style setter on the config record
+TrialSpawnerConfig.Builder	skip:java		builder for the trial config
+TrialSpawnerConfigs	skip:data		registry bootstrap and equipment spawn data
+SolidDebugger	skip:debug		debug dump of a block state
+StateDefinition	skip:java		codecs and state builders; states come from the generated block state table
+StateDefinition.Builder	skip:java		state builder
+StateDefinition.StateCollection	skip:data		neighbour tables of the state graph are generated data
+BlockInWorld	skip:java		accessor over the level's state and block entity
+BlockPattern.matches	port	crates/horizon-client/src/game/golems.rs::Game::find_golem	golem head and body patterns only, not a generic pattern matcher
+BlockPattern.translateAndRotate	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	pattern placement folded into golem search
+BlockPattern.BlockPatternMatch	skip:java		match result accessor
+BlockPatternBuilder	skip:java		builder for block patterns
+BlockStatePredicate	skip:java		predicate builder
+BooleanProperty	skip:java		property accessor
+ChestType	skip:java		enum helper
+EnumProperty	skip:java		property factory and hashing
+IntegerProperty	skip:java		property accessor
+BlockMatcher	skip:java		block scan helpers; Horizon scans with direct loops
+BoxBlockMatcher	skip:java		block scan helpers; Horizon scans with direct loops
+FilteredSectionCache	skip:java		section cache for block scans
+OrderedBlockMatcher	skip:java		block scan helpers; Horizon scans with direct loops
+BulkSectionAccess	skip:java		section cache for bulk writes
+ChunkGenerators	skip:data		bootstrap
+ChunkSource.hasChunk	port	crates/horizon-client/src/game.rs::GameLevel::is_loaded	
+GlobalPalette	skip:java		palette storage; Horizon's chunk.rs keeps block ids in plain arrays
+HashMapPalette	skip:java		palette storage; Horizon's chunk.rs keeps block ids in plain arrays
+ImposterProtoChunk	skip:other		wrapper so the vanilla status pipeline can read a loaded chunk; streaming keeps its own protos
+LinearPalette	skip:java		palette storage; Horizon's chunk.rs keeps block ids in plain arrays
+PalettedContainerFactory	skip:java		factory for palette storage; Horizon's chunk.rs keeps block ids in plain arrays
+SingleValuePalette	skip:java		palette storage; Horizon's chunk.rs keeps block ids in plain arrays
+UpgradeData	missing		unsure: minor: block upgrades of old chunks on load are not ported
+ChunkDependencies.getRadiusOf	inline	crates/horizon-client/src/streaming.rs::Ranges::margins	fixed margins instead of a per-status radius
+ChunkPyramid.Builder	skip:java		builder for the status pyramid; Horizon uses fixed margins
+ChunkStatusTasks.buildTerrain	inline	crates/horizon-world/src/worldgen/generator.rs::Pipeline::generate_with_context	terrain pass
+ChunkStatusTasks.collectPossibleBiomes	inline	crates/horizon-world/src/worldgen/generator.rs::Pipeline::biome_chunk	biome set folded into the biome pass
+ChunkStatusTasks.full	skip:other		turns the proto into the finished chunk; the generator returns the finished chunk
+ChunkStatusTasks.generateBiomes	port	crates/horizon-world/src/worldgen/generator.rs::Pipeline::biome_chunk	
+ChunkStatusTasks.generateFeatures	port	crates/horizon-world/src/worldgen/generator_decoration.rs::Decoration::decorate	
+ChunkStatusTasks.generateSpawn	port	crates/horizon-world/src/worldgen/spawn_finder.rs::find_spawn_position	
+ChunkStatusTasks.generateStructureReferences	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::references	
+ChunkStatusTasks.generateStructureStarts	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::starts_at	
+ChunkStatusTasks.initializeLight	port	crates/horizon-client/src/light.rs::light_chunk	
+ChunkStatusTasks.isLighted	skip:other		status check; streaming tracks which chunks are lit
+ChunkStep.apply	inline	crates/horizon-client/src/streaming.rs::Streaming::update	stage advance
+ChunkStep.completeChunkGeneration	inline	crates/horizon-client/src/streaming.rs::Streaming::update	final stage hand-over
+ChunkStep.getAccumulatedRadiusOf	inline	crates/horizon-client/src/streaming.rs::Ranges::margins	fixed margins
+ChunkStep.Builder	skip:java		builder for chunk steps
+ChunkIOErrorReporter.createMisplacedChunkReport	skip:other		report text for a chunk saved at another position; Horizon logs its own load error
+RecreatingSimpleRegionStorage	skip:java		close: Rust closes the file on drop
+RegionFileStorage.cache	port	crates/horizon-client/src/save.rs::cached_region	
+RegionFileStorage.close	skip:java		files close on drop
+RegionFileStorage.flush	port	crates/horizon-world/src/region.rs::RegionFile::sync	
+RegionFileStorage.getRegionFile	port	crates/horizon-client/src/save.rs::cached_region	
+RegionFileStorage.read	port	crates/horizon-world/src/region.rs::RegionFile::read	
+RegionFileStorage.scanChunk	port	crates/horizon-client/src/save.rs::read_region_record	
+RegionFileStorage.write	port	crates/horizon-world/src/region.rs::RegionFile::write	

@@ -1,0 +1,20 @@
+{
+  "noise": {"min_y": -64, "height": 384},
+  "default_block": "minecraft:stone",
+  "default_fluid": "minecraft:water",
+  "noise_router": {
+    "chunk_surface_level": "minecraft:overworld/chunk_surface_level",
+    "continents": "minecraft:overworld/continents",
+    "depth": "minecraft:overworld/depth",
+    "erosion": "minecraft:overworld/erosion",
+    "final_density": "horizon_test:final_density",
+    "ridges": "minecraft:overworld/ridges",
+    "temperature": "minecraft:overworld/temperature",
+    "vegetation": "minecraft:overworld/vegetation"
+  },
+  "material_rule": "minecraft:overworld",
+  "spawn_target": [],
+  "sea_level": 70,
+  "disable_mob_generation": false,
+  "legacy_random_source": false
+}

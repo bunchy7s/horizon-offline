@@ -38,9 +38,14 @@ def main():
     parser.add_argument('--label', default='candidate')
     parser.add_argument('--resources', type=Path, default=lab.RESOURCES)
     args = parser.parse_args()
-    path = 'crates/horizon-client/src/gfx.rs'
-    source = (subprocess.check_output(['git', 'show', f'{args.ref}:{path}'], cwd=ROOT, text=True)
-              if args.ref else (ROOT / path).read_text())
+    path = 'crates/horizon-client-render/src/gfx.rs'
+    if args.ref:
+        # gfx.rs moved from horizon-client to horizon-client-render; older refs have it at its old path.
+        shown = subprocess.run(['git', 'show', f'{args.ref}:{path}'], cwd=ROOT, text=True, capture_output=True)
+        source = shown.stdout if shown.returncode == 0 else subprocess.check_output(
+            ['git', 'show', f'{args.ref}:crates/horizon-client/src/gfx.rs'], cwd=ROOT, text=True)
+    else:
+        source = (ROOT / path).read_text()
     build = ROOT / '.local/sprite-mips-bench' / args.label
     build.mkdir(parents=True, exist_ok=True)
     cached = 'struct AnimatedSprites' in source
@@ -56,7 +61,7 @@ def main():
         code += '\n' + (function(source, 'sprite_mipmap_limit') if 'fn sprite_mipmap_limit' in source
                          else 'use sprites::sprite_mipmap_limit;')
         code += '\n' + source[source.index('#[cfg(test)]\nmod sprite_upload_tests'):]
-    modules = '\n'.join(f'#[path = {json.dumps(str(ROOT / "crates/horizon-client/src" / (name + ".rs")))}] mod {name};'
+    modules = '\n'.join(f'#[path = {json.dumps(str(ROOT / "crates/horizon-client-render/src" / (name + ".rs")))}] mod {name};'
                         for name in ('mipmap', 'sprites', 'fast_hash'))
     (build / 'main.rs').write_text(modules + '\nuse sprites::SpriteAnimation;\n'
                                   + code + '\n' + (ROOT / 'tools/bench_sprite_mips.rs').read_text())

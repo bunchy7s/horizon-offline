@@ -1,0 +1,150 @@
+SkullBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	skull arm writes profile, note_block_sound and custom_name
+SkullBlockEntity.loadAdditional	port	crates/horizon-client/src/save.rs::decode_block_entity	skull arm reads the same three keys
+SkullBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	profile, note sound and custom name from the item components are applied to the saved tag
+SkullBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	per-part component read; the skull's three parts come from the parts table
+SkullBlockEntity.removeComponentsFromTag	inline	crates/horizon-client/src/block_entity_item.rs::pick	the three keys are removed from the saved NBT inside pick's part loop
+SpawnerBlockEntity.triggerEvent	port	crates/horizon-client/src/mobs/spawner.rs::Spawner::client_event	event 1 resets the client spawn delay to the minimum; other events return false
+SpawnerBlockEntity.setEntityData	missing		minor: an op's spawn egg with an ENTITY_DATA component only sets the mob type on a spawner here (use_spawn_egg_on_spawner); the rest of the egg's entity data is dropped
+StructureBlockEntity.updateBlockState	missing		player: the structure block's mode is never written to its block state, so the block does not switch between SAVE, LOAD, CORNER and DATA
+StructureBlockEntity.usedBy	missing		player: right-clicking a structure block opens no edit screen; Horizon has no structure block screen
+StructureBlockEntity.setStructureName	missing		player: the structure name box does nothing; the structure block edit packet (SET_STRUCTURE_BLOCK, id 60) has no handler
+StructureBlockEntity.setMode	missing		player: changing the mode in the structure block screen does nothing
+StructureBlockEntity.detectSize	missing		player: the Detect Size button does nothing, so a corner-marked area is never sized
+StructureBlockEntity.getEnclosingBoundingBox	missing		player: no area is found between corner blocks, so Detect Size and saving have nothing to use
+StructureBlockEntity.saveStructure	missing		player: the Save button and redstone save do nothing, so a built structure cannot be saved from the game
+StructureBlockEntity.placeStructureIfSameSize	missing		player: the Load button does nothing when the template size matches
+StructureBlockEntity.loadStructureInfo	missing		player: a structure block never reads a template's size and author
+StructureBlockEntity.placeStructure	port	crates/horizon-world/src/worldgen/structure/processor.rs::place_in_world	gap: player: the block's own settings (mirror, rotation, integrity, seed, strict, ignore entities) and its redstone trigger are not read; only the placement runs
+StructureBlockEntity.getStructureTemplate	port	crates/horizon-world/src/worldgen/structure.rs::StructureResources::template	name lookup only; nothing calls it for a structure block
+StructureBlockEntity.unloadStructure	missing		minor: no structure block to unload a template from; templates in StructureResources are never dropped
+StructureBlockEntity.isStructureLoadable	missing		player: the Load button never reports whether the template exists
+StructureBlockEntity.renderMode	missing		player: a structure block in creative shows no outline box for its SAVE or LOAD mode
+StructureBlockEntity.getRenderableBox	missing		player: no outline box is drawn around the structure's area
+TestInstanceBlockEntity.Data.withSize	skip:java		record copy-with builder; no behaviour of its own
+TestInstanceBlockEntity.Data.withStatus	missing		minor: test instance status never changes; Horizon has no game test runner (/test only reports no instances)
+TestInstanceBlockEntity.Data.withError	missing		minor: no game test runner, so no error message is ever set on a test instance block
+TheEndGatewayBlockEntity.beamAnimationTick	port	crates/horizon-client/src/block_entity_anim.rs::EndGateway::tick	client ticker: age goes up and the teleport cooldown goes down
+TheEndGatewayBlockEntity.getSpawnPercent	inline	crates/horizon-client/src/block_entity_render.rs::gateway_beam	spawn percent is (age + partial) / 200, clamped, inside the beam function
+TheEndGatewayBlockEntity.getCooldownPercent	inline	crates/horizon-client/src/block_entity_render.rs::gateway_beam	cooldown percent is one minus the clamped cooldown over 40, inside the beam function
+TheEndGatewayBlockEntity.findExitPosition	inline	crates/horizon-client/src/game/end.rs::Game::resolve_gateway	the known-exit branch's find_exit closure: tallest block from two up and five out, then one above it
+TheEndGatewayBlockEntity.findOrCreateValidTeleportPos	port	crates/horizon-client/src/game/end.rs::Game::resolve_gateway	the find branch: tentative chunk, valid end stone, an island when none, then the tallest block
+TheEndGatewayBlockEntity.findExitPortalXZPosTentative	inline	crates/horizon-client/src/game/end.rs::Game::resolve_gateway	the find branch walks back over non-empty and forward over empty chunks; gap: minor: an unloaded chunk stops the walk instead of loading it
+TheEndGatewayBlockEntity.getChunk	port	crates/horizon-client/src/game/end.rs::Game::chunk_empty	gap: minor: returns whether the chunk is empty, not the chunk; an unloaded chunk reads as None
+TheEndGatewayBlockEntity.findValidSpawnInChunk	inline	crates/horizon-client/src/game/end.rs::Game::resolve_gateway	end stone with two open blocks above it, closest to the origin
+TheEndGatewayBlockEntity.getParticleAmount	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::gateway_faces	the count is the number of gateway faces that render; render_tick passes its length to animate_tick, which draws one particle per face
+TrialSpawnerBlockEntity.createDefaultSpawner	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::default	default cooldown 36000 and range 14; the no-creative player filter is in TrialSpawner::detect
+TrialSpawnerBlockEntity.setEntityId	missing		player: a spawn egg used on a trial spawner does not change the mob it spawns; only spawners take eggs (use_spawn_egg_on_spawner)
+TrialSpawnerBlockEntity.setEntityData	missing		player: an op's spawn egg with entity data does nothing to a trial spawner
+TrialSpawnerBlockEntity.getState	port	crates/horizon-client/src/game/trial_spawner.rs::Game::trial_spawner_block	reads the state and ominous properties of the block
+TrialSpawnerBlockEntity.setState	port	crates/horizon-client/src/game/trial_spawner.rs::Game::set_trial_spawner_state	writes the state property and the ominous flag together
+TrialSpawnerBlockEntity.markUpdated	port	crates/horizon-client/src/game/trial_spawner.rs::Game::mark_block_entity_updated	
+TrialSpawner.removeOminous	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::tick_and_get_next	the cooldown branch clears the ominous flag and emits OminousSet(false); the block write goes through set_trial_spawner_state
+TrialSpawner.shouldMobBeUntracked	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::server_tick	gap: minor: drops mobs that are gone or beyond 47 blocks; no separate alive or dimension check
+TrialSpawner.addBecomeOminousParticles	inline	crates/horizon-client/src/game/trial_visuals.rs::Game::trial_level_event	the 3020 arm draws the 20 trial omen and soul fire flame particles
+TrialSpawner.overrideEntityToSpawn	missing		player: a spawn egg on a trial spawner cannot change its mob; the egg only reaches spawners
+TrialSpawner.FullConfig.overrideEntity	missing		player: same as overrideEntityToSpawn; the trial spawner's mob type cannot be set from an egg
+TrialSpawner.FullConfig.overrideEntityData	missing		player: same as overrideEntityToSpawn; egg entity data never reaches a trial spawner
+TrialSpawnerState.calculatePositionToSpawnSpawner	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::item_spawner_position	
+TrialSpawnerState.calculatePositionAbove	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::item_spawner_position	the clip two to five blocks above the chosen entity and the drop point under it
+TrialSpawnerState.selectEntityToSpawnItemAbove	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::item_spawner_position	picks a mob or a player at random, as vanilla does
+TrialSpawnerState.ParticleEmission.addParticle	inline	crates/horizon-client/src/game/trial_visuals.rs::Game::client_tick_trial_spawner	each state's particle is emitted by this fn; the Game::particle helper sends it
+TrialSpawnerStateData.pack	skip:java		immutable snapshot copy of the data for save and sync; no behaviour of its own
+TrialSpawnerStateData.isReadyToSpawnNextMob	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::tick_and_get_next	the Active spawn branch checks the spawn time and the simultaneous-mob target
+TrialSpawnerStateData.countAdditionalPlayers	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::tick_and_get_next	additional players are detected players minus one, floored at zero
+TrialSpawnerStateData.findPlayerWithOminousEffect	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::try_detect_players	Trial Omen wins, else the last Bad Omen player; folded into the detect step
+TrialSpawnerStateData.resetAfterBecomingOminous	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::apply_ominous	gap: minor: mobs are discarded without Mob.dropPreservedEquipment
+TrialSpawnerStateData.transformBadOmenIntoTrialOmen	port	crates/horizon-client/src/game/trial_spawner.rs::Game::bad_omen_to_trial_omen	Bad Omen level plus one becomes Trial Omen for 18000 ticks per level
+TrialSpawnerStateData.isReadyToOpenShutter	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::tick_and_get_next	WaitingForRewardEjection opens the shutter after the delay and plays its sound
+TrialSpawnerStateData.isReadyToEjectItems	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::tick_and_get_next	EjectingReward ejects on the ejection interval
+TrialSpawnerStateData.getOrCreateDisplayEntity	port	crates/horizon-client/src/game/spawner.rs::Game::update_spawner_display	the shown mob is made again when its type changes; a trial spawner shows one only with a spinning mob
+TrialSpawnerStateData.getDispensingItems	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::spawn_ominous_item_spawner	rolls the loot once and keeps a non-empty roll
+TrialSpawnerStateData.lowResolutionPosition	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::spawn_ominous_item_spawner	the 30 by 20 by 30 cell of the position plus the level seed
+VaultBlockEntity.saveAdditional	port	crates/horizon-client/src/vault.rs::Vault::save	writes config, shared data and server data
+VaultBlockEntity.loadAdditional	port	crates/horizon-client/src/vault.rs::Vault::load	reads server data, config and shared data back
+VaultBlockEntity.getServerData	skip:other		accessor that is null on the client; Horizon keeps one Vault struct holding both halves, so there is no server object to return
+VaultBlockEntity.Client.emitDeactivationParticles	inline	crates/horizon-client/src/game/trial_visuals.rs::Game::trial_level_event	the 3016 arm draws 20 flame particles in the cage and plays the deactivate sound
+VaultBlockEntity.Client.emitIdleParticles	inline	crates/horizon-client/src/game/trial_visuals.rs::Game::client_tick_vault	half the ticks: a smoke and a flame particle inside the cage
+VaultBlockEntity.Client.emitConnectionParticlesForPlayer	inline	crates/horizon-client/src/game/trial_visuals.rs::Game::vault_connection_particles	two to five connection particles aimed from the keyhole at the player
+VaultBlockEntity.Client.emitConnectionParticlesForNearbyPlayers	port	crates/horizon-client/src/game/trial_visuals.rs::Game::vault_connection_particles	gap: player: only the local player gets connection particles; other connected players get none
+VaultBlockEntity.Client.isWithinConnectionRange	inline	crates/horizon-client/src/game/trial_visuals.rs::Game::vault_connection_particles	range check against the connected particles range
+VaultBlockEntity.Client.playIdleSounds	inline	crates/horizon-client/src/game/trial_visuals.rs::Game::client_tick_vault	ambient sound at a two percent chance while a display item shows
+VaultBlockEntity.Client.randomPosCenterOfCage	inline	crates/horizon-client/src/game/trial_visuals.rs::Game::trial_level_event	the 3016 arm draws each axis from 0.4 to 0.6
+VaultBlockEntity.Client.randomPosInsideCage	port	crates/horizon-client/src/game/trial_visuals.rs::cage_point	
+VaultBlockEntity.Client.keyholePos	inline	crates/horizon-client/src/game/trial_visuals.rs::Game::vault_connection_particles	keyhole point: bottom centre, 1.75 up, half a block out of the facing side
+VaultBlockEntity.Server.setVaultState	port	crates/horizon-client/src/game/vault.rs::Game::set_vault_state	writes the vault_state block property; the exit and entry effects run in Vault::on_transition
+VaultBlockEntity.Server.cycleDisplayItemFromLootTable	port	crates/horizon-client/src/vault.rs::Vault::cycle_display_item	
+VaultBlockEntity.Server.getRandomDisplayItemFromLootTable	inline	crates/horizon-client/src/vault.rs::Vault::cycle_display_item	rolls the display table and picks one item at random
+VaultBlockEntity.Server.unlock	inline	crates/horizon-client/src/vault.rs::Vault::try_insert_key	the unlock step sets the ejection list and display item and starts the 14 tick delay
+VaultBlockEntity.Server.resolveItemsToEject	inline	crates/horizon-client/src/vault.rs::Vault::try_insert_key	rolls the vault loot table when a key is inserted
+VaultBlockEntity.Server.isValidToInsert	inline	crates/horizon-client/src/vault.rs::Vault::try_insert_key	the stack must match the key item's components and hold at least its count
+VaultBlockEntity.Server.shouldCycleDisplayItem	inline	crates/horizon-client/src/vault.rs::Vault::server_tick	cycles the display item every 20 ticks while Active
+VaultConfig.validate	port	crates/horizon-client/src/vault.rs::VaultConfig::decode	an activation range above the deactivation range fails the whole config
+VaultServerData.addToRewardedPlayers	inline	crates/horizon-client/src/vault.rs::Vault::try_insert_key	adds the player and keeps at most 128 rewarded players
+VaultServerData.setItemsToEject	inline	crates/horizon-client/src/vault.rs::Vault::try_insert_key	the unlock stores the rolled items as the ejection list
+VaultServerData.getNextItemToEject	inline	crates/horizon-client/src/vault.rs::Vault::try_insert_key	the display item becomes the last item to eject, also after each ejection in tick_and_get_next
+VaultServerData.popNextItemToEject	inline	crates/horizon-client/src/vault.rs::Vault::tick_and_get_next	the ejecting state pops the last item
+VaultSharedData.set	inline	crates/horizon-client/src/vault.rs::Vault::load	the display item, connected players and particles range are read straight into the vault on load
+VaultState.ejectResultItem	inline	crates/horizon-client/src/vault.rs::Vault::tick_and_get_next	the ejecting branch spawns the item upward, sends level event 3017 and plays the eject sound
+TreeGrower.getConfiguredFeature	inline	crates/horizon-world/src/level/growth.rs::Sim::grow_tree	the flower list is used when a flower is near and the list is not empty, then a weighted pick
+TreeGrower.getSurroundingBlockStates	inline	crates/horizon-world/src/level/growth.rs::Sim::two_by_two	reads the four blocks of the two by two square
+TreeGrower.removeSaplings	inline	crates/horizon-world/src/level/growth.rs::Sim::grow_tree	the mega branch clears the four sapling blocks before placing
+TreeGrower.resetSaplings	inline	crates/horizon-world/src/level/growth.rs::Sim::grow_tree	restores the four blocks after a failed placement
+TreeGrower.isTwoByTwoSapling	inline	crates/horizon-world/src/level/growth.rs::Sim::two_by_two	all four blocks must be the sapling's own block
+MovingPistonBlock.destroy	missing		minor: breaking a moving piston does not remove the extended base piston next to it
+MovingPistonBlock.useWithoutItem	missing		minor: a right click on a moving piston with no block entity does not remove it
+MovingPistonBlock.getDrops	missing		minor: a moving piston drops nothing; vanilla drops the drops of the block it carries
+MovingPistonBlock.getBlockEntity	port	crates/horizon-world/src/level/pistons.rs::Sim::moving_piston	
+MovingPistonBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	rotation goes through the table built from block data
+MovingPistonBlock.createBlockStateDefinition	skip:data		state properties come from the block data tables
+PistonBaseBlock.getShape	skip:data		collision and outline shapes come from the block data tables; the moving piston shape is in piston_shape.rs
+PistonBaseBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	the piston arm re-checks extension when the block changes and no moving piston is there
+PistonBaseBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	facing opposite the nearest look direction, not extended
+PistonBaseBlock.getNeighborSignal	port	crates/horizon-world/src/level/pistons.rs::Sim::piston_neighbor_signal	
+PistonBaseBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	rotation goes through the table built from block data
+PistonBaseBlock.createBlockStateDefinition	skip:data		state properties come from the block data tables
+PistonHeadBlock.getShape	skip:data		collision and outline shapes come from the block data tables; the head shape is in piston_shape.rs
+PistonHeadBlock.isFittingBase	port	crates/horizon-world/src/level/pistons.rs::Sim::piston_head_fitting_base	
+PistonHeadBlock.playerWillDestroy	inline	crates/horizon-world/src/level/hooks.rs::Sim::affect_neighbors_after_removal	the base goes on removal whichever way the head leaves; creative only skips the drop, which creative players never get
+PistonHeadBlock.affectNeighborsAfterRemoval	port	crates/horizon-world/src/level/hooks.rs::Sim::affect_neighbors_after_removal	removes the fitting extended base
+PistonHeadBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	the head becomes air when it cannot survive from its facing side
+PistonHeadBlock.canSurvive	port	crates/horizon-world/src/level/pistons.rs::Sim::piston_head_can_survive	
+PistonHeadBlock.neighborChanged	port	crates/horizon-world/src/level/hooks.rs::Sim::neighbor_changed	the head passes the neighbour change to its base while it can survive
+PistonHeadBlock.getCloneItemStack	missing		player: unsure: middle-click on a piston head probably gives no item; the head has no item form and block_items.rs has no piston case
+PistonHeadBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	rotation goes through the table built from block data
+PistonHeadBlock.createBlockStateDefinition	skip:data		state properties come from the block data tables
+PistonMovingBlockEntity.getProgress	port	crates/horizon-world/src/piston_shape.rs::MovingPistonState::interpolated_progress	
+PistonMovingBlockEntity.getYOff	port	crates/horizon-world/src/piston_shape.rs::MovingPistonState::interpolated_offset	the y part of the offset
+PistonMovingBlockEntity.getZOff	port	crates/horizon-world/src/piston_shape.rs::MovingPistonState::interpolated_offset	the z part of the offset
+PistonMovingBlockEntity.moveEntityByPiston	port	crates/horizon-client/src/game/piston_push.rs::Game::move_pushed	moves a body along the push with the piston no-clip rule
+PistonMovingBlockEntity.moveStuckEntities	port	crates/horizon-client/src/game/piston_push.rs::Game::push_for_piston	the honey branch selects sticky passengers after the collided ones
+PistonMovingBlockEntity.loadAdditional	missing		minor: moving piston data is not read from the save; moving pistons are not persisted at all
+PistonMovingBlockEntity.saveAdditional	missing		minor: moving pistons are not written to the save, so a save taken mid-move leaves no entry for the moving_piston block
+PistonMovingBlockEntity.setLevel	skip:data		on load an unknown moved block becomes air; Horizon resolves moved states from the block registry
+PistonStructureResolver.isSticky	port	crates/horizon-world/src/level/pistons.rs::Sim::is_sticky_piston	
+PistonStructureResolver.canStickToEachOther	port	crates/horizon-world/src/level/pistons.rs::Sim::can_stick	
+AmbientDesertBlockSoundsPlayer.columnContainsTriggeringBlock	inline	crates/horizon-client/src/animate_tick.rs::sand_sound_nearby	the column check runs for each of the four sides at eight blocks out
+AmbientLeavesBlockSoundPlayer.of	inline	crates/horizon-client/src/animate_tick.rs::leaves_ambient_sound	the 1 in 300 chance, the poplar log count and the three leaf count are in leaves_ambient_sound
+BlockBehaviour.isPathfindable	port	crates/horizon-client/src/game/natural_spawning.rs::GameLevel::pathfindable_land	gap: minor: only the LAND type; WATER is read as a fluid state in dolphin.rs and AIR is not used
+BlockBehaviour.showAsInteractableInSpectatorMode	port	crates/horizon-client/src/game/hand.rs::Game::spectator_crosshair	the block branch lists the menu blocks and portals; a chest with a redstone block on top is not interactable
+BlockBehaviour.canBeReplaced	port	crates/horizon-world/src/level/place.rs::Sim::can_be_replaced	default case: replaceable, and not the same item as the one in hand
+BlockBehaviour.getDrops	port	crates/horizon-items/src/items.rs::Items::block_drops	the block's loot table for a player break
+BlockBehaviour.getLightDampening	skip:data		the dampening value is read from the block data table (level/data.rs)
+BlockBehaviour.propagatesSkylightDown	skip:data		the skylight_down flag is read from the block data table (level/data.rs)
+BlockBehaviour.BlockStateBase.<init>	skip:java		precomputed state cache; Horizon keeps these values in its block tables
+BlockBehaviour.BlockStateBase.hasLargeCollisionShape	skip:data		flag read from the block collision data table (block_collision_scan.rs)
+BlockBehaviour.BlockStateBase.Cache.<init>	skip:java		state cache built at load; Horizon's level data cache holds these fields
+BlockBehaviour.Properties.<init>	skip:java		block definition builder; Horizon reads block values from the data tables
+BlockBehaviour.Properties.ofFullCopy	skip:java		builder copy; values come from block data
+BlockBehaviour.Properties.ofLegacyCopy	skip:java		builder copy; values come from block data
+BlockBehaviour.Properties.mapColor	skip:java		builder setter; values come from block data
+BlockBehaviour.Properties.strength	skip:java		builder setter; values come from block data
+BlockBehaviour.Properties.offsetType	skip:java		builder setter; values come from block data
+StateHolder.findNextInCollection	missing		minor: cycling a block property to its next value (the debug stick's cycle) is not in Horizon
+StateHolder.toString	skip:debug		string form of a state for logs and debug output
+StateHolder.valueIndex	skip:java		index lookup over a fixed array; Horizon keeps properties in a name-keyed map
+StateHolder.getNullableValue	port	crates/horizon-world/src/worldgen/structure/legacy.rs::PieceContext::property	returns None for a missing property
+StateHolder.getValue	port	crates/horizon-world/src/worldgen/structure/legacy.rs::PieceContext::property	gap: minor: a missing property yields None instead of an exception
+StateHolder.setValueInternal	port	crates/horizon-world/src/registry.rs::BlockRegistry::resolve	properties set by name are resolved to a state id; a value not allowed fails
+StateHolder.initializeNeighbors	skip:java		neighbour table built once in Java; Horizon resolves states by key (registry.rs state_key)
+StateHolder.getValues	skip:java		stream over the state's property values; Horizon iterates the name-keyed map
+StateHolder.codec	port	crates/horizon-client/src/game/persist.rs::Game::state_from_nbt	gap: minor: decodes Name and Properties; the write side is in the NBT writers

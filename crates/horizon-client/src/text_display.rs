@@ -154,6 +154,100 @@ impl TextDisplayData {
     }
 }
 
+/// `TextDisplay.CachedInfo`: each line and its width, and the widest.
+pub struct Lines {
+    pub lines: Vec<(Text, f32)>,
+    pub width: f32,
+}
+
+impl Lines {
+    /// `TextDisplayRenderer.splitLines`: Font.split, no indent on wrapped lines.
+    pub fn split(font: &crate::font::Font, text: &Text, line_width: i32) -> Self {
+        let lines: Vec<_> = font
+            .split_formatted(text, line_width as f32)
+            .into_iter()
+            .map(|line| {
+                let width = font.width_text(&line).ceil();
+                (line, width)
+            })
+            .collect();
+        let width = lines.iter().map(|l| l.1).fold(0.0, f32::max);
+        Self { lines, width }
+    }
+    /// Ten units a line, less the spacing under the last.
+    pub fn height(&self) -> f32 {
+        self.lines.len() as f32 * 10.0 - 1.0
+    }
+    /// `submitInner`'s pose for the text, after the display's own: half a
+    /// turn about y, the mirrored 0.025 scale and `translate(1 - width / 2,
+    /// -height, 0)`.
+    pub fn pose(&self) -> glam::Mat4 {
+        glam::Mat4::from_rotation_y(std::f32::consts::PI)
+            * glam::Mat4::from_scale(glam::Vec3::splat(-0.025))
+            * glam::Mat4::from_translation(glam::Vec3::new(
+                1.0 - self.width / 2.0,
+                -self.height(),
+                0.0,
+            ))
+    }
+}
+
+/// `TextDisplayRenderer.submitInner` after its `translate(1 - width / 2,
+/// -height, 0)`: the background and each line, in text units, each quad's
+/// `depth` its z (the background 0.01 behind, `Font.prepareBackground`).
+/// `default_background` is `Options.getBackgroundOpacity(0.25)` as a colour.
+pub fn draw(
+    batch: &mut crate::hud::HudBatch,
+    atlas: &crate::hud::HudAtlas,
+    d: &TextDisplayData,
+    lines: &Lines,
+    default_background: u32,
+) {
+    use crate::hud::rgba;
+    let (width, height) = (lines.width, lines.height());
+    let bg = if d.flags & 4 != 0 {
+        default_background
+    } else {
+        d.background as u32
+    };
+    if bg != 0 {
+        let start = batch.vertices.len();
+        batch.fill(
+            atlas,
+            // submitTextBackground(-1, -1, width, height): corners, not a size.
+            -1.0,
+            -1.0,
+            width + 1.0,
+            height + 1.0,
+            rgba(
+                (bg >> 16) as u8,
+                (bg >> 8) as u8,
+                bg as u8,
+                (bg >> 24) as u8,
+            ),
+        );
+        for v in &mut batch.vertices[start..] {
+            v.depth = -0.01;
+        }
+    }
+    let align = d.align();
+    for (i, (line, line_width)) in lines.lines.iter().enumerate() {
+        let x = match align {
+            Align::Left => 0.0,
+            Align::Right => width - line_width,
+            Align::Center => width / 2.0 - line_width / 2.0,
+        };
+        batch.text_styled_world(
+            atlas,
+            line,
+            x,
+            i as f32 * 10.0,
+            rgba(255, 255, 255, d.opacity as u8),
+            d.flags & 1 != 0,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -5,7 +5,7 @@
 //! attack (blocking, armour, knockback), when the `pvp` game rule allows it
 //! (`ServerPlayer.canHarmPlayer`, `isPvpAllowed`). A player's arrow on
 //! another player lands the same way.
-use super::{Game, lan::LanHost, lan_mobs::guest_bounds, ray_box, view_vector};
+use super::{Game, lan::LanHost, lan_mobs::guest_bounds, mace::Spared, ray_box};
 
 use horizon_client::{
     Result,
@@ -50,8 +50,6 @@ pub(super) struct Strike {
     knockback_attack: bool,
     /// The attacker's team, for the victim's `Player.canHarmPlayer`.
     team: Option<horizon_client::scoreboard::Team>,
-    /// The sweep's damage to the players around the victim.
-    sweep_hit: Option<Sweep>,
 }
 
 /// A sweep attack's reach to the other players (`Player.doSweepAttack`),
@@ -68,8 +66,8 @@ pub(super) struct Sweep {
     team: Option<horizon_client::scoreboard::Team>,
     /// The target's box grown by (1, 0.25, 1).
     pub(super) hit_box: Aabb,
-    /// The player the sweep started from, which it spares.
-    skip: Option<Victim>,
+    /// The entity id of the player the sweep started from, which it spares.
+    pub(super) skip: Option<i32>,
 }
 
 impl Strike {
@@ -84,8 +82,7 @@ impl Game<'_> {
     /// The guest on the host's crosshair and how far, within reach.
     pub(super) fn guest_hit(&self) -> Option<(u32, f64)> {
         let host = self.lan.as_ref()?;
-        let eye = self.eye_position()?;
-        let dir = view_vector(self.yaw, self.pitch);
+        let (eye, dir) = self.aim()?;
         let reach = if self.creative { 5.0 } else { 3.0 };
         host.hub
             .guests
@@ -146,12 +143,8 @@ impl Game<'_> {
     pub(super) fn pvp_strike(&mut self) -> Option<Strike> {
         let p = self.player.as_ref()?;
         let from = [p.position.x, p.position.y, p.position.z];
-        let (amount, scale, crit, magic) = self.melee_damage("minecraft:player");
+        let (amount, scale, crit, magic) = self.melee_damage("minecraft:player", true);
         let sweep = self.sweep_attack_position(scale, crit);
-        let sweep_hit = sweep.map(|_| {
-            let base = self.sweep_base_damage(scale);
-            self.player_sweep(base, scale)
-        });
         let (strength, knockback_attack) = self.extra_knockback("minecraft:player", scale);
         let (xd, zd) = self.extra_knockback_direction();
         self.attack_ticks = 0;
@@ -176,7 +169,6 @@ impl Game<'_> {
             knockback: (strength, xd, zd),
             knockback_attack,
             team: self.player_team().cloned(),
-            sweep_hit,
         })
     }
 
@@ -369,21 +361,29 @@ impl Game<'_> {
             (true, false, false) => "minecraft:entity.player.attack.weak",
         };
         if let Some(at) = s.sweep.filter(|_| hurt) {
-            self.sweep_attack(at, Some(s.from));
-            // The other players next to the victim (Player.doSweepAttack).
-            let bounds = match victim {
-                Victim::Host => self.player.as_ref().map(|p| p.bounds()),
-                Victim::Guest(conn) => host.hub.guest(conn).map(guest_bounds),
+            // The sweep around the player that was hit, as its attacker.
+            let (area, id) = match victim {
+                Victim::Host => (self.player.as_ref().map(|p| p.bounds()), host.host_entity),
+                Victim::Guest(conn) => {
+                    let g = host.hub.guest(conn);
+                    (g.map(guest_bounds), g.map_or(-1, |g| g.entity_id))
+                }
             };
-            if let (Some(sweep), Some(bounds)) = (&s.sweep_hit, bounds) {
-                self.sweep_players(
-                    host,
-                    &Sweep {
-                        hit_box: bounds.inflate(Vec3::new(1.0, 0.25, 1.0)),
-                        skip: Some(victim),
-                        ..sweep.clone()
-                    },
-                );
+            let target = area.map(|area| (area, Spared::Player(id)));
+            match s.attacker {
+                None => {
+                    // The host is checked out here: collect the sweep for the players.
+                    self.combat.sweeps = Some(Vec::new());
+                    self.sweep_attack(at, Some(s.from), target, s.scale);
+                    for sweep in self.combat.sweeps.take().unwrap_or_default() {
+                        self.sweep_players(host, &sweep);
+                    }
+                }
+                Some(conn) => {
+                    self.as_guest(host, conn, |g| {
+                        g.sweep_attack(at, Some(s.from), target, s.scale)
+                    });
+                }
             }
         } else {
             self.audio.play(sound, Some(s.from), 1.0, 1.0);
@@ -400,7 +400,7 @@ impl Game<'_> {
             .player
             .as_ref()
             .map_or([0.0; 3], |p| [p.position.x, p.position.y, p.position.z]);
-        let damage = (base + self.enchant_damage_bonus("minecraft:player")) * scale;
+        let damage = self.enchanted_damage("minecraft:player", base) * scale;
         Sweep {
             attacker: self.lan_acting,
             from,
@@ -416,7 +416,9 @@ impl Game<'_> {
     /// turn the host holds the other players (`as_guest`), so it waits for
     /// the turn to end.
     pub(super) fn sweep_other_players(&mut self, sweep: Sweep) {
-        if self.lan_acting.is_some() {
+        if let Some(collect) = self.combat.sweeps.as_mut() {
+            collect.push(sweep);
+        } else if self.lan_acting.is_some() {
             self.creatures.sweeps.push(sweep);
         } else if let Some(mut host) = self.lan.take() {
             self.sweep_players(&mut host, &sweep);
@@ -446,7 +448,7 @@ impl Game<'_> {
             && p.bounds().intersects(sweep.hit_box)
             && p.position.distance_squared(from) < 9.0
         {
-            victims.push((Victim::Host, self.player_team().cloned()));
+            victims.push((Victim::Host, host.host_entity, self.player_team().cloned()));
         }
         for g in &host.hub.guests {
             if host.hub.here(g)
@@ -459,7 +461,7 @@ impl Game<'_> {
                     < 9.0
             {
                 let team = self.score.board.players_team(&g.name).cloned();
-                victims.push((Victim::Guest(g.conn), team));
+                victims.push((Victim::Guest(g.conn), g.entity_id, team));
             }
         }
         let (xd, zd) = sweep.knockback;
@@ -469,8 +471,8 @@ impl Game<'_> {
                 g.knock_back_player(0.4, xd, zd);
             }
         };
-        for (victim, team) in victims {
-            if sweep.skip == Some(victim)
+        for (victim, id, team) in victims {
+            if sweep.skip == Some(id)
                 || horizon_client::scoreboard::teams_allied(team.as_ref(), sweep.team.as_ref())
                 || !self.ui.rules.bool("pvp")
             {

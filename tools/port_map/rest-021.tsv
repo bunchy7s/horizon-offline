@@ -1,0 +1,135 @@
+BinaryAnimator.tick	port	crates/horizon-client/src/mobs/axolotl.rs::Animation::tick	one axolotl Animation holds the four animators; old/value pair and the clamp to 10 as vanilla
+BinaryAnimator.getFactor	port	crates/horizon-client/src/mobs/axolotl.rs::Animation::factor	lerp of old and value over 10, then the IN_OUT_SINE curve as vanilla
+BlockUtil.packDifferenceInPositionInternal	port	crates/horizon-client/src/mobs/shulker.rs::pack_diff	gap: minor: radius fixed at 8 on each axis; the dragon egg packs (16, 8, 16) inline in crates/horizon-world/src/level/interact.rs::Sim::dragon_egg_teleport
+BlockUtil.checkDifferenceInBounds	skip:other		range guard inside packDifferenceInPosition; radii of 8 and 16 cannot exceed 127
+ByIdMap.createMap	skip:java		id-to-value lookup table; Horizon enums match their own ids
+ByIdMap.sparse	skip:java		id-to-value lookup table; Horizon enums match their own ids
+ByIdMap.createSortedArray	skip:java		id-to-value lookup table; Horizon enums match their own ids
+ByIdMap.continuous	skip:java		id-to-value lookup table; Horizon enums match their own ids
+ClassInstanceMultiMap.add	skip:java		typed collection helper for entity sections; Horizon uses its own containers
+ClassInstanceMultiMap.remove	skip:java		typed collection helper for entity sections; Horizon uses its own containers
+ClassInstanceMultiMap.find	skip:java		typed collection helper for entity sections; Horizon uses its own containers
+ClassInstanceMultiMap.iterator	skip:java		typed collection helper for entity sections; Horizon uses its own containers
+ClassTreeIdRegistry.getLastIdFor	skip:java		synched entity data slot allocator by class; Horizon does not allocate slots this way
+ClassTreeIdRegistry.define	skip:java		synched entity data slot allocator by class; Horizon does not allocate slots this way
+CommonLinks.extendRealms	skip:service		Realms upgrade link
+CompilableString.codec	skip:java		codec
+CompilableString.equals	skip:java		value equality on the source string
+CompilableString.CommandParserHelper.apply	missing		player: a selector, score or NBT text component is not compiled (Horizon has no SelectorContents), so this parse and its trailing-data error are missing
+CrudeIncrementalIntIdentityHashBiMap.byId	skip:java		identity bimap over registry ids; Horizon uses its own id tables
+CrudeIncrementalIntIdentityHashBiMap.contains	skip:java		identity bimap over registry ids; Horizon uses its own id tables
+CrudeIncrementalIntIdentityHashBiMap.nextId	skip:java		identity bimap over registry ids; Horizon uses its own id tables
+CrudeIncrementalIntIdentityHashBiMap.grow	skip:java		identity bimap over registry ids; Horizon uses its own id tables
+CrudeIncrementalIntIdentityHashBiMap.addMapping	skip:java		identity bimap over registry ids; Horizon uses its own id tables
+CrudeIncrementalIntIdentityHashBiMap.indexOf	skip:java		identity bimap over registry ids; Horizon uses its own id tables
+CrudeIncrementalIntIdentityHashBiMap.findEmpty	skip:java		identity bimap over registry ids; Horizon uses its own id tables
+CrudeIncrementalIntIdentityHashBiMap.clear	skip:java		identity bimap over registry ids; Horizon uses its own id tables
+CrudeIncrementalIntIdentityHashBiMap.copy	skip:java		identity bimap over registry ids; Horizon uses its own id tables
+Crypt.generateKeyPair	port	crates/horizon-protocol/src/rsa.rs::RsaPrivateKey::generate	RSA key pair with the bit size passed in; vanilla passes 1024
+Crypt.digestData	port	crates/horizon-protocol/src/crypto.rs::server_hash	returns the signed hex string; vanilla returns bytes and the caller converts them
+Crypt.rsaStringToKey	missing		minor: PEM reader for the account chat key pair (AccountProfileKeyPairManager); Horizon has no PEM reader
+Crypt.rsaPublicKeyToString	missing		minor: PEM writer for the account chat public key; Horizon has no PEM writer
+Crypt.pemRsaPrivateKeyToString	missing		minor: PEM writer for the account chat private key; Horizon has no PEM writer
+Crypt.byteToPrivateKey	missing		minor: PKCS#8 private key reader for the account chat key pair; Horizon has none
+Crypt.byteToPublicKey	port	crates/horizon-protocol/src/rsa.rs::RsaPublicKey::from_der	X.509 SubjectPublicKeyInfo decode
+Crypt.decryptByteToSecretKey	port	crates/horizon-protocol/src/rsa.rs::RsaPrivateKey::decrypt	RSA PKCS#1 v1.5 decrypt of the shared secret; the bytes are used as the AES key as given
+Crypt.cipherData	port	crates/horizon-protocol/src/rsa.rs::RsaPublicKey::encrypt	the encrypt half (opMode 1); the decrypt half is RsaPrivateKey::decrypt
+Crypt.getCipher	port	crates/horizon-protocol/src/crypto.rs::Cfb8::new	AES CFB8 with the shared secret as both key and IV
+Crypt.SaltSignaturePair.write	skip:other		no caller in the 26.3 source; the salt and signature are packet fields
+CsvOutput.writeRow	skip:debug		CSV dumps for chunk, entity and metrics output
+CsvOutput.writeLine	skip:debug		CSV dumps for chunk, entity and metrics output
+CubicSpline.asSampler	port	crates/horizon-core/src/density/spline.rs::SplineSampler::new	compiles the spline into a sampler over its coordinates
+CubicSpline.codec	skip:java		codec
+CubicSpline.builder	skip:java		builder entry point
+CubicSpline.Builder.addPoint	skip:java		builder; the point goes into the point list
+CubicSpline.Builder.build	port	crates/horizon-core/src/density/spline.rs::CubicSpline::multipoint	empty input is the error (EmptyPoints); otherwise the same point list
+CubicSpline.Constant.parityString	skip:debug		parity debug string
+CubicSpline.Multipoint.range	port	crates/horizon-core/src/density/spline.rs::CubicSpline::try_range	range analysis; the one-argument range is CubicSpline::range
+CubicSpline.Multipoint.linearExtend	inline	crates/horizon-core/src/density/spline.rs::CubicSpline::try_range	the extend closure used at both ends
+CubicSpline.Multipoint.validateSizes	port	crates/horizon-core/src/density/spline.rs::CubicSpline::multipoint	gap: minor: equal lengths hold by construction; the empty check is EmptyPoints
+CubicSpline.Multipoint.findIntervalStart	inline	crates/horizon-core/src/density/spline.rs::CubicSpline::sample	the binary search for the first location greater than the input
+CubicSpline.Multipoint.parityString	skip:debug		parity debug string
+CubicSpline.Multipoint.forEachCoordinate	port	crates/horizon-core/src/density/spline.rs::CubicSpline::coordinates_mut	visits the node coordinate and every child coordinate
+CubicSpline.Multipoint.equals	skip:java		value equality
+CubicSpline.Multipoint.hashCode	skip:java		hashing
+CubicSpline.Multipoint.codec	skip:java		codec
+CubicSpline.Multipoint.packToPoints	skip:java		codec helper: nodes to a point list
+CubicSpline.Multipoint.createFromPoints	skip:java		codec helper: point list to nodes
+CubicSpline.Multipoint.Point.codec	skip:java		codec
+DelegateDataOutput.write	skip:java		stream delegate
+DependencySorter.visitDependenciesAndElement	port	crates/horizon-world/src/worldgen/tags.rs::visit	depth-first walk that emits dependencies before the element
+DependencySorter.isCyclic	port	crates/horizon-world/src/worldgen/tags.rs::reaches	reach test used to refuse a cyclic edge
+DependencySorter.addDependencyIfNotCyclic	inline	crates/horizon-world/src/worldgen/tags.rs::TagDefinitions::build	adds the edge only when reaches is false
+DependencySorter.orderByDependencies	inline	crates/horizon-world/src/worldgen/tags.rs::TagDefinitions::build	required edges first, then optional ones, then the visit order
+DirectoryLock.create	port	crates/horizon-client/src/save.rs::SessionLock::acquire	exclusive file lock on session.lock with the two-byte snowman content
+DirectoryLock.isLocked	missing		player: a world another copy has open is listed as an ordinary world; vanilla flags it as locked in the list (LevelStorageSource.loadLevelSummaries), Horizon has no such check in title.rs list_worlds
+Ease.inBack	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
+Ease.inElastic	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
+Ease.inExpo	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
+Ease.inOutBounce	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
+Ease.inOutCirc	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
+Ease.inOutQuad	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
+Ease.inOutQuart	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
+Ease.inOutQuint	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
+Ease.outBounce	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
+Ease.outElastic	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
+Ease.outExpo	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
+EasingType.cubicBezier	inline	crates/horizon-client/src/environment.rs::Environment::load_dimension	reads the four control points of a cubic_bezier ease; gap: minor: no range check, see CubicBezierControls.validate
+EasingType.CubicBezier.curveFromControls	inline	crates/horizon-client/src/environment.rs::Easing::apply	the curve coefficients closure
+EasingType.CubicBezier.solveT	inline	crates/horizon-client/src/environment.rs::Easing::apply	Newton steps with the 1e-5 tolerance
+EasingType.CubicBezier.solveTBisect	inline	crates/horizon-client/src/environment.rs::Easing::apply	bisection fallback when Newton does not converge
+EasingType.CubicBezier.equals	skip:java		value equality
+EasingType.CubicBezier.toString	skip:debug		debug string
+EasingType.CubicBezier.CubicCurve.sample	inline	crates/horizon-client/src/environment.rs::Easing::apply	the sample closure
+EasingType.CubicBezier.CubicCurve.sampleGradient	inline	crates/horizon-client/src/environment.rs::Easing::apply	the gradient closure
+EasingType.CubicBezierControls.validate	missing		minor: vanilla rejects control points outside [0;1] when a timeline loads; Horizon takes any value
+EncoderCache.Key.equals	skip:java		cache key equality
+EncoderCache.Key.hashCode	skip:java		cache key hashing
+ExceptionCollector.add	skip:java		suppressed exception collector
+ExtraCodecs.converter	skip:java		codec or codec validator
+ExtraCodecs.hexColor	skip:java		codec or codec validator
+ExtraCodecs.intervalCodec	skip:java		codec or codec validator
+ExtraCodecs.idResolverCodec	skip:java		codec or codec validator
+ExtraCodecs.orCompressed	skip:java		codec or codec validator
+ExtraCodecs.overrideLifecycle	skip:java		codec or codec validator
+ExtraCodecs.compactListCodec	skip:java		codec or codec validator
+ExtraCodecs.intRangeWithMessage	skip:java		codec or codec validator
+ExtraCodecs.intRange	skip:java		codec or codec validator
+ExtraCodecs.longRangeWithMessage	skip:java		codec or codec validator
+ExtraCodecs.longRange	skip:java		codec or codec validator
+ExtraCodecs.floatRangeMinInclusiveWithMessage	skip:java		codec or codec validator
+ExtraCodecs.floatRangeMinExclusiveWithMessage	skip:java		codec or codec validator
+ExtraCodecs.floatRange	skip:java		codec or codec validator
+ExtraCodecs.nonEmptyHolderSet	skip:java		codec or codec validator
+ExtraCodecs.nonEmptyMap	skip:java		codec or codec validator
+ExtraCodecs.temporalCodec	skip:java		codec or codec validator
+ExtraCodecs.gameProfileCodec	skip:java		codec or codec validator
+ExtraCodecs.sizeLimitedMap	skip:java		codec or codec validator
+ExtraCodecs.legacyEnum	skip:java		codec or codec validator
+ExtraCodecs.relativeNormalizedSubPathCodec	skip:data		path codec for data paths; Horizon reads its data from tables and files
+ExtraCodecs.guardedPathCodec	skip:data		path codec for data paths; Horizon reads its data from tables and files
+ExtraCodecs.optionalAlwaysPresentFieldOf	skip:java		codec or codec validator
+ExtraCodecs.LateBoundIdMapper.codec	skip:java		codec
+ExtraCodecs.LateBoundIdMapper.put	skip:java		builder-style registration into a map
+ExtraCodecs.TagOrElementLocation.decoratedId	skip:java		string for codec error messages
+FastBufferedInputStream.read	skip:java		buffered stream helper; Rust readers do their own buffering
+FastBufferedInputStream.skip	skip:java		buffered stream helper; Rust readers do their own buffering
+FastBufferedInputStream.fill	skip:java		buffered stream helper; Rust readers do their own buffering
+FileSystemUtil.safeGetPath	skip:other		opens a jar or zip filesystem for a URI; Horizon reads archives with the zip crate
+FileUtil.sanitizeName	port	crates/horizon-client/src/title.rs::Title::target_folder	gap: minor: replaces every non-alphanumeric character with _; vanilla only replaces illegal file characters, dots, slashes and quotes
+FileUtil.isPathPortable	skip:other		portable path check; no caller in the 26.3 source
+FileUtil.decomposePath	skip:data		resource path handling; Horizon reads its data from tables and files
+FileUtil.resolvePath	skip:data		resource path handling; Horizon reads its data from tables and files
+FileUtil.isValidPathSegment	skip:data		resource path handling; Horizon reads its data from tables and files
+FileUtil.validatePath	skip:data		resource path handling; Horizon reads its data from tables and files
+FileUtil.createDirectoriesSafe	skip:other		directory creation; save.rs uses create_dir_all
+FileUtil.isEmptyPath	skip:data		resource path handling; Horizon reads its data from tables and files
+FileZipper.add	skip:debug		profiling report archive (Minecraft.archiveProfilingReport, PerfCommand); Horizon writes no zip report
+FileZipper.close	skip:debug		profiling report archive (Minecraft.archiveProfilingReport, PerfCommand); Horizon writes no zip report
+FormattedCharSequence.forward	port	crates/horizon-client-core/src/text.rs::Text::styled	styled text object; the per-character walk is Text::chars
+FormattedCharSequence.backward	skip:other		two-argument reverse walk; no caller in the 26.3 source (SubStringSource uses the three-argument form)
+FormattedCharSequence.decorateOutput	missing		minor: char-code modifier for reversed text, used only for right-to-left languages; Horizon has no right-to-left layout
+FormattedCharSequence.composite	port	crates/horizon-client-core/src/text.rs::Text::empty	zero parts give the empty sequence
+FormattedCharSequence.fromPair	port	crates/horizon-client-core/src/text.rs::Text::append	concatenation of two sequences
+FutureChain.append	skip:other		ordering helper for the async chat-signature checks in ServerGamePacketListenerImpl; a scheduling wrapper, no game behaviour of its own
+Graph.depthFirstSearch	inline	crates/horizon-world/src/worldgen/feature_sort.rs::build_features_per_step	iterative DFS with colours; finds the cycle and emits the reverse topological order

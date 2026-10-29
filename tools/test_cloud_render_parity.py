@@ -28,7 +28,7 @@ def make_input(build):
 def main():
     harness.differential("cloud-render-parity", "VanillaCloudRenderOracle", "cloud_fixture", make_input,
                          "Fancy cloud face culling, interior winding flags and mesh traversal; not full framebuffer parity.",
-                         sources=[lab.ROOT / "crates/horizon-client/src/clouds.rs"])
+                         sources=[lab.ROOT / "crates/horizon-client-render/src/clouds.rs"])
 
 
 if __name__ == "__main__":

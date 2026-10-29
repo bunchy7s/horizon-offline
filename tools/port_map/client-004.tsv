@@ -1,0 +1,149 @@
+DolphinRenderer.extractRenderState	port	crates/horizon-client/src/game/mob_blocks.rs::Game::held_item_geometry	gap: minor: isMoving (dolphin motion flag) is not read
+DragonFireballRenderer.submit	port	crates/horizon-client/src/game/dragon.rs::Game::dragon_fireball_geometry	
+DragonFireballRenderer.buildQuad	inline	crates/horizon-client/src/game/dragon.rs::Game::dragon_fireball_geometry	quad built inline
+DragonFireballRenderer.vertex	inline	crates/horizon-client/src/game/dragon.rs::Game::dragon_fireball_geometry	vertex built inline
+EndCrystalRenderer.submit	port	crates/horizon-client/src/game/end.rs::Game::end_crystal_geometry	model at scale 2 and the beam to the target
+EndCrystalRenderer.extractRenderState	inline	crates/horizon-client/src/game/end.rs::Game::end_crystal_geometry	age, show-bottom and beam target read from the crystal there
+EndCrystalRenderer.shouldRender	inline	crates/horizon-client/src/game/end.rs::Game::end_crystal_geometry	gap: minor: no frustum test; crystals within 256 blocks always draw, beam included
+EnderDragonRenderer.submit	port	crates/horizon-client/src/game/dragon.rs::Game::dragon_geometry	
+EnderDragonRenderer.submitRays	port	crates/horizon-client/src/game/dragon.rs::Game::dragon_rays	
+EnderDragonRenderer.submitCrystalBeams	port	crates/horizon-client/src/game/dragon.rs::Game::crystal_beam	
+EnderDragonRenderer.extractRenderState	inline	crates/horizon-client/src/game/dragon.rs::Game::dragon_geometry	flap, death fade, hurt overlay, nearest-crystal beam and egg distance read there
+EndermanRenderer.getRenderOffset	missing		player: an angry enderman does not jitter sideways (vanilla random offset each frame); no such offset in the mob draw path
+EndermanRenderer.extractRenderState	inline	crates/horizon-client/src/mobs/enderman.rs::anim	gap: minor: carried block is drawn by game/mob_blocks.rs, not from this pose
+EntityRenderDispatcher.getRenderer	skip:other		renderer lookup; Horizon dispatches by mob kind in game.rs::Game::entity_geometry and game/creatures.rs::Game::mob_geometry
+EntityRenderDispatcher.getAvatarRenderer	port	crates/horizon-client/src/mobs/render.rs::body	slim or wide arm model by skin
+EntityRenderDispatcher.shouldRender	skip:other		frustum culling only; Horizon culls with its own entity culler
+EntityRenderDispatcher.extractEntity	skip:other		render-state wrapper with a crash report; Horizon has no separate extraction stage
+EntityRenderDispatcher.fillRendererDetails	skip:debug		crash report detail
+EntityRenderDispatcher.onResourceManagerReload	skip:data		renderer rebuild on resource reload; Horizon loads its assets from files
+EntityRenderer.getBlockLightLevel	port	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	burning mobs drawn at full light (game/creatures.rs::Game::mob_geometry); other entities use world light
+EntityRenderer.submit	inline	crates/horizon-client/src/game.rs::Game::entity_geometry	leash ropes and name tags drawn in their own passes from there
+EntityRenderer.shouldShowName	port	crates/horizon-client/src/game/names.rs::Game::name_tags	named mob under the crosshair
+EntityRenderer.submitNameDisplay	port	crates/horizon-client/src/game/names.rs::Game::name_tag_geometry	
+EntityRenderer.createRenderState	skip:java		allocates the render-state object
+EntityRenderer.extractRenderState	inline	crates/horizon-client/src/game.rs::Game::entity_geometry	positions, invisibility, leash state, outline colour and light read there
+EntityRenderer.finalizeRenderState	inline	crates/horizon-client/src/game.rs::Game::entity_geometry	shadow pass after the entities
+EntityRenderer.extractShadowPiece	port	crates/horizon-client/src/shadows.rs::shadow	block-top shadow pieces with fall-off
+EntityRenderer.getServerSideEntity	skip:other		no callers in vanilla (dead code)
+EntityRenderers.createEntityRenderers	skip:data		renderer registration table
+EntityRenderers.createAvatarRenderers	skip:data		renderer registration table
+EntityRenderers.validateRegistrations	skip:debug		startup check that every type has a renderer
+EvokerFangsRenderer.submit	port	crates/horizon-client/src/game/fangs.rs::Game::fangs_geometry	bite progress and facing
+EvokerFangsRenderer.extractRenderState	inline	crates/horizon-client/src/game/fangs.rs::Game::fangs_geometry	yaw and bite progress read there
+ExperienceOrbRenderer.submit	inline	crates/horizon-client/src/game.rs::Game::entity_geometry	orb billboards with the pulsing colour, in the entity pass
+ExperienceOrbRenderer.vertex	inline	crates/horizon-client/src/game.rs::Game::entity_geometry	vertex built inline
+FallingBlockRenderer.shouldRender	missing		minor: a falling block inside an identical block (vanilla hides it that tick) is still drawn; no such check in game.rs or falling_block.rs
+FallingBlockRenderer.submit	inline	crates/horizon-client/src/game.rs::Game::entity_geometry	falling block pass with its baked block model
+FallingBlockRenderer.extractRenderState	inline	crates/horizon-client/src/game.rs::Game::entity_geometry	position, state, biome tint and light read there
+FireworkEntityRenderer.extractRenderState	port	crates/horizon-client/src/game/fireworks.rs::Game::rocket_geometry	angled rocket keeps its direction
+FishingHookRenderer.shouldRender	inline	crates/horizon-client/src/game/fishing.rs::Game::fishing_geometry	hook drawn only with an owner
+FishingHookRenderer.submit	port	crates/horizon-client/src/game/fishing.rs::Game::fishing_geometry	hook quad and line
+FishingHookRenderer.vertex	inline	crates/horizon-client/src/game/fishing.rs::Game::fishing_geometry	hook quad vertex
+FishingHookRenderer.stringVertex	inline	crates/horizon-client/src/game/fishing.rs::Game::fishing_line	line strip vertices
+FishingHookRenderer.extractRenderState	port	crates/horizon-client/src/game/fishing.rs::Game::rod_hand_position	line origin from the rod hand
+FoxRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::fox	crouch, sleep, sit, faceplant, pounce and head roll
+FrogRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::frog	jump, croak, tongue and swim animations; climate texture in mobs/render.rs::body
+GiantMobRenderer.extractRenderState	port	crates/horizon-client/src/mobs/anim.rs::humanoid	gap: minor: giant model comes from the species table (giant#main), not a separate renderer
+GlowSquidRenderer.getBlockLightLevel	port	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	gap: player: glow squid dark-tick light is not read, so its body never brightens in the dark
+GoatRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::goat	horns and ramming head pitch
+GuardianRenderer.shouldRender	skip:other		frustum culling of the beam only; the guardian body is culled by the entity culler
+GuardianRenderer.getPosition	inline	crates/horizon-client/src/mobs/guardian.rs::beam_geometry	target and eye positions
+GuardianRenderer.submit	port	crates/horizon-client/src/mobs/guardian.rs::beam_geometry	beam to the attack target
+GuardianRenderer.vertex	inline	crates/horizon-client/src/mobs/guardian.rs::beam_geometry	vertex built inline
+GuardianRenderer.extractRenderState	port	crates/horizon-client/src/mobs/guardian.rs::beam	beam attack scale and time
+HappyGhastRenderer.getBoundingBoxForCulling	skip:other		culling box only
+HappyGhastRenderer.extractRenderState	port	crates/horizon-client/src/mobs/happy_ghast.rs::wearing_harness	gap: player: the body item (harness) is not drawn on the ghast; only the harnessed state is read
+HoglinRenderer.isShaking	port	crates/horizon-client/src/mobs/render.rs::shaking	converting hoglin shakes
+HorseRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::body	variant and baby texture
+HorseRenderer.extractRenderState	port	crates/horizon-client/src/mobs/equine.rs::markings	variant, markings and armour layer
+HumanoidMobRenderer.getArmPose	port	crates/horizon-client/src/mobs/anim.rs::pose_arm	spear and empty arm poses
+HumanoidMobRenderer.usesSpearPose	inline	crates/horizon-client/src/mobs/anim.rs::pose_arm	spear pose check folded into the arm pose
+HumanoidMobRenderer.extractRenderState	port	crates/horizon-client/src/mobs/anim.rs::humanoid	arm poses for both arms
+HumanoidMobRenderer.extractHumanoidRenderState	port	crates/horizon-client/src/mobs/anim.rs::humanoid	crouch, swim, use-item hand, elytra and armour state
+HumanoidMobRenderer.getEquipmentIfRenderable	port	crates/horizon-client/src/mobs/render.rs::humanoid_armor	armour slot shown only when renderable
+IllagerRenderer.extractRenderState	port	crates/horizon-client/src/mobs/illager.rs::holding_crossbow	crossbow charge and aggressive pose
+IllusionerRenderer.extractRenderState	port	crates/horizon-client/src/mobs/illusioner.rs::offsets	mirror-image offsets; casting flag
+IronGolemRenderer.extractRenderState	port	crates/horizon-client/src/mobs/golem.rs::client_tick	gap: player: the offered poppy is not drawn in the golem hand and cracks from damage are not drawn
+IronGolemRenderer.setupRotations	missing		player: an iron golem does not tilt side to side as it walks (IronGolemRenderer.setupRotations); only arm and leg swing is ported in mobs/golem.rs
+ItemEntityRenderer.extractRenderState	port	crates/horizon-client/src/game/item_draw.rs::Game::dropped_item_geometry	bob offset, spin and spread
+ItemEntityRenderer.renderMultipleFromCount	port	crates/horizon-client/src/item_render.rs::cluster_poses	copies of a stack laid out by depth
+ItemFrameRenderer.submit	port	crates/horizon-client/src/game/frames.rs::Game::frame_geometry	frame model, item or map
+ItemFrameRenderer.getRenderOffset	inline	crates/horizon-client/src/game/frames.rs::Game::frame_geometry	offset in front of the wall
+ItemFrameRenderer.extractRenderState	inline	crates/horizon-client/src/game/frames.rs::Game::frame_geometry	direction, item, rotation, glow and map read there
+LeashKnotRenderer.submit	port	crates/horizon-client/src/game/leads.rs::Game::leash_geometry	knot drawn with the rope pass
+LightningBoltRenderer.quad	inline	crates/horizon-client/src/gfx/lightning.rs::geometry	quad built inline
+LivingEntityRenderer.getBoundingBoxForCulling	skip:other		culling box only (dragon-head inflate)
+LivingEntityRenderer.isEntityUpsideDown	port	crates/horizon-client/src/mobs/render.rs::base_transform_at	upside-down flip for Dinnerbone and Grumm
+LivingEntityRenderer.isUpsideDownName	inline	crates/horizon-client/src/mobs/render.rs::base_transform_at	name check folded into the flip
+LivingEntityRenderer.extractNameTags	port	crates/horizon-client/src/game/names.rs::Game::name_tags	gap: minor: unsure whether the name-tag distance attributes are read
+LivingEntityRenderer.solveBodyRot	missing		minor: unsure: no rider body-rotation clamp (85 degrees, 50 degree lag) found; mob AI turn limits only
+LlamaRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::body	variant and baby texture
+LlamaRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::llama	chest flag; decor layers in mobs/render.rs::layers
+LlamaSpitRenderer.submit	port	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	gap: minor: drawn as a camera-facing sprite, not the spit model with its rotation
+LlamaSpitRenderer.extractRenderState	inline	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	rotation read there
+MobRenderer.checkMagicName	inline	crates/horizon-client/src/mobs/render.rs::body	gap: player: Toast is handled; a sheep named jeb_ does not get rainbow wool
+MushroomCowRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::body	variant and baby texture
+MushroomCowRenderer.extractRenderState	port	crates/horizon-client/src/mobs/render.rs::body	gap: player: the mushroom block on the back is not drawn
+NautilusRenderer.extractRenderState	port	crates/horizon-client/src/mobs/render.rs::layers	saddle and armour layers
+OcelotRenderer.extractRenderState	missing		player: an ocelot keeps the standing pose when crouching or sprinting; no ocelot pose code in mobs/
+OminousItemSpawnerRenderer.extractRenderState	inline	crates/horizon-client/src/game/ominous_item_spawner.rs::Game::ominous_item_spawner_geometry	item and age read there
+OminousItemSpawnerRenderer.submit	port	crates/horizon-client/src/game/ominous_item_spawner.rs::Game::ominous_item_spawner_geometry	spinning item cluster, scaled in during the first 50 ticks
+PaintingRenderer.submit	port	crates/horizon-client/src/game/paintings.rs::Game::painting_geometry	
+PaintingRenderer.extractRenderState	inline	crates/horizon-client/src/game/paintings.rs::Game::painting_geometry	per-segment light read there
+PaintingRenderer.renderPainting	port	crates/horizon-client/src/game/paintings.rs::Game::painting_geometry	front, back and edge quads
+PaintingRenderer.vertex	inline	crates/horizon-client/src/game/paintings.rs::Game::painting_geometry	vertex built inline
+PandaRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::panda	sit, lie, sneeze and roll states
+ParrotRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::parrot	pose and flap angle
+PhantomRenderer.extractRenderState	port	crates/horizon-client/src/mobs/phantom.rs::anim	gap: player: phantom size is not read, so phantoms never grow
+PhantomRenderer.scale	missing		player: phantoms are never drawn larger (vanilla scale 1 + 0.15 x size); no phantom size in mobs/render.rs::species_scale
+PhantomRenderer.setupRotations	port	crates/horizon-client/src/mobs/phantom.rs::anim	gap: minor: body pitch (xRot) is not applied; wings and tail are
+PigRenderer.bakeModels	skip:data		model baking; Horizon loads model data from files
+PigRenderer.submit	port	crates/horizon-client/src/mobs/render.rs::body	cold or normal model by variant
+PigRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::body	variant and baby texture
+PigRenderer.extractRenderState	port	crates/horizon-client/src/mobs/render.rs::layers	saddle layer and variant
+PiglinRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::body	brute, baby and zombified texture
+PiglinRenderer.extractRenderState	port	crates/horizon-client/src/mobs/anim.rs::humanoid	brute flag, arm pose and crossbow charge
+PiglinRenderer.isShaking	port	crates/horizon-client/src/mobs/render.rs::shaking	converting piglin shakes
+PolarBearRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::polar_bear	standing scale
+PufferfishRenderer.submit	port	crates/horizon-client/src/mobs/render.rs::body	small, medium or big model by size
+PufferfishRenderer.setupRotations	missing		player: a pufferfish does not bob up and down (cos bob, 0.08 blocks); no such offset in mobs/anim.rs, body_anim.rs or aquatic.rs
+RabbitRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::rabbit	hop and idle head-tilt animations; Toast name in mobs/render.rs::body
+RavagerRenderer.extractRenderState	port	crates/horizon-client/src/mobs/ravager.rs::anim	stun, bite and roar clocks
+SalmonRenderer.setupRotations	missing		player: salmon do not wiggle their body while swimming or flop on land (SalmonRenderer.setupRotations); no 4.3 amplitude or flop pose in mobs/
+SheepRenderer.extractRenderState	port	crates/horizon-client/src/mobs/render.rs::sheep_wool_rgb	gap: player: sheep named jeb_ do not cycle their wool colour; head eat and sheared state read elsewhere
+ShulkerBulletRenderer.submit	port	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	gap: minor: drawn as a spark sprite, not the spinning two-layer model
+ShulkerBulletRenderer.extractRenderState	inline	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	rotation read there
+ShulkerRenderer.shouldRender	skip:other		frustum culling only
+ShulkerRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/shulker.rs::texture	colour texture
+ShulkerRenderer.extractRenderState	port	crates/horizon-client/src/mobs/shulker.rs::rotations	peek and head angles
+SnifferRenderer.extractRenderState	port	crates/horizon-client/src/mobs/sniffer.rs::anim	searching state and animation clocks
+SnowGolemRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::snow_golem	gap: player: a carved pumpkin on the head is not drawn; the pumpkin flag is not read
+SquidRenderer.extractRenderState	port	crates/horizon-client/src/mobs/aquatic.rs::squid_ai_step	tentacle cycle clock
+SquidRenderer.setupRotations	missing		player: a squid does not tilt its body while swimming (xBodyRot, zBodyRot); only the vector rotation for ink exists in mobs/aquatic.rs
+StriderRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::body	cold texture when suffocating
+StriderRenderer.getShadowRadius	missing		minor: a baby strider keeps the full shadow (shadows.rs::shadow_params takes the species only)
+StriderRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::strider	saddle, suffocating and ridden states
+StriderRenderer.isShaking	port	crates/horizon-client/src/mobs/render.rs::shaking	suffocating strider shakes
+SulfurCubeRenderer.submit	port	crates/horizon-client/src/mobs/sulfur_cube.rs::body	normal or small model
+SulfurCubeRenderer.extractRenderState	port	crates/horizon-client/src/game/sulfur_cubes.rs::Game::sulfur_cube_body_geometry	fuse flash, contained block and worn head
+SulfurCubeRenderer.applySizeAndSquish	port	crates/horizon-client/src/mobs/sulfur_cube.rs::scale	size and squish scale
+ThrownItemRenderer.submit	port	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	thrown item sprite at its scale
+ThrownItemRenderer.extractRenderState	inline	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	item sprite read there
+ThrownTridentRenderer.submit	port	crates/horizon-client/src/game/trident.rs::Game::trident_geometry	gap: minor: foil glint is not drawn on a thrown trident
+ThrownTridentRenderer.extractRenderState	inline	crates/horizon-client/src/game/trident.rs::Game::trident_geometry	yaw, pitch and foil read there
+TippableArrowRenderer.extractRenderState	missing		player: a tipped arrow looks like a plain arrow; no potion colour on arrows in game/creatures.rs or projectiles.rs
+TntMinecartRenderer.submitMinecartContents	port	crates/horizon-client/src/game/minecarts.rs::Game::cart_geometry	TNT block swell and white flash
+TntMinecartRenderer.submitWhiteSolidBlock	inline	crates/horizon-client/src/game/minecarts.rs::Game::cart_geometry	white overlay built inline
+TntMinecartRenderer.extractRenderState	inline	crates/horizon-client/src/game/minecarts.rs::Game::cart_geometry	fuse read from the cart
+TntRenderer.submit	port	crates/horizon-client/src/game/tnt.rs::Game::tnt_geometry	swell and white flash
+TntRenderer.getSwellAmount	inline	crates/horizon-client/src/game/tnt.rs::Game::tnt_geometry	swell curve folded in
+TntRenderer.isLit	inline	crates/horizon-client/src/game/tnt.rs::Game::tnt_geometry	flash every 5 ticks
+TntRenderer.extractRenderState	inline	crates/horizon-client/src/game/tnt.rs::Game::tnt_geometry	fuse read there
+TropicalFishRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::body	small or large texture
+TropicalFishRenderer.extractRenderState	port	crates/horizon-client/src/mobs/render.rs::body_color	pattern colours
+TropicalFishRenderer.submit	port	crates/horizon-client/src/mobs/render.rs::body	small or large model
+TropicalFishRenderer.setupRotations	missing		player: a tropical fish does not wiggle its body while swimming or flop on land (see SalmonRenderer.setupRotations); no 4.3 amplitude in mobs/
+TurtleRenderer.getShadowRadius	missing		minor: a baby turtle keeps the full shadow (shadows.rs::shadow_params takes the species only)
+TurtleRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::turtle	on-land, laying and egg states
+VexRenderer.extractRenderState	port	crates/horizon-client/src/mobs/vex.rs::anim	charging pose; held item in mobs/render.rs::hand_base

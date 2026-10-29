@@ -8,6 +8,7 @@ const COMMON: &[u8] = b"a library every system uses";
 const LINUX: &[u8] = b"a linux native";
 const SOUND: &[u8] = b"a fake ogg";
 const LANG: &[u8] = b"{}";
+const LOGGING: &[u8] = b"<Configuration/>";
 /// Never cancelled.
 static GO: AtomicBool = AtomicBool::new(false);
 
@@ -455,4 +456,114 @@ fn a_cancelled_download_goes_on_where_it_stopped() {
     );
     assert_eq!(asked.len(), 6, "{asked:#?}");
     fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A version Horizon doesn't pin, as Mojang's list names it (its version file's sha1): the
+/// client's sha1 comes from that checked file, and an old version's natives for this system
+/// (a classifier of their library, `${arch}` filled in) come with the libraries.
+#[test]
+fn any_listed_version_comes_with_its_natives() {
+    let native = |name: &str, data: &[u8]| {
+        serde_json::json!({
+            "path": format!("org/lwjgl/lwjgl-platform/2.9.4/lwjgl-platform-2.9.4-{name}.jar"),
+            "sha1": sha1_hex(data),
+            "url": format!("https://libraries.minecraft.net/lwjgl-platform-{name}.jar"),
+        })
+    };
+    let index = serde_json::json!({"objects": {}}).to_string();
+    let manifest = serde_json::json!({
+        "id": "1.12.2",
+        "assetIndex": {"id": "1.12", "sha1": sha1_hex(index.as_bytes()),
+                       "url": "https://piston-meta.mojang.com/v1/packages/i/1.12.json"},
+        "downloads": {"client": {"sha1": sha1_hex(CLIENT), "size": CLIENT.len(), "url": "https://piston-data.mojang.com/old.jar"}},
+        "logging": {"client": {"argument": "-Dlog4j.configurationFile=${path}", "file": {
+            "id": "client-1.12.xml", "sha1": sha1_hex(LOGGING), "size": LOGGING.len(),
+            "url": "https://piston-data.mojang.com/client-1.12.xml"}}},
+        "libraries": [{
+            "name": "org.lwjgl.lwjgl:lwjgl-platform:2.9.4",
+            "natives": {"osx": "natives-osx", "windows": "natives-windows-${arch}"},
+            "downloads": {"classifiers": {
+                "natives-osx": native("natives-osx", b"osx natives"),
+                "natives-windows-64": native("natives-windows-64", b"win64 natives"),
+                "natives-windows-32": native("natives-windows-32", b"win32 natives"),
+            }},
+        }],
+    })
+    .to_string();
+    let sha1 = sha1_hex(manifest.as_bytes());
+    let lib = |name: &str| format!("https://libraries.minecraft.net/lwjgl-platform-{name}.jar");
+    let server = Server {
+        files: HashMap::from([
+            (
+                format!("https://piston-meta.mojang.com/v1/packages/{sha1}/1.12.2.json"),
+                manifest.into_bytes(),
+            ),
+            (
+                "https://piston-data.mojang.com/old.jar".into(),
+                CLIENT.to_vec(),
+            ),
+            (
+                "https://piston-data.mojang.com/client-1.12.xml".into(),
+                LOGGING.to_vec(),
+            ),
+            (lib("natives-osx"), b"osx natives".to_vec()),
+            (lib("natives-windows-64"), b"win64 natives".to_vec()),
+            (lib("natives-windows-32"), b"win32 natives".to_vec()),
+            (
+                "https://piston-meta.mojang.com/v1/packages/i/1.12.json".into(),
+                index.into_bytes(),
+            ),
+        ]),
+        asked: Mutex::new(Vec::new()),
+    };
+    let pins = Pins::for_version("1.12.2", &sha1);
+    let platform = |os: &str| {
+        let dir = scratch(&format!("any-{os}"));
+        download(&pins, &dir, os, 2, &|url| server.fetch(url), &GO, &|_| {}).unwrap();
+        dir
+    };
+    let mac = platform("osx");
+    assert_eq!(
+        fs::read(mac.join("versions/1.12.2/1.12.2.jar")).unwrap(),
+        CLIENT
+    );
+    let natives = |dir: &Path, name: &str| {
+        dir.join(format!(
+            "libraries/org/lwjgl/lwjgl-platform/2.9.4/lwjgl-platform-2.9.4-{name}.jar"
+        ))
+    };
+    assert!(natives(&mac, "natives-osx").is_file());
+    assert_eq!(
+        fs::read(mac.join("assets/log_configs/client-1.12.xml")).unwrap(),
+        LOGGING
+    );
+    assert!(!natives(&mac, "natives-windows-64").exists());
+    let windows = platform("windows");
+    assert!(natives(&windows, "natives-windows-64").is_file());
+    assert!(!natives(&windows, "natives-windows-32").exists());
+    // Linux has no natives in this library: nothing to fetch for it, and no error.
+    let linux = platform("linux");
+    assert!(!linux.join("libraries").exists());
+    assert!(linux.join("assets/log_configs/client-1.12.xml").is_file());
+    for dir in [mac, windows, linux] {
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    // A client that isn't the one its checked version file names is refused.
+    let wrong = Server {
+        files: server
+            .files
+            .clone()
+            .into_iter()
+            .map(|(url, body)| match url.ends_with("old.jar") {
+                true => (url, b"another jar".to_vec()),
+                false => (url, body),
+            })
+            .collect(),
+        asked: Mutex::new(Vec::new()),
+    };
+    let dir = scratch("any-wrong");
+    let refused = download(&pins, &dir, "osx", 1, &|url| wrong.fetch(url), &GO, &|_| {});
+    assert!(refused.unwrap_err().contains("old.jar"));
+    let _ = fs::remove_dir_all(&dir);
 }

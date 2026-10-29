@@ -425,7 +425,7 @@ pub const COMMANDS: &[Cmd] = &[
         &[BOX[0], BOX[1], BOX[2], BOX[3], BOX[4], BOX[5], p("block", Ty::Str, "block state")], mcp: true, local: false),
     cmd!("container", World, "container X Y Z [ITEM COUNT]", "list a container's items, or add items to it", "", ["horizon-ctl container 3 64 1", "horizon-ctl container 3 64 1 diamond 3"],
         &[BLOCK_XYZ[0], BLOCK_XYZ[1], BLOCK_XYZ[2], opt("item", Ty::Str, "item to add"), opt("count", Ty::Int, "how many")], mcp: true, local: false),
-    cmd!("render-distance", World, "render-distance N", "chunks, 2..64", "", ["horizon-ctl render-distance 8"], &[p("chunks", Ty::Int, "render distance")], mcp: false, local: false),
+    cmd!("render-distance", World, "render-distance N", "chunks, 2..128", "", ["horizon-ctl render-distance 8"], &[p("chunks", Ty::Int, "render distance")], mcp: false, local: false),
     cmd!("wait", World, "wait TICKS", "wait until TICKS game ticks have passed (20 per second)",
         "Keys and mouse buttons held with key ... down or mouse ... down stay held while it waits. Release them with key ... up, release or stop.",
         ["horizon-ctl wait 40", "horizon-ctl key w down && horizon-ctl wait 40 && horizon-ctl key w up"],

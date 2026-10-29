@@ -1,0 +1,150 @@
+Evoker.EvokerWololoSpellGoal.canContinueToUse	port	crates/horizon-client/src/mobs/illager.rs::UseSpell::can_continue	wololo branch: sheep target still set and warm-up left
+Evoker.EvokerWololoSpellGoal.performSpellCasting	port	crates/horizon-client/src/game/creatures.rs::Game::handle_mob_events	MobEvent::Wololo dyes the sheep red (color 14); the event is pushed from UseSpell::tick
+Illusioner.registerGoals	port	crates/horizon-client/src/mobs/illusioner.rs::register	same goal list and priorities
+Illusioner.createAttributes	skip:data		attribute defaults (speed 0.5, follow 18, health 32) live in data tables
+Illusioner.performRangedAttack	port	crates/horizon-client/src/mobs/undead.rs::perform_ranged_attack	bow shot at speed 1.6 with the aim and uncertainty the skeleton uses
+Illusioner.getArmPose	port	crates/horizon-client/src/mobs/illager.rs::arm_pose	spellcasting, bow when aggressive, else crossed
+Illusioner.IllusionerBlindnessSpellGoal.canUse	port	crates/horizon-client/src/mobs/illusioner.rs::Spell::can_use	target id differs from last target, difficulty above normal
+Illusioner.IllusionerBlindnessSpellGoal.start	port	crates/horizon-client/src/mobs/illusioner.rs::Spell::start	remembers the target id for the next can_use
+Illusioner.IllusionerBlindnessSpellGoal.performSpellCasting	port	crates/horizon-client/src/mobs/illusioner.rs::Spell::tick	gap: minor: blindness reaches only a player target; vanilla also blinds villagers and iron golems
+Illusioner.IllusionerMirrorSpellGoal.canUse	port	crates/horizon-client/src/mobs/illusioner.rs::Spell::can_use	not already invisible
+SpellcasterIllager.getArmPose	port	crates/horizon-client/src/mobs/illager.rs::arm_pose	spellcasting pose while a spell is cast, else celebrating or crossed
+SpellcasterIllager.isCastingSpell	skip:other		getter; Horizon reads extra.counter > 0 inline
+SpellcasterIllager.setIsCastingSpell	inline	crates/horizon-client/src/mobs/illager.rs::UseSpell::start	the spell id the client draws (extra.variant2) is set when the cast starts
+SpellcasterIllager.getCurrentSpell	skip:other		getter; Horizon reads extra.variant2 inline in arm_pose and shows_item
+SpellcasterIllager.SpellcasterUseSpellGoal.canContinueToUse	port	crates/horizon-client/src/mobs/illager.rs::UseSpell::can_continue	target alive and warm-up left
+Vindicator.registerGoals	port	crates/horizon-client/src/mobs/illager.rs::register_vindicator	break door, open door, hold ground, melee, Johnny goal
+Vindicator.createAttributes	skip:data		attribute defaults (speed 0.35, follow 12, health 24, attack 5) live in data tables
+Vindicator.addAdditionalSaveData	missing		minor: the Johnny flag is not saved; Horizon's Johnny goal tests the custom name, so only a vindicator renamed after being named Johnny differs
+Vindicator.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	raider spawn, then equipment and enchantments; the door flag it sets each tick comes from vindicator_server_ai_step
+Vindicator.populateDefaultEquipmentSlots	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::populate	iron axe unless the mob is in a raid
+Vindicator.setCustomName	inline	crates/horizon-client/src/mobs/illager.rs::register_vindicator	gap: minor: the Johnny goal reads the current custom name each tick; vanilla latches the flag once a name is Johnny
+Vindicator.VindicatorBreakDoorGoal.canContinueToUse	port	crates/horizon-client/src/mobs/doors.rs::BreakDoor::can_continue	still in a raid, plus the base break checks
+AbstractPiglin.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	writes IsImmuneToZombification and TimeInOverworld
+AbstractPiglin.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	reads immunity, time in overworld and the pick-up flag
+AbstractPiglin.customServerAiStep	port	crates/horizon-client/src/mobs/piglin.rs::ai_step	gap: minor: zombification runs outside the Nether by the nether flag, not the PIGLINS_ZOMBIFY attribute
+AbstractPiglin.finishConversion	port	crates/horizon-client/src/mobs/piglin.rs::ai_step	spawns the zombified piglin with nausea and removes the old one
+Piglin.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	gap: minor: CannotHunt is not read, so hunting ignores it; baby and inventory are read
+Piglin.getSlot	missing		minor: item commands cannot reach a piglin's inventory slots (300 and up); 300 and up only address the open container
+Piglin.defineSynchedData	skip:java		synched-data registration; Horizon keeps baby, crossbow and dancing state in Mob fields
+Piglin.createAttributes	skip:data		attribute defaults (health 16, speed 0.35, attack 5) live in data tables
+Piglin.checkPiglinSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	not spawning on a nether wart block
+Piglin.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::piglin	baby chance or spawn weapon, hunt wait, then equipment and enchantments
+Piglin.populateDefaultEquipmentSlots	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::populate	golden armour at 10 percent per adult slot
+Piglin.mobInteract	port	crates/horizon-client/src/game/piglins.rs::Game::give_piglin	a gold ingot handed over starts admiring
+Piglin.setBaby	port	crates/horizon-client/src/mobs/finalize.rs::set_baby	gap: minor: sets the baby age only; the speed modifier is not set in this fn
+Piglin.customServerAiStep	port	crates/horizon-client/src/mobs/piglin.rs::ai_step	gap: minor: the brain tick is the registered goal set (register_piglin), not this fn
+Piglin.finishConversion	missing		minor: a piglin turning into a zombified piglin in the Overworld drops nothing; vanilla drops its inventory and any gold it admires
+Piglin.hurtServer	inline	crates/horizon-client/src/mobs/piglin.rs::celebrate	gap: player: a hit by a player does not stop an admiring piglin or start its admiring-disabled wait; babies do not flee the attacker
+Piglin.canUseNonMeleeWeapon	port	crates/horizon-client/src/game/piglins.rs::Game::piglin_wanted	gap: minor: checks the preferred-weapons tag only, not the usable-crossbow tag or the kinetic weapon component
+Piglin.holdInOffHand	port	crates/horizon-client/src/game/piglins.rs::Game::start_admiring	gap: minor: does not drop an item already in the off hand and does not set persistence
+Piglin.wantsToPickUp	port	crates/horizon-client/src/game/piglins.rs::Game::piglin_wants	gap: minor: does not check the admiring-disabled wait after a hit by a player
+Piglin.startRiding	missing		minor: baby piglins never mount a baby hoglin (see PiglinAi.babySometimesRideBabyHoglin)
+Piglin.getTopPassenger	missing		minor: helper of baby piglin riding, which Horizon lacks
+Piglin.getAmbientSound	missing		player: piglins always play their plain ambient grunt; the jealous, retreat, celebrate and admiring sounds of their activity never play
+PiglinAi.initCoreActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_piglin	gap: minor: no babyAvoidNemesis (babies do not flee a nemesis); avoidZombified and admiring stop are covered by goals
+PiglinAi.initIdleActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_piglin	gap: minor: no ride for baby piglins and no look at or interact with other piglins; hunting and repellent avoidance are present
+PiglinAi.initFightActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_piglin	gap: minor: no spear approach or attack, no back-off for crossbow piglins, no erase of the attack target near zombified piglins
+PiglinAi.initCelebrateActivity	inline	crates/horizon-client/src/mobs/piglin.rs::Celebrate::walk	gap: minor: walks to the spot only; no look at gold-holding players and no random strolls
+PiglinAi.initAdmireItemActivity	inline	crates/horizon-client/src/mobs/piglin.rs::GoToWantedItem::can_use	gap: minor: no give-up after 9 blocks or 200 ticks of trying to reach the item
+PiglinAi.initRetreatActivity	missing		player: piglins never retreat from hoglins or other avoid targets; they keep fighting or idling instead
+PiglinAi.initRideHoglinActivity	missing		player: baby piglins never ride baby hoglins
+PiglinAi.createLookBehaviors	inline	crates/horizon-client/src/mobs/piglin.rs::register_piglin	gap: minor: looks at players only; piglins and random look targets are not there
+PiglinAi.createIdleLookBehaviors	inline	crates/horizon-client/src/mobs/piglin.rs::register_piglin	gap: minor: looks at players only, no idle look at piglins or random points
+PiglinAi.createIdleMovementBehaviors	inline	crates/horizon-client/src/mobs/piglin.rs::register_piglin	gap: minor: strolls only; no walking up to other piglins or to a look target
+PiglinAi.updateActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_piglin	gap: minor: the activity choice is the goal priority order; the aggressive and dancing flags are set elsewhere
+PiglinAi.isBabyRidingBaby	missing		player: baby piglins never ride baby hoglins, so no piglin dismounts for that reason
+PiglinAi.pickUpItem	port	crates/horizon-client/src/game/piglins.rs::Game::piglin_pickups	loved item admired, food eaten, else worn or stored
+PiglinAi.holdInOffhand	port	crates/horizon-client/src/game/piglins.rs::Game::start_admiring	gap: minor: does not drop an item already in the off hand and does not set persistence
+PiglinAi.removeOneItemFromItemEntity	port	crates/horizon-client/src/game/piglins.rs::Game::piglin_pickups	takes one item from the stack (nuggets whole)
+PiglinAi.cancelAdmiring	missing		minor: a piglin that converts while admiring does not drop the gold ingot it holds
+PiglinAi.throwItems	port	crates/horizon-client/src/game/piglins.rs::Game::finish_admiring	gap: minor: only the barter path throws; the target choice is nearest player within 16, else a spot nearby
+PiglinAi.throwItemsTowardPos	port	crates/horizon-client/src/game/piglins.rs::Game::piglin_throw	gap: minor: no off-hand swing animation
+PiglinAi.getBarterResponseItems	port	crates/horizon-client/src/game/piglins.rs::Game::finish_admiring	rolls minecraft:gameplay/piglin_bartering for an adult; a baby gets the ingot back
+PiglinAi.wantsToStopRiding	missing		player: baby piglins never ride baby hoglins, so no dismount rule runs
+PiglinAi.isNearestValidAttackTarget	inline	crates/horizon-client/src/mobs/piglin.rs::ai_step	gap: minor: only drops a mob target that is dead or unseen; vanilla also re-picks the nearest valid target
+PiglinAi.isNearZombified	inline	crates/horizon-client/src/mobs/piglin.rs::register_piglin	gap: minor: the 6-block avoid is an AvoidEntity goal; the attack target is not erased near a zombified piglin
+PiglinAi.findNearestValidAttackTarget	port	crates/horizon-client/src/mobs/piglin.rs::hostile_to_player	gap: minor: decides player targets only; angry-at, nemesis and universal anger are not chosen here
+PiglinAi.canAdmire	port	crates/horizon-client/src/game/piglins.rs::Game::give_piglin	adult piglin takes a gold ingot from the hand
+PiglinAi.maybeRetaliate	inline	crates/horizon-client/src/mobs/goals.rs::HurtByTarget::start	gap: minor: the hurt mob becomes the target; the 600-tick anger timer and the too-far check are not kept
+PiglinAi.getSoundForActivity	missing		player: piglins never play their jealous, retreat, celebrate or admiring-item ambient sounds
+PiglinAi.isNearAvoidTarget	missing		minor: only used by the retreat sound, which Horizon lacks
+PiglinAi.babySometimesRideBabyHoglin	missing		player: baby piglins never ride baby hoglins
+PiglinAi.broadcastAngerTarget	inline	crates/horizon-client/src/mobs/goals.rs::HurtByTarget::start	gap: minor: alerts same-kind mobs nearby; no closer-target check and no hoglin rule
+PiglinAi.broadcastUniversalAnger	missing		minor: the universal_anger game rule is stored but piglins ignore it
+PiglinAi.setAngerTarget	port	crates/horizon-client/src/game/piglins.rs::Game::anger_piglins	gap: minor: only the player path (600-tick anger); a hoglin target does not set the hunt wait
+PiglinAi.setAngerTargetToNearestTargetablePlayerIfFound	missing		minor: only for universal anger, which Horizon does not apply
+PiglinAi.setAngerTargetIfCloserThanCurrent	inline	crates/horizon-client/src/mobs/goals.rs::HurtByTarget::start	gap: minor: alerts nearby piglins but never keeps a closer target
+PiglinAi.getAvoidTarget	missing		player: no avoid target exists, so piglins do not back away from hoglins they are outnumbered by
+PiglinAi.getNearestVisibleTargetablePlayer	missing		minor: only used by universal anger, which Horizon does not apply
+PiglinAi.broadcastRetreat	missing		player: piglins do not warn others to retreat from a hoglin group
+PiglinAi.retreatFromNearestTarget	missing		player: piglins do not retreat from a hoglin group
+PiglinAi.wantsToStopFleeing	missing		player: no retreat state, so nothing ends one
+PiglinAi.hoglinsOutnumberPiglins	missing		player: no retreat decision, so hoglins outnumbering piglins changes nothing
+PiglinAi.setAvoidTargetAndDontHuntForAWhile	missing		player: piglins hit by a hoglin group do not stop attacking and back off
+PiglinAi.dontKillAnyMoreHoglinsForAWhile	port	crates/horizon-client/src/mobs/piglin.rs::HuntHoglin::start	gap: minor: sets only the hunting piglin's own wait; the wait from a hit on a hoglin is not set
+PiglinAi.getRandomNearbyPos	inline	crates/horizon-client/src/game/piglins.rs::Game::finish_admiring	gap: minor: a random spot within 4 blocks, not a land position
+PiglinAi.isPlayerHoldingLovedItem	missing		player: piglins do not turn to look at a player holding gold, so that look never happens
+PiglinAi.isNotHoldingLovedItemInOffHand	inline	crates/horizon-client/src/game/piglins.rs::Game::piglin_wants	the off hand holds no loved item test
+PiglinAi.isZombified	inline	crates/horizon-client/src/mobs/piglin.rs::register_piglin	the zombified piglin and zoglin species list of the avoid goal
+PiglinAi.findNearbyAdultPiglins	inline	crates/horizon-client/src/mobs/piglin.rs::HuntHoglin::start	gap: minor: uses the follow range, not the sensor's nearest living entities list
+AbstractSkeleton.registerGoals	port	crates/horizon-client/src/mobs/undead.rs::register	restrict sun, flee sun, wolf avoid, stroll, look, targets
+AbstractSkeleton.rideTick	missing		minor: a skeleton riding a spider does not turn its body with the mount
+AbstractSkeleton.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::skeleton	equipment, enchantments, pick-up chance, halloween pumpkin; the weapon goal is re-picked on the next tick
+AbstractSkeleton.reassessWeaponGoal	port	crates/horizon-client/src/mobs/undead.rs::SkeletonWeapon::can_use	bow goal with the hard or normal interval, else melee
+AbstractSkeleton.onEquipItem	inline	crates/horizon-client/src/mobs/undead.rs::SkeletonWeapon::can_use	gap: minor: the weapon is re-picked on the next goal check, not at the moment of equipping
+AbstractSkeleton.wantsToPickUp	missing		minor: skeletons never pick up dropped items in Horizon (no generic mob pickup); vanilla refuses spears
+Bogged.getArrow	port	crates/horizon-client/src/mobs/undead.rs::perform_ranged_attack	Bogged arrows carry poison for 100 ticks
+Bogged.shear	port	crates/horizon-client/src/game/creatures.rs::Game::interact_shear_mob	shear sound, sheared flag, shearing loot, game event
+Bogged.spawnShearedMushrooms	port	crates/horizon-client/src/game/creatures.rs::Game::interact_shear_mob	drops the shearing/bogged loot table at the mob's height
+WitherSkeleton.registerGoals	port	crates/horizon-client/src/mobs/undead.rs::register	piglin and piglin brute target at priority 3, then the skeleton goals
+WitherSkeleton.canHoldItem	missing		minor: no mob item pickup in Horizon, so the disliked-weapons tag never applies
+WitherSkeleton.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::skeleton	attack damage 4 for wither skeletons
+WitherSkeleton.getArrow	missing		minor: arrows from a wither skeleton are not set on fire for 100 seconds
+Spider.registerGoals	port	crates/horizon-client/src/mobs/hostile.rs::register	spider goals: leap at target and the spider melee that gives up in bright light
+Spider.isClimbing	skip:other		getter; Horizon reads the mob's climbing field
+Spider.setClimbing	inline	crates/horizon-client/src/mobs/ai.rs::ai_step	climbing set from the horizontal collision each tick
+Spider.getVehicleAttachmentPoint	port	crates/horizon-client/src/mobs/riders.rs::passenger_attachment	gap: minor: always the spider's fixed seat; vanilla uses a lower seat for riders narrower than the spider
+Spider.SpiderEffectsGroupData.setRandomEffect	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::spider	hard-difficulty effect: speed, strength, regeneration or invisibility
+AngerManagement.codec	missing		minor: warden anger is not saved; the anger tag is written empty, so a reloaded warden forgets its suspects
+AngerManagement.createUuidAngerPairs	missing		minor: part of the anger save, which Horizon does not write
+AngerManagement.convertFromUuids	missing		minor: part of the anger load, which Horizon does not read
+AngerManagement.getTopSuspect	port	crates/horizon-client/src/mobs/warden.rs::AngerManagement::active_entity	first suspect the filter accepts
+AngerManagement.Sorter.compare	port	crates/horizon-client/src/mobs/warden.rs::AngerManagement::sort_and_update_highest	angry first, then players, then the angriest
+Warden.<init>	port	crates/horizon-client/src/mobs/warden.rs::register	pathfinding maluses and can-float; the anger and vibration state start empty
+Warden.getAddEntityPacket	missing		unsure: the spawn packet's emerging flag (data 1) has no Horizon counterpart that I found
+Warden.recreateFromPacket	missing		unsure: no client-side emerging pose from a spawn packet that I found
+Warden.createAttributes	skip:data		attribute defaults (health 500, speed 0.3, damage 30) live in data tables
+Warden.handleEntityEvent	inline	crates/horizon-client/src/mobs/warden.rs::animate	gap: minor: could not confirm the attack animation (event 4) is started here; tendril and sonic boom are
+Warden.onSyncedDataUpdated	inline	crates/horizon-client/src/mobs/warden.rs::set_pose	starts the emerge, dig, roar or sniff animation on pose change
+Warden.updateDynamicGameEventListener	port	crates/horizon-client/src/mobs/warden.rs::listen	vibrations reach the warden through listen; there is no registration step
+Warden.addAdditionalSaveData	missing		minor: warden anger is not saved (the anger tag is written empty)
+Warden.readAdditionalSaveData	missing		minor: warden anger is not read back, so a reloaded warden is calm
+Warden.playListeningSound	inline	crates/horizon-client/src/mobs/warden.rs::increase_anger	plays the listening sound for the anger level, unless roaring
+WardenAi.initCoreActivity	inline	crates/horizon-client/src/mobs/warden_brain.rs::activities	swim, look at target, look sink, move sink
+WardenAi.initDiggingActivity	inline	crates/horizon-client/src/mobs/warden_brain.rs::activities	force unmount and digging
+WardenAi.initIdleActivity	inline	crates/horizon-client/src/mobs/warden_brain.rs::activities	roar target, sniff, stroll or idle
+WardenAi.initInvestigateActivity	inline	crates/horizon-client/src/mobs/warden_brain.rs::activities	roar target and walk to the disturbance
+WardenAi.initSniffingActivity	inline	crates/horizon-client/src/mobs/warden_brain.rs::activities	roar target and sniffing
+WardenAi.isTarget	port	crates/horizon-client/src/mobs/warden.rs::brain_target	gap: minor: returns the attack target; the look-at filter is the caller's check
+WardenSpawnTracker.hasNearbyWarden	inline	crates/horizon-client/src/game/sculk.rs::Game::try_to_warn	a warden within 24 blocks on each axis stops the warning
+WardenSpawnTracker.getNearbyPlayers	inline	crates/horizon-client/src/game/sculk.rs::Game::try_to_warn	gap: minor: only the player who set off the shrieker is counted, not other players within 16 blocks
+WardenSpawnTracker.copyData	inline	crates/horizon-client/src/sculk.rs::WardenSpawnTracker::try_warn	every tracker takes the highest one's level, cooldown and tick count
+Drowned.checkDrownedSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	water below, spawner or deep enough, dark enough, frequency roll
+Drowned.isDeepEnoughToSpawn	inline	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	below sea level minus 5
+Drowned.populateDefaultEquipmentSlots	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::populate	10 percent chance of a trident (10 in 16) or fishing rod
+Drowned.canReplaceCurrentItem	missing		minor: no mob item pickup in Horizon, so the nautilus shell guard never applies
+Drowned.rangedAttackUncertainty	port	crates/horizon-client/src/mobs/undead.rs::drowned_throw	gap: minor: fixed uncertainty 6 (normal difficulty), not 14 minus 4 times the difficulty
+Drowned.rideTick	missing		minor: a drowned riding a mount does not turn its body with the mount
+Drowned.wantsToPickUp	missing		minor: no mob item pickup in Horizon, so the spear refusal never applies
+Drowned.DrownedGoToBeachGoal.isValidTarget	port	crates/horizon-client/src/mobs/undead.rs::beach_target	two empty blocks above and a standable block below
+Drowned.DrownedGoToWaterGoal.getWaterPos	port	crates/horizon-client/src/mobs/undead.rs::DrownedGoToWater::can_use	ten random spots 10 blocks around and up to 2 above, water only
+Zombie.addBehaviourGoals	port	crates/horizon-client/src/mobs/undead.rs::register	break door, turtle egg, melee, village, stroll, targets
+Zombie.createAttributes	skip:data		attribute defaults (follow 35, speed 0.23, damage 3, armour 2) live in data tables
+Zombie.defineSynchedData	skip:java		synched-data registration; Horizon keeps baby, special type and drowned state in Mob fields
+Zombie.populateDefaultEquipmentSlots	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::populate	armour, then 1 percent (5 on hard) of an iron sword, spear or shovel
+Zombie.canHoldItem	missing		minor: no mob item pickup in Horizon, so the baby-egg rule never applies
+Zombie.wantsToPickUp	missing		minor: no mob item pickup in Horizon, so the glow ink sac refusal never applies
+Zombie.onOffspringSpawnedFromEgg	missing		unsure: no egg-offspring pickup roll found for zombies in Horizon
+Zombie.ZombieAttackTurtleEggGoal.playDestroyProgressSound	inline	crates/horizon-client/src/mobs/undead.rs::AttackTurtleEgg::tick	zombie.destroy_egg sound while the egg is trampled
+Zombie.ZombieAttackTurtleEggGoal.playBreakSound	inline	crates/horizon-client/src/mobs/undead.rs::AttackTurtleEgg::tick	turtle egg break sound when the egg breaks

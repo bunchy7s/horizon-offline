@@ -182,9 +182,10 @@ pub fn custom_server_ai_step(m: &mut Mob, cx: &mut Cx) {
     // Being angry (target set) makes the head "creepy" (render).
     m.extra.flag = m.ai.target.is_some();
 }
-/// Enderman.hurtServer: projectiles miss (teleport away), others may teleport.
+/// Enderman.hurtServer: projectiles miss (teleport away) unless it rides
+/// something (`!isPassenger()`), others may teleport.
 pub fn on_damage(m: &mut Mob, source: &Damage) -> bool {
-    if source.is_projectile() {
+    if source.is_projectile() && !m.extra.passenger {
         // repeatedlyTryToTeleport is applied by the next AI step.
         m.extra.counter2 = 64;
         return false;
@@ -431,6 +432,35 @@ impl Goal for LeaveBlock {
                 state: carried,
             });
             m.extra.carried = None;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mobs::DamageKind;
+    use std::sync::Arc;
+
+    fn enderman() -> Mob {
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = Species::Enderman;
+        Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0)
+    }
+
+    /// Enderman.hurtServer: a projectile makes a free enderman teleport away
+    /// unhurt, but one that rides something (`isPassenger`) takes the hit.
+    #[test]
+    fn projectiles_hit_a_seated_enderman() {
+        for kind in [DamageKind::Arrow, DamageKind::Thrown, DamageKind::Fireball] {
+            let mut free = enderman();
+            assert!(!on_damage(&mut free, &Damage::of(kind)), "{kind:?}");
+            assert_eq!(free.extra.counter2, 64);
+
+            let mut seated = enderman();
+            seated.extra.passenger = true;
+            assert!(on_damage(&mut seated, &Damage::of(kind)), "{kind:?}");
+            assert_eq!(seated.extra.counter2, 0, "no teleport while seated");
         }
     }
 }

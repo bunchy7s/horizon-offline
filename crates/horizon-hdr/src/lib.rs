@@ -45,13 +45,14 @@ pub fn open_vulkan_device(
 }
 
 /// Tells the compositor, through `VK_EXT_hdr_metadata`, that the swapchain's
-/// content is BT.709 and peaks at `peak` nits. Needs a device from
-/// `open_vulkan_device` and a configured surface; does nothing otherwise.
+/// content is BT.709, peaks at `peak` nits and is no darker than `black`. Needs a
+/// device from `open_vulkan_device` and a configured surface; does nothing otherwise.
 pub fn set_metadata(
     device: &wgpu::Device,
     surface: &wgpu::Surface<'_>,
     paper_white: f32,
     peak: f32,
+    black: f32,
 ) {
     #[cfg(not(target_os = "macos"))]
     {
@@ -80,7 +81,7 @@ pub fn set_metadata(
             .display_primary_blue(xy(0.15, 0.06))
             .white_point(xy(0.3127, 0.3290))
             .max_luminance(peak)
-            .min_luminance(0.0)
+            .min_luminance(black)
             .max_content_light_level(peak)
             .max_frame_average_light_level(paper_white.min(peak));
         let loader = ash::ext::hdr_metadata::Device::new(
@@ -91,5 +92,5 @@ pub fn set_metadata(
         unsafe { loader.set_hdr_metadata(&[swapchain], &[metadata]) };
     }
     #[cfg(target_os = "macos")]
-    let _ = (device, surface, paper_white, peak);
+    let _ = (device, surface, paper_white, peak, black);
 }

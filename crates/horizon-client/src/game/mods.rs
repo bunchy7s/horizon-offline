@@ -92,12 +92,6 @@ pub(super) struct ModsState {
     /// Capability `recipes`'s tables, made once a mod reads them.
     #[cfg(feature = "mods")]
     pub(super) recipes: Option<std::sync::Arc<horizon_mods::Recipes>>,
-    /// The recipe book's known displays, and the book's version they are of.
-    #[cfg(feature = "mods")]
-    pub(super) known_recipes: (Option<u64>, std::sync::Arc<[i32]>),
-    /// Capability `ui`'s item panel beside container screens.
-    #[cfg(feature = "mods")]
-    pub(super) browser: super::mod_browser::Browser,
     /// Extras that are official mods now, being installed.
     #[cfg(feature = "mods")]
     pub(super) moved: super::moved_extras::MovedState,
@@ -267,6 +261,7 @@ impl Game<'_> {
                 "Horizon: {found} mod(s) not started: this build has no mod runtime (build with --features mods)"
             );
         }
+        self.list_native_mods();
     }
     pub(super) fn merge_remote_tree(&mut self) {}
     pub(super) fn sync_mods(&mut self) {}
@@ -302,8 +297,14 @@ impl Game<'_> {
             .filter_map(|p| horizon_mods::Package::read(p).ok())
             .map(|p| p.manifest.id)
             .collect();
+        // A native mod of the same id (one built into this game) takes over.
+        let mut native = Vec::new();
+        self.native_mods(&mut native);
         let enabled = &self.settings.mods.enabled;
-        let on = |id: &str| enabled.contains(id) || dev_ids.iter().any(|d| d == id);
+        let on = |id: &str| {
+            (enabled.contains(id) || dev_ids.iter().any(|d| d == id))
+                && !native.iter().any(|n| n.id == id)
+        };
         let mods = Mods::load_for(self.mod_runs(), &paths, on, vanilla_command);
         self.mods.mods = mods;
         let chosen = &self.settings.mods;
@@ -349,6 +350,7 @@ impl Game<'_> {
                         problem,
                         dev: false,
                         has_settings: false,
+                        native: None,
                     };
                 };
                 // What it may do first: the row cuts long descriptions.
@@ -365,9 +367,11 @@ impl Game<'_> {
                     problem,
                     dev: dev.contains(&e.path),
                     has_settings: e.has_ui_settings(),
+                    native: None,
                 }
             })
             .collect();
+        self.list_native_mods();
     }
     /// The chat's tree after the running mods changed.
     fn sync_mod_commands(&mut self) {
@@ -490,8 +494,7 @@ impl Game<'_> {
         if !self.mods.mods.wants_raycast() {
             return None;
         }
-        let eye = self.eye_position()?;
-        let dir = super::view_vector(self.yaw, self.pitch);
+        let (eye, dir) = self.aim()?;
         let reach = f64::from(horizon_mods::RAYCAST_MAX);
         let (pos, point, state) = match self.clip_ray(eye, dir, reach) {
             Some(hit) => (
@@ -904,7 +907,9 @@ impl Game<'_> {
     /// A mod pushes its screen (`ui.open-screen`), or Options > Mods opens
     /// its settings page (`settings`, the mod's `installed` index).
     pub(super) fn open_mod_screen(&mut self, owner: usize, settings: bool) {
-        if self.title.is_some() {
+        // Only the settings page is drawn at the title (Options > Mods); a
+        // mod's own screen waits for a world.
+        if self.title.is_some() && !settings {
             return;
         }
         if settings {
@@ -1071,26 +1076,15 @@ impl Game<'_> {
                         batch.fill(atlas, xx, yy, 1.0, wh, 0xFF50_5050);
                     }
                     let content = l.rows.len() as f32 * 12.0;
-                    let first = (scroll.amount / 12.0) as usize;
-                    let last = (first + ((rows_bottom - rows_top) / 12.0).ceil() as usize + 1)
-                        .min(l.rows.len());
-                    for (vi, ri) in (first..last).enumerate() {
-                        let ry = rows_top + vi as f32 * 12.0 - (scroll.amount % 12.0);
-                        if ui::hovered(self.cursor, x, ry, MOD_UI_COLUMN - 6.0, 12.0) {
-                            batch.fill(atlas, x + 1.0, ry, MOD_UI_COLUMN - 8.0, 12.0, 0x20FF_FFFF);
-                        }
-                        if l.selected == Some(ri as u32) {
-                            batch.fill(atlas, x + 1.0, ry, 3.0, 12.0, 0xFFFF_FFFF);
-                        }
-                        batch.text_styled(
-                            atlas,
-                            &Text::literal(l.rows[ri].clone()),
-                            x + 6.0,
-                            ry + 2.0,
-                            u32::MAX,
-                            true,
-                        );
-                    }
+                    draw_list_rows(
+                        batch,
+                        atlas,
+                        self.cursor,
+                        &l.rows,
+                        l.selected,
+                        scroll.amount,
+                        (x, wy, wh),
+                    );
                     ui::scrollbar(
                         batch,
                         atlas,
@@ -1228,6 +1222,51 @@ impl Game<'_> {
     }
 }
 
+/// A mod screen's `list` rows in its frame at (`x`, `wy`), `wh` high, scrolled by `scroll`: the
+/// rows in view, the hovered one lit and the selected one marked. As AbstractSelectionList draws
+/// its entries inside `enableScissor`, they are cut at the frame's inside: the row a scroll shows
+/// in part, and the one below a full view, never draw over the frame or below it.
+#[cfg(feature = "mods")]
+fn draw_list_rows(
+    batch: &mut HudBatch,
+    atlas: &horizon_client::hud::HudAtlas,
+    cursor: (f32, f32),
+    rows: &[String],
+    selected: Option<u32>,
+    scroll: f32,
+    (x, wy, wh): (f32, f32, f32),
+) {
+    let rows_top = wy + 4.0;
+    let rows_bottom = wy + wh - 4.0;
+    let first = (scroll / 12.0) as usize;
+    let last = (first + ((rows_bottom - rows_top) / 12.0).ceil() as usize + 1).min(rows.len());
+    let start = batch.vertices.len();
+    for (vi, ri) in (first..last).enumerate() {
+        let ry = rows_top + vi as f32 * 12.0 - (scroll % 12.0);
+        if ui::hovered(cursor, x, ry, MOD_UI_COLUMN - 6.0, 12.0) {
+            batch.fill(atlas, x + 1.0, ry, MOD_UI_COLUMN - 8.0, 12.0, 0x20FF_FFFF);
+        }
+        if selected == Some(ri as u32) {
+            batch.fill(atlas, x + 1.0, ry, 3.0, 12.0, 0xFFFF_FFFF);
+        }
+        batch.text_styled(
+            atlas,
+            &Text::literal(rows[ri].clone()),
+            x + 6.0,
+            ry + 2.0,
+            u32::MAX,
+            true,
+        );
+    }
+    batch.clip_since(
+        start,
+        x + 1.0,
+        wy + 1.0,
+        x + MOD_UI_COLUMN - 1.0,
+        wy + wh - 1.0,
+    );
+}
+
 #[cfg(feature = "mods")]
 const MOD_UI_TOP: f32 = 40.0;
 #[cfg(feature = "mods")]
@@ -1235,3 +1274,45 @@ const MOD_UI_COLUMN: f32 = 200.0;
 /// A key row's height with its gap, as the widgets below it space out.
 #[cfg(feature = "mods")]
 const MOD_UI_KEY_ROW: f32 = 26.0;
+
+#[cfg(all(test, feature = "mods"))]
+mod tests {
+    use super::*;
+    use horizon_client::hud::HudAtlas;
+
+    #[test]
+    fn list_rows_stay_inside_the_frame_scrolled_or_not() {
+        let atlas =
+            HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
+        // #3237: 22 rows in a frame of 6 (mod_ui_layout's height for a long list). The 7th row
+        // (index 6), drawn for a scroll that shows it in part, is selected and under the
+        // cursor, so its fills reach past the frame unless they are cut.
+        let rows: Vec<String> = (0..22).map(|i| format!("Row {i}")).collect();
+        let (x, wy, wh) = (100.0, 40.0, 6.0 * 12.0 + 8.0);
+        for scroll in [0.0, 6.0, 30.0] {
+            let mut batch = HudBatch::new([640, 480]);
+            let seventh_row = wy + 4.0 + 6.0 * 12.0 - scroll % 12.0;
+            draw_list_rows(
+                &mut batch,
+                &atlas,
+                (x + 10.0, seventh_row + 2.0),
+                &rows,
+                Some(6 + (scroll / 12.0) as u32),
+                scroll,
+                (x, wy, wh),
+            );
+            assert!(!batch.vertices.is_empty(), "scroll {scroll}: rows drawn");
+            let (top, bottom) = batch
+                .vertices
+                .iter()
+                .map(|v| v.pos[1])
+                .fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.min(y), hi.max(y)));
+            assert!(
+                top >= wy + 1.0 && bottom <= wy + wh - 1.0,
+                "scroll {scroll}: rows span {top}..{bottom}, the frame's inside is {}..{}",
+                wy + 1.0,
+                wy + wh - 1.0
+            );
+        }
+    }
+}

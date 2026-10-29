@@ -11,13 +11,18 @@ pub fn parse_snbt(input: &str) -> Result<(Value, usize), String> {
     let mut p = Parser {
         s: input.as_bytes(),
         i: 0,
+        depth: 0,
     };
     let v = p.value()?;
     Ok((v, p.i))
 }
+/// Nesting deeper than NBT's own limit (`NbtAccounter`'s 512) is refused
+/// rather than overflowing the stack.
+const SNBT_MAX_DEPTH: usize = 512;
 struct Parser<'a> {
     s: &'a [u8],
     i: usize,
+    depth: usize,
 }
 impl Parser<'_> {
     fn ws(&mut self) {
@@ -41,57 +46,22 @@ impl Parser<'_> {
         self.ws();
         match self.peek() {
             Some(b'{') => {
-                self.i += 1;
-                let mut map = Map::new();
-                self.ws();
-                if self.peek() == Some(b'}') {
-                    self.i += 1;
-                    return Ok(Value::Object(map));
+                if self.depth >= SNBT_MAX_DEPTH {
+                    return Err(format!("tag nesting too deep at {}", self.i));
                 }
-                loop {
-                    self.ws();
-                    let key = self.string()?;
-                    self.expect(b':')?;
-                    map.insert(key, self.value()?);
-                    self.ws();
-                    match self.peek() {
-                        Some(b',') => self.i += 1,
-                        Some(b'}') => {
-                            self.i += 1;
-                            return Ok(Value::Object(map));
-                        }
-                        _ => return Err("expected ',' or '}'".into()),
-                    }
-                }
+                self.depth += 1;
+                let v = self.object();
+                self.depth -= 1;
+                v
             }
             Some(b'[') => {
-                self.i += 1;
-                let mut list = Vec::new();
-                self.ws();
-                // Typed arrays [B;...], [I;...], [L;...].
-                if matches!(
-                    self.s.get(self.i..self.i + 2),
-                    Some([b'B' | b'I' | b'L', b';'])
-                ) {
-                    self.i += 2;
+                if self.depth >= SNBT_MAX_DEPTH {
+                    return Err(format!("tag nesting too deep at {}", self.i));
                 }
-                self.ws();
-                if self.peek() == Some(b']') {
-                    self.i += 1;
-                    return Ok(Value::Array(list));
-                }
-                loop {
-                    list.push(self.value()?);
-                    self.ws();
-                    match self.peek() {
-                        Some(b',') => self.i += 1,
-                        Some(b']') => {
-                            self.i += 1;
-                            return Ok(Value::Array(list));
-                        }
-                        _ => return Err("expected ',' or ']'".into()),
-                    }
-                }
+                self.depth += 1;
+                let v = self.array();
+                self.depth -= 1;
+                v
             }
             Some(b'"' | b'\'') => Ok(Value::String(self.string()?)),
             Some(_) => {
@@ -105,15 +75,78 @@ impl Parser<'_> {
                     _ => {
                         let digits = word
                             .trim_end_matches(['b', 'B', 's', 'S', 'l', 'L', 'f', 'F', 'd', 'D']);
-                        match (digits.parse::<i64>(), digits.parse::<f64>()) {
-                            (Ok(n), _) if digits.len() + 1 >= word.len() => Value::from(n),
-                            (_, Ok(f)) if digits.len() + 1 >= word.len() => Value::from(f),
-                            _ => Value::String(word),
+                        // Only digits (and an exponent) make a number: `nan`
+                        // or `Infinity`, which Rust's parse would take, stays
+                        // a string.
+                        if digits
+                            .bytes()
+                            .any(|c| c.is_ascii_alphabetic() && c != b'e' && c != b'E')
+                        {
+                            Value::String(word)
+                        } else {
+                            match (digits.parse::<i64>(), digits.parse::<f64>()) {
+                                (Ok(n), _) if digits.len() + 1 >= word.len() => Value::from(n),
+                                (_, Ok(f)) if digits.len() + 1 >= word.len() => Value::from(f),
+                                _ => Value::String(word),
+                            }
                         }
                     }
                 })
             }
             None => Err("expected a value".into()),
+        }
+    }
+    fn object(&mut self) -> Result<Value, String> {
+        self.i += 1;
+        let mut map = Map::new();
+        self.ws();
+        if self.peek() == Some(b'}') {
+            self.i += 1;
+            return Ok(Value::Object(map));
+        }
+        loop {
+            self.ws();
+            let key = self.string()?;
+            self.expect(b':')?;
+            map.insert(key, self.value()?);
+            self.ws();
+            match self.peek() {
+                Some(b',') => self.i += 1,
+                Some(b'}') => {
+                    self.i += 1;
+                    return Ok(Value::Object(map));
+                }
+                _ => return Err("expected ',' or '}'".into()),
+            }
+        }
+    }
+    fn array(&mut self) -> Result<Value, String> {
+        self.i += 1;
+        let mut list = Vec::new();
+        self.ws();
+        // Typed arrays [B;...], [I;...], [L;...].
+        if matches!(
+            self.s.get(self.i..self.i + 2),
+            Some([b'B' | b'I' | b'L', b';'])
+        ) {
+            self.i += 2;
+        }
+        self.ws();
+        if self.peek() == Some(b']') {
+            self.i += 1;
+            return Ok(Value::Array(list));
+        }
+        loop {
+            list.push(self.value()?);
+            self.ws();
+            match self.peek() {
+                Some(b',') => self.i += 1,
+                Some(b']') => {
+                    self.i += 1;
+                    return Ok(Value::Array(list));
+                }
+                _ => return Err("expected ',' or ']'".into()),
+            }
         }
     }
     fn unquoted(&mut self) -> String {
@@ -350,5 +383,23 @@ mod tests {
         let (v, _) = parse_snbt(r#"{text:"a",font:"Bad Font"}"#).unwrap();
         let t = to_text(&v, &mut |_| Text::empty());
         assert_eq!(t.spans[0].style.font, None);
+    }
+
+    #[test]
+    fn snbt_nesting_is_bounded() {
+        let nest = |n: usize| format!("{}1{}", "[".repeat(n), "]".repeat(n));
+        assert!(parse_snbt(&nest(512)).is_ok());
+        assert!(parse_snbt(&nest(513)).is_err());
+        assert!(parse_snbt(&nest(100_000)).is_err());
+    }
+
+    #[test]
+    fn bare_words_that_look_numeric_stay_strings() {
+        let (v, _) = parse_snbt("{text:nan}").unwrap();
+        assert_eq!(v["text"], Value::String("nan".into()));
+        let (v, _) = parse_snbt("{text:Infinity}").unwrap();
+        assert_eq!(v["text"], Value::String("Infinity".into()));
+        let (v, _) = parse_snbt("{n:1.5}").unwrap();
+        assert_eq!(v["n"], Value::from(1.5));
     }
 }

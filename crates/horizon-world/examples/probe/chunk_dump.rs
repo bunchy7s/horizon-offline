@@ -2,6 +2,8 @@
 //!
 //! chunk_dump <client resource dir> <seed> <dimension> <x0,z0,x1,z1>...
 //! With HORIZON_SCAN set, one rectangle lists the structure starts in it.
+//! HORIZON_DATAPACKS names a world's datapacks folder of folder packs, each
+//! enabled after vanilla in name order (tools/test_datapack_worldgen_parity.py).
 //! HORIZON_SAVED_STARTS names a JSON file of saved starts (`[{"id", "chunk":
 //! [x, z], "pieces": [...]}]`, jigsaw pieces as a save lists them) that take
 //! the place of the starts generation builds in their chunks.
@@ -20,7 +22,10 @@ use horizon_world::{
     DATA_VERSION,
     nbt::Tag,
     registry::BlockRegistry,
-    worldgen::generator::{GeneratorData, OverworldGenerator, ProtoChunk},
+    worldgen::{
+        generator::{GeneratorData, OverworldGenerator, ProtoChunk},
+        overrides::{PackFile, WorldgenOverrides},
+    },
 };
 use serde_json::Value;
 use std::{collections::HashMap, fmt::Write as _, fs, io::Write as _, path::Path};
@@ -99,6 +104,50 @@ fn canonical(tag: &Tag, out: &mut String) {
     }
 }
 
+/// HORIZON_DATAPACKS: a world's datapacks folder of folder packs, each enabled
+/// after vanilla in name order, as the oracle selects them.
+fn datapacks(dir: &Path) -> Result<WorldgenOverrides, Error> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        let mut entries: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else if let Ok(rel) = path.strip_prefix(root) {
+                out.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    let mut packs: Vec<_> = fs::read_dir(dir)?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.join("pack.mcmeta").exists())
+        .collect();
+    packs.sort();
+    let mut overrides = WorldgenOverrides::default();
+    for pack in packs {
+        let id = format!(
+            "file/{}",
+            pack.file_name().unwrap_or_default().to_string_lossy()
+        );
+        let mut files = Vec::new();
+        walk(&pack, &pack.join("data"), &mut files);
+        for file in files {
+            let read = || fs::read_to_string(pack.join(&file)).ok();
+            if let PackFile::Unreadable = overrides.add_file(&id, &file, read) {
+                return Err(format!("{id}: {file}: unreadable").into());
+            }
+        }
+    }
+    for warning in overrides.finish(|_| true) {
+        eprintln!("data pack worldgen: {warning}");
+    }
+    Ok(overrides)
+}
+
 pub fn main() -> Result<(), Error> {
     let mut args = crate::args().skip(1);
     let resources = std::path::PathBuf::from(args.next().ok_or("client resource directory")?);
@@ -126,7 +175,14 @@ pub fn main() -> Result<(), Error> {
         }
         return Ok(());
     }
-    let data = GeneratorData::load(&resources.join("worldgen"), blocks)?;
+    let overrides = match std::env::var_os("HORIZON_DATAPACKS") {
+        Some(dir) => datapacks(Path::new(&dir))?,
+        None => WorldgenOverrides::default(),
+    };
+    let data = GeneratorData::load_with(&resources.join("worldgen"), blocks, &overrides)?;
+    for warning in data.warnings() {
+        eprintln!("data pack worldgen: {warning}");
+    }
     let generator = OverworldGenerator::for_dimension(data, seed, "minecraft:normal", &dimension)?;
     let mut worker = generator.worker();
     // HORIZON_PHASE: terrain (no decoration), structures (pieces only) or full.

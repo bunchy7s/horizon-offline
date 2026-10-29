@@ -1,0 +1,144 @@
+MultilineTextField.setCharacterLimit	port	crates/horizon-client/src/game/books.rs::book_page_box	gap: minor: only the book page sets a character limit (PAGE_CHARS); other MultiLineEditBox users are not ported
+MultilineTextField.setLineLimit	inline	crates/horizon-client/src/game/books.rs::Game::page_keep	the 14-line limit (LINES) is checked in page_keep; there is no limit field
+MultilineTextField.setValue	port	crates/horizon-client/src/ui.rs::EditBox::set_value	gap: minor: no line-limit check when the text is set (allowOverflowLineLimit path)
+MultilineTextField.insertText	port	crates/horizon-client/src/ui.rs::EditBox::insert_text	the line limit is checked by Game::page_keep, not here
+MultilineTextField.deleteText	port	crates/horizon-client/src/ui.rs::EditBox::delete_chars	
+MultilineTextField.getSelected	port	crates/horizon-client/src/ui.rs::EditBox::selected	
+MultilineTextField.getLineAtCursor	port	crates/horizon-client/src/game/books.rs::Game::caret_on	the visual row holding the caret, with its x
+MultilineTextField.getLineView	port	crates/horizon-client/src/game/books.rs::Game::page_rows	visual rows as character ranges
+MultilineTextField.seekCursor	port	crates/horizon-client/src/ui.rs::EditBox::set_cursor	
+MultilineTextField.seekCursorLine	port	crates/horizon-client/src/game/books.rs::Game::book_move_line	gap: minor: column kept without vanilla's 2 px bias (LINE_SEEK_PIXEL_BIAS)
+MultilineTextField.seekCursorToPoint	port	crates/horizon-client/src/game/books.rs::Game::page_index_at	
+MultilineTextField.selectWordAtCursor	missing		player: double-clicking a word on a book page does not select it; Game::book_page_click only sets the caret
+MultilineTextField.keyPressed	port	crates/horizon-client/src/game/books.rs::Game::book_input	gap: player: Home and End go to the start and end of the whole page, not of the visual line (EditBox::key); Enter, arrows and Ctrl keys are handled
+MultilineTextField.getSelectedText	port	crates/horizon-client/src/ui.rs::EditBox::selected_text	
+MultilineTextField.getCursorLineView	inline	crates/horizon-client/src/game/books.rs::Game::book_move_line	gap: player: Home and End do not use the caret's line range (see keyPressed)
+MultilineTextField.getNextWord	port	crates/horizon-client/src/ui.rs::multiline_word_position	start of the next word; Ctrl+Right and Ctrl+Delete reach it through EditBox::word_position
+MultilineTextField.getWordEndPosition	missing		minor: the word end only feeds selectWordAtCursor, which is missing for book pages
+MultilineTextField.onValueChange	inline	crates/horizon-client/src/game/books.rs::Game::page_keep	the page text is stored there after the limit check; visual rows are computed on demand by page_rows
+MultilineTextField.reflowDisplayLines	port	crates/horizon-client/src/game/books.rs::Game::page_rows	same wrap breaks as font.split
+MultilineTextField.truncateFullText	port	crates/horizon-client/src/ui.rs::EditBox::set_value	truncates to max_length characters
+MultilineTextField.truncateInsertionText	inline	crates/horizon-client/src/ui.rs::EditBox::insert_text	room left under max_length
+MultilineTextField.overflowsLineLimit	port	crates/horizon-client/src/game/books.rs::Game::page_keep	counts page_rows, which adds the row after a trailing newline as vanilla does
+ObjectSelectionList.nextFocusPath	missing		minor: no arrow-key focus or selection in the title, server or pack lists
+ObjectSelectionList.updateWidgetNarration	skip:other		screen-reader narration; Horizon has no narration output
+OptionsList.addBig	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	Row::Big: 310 wide at width/2 - 155
+OptionsList.addHeader	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	gap: minor: the header is centred text, not a focusable widget
+OptionsList.findOption	skip:ui		widget lookup only; rows are rebuilt from Settings in OptionsUi::layout each frame
+OptionsList.applyUnsavedChanges	inline	crates/horizon-client/src/options_ui.rs::set_slider	gap: minor: delayed sliders (render, simulation, biome blend distance, wheel sensitivity) apply on every step, not 600 ms after the last move or on close
+OptionsList.resetOption	inline	crates/horizon-client/src/options_ui.rs::OptionsUi::slider_shown	gap: minor: only sliders show the stored value at once; other options redraw from Settings each frame
+OptionsList.Entry.big	port	crates/horizon-client/src/options_ui.rs::option_widget	310 wide; the row's place is OptionsUi::layout (Row::Big)
+OptionsList.Entry.small	port	crates/horizon-client/src/options_ui.rs::option_widget	pair placement at width/2 - 155 and + 5 in OptionsUi::layout (Row::Pair)
+OptionsList.Entry.extractContent	inline	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	positions the row's widgets; OptionsUi::draw paints them
+OptionsList.Entry.findOption	skip:ui		widget lookup only; rows are rebuilt from Settings each frame
+OptionsList.HeaderEntry.extractContent	inline	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	header centred on the row (Row::Header)
+PlainTextButton.extractContents	missing		player: the title's bottom copyright text that opens Credits is not a button; Horizon draws "Not affiliated with Mojang or Microsoft" there instead
+PlayerFaceExtractor.extractHat	port	crates/horizon-client/src/tab_list.rs::face	hat layer: UV 40, flipped for Dinnerbone and Grumm
+PlayerFaceWidget.extractWidgetRenderState	skip:service		head in the friends list (AbstractFriendsEntryContainerWidget)
+PlayerSkinWidget.extractWidgetRenderState	skip:service		skin preview on the chat report screen (SkinReportScreen)
+PlayerSkinWidget.onDrag	skip:service		drag-to-rotate of the chat report skin preview
+PlayerTabOverlay.extractTablistScore	inline	crates/horizon-client/src/tab_list.rs::TabList::layout	the score column is drawn in layout; hearts go through TabList::hearts
+PopupScreen.init	port	crates/horizon-client/src/game/lan_screen.rs::Popup::new	gap: minor: only the lock question (title, message, Yes and No); images and extra buttons are not ported
+PopupScreen.buildButtonRow	inline	crates/horizon-client/src/game/lan_screen.rs::Popup::new	two buttons min((214 - 6) / 2, 150) wide, 6 apart
+PopupScreen.repositionElements	inline	crates/horizon-client/src/game/lan_screen.rs::Popup::new	centres the popup on the screen
+PopupScreen.extractBackground	port	crates/horizon-client/src/game/lan_screen.rs::Game::draw_lock_question	dimmed gradient, then the popup background sprite
+PopupScreen.getNarrationMessage	skip:other		screen-reader text; Horizon has no narration output
+PopupScreen.onClose	port	crates/horizon-client/src/game/lan_screen.rs::Game::world_options_escape	Escape on the lock question returns to the options page
+PopupScreen.Builder.addButton	skip:java		builder setter; Horizon's lock popup has fixed Yes and No buttons
+PopupScreen.Builder.build	skip:java		builder; Horizon constructs the popup directly
+RealmsButton.extractContents	skip:service		Realms button
+ScrollableLayout.setMinWidth	skip:ui		sizing only; each screen sizes its own scroll area (dialog_screen.rs, server_links.rs, lan_screen.rs)
+ScrollableLayout.setMinHeight	skip:ui		sizing only; same screens
+ScrollableLayout.setMaxHeight	skip:ui		sizing only; same screens
+ScrollableLayout.arrangeElements	skip:ui		scrollbar reserve and layout live in each screen's own code (10 px each side in dialog and LAN screens)
+ScrollableLayout.Container.refreshChildren	skip:ui		children are laid out each frame
+ScrollableLayout.Container.extractWidgetRenderState	skip:ui		each screen draws its own clipped list (server links, dialog, LAN)
+ScrollableLayout.Container.getBorderForArrowNavigation	missing		minor: arrow-key focus moves across the list are not ported; Horizon lists have no keyboard focus
+ScrollableLayout.Container.setFocused	missing		minor: focusing a row does not scroll it into view; Horizon lists have no keyboard focus
+ScrollableLayout.Container.setX	skip:ui		positions set by each screen's layout
+ScrollableLayout.Container.setY	skip:ui		positions set by each screen's layout
+ScrollableLayout.Container.setScrollAmount	inline	crates/horizon-client/src/game/server_links.rs::Game::server_links_scroll	gap: minor: clamps the server links list only; other scroll areas clamp in their own code
+SelectableEntry.mouseOverIcon	port	crates/horizon-client/src/pack_screen.rs::PackScreen::entry_click	32 px icon of a pack row; the world row's icon uses the same test in Title::click_action
+SelectableEntry.mouseOverLeftHalf	port	crates/horizon-client/src/pack_screen.rs::PackScreen::entry_click	left 16 px of the pack icon (unselect)
+SelectableEntry.mouseOverRightHalf	port	crates/horizon-client/src/multiplayer.rs::over_right_half	join half of a server row
+SelectableEntry.mouseOverTopRightQuarter	port	crates/horizon-client/src/pack_screen.rs::PackScreen::entry_click	move-up arrow of a pack row
+SelectableEntry.mouseOverBottomRightQuarter	port	crates/horizon-client/src/pack_screen.rs::PackScreen::entry_click	move-down arrow of a pack row
+SelectableEntry.mouseOverTopLeftQuarter	port	crates/horizon-client/src/multiplayer.rs::over_top_left	move-up arrow of a server row
+SelectableEntry.mouseOverBottomLeftQuarter	port	crates/horizon-client/src/multiplayer.rs::over_bottom_left	move-down arrow of a server row
+SplashRenderer.extractRenderState	missing		player: the random splash line on the title screen is not drawn; Title::draw has no splash
+SpriteIconButton.setLoading	skip:service		the loading state is used only by the friends buttons (AddFriendWidget, FriendEntry)
+SpriteIconButton.extractSprite	port	crates/horizon-client/src/title.rs::Title::draw	draws the title's icon buttons (language, accessibility); the loading state is service-only
+SpriteIconButton.extractLoadingStateIfLoading	skip:service		loading spinner only for the friends buttons
+SpriteIconButton.Builder.sprite	skip:java		builder setter; Horizon draws its icon buttons with fixed sprites
+SpriteIconButton.Builder.build	skip:java		builder; no object is needed
+SpriteIconButton.CenteredIcon.extractContents	skip:service		FriendsButton (social)
+SpriteIconButton.TextAndIcon.extractContents	skip:other		no caller in 26.3
+StringWidget.setMaxWidth	port	crates/horizon-client/src/screen_draw.rs::string_widget	clips at max_width (CLAMPED)
+StringWidget.getWidth	port	crates/horizon-client/src/screen_draw.rs::label_width	the smaller of max width and text width
+StringWidget.visitLines	port	crates/horizon-client/src/screen_draw.rs::string_widget	gap: minor: SCROLLING overflow (scrolling text) is not ported; CLAMPED draws "..."
+TabButton.updateWidgetNarration	skip:other		screen-reader text; Horizon has no narration output
+TextCursorUtils.extractInsertCursor	port	crates/horizon-client/src/ui.rs::EditBox::draw	insert caret is a 1 px bar; blinks every 300 ms
+Tooltip.create	skip:java		factory; Horizon passes the lines to ui::tooltip
+Tooltip.toCharSequence	port	crates/horizon-client/src/screen_draw.rs::tooltip	wraps at 170 px as splitTooltip does; no per-language cache
+WidgetSprites.get	port	crates/horizon-client/src/ui.rs::button	disabled and hovered pick the sprite; gap: minor: keyboard focus does not pick the highlighted sprite
+WidgetTooltipHolder.refreshTooltipForNextRenderPass	port	crates/horizon-client/src/ui.rs::tooltip	gap: minor: tooltips show only under the pointer, not for keyboard focus
+WidgetTooltipHolder.createTooltipPositioner	missing		minor: a keyboard-focused widget gets no tooltip placed below or above it
+DebugEntryBiome.display	missing		minor: F3 biome line not drawn
+DebugEntryBiome.printBiome	missing		minor: biome id text for the F3 biome line
+DebugEntryChunkGeneration.display	missing		minor: F3 chunk generation line (Blending: Old) not drawn
+DebugEntryChunkGeneration.update	missing		minor: F3 chunk generation sampling not ported
+DebugEntryChunkSourceStats.display	missing		minor: F3 chunk source stats line not drawn
+DebugEntryDayCount.display	missing		minor: F3 "Day #" line not drawn
+DebugEntryDetailedMemory.display	skip:java		JVM heap and non-heap readout (MemoryMXBean); Rust has no JVM heap
+DebugEntryDetailedMemory.printMemoryUsage	skip:java		JVM memory format for the heap readout
+DebugEntryFps.display	port	crates/horizon-client/src/game/debug_keys.rs::Game::draw_debug_overlay	first line: fps, framerate cap (inf), present mode and refresh rate
+DebugEntryFps.presentModeName	port	crates/horizon-client/src/game/debug_keys.rs::Game::draw_debug_overlay	present mode suffix (immediate, mailbox, fifo)
+DebugEntryGpuUtilization.display	missing		minor: F3 GPU utilisation percentage not drawn; Horizon shows the GPU name only
+DebugEntryHeightmap.display	missing		minor: F3 heightmap line not drawn
+DebugEntryLight.display	missing		minor: F3 client and server light line not drawn
+DebugEntryLocalDifficulty.display	missing		minor: F3 local difficulty line not drawn
+DebugEntryLookingAt.display	missing		minor: F3 targeted block line not drawn
+DebugEntryLookingAt.addTagEntries	missing		minor: block tag lines of the targeted block (F3) not drawn
+DebugEntryLookingAt.DebugEntryLookingAtState.extractInfo	missing		minor: targeted block state (F3) not drawn
+DebugEntryLookingAt.DebugEntryLookingAtState.addStateProperties	missing		minor: targeted block state properties (F3) not drawn
+DebugEntryLookingAt.DebugEntryLookingAtState.getPropertyValueString	missing		minor: property values of the targeted block state (F3) not drawn
+DebugEntryLookingAtEntity.display	missing		minor: F3 targeted entity line not drawn
+DebugEntryLookingAtEntityTags.display	missing		minor: entity tag lines of the targeted entity (F3) not drawn
+DebugEntryMemory.display	skip:java		JVM heap and allocation counters (Runtime, GC); Rust has none
+DebugEntryMemory.AllocationRateCalculator.bytesAllocatedPerSecond	skip:java		JVM allocation counter from GC data
+DebugEntryMemory.AllocationRateCalculator.gcCounts	skip:java		JVM garbage collector counts
+DebugEntryPlayerSpeed.display	missing		minor: F3 speed line (blocks per tick) not drawn
+DebugEntryPosition.display	port	crates/horizon-client/src/debug_overlay.rs::position	XYZ, block, chunk and facing lines
+DebugEntryPostEffects.display	missing		minor: F3 post effect chain line not drawn
+DebugEntrySectionPosition.display	port	crates/horizon-client/src/debug_overlay.rs::position	section-relative line
+DebugEntrySoundCache.display	missing		minor: F3 sound cache line not drawn
+DebugEntrySoundMood.display	missing		minor: F3 sound mood line not drawn
+DebugEntrySpawnCounts.display	missing		minor: F3 spawn counts line not drawn
+DebugEntrySystemSpecs.getCpuInfo	port	crates/horizon-client/src/game/debug_keys.rs::Game::draw_debug_overlay	CPU name line
+DebugEntrySystemSpecs.display	port	crates/horizon-client/src/game/debug_keys.rs::Game::draw_debug_overlay	gap: minor: no Java version line; CPU, display, window and GPU lines are drawn
+DebugEntrySystemSpecs.typeName	port	crates/horizon-client/src/game/debug_keys.rs::Game::draw_debug_overlay	GPU type suffix (iGPU, dGPU, vGPU, software)
+DebugEntryTps.display	port	crates/horizon-client/src/game/debug_keys.rs::Game::draw_debug_overlay	integrated or remote server line: tick ms against target, sprinting or frozen, tx and rx
+DebugScreenEntries.register	skip:debug		registry of F3 entries; Horizon's overlay has a fixed profile
+DebugScreenEntryList.load	skip:debug		reads the F3 profile file; F3 profile editing is developer tooling (Horizon's F3 hint says To edit but has no editor)
+DebugScreenEntryList.setStatus	skip:debug		F3 profile editor (developer tooling)
+DebugScreenEntryList.toggleStatus	skip:debug		F3 profile editor (developer tooling)
+DebugScreenEntryList.rebuildCurrentList	skip:debug		F3 profile editor (developer tooling)
+DebugScreenEntryList.save	skip:debug		F3 profile editor (developer tooling)
+AbstractDebugChart.extractSampleBars	port	crates/horizon-client/src/debug_chart.rs::Chart::bars	one bar per sample
+AbstractDebugChart.extractMainSampleBar	port	crates/horizon-client/src/debug_chart.rs::Chart::bars	the main value's bar (dimension 0)
+BandwidthDebugChart.extractLabeledLineAtValue	port	crates/horizon-client/src/debug_chart.rs::Chart::lines_and_labels	
+BandwidthDebugChart.extractLineWithLabel	port	crates/horizon-client/src/debug_chart.rs::Chart::lines_and_labels	
+FpsDebugChart.extractAdditionalLinesAndLabels	port	crates/horizon-client/src/debug_chart.rs::Chart::lines_and_labels	
+FpsDebugChart.toDisplayString	port	crates/horizon-client/src/debug_chart.rs::Chart::display	
+FpsDebugChart.getSampleColor	port	crates/horizon-client/src/debug_chart.rs::Chart::color	
+PingDebugChart.extractAdditionalLinesAndLabels	port	crates/horizon-client/src/debug_chart.rs::Chart::lines_and_labels	
+PingDebugChart.toDisplayString	port	crates/horizon-client/src/debug_chart.rs::Chart::display	
+PingDebugChart.getSampleColor	port	crates/horizon-client/src/debug_chart.rs::Chart::color	
+ProfilerPieChart.extractRenderState	missing		minor: F3+1 profiler pie chart is not drawn; the chart toggle always reads hidden
+ProfilerPieChart.splitNodeName	missing		minor: profiler node names for the pie chart not ported
+ProfilerPieChart.profilerPieChartKeyPress	missing		minor: profiler pie keys are not handled
+TpsDebugChart.extractAdditionalLinesAndLabels	port	crates/horizon-client/src/debug_chart.rs::Chart::lines_and_labels	
+TpsDebugChart.getValueForAggregation	port	crates/horizon-client/src/debug_chart.rs::Chart::aggregated	tick time without its idle part
+TpsDebugChart.toDisplayString	port	crates/horizon-client/src/debug_chart.rs::Chart::display	
+TpsDebugChart.getSampleHeight	port	crates/horizon-client/src/debug_chart.rs::Chart::height	
+TpsDebugChart.getSampleColor	port	crates/horizon-client/src/debug_chart.rs::Chart::color	

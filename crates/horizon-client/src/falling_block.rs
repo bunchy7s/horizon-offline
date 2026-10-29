@@ -173,12 +173,16 @@ pub fn passes_cobweb(
     stuck
 }
 pub fn hurt_mobs(mobs: &mut [Mob], position: Vec3, amount: f32) {
+    hurt_mobs_with_kind(mobs, position, amount, DamageKind::FallingBlock);
+}
+
+pub fn hurt_mobs_with_kind(mobs: &mut [Mob], position: Vec3, amount: f32, kind: DamageKind) {
     if amount <= 0.0 {
         return;
     }
     let bounds = bounds(position);
     let source = MobDamage {
-        kind: DamageKind::FallingBlock,
+        kind,
         attacker: None,
         from: Some([position.x, position.y, position.z]),
     };

@@ -6,7 +6,7 @@ use horizon_protocol::packets::play::{self, Clientbound as C};
 impl Game<'_> {
     /// ComponentArgument with selectors resolved for the source
     /// (ComponentUtils.updateForEntity: names joined by ", ").
-    fn component_arg(&mut self, ctx: &Context, name: &str) -> R<Text> {
+    pub(in crate::game) fn component_arg(&mut self, ctx: &Context, name: &str) -> R<Text> {
         let Some(Arg::Str(json)) = ctx.get(name) else {
             return Ok(Text::empty());
         };

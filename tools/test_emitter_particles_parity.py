@@ -46,7 +46,7 @@ def main():
              'once spawned, are covered elsewhere.')
     harness.differential(
         'rust-emitter-particles-parity', 'VanillaEmitterParticlesOracle', 'emitter_particles_probe', make_cases, scope,
-        sources=[lab.ROOT / 'crates/horizon-client/src/particles.rs'])
+        sources=[lab.ROOT / 'crates/horizon-client-render/src/particles.rs'])
 
 
 if __name__ == '__main__':

@@ -408,7 +408,7 @@ impl StructureState {
                     if let Some((_, c)) = nearest
                         && let Some(name) = found_at(self, context, c)
                     {
-                        let p = [c.x * 16, 0, c.z * 16];
+                        let p = set.locate_pos(c);
                         let d = dist(p);
                         if best.as_ref().is_none_or(|(b, ..)| d < *b) {
                             best = Some((d, name, p));
@@ -436,7 +436,7 @@ impl StructureState {
                                     continue;
                                 }
                                 if let Some(name) = found_at(self, context, c) {
-                                    let p = [c.x * 16, 0, c.z * 16];
+                                    let p = set.locate_pos(c);
                                     let d = dist(p);
                                     if best.as_ref().is_none_or(|(b, ..)| d < *b) {
                                         best = Some((d, name, p));

@@ -106,7 +106,7 @@ pub fn tear_down(m: &mut Mob, events: &mut Vec<MobEvent>) {
 /// invulnerability animation and the heart's reaction. Returns whether the
 /// normal damage path should run.
 pub fn accepts_damage(m: &mut Mob, source: &Damage) -> bool {
-    if !heart_bound(m) || source.kind == DamageKind::Generic {
+    if !heart_bound(m) || source.kind.bypasses_invulnerability() {
         return true;
     }
     if source.is_fire() || !m.alive() || m.extra.ints[INVULNERABLE] > 0 {

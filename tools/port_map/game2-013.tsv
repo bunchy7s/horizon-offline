@@ -1,0 +1,148 @@
+ConcretePowderBlock.onLand	port	crates/horizon-world/src/level/falling.rs::Behaviours::falling_block_landed	landing branch turns the powder to concrete when the spot is water or touches liquid
+ConcretePowderBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	ConcretePowder arm: concrete when the clicked spot is water or touches liquid
+ConcretePowderBlock.shouldSolidify	inline	crates/horizon-world/src/level/falling.rs::Behaviours::falling_block_landed	gap: minor: both overloads folded into the landing branch; only the water fluid test, canBeHydrated is not read
+ConcretePowderBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	concrete arm: turns to concrete when touching liquid, else default shape
+CopperBulbBlock.onPlace	inline	crates/horizon-world/src/level/hooks.rs::Sim::on_place	copper_bulb_check runs on placement when the old block differs
+CopperBulbBlock.neighborChanged	inline	crates/horizon-world/src/level/hooks.rs::Sim::neighbor_changed	arm calls copper_bulb_check (checkAndFlip) on neighbour change
+CopperBulbBlock.createBlockStateDefinition	skip:data		lit and powered properties come from the block state tables
+CopperBulbBlock.getAnalogOutputSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::analog_output	CopperBulb arm: 15 when lit, else 0
+CopperChestBlock.getHingeSound	inline	crates/horizon-client/src/mobs/transport_items.rs::open_or_close	weathered, oxidized and plain open and close sound ids are chosen inside open_or_close
+CopperGolemStatueBlock.createBlockStateDefinition	skip:data		facing, pose and waterlogged properties come from the block state tables
+CopperGolemStatueBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	facing opposite the player and waterlogged when the spot is water
+CopperGolemStatueBlock.rotate	skip:data		rotation results come from the exported BlockState rotate table (worldgen/structure.rs)
+CopperGolemStatueBlock.updatePose	inline	crates/horizon-world/src/level/interact.rs::Behaviours::turn_statue	become-statue sound, pose cycle and block_change game event are folded into turn_statue
+CopperGolemStatueBlock.isPathfindable	skip:data		path types come from the per-state path data (mobs/path.rs)
+CopperGolemStatueBlock.getCloneItemStack	port	crates/horizon-client/src/game/block_items.rs::Game::picked_stack	gap: player: the picked statue does not get its pose in block_state, so a middle-click pick gives it standing
+CopperGolemStatueBlock.getFluidState	skip:data		waterlogged water source comes from the per-state fluid facts table (Level::fluid)
+CopperGolemStatueBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	statue arm runs waterlogged_tick then the default shape update
+CrafterBlock.getAnalogOutputSignal	port	crates/horizon-client/src/game/machines.rs::Containers::signal	crafter signal is the filled or disabled slot count from the block entity
+CrafterBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Crafter arm sets orientation from look direction and triggered from neighbour signal
+CrafterBlock.setPlacedBy	port	crates/horizon-world/src/level/place.rs::Sim::set_placed_by	schedules the 4-tick crafter tick when triggered
+CrafterBlock.rotate	skip:data		rotation results come from the exported BlockState rotate table (worldgen/structure.rs)
+CrafterBlock.mirror	skip:data		mirror results come from the exported BlockState mirror table (worldgen/structure.rs)
+CrafterBlock.createBlockStateDefinition	skip:data		orientation, triggered and crafting properties come from the block state tables
+CraftingTableBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	CraftingTable arm opens the menu; the interact_with_crafting_table stat is awarded in Game::open_station
+CreakingHeartBlock.getTicker	port	crates/horizon-world/src/level/creaking.rs::Sim::heart_tick	scheduled heart tick; the uprooted check is done inside heart_update_state
+CreakingHeartBlock.animateTick	missing		player: the creak idle sound near a heart with its logs at night is never played (no creaking_heart.idle sound in Horizon)
+CreakingHeartBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	CreakingHeart arm schedules the 1-tick heart update then the default shape
+CreakingHeartBlock.isSurroundedByLogs	missing		player: the six-side pale oak log check only gates the idle creak sound in animateTick
+CreakingHeartBlock.createBlockStateDefinition	skip:data		axis, creaking_heart_state and natural properties come from the block state tables
+CreakingHeartBlock.tryAwardExperience	inline	crates/horizon-client/src/game/creaking.rs::Game::creaking_heart_broken	natural heart drops 20-24 xp orbs when broken by a player outside creative and spectator
+CreakingHeartBlock.getAnalogOutputSignal	port	crates/horizon-client/src/mobs/creaking_heart.rs::output_signal	gap: minor: distance-based signal, no explicit uprooted check; a heart with no creaking or protector gives 0
+CropBlock.growCrops	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	crop arm adds the bonemeal age increase capped at max age and sets the state
+CropBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Crop arm: raw light of at least 8 and the supports_crops ground check
+CropBlock.entityInside	missing		player: ravagers no longer trample crops they walk into; Horizon only breaks leaves for ravagers
+DaylightDetectorBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	DaylightDetector arm checks mayBuild, cycles inverted, sends block change and updates the signal
+DaylightDetectorBlock.getTicker	port	crates/horizon-world/src/level/mod.rs::Behaviours::tick_daylight_detector	gap: minor: every 20 game ticks; only the Nether is skipped here, the End has no sky light but is not excluded
+DaylightDetectorBlock.createBlockStateDefinition	skip:data		power and inverted properties come from the block state tables
+DecoratedPotBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	DecoratedPot arm: waterlogged tick then the default shape update
+DecoratedPotBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	DecoratedPot arm: facing from the player, waterlogged from the spot, cracked false
+DecoratedPotBlock.useWithoutItem	port	crates/horizon-client/src/game/decorated_pot.rs::Game::use_decorated_pot	empty-hand path plays insert_fail, negative wobble and block change
+DecoratedPotBlock.createBlockStateDefinition	skip:data		facing, waterlogged and cracked properties come from the block state tables
+DecoratedPotBlock.getFluidState	skip:data		waterlogged water source comes from the per-state fluid facts table (Level::fluid)
+DecoratedPotBlock.onProjectileHit	missing		player: a projectile hitting a pot does not crack it, and the pot is not broken by the hit
+DecoratedPotBlock.getCloneItemStack	missing		player: middle-click pick of a pot gives an empty pot, not one with its sherd decorations
+DecoratedPotBlock.rotate	skip:data		rotation results come from the exported BlockState rotate table (worldgen/structure.rs)
+DetectorRailBlock.entityInside	port	crates/horizon-world/src/level/hooks.rs::Sim::entity_inside	when not powered, checks for minecarts inside the search box
+DetectorRailBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	when powered, rechecks the minecart presence
+DetectorRailBlock.getDirectSignal	skip:data		the power to the block above comes from the per-state strong signal facts (direct_signal default arm)
+DetectorRailBlock.updatePowerToConnected	inline	crates/horizon-world/src/level/rails.rs::Sim::detector_rail_check_pressed	neighbour notify on the connected rails is folded into check_pressed
+DetectorRailBlock.onPlace	inline	crates/horizon-world/src/level/hooks.rs::Sim::on_place	rail state update and check_pressed on a new placement
+DetectorRailBlock.getSearchBB	inline	crates/horizon-world/src/level/rails.rs::Sim::detector_rail_check_pressed	the 0.2-inset search box is built inline
+DetectorRailBlock.rotate	skip:data		rail shape rotation comes from the exported BlockState rotate table (worldgen/structure.rs)
+DetectorRailBlock.mirror	skip:data		rail shape mirror comes from the exported BlockState mirror table (worldgen/structure.rs)
+DetectorRailBlock.createBlockStateDefinition	skip:data		shape, powered and waterlogged properties come from the block state tables
+DiodeBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Diode arm: the block below must be a rigid sturdy face
+DiodeBlock.getInputSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::diode_input_signal	input from the facing target, wire power, comparator analog and conductor cases
+DiodeBlock.getAlternateSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::diode_alternate_signal	maximum of the two side control inputs
+DiodeBlock.ownSignal	skip:data		the output while powered comes from the per-state weak signal facts (state_signal default arm)
+DiodeBlock.getSignal	skip:data		the facing check and output per side come from the per-state weak signal facts (state_signal default arm)
+DiodeBlock.setPlacedBy	port	crates/horizon-world/src/level/place.rs::Sim::set_placed_by	schedules the 1-tick update when the diode should turn on
+DiodeBlock.updateNeighborsInFront	port	crates/horizon-world/src/level/redstone.rs::Sim::diode_update_neighbors_in_front	neighbour notify on the block behind the output
+DiodeBlock.shouldPrioritize	port	crates/horizon-world/src/level/redstone.rs::Sim::diode_should_prioritize	checks for a diode facing back at it
+DispenserBlock.registerProjectileBehavior	inline	crates/horizon-client/src/game/dispenser.rs::Game::dispense_item	egg, snowball and wind charge dispense as projectiles in dispense_item
+DispenserBlock.neighborChanged	port	crates/horizon-world/src/level/redstone.rs::Sim::dispenser_neighbor_changed	a signal at the block or above starts a 4-tick dispense and sets triggered
+DispenserBlock.rotate	skip:data		rotation results come from the exported BlockState rotate table (worldgen/structure.rs)
+DispenserBlock.createBlockStateDefinition	skip:data		facing and triggered properties come from the block state tables
+DoorBlock.getShape	skip:data		outline shapes come from the per-state shape table (facts shape index)
+DoorBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Door arm: the other half follows, and the lower half breaks when unsupported
+DoorBlock.onExplosionHit	missing		player: a wind charge blast does not swing a door open; canOpenByWindCharge is read from data but no code uses it
+DoorBlock.playerWillDestroy	port	crates/horizon-world/src/level/hooks.rs::Sim::player_destroy	creative break of the upper half removes the lower half without drops
+DoorBlock.isPathfindable	skip:data		path types come from the per-state path data (mobs/path.rs)
+DoorBlock.setPlacedBy	port	crates/horizon-world/src/level/place.rs::Sim::set_placed_by	Door branch places the upper half
+DoorBlock.neighborChanged	port	crates/horizon-world/src/level/redstone.rs::Sim::door_neighbor_changed	redstone power toggles the door open and plays the sound
+DoorBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Door arm: lower half needs a sturdy face below, upper half needs the same door below
+DoorBlock.playSound	port	crates/horizon-world/src/level/redstone.rs::Sim::door_sound	open or close sound from the block set type with a random pitch
+DoorBlock.rotate	skip:data		rotation results come from the exported BlockState rotate table (worldgen/structure.rs)
+DoorBlock.mirror	skip:data		mirror results come from the exported BlockState mirror table (worldgen/structure.rs)
+DoorBlock.getSeed	skip:other		other: only seeds a random model offset, and doors have no offset type
+DoorBlock.createBlockStateDefinition	skip:data		half, facing, open, hinge and powered properties come from the block state tables
+DoublePlantBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	DoublePlant arm: the partner half follows, and the lower half breaks when unsupported
+DoublePlantBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	DoublePlant arm: needs room below the build limit and a replaceable block above
+DoublePlantBlock.setPlacedBy	port	crates/horizon-world/src/level/place.rs::Sim::set_placed_by	DoublePlant branch places the upper half, waterlogged from its own spot
+DoublePlantBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	DoublePlant arm: upper half needs the lower half of the same block below
+DoublePlantBlock.copyWaterloggedFrom	inline	crates/horizon-world/src/level/place.rs::Sim::set_placed_by	upper half waterlogged from the water at its spot, inline in set_placed_by
+DoublePlantBlock.playerWillDestroy	port	crates/horizon-world/src/level/hooks.rs::Sim::player_destroy	gap: minor: only the creative bottom-half removal is read here, the drop branch is not
+DoublePlantBlock.preventDropFromBottomPart	inline	crates/horizon-world/src/level/hooks.rs::Sim::player_destroy	bottom half removed without drops on a creative break of the upper half
+DoublePlantBlock.getSeed	port	crates/horizon-client/src/mesher.rs::offset	gap: minor: the jitter seed uses y 0 for every block, vanilla uses the lower half's y, so tall grass and flower offsets differ
+DriedGhastBlock.createBlockStateDefinition	skip:data		facing, hydration_level and waterlogged properties come from the block state tables
+DriedGhastBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	DriedGhast arm: waterlogged tick, then the default shape update
+DriedGhastBlock.tickWaterlogged	inline	crates/horizon-world/src/level/timeline.rs::Sim::dried_ghast_tick	waterlogged branch: transition sound and hydration plus one, or the ghastling spawn event at full hydration
+DriedGhastBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	DriedGhast arm: waterlogged from the spot and facing opposite the player
+DriedGhastBlock.getFluidState	skip:data		waterlogged water source comes from the per-state fluid facts table (Level::fluid)
+DriedGhastBlock.placeLiquid	port	crates/horizon-world/src/level/fluids.rs::Sim::place_liquid	gap: player: waterlogs the block like the generic path, but plays no dried ghast place-in-water sound
+DriedGhastBlock.setPlacedBy	missing		player: no dried ghast placement sound is played on placing it (no dried_ghast place or place-in-water sound id is referenced)
+EndGatewayBlock.getPortalDestination	port	crates/horizon-client/src/game/end.rs::Game::gateway_job	gap: minor: the thrown ender pearl branch (no relative flags) is not read, only the player travels through gateways here
+EndPortalFrameBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	EndPortalFrame arm: facing opposite the player and eye set to false
+EndPortalFrameBlock.rotate	skip:data		rotation results come from the exported BlockState rotate table (worldgen/structure.rs)
+EndPortalFrameBlock.createBlockStateDefinition	skip:data		facing and eye properties come from the block state tables
+EntityBlock.getListener	inline	crates/horizon-client/src/game/sculk.rs::Game::post_game_event	gap: minor: listeners within reach are found in post_game_event, which reads only the sculk listener tables
+EyeblossomBlock.randomTick	port	crates/horizon-world/src/level/timeline.rs::Sim::eyeblossom_tick	random tick runs tryChangingState and picks the long switch sound
+FaceAttachedHorizontalDirectionalBlock.canAttach	inline	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	the sturdy-face test on the attached side is inline in the FaceAttached arm
+FaceAttachedHorizontalDirectionalBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	FaceAttached arm: tries the nearest looking directions and keeps the first that survives
+FaceAttachedHorizontalDirectionalBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	FaceAttached arm: breaks when the attached side is no longer sturdy
+FallingBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	FallingBlock arm schedules the falling tick (2, or 5 for dragon egg) then the default shape
+FarmlandBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Farmland arm schedules a 1-tick check when the block above changes and farmland cannot survive
+FarmlandBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Farmland arm: survives when the block above is not solid or maintains farmland
+FarmlandBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Farmland arm: the base block when farmland cannot survive at the spot
+FarmlandBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	Farmland arm turns the block to its base when it cannot survive
+FarmlandBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::farmland_random_tick	moisture falls or rises with water in reach and rain above, else turns to base
+FarmlandBlock.turnToBaseBlock	port	crates/horizon-world/src/level/tick.rs::Sim::turn_to_base_block	gap: player: entities standing on it are not pushed up when it turns to dirt (pushEntitiesUp is not read)
+FarmlandBlock.isNearWater	inline	crates/horizon-world/src/level/tick.rs::Sim::farmland_random_tick	gap: minor: the 9x2x9 water search is inline and tests the water fluid only, not canBeHydrated
+FenceBlock.isSameFence	inline	crates/horizon-world/src/level/shapes.rs::Sim::fence_connects_to	the same-fence test (fence tag and wooden match) is inline in fence_connects_to
+FenceBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Fence arm: each horizontal side connects per neighbour and waterlogged from the spot
+FenceBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Fence arm: waterlogged tick and the horizontal side connection update
+FenceBlock.createBlockStateDefinition	skip:data		north, east, south, west and waterlogged properties come from the block state tables
+FireBlock.makeShapes	skip:data		the per-age and per-side outline shapes come from the per-state shape table
+FireBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Fire arm: keeps the fire with its age when it can survive, else air
+FireBlock.getStateForPlacement	port	crates/horizon-world/src/level/shapes.rs::Sim::fire_state_for	fire state from the sides that can catch fire, or the plain fire when the spot below is sturdy
+FireBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Fire arm: a sturdy block below or a valid fire location
+FireBlock.isNearRain	port	crates/horizon-world/src/level/tick.rs::Sim::fire_near_rain	rain at the spot or on one of its four sides
+FireBlock.getBurnOdds	port	crates/horizon-world/src/level/survive.rs::Sim::burn_odds	waterlogged blocks never burn, else the burn odds table
+FireBlock.checkBurnOut	port	crates/horizon-world/src/level/tick.rs::Sim::fire_check_burn_out	burn-out roll that either ages the fire or removes the block
+FireBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	Fire arm: base fire placement, then the fire tick scheduled at 30 plus a random 0 to 9
+FireBlock.createBlockStateDefinition	skip:data		age and the per-side properties come from the block state tables
+FireBlock.setFlammable	skip:data		flammability odds are data (burn odds table read by survive.rs), set by the registry bootstrap
+FireBlock.bootStrap	skip:data		registry bootstrap of the flammable blocks; Horizon reads the odds from data tables
+FlowerPotBlock.useItemOn	missing		player: right-clicking an empty flower pot with a flower or sapling does nothing, so no potted plant can be made
+FlowerPotBlock.useWithoutItem	missing		player: right-clicking a potted plant with an empty hand does not take the plant out
+FlowerPotBlock.getCloneItemStack	missing		player: middle-click pick of a potted plant gives an empty flower pot, not the plant
+FlowerPotBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	FlowerPot arm: breaks when the block under it stops supporting it
+GrassBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	grass arm: air above and inside build height
+GrassBlock.stopBonemealSpread	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::grass_bonemeal	the per-step stop test (grass below, full collision at the spot) is inline in the attempt loop
+GrowingPlantBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	GrowingPlant arm: attached to a supporting face, a body or a head on the growth side
+GrowingPlantBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	GrowingPlant is in the tick list that breaks the plant when it cannot survive
+GrowingPlantBodyBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	GrowingPlantBody arm: 1-tick survival check, and a random-age head replaces the body when the growth side opens
+GrowingPlantBodyBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	PlantBody arm: finds the head and checks its growth spot
+GrowingPlantBodyBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	PlantBody arm forwards to the head's bonemeal growth
+GrowingPlantBodyBlock.canBeReplaced	port	crates/horizon-world/src/level/place.rs::Sim::can_be_replaced	GrowingPlantBody arm: not replaceable by a held head item
+GrowingPlantHeadBlock.isRandomlyTicking	skip:data		the random-ticking flag per state comes from the exported facts (Level::is_randomly_ticking)
+GrowingPlantHeadBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	GrowingPlantHead arm: below age 25 and the growth roll grows it into the next spot
+GrowingPlantHeadBlock.isMaxAge	skip:other		other: an AGE == 25 predicate that no pinned game code calls for plant heads (only crop, loot and villager code use isMaxAge)
+GrowingPlantHeadBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	GrowingPlantHead arm: 1-tick survival check, and turns to body when the head or body sits on the growth side
+GrowingPlantHeadBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	PlantHead arm: the growth spot is free and inside build height
+HangingMossBlock.canStayAtPosition	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	HangingMoss arm: attaches above to a multiface or to another moss
+HangingMossBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	HangingMoss arm: 1-tick check when unattached, and the tip follows the block below
+HangingMossBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	HangingMoss arm breaks the moss when it cannot stay
+HangingMossBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	HangingMoss arm: air below the tip inside build height
+HangingMossBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	HangingMoss arm sets the tip on the air below the tip

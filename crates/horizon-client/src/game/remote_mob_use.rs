@@ -93,4 +93,45 @@ impl Game<'_> {
             _ => false,
         }
     }
+    /// `AbstractHorse.handleEating` (`Llama`'s and `Camel`'s too) on this
+    /// client's copy: a baby fed something that ages it draws one happy
+    /// villager particle. The server draws it on its own level only, so no
+    /// packet brings it.
+    pub(super) fn remote_feed_particles(&mut self, i: usize, hand: Hand) {
+        let Some(m) = self.mobs.get(i).filter(|m| m.alive() && m.is_baby()) else {
+            return;
+        };
+        let stack = match hand {
+            Hand::Main => self.stack_in(self.selected),
+            Hand::Off => self.offhand.as_ref(),
+        };
+        let item = stack.map_or("", |s| &*s.item);
+        let ages = match m.species() {
+            // Llama.handleEating: wheat 10, hay 90.
+            s if llama::is_llama(s) => matches!(item, "minecraft:wheat" | "minecraft:hay_block"),
+            // Camel.handleEating: its food ages it by 10.
+            Species::Camel => m.kind.food.iter().any(|f| f.as_str() == item),
+            // AbstractHorse.handleEating: every food but the red mushroom.
+            Species::Horse | Species::Donkey | Species::Mule => matches!(
+                item,
+                "minecraft:wheat"
+                    | "minecraft:sugar"
+                    | "minecraft:hay_block"
+                    | "minecraft:apple"
+                    | "minecraft:carrot"
+                    | "minecraft:golden_carrot"
+                    | "minecraft:golden_apple"
+                    | "minecraft:enchanted_golden_apple"
+            ),
+            _ => false,
+        };
+        if ages {
+            let id = m.id;
+            self.particles_around_mob(
+                id,
+                "happy_villager",
+                horizon_client::particles::Burst::HORSE_EATING,
+            );
+        }
+    }
 }

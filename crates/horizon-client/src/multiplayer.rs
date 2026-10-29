@@ -29,6 +29,8 @@ pub enum Ping {
         motd: Text,
         /// Online and max players; None when the status has no `players`.
         players: Option<(i64, i64)>,
+        /// `ServerData.playerList`: shown over the player count.
+        player_list: Vec<Text>,
         ms: u128,
         version: String,
     },
@@ -50,6 +52,26 @@ impl Ping {
         }
         .with_color(DARK_GRAY)
     }
+}
+/// ServerStatusPinger: each sample name as a literal line (its `§` codes
+/// styled as the font does), then `multiplayer.status.and_more` for the
+/// players the sample leaves out.
+fn player_list(players: &serde_json::Value, online: i64) -> Vec<Text> {
+    let Some(sample) = players["sample"].as_array().filter(|s| !s.is_empty()) else {
+        return Vec::new();
+    };
+    let mut lines: Vec<Text> = sample
+        .iter()
+        .map(|p| Text::literal(p["name"].as_str().unwrap_or_default()).resolve_legacy())
+        .collect();
+    let shown = sample.len() as i64;
+    if shown < online {
+        lines.push(Text::translate(
+            "multiplayer.status.and_more",
+            &[Text::literal((online - shown).to_string())],
+        ));
+    }
+    lines
 }
 type Pings = Arc<Mutex<HashMap<String, Ping>>>;
 /// Server icons by address as 64x64 RGBA (FaviconTexture), from servers.dat
@@ -110,6 +132,22 @@ pub enum Outcome {
 /// A button: x, y, width, label, enabled, id.
 pub type ButtonSpec = (f32, f32, f32, String, bool, u8);
 
+/// `this.width / 2` (or `height / 2`): `Screen`'s size is an int, so the
+/// division drops the half and widgets stay on whole GUI pixels. A half
+/// pixel lands between device pixels and draws thinner borders and uneven
+/// glyphs at most window heights.
+fn half(size: f32) -> f32 {
+    (size.ceil() / 2.0).floor()
+}
+/// `this.height / 4`, as an int division.
+fn quarter(size: f32) -> f32 {
+    (size.ceil() / 4.0).floor()
+}
+/// `centeredText` around `width / 2`: `x - font.width(text) / 2`.
+fn centered_x(width: f32, text_width: f32) -> f32 {
+    half(width) - half(text_width)
+}
+
 pub fn servers_file(saves: &Path) -> PathBuf {
     saves
         .parent()
@@ -157,6 +195,9 @@ fn ping_all(servers: &[ServerEntry], pings: &Pings, icons: &Icons, file: &Path) 
                                 p.get("max").and_then(|n| n.as_i64()).unwrap_or(0),
                             )
                         });
+                        let player_list = players
+                            .map(|(online, _)| player_list(&json["players"], online))
+                            .unwrap_or_default();
                         let version = json["version"]["name"].as_str().unwrap_or("?").to_owned();
                         // A new favicon replaces the saved one (an invalid one
                         // clears it) and servers.dat is saved again.
@@ -175,6 +216,7 @@ fn ping_all(servers: &[ServerEntry], pings: &Pings, icons: &Icons, file: &Path) 
                         Ping::Ok {
                             motd,
                             players,
+                            player_list,
                             ms,
                             version,
                         }
@@ -186,13 +228,14 @@ fn ping_all(servers: &[ServerEntry], pings: &Pings, icons: &Icons, file: &Path) 
     }
 }
 /// Save the list after a move or delete, keeping the icons pings stored in
-/// servers.dat since it was loaded.
+/// servers.dat since it was loaded, and the Code of Conduct accepted on a server.
 fn save_servers(file: &Path, servers: &mut [ServerEntry]) {
     let _guard = SAVING.lock();
     let saved = servers::load(file);
     for entry in servers.iter_mut() {
         if let Some(s) = saved.iter().find(|s| s.ip == entry.ip) {
             entry.icon = s.icon.clone();
+            entry.accepted_code_of_conduct = s.accepted_code_of_conduct;
         }
     }
     let _ = servers::save(file, servers);
@@ -219,6 +262,32 @@ pub fn save_server_icon(saves: &Path, address: &str, png: &[u8]) {
     if icon_pixels(png).is_some() {
         save_icon(&servers_file(saves), address, Some(crate::lan::base64(png)));
     }
+}
+
+/// Horizon's official survival server: a name and an address like any entry.
+pub const OFFICIAL_SERVER: (&str, &str) = ("Horizon Official", "horizon.bunchy7s.dev");
+/// Beside servers.dat once the official server was offered, so a player who
+/// deletes it never gets it back. The launcher writes the same file.
+const OFFICIAL_MARKER: &str = "horizon_official_server.txt";
+
+/// Puts the official server at the top of the list in `game_dir`, once: not
+/// again after the player deletes it, and not when the list has its address.
+pub fn add_official_server(game_dir: &Path) -> std::io::Result<()> {
+    let marker = game_dir.join(OFFICIAL_MARKER);
+    if marker.exists() {
+        return Ok(());
+    }
+    let (name, address) = OFFICIAL_SERVER;
+    let file = game_dir.join("servers.dat");
+    let key = |ip: &str| servers::parse_address(ip).map(|(h, p)| (h.to_ascii_lowercase(), p));
+    let _guard = SAVING.lock();
+    if !servers::load(&file)
+        .iter()
+        .any(|s| key(&s.ip) == key(address))
+    {
+        servers::prepend(&file, &ServerEntry::new(name, address))?;
+    }
+    std::fs::write(marker, format!("{address}\n"))
 }
 
 /// The address of list row `index`: the saved servers, then the LAN games.
@@ -366,6 +435,37 @@ fn ping_tooltip(
         )),
     })
 }
+/// OnlineServerEntry's player list, over the player count drawn left of
+/// the status icon; `width` measures that count.
+fn player_list_tooltip(
+    servers: &[ServerEntry],
+    pings: &HashMap<String, Ping>,
+    size: (f32, f32),
+    scroll: f32,
+    cursor: (f32, f32),
+    width: impl Fn(&Text) -> f32,
+) -> Option<Vec<Text>> {
+    let Row::Server(i) = row_at(servers.len(), 0, cursor, size, scroll)? else {
+        return None;
+    };
+    let Some(Ping::Ok {
+        players,
+        player_list,
+        ..
+    }) = pings.get(&servers[i].ip)
+    else {
+        return None;
+    };
+    let (top, _, left) = list_area(size.0, size.1);
+    let icon_x = left + 2.0 + ROW_WIDTH - 4.0 - 15.0;
+    let y = top + 4.0 - scroll.trunc() + i as f32 * ROW_HEIGHT;
+    let w = width(&Ping::player_count(*players)).ceil();
+    let x = icon_x - w - 5.0;
+    if cursor.0 < x || cursor.0 >= x + w || cursor.1 < y || cursor.1 >= y + 8.0 {
+        return None;
+    }
+    (!player_list.is_empty()).then(|| player_list.clone())
+}
 
 impl Screen {
     /// Draw after the list and footer so the tooltip is neither clipped nor covered.
@@ -388,11 +488,15 @@ impl Screen {
             bottom,
             content_height(servers.len(), lan.games().len()),
         );
-        if let Some(text) =
-            ping_tooltip(servers, &pings.lock().unwrap(), size, scroll.amount, cursor)
-        {
-            crate::ui::tooltip(batch, atlas, &[text], cursor);
-        }
+        let pings = pings.lock().unwrap();
+        let lines = match ping_tooltip(servers, &pings, size, scroll.amount, cursor) {
+            Some(text) => vec![text],
+            None => player_list_tooltip(servers, &pings, size, scroll.amount, cursor, |t| {
+                atlas.font.width_text(t)
+            })
+            .unwrap_or_default(),
+        };
+        crate::ui::tooltip(batch, atlas, &lines, cursor);
     }
 
     pub fn list(saves: &Path) -> Self {
@@ -486,24 +590,24 @@ impl Screen {
             Self::Edit { address, packs, .. } => vec![
                 // ManageServerScreen's CycleButton, above Done.
                 b(
-                    w / 2.0 - 100.0,
-                    h / 4.0 + 72.0,
+                    half(w) - 100.0,
+                    quarter(h) + 72.0,
                     200.0,
                     &pack_setting_label(*packs),
                     true,
                     60,
                 ),
                 b(
-                    w / 2.0 - 100.0,
-                    h / 4.0 + 96.0 + 18.0,
+                    half(w) - 100.0,
+                    quarter(h) + 96.0 + 18.0,
                     200.0,
                     &crate::lang::get_or("gui.done", "Done"),
                     servers::parse_address(address).is_some(),
                     50,
                 ),
                 b(
-                    w / 2.0 - 100.0,
-                    h / 4.0 + 120.0 + 18.0,
+                    half(w) - 100.0,
+                    quarter(h) + 120.0 + 18.0,
                     200.0,
                     &crate::lang::get_or("gui.cancel", "Cancel"),
                     true,
@@ -535,16 +639,16 @@ impl Screen {
             }
             Self::Direct { address } => vec![
                 b(
-                    w / 2.0 - 100.0,
-                    h / 4.0 + 96.0 + 12.0,
+                    half(w) - 100.0,
+                    quarter(h) + 96.0 + 12.0,
                     200.0,
                     &crate::lang::get_or("selectServer.select", "Join Server"),
                     servers::parse_address(address).is_some(),
                     52,
                 ),
                 b(
-                    w / 2.0 - 100.0,
-                    h / 4.0 + 120.0 + 12.0,
+                    half(w) - 100.0,
+                    quarter(h) + 120.0 + 12.0,
                     200.0,
                     &crate::lang::get_or("gui.cancel", "Cancel"),
                     true,
@@ -553,16 +657,16 @@ impl Screen {
             ],
             Self::Friend { code, .. } => vec![
                 b(
-                    w / 2.0 - 100.0,
-                    h / 4.0 + 96.0 + 18.0,
+                    half(w) - 100.0,
+                    quarter(h) + 96.0 + 18.0,
                     200.0,
                     "Join",
                     horizon_friends::invite::parse(code).is_some(),
                     56,
                 ),
                 b(
-                    w / 2.0 - 100.0,
-                    h / 4.0 + 120.0 + 18.0,
+                    half(w) - 100.0,
+                    quarter(h) + 120.0 + 18.0,
                     200.0,
                     &crate::lang::get_or("gui.cancel", "Cancel"),
                     true,
@@ -571,8 +675,8 @@ impl Screen {
             ],
             Self::Disconnected { retry, .. } => {
                 let mut v = vec![b(
-                    w / 2.0 - 100.0,
-                    h / 2.0 + 30.0,
+                    half(w) - 100.0,
+                    half(h) + 30.0,
                     200.0,
                     &crate::lang::get_or("gui.toMenu", "Back to Server List"),
                     true,
@@ -580,8 +684,8 @@ impl Screen {
                 )];
                 if retry.is_some() {
                     v.push(b(
-                        w / 2.0 - 100.0,
-                        h / 2.0 + 54.0,
+                        half(w) - 100.0,
+                        half(h) + 54.0,
                         200.0,
                         "Cancel Reconnecting",
                         true,
@@ -636,9 +740,10 @@ impl Screen {
         let (w, h) = (batch.width, batch.height);
         let max = self.max_length();
         crate::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
+        // GuiGraphicsExtractor.centeredText at width / 2: x - width(text) / 2.
         let centered = |batch: &mut HudBatch, text: &str, y: f32, color: u32| {
             let tw = HudBatch::text_width(atlas, text);
-            batch.text(atlas, text, (w - tw) / 2.0, y, color, true);
+            batch.text(atlas, text, centered_x(w, tw), y, color, true);
         };
         match self {
             Self::List {
@@ -980,15 +1085,15 @@ impl Screen {
                 centered(
                     batch,
                     &crate::lang::get_or("disconnect.lost", "Connection Lost"),
-                    h / 2.0 - 40.0,
+                    half(h) - 40.0,
                     rgba(170, 170, 170, 255),
                 );
                 for (i, line) in wrap(reason, 300.0, atlas).iter().enumerate() {
-                    centered(batch, line, h / 2.0 - 16.0 + i as f32 * 9.0, u32::MAX);
+                    centered(batch, line, half(h) - 16.0 + i as f32 * 9.0, u32::MAX);
                 }
                 if let Some(r) = retry {
                     let text = r.text(std::time::Instant::now());
-                    centered(batch, &text, h / 2.0 + 16.0, rgba(170, 170, 170, 255));
+                    centered(batch, &text, half(h) + 16.0, rgba(170, 170, 170, 255));
                 }
             }
         }
@@ -1219,7 +1324,7 @@ impl Screen {
                     unreachable!()
                 };
                 for (i, fy) in [(0u8, boxes[0]), (1, boxes[1])] {
-                    if y >= fy && y < fy + 20.0 && (x - w / 2.0).abs() < 100.0 {
+                    if y >= fy && y < fy + 20.0 && (half(w) - 100.0..half(w) + 100.0).contains(&x) {
                         *focus = i;
                     }
                 }
@@ -1440,6 +1545,7 @@ mod tests {
             Ping::Ok {
                 motd: Text::empty(),
                 players: None,
+                player_list: Vec::new(),
                 ms: 42,
                 version: String::new(),
             },
@@ -1474,6 +1580,89 @@ mod tests {
             hover(&pings, 0.0, (349.0, 37.0)).as_deref(),
             Some("(no connection)")
         );
+    }
+
+    #[test]
+    fn screens_lay_out_on_whole_gui_pixels_at_any_window_size() {
+        // A 1000-pixel-high window at GUI scale 3 is 334 GUI pixels high and
+        // a 1281-wide one 427 wide: vanilla's `height / 4` is 83 and
+        // `width / 2` 213, never 83.5 and 213.5.
+        let direct = Screen::Direct {
+            address: "localhost".into(),
+        };
+        let at = |screen: &Screen, w, h| -> Vec<(f32, f32)> {
+            screen.buttons(w, h).iter().map(|b| (b.0, b.1)).collect()
+        };
+        assert_eq!(at(&direct, 427.0, 334.0), [(113.0, 191.0), (113.0, 215.0)]);
+        assert_eq!(at(&direct, 320.0, 240.0), [(60.0, 168.0), (60.0, 192.0)]);
+        let friend = Screen::Friend {
+            code: String::new(),
+            relay: String::new(),
+            focus: 0,
+        };
+        assert_eq!(at(&friend, 427.0, 253.0), [(113.0, 177.0), (113.0, 201.0)]);
+        let lost = Screen::Disconnected {
+            reason: String::new(),
+            retry: None,
+        };
+        assert_eq!(at(&lost, 427.0, 253.0), [(113.0, 156.0)]);
+        // centeredText: `width / 2 - font.width(text) / 2`.
+        assert_eq!(centered_x(427.0, 85.0), 171.0);
+        assert_eq!(centered_x(320.0, 84.0), 118.0);
+    }
+
+    #[test]
+    fn player_list_styles_sample_names_and_counts_the_rest() {
+        let players = serde_json::json!({
+            "online": 5,
+            "sample": [
+                {"name": "\u{a7}b\u{a7}lBIT\u{a7}rMADE"},
+                {"name": ""},
+                {"name": "\u{a7}8\u{2022}\u{a7}r \u{a7}bLobby"},
+            ]
+        });
+        let lines = player_list(&players, 5);
+        assert_eq!(lines.len(), 4);
+        let plain: Vec<String> = lines.iter().take(3).map(Text::plain).collect();
+        assert_eq!(plain, ["BITMADE", "", "\u{2022} Lobby"]);
+        assert_eq!(player_list(&players, 3).len(), 3);
+        assert!(player_list(&serde_json::json!({"online": 2}), 2).is_empty());
+        assert!(player_list(&serde_json::json!({"online": 2, "sample": []}), 2).is_empty());
+    }
+
+    #[test]
+    fn player_list_tooltip_covers_only_the_player_count() {
+        let servers = vec![ServerEntry::new("Test", "server0")];
+        let size = (427.0, 240.0);
+        let mut pings = HashMap::new();
+        let hover = |pings: &HashMap<String, Ping>, cursor| {
+            player_list_tooltip(&servers, pings, size, 0.0, cursor, |_| 20.0)
+                .map(|l| l.iter().map(Text::plain).collect::<Vec<_>>())
+        };
+        assert!(hover(&pings, (324.0, 37.0)).is_none());
+        let ok = |player_list| Ping::Ok {
+            motd: Text::empty(),
+            players: Some((0, 500)),
+            player_list,
+            ms: 1,
+            version: String::new(),
+        };
+        pings.insert("server0".into(), ok(vec![Text::literal("Lobby")]));
+        // The 20-wide count ends 5 pixels left of the bars at (349, 37).
+        for cursor in [(324.0, 37.0), (343.9, 44.9)] {
+            assert_eq!(hover(&pings, cursor), Some(vec!["Lobby".to_owned()]));
+        }
+        for cursor in [
+            (323.9, 37.0),
+            (344.0, 37.0),
+            (324.0, 36.9),
+            (324.0, 45.0),
+            (349.0, 37.0),
+        ] {
+            assert!(hover(&pings, cursor).is_none(), "{cursor:?}");
+        }
+        pings.insert("server0".into(), ok(Vec::new()));
+        assert!(hover(&pings, (324.0, 37.0)).is_none());
     }
 
     #[test]
@@ -1557,6 +1746,50 @@ mod tests {
         // FaviconTexture refuses other sizes; other formats are not icons.
         assert!(icon_pixels(&png(32)).is_none());
         assert!(favicon_bytes(&serde_json::json!({ "favicon": encoded })).is_none());
+    }
+
+    #[test]
+    fn the_official_server_is_added_once_at_the_top() {
+        let dir = std::env::temp_dir().join(format!("horizon-mp-official-{}", std::process::id()));
+        let (name, address) = OFFICIAL_SERVER;
+        let file = dir.join("servers.dat");
+        let ips = || -> Vec<String> { servers::load(&file).into_iter().map(|s| s.ip).collect() };
+        let fresh = |list: &[ServerEntry]| {
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            if !list.is_empty() {
+                servers::save(&file, list).unwrap();
+            }
+        };
+        // A fresh list: just the official server, named like it.
+        fresh(&[]);
+        add_official_server(&dir).unwrap();
+        assert_eq!(servers::load(&file), [ServerEntry::new(name, address)]);
+        // An existing list: on top, the player's servers kept in their order.
+        let mine = [
+            ServerEntry::new("Mine", "127.0.0.1:2"),
+            ServerEntry::new("Other", "example.org"),
+        ];
+        fresh(&mine);
+        add_official_server(&dir).unwrap();
+        assert_eq!(ips(), [address, "127.0.0.1:2", "example.org"]);
+        // Once only: a second start adds nothing.
+        add_official_server(&dir).unwrap();
+        assert_eq!(ips(), [address, "127.0.0.1:2", "example.org"]);
+        // Already there under the player's own name and spelling: not duplicated.
+        fresh(&[
+            ServerEntry::new("SMP", "Horizon.Bunchy7s.dev:25565"),
+            mine[0].clone(),
+        ]);
+        add_official_server(&dir).unwrap();
+        assert_eq!(ips(), ["Horizon.Bunchy7s.dev:25565", "127.0.0.1:2"]);
+        // Deleted by the player: never back.
+        fresh(&mine);
+        add_official_server(&dir).unwrap();
+        servers::save(&file, &mine).unwrap();
+        add_official_server(&dir).unwrap();
+        assert_eq!(ips(), ["127.0.0.1:2", "example.org"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1703,11 +1936,12 @@ mod tests {
                 .find(|b| b.5 == 60)
                 .map(|b| (b.0, b.1, b.2, b.3))
         };
-        // ManageServerScreen: 200 wide at height / 4 + 72, the saved value first.
+        // ManageServerScreen: 200 wide at width / 2 - 100 (ints: 427 / 2 is
+        // 213) and height / 4 + 72, the saved value first.
         assert_eq!(
             cycle(&screen),
             Some((
-                113.5,
+                113.0,
                 132.0,
                 200.0,
                 "Server Resource Packs: Disabled".into()

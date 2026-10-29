@@ -114,7 +114,7 @@ public final class VanillaChatScreenOracle {
         private Provider() { super(null, null, null); }
         @Override public Collection<String> getOnlinePlayerNames() { return new ArrayList<>(List.of(VanillaCommandParseOracle.PLAYERS)); }
         @Override public Collection<String> getCustomTabSuggestions() { return getOnlinePlayerNames(); }
-        @Override public Collection<String> getSelectedEntities() { return List.of(); }
+        @Override public Collection<String> getSelectedEntities() { return new ArrayList<>(List.of(VanillaCommandParseOracle.SELECTED)); }
         @Override public Collection<String> getAllTeams() { return new ArrayList<>(List.of(VanillaCommandParseOracle.TEAMS)); }
         @Override public java.util.stream.Stream<Identifier> getAvailableSounds() { return BuiltInRegistries.SOUND_EVENT.keySet().stream(); }
         @Override public java.util.stream.Stream<Identifier> getAvailablePostEffects() { return source.getAvailablePostEffects(); }

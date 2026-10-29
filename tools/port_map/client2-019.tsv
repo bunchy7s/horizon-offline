@@ -1,0 +1,150 @@
+SocialInteractionsPlayerList.enableScissor	skip:service		social list (hidden and blocked players); Horizon has no Social Interactions screen
+SocialInteractionsPlayerList.updatePlayerList	skip:service		social list (hidden and blocked players); Horizon has no Social Interactions screen
+SocialInteractionsPlayerList.addOnlinePlayers	skip:service		social list (hidden and blocked players); Horizon has no Social Interactions screen
+SocialInteractionsPlayerList.addSeenPlayers	skip:service		social list (hidden and blocked players); Horizon has no Social Interactions screen
+SocialInteractionsPlayerList.makePlayerEntry	skip:service		social list (hidden and blocked players); Horizon has no Social Interactions screen
+SocialInteractionsPlayerList.updatePlayersFromChatLog	skip:service		social list (hidden and blocked players); Horizon has no Social Interactions screen
+SocialInteractionsPlayerList.collectProfilesFromChatLog	skip:service		social list (hidden and blocked players); Horizon has no Social Interactions screen
+SocialInteractionsPlayerList.sortPlayerEntries	skip:service		social list (hidden and blocked players); Horizon has no Social Interactions screen
+SocialInteractionsPlayerList.updateFiltersAndScroll	skip:service		social list (hidden and blocked players); Horizon has no Social Interactions screen
+SocialInteractionsPlayerList.updateFilteredPlayers	skip:service		social list (hidden and blocked players); Horizon has no Social Interactions screen
+SocialInteractionsPlayerList.addPlayer	skip:service		social list (hidden and blocked players); Horizon has no Social Interactions screen
+SocialInteractionsPlayerList.removePlayer	skip:service		social list (hidden and blocked players); Horizon has no Social Interactions screen
+SocialInteractionsPlayerList.refreshHasDraftReport	skip:service		social list (hidden and blocked players); Horizon has no Social Interactions screen
+SocialInteractionsScreen.getNarrationMessage	skip:ui		narration text only
+SocialInteractionsScreen.init	skip:service		social screen: tabs, search box, server label; no Horizon counterpart
+SocialInteractionsScreen.repositionElements	skip:ui		layout only
+SocialInteractionsScreen.showPage	skip:service		social: All, Hidden and Blocked tabs
+SocialInteractionsScreen.extractBackground	skip:service		social screen background
+SocialInteractionsScreen.extractRenderState	skip:service		social screen drawing
+SocialInteractionsScreen.keyPressed	skip:service		social keybind closes the screen
+SocialInteractionsScreen.checkSearchStringUpdate	skip:service		social search filter
+SocialInteractionsScreen.updateServerLabel	skip:service		social server label
+TelemetryEventWidget.buildContent	skip:service		telemetry event list (opt-in data); Horizon's telemetry.rs is perf and crash reporting
+TelemetryEventWidget.setScrollAmount	skip:service		telemetry event list (opt-in data); Horizon's telemetry.rs is perf and crash reporting
+TelemetryEventWidget.extractContents	skip:service		telemetry event list (opt-in data); Horizon's telemetry.rs is perf and crash reporting
+TelemetryEventWidget.addEventType	skip:service		telemetry event list (opt-in data); Horizon's telemetry.rs is perf and crash reporting
+TelemetryEventWidget.addEventTypeProperties	skip:service		telemetry event list (opt-in data); Horizon's telemetry.rs is perf and crash reporting
+TelemetryEventWidget.ContentBuilder.addLine	skip:service		telemetry event list builder
+TelemetryEventWidget.ContentBuilder.addHeader	skip:service		telemetry event list builder
+TelemetryEventWidget.ContentBuilder.build	skip:service		telemetry event list builder
+TelemetryInfoScreen.getNarrationMessage	skip:ui		narration text only
+TelemetryInfoScreen.init	skip:service		telemetry info screen: privacy, feedback, opt-in, view data
+TelemetryInfoScreen.repositionElements	skip:ui		layout only
+AbstractGameRulesScreen.createAndConfigureSearchBox	port	crates/horizon-client/src/game_rules_screen.rs::RulesScreen::build	search box made with the screen; the search text filters through rows()
+AbstractGameRulesScreen.init	port	crates/horizon-client/src/game_rules_screen.rs::RulesScreen::build	title, search box and rule list; Done and Cancel are handled by RulesScreen::click
+AbstractGameRulesScreen.repositionElements	skip:ui		layout only
+AbstractGameRulesScreen.filterGameRules	port	crates/horizon-client/src/game_rules_screen.rs::RulesScreen::rows	gap: minor: the scroll reset to the top is in RulesScreen::edited, not here
+AbstractGameRulesScreen.BooleanRuleEntry.extractContent	port	crates/horizon-client/src/game_rules_screen.rs::RulesScreen::draw	draws the on/off button of a boolean rule
+AbstractGameRulesScreen.CategoryRuleEntry.extractContent	port	crates/horizon-client/src/game_rules_screen.rs::RulesScreen::draw	draws the category header row
+AbstractGameRulesScreen.GameRuleEntry.extractLabel	port	crates/horizon-client/src/game_rules_screen.rs::lines	wraps the rule label to 170 px (one or two lines); drawn by RulesScreen::draw
+AbstractGameRulesScreen.IntegerRuleEntry.extractContent	port	crates/horizon-client/src/game_rules_screen.rs::RulesScreen::draw	draws the 44 px number box; invalid text turns red in RulesScreen::edited
+AbstractGameRulesScreen.RuleList.matchesFilter	port	crates/horizon-client/src/game_rules_screen.rs::RulesScreen::rows	matches id, name, category and description, as rows() does
+AbstractGameRulesScreen.RuleList.extractWidgetRenderState	port	crates/horizon-client/src/game_rules_screen.rs::RulesScreen::draw	hovered rule's tooltip: id, description, default
+ConfirmExperimentalFeaturesScreen.getNarrationMessage	skip:ui		narration text only
+ConfirmExperimentalFeaturesScreen.init	missing		minor: confirmation for experimental packs; Horizon has no experimental packs, so it never opens
+ConfirmExperimentalFeaturesScreen.repositionElements	skip:ui		layout only
+ConfirmExperimentalFeaturesScreen.DetailsScreen.init	missing		minor: details of the experimental packs; no such screen in Horizon
+ConfirmExperimentalFeaturesScreen.DetailsScreen.repositionElements	skip:ui		layout only
+ConfirmExperimentalFeaturesScreen.DetailsScreen.PackListEntry.extractContent	missing		minor: draws an experimental pack id and its message; no such list in Horizon
+ConfirmExperimentalFeaturesScreen.DetailsScreen.PackListEntry.getNarration	skip:ui		narration text only
+CreateWorldScreen.openFresh	port	crates/horizon-client/src/title.rs::Title::new_world	gap: minor: no resource load for datapack registries before the screen
+CreateWorldScreen.testWorld	skip:debug		TW button, shown only when running in the IDE
+CreateWorldScreen.openCreateWorldScreen	skip:data		loads datapack registries and world presets before the screen; Horizon reads data from tables
+CreateWorldScreen.createFromExisting	port	crates/horizon-client/src/title/create_world.rs::WorldOptions::of_world	gap: minor: no datapacks copied; name, seed and mode come from title.rs click_action arm 15
+CreateWorldScreen.init	port	crates/horizon-client/src/title/create_world.rs::buttons	tab bar and footer buttons; tabs are drawn by draw_create
+CreateWorldScreen.repositionElements	skip:ui		layout only
+CreateWorldScreen.onCreate	port	crates/horizon-client/src/title.rs::Title::create_action	gap: minor: no experimental or deprecated-data warning before creating
+CreateWorldScreen.createWorldAndCleanup	inline	crates/horizon-client/src/game/startup_menu.rs::StartupMenu::queue_entry	gap: minor: temp datapack folder cleanup not modelled (no datapack copy)
+CreateWorldScreen.createNewWorld	port	crates/horizon-client/src/game.rs::Game::open_world	gap: minor: the folder is made in WorldRequest::prepare and no datapacks are copied in
+CreateWorldScreen.createLevelSettings	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	name, mode, difficulty, hardcore and commands written with the new level; gap: minor: debug world (spectator, peaceful) not modelled
+CreateWorldScreen.keyPressed	missing		player: Enter does not create the world; startup_menu title_key only confirms a focused rename box, so Enter on Create New World does nothing
+CreateWorldScreen.extractRenderState	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	draws the footer separator
+CreateWorldScreen.extractMenuBackground	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	draws the tab header strip and menu background
+CreateWorldScreen.getOrCreateTempDataPackDir	missing		minor: temp folder for datapacks chosen at creation; Horizon has no create-time datapack picker
+CreateWorldScreen.openExperimentsScreen	missing		minor: Experiments screen, only in non-stable builds; Horizon's button is disabled and has no screen
+CreateWorldScreen.openDataPackSelectionScreen	missing		player: the Data Packs button is disabled on the More tab, so the datapack picker never opens
+CreateWorldScreen.tryApplyNewDataPacks	missing		player: part of the greyed-out Data Packs picker; picked packs never reach the new world
+CreateWorldScreen.applyNewPackConfig	missing		player: part of the greyed-out Data Packs picker; validates and applies the picked packs
+CreateWorldScreen.createDefaultLoadConfig	skip:data		builds the datapack load config; Horizon loads no datapack set at creation
+CreateWorldScreen.removeTempDataPackDir	missing		minor: cleanup of the temp datapack folder; no such folder in Horizon
+CreateWorldScreen.copyBetweenDirs	missing		minor: copies datapack files into the temp folder; not in Horizon
+CreateWorldScreen.createNewWorldDirectory	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	makes the world folder and writes level.dat; gap: minor: datapack files not copied in
+CreateWorldScreen.createTempDataPackDirFromExistingWorld	missing		minor: Re-Create copies the old world's datapacks to a temp folder; Horizon's Re-Create does not
+CreateWorldScreen.getDataPackSelectionSettings	missing		minor: temp datapack repository for the picker; no picker in Horizon
+CreateWorldScreen.GameTab.<init>	port	crates/horizon-client/src/title/create_world.rs::buttons	Game tab: name box, game mode, difficulty, allow cheats; gap: minor: vanilla's Experiments button sits on this tab in non-stable builds
+CreateWorldScreen.MoreTab.openGameRulesScreen	port	crates/horizon-client/src/title.rs::Title::click_action	Game Rules button (arm 29) over a copy of the rules, via RulesScreen::for_creation
+CreateWorldScreen.WorldTab.<init>	port	crates/horizon-client/src/title/create_world.rs::buttons	World tab: world type, customize, seed box (field 1), structures and bonus chest; gap: player: only Default and Superflat are offered, vanilla also offers Amplified and other presets
+CreateWorldScreen.WorldTab.openPresetEditor	port	crates/horizon-client/src/title.rs::Title::click_action	Customize button (arm 26) opens the Superflat editor (Mode::CreateFlat)
+EditWorldScreen.create	port	crates/horizon-client/src/title.rs::Title::click_action	Edit button (arm 13) builds the Edit mode from the list entry; gap: minor: no fixAndGetSummary (file fixing) on open
+EditWorldScreen.<init>	port	crates/horizon-client/src/title.rs::Title::buttons	Edit buttons: reset icon, open folder, backup, backups folder, Optimize, Save, Cancel; gap: player: Optimize World is drawn inactive and does nothing
+EditWorldScreen.keyPressed	port	crates/horizon-client/src/game/startup_menu.rs::StartupMenu::title_key	Enter confirms a focused name box through confirm_edit; Escape goes back through Title::escape
+EditWorldScreen.onRename	port	crates/horizon-client/src/title/world_management.rs::rename	saves the trimmed name to level.dat; Save (arm 35) and Enter reach it, then return to the list
+EditWorldScreen.makeBackupAndShowToast	port	crates/horizon-client/src/title.rs::Title::start_backup	gap: minor: the success or failure toast and the return to the list are in Title::poll_backup
+EditWorldScreen.extractRenderState	port	crates/horizon-client/src/title.rs::Title::draw	draws the centred Edit World title
+ExperimentsScreen.init	missing		minor: Experiments screen, only in non-stable builds; Horizon has none
+ExperimentsScreen.getHumanReadableTitle	missing		minor: translated title of an experiment pack; Horizon has no experiments
+ExperimentsScreen.repositionElements	skip:ui		layout only
+ExperimentsScreen.getNarrationMessage	skip:ui		narration text only
+ExperimentsScreen.onDone	missing		minor: applies the chosen experiments to the pack repository; none in Horizon
+FileFixerProgressScreen.init	missing		player: Cancel while a world's files are fixed; Horizon fixes them with no progress screen
+FileFixerProgressScreen.extractRenderState	missing		player: part of the file-fix progress screen, which Horizon never shows
+FileFixerProgressScreen.extractProgress	missing		player: part of the file-fix progress screen, which Horizon never shows
+FileFixerProgressScreen.extractProgressBar	missing		player: part of the file-fix progress screen, which Horizon never shows
+FileFixerProgressScreen.extractTypeText	missing		player: part of the file-fix progress screen, which Horizon never shows
+FileFixerProgressScreen.extractTypeProgress	missing		player: part of the file-fix progress screen, which Horizon never shows
+FileFixerProgressScreen.extractFileStats	missing		player: part of the file-fix progress screen, which Horizon never shows
+FileFixerProgressScreen.extractScanning	missing		player: part of the file-fix progress screen, which Horizon never shows
+FileFixerProgressScreen.extractFileFixerCount	missing		player: part of the file-fix progress screen, which Horizon never shows
+OptimizeWorldScreen.create	missing		player: opens from Optimize World, which Horizon draws inactive on purpose; no optimizer exists
+OptimizeWorldScreen.init	missing		player: Cancel of the optimize run; no optimize run exists
+OptimizeWorldScreen.extractRenderState	missing		player: optimize progress (converted, skipped, per-dimension bars); not shown
+SelectWorldScreen.init	port	crates/horizon-client/src/title.rs::Title::buttons	Play, Create, Edit, Delete, Re-Create and Back; the list comes from list_worlds in return_to_list
+SelectWorldScreen.createFooterButtons	port	crates/horizon-client/src/title.rs::Title::buttons	footer buttons for the selected world: Play, Create, Edit, Delete, Re-Create, Back
+SelectWorldScreen.createDebugWorldRecreateButton	skip:debug		DEBUG recreate button, only with SharedConstants.DEBUG_WORLD_RECREATE
+SelectWorldScreen.repositionElements	skip:ui		layout only
+SelectWorldScreen.updateButtonStatus	port	crates/horizon-client/src/title.rs::Title::buttons	gap: minor: buttons enable from the selection only; canEdit, canRecreate, canDelete and the primary action are not modelled
+SwitchGrid.Builder.addSwitch	skip:java		builder for the switch rows
+SwitchGrid.Builder.build	skip:java		layout builder for the switch rows; Horizon draws them in create_world buttons
+SwitchGrid.LabeledSwitch.refreshState	port	crates/horizon-client/src/title/create_world.rs::buttons	switch value and enabled flag are read from WorldOptions every frame
+SwitchGrid.SwitchBuilder.build	port	crates/horizon-client/src/title/create_world.rs::buttons	structures (27) and bonus chest (28) switches with their enable rules; structures info is in create_tooltip
+WorldCreationContext.withSettings	skip:java		immutable copy-with helper; Horizon's WorldOptions is a plain struct changed in place
+WorldCreationContext.withOptions	skip:java		immutable copy-with helper; Horizon's WorldOptions is changed in place
+WorldCreationContext.withDimensions	skip:java		immutable copy-with helper; Horizon has no dimension settings to copy
+WorldCreationContext.validate	skip:data		validates datapack dimension generators; Horizon has no datapack dimensions
+WorldCreationGameRulesScreen.initContent	port	crates/horizon-client/src/game_rules_screen.rs::RulesScreen::for_creation	creation rule list
+WorldCreationUiState.<init>	port	crates/horizon-client/src/title.rs::Title::new_world	gap: minor: builds the defaults only; Re-Create and preset starts are in click_action and WorldOptions::of_world
+WorldCreationUiState.onChanged	skip:ui		listener refresh; Horizon's buttons read WorldOptions every frame, bonus chest via WorldOptions::bonus_chest
+WorldCreationUiState.setName	port	crates/horizon-client/src/title.rs::Title::edit_field	name text kept in Mode::Create.name; gap: minor: target folder is not recomputed per keystroke (create_tooltip and create_action compute it)
+WorldCreationUiState.findResultFolder	port	crates/horizon-client/src/title.rs::Title::target_folder	gap: minor: a blank name gives folder World, vanilla gives New World
+WorldCreationUiState.isAllowCommands	port	crates/horizon-client/src/title/create_world.rs::WorldOptions::commands	never in Hardcore, else on for Creative until toggled
+WorldCreationUiState.setSeed	port	crates/horizon-client/src/title.rs::parse_seed	gap: minor: seed text is stored in Mode::Create.seed and parsed in create_action
+WorldCreationUiState.isBonusChest	port	crates/horizon-client/src/title/create_world.rs::WorldOptions::bonus_chest	never in Hardcore
+WorldCreationUiState.tryUpdateDataConfiguration	skip:data		datapack and feature-flag config; Horizon has neither at creation
+WorldCreationUiState.setWorldType	port	crates/horizon-client/src/title/create_world.rs::WorldOptions::press	Superflat toggle (id 25); gap: player: only Default and Superflat exist, vanilla's other presets such as Amplified are missing
+WorldCreationUiState.getPresetEditor	port	crates/horizon-client/src/title/create_world.rs::buttons	customize button enabled only for Superflat; the editor opens in title.rs click_action arm 26
+WorldCreationUiState.updatePresetLists	skip:data		preset lists from the registry; Horizon has two built-in types
+WorldCreationUiState.findPreset	skip:data		registry lookup
+WorldCreationUiState.getNonEmptyList	skip:data		registry tag lookup
+WorldCreationUiState.WorldTypeEntry.describePreset	port	crates/horizon-client/src/title/create_world.rs::buttons	world type label: Default or Superflat
+WorldCreationUiState.WorldTypeEntry.isAmplified	missing		player: there is no Amplified world type in Horizon, so its help tooltip never shows
+WorldOpenFlows.createFreshLevel	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	writes a fresh level.dat; gap: minor: vanilla uses it for the debug recreate and the demo world; no datapack dimensions
+WorldOpenFlows.createWorldAccess	port	crates/horizon-client/src/save.rs::SessionLock::acquire	takes the world's session lock as the access; gap: minor: no symlink warning
+WorldOpenFlows.createLevelFromExistingSettings	port	crates/horizon-client/src/game.rs::Game::open_world	starts the world with the given settings; gap: minor: no datapack repository is built
+WorldOpenFlows.loadWorldStem	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	reads level data and generator settings; gap: minor: no datapack load or safe-mode retry
+WorldOpenFlows.recreateWorldData	port	crates/horizon-client/src/title/create_world.rs::WorldOptions::of_world	reads the old world's settings for Re-Create; title.rs click_action arm 15 fills name, seed and mode
+WorldOpenFlows.loadWorldDataBlocking	port	crates/horizon-client/src/game/world_loading.rs::WorldLoader::finish	waits for the load worker and returns its result
+WorldOpenFlows.askForBackup	missing		player: backup question before opening an old customized or experimental world; Horizon never asks
+WorldOpenFlows.confirmWorldCreation	skip:data		lifecycle warning for experimental or deprecated data; Horizon has no such data
+WorldOpenFlows.openWorld	port	crates/horizon-client/src/game/startup_menu.rs::StartupMenu::queue_entry	Play (title.rs arm 10) queues the existing world for loading
+WorldOpenFlows.openWorldLoadLevelData	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	gap: player: a level.dat that will not read (Level::read gives None) opens with a random seed and the folder name, not the Recover World Data screen
+WorldOpenFlows.openWorldCheckVersionCompatibility	missing		player: no incompatible-version alert and no backup question; Horizon upgrades older worlds and opens newer ones without a check
+WorldOpenFlows.createBackupAndOpenWorld	missing		player: no backup step before opening an old world; the backup button exists only in Edit World
+WorldOpenFlows.upgradeAndOpenWorld	port	crates/horizon-client/src/save.rs::upgrade_older_world	runs the file fixes and upgrades on open; gap: player: no file-fix progress screen and no upgrade done, join now confirm
+WorldOpenFlows.tryFileFixAndReportErrors	port	crates/horizon-world/src/datafix/files.rs::fix_world_files	runs the file fixer; gap: player: cancel, symlink and failed-cleanup alerts are not shown
+WorldOpenFlows.openWorldLoadLevelStem	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	loads the level stem and generator; gap: minor: no safe-mode retry
+WorldOpenFlows.openWorldCheckWorldStemCompatibility	missing		player: old-customized and experimental warning before the load; Horizon has none
+WorldOpenFlows.openWorldLoadBundledResourcePack	missing		player: the world's own resources.zip is not applied on open; only an old-world file fix moves it into resourcepacks (datafix fix 4772)
+WorldOpenFlows.openWorldCheckDiskSpace	missing		player: no low-disk-space warning before loading a world
+WorldOpenFlows.loadBundledResourcePack	missing		player: pushes the world's resources.zip as a local pack; Horizon has no such path
+WorldOpenFlows.promptBundledPackLoadFailure	missing		minor: prompt when the world's own pack fails to load; no such pack in Horizon

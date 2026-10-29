@@ -1,0 +1,67 @@
+[package]
+name = "horizon-client-render"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version = "1.90"
+description = "The client's world data, rendering and screens: chunks, meshing, light, streaming, the renderer, the HUD, menus and settings; no gameplay"
+
+[dependencies]
+horizon-assets = { path = "../horizon-assets" }
+horizon-bench = { path = "../horizon-bench" }
+horizon-client-core = { path = "../horizon-client-core" }
+horizon-client-input = { path = "../horizon-client-input" }
+horizon-command = { path = "../horizon-command" }
+horizon-core = { path = "../horizon-core" }
+horizon-hdr = { path = "../horizon-hdr" }
+horizon-items = { path = "../horizon-items" }
+horizon-protocol = { path = "../horizon-protocol" }
+horizon-shader-api = { path = "../horizon-shader-api" }
+horizon-shaders = { path = "../horizon-shaders" }
+horizon-telemetry = { path = "../horizon-telemetry", default-features = false, features = ["live"] }
+horizon-theme = { path = "../horizon-theme" }
+horizon-threads = { path = "../horizon-threads" }
+horizon-world = { path = "../horizon-world" }
+ab_glyph = "0.2.32"
+bytemuck = { version = "1.24", features = ["derive"] }
+# Sound (ALSA on Linux); the `audio` feature.
+cpal = { version = "0.16", optional = true }
+chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs", "runtime_detection"] }
+glam = "0.30"
+log = "0.4"
+miniz_oxide = "0.8"
+naga = { version = "30.0.1", features = ["wgsl-in", "hlsl-out"] }
+png = "0.18"
+pollster = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["raw_value"] }
+sha2 = "0.10.9"
+symphonia = { version = "0.5", default-features = false, features = ["ogg", "vorbis"] }
+unicode-bidi = "0.3.18"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "wgsl", "naga-ir"] }
+winit = "0.30.13"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+wgpu = { version = "30.0.1", default-features = false, features = ["dx12"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
+
+[features]
+# Sound output: horizon-client's `audio` feature.
+audio = ["dep:cpal"]
+# Helpers horizon-client's tests build their fixtures with.
+test-support = []
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+horizon-items = { path = "../horizon-items", features = ["test-support"] }
+naga = { version = "30.0.1", features = ["wgsl-in", "hlsl-out", "msl-out", "spv-out"] }

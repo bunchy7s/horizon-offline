@@ -162,6 +162,22 @@ impl Game<'_> {
                 },
             );
         }
+        // LivingEntity.setSprinting: SPEED_MODIFIER_SPRINTING (a dashing cat or ocelot).
+        if let (true, Some(a)) = (
+            m.extra.sprinting,
+            self.synced_attribute(kind, "minecraft:movement_speed"),
+        ) {
+            add_modifier(
+                out,
+                a,
+                finalize::base_value(m, Attr::MovementSpeed),
+                AttributeModifier {
+                    id: "minecraft:sprinting".into(),
+                    amount: f64::from(0.3f32),
+                    operation: 2,
+                },
+            );
+        }
         let base = |name: &str| {
             Attr::ALL
                 .into_iter()

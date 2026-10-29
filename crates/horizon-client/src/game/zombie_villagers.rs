@@ -2,10 +2,11 @@
 //! into zombie villagers (`Zombie.killedEntity`), the golden apple that starts
 //! a cure (`ZombieVillager.mobInteract`), and the cured villager that
 //! remembers who saved it (`ZombieVillager.finishConversion`).
-use super::Game;
+use super::{Game, commands::Target};
 use horizon_client::{
     advancements as adv,
     gossip::GossipType,
+    lan::playerdata,
     mobs::{Mob, Species, villager, zombie_villager},
 };
 use horizon_core::random::RandomSource;
@@ -93,7 +94,8 @@ impl Game<'_> {
             return true;
         }
         self.consume_held();
-        let starter = self.level.player_uuid;
+        // `player.getUUID()`: the acting player, a server's guest included.
+        let starter = Some(self.acting_player_uuid());
         let time = zombie_villager::WAIT_MIN
             + self
                 .world
@@ -127,11 +129,15 @@ impl Game<'_> {
             return;
         };
         convert_to_villager(&old, v);
-        // `Villager.onReputationEventFrom(ZOMBIE_VILLAGER_CURED)`.
+        // `level.getPlayerByUUID(conversionStarter)`: the player who fed the
+        // apple, if still in this level (the host or a server's guest).
         let starter = zombie_villager::cure(&old).and_then(|c| c.starter);
-        let player = self.level.player_uuid;
-        let cured_by_player = starter.is_some() && starter == player;
-        if cured_by_player && let Some(uuid) = starter {
+        let curer = starter.and_then(|uuid| Some((uuid, self.player_here(uuid)?)));
+        // `Villager.onReputationEventFrom(ZOMBIE_VILLAGER_CURED)`.
+        let Some(v) = self.mobs.iter_mut().find(|m| m.id == vid) else {
+            return;
+        };
+        if let Some((uuid, _)) = curer {
             let g = &mut villager::ext_mut(v).gossips;
             g.add(uuid, GossipType::MajorPositive, 20);
             g.add(uuid, GossipType::MinorPositive, 25);
@@ -139,8 +145,10 @@ impl Game<'_> {
         let cured = v.clone();
         let villager_view = self.mob_entity(&cured);
         let zombie_view = self.mob_entity(&old);
-        if cured_by_player {
-            self.trigger_cured_zombie_villager(&zombie_view, &villager_view);
+        if let Some((_, who)) = curer {
+            self.for_player(who, |g| {
+                g.trigger_cured_zombie_villager(&zombie_view, &villager_view)
+            });
         }
         let pitch = (self.world.random.next_float() - self.world.random.next_float()) * 0.2 + 1.0;
         self.audio.play(
@@ -149,6 +157,18 @@ impl Game<'_> {
             2.0,
             pitch,
         );
+    }
+
+    /// `ServerLevel.getPlayerByUUID`: the player with `uuid` in this level.
+    fn player_here(&self, uuid: [i32; 4]) -> Option<Target> {
+        match self.target_by_uuid(playerdata::ints_uuid(uuid))? {
+            Target::Player => Some(Target::Player),
+            Target::Guest(conn) => {
+                let g = self.lan.as_ref()?.hub.guest(conn)?;
+                (g.dimension == self.dim.id()).then_some(Target::Guest(conn))
+            }
+            _ => None,
+        }
     }
 
     /// `CuredZombieVillagerTrigger`.

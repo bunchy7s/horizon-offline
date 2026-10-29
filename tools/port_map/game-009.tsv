@@ -1,0 +1,125 @@
+UseBonemeal.checkExtraStartConditions	missing		minor: the B::UseBonemeal arm only checks for bone meal in the inventory and then always returns false, so a farmer carrying bone meal never grows a crop with it
+UseBonemeal.canStillUse	missing		minor: no bone meal session is ever started
+UseBonemeal.pickNextTarget	missing		minor: no random pick of a growing crop in the 3x3x3 around the villager
+UseBonemeal.validPos	missing		minor: no crop-not-fully-grown test
+UseBonemeal.start	missing		minor: villager never holds bone meal or walks to a crop
+UseBonemeal.setCurrentCropAsTarget	missing		minor: no look and walk target on a crop
+UseBonemeal.tick	missing		minor: never uses a bone meal item on a crop (no growCrop, no bonemeal effect)
+ValidateNearbyPoi.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	ValidatePoi arm: within 16 blocks the memory is erased when the POI is gone or the bed is occupied by someone else
+ValidateNearbyPoi.bedIsOccupiedByVillager	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	no ticket to release: POI tickets are counted from the villagers' memories (tickets), so erasing the memory frees the bed
+VillageBoundRandomStroll.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	VillageBoundStroll arm: land pos inside a village, else a pos towards the section closest to a village
+VillagerGoalPackages.getCorePackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	gap: minor: GoToWantedItem (priority 5) never starts (arm returns false), so villagers do not walk to dropped items within 4 blocks; they only pick up what lands at their feet
+VillagerGoalPackages.validateBedPoi	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	AcquirePoi home arm keeps only beds that are not occupied, after the 5-candidate cap like vanilla
+VillagerGoalPackages.getWorkPackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	gap: minor: the UseBonemeal entry never starts (see UseBonemeal)
+VillagerGoalPackages.getPlayPackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	baby villagers: look, tag, run-one of interact, stroll, jump on bed, do nothing
+VillagerGoalPackages.getRestPackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	walk home, validate home, sleep, homeless run-one, minimal look
+VillagerGoalPackages.getMeetPackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	bell gate, trades, gift, validate meeting point, trade gate, full look
+VillagerGoalPackages.getIdlePackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	run-one of interactions and strolls, gift, trades, trade gate, make love gate, full look
+VillagerGoalPackages.getPanicPackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	calm down, walk away from hostile and from the attacker at 0.75, stroll 2x2
+VillagerGoalPackages.getPreRaidPackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	ring bell, meeting point or stroll at 0.75, reset raid status
+VillagerGoalPackages.getRaidPackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	sky spot or stroll once the raid is won, celebrate, hide while the raid is active
+VillagerGoalPackages.getHidePackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	set hidden state, locate hiding place at 0.625, minimal look
+VillagerGoalPackages.getFullLookBehavior	port	crates/horizon-client/src/mobs/villager_brain.rs::look_full	
+VillagerGoalPackages.getMinimalLookBehavior	port	crates/horizon-client/src/mobs/villager_brain.rs::look_minimal	
+VillagerGoalPackages.raidExistsAndActive	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	RaidSequence arm (victory false): the villager's raid status is RAID or PRE_RAID instead of looking up the raid at its position
+VillagerGoalPackages.raidExistsAndNotVictory	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	RaidSequence arm (victory true): the villager's raid status is victory (the vanilla name is misleading, it tests isVictory)
+VillagerMakeLove.canStillUse	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	MakeLove arm stops once now passes the birth time or breeding is no longer possible
+VillagerMakeLove.start	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	MakeLove arm: lock gaze, birth time 275 + random 50 ticks; entity event 18 has no villager effect
+VillagerMakeLove.canReach	inline	crates/horizon-client/src/mobs/villager_brain.rs::take_bed_for_child	bed counts only if create_path_to gets there
+VillagerMakeLove.breed	port	crates/horizon-client/src/game/villagers.rs::Game::villager_birth	baby villager at the parent, ages 6000 and -24000, hearts for the child
+VillagerMakeLove.giveBedToChild	inline	crates/horizon-client/src/game/villagers.rs::Game::villager_birth	child.extra.bed is the taken bed
+WorkAtPoi.checkExtraStartConditions	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	WorkAtPoi arm: 300 tick gap, 1 in 2 roll, within 1.73 of the job site
+WorkAtPoi.canStillUse	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	WorkAtPoi arm: job site still within 1.73
+YieldJobSite.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	gap: minor: the villager gives up its potential site but the nearby villager is not handed the walk and look target or the potential site; it finds the site through its own job search
+YieldJobSite.nearbyWantsJobsite	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	tests the nearby villager's profession against the site type and its job site memory
+YieldJobSite.canReachPos	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	gap: minor: no path test to the site for the nearby villager
+BehaviorBuilder.create	skip:java		declarative behaviour builder; Horizon codes each behaviour as an arm of B
+BehaviorBuilder.sequence	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	RaidSequence arm is the only sequence the villager packages use
+BehaviorBuilder.triggerIf	skip:java		condition combinator; each use is ported in place (raid conditions in RaidSequence)
+BehaviorBuilder.Instance.point	skip:java		applicative plumbing of the behaviour DSL
+BehaviorBuilder.Instance.lift1	skip:java		applicative plumbing of the behaviour DSL
+BehaviorBuilder.Instance.map	skip:java		applicative plumbing of the behaviour DSL
+BehaviorBuilder.Instance.ap2	skip:java		applicative plumbing of the behaviour DSL
+BehaviorBuilder.Instance.ap3	skip:java		applicative plumbing of the behaviour DSL
+BehaviorBuilder.Instance.ap4	skip:java		applicative plumbing of the behaviour DSL
+MemoryCondition.Absent.createAccessor	skip:java		memory accessor of the behaviour DSL; memories are Slot fields
+MemoryCondition.Present.createAccessor	skip:java		memory accessor of the behaviour DSL; memories are Slot fields
+Digging.start	inline	crates/horizon-client/src/mobs/warden_brain.rs::B::try_start	Digging arm: dig pose and sound on ground, else agitated sound and the warden is removed
+Roar.start	inline	crates/horizon-client/src/mobs/warden_brain.rs::B::try_start	Roar arm: sound delay 25, walk target cleared, look at target, roaring pose, anger +20
+Roar.stop	inline	crates/horizon-client/src/mobs/warden_brain.rs::B::do_stop	Roar arm: standing pose, roar target becomes the attack target
+SetRoarTarget.create	inline	crates/horizon-client/src/mobs/warden_brain.rs::B::try_start	SetRoarTarget arm: entity_angry_at and can_target, clears cant-reach memory
+Sniffing.stop	inline	crates/horizon-client/src/mobs/warden_brain.rs::B::do_stop	Sniffing arm: standing pose, anger +35 for a target within 6x20, disturbance location
+SonicBoom.checkExtraStartConditions	inline	crates/horizon-client/src/mobs/warden_brain.rs::B::try_start	SonicBoom arm: target within 15 horizontally and 20 vertically
+BodyRotationControl.rotateBodyIfNecessary	inline	crates/horizon-client/src/mobs/control.rs::Mob::body_rotation_tick	rotate_if_necessary on body_yaw in the standing-still branches
+BodyRotationControl.rotateHeadIfNecessary	inline	crates/horizon-client/src/mobs/control.rs::Mob::body_rotation_tick	rotate_if_necessary on head_yaw in the moving branch
+BodyRotationControl.isMoving	inline	crates/horizon-client/src/mobs/control.rs::Mob::body_rotation_tick	moved distance squared against ARRIVED
+LookControl.clampHeadRotationToBody	inline	crates/horizon-client/src/mobs/control.rs::Mob::look_control_tick	head yaw clamped to the body while the navigation is not done
+LookControl.getXRotD	port	crates/horizon-client/src/mobs/control.rs::Mob::look_angles	
+LookControl.getYRotD	port	crates/horizon-client/src/mobs/control.rs::Mob::look_angles	
+MoveControl.isWalkable	port	crates/horizon-client/src/mobs/control.rs::Mob::walkable	gap: minor: tests the static path type of the cell, not the mob's own node evaluator
+SmoothSwimmingLookControl.tick	port	crates/horizon-client/src/mobs/control.rs::Mob::look_control_tick	SmoothSwimming arm of the look kinds
+SmoothSwimmingMoveControl.getTurningSpeedFactor	inline	crates/horizon-client/src/mobs/control.rs::Mob::move_control_tick	SmoothSwimming arm: 1 - clamp((left - 10) / 50)
+BegGoal.canContinueToUse	port	crates/horizon-client/src/mobs/tame.rs::Beg::can_continue	
+BegGoal.playerHoldingInteresting	port	crates/horizon-client/src/mobs/tame.rs::Beg::interesting	gap: minor: untamed wolves beg only for bones and tamed wolves only for food; in 26.3 a bone or food interests any wolf
+BreathAirGoal.givesAir	inline	crates/horizon-client/src/mobs/goals.rs::BreathAir::find_air	no fluid or a bubble column, and land-pathfindable
+BreedGoal.getFreePartner	inline	crates/horizon-client/src/mobs/goals.rs::Breed::can_use	gap: minor: the partner's isPanicking is not tested (Seen has no panic flag)
+CatLieOnBlockGoal.isValidTarget	port	crates/horizon-client/src/mobs/tame.rs::can_lie_on	
+CatSitOnBlockGoal.isValidTarget	port	crates/horizon-client/src/mobs/tame.rs::can_sit_on	
+ClimbOnTopOfPowderSnowGoal.canUse	missing		player: rabbits, foxes, silverfish and endermites that end up in powder snow never jump to climb out (goal missing from their registration)
+DolphinJumpGoal.waterIsClear	inline	crates/horizon-client/src/mobs/dolphin.rs::Jump::can_use	water at each step and not a blocks_dolphin_jump block
+DolphinJumpGoal.surfaceIsClear	inline	crates/horizon-client/src/mobs/dolphin.rs::Jump::can_use	two air blocks above each step
+DolphinJumpGoal.canContinueToUse	port	crates/horizon-client/src/mobs/dolphin.rs::Jump::can_continue	
+DoorInteractGoal.start	inline	crates/horizon-client/src/mobs/doors.rs::RaiderOpenDoor::start	passed and the door direction only feed canContinueToUse, which both subclasses override, so they are not kept
+DoorInteractGoal.tick	inline	crates/horizon-client/src/mobs/doors.rs::BreakDoor::tick	the passed-the-door dot test is not kept: BreakDoor and RaiderOpenDoor both override can_continue
+FollowFlockLeaderGoal	missing		player: cod, salmon and tropical fish spawn in groups but do not follow a leader, so schools do not swim together (leader id is stored, no goal uses it)
+FollowMobGoal	missing		player: parrots do not fly after and hover near other mobs (priority 3 goal missing from register_parrot)
+FollowPlayerRiddenEntityGoal	missing		player: dolphins do not swim after a boat or nautilus a player is riding
+GoalSelector.removeAllGoals	port	crates/horizon-client/src/mobs/goals.rs::GoalSelector::clear	gap: minor: clear() takes no predicate and does not stop running goals
+GoalSelector.removeGoal	missing		minor: no per-goal removal; callers (cat and ocelot trust, zombie break door, skeleton weapon swap, skeleton horse trap) fold the condition into can_use
+GoalSelector.goalContainsAnyFlags	inline	crates/horizon-client/src/mobs/goals.rs::GoalSelector::tick	flags & disabled
+GoalSelector.goalCanBeReplacedForAllFlags	inline	crates/horizon-client/src/mobs/goals.rs::GoalSelector::tick	the replaceable check over the locked slots
+GoalSelector.tickRunningGoals	port	crates/horizon-client/src/mobs/goals.rs::GoalSelector::tick_running	
+GolemRandomStrollInVillageGoal	missing		player: iron golems stroll with a plain water-avoiding stroll, so they do not stay in the village or go towards villagers who want a golem
+MeleeAttackGoal.checkAndPerformAttack	inline	crates/horizon-client/src/mobs/goals.rs::MeleeAttack::tick	reset cooldown, swing, do_hurt_target
+MeleeAttackGoal.canPerformAttack	inline	crates/horizon-client/src/mobs/goals.rs::MeleeAttack::tick	cooldown over, within melee range, line of sight
+MoveBackToVillageGoal	missing		player: iron golems outside a village never walk back towards it (goal missing from register_iron)
+MoveThroughVillageGoal	missing		player: zombies never walk purposefully through a village towards its POIs and doors at night; they only wander (priority 6 goal missing; the raider variant is separate)
+MoveToBlockGoal.moveMobToBlock	inline	crates/horizon-client/src/mobs/goals.rs::MoveToBlock::start	nav_move_to the block centre one up
+MoveTowardsTargetGoal.start	inline	crates/horizon-client/src/mobs/golem.rs::MoveTowardsTarget::can_use	gap: minor: paths straight to the target entity in can_use, not to a random position towards it chosen in canUse
+OpenDoorGoal.canContinueToUse	port	crates/horizon-client/src/mobs/doors.rs::RaiderOpenDoor::can_continue	the raider goal does not close the door after, so it never continues
+PanicGoal.findRandomPosition	inline	crates/horizon-client/src/mobs/goals.rs::Panic::can_use	default_random_pos(5, 4)
+PanicGoal.lookForWater	inline	crates/horizon-client/src/mobs/goals.rs::Panic::can_use	burning (or turtle) mob not inside a solid cell looks for water by Manhattan distance
+PathfindToRaidGoal.canContinueToUse	port	crates/horizon-client/src/mobs/raider.rs::PathfindToRaid::can_continue	
+RandomStandGoal.playStandSound	port	crates/horizon-client/src/mobs/equine.rs::RandomStand::start	gap: player: plays the angry neigh and only for horses; vanilla plays the ambient sound (baby variants too), so skeleton and zombie horses rear silently, and donkeys and mules never get the goal (can_rear) although only llamas are barred from rearing
+RangedCrossbowAttackGoal.canContinueToUse	port	crates/horizon-client/src/mobs/illager.rs::CrossbowAttack::can_continue	gap: minor: holding test looks at the main hand only
+RangedCrossbowAttackGoal.isValidTarget	inline	crates/horizon-client/src/mobs/illager.rs::CrossbowAttack::can_use	alive target; also rejects creative players
+RemoveBlockGoal.getPosWithBlock	inline	crates/horizon-client/src/mobs/undead.rs::AttackTurtleEgg::tick	own cell, below, west, east, north, south, two below
+RunAroundLikeCrazyGoal.start	inline	crates/horizon-client/src/mobs/equine.rs::RunAroundLikeCrazy::can_use	navigation to the random spot starts in can_use
+SpearUseGoal	missing		player: zombies and zombified piglins holding a spear do not run the charge, jab and retreat routine; they only melee
+SpearUseGoal.SpearUseState	missing		player: see SpearUseGoal
+StrollThroughVillageGoal.tick	missing		minor: foxes do not wander through villages at night (goal missing; no village-bound step)
+StrollThroughVillageGoal.moveRandomly	missing		minor: foxes do not wander through villages at night
+TemptGoal.shouldFollow	inline	crates/horizon-client/src/mobs/goals.rs::Tempt::can_use	main hand or off hand holds a tempt item
+TemptGoal.ForNonPathfinders.navigateTowards	port	crates/horizon-client/src/mobs/happy_ghast.rs::GhastTempt::tick	random fraction of the way to the player's eye as the wanted position; the sulfur cube has its own SulfurTempt
+WaterAvoidingRandomFlyingGoal.getPosition	inline	crates/horizon-client/src/mobs/goals.rs::Stroll::can_use	gap: minor: a flying stroll (the wither) draws a plain default_random_pos(10, 7), not HoverRandomPos along its view direction and AirAndWaterRandomPos
+WaterAvoidingRandomStrollGoal.getPosition	inline	crates/horizon-client/src/mobs/goals.rs::Stroll::can_use	water_avoiding arm: land pos, or default pos with the probability
+WrappedGoal.canBeReplacedBy	inline	crates/horizon-client/src/mobs/goals.rs::GoalSelector::tick	interruptable and lower priority number
+WrappedGoal.start	inline	crates/horizon-client/src/mobs/goals.rs::GoalSelector::tick	running flag then goal.start
+WrappedGoal.equals	skip:java		identity of wrapped goals in a set
+HurtByTargetGoal.alertOthers	inline	crates/horizon-client/src/mobs/goals.rs::HurtByTarget::start	gap: player: the owner and team checks are missing, so when a wolf is hurt every wolf nearby is called, including other owners' and the player's own tamed wolves
+NonTameRandomTargetGoal.canUse	inline	crates/horizon-client/src/mobs/tame.rs::register	wolf and cat target goals use NearestTarget with when(!tame)
+NonTameRandomTargetGoal.canContinueToUse	inline	crates/horizon-client/src/mobs/goals.rs::NearestTarget::can_continue	gap: minor: the prey filter is not re-tested while hunting, only the base TargetGoal rules
+ResetUniversalAngerTargetGoal.wasHurtByPlayer	missing		minor: the universal_anger rule is never read by mobs (default off)
+ResetUniversalAngerTargetGoal.getNearbyMobsOfSameType	missing		minor: the universal_anger rule is never read by mobs (default off)
+TargetGoal.canAttack	inline	crates/horizon-client/src/mobs/goals.rs::NearestTarget::can_use	gap: minor: no isWithinHome test and no must-reach path test
+TargetGoal.canReach	missing		minor: must_reach is stored by reach() but never read, so polar bears, llamas and endermen pick targets they cannot path to
+GossipContainer.getGossipEntries	port	crates/horizon-client/src/gossip.rs::Gossips::entries	
+GossipContainer.add	port	crates/horizon-client/src/gossip.rs::Gossips::add	
+GossipContainer.remove	port	crates/horizon-client/src/gossip.rs::Gossips::remove	gap: minor: only the per-target, per-type removal; the by-amount and all-targets overloads have no caller
+GossipContainer.putAll	skip:java		map copy; Gossips is Clone
+GossipContainer.mergeValuesForAddition	inline	crates/horizon-client/src/gossip.rs::Gossips::add	sum above the max keeps the larger of max and old
+GossipContainer.EntityGossips.weightedValue	port	crates/horizon-client/src/gossip.rs::Gossips::reputation	all types summed; no type filter, as every caller passes all types
+GossipContainer.EntityGossips.makeSureValueIsntTooLowOrTooHigh	inline	crates/horizon-client/src/gossip.rs::Gossips::add	clamps to the max and forgets values below 2
+ExpirableValue.of	inline	crates/horizon-client/src/mobs/villager_brain.rs::Slot::set_ttl	Slot holds the value and its time to live (set or set_ttl)
+ExpirableValue.toString	skip:debug		
+ExpirableValue.codec	skip:java		memory serialisation; Horizon packs memories in its own save format

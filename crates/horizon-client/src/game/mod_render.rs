@@ -6,7 +6,7 @@ use super::Game;
 use horizon_client::hud::HudBatch;
 #[cfg(feature = "mods")]
 use {
-    horizon_client::{hud::rgba, items::ItemStack, text::Text},
+    horizon_client::{hud::rgba, items::ItemStack, text::Text, ui},
     horizon_mods::Shape,
     std::time::Instant,
 };
@@ -108,7 +108,17 @@ impl Game<'_> {
                     let r = s.rect;
                     let name = s.sprite.strip_prefix("minecraft:").unwrap_or(&s.sprite);
                     let name = format!("gui/sprites/{name}");
-                    batch.sprite_scaled(atlas, &name, ox + r.x, oy + r.y, r.w, r.h, argb(s.color));
+                    // As vanilla's blitSprite: a frame or a button keeps its border.
+                    ui::blit_sprite(
+                        batch,
+                        atlas,
+                        &name,
+                        ox + r.x,
+                        oy + r.y,
+                        r.w,
+                        r.h,
+                        argb(s.color),
+                    );
                 }
                 Shape::Item(i) => {
                     if self.res.items().get(&i.item).is_none() {

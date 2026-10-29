@@ -403,31 +403,7 @@ impl Text {
                     continue;
                 }
                 let Some(code) = chars.next() else { break };
-                let code = code.to_ascii_lowercase();
-                let next = if let Some(c) = COLORS.iter().find(|c| c.0 == code) {
-                    // Style.applyLegacyFormat: a colour clears the decorations.
-                    Style {
-                        color: Some(c.2),
-                        bold: Some(false),
-                        italic: Some(false),
-                        underlined: Some(false),
-                        strikethrough: Some(false),
-                        obfuscated: Some(false),
-                        ..style.clone()
-                    }
-                } else {
-                    let mut s = style.clone();
-                    match code {
-                        'k' => s.obfuscated = Some(true),
-                        'l' => s.bold = Some(true),
-                        'm' => s.strikethrough = Some(true),
-                        'n' => s.underlined = Some(true),
-                        'o' => s.italic = Some(true),
-                        'r' => s = span.style.clone(),
-                        _ => {}
-                    }
-                    s
-                };
+                let next = legacy_format(&style, code, &span.style);
                 if next != style {
                     if !current.is_empty() {
                         out.spans.push(Span {
@@ -586,6 +562,35 @@ fn style_json(style: &Style) -> Vec<(String, Value)> {
         out.push(("font".to_owned(), font.clone().into()));
     }
     out
+}
+
+/// `Style.applyLegacyFormat` for the code after a `§`, `§r` going back to
+/// `reset` (`StringDecomposer.iterateFormatted`); an unknown code changes nothing.
+pub fn legacy_format(style: &Style, code: char, reset: &Style) -> Style {
+    let code = code.to_ascii_lowercase();
+    if let Some(c) = COLORS.iter().find(|c| c.0 == code) {
+        // A colour clears the decorations.
+        return Style {
+            color: Some(c.2),
+            bold: Some(false),
+            italic: Some(false),
+            underlined: Some(false),
+            strikethrough: Some(false),
+            obfuscated: Some(false),
+            ..style.clone()
+        };
+    }
+    let mut s = style.clone();
+    match code {
+        'k' => s.obfuscated = Some(true),
+        'l' => s.bold = Some(true),
+        'm' => s.strikethrough = Some(true),
+        'n' => s.underlined = Some(true),
+        'o' => s.italic = Some(true),
+        'r' => s = reset.clone(),
+        _ => {}
+    }
+    s
 }
 
 /// TranslatableContents.decomposeTemplate: `%s` takes the next argument,

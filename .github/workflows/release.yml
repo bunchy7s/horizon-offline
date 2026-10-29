@@ -1,22 +1,15 @@
 name: release
-# Automatic game releases (docs/release-flow.md). After every green `checks` run on main, every 10 minutes (so a
-# release waiting for merges to settle goes out without another merge) and by hand, tools/release_train.py decides,
-# for a commit whose checks and parity-main (the vanilla harnesses on main) both passed:
-# a release when 5 pull requests merged since the last one changed what players run and the newest merged 5 minutes
-# ago, or when the oldest has waited 6 hours, or at once for a pull request labelled release-now.
-# RELEASES_PAUSED=1 (repository variable) stops them; so does an open issue labelled release-blocker, forced runs too.
-# Builds Linux (an older Ubuntu, so the binary runs on any recent distribution and on NixOS through nix-ld) and
-# Windows on GitHub, macOS on the Mac mini's runner (MAC_RUNNER=macos-latest sends it to GitHub), then
-# publishes vX.Y.Z on the release line in .github/release-line.txt (docs/versioning.md; without it, the dated
-# vYYYY.MM.DD[.N] from before 0.2) with notes from the merged pull requests, as the release and GitHub's latest: one
-# channel, which launchers, `horizon-server update` and install.sh follow at once. So it is published only after the
-# checks that used to gate a promotion pass in this run: the Mac mini's smoke test drew a world, and no release-blocker
-# is open (tools/release_train.py gate); otherwise nothing is published. macOS: with the repository variable
-# MACOS_SIGN_IDENTITY set, the programs are signed with
-# Developer ID and the hardened runtime and the zip is notarized, from the runner's signing keychain
-# (packaging/macos/README.md); unset (forks), ad hoc.
-#   gh workflow run release --ref <branch>                       # dry run: builds and notes, publishes nothing
-#   gh workflow run release -f dry_run=false -f force=true       # on main: release now, whatever the rules say
+# Automatic game releases (docs/release-flow.md). Horizon ships only the Nightly since 2026-10-28 (Ludovic): this
+# workflow is the batch train that decides when a new Nightly goes out, and `nightly build` (nightly-build.yml) builds,
+# signs and publishes it. After every green `checks` run on main, every 10 minutes (so a batch waiting for merges to
+# settle goes out without another merge) and by hand, tools/release_train.py decides, for a commit whose checks and
+# parity-main (the vanilla harnesses on main) both passed: a Nightly when 5 pull requests merged since the published
+# Nightly changed what players run and the newest merged 5 minutes ago, or when the oldest has waited 6 hours, or at
+# once for a pull request labelled release-now. RELEASES_PAUSED=1 (repository variable) stops it; so does an open issue
+# labelled release-blocker, forced runs too (nightly-build.yml checks again before publishing). One Nightly build at a
+# time, at most 12 a day (release-now and force=true pass the cap). No `vX.Y.Z` game release is made any more.
+#   gh workflow run release --ref <branch>                       # dry run: decides, starts nothing
+#   gh workflow run release -f dry_run=false -f force=true       # on main: a Nightly now, whatever the rules say
 on:
   workflow_run:
     # A game release ships a commit both passed on (parity-main runs on batches: the newest commit it passed on).
@@ -28,17 +21,19 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Build everything and write the notes, but publish nothing
+        description: Decide only; start no Nightly build
         type: boolean
         default: true
       force:
-        description: Release even without player-facing changes, before merges settle or while paused
+        description: A Nightly even without player-facing changes, before merges settle, while paused or past the day's cap
         type: boolean
         default: false
 permissions:
   contents: read
   # The open release-blocker issues (decide).
   issues: read
+  # The checks, parity-main and nightly build runs (decide).
+  actions: read
 concurrency:
   # One release at a time. A hand-started dry run publishes nothing, so it can't race a real release: it gets a
   # group of its own. In the shared group, a release queued behind it replaced it as the pending run and GitHub
@@ -54,9 +49,8 @@ jobs:
     timeout-minutes: 10
     outputs:
       release: ${{ steps.decide.outputs.release }}
-      tag: ${{ steps.decide.outputs.tag }}
-      version: ${{ steps.decide.outputs.version }}
       head: ${{ steps.decide.outputs.head }}
+      urgent: ${{ steps.decide.outputs.urgent }}
       dry_run: ${{ steps.mode.outputs.dry_run }}
     steps:
       - uses: actions/checkout@v4
@@ -76,127 +70,21 @@ jobs:
         run: |
           python3 tools/release_train.py decide --kind game ${HEAD_SHA:+--head "$HEAD_SHA"} ${FORCE:+--force} | tee decision.json
           echo "### $(jq -r '.reason' decision.json)" >> "$GITHUB_STEP_SUMMARY"
-          # The version the programs are built with (docs/versioning.md): the tag without its v.
-          tag=$(jq -r '.tag' decision.json)
-          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
-          # A dry run builds whatever the decision, to test the builds.
-          if [[ "${{ steps.mode.outputs.dry_run }}" == true ]]; then echo "release=true" >> "$GITHUB_OUTPUT"; fi
 
-  build:
+  nightly:
+    # The Nightly is the release: nightly-build.yml builds the decided commit plus the reviewers' picks, signs it for
+    # the Nightly channel and publishes it once its smoke test passed and no release-blocker is open.
     needs: decide
-    if: needs.decide.outputs.release == 'true'
-    # Every platform's archive, and macOS's smoke test (game-build.yml).
-    uses: ./.github/workflows/game-build.yml
-    with:
-      ref: ${{ needs.decide.outputs.head }}
-      version: ${{ needs.decide.outputs.version }}
-      trusted: true  # main: the release runner, the release cache, no shared sccache
-
-  sign:
-    needs: [decide, build]
+    if: needs.decide.outputs.release == 'true' && needs.decide.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # The only job that holds the release signing key, a secret of the `release` environment, which only main's real
-    # releases enter (dry runs sign with a throwaway key). It runs no code from the repository but
-    # tools/ci/sign_release.sh, which calls only the runner's sha256sum and OpenSSL (docs/release-flow.md).
-    environment: ${{ needs.decide.outputs.dry_run != 'true' && 'release' || '' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: tools/ci/sign_release.sh
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          pattern: horizon-*
-          merge-multiple: true
-      - name: Sign the checksums (SHA256SUMS, SHA256SUMS.sig)
-        env:
-          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
-          RELEASE_SIGNING_KEY_NEXT: ${{ secrets.RELEASE_SIGNING_KEY_NEXT }}
-          EPHEMERAL: ${{ needs.decide.outputs.dry_run == 'true' && 'yes' || '' }}
-          TAG: ${{ needs.decide.outputs.tag }}
-        run: |
-          bash tools/ci/sign_release.sh "$TAG" dist/horizon-linux-x86_64.tar.gz dist/horizon-windows-x64.zip \
-            dist/horizon-macos-arm64.zip dist/horizon-server-linux-x86_64.tar.gz
-      - uses: actions/upload-artifact@v4
-        with:
-          name: signature
-          path: dist/SHA256SUMS*
-          if-no-files-found: error
-          retention-days: 3
-      - uses: actions/upload-artifact@v4
-        if: needs.decide.outputs.dry_run == 'true'
-        with:
-          name: ephemeral.pub
-          path: dist/ephemeral.pub
-          retention-days: 3
-
-  publish:
-    needs: [decide, build, sign]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     permissions:
-      contents: write
-      issues: read
+      actions: write  # starts `nightly build`
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Notes
-        env:
+      - env:
           GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ needs.decide.outputs.head }}
+          URGENT: ${{ needs.decide.outputs.urgent }}
         run: |
-          python3 tools/release_train.py notes --kind game --tag "${{ needs.decide.outputs.tag }}" \
-            --head "${{ needs.decide.outputs.head }}" --out notes > /dev/null
-          { echo "## $(cat notes/title.txt)"; echo; cat notes/body.md; } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - name: The signature, checked as launchers check it
-        env:
-          TAG: ${{ needs.decide.outputs.tag }}
-          EPHEMERAL: ${{ needs.decide.outputs.dry_run == 'true' && 'yes' || '' }}
-        run: |
-          key=(); [[ -n "$EPHEMERAL" ]] && key=(--key "$(cat dist/ephemeral.pub)")
-          cargo run --locked --quiet -p horizon-release-sign -- verify --tag "$TAG" --publishing "${key[@]}" dist
-      - name: Ready to publish (the smoke test passed, no release-blocker is open)
-        # Right before publishing: an issue labelled while the builds ran still holds this release. A dry run only
-        # reports what a real run would do.
-        env:
-          GH_TOKEN: ${{ github.token }}
-          DRY_RUN: ${{ needs.decide.outputs.dry_run }}
-        run: |
-          if ! python3 tools/release_train.py gate --kind game --smoke dist/smoke-test.json --blockers; then
-            [[ "$DRY_RUN" == true ]] || { echo "::error::Nothing published"; exit 1; }
-            echo "::warning::A real run would publish nothing"
-          fi
-      - name: Publish ${{ needs.decide.outputs.tag }}
-        if: needs.decide.outputs.dry_run != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.decide.outputs.tag }}
-        run: |
-          signature=(); [[ -f dist/SHA256SUMS.sig ]] && signature=(dist/SHA256SUMS.sig)
-          # The release and the latest at once: there is one channel (docs/release-flow.md). Each archive gets a
-          # label (file#label), which GitHub's page shows instead of the file name, so nobody takes the game's
-          # files for the download (#1647). Launchers, servers and install.sh match the name, which stays.
-          gh release create "$TAG" --target "${{ needs.decide.outputs.head }}" --title "$(cat notes/title.txt)" \
-            --notes-file notes/body.md --latest \
-            "dist/horizon-linux-x86_64.tar.gz#Game files the launcher installs: Linux (horizon-linux-x86_64.tar.gz)" \
-            "dist/horizon-windows-x64.zip#Game files the launcher installs: Windows (horizon-windows-x64.zip)" \
-            "dist/horizon-macos-arm64.zip#Game files the launcher installs: macOS (horizon-macos-arm64.zip)" \
-            "dist/horizon-server-linux-x86_64.tar.gz#Dedicated server for Linux (horizon-server-linux-x86_64.tar.gz)" \
-            dist/SHA256SUMS "${signature[@]}" dist/smoke-test.json
-      - name: Dry run, the release that would be published
-        if: needs.decide.outputs.dry_run == 'true'
-        run: |
-          echo "Would publish ${{ needs.decide.outputs.tag }} at ${{ needs.decide.outputs.head }} as the release and latest: $(cat notes/title.txt)"
-          ls -l dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-notes
-          path: notes/
-          retention-days: 3
+          gh workflow run nightly-build.yml --repo "$GITHUB_REPOSITORY" --ref main -f base="$HEAD_SHA" -f urgent="$URGENT"
+          echo "### Started \`nightly build\` on ${HEAD_SHA:0:9}" >> "$GITHUB_STEP_SUMMARY"

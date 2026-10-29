@@ -16,6 +16,15 @@ pub(super) struct BundleMouse {
     hovered: Option<usize>,
 }
 
+/// Whether `screen` is an `AbstractContainerScreen`, whose `mouseScrolled` first offers
+/// the wheel to the hovered slot's `ItemSlotMouseAction`s (the bundle's), and whose
+/// `onStopHovering` clears the selection: the inventory and container menus, and
+/// `CreativeModeInventoryScreen`, which scrolls its items only when no bundle took
+/// the wheel.
+pub(super) fn takes_bundle_wheel(screen: Screen) -> bool {
+    matches!(screen, Screen::Inventory | Screen::Creative)
+}
+
 impl Game<'_> {
     /// A slot a bundle can be selected in: the player's inventory, the off hand and a
     /// container's own slots. A server only knows these in the inventory and chest-like menus.
@@ -89,7 +98,7 @@ impl Game<'_> {
     /// `AbstractContainerScreen.onStopHovering` (and `onClose`): leaving a slot, or the
     /// screen, clears the bundle's selection.
     pub(super) fn tick_bundle_hover(&mut self) {
-        let now = if self.screen == Screen::Inventory {
+        let now = if takes_bundle_wheel(self.screen) {
             self.inventory_target().0
         } else {
             None
@@ -98,6 +107,27 @@ impl Game<'_> {
             && Some(left) != now
         {
             self.unselect_bundle(left);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `CreativeModeInventoryScreen.mouseScrolled` calls `AbstractContainerScreen`'s
+    /// first: a bundle under the cursor takes the wheel there too (#3211).
+    #[test]
+    fn container_screens_offer_the_wheel_to_bundles() {
+        assert!(takes_bundle_wheel(Screen::Inventory));
+        assert!(takes_bundle_wheel(Screen::Creative));
+        for screen in [
+            Screen::Playing,
+            Screen::Chat,
+            Screen::Paused,
+            Screen::Options,
+        ] {
+            assert!(!takes_bundle_wheel(screen));
         }
     }
 }

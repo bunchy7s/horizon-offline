@@ -6,6 +6,9 @@
     python3 tools/release_train.py notes --kind game --tag v2026.10.15 --out dist/notes
     python3 tools/release_train.py gate --kind game --smoke dist/smoke-test.json [--blockers]   # before publishing
 
+The game ships only the Nightly since 2026-10-28 (Ludovic): when `decide --kind game` says so, release.yml starts
+`nightly build` on the commit it decided (tools/ci/nightly.py), and "the last release" is the published Nightly.
+
 A kind releases when a pull request merged into main since its last published release changed one of its
 player-facing paths (GAME_PATHS, LAUNCHER_PATHS), once BATCH of them are waiting and the newest merged at least
 DEBOUNCE ago (a burst of merges becomes one release), or once the oldest has waited MAX_WAIT (a lone fix still ships),
@@ -411,6 +414,45 @@ def notes(kind, version, prs, issues, previous=None):
     return title, "\n\n".join(parts) + "\n"
 
 
+# The workflow that builds and publishes a Nightly. NIGHTLY_CAP is tools/ci/nightly_set.py's MAX_BUILDS_PER_DAY: past
+# it, the train waits for the next UTC day unless a pull request is labelled release-now or the run is forced.
+NIGHTLY_WORKFLOW = "nightly-build.yml"
+NIGHTLY_CAP = 12
+
+
+def published_nightly():
+    """The published Nightly (the `nightly` pre-release) as {tag_name, published_at}, or None."""
+    out = run("gh", "api", f"repos/{REPO}/releases/tags/nightly", "--jq", "{tag_name, published_at}", check=False)
+    return json.loads(out) if out.strip() else None
+
+
+def nightly_building():
+    """The run of `nightly build` under way or waiting, if any: the train starts no second one."""
+    runs = gh_json("run", "list", "--repo", REPO, "--workflow", NIGHTLY_WORKFLOW, "--limit", "10",
+                   "--json", "databaseId,status")
+    return next((entry["databaseId"] for entry in runs if entry["status"] in ("queued", "in_progress", "waiting",
+                                                                              "pending", "requested")), None)
+
+
+def nightly_builds_today(today):
+    """The nightly/build-<date>-<n> branches of `today` (every Nightly build pushes one)."""
+    out = run("git", "ls-remote", "origin", f"refs/heads/nightly/build-{today}-*")
+    return [line for line in out.splitlines() if line.strip()]
+
+
+def nightly_decision(release, reason, prs, building, built_today, force=False, cap=NIGHTLY_CAP):
+    """The train's decision held back by the Nightly build: one at a time, and at most `cap` a day unless a pull
+    request is labelled release-now or the run is forced. Returns (release, reason, urgent)."""
+    urgent = force or any("release-now" in pr["labels"] for pr in prs if pr["paths"])
+    if not release:
+        return False, reason, urgent
+    if building:
+        return False, f"a Nightly is being built (run {building}): the next decision takes what it leaves", urgent
+    if built_today >= cap and not urgent:
+        return False, f"{built_today} Nightlies today already, the most a day takes: the next goes out after 00:00 UTC", urgent
+    return True, reason, urgent
+
+
 def gather(kind, head, releases=None):
     """The last published release of this kind and the pull requests merged since, with their player-facing
     paths."""
@@ -496,7 +538,12 @@ def main():
         write_outputs({"release": "false", "reason": result["reason"]})
         return 0
     head = run("git", "rev-parse", head).strip()
-    last, prs = gather(args.kind, head)
+    nightly = published_nightly() if args.kind == "game" else None
+    if nightly:
+        run("git", "fetch", "--quiet", "--force", "origin", "refs/tags/nightly:refs/tags/nightly")
+        last, prs = nightly, merged_between("game", "refs/tags/nightly", head)
+    else:
+        last, prs = gather(args.kind, head)
     if args.command == "notes":
         version = args.tag or "unreleased"
         previous = last["tag_name"] if last and last["tag_name"] != version else None
@@ -511,21 +558,26 @@ def main():
     tags = run("git", "tag", "--list").split()
     line = release_line()
     prefix = GAME_PREFIX if args.kind == "game" else LAUNCHER_PREFIX
-    new_line = f"{line[0]}.{line[1]}" if line and first_on_line(tags, prefix, line) else None
+    new_line = f"{line[0]}.{line[1]}" if line and first_on_line(tags, prefix, line) and not nightly else None
     blockers = open_blockers() if args.kind == "game" else []
     release, reason = decision(args.kind, prs, now, os.environ.get("RELEASES_PAUSED") == "1", args.force, new_line,
                                blockers)
     if release and args.head and parity and not (passed_on("parity-main", head) and passed_on("checks", head)):
         release, reason = False, f"waiting for checks and parity-main to pass on {head[:9]}"
+    urgent = False
+    if args.kind == "game":
+        release, reason, urgent = nightly_decision(release, reason, prs, nightly_building(),
+                                                   len(nightly_builds_today(now.date().isoformat())), args.force)
     minor = any("feature" in pr["labels"] for pr in prs if pr["paths"])
-    tag = next_game_tag(tags, now.date(), line) if args.kind == "game" else next_launcher_tag(tags, minor, line)
+    tag = "nightly" if args.kind == "game" else next_launcher_tag(tags, minor, line)
     result = {
-        "release": release, "reason": reason, "tag": tag, "head": head,
+        "release": release, "reason": reason, "tag": tag, "head": head, "urgent": urgent,
         "last": last["tag_name"] if last else None, "last_published": last["published_at"] if last else None,
         "pull_requests": [{key: pr[key] for key in ("number", "title", "labels", "paths")} for pr in prs],
     }
     print(json.dumps(result, indent=1))
-    write_outputs({"release": str(release).lower(), "reason": reason, "tag": tag, "head": head})
+    write_outputs({"release": str(release).lower(), "reason": reason, "tag": tag, "head": head,
+                   "urgent": str(urgent).lower()})
     return 0
 
 

@@ -1,0 +1,7 @@
+{
+  "pack": {
+    "description": "Horizon's data pack worldgen harness: overrides and new entries",
+    "min_format": 121,
+    "max_format": 121
+  }
+}

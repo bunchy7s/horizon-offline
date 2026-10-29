@@ -137,6 +137,21 @@ impl Heightmap {
         Ok((self.data.get(Self::index(x, z))? as i32).wrapping_add(self.min_y))
     }
 
+    /// Whether any column of the local square `x0..=x1` by `z0..=z1` (each
+    /// within 0..16) has its first available y at or above `y`.
+    pub fn any_first_available_at_least(
+        &self,
+        [x0, x1]: [i32; 2],
+        [z0, z1]: [i32; 2],
+        y: i32,
+    ) -> bool {
+        debug_assert!(0 <= x0 && x1 < 16 && 0 <= z0 && z1 < 16);
+        (z0..=z1).any(|z| {
+            (x0..=x1)
+                .any(|x| (self.data.read(Self::index(x, z)) as i32).wrapping_add(self.min_y) >= y)
+        })
+    }
+
     pub fn highest_taken(&self, x: i32, z: i32) -> Result<i32, HeightmapError> {
         Ok(self.first_available(x, z)?.wrapping_sub(1))
     }

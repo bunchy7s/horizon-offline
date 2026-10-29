@@ -8,6 +8,10 @@ use horizon_client::{
     command::CommandError,
     text::{self, Style, Text},
 };
+use horizon_protocol::packets::{
+    Empty,
+    play::{self, Clientbound as C, DialogHolder},
+};
 use std::{collections::HashMap, time::Instant};
 
 /// Waypoint.Icon: the locator bar style and colour of a transmitter.
@@ -43,8 +47,6 @@ pub(in crate::game) struct CommandExtras {
     pub jfr: Option<(Instant, u64, String)>,
     /// Waypoint icons changed by `/waypoint modify`.
     pub waypoint_icons: HashMap<Target, WaypointIcon>,
-    /// The dialog `/dialog show` opened (its id or inline definition).
-    pub dialog: Option<String>,
     /// `/datapack disable vanilla` took the built-in pack out of the selection.
     pub vanilla_disabled: bool,
     /// The waypoint manager's tracked transmitters (None until first used).
@@ -430,9 +432,9 @@ impl Game<'_> {
             let Some(Arg::Resource(dialog)) = ctx.get("dialog").cloned() else {
                 return Ok(0);
             };
-            self.open_dialog(&dialog)?;
+            self.show_dialog_to(&targets, &dialog);
         } else {
-            self.close_dialog();
+            self.clear_dialog_to(&targets);
         }
         let (single, multiple) = if id == "dialog.show" {
             (
@@ -1039,22 +1041,84 @@ impl Game<'_> {
 }
 
 impl Game<'_> {
-    /// `ServerPlayer.openDialog`: the dialog screen for a dialog id or inline
-    /// definition.
-    pub(in crate::game) fn open_dialog(&mut self, dialog: &str) -> R<()> {
-        self.cmds.dialog = Some(dialog.to_owned());
-        Ok(())
+    /// `ServerPlayer.openDialog` for every target of `/dialog show`: a guest
+    /// is sent `ClientboundShowDialogPacket`, the window's own player opens
+    /// the dialog on its screen.
+    fn show_dialog_to(&mut self, targets: &[Target], dialog: &str) {
+        let Some(holder) = self.dialog_holder(dialog) else {
+            return;
+        };
+        let packet = C::ShowDialog(play::ShowDialog {
+            dialog: holder.clone(),
+        });
+        for &t in targets {
+            match t {
+                Target::Player if self.lan_acting.is_some() => {
+                    self.guest_packets.push(packet.clone());
+                }
+                Target::Player => self.show_play_dialog(&holder),
+                Target::Guest(conn) => {
+                    if let Some(host) = self.lan.as_ref() {
+                        host.hub.send_to(conn, &packet);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
-    /// `ClientboundClearDialogPacket`: close the dialog screen.
-    pub(in crate::game) fn close_dialog(&mut self) {
-        self.cmds.dialog = None;
+    /// `ServerPlayer.closeDialog` for every target of `/dialog clear`.
+    fn clear_dialog_to(&mut self, targets: &[Target]) {
+        let packet = C::ClearDialog(Empty);
+        for &t in targets {
+            match t {
+                Target::Player if self.lan_acting.is_some() => {
+                    self.guest_packets.push(packet.clone());
+                }
+                Target::Player => self.clear_dialog(),
+                Target::Guest(conn) => {
+                    if let Some(host) = self.lan.as_ref() {
+                        host.hub.send_to(conn, &packet);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    /// `ServerPlayer.openDialog`'s dialog: an entry of the `minecraft:dialog`
+    /// registry, or the dialog an inline `ResourceOrIdArgument` carries.
+    fn dialog_holder(&self, dialog: &str) -> Option<DialogHolder> {
+        let text = dialog.trim();
+        if text.starts_with('{') {
+            return horizon_client::command::snbt::parse_fully(text)
+                .ok()
+                .map(DialogHolder::Direct);
+        }
+        // A registry id, written with or without its namespace.
+        let id = if text.contains(':') {
+            text.to_owned()
+        } else {
+            format!("minecraft:{text}")
+        };
+        let index = self
+            .ui
+            .registries
+            .ids("minecraft:dialog")
+            .iter()
+            .position(|name| *name == id);
+        match index {
+            Some(i) => Some(DialogHolder::Registry(i as i32)),
+            None => {
+                log::warn!("Horizon: no dialog {id} in the registry");
+                None
+            }
+        }
     }
 }
 impl Game<'_> {
-    /// The player's profile id as `UUID.toString()`: the saved id, else the
-    /// offline id of the player's name.
-    pub(in crate::game) fn player_uuid_string(&self) -> String {
-        let id = self.level.player_uuid.map_or_else(
+    /// The player's profile id: the saved id, else the offline id of the
+    /// player's name.
+    pub(in crate::game) fn player_uuid(&self) -> u128 {
+        self.level.player_uuid.map_or_else(
             || horizon_protocol::crypto::offline_uuid(super::super::chat::PLAYER_NAME),
             |[a, b, c, d]| {
                 (u128::from(a as u32) << 96)
@@ -1062,15 +1126,6 @@ impl Game<'_> {
                     | (u128::from(c as u32) << 32)
                     | u128::from(d as u32)
             },
-        );
-        let h = format!("{id:032x}");
-        format!(
-            "{}-{}-{}-{}-{}",
-            &h[..8],
-            &h[8..12],
-            &h[12..16],
-            &h[16..20],
-            &h[20..]
         )
     }
 }

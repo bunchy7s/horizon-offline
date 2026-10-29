@@ -267,10 +267,11 @@ impl<'r, 'a> SelectorParser<'r, 'a> {
         }
         let start = self.reader.cursor;
         let name = self.reader.read_string()?;
+        // A UUID selects by entityUUID alone: findEntities looks a
+        // playerName up first, among the players only.
         if let Some(uuid) = java_uuid(&name) {
             self.s.uuid = Some(uuid);
             self.s.include_entities = true;
-            self.s.player_name = Some(name);
         } else {
             if name.is_empty() || name.encode_utf16().count() > 16 {
                 self.reader.cursor = start;

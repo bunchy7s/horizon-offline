@@ -1,0 +1,147 @@
+BellBlockEntity.areRaidersNearby	inline	crates/horizon-client/src/block_entity_anim.rs::Bell::tick	resonation start check (raider within 32 blocks) folded into Bell::tick
+BellBlockEntity.makeRaidersGlow	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::tick_block_entity_anims	GLOWING 60 applied to the raiders Bell::tick returns
+BellBlockEntity.showBellParticles	port	crates/horizon-client/src/block_entity_anim.rs::Bell::tick	particle positions and colours computed here; emitted in tick_block_entity_anims
+BellBlockEntity.isRaiderWithinRange	inline	crates/horizon-client/src/block_entity_anim.rs::Bell::tick	raider_in closure (48 blocks)
+BlockEntity.validateBlockState	skip:other		guard that throws on a wrong block state; no player behaviour
+BlockEntity.getPosFromTag	missing		minor: a block entity saved in the wrong chunk keeps its saved x/z; no chunk fix-up in decode_block_entity
+BlockEntity.saveCustomOnly	port	crates/horizon-client/src/block_entity_item.rs::custom_only	saved NBT without id, position and components
+BlockEntity.loadStatic	port	crates/horizon-client/src/save.rs::decode_block_entity	creates the block entity from its saved tag
+BlockEntity.fillCrashReportCategory	skip:debug		crash report detail
+BlockEntity.applyComponents	inline	crates/horizon-client/src/block_entity_item.rs::place	implicit components applied as part of placing the item's data
+BlockEntity.collectComponents	port	crates/horizon-client/src/block_entity_item.rs::pick	component patch built when a block entity is picked
+BrewingStandBlockEntity.getPotionBits	inline	crates/horizon-client/src/brewing.rs::BrewingStand::tick	bottle occupancy sent as out.bottles
+BrewingStandBlockEntity.isBrewable	port	crates/horizon-client/src/brewing.rs::BrewingStand::brewable	
+BrewingStandBlockEntity.doBrew	port	crates/horizon-client/src/brewing.rs::BrewingStand::brew	
+BrewingStandBlockEntity.getSlotsForFace	port	crates/horizon-client/src/game/machines.rs::View::slots_for_face	
+BrushableBlockEntity.dropContent	port	crates/horizon-client/src/game/brush.rs::Game::brushing_completed	item drops from the hit face; loot is unpacked in unpack_brush_loot
+BrushableBlockEntity.tryLoadLootTable	port	crates/horizon-client/src/game/brush.rs::Game::unpack_brush_loot	reads LootTable and seed from the saved tag
+BrushableBlockEntity.trySaveLootTable	skip:other		no own code: the raw saved tag (spill::saved_entity) keeps LootTable
+BrushableBlockEntity.getUpdateTag	missing		minor: unsure: no client update tag carrying hit direction and item; no Horizon equivalent found
+BrushableBlockEntity.loadAdditional	skip:other		no own code: the raw saved tag (spill::saved_entity) keeps item and LootTable
+BrushableBlockEntity.saveAdditional	skip:other		no own code: the raw saved tag (spill::saved_entity) keeps item and LootTable
+CalibratedSculkSensorBlockEntity.VibrationUser.canReceiveVibration	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_listen	calibrated back-signal frequency filter
+CampfireBlockEntity.markUpdated	port	crates/horizon-client/src/game/campfire.rs::Game::tick_campfire	gap: minor: placing food (use_on_campfire) sends no block update
+CampfireBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	container components applied when the item's data is placed
+CampfireBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	container component collected from Items
+ChestBlockEntity.loadAdditional	port	crates/horizon-client/src/save.rs::decode_block_entity	Items (or loot table, via the chunk)
+ChestBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	Items
+ChestBlockEntity.stopOpen	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::container_opener_event	opener count down (close side), spectators excluded
+ChestBlockEntity.swapContents	missing		minor: unsure: double-chest halves are not swapped during an old-world upgrade; no such step found in save.rs
+ChestBlockEntity.recheckOpen	missing		minor: unsure: player openers are not recounted when the block next to a chest changes; only golem openers are rechecked (recheck_golem_openers)
+ChestLidController.tickLid	port	crates/horizon-client/src/block_entity_anim.rs::ChestLid::tick	lid openness step of 0.1 per tick
+ChiseledBookShelfBlockEntity.removeItem	port	crates/horizon-client/src/game/machines.rs::Game::take_one	removes one item from the slot
+ChiseledBookShelfBlockEntity.setItem	port	crates/horizon-client/src/game/chiseled_bookshelf.rs::Game::use_chiseled_bookshelf	player insert path; slot update via chiseled_bookshelf_update_state
+ChiseledBookShelfBlockEntity.canTakeItem	port	crates/horizon-client/src/game/machines.rs::Containers::can_take	gap: minor: the target-has-room check is left to take_one and put_back
+ChiseledBookShelfBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	Items as container component
+ChiseledBookShelfBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	Items as container component
+CommandBlockEntity.onModeSwitch	port	crates/horizon-client/src/game/command_blocks.rs::Game::apply_command_block	mode switch; the AUTO schedule follows the setAutomatic step
+CommandBlockEntity.isConditional	port	crates/horizon-client/src/game/command_blocks.rs::conditional	
+CommandBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	custom name component
+CommandBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	custom name component
+CommandBlockEntity.removeComponentsFromTag	port	crates/horizon-client/src/block_entity_item.rs::pick	CustomName, conditionMet and powered left out of the item data
+ConduitBlockEntity.updateDestroyTarget	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::conduit_attack	kept target while alive and within 8 blocks, else a new one
+ContainerOpenersCounter.decrementOpeners	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::count_opener	decrement side of the counter
+ContainerOpenersCounter.hasContainerOpen	port	crates/horizon-client/src/mobs/transport_items.rs::has_open	golems only; players are counted in lid_openers
+CrafterBlockEntity.isSlotDisabled	port	crates/horizon-client/src/containers.rs::Crafter::can_place	disabled check (disabled[slot]) inside can_place
+CrafterBlockEntity.canPlaceItem	port	crates/horizon-client/src/game/machines.rs::Containers::can_place	calls Crafter::can_place
+CrafterBlockEntity.smallerStackExist	port	crates/horizon-client/src/containers.rs::Crafter::can_place	the smaller-stack check later in the slots
+CrafterBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	crafter arm: items, disabled slots, triggered, ticks
+CrafterBlockEntity.isEmpty	port	crates/horizon-client/src/game/machines.rs::Containers::is_empty	
+CrafterBlockEntity.fillStackedContents	missing		minor: unsure: recipe-book fill of a crafter is not handled; recipe_book.rs has no crafter case
+CrafterBlockEntity.addDisabledSlots	port	crates/horizon-client/src/save.rs::encode_block_entity	disabled_slots in the crafter arm
+CrafterBlockEntity.slotCanBeDisabled	port	crates/horizon-client/src/containers.rs::Crafter::slot_can_be_disabled	
+CreakingHeartBlockEntity.updateCreakingState	inline	crates/horizon-client/src/mobs/creaking_heart.rs::server_tick	creaking_heart_state set in server_tick
+CreakingHeartBlockEntity.setCreakingInfo	inline	crates/horizon-client/src/mobs/creaking_heart.rs::protector	uuid reset and ticks reset inside protector
+CreakingHeartBlockEntity.isProtector	port	crates/horizon-client/src/mobs/creaking_heart.rs::protector	
+CreakingHeartBlockEntity.loadAdditional	port	crates/horizon-client/src/save.rs::decode_block_entity	creaking uuid
+CreakingHeartBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	creaking uuid
+DecoratedPotBlockEntity.saveAdditional	skip:other		no own code: the raw saved tag keeps sherds and item
+DecoratedPotBlockEntity.loadAdditional	skip:other		no own code: the raw saved tag keeps sherds and item
+DecoratedPotBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	sherds and item as components
+DecoratedPotBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	sherds and item as components
+DecoratedPotBlockEntity.splitTheItem	missing		minor: unsure: no split-count step for the pot's item found in decorated_pot.rs
+DecoratedPotBlockEntity.wobble	port	crates/horizon-client/src/game/decorated_pot.rs::Game::use_decorated_pot	wobble event sent on a hit
+DispenserBlockEntity.insertItem	port	crates/horizon-client/src/game/machines.rs::Game::add_item	slot-by-slot insert, as hoppers use it
+DispenserBlockEntity.loadAdditional	port	crates/horizon-client/src/save.rs::decode_block_entity	Items (9 slots)
+DispenserBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	Items (9 slots)
+EnderChestBlockEntity.startOpen	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::container_opener_event	opener count up (open side)
+EnderChestBlockEntity.stopOpen	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::container_opener_event	opener count down (close side)
+EnderChestBlockEntity.recheckOpen	missing		minor: unsure: player openers are not recounted when the block next to an ender chest changes
+HopperBlockEntity.loadAdditional	port	crates/horizon-client/src/save.rs::decode_block_entity	gap: minor: TransferCooldown is not saved (transient state in machines.rs)
+HopperBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	gap: minor: TransferCooldown is not saved (transient state in machines.rs)
+HopperBlockEntity.setItem	port	crates/horizon-client/src/game/machines.rs::Game::try_move_in_item	gap: minor: unpackLootTable(null) on set is not done here
+HopperBlockEntity.inventoryFull	inline	crates/horizon-client/src/game/machines.rs::Game::hopper_try_move_items	all-slots-at-max check before sucking
+HopperBlockEntity.getSlots	port	crates/horizon-client/src/game/machines.rs::View::slots_for_face	
+HopperBlockEntity.createFlatSlots	skip:java		cached slot index array
+HopperBlockEntity.canPlaceItemInContainer	port	crates/horizon-client/src/game/machines.rs::Containers::can_place	
+HopperBlockEntity.canTakeItemFromContainer	port	crates/horizon-client/src/game/machines.rs::Containers::can_take	
+HopperBlockEntity.getSourceContainer	port	crates/horizon-client/src/game/machines.rs::Game::suck_from_container	container above the hopper
+HopperBlockEntity.getItemsAtAndAbove	port	crates/horizon-client/src/game/machines.rs::Game::suck_item_entities	item entities in the suck box
+HopperBlockEntity.entityInside	inline	crates/horizon-client/src/game/machines.rs::Game::suck_item_entities	item entering the hopper is polled each tick instead
+JigsawBlockEntity.generate	missing		player: creative: the Jigsaw block's Generate button and structure growth do not exist; no jigsaw screen or block-driven generation found (/place only places templates)
+JukeboxBlockEntity.notifyItemChangedInJukebox	port	crates/horizon-client/src/game/jukebox.rs::Game::set_has_record	gap: minor: no BLOCK_CHANGE game event
+JukeboxBlockEntity.getComparatorOutput	port	crates/horizon-client/src/game/jukebox.rs::jukebox_signals	comparator value of the song
+JukeboxBlockEntity.loadAdditional	port	crates/horizon-client/src/save.rs::decode_block_entity	RecordItem and ticks
+JukeboxBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	RecordItem and ticks
+JukeboxBlockEntity.setTheItem	inline	crates/horizon-client/src/game/jukebox.rs::Game::use_jukebox	gap: player: hoppers and other containers cannot insert a disc
+JukeboxBlockEntity.canPlaceItem	port	crates/horizon-client/src/game/jukebox.rs::Game::use_jukebox	gap: player: hopper insertion of discs is missing
+JukeboxBlockEntity.setSongItemWithoutPlaying	skip:other		@VisibleForTesting setter; no player behaviour
+JukeboxBlockEntity.tryForcePlaySong	skip:other		@VisibleForTesting hook; no player behaviour
+LecternBlockEntity.hasBook	inline	crates/horizon-client/src/game/books.rs::Game::use_lectern	book-present check before a book is placed
+LecternBlockEntity.onBookItemRemove	port	crates/horizon-client/src/game/books.rs::Game::lectern_menu_done	book gone: has_book off, container changed
+LecternBlockEntity.resolveBook	missing		minor: unsure: written-book components (selectors, scores) are not resolved when a book goes on a lectern; books.rs has no resolve step
+LecternBlockEntity.createCommandSourceStack	missing		minor: unsure: only used by resolveBook (see there)
+LecternBlockEntity.loadAdditional	port	crates/horizon-client/src/save.rs::decode_block_entity	Book and Page
+LecternBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	Book and Page
+SculkCatalystBlockEntity.CatalystListener.tryAwardItSpreadsAdvancement	missing		player: no 'It Spreads' advancement for a mob killed next to a sculk catalyst; Horizon never fires kill_mob_near_sculk_catalyst
+SculkShriekerBlockEntity.loadAdditional	port	crates/horizon-client/src/save.rs::decode_block_entity	shrieker state from the sculk arm
+SculkShriekerBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	shrieker state from the sculk arm
+SculkShriekerBlockEntity.tryGetPlayer	inline	crates/horizon-client/src/game/sculk.rs::Game::sculk_listen	ctx.player flag decides whether a player set it off
+SculkShriekerBlockEntity.tryToWarn	port	crates/horizon-client/src/game/sculk.rs::Game::try_to_warn	
+SculkShriekerBlockEntity.tryRespond	port	crates/horizon-client/src/game/sculk.rs::Game::shrieker_respond	
+SculkShriekerBlockEntity.playWardenReplySound	port	crates/horizon-client/src/game/sculk.rs::Game::warden_reply_sound	
+SculkShriekerBlockEntity.trySummonWarden	port	crates/horizon-client/src/game/sculk.rs::Game::try_summon_warden	
+SculkShriekerBlockEntity.VibrationUser.canReceiveVibration	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_listen	not shrieking and a player is the source
+SculkShriekerBlockEntity.VibrationUser.onReceiveVibration	port	crates/horizon-client/src/game/sculk.rs::Game::try_shriek	
+ShelfBlockEntity.loadAdditional	skip:other		no own code: the raw saved tag keeps Items (shelf_signal reads it)
+ShelfBlockEntity.saveAdditional	skip:other		no own code: the raw saved tag keeps Items (shelf_signal reads it)
+ShelfBlockEntity.getUpdateTag	missing		minor: unsure: no client update tag for shelves
+ShelfBlockEntity.setChanged	missing		player: shelves cannot be used: no item insert or take on a shelf; no shelf interaction code found
+ShelfBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	Items as container component
+ShelfBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	Items as container component
+ShulkerBoxBlockEntity.updateAnimation	port	crates/horizon-client/src/block_entity_anim.rs::Shulker::tick	lid progress
+ShulkerBoxBlockEntity.moveCollidedEntities	missing		player: unsure: a player in the swept lid box is not pushed out when the box opens; the code comment says the level does it and no push code was found
+ShulkerBoxBlockEntity.doNeighborUpdates	missing		minor: unsure: neighbour updates on lid open and close are left to the level; no code found
+ShulkerBoxBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	shulker box uses the chest arm (27 slots)
+ShulkerBoxBlockEntity.loadFromTag	port	crates/horizon-client/src/block_entity_item.rs::place	contents from the item's data
+SignBlockEntity.getText	skip:other		accessor; SignData keeps front and back sides as fields
+SignBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	sign arm: sign.encode()
+SignBlockEntity.loadAdditional	port	crates/horizon-client/src/signs.rs::SignData::decode	
+SignBlockEntity.resolveLines	missing		minor: unsure: sign text selectors are not resolved; SignText keeps plain strings (component_text)
+SignBlockEntity.resolveLine	missing		minor: unsure: sign text selectors are not resolved; SignText keeps plain strings (component_text)
+SignBlockEntity.updateText	port	crates/horizon-client/src/game/sign_edit.rs::Game::lan_sign_update	guest's sign write
+SignBlockEntity.updateMessages	missing		minor: unsure: sign text selectors are not resolved; SignText keeps plain strings (component_text)
+SignBlockEntity.setText	port	crates/horizon-client/src/game/sign_edit.rs::Game::sign_write	
+SignBlockEntity.canExecuteClickCommands	missing		player: sign text click events are not kept; Horizon flattens sign text to plain strings, so clicking a sign runs nothing
+SignBlockEntity.executeClickCommandsIfPresent	missing		player: sign text click events are not kept; clicking a sign runs nothing
+SignBlockEntity.createCommandSourceStack	missing		minor: unsure: only used by click commands (see executeClickCommandsIfPresent)
+SignBlockEntity.markUpdated	port	crates/horizon-client/src/game/trial_spawner.rs::Game::mark_block_entity_updated	
+SignBlockEntity.setWaxed	port	crates/horizon-client/src/game/sign_edit.rs::Game::use_sign_applicator	honeycomb wax
+SignBlockEntity.playerIsTooFarAwayToEdit	port	crates/horizon-client/src/game/sign_edit.rs::Game::lan_sign_update	reach check when a guest writes
+SignBlockEntity.tick	missing		minor: unsure: no per-tick clearing of the edit permission; the reach check only happens when a guest writes
+SignBlockEntity.removeComponentsFromTag	port	crates/horizon-client/src/block_entity_item.rs::pick	front, back and waxed left out of the item data
+SignText.load	port	crates/horizon-client/src/signs.rs::SignData::decode	
+SignText.validateLineCounts	skip:java		codec check of four lines; Horizon fixes the array size
+SignText.withGlowingText	port	crates/horizon-client/src/game/sign_edit.rs::Game::use_sign_applicator	glow ink sac
+SignText.withColor	port	crates/horizon-client/src/game/sign_edit.rs::Game::use_sign_applicator	dye
+SignText.hasMessage	port	crates/horizon-client/src/signs.rs::SignText::is_empty	inverse of is_empty
+SignText.getRenderMessages	port	crates/horizon-client/src/block_entity_render.rs::sign_text_calls	lines drawn on the sign
+SignText.filteredMessagesForSerialization	skip:service		chat-filtered sign text for clients; Horizon has no text filter
+SignText.hasAnyClickCommands	missing		player: sign text click events are not kept; no click command exists on any sign
+SignText.hasEditableText	skip:other		Horizon sign text has no click events, so every line is editable
+SignText.equals	skip:java		value equality
+SignText.hashCode	skip:java		value hashing
+SignText.Mutable.asImmutable	skip:java		copy into the immutable record
+SignText.Mutable.setLine	port	crates/horizon-client/src/game/sign_edit.rs::Game::sign_write	writes the edited lines to the side
+SignText.Mutable.modifyLine	missing		minor: unsure: component resolution helper; see SignBlockEntity.resolveLines
+SignText.Mutable.modifyLines	missing		minor: unsure: component resolution helper; see SignBlockEntity.resolveLines

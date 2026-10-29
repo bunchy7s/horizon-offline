@@ -1,0 +1,149 @@
+BuildContexts.Continuation.execute	inline	crates/horizon-client/src/game/commands/execute.rs::Game::run_execute	the rest of a modifier chain runs as a loop over the sources in run_execute, not as a queued continuation
+BuildContexts.TopLevel.execute	port	crates/horizon-client/src/game/commands/execute.rs::Game::execute_line	gap: minor: no trace-start event (only the /debug tracer uses it)
+BuildContexts.Unbound.execute	port	crates/horizon-client/src/game/commands/execute.rs::Game::execute_line	gap: minor: no trace-start event (only the /debug tracer uses it)
+CallFunction.execute	port	crates/horizon-client/src/game/functions.rs::Game::run_function	gap: minor: the lines run in one loop, not through the command queue; no tracer onCall
+ContinuationTask.execute	inline	crates/horizon-client/src/game/commands/execute.rs::Game::run_execute	the one-source-at-a-time task queue is the loop over sources in run_execute
+ContinuationTask.schedule	inline	crates/horizon-client/src/game/commands/execute.rs::Game::run_execute	no queue of continuation tasks: run_execute walks the sources in a loop
+net/minecraft/commands/execution/tasks/ExecuteCommand#execute	port	crates/horizon-client/src/game/commands/execute.rs::Game::run_execute	gap: minor: profiler and tracer.onReturn are not reported; forked errors are silenced in the run branch
+IsolatedCall.execute	inline	crates/horizon-client/src/game/functions.rs::Game::run_function	the new depth and the isolated return slot are set up in run_function; if function reaches it through call_function_ref
+CommandFunction.shouldConcatenateNextLine	inline	crates/horizon-client/src/datapack.rs::parse_function	the trailing-backslash join is the continuation loop in parse_function
+CommandFunction.checkCommandLineLength	missing		minor: no 2,000,000-character limit on a command line; a longer line is not refused
+CommandFunction.parseCommand	missing		minor: lines are parsed when they run (execute_line), not when the datapack loads; a syntax error fails at run time
+FunctionBuilder.addCommand	inline	crates/horizon-client/src/datapack.rs::parse_function	plain lines are collected in parse_function
+FunctionBuilder.getArgumentIndex	inline	crates/horizon-client/src/datapack.rs::parse_function	macro parameter names are collected in order without duplicates; names, not indices
+FunctionBuilder.convertToIndices	inline	crates/horizon-client/src/datapack.rs::Function::instantiate	parameters are looked up by name in instantiate; there is no index list
+FunctionBuilder.addMacro	inline	crates/horizon-client/src/datapack.rs::parse_function	the $ line branch of parse_function, split by macro_parameters
+FunctionBuilder.build	port	crates/horizon-client/src/datapack.rs::parse_function	returns one Function; Function::is_macro tells a plain function from a macro one
+MacroFunction.lookupValues	inline	crates/horizon-client/src/datapack.rs::Function::instantiate	values are picked by parameter name in instantiate
+MacroFunction.substituteAndParse	port	crates/horizon-client/src/datapack.rs::Function::instantiate	gap: minor: substitutes only; no new function with a per-call id, and lines are parsed when they run
+MacroFunction.MacroEntry.instantiate	port	crates/horizon-client/src/datapack.rs::Function::instantiate	gap: minor: substitutes only; a parse error is raised when the line runs, not as commands.function.error.parse
+StringTemplate.fromString	port	crates/horizon-client/src/datapack.rs::macro_parameters	gap: minor: keeps the variable names only, and accepts a $ line with no $(name) (vanilla rejects it)
+StringTemplate.isValidVariableName	inline	crates/horizon-client/src/datapack.rs::macro_parameters	checks ASCII letters, digits and _; Java also accepts other Unicode letters and digits
+StringTemplate.substitute	port	crates/horizon-client/src/datapack.rs::substitute	gap: minor: no 2,000,000-character length check
+ArgumentTypeInfos.register	skip:data		bootstrap registration of argument type infos
+ArgumentTypeInfos.byClass	skip:java		lookup by Java class; Horizon's argument types are an enum
+ArgumentUtils.createNumberFlags	inline	crates/horizon-client/src/lan/commands.rs::properties	the min and max presence bits are written inline in properties
+ArgumentUtils.serializeArgumentToJson	skip:data		JSON of the commands report written by datagen; Horizon reads commands.json
+ArgumentUtils.findUsedArgumentTypes	skip:data		bootstrap check that every used argument type is registered
+SuggestionProviders.register	skip:data		bootstrap registration; the ids Horizon knows are the match in network.rs::provider
+SuggestionProviders.getName	inline	crates/horizon-client/src/lan/commands.rs::CommandTree::packet_with	gap: minor: the suggestion id is found by node path in SUGGESTIONS, not from the provider object
+DoubleArgumentInfo.serializeToNetwork	port	crates/horizon-client/src/lan/commands.rs::properties	writes the min and max presence byte, then each bound
+DoubleArgumentInfo.deserializeFromNetwork	port	crates/horizon-protocol/src/packets/play.rs::ArgumentProperties::read	reads the presence byte and the bounds
+DoubleArgumentInfo.serializeToJson	skip:data		the min and max JSON of the datagen report; Horizon reads commands.json
+FloatArgumentInfo.serializeToNetwork	port	crates/horizon-client/src/lan/commands.rs::properties	writes the min and max presence byte, then each bound
+FloatArgumentInfo.deserializeFromNetwork	port	crates/horizon-protocol/src/packets/play.rs::ArgumentProperties::read	reads the presence byte and the bounds
+FloatArgumentInfo.serializeToJson	skip:data		the min and max JSON of the datagen report; Horizon reads commands.json
+IntegerArgumentInfo.serializeToNetwork	port	crates/horizon-client/src/lan/commands.rs::properties	writes the min and max presence byte, then each bound
+IntegerArgumentInfo.deserializeFromNetwork	port	crates/horizon-protocol/src/packets/play.rs::ArgumentProperties::read	reads the presence byte and the bounds
+IntegerArgumentInfo.serializeToJson	skip:data		the min and max JSON of the datagen report; Horizon reads commands.json
+LongArgumentInfo.serializeToNetwork	port	crates/horizon-client/src/lan/commands.rs::properties	writes the min and max presence byte, then each bound
+LongArgumentInfo.deserializeFromNetwork	port	crates/horizon-protocol/src/packets/play.rs::ArgumentProperties::read	reads the presence byte and the bounds
+LongArgumentInfo.serializeToJson	skip:data		the min and max JSON of the datagen report; Horizon reads commands.json
+StringArgumentSerializer.deserializeFromNetwork	port	crates/horizon-protocol/src/packets/play.rs::ArgumentProperties::read	reads the string type as a varint
+StringArgumentSerializer.Template.instantiate	port	crates/horizon-command/src/network.rs::argument_type	word, phrase and greedy string types
+BlockBox.of	skip:other		no caller outside BlockBox in the 26.3 sources
+BlockBox.include	skip:other		no caller outside BlockBox in the 26.3 sources
+BlockBox.contains	skip:other		no caller outside BlockBox in the 26.3 sources
+BlockBox.extend	skip:other		no caller outside BlockBox in the 26.3 sources
+BlockBox.move	skip:other		no caller outside BlockBox in the 26.3 sources
+BlockBox.offset	skip:other		no caller outside BlockBox in the 26.3 sources
+BlockMath.blockCenterToCorner	skip:other		no callers in the 26.3 sources
+BlockMath.blockCornerToCenter	skip:other		no callers in the 26.3 sources
+BlockMath.getFaceTransformation	port	crates/horizon-assets/src/bake/transform.rs::BlockModelTransform::inverse_uv_rows	the per-face UV matrix; Horizon returns identity unless the model is uv-locked
+BlockPos.getX	port	crates/horizon-core/src/position.rs::BlockPos::unpack	static getter of the packed long; unpack gives all three axes
+BlockPos.getY	port	crates/horizon-core/src/position.rs::BlockPos::unpack	static getter of the packed long; unpack gives all three axes
+BlockPos.getZ	port	crates/horizon-core/src/position.rs::BlockPos::unpack	static getter of the packed long; unpack gives all three axes
+BlockPos.min	skip:other		only BlockBox uses it, and nothing outside BlockBox calls BlockBox
+BlockPos.max	skip:other		only BlockBox uses it, and nothing outside BlockBox calls BlockBox
+BlockPos.asLong	port	crates/horizon-core/src/position.rs::BlockPos::pack	packs the three axes
+BlockPos.subtract	inline	crates/horizon-core/src/position.rs::BlockPos::offset	callers pass the negated vector
+BlockPos.multiply	skip:other		only the MutableBlockPos override calls it; nothing scales a block position in gameplay
+BlockPos.rotate	skip:other		only the MutableBlockPos override calls it in 26.3; structure rotation is StructureTemplate.transform
+BlockPos.cross	skip:other		no callers in the 26.3 sources
+BlockPos.randomInCube	inline	crates/horizon-world/src/level/tick.rs::Sim::lightning_clear_copper	the 3x3x3 random picks of the lightning copper walk; WeavingMobEffect's cobwebs draw the same way in game/potions.rs
+BlockPos.randomBetweenClosed	inline	crates/horizon-world/src/worldgen/projected.rs::SteppedColumnClusterFeature::place	gap: minor: FlyNodeEvaluator.getStarts' random start points are not ported; path.rs Finder::start uses one start
+BlockPos.withinClippedManhattan	skip:other		no callers in the 26.3 sources
+BlockPos.manhattanOrdered	skip:other		only withinClippedManhattan calls it, and nothing calls that
+BlockPos.betweenClosedStream	port	crates/horizon-core/src/position/iter.rs::BlockPos::between_closed	an iterator instead of a stream
+BlockPos.neighborColumn	port	crates/horizon-client/src/mobs/goals.rs::BreathAir::find_air	gap: minor: searches only the mob's own column; vanilla also searches the four neighbouring columns
+BlockPos.MutableBlockPos.set	skip:java		a reusable cursor; Horizon's BlockPos is a copied value
+BlockPos.MutableBlockPos.setWithOffset	skip:java		a reusable cursor; Horizon's BlockPos is a copied value
+BlockPos.MutableBlockPos.move	skip:java		a reusable cursor; Horizon's BlockPos is a copied value
+BlockPos.MutableBlockPos.clamp	skip:java		a reusable cursor; Horizon's BlockPos is a copied value
+Cloner.clone	skip:data		codec copy between registry layers; Horizon reads data from tables
+Cloner.Factory.addCodec	skip:data		codec registration for the copy above
+CompositeDirection.compose	missing		minor: Horizon has no old-world chunk upgrade (UpgradeData) and no worldgen blending (BlendingData, Blender)
+Cursor3D.advance	port	crates/horizon-world/src/block_collision_scan.rs::BlockCollisionScan::find_next	steps the cursor in x, y, z order and stops at the end
+Cursor3D.getNextType	inline	crates/horizon-world/src/block_collision_scan.rs::BlockCollisionScan::find_next	the boundary count is computed inside find_next, which skips corners and gates edges and pistons
+DefaultedMappedRegistry.register	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+DefaultedMappedRegistry.getId	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+DefaultedMappedRegistry.getKey	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+DefaultedMappedRegistry.getValue	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+DefaultedMappedRegistry.byId	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+Direction.makeDirectionArray	skip:java		builds an array of the six directions
+Direction.rotate	port	crates/horizon-assets/src/bake/transform.rs::BlockModelTransform::direction	a facing turned by a block model's rotation, then snapped to the nearest direction
+Direction.getYRot	inline	crates/horizon-client/src/game/ghasts.rs::Game::spawn_ghastling	the facing-to-yaw table is inline there: north 180, east 270, west 90, others 0
+Direction.getFacingAxis	port	crates/horizon-world/src/level/place.rs::Ctx::nearest_looking_vertical	the Y axis only, which is the only axis vanilla asks for
+Direction.getClockWiseX	skip:other		reached only from getClockWise(Axis), which no 26.3 code calls
+Direction.getCounterClockWiseX	skip:other		reached only from getClockWise(Axis), which no 26.3 code calls
+Direction.getClockWiseZ	skip:other		reached only from getClockWise(Axis), which no 26.3 code calls
+Direction.getCounterClockWiseZ	skip:other		reached only from getClockWise(Axis), which no 26.3 code calls
+Direction.fromAxisAndDirection	inline	crates/horizon-world/src/level/sculk.rs::Sim::sculk_unobstructed_move	gap: minor: the axis-and-sign pick is done for sculk's movement check; the other callers (voxel shape faces, poplar foliage) are not checked
+Direction.getNearest	missing		minor: only the experimental redstone orientation uses it, and Horizon has no orientation code
+Direction.verifyVertical	skip:data		codec check for vertical directions
+Direction.get	inline	crates/horizon-world/src/level/portal_travel.rs::largest_rectangle_around	the positive side is negative(axis).opposite() there; the PortalForcer call is not traced
+Direction.Axis.getPositive	inline	crates/horizon-world/src/level/portal_travel.rs::largest_rectangle_around	the positive side is negative(axis).opposite() there
+Direction.Axis.getNegative	port	crates/horizon-world/src/level/portal_travel.rs::negative	
+Direction.Axis.getDirections	port	crates/horizon-world/src/level/creaking.rs::axis_directions	gap: minor: returns the negative direction first; vanilla returns the positive one first
+Direction.Axis.getPlane	port	crates/horizon-world/src/level/query.rs::is_horizontal	takes a direction and checks its axis is X or Z
+Direction.Axis.choose	port	crates/horizon-core/src/geometry/mod.rs::Vec3::component	gap: minor: selects a double component of a Vec3; no integer version
+Direction.Plane.test	port	crates/horizon-world/src/level/query.rs::is_horizontal	the horizontal plane only; the vertical plane has no test
+GlobalPos.isCloseEnough	missing		player: an allay never remembers a liked jukebox or note block, so the same-dimension, 1024-block check never runs (see AllayAi.hearNoteblock)
+Holder.direct	skip:data		wraps a value as a registry holder; Horizon has no holders
+Holder.Reference.key	skip:data		registry holder bookkeeping
+Holder.Reference.value	skip:data		registry holder bookkeeping
+Holder.Reference.is	skip:data		registry holder bookkeeping
+Holder.Reference.boundTags	skip:data		registry holder bookkeeping
+Holder.Reference.bindKey	skip:data		registry holder bookkeeping
+Holder.Reference.bindValue	skip:data		registry holder bookkeeping
+HolderGetter.getOrThrow	skip:data		registry lookup helper
+HolderGetter.Provider.lookupOrThrow	skip:data		registry lookup helper
+HolderGetter.Provider.get	skip:data		registry lookup helper
+HolderGetter.Provider.getOrThrow	skip:data		registry lookup helper
+HolderLookup.Provider.lookupOrThrow	skip:data		registry lookup helper
+HolderLookup.Provider.create	skip:data		registry lookup helper
+HolderLookup.RegistryLookup.filterFeatures	skip:data		feature-flag filter of registries; Horizon reads data from tables
+HolderLookup.RegistryLookup.Delegate.get	skip:data		registry lookup delegate
+HolderSet.direct	skip:data		builds a direct holder set
+HolderSet.Direct.contains	skip:java		a cached set for membership tests
+HolderSet.Direct.equals	skip:java		equality of two lists
+HolderSet.Named.contents	skip:data		tag contents bound at load
+IdMap.byIdOrThrow	skip:data		registry id helper
+IdMap.getIdOrThrow	skip:data		registry id helper
+IdMapper.addMapping	skip:data		registry id table filled at bootstrap
+IdMapper.byId	skip:data		registry id table lookup
+LayeredRegistryAccess.getLayerIndexOrThrow	skip:data		layered registry bookkeeping
+LayeredRegistryAccess.getAccessFrom	skip:data		layered registry bookkeeping
+LayeredRegistryAccess.getCompositeAccessForLayers	skip:data		layered registry bookkeeping
+LayeredRegistryAccess.replaceFrom	skip:data		layered registry bookkeeping
+LayeredRegistryAccess.collectRegistries	skip:data		layered registry bookkeeping
+MappedRegistry.validateWrite	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.register	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.getKey	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.getValue	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.byId	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.get	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.getAny	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.wrapAsHolder	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.getOrCreateHolderOrThrow	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.containsKey	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.freeze	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.createIntrusiveHolder	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.validateAndUnwrapTagElement	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.bindTags	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.refreshTagsInHolders	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.bindAllTagsToEmpty	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+MappedRegistry.prepareTagReload	skip:data		registry bookkeeping; Horizon's tables fix the registry contents
+NonNullList.withSize	skip:java		a list filled with a default value
+NonNullList.clear	skip:java		a list reset to its default values
+PositionAndRotation.Mutable.addRotation	missing		minor: when an entity turns itself while steps are pending, vanilla shifts those steps by the same delta (AbstractInterpolationHandler); Horizon does not

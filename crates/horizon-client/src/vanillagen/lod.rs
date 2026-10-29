@@ -20,7 +20,9 @@ use std::{
     thread,
 };
 
+mod islands;
 mod vegetation;
+use islands::EndIslands;
 use vegetation::Vegetation;
 const CACHE: usize = 1024;
 const REQUESTS: usize = 64;
@@ -67,7 +69,7 @@ impl Builder {
                 let generator = match OverworldGenerator::for_dimension(
                     terrain.generator.data().clone(),
                     terrain.seed,
-                    "minecraft:normal",
+                    &terrain.preset,
                     &terrain.dimension,
                 ) {
                     Ok(generator) => generator,
@@ -242,12 +244,14 @@ fn columns(chunk: &ProtoChunk, biome_map: &[u16], dimension: &str) -> Arc<[Colum
         for y in min..max {
             let state = chunk.block(x, y, z);
             let properties = states.get(state);
+            let name = registry.state(state).map_or("", |s| s.name.as_str());
             if properties.is_air()
-                || (!properties.blocks_motion_in_heightmap() && !properties.has_fluid())
+                || (!properties.blocks_motion_in_heightmap()
+                    && !properties.has_fluid()
+                    && !matches!(name, "minecraft:chorus_plant" | "minecraft:chorus_flower"))
             {
                 continue;
             }
-            let name = registry.state(state).map_or("", |s| s.name.as_str());
             let fluid = matches!(name, "minecraft:water" | "minecraft:lava");
             let biome = biome_map
                 .get(chunk.biome_id_at(x, y, z).0 as usize)
@@ -297,9 +301,12 @@ pub(super) struct VanillaLodSampler {
     worker: GeneratorWorker,
     builder: Option<Builder>,
     vegetation: Arc<Vegetation>,
+    islands: EndIslands,
     cache: FxHashMap<(i32, i32), Arc<[Column; 256]>>,
     order: VecDeque<(i32, i32)>,
     details: Vec<LodDetail>,
+    /// Reduced far detail: `lod_grid` approximates wide cells.
+    approximate: bool,
 }
 impl VanillaLodSampler {
     pub(super) fn new(generator: Arc<VanillaTerrain>) -> Self {
@@ -310,14 +317,17 @@ impl VanillaLodSampler {
             &generator.biome_map,
             generator.seed,
         ));
+        let islands = EndIslands::new(generator.clone());
         Self {
             generator,
             worker,
             builder,
             vegetation,
+            islands,
             cache: FxHashMap::default(),
             order: VecDeque::new(),
             details: Vec::new(),
+            approximate: false,
         }
     }
 }
@@ -328,10 +338,15 @@ impl LodSampler for VanillaLodSampler {
             worker: self.generator.generator.worker(),
             builder: None,
             vegetation: self.vegetation.clone(),
+            islands: self.islands.fork(),
             cache: FxHashMap::default(),
             order: VecDeque::new(),
             details: Vec::new(),
+            approximate: self.approximate,
         }))
+    }
+    fn set_approximate(&mut self, approximate: bool) {
+        self.approximate = approximate;
     }
     fn request_detail(&mut self, chunks: &[(i32, i32)], center: [i32; 2]) {
         let mut missing = Vec::new();
@@ -391,16 +406,17 @@ impl LodSampler for VanillaLodSampler {
         self.grid(x, z, width, 1).pop().unwrap_or_default()
     }
     fn grid(&mut self, x: i32, z: i32, width: i32, side: usize) -> Vec<Column> {
-        let samples = match self
-            .worker
-            .lod_grid(x + width / 2, z + width / 2, width, side)
-        {
-            Ok(samples) => samples,
-            Err(error) => {
-                log::warn!("Horizon: direct far sampling failed: {error}");
-                return vec![Column::default(); side * side];
-            }
-        };
+        let samples =
+            match self
+                .worker
+                .lod_grid(x + width / 2, z + width / 2, width, side, self.approximate)
+            {
+                Ok(samples) => samples,
+                Err(error) => {
+                    log::warn!("Horizon: direct far sampling failed: {error}");
+                    return vec![Column::default(); side * side];
+                }
+            };
         samples
             .into_iter()
             .enumerate()
@@ -426,7 +442,7 @@ impl LodSampler for VanillaLodSampler {
 }
 impl VanillaLodSampler {
     fn preview_column(
-        &self,
+        &mut self,
         x: i32,
         z: i32,
         width: i32,
@@ -466,6 +482,7 @@ impl VanillaLodSampler {
             240
         };
         self.vegetation.apply(&mut column, x, z, width, light);
+        self.islands.apply(&mut column, x, z, width, light);
         column
     }
 }
@@ -499,10 +516,10 @@ mod tests {
             .registry
             .default_state("minecraft:grass_block")
             .unwrap();
-        let planted = |biome, width, x, z| {
+        let planted = |ground, biome, width, x, z| {
             let mut column = Column::from_surface(Some(Surface {
                 height: 80,
-                state: grass,
+                state: ground,
                 water: None,
                 biome,
             }));
@@ -525,8 +542,8 @@ mod tests {
         let mut plains_count = 0;
         for z in 0..64 {
             for x in 0..64 {
-                forest_count += usize::from(leaves(&planted(forest, 1, x, z)));
-                plains_count += usize::from(leaves(&planted(plains, 1, x, z)));
+                forest_count += usize::from(leaves(&planted(grass, forest, 1, x, z)));
+                plains_count += usize::from(leaves(&planted(grass, plains, 1, x, z)));
             }
         }
         assert!(
@@ -535,9 +552,81 @@ mod tests {
         );
         for width in [16, 32, 128, 512, 1024] {
             assert!(
-                leaves(&planted(forest, width, 0, 0)),
+                leaves(&planted(grass, forest, width, 0, 0)),
                 "forest canopy missing at scale {width}"
             );
+        }
+        // The End's chorus plants come from the biome's own feature data: only
+        // end highlands carry it, and only end stone is a valid ground.
+        let end_stone = assets
+            .registry
+            .default_state("minecraft:end_stone")
+            .unwrap();
+        let chorus_name = |state| {
+            matches!(
+                assets.registry.state(state).unwrap().name.as_str(),
+                "minecraft:chorus_plant" | "minecraft:chorus_flower"
+            )
+        };
+        let chorus = |column: &Column| column.spans.iter().any(|span| chorus_name(span.state));
+        let highlands = biomes.id("minecraft:end_highlands");
+        assert!(
+            sampler.vegetation.chorus_count(highlands).unwrap_or(0.) > 0.,
+            "end highlands keep the chorus feature"
+        );
+        assert_eq!(
+            sampler.vegetation.chorus_count(forest),
+            None,
+            "a biome without the feature estimates none"
+        );
+        let mut highlands_count = 0;
+        let mut control_count = 0;
+        for z in 0..64 {
+            for x in 0..64 {
+                highlands_count += usize::from(chorus(&planted(end_stone, highlands, 1, x, z)));
+                control_count += usize::from(chorus(&planted(end_stone, forest, 1, x, z)));
+            }
+        }
+        assert!(
+            highlands_count > 0 && control_count == 0,
+            "feature-derived chorus density: highlands={highlands_count}, forest={control_count}"
+        );
+        let stem = (0..64)
+            .flat_map(|z| (0..64).map(move |x| (x, z)))
+            .map(|(x, z)| planted(end_stone, highlands, 1, x, z))
+            .find(|column| chorus(column))
+            .expect("a chorus column");
+        let plant = stem
+            .spans
+            .iter()
+            .find(|span| chorus_name(span.state))
+            .unwrap();
+        assert!(
+            (2..=5).contains(&(i32::from(plant.max - plant.min))),
+            "stem height follows the feature's 2..=5"
+        );
+        let top = stem.spans.last().unwrap();
+        assert_eq!(
+            assets.registry.state(top.state).unwrap().name,
+            "minecraft:chorus_flower"
+        );
+        assert_eq!(stem.surface.unwrap().height, i32::from(top.max));
+        let mut wide = 0;
+        for width in [2, 4] {
+            for z in (0..64).step_by(2) {
+                for x in (0..64).step_by(2) {
+                    wide += usize::from(chorus(&planted(end_stone, highlands, width, x, z)));
+                }
+            }
+        }
+        assert!(wide > 0, "nearby LOD cells still draw chorus");
+        for z in (0..64).step_by(16) {
+            for x in (0..64).step_by(16) {
+                assert!(
+                    !chorus(&planted(end_stone, highlands, 16, x, z)),
+                    "a 16-block cell is too wide to read as one plant"
+                );
+            }
         }
         let key = (-64, 0);
         sampler.request_detail(&[key], [-1024, 0]);
@@ -696,5 +785,237 @@ mod tests {
             previous = Some(snapshot);
         }
         Ok(())
+    }
+    /// Small End islands are decoration over the void, so the direct sampler
+    /// has to estimate them from `end_island_decorated`.
+    #[test]
+    #[ignore = "requires prepared worldgen data in HORIZON_TEST_RESOURCES"]
+    fn end_small_islands_are_estimated_over_the_void() -> crate::Result<()> {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("resources"),
+        );
+        let assets = crate::assets::Assets::load(&root)?;
+        let biomes = crate::biome::Biomes::load(&root)?;
+        let terrain = Arc::new(VanillaTerrain::for_dimension(
+            &root.join("worldgen"),
+            assets.registry,
+            &biomes,
+            1234,
+            "minecraft:the_end",
+        )?);
+        let mut sampler = VanillaLodSampler::new(terrain.clone());
+        let mut search = terrain.generator.worker();
+        let mut center = None;
+        'search: for x in (1024..=8192).step_by(512) {
+            for z in (-8192..=8192).step_by(512) {
+                let biome = search.noise_biomes(&[[x >> 2, 16, z >> 2]]);
+                if biome.first().and_then(|name| name.as_deref())
+                    != Some("minecraft:small_end_islands")
+                {
+                    continue;
+                }
+                if search.surface_sample(x, z).is_some() {
+                    continue;
+                }
+                center = Some((x, z));
+                break 'search;
+            }
+        }
+        let (cx, cz) = center.expect("a small end islands region");
+        let end_stone = assets
+            .registry
+            .default_state("minecraft:end_stone")
+            .unwrap();
+        // The estimator itself, a wide void at one block per cell.
+        let mut islands = 0;
+        for z in cz - 128..cz + 128 {
+            for x in cx - 128..cx + 128 {
+                let mut column = Column::default();
+                sampler.islands.apply(&mut column, x, z, 1, 240);
+                let Some(surface) = column.surface else {
+                    continue;
+                };
+                assert!(
+                    (56..=71).contains(&surface.height),
+                    "island top at {}",
+                    surface.height
+                );
+                assert_eq!(surface.state, end_stone);
+                assert!(column.spans.iter().any(|span| {
+                    span.state == end_stone && i32::from(span.max) == surface.height
+                }));
+                assert!(
+                    column.spans.iter().all(|span| i32::from(span.min) >= 45),
+                    "an estimated island floats above the void"
+                );
+                islands += 1;
+            }
+        }
+        assert!(islands > 0, "no estimated small islands in a 256² void");
+        // And through the whole direct-sampling path with the real biome map.
+        let sampled = sampler.grid(cx - 32, cz - 32, 1, 64);
+        assert!(
+            sampled.iter().any(|column| column
+                .surface
+                .is_some_and(|surface| surface.state == end_stone)),
+            "direct sampling shows an island in the real small end islands biome"
+        );
+        Ok(())
+    }
+    /// The refined path must keep the real feature's end stone in its columns.
+    #[test]
+    #[ignore = "requires prepared worldgen data in HORIZON_TEST_RESOURCES"]
+    fn end_small_islands_from_decoration_survive_far_columns() -> crate::Result<()> {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("resources"),
+        );
+        let assets = crate::assets::Assets::load(&root)?;
+        let biomes = crate::biome::Biomes::load(&root)?;
+        let terrain = Arc::new(VanillaTerrain::for_dimension(
+            &root.join("worldgen"),
+            assets.registry,
+            &biomes,
+            1234,
+            "minecraft:the_end",
+        )?);
+        let sampler = VanillaLodSampler::new(terrain.clone());
+        let mut worker = terrain.generator.worker();
+        let stop = AtomicBool::new(false);
+        let mut centers = Vec::new();
+        'search: for cx in (64..=512).step_by(4) {
+            for cz in (-512..=512).step_by(4) {
+                let (x, z) = (cx * 16 + 8, cz * 16 + 8);
+                let biome = worker.noise_biomes(&[[x >> 2, 16, z >> 2]]);
+                if biome.first().and_then(|name| name.as_deref())
+                    != Some("minecraft:small_end_islands")
+                {
+                    continue;
+                }
+                if worker.surface_sample(x, z).is_some() {
+                    continue;
+                }
+                centers.push((cx, cz));
+                if centers.len() >= 200 {
+                    break 'search;
+                }
+            }
+        }
+        for &(cx, cz) in &centers {
+            // The replay is cheap; only decorate chunks it actually places in.
+            let origins = sampler.islands.origins(cx, cz);
+            if origins.is_empty() {
+                continue;
+            }
+            let Some(chunk) = decorated_region(&mut worker, (cx, cz), &stop)? else {
+                continue;
+            };
+            for [x, y, z] in &origins {
+                assert!((55..=70).contains(y), "island origin at y {y} in {cx} {cz}");
+                assert_eq!(
+                    chunk.block_name(*x, *y, *z),
+                    "minecraft:end_stone",
+                    "exact origin {x} {y} {z} is the real island's top centre"
+                );
+            }
+            let min = chunk.terrain.min_y();
+            let max = min + chunk.terrain.height();
+            let mut raw = 0;
+            for y in min..max {
+                for z in 0..16 {
+                    for x in 0..16 {
+                        raw += usize::from(chunk.block_name(x, y, z) == "minecraft:end_stone");
+                    }
+                }
+            }
+            let kept: usize = columns(&chunk, &terrain.biome_map, "minecraft:the_end")
+                .iter()
+                .flat_map(|column| &column.spans)
+                .filter(|span| {
+                    assets.registry.state(span.state).unwrap().name == "minecraft:end_stone"
+                })
+                .map(|span| (span.max - span.min) as usize)
+                .sum();
+            assert_eq!(
+                raw, kept,
+                "far columns keep the real small island in {cx} {cz}"
+            );
+            return Ok(());
+        }
+        panic!(
+            "no exact small end island among {} candidates",
+            centers.len()
+        );
+    }
+    /// Vanilla decoration places chorus plants in the End; the far columns must
+    /// keep them even though they are not motion-blocking blocks.
+    #[test]
+    #[ignore = "requires prepared worldgen data in HORIZON_TEST_RESOURCES"]
+    fn end_far_columns_keep_real_chorus_plants() -> crate::Result<()> {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("resources"),
+        );
+        let assets = crate::assets::Assets::load(&root)?;
+        let biomes = crate::biome::Biomes::load(&root)?;
+        let terrain = Arc::new(VanillaTerrain::for_dimension(
+            &root.join("worldgen"),
+            assets.registry,
+            &biomes,
+            1234,
+            "minecraft:the_end",
+        )?);
+        let mut worker = terrain.generator.worker();
+        let chorus = |state| {
+            matches!(
+                assets.registry.state(state).unwrap().name.as_str(),
+                "minecraft:chorus_plant" | "minecraft:chorus_flower"
+            )
+        };
+        let mut checked = 0;
+        'search: for cx in (-160..=160).step_by(16) {
+            for cz in (-160..=160).step_by(16) {
+                let (x, z) = (cx * 16 + 8, cz * 16 + 8);
+                let biome = worker.noise_biomes(&[[x >> 2, 16, z >> 2]]);
+                if biome.first().and_then(|name| name.as_deref()) != Some("minecraft:end_highlands")
+                {
+                    continue;
+                }
+                if worker.surface_sample(x, z).is_none() {
+                    continue;
+                }
+                checked += 1;
+                if checked > 24 {
+                    break 'search;
+                }
+                let Some(chunk) = decorated_region(&mut worker, (cx, cz), &AtomicBool::new(false))?
+                else {
+                    continue;
+                };
+                let min = chunk.terrain.min_y();
+                let max = min + chunk.terrain.height();
+                let mut raw = 0;
+                for y in min..max {
+                    for zz in 0..16 {
+                        for xx in 0..16 {
+                            raw += usize::from(chorus(chunk.block(xx, y, zz)));
+                        }
+                    }
+                }
+                if raw == 0 {
+                    continue;
+                }
+                let kept: usize = columns(&chunk, &terrain.biome_map, "minecraft:the_end")
+                    .iter()
+                    .flat_map(|column| &column.spans)
+                    .filter(|span| chorus(span.state))
+                    .map(|span| (span.max - span.min) as usize)
+                    .sum();
+                assert_eq!(
+                    raw, kept,
+                    "far columns keep every real chorus block in {cx} {cz}"
+                );
+                return Ok(());
+            }
+        }
+        panic!("no generated end_highlands chunk with chorus among {checked} candidates");
     }
 }

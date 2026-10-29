@@ -1,0 +1,156 @@
+SetStewEffectFunction.Builder	skip:java		builder for the stew effect list; Horizon keeps the effects in loot.rs Context::run (set_stew_effect)
+SetWritableBookPagesFunction	missing		minor: no vanilla loot table uses set_writable_book_pages; Horizon's loot run has no arm for it
+SetWrittenBookPagesFunction	missing		minor: no vanilla loot table uses set_written_book_pages; Horizon's loot run has no arm for it
+SmeltItemFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	furnace_smelt arm: smelting recipe, use_input_count and stack cap
+SmeltItemFunction.smelted	skip:java		static builder factory
+ToggleTooltips	missing		minor: no vanilla loot table uses toggle_tooltips; Horizon's loot run has no arm for it
+LootContextParamSets	skip:data		loot parameter set registry and validation; Horizon reads its loot tables
+AllOfCondition.allOf	skip:java		static builder
+AllOfCondition.combine	inline	crates/horizon-items/src/items.rs::LootContext::condition	all_of arm: every term must hold
+AnyOfCondition.combine	inline	crates/horizon-items/src/items.rs::LootContext::condition	any_of arm: one term must hold
+AnyOfCondition.Builder	skip:java		builder (or)
+BonusLevelTableCondition.bonusLevelFlatChance	skip:java		static builder
+BonusLevelTableCondition.test	port	crates/horizon-items/src/items.rs::LootContext::condition	table_bonus arm: chance by enchantment level, capped at the last entry
+CompositeLootItemCondition	skip:java		codec only
+CompositeLootItemCondition.Builder	skip:java		builder (addTerm)
+ConditionUserBuilder	skip:java		builder interface for loot conditions
+DamageSourceCondition.test	port	crates/horizon-world/src/loot.rs::Context::condition	damage_source_properties arm (mob death loot)
+EnchantmentActiveCheck.test	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::tick_soul_speed	the soul speed modifiers switch on and off here; the ENCHANTMENT_ACTIVE flag itself is not read as a condition
+EntityHasScoreCondition.hasScore	missing		minor: no vanilla loot table uses entity_scores
+EntityHasScoreCondition.test	missing		minor: no vanilla loot table uses entity_scores
+EntityHasScoreCondition.validate	skip:data		datapack validation
+EnvironmentAttributeCheck.createCodec	skip:java		codec
+EnvironmentAttributeCheck.test	missing		minor: no vanilla data uses environment_attribute_check
+ExplosionCondition.test	port	crates/horizon-items/src/items.rs::LootContext::condition	survives_explosion arm: 1 / radius under an explosion (block loot; only block tables use it)
+FloatValueCheck.validate	skip:data		datapack validation
+IntValueCheck.validate	skip:data		datapack validation
+InvertedLootItemCondition.invert	skip:java		static builder
+InvertedLootItemCondition.test	port	crates/horizon-world/src/loot.rs::Context::condition	inverted arm
+LocationCheck.checkLocation	skip:java		static builder
+LocationCheck.test	port	crates/horizon-world/src/loot.rs::Context::condition	gap: minor: biome lists only; block predicate and offsetY are not read here, and block loot (items.rs) passes location_check unconditionally
+LootItemCondition.Builder	skip:java		builders (and, or)
+LootItemEntityPropertyCondition.hasProperties	skip:java		static builder
+LootItemEntityPropertyCondition.test	port	crates/horizon-world/src/loot.rs::Context::condition	entity_properties arm (mob loot); the block-loot arm covers only a bare 'this' check
+LootItemRandomChanceCondition.test	port	crates/horizon-world/src/loot.rs::Context::condition	random_chance arm
+LootItemRandomChanceWithEnchantedBonusCondition.randomChanceAndLootingBoost	skip:java		static builder
+LootItemRandomChanceWithEnchantedBonusCondition.test	port	crates/horizon-world/src/loot.rs::Context::condition	random_chance_with_enchanted_bonus arm: living attacker's enchantment level
+LootPredicates	skip:data		registry bootstrap; loot conditions are matched in loot.rs and items.rs
+MatchBlock.blockMatches	skip:java		static builder
+MatchBlock.getReferencedContextParams	skip:data		validation metadata for context params
+MatchBlock.test	port	crates/horizon-items/src/items.rs::LootContext::condition	match_block arm: block id, state and property ranges; gap: minor: the block-entity part of the predicate is not read
+MatchTool.test	port	crates/horizon-items/src/items.rs::LootContext::condition	match_tool arm; gap: minor: item ids, tags and enchantment levels only, other ItemPredicate parts are not read
+TimeCheck	missing		minor: time_check is used by no vanilla data file (datapacks only)
+WeatherCheck.test	port	crates/horizon-client/src/game/trident.rs::Game::channel_lightning	channeling's thunder check (thundering only); gap: minor: raining is not read, channeling only uses thundering
+NbtProviders	skip:data		registry bootstrap
+AggregateProvider	skip:java		codec only
+BinaryProvider.mapCodec	skip:java		codec
+BinaryProvider.validate	skip:data		datapack validation
+ConditionalProvider.selectValue	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_select	conditional arm: on_true or on_false by the condition
+DispatcherProvider.mapCodec	skip:java		codec
+DispatcherProvider.selectValue	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_select	number_dispatcher arm: first case whose condition holds, else default
+DispatcherProvider.validate	skip:data		datapack validation
+DispatcherProvider.Case.codec	skip:java		codec
+DispatcherProvider.Case.validate	skip:data		datapack validation
+DistributionProvider.mapCodec	skip:java		codec
+DistributionProvider.validate	skip:data		datapack validation
+EnvironmentAttributeProvider	skip:java		codec only
+PowerProvider.mapCodec	skip:java		codec
+PowerProvider.validate	skip:data		datapack validation
+RangeProvider.mapCodec	skip:java		codec
+RangeProvider.validate	skip:data		datapack validation
+StoredNumberAccess	missing		minor: storage-backed numbers; no vanilla data uses storage providers
+UnaryProvider	skip:java		codec only
+floats/Average.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	avg arm
+floats/ContextFloatProviders	skip:data		registry bootstrap
+floats/Difference.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	sub arm
+floats/EnchantmentLevelProvider.getFloatUnsafe	port	crates/horizon-items/src/enchant.rs::Enchantments::condition	random_chance arm: chance at the enchantment level; gap: minor: only the random_chance use is read
+floats/EnvironmentAttributeValue	missing		minor: no vanilla data uses environment_attribute providers
+floats/Length.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	length arm
+floats/Maximum.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	max arm
+floats/Minimum.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	min arm
+floats/Modulus.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	mod arm
+floats/Product.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	mul arm
+floats/Quotient.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	div arm
+ResolvableFloat.getFromItem	port	crates/horizon-client/src/providers.rs::Providers::speed	furnace fuel speed multiplier (COOKING_FUEL); gap: minor: only the furnace fuel component is read
+ResolvableFloat.wrap	skip:java		codec helper
+floats/StorageValue	missing		minor: no vanilla data uses storage providers
+floats/Sum.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	add arm
+floats/Truncate.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	truncate arm
+floats/UniformGenerator.getFloatUnsafe	port	crates/horizon-world/src/loot.rs::Context::float	uniform arm: min + random * (max - min)
+floats/WeightedListValue.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_select	weighted list pick (the default branch)
+ints/Average.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	avg arm
+ints/BinomialDistributionGenerator.getIntUnsafe	port	crates/horizon-world/src/loot.rs::Context::int	binomial arm
+ints/BinomialDistributionGenerator.validate	skip:data		datapack validation
+ints/ContextIntProviders.bootstrap	skip:data		registry bootstrap
+ints/ContextIntProviders.compostable	port	crates/horizon-client/src/game/composter.rs::Game::compostable	the item's compostable layer provider; evaluated when the composter takes it (Game::composter_add)
+ints/ContextIntProviders.cooking	port	crates/horizon-client/src/providers.rs::Providers::burn_time	fuel burn times (the cooking/time_* providers)
+ints/Difference.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	sub arm
+ints/EnvironmentAttributeValue	missing		minor: no vanilla data uses environment_attribute providers
+ints/FloorModulus.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	floor_mod arm
+ints/FloorQuotient.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	floor_div arm
+ints/Maximum.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	max arm
+ints/Minimum.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	min arm
+ints/Modulus.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	mod arm
+ints/Product.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	mul arm
+ints/Quotient.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	div arm
+ResolvableInt.getFromItem	port	crates/horizon-client/src/providers.rs::Providers::burn_time	furnace fuel burn time (COOKING_FUEL); gap: minor: only the furnace fuel component is read
+ResolvableInt.wrap	skip:java		codec helper
+ints/ScoreboardValue.getIntUnsafe	missing		minor: no vanilla data uses score providers
+ints/ScoreboardValue.getScoreInfo	missing		minor: no vanilla data uses score providers
+ints/ScoreboardValue.validate	skip:data		datapack validation
+ints/StorageValue	missing		minor: no vanilla data uses storage providers
+ints/Sum.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	add arm
+ints/UniformGenerator.getIntUnsafe	port	crates/horizon-world/src/loot.rs::Context::int	uniform arm: inclusive random int between min and max
+ints/WeightedListValue.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_select	weighted list pick (the default branch)
+ScoreboardNameProviders	skip:data		registry bootstrap
+FunctionCallback.handle	port	crates/horizon-client/src/game/functions.rs::Game::run_function_by_id	runs the function by id when its time comes
+FunctionTagCallback.handle	inline	crates/horizon-client/src/game/functions.rs::Game::tick_functions	tag branch: runs every function in the tag
+TimerQueue.createComparator	inline	crates/horizon-client/src/game/functions.rs::Game::tick_functions	ordering by (time, seq) in the due-event search
+TimerQueue.pack	port	crates/horizon-client/src/game/functions.rs::Game::save_schedule	writes data/minecraft/scheduled_events.dat sorted by (time, seq)
+TimerQueue.remove	port	crates/horizon-client/src/game/functions.rs::Game::cmd_schedule	schedule clear arm
+TimerQueue.schedule	port	crates/horizon-client/src/game/functions.rs::Game::cmd_schedule	schedule function arm
+TimerQueue.tick	port	crates/horizon-client/src/game/functions.rs::Game::tick_functions	runs due events in (time, seq) order, then the tick tag
+TimerQueue.Event.Packed.codec	skip:java		codec
+TimerQueue.Packed.codec	skip:java		codec
+ContentValidationException.getMessage	skip:java		exception message getter
+DirectoryValidator.validateDirectory	skip:server		server check of symlinks in world and resource folders (allowed_symlinks.txt)
+DirectoryValidator.validateSymlink	skip:server		server check of symlinks in world and resource folders (allowed_symlinks.txt)
+PathAllowList.getForFileSystem	skip:server		server file allow-list
+PathAllowList.readPlain	skip:server		server file allow-list
+PathAllowList.ConfigEntry.parse	skip:server		server file allow-list
+BlockHitResult.hitBorder	missing		minor: BlockHit has no world-border flag; vanilla projectiles check it on a border hit
+BlockHitResult.withDirection	skip:java		copy helper (Rust struct update)
+BlockHitResult.withPosition	skip:java		copy helper (Rust struct update)
+HitResult.distanceTo	missing		minor: only the fishing bobber's block-hit bounce uses it; Horizon's bobber does not bounce back on a block hit
+Vec2.add	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
+Vec2.distanceToSqr	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
+Vec2.dot	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
+Vec2.length	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
+Vec2.lengthSquared	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
+Vec2.normalized	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
+Vec2.rotate	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
+Vec2.scale	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
+Vec2.equals	skip:java		Object equality; Rust derives it
+Vec2.hashCode	skip:java		Object hashing; Rust derives it
+ArrayVoxelShape.getCoords	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::coordinates	
+BitSetDiscreteVoxelShape.<init>	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::from_cube	gap: minor: takes the occupancy from the caller; there is no empty-grid constructor
+BitSetDiscreteVoxelShape.clearZStrip	port	crates/horizon-core/src/geometry/shape.rs::clear_strip	
+BitSetDiscreteVoxelShape.fillUpdateBounds	inline	crates/horizon-core/src/geometry/shape.rs::VoxelShape::build	bounds computed from the filled grid
+BitSetDiscreteVoxelShape.forAllBoxes	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::decompose	
+BitSetDiscreteVoxelShape.getIndex	port	crates/horizon-core/src/geometry/shape.rs::index	
+BitSetDiscreteVoxelShape.isInterior	skip:other		no vanilla caller outside its own class
+BitSetDiscreteVoxelShape.isXZRectangleFull	inline	crates/horizon-core/src/geometry/shape.rs::VoxelShape::decompose	the greedy x-z merge inside decompose
+BitSetDiscreteVoxelShape.isZStripFull	port	crates/horizon-core/src/geometry/shape.rs::strip_full	
+BitSetDiscreteVoxelShape.join	port	crates/horizon-core/src/geometry/shape/create.rs::VoxelShape::join	
+BitSetDiscreteVoxelShape.withFilledBounds	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::with_discrete_bounds	
+CubeVoxelShape.findIndex	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::find_index	
+DiscreteCubeMerger.forMergedIndexes	port	crates/horizon-core/src/geometry/shape/join.rs::merge	
+IdenticalMerger.forMergedIndexes	port	crates/horizon-core/src/geometry/shape/join.rs::merge	
+IndirectMerger.<init>	skip:java		list wrapper constructor
+IndirectMerger.forMergedIndexes	port	crates/horizon-core/src/geometry/shape/join.rs::merge	
+IndirectMerger.getList	skip:java		list accessor
+MinecartCollisionContext	missing		player: vanilla lets a rail cart pass through the block under its rail and the slope block of an ascending rail (MinecartCollisionContext); minecarts.rs move_cart has no such exclusion, so carts may bump on those blocks (read from code, not checked in game)
+NonOverlappingMerger.forMergedIndexes	port	crates/horizon-core/src/geometry/shape/join.rs::disjoint	
+NonOverlappingMerger.forNonSwappedIndexes	port	crates/horizon-core/src/geometry/shape/join.rs::disjoint	
+NonOverlappingMerger.getDouble	skip:java		list accessor
+PositionCollisionContext.isAbove	port	crates/horizon-world/src/collision_context.rs::CollisionContext::is_above	

@@ -30,6 +30,30 @@ impl FeatureBlocks {
 pub trait FeatureWorld {
     type Error;
     fn block(&mut self, position: [i32; 3]) -> Result<BlockStateId, Self::Error>;
+    /// Walk the column from `position` by `step` (1 or -1) while `keep`
+    /// holds for the block there, reading at most `limit` blocks. Returns the
+    /// y it stopped at: the first refused block, or the one after the last
+    /// read. `keep` must depend only on the state (it may be skipped for a
+    /// run of blocks known to be identical).
+    fn scan_column(
+        &mut self,
+        position: [i32; 3],
+        step: i32,
+        limit: i32,
+        mut keep: impl FnMut(BlockStateId) -> bool,
+    ) -> Result<i32, Self::Error>
+    where
+        Self: Sized,
+    {
+        let mut p = position;
+        for _ in 0..limit {
+            if !keep(self.block(p)?) {
+                break;
+            }
+            p[1] = p[1].wrapping_add(step);
+        }
+        Ok(p[1])
+    }
     fn set_block(
         &mut self,
         position: [i32; 3],

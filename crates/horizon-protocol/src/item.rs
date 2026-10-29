@@ -6,6 +6,7 @@ use crate::{
     buf::{Codec, Reader, Writer, pack_block_pos, unpack_block_pos},
 };
 use horizon_world::nbt::Tag;
+use std::sync::Arc;
 
 mod skip;
 
@@ -31,6 +32,8 @@ pub mod component {
     pub const ATTACK_RANGE: i32 = 30;
     pub const STORED_ENCHANTMENTS: i32 = 45;
     pub const PROFILE: i32 = 72;
+    pub const BANNER_PATTERNS: i32 = 74;
+    pub const BASE_COLOR: i32 = 75;
     pub const DYED_COLOR: i32 = 47;
     pub const MAP_ID: i32 = 48;
     pub const MAP_POST_PROCESSING: i32 = 50;
@@ -40,9 +43,13 @@ pub mod component {
     pub const WRITABLE_BOOK_CONTENT: i32 = 56;
     pub const WRITTEN_BOOK_CONTENT: i32 = 57;
     pub const TRIM: i32 = 58;
+    pub const INSTRUMENT: i32 = 63;
     pub const LODESTONE_TRACKER: i32 = 69;
     pub const FIREWORK_EXPLOSION: i32 = 70;
     pub const FIREWORKS: i32 = 71;
+    pub const BLOCK_ENTITY_DATA: i32 = 62;
+    pub const OMINOUS_BOTTLE_AMPLIFIER: i32 = 65;
+    pub const CONTAINER: i32 = 77;
 }
 
 /// A written book's content (`WrittenBookContent.STREAM_CODEC`): the
@@ -112,6 +119,13 @@ pub enum Component {
         material: i32,
         pattern: i32,
     },
+    /// `InstrumentComponent` naming its instrument by `minecraft:instrument`
+    /// registry id; a direct instrument stays [`Component::Raw`].
+    Instrument(i32),
+    /// `BannerPatternLayers`: each layer's `banner_pattern` registry id and
+    /// its dye id (`DyeColor.getId`). A layer with a direct pattern has no
+    /// registry name: that value stays [`Component::Raw`].
+    BannerPatterns(Vec<(i32, i32)>),
     /// A component Horizon reads past without interpreting it: its encoded
     /// bytes, written back as they came.
     Raw(Vec<u8>),
@@ -174,8 +188,14 @@ impl Component {
     pub(crate) fn read(kind: i32, r: &mut Reader) -> Result<Self> {
         use component::*;
         Ok(match kind {
-            MAX_STACK_SIZE | MAX_DAMAGE | DAMAGE | RARITY | REPAIR_COST | MAP_ID
-            | MAP_POST_PROCESSING => Self::Int(r.varint()?),
+            MAX_STACK_SIZE
+            | MAX_DAMAGE
+            | DAMAGE
+            | RARITY
+            | REPAIR_COST
+            | MAP_ID
+            | MAP_POST_PROCESSING
+            | OMINOUS_BOTTLE_AMPLIFIER => Self::Int(r.varint()?),
             WRITABLE_BOOK_CONTENT => {
                 let n = r.count(100)?;
                 Self::WritableBook(
@@ -349,6 +369,31 @@ impl Component {
                     _ => Self::Raw(bytes.to_vec()),
                 }
             }
+            // InstrumentComponent.STREAM_CODEC: a holder, a reference's id plus one.
+            // A direct instrument has no registry name: read past.
+            INSTRUMENT => {
+                let start = r.position();
+                skip::component(INSTRUMENT, r)?;
+                let bytes = r.since(start);
+                let mut ids = Reader::new(bytes);
+                match ids.varint() {
+                    Ok(id @ 1..) if ids.remaining() == 0 => Self::Instrument(id - 1),
+                    _ => Self::Raw(bytes.to_vec()),
+                }
+            }
+            // DyeColor.STREAM_CODEC: its id.
+            BASE_COLOR => Self::Int(r.varint()?),
+            // BannerPatternLayers.STREAM_CODEC: a list of a pattern holder (a
+            // reference's id plus one, or 0 and the pattern itself) and a dye.
+            BANNER_PATTERNS => {
+                let start = r.position();
+                skip::component(BANNER_PATTERNS, r)?;
+                let bytes = r.since(start);
+                match Self::banner_layers(bytes) {
+                    Some(layers) => Self::BannerPatterns(layers),
+                    None => Self::Raw(bytes.to_vec()),
+                }
+            }
             other => {
                 let start = r.position();
                 skip::component(other, r)?;
@@ -356,13 +401,37 @@ impl Component {
             }
         })
     }
+    /// The layers of encoded `BannerPatternLayers` whose patterns are all
+    /// registry references (`None` when one is direct).
+    fn banner_layers(bytes: &[u8]) -> Option<Vec<(i32, i32)>> {
+        let mut r = Reader::new(bytes);
+        let n = r.count(r.remaining()).ok()?;
+        let mut layers = Vec::with_capacity(n);
+        for _ in 0..n {
+            let pattern = r.varint().ok()?;
+            let color = r.varint().ok()?;
+            if pattern < 1 {
+                return None;
+            }
+            layers.push((pattern - 1, color));
+        }
+        (r.remaining() == 0).then_some(layers)
+    }
     pub(crate) fn write(&self, kind: i32, w: &mut Writer) {
         match self {
             Self::Raw(bytes) => w.bytes(bytes),
+            Self::BannerPatterns(layers) => {
+                w.varint(layers.len() as i32);
+                for (pattern, color) in layers {
+                    w.varint(pattern + 1);
+                    w.varint(*color);
+                }
+            }
             Self::Trim { material, pattern } => {
                 w.varint(material + 1);
                 w.varint(pattern + 1);
             }
+            Self::Instrument(id) => w.varint(id + 1),
             Self::Int(v) if kind == component::DYED_COLOR => w.i32(*v),
             Self::Int(v) => w.varint(*v),
             Self::Unit => {}
@@ -486,6 +555,17 @@ impl Component {
     }
 }
 
+/// A component patch as `DelimitedSlot` writes it (both counts, then each
+/// value behind its length), kept from a stack that was read so one nobody
+/// edited goes back byte for byte. It is no part of a stack's equality.
+#[derive(Clone, Debug, Default)]
+pub struct WirePatch(pub Option<Arc<[u8]>>);
+impl PartialEq for WirePatch {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
 /// A non-empty item stack.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Stack {
@@ -493,6 +573,9 @@ pub struct Stack {
     pub count: i32,
     pub added: Vec<(i32, Component)>,
     pub removed: Vec<i32>,
+    /// The patch as it was read; [`DelimitedSlot`] writes it in place of
+    /// `added` and `removed` when set. Only for a stack nobody has edited.
+    pub wire: WirePatch,
 }
 impl Stack {
     pub fn new(item: i32, count: i32) -> Self {
@@ -501,6 +584,7 @@ impl Stack {
             count,
             added: Vec::new(),
             removed: Vec::new(),
+            wire: WirePatch::default(),
         }
     }
     pub fn component(&self, kind: i32) -> Option<&Component> {
@@ -517,25 +601,7 @@ impl Stack {
 pub struct Slot;
 impl Codec<Option<Stack>> for Slot {
     fn read(r: &mut Reader) -> Result<Option<Stack>> {
-        let count = r.varint()?;
-        if count <= 0 {
-            return Ok(None);
-        }
-        let item = r.varint()?;
-        let positive = r.count(65536)?;
-        let negative = r.count(65536)?;
-        let mut added = Vec::with_capacity(positive.min(64));
-        for _ in 0..positive {
-            let kind = r.varint()?;
-            added.push((kind, Component::read(kind, r)?));
-        }
-        let removed = (0..negative).map(|_| r.varint()).collect::<Result<_>>()?;
-        Ok(Some(Stack {
-            item,
-            count,
-            added,
-            removed,
-        }))
+        read_stack(r, false)
     }
     fn write(v: &Option<Stack>, w: &mut Writer) {
         let Some(s) = v else {
@@ -549,6 +615,79 @@ impl Codec<Option<Stack>> for Slot {
         for (kind, c) in &s.added {
             w.varint(*kind);
             c.write(*kind, w);
+        }
+        for kind in &s.removed {
+            w.varint(*kind);
+        }
+    }
+}
+
+/// A stack of either optional codec: with `delimited` each component value
+/// has a length in front (DataComponentPatch.DELIMITED_STREAM_CODEC). The
+/// patch is also kept, in the delimited form, for [`Stack::wire`].
+fn read_stack(r: &mut Reader, delimited: bool) -> Result<Option<Stack>> {
+    let count = r.varint()?;
+    if count <= 0 {
+        return Ok(None);
+    }
+    let item = r.varint()?;
+    let positive = r.count(65536)?;
+    let negative = r.count(65536)?;
+    let mut added = Vec::with_capacity(positive.min(64));
+    let mut patch = Writer::new();
+    patch.varint(positive as i32);
+    patch.varint(negative as i32);
+    for _ in 0..positive {
+        let kind = r.varint()?;
+        let (component, value) = if delimited {
+            let len = r.count(r.remaining())?;
+            let value = r.bytes(len)?;
+            (Component::read(kind, &mut Reader::new(value))?, value)
+        } else {
+            let start = r.position();
+            (Component::read(kind, r)?, r.since(start))
+        };
+        patch.varint(kind);
+        patch.byte_array(value);
+        added.push((kind, component));
+    }
+    let removed: Vec<i32> = (0..negative).map(|_| r.varint()).collect::<Result<_>>()?;
+    removed.iter().for_each(|kind| patch.varint(*kind));
+    Ok(Some(Stack {
+        item,
+        count,
+        added,
+        removed,
+        wire: WirePatch((positive + negative > 0).then(|| patch.data.into())),
+    }))
+}
+
+/// ItemStack.OPTIONAL_UNTRUSTED_STREAM_CODEC (`SetCreativeModeSlot`): as [`Slot`],
+/// but every component value goes behind its byte length
+/// (DataComponentPatch.DELIMITED_STREAM_CODEC), so a server skips what it can't read.
+pub struct DelimitedSlot;
+impl Codec<Option<Stack>> for DelimitedSlot {
+    fn read(r: &mut Reader) -> Result<Option<Stack>> {
+        read_stack(r, true)
+    }
+    fn write(v: &Option<Stack>, w: &mut Writer) {
+        let Some(s) = v else {
+            w.varint(0);
+            return;
+        };
+        w.varint(s.count);
+        w.varint(s.item);
+        if let Some(patch) = &s.wire.0 {
+            w.bytes(patch);
+            return;
+        }
+        w.varint(s.added.len() as i32);
+        w.varint(s.removed.len() as i32);
+        for (kind, c) in &s.added {
+            w.varint(*kind);
+            let mut value = Writer::new();
+            c.write(*kind, &mut value);
+            w.byte_array(&value.data);
         }
         for kind in &s.removed {
             w.varint(*kind);
@@ -575,6 +714,7 @@ impl Codec<Stack> for Template {
             count,
             added,
             removed,
+            wire: WirePatch::default(),
         })
     }
     fn write(s: &Stack, w: &mut Writer) {
@@ -746,6 +886,15 @@ mod tests {
         book.added
             .push((component::MAP_POST_PROCESSING, Component::Int(1)));
         round::<Option<Stack>, Slot>(Some(book));
+        // OminousBottleAmplifier.STREAM_CODEC: a VarInt.
+        let mut bottle = Stack::new(1200, 1);
+        bottle
+            .added
+            .push((component::OMINOUS_BOTTLE_AMPLIFIER, Component::Int(3)));
+        let mut w = Writer::new();
+        Slot::write(&Some(bottle.clone()), &mut w);
+        assert_eq!(w.data, [1, 0xb0, 0x09, 1, 0, 65, 3]);
+        round::<Option<Stack>, Slot>(Some(bottle));
         let mut quill = Stack::new(1099, 1);
         quill.added.push((
             component::WRITABLE_BOOK_CONTENT,
@@ -911,6 +1060,8 @@ mod tests {
             ("01890b01004a02200e000b6d696e6563726166743a7801790b", 74),
             ("01880301004c01f60801000001be0c0100000001d30c010000", 76),
             ("01a408010037020f6412a001", 55),
+            // A goat horn's instrument by reference (InstrumentComponent's holder).
+            ("01bd0801003f02", 63),
         ] {
             let bytes: Vec<u8> = (0..hex.len())
                 .step_by(2)
@@ -926,6 +1077,7 @@ mod tests {
                         pattern: 1,
                     }
                 }
+                63 => *c == Component::Instrument(1),
                 _ => matches!(c, Component::Raw(_)),
             };
             assert!(

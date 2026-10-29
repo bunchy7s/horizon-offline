@@ -1760,7 +1760,7 @@ impl B {
             B::WakeUp(r) => one(
                 || {
                     if !brain_mut(m).is_active(Act::Rest) && super::villager::sleeping(m) {
-                        super::villager::stop_sleeping(m, cx.w);
+                        super::villager::stop_sleeping(m, cx.w, cx.events);
                         mem(m).last_woken.set(now);
                         true
                     } else {
@@ -2314,7 +2314,7 @@ impl B {
                 t.begin(cx.lr, cx.now);
                 if now > *next_ok {
                     close_doors(m, cx, None, None);
-                    if super::villager::start_sleeping(m, home, w) {
+                    if super::villager::start_sleeping(m, home, w, cx.events) {
                         mem(m).last_slept.set(now);
                     }
                     let mm = mem(m);
@@ -3137,7 +3137,7 @@ impl B {
             B::SleepInBed { t, next_ok } => {
                 t.running = false;
                 if super::villager::sleeping(m) {
-                    super::villager::stop_sleeping(m, cx.w);
+                    super::villager::stop_sleeping(m, cx.w, cx.events);
                     mem(m).last_woken.set(now);
                     *next_ok = now + 40;
                 }

@@ -1,0 +1,146 @@
+ServerBossEvent.setProgress	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	UpdateProgress goes out when a viewer's last-sent progress differs
+ServerBossEvent.setColor	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	UpdateStyle when colour or overlay differ from what the viewer was sent
+ServerBossEvent.setOverlay	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	same UpdateStyle packet as the colour
+ServerBossEvent.setDarkenScreen	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	UpdateProperties when darken, music or fog differ
+ServerBossEvent.setPlayBossMusic	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	same UpdateProperties packet
+ServerBossEvent.setCreateWorldFog	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	same UpdateProperties packet
+ServerBossEvent.setName	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	UpdateName when the name differs
+ServerBossEvent.broadcast	inline	crates/horizon-client/src/game/bossbars.rs::Game::publish_boss_bars	bars are re-evaluated each tick per viewer and the diff is sent to that viewer only
+ServerBossEvent.addPlayer	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	a viewer in the bar's player list gets an Add the first time it is wanted
+ServerBossEvent.removePlayer	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	a Remove goes out once the viewer no longer wants the bar
+ServerBossEvent.removeAllPlayers	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	every viewer gets its Remove from the same diff
+ServerBossEvent.setVisible	inline	crates/horizon-client/src/game/bossbars.rs::Game::boss_events_for	a hidden bar is left out of the wanted list, so the diff sends Remove or Add
+ServerChunkCache.<init>	inline	crates/horizon-client/src/streaming.rs::Streaming::new	builds the chunk map and workers per level; forced chunks are loaded in world_loading, no ticket storage object
+ServerChunkCache.storeInCache	skip:java		4-entry last-chunk lookup cache
+ServerChunkCache.getChunk	inline	crates/horizon-client/src/streaming.rs::Streaming::update	chunks load and generate asynchronously around tickets; callers read World::chunks and skip an absent column, nothing waits for a target status
+ServerChunkCache.getChunkNow	port	crates/horizon-client/src/world.rs::World::loaded	World::chunks.get is the lookup itself
+ServerChunkCache.clearCache	skip:java		clears the 4-entry lookup cache
+ServerChunkCache.getChunkFuture	inline	crates/horizon-client/src/streaming.rs::Streaming::update	no futures; the worker pool delivers columns to the game thread
+ServerChunkCache.getChunkFutureMainThread	inline	crates/horizon-client/src/streaming.rs::Streaming::update	no futures or per-request tickets; streaming loads by distance
+ServerChunkCache.hasChunk	port	crates/horizon-client/src/world.rs::World::loaded	
+ServerChunkCache.getChunkForLighting	inline	crates/horizon-client/src/streaming.rs::Streaming::light_region	the 3x3 region handed to the light workers
+ServerChunkCache.runDistanceManagerUpdates	inline	crates/horizon-client/src/game.rs::Game::update_chunk_tickets	ticket levels are recomputed once a tick from players and forced chunks
+ServerChunkCache.isPositionTicking	port	crates/horizon-client/src/game.rs::GameLevel::is_ticking_chunk	block-ticking ticket level and a lit chunk with its neighbours loaded
+ServerChunkCache.close	inline	crates/horizon-client/src/game.rs::Game::save_game	save with wait; nothing else to close
+ServerChunkCache.broadcastChangedChunks	port	crates/horizon-client/src/lan/hub.rs::Hub::broadcast_block_changes	block changes grouped by section as BlockUpdate or SectionBlocksUpdate, plus block entity data; light is in broadcast_light_changes
+ServerChunkCache.getFullChunk	inline	crates/horizon-client/src/game/natural_spawning.rs::Game::spawn_natural	the spawn pass reads World::chunks directly
+ServerChunkCache.blockChanged	inline	crates/horizon-client/src/world.rs::World::set	World::set pushes the position onto block_log, which the hub drains
+ServerChunkCache.onLightUpdate	port	crates/horizon-client/src/lan/hub.rs::Hub::broadcast_light_changes	light_log read once a tick; sent to players for whom the column is on the tracked border
+ServerChunkCache.addTicketAndLoadWithRadius	inline	crates/horizon-client/src/streaming.rs::Streaming::update	spawn search and guest placement wait for streaming to produce the columns; no ticket-with-radius future
+ServerChunkCache.MainThreadExecutor.pollTask	inline	crates/horizon-client/src/streaming.rs::Streaming::update	chunk-system updates run once per tick (streaming and ticket levels); there is no task queue to poll
+ServerEntity.isFullPrecisionEncodingRequired	missing		minor: item entities against a wall are sent as quantised deltas, so a LAN guest can see them off by a hair; TNT and happy ghast use the precise flag instead
+ServerEntity.handleMinecartPosRot	skip:other		only for the experimental minecart_improvements movement; Horizon has the old minecart movement only
+ServerEntity.addPairing	inline	crates/horizon-client/src/lan/entity.rs::Entities::tick	a viewer that starts tracking an entity gets ServerEntity::pairing bundled, and the entity is remembered per viewer
+ServerEntityGetter.getNearestPlayer	inline	crates/horizon-client/src/game/lan_mobs.rs::player_for	each mob is given one player (the host or a guest) per tick, then Mob::can_target_player and friends apply the TargetingConditions
+ServerEntityGetter.getNearestEntity	inline	crates/horizon-client/src/mobs/world.rs::MobWorld::nearby	nearest-first scan used by NearestTarget; the goal applies its own conditions
+ServerEntityGetter.getNearbyPlayers	inline	crates/horizon-client/src/mobs/goals.rs::Mob::can_target_player	gap: minor: tests only the one player a mob sees, so a phantom or iron golem with several players around considers one of them
+ServerEntityGetter.getNearbyEntities	inline	crates/horizon-client/src/mobs/world.rs::MobWorld::nearby	each caller (breed partner, raider shout, fox, evoker) scans this and filters itself
+ServerLevel.<init>	inline	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	
+ServerLevel.getNextEntityId	inline	crates/horizon-client/src/game/lan_entities.rs::Game::lan_assign_ids	one counter, Game::next_entity, bumped wherever an entity is created; ids for guests' tracking are given here
+ServerLevel.tickCustomSpawners	inline	crates/horizon-client/src/game/creatures.rs::Game::tick_creatures	wandering trader, patrol, cat and siege spawners; the phantom spawner runs from stats.rs
+ServerLevel.tickThunder	port	crates/horizon-client/src/game/lightning.rs::Game::tick_thunder	
+ServerLevel.findLightningTargetAround	port	crates/horizon-client/src/game/lightning.rs::Game::lightning_target	
+ServerLevel.announceSleepStatus	port	crates/horizon-client/src/game/lan_actions.rs::Game::announce_sleep_status	
+ServerLevel.getMoonBrightness	inline	crates/horizon-client/src/game/creatures.rs::Game::local_difficulty	MOON_BRIGHTNESS table indexed by day / 24000 mod 8
+ServerLevel.prepareWeather	port	crates/horizon-client/src/save.rs::Level::read	rain and thunder levels start at 1 when the saved flags are on
+ServerLevel.advanceWeatherCycle	port	crates/horizon-client/src/world.rs::Weather::tick_timers	level fade in tick_levels, game events broadcast in Hub::sync_world
+ServerLevel.resetWeatherCycle	inline	crates/horizon-client/src/game.rs::Game::tick_sleep	the sleep-through-night reset; /weather sets the timers itself
+ServerLevel.tickFluid	port	crates/horizon-world/src/level/tick.rs::Behaviours::scheduled_step	
+ServerLevel.tickBlock	port	crates/horizon-world/src/level/tick.rs::Behaviours::scheduled_step	
+ServerLevel.tickPassenger	inline	crates/horizon-client/src/game/passengers.rs::Game::sync_riders	a rider whose vehicle is gone or dead lets go; others are re-seated each tick
+ServerLevel.updateNeighboursOnBlockSet	inline	crates/horizon-world/src/level/update.rs::Sim::set_block_limit	neighbour and comparator updates inside setBlock
+ServerLevel.mayInteract	inline	crates/horizon-client/src/game/lan_actions.rs::Game::under_spawn_protection	gap: minor: spawn protection only for guests on a dedicated server; the world border check is a stub that always allows (hand.rs within_border), so blocks can be built and broken outside the border
+ServerLevel.save	port	crates/horizon-client/src/game.rs::Game::save_level	
+ServerLevel.saveLevelData	port	crates/horizon-client/src/game.rs::Game::save_game_metadata	
+ServerLevel.getEntities	inline	crates/horizon-client/src/game/commands.rs::Game::select_in_level	entity selectors filter the per-kind entity lists
+ServerLevel.addDuringTeleport	inline	crates/horizon-client/src/game/nether_portal.rs::Game::resolve_arrivals	mobs, items, boats and carts waiting for a portal exit join the level with the chunk entities; players go through Hub::respawn
+ServerLevel.addPlayer	inline	crates/horizon-client/src/lan/hub.rs::Hub::place_new_player	
+ServerLevel.addEntity	inline	crates/horizon-client/src/game/creatures.rs::Game::spawn_mob	mobs go in Game::mobs; other kinds have their own lists
+ServerLevel.tryAddFreshEntityWithPassengers	inline	crates/horizon-client/src/game/persist.rs::Game::load_mob	gap: minor: loads a mob with its Passengers but never refuses a UUID that is already loaded, so /summon with a fixed UUID twice makes two
+ServerLevel.unload	inline	crates/horizon-client/src/game.rs::Game::update_world	unloaded columns drop their block entities and names, and their entities are saved out
+ServerLevel.playSeededSound	port	crates/horizon-client/src/lan/containers.rs::Hub::sound	
+ServerLevel.sendBlockUpdated	inline	crates/horizon-client/src/world.rs::World::set	gap: minor: mobs never re-plan a path when a block on it changes (Mob::recompute_path is never triggered by a block update), so they walk a stale path until a goal re-paths
+ServerLevel.neighborChanged	port	crates/horizon-world/src/level/hooks.rs::Sim::neighbor_changed	
+ServerLevel.getDestroyType	port	crates/horizon-client/src/game.rs::Game::explode	mob explosions pick Keep, Destroy or DestroyWithDecay from mob_griefing and mob_explosion_drop_decay
+ServerLevel.doBlockEvent	inline	crates/horizon-world/src/level/pistons.rs::Behaviours::run_block_events	
+ServerLevel.getEntityInAnyDimension	missing		minor: owner and target references resolve in the level in place only; parked levels are not searched
+ServerLevel.getEntityOrPart	inline	crates/horizon-client/src/game/lan_actions.rs::Game::look_at_entity	an entity id from a guest finds a mob, an object or a tracked dragon part or end crystal
+ServerLevel.findClosestBiome3d	port	crates/horizon-client/src/vanillagen.rs::VanillaTerrain::find_closest_biome	
+ServerLevel.getWorldBorder	inline	crates/horizon-client/src/game/scoreboard.rs::Game::load_scoreboard	the border is unpacked from saved data next to the scoreboard
+ServerLevel.setChunkForced	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_forceload	
+ServerLevel.updatePOIOnBlockStateChange	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	no incremental records: a section's POI list is rebuilt from its blocks after any edit
+ServerLevel.saveDebugReport	skip:debug		
+ServerLevel.dumpEntities	skip:debug		
+ServerLevel.dumpBlockEntityTickers	skip:debug		
+ServerLevel.clearBlockEvents	skip:debug		test hook for game tests
+ServerLevel.getWatchdogStats	skip:server		server watchdog crash text
+ServerLevel.getTypeCount	skip:debug		
+ServerLevel.onStructureStartsAvailable	skip:other		Horizon computes structure starts from the seed (VanillaTerrain) instead of caching them in a StructureCheck
+ServerLevel.waitForEntities	skip:other		entities load together with their chunk, so a spawning player has nothing to wait for
+ServerLevel.areEntitiesActuallyLoadedAndTicking	skip:debug		only game tests call it
+ServerLevel.anyPlayerCloseEnoughForSpawning	port	crates/horizon-client/src/game/natural_spawning.rs::close_enough_for_spawning	
+ServerLevel.fillReportDetails	skip:debug		crash report detail
+ServerLevel.EntityCallbacks.onCreated	inline	crates/horizon-client/src/lan/waypoints.rs::Waypoints::track	players are the only waypoint transmitters Horizon has
+ServerLevel.EntityCallbacks.onDestroyed	inline	crates/horizon-client/src/lan/waypoints.rs::Waypoints::untrack	gap: minor: dead non-player entities keep their scores and team membership (vanilla Scoreboard.entityRemoved clears them), so a sidebar can keep listing a dead mob
+ServerLevel.EntityCallbacks.onTrackingStart	inline	crates/horizon-client/src/lan/entity.rs::Entities::tick	an entity is tracked the first tick the level lists it; guests, waypoints and the sleep list are polled each tick, and there are no separate dragon part entities
+ServerLevel.EntityCallbacks.onTrackingEnd	inline	crates/horizon-client/src/lan/entity.rs::Entities::tick	an entity the level stops listing is removed from every viewer (RemoveEntities)
+ServerPlayer.<init>	port	crates/horizon-client/src/lan/guest.rs::Guest::new	
+ServerPlayer.readAdditionalSaveData	port	crates/horizon-client/src/save.rs::Level::read_player	gap: minor: entered_nether_pos, last_explosion_impact_pos, spawn_extra_particles_on_fall, post_effects and previousPlayerGameType are not read back (kept verbatim in player_extra); recipe book, respawn, shoulders, warden tracker and raid omen are read
+ServerPlayer.addAdditionalSaveData	port	crates/horizon-client/src/save.rs::Level::player_tag	gap: minor: writes only what it reads; the keys above come from the loaded file unchanged
+ServerPlayer.saveParentVehicle	missing		player: quitting while riding a horse, boat or minecart and reloading leaves the player standing next to the mount instead of still riding it
+ServerPlayer.loadAndSpawnParentVehicle	missing		player: the player is never put back on its mount when the world loads
+ServerPlayer.saveEnderPearls	missing		minor: a thrown ender pearl is not saved at all, so one in flight or hanging in a stasis chamber is gone after a reload
+ServerPlayer.loadAndSpawnEnderPearl	missing		minor: ender pearls are not loaded back (spawn_loaded_entities has no pearl)
+ServerPlayer.setExperiencePoints	port	crates/horizon-client/src/game/commands.rs::Game::change_experience	/xp set points
+ServerPlayer.setExperienceLevels	port	crates/horizon-client/src/game/commands.rs::Game::change_experience	/xp set levels
+ServerPlayer.onLeaveCombat	skip:other		the client ignores ClientboundPlayerCombatEnd
+ServerPlayer.playShoulderEntityAmbientSound	missing		player: a parrot on the player's shoulder never chirps or imitates nearby mobs (1 in 200 ticks in vanilla)
+ServerPlayer.respawnEntityOnShoulder	port	crates/horizon-client/src/game/shoulders.rs::Game::remove_entities_on_shoulder	
+ServerPlayer.trackStartFallingPosition	missing		player: the Caves & Cliffs (fall_from_height) and Who Needs Rockets? (fall_after_explosion) advancements can never be earned; neither trigger exists
+ServerPlayer.trackEnteredOrExitedLavaOnVehicle	missing		player: the This Boat Has Legs advancement (ride_entity_in_lava) can never be earned; the trigger does not exist
+ServerPlayer.updateScoreForCriteria	port	crates/horizon-client/src/game/scoreboard.rs::Game::tick_scoreboard	health, food, air, armor, xp and level objectives
+ServerPlayer.tellNeutralMobsThatIDied	missing		player: wolves, bees, piglins and other mobs that were angry at the player stay angry after the player dies and respawns (vanilla forgives them with forgive_dead_players)
+ServerPlayer.handleTeamKill	inline	crates/horizon-client/src/game/scoreboard.rs::Game::score_player_killed	teamkill and killedByTeam objectives
+ServerPlayer.hurtServer	port	crates/horizon-client/src/game/lan_pvp.rs::Game::pvp_land	pvp rule and team friendly fire gate the damage
+ServerPlayer.addPostEffect	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_posteffect	gap: minor: one list shared by every target, nothing is sent to guests (an empty list at join) and no post shader is drawn
+ServerPlayer.clearPostEffects	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_posteffect	gap: minor: same as addPostEffect
+ServerPlayer.removePostEffect	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_posteffect	gap: minor: same as addPostEffect
+ServerPlayer.forceSetRotation	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_rotate	/rotate turns a guest through a teleport packet with the new rotation
+ServerPlayer.triggerDimensionChangeTriggers	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_dimension	gap: player: nether_travel is never triggered (entered_nether_pos is not kept), so the Subspace Bubble advancement can never be earned
+ServerPlayer.broadcastToPlayer	missing		player: a spectator (the host or a LAN guest) is shown to the other players as an ordinary visible player; vanilla hides spectators from everyone who is not a spectator
+ServerPlayer.startSleeping	port	crates/horizon-client/src/game.rs::Game::try_sleep	
+ServerPlayer.isReachableBedBlock	inline	crates/horizon-client/src/game.rs::Game::try_sleep	the reachable closure: 3 blocks sideways, 2 vertically
+ServerPlayer.isInvulnerableTo	inline	crates/horizon-client/src/game/lan_mobs.rs::Game::lan_guest_views	gap: minor: only the not-loaded part (a guest that has not sent PlayerLoaded is ignored by mobs); no invulnerability while a dimension change is pending
+ServerPlayer.openNautilusInventory	missing		player: sneak-using a tamed nautilus does nothing, so its saddle and armour screen never opens (items can only be put on by right-clicking with them)
+ServerPlayer.doCloseContainer	inline	crates/horizon-client/src/lan/containers.rs::Hub::container_closed	the carried stack and a crafting grid go back through Game::guest_carried_back and lan_crafting_closed
+ServerPlayer.rideTick	inline	crates/horizon-client/src/game/stats.rs::Game::movement_stats	only the riding statistics part; the ride itself is per vehicle
+ServerPlayer.didNotMove	inline	crates/horizon-client/src/game/stats.rs::Game::movement_stats	a move of 0 cm counts nothing
+ServerPlayer.awardStat	port	crates/horizon-client/src/game/stats.rs::Stats::add	scoreboard objectives follow in stat_criteria_changed
+ServerPlayer.resetStat	port	crates/horizon-client/src/game/stats.rs::Stats::reset	
+ServerPlayer.disconnect	inline	crates/horizon-client/src/game/lan.rs::Game::tick_lan	HostEvent::Left: the guest is saved and removed; its mount just loses its rider (no eject or forced wake)
+ServerPlayer.transferInventoryXpAndScore	inline	crates/horizon-client/src/game/screens.rs::Game::respawn_player	keep_inventory keeps the inventory and Experience::respawn keeps xp
+ServerPlayer.onEffectUpdated	port	crates/horizon-client/src/lan/hub.rs::Hub::sync_effects	gap: player: the effects_changed trigger does not exist, so How Did We Get Here? and A Furious Cocktail can never be earned
+ServerPlayer.onEffectsRemoved	port	crates/horizon-client/src/lan/hub.rs::Hub::sync_effects	gap: player: same missing effects_changed trigger
+ServerPlayer.magicCrit	port	crates/horizon-client/src/lan/containers.rs::Hub::critical_hit	
+ServerPlayer.onUpdateAbilities	inline	crates/horizon-client/src/lan/hub.rs::Hub::set_game_mode	abilities go out with a game mode change; there is no other way abilities change
+ServerPlayer.createCommandSourceStack	inline	crates/horizon-client/src/game/lan_actions.rs::Game::run_guest_command	the guest is swapped in as the acting player and its permission level applied
+ServerPlayer.sendSystemMessage	port	crates/horizon-client/src/lan/hub.rs::Hub::system_message	
+ServerPlayer.sendBuildLimitMessage	missing		player: placing a block at the build limit fails silently; the red build.tooHigh / build.tooLow overlay never shows
+ServerPlayer.getIpAddress	skip:server		for ban-ip and the dedicated server log
+ServerPlayer.updateOptions	port	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	the ClientInformation arm: view distance, main hand, model parts and chat visibility are kept
+ServerPlayer.clientInformation	skip:java		getter
+ServerPlayer.sendServerStatus	port	crates/horizon-client/src/lan/hub.rs::Hub::place_new_player	ServerData with the motd and icon at join
+ServerPlayer.updateInvisibilityStatus	missing		player: a spectator is not made invisible, so others see a full player model flying around
+ServerPlayer.drop	port	crates/horizon-client/src/game.rs::Game::player_drop	item_dropped and drop statistics, thrower set
+ServerPlayer.calculateGameModeForNewPlayer	port	crates/horizon-client/src/game/lan.rs::Game::lan_guest_joined	default or forced game mode for a new or force-gamemode guest
+ServerPlayer.storeGameTypes	port	crates/horizon-client/src/save.rs::Level::player_tag	gap: minor: playerGameType only; previousPlayerGameType is not saved, so the game mode switcher forgets the previous mode after a reload
+ServerPlayer.shouldFilterMessageTo	skip:service		text filtering
+ServerPlayer.mayInteract	inline	crates/horizon-client/src/game/lan_actions.rs::Game::under_spawn_protection	gap: minor: same as ServerLevel.mayInteract, no world border check
+ServerPlayer.onItemPickup	missing		player: the You've Got a Friend in Me advancement (thrown_item_picked_up_by_player) can never be earned
+ServerPlayer.getChatSession	skip:java		getter with an expiry check
+ServerPlayer.startRiding	inline	crates/horizon-client/src/game/lan_entities.rs::Game::lan_riding	gap: minor: SetPassengers goes out, but the mount's active effects (a horse's speed) are not sent to the rider
+ServerPlayer.removeVehicle	inline	crates/horizon-client/src/game/lan_entities.rs::Game::lan_riding	gap: minor: SetPassengers updates, vehicle effects are not removed from the rider
+ServerPlayer.getKnownSpeed	port	crates/horizon-client/src/game/spear.rs::Game::known_player_movement	gap: minor: ignores the vehicle's speed for a rider who is not steering
+ServerPlayer.onEquippedItemBroken	port	crates/horizon-client/src/game.rs::Game::damage_held	gap: minor: only the held item counts toward the broken statistic; breaking armour is not counted
+ServerPlayer.registerAndUpdateEnderPearlTicket	missing		minor: a thrown ender pearl does not keep its chunk loaded; none are saved either
+ServerPlayer.debugSubscriptions	skip:debug		debug subscriptions for the debug screen

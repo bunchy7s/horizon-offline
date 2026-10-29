@@ -70,6 +70,7 @@ FIXTURES = [
     ('bees', '{bees:[{entity_data:{id:"minecraft:bee",Health:5f},ticks_in_hive:5,min_ticks_in_hive:10}]}'),
     ('entity_data', '{entity_data:{id:"minecraft:pig",NoAI:1b}}'),
     ('bucket_entity_data', '{bucket_entity_data:{Health:5f}}'),
+    ('instrument registry', '{instrument:"minecraft:sing_goat_horn"}'),
     ('instrument direct', '{instrument:{sound_event:{sound_id:"minecraft:x",range:8f},use_duration:3f,range:64f,description:"Horn"}}'),
     ('painting variant', '{"minecraft:painting/variant":"minecraft:kebab"}'),
     ('sign_text_front', '{sign_text_front:{messages:["a","b","c","d"],filtered_messages:["e","f","g","h"],color:"red",has_glowing_text:1b}}'),
@@ -104,7 +105,7 @@ FIXTURES = [
 # Fixtures on another item than a stick (the components need it, or read better there).
 ITEMS = {'profile name': 'player_head', 'profile full': 'player_head', 'trim registry': 'diamond_chestplate',
          'trim direct': 'diamond_chestplate', 'banner_patterns': 'white_banner', 'pot_decorations': 'decorated_pot',
-         'everything at once': 'diamond_chestplate'}
+         'everything at once': 'diamond_chestplate', 'instrument registry': 'goat_horn'}
 
 
 def compare(vanilla, rust):

@@ -6,11 +6,33 @@ use horizon_world::level::LevelEvent;
 
 impl Game<'_> {
     pub(super) fn finish_falling_block(&mut self, mut block: FallingBlock, pos: [i32; 3]) {
-        let anvil = self.res.facts().get(block.state).name.ends_with("anvil");
+        let name = self.res.facts().get(block.state).name.clone();
+        let anvil = name.ends_with("anvil");
+        let stalactite = matches!(
+            &*name,
+            "minecraft:pointed_dripstone" | "minecraft:sulfur_spike"
+        );
+        let sound_event = match &*name {
+            "minecraft:pointed_dripstone" => Some(1045),
+            "minecraft:sulfur_spike" => Some(1052),
+            _ => None,
+        };
         if let Some(impact) = block.damage.impact(block.fall_distance) {
             if impact.amount > 0.0 {
-                falling_block::hurt_mobs(&mut self.mobs, block.position, impact.amount);
-                let kind = if anvil {
+                let mob_kind = if stalactite {
+                    horizon_client::mobs::DamageKind::FallingStalactite
+                } else {
+                    horizon_client::mobs::DamageKind::FallingBlock
+                };
+                falling_block::hurt_mobs_with_kind(
+                    &mut self.mobs,
+                    block.position,
+                    impact.amount,
+                    mob_kind,
+                );
+                let kind = if stalactite {
+                    "minecraft:falling_stalactite"
+                } else if anvil {
                     "minecraft:falling_anvil"
                 } else {
                     "minecraft:falling_block"
@@ -58,7 +80,13 @@ impl Game<'_> {
             }
         }
         if block.damage.cancel_drop {
-            if anvil {
+            if let Some(id) = sound_event {
+                self.level_events.push(LevelEvent::LevelEvent {
+                    id,
+                    pos: BlockPos::new(pos[0], pos[1], pos[2]),
+                    data: 0,
+                });
+            } else if anvil {
                 self.level_events.push(LevelEvent::LevelEvent {
                     id: 1029,
                     pos: BlockPos::new(pos[0], pos[1], pos[2]),
@@ -99,6 +127,13 @@ impl Game<'_> {
             && block.drop_item
             && self.ui.rules.bool("entity_drops")
         {
+            if let Some(id) = sound_event {
+                self.level_events.push(LevelEvent::LevelEvent {
+                    id,
+                    pos: BlockPos::new(pos[0], pos[1], pos[2]),
+                    data: 0,
+                });
+            }
             let item = self.res.facts().get(block.state).item.clone();
             if &*item != "minecraft:air" {
                 self.pop_resource(

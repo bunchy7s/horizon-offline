@@ -1,0 +1,148 @@
+ListOperation.Insert.apply	port	crates/horizon-client/src/game/commands/items.rs::list_operation	gap: minor: an offset past the end is clamped and a result over 256 entries is cut; vanilla returns the original list
+ListOperation.ReplaceSection.apply	port	crates/horizon-client/src/game/commands/items.rs::list_operation	gap: minor: an offset past the end is clamped and a result over 256 entries is cut; vanilla returns the original list
+ListOperation.StandAlone.codec	skip:java		codec
+SetNameFunction.getReferencedContextParams	skip:other		loot table validation only: the context params a function reads; no runtime effect
+SetNameFunction.createResolver	missing		minor: a set_name with an entity target keeps its raw text; vanilla resolves selectors and scores against the entity (loot.rs:1230 notes no table uses it)
+SetNameFunction.setName	skip:data		datagen builder for loot tables; Horizon reads the loot JSON
+SetNameFunction.Target.component	port	crates/horizon-world/src/loot.rs::Context::run	target becomes the component id minecraft:custom_name or minecraft:item_name
+ContextFloatProvider.getFloat	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	gap: minor: the 0.0 fallback for a non-finite result or arithmetic error is not applied; Game::cmd_compute rejects non-finite values instead
+ContextFloatProvider.getFloatOrThrow	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	the non-finite throw is in Game::cmd_compute (compute.rs:119)
+floats/Power.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	the "pow" arm; 0 to the power of 0 gives NaN as in vanilla
+ResolvableFloat.Reference.get	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	gap: minor: a missing registry entry gives 0.0, not the caller's default
+ContextIntProvider.floatToIntSafe	inline	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	the "from_float" arm rejects non-finite values and out-of-range results
+ContextIntProvider.longToIntSafe	inline	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	the long_to_int closure inside provider_int
+ints/Power.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	the "pow" arm uses checked_pow; 0 to the power of 0 and negative exponents are errors
+ResolvableInt.Reference.get	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	gap: minor: a missing registry entry gives 0, not the caller's default
+AABB.of	inline	crates/horizon-world/src/worldgen/structure.rs::BoundingBox::intersects	the max+1 edge is folded into the inclusive compare; the 0.25 deflate and shape joins in JigsawPlacement are not reproduced
+AABB.unitCubeFromLowerCorner	port	crates/horizon-core/src/geometry/mod.rs::Aabb::unit_cube	-
+AABB.encapsulatingFullBlocks	port	crates/horizon-core/src/geometry/mod.rs::Aabb::encapsulating_blocks	-
+AABB.setMinX	port	crates/horizon-core/src/geometry/mod.rs::Aabb::with_min	-
+AABB.setMinY	port	crates/horizon-core/src/geometry/mod.rs::Aabb::with_min	-
+AABB.setMinZ	port	crates/horizon-core/src/geometry/mod.rs::Aabb::with_min	-
+AABB.setMaxX	port	crates/horizon-core/src/geometry/mod.rs::Aabb::with_max	-
+AABB.setMaxY	port	crates/horizon-core/src/geometry/mod.rs::Aabb::with_max	-
+AABB.setMaxZ	port	crates/horizon-core/src/geometry/mod.rs::Aabb::with_max	-
+AABB.equals	skip:java		Object equality
+AABB.hashCode	skip:java		Hashing
+AABB.minmax	port	crates/horizon-core/src/geometry/mod.rs::Aabb::union_bounds	-
+AABB.move	port	crates/horizon-core/src/geometry/mod.rs::Aabb::move_by	the BlockPos, Vec3 and Vector3f overloads are the same offset
+AABB.getSize	port	crates/horizon-core/src/geometry/mod.rs::Aabb::average_size	-
+AABB.getDirection	port	crates/horizon-core/src/geometry/mod.rs::Aabb::clip_direction	same axis order and strict nearest-hit test
+AABB.clipPoint	inline	crates/horizon-core/src/geometry/mod.rs::Aabb::clip_direction	the per-face plane test is folded into the axis loop
+AABB.toString	skip:java		String form
+AABB.hasNaN	port	crates/horizon-core/src/geometry/mod.rs::Aabb::has_nan	-
+AABB.Builder.include	skip:java		builder: Horizon folds points into min and max directly
+AABB.Builder.build	skip:java		builder
+Vec3.dot	port	crates/horizon-core/src/geometry/mod.rs::Vec3::dot	-
+Vec3.add	port	crates/horizon-core/src/geometry/mod.rs::Vec3::add_vector	all three add overloads
+Vec3.distanceToSqr	port	crates/horizon-core/src/geometry/mod.rs::Vec3::distance_squared	both overloads
+Vec3.offsetRandomXZ	port	crates/horizon-world/src/level/removal.rs::jukebox_pop_position	specialised to the 0.7 offset used by the jukebox and composter
+Vec3.length	port	crates/horizon-core/src/geometry/mod.rs::Vec3::length	-
+Vec3.lengthSqr	port	crates/horizon-core/src/geometry/mod.rs::Vec3::length_squared	-
+Vec3.horizontalDistanceSqr	port	crates/horizon-core/src/geometry/mod.rs::Vec3::horizontal_distance_squared	-
+Vec3.hashCode	skip:java		Hashing
+Vec3.zRot	port	crates/horizon-core/src/geometry/mod.rs::Vec3::rotate_z	-
+Vec3.with	port	crates/horizon-core/src/geometry/mod.rs::Vec3::with_component	-
+Vec3.toVector3f	skip:java		float copy; Horizon keeps f64 vectors and the renderer converts its own
+CollisionContext.placementContext	port	crates/horizon-world/src/collision_context.rs::CollisionContext::placement	-
+DiscreteVoxelShape.rotate	skip:data		block shape rotation used only in static block shape definitions; Horizon reads block shapes from the collision table
+DiscreteVoxelShape.fixupCoordinate	skip:data		helper of rotate; block shape definitions only
+DiscreteVoxelShape.isFullWide	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::is_full	both overloads; out-of-range cells are empty
+DiscreteVoxelShape.isFull	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::is_full	the AxisCycle overload is index mapping only
+DiscreteVoxelShape.isEmpty	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::is_empty	-
+DiscreteVoxelShape.firstFull	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::min_at	returns the coordinate, not the index; an empty column gives +infinity
+DiscreteVoxelShape.lastFull	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::max_at	returns the coordinate, not the index; an empty column gives -infinity
+DiscreteVoxelShape.forAllEdges	skip:data		edge outline is precomputed in the outline table (game.rs outline_boxes); no runtime edge walk
+DiscreteVoxelShape.forAllAxisEdges	skip:data		edge outline is precomputed in the outline table (game.rs outline_boxes)
+DiscreteVoxelShape.forAllAxisFaces	port	crates/horizon-world/src/worldgen/tree.rs::update_shape_at_edge	the face walk of the tree shape; forAllFaces is used only there
+Shapes.box	port	crates/horizon-core/src/geometry/shape/create.rs::VoxelShape::from_box	-
+Shapes.or	port	crates/horizon-core/src/geometry/shape/create.rs::VoxelShape::join	OR operation
+Shapes.collide	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::collide_all	same early exit when the distance is tiny
+Shapes.createIndexMerger	skip:java		choice of merge representation for speed; the join gives the same result
+Shapes.rotate	skip:data		block shape definitions only; Horizon reads block shapes from the collision table
+Shapes.flipAxisIfNeeded	skip:data		helper of rotate; block shape definitions only
+Shapes.rotateHorizontalAxis	skip:data		block shape definitions only
+Shapes.rotateAllAxis	skip:data		block shape definitions only
+Shapes.rotateHorizontal	skip:data		block shape definitions only
+Shapes.rotateAll	skip:data		block shape definitions only
+Shapes.rotateAttachFace	skip:data		block shape definitions only
+SliceShape.makeSlice	inline	crates/horizon-world/src/level/fluids.rs::merged_face_occludes	the boundary layers are taken as face_shape() samples, not as slice views
+SliceShape.getCoords	inline	crates/horizon-world/src/level/fluids.rs::merged_face_occludes	same as makeSlice
+VoxelShape.min	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::min	-
+VoxelShape.max	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::max	-
+VoxelShape.singleEncompassing	skip:data		block shape definition (SegmentableBlock); Horizon reads block shapes from the collision table
+VoxelShape.move	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::moved	all three overloads
+VoxelShape.forAllEdges	skip:data		edge outline is precomputed in the outline table (game.rs outline_boxes)
+VoxelShape.forAllBoxes	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::boxes	the same box decomposition
+VoxelShape.toAabbs	port	crates/horizon-core/src/geometry/shape.rs::VoxelShape::boxes	-
+VoxelShape.isCubeLike	port	crates/horizon-core/src/geometry/shape/face.rs::VoxelShape::cube_like_along	gap: minor: one axis per call; the three-axis loop is not a separate fn
+VoxelShape.isCubeLikeAlong	port	crates/horizon-core/src/geometry/shape/face.rs::VoxelShape::cube_like_along	-
+Objective.pack	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::pack	objectives are written inside the saved scoreboard
+PlayerTeam.pack	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::pack	teams are written inside the saved scoreboard
+PlayerTeam.setPlayerPrefix	port	crates/horizon-client/src/scoreboard_cmd.rs::team_modify	the team.modify prefix path; the null-to-empty rule is not repeated here
+PlayerTeam.setPlayerSuffix	port	crates/horizon-client/src/scoreboard_cmd.rs::team_modify	the team.modify suffix path
+PlayerTeam.packOptions	port	crates/horizon-client/src/lan/scoreboard.rs::View::of	the friendly fire and see-invisible flags as the team options byte
+PlayerTeam.unpackOptions	port	crates/horizon-client/src/game/remote.rs::Game::remote_team	the two option bits are read from the team packet
+ScoreHolder.getFeedbackDisplayName	port	crates/horizon-client/src/scoreboard_cmd.rs::Holder::named	gap: minor: the hover with the scoreboard name is set where a holder is built from an entity, not here
+ScoreHolder.forNameOnly	port	crates/horizon-client/src/scoreboard_cmd.rs::Holder::named	gap: minor: "*" is not a wildcard holder; game/scoreboard.rs maps it to the player name
+Scoreboard.getOrCreatePlayerScore	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::score_mut	gap: minor: the read-only criteria check is in scoreboard_cmd.rs, not here
+Scoreboard.getPlayerScoreInfo	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::score	-
+Scoreboard.listPlayerScores	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::list_scores	-
+Scoreboard.resetAllPlayerScores	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::reset_all	-
+Scoreboard.resetSinglePlayerScore	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::reset_one	-
+Scoreboard.addPlayerTeam	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::add_team	-
+Scoreboard.removePlayerTeam	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::remove_team	-
+Scoreboard.packPlayerScores	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::pack	scores are written inside the saved scoreboard
+Scoreboard.loadPlayerScore	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::unpack	-
+Scoreboard.loadPlayerTeam	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::unpack	-
+Scoreboard.loadObjective	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::unpack	-
+Scoreboard.packDisplaySlots	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::pack	display slots are written inside the saved scoreboard
+ObjectiveCriteria.registerForEveryTeamColor	skip:data		criteria registry; Horizon resolves criteria names in criteria_by_name
+ObjectiveCriteria.registerCustom	skip:data		criteria registry; Horizon resolves criteria names in criteria_by_name
+ObjectiveCriteria.getStat	port	crates/horizon-client-core/src/scoreboard.rs::stat_criteria	-
+LevelTicks.addContainer	port	crates/horizon-core/src/ticks/mod.rs::LevelTicks::add_chunk	-
+LevelTicks.removeContainer	port	crates/horizon-core/src/ticks/mod.rs::LevelTicks::remove_chunk	-
+LevelTicks.collectTicks	port	crates/horizon-core/src/ticks/mod.rs::LevelTicks::begin_tick	-
+LevelTicks.sortContainersToTick	inline	crates/horizon-core/src/ticks/mod.rs::LevelTicks::begin_tick	chunk order is built in begin_tick
+LevelTicks.drainContainers	inline	crates/horizon-core/src/ticks/mod.rs::LevelTicks::begin_tick	the per-chunk drain is in begin_tick
+LevelTicks.rescheduleLeftoverContainers	inline	crates/horizon-core/src/ticks/mod.rs::LevelTicks::begin_tick	leftover chunks are kept in begin_tick
+LevelTicks.drainFromCurrentContainer	inline	crates/horizon-core/src/ticks/mod.rs::LevelTicks::begin_tick	the same-chunk drain is in begin_tick
+LevelTicks.runCollectedTicks	inline	crates/horizon-core/src/ticks/mod.rs::LevelTicks::tick	run is the callback loop in tick
+LevelTicks.cleanupAfterTick	port	crates/horizon-core/src/ticks/mod.rs::LevelTicks::finish_tick	-
+LevelTicks.hasScheduledTick	port	crates/horizon-core/src/ticks/mod.rs::LevelTicks::has_scheduled	-
+LevelTicks.calculateTickSetIfNeeded	skip:java		lazy membership set for speed; will_tick_this_tick answers the same question
+LevelTicks.forContainersInArea	port	crates/horizon-core/src/ticks/mod.rs::LevelTicks::chunks_in_area	-
+LevelTicks.copyAreaFrom	port	crates/horizon-core/src/ticks/mod.rs::LevelTicks::copy_area	-
+ProtoChunkTicks.load	port	crates/horizon-core/src/ticks/generation.rs::ProtoChunkTicks::from_saved	-
+SavedTick.codec	skip:java		codec
+ScheduledTick.toSavedTick	port	crates/horizon-core/src/ticks/mod.rs::ScheduledTick::saved	-
+Timeline.filterSyncableTracks	skip:other		network filter for environment attribute tracks; Horizon has no attribute tracks to sync
+Timeline.validateRegistry	skip:data		registry validation
+Timeline.validateInternal	skip:data		data validation of timeline files
+Timeline.getPeriodCount	missing		minor: no day count from a clock period; the day number of /time query and the F3 Day line is not computed
+Timeline.getCurrentTicks	port	crates/horizon-world/src/level/timeline.rs::Sim::day_ticks	gap: minor: the overworld day clock only, 24000 ticks
+Timeline.registerTimeMarkers	skip:data		clock time markers are read from the registry data (registries.rs clock_time_markers)
+Timeline.createTrackSampler	missing		unsure: no environment attribute track sampler; the day-time curves are coded per feature (game.rs sky_darken, fog.rs)
+Timeline.Builder.addModifierTrack	skip:data		timeline builder used by data bootstrap
+Timeline.Builder.addTimeMarker	skip:data		timeline builder used by data bootstrap
+Timeline.Builder.build	skip:data		timeline builder used by data bootstrap
+TrackedWaypoint.AzimuthWaypoint.update	port	crates/horizon-client/src/locator_bar.rs::ClientWaypoints::apply	only the same kind of waypoint moves
+TrackedWaypoint.AzimuthWaypoint.pitchDirectionToCamera	port	crates/horizon-client/src/locator_bar.rs::View::pitch_direction	-
+TrackedWaypoint.ChunkWaypoint.update	port	crates/horizon-client/src/locator_bar.rs::ClientWaypoints::apply	only the same kind of waypoint moves
+TrackedWaypoint.ChunkWaypoint.yawAngleToCamera	port	crates/horizon-client/src/locator_bar.rs::View::yaw_angle	-
+TrackedWaypoint.ChunkWaypoint.pitchDirectionToCamera	port	crates/horizon-client/src/locator_bar.rs::View::pitch_direction	-
+TrackedWaypoint.Vec3iWaypoint.update	port	crates/horizon-client/src/locator_bar.rs::ClientWaypoints::apply	only the same kind of waypoint moves
+TrackedWaypoint.Vec3iWaypoint.writeContents	port	crates/horizon-protocol/src/packets/play.rs::TrackedWaypoint::write	the block target is written as three varints
+TrackedWaypoint.Vec3iWaypoint.yawAngleToCamera	port	crates/horizon-client/src/locator_bar.rs::View::yaw_angle	-
+TrackedWaypoint.Vec3iWaypoint.pitchDirectionToCamera	port	crates/horizon-client/src/locator_bar.rs::View::pitch_direction	-
+Waypoint.addHideAttribute	skip:data		item property for the waypoint item, set in item registration
+Waypoint.Icon.hasData	missing		unsure: LivingEntity.java:798 tracks only entities whose icon has data; lan/waypoints.rs make() has no such gate
+WaypointTransmitter.EntityAzimuthConnection.isBroken	port	crates/horizon-client/src/lan/waypoints.rs::Tick::broken	-
+WaypointTransmitter.EntityAzimuthConnection.connect	port	crates/horizon-client/src/lan/waypoints.rs::Tick::connect	-
+WaypointTransmitter.EntityAzimuthConnection.update	port	crates/horizon-client/src/lan/waypoints.rs::Tick::update	-
+WaypointTransmitter.EntityBlockConnection.connect	port	crates/horizon-client/src/lan/waypoints.rs::Tick::connect	-
+WaypointTransmitter.EntityBlockConnection.update	port	crates/horizon-client/src/lan/waypoints.rs::Tick::update	-
+WaypointTransmitter.EntityBlockConnection.isBroken	port	crates/horizon-client/src/lan/waypoints.rs::Tick::broken	-
+WaypointTransmitter.EntityChunkConnection.connect	port	crates/horizon-client/src/lan/waypoints.rs::Tick::connect	-
+WaypointTransmitter.EntityChunkConnection.update	port	crates/horizon-client/src/lan/waypoints.rs::Tick::update	-
+WaypointTransmitter.EntityChunkConnection.isBroken	port	crates/horizon-client/src/lan/waypoints.rs::Tick::broken	-

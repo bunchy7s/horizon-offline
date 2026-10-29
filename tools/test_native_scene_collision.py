@@ -71,7 +71,7 @@ def main():
                lab.ROOT/'tools/lab.py', lab.ROOT/'tools/prepare_native_client.py', oracle, *helpers,
                lab.ROOT/'Cargo.toml', lab.ROOT/'Cargo.lock',
                lab.ROOT/'crates/horizon-client/examples/probe/scene_collision_probe.rs']
-    for crate in ['horizon-core', 'horizon-world', 'horizon-assets', 'horizon-client']:
+    for crate in ['horizon-core', 'horizon-world', 'horizon-assets', 'horizon-client', 'horizon-client-render']:
         sources += [lab.ROOT/'crates'/crate/'Cargo.toml', *sorted((lab.ROOT/'crates'/crate/'src').rglob('*.rs'))]
     tested = base.source_hashes(sources)
     def run(command, name):

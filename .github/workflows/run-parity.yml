@@ -5,11 +5,15 @@ name: run-parity
 # skipped `verify`, and GitHub counts a skipped required check as passed.
 on:
   pull_request:
-    types: [labeled]
+    # A push starts a run only to cancel the old head's (see concurrency): the job runs on the label alone.
+    types: [labeled, synchronize]
 permissions:
   contents: read
 concurrency:
-  group: run-parity-${{ github.event.pull_request.number }}
+  # The run-parity label and pushes share one group per pull request, so the newest run cancels the one before: a
+  # pushed pull request's run tested a head the merge would no longer land. Any other label gets a group of its own:
+  # in the shared one, adding needs-proof cancelled the parity run queued seconds before (run 40766180150).
+  group: run-parity-${{ github.event.pull_request.number }}${{ github.event.action == 'labeled' && github.event.label.name != 'run-parity' && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 env:
   # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).

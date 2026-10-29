@@ -2,7 +2,7 @@
 //! `ServerGamePacketListenerImpl.handlePickItemFromEntity`): the client aims,
 //! the server answers with `Entity.getPickResult`.
 use super::Game;
-use horizon_client::items::ItemStack;
+use horizon_client::{items::ItemStack, lan::playerdata::uuid_ints, save::uuid_text};
 
 impl Game<'_> {
     /// The entity the crosshair hits before any block, as `Entity.getId`; an
@@ -31,6 +31,38 @@ impl Game<'_> {
             offer(d, None);
         }
         best.map(|b| b.1)
+    }
+
+    /// `ClientSuggestionProvider.getSelectedEntities`: the UUID
+    /// (`Entity.getStringUUID`) of the entity the crosshair hits before any
+    /// block (`Minecraft.hitResult` an `EntityHitResult`).
+    pub(super) fn crosshair_entity_uuid(&self) -> Option<String> {
+        // The nearest entity wins, as in `pick_entity_hit`; one whose UUID
+        // the client doesn't know (the dragon's parts) suggests nothing.
+        let mut best: Option<(f64, Option<[i32; 4]>)> = None;
+        let mut offer = |distance: f64, uuid: Option<[i32; 4]>| {
+            if self.before_block(distance) && best.is_none_or(|b| distance < b.0) {
+                best = Some((distance, uuid));
+            }
+        };
+        let uuid_of = |id: u32| self.persist.uuids.get(&id).copied();
+        if let Some(hit) = self.remote_object_hit(true) {
+            offer(hit.distance, uuid_of(hit.id as u32));
+        }
+        if let Some((i, d)) = self.mob_hit() {
+            offer(d, uuid_of(self.mobs[i].id));
+        }
+        if let Some((conn, d)) = self.guest_hit() {
+            let guest = self.lan.as_ref().and_then(|h| h.hub.guest(conn));
+            offer(d, guest.map(|g| uuid_ints(g.uuid)));
+        }
+        if let Some((i, d)) = self.redirectable_hit() {
+            offer(d, uuid_of(self.creatures.projectiles[i].id));
+        }
+        if let Some((_, d)) = self.dragon_hit() {
+            offer(d, None);
+        }
+        best.and_then(|b| b.1).map(uuid_text)
     }
 
     /// `Entity.getPickResult` of the entity `id`: a mob's spawn egg, the item

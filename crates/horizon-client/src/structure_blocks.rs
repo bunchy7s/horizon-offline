@@ -72,6 +72,9 @@ pub fn loot_item_with_components(s: &horizon_world::loot::LootStack) -> ItemStac
     for (id, text) in &s.names {
         item.data_mut().set_loot_name(id, text);
     }
+    for (id, value) in &s.components {
+        item.data_mut().set_loot_component(id, value);
+    }
     item
 }
 
@@ -291,6 +294,7 @@ mod tests {
                 ominous_amplifier: None,
                 stew_effects: Vec::new(),
                 names: Vec::new(),
+                components: Vec::new(),
             };
         // An End city chest's enchant_with_levels roll.
         let boots = loot_item_with_components(&stack(
@@ -354,6 +358,7 @@ mod tests {
             ominous_amplifier: None,
             stew_effects: Vec::new(),
             names: Vec::new(),
+            components: Vec::new(),
         };
         let mut item = loot_item(&stack);
         assert!(has_pending_map(&item));

@@ -15,7 +15,10 @@ use horizon_client::{
     gamerules::Value as RuleValue,
     item_data::{canon_stack, parse_stack},
     items::ItemStack,
-    mobs::{Mob, Species},
+    mobs::{
+        Mob, Species,
+        spawner::{SpawnDataExt, SpawnerExt},
+    },
     motion::PlayerMotion,
     projectiles::ProjectileKind,
     world::World,

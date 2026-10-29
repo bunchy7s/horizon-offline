@@ -73,7 +73,7 @@ impl Game<'_> {
 
     /// `EntitySelector.findEntities` with a UUID: the player with it, else
     /// the entity.
-    pub(super) fn target_by_uuid(&self, uuid: u128) -> Option<Target> {
+    pub(in crate::game) fn target_by_uuid(&self, uuid: u128) -> Option<Target> {
         let own = self.lan_acting_uuid.or_else(|| {
             self.level.player_uuid.map(|[a, b, c, d]| {
                 (u128::from(a as u32) << 96)

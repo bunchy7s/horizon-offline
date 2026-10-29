@@ -232,7 +232,7 @@ impl Mob {
         }
         q
     }
-    fn create_path_raw(
+    pub(super) fn create_path_raw(
         &mut self,
         w: &MobWorld,
         targets: &[[i32; 3]],

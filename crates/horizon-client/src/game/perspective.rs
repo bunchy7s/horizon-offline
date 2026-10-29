@@ -122,9 +122,21 @@ impl CameraType {
         }
     }
 }
+/// `LivingEntityRenderer.isBodyVisible` and `isInvisibleTo` for the player's
+/// own body, seen by itself: the Invisibility effect (`Entity.isInvisible`)
+/// hides it unless its team sees friendly invisibles, where vanilla draws it
+/// translucent.
+fn body_visible(
+    effects: &horizon_client::effects::PlayerEffects,
+    team: Option<&horizon_client::scoreboard::Team>,
+) -> bool {
+    let invisible = effects.get("invisibility").is_some();
+    !horizon_client::scoreboard::invisible_to(team, team, false, invisible)
+}
 /// The player's model type (`PlayerModel` with the default skin).
 pub(super) fn player_type(root: &Path) -> Option<Arc<MobType>> {
-    horizon_client::mobs::load_model(root, "minecraft:player#main").map(|model| {
+    let models = horizon_client::mobs::EntityModelDocument::load(root).ok()?;
+    models.model("minecraft:player#main").map(|model| {
         Arc::new(MobType {
             id: "minecraft:player".into(),
             // Players render as a humanoid; the species only drives local AI.
@@ -158,10 +170,14 @@ pub(super) fn player_type(root: &Path) -> Option<Arc<MobType>> {
             ambient_interval: 80,
             flags: Default::default(),
             model: Arc::new(model),
-            // PlayerModel's slim arms, for slim skins.
-            layers: horizon_client::mobs::load_model(root, "minecraft:player_slim#main")
-                .map(|slim| [("player_slim#main".to_owned(), Arc::new(slim))].into())
-                .unwrap_or_default(),
+            // PlayerModel's slim arms, for slim skins, and PlayerCapeModel.
+            layers: ["player_slim#main", "player#cape"]
+                .into_iter()
+                .filter_map(|key| {
+                    let model = models.model(&format!("minecraft:{key}"))?;
+                    Some((key.to_owned(), Arc::new(model)))
+                })
+                .collect(),
             texture: "entity/player/wide/steve".into(),
             brain: Brain::Passive,
             anim: Anim::Humanoid { zombie_arms: false },
@@ -311,6 +327,11 @@ impl Game<'_> {
     /// Keep the player's model in step with the player (`LivingEntity.tick`
     /// body turning, `WalkAnimationState`, the swing and the pose).
     pub(super) fn tick_player_model(&mut self) {
+        let scale = self
+            .player
+            .as_mut()
+            .and_then(|p| p.attribute("minecraft:scale").ok())
+            .unwrap_or(1.0) as f32;
         let Some(p) = self.player.as_ref() else {
             self.player_model = None;
             return;
@@ -322,7 +343,7 @@ impl Game<'_> {
             self.player_model = Some(Mob::new(0, kind, p.position, self.yaw));
         }
         let crouching = p.pose == Pose::Crouching;
-        let (position, flying) = (p.position, p.flying || p.fall_flying);
+        let position = p.position;
         let (fall_flying, fly_ticks, velocity) = (p.fall_flying, p.fall_fly_ticks, p.velocity);
         let spinning = p.auto_spin_attack_ticks > 0;
         let using = self.using.map(|(_, ticks)| ticks as i32 + 1).unwrap_or(0);
@@ -357,9 +378,15 @@ impl Game<'_> {
         let off = self.offhand.as_ref().map(|s| s.item.clone());
         let riding = self.riding.is_some();
         let hurt = p.health.hurt_animation_time;
+        let avatar = self.avatar;
+        // LivingEntity.getBedOrientation: the model lies in the bed as
+        // another player's does (`villager::sleep_pose`).
+        let bed = self.sleeping.map_or(0, |head| self.bed_facing(head));
         let Some(m) = self.player_model.as_mut() else {
             return;
         };
+        m.extra.ints[1] = bed;
+        m.extra.model_scale = scale;
         let at = Vec3::new(
             position.x,
             position.y - if crouching { 0.125 } else { 0.0 },
@@ -370,6 +397,7 @@ impl Game<'_> {
             at.y - m.position.y,
             at.z - m.position.z,
         );
+        let walked = player_walk_distance(m.position, at);
         m.previous = m.position;
         m.position = at;
         if dx * dx + dy * dy + dz * dz > 100.0 {
@@ -404,9 +432,8 @@ impl Game<'_> {
             m.body_yaw += diff - diff.signum() * 50.0;
         }
         // WalkAnimationState.update(min(distance * 4, 1), 0.4).
-        let dist = (dx * dx + dz * dz + if flying { dy * dy } else { 0.0 }).sqrt() as f32;
         m.previous_limb_speed = m.limb_speed;
-        m.limb_speed += ((dist * 4.0).min(1.0) - m.limb_speed) * 0.4;
+        m.limb_speed += ((walked * 4.0).min(1.0) - m.limb_speed) * 0.4;
         m.limb_position += m.limb_speed;
         m.age = m.age.wrapping_add(1);
         m.anim.attack_anim_o = attack.0;
@@ -420,6 +447,7 @@ impl Game<'_> {
         m.extra.fall_fly_ticks = fly_ticks;
         m.extra.auto_spin_attack = spinning;
         m.extra.main_hand_left = self.settings.main_hand_left;
+        m.extra.hidden_model_parts = !self.settings.file.model_customisation() & 0x7F;
         m.extra.using_item = using;
         m.extra.using_off_hand = using_off_hand;
         m.extra.blocking = blocking;
@@ -427,20 +455,43 @@ impl Game<'_> {
         m.extra.ints[5] = charge_duration;
         m.extra.elytra.tick(fall_flying, crouching, velocity);
         m.extra.swim.tick(visually_swimming, in_water);
+        // The local player's ClientAvatarState, its cloak in the model's frame
+        // (the model stands 0.125 lower while crouching).
+        m.extra.avatar = avatar;
+        if crouching {
+            m.extra.avatar.cloak[1] -= 0.125;
+            m.extra.avatar.cloak_o[1] -= 0.125;
+        }
         m.extra.swing_right_arm = swing_right_arm;
+        m.extra.swing_stab = self.swing.current.is_some_and(|c| c.animation.kind == 2);
         m.hurt_time = hurt;
     }
-    /// Whether the player's own model shows in the world view.
-    fn player_model_shown(&self) -> bool {
+    /// `LevelExtractor`'s skip of the camera entity: the player's own body
+    /// is drawn unless the camera is in first person, or while it sleeps.
+    pub(super) fn own_body_in_view(&self) -> bool {
+        !self.camera_type.first_person() || self.sleeping.is_some()
+    }
+    /// Whether the player's own model shows in the world view (its body or,
+    /// while invisible, only its armour and held items).
+    pub(super) fn player_model_shown(&self) -> bool {
         // A shader pack's shadow pass draws the player in first person too (shadowPlayer).
-        (!self.camera_type.first_person() || self.pack_shadow_casters.1)
-            && self.sleeping.is_none()
+        (self.own_body_in_view() || self.pack_shadow_casters.1)
             && !self.spectator()
-            && self.potions.effects.get("minecraft:invisibility").is_none()
             && self
                 .player
                 .as_ref()
                 .is_some_and(|p| !p.health.dead_or_dying())
+    }
+    /// The player's own team: a server's client is in it by its profile name.
+    fn own_team(&self) -> Option<&horizon_client::scoreboard::Team> {
+        match &self.remote {
+            Some(r) => self.score.board.players_team(&r.profile_name),
+            None => self.player_team(),
+        }
+    }
+    /// Whether the player's own body is drawn (`body_visible`).
+    pub(super) fn own_body_visible(&self) -> bool {
+        body_visible(&self.potions.effects, self.own_team())
     }
     /// The player's model for the entity pass in third person.
     pub(super) fn player_model_geometry(
@@ -464,7 +515,13 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let start = out.len();
-        horizon_client::mobs::render::render_with(
+        let body = self.own_body_visible();
+        let render = if body {
+            horizon_client::mobs::render::render_with
+        } else {
+            horizon_client::mobs::render::render_layers
+        };
+        render(
             m,
             alpha as f32,
             camera,
@@ -474,24 +531,33 @@ impl Game<'_> {
             &self.player_armor_layers(),
             out,
         );
-        self.player_elytra_geometry(
-            m,
-            self.armor[1].as_ref().map(|s| &*s.item),
-            camera,
-            alpha as f32,
-            packed,
-            out,
-        );
+        let chest = self.armor[1].as_ref().map(|s| &*s.item);
+        // CapeLayer: no cape on an invisible player (`isInvisible`, whoever looks).
+        if self.potions.effects.get("invisibility").is_none() {
+            self.player_cape_geometry(m, chest, camera, alpha as f32, packed, out);
+        }
+        self.player_elytra_geometry(m, chest, camera, alpha as f32, packed, out);
         self.spin_attack_geometry(m, camera, alpha as f32, packed, out);
         self.held_item_geometry(m, camera, alpha, packed, true, out);
-        // LivingEntity.isCurrentlyGlowing: the Glowing effect. A server's client is
-        // in its team by its profile name.
+        // LivingEntity.isCurrentlyGlowing: the Glowing effect.
         if self.potions.effects.get("glowing").is_some() {
-            let team = match &self.remote {
-                Some(r) => self.score.board.players_team(&r.profile_name),
-                None => self.player_team(),
-            };
-            self.mark_outline(&out[start..], super::glowing::team_color(team));
+            let color = super::glowing::team_color(self.own_team());
+            // LivingEntityRenderer.getRenderType: an invisible glowing body
+            // still draws its outline.
+            if !body {
+                let mut silhouette = Vec::new();
+                horizon_client::mobs::render::render(
+                    m,
+                    alpha as f32,
+                    camera,
+                    &lookup,
+                    packed,
+                    self.res.mob_data(),
+                    &mut silhouette,
+                );
+                self.mark_outline(&silhouette, color);
+            }
+            self.mark_outline(&out[start..], color);
         }
     }
     /// `extractEntityInInventoryFollowsMouse`: the player in the box
@@ -522,6 +588,9 @@ impl Game<'_> {
         let x_angle = ((cx - self.cursor.0) / 40.0).atan();
         let y_angle = ((cy - self.cursor.1) / 40.0).atan();
         let mut m = m.clone();
+        // `extractEntityInInventory` divides the size by the entity's scale: the
+        // preview is the same size whatever the player's scale.
+        m.extra.model_scale = 0.0;
         // The render state: still, facing out, the head toward the cursor.
         m.previous = m.position;
         m.body_yaw = 180.0 + x_angle * 20.0;
@@ -536,7 +605,13 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let mut verts = Vec::new();
-        horizon_client::mobs::render::render_with(
+        // The same render state as in the world: an invisible body is not drawn.
+        let render = if self.own_body_visible() {
+            horizon_client::mobs::render::render_with
+        } else {
+            horizon_client::mobs::render::render_layers
+        };
+        render(
             &m,
             1.0,
             camera,
@@ -546,14 +621,11 @@ impl Game<'_> {
             &self.player_armor_layers(),
             &mut verts,
         );
-        self.player_elytra_geometry(
-            &m,
-            self.armor[1].as_ref().map(|s| &*s.item),
-            camera,
-            1.0,
-            240 | 240 << 8,
-            &mut verts,
-        );
+        let chest = self.armor[1].as_ref().map(|s| &*s.item);
+        if self.potions.effects.get("invisibility").is_none() {
+            self.player_cape_geometry(&m, chest, camera, 1.0, 240 | 240 << 8, &mut verts);
+        }
+        self.player_elytra_geometry(&m, chest, camera, 1.0, 240 | 240 << 8, &mut verts);
         self.held_item_geometry(&m, camera, 1.0, 240 | 240 << 8, false, &mut verts);
         let height = if m.extra.crouching { 1.5 } else { 1.8 };
         // PictureInPictureRenderer: the box centre, (size, size, -size);
@@ -612,9 +684,12 @@ impl Game<'_> {
         let Some((texture, _)) = assets.equipment.get(asset).and_then(|k| k.get("wings")) else {
             return;
         };
+        // WingsLayer.getPlayerElytraTexture: a player's cape texture has its elytra.
+        let sprites = &self.gui.atlas.sprites;
+        let rect = m.cape.as_deref().and_then(|c| sprites.get(c));
         let (Some(model), Some(rect)) = (
             assets.player.get("elytra"),
-            self.gui.atlas.sprites.get(texture),
+            rect.or_else(|| sprites.get(texture)),
         ) else {
             return;
         };
@@ -638,6 +713,48 @@ impl Game<'_> {
             [rect.u0, rect.v0, rect.u1, rect.v1],
             light,
             0,
+            out,
+        );
+    }
+    /// `CapeLayer` for a player wearing `chest`: no cape under an elytra's
+    /// wings, and moved out over a chestplate.
+    pub(super) fn player_cape_geometry(
+        &self,
+        m: &Mob,
+        chest: Option<&str>,
+        camera: glam::DVec3,
+        partial: f32,
+        light: u32,
+        out: &mut Vec<horizon_client::mesher::Vertex>,
+    ) {
+        let Some(rect) = m
+            .cape
+            .as_deref()
+            .and_then(|c| self.gui.atlas.sprites.get(c))
+        else {
+            return;
+        };
+        if horizon_client::mobs::trader::is_invisible(m) {
+            return;
+        }
+        let layers = chest
+            .and_then(|item| self.res.items().get(item))
+            .and_then(|i| i.equip_asset.as_ref())
+            .and_then(|asset| self.armor_stand_assets.equipment.get(asset));
+        if layers.is_some_and(|k| k.contains_key("wings")) {
+            return;
+        }
+        let mut base = horizon_client::mobs::render::base_transform(m, partial, camera);
+        if layers.is_some_and(|k| k.contains_key("humanoid")) {
+            base *= glam::Mat4::from_translation(glam::Vec3::new(0.0, -0.053125, 0.06875));
+        }
+        horizon_client::mobs::render::cape(
+            m,
+            partial,
+            base,
+            [rect.u0, rect.v0, rect.u1, rect.v1],
+            light,
+            self.res.mob_data(),
             out,
         );
     }
@@ -735,9 +852,29 @@ fn player_preview_quads(
     quads
 }
 
+/// The distance `LivingEntity.calculateEntityAnimation` walks the player's
+/// model for a move from `from` to `to`. `omnidirectionalAirMover()` is false
+/// for every player (`Entity`'s, not overridden), so only the horizontal
+/// distance counts, flying and gliding included: rising or sinking straight
+/// up or down leaves the legs and arms still.
+fn player_walk_distance(from: Vec3, to: Vec3) -> f32 {
+    let (dx, dz) = (to.x - from.x, to.z - from.z);
+    (dx * dx + dz * dz).sqrt() as f32
+}
+
 #[cfg(test)]
 mod preview_tests {
     use super::*;
+    #[test]
+    fn flying_straight_up_does_not_walk_the_player_model() {
+        let from = Vec3::new(0.5, 80.0, 0.5);
+        // Creative flight straight up (#3302) and straight down.
+        assert_eq!(player_walk_distance(from, Vec3::new(0.5, 80.375, 0.5)), 0.0);
+        assert_eq!(player_walk_distance(from, Vec3::new(0.5, 78.5, 0.5)), 0.0);
+        // Moving sideways while rising walks only the horizontal part.
+        let d = player_walk_distance(from, Vec3::new(0.8, 81.0, 0.9));
+        assert!((d - 0.5).abs() < 1e-6, "{d}");
+    }
     #[test]
     fn preview_keeps_crossing_faces_depth_and_clips_without_dropping_faces() {
         use horizon_client::{
@@ -792,6 +929,73 @@ mod preview_tests {
                 assert!((transform.transform_vector3(axis).length() - expected).abs() < 1e-6);
             }
         }
+    }
+
+    #[test]
+    fn an_invisible_player_hides_its_own_body() {
+        use horizon_client::{effects::EffectInstance, scoreboard::Scoreboard};
+        // The effect as a server's UpdateMobEffect or a drunk potion adds it.
+        let id = horizon_client::brewing::effect("minecraft:invisibility")
+            .unwrap()
+            .id;
+        let mut effects = horizon_client::effects::PlayerEffects::default();
+        assert!(body_visible(&effects, None));
+        effects.add(EffectInstance::new(id, 3600, 0));
+        assert!(!body_visible(&effects, None), "no team: the body is hidden");
+        // Entity.isInvisibleTo: a team that sees friendly invisibles sees it.
+        let mut board = Scoreboard::default();
+        let team = board.add_team("blue");
+        assert!(body_visible(&effects, Some(team)));
+        team.see_friendly_invisibles = false;
+        assert!(!body_visible(&effects, Some(team)));
+    }
+
+    /// LivingEntityRenderer.submit: an invisible body is not drawn, its
+    /// HumanoidArmorLayer is.
+    #[test]
+    fn an_invisible_body_keeps_its_armour() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        let Some(kind) = player_type(&root) else {
+            return;
+        };
+        let m = Mob::new(1, kind.clone(), Vec3::ZERO, 0.0);
+        let armour = [(&*kind.model, [0.5, 0.5, 0.75, 0.75], u32::MAX)];
+        let atlas = |_: &str| Some([0.0, 0.0, 0.25, 0.25]);
+        let data = horizon_client::mobs::MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: Default::default(),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            villager_hats: Default::default(),
+            pois: Default::default(),
+        };
+        let draw = |body: bool| {
+            let mut out = Vec::new();
+            let render = if body {
+                horizon_client::mobs::render::render_with
+            } else {
+                horizon_client::mobs::render::render_layers
+            };
+            render(
+                &m,
+                1.0,
+                glam::DVec3::ZERO,
+                &atlas,
+                0xF0F0,
+                &data,
+                &armour,
+                &mut out,
+            );
+            out
+        };
+        let (shown, hidden) = (draw(true), draw(false));
+        assert!(shown.iter().any(|v| v.uv[0] <= 0.25), "the body draws");
+        assert!(!hidden.is_empty(), "the armour still draws");
+        assert!(hidden.iter().all(|v| v.uv[0] >= 0.5), "only the armour");
+        assert_eq!(hidden.len() * 2, shown.len());
     }
 
     #[test]

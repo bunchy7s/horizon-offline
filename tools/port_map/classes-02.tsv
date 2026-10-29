@@ -1,0 +1,158 @@
+PlayerHeadItem.getName	missing		minor: a head whose profile has a name should read "<name>'s Head"; Horizon shows the plain item name
+ShearsItem.createToolProperties	skip:data		tool rules (cobweb speed, shears breaking-speed tags) come from item data; items.rs reads minecraft:tool
+ShearsItem.mineBlock	port	crates/horizon-client/src/game.rs::Game::mine_block_with_held	shears wear one damage_per_block on any block but fire
+ShearsItem.useOn	missing		unsure: SHEARS_TRIM is a NeoForge ability that no block in the pinned sources registers; pumpkin carving is a separate path (game/pumpkin.rs)
+SnowballItem.asProjectile	port	crates/horizon-client/src/game/dispenser.rs::Game::shoot_projectile_item	a dispensed snowball or egg is shot with the dispenser's own config
+SnowballItem.use	port	crates/horizon-client/src/game/creatures.rs::Game::throw_item	throw at 1.5 power, throw sound, use cooldown, one consumed
+SplashPotionItem.createPotion	port	crates/horizon-client/src/game/potions.rs::Game::launch_thrown	the thrown splash potion entity is launched with the stack
+SplashPotionItem.use	port	crates/horizon-client/src/game/potions.rs::Game::use_potion_item	splash throw sound, throw at -20 degrees, one consumed
+ThrowablePotionItem.createDispenseConfig	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_projectile	splash, lingering and XP bottle: uncertainty 3.0 and power 1.375
+ThrowablePotionItem.use	port	crates/horizon-client/src/game/potions.rs::Game::use_potion_item	throw at -20 degrees, one consumed
+StandingAndWallBlockItem.getPlacementState	port	crates/horizon-world/src/level/place.rs::Sim::placement	standing or wall state by nearest looking direction, with survival and unobstructed checks
+StandingAndWallBlockItem.registerBlocks	skip:data		wall block to item bindings come from the generated item table (level/data.rs)
+SwingAnimationType.byName	skip:data		swing names are data; Horizon hardcodes spear swings (spear.rs) and reads no swing_animation component
+ToolMaterial.applyCommonProperties	skip:data		material numbers come from item data (items.rs), not built in code
+ToolMaterial.applySwordProperties	skip:data		sword properties come from item data (items.rs)
+ToolMaterial.applyToolProperties	skip:data		tool properties come from item data (items.rs)
+ToolMaterial.createSwordAttributes	skip:data		sword attribute modifiers come from item data (items.rs)
+ToolMaterial.createToolAttributes	skip:data		tool attribute modifiers come from item data (items.rs)
+TippedArrowItem.getDefaultInstance	skip:data		creative entries come from the exported creative list (creative.rs), not a default stack built in code
+TippedArrowItem.getName	port	crates/horizon-client/src/game/commands.rs::Game::stack_display_name	the hover name takes the potion's name key for a tipped arrow
+BlockTransformers.axe	skip:data		axe rules are built in code; Horizon loads block transforms from data (block_transform.rs)
+BlockTransformers.axeStrippables	skip:data		stripping table is data; Horizon loads it from block_transform.rs
+BlockTransformers.bootstrap	skip:data		registry bootstrap; transforms are read from data
+CustomData.equals	skip:java		
+CustomData.set	inline	crates/horizon-client/src/game/commands/items.rs::edit_components	gap: minor: does not remove the component when the tag ends up empty
+CustomData.update	inline	crates/horizon-client/src/game/commands/items.rs::edit_components	gap: minor: does not remove the component when the tag ends up empty
+CustomModelData.getSafe	port	crates/horizon-assets/src/item_model.rs::custom_data_at	index bounds check for flags, floats, strings and colors
+DeathProtection.applyEffects	port	crates/horizon-client/src/game/totem.rs::Game::apply_totem	totem use: clears effects, then the totem's regeneration, absorption and fire resistance
+GrowableMutableContainer.replaceSlotItems	inline	crates/horizon-items/src/bundle.rs::Contents::try_insert	gap: minor: the loop that adds slots while items remain is not ported; bundles insert one stack at a time
+ItemAttributeModifiers.compute	inline	crates/horizon-world/src/attributes/mod.rs::Instance::value	item modifiers are added to the attribute instance and summed by operation; slot filtering is in the equipment code
+ItemAttributeModifiers.forEach	inline	crates/horizon-client/src/item_tooltip.rs::attribute_lines	tooltip lines per slot group
+ItemAttributeModifiers.withModifierAdded	missing		minor: the loot set_attributes function (SetAttributesFunction) is not ported; no loot path adds a modifier to a stack
+ItemAttributeModifiers.Builder.add	skip:java		
+ItemAttributeModifiers.Entry.matches	inline	crates/horizon-world/src/attributes/mod.rs::Instance::add_or_replace_permanent	modifier identity by id within one attribute
+OminousBottleAmplifier.addToTooltip	missing		player: an ominous bottle's tooltip shows no Bad Omen line for its level; Horizon's potion tooltip covers potion items only
+SimpleMutableContainer.modifySlots	port	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item_modify	each slot is visited and set
+SimpleMutableContainer.replaceSlotItems	port	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item	/item replace fills slots from the item list
+SulfurCubeContent.addToTooltip	missing		minor: Horizon never writes sulfur_cube_content, so no item shows the absorbed block line
+SuspiciousStewEffects.addToTooltip	missing		player: in creative, a suspicious stew's tooltip should list its effects; Horizon's stack tooltip shows none
+TypedEntityData.addToTooltip	missing		player: in Peaceful, a hostile mob's spawn egg should show a red Peaceful line; Horizon shows only the OP-only warning
+TypedEntityData.equals	skip:java		
+TypedEntityData.stripId	skip:other		the stored entity data keeps its id; block_entity_item.rs reads it from the tag
+WritableBookContent.getPages	missing		minor: the filtered page text (chat filter) is not ported; pages always show raw text
+PlaySoundConsumeEffect.apply	port	crates/horizon-world/src/consume_effect.rs::ConsumeEffect::apply	the play_sound arm
+RemoveStatusEffectsConsumeEffect.apply	port	crates/horizon-world/src/consume_effect.rs::ConsumeEffect::apply	the remove_status arm
+AbstractCookingRecipe.cookingStreamCodec	skip:java		
+AbstractCookingRecipe.display	port	crates/horizon-client/src/recipe_book.rs::Book::build	furnace display (Display::Furnace) for each cooking recipe
+BannerDuplicateRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	copies the patterns of the banner onto a blank one
+BannerDuplicateRecipe.getRemainingItems	port	crates/horizon-client/src/crafting.rs::Recipes::remainders	a patterned banner stays as one copy
+BannerDuplicateRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	
+BlastingRecipe.recipeBookCategory	skip:data		book category comes from the recipe JSON (Recipes::load keeps recipes.meta)
+BrewingInput.getItem	skip:java		
+BrewingRecipe.matches	port	crates/horizon-client/src/brewing.rs::Brewing::find	input and reagent both tested
+CraftingRecipe.recipeBookCategory	skip:java		
+DecoratedPotRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	
+DecoratedPotRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	four sherds or bricks in the four pattern cells
+DyeRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	
+DyeRecipe.display	port	crates/horizon-client/src/crafting.rs::Special::book_displays	
+DyeRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	
+FireworkRocketRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	
+FireworkRocketRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	
+FireworkStarFadeRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	
+FireworkStarFadeRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	
+FireworkStarRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	
+FireworkStarRecipe.findShape	inline	crates/horizon-client/src/crafting.rs::Special::assemble	the shape is looked up from the shapes table while assembling
+FireworkStarRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	
+ImbueRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	tipped arrows
+ImbueRecipe.createPlacementInfo	port	crates/horizon-client/src/crafting.rs::Recipes::placement	
+ImbueRecipe.display	port	crates/horizon-client/src/crafting.rs::Special::book_displays	
+ImbueRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	
+MapExtendingRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	
+MapExtendingRecipe.findFilledMap	inline	crates/horizon-client/src/crafting.rs::Special::matches	the filled map must have scale under 4
+MapExtendingRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	
+RecipeCache.compute	skip:java		
+RecipeCache.insert	skip:java		
+RecipeCache.moveEntryToFront	skip:java		
+RecipeCache.validateRecipeManager	skip:java		
+RecipeCache.Entry.matches	skip:java		
+RecipeHolder.equals	skip:java		
+RecipeInput.isEmpty	skip:java		
+RecipeMap.create	skip:java		
+RecipeMap.getRecipesFor	port	crates/horizon-client/src/crafting.rs::Recipes::find_with	the recipes that match the input, in order
+RecipePropertySet.create	skip:java		
+SelectableRecipe.noRecipeCodec	skip:java		
+SelectableRecipe.SingleInputSet.acceptsInput	port	crates/horizon-client/src/stations.rs::StationRecipes::stonecutter	any stonecutting recipe takes the input
+SelectableRecipe.SingleInputSet.selectByInput	port	crates/horizon-client/src/stations.rs::StationRecipes::stonecutter	the stonecutting recipes that take the input
+ShapedRecipe.display	port	crates/horizon-client/src/recipe_book.rs::Book::build	shaped grid display
+ShapelessRecipe.display	port	crates/horizon-client/src/recipe_book.rs::Book::build	shapeless display
+ShapelessRecipe.matches	port	crates/horizon-client/src/crafting.rs::Recipes::recipe_matches	
+ShieldDecorationRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	
+ShieldDecorationRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	
+SingleItemRecipe.placementInfo	port	crates/horizon-client/src/crafting.rs::Recipes::placement	
+SingleItemRecipe.simpleMapCodec	skip:java		
+SingleItemRecipe.simpleStreamCodec	skip:java		
+SingleRecipeInput.getItem	skip:java		
+SmeltingRecipe.recipeBookCategory	skip:data		book category comes from the recipe JSON (Recipes::load keeps recipes.meta)
+SmithingRecipe.matches	port	crates/horizon-client/src/stations.rs::StationRecipes::smithing_result	template, base and addition tested together; the result is shown only when they match
+SmithingRecipeInput.getItem	skip:java		
+SmithingRecipeInput.isEmpty	skip:java		
+StonecutterRecipe.display	port	crates/horizon-client/src/stations.rs::StationRecipes::stonecutter	stonecutting recipe with its input and result
+TransmuteResult.fromTemplate	inline	crates/horizon-client/src/crafting.rs::Template::create	the transmute result is kept as the template
+TransmuteResult.resolve	port	crates/horizon-client/src/crafting.rs::Template::over	item from the input when the template has none; count and components from the template
+DisplayContentsFactory.ForStacks.forStack	skip:java		
+FurnaceRecipeDisplay.isEnabled	skip:data		feature flags: Horizon's recipe set is the pinned pack's, with no flags to check
+ShapedCraftingRecipeDisplay.isEnabled	skip:data		feature flags: Horizon's recipe set is the pinned pack's, with no flags to check
+ShapelessCraftingRecipeDisplay.isEnabled	skip:data		feature flags: Horizon's recipe set is the pinned pack's, with no flags to check
+SlotDisplays.bootstrap	skip:data		registry bootstrap
+ConditionalEffect.codec	skip:java		
+ConditionalEffect.matches	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::post_attack	the requirements check is repeated per hook: post_attack, post_attack_bursts, thorns_damage, bow_projectile_ignite
+ItemEnchantments.addToTooltip	port	crates/horizon-client/src/game/stations.rs::Game::stack_tooltip_lines	enchantment lines; stored enchantments for books
+ItemEnchantments.equals	skip:java		
+ItemEnchantments.getTagOrEmpty	skip:java		
+TargetedConditionalEffect.equipmentDropsCodec	skip:java		
+TargetedConditionalEffect.matches	port	crates/horizon-world/src/loot.rs::LootData::equipment_drops	equipment_drops (Looting) checks the requirements per enchanted slot
+AllOf.codec	skip:java		
+AllOf.EntityEffects.apply	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::apply_piercing_effect	gap: minor: nested all_of is walked only for the post-piercing hook
+AllOf.LocationBasedEffects.onChangedBlock	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::location_changed_effects	gap: minor: only the replace_disk effect is handled; the nested list is not walked
+AllOf.LocationBasedEffects.onDeactivated	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::location_changed_effects	gap: minor: only the replace_disk effect is handled; the nested list is not walked
+AllOf.ValueEffects.process	port	crates/horizon-items/src/enchant.rs::Enchantments::modify_value_with	each value effect in turn
+ApplyEntityImpulse.apply	port	crates/horizon-client/src/game/enchant_effects.rs::Game::apply_piercing_effect	impulse along the look direction on the post-piercing hook
+ApplyExhaustion.apply	port	crates/horizon-client/src/game/enchant_effects.rs::Game::apply_piercing_effect	food exhaustion on the post-piercing hook
+DamageEntity.apply	port	crates/horizon-client/src/game/enchant_effects.rs::Game::thorns_damage	thorns damage, random between min and max
+ExplodeEffect.apply	port	crates/horizon-client/src/game/enchant_effects.rs::Game::post_attack_bursts	wind burst at the player's feet
+ExplodeEffect.getDamageSource	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::post_attack_bursts	gap: minor: the burst builds no damage source; it knocks back and triggers blocks only
+PlaySoundEffect.apply	port	crates/horizon-client/src/game/enchant_effects.rs::Game::apply_piercing_effect	sound by level, heard by all
+RemoveBinomial.process	port	crates/horizon-items/src/enchant.rs::apply_value_effect	the binomial drop count for unbreaking
+ReplaceBlock.apply	missing		minor: no enchantment in the pinned data uses replace_block
+RunFunction.apply	missing		minor: no enchantment in the pinned data uses run_function
+ScaleExponentially.process	missing		minor: no enchantment in the pinned data uses the exponential value effect
+SetBlockProperties.apply	missing		minor: no enchantment in the pinned data uses set_block_properties
+SpawnParticlesEffect.apply	port	crates/horizon-client/src/game/enchant_effects.rs::Game::tick_soul_speed	gap: minor: soul speed's particles are hardcoded, not read from the effect data
+SpawnParticlesEffect.PositionSource.getCoordinate	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::tick_soul_speed	gap: minor: the particle position is hardcoded
+SpawnParticlesEffect.VelocitySource.getVelocity	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::tick_soul_speed	gap: minor: the particle velocity is hardcoded
+SummonEntityEffect.apply	port	crates/horizon-client/src/game/trident.rs::Game::channel_lightning	gap: minor: only the lightning bolt of channeling; other summon_entity types are not ported
+EnchantmentProviderTypes.bootstrap	skip:data		registry bootstrap
+EnchantmentsByCost.enchant	port	crates/horizon-world/src/loot.rs::LootData::select_enchantments	EnchantmentHelper.selectEnchantment with a cost budget
+SingleEnchantment.enchant	port	crates/horizon-world/src/loot.rs::enchant	one enchantment at a level
+VanillaEnchantmentProviders.bootstrap	skip:data		registry bootstrap
+ArmorMaterials.makeDefense	skip:data		armour defence values come from item data
+ArmorTrim.addToTooltip	port	crates/horizon-client/src/game/stations.rs::Game::stack_tooltip_lines	upgrade title, trim pattern and material lines
+TrimMaterials.bootstrap	skip:data		registry bootstrap
+TrimMaterials.register	skip:data		trim materials are read from data
+TrimPatterns.bootstrap	skip:data		registry bootstrap
+TrimPatterns.register	skip:data		trim patterns are read from data
+CompositeSlotSource.createCodec	skip:java		
+CompositeSlotSource.group	missing		minor: composite slot groups (loot-style term lists) are not ported; /item takes one slot name
+CountingModifier.accept	port	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item_modify	counts each slot set, limited to the max stack size
+RangeSlotSource.provide	port	crates/horizon-client/src/game/commands/items.rs::Game::slots_named	gap: minor: slots by name pattern only, no slot_range argument
+SlotCollection.concat	inline	crates/horizon-client/src/game/commands/items.rs::Game::slots_named	the slots of several names become one list
+SlotCollection.of	port	crates/horizon-client/src/game/commands/items.rs::Game::slot_get	
+SlotCollection.FlatMapped.modifySlots	inline	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item_modify	per-target slot loop
+SlotCollection.FlatMapped.replaceSlotItems	inline	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item	per-target slot loop
+SlotSelector.FilteringSelector.trySelectSlot	inline	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item_modify	gap: minor: only the non-empty filter (SlotSelector.NON_EMPTY_SLOTS); predicate filters are not ported
+SlotSelector.TrackingSelector.filter	missing		minor: slot limit selectors are not ported
+SlotSelector.TrackingSelector.trySelectSlot	missing		minor: slot limit selectors are not ported
+SlotSources.bootstrap	skip:data		registry bootstrap
+TransformedSlotSource.commonFields	skip:java		
+TradeCost.toItemCost	port	crates/horizon-client/src/merchant.rs::cost	count plus the extra cost, clamped to the max stack size

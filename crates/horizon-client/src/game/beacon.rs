@@ -105,10 +105,28 @@ impl Game<'_> {
         let Some(BlockEntity::Beacon(mut b)) = self.world.block_entities.take(&key) else {
             return;
         };
-        self.tick_beacon(key, &mut b);
+        self.tick_beacon(key, &mut b, false);
         self.world.block_entities.put(key, BlockEntity::Beacon(b));
     }
-    fn tick_beacon(&mut self, (x, y, z): (i32, i32, i32), b: &mut Beacon) {
+    /// `ClientLevel.tickBlockEntities` for beacons: a server's chunk data
+    /// carries no beam sections, so the client builds them too; effects,
+    /// sounds and the advancement stay with the server.
+    pub(super) fn client_tick_beacons(&mut self) {
+        let keys: Vec<_> = self
+            .world
+            .block_entities
+            .iter()
+            .filter_map(|(k, e)| matches!(e, BlockEntity::Beacon(_)).then_some(*k))
+            .collect();
+        for key in keys {
+            let Some(BlockEntity::Beacon(mut b)) = self.world.block_entities.take(&key) else {
+                continue;
+            };
+            self.tick_beacon(key, &mut b, true);
+            self.world.block_entities.put(key, BlockEntity::Beacon(b));
+        }
+    }
+    fn tick_beacon(&mut self, (x, y, z): (i32, i32, i32), b: &mut Beacon, client: bool) {
         let mut check = if b.last_check_y < y {
             b.checking.clear();
             b.last_check_y = y - 1;
@@ -153,7 +171,7 @@ impl Game<'_> {
             if !b.sections.is_empty() {
                 b.levels = self.beacon_base(x, y, z);
             }
-            if b.levels > 0 && !b.sections.is_empty() {
+            if !client && b.levels > 0 && !b.sections.is_empty() {
                 self.beacon_effects([x, y, z], b);
                 self.beacon_sound([x, y, z], "minecraft:block.beacon.ambient");
             }
@@ -163,10 +181,12 @@ impl Game<'_> {
             b.sections = std::mem::take(&mut b.checking);
             let (was, is) = (previous > 0, b.levels > 0);
             if !was && is {
-                self.beacon_sound([x, y, z], "minecraft:block.beacon.activate");
-                let levels = b.levels;
-                self.for_each_player(|g| g.beacon_constructed([x, y, z], levels));
-            } else if was && !is {
+                if !client {
+                    self.beacon_sound([x, y, z], "minecraft:block.beacon.activate");
+                    let levels = b.levels;
+                    self.for_each_player(|g| g.beacon_constructed([x, y, z], levels));
+                }
+            } else if was && !is && !client {
                 self.beacon_sound([x, y, z], "minecraft:block.beacon.deactivate");
             }
         }
@@ -551,7 +571,12 @@ impl Game<'_> {
         }
     }
     /// `BeaconRenderer`: each section's rotating solid beam and its glow.
-    pub(super) fn beacon_geometry(&self, camera: glam::DVec3, alpha: f64, out: &mut Vec<Vertex>) {
+    pub(super) fn beacon_geometry(
+        &mut self,
+        camera: glam::DVec3,
+        alpha: f64,
+        out: &mut Vec<Vertex>,
+    ) {
         let Some(s) = self
             .gui
             .atlas
@@ -563,15 +588,28 @@ impl Game<'_> {
         };
         let time = (self.world.game_time.rem_euclid(40)) as f32 + alpha as f32;
         let scoping = self.scoping();
-        let view = f64::from(self.settings.render_distance * 16);
-        for (k, e) in &self.world.block_entities {
-            let BlockEntity::Beacon(b) = e else { continue };
-            // `getBeamSections` is empty while Levels is 0.
-            if b.levels == 0 || b.sections.is_empty() {
-                continue;
+        // `BeaconRenderer.shouldRender` culls at the render distance; far
+        // terrain extends that to its own distance.
+        let view = f64::from(self.terrain_distance() * 16);
+        let world = &self.world;
+        if self.lod.is_some() {
+            // The beam stays after its chunk unloads; once the chunk is back,
+            // its block entity decides whether the beam is still there.
+            self.far_beacons.retain(|&pos, _| {
+                let (x, _, z) = pos;
+                !world.chunks.contains_key(&(x >> 4, z >> 4))
+                    || world.block_entities.get(&pos).and_then(beam).is_some()
+            });
+        } else {
+            self.far_beacons.clear();
+        }
+        for (k, e) in &world.block_entities {
+            if let Some(sections) = beam(e) {
+                self.far_beacons.insert(*k, sections.to_vec());
             }
+        }
+        for (k, sections) in &self.far_beacons {
             let base = glam::DVec3::new(f64::from(k.0) + 0.5, f64::from(k.1), f64::from(k.2) + 0.5);
-            // `BeaconRenderer.shouldRender`: horizontal distance under render distance × 16.
             let offset = base - camera;
             let horizontal = glam::DVec2::new(offset.x, offset.z).length();
             if horizontal >= view {
@@ -586,14 +624,30 @@ impl Game<'_> {
             let origin = (glam::DVec3::new(f64::from(k.0), f64::from(k.1), f64::from(k.2))
                 - camera)
                 .as_vec3();
-            horizon_client::block_entity_render::beacon_beam(
-                origin,
-                &b.sections,
-                time,
-                scale,
-                s,
-                out,
-            );
+            horizon_client::block_entity_render::beacon_beam(origin, sections, time, scale, s, out);
         }
+    }
+}
+/// The beam sections of an active beacon (`BeaconRenderer` draws no beam for
+/// a beacon without a pyramid or with all sections cleared).
+fn beam(e: &BlockEntity) -> Option<&[(u32, i32)]> {
+    match e {
+        BlockEntity::Beacon(b) if b.levels > 0 && !b.sections.is_empty() => Some(&b.sections),
+        _ => None,
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn only_active_beacons_have_beams() {
+        let mut b = Beacon::default();
+        assert!(beam(&BlockEntity::Beacon(Box::new(b.clone()))).is_none());
+        b.levels = 1;
+        b.sections.push((0xFFFFFF, 10));
+        assert_eq!(
+            beam(&BlockEntity::Beacon(Box::new(b))),
+            Some(&[(0xFFFFFF, 10)][..])
+        );
     }
 }

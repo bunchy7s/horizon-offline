@@ -137,7 +137,7 @@ impl Launcher {
                     Ok(invite) => {
                         i.message = None;
                         i.fresh = Some(invite);
-                        self.servers.text(Field::Email).clear();
+                        self.servers.text(Field::Email).set(String::new());
                     }
                     Err(e) => i.message = Some(Err(e)),
                 }
@@ -169,7 +169,7 @@ impl Launcher {
             ));
             return;
         }
-        self.servers.text(Field::Token).clear();
+        self.servers.text(Field::Token).set(String::new());
         self.internet.asking_token = false;
         self.internet.message = match account::store().set(tailscale::TOKEN_KEY, &token) {
             Ok(()) if account::store().persistent() => None,

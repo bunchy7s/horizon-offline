@@ -13,7 +13,7 @@ const TYPE_SRV: u16 = 33;
 pub(super) const SERVER_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// JNDI reads them from resolv.conf on Unix and from the network adapters on
-/// Windows.
+/// Windows, where it leaves out the scoped IPv6 ones.
 #[cfg(unix)]
 pub(super) fn system_name_servers() -> Vec<SocketAddr> {
     std::fs::read_to_string("/etc/resolv.conf")
@@ -27,7 +27,7 @@ pub(super) fn system_name_servers() -> Vec<SocketAddr> {
         if adapter.oper_status() != ipconfig::OperStatus::IfOperStatusUp {
             continue;
         }
-        for &ip in adapter.dns_servers() {
+        for &ip in adapter.dns_servers().iter().filter(|ip| !scoped(**ip)) {
             let server = SocketAddr::new(ip, 53);
             if !servers.contains(&server) {
                 servers.push(server);
@@ -40,6 +40,13 @@ pub(super) fn system_name_servers() -> Vec<SocketAddr> {
 #[cfg(not(any(unix, windows)))]
 pub(super) fn system_name_servers() -> Vec<SocketAddr> {
     Vec::new()
+}
+
+/// Link-local and site-local IPv6 addresses (such as Windows' `fec0:0:0:ffff::1`
+/// defaults), which only work with a scope the adapter's list doesn't carry.
+#[cfg(any(windows, test))]
+fn scoped(ip: std::net::IpAddr) -> bool {
+    matches!(ip, std::net::IpAddr::V6(v6) if matches!(v6.segments()[0] & 0xffc0, 0xfe80 | 0xfec0))
 }
 
 /// `nameserver` lines of resolv.conf, in order.
@@ -301,6 +308,17 @@ mod tests {
                     nameserver  ::1 \nnameserver bogus\noptions ndots:1\n";
         let servers: Vec<String> = name_servers(conf).iter().map(|s| s.to_string()).collect();
         assert_eq!(servers, ["192.168.1.1:53", "[fe80::1]:53", "[::1]:53"]);
+    }
+
+    #[test]
+    fn windows_skips_scoped_ipv6_name_servers() {
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        for s in ["fe80::1", "fec0:0:0:ffff::1", "febf::1"] {
+            assert!(scoped(ip(s)), "{s}");
+        }
+        for s in ["1.1.1.1", "2606:4700:4700::1111", "::1", "fc00::1"] {
+            assert!(!scoped(ip(s)), "{s}");
+        }
     }
 
     /// A local name server: a silent one first, then one that answers truncated

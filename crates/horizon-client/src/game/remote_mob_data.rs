@@ -35,6 +35,8 @@ fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_enti
             // fire down: the flag goes off when the server's fire is out.
             (0, Value::Byte(flags)) => {
                 m.fire_ticks = i32::from(flags & 1);
+                // Entity.isSprinting: a dashing cat's or ocelot's model.
+                m.extra.sprinting = flags & 8 != 0;
                 // Drowned.setSwimming: the shared flag of swimming.
                 if species == Species::Drowned {
                     m.extra.flag = flags & 16 != 0;
@@ -244,6 +246,11 @@ fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_enti
             // Zombie.DATA_DROWNED_CONVERSION_ID (after DATA_BABY_ID and
             // DATA_SPECIAL_TYPE_ID): the conversion's shaking.
             (Species::Zombie | Species::Husk, 18, Value::Bool(converting)) => {
+                m.extra.counter2 = i32::from(*converting);
+            }
+            // Skeleton.DATA_STRAY_CONVERSION_ID (the first entry after Mob's):
+            // the freezing conversion's shaking.
+            (Species::Skeleton, 16, Value::Bool(converting)) => {
                 m.extra.counter2 = i32::from(*converting);
             }
             // ZombieVillager.DATA_CONVERTING_ID (before its villager data).

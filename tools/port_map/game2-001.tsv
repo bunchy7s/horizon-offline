@@ -1,0 +1,140 @@
+WorldGenRegion.getChunk	port	crates/horizon-world/src/worldgen/feature_region.rs::TerrainRegion::chunk	gap: minor: returns the resident chunk without the generating-step status check
+GossipContainer.getReputation	port	crates/horizon-client/src/gossip.rs::Gossips::reputation	Villager calls it with all types only; the type predicate is fixed to all
+Frog.travelInWater	missing		minor: frog water travel (getSpeed() move, 0.9 drag on all axes) absent; generic fluid travel used instead
+HappyGhast.HappyGhastBodyRotationControl.clientTick	port	crates/horizon-client/src/mobs/happy_ghast.rs::ridden	gap: minor: vehicle yaw sync only; the super.clientTick step is Mob::body_rotation_tick in control.rs
+SnifferAi.initCoreActivity	inline	crates/horizon-client/src/mobs/animal_brain.rs::sniffer_package	core behaviour list (Swim, panic, sink, cooldown) built here
+SnifferAi.initSniffingActivity	inline	crates/horizon-client/src/mobs/animal_brain.rs::sniffer_package	Searching entry here; memory gates in update_activity
+SnifferAi.initDigActivity	inline	crates/horizon-client/src/mobs/animal_brain.rs::sniffer_package	Digging and FinishedDigging entries here; memory gates in update_activity
+SnifferAi.initIdleActivity	inline	crates/horizon-client/src/mobs/animal_brain.rs::sniffer_package	idle entries (make love with reset, temptation, look sink, RunOne) here
+SnifferAi.Digging.canStillUse	port	crates/horizon-client/src/mobs/animal_brain.rs::B::tick_or_stop	
+SnifferAi.Digging.stop	port	crates/horizon-client/src/mobs/animal_brain.rs::B::do_stop	
+SnifferAi.FinishedDigging.stop	port	crates/horizon-client/src/mobs/animal_brain.rs::B::do_stop	
+SnifferAi.Searching.canStillUse	port	crates/horizon-client/src/mobs/animal_brain.rs::B::tick_or_stop	
+SnifferAi.Searching.stop	port	crates/horizon-client/src/mobs/animal_brain.rs::B::do_stop	
+SnifferAi.Sniffing.stop	port	crates/horizon-client/src/mobs/animal_brain.rs::B::do_stop	
+Squid.registerGoals	port	crates/horizon-client/src/mobs/aquatic.rs::register	
+Squid.rotateVector	inline	crates/horizon-client/src/mobs/aquatic.rs::spawn_ink	xRot then yRot of the body angles, inside spawn_ink
+Squid.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	S::Squid arm: ageable group with 0.05 baby chance
+Turtle.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	HAS_EGG and LAYING_EGG as entity metadata 18 and 19
+Turtle.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	home_pos and has_egg written here
+Turtle.checkTurtleSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Turtle arm: below sea+4, sand, bright
+Turtle.createAttributes	skip:data		attribute values come from data tables (attr lookups in mobs.rs)
+Turtle.getAmbientSound	port	crates/horizon-client/src/mobs/ai.rs::ambient_sound	gap: player: turtles in water or babies also play the land ambient (no Turtle arm; vanilla is silent there)
+Turtle.playStepSound	port	crates/horizon-client/src/mobs/ai.rs::step_sound	shamble and shamble_baby at 0.15 volume
+Turtle.travelInWater	missing		player: turtles swim with generic fluid travel (0.02 base speed, 0.8 vertical drag), not 0.1 move speed, 0.9 drag and the slow sink
+Turtle.TurtleLayEggGoal.isValidTarget	port	crates/horizon-client/src/mobs/turtle.rs::LayEgg::valid	air above and sand below
+Wolf.registerGoals	port	crates/horizon-client/src/mobs/tame.rs::register	
+Wolf.getSoundSet	missing		player: wolves always use the classic voice; the sound variant (big, puglin, sad, angry...) never changes what plays
+Wolf.createAttributes	skip:data		attribute values come from data tables
+Wolf.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	flags, variant and anger metadata sent to clients
+Wolf.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	CollarColor written
+Wolf.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	CollarColor, sound_variant and anger read
+Wolf.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	gap: minor: sound variant is stored but no sound uses it (see getSoundSet)
+Wolf.getAmbientSound	port	crates/horizon-client/src/mobs/ai.rs::ambient_sound	gap: minor: angry is taken as having a target, not the anger timer
+Wolf.die	missing		minor: a wolf that dies mid-shake keeps its shake state; Horizon never resets the wet and shake fields on death
+Wolf.getHeadRollAngle	port	crates/horizon-client/src/mobs/tame.rs::anim	
+Wolf.applyTamingSideEffects	port	crates/horizon-client/src/mobs/tame.rs::set_tame	
+Wolf.hurtArmor	port	crates/horizon-client/src/mobs.rs::Mob::hurt_wolf_armor	
+Wolf.tryToTame	port	crates/horizon-client/src/game/creatures.rs::Game::interact_mob	one in three tames; particles 7 or 6, sit, stop nav, clear target
+Wolf.handleEntityEvent	inline	crates/horizon-client/src/mobs/tame.rs::ai_step	entity events 8 and 56 folded into the shake state in ai_step
+Wolf.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: player: wolf rope point uses full eye height, not 0.6 times it
+Wolf.checkWolfSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Wolf arm: wolves_spawnable_on and bright
+Wolf.WolfAvoidEntityGoal.avoidLlama	port	crates/horizon-client/src/mobs/tame.rs::AvoidLlamas::can_use	strength check inside can_use
+WolfVariants.bootstrap	skip:data		registry bootstrap; variants are the WOLF_VARIANTS table in tame.rs
+DragonFlightHistory.copyFrom	skip:java		ring-buffer copy; Horizon keeps the flight history as fields of Dragon
+EndCrystal.defineSynchedData	missing		player: multiplayer guests never get a crystal's beam target, and the base is always shown (remote spawn ignores show_bottom)
+EndCrystal.addAdditionalSaveData	port	crates/horizon-client/src/game/dragon.rs::Crystal::to_nbt	
+EndCrystal.readAdditionalSaveData	port	crates/horizon-client/src/game/dragon.rs::Crystal::from_nbt	
+EndCrystal.hurtClient	missing		unsure: client hit check that refuses dragon-sourced hits; not found in destroy_crystal
+EndCrystal.shouldRenderAtSqrDistance	skip:ui		render culling so beams draw from farther away; drawing only
+EnderDragon.<init>	port	crates/horizon-client/src/game/dragon.rs::Dragon::new	gap: minor: parts are placed later by Game::place_dragon_parts
+EnderDragon.isFlapping	port	crates/horizon-client/src/game/dragon.rs::Game::tick_dragon	
+EnderDragon.onFlap	port	crates/horizon-client/src/game/dragon.rs::Game::tick_dragon	flap sound at volume 5 and pitch 0.8 plus random 0.3
+EnderDragon.defineSynchedData	port	crates/horizon-client/src/game/dragon.rs::Game::lan_dragon_state	DATA_PHASE defined as hovering on the wire
+EnderDragon.tickPart	port	crates/horizon-client/src/game/dragon.rs::Game::place_dragon_parts	
+EnderDragon.getHeadYOffset	inline	crates/horizon-client/src/game/dragon.rs::Game::place_dragon_parts	sitting gives -1, else flight sample 5 minus sample 0
+EnderDragon.knockBack	port	crates/horizon-client/src/game/dragon.rs::Game::dragon_contacts	wing zones push players
+EnderDragon.handleKillingBlow	inline	crates/horizon-client/src/game/dragon.rs::Dragon::hurt	health set to 1 and dying phase unless sitting
+EnderDragon.knockback	missing		minor: a hit does not push the dragon back outside the sitting phase
+EnderDragon.findClosestNode	port	crates/horizon-client/src/game/dragon.rs::Game::closest_node	
+EnderDragon.findPath	port	crates/horizon-client/src/game/dragon.rs::Game::dragon_path	
+EnderDragon.reconstructPath	inline	crates/horizon-client/src/game/dragon.rs::Game::dragon_path	path list built inside the A* search
+EnderDragon.addAdditionalSaveData	port	crates/horizon-client/src/game/dragon.rs::Dragon::to_nbt	
+EnderDragon.readAdditionalSaveData	port	crates/horizon-client/src/game/dragon.rs::Dragon::from_nbt	gap: minor: sitting_damage_received is not read back
+EnderDragon.getHeadLookVector	port	crates/horizon-client/src/game/dragon.rs::Game::dragon_look	
+EnderDragon.onSyncedDataUpdated	port	crates/horizon-client/src/game/dragon.rs::Game::remote_dragon_data	phase set on guests from synced data
+EnderDragon.recreateFromPacket	port	crates/horizon-client/src/game/dragon.rs::Game::spawn_remote_dragon	gap: minor: part entity ids are not assigned; parts are indexes
+EnderDragonPart.hurtServer	port	crates/horizon-client/src/game/dragon.rs::Dragon::hurt	hits route to the dragon with the part index
+EnderDragonPart.is	skip:other		identity check; parts are SPECIAL+index ids in special_targets
+DragonStrafePlayerPhase.doServerTick	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_phase	Strafe arm: charge, sight, fireball, then holding pattern
+DragonStrafePlayerPhase.findNewTarget	port	crates/horizon-client/src/game/dragon.rs::Game::ring_path	
+DragonStrafePlayerPhase.navigateToNextPathNode	port	crates/horizon-client/src/game/dragon.rs::Game::next_target	
+DragonStrafePlayerPhase.begin	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_phase	fresh strafe state (charge 0, no path or target) when entered
+EnderDragonPhaseManager.getPhase	skip:java		lazy cache of phase instances; Horizon phases are enum values
+WitherBoss.createNavigation	port	crates/horizon-client/src/mobs/wither.rs::register	gap: minor: door and float flags are not set here
+WitherBoss.registerGoals	port	crates/horizon-client/src/mobs/wither.rs::register	
+WitherBoss.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	gap: minor: only heads A and B are synced; the invulnerable counter is sent at index 19, the slot of target C
+WitherBoss.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	Invul read; boss bar name not checked here
+WitherBoss.canDestroy	inline	crates/horizon-client/src/mobs/wither.rs::custom_server_ai_step	air and wither-immune checks in the block loop
+WitherBoss.getHeadX	port	crates/horizon-client/src/mobs/wither.rs::head_pos	
+WitherBoss.getHeadY	port	crates/horizon-client/src/mobs/wither.rs::head_pos	
+WitherBoss.getHeadZ	port	crates/horizon-client/src/mobs/wither.rs::head_pos	
+WitherBoss.rotlerp	port	crates/horizon-client/src/mobs/control.rs::rotlerp	result wrapped into 0 to 360, equal modulo 360
+WitherBoss.performRangedAttack	port	crates/horizon-client/src/mobs/wither.rs::shoot	
+WitherBoss.createAttributes	skip:data		attribute values come from data tables
+WitherBoss.isPowered	port	crates/horizon-client/src/mobs/wither.rs::powered	
+ArmorStand.refreshDimensions	skip:other		no cached dimensions: bounds are computed from position, small and marker
+ArmorStand.defineSynchedData	port	crates/horizon-client/src/game/lan_entities.rs::Game::lan_object_states	flag and pose values sent to clients; defaults are the DEFAULT_POSE table
+ArmorStand.canUseSlot	inline	crates/horizon-client/src/game/armor_stands.rs::Game::interact_armor_stand	hand slots gated by show_arms; gap: minor: body and saddle are never offered and disabled bits are not read
+ArmorStand.pushEntities	missing		minor: armour stands do not push nearby minecarts
+ArmorStand.interact	port	crates/horizon-client/src/game/armor_stands.rs::Game::interact_armor_stand	
+ArmorStand.getClickedSlot	inline	crates/horizon-client/src/game/armor_stands.rs::Game::interact_armor_stand	click height picks feet, chest, legs, head or offhand
+ArmorStand.isDisabled	inline	crates/horizon-client/src/game/armor_stands.rs::Game::interact_armor_stand	gap: minor: disabled-slot bits are not read; hands gated by show_arms only
+ArmorStand.handleEntityEvent	inline	crates/horizon-client/src/game/armor_stands.rs::Game::attack_armor_stand	event 32 becomes the wobble timer and the hit sound
+ArmorStand.showBreakingParticles	missing		player: no plank particles when a stand breaks, by a creative hand or the second hit
+ArmorStand.causeDamage	port	crates/horizon-client/src/entities.rs::ArmorStand::environment_tick	gap: minor: fire damage only (4 per second burning, 0.15 per contact); hit and explosion paths are elsewhere
+ArmorStand.brokenByPlayer	inline	crates/horizon-client/src/game/armor_stands.rs::Game::attack_armor_stand	stand item dropped, then the equipment
+ArmorStand.brokenByAnything	inline	crates/horizon-client/src/game/armor_stands.rs::Game::attack_armor_stand	gap: minor: vanishing-curse items are not filtered on the hand-break path, only on the burn path
+ArmorStand.playBrokenSound	inline	crates/horizon-client/src/game/armor_stands.rs::Game::attack_armor_stand	break sound on both break paths
+ArmorStand.setYBodyRot	skip:other		client rotation setter from packets; a stand turns only with its yaw field
+ArmorStand.setYHeadRot	skip:other		client rotation setter from packets; a stand turns only with its yaw field
+ArmorStand.kill	inline	crates/horizon-client/src/game/armor_stands.rs::Game::attack_armor_stand	removes the stand; no game event
+ArmorStand.setSmall	port	crates/horizon-client/src/entity_nbt.rs::armor_stand_from_nbt	Small tag
+ArmorStand.isSmall	skip:other		accessor; reads the small field
+ArmorStand.setShowArms	port	crates/horizon-client/src/entity_nbt.rs::armor_stand_from_nbt	ShowArms tag
+ArmorStand.showArms	skip:other		accessor; reads the show_arms field
+ArmorStand.setNoBasePlate	port	crates/horizon-client/src/entity_nbt.rs::armor_stand_from_nbt	NoBasePlate tag
+ArmorStand.showBasePlate	skip:other		accessor; reads the no_base_plate field
+ArmorStand.setMarker	port	crates/horizon-client/src/entity_nbt.rs::armor_stand_from_nbt	Marker tag
+ArmorStand.isMarker	skip:other		accessor; reads the marker field
+ArmorStand.setBit	skip:other		packed-flag helper; Horizon keeps separate bools and packs them when sent
+ArmorStand.skipAttackInteraction	missing		minor: adventure-mode protection on stand hits is not checked
+ArmorStand.onSyncedDataUpdated	skip:other		client refresh when flags sync; bounds are computed on demand
+ArmorStand.getDimensionsMarker	inline	crates/horizon-client/src/game/armor_stands.rs::Game::armor_stand_hit	marker stands are skipped, so they have no box
+ArmorStand.getLightProbePosition	skip:ui		render light probe for markers; drawing only
+ArmorStand.setArmorStandPose	port	crates/horizon-client/src/entity_nbt.rs::armor_stand_from_nbt	Pose tag read into the six pose parts
+ArmorStand.getArmorStandPose	port	crates/horizon-client/src/entity_nbt.rs::armor_stand_to_nbt	Pose tag written from the six pose parts
+BlockAttachedEntity.skipAttackInteraction	inline	crates/horizon-client/src/game/cushions.rs::Game::attack_cushion	the mayInteract gate and the break; frames and paintings keep their own copies
+BlockAttachedEntity.kill	inline	crates/horizon-client/src/game/cushions.rs::Game::break_cushion	removal and the break; no game event
+BlockAttachedEntity.ignoreExplosion	missing		player: explosions do not break paintings, item frames, cushions or armour stands; only players, mobs, items, TNT and minecarts are hurt
+BlockAttachedEntity.move	missing		minor: a piston push does not break a cushion, painting or frame here
+BlockAttachedEntity.push	missing		minor: a push from a blast or piston does not break a cushion, painting or frame
+BlockAttachedEntity.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::cushion_from_nbt	gap: minor: no 16-block check on block_pos; the stored block is used as is
+Cushion.isBreakingDeniedFor	inline	crates/horizon-client/src/game/cushions.rs::Game::attack_cushion	the may_build gate
+Cushion.isBreakingDeniedAtPosFor	inline	crates/horizon-client/src/game/cushions.rs::Game::attack_cushion	the mayInteract gate, folded into the one may_build check
+Cushion.tickAtCheckInterval	inline	crates/horizon-client/src/game/cushions.rs::Game::tick_cushions	gap: minor: fluid effects not applied; fire and survival checked every 100 ticks
+Cushion.thunderHit	missing		player: a lightning strike does not break a cushion
+Cushion.setPos	skip:other		position field write; the block position is kept apart in cushion.pos
+Cushion.canBePlacedAt	port	crates/horizon-client/src/cushion.rs::can_place	
+Cushion.wouldSurviveAt	port	crates/horizon-client/src/cushion.rs::survives	
+Cushion.hasAnchorBelow	inline	crates/horizon-client/src/cushion.rs::survives	anchor scan under the box
+Cushion.isCoveredBySuffocatingBlocks	inline	crates/horizon-client/src/cushion.rs::survives	per-block suffocating test through PlacementWorld::suffocating
+Cushion.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::cushion_from_nbt	color tag read
+Cushion.get	port	crates/horizon-client/src/game/pick_entity.rs::Game::entity_pick_result	the pick gives the cushion item in its colour
+Cushion.applyImplicitComponent	port	crates/horizon-client/src/game/cushions.rs::Game::place_cushion	colour from the stack's cushion colour data
+HangingEntity.onSyncedDataUpdated	skip:other		client resync of the facing; Horizon keeps the facing as a field
+HangingEntity.setDirection	skip:other		facing field write; bounds are derived on demand from the facing
+HangingEntity.recalculateBoundingBox	skip:other		bounds are derived on demand from the facing
+HangingEntity.calculateSupportBox	inline	crates/horizon-client/src/game/paintings.rs::Game::painting_survives	support box moved half a block into the wall
+HangingEntity.canCoexist	port	crates/horizon-client/src/game/paintings.rs::Game::painting_survives	gap: minor: only other paintings are checked for overlap; item frames and the same-facing rule are not
+HangingEntity.hasLevelCollision	port	crates/horizon-client/src/game/paintings.rs::Game::painting_survives	block collision of the box

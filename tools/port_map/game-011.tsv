@@ -1,0 +1,148 @@
+AbstractHorse.registerGoals	port	crates/horizon-client/src/mobs/equine.rs::register	same goals and priorities; llamas and camels have their own register
+AbstractHorse.addBehaviourGoals	inline	crates/horizon-client/src/mobs/equine.rs::register	float, mount panic and tempt come after the rest; none for a skeleton horse, no panic for a zombie horse
+AbstractHorse.getFlag	skip:other		bit accessor of the synched flags; Horizon keeps tame, eating (flag) and standing (counter) as separate fields
+AbstractHorse.setFlag	skip:other		bit accessor of the synched flags; the bits are packed for sync in lan.rs::mob_meta and read back in equine::set_flags
+AbstractHorse.canUseSlot	port	crates/horizon-client/src/game/dispenser.rs::mob_can_use_slot	saddle needs an alive tamed adult; horses, zombie horses, skeleton horses and llamas allow every slot
+AbstractHorse.equipBodyArmor	inline	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	gap: minor: right click armours only a tamed Horse, a tamed zombie horse needs the inventory screen
+AbstractHorse.canDispenserEquipIntoSlot	port	crates/horizon-client/src/game/dispenser.rs::mob_can_dispenser_equip	body and saddle of a tamed mount
+AbstractHorse.modifyTemper	inline	crates/horizon-client/src/game/mounts.rs::Game::feed_mount	temper raised by the food, clamped to the maximum; a buck adds 5 in equine.rs RunAroundLikeCrazy::tick
+AbstractHorse.eating	inline	crates/horizon-client/src/game/mounts.rs::Game::feed_mount	gap: minor: the mouth stays open 3 ticks instead of 30; a foal uses the adult eat sound
+AbstractHorse.causeFallDamage	inline	crates/horizon-client/src/mobs/living.rs::Mob::cause_fall_damage	gap: player: a landing horse makes no thud (entity.horse.land) and its rider takes no fall damage (position_rider zeroes the rider's fall distance); the mount's own damage uses its safe distance of 6
+AbstractHorse.createInventory	skip:java		resizes a SimpleContainer; Horizon sizes the chest items when the menu opens
+AbstractHorse.getEquipSound	port	crates/horizon-client/src/game/dispenser.rs::equip_sound	saddle slot plays entity.horse.saddle
+AbstractHorse.hurtServer	missing		player: a hurt horse never rears up (vanilla: one hit in three makes it stand for a second)
+AbstractHorse.playStepSound	inline	crates/horizon-client/src/mobs/ai.rs::step_sound	gap: player: horses play the block's own step sound at 15%, never entity.horse.step, step_wood, step_baby or the gallop of a ridden horse; snow above the block is not used either
+AbstractHorse.isWoodSoundType	missing		minor: part of playStepSound, horses on wood use the block's wood step instead of horse.step_wood
+AbstractHorse.fedFood	port	crates/horizon-client/src/game/mounts.rs::Game::feed_mount	handleEating and consuming one item; llamas use llamas.rs feed_llama
+AbstractHorse.doPlayerRide	inline	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	clears eating and standing, turns the player to the mount and mounts; the block at the end of interact_mount
+AbstractHorse.isImmobile	missing		player: a grazing or rearing horse is not held still, goals and strolling keep running while its head is down or it is up on its hind legs
+AbstractHorse.dropEquipment	inline	crates/horizon-client/src/mobs/drops.rs::die	the equine branch drops the inventory items and a donkey's or mule's chest
+AbstractHorse.followMommy	missing		minor: no Bred flag, so a bred foal is not pulled to its mother from 16 blocks; the FollowParent goal covers 8
+AbstractHorse.openMouth	inline	crates/horizon-client/src/game/mounts.rs::Game::feed_mount	gap: minor: sets the mouth animation to 1 once, it closes after 3 ticks; the mouth flag is not synced to a remote client
+AbstractHorse.setStanding	inline	crates/horizon-client/src/mobs/equine.rs::make_mad	the 20 tick rear; RandomStand::start and the jump in tick_mount_riding set the same counter
+AbstractHorse.standIfPossible	inline	crates/horizon-client/src/mobs/equine.rs::make_mad	rears only species that can; the hurt caller is missing (see hurtServer)
+AbstractHorse.tickRidden	port	crates/horizon-client/src/mobs/equine.rs::ridden_step	yaw and half the pitch follow the rider; no gallop counter (see playStepSound)
+AbstractHorse.addPassenger	inline	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	gap: minor: the rider's yaw is snapped to the mount's on mounting, the pitch is not
+AbstractHorse.getRiddenInput	port	crates/horizon-client/src/mobs/equine.rs::ridden_step	gap: player: no allowStandSliding, so a horse that lands from a small hop while still rearing ignores the keys until the rear ends
+AbstractHorse.executeRidersJump	port	crates/horizon-client/src/mobs/equine.rs::ridden_step	gap: minor: the impulse is jump strength times the bar only, no honey block factor and no Jump Boost
+AbstractHorse.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	gap: minor: Tame, Temper and Owner are read; EatingHaystack and Bred are not
+AbstractHorse.setOffspringAttribute	port	crates/horizon-client/src/mobs/equine.rs::inherit	max health, jump strength and speed from both parents
+AbstractHorse.onPlayerJump	inline	crates/horizon-client/src/game/mounts.rs::Game::tick_mount_riding	gap: minor: the rear and the jump sound; donkeys and mules play the horse jump sound
+AbstractHorse.handleEntityEvent	port	crates/horizon-client/src/particles.rs::entity_event_burst	events 7 and 6: hearts and smoke around the mount
+AbstractHorse.positionRider	port	crates/horizon-client/src/game/mounts.rs::Game::position_rider	gap: minor: the rider's body yaw is not copied from the mount
+AbstractHorse.generateMaxHealth	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::horse_health	
+AbstractHorse.generateJumpStrength	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::horse_jump	
+AbstractHorse.generateSpeed	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::horse_speed	
+AbstractHorse.getSlot	missing		minor: /item cannot reach the mount slots horse.0 to horse.14
+AbstractHorse.getControllingPassenger	port	crates/horizon-client/src/mobs/equine.rs::controlled	gap: player: a tamed skeleton horse obeys its rider without a saddle
+AbstractHorse.getDismountLocationInDirection	inline	crates/horizon-client/src/game/mounts.rs::Game::dismount_mount	gap: minor: no climb up to 0.75 above the mount and no pose boxes, only block checks beside the mount
+AbstractHorse.getDismountLocationForPassenger	port	crates/horizon-client/src/game/mounts.rs::Game::dismount_mount	gap: minor: tries both sides by the mount's yaw then on top, not by the rider's main arm
+AbstractHorse.getPassengerAttachmentPoint	inline	crates/horizon-client/src/game/mounts.rs::Game::position_rider	gap: player: the rider does not slide back and up when the horse rears; the seat is a fixed point per species
+Donkey.canMate	inline	crates/horizon-client/src/mobs/goals.rs::Breed::can_use	gap: player: only Horse, Donkey and llamas get the tame, full health, not ridden rules, so two tame mules in love also breed (a mule never mates in vanilla)
+Donkey.getBreedOffspring	inline	crates/horizon-client/src/game/creatures.rs::Game::breed	donkey with horse gives a mule, donkey with donkey a donkey; attributes from both parents
+Horse.randomizeAttributes	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::horse	health, speed and jump strength
+Horse.setVariantAndMarkings	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	coat and markings drawn at spawn; breeding mixes them in creatures.rs Game::breed
+Horse.setVariant	missing		minor: only reached by the horse/variant item component, which Horizon does not read
+Horse.get	missing		minor: the horse/variant component is never reported
+Horse.applyImplicitComponent	missing		minor: a horse/variant component on a spawn egg or item is ignored
+Horse.playGallopSound	missing		player: a ridden horse never plays the gallop and the now and then breathing sound
+Horse.mobInteract	inline	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	gap: player: an untamed horse with a non-food item in hand is mounted instead of rearing angrily, a full health tame horse with food in hand is mounted instead of ignoring the click, and a golden dandelion on a foal does nothing
+Horse.canMate	inline	crates/horizon-client/src/mobs/goals.rs::Breed::can_use	horse or donkey partner, both tame, adult, not ridden and at full health
+Horse.hurtArmor	missing		player: horse armour never loses durability when the horse is hurt (the body item is only an id)
+Horse.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	random coat and markings, the herd shares the coat
+Llama.setStrength	inline	crates/horizon-client/src/mobs/llama.rs::from_nbt	strength kept in variant2 and clamped to 1 to 5 where it is set (from_nbt, offspring, apply_offspring)
+Llama.setRandomStrength	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	one in 25 llamas rolls up to 5, else up to 3
+Llama.addAdditionalSaveData	port	crates/horizon-client/src/mobs/llama.rs::to_nbt	Variant and Strength
+Llama.readAdditionalSaveData	port	crates/horizon-client/src/mobs/llama.rs::from_nbt	
+Llama.registerGoals	port	crates/horizon-client/src/mobs/llama.rs::register	goals and targets as vanilla, path length 40
+Llama.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	strength and variant entries
+Llama.get	missing		minor: the llama/variant component is never reported
+Llama.applyImplicitComponent	missing		minor: a llama/variant component on an item is ignored
+Llama.playChestEquipsSound	inline	crates/horizon-client/src/game/llamas.rs::Game::interact_llama	entity.llama.chest when a chest is added
+Llama.canMate	inline	crates/horizon-client/src/mobs/goals.rs::Breed::can_use	any llama or trader llama, both tame, adult, not ridden and at full health
+Llama.causeFallDamage	inline	crates/horizon-client/src/mobs/living.rs::Mob::cause_fall_damage	gap: player: the rider of a llama takes no fall damage; the llama's own damage uses its safe distance of 6
+Llama.leaveCaravan	inline	crates/horizon-client/src/mobs/caravan.rs::FollowCaravan::stop	clears the caravan head
+Llama.LlamaHurtByTargetGoal.canContinueToUse	port	crates/horizon-client/src/mobs/llama.rs::LlamaHurtBy::can_continue	stops after a spit
+Mule.playChestEquipsSound	inline	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	gap: minor: a mule uses the donkey's chest sound (entity.donkey.chest) instead of entity.mule.chest
+SkeletonHorse.checkSkeletonHorseSpawnRules	inline	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	spawner reasons need light or a light ignoring reason, otherwise the animal rules
+SkeletonHorse.randomizeAttributes	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::horse	jump strength only
+SkeletonHorse.getSwimSound	missing		minor: a skeleton horse in water uses the generic swim sound, no skeleton_horse.swim, step_water or gallop_water
+SkeletonHorse.playSwimSound	missing		minor: the swim volume rules for a skeleton horse are not applied
+SkeletonHorse.playJumpSound	missing		minor: no skeleton_horse.jump_water in water; the horse jump sound plays on land
+SkeletonHorse.aiStep	inline	crates/horizon-client/src/game/passengers.rs::Game::tick_skeleton_traps	a trap horse that is not persistent is removed after 18000 ticks
+SkeletonHorse.addAdditionalSaveData	port	crates/horizon-client/src/mobs/riders.rs::write_nbt	SkeletonTrap and SkeletonTrapTime
+SkeletonHorse.readAdditionalSaveData	port	crates/horizon-client/src/mobs/riders.rs::read_nbt	
+SkeletonHorse.setTrap	inline	crates/horizon-client/src/game/passengers.rs::Game::spring_skeleton_trap	the trap flag is a plain bool polled every tick instead of adding and removing a goal; lightning.rs sets it
+SkeletonTrapGoal.canUse	inline	crates/horizon-client/src/game/passengers.rs::Game::tick_skeleton_traps	a living player within 10 blocks
+SkeletonTrapGoal.tick	port	crates/horizon-client/src/game/passengers.rs::Game::spring_skeleton_trap	lightning, a skeleton on the horse and three more horse and skeleton pairs
+SkeletonTrapGoal.createHorse	inline	crates/horizon-client/src/game/passengers.rs::Game::spring_skeleton_trap	tame, adult, invulnerable for 60 ticks, persistent
+TraderLlama.makeNewLlama	inline	crates/horizon-client/src/mobs/llama.rs::apply_offspring	the baby trader llama is persistent
+TraderLlama.registerGoals	port	crates/horizon-client/src/mobs/llama.rs::register	adds panic 2.0, the defend trader target and the zombie and illager targets
+TraderLlama.canDespawn	port	crates/horizon-client/src/mobs/caravan.rs::trader_llama_tick	despawn delay counts down unless tamed, led by something else, ridden, age locked or persistent
+TraderLlama.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	an event spawn is an adult; a lone one gets no baby chance
+ZombieHorse.randomizeAttributes	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::horse	jump strength and speed
+ZombieHorse.generateZombieHorseJumpStrength	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::horse	0.5 plus three draws of 0.0667
+ZombieHorse.generateZombieHorseSpeed	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::horse	(9 plus three draws) over 42.16
+ZombieHorse.addBehaviourGoals	inline	crates/horizon-client/src/mobs/equine.rs::register	float and tempt with the zombie horse food, no mount panic
+ZombieHorse.mobInteract	inline	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	gap: player: an untamed zombie horse with a non-food item in hand is mounted instead of rearing angrily, and food that is not eaten still mounts it
+Cat.getSoundSet	missing		player: cats always use the classic adult sounds, so royal cats and kittens never get their own voices
+Cat.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	gap: minor: variant, lying, relax and collar are sent, the sound variant entry is not
+Cat.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	variant, sound_variant and CollarColor
+Cat.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	
+Cat.getAmbientSound	inline	crates/horizon-client/src/mobs/ai.rs::play_ambient	gap: minor: purr when in love and the stray sound are used; a tame cat never plays the purreow variant
+Cat.createAttributes	skip:data		attributes come from entity-types.json
+Cat.handleLieDown	inline	crates/horizon-client/src/mobs/tame.rs::cat_ai_step	gap: minor: purring and the amounts are ported; lying on top of a sleeping player (a 0.15 shift of the pose) is not tracked
+Cat.updateLieDownAmount	port	crates/horizon-client/src/mobs/tame.rs::cat_amounts	
+Cat.updateRelaxStateOneAmount	port	crates/horizon-client/src/mobs/tame.rs::cat_amounts	
+Cat.canMate	inline	crates/horizon-client/src/mobs/goals.rs::Breed::can_use	gap: minor: a sitting cat is refused as a mate, vanilla only needs both tame and in love
+Cat.removeWhenFarAway	missing		minor: wild cats never despawn for distance (vanilla: untamed and older than 2400 ticks)
+Cat.reassessTameGoals	inline	crates/horizon-client/src/mobs/tame.rs::register_cat	the player avoidance goal is conditioned on being untamed instead of added and removed
+Cat.tryToTame	inline	crates/horizon-client/src/game/creatures.rs::Game::interact_mob	one chance in three, then tame, sitting, event 7 or 6 and the advancement trigger
+Cat.CatAvoidEntityGoal.canContinueToUse	inline	crates/horizon-client/src/mobs/goals.rs::AvoidEntity::can_continue	gap: minor: a cat tamed mid flight finishes its escape path, the untamed check is only in can_use
+Cat.CatRelaxOnOwnerGoal.spaceIsOccupied	port	crates/horizon-client/src/mobs/tame.rs::CatRelaxOnOwner::occupied	another lying or relaxing cat within 2 blocks of the spot
+Cat.CatRelaxOnOwnerGoal.canContinueToUse	port	crates/horizon-client/src/mobs/tame.rs::CatRelaxOnOwner::can_continue	tame, not sitting, owner still asleep and the spot free
+Cat.CatTemptGoal.canScare	missing		player: a cat lured with fish is scared by every move or look of the player; vanilla lets a randomly picked player (re-rolled every 500 to 600 ticks) approach without scaring it
+CatVariants.bootstrap	skip:data		variant registry bootstrap; Horizon reads cat variants from data
+Ocelot.registerGoals	missing		player: an ocelot only panics, wanders and looks at players (the generic animal goals): it is not lured by fish, does not run from players, never stalks chickens or baby turtles and has no breed goal
+Ocelot.customServerAiStep	port	crates/horizon-client/src/mobs/tame.rs::cat_anim	crouch and sprint pose from the move speed, shared with cats; nothing sets those speeds for an ocelot yet
+Ocelot.removeWhenFarAway	missing		minor: ocelots never despawn for distance (vanilla: not trusting and older than 2400 ticks)
+Ocelot.createAttributes	skip:data		attributes come from entity-types.json
+Ocelot.mobInteract	missing		player: raw fish never makes a wild ocelot trust the player (no one in three roll, no hearts or smoke); it only puts the ocelot in love mode
+Ocelot.handleEntityEvent	port	crates/horizon-client/src/particles.rs::entity_event_burst	events 41 and 40: hearts and smoke; nothing sends them without the trust roll
+Ocelot.reassessTrustingGoals	missing		player: no player avoidance goal, so wild ocelots never run from the player
+Ocelot.checkSpawnObstruction	port	crates/horizon-client/src/mobs/spawn_selection.rs::spawn_obstruction	unobstructed, no liquid, at or above sea level on grass or leaves
+Ocelot.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	baby chance 1.0 for a group
+Ocelot.getLeashOffset	missing		minor: the lead ties at full eye height instead of half of it (leash::leash_offset only special-cases llamas)
+Ocelot.OcelotAvoidEntityGoal.canUse	missing		player: see reassessTrustingGoals, no avoidance goal exists
+Ocelot.OcelotAvoidEntityGoal.canContinueToUse	missing		minor: see reassessTrustingGoals, no avoidance goal exists
+Ocelot.OcelotTemptGoal.canScare	missing		minor: see registerGoals, an ocelot has no tempt goal
+AbstractFish.registerGoals	port	crates/horizon-client/src/mobs/aquatic.rs::register	panic, player avoidance and random swimming; gap: player: creative players do not scare fish (the avoid goal skips them, vanilla only skips spectators)
+AbstractFish.mobInteract	port	crates/horizon-client/src/game/creatures.rs::Game::interact_mob	a water bucket scoops the fish with its bucket data
+AbstractFish.FishSwimGoal.canUse	inline	crates/horizon-client/src/mobs/aquatic.rs::register	Stroll::swimming(1.0, 40) is the random swim goal; fish never follow a leader so it always applies
+AbstractSchoolingFish.registerGoals	missing		player: no follow the flock leader goal, so cod, salmon and tropical fish spawn in groups but swim about alone instead of schooling
+AbstractSchoolingFish.isFollower	missing		minor: part of the missing schooling; the leader id is kept at spawn but never read
+AbstractSchoolingFish.canBeFollowed	missing		minor: part of the missing schooling
+AbstractSchoolingFish.tick	missing		minor: part of the missing schooling (school size reset when alone)
+AbstractSchoolingFish.inRangeOfLeader	missing		minor: part of the missing schooling
+AbstractSchoolingFish.pathToLeader	missing		minor: part of the missing schooling
+AbstractSchoolingFish.addFollowers	missing		minor: part of the missing schooling
+AbstractSchoolingFish.finalizeSpawn	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	gap: player: the group shares a leader id and variant, but followers never use it to follow the leader
+Pufferfish.readAdditionalSaveData	missing		minor: PuffState is not read or written, a reloaded pufferfish starts deflated
+Pufferfish.registerGoals	port	crates/horizon-client/src/mobs/aquatic.rs::register	the puff goal at priority 1
+Pufferfish.touch	missing		minor: only the player is stung (inside ai_step); other mobs touching a puffed fish are not hurt or poisoned
+Salmon.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	size entry, small 0 to large 2
+Salmon.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::read_variant	the type tag, medium by default
+Salmon.get	inline	crates/horizon-client/src/entity_nbt.rs::bucket_components	the size component goes onto the bucket
+Salmon.applyImplicitComponent	port	crates/horizon-client/src/entity_nbt.rs::load_bucket_data	size from the bucket
+Salmon.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	weighted size: small 30, medium 50, large 15
+TropicalFish.packVariant	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	packed pattern, base colour and pattern colour; lan.rs::mob_meta packs it for sync
+TropicalFish.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	packed variant entry
+TropicalFish.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::read_variant	an unknown pattern is a kob
+TropicalFish.setPattern	inline	crates/horizon-client/src/entity_nbt.rs::load_bucket_data	only reached from the bucket's pattern component
+TropicalFish.setBaseColor	inline	crates/horizon-client/src/entity_nbt.rs::load_bucket_data	only reached from the bucket's base colour component
+TropicalFish.setPatternColor	inline	crates/horizon-client/src/entity_nbt.rs::load_bucket_data	only reached from the bucket's pattern colour component
+TropicalFish.get	inline	crates/horizon-client/src/entity_nbt.rs::bucket_components	pattern and both colours go onto the bucket
+TropicalFish.applyImplicitComponents	port	crates/horizon-client/src/entity_nbt.rs::load_bucket_data	pattern and colours from the bucket
+TropicalFish.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	one in ten is a lone random fish, else a shared common variant
+TropicalFish.checkTropicalFishSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	water below and above, and any height biomes or the surface rule
+TropicalFish.Pattern.addToTooltip	missing		player: a tropical fish bucket shows no pattern and colour lines in its tooltip

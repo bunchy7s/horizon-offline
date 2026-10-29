@@ -2396,6 +2396,7 @@ fn axolotl_action(m: &mut Mob, cx: &mut Bx, action: AxolotlAction, until: &mut i
                 target,
                 &mut super::goals::Cx {
                     w: cx.w,
+                    lr: cx.lr,
                     events: cx.events,
                 },
             );

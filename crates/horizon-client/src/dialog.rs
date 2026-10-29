@@ -37,9 +37,11 @@ pub enum Kind {
         columns: i32,
         button_width: i32,
     },
-    /// `DialogListDialog`: its dialogs as sent (ids, a tag or inline dialogs).
+    /// `DialogListDialog`: its dialogs as sent (ids, a tag or inline dialogs),
+    /// and one button per dialog they resolve to (`set_list`).
     DialogList {
         dialogs: Tag,
+        entries: Vec<Button>,
         exit: Option<Button>,
         columns: i32,
         button_width: i32,
@@ -325,29 +327,36 @@ impl Control {
     fn parse(t: &Tag) -> Option<Self> {
         let label = || t.get("label").map(text);
         Some(match path(&string(t.get("type"))?) {
-            "text" => Self::Text {
-                width: int(t, "width", 200),
-                label: label()?,
-                label_visible: boolean(t, "label_visible", true),
-                initial: string(t.get("initial")).unwrap_or_default(),
-                max_length: int(t, "max_length", 32),
-                multiline: t.get("multiline").map(|m| {
-                    let get = |key| number(m.get(key)).map(|v| v as i32);
-                    (get("max_lines"), get("height"))
-                }),
-            },
+            "text" => {
+                let initial = string(t.get("initial")).unwrap_or_default();
+                let max_length = int(t, "max_length", 32);
+                // TextInput: the default text may not be longer than the length.
+                if initial.encode_utf16().count() > max_length.max(0) as usize {
+                    return None;
+                }
+                Self::Text {
+                    width: int(t, "width", 200),
+                    label: label()?,
+                    label_visible: boolean(t, "label_visible", true),
+                    initial,
+                    max_length,
+                    multiline: t.get("multiline").map(|m| {
+                        let get = |key| number(m.get(key)).map(|v| v as i32);
+                        (get("max_lines"), get("height"))
+                    }),
+                }
+            }
             "boolean" => Self::Boolean {
                 label: label()?,
                 initial: boolean(t, "initial", false),
                 on_true: string(t.get("on_true")).unwrap_or_else(|| "true".into()),
                 on_false: string(t.get("on_false")).unwrap_or_else(|| "false".into()),
             },
-            "single_option" => Self::SingleOption {
-                width: int(t, "width", 200),
+            "single_option" => {
                 // SingleOptionInput.Entry.CODEC: a full entry or just its id.
-                options: list(t.get("options"))
+                let options: Vec<_> = list(t.get("options"))
                     .iter()
-                    .filter_map(|o| match o {
+                    .map(|o| match o {
                         Tag::String(id) => Some((id.to_string_lossy(), None, false)),
                         o => Some((
                             string(o.get("id"))?,
@@ -355,10 +364,18 @@ impl Control {
                             boolean(o, "initial", false),
                         )),
                     })
-                    .collect(),
-                label: label()?,
-                label_visible: boolean(t, "label_visible", true),
-            },
+                    .collect::<Option<_>>()?;
+                // A non-empty list with at most one initial entry.
+                if options.is_empty() || options.iter().filter(|o| o.2).count() > 1 {
+                    return None;
+                }
+                Self::SingleOption {
+                    width: int(t, "width", 200),
+                    options,
+                    label: label()?,
+                    label_visible: boolean(t, "label_visible", true),
+                }
+            }
             "number_range" => {
                 let float = |key| number(t.get(key)).map(|v| v as f32);
                 Self::NumberRange {
@@ -393,6 +410,44 @@ impl Control {
                 *start,
                 *end,
             )),
+        }
+    }
+    /// The text on a cycle button or slider holding `value`
+    /// (`CycleButton.createFullName`, `NumberRangeInput.computeLabel`).
+    pub fn message(&self, value: &InputValue) -> Option<Text> {
+        match (self, value) {
+            (
+                Self::SingleOption {
+                    options,
+                    label,
+                    label_visible,
+                    ..
+                },
+                InputValue::Option(i),
+            ) => {
+                let (id, display, _) = options.get(*i)?;
+                let shown = display.clone().unwrap_or_else(|| Text::literal(id));
+                Some(if *label_visible {
+                    Text::translate("options.generic_value", &[label.clone(), shown])
+                } else {
+                    shown
+                })
+            }
+            (
+                Self::NumberRange {
+                    label,
+                    label_format,
+                    ..
+                },
+                InputValue::Slider(_),
+            ) => {
+                let shown = number_string(self.scaled(value)?);
+                Some(Text::translate(
+                    label_format,
+                    &[label.clone(), Text::literal(shown)],
+                ))
+            }
+            _ => None,
         }
     }
     /// `ValueGetter.asTemplateSubstitution`.
@@ -536,6 +591,7 @@ impl Dialog {
             },
             "dialog_list" => Kind::DialogList {
                 dialogs: t.get("dialogs")?.clone(),
+                entries: Vec::new(),
                 exit: button("exit_action"),
                 columns: int(t, "columns", 2),
                 button_width: int(t, "button_width", 150),
@@ -543,20 +599,21 @@ impl Dialog {
             _ => return None,
         };
         // DialogBody.COMPACT_LIST_CODEC: one body, or a list of them.
+        // A body or input it cannot read fails the whole dialog.
         let body = match t.get("body") {
-            Some(Tag::List(items)) => items.iter().filter_map(Body::parse).collect(),
-            Some(one) => Body::parse(one).into_iter().collect(),
+            Some(Tag::List(items)) => items.iter().map(Body::parse).collect::<Option<_>>()?,
+            Some(one) => vec![Body::parse(one)?],
             None => Vec::new(),
         };
         let inputs = list(t.get("inputs"))
             .iter()
-            .filter_map(|i| {
+            .map(|i| {
                 Some(Input {
                     key: string(i.get("key"))?,
                     control: Control::parse(i)?,
                 })
             })
-            .collect();
+            .collect::<Option<_>>()?;
         Some(Self {
             kind,
             title: text(t.get("title")?),
@@ -588,7 +645,51 @@ impl Dialog {
             Kind::Notice(b) => vec![b],
             Kind::Confirmation { yes, no } => vec![yes, no],
             Kind::MultiAction { actions, exit, .. } => actions.iter().chain(exit).collect(),
-            Kind::ServerLinks { exit, .. } | Kind::DialogList { exit, .. } => exit.iter().collect(),
+            Kind::ServerLinks { exit, .. } => exit.iter().collect(),
+            Kind::DialogList { entries, exit, .. } => entries.iter().chain(exit).collect(),
+        }
+    }
+    /// `DialogListDialogScreen.createListActions`: a button for each of `dialogs`
+    /// (what the list names), labelled by its external title, opening it.
+    pub fn set_list(&mut self, dialogs: &[Tag]) {
+        let Kind::DialogList {
+            entries,
+            button_width,
+            ..
+        } = &mut self.kind
+        else {
+            return;
+        };
+        *entries = dialogs
+            .iter()
+            .filter_map(|tag| {
+                let sub = Dialog::parse(tag)?;
+                Some(Button {
+                    label: sub.external_title.unwrap_or(sub.title),
+                    tooltip: None,
+                    width: *button_width,
+                    action: Some(Action::Static(Click::ShowDialog(tag.clone()))),
+                })
+            })
+            .collect();
+    }
+    /// The dialogs a `dialog_list`'s `dialogs` names: the entries of a `#tag`
+    /// (by `tag`), registry ids (by `registry`) and dialogs written inline.
+    pub fn list_entries(
+        dialogs: &Tag,
+        tag: &dyn Fn(&str) -> Vec<Tag>,
+        registry: &dyn Fn(&str) -> Option<Tag>,
+    ) -> Vec<Tag> {
+        let one = |t: &Tag| match t {
+            Tag::String(id) => registry(&id.to_string_lossy()),
+            inline => Some(inline.clone()),
+        };
+        match dialogs {
+            Tag::String(id) if id.to_string_lossy().starts_with('#') => {
+                tag(&id.to_string_lossy()[1..])
+            }
+            Tag::List(items) => items.iter().filter_map(one).collect(),
+            single => one(single).into_iter().collect(),
         }
     }
     /// What `status` reports of it.

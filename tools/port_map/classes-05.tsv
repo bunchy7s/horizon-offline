@@ -1,0 +1,227 @@
+RegionFileVersion.configure	missing		minor: region-file-compression is read from server.properties (horizon-server-files properties.rs) but nothing applies it; chunk saves always write zlib (save.rs compress_records)
+RegionFileVersion.register	skip:data		static version table; Horizon's codecs are the Compression enum (compression.rs)
+RegionFileVersion.wrap	port	crates/horizon-world/src/compression.rs::Compression::encode	whole-buffer codec; output side (input side is Compression::decode)
+RegionStorageInfo.withTypeSuffix	port	crates/horizon-client/src/save.rs::Folder::name	folder name per region kind; only the fixed region, entities and poi folders exist, none is suffixed
+EntityLookup.add	skip:java		index insert; Horizon keeps entities in per-kind Vecs (game.rs) and a uuid map (game/persist.rs)
+EntityLookup.getEntities	port	crates/horizon-client/src/mobs/seen_grid.rs::SeenGrid::candidates	gap: minor: returns mob candidates only (only mobs are indexed); callers test the boxes exactly
+EntityLookup.getEntity	skip:java		lookup by id or uuid over Horizon's per-kind lists and the uuid map
+EntityLookup.remove	skip:java		index removal; Horizon removes the entity from its per-kind list
+EntitySection	skip:java		section container; Horizon has no section index, only the mob grid (mobs/seen_grid.rs)
+EntitySectionStorage	skip:java		spatial section index; Horizon has no section storage, the mob grid is its only spatial index
+EntityTickList	skip:java		ticking list; Horizon ticks its per-kind Vecs in order (game.rs)
+LevelEntityGetterAdapter	skip:java		adapter over the section storage; no equivalent needed
+PersistentEntitySectionManager.addEntity	skip:java		section and visibility bookkeeping; Horizon spawns entities into its per-kind Vecs (game.rs)
+PersistentEntitySectionManager.addEntityUuid	skip:java		uuid set kept in persist.uuids (game/persist.rs)
+PersistentEntitySectionManager.addLegacyChunkEntities	port	crates/horizon-client/src/game/persist.rs::Game::spawn_loaded_entities	saved chunk entity tags are spawned here once the chunk's entities arrive
+PersistentEntitySectionManager.addWorldGenChunkEntities	port	crates/horizon-client/src/game/persist.rs::Game::spawn_loaded_entities	worldgen entities arrive as saved tags and are spawned the same way
+PersistentEntitySectionManager.canPositionTick	port	crates/horizon-client/src/ticket_levels.rs::Levels::entity_ticking_at	a position ticks entities when its chunk is entity ticking
+PersistentEntitySectionManager.dumpSections	skip:debug		section dump for debugging
+PersistentEntitySectionManager.ensureChunkQueuedForLoad	skip:other		async load queue; Horizon's streaming hands the saved entity tags over with the chunk
+PersistentEntitySectionManager.gatherStats	skip:debug		statistics string
+PersistentEntitySectionManager.getAllChunksToSave	inline	crates/horizon-client/src/game/persist.rs::Game::save_entities	the resident chunk keys that save_entities writes
+PersistentEntitySectionManager.processChunkUnload	port	crates/horizon-client/src/game/persist.rs::Game::unload_entities	saves and removes the entities of an unloaded chunk
+PersistentEntitySectionManager.processUnloads	inline	crates/horizon-client/src/game/persist.rs::Game::unload_entities	the batch of unloaded chunks handed over by the tick
+PersistentEntitySectionManager.requestChunkLoad	port	crates/horizon-client/src/save.rs::SaveDir::load_entities	reads the saved entity record of the chunk; the chunk load itself is streaming
+PersistentEntitySectionManager.saveAll	port	crates/horizon-client/src/game/persist.rs::Game::save_entities	the waiting form (quit path) writes every resident chunk and flushes
+PersistentEntitySectionManager.storeChunkSections	port	crates/horizon-client/src/game/persist.rs::Game::entity_chunks	the saved entity tags of a chunk; with remove the entities leave the world
+PersistentEntitySectionManager.updateChunkStatus	skip:other		visibility per chunk status; Horizon derives entity ticking from ticket levels (ticket_levels.rs) instead of storing it
+PersistentEntitySectionManager.Callback.onMove	skip:java		section membership change; Horizon has no sections
+PersistentEntitySectionManager.Callback.onRemove	port	crates/horizon-client/src/game/persist.rs::Game::prune_entity_memory	gap: minor: removal is batched; dead ids are dropped from persist memory on save, not per removal
+PersistentEntitySectionManager.Callback.updateStatus	skip:other		visibility changes are chunk ticket levels in Horizon (ticket_levels.rs)
+TransientEntitySectionManager	skip:java		sections for entities that are not saved; Horizon keeps them in its per-kind lists (game.rs)
+TransientEntitySectionManager.Callback	skip:java		section callbacks of the transient manager; no sections in Horizon
+DynamicGameEventListener.ifChunkExists	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_listen	a sensor in an unloaded chunk has no entity, so the listener is dropped
+DynamicGameEventListener.move	skip:other		listeners are fixed block positions in Horizon; sculk blocks do not move
+DynamicGameEventListener.remove	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_sync_index	drops the listener's index entry when its block is gone
+EntityPositionSource.getId	skip:java		accessor; Horizon's listeners hold the source as a Who (sculk.rs Info)
+EntityPositionSource.getPosition	port	crates/horizon-client/src/mobs/warden.rs::listen	gap: minor: covers the warden's eye-height listener only; no other position source is used
+EntityPositionSource.getUuid	skip:java		accessor; Horizon holds the source as a Who
+EntityPositionSource.resolveEntity	skip:other		the source is a Who held by the listener, so there is no entity lookup to port
+EuclideanGameEventListenerRegistry.getPostableListenerPosition	inline	crates/horizon-client/src/game/sculk.rs::Game::post_game_event	the in-range distance test that picks the listeners
+EuclideanGameEventListenerRegistry.register	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_scan_chunk	a sculk block found in a loaded chunk enters the index
+EuclideanGameEventListenerRegistry.sendDebugInfo	skip:debug		debug rendering of listeners
+EuclideanGameEventListenerRegistry.unregister	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_sync_index	index entries of removed sculk blocks are dropped
+EuclideanGameEventListenerRegistry.visitInRangeListeners	port	crates/horizon-client/src/game/sculk.rs::Game::post_game_event	walks the index for listeners in range, then the wardens
+VibrationInfo.getEntity	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_receive	the source is held as a Who and read there
+VibrationInfo.getProjectileOwner	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_receive	the projectile owner is captured when posted (info.owner) and read there
+VibrationSelector.addCandidate	port	crates/horizon-client/src/sculk.rs::Selector::add_candidate	
+VibrationSelector.chosenCandidate	port	crates/horizon-client/src/sculk.rs::Selector::chosen_candidate	
+VibrationSelector.shouldReplaceVibration	port	crates/horizon-client/src/sculk.rs::Selector::should_replace	
+GameRuleCategory.register	skip:data		static category table; Horizon's rule categories are static strings (gamerules.rs)
+GameRuleMap.equals	skip:java		value equality of the map
+GameRuleMap.of	port	crates/horizon-client-core/src/gamerules.rs::GameRules::get	no stored map: a rule that was never set reads its table default
+GameRuleMap.setFromIf	skip:other		no caller in the pinned sources (only withOther uses it)
+GameRuleMap.withOther	skip:other		no caller in the pinned sources
+BlendingData	missing		player: in worlds upgraded from before 1.18 the old/new chunk border is not blended (datafix/fixes_c.rs drops blending_data), so a seam can show
+BlendingData.Packed.validateArraySize	skip:java		codec size check
+AllOfPredicate.test	port	crates/horizon-world/src/worldgen/block_predicate.rs::BlockPredicate::test_inner	the All arm
+AnyOfPredicate.test	port	crates/horizon-world/src/worldgen/block_predicate.rs::BlockPredicate::test_inner	the Any arm
+CombiningPredicate.codec	skip:java		codec
+HasSturdyFacePredicate.test	port	crates/horizon-world/src/worldgen/block_predicate.rs::BlockPredicate::test_inner	the HasSturdyFace arm
+HeightRangePredicate.test	port	crates/horizon-world/src/worldgen/block_predicate.rs::BlockPredicate::test_inner	the HeightRange arm
+StateTestingPredicate.stateTestingCodec	skip:java		codec
+VolumeMatchPredicate.test	port	crates/horizon-world/src/worldgen/block_predicate.rs::BlockPredicate::test_inner	the Volume arm
+CanyonWorldCarver.carve	port	crates/horizon-world/src/worldgen/carver/canyon.rs::CanyonCarver::carve	
+CanyonWorldCarver.doCarve	inline	crates/horizon-world/src/worldgen/carver/canyon.rs::CanyonCarver::carve	the per-tunnel walk inside carve
+CanyonWorldCarver.initWidthFactors	inline	crates/horizon-world/src/worldgen/carver/canyon.rs::CanyonCarver::carve	the width factors are built at the start of carve
+CanyonWorldCarver.shouldSkip	inline	crates/horizon-world/src/worldgen/carver/canyon.rs::CanyonCarver::carve	the width-factor test in the carve_ellipsoid closure
+CanyonWorldCarver.updateVerticalRadius	inline	crates/horizon-world/src/worldgen/carver/canyon.rs::CanyonCarver::carve	center-weighted vertical factor times the random 0.75 to 1.0 scale
+CaveWorldCarver.carve	port	crates/horizon-world/src/worldgen/carver.rs::CaveCarver::carve	
+CaveWorldCarver.createRoom	inline	crates/horizon-world/src/worldgen/carver.rs::CaveCarver::carve	the room branch of carve, which calls CaveRun::ellipsoid
+CaveWorldCarver.createTunnel	port	crates/horizon-world/src/worldgen/carver.rs::CaveRun::tunnel	
+CaveWorldCarver.getThickness	inline	crates/horizon-world/src/worldgen/carver.rs::CaveCarver::carve	thickness sample and the weird thickness bias
+CaveWorldCarver.shouldSkip	inline	crates/horizon-world/src/worldgen/carver.rs::CaveRun::ellipsoid	the floor and unit sphere test in the skip closure
+WorldCarverTypes.bootstrap	skip:data		registry bootstrap; carvers are read from JSON (carver.rs, canyon.rs)
+DensityBuffer.copyFrom	skip:java		buffers are plain slices; the samplers copy slices directly
+DensityBufferPool	skip:java		buffer pool; Horizon's scratch Vecs in SamplerContext (density/mod.rs) play that role
+DensityFunction.axesFrom	inline	crates/horizon-core/src/density/graph/mod.rs::DensityGraph::domain_axes	the axis bit (1 << axis) is set inline in the Gradient and Slice arms
+DensityFunction.pow	port	crates/horizon-world/src/worldgen/density.rs::Loader::decode	the minecraft:pow token builds a Power node
+DensityFunctionCompiler.optimizeAndCompile	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::get_sampler	optimize, then compile_raw, cached per function id
+DensityFunctionCompiler.prepareCache	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::prepare	cache arm: compile the input, bind its range and axes
+DensityFunctionCompiler.reuseOrPrepareCache	inline	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::prepare	the prepared-map lookup in the cache arm
+DensityFunctions.ceil	port	crates/horizon-world/src/worldgen/density.rs::Loader::decode	minecraft:ceil token; multiple defaults to 1
+DensityFunctions.floor	port	crates/horizon-world/src/worldgen/density.rs::Loader::decode	minecraft:floor token; multiple defaults to 1
+DensityFunctions.lerp	port	crates/horizon-world/src/worldgen/density.rs::Loader::decode	minecraft:lerp token
+DensityFunctions.mappedNoise	skip:data		bootstrap helper that composes noise and remap; Horizon reads the finished graph from data
+DensityFunctions.noise	port	crates/horizon-world/src/worldgen/density.rs::Loader::decode	minecraft:noise token
+DensityFunctions.remap	skip:data		bootstrap composition of clamp and arithmetic; Horizon reads the finished graph from data
+DensityFunctions.round	port	crates/horizon-world/src/worldgen/density.rs::Loader::decode	floor, round, ceil and truncate share one token arm
+DensityFunctions.truncate	port	crates/horizon-world/src/worldgen/density.rs::Loader::decode	minecraft:truncate token in the same arm as floor, round and ceil
+DensityFunctions.HolderHolder.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	the Reference arm rewrites its input only
+DfRewriteRule.SliceUniformAxes.getExistingRemovedAxes	inline	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::slice_uniform_axes	the walk over existing slice nodes
+DfRewriteRule.SliceUniformAxes.removeAxes	inline	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::slice_uniform_axes	the remove mask and the X, Z, Y slice insertion
+DfRewriteRule.SliceUniformAxes.rewrite	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::slice_uniform_axes	
+ScopedDensityBuffer.close	port	crates/horizon-core/src/density/mod.rs::SamplerContext::with_buffer	the scratch buffer goes back when the scope ends
+ScopedDensityBuffer.restore	skip:java		reuse of a pooled buffer's size and flags; scratch Vecs are simply reused
+DistanceToPointFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	DistanceToPoint arm
+DistanceToPointFunction.Sampler.sampleValue	port	crates/horizon-core/src/density/terrain_noise.rs::DistanceToPointSampler::sample_value	
+DistanceToPointFunction.Sampler.sampleVolume	port	crates/horizon-core/src/density/mod.rs::visit	the trait default sample_volume, which visits each position
+EndIslandFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	EndIslands arm, islands from the seeded context
+EndIslandFunction.getHeightValue	port	crates/horizon-core/src/density/end_islands.rs::EndIslandSampler::height	
+EndIslandFunction.Sampler.sampleValue	port	crates/horizon-core/src/density/end_islands.rs::EndIslandSampler::sample_value	
+EndIslandFunction.Sampler.sampleVolume	port	crates/horizon-core/src/density/end_islands.rs::EndIslandSampler::sample_volume	
+GradientFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	Gradient arm builds a GradientSampler
+GradientFunction.validate	port	crates/horizon-world/src/worldgen/density.rs::Loader::decode	the gradient arm rejects invalid coordinates
+GradientFunction.ClampedSampler.compute	port	crates/horizon-core/src/density/mod.rs::GradientSampler::compute	clamped tiling
+GradientFunction.MirroredRepeatSampler.compute	port	crates/horizon-core/src/density/mod.rs::GradientSampler::compute	mirrored repeat tiling
+GradientFunction.RepeatSampler.compute	port	crates/horizon-core/src/density/mod.rs::GradientSampler::compute	repeat tiling
+NoiseFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	Noise arm; nonzero shifts select the shifted sampler
+NoiseFunction.domainAxes	port	crates/horizon-core/src/density/graph/mod.rs::DensityGraph::domain_axes	
+NoiseFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	
+NoiseFunction.Sampler.sampleValue	port	crates/horizon-core/src/density/mod.rs::NoiseSampler::sample_value	
+NoiseFunction.Sampler.sampleVolume	port	crates/horizon-core/src/density/mod.rs::NoiseSampler::sample_volume	
+NoiseFunction.ShiftedXyzSampler.sampleValue	port	crates/horizon-core/src/density/mod.rs::ShiftedNoiseSampler::sample_value	shift_y present
+NoiseFunction.ShiftedXyzSampler.sampleVolume	port	crates/horizon-core/src/density/mod.rs::ShiftedNoiseSampler::sample_volume	shift_y present
+NoiseFunction.ShiftedXzSampler.sampleValue	port	crates/horizon-core/src/density/mod.rs::ShiftedNoiseSampler::sample_value	shift_y absent
+NoiseFunction.ShiftedXzSampler.sampleVolume	port	crates/horizon-core/src/density/mod.rs::ShiftedNoiseSampler::sample_volume	shift_y absent
+ShiftNoiseFunction.Shift.compileSampler	port	crates/horizon-core/src/density/terrain_noise.rs::compile_shift_noise	
+ShiftNoiseFunction.ShiftA.compileSampler	port	crates/horizon-core/src/density/terrain_noise.rs::compile_shift_noise	
+ShiftNoiseFunction.ShiftB.compileSampler	port	crates/horizon-core/src/density/terrain_noise.rs::compile_shift_noise	ShiftB gets ShiftBSampler
+SimpleDensityFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	WorldField arm (blend alpha and offset, end islands)
+SimpleDensityFunction.domainAxes	port	crates/horizon-core/src/density/world_fields.rs::WorldField::domain_axes	
+SimpleDensityFunction.range	port	crates/horizon-core/src/density/world_fields.rs::WorldField::range	
+BinaryFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_binary	constant operands become unary ops
+BinaryFunction.range	port	crates/horizon-core/src/density/graph/mod.rs::DensityGraph::range	Binary arm
+BinaryFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	
+BinaryFunction.warnNonIntersecting	skip:debug		log-only warning when min or max ranges never meet; Horizon returns the surviving side silently in compile_binary
+BinaryFunction.AddSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::BinarySampler::sample_value	BinaryOp::Add
+BinaryFunction.AddSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::BinarySampler::sample_volume	BinaryOp::Add
+BinaryFunction.ConstAddSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_value	UnaryOp::Add with a constant
+BinaryFunction.ConstAddSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	UnaryOp::Add with a constant
+BinaryFunction.ConstDivSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_value	UnaryOp::DivideInto (constant over input)
+BinaryFunction.ConstDivSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	UnaryOp::DivideInto
+BinaryFunction.ConstMaxSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_value	UnaryOp::Maximum
+BinaryFunction.ConstMaxSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	UnaryOp::Maximum
+BinaryFunction.ConstMinSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_value	UnaryOp::Minimum
+BinaryFunction.ConstMinSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	UnaryOp::Minimum
+BinaryFunction.ConstMulSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_value	UnaryOp::Multiply (a constant divisor becomes 1/c, as in vanilla)
+BinaryFunction.ConstMulSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	UnaryOp::Multiply
+BinaryFunction.ConstSubSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_value	UnaryOp::SubtractFrom (constant minus input)
+BinaryFunction.ConstSubSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	UnaryOp::SubtractFrom
+BinaryFunction.DivSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::BinarySampler::sample_value	BinaryOp::Divide; a zero left gives zero
+BinaryFunction.DivSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::BinarySampler::sample_volume	BinaryOp::Divide
+BinaryFunction.MaxSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::BinarySampler::sample_value	BinaryOp::Maximum with the right-max shortcut
+BinaryFunction.MaxSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::BinarySampler::sample_volume	BinaryOp::Maximum
+BinaryFunction.MinSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::BinarySampler::sample_value	BinaryOp::Minimum with the right-min shortcut
+BinaryFunction.MinSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::BinarySampler::sample_volume	BinaryOp::Minimum
+BinaryFunction.MulSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::BinarySampler::sample_value	BinaryOp::Multiply; a zero left gives zero
+BinaryFunction.MulSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::BinarySampler::sample_volume	BinaryOp::Multiply
+BinaryFunction.SubSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::BinarySampler::sample_value	BinaryOp::Subtract
+BinaryFunction.SubSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::BinarySampler::sample_volume	BinaryOp::Subtract
+BlendDensityFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	
+BlendDensityFunction.Sampler.sampleValue	port	crates/horizon-core/src/density/world_fields.rs::BlendDensitySampler::sample_value	
+BlendDensityFunction.Sampler.sampleVolume	port	crates/horizon-core/src/density/world_fields.rs::BlendDensitySampler::sample_volume	
+CacheFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	the cache node itself is prepared in DensityCompiler::prepare
+ClampFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	Clamp arm: a UnarySampler with UnaryOp::Clamp
+ClampFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	
+ClampFunction.validate	port	crates/horizon-world/src/worldgen/density.rs::Loader::decode	the clamp arm rejects max below min
+ClampFunction.Sampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_value	UnaryOp::Clamp
+ClampFunction.Sampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	UnaryOp::Clamp
+FindTopSurfaceFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	Surface arm, built by compile_surface_search
+FindTopSurfaceFunction.range	port	crates/horizon-core/src/density/graph/mod.rs::DensityGraph::range	Surface arm
+FindTopSurfaceFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	
+FindTopSurfaceFunction.Sampler.findSurfaceFrom	port	crates/horizon-core/src/density/surface.rs::FindTopSurfaceSampler::find_surface_from	
+FindTopSurfaceFunction.Sampler.sampleValue	port	crates/horizon-core/src/density/surface.rs::FindTopSurfaceSampler::sample_value	
+FindTopSurfaceFunction.Sampler.sampleVolume	port	crates/horizon-core/src/density/surface.rs::FindTopSurfaceSampler::sample_volume	
+InterpolatedFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	Interpolated arm
+InterpolatedFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	
+InterpolatedFunction.Sampler.fillCell	port	crates/horizon-core/src/density/interpolation.rs::InterpolatedSampler::fill_cell	
+InterpolatedFunction.Sampler.sampleValue	port	crates/horizon-core/src/density/interpolation.rs::InterpolatedSampler::sample_value	
+InterpolatedFunction.Sampler.sampleVolume	port	crates/horizon-core/src/density/interpolation.rs::InterpolatedSampler::sample_volume	
+InterpolatedFunction.Sampler.sampleWithBlockStep	port	crates/horizon-core/src/density/interpolation.rs::InterpolatedSampler::sample_block_volume	
+InterpolatedFunction.Sampler.sampleWithNonBlockStep	inline	crates/horizon-core/src/density/interpolation.rs::InterpolatedSampler::sample_volume	the sparse and arbitrary-step branches of sample_volume
+IntervalSelectFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	IntervalSelect arm
+IntervalSelectFunction.domainAxes	port	crates/horizon-core/src/density/graph/mod.rs::DensityGraph::domain_axes	
+IntervalSelectFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	
+IntervalSelectFunction.validate	port	crates/horizon-core/src/density/graph/mod.rs::DensityGraph::insert	the branch and threshold counts are checked when the node is inserted
+IntervalSelectFunction.Sampler.sampleValue	port	crates/horizon-core/src/density/selection.rs::IntervalSelectSampler::sample_value	
+IntervalSelectFunction.Sampler.sampleVolume	port	crates/horizon-core/src/density/selection.rs::IntervalSelectSampler::sample_volume	
+IntervalSelectFunction.Sampler.selectSamplerIndex	port	crates/horizon-core/src/density/selection.rs::IntervalSelectSampler::select	
+IntervalSelectFunction.SingleThresholdSampler.sampleValue	inline	crates/horizon-core/src/density/selection.rs::IntervalSelectSampler::select	no one-threshold class; the generic select covers it
+IntervalSelectFunction.SingleThresholdSampler.sampleVolume	inline	crates/horizon-core/src/density/selection.rs::IntervalSelectSampler::sample_volume	no one-threshold class; the generic path covers it
+densityfunction/op/LerpFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	Lerp arm; constant ends become DensityValue::Constant
+densityfunction/op/LerpFunction.domainAxes	port	crates/horizon-core/src/density/graph/mod.rs::DensityGraph::domain_axes	
+densityfunction/op/LerpFunction.range	port	crates/horizon-core/src/density/graph/mod.rs::DensityGraph::range	Lerp arm
+densityfunction/op/LerpFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	
+LerpFunction.ConstFirstSampler.sampleValue	port	crates/horizon-core/src/density/selection.rs::DensityValue::sample_value	constant first end
+LerpFunction.ConstFirstSampler.sampleVolume	port	crates/horizon-core/src/density/selection.rs::DensityValue::with_volume	constant first end
+LerpFunction.ConstSecondSampler.sampleValue	port	crates/horizon-core/src/density/selection.rs::DensityValue::sample_value	constant second end
+LerpFunction.ConstSecondSampler.sampleVolume	port	crates/horizon-core/src/density/selection.rs::DensityValue::with_volume	constant second end
+LerpFunction.Sampler.sampleValue	port	crates/horizon-core/src/density/selection.rs::LerpSampler::sample_value	
+LerpFunction.Sampler.sampleVolume	port	crates/horizon-core/src/density/selection.rs::LerpSampler::sample_volume	
+PowFunction.compileConstExponent	port	crates/horizon-core/src/density/power.rs::compile_constant_exponent	0.5, 1, 2, 3 and negatives get their own ops
+PowFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	Power arm
+PowFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	
+PowFunction.ConstBaseSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_value	UnaryOp::PowerBase
+PowFunction.ConstBaseSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	UnaryOp::PowerBase
+PowFunction.ConstExponentSampler.sampleValue	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_value	UnaryOp::PowerExponent or the specialised ops
+PowFunction.ConstExponentSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	UnaryOp::PowerExponent or the specialised ops
+PowFunction.Sampler.sampleValue	port	crates/horizon-core/src/density/power.rs::PowerSampler::sample_value	
+PowFunction.Sampler.sampleVolume	port	crates/horizon-core/src/density/power.rs::PowerSampler::sample_volume	
+RangeChoiceFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	Choice arm; constant branches become UnaryOp::ConstantRangeChoice
+RangeChoiceFunction.domainAxes	port	crates/horizon-core/src/density/graph/mod.rs::DensityGraph::domain_axes	
+RangeChoiceFunction.range	port	crates/horizon-core/src/density/graph/mod.rs::DensityGraph::range	Choice arm
+RangeChoiceFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	
+RangeChoiceFunction.ConstSampler.choose	port	crates/horizon-core/src/density/arithmetic.rs::UnaryOp::apply	UnaryOp::ConstantRangeChoice
+RangeChoiceFunction.ConstSampler.sampleVolume	port	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	UnaryOp::ConstantRangeChoice
+RangeChoiceFunction.Sampler.sampleValue	port	crates/horizon-core/src/density/selection.rs::RangeChoiceSampler::sample_value	
+RangeChoiceFunction.Sampler.sampleVolume	port	crates/horizon-core/src/density/selection.rs::RangeChoiceSampler::sample_volume	
+RoundFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	Round arm; a multiple of 1 skips the multiply
+RoundFunction.range	port	crates/horizon-core/src/density/graph/mod.rs::DensityGraph::range	Round arm
+RoundFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	
+RoundFunction.roundToInteger	port	crates/horizon-core/src/density/rounding.rs::RoundMode::apply	the multiple-of-1 case
+RoundFunction.IntegerMultipleSampler.sampleValue	port	crates/horizon-core/src/density/rounding.rs::RoundSampler::sample_value	multiple absent
+RoundFunction.IntegerMultipleSampler.sampleVolume	port	crates/horizon-core/src/density/rounding.rs::RoundSampler::sample_volume	multiple absent
+RoundFunction.Sampler.apply	port	crates/horizon-core/src/density/rounding.rs::RoundMode::apply	
+RoundFunction.Sampler.sampleValue	port	crates/horizon-core/src/density/rounding.rs::RoundSampler::sample_value	
+RoundFunction.Sampler.sampleVolume	port	crates/horizon-core/src/density/rounding.rs::RoundSampler::sample_volume	
+SliceFunction.compileSampler	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	Slice arm; an X and a Z slice fuse into one Xz sampler
+SliceFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	
+SliceFunction.XSampler.sampleVolume	port	crates/horizon-core/src/density/slice.rs::SliceSampler::sample_volume	SliceAxes::X
+SliceFunction.XzSampler.sampleVolume	port	crates/horizon-core/src/density/slice.rs::SliceSampler::sample_volume	SliceAxes::Xz
+SliceFunction.YSampler.sampleVolume	port	crates/horizon-core/src/density/slice.rs::SliceSampler::sample_volume	SliceAxes::Y
+SliceFunction.ZSampler.sampleVolume	port	crates/horizon-core/src/density/slice.rs::SliceSampler::sample_volume	SliceAxes::Z
+SplineFunction.domainAxes	port	crates/horizon-core/src/density/graph/mod.rs::DensityGraph::domain_axes	
+SplineFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	spline coordinates are children too (GraphNode::children_mut)
+SplineFunction.BufferSplineInput.close	port	crates/horizon-core/src/density/spline.rs::SplineSampler::sample_volume	coordinate buffers go back to context.scratch when sample_volume ends
+SplineFunction.BufferSplineInput.sampleCoordinate	port	crates/horizon-core/src/density/spline.rs::SplineSampler::sample_volume	each coordinate buffer is filled on first use

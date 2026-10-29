@@ -75,6 +75,21 @@ pub fn abgr(rgb: u32) -> u32 {
     let (r, g, b) = ((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
     0xFF00_0000 | b << 16 | g << 8 | r
 }
+
+/// `EquipmentLayerRenderer.getColorForLayer`: a dyeable layer takes the
+/// stack's dye colour (`minecraft:dyed_color`), the colour it has when
+/// undyed otherwise; a layer that is not dyeable is not tinted.
+pub fn armor_tint(undyed: Option<u32>, stack: Option<&crate::items::ItemStack>) -> u32 {
+    let Some(undyed) = undyed else {
+        return 0xFFFF_FFFF;
+    };
+    let dyed = stack
+        .and_then(|s| s.extra.as_ref())
+        .and_then(|e| e.dyed_color)
+        .map(|d| d as u32)
+        .unwrap_or(undyed);
+    abgr(dyed)
+}
 /// ColorLerper.Type.SHEEP colour: white is 0xE6E6E6, others 75% of the dye.
 pub fn sheep_wool_rgb(color: u8) -> u32 {
     if color == 0 {
@@ -676,10 +691,12 @@ pub fn layers(m: &Mob) -> Vec<Layer> {
             white,
             true,
         ),
-        // The copper golem's eyes glow (LivingEntityEmissiveLayer, eyes render type).
+        // The copper golem's eyes glow: CopperGolemRenderer's
+        // LivingEntityEmissiveLayer (eyes render type) draws on a model baked
+        // from ModelLayers.COPPER_GOLEM, the body's, not COPPER_GOLEM_EYES.
         S::CopperGolem => {
             let eyes = super::copper_golem::eye_texture(m);
-            push(&mut v, "copper_golem#eyes", &eyes, white, true);
+            push(&mut v, &m.kind.model_key(), &eyes, white, true);
         }
         S::Spider | S::CaveSpider => push(
             &mut v,
@@ -816,12 +833,12 @@ fn humanoid_armor(m: &Mob, v: &mut Vec<Layer>) {
         return;
     };
     let slots = [
-        (&m.extra.head, "helmet"),
-        (&m.extra.chest, "chestplate"),
-        (&m.extra.legs, "leggings"),
-        (&m.extra.feet, "boots"),
+        (&m.extra.head, &m.extra.armor[0], "helmet"),
+        (&m.extra.chest, &m.extra.armor[1], "chestplate"),
+        (&m.extra.legs, &m.extra.armor[2], "leggings"),
+        (&m.extra.feet, &m.extra.armor[3], "boots"),
     ];
-    for (item, layer) in slots {
+    for (item, stack, layer) in slots {
         let Some(name) = item.as_deref().and_then(|i| i.strip_prefix("minecraft:")) else {
             continue;
         };
@@ -839,8 +856,10 @@ fn humanoid_armor(m: &Mob, v: &mut Vec<Layer>) {
             "humanoid"
         };
         let model = format!("{base}#{layer}");
+        // EquipmentLayerRenderer.getColorForLayer: the leather layer takes
+        // the stack's dye colour, the colour it has when undyed otherwise.
         let tint = if asset == "leather" {
-            abgr(0xA06540)
+            armor_tint(Some(0xA06540), stack.as_ref())
         } else {
             0xFFFF_FFFF
         };
@@ -899,7 +918,7 @@ pub fn base_transform_at(m: &Mob, alpha: f32, origin: glam::Mat4) -> glam::Mat4 
             let eye = if avatar(m) {
                 m.kind.eye_height as f32
             } else {
-                (m.eye_y() - m.position.y) as f32
+                m.awake_dims().2 as f32
             };
             let head = eye - 0.1;
             glam::Mat4::from_translation(glam::Vec3::new(-step[0] * head, 0.0, -step[1] * head))
@@ -990,7 +1009,7 @@ fn shaking(m: &Mob) -> bool {
     match m.species() {
         Species::Strider => super::strider::suffocating(m),
         Species::ZombieVillager => super::zombie_villager::is_converting(m),
-        Species::Zombie | Species::Husk => m.extra.counter2 > 0,
+        Species::Zombie | Species::Husk | Species::Skeleton => m.extra.counter2 > 0,
         Species::Piglin | Species::PiglinBrute | Species::Hoglin => {
             !m.extra.flag2 && m.extra.counter2 > 0
         }
@@ -1012,6 +1031,11 @@ fn species_rotations(m: &Mob, alpha: f32) -> glam::Mat4 {
         Species::Fox if super::fox::flag(m, super::fox::POUNCING | super::fox::FACEPLANTED) => {
             let pitch = m.previous_head_pitch + (m.head_pitch - m.previous_head_pitch) * alpha;
             glam::Mat4::from_rotation_x((-pitch).to_radians())
+        }
+        // PhantomRenderer.setupRotations: the body follows its pitch.
+        Species::Phantom => {
+            let pitch = m.previous_head_pitch + (m.head_pitch - m.previous_head_pitch) * alpha;
+            glam::Mat4::from_rotation_x(pitch.to_radians())
         }
         _ => glam::Mat4::IDENTITY,
     }
@@ -1037,8 +1061,14 @@ fn red_overlay(m: &Mob) -> bool {
 }
 fn species_scale(m: &Mob, alpha: f32) -> glam::Mat4 {
     if avatar(m) {
-        // AvatarRenderer.scale, shared by the inventory and world renderer.
-        return glam::Mat4::from_scale(glam::Vec3::splat(0.9375));
+        // AvatarRenderer.scale, shared by the inventory and world renderer, on
+        // top of the entity's own `scale` (`LivingEntityRenderer.submit`).
+        let own = if m.extra.model_scale > 0.0 {
+            m.extra.model_scale
+        } else {
+            1.0
+        };
+        return glam::Mat4::from_scale(glam::Vec3::splat(0.9375 * own));
     }
     match m.species() {
         Species::Wither => {
@@ -1056,6 +1086,13 @@ fn species_scale(m: &Mob, alpha: f32) -> glam::Mat4 {
         }
         Species::Slime | Species::MagmaCube => super::cube::scale(m, alpha),
         Species::SulfurCube => super::sulfur_cube::scale(m, alpha),
+        Species::Phantom => {
+            // PhantomRenderer.scale: 15% bigger per size, and the model moved
+            // down to the box (it is modelled 1.3125 blocks above the feet).
+            let s = 1.0 + 0.15 * m.extra.size as f32;
+            glam::Mat4::from_scale(glam::Vec3::splat(s))
+                * glam::Mat4::from_translation(glam::Vec3::new(0.0, 1.3125, 0.1875))
+        }
         _ => glam::Mat4::IDENTITY,
     }
 }
@@ -1196,7 +1233,7 @@ pub fn render_with(
                 let shifted =
                     camera - glam::DVec3::new(off[0] + w[0], off[1] + w[1], off[2] + w[2]);
                 let base = base_transform(m, alpha, shifted);
-                render_visible(m, alpha, base, atlas, light, data, extra, out);
+                render_visible(m, alpha, base, atlas, light, data, extra, true, out);
             }
         }
         return;
@@ -1209,8 +1246,69 @@ pub fn render_with(
         light,
         data,
         extra,
+        true,
         out,
     );
+}
+/// `CapeLayer.submit` with `PlayerCapeModel`: the player model's body posed
+/// as the player's, its cape turned by `ModelPart.rotateBy` with the cape's
+/// flap and leans. `base` is the player's root transform (moved out over a
+/// chestplate); `uv` the cape texture.
+#[allow(clippy::too_many_arguments)]
+pub fn cape(
+    m: &Mob,
+    alpha: f32,
+    base: glam::Mat4,
+    uv: [f32; 4],
+    light: u32,
+    data: &MobData,
+    out: &mut Vec<Vertex>,
+) {
+    let Some(model) = m.kind.layer("player#cape") else {
+        return;
+    };
+    let s = anim::state(m, alpha);
+    let mut poses = Poses::new(model);
+    anim::setup(m, &s, &mut poses, &data.animations);
+    let a = f64::from(alpha);
+    let at = [
+        m.previous.x + (m.position.x - m.previous.x) * a,
+        m.previous.y + (m.position.y - m.previous.y) * a,
+        m.previous.z + (m.position.z - m.previous.z) * a,
+    ];
+    let body = m.previous_body_yaw + wrap(m.body_yaw - m.previous_body_yaw) * alpha;
+    // LivingEntityRenderState.fallFlyingScale.
+    let ticks = m.extra.fall_fly_ticks as f32 + alpha;
+    let gliding = (ticks * ticks / 100.0).clamp(0.0, 1.0);
+    let [flap, lean, lean2] = m.extra.avatar.cape(alpha, at, body, gliding);
+    let pose = poses.get("cape");
+    let by = glam::Quat::from_rotation_y(-PI)
+        * glam::Quat::from_rotation_x((6.0 + lean / 2.0 + flap).to_radians())
+        * glam::Quat::from_rotation_z((lean2 / 2.0).to_radians())
+        * glam::Quat::from_rotation_y((180.0 - lean2 / 2.0).to_radians());
+    let now = glam::Quat::from_euler(glam::EulerRot::ZYX, pose[5], pose[4], pose[3]);
+    let (z, y, x) = (now * by).to_euler(glam::EulerRot::ZYX);
+    (pose[3], pose[4], pose[5]) = (x, y, z);
+    // RenderTypes.entitySolid with OverlayTexture.NO_OVERLAY.
+    draw(model, base, &poses, uv, 0xFFFF_FFFF, light, 0, out);
+}
+/// `render_with` without the body, for an avatar the viewer can't see:
+/// `LivingEntityRenderer.submit` gets no render type for an invisible body
+/// (`isBodyVisible`, `isInvisibleTo`), but its layers still draw
+/// (`HumanoidArmorLayer`: the armour in `extra`).
+#[allow(clippy::too_many_arguments)]
+pub fn render_layers(
+    m: &Mob,
+    alpha: f32,
+    camera: glam::DVec3,
+    atlas: Atlas,
+    light: u32,
+    data: &MobData,
+    extra: &[(&Part, [f32; 4], u32)],
+    out: &mut Vec<Vertex>,
+) {
+    let base = base_transform(m, alpha, camera);
+    render_visible(m, alpha, base, atlas, light, data, extra, false, out);
 }
 /// A mob drawn under `origin` instead of at its position (the spinning mob
 /// of `SpawnerRenderer.submitEntityInSpawner`).
@@ -1224,7 +1322,7 @@ pub fn render_posed(
     out: &mut Vec<Vertex>,
 ) {
     let base = base_transform_at(m, alpha, origin);
-    render_visible(m, alpha, base, atlas, light, data, &[], out);
+    render_visible(m, alpha, base, atlas, light, data, &[], true, out);
 }
 #[allow(clippy::too_many_arguments)]
 fn render_visible(
@@ -1235,6 +1333,7 @@ fn render_visible(
     light: u32,
     data: &MobData,
     extra: &[(&Part, [f32; 4], u32)],
+    body_visible: bool,
     out: &mut Vec<Vertex>,
 ) {
     let overlay = u32::from(red_overlay(m));
@@ -1248,7 +1347,7 @@ fn render_visible(
     let mut poses = Poses::new(&model);
     anim::setup(m, &s, &mut poses, &data.animations);
     let draw_body = |out: &mut Vec<Vertex>| {
-        if let Some(uv) = atlas(&texture) {
+        if body_visible && let Some(uv) = atlas(&texture) {
             draw(
                 &model,
                 base,
@@ -1456,8 +1555,12 @@ fn hand_base(
             | Species::WitherSkeleton
     );
     let arm = if left { "left_arm" } else { "right_arm" };
+    // `SkeletonModel.translateToHand` shifts the arm by 1, `PlayerModel.translateToHand`
+    // by 0.5 for slim arms: the hand is the middle of the arm.
     let offset = if skeleton {
         if left { -1.0 } else { 1.0 }
+    } else if avatar(m) && m.slim {
+        if left { -0.5 } else { 0.5 }
     } else {
         0.0
     };
@@ -1505,6 +1608,43 @@ pub fn part_transform(
     anim::setup(m, &s, &mut poses, &data.animations);
     part_matrix(&model, base, &poses, part, 0.0)
 }
+/// `FoxHeldItemLayer`: the item sits at the head's position under the render
+/// state's head roll, yaw and pitch (not the posed head's, which differ while
+/// it sleeps), pushed out to the mouth.
+fn fox_item_transform(m: &Mob, alpha: f32, camera: glam::DVec3, data: &MobData) -> glam::Mat4 {
+    use glam::{Mat4, Vec3};
+    let s = anim::state(m, alpha);
+    let (model_key, _) = body(m);
+    let model = m
+        .kind
+        .layer(&model_key)
+        .cloned()
+        .unwrap_or_else(|| m.kind.model.clone());
+    let mut poses = Poses::new(&model);
+    anim::setup(m, &s, &mut poses, &data.animations);
+    let head = *poses.get("head");
+    let fox = super::fox::pose(m, alpha);
+    let baby = m.is_baby();
+    let mut t = base_transform(m, alpha, camera)
+        * Mat4::from_translation(Vec3::new(head[0], head[1], head[2]) / 16.0);
+    if baby {
+        t *= Mat4::from_scale(Vec3::splat(0.75));
+    }
+    t *= Mat4::from_rotation_z(fox.head_roll_angle)
+        * Mat4::from_rotation_y(s.y_rot.to_radians())
+        * Mat4::from_rotation_x(s.x_rot.to_radians());
+    let (x, y, z) = match (baby, fox.sleeping) {
+        (true, true) => (0.4, 0.26, 0.15),
+        (true, false) => (0.06, 0.26, -0.5),
+        (false, true) => (0.46, 0.26, 0.22),
+        (false, false) => (0.06, 0.27, -0.5),
+    };
+    t *= Mat4::from_translation(Vec3::new(x, y, z)) * Mat4::from_rotation_x(90.0f32.to_radians());
+    if fox.sleeping {
+        t *= Mat4::from_rotation_z(90.0f32.to_radians());
+    }
+    t
+}
 /// The pose a mob's held item is submitted under (`ItemInHandLayer`:
 /// `translateToHand`, then the hand offset; the item model adds its own
 /// display transform), or `None` when the mob shows no held items.
@@ -1521,6 +1661,10 @@ pub fn held_item_transform(
             .filter(|_| !left)
             .map(|offset| base_transform(m, alpha, camera) * offset);
     }
+    // FoxHeldItemLayer: the main hand's item in its mouth.
+    if m.species() == Species::Fox {
+        return (!left).then(|| fox_item_transform(m, alpha, camera, data));
+    }
     if !super::illager::shows_item(m) {
         return None;
     }
@@ -1535,7 +1679,20 @@ pub fn held_item_transform(
     let mut poses = Poses::new(&model);
     anim::setup(m, &s, &mut poses, &data.animations);
     let mut t = hand_base(m, &model, base, &poses, left)?;
-    // ItemInHandLayer: a spear in use (ArmPose.SPEAR's animateUseItem).
+    // ItemInHandLayer: a STAB swing of this arm thrusts its item out
+    // (SpearAnimations.thirdPersonAttackItem, the main hand's forward
+    // movement), and a spear in use moves with it (ArmPose.SPEAR's
+    // animateUseItem).
+    let swing_left = m.extra.swing_right_arm.map_or(m.main_arm_left(), |r| !r);
+    if m.extra.swing_stab && swing_left == left {
+        let forward = m
+            .extra
+            .main_hand
+            .as_deref()
+            .and_then(crate::spear::Kinetic::of)
+            .map_or(0.0, |k| k.forward_movement);
+        t *= crate::spear::third_person_attack_item(s.swing, forward);
+    }
     let off_hand = left != m.main_arm_left();
     if m.extra.using_item > 0
         && m.extra.using_off_hand == off_hand
@@ -1679,6 +1836,58 @@ mod tests {
             assert!(vertices.iter().all(|v| v.uv[0] >= 0.5));
         }
     }
+    /// CopperGolemRenderer: the emissive eye layer draws the eye texture on
+    /// the body's model, every polygon of it, at each oxidation level. The
+    /// prepared `copper_golem#eyes` model has no polygons, so the eyes
+    /// showed the body texture's black sockets.
+    #[test]
+    fn copper_golem_eyes_are_drawn_on_the_body_model() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            return;
+        }
+        let types = super::super::MobTypes::load(&root).unwrap();
+        let kind = std::sync::Arc::new(types.types["minecraft:copper_golem"].clone());
+        let data = MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: Default::default(),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            villager_hats: Default::default(),
+            pois: Default::default(),
+        };
+        let atlas = |name: &str| {
+            Some(if name.contains("copper_golem_eyes") {
+                [0.5, 0.5, 0.75, 0.75]
+            } else {
+                [0.0, 0.0, 0.25, 0.25]
+            })
+        };
+        for variant in 0..4 {
+            let mut mob = Mob::new(1, kind.clone(), horizon_core::geometry::Vec3::ZERO, 0.0);
+            mob.extra.variant = variant;
+            let mut vertices = Vec::new();
+            render(
+                &mob,
+                0.5,
+                glam::DVec3::ZERO,
+                &atlas,
+                0xf0f0,
+                &data,
+                &mut vertices,
+            );
+            let body = vertices.iter().filter(|v| v.uv[0] <= 0.25).count();
+            let eyes = vertices.iter().filter(|v| v.uv[0] >= 0.5).count();
+            assert!(body > 0, "variant {variant}: no body drawn");
+            assert_eq!(
+                eyes, body,
+                "variant {variant}: the eye layer covers the body"
+            );
+        }
+    }
     /// `VexModel.translateToHand`: the held item is drawn at 0.55 scale and
     /// moved by the vex's own offset, so the vex's sword is the tiny one
     /// vanilla shows. It was drawn at the full size, like a zombie's.
@@ -1714,6 +1923,56 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// PhantomRenderer.scale moves the model down into its 0.5-high box:
+    /// the model's origin ends 1.501 - 1.3125 blocks above the feet (times
+    /// the size's scale), not 1.501 like other mobs (#3008).
+    #[test]
+    fn the_phantom_model_sits_in_its_box() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            return;
+        }
+        let types = super::super::MobTypes::load(&root).unwrap();
+        let kind = std::sync::Arc::new(types.types["minecraft:phantom"].clone());
+        let mut mob = Mob::new(1, kind, horizon_core::geometry::Vec3::ZERO, 0.0);
+        for (size, scale) in [(0, 1.0f32), (5, 1.75)] {
+            mob.extra.size = size;
+            let origin =
+                base_transform(&mob, 1.0, glam::DVec3::ZERO).transform_point3(glam::Vec3::ZERO);
+            let y = (1.501 - 1.3125) * scale;
+            assert!(
+                (origin.y - y).abs() < 1.0e-4,
+                "size {size}: origin {origin}"
+            );
+            assert!(
+                (origin.z.abs() - 0.1875 * scale).abs() < 1.0e-4,
+                "size {size}: origin {origin}"
+            );
+        }
+    }
+    #[test]
+    fn a_dyed_leather_armour_keeps_its_colour() {
+        // EquipmentLayerRenderer.getColorForLayer: a dyeable layer takes
+        // the stack's dye colour, the colour it has when undyed otherwise.
+        let mut stack = crate::items::ItemStack {
+            item: "minecraft:leather_helmet".into(),
+            count: 1,
+            damage: 0,
+            extra: None,
+        };
+        // Undyed leather: the colour the leather layer has when undyed.
+        assert_eq!(armor_tint(Some(0xA06540), Some(&stack)), abgr(0xA06540));
+        // Dyed: the stack's own colour.
+        stack.extra = Some(Box::new(crate::item_data::StackData {
+            dyed_color: Some(0x0000FF),
+            ..Default::default()
+        }));
+        assert_eq!(armor_tint(Some(0xA06540), Some(&stack)), abgr(0x0000FF));
+        // A layer that is not dyeable is not tinted.
+        assert_eq!(armor_tint(None, Some(&stack)), 0xFFFF_FFFF);
     }
 }
 

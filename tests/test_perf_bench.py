@@ -106,3 +106,106 @@ class WaitLoadedTests(unittest.TestCase):
         self.assertLess(took, 4.0)
         # Without one (the old call), the quiet start ends the wait at once.
         self.assertLess(self.run_script(idle + loading + tail), 1.6)
+
+
+class PortabilityTests(unittest.TestCase):
+    """What the driver needs from the OS also works where it differs (Windows: no ps, no load average,
+    no Unix sockets in Python, nvidia-smi without per-process memory)."""
+
+    def test_resident_memory_of_this_process(self):
+        import os
+        from tools.perf_bench import rss_bytes
+        self.assertGreater(rss_bytes(os.getpid()), 1 << 20)
+
+    def test_load_average_is_a_number_or_absent(self):
+        from tools.perf_bench import load_average
+        self.assertTrue(load_average() is None or load_average() >= 0)
+
+    def test_report_without_a_load_average(self):
+        import argparse
+        import tools.perf_bench as pb
+        run = {"startup": {"title_s": 1.0, "world_s": 5.0}, "memory": {}, "load_before": None,
+               "scenes": {"village": {"load_s": 2.0, "frame_ms": [5.0] * 100, "meshes_load": 10}}}
+        args = argparse.Namespace(offscreen=False, settle=2.0, label="x")
+        r = pb.report(args, 8, [run], {"name": "horizon-client"})
+        self.assertNotIn("load_avg_1m", r["conditions"])
+        self.assertEqual(r["metrics"]["fps.village.avg_fps"]["mean"], 200.0)
+        self.assertEqual(pb.report(args, 8, [dict(run, load_before=1.25)], {})["conditions"]["load_avg_1m"], 1.25)
+        self.assertTrue(r["hardware"]["os"] and r["hardware"]["cpu_threads"])
+
+    def test_nvidia_memory_not_available(self):
+        from unittest import mock
+        import subprocess
+        import tools.perf_bench as pb
+        out = subprocess.CompletedProcess([], 0, stdout="1234, [N/A]\n4321, 812\n")
+        with mock.patch.object(pb.shutil, "which", return_value="nvidia-smi"), \
+                mock.patch.object(pb.subprocess, "run", return_value=out):
+            self.assertIsNone(pb.nvidia_memory_mb(1234))
+            self.assertEqual(pb.nvidia_memory_mb(4321), 812.0)
+            self.assertIsNone(pb.nvidia_memory_mb(99))
+
+    def test_control_over_the_tcp_endpoint(self):
+        # The game's TCP transport (Windows, or an endpoint path ending in .json): the file names a port and
+        # a token, and the first line must be `auth TOKEN`.
+        import socket
+        import tempfile
+        import threading
+        from pathlib import Path
+        from tools.perf_bench import Control, control_path
+        self.assertIn(control_path().suffix, (".sock", ".json"))
+        server = socket.create_server(("127.0.0.1", 0))
+        lines = []
+
+        def serve():
+            for _ in range(2):
+                conn, _ = server.accept()
+                with conn, conn.makefile("rwb") as f:
+                    auth = f.readline().decode().strip()
+                    lines.append(auth)
+                    if auth != "auth secret":
+                        f.write(b'{"error":"bad or missing token"}\n')
+                        f.flush()
+                        continue
+                    f.write(b'{"ok":true}\n')
+                    f.flush()
+                    lines.append(f.readline().decode().strip())
+                    f.write(b'{"screen":"title"}\n')
+                    f.flush()
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        with tempfile.TemporaryDirectory() as tmp, server:
+            path = Path(tmp) / "control.json"
+            port = server.getsockname()[1]
+            path.write_text(json.dumps({"transport": "tcp", "port": port, "token": "secret"}))
+            self.assertEqual(Control(path)("status", timeout=10), {"screen": "title"})
+            path.write_text(json.dumps({"transport": "tcp", "port": port, "token": "wrong"}))
+            with self.assertRaises(OSError):
+                Control(path)("status", timeout=10)
+            thread.join(10)
+        self.assertEqual(lines, ["auth secret", "status", "auth wrong"])
+
+    def test_a_release_build_reports_its_own_version(self):
+        import tempfile
+        from pathlib import Path
+        from tools.perf_bench import release_version
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "horizon-rd8.log"
+            log.write_text("Horizon v0.2.97\nload assets: 1.29s\n")
+            self.assertEqual(release_version(log), "v0.2.97")
+            log.write_text("Horizon nightly-2026-10-28-0c02067\n")
+            self.assertEqual(release_version(log), "nightly-2026-10-28-0c02067")
+            for dev in ("Horizon 0.1.0\n", "Horizon v0.2.97 (client 0.1.0)\n"):
+                log.write_text(dev)
+                self.assertIsNone(release_version(log))
+            self.assertIsNone(release_version(Path(tmp) / "missing.log"))
+
+    def test_vanilla_gets_the_manifest_jvm_flags(self):
+        from tools.perf_bench import manifest_jvm_flags
+        manifest = {"arguments": {"jvm": [
+            {"rules": [{"action": "allow", "os": {"name": "osx"}}], "value": ["-XstartOnFirstThread"]},
+            {"rules": [{"action": "allow", "os": {"arch": "x86"}}], "value": "-Xss1M"},
+            "-XX:StackShadowPages=32", "--enable-native-access=ALL-UNNAMED",
+            "-Djava.library.path=${natives_directory}/java", "-cp", "${classpath}"]}}
+        self.assertEqual(manifest_jvm_flags(manifest), ["-XX:StackShadowPages=32"])
+        self.assertEqual(manifest_jvm_flags({}), [])

@@ -302,7 +302,7 @@ fn avatar(c: &Value, out: &mut impl Write) -> Result<()> {
     for op in c["ops"].as_array().unwrap() {
         let name = op[0].as_str().unwrap();
         match name {
-            "tick" => state.tick(),
+            "tick" => state.tick([0.0; 3]),
             "move" => state.add_walked(fl(&op[1]), fl(&op[2])),
             "bob" => state.update_bob(b(&op[1]) && !b(&op[2]) && !b(&op[3]), vec3(&op[4])),
             "reset" => state.reset_bob(),

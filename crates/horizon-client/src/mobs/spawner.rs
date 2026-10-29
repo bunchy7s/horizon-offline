@@ -17,15 +17,26 @@ pub use crate::chunk::block_entity::{CustomSpawnRules, SpawnData, Spawner};
 use horizon_core::{geometry::Aabb, geometry::Vec3, random::RandomSource};
 use horizon_world::nbt::{Compound, JavaString, Tag};
 
-impl SpawnData {
+/// `SpawnData`'s codec and rules, over the data in `chunk::block_entity`.
+pub trait SpawnDataExt: Sized {
     /// The `SpawnData` constructor: an `id` that is a valid identifier is
     /// stored normalised (`zombie` becomes `minecraft:zombie`), any other is
     /// removed.
-    pub fn new(
-        mut entity: Compound,
-        rules: Option<CustomSpawnRules>,
-        equipment: Option<Tag>,
-    ) -> Self {
+    fn new(entity: Compound, rules: Option<CustomSpawnRules>, equipment: Option<Tag>) -> Self;
+    /// The entity's `id`, if any.
+    fn id(&self) -> Option<String>;
+    /// `SpawnData.CODEC`: `entity` (required), `custom_spawn_rules` and
+    /// `equipment`.
+    fn decode(tag: &Tag) -> Option<Self>;
+    fn encode(&self) -> Tag;
+    /// The entity compound is only its `id` (`hasNoConfiguration`): the
+    /// spawned mob is finalized.
+    fn unconfigured(&self) -> bool;
+    /// `CustomSpawnRules.isValidPosition`.
+    fn valid_position<L: SpawnerLevel>(r: CustomSpawnRules, l: &L, x: i32, y: i32, z: i32) -> bool;
+}
+impl SpawnDataExt for SpawnData {
+    fn new(mut entity: Compound, rules: Option<CustomSpawnRules>, equipment: Option<Tag>) -> Self {
         let key = JavaString::from("id");
         let id = match entity.get(&key) {
             Some(Tag::String(s)) => normalize_id(&s.to_string_lossy()),
@@ -45,16 +56,13 @@ impl SpawnData {
             equipment,
         }
     }
-    /// The entity's `id`, if any.
-    pub fn id(&self) -> Option<String> {
+    fn id(&self) -> Option<String> {
         match self.entity.get(&JavaString::from("id")) {
             Some(Tag::String(s)) => Some(s.to_string_lossy()),
             _ => None,
         }
     }
-    /// `SpawnData.CODEC`: `entity` (required), `custom_spawn_rules` and
-    /// `equipment`.
-    pub fn decode(tag: &Tag) -> Option<Self> {
+    fn decode(tag: &Tag) -> Option<Self> {
         let Some(Tag::Compound(entity)) = tag.get("entity") else {
             return None;
         };
@@ -75,7 +83,7 @@ impl SpawnData {
             tag.get("equipment").cloned(),
         ))
     }
-    pub fn encode(&self) -> Tag {
+    fn encode(&self) -> Tag {
         let mut out = vec![("entity", Tag::Compound(self.entity.clone()))];
         if let Some(r) = self.custom_spawn_rules {
             let mut rules = Vec::new();
@@ -92,19 +100,10 @@ impl SpawnData {
         }
         Tag::compound(out)
     }
-    /// The entity compound is only its `id` (`hasNoConfiguration`): the
-    /// spawned mob is finalized.
-    pub(crate) fn unconfigured(&self) -> bool {
+    fn unconfigured(&self) -> bool {
         self.entity.len() == 1 && self.id().is_some()
     }
-    /// `CustomSpawnRules.isValidPosition`.
-    pub(crate) fn valid_position<L: SpawnerLevel>(
-        r: CustomSpawnRules,
-        l: &L,
-        x: i32,
-        y: i32,
-        z: i32,
-    ) -> bool {
+    fn valid_position<L: SpawnerLevel>(r: CustomSpawnRules, l: &L, x: i32, y: i32, z: i32) -> bool {
         let block = l.block_light(x, y, z);
         let sky = (l.sky_light(x, y, z) - l.sky_darken()).max(0);
         (r.block.0..=r.block.1).contains(&block) && (r.sky.0..=r.sky.1).contains(&sky)
@@ -200,25 +199,6 @@ fn encode_range((lo, hi): (i32, i32)) -> Tag {
     }
 }
 
-impl Default for Spawner {
-    fn default() -> Self {
-        Self {
-            spawn_delay: 20,
-            potentials: Vec::new(),
-            next: None,
-            min_spawn_delay: 200,
-            max_spawn_delay: 800,
-            spawn_count: 4,
-            max_nearby_entities: 6,
-            required_player_range: 16,
-            spawn_range: 4,
-            client_delay: 20,
-            spin: 0.0,
-            o_spin: 0.0,
-        }
-    }
-}
-
 /// What a spawner did that the level shows or sends.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SpawnerEvent {
@@ -270,9 +250,60 @@ pub trait SpawnerLevel: NaturalLevel {
     fn count_entities(&self, id: &str, bounds: Aabb) -> usize;
 }
 
-impl Spawner {
+/// `BaseSpawner`'s behaviour, over the data in `chunk::block_entity`.
+pub trait SpawnerExt: Sized {
     /// `BaseSpawner.load` (`SpawnerBlockEntity.loadAdditional`).
-    pub fn load(tag: &Tag) -> Self {
+    fn load(tag: &Tag) -> Self;
+    /// `BaseSpawner.save`: the fields as shorts, the next data when set and
+    /// the potentials.
+    fn save(&self) -> Vec<(&'static str, Tag)>;
+    /// `SpawnerBlockEntity.getUpdateTag`: the saved fields without the potentials.
+    fn update_tag(&self) -> Tag;
+    fn next_data(&self) -> Option<&SpawnData>;
+    fn next_data_mut(&mut self) -> Option<&mut SpawnData>;
+    fn random_potential(&self, random: &mut impl RandomSource) -> Option<usize>;
+    /// `getOrCreateNextSpawnData`: a potential at random, or empty data.
+    fn next_or_create(&mut self, random: &mut impl RandomSource, events: &mut Vec<SpawnerEvent>);
+    /// `setEntityId`: the next data's `id` (a spawn egg used on the spawner).
+    fn set_entity_id(
+        &mut self,
+        id: &str,
+        random: &mut impl RandomSource,
+        events: &mut Vec<SpawnerEvent>,
+    );
+    /// `isNearPlayer`.
+    fn near_player<L: SpawnerLevel>(&self, l: &L, pos: [i32; 3]) -> bool;
+    /// `delay`: the next delay, a new potential (when there are any) and the
+    /// block event.
+    fn delay(&mut self, random: &mut impl RandomSource, events: &mut Vec<SpawnerEvent>);
+    /// `serverTick`. `spawn` adds an entity the spawner accepted and returns
+    /// it, or None when the level would not take it.
+    fn server_tick<L: SpawnerLevel, R: RandomSource>(
+        &mut self,
+        l: &L,
+        random: &mut R,
+        pos: [i32; 3],
+        spawn: &mut dyn FnMut(&L, &SpawnerSpawn) -> Option<SpawnerAdded>,
+        events: &mut Vec<SpawnerEvent>,
+    );
+    /// `clientTick`: with a player near and a mob to show, a smoke and flame
+    /// particle at a random point of the block (returned) and the spin.
+    fn client_tick(
+        &mut self,
+        near_player: bool,
+        has_display: bool,
+        random: &mut impl RandomSource,
+        pos: [i32; 3],
+    ) -> Option<[f64; 3]>;
+    /// `onEventTriggered` on the client: event 1 resets the delay.
+    fn client_event(&mut self, id: i32) -> bool;
+    /// The client copy received an update tag (`load`): its delay follows.
+    fn client_loaded(&mut self);
+    /// The display mob's spin in degrees and scale ([`display_pose`]).
+    fn display_pose(&self, alpha: f32, width: f32, height: f32) -> (f32, f32);
+}
+impl SpawnerExt for Spawner {
+    fn load(tag: &Tag) -> Self {
         let mut s = Self {
             spawn_delay: number(tag.get("Delay")).map_or(20, |v| i32::from(v as i16)),
             ..Self::default()
@@ -316,9 +347,7 @@ impl Spawner {
         s.client_delay = s.spawn_delay;
         s
     }
-    /// `BaseSpawner.save`: the fields as shorts, the next data when set and
-    /// the potentials.
-    pub fn save(&self) -> Vec<(&'static str, Tag)> {
+    fn save(&self) -> Vec<(&'static str, Tag)> {
         let short = |v: i32| Tag::Short(v as i16);
         let mut out = vec![
             ("Delay", short(self.spawn_delay)),
@@ -343,15 +372,14 @@ impl Spawner {
         ));
         out
     }
-    /// `SpawnerBlockEntity.getUpdateTag`: the saved fields without the potentials.
-    pub fn update_tag(&self) -> Tag {
+    fn update_tag(&self) -> Tag {
         Tag::compound(
             self.save()
                 .into_iter()
                 .filter(|(k, _)| *k != "SpawnPotentials"),
         )
     }
-    pub fn next_data(&self) -> Option<&SpawnData> {
+    fn next_data(&self) -> Option<&SpawnData> {
         match self.next.as_ref()? {
             Next::Own(d) => Some(d),
             Next::Potential(i) => self.potentials.get(*i).map(|(d, _)| d),
@@ -366,7 +394,6 @@ impl Spawner {
     fn random_potential(&self, random: &mut impl RandomSource) -> Option<usize> {
         weighted_index(self.potentials.iter().map(|(_, w)| *w), random)
     }
-    /// `getOrCreateNextSpawnData`: a potential at random, or empty data.
     fn next_or_create(&mut self, random: &mut impl RandomSource, events: &mut Vec<SpawnerEvent>) {
         if self.next.is_some() {
             return;
@@ -377,8 +404,7 @@ impl Spawner {
         });
         events.push(SpawnerEvent::BlockUpdated);
     }
-    /// `setEntityId`: the next data's `id` (a spawn egg used on the spawner).
-    pub fn set_entity_id(
+    fn set_entity_id(
         &mut self,
         id: &str,
         random: &mut impl RandomSource,
@@ -389,7 +415,6 @@ impl Spawner {
             d.entity.insert("id".into(), Tag::String(id.into()));
         }
     }
-    /// `isNearPlayer`.
     fn near_player<L: SpawnerLevel>(&self, l: &L, pos: [i32; 3]) -> bool {
         l.alive_player_near(
             f64::from(pos[0]) + 0.5,
@@ -398,8 +423,6 @@ impl Spawner {
             f64::from(self.required_player_range),
         )
     }
-    /// `delay`: the next delay, a new potential (when there are any) and the
-    /// block event.
     fn delay(&mut self, random: &mut impl RandomSource, events: &mut Vec<SpawnerEvent>) {
         self.spawn_delay = if self.max_spawn_delay <= self.min_spawn_delay {
             self.min_spawn_delay
@@ -415,9 +438,7 @@ impl Spawner {
         }
         events.push(SpawnerEvent::BlockEvent(1));
     }
-    /// `serverTick`. `spawn` adds an entity the spawner accepted and returns
-    /// it, or None when the level would not take it.
-    pub fn server_tick<L: SpawnerLevel, R: RandomSource>(
+    fn server_tick<L: SpawnerLevel, R: RandomSource>(
         &mut self,
         l: &L,
         random: &mut R,
@@ -571,9 +592,7 @@ impl Spawner {
             self.delay(random, events);
         }
     }
-    /// `clientTick`: with a player near and a mob to show, a smoke and flame
-    /// particle at a random point of the block (returned) and the spin.
-    pub fn client_tick(
+    fn client_tick(
         &mut self,
         near_player: bool,
         has_display: bool,
@@ -600,8 +619,7 @@ impl Spawner {
             (self.spin + f64::from(1000.0_f32 / (self.client_delay as f32 + 200.0))) % 360.0;
         Some(p)
     }
-    /// `onEventTriggered` on the client: event 1 resets the delay.
-    pub fn client_event(&mut self, id: i32) -> bool {
+    fn client_event(&mut self, id: i32) -> bool {
         if id == 1 {
             self.client_delay = self.min_spawn_delay;
             true
@@ -609,12 +627,10 @@ impl Spawner {
             false
         }
     }
-    /// The client copy received an update tag (`load`): its delay follows.
-    pub fn client_loaded(&mut self) {
+    fn client_loaded(&mut self) {
         self.client_delay = self.spawn_delay;
     }
-    /// The display mob's spin in degrees and scale ([`display_pose`]).
-    pub fn display_pose(&self, alpha: f32, width: f32, height: f32) -> (f32, f32) {
+    fn display_pose(&self, alpha: f32, width: f32, height: f32) -> (f32, f32) {
         display_pose(self.o_spin, self.spin, alpha, width, height)
     }
 }
@@ -749,5 +765,12 @@ mod tests {
         );
         assert_eq!(light_limit(Some(&tag("[I;9,2]"))), None);
         assert_eq!(encode_range((3, 3)), Tag::Int(3));
+    }
+
+    #[test]
+    fn spawner_defaults_empty() {
+        let s = Spawner::default();
+        assert_eq!(s.next_data(), None);
+        assert!(s.potentials.is_empty());
     }
 }

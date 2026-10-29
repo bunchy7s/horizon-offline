@@ -142,7 +142,7 @@ impl Launcher {
         }
         self.play_as(Player::Offline(name));
         if !matches!(self.sign_in_state, Some(SignInState::Done(Err(_)))) {
-            self.servers.text(Field::OfflineName).clear();
+            self.servers.text(Field::OfflineName).set(String::new());
         }
     }
 

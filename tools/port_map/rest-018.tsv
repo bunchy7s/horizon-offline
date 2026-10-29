@@ -1,0 +1,147 @@
+ServerGamePacketListenerImpl.getMaximumFlyingTicks	missing		player: the flying kick (multiplayer.disconnect.flying) for hovering above ground is never checked; the tick limit is not computed
+ServerGamePacketListenerImpl.resetPosition	inline	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	gap: minor: only firstGood is reset at the start of each inbox pass; lastGood is not kept and teleports do not reset it
+ServerGamePacketListenerImpl.isAcceptingMessages	skip:other		the waiting-for-configuration flag does not exist: the host never starts a configuration phase mid-play
+ServerGamePacketListenerImpl.shouldHandleMessage	skip:other		the waiting-for-configuration flag does not exist: the host never starts a configuration phase mid-play
+ServerGamePacketListenerImpl.filterTextPacket	skip:service		text filter / notification service: the LAN host wires no such service
+ServerGamePacketListenerImpl.handlePlayerInput	port	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	PlayerInput arm: keys stored, sneaking set, action time reset once the guest is loaded
+ServerGamePacketListenerImpl.containsInvalidValues	port	crates/horizon-client/src/lan/hub.rs::Hub::move_player	NaN and non-finite rotation test, kick with invalid_player_movement; process_inbox runs the same test for AcceptTeleportation
+ServerGamePacketListenerImpl.noBlocksAround	missing		player: the air-below test of the flying check is never run, so a player hovering over empty air is not checked
+ServerGamePacketListenerImpl.handleAcceptTeleportPacket	port	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	gap: minor: an accept with the right id but no teleport awaited is ignored; vanilla disconnects
+ServerGamePacketListenerImpl.handleRecipeBookSeenRecipePacket	missing		minor: the server never clears the new-recipe highlight (RECIPE_BOOK_SEEN_RECIPE has no handler)
+ServerGamePacketListenerImpl.handleBundleItemSelectedPacket	port	crates/horizon-client/src/lan/containers.rs::Hub::select_bundle_item	the spectator check is in the SelectBundleItem arm of lan_guest_packet
+ServerGamePacketListenerImpl.handleSeenAdvancements	missing		minor: the advancement tab a player last opened is not stored on the host (SEEN_ADVANCEMENTS has no handler)
+ServerGamePacketListenerImpl.handleSetCommandMinecart	missing		player: a command minecart's command cannot be saved from its edit screen (SET_COMMAND_MINECART has no handler)
+ServerGamePacketListenerImpl.handlePickItemFromBlock	port	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	the reach check and block pick are in the PickItemFromBlock arm; the pick itself is guest_pick_item
+ServerGamePacketListenerImpl.handlePickItemFromEntity	port	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	gap: minor: the op's fetchprofile printout with includeData is not sent; Horizon prints no profiles
+ServerGamePacketListenerImpl.handleSetGameRule	port	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	SetGameRule arm: permission 2 or more, unknown rules ignored, rules synced
+ServerGamePacketListenerImpl.setGameRuleValue	inline	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	the rule set and the op broadcast are in the SetGameRule arm
+ServerGamePacketListenerImpl.broadcastGameRuleChangeToOperators	inline	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	the operator message is sent in the SetGameRule arm to guests with permission 2 or more
+ServerGamePacketListenerImpl.handleSetStructureBlock	missing		player: a creative player's structure block edits (save, load, scan) do nothing; SET_STRUCTURE_BLOCK has no handler
+ServerGamePacketListenerImpl.handleSetTestBlock	missing		player: test block edits do not save; SET_TEST_BLOCK has no handler
+ServerGamePacketListenerImpl.handleTestInstanceBlockAction	missing		player: test instance block actions (save, run, reset, export) do nothing; TEST_INSTANCE_BLOCK_ACTION has no handler
+ServerGamePacketListenerImpl.handleSetJigsawBlock	missing		player: jigsaw block edits do not save; SET_JIGSAW_BLOCK has no handler
+ServerGamePacketListenerImpl.handleJigsawGenerate	missing		player: the jigsaw block's Generate does nothing; JIGSAW_GENERATE has no handler
+ServerGamePacketListenerImpl.handleSelectTrade	port	crates/horizon-client/src/game/lan_trading.rs::Game::lan_select_trade	
+ServerGamePacketListenerImpl.updateBookContents	port	crates/horizon-client/src/game/books.rs::Game::write_book	writes the pages into the writable book in the slot
+ServerGamePacketListenerImpl.filterableFromOutgoing	skip:service		text filter pass-through: with no filter on the LAN host the page is the raw text
+ServerGamePacketListenerImpl.handleEntityTagQuery	missing		player: an op's entity NBT query (ENTITY_TAG_QUERY) gets no reply
+ServerGamePacketListenerImpl.handleBlockEntityTagQuery	missing		player: an op's block entity NBT query (BLOCK_ENTITY_TAG_QUERY) gets no reply
+ServerGamePacketListenerImpl.shouldCheckPlayerMovement	inline	crates/horizon-client/src/lan/hub.rs::Hub::position_change	gap: minor: the changing-dimension exemption is not checked; the single-player owner, movement and elytra gates are
+ServerGamePacketListenerImpl.forceSendPlayerSupportBlocks	missing		minor: the blocks under a player standing on air are never sent again (vanilla's desync fix)
+ServerGamePacketListenerImpl.updateAwaitingTeleport	port	crates/horizon-client/src/lan/hub.rs::Hub::move_player	gap: minor: vanilla runs it every tick; here it runs only when a move packet arrives
+ServerGamePacketListenerImpl.isEntityCollidingWithAnythingNew	port	crates/horizon-client/src/lan/hub.rs::Hub::collide	
+ServerGamePacketListenerImpl.wasBlockPlacementAttempt	missing		minor: only decides the build-limit message, which is not sent (see handleUseItemOn)
+ServerGamePacketListenerImpl.handleUseItemOn	port	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	gap: player: the build-limit message is never sent when placing at the top or bottom of the world
+ServerGamePacketListenerImpl.handleUseItem	port	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	UseItem arm: rotation taken from the packet, then the item is used
+ServerGamePacketListenerImpl.handlePaddleBoat	port	crates/horizon-client/src/game/lan_vehicles.rs::Game::guest_paddle_boat	
+ServerGamePacketListenerImpl.onDisconnect	port	crates/horizon-client/src/lan/hub.rs::Hub::remove_guest	the reason is kept and the leave is broadcast
+ServerGamePacketListenerImpl.handleSetCarriedItem	port	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	SetCarriedItem arm: hotbar slot set, using item cleared
+ServerGamePacketListenerImpl.performUnsignedChatCommand	port	crates/horizon-client/src/game/lan_chat.rs::Game::guest_chat_command	
+ServerGamePacketListenerImpl.performSignedChatCommand	port	crates/horizon-client/src/game/lan_chat.rs::Game::guest_signed_command	
+ServerGamePacketListenerImpl.collectUnsignedArguments	port	crates/horizon-client/src/lan/hub/chat.rs::Hub::signed_arguments	the empty-arguments branch of signed_arguments
+ServerGamePacketListenerImpl.createSignedArgumentMismatchException	inline	crates/horizon-client/src/lan/hub/chat.rs::Hub::signed_arguments	the mismatch error and log are in signed_arguments
+ServerGamePacketListenerImpl.parseCommand	port	crates/horizon-client/src/game/lan_chat.rs::Game::parse_as	parse with the guest's permission level
+ServerGamePacketListenerImpl.isChatMessageIllegal	port	crates/horizon-client/src/lan/hub/chat.rs::Hub::try_handle_chat	per-character allowed test; kicks with illegal_characters
+ServerGamePacketListenerImpl.getSignedMessage	port	crates/horizon-client/src/lan/hub/chat.rs::Hub::handle_chat	the body is unpacked in handle_chat
+ServerGamePacketListenerImpl.detectRateSpam	missing		player: a player who spams chat or commands is never kicked (disconnect.spam); chat-spam-threshold-seconds is read but not used
+ServerGamePacketListenerImpl.switchToConfig	skip:other		the host never starts a configuration phase mid-play
+ServerGamePacketListenerImpl.handleAttack	port	crates/horizon-client/src/game/lan_actions.rs::Game::guest_attack	gap: minor: no kick for attacking an item, XP orb, self or a non-attackable arrow; the piercing-weapon skip is not in this fn
+ServerGamePacketListenerImpl.handleSpectatorAction	missing		player: a spectator's entity camera choice (SPECTATOR_ACTION) has no handler and SET_CAMERA is never sent
+ServerGamePacketListenerImpl.sendGameRuleValues	port	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	ClientCommand action 2 arm: the game rule list for ops
+ServerGamePacketListenerImpl.addGameRuleValue	inline	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	the value list is built in the same arm
+ServerGamePacketListenerImpl.handleSetCreativeModeSlot	port	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	gap: minor: slot 0 (craft result) is accepted where vanilla takes 1 to 45, and the stack max is not checked for a set
+ServerGamePacketListenerImpl.updateSignText	inline	crates/horizon-client/src/game/sign_edit.rs::Game::lan_sign_update	the sign write is in lan_sign_update
+ServerGamePacketListenerImpl.handlePlayerAbilities	port	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	PlayerAbilities arm: flying only when the guest may fly
+ServerGamePacketListenerImpl.handleClientInformation	port	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	gap: player: the hat-layer change is not sent to the other players (UPDATE_HAT)
+ServerGamePacketListenerImpl.handleChangeDifficulty	port	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	ChangeDifficulty arm: permission 2 or more, not locked, 0 to 3
+ServerGamePacketListenerImpl.handleChangeGameMode	port	crates/horizon-client/src/game/debug_keys.rs::Game::change_game_mode	reached from the ChangeGameMode arm, which checks permission 2 or more
+ServerGamePacketListenerImpl.handleLockDifficulty	port	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	LockDifficulty arm: permission 2 or more
+ServerGamePacketListenerImpl.handleConfigurationAcknowledged	skip:other		the host never starts a configuration phase mid-play, so there is no acknowledgement to wait for
+ServerGamePacketListenerImpl.handleChunkBatchReceived	port	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	ChunkBatchReceived arm: updates the send quota
+ServerGamePacketListenerImpl.handleDebugSubscriptionRequest	skip:debug		F3 debug subscriptions are not implemented by the LAN host
+ServerGamePacketListenerImpl.resetPlayerChatState	port	crates/horizon-client/src/lan/hub/chat.rs::Hub::chat_session_update	gap: minor: the chain swap is immediate and not queued behind pending chat; INITIALIZE_CHAT is broadcast
+ServerGamePacketListenerImpl.handleClientTickEnd	port	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	ClientTickEnd arm clears the per-tick movement flag; known movement is the known_moves copy taken at the start of the pass
+ServerGamePacketListenerImpl.handlePlayerKnownMovement	port	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	a move that goes far enough resets the action time
+ServerHandshakePacketListenerImpl.handleIntention	port	crates/horizon-client/src/lan/conn.rs::serve_connection	LOGIN, STATUS and TRANSFER branches; a protocol mismatch sends a disconnect
+ServerLoginPacketListenerImpl.tick	port	crates/horizon-client/src/lan/conn.rs::serve_connection	gap: minor: the 600-tick slow-login kick becomes a 30 s socket read timeout that closes without a message
+ServerLoginPacketListenerImpl.isPlayerAlreadyInWorld	port	crates/horizon-client/src/lan/mod.rs::Shared::try_admit	the online check and the wait for a duplicate profile to leave
+ServerLoginPacketListenerImpl.handleHello	port	crates/horizon-client/src/lan/conn.rs::serve_login	name check, then authenticate online or derive the offline id
+ServerLoginPacketListenerImpl.verifyLoginAndFinishConnectionSetup	port	crates/horizon-client/src/lan/mod.rs::Shared::try_admit	gap: minor: canPlayerLogin and the duplicate wait are here; compression is sent in login_and_configure
+ServerLoginPacketListenerImpl.finishLoginAndWaitForClient	port	crates/horizon-client/src/lan/conn.rs::login_and_configure	sends LoginFinished
+ServerLoginPacketListenerImpl.handleLoginAcknowledgement	port	crates/horizon-client/src/lan/conn.rs::login_and_configure	reads the login acknowledgement, then the configuration phase
+ServerStatusPacketListenerImpl.handleStatusRequest	port	crates/horizon-client/src/lan/conn.rs::serve_status	a second request closes the connection
+ServerStatusPacketListenerImpl.handlePingRequest	port	crates/horizon-client/src/lan/conn.rs::serve_status	pong, then close
+ServerTextFilter.getEndpoint	skip:service		text filter / notification service: the LAN host wires no such service
+ServerTextFilter.createFromConfig	skip:service		text filter / notification service: the LAN host wires no such service
+ServerTextFilter.requestMessageProcessing	skip:service		text filter / notification service: the LAN host wires no such service
+ServerTextFilter.parseMask	skip:service		text filter / notification service: the LAN host wires no such service
+ServerTextFilter.processRequestResponse	skip:service		text filter / notification service: the LAN host wires no such service
+ServerTextFilter.makeRequest	skip:service		text filter / notification service: the LAN host wires no such service
+ServerTextFilter.getURLConnection	skip:service		text filter / notification service: the LAN host wires no such service
+ServerTextFilter.PlayerContext.processMessageBundle	skip:service		text filter / notification service: the LAN host wires no such service
+ServerTextFilter.PlayerContext.processStreamMessage	skip:service		text filter / notification service: the LAN host wires no such service
+PrepareSpawnTask.start	port	crates/horizon-client/src/game/lan.rs::Game::lan_guest_joined	gap: minor: no wait for the spawn chunks; the saved state is applied and a new player is placed by server_player_spawn
+PrepareSpawnTask.tick	missing		minor: no spawn-chunk wait before a joining player is placed (see Preparing.tick)
+PrepareSpawnTask.spawnPlayer	inline	crates/horizon-client/src/game/lan.rs::Game::lan_guest_joined	the load and the placement run here, through place_new_player
+PrepareSpawnTask.keepAlive	skip:other		no preparing state to hold spawn chunks for
+PrepareSpawnTask.close	skip:other		no preparing state to cancel
+PrepareSpawnTask.Preparing.tick	missing		minor: no spawn-chunk load (radius 3) and no LOAD_PLAYER_CHUNKS progress before the join
+PrepareSpawnTask.Ready.keepAlive	skip:other		no waiting state to hold spawn chunks for
+PrepareSpawnTask.Ready.spawn	port	crates/horizon-client/src/lan/hub.rs::Hub::place_new_player	the saved state is loaded in lan_guest_joined; placeNewPlayer is here
+ServerResourcePackConfigurationTask.start	port	crates/horizon-client/src/lan/conn.rs::offer_pack	sends ResourcePackPush; the answer is awaited
+SynchronizeRegistriesTask.sendRegistries	port	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	registry data; the tags are sent by login_and_configure
+SynchronizeRegistriesTask.handleResponse	port	crates/horizon-client/src/lan/conn.rs::login_and_configure	known-pack answer: only the core pack is offered, so it is all or the core pack
+NotificationManager.setServer	skip:service		external notification services for dedicated servers
+NotificationManager.onGameRuleChanged	skip:service		external notification services for dedicated servers
+ServerActivityMonitor.processWithRateLimit	skip:service		external notification services for dedicated servers
+AbstractPackMetadataResources.getMetadataSection	skip:data		pack file access; Horizon reads its data from tables and files
+AbstractPackMetadataResources.loadMetadata	skip:data		pack file access; Horizon reads its data from tables and files
+DownloadCacheCleaner.listFilesWithModificationTimes	inline	crates/horizon-client/src/server_packs/download.rs::vacuum	the folder walk and modification times are in vacuum
+DownloadCacheCleaner.prioritizeFilesInDirs	inline	crates/horizon-client/src/server_packs/download.rs::vacuum	the per-folder rank is in vacuum
+DownloadQueue.getFileInfo	port	crates/horizon-client/src/server_packs/download.rs::run	the size and relative name of each downloaded file are in the log entry built by run
+DownloadQueue.downloadBatch	port	crates/horizon-client/src/server_packs/download.rs::Queue::download	queues the batch for the download thread, which runs run
+FilePackResources.getPathFromLocation	skip:data		pack file access; Horizon reads its data from tables and files
+FilePackResources.getResource	skip:data		pack file access; Horizon reads its data from tables and files
+FilePackResources.addPrefix	skip:data		pack file access; Horizon reads its data from tables and files
+FilePackResources.getNamespaces	skip:data		pack file access; Horizon reads its data from tables and files
+FilePackResources.extractNamespace	skip:data		pack file access; Horizon reads its data from tables and files
+FilePackResources.listResources	skip:data		pack file access; Horizon reads its data from tables and files
+FilePackResources.FileResourcesSupplier.openMetadata	skip:data		pack file access; Horizon reads its data from tables and files
+FilePackResources.FileResourcesSupplier.openResources	skip:data		pack file access; Horizon reads its data from tables and files
+FilePackResources.SharedZipFileAccess.getOrCreateZipFile	skip:java		lazily opened zip cache
+FixedPathPackResources.getRootResource	skip:data		pack file access; Horizon reads its data from tables and files
+FixedPathPackResources.listRawPaths	skip:data		pack file access; Horizon reads its data from tables and files
+FixedPathPackResources.listResources	skip:data		pack file access; Horizon reads its data from tables and files
+FixedPathPackResources.getResource	skip:data		pack file access; Horizon reads its data from tables and files
+FixedPathPackResources.getMetadataSection	skip:data		pack file access; Horizon reads its data from tables and files
+FixedPathPackResources.Builder.validateDirPath	skip:java		builder step; Horizon has no pack builder
+FixedPathPackResources.Builder.pushPathForType	skip:java		builder step; Horizon has no pack builder
+FixedPathPackResources.Builder.build	skip:java		builder step; Horizon has no pack builder
+OverlayMetadataSection.validateOverlayDir	skip:java		codec validator for overlay directory names
+OverlayMetadataSection.codecForPackType	skip:java		codec construction
+OverlayMetadataSection.forPackType	skip:java		codec type lookup
+OverlayMetadataSection.overlaysForVersion	skip:data		overlay selection by pack format; no pack stack in Horizon
+OverlayMetadataSection.OverlayEntry.listCodecForPackType	skip:java		codec construction
+OverlayedPackResources.getResource	skip:data		pack file access; Horizon reads its data from tables and files
+OverlayedPackResources.listResources	skip:data		pack file access; Horizon reads its data from tables and files
+OverlayedPackResources.getNamespaces	skip:data		pack file access; Horizon reads its data from tables and files
+PathPackResources.getRootResource	skip:data		pack file access; Horizon reads its data from tables and files
+PathPackResources.validatePath	skip:debug		DEBUG_VALIDATE_RESOURCE_PATH_CASE check
+PathPackResources.getResource	skip:data		pack file access; Horizon reads its data from tables and files
+PathPackResources.returnFileIfExists	skip:data		pack file access; Horizon reads its data from tables and files
+PathPackResources.listResources	skip:data		pack file access; Horizon reads its data from tables and files
+PathPackResources.listPath	skip:data		pack file access; Horizon reads its data from tables and files
+PathPackResources.isRegularFile	skip:debug		IDE-only .DS_Store filter
+PathPackResources.getNamespaces	skip:data		pack file access; Horizon reads its data from tables and files
+PathPackResources.PathResourcesSupplier.openResources	skip:data		pack file access; Horizon reads its data from tables and files
+VanillaPackResources.asResourceManager	skip:data		pack file access; Horizon reads its data from tables and files
+VanillaPackResourcesBuilder.forLastLayer	skip:java		builder step; Horizon has no pack builder
+VanillaPackResourcesBuilder.forAllLayers	skip:java		builder step; Horizon has no pack builder
+VanillaPackResourcesBuilder.pushPathForType	skip:java		builder step; Horizon has no pack builder
+VanillaPackResourcesBuilder.pushJarResources	skip:data		resource roots from the jar or classpath; Horizon reads its data from tables and files
+VanillaPackResourcesBuilder.pushClasspathResources	skip:data		resource roots from the jar or classpath; Horizon reads its data from tables and files
+VanillaPackResourcesBuilder.pushUniversalPath	skip:data		resource roots from the jar or classpath; Horizon reads its data from tables and files
+VanillaPackResourcesBuilder.setMetadata	skip:java		builder step; Horizon has no pack builder
+VanillaPackResourcesBuilder.exposeNamespace	skip:java		builder step; Horizon has no pack builder
+VanillaPackResourcesBuilder.pushLayer	skip:java		builder step; Horizon has no pack builder
+VanillaPackResourcesBuilder.build	skip:java		builder step; Horizon has no pack builder

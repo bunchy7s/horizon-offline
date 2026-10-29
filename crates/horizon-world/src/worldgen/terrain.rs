@@ -31,6 +31,15 @@ pub trait TerrainAquifer {
         density: f64,
     ) -> Result<Option<BlockStateId>, AquiferError>;
     fn should_schedule_fluid_update(&self) -> bool;
+    /// The y above which every non-positive density is the aquifer's air. The
+    /// fill skips those blocks without asking the aquifer; `None` keeps the
+    /// per-block call for aquifers whose global fluid can vary with x/z.
+    fn air_above_y(&self) -> Option<i32> {
+        None
+    }
+    /// The fill decided this block without the aquifer (positive density or air
+    /// above its skip height). Both old paths cleared the pending fluid update.
+    fn note_skipped(&mut self) {}
 }
 impl<P: FluidPicker> TerrainAquifer for DisabledAquifer<P> {
     fn compute_substance(
@@ -58,6 +67,12 @@ impl<P: FluidPicker, F: PositionalRandom, B: AquiferBlockStates> TerrainAquifer
     }
     fn should_schedule_fluid_update(&self) -> bool {
         NoiseBasedAquifer::should_schedule_fluid_update(self)
+    }
+    fn air_above_y(&self) -> Option<i32> {
+        NoiseBasedAquifer::air_above_y(self)
+    }
+    fn note_skipped(&mut self) {
+        NoiseBasedAquifer::note_skipped(self);
     }
 }
 
@@ -172,10 +187,12 @@ impl<B: TerrainBlockStates> HeightmapChunk for TerrainBlocks<'_, B> {
     }
 }
 impl<B: TerrainBlockStates> TerrainBlocks<'_, B> {
+    #[inline]
     fn section_index(&self, y: i32) -> Option<usize> {
         let dy = i64::from(y) - i64::from(self.min_y);
         (dy >= 0 && dy < i64::from(self.height)).then_some((dy >> 4) as usize)
     }
+    #[inline]
     fn block(&self, x: i32, y: i32, z: i32) -> BlockStateId {
         let Some(section) = self.section_index(y) else {
             return self.void_air;
@@ -183,11 +200,10 @@ impl<B: TerrainBlockStates> TerrainBlocks<'_, B> {
         if self.non_air[section] == 0 {
             return self.air;
         }
-        self.sections[section]
-            .get(local_index(x, y, z))
-            .expect("valid section coordinates")
+        self.sections[section].state(local_index(x, y, z))
     }
 }
+#[inline]
 fn local_index(x: i32, y: i32, z: i32) -> usize {
     (((y & 15) << 8) | ((z & 15) << 4) | (x & 15)) as usize
 }
@@ -334,8 +350,50 @@ impl<'r, B: TerrainBlockStates> TerrainChunk<'r, B> {
         self.blocks.highest_section_y()
     }
     /// ProtoChunk reads collapse an all-air section to its default AIR state.
+    #[inline]
     pub fn block(&self, x: i32, y: i32, z: i32) -> BlockStateId {
         self.blocks.block(x, y, z)
+    }
+    /// `FeatureWorld::scan_column` in this chunk: an all-air section is
+    /// tested once, a mixed one read without looking the section up per block.
+    pub fn scan_column(
+        &self,
+        [x, mut y, z]: [i32; 3],
+        step: i32,
+        mut limit: i32,
+        mut keep: impl FnMut(BlockStateId) -> bool,
+    ) -> i32 {
+        debug_assert!(step == 1 || step == -1);
+        let blocks = &self.blocks;
+        while limit > 0 {
+            let Some(section) = blocks.section_index(y) else {
+                if !keep(blocks.void_air) {
+                    return y;
+                }
+                y = y.wrapping_add(step);
+                limit -= 1;
+                continue;
+            };
+            // Blocks from y to this section's end in the walk's direction.
+            let within = (y - blocks.min_y) & 15;
+            let run = if step > 0 { 16 - within } else { within + 1 }.min(limit);
+            limit -= run;
+            if blocks.non_air[section] == 0 {
+                if !keep(blocks.air) {
+                    return y;
+                }
+                y = y.wrapping_add(step * run);
+                continue;
+            }
+            let storage = &blocks.sections[section];
+            for _ in 0..run {
+                if !keep(storage.state(local_index(x, y, z))) {
+                    return y;
+                }
+                y = y.wrapping_add(step);
+            }
+        }
+        y
     }
     pub fn section(&self, index: usize) -> Option<&BlockSection<'r>> {
         self.blocks.sections.get(index)
@@ -386,6 +444,44 @@ impl<'r, B: TerrainBlockStates> TerrainChunk<'r, B> {
             self.blocks.non_air[section] -= 1;
         }
         Ok(old)
+    }
+    /// Write a vertical run of one non-air state from `y_top` downward, all
+    /// inside the chunk. Returns how many blocks changed from air; section
+    /// non-air counts are updated here and the caller owns the heightmaps.
+    pub fn fill_solid_run(
+        &mut self,
+        x: i32,
+        y_top: i32,
+        z: i32,
+        len: i32,
+        state: BlockStateId,
+    ) -> Result<u16, TerrainError> {
+        let air = self.blocks.air;
+        let mut added = 0u16;
+        let mut top = y_top;
+        let mut left = len;
+        while left > 0 {
+            let section = self
+                .blocks
+                .section_index(top)
+                .ok_or(TerrainError::OutsideBuildHeight)?;
+            let local_top = top & 15;
+            let take = (local_top + 1).min(left);
+            let local_start = local_top - take + 1;
+            let now = self.blocks.sections[section].fill_run(
+                x & 15,
+                local_start,
+                z & 15,
+                take,
+                state,
+                air,
+            )?;
+            self.blocks.non_air[section] = self.blocks.non_air[section].saturating_add(now);
+            added = added.saturating_add(now);
+            top -= take;
+            left -= take;
+        }
+        Ok(added)
     }
     pub fn update_heightmap(
         &mut self,
@@ -474,6 +570,15 @@ pub fn fill_noise<B: TerrainBlockStates>(
     chunk.ensure_heightmap(HeightmapType::WorldSurfaceWg);
     let mut density = vec![0.; volume.size()];
     final_density.sample_volume(context, &mut density, volume)?;
+    let air_above = aquifer.air_above_y();
+    // A non-air, non-fluid default block may be written as a run without asking
+    // the aquifer or touching the heightmap below the run's top.
+    let solid_runs = default_block != chunk.blocks.air
+        && !chunk
+            .blocks
+            .properties
+            .heightmap_state(default_block)
+            .has_fluid();
     const MAPS: [HeightmapType; 2] = [HeightmapType::OceanFloorWg, HeightmapType::WorldSurfaceWg];
     for z in 0..sz {
         let world_z = bz.wrapping_add(z as i32);
@@ -488,12 +593,58 @@ pub fn fill_noise<B: TerrainBlockStates>(
                     .first_available(x as i32, z as i32)
                     .map(|first| first.wrapping_sub(2))
             });
-            for y in (0..sy).rev() {
+            let mut y = sy;
+            while y > 0 {
+                y -= 1;
                 let world_y = by.wrapping_add(y as i32);
                 let value = density[volume.index([x, y, z]).expect("valid density coordinates")];
-                let state = aquifer
-                    .compute_substance(context, [world_x, world_y, world_z], f64::from(value))?
-                    .unwrap_or(default_block);
+                // A positive-density run is entirely the default block. Write it
+                // through the section once instead of per block; the heightmap
+                // only changes at the run's top.
+                if solid_runs && value > 0.0 {
+                    let mut run = 1usize;
+                    while run <= y
+                        && density[volume
+                            .index([x, y - run, z])
+                            .expect("valid density coordinates")]
+                            > 0.0
+                    {
+                        run += 1;
+                    }
+                    aquifer.note_skipped();
+                    chunk.fill_solid_run(x as i32, world_y, z as i32, run as i32, default_block)?;
+                    for (kind, settled) in MAPS.into_iter().zip(&mut settled) {
+                        if matches!(settled, Ok(bound) if world_y <= *bound) {
+                            continue;
+                        }
+                        chunk.update_heightmap(kind, x as i32, world_y, z as i32, default_block)?;
+                        *settled = chunk.heightmaps[kind as usize]
+                            .as_ref()
+                            .expect("ensured heightmap")
+                            .first_available(x as i32, z as i32)
+                            .map(|first| first.wrapping_sub(2));
+                    }
+                    y -= run - 1;
+                    continue;
+                }
+                // The aquifer answers `None` for positive density, which the fill
+                // writes as the default block, and air above its skip/fluid level.
+                // Both are decided here so the per-block call is not made at all,
+                // with the same pending-update side effect the call had.
+                let solid = value > 0.0;
+                if solid {
+                    aquifer.note_skipped();
+                }
+                let state = if solid {
+                    default_block
+                } else if air_above.is_some_and(|limit| world_y > limit) {
+                    aquifer.note_skipped();
+                    continue;
+                } else {
+                    aquifer
+                        .compute_substance(context, [world_x, world_y, world_z], f64::from(value))?
+                        .unwrap_or(default_block)
+                };
                 if state == chunk.blocks.air {
                     continue;
                 }

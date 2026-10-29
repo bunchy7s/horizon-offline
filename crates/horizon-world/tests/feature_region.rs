@@ -129,6 +129,51 @@ fn rejects_incompatible_regions_and_routes_negative_chunk_coordinates() {
     ));
     assert_eq!(region.block([0, 7, 0]).unwrap(), BlockStateId(0));
 }
+/// The column scan matches reading block by block: from inside and outside
+/// the build range, both ways, across all-air and mixed sections.
+#[test]
+fn column_scan_matches_block_by_block_reads() {
+    let registry = registry();
+    let chunk = TerrainChunk::new(ChunkPos::new(-1, 0), -32, 64, &registry, Properties).unwrap();
+    let mut region =
+        TerrainRegion::new(vec![chunk], WorldGenerationContext::new(-32, 64, 8)).unwrap();
+    for (y, state) in [
+        (-30, 2),
+        (-17, 3),
+        (-16, 2),
+        (5, 4),
+        (6, 0),
+        (20, 2),
+        (31, 3),
+    ] {
+        region
+            .set_block_worldgen([-13, y, 5], BlockStateId(state))
+            .unwrap();
+    }
+    let keeps: [fn(BlockStateId) -> bool; 3] = [|s| s.0 < 2, |s| s.0 == 0, |s| s.0 != 2];
+    for keep in keeps {
+        for start in -40..40 {
+            for step in [1, -1] {
+                for limit in [0, 1, 3, 15, 16, 17, 40, 90] {
+                    let mut y = start;
+                    for _ in 0..limit {
+                        if !keep(region.block([-13, y, 5]).unwrap()) {
+                            break;
+                        }
+                        y += step;
+                    }
+                    assert_eq!(
+                        region
+                            .scan_column([-13, start, 5], step, limit, keep)
+                            .unwrap(),
+                        y,
+                        "start {start} step {step} limit {limit}"
+                    );
+                }
+            }
+        }
+    }
+}
 #[test]
 fn write_callback_controls_mutation_and_receives_all_flags() {
     let registry = registry();

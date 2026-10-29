@@ -157,10 +157,21 @@ class PullRequest:
     author: str
     base: str
     files: list[str]
+    approvals: dict[str, str] = field(default_factory=dict)  # login (lowercase) -> the head their approval is on
 
 
-def check(pr: PullRequest | None, number: int, patterns: list[str]) -> str | None:
-    """Why `pr` can't go in a Nightly, or None."""
+def approvers(pr: PullRequest, head: str, team: set[str]) -> list[str]:
+    """Who approved `pr` at exactly `head`: a trusted reviewer, or Ludovic (his own review or his agents', which post
+    as ludovic111), never its author. A Nightly reaches every player (Ludovic, 2026-10-28): nothing goes in that the
+    Team or the agents haven't reviewed, and a push after the review needs a new one."""
+    ok = {t.lower() for t in team} | {OWNER}
+    return sorted(login for login, sha in pr.approvals.items()
+                  if sha == head and login in ok and login != pr.author.lower())
+
+
+def check(pr: PullRequest | None, number: int, patterns: list[str], team: set[str] | None = None) -> str | None:
+    """Why `pr` can't go in a Nightly, or None. `team`: the trusted reviewers, whose approval (or Ludovic's) it needs
+    at its head; None skips that, for a dry run, which publishes nothing."""
     if pr is None:
         return f"#{number} isn't a pull request here"
     if pr.state != "open":
@@ -171,6 +182,9 @@ def check(pr: PullRequest | None, number: int, patterns: list[str]) -> str | Non
     if bad:
         more = f" and {len(bad) - 1} more" if len(bad) > 1 else ""
         return f"#{number} changes `{bad[0]}`{more}, which only Ludovic merges (CODEOWNERS)"
+    if team is not None and not approvers(pr, pr.head, team):
+        return (f"#{number} has no approving review at its head {pr.head[:7]} from the Team or Ludovic's agents "
+                "(not its author)")
     return None
 
 
@@ -202,7 +216,7 @@ def describe(prs: list[dict], heading: str = "The set") -> str:
 
 
 def apply(state: dict, cmd: Command, login: str, now: str, lookup: Callable[[int], PullRequest | None],
-          patterns: list[str]) -> Result:
+          patterns: list[str], team: set[str] = frozenset()) -> Result:
     """What `cmd` by `login` makes of `state` (set.json). Pure but for `lookup`; raises Refused."""
     st = copy.deepcopy(state)
     prs: list[dict] = st.setdefault("prs", [])
@@ -227,7 +241,7 @@ def apply(state: dict, cmd: Command, login: str, now: str, lookup: Callable[[int
         problems, asked = [], []
         for n in cmd.prs:
             pr = lookup(n)
-            if why := check(pr, n, patterns):
+            if why := check(pr, n, patterns, None if cmd.verb == "dry-run" else team):
                 problems.append(why)
             else:
                 asked.append(entry(pr, login, now))
@@ -448,7 +462,16 @@ def lookup(repo: str) -> Callable[[int], PullRequest | None]:
         files = gh("api", "--paginate", f"repos/{repo}/pulls/{n}/files", "--jq",
                    ".[] | .filename, (.previous_filename // empty)").splitlines()
         state = "merged" if p.get("merged_at") else p["state"]
-        return PullRequest(n, state, p["head"]["sha"], p["title"], p["user"]["login"], p["base"]["ref"], files)
+        approvals: dict[str, str] = {}  # each reviewer's last say: an approval, or a change request or dismissal
+        for r in json.loads(gh("api", "--paginate", "--slurp", f"repos/{repo}/pulls/{n}/reviews") or "[]"):
+            for review in r if isinstance(r, list) else [r]:
+                who = (review.get("user") or {}).get("login", "").lower()
+                if review.get("state") == "APPROVED":
+                    approvals[who] = review.get("commit_id", "")
+                elif review.get("state") in ("CHANGES_REQUESTED", "DISMISSED"):
+                    approvals.pop(who, None)
+        return PullRequest(n, state, p["head"]["sha"], p["title"], p["user"]["login"], p["base"]["ref"], files,
+                           approvals)
     return get
 
 
@@ -499,7 +522,7 @@ def command() -> None:
         results: list[Result] = []
 
         def change(state: dict, builds: str):
-            result = apply(state, cmd, login, now, lookup(repo), patterns)
+            result = apply(state, cmd, login, now, lookup(repo), patterns, read_reviewers(reviewers).logins)
             results.append(result)
             if result.state is state:  # status, dry run: nothing to save
                 return None

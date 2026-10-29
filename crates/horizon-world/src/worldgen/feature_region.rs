@@ -118,6 +118,7 @@ impl ChunkIndex {
             cells,
         })
     }
+    #[inline]
     fn get(&self, x: i32, z: i32) -> Option<usize> {
         match self {
             Self::Grid {
@@ -246,9 +247,11 @@ impl<'r, B: TerrainBlockStates> TerrainRegion<'r, B> {
     pub fn chunks(&self) -> impl Iterator<Item = &TerrainChunk<'r, B>> {
         self.chunks.iter()
     }
+    #[inline]
     fn index(&self, x: i32, z: i32) -> Option<usize> {
         self.index.get(x, z)
     }
+    #[inline]
     pub fn chunk(&self, x: i32, z: i32) -> Result<&TerrainChunk<'r, B>, RegionError> {
         match self.index(x, z) {
             Some(i) => Ok(&self.chunks[i]),
@@ -261,8 +264,21 @@ impl<'r, B: TerrainBlockStates> TerrainRegion<'r, B> {
             None => Err(RegionError::MissingChunk([x, z])),
         }
     }
+    #[inline]
     pub fn block(&self, [x, y, z]: [i32; 3]) -> Result<BlockStateId, RegionError> {
         Ok(self.chunk(x >> 4, z >> 4)?.block(x, y, z))
+    }
+    /// `FeatureWorld::scan_column` within one chunk's column.
+    pub fn scan_column(
+        &self,
+        [x, y, z]: [i32; 3],
+        step: i32,
+        limit: i32,
+        keep: impl FnMut(BlockStateId) -> bool,
+    ) -> Result<i32, RegionError> {
+        Ok(self
+            .chunk(x >> 4, z >> 4)?
+            .scan_column([x, y, z], step, limit, keep))
     }
     /// Level-style biome lookup checks the selected chunk's generation status
     /// before reading its palette. Raw biome storage remains independently
@@ -649,6 +665,15 @@ where
     type Error = RegionError;
     fn block(&mut self, position: [i32; 3]) -> Result<BlockStateId, Self::Error> {
         self.region.block(position)
+    }
+    fn scan_column(
+        &mut self,
+        position: [i32; 3],
+        step: i32,
+        limit: i32,
+        keep: impl FnMut(BlockStateId) -> bool,
+    ) -> Result<i32, Self::Error> {
+        self.region.scan_column(position, step, limit, keep)
     }
     fn set_block(
         &mut self,

@@ -15,6 +15,12 @@ pub struct Manifest {
     /// Exact source revisions tested together, never mutable tags.
     pub horizon: String,
     pub mixins: String,
+    /// The version of Horizon's native hook points (`game/native_hooks.rs`,
+    /// `NATIVE_HOOKS_API`) a mod that hooks nothing else needs: the launcher
+    /// builds it on any Horizon with that version or a later one, and
+    /// `horizon` is only the revision it was tested on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<u32>,
 }
 
 pub fn revision(value: &str) -> bool {
@@ -32,6 +38,7 @@ impl Manifest {
             || self.game.is_empty()
             || !revision(&self.horizon)
             || !revision(&self.mixins)
+            || self.hooks == Some(0)
         {
             return Err(
                 "invalid native manifest: schema 1, id, version, game and exact revisions required"
@@ -154,6 +161,7 @@ mod tests {
             game: "26.3".into(),
             horizon: "a".repeat(40),
             mixins: "b".repeat(40),
+            hooks: None,
         }
     }
     fn read(name: &str, extras: &[(&str, &[u8])], mixin: &str) -> Result<Bundle, String> {
@@ -234,5 +242,23 @@ mod tests {
             .check()
             .is_err()
         );
+    }
+    #[test]
+    fn hooks_is_optional_and_kept() {
+        let hooked = Manifest {
+            hooks: Some(1),
+            ..manifest()
+        };
+        assert!(hooked.check().is_ok());
+        let text = serde_json::to_string(&hooked).unwrap();
+        assert!(text.contains("\"hooks\":1"), "{text}");
+        assert_eq!(serde_json::from_str::<Manifest>(&text).unwrap(), hooked);
+        let plain = serde_json::to_string(&manifest()).unwrap();
+        assert!(!plain.contains("hooks"), "{plain}");
+        let zero = Manifest {
+            hooks: Some(0),
+            ..manifest()
+        };
+        assert!(zero.check().is_err());
     }
 }

@@ -1,0 +1,142 @@
+NaturalSpawner.getFilteredSpawningCategories	port	crates/horizon-client/src/mobs/spawn_selection.rs::SpawnState::filtered_categories	categories in spawn order, filtered by enemies, persistent and the global cap
+NaturalSpawner.isRightDistanceToPlayerAndSpawnPoint	port	crates/horizon-client/src/mobs/spawn_selection.rs::right_distance	24 block player distance, respawn point distance and chunk checks
+NaturalSpawner.getMobForSpawn	inline	crates/horizon-client/src/mobs/spawn_selection.rs::spawn_category_for_position	gap: minor: no warning log when a type cannot be created; the type is skipped there
+NaturalSpawner.isValidPositionForMob	inline	crates/horizon-client/src/mobs/spawn_selection.rs::spawn_category_for_position	the far-away removal check; gap: minor: NeoForge spawn position event hook is not modelled
+NaturalSpawner.getRandomSpawnMobAt	inline	crates/horizon-client/src/mobs/spawn_selection.rs::spawn_category_for_position	the water ambient reduce roll, then the weighted pick from mobs_at
+NaturalSpawner.isInNetherFortressBounds	inline	crates/horizon-client/src/mobs/spawn_selection.rs::mobs_at	the monster fortress check on nether bricks comes first in mobs_at
+NaturalSpawner.getRandomPosWithin	port	crates/horizon-client/src/mobs/spawn_selection.rs::spawn_category_for_chunk	random column in the chunk, height up to one above the world surface
+NaturalSpawner.SpawnState.canSpawnForCategoryGlobal	port	crates/horizon-client/src/mobs/spawn_selection.rs::SpawnState::can_spawn_global	per chunk cap from the spawnable chunk count
+NaturalSpawner.SpawnState.canSpawnForCategoryLocal	port	crates/horizon-client/src/mobs/spawn_selection.rs::SpawnState::can_spawn_local	local cap per player near the chunk; the debug flag is not kept
+NoiseColumn.getBlock	port	crates/horizon-world/src/worldgen/structure/start.rs::NoiseColumn::get	air outside the column height
+NoiseColumn.setBlock	skip:other		no callers in vanilla; Horizon builds the column once and never writes it
+PotentialCalculator.PointCharge.getPotentialChange	inline	crates/horizon-client/src/mobs/spawn_selection.rs::SpawnState::energy_change	one charge's term charge over distance, infinity at zero distance, summed in energy_change
+ServerExplosion.interactWithBlocks	inline	crates/horizon-client/src/game/explosion.rs::Game::server_explode_as	shuffles the targets, runs each block's explosion hit, then pops the merged drops
+ServerExplosion.createFire	inline	crates/horizon-client/src/game/explosion.rs::Game::server_explode_as	one in three chance on air above a solid block, with the block's fire state
+ServerExplosion.canTriggerBlocks	inline	crates/horizon-client/src/game/wind.rs::Game::wind_burst	breeze charges need mob griefing before the trigger pass; the trigger-only check is implicit because only wind bursts reach it
+ServerExplosion.StackCollector.tryMerge	port	crates/horizon-client/src/game/explosion.rs::add_or_append_stack	merges up to 16 of the same item and damage
+SignalGetter.getBestOwnOrNeighbourSignal	missing		player: an explosive sulfur cube on or next to redstone power does not light its fuse every tick; Horizon's sulfur cube only primes on fire or explosion damage and best_neighbor_signal has no own-signal part
+SpawnData.CustomSpawnRules.checkLightBoundaries	skip:java		codec validation of the light limit range; Horizon decodes the limits in spawner.rs
+StructureManager.forWorldGenRegion	skip:other		wraps the level as a worldgen region view; Horizon passes the level into worldgen fns, no manager object
+StructureManager.startsForStructure	inline	crates/horizon-client/src/game/structures.rs::Game::structures_reaching_where	gap: minor: returns starts whose box holds the position, not every start the section references
+StructureManager.fillStartsForStructure	inline	crates/horizon-client/src/game/structures.rs::Game::structures_reaching_where	the reference loop and the valid start check
+StructureManager.getStructureAt	port	crates/horizon-client/src/game/structures.rs::Game::structures_reaching	returns every start whose box holds the position; the caller takes the one it needs
+StructureManager.getStructureWithPieceAt	port	crates/horizon-client/src/game/structures.rs::Game::structures_at	gap: minor: returns names of structures with a piece at the position; no predicate filter here
+StructureManager.matching	inline	crates/horizon-client/src/game/structures.rs::Game::structures_reaching_where	the predicate becomes the wanted closure
+StructureManager.structureHasPieceAt	inline	crates/horizon-client/src/game/structures.rs::Game::structures_reaching_where	the piece box test behind the piece flag
+StructureManager.getAllStructuresAt	inline	crates/horizon-client/src/game/structures.rs::Game::structures_reaching_where	gap: minor: the chunk's full reference map is not returned; only starts whose box holds the position
+Biome.getTemperature	port	crates/horizon-world/src/worldgen/biome_temperature.rs::BiomeTemperature::temperature	height adjusted temperature with the 1024 entry cache
+Biome.warmEnoughToRain	port	crates/horizon-world/src/worldgen/biome_temperature.rs::BiomeTemperature::warm_enough_to_rain	temperature at least 0.15
+Biome.shouldMeltFrozenOceanIcebergSlightly	port	crates/horizon-world/src/worldgen/biome_temperature.rs::BiomeTemperature::should_melt_frozen_ocean_iceberg_slightly	temperature above 0.1
+Biome.getGrassColor	port	crates/horizon-client/src/biome.rs::Biomes::grass	the grass modifier on the base colour
+Biome.getBaseGrassColor	inline	crates/horizon-client/src/biome.rs::Biomes::load	the grass_color override, else the colormap sample, resolved at load
+Biome.getGrassColorFromTexture	port	crates/horizon-client/src/biome.rs::sample	grass colormap by clamped temperature and downfall
+Biome.getFoliageColorFromTexture	port	crates/horizon-client/src/biome.rs::sample	foliage colormap by clamped temperature and downfall
+Biome.getDryFoliageColorFromTexture	port	crates/horizon-client/src/biome.rs::sample	dry foliage colormap by clamped temperature and downfall
+Biome.BiomeBuilder.putAttributes	skip:java		builder for the biome bootstrap; Horizon reads biome data
+Biome.BiomeBuilder.build	skip:java		builder for the biome bootstrap; Horizon reads biome data
+Biome.BiomeBuilder.toString	skip:debug		debug text only
+BiomeGenerationSettings.Builder.addFeature	skip:java		builder for the biome bootstrap; feature lists come from data
+BiomeGenerationSettings.PlainBuilder.addFeature	skip:java		builder for the biome bootstrap
+BiomeGenerationSettings.PlainBuilder.addFeatureStepsUpTo	skip:java		builder for the biome bootstrap
+BiomeGenerationSettings.PlainBuilder.build	skip:java		builder for the biome bootstrap
+BiomeManager.getFiddledDistance	inline	crates/horizon-core/src/biome.rs::BiomeZoom::quart_at_block	the eight corner distances with fiddled offsets; the nearest one is picked there
+BiomeManager.getFiddle	port	crates/horizon-core/src/biome.rs::fiddle	uniform offset of plus or minus 0.45
+BiomeResolver.getBiomesWithin	inline	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	the monument's surrounding check walks the same quart box of radius 29 around the sea level
+Climate.parameters	skip:data		builds parameter points from float literals in the biome bootstrap; Horizon reads quantized points from data
+Climate.Parameter.span	port	crates/horizon-world/src/worldgen/climate/index.rs::Parameter::span	union of two parameter ranges
+Climate.Parameter.toString	skip:debug		debug text only
+Climate.Parameter.distance	port	crates/horizon-world/src/worldgen/climate/index.rs::Parameter::distance	distance from a value to the range
+Climate.ParameterList.codec	skip:java		codec
+Climate.ParameterList.findValueBruteForce	port	crates/horizon-world/src/worldgen/climate/index.rs::ClimateIndex::brute_force	lowest fitness, ties keep the first entry
+Climate.ParameterList.findValueIndex	port	crates/horizon-world/src/worldgen/climate/index.rs::ClimateSearch::find	tree search with the previous leaf as the candidate
+Climate.ParameterPoint.fitness	port	crates/horizon-world/src/worldgen/climate/index.rs::ParameterPoint::fitness	sum of squared distances over the seven axes
+Climate.RTree.create	port	crates/horizon-world/src/worldgen/climate/index.rs::ClimateIndex::with_branching	builds the tree with the branching factor
+Climate.RTree.build	port	crates/horizon-world/src/worldgen/climate/index.rs::build	recursive split into buckets by the cheapest axis
+Climate.RTree.sort	inline	crates/horizon-world/src/worldgen/climate/index.rs::build	the axis order sort runs inside build
+Climate.RTree.comparator	port	crates/horizon-world/src/worldgen/climate/index.rs::compare_space	compares centres on one axis, optionally by absolute value
+Climate.RTree.bucketize	inline	crates/horizon-world/src/worldgen/climate/index.rs::build	buckets sliced to the bucket size inside build
+Climate.RTree.cost	inline	crates/horizon-world/src/worldgen/climate/index.rs::build	the summed span of each axis picks the best split inside build
+Climate.RTree.buildParameterSpace	port	crates/horizon-world/src/worldgen/climate/index.rs::space	union of the children's ranges per axis
+Climate.RTree.search	port	crates/horizon-world/src/worldgen/climate/index.rs::ClimateSearch::find	search from the root with the previous result kept
+Climate.RTree.Node.distance	port	crates/horizon-world/src/worldgen/climate/index.rs::distance	squared distance from the target to the node's box
+Climate.RTree.SubTree.search	port	crates/horizon-world/src/worldgen/climate/index.rs::ClimateIndex::search	recursive search over the children
+Climate.Sampler.sample	port	crates/horizon-world/src/worldgen/climate.rs::ClimateSampler::sample	samples the six climate fields at a quart
+FixedBiomeSource.findBiomeHorizontal	missing		unsure: flat worlds use one fixed biome, and this override picks a random point in the box; Horizon's ring search is the generic one and draws random values in a different order
+FixedBiomeSource.findClosestBiome3d	port	crates/horizon-world/src/worldgen/generator.rs::Pipeline::find_closest_biome	generic 3D search; for one biome its first sample is the origin
+MobSpawnSettings.SpawnerData.toString	skip:debug		debug text only
+MultiNoiseBiomeSource.stable	skip:other		preset check used only by world creation dimension validation
+MultiNoiseBiomeSource.createResolver	port	crates/horizon-world/src/worldgen/biome.rs::MultiNoiseBiomeSource::resolver	resolver over the sampler
+MultiNoiseBiomeSource.createResolverForChunk	port	crates/horizon-world/src/worldgen/biome.rs::BiomeResolver::prepare_volume	samples the climate volume for the chunk; sample_prepared then resolves each quart
+MultiNoiseBiomeSource.addDebugInfo	skip:debug		debug screen line with the climate values
+AbstractBedBlock.getSleepHeight	inline	crates/horizon-client/src/game.rs::Game::tick_sleep	the sleep height is the fixed bed top 0.5625 above the head cell; the shape is not read
+AbstractBedBlock.onStopSleeping	missing		player: waking up on a straw bed in the Overworld should break it (straw_bed_rule destroy_on_leave); Horizon's wake_up never breaks the bed
+AbstractBedBlock.kickVillagerOutOfBed	missing		player: right-clicking a bed a villager sleeps in neither wakes the villager nor shows the occupied message; Horizon's bed use never reads the occupied state
+AbstractBedBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	the other half removed takes this half with it, and occupied comes from the other half
+AbstractBedBlock.playerWillDestroy	port	crates/horizon-world/src/level/hooks.rs::Sim::player_destroy	creative breaking of the foot removes the head
+AbstractBedBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	the cell in front must be replaceable; gap: minor: no world border check on that cell
+AbstractBedBlock.getConnectedDirection	port	crates/horizon-world/src/level/shapes.rs::Sim::bed_neighbour_direction	the way to the other half: facing from the foot, opposite from the head
+AbstractBedBlock.getBlockType	skip:other		chooses the block entity half for the combiner; Horizon keeps one bed block state with no combined block entity
+AbstractBedBlock.findBunkBedStandUpPosition	inline	crates/horizon-client/src/game/respawn_anchor.rs::Game::bed_stand_up	bunk bed branch: around the bed, a block lower, above, then the unsafe fallbacks
+AbstractBedBlock.findStandUpPositionAtOffset	inline	crates/horizon-client/src/game/respawn_anchor.rs::Game::bed_stand_up	the offset loop; each cell goes through safe_dismount_location
+AbstractBedBlock.createBlockStateDefinition	skip:data		state definition comes from the block data tables
+AbstractBedBlock.setPlacedBy	port	crates/horizon-world/src/level/place.rs::Sim::set_placed_by	places the head in the cell the bed faces
+AbstractBedBlock.getSeed	skip:other		model seed of a random block variant; beds have one model, nothing reads it
+AbstractBedBlock.bedSurroundStandUpOffsets	inline	crates/horizon-client/src/game/respawn_anchor.rs::Game::bed_stand_up	the ten cells around the bed, built inside bed_stand_up
+AbstractBedBlock.bedAboveStandUpOffsets	inline	crates/horizon-client/src/game/respawn_anchor.rs::Game::bed_stand_up	the two cells on the bed, built inside bed_stand_up
+AbstractCandleBlock.onProjectileHit	port	crates/horizon-client/src/arrows.rs::Ticker::block_reaction	a fire arrow lights an unlit, dry candle or candle cake
+AbstractCandleBlock.extinguish	inline	crates/horizon-world/src/level/fluids.rs::Sim::place_liquid	gap: minor: water flow turns a lit candle off with its sound; the smoke particles and game event are not here (the candle cake click is CandleCakeBlock's)
+AbstractCandleBlock.setLit	inline	crates/horizon-client/src/arrows.rs::Ticker::block_reaction	the lit=true write for a fire arrow; the lit=false write is in place_liquid
+AbstractCandleBlock.onExplosionHit	port	crates/horizon-client/src/game/wind.rs::Game::wind_trigger_block	a wind burst puts out a lit candle; only trigger blasts do this, as in vanilla
+AbstractCauldronBlock.useItemOn	port	crates/horizon-client/src/game.rs::Game::use_on_cauldron	held item interaction with a cauldron
+AbstractSkullBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	powered from the neighbour signal at placement
+AbstractSkullBlock.neighborChanged	port	crates/horizon-world/src/level/redstone.rs::Sim::skull_neighbor_changed	powered state follows the neighbour signal
+AnvilBlock.useWithoutItem	inline	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	anvil screen opened from the use result, in the station list
+AnvilBlock.getMenuProvider	inline	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	the menu itself is built by the client station code; gap: minor: only the open is here
+AnvilBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	facing rotated through the state transform table
+BambooStalkBlock.createBlockStateDefinition	skip:data		state definition comes from the block data tables
+BambooStalkBlock.getShape	skip:data		the stalk box comes from the block data tables by leaves size
+BambooStalkBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	no placement in fluid, age and stage from the bamboo below
+BambooStalkBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	breaks the stalk when it cannot survive on the scheduled tick
+BambooStalkBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	schedules the survive check and cycles age when the bamboo above grows
+BambooStalkBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	height and stage limits for growth
+BambooStalkBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	grows the stalk up to the limit
+BambooStalkBlock.getHeightAboveUpToMax	port	crates/horizon-world/src/level/tick.rs::Sim::bamboo_height_above	counts bamboo above up to the max
+BambooStalkBlock.getHeightBelowUpToMax	port	crates/horizon-world/src/level/tick.rs::Sim::bamboo_height_below	counts bamboo below up to the max
+BannerBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	standing banner placement
+BannerBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	a standing banner breaks when its support goes
+BannerBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	rotation through the state transform table
+BannerBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	mirror through the state transform table
+BaseCoralPlantTypeBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	waterlogged when the clicked cell is full water
+BaseCoralPlantTypeBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	goes to air when it cannot survive below
+BaseCoralPlantTypeBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	needs a sturdy top face below
+BaseCoralPlantTypeBlock.getFluidState	skip:other		waterlogged water comes from the block state in the generic fluid code
+BaseFireBlock.inPortalDimension	inline	crates/horizon-world/src/level/portal.rs::Sim::fire_can_be_placed_at	the Overworld or Nether check is inside fire_can_be_placed_at
+BaseFireBlock.playerWillDestroy	port	crates/horizon-world/src/level/hooks.rs::Sim::player_destroy	fire broken by a player emits level event 1009
+BaseFireBlock.isPortal	inline	crates/horizon-world/src/level/portal.rs::Sim::fire_can_be_placed_at	the portal frame check and axis pick are inside fire_can_be_placed_at
+BasePressurePlateBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	goes to air when it cannot survive below
+BasePressurePlateBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	rigid block or centre support below
+BasePressurePlateBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	re-checks the pressed signal on the scheduled tick
+BasePressurePlateBlock.entityInside	port	crates/horizon-world/src/level/hooks.rs::Sim::entity_inside	an entity pressing an unpowered plate runs the pressed check
+BasePressurePlateBlock.affectNeighborsAfterRemoval	port	crates/horizon-world/src/level/hooks.rs::Sim::affect_neighbors_after_removal	a powered plate removed updates its neighbours
+BasePressurePlateBlock.getEntityCount	inline	crates/horizon-world/src/level/redstone.rs::Sim::plate_signal_strength	counts entities in the detection area
+BaseRailBlock.isRail	port	crates/horizon-world/src/level/rails.rs::Sim::is_rail	rail test on a block state
+BaseRailBlock.getShape	skip:data		the rail box comes from the block data tables; rail_shape only reads the shape property
+BaseRailBlock.onPlace	port	crates/horizon-world/src/level/rails.rs::Sim::rail_place	the placed rail takes its shape and connections
+BaseRailBlock.neighborChanged	port	crates/horizon-world/src/level/rails.rs::Sim::rail_neighbor_changed	neighbour update of a rail
+BaseRailBlock.shouldBeRemoved	inline	crates/horizon-world/src/level/rails.rs::Sim::rail_neighbor_changed	the rigid support check below and beside ascending rails is in the neighbour update
+BaseRailBlock.updateDir	port	crates/horizon-world/src/level/rails.rs::Sim::rail_update_dir	shape update for the rail's direction
+BaseRailBlock.affectNeighborsAfterRemoval	port	crates/horizon-world/src/level/hooks.rs::Sim::affect_neighbors_after_removal	rail arm updates neighbours after removal
+BaseRailBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	BaseRail arm of placement
+BaseRailBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	rotation through the state transform table
+BaseRailBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	mirror through the state transform table
+BaseRailBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	BaseRail arm of the shape update
+BaseRailBlock.getFluidState	skip:other		waterlogged water comes from the block state in the generic fluid code
+BeaconBlock.useWithoutItem	inline	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	beacon screen opened from the use result, in the station list
+BeehiveBlock.hiveContainsBees	inline	crates/horizon-client/src/game/beehives.rs::Game::use_beehive	the bees-in-hive check before angering bees in the honey harvest path
+BeehiveBlock.releaseBeesAndResetHoneyLevel	port	crates/horizon-client/src/game/beehives.rs::Game::empty_hive	gap: minor: the honey reset is not in empty_hive; set_honey_level does it
+BeehiveBlock.resetHoneyLevel	port	crates/horizon-client/src/game/beehives.rs::GameHive::set_honey_level	honey level written back to the hive
+BeehiveBlock.spawnParticle	inline	crates/horizon-client/src/animate_tick.rs::beehive_drip	the drip point from the hive shape; the honey drip particle is added there
+BeehiveBlock.spawnFluidParticle	inline	crates/horizon-client/src/animate_tick.rs::beehive_drip	the dripping honey particle position
+BeehiveBlock.createBlockStateDefinition	skip:data		state definition comes from the block data tables
+BeehiveBlock.playerWillDestroy	missing		player: in survival, breaking a hive with bees or honey should give the hive item back with its bees and honey level; Horizon's break path only angers the bees
+BeehiveBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	rotation through the state transform table

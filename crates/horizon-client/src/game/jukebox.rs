@@ -5,6 +5,7 @@
 use super::Game;
 use horizon_client::{
     containers::{BlockEntity, Jukebox},
+    first_person::Hand,
     items::ItemStack,
     mobs::Species,
     particles::{ParticleOptions, ParticleType},
@@ -64,6 +65,10 @@ impl Game<'_> {
             return false;
         }
         if self.jukebox(pos).is_some_and(|j| j.record.is_some()) {
+            // TRY_WITH_EMPTY_HAND: only the main hand goes on to useWithoutItem.
+            if self.hand != Hand::Main {
+                return false;
+            }
             self.eject_record(pos);
             return true;
         }
@@ -100,6 +105,30 @@ impl Game<'_> {
         self.trigger_block("minecraft:item_used_on_block", pos, stack);
         true
     }
+    /// `JukeboxBlock.useItemOn` on this client's level for the main hand:
+    /// whether the jukebox at `pos` takes the click (`has_record` pops the
+    /// disc out, or a `jukebox_playable` item goes in). The server does the
+    /// rest, see `use_jukebox`.
+    pub(super) fn jukebox_takes(&self, pos: [i32; 3], held: Option<&ItemStack>) -> bool {
+        let state = self.world.block(pos[0], pos[1], pos[2]);
+        if &*self.res.facts().get(state).name != "minecraft:jukebox" {
+            return false;
+        }
+        let has_record = self
+            .pack
+            .assets
+            .registry
+            .state(state)
+            .and_then(|s| s.properties.get("has_record"))
+            .is_some_and(|v| v == "true");
+        has_record
+            || held.is_some_and(|stack| {
+                self.res
+                    .items()
+                    .get(&stack.item)
+                    .is_some_and(|i| i.jukebox_song.is_some())
+            })
+    }
     /// Level event 1010: the song from the jukebox, and the "Now Playing" overlay.
     fn start_song(&mut self, pos: [i32; 3], song: &str) {
         self.stop_sound(pos);
@@ -118,6 +147,20 @@ impl Game<'_> {
         if self.audio.capture.is_some() {
             self.lan_songs.push((pos, Some(song.to_owned())));
         }
+    }
+    /// `LevelEventHandler` 1010 on a client of a server: `playJukeboxSong`
+    /// for the song the event's data names in the server's `jukebox_song`
+    /// registry (`Registry.get(int).ifPresent`: an unknown id does nothing).
+    /// The server's jukebox plays it; this client only hears it.
+    pub(super) fn jukebox_song_event(&mut self, pos: [i32; 3], data: i32) {
+        if let Some(song) = jukebox_song_name(self.remote.as_ref().map(|r| &*r.registries), data) {
+            self.start_song(pos, &song);
+        }
+    }
+    /// `LevelEventHandler` 1011: `stopJukeboxSongAndNotifyNearby`.
+    pub(super) fn jukebox_stop_event(&mut self, pos: [i32; 3]) {
+        self.stop_sound(pos);
+        self.notify_record_playing(pos, false);
     }
     fn stop_sound(&mut self, pos: [i32; 3]) {
         if let Some(id) = self.jukebox_sounds.remove(&(pos[0], pos[1], pos[2])) {
@@ -227,14 +270,36 @@ impl Game<'_> {
             .map(|(k, id)| (*k, *id))
             .collect();
         for (k, id) in sounds {
-            if !self.audio.engine.is_active(id)
-                || !matches!(self.world.block_entities.get(&k), Some(BlockEntity::Jukebox(j)) if j.playing)
-            {
+            // A server's client has no playing jukebox of its own: its songs
+            // stop with level event 1011, or when they end.
+            let playing = matches!(self.world.block_entities.get(&k), Some(BlockEntity::Jukebox(j)) if j.playing);
+            if !keeps_song(
+                self.audio.engine.is_active(id),
+                self.remote.is_some(),
+                playing,
+            ) {
                 self.audio.stop_and_release(id);
                 self.jukebox_sounds.remove(&k);
             }
         }
     }
+}
+/// The song a level event 1010's data names: its id in the `jukebox_song`
+/// registry the server sent (`Registry.get(int)`). Only a server's client
+/// has one; a level that plays its own jukeboxes starts their songs itself.
+fn jukebox_song_name(
+    registries: Option<&horizon_protocol::registry::Dynamic>,
+    id: i32,
+) -> Option<String> {
+    registries?
+        .name("minecraft:jukebox_song", id)
+        .map(str::to_owned)
+}
+/// Whether a jukebox song keeps playing: until it ends, and, in a level that
+/// plays its own jukeboxes, while that jukebox plays. A server's client
+/// stops it at level event 1011 (`LevelRenderer.playingJukeboxSongs`).
+fn keeps_song(active: bool, server_client: bool, jukebox_playing: bool) -> bool {
+    active && (server_client || jukebox_playing)
 }
 /// The jukebox's redstone signal (15 while a song plays) and comparator output.
 pub(super) fn jukebox_signals(
@@ -253,5 +318,38 @@ pub(super) fn jukebox_signals(
             Some((if j.playing { 15 } else { 0 }, comparator))
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{jukebox_song_name, keeps_song};
+    use horizon_protocol::registry::Dynamic;
+
+    /// On a server's client the song comes from level event 1010, whose data
+    /// is the song's id in the server's `jukebox_song` registry (#3173), and
+    /// it plays on although this client's jukebox isn't playing.
+    #[test]
+    fn a_server_clients_jukebox_song_comes_from_level_event_1010() {
+        let mut registries = Dynamic::default();
+        registries.registries.insert(
+            "minecraft:jukebox_song".into(),
+            ["minecraft:11", "minecraft:13", "minecraft:cat"]
+                .map(|n| (n.to_owned(), None))
+                .to_vec(),
+        );
+        assert_eq!(
+            jukebox_song_name(Some(&registries), 2).as_deref(),
+            Some("minecraft:cat")
+        );
+        assert_eq!(jukebox_song_name(Some(&registries), 3), None);
+        assert_eq!(jukebox_song_name(Some(&registries), -1), None);
+        assert_eq!(jukebox_song_name(None, 2), None);
+        // A server's client: on until the song ends (or level event 1011).
+        assert!(keeps_song(true, true, false));
+        assert!(!keeps_song(false, true, false));
+        // A level that plays its own jukebox: also until the jukebox stops.
+        assert!(keeps_song(true, false, true));
+        assert!(!keeps_song(true, false, false));
     }
 }

@@ -19,6 +19,10 @@ impl SliceAxes {
     }
 }
 
+/// A y-fixed slice's plane: the slice node, the plane's corner (y fixed),
+/// its x/z sizes and steps (`SamplerContext::with_planes`).
+pub(super) type PlaneKey = (usize, [i32; 3], [usize; 2], [i32; 2]);
+
 #[derive(Clone, Debug)]
 pub struct SliceSampler {
     pub input: Arc<dyn DensitySampler>,
@@ -61,25 +65,54 @@ impl DensitySampler for SliceSampler {
         if reduced == volume {
             return self.input.sample_volume(context, buffer, volume);
         }
+        let plane = (fixed[1].is_some() && context.planes.is_some()).then(|| {
+            let [rx, _, rz] = reduced.sizes();
+            let [step_x, _, step_z] = volume.steps();
+            (
+                self as *const Self as usize,
+                reduced.minimum(),
+                [rx, rz],
+                [step_x, step_z],
+            )
+        });
+        if let Some(key) = &plane
+            && let Some(samples) = context.planes.as_ref().and_then(|p| p.get(key))
+        {
+            spread(fixed, volume, reduced, samples, buffer);
+            return Ok(());
+        }
         context.with_buffer(reduced.size(), |context, samples| {
             self.input.sample_volume(context, samples, reduced)?;
-            let [sx, sy, sz] = volume.sizes();
-            let [rx, ry, _] = reduced.sizes();
-            for z in 0..sz {
-                let source_z = if fixed[2].is_some() { 0 } else { z };
-                for x in 0..sx {
-                    let source_x = if fixed[0].is_some() { 0 } else { x };
-                    let source = (source_x + source_z * rx) * ry;
-                    let target = (x + z * sx) * sy;
-                    let column = &mut buffer[target..target + sy];
-                    if fixed[1].is_some() {
-                        column.fill(samples[source]);
-                    } else {
-                        column.copy_from_slice(&samples[source..source + sy]);
-                    }
-                }
+            spread(fixed, volume, reduced, samples, buffer);
+            if let (Some(key), Some(planes)) = (plane, &mut context.planes) {
+                planes.insert(key, samples[..reduced.size()].to_vec());
             }
             Ok(())
         })
+    }
+}
+/// Copies the `reduced` samples along the fixed axes of `volume`.
+fn spread(
+    fixed: [Option<i32>; 3],
+    volume: DensityVolume,
+    reduced: DensityVolume,
+    samples: &[f32],
+    buffer: &mut [f32],
+) {
+    let [sx, sy, sz] = volume.sizes();
+    let [rx, ry, _] = reduced.sizes();
+    for z in 0..sz {
+        let source_z = if fixed[2].is_some() { 0 } else { z };
+        for x in 0..sx {
+            let source_x = if fixed[0].is_some() { 0 } else { x };
+            let source = (source_x + source_z * rx) * ry;
+            let target = (x + z * sx) * sy;
+            let column = &mut buffer[target..target + sy];
+            if fixed[1].is_some() {
+                column.fill(samples[source]);
+            } else {
+                column.copy_from_slice(&samples[source..source + sy]);
+            }
+        }
     }
 }

@@ -1,0 +1,109 @@
+BitmapProvider.ImageDataHolder.gpuData	skip:other		GPU staging buffer for a sheet; Horizon copies the sheet pixels into its atlas at load (font.rs load_bitmap)
+FreeTypeUtil	skip:other		FreeType library wrapper (getLibrary, error helpers, setVector, destroy); Horizon rasterizes TrueType with ab_glyph (font.rs load_true_type)
+UnihexProvider.unpackBitsToBytes	port	crates/horizon-client/src/font.rs::Font::rasterize_hex	gap: minor: rows are written as RGBA into the atlas region, not an IntBuffer; same glyph columns
+UnihexProvider.decodeHex	port	crates/horizon-client/src/font.rs::parse_hex_digit	gap: minor: a bad digit skips the whole glyph line (vanilla throws and fails the load)
+UnihexProvider.copyUntil	inline	crates/horizon-client/src/font.rs::parse_hex	line splitting on newline and CR; the .hex text is parsed in one pass
+UnihexProvider.ByteContents.read	inline	crates/horizon-client/src/font.rs::parse_hex	8 px rows (32 hex digits) read by parse_hex
+UnihexProvider.Definition.loadData	port	crates/horizon-client/src/font.rs::load_hex	reads every .hex entry of the zip and applies size_overrides
+UnihexProvider.Dimensions.pack	skip:java		packs left and right into one int as a map value; Horizon keeps two fields on HexGlyph
+UnihexProvider.IntContents.read24	port	crates/horizon-client/src/font.rs::parse_hex	6-digit rows (24 bit) handled by parse_hex
+UnihexProvider.IntContents.read32	port	crates/horizon-client/src/font.rs::parse_hex	8-digit rows (32 bit) handled by parse_hex
+UnihexProvider.LineData.mask	inline	crates/horizon-client/src/font.rs::parse_hex	the OR of the rows, used for the glyph width (mask |= row)
+UnihexProvider.ShortContents.read	port	crates/horizon-client/src/font.rs::parse_hex	4-digit rows (16 bit) handled by parse_hex
+AbstractLayout.setX	skip:ui		moves a layout's children with it; Horizon computes positions each frame (dialog_screen.rs Layout::new)
+AbstractLayout.setY	skip:ui		moves a layout's children with it; Horizon computes positions each frame (dialog_screen.rs Layout::new)
+AbstractLayout.AbstractChildWrapper.getHeight	skip:ui		padded child height, layout bookkeeping only
+AbstractLayout.AbstractChildWrapper.getWidth	skip:ui		padded child width, layout bookkeeping only
+AbstractLayout.AbstractChildWrapper.setX	inline	crates/horizon-client/src/dialog_screen.rs::Layout::new	gap: minor: only centred alignment (0.5) is modelled; xAlignment and per-child padding are not
+AbstractLayout.AbstractChildWrapper.setY	inline	crates/horizon-client/src/dialog_screen.rs::Layout::new	gap: minor: only centred alignment (0.5) is modelled; yAlignment and per-child padding are not
+EqualSpacingLayout	skip:ui		equal-gap layout; its only user is WorldOptionsScreen, placing its buttons; layout only, no behaviour
+EqualSpacingLayout.Orientation	skip:ui		horizontal or vertical helpers of EqualSpacingLayout; layout only
+FrameLayout.arrangeElements	inline	crates/horizon-client/src/dialog_screen.rs::Layout::new	gap: minor: frame centring is done for the header title and the footer buttons only; no general minimum size
+FrameLayout.addChild	skip:ui		adds a child to the frame's list; no behaviour of its own
+FrameLayout.visitChildren	skip:ui		visits children for layout; no behaviour of its own
+FrameLayout.centerInRectangle	port	crates/horizon-client/src/dialog_screen.rs::centre	gap: minor: one axis at a time through centre; the 2D call is not a separate fn
+FrameLayout.alignInRectangle	inline	crates/horizon-client/src/dialog_screen.rs::Layout::new	gap: minor: only the centre alignment (0.5); PauseScreen's 0.25 vertical alignment is not modelled
+GridLayout.arrangeElements	port	crates/horizon-client/src/dialog_screen.rs::columns	gap: minor: only the dialog button grids (2 px apart, 22 px rows); general row and column spans and spacing are not modelled
+GridLayout.addChild	skip:ui		adds a cell to the grid's list; no behaviour of its own
+GridLayout.visitChildren	skip:ui		visits children for layout; no behaviour of its own
+GridLayout.RowHelper.addChild	inline	crates/horizon-client/src/dialog_screen.rs::columns	gap: minor: rows fill left to right and a full row is cut from the list by columns(); a row that does not fit moves down, as RowHelper does
+HeaderAndFooterLayout.visitChildren	skip:ui		visits children for layout; no behaviour of its own
+HeaderAndFooterLayout.arrangeElements	port	crates/horizon-client/src/dialog_screen.rs::Layout::new	header 33 high, body at header + 30 clamped above the footer, footer at the bottom; server_links.rs list_top and lan_screen.rs WorldOptions::top do the same for their screens
+HeaderAndFooterLayout.addToHeader	skip:ui		adds to the header frame; no behaviour of its own
+HeaderAndFooterLayout.addToFooter	skip:ui		adds to the footer frame; no behaviour of its own
+HeaderAndFooterLayout.addToContents	skip:ui		adds to the contents frame; no behaviour of its own
+Layout.arrangeElements	skip:ui		default recursive layout pass; Horizon places each screen's parts directly
+LayoutElement.getRectangle	skip:ui		builds a rectangle from position and size; Horizon uses [f32; 4] arrays
+LayoutSettings.LayoutSettingsImpl.padding	skip:java		builder method for padding values
+LinearLayout.addChild	skip:ui		queues a child into a GridLayout; positions come from the layout pass (dialog_screen.rs Layout::new body column)
+LinearLayout.Orientation.setSpacing	skip:ui		sets the grid spacing of a linear layout; layout only
+LinearLayout.Orientation.addChild	skip:ui		places a child in the grid row or column; layout only
+NarrationElementOutput	skip:other		screen-reader narration; Horizon has no narration output
+NarrationThunk	skip:other		screen-reader narration text; Horizon has no narration output
+ScreenNarrationCollector	skip:other		screen-reader narration collection; Horizon has no narration output
+ScreenNarrationCollector.NarrationEntry	skip:other		screen-reader narration entries; Horizon has no narration output
+ScreenNarrationCollector.Output	skip:other		screen-reader narration output; Horizon has no narration output
+ScreenAxis	missing		minor: keyboard focus moves along the axis (arrow keys, Tab) between widgets; Horizon's menus have no widget focus navigation, Tab only moves between title fields (title.rs tab)
+ScreenDirection	missing		minor: keyboard focus navigation by direction (arrow keys); Horizon's menus have no widget focus navigation
+ScreenPosition	missing		minor: grid position stepping for keyboard focus navigation; not in Horizon's menus
+ScreenRectangle.of	skip:java		builds a rectangle from an axis-ordered index; Horizon uses x and y directly
+ScreenRectangle.step	missing		minor: moves a rectangle one step for keyboard focus navigation; not in Horizon's menus
+ScreenRectangle.getLength	skip:java		width or height accessor
+ScreenRectangle.getBoundInDirection	missing		minor: edge coordinate for keyboard focus navigation; not in Horizon's menus
+ScreenRectangle.getBorder	missing		minor: border strip used by keyboard focus navigation to find the next widget; not in Horizon's menus
+ScreenRectangle.overlaps	missing		minor: overlap test used by keyboard focus navigation; not in Horizon's menus
+ScreenRectangle.overlapsInAxis	missing		minor: per-axis overlap used by keyboard focus navigation; not in Horizon's menus
+ScreenRectangle.getCenterInAxis	missing		minor: centre along one axis for keyboard focus navigation; not in Horizon's menus
+ScreenRectangle.intersection	missing		minor: a nested GUI clip is not intersected with the outer one; paint (screen_draw.rs) replaces the clip on each Scissor draw
+ScreenRectangle.intersects	skip:other		no caller in the 26.3 client GUI code; pure geometry predicate
+ScreenRectangle.encompasses	skip:other		used by GuiRenderState for element batching bounds; Horizon appends quads to the HUD batch without it
+ScreenRectangle.containsPoint	port	crates/horizon-client/src/screen_draw.rs::inside	the same half-open point-in-rectangle test
+ScreenRectangle.transformAxisAligned	skip:other		bounds of a rectangle under a GUI pose, for the GUI scissor; Horizon clips the quads themselves (hud.rs HudBatch::clip_since)
+ScreenRectangle.transformMaxBounds	skip:other		bounds of a rotated rectangle under a GUI pose; Horizon clips the quads themselves (hud.rs HudBatch::clip_since)
+DynamicAtlasAllocator	skip:other		slot allocator for the GUI item atlas; Horizon has no item atlas and draws items into the HUD batch (item_render/gui.rs)
+GuiItemAtlas.computeTextureSizeFor	skip:other		atlas texture sizing; Horizon has no item atlas
+GuiItemAtlas.tryPrepareFor	skip:other		atlas space check; Horizon has no item atlas
+GuiItemAtlas.getOrUpdate	inline	crates/horizon-client/src/item_render/gui.rs::draw	gap: minor: vanilla draws each item once into an atlas slot and blits it; Horizon re-submits the item and caches its vertices by position (gui_drawn, DrawnKey)
+GuiItemAtlas.drawToSlot	port	crates/horizon-client/src/item_render/gui.rs::draw_now	the item is clipped to its 16x16 slot unless oversized
+GuiItemAtlas.close	skip:other		GPU texture release; Horizon has no item atlas
+GuiRenderer.render	inline	crates/horizon-client/src/screen_draw.rs::paint	gap: minor: paint has no panorama, blur or GPU upload pass; the frame is one ordered list of draws
+GuiRenderer.clearUnusedOversizedItemRenderers	skip:other		GPU renderer cache cleanup; Horizon's gui_drawn cache is bounded (DRAWN_LIMIT)
+GuiRenderer.prepare	inline	crates/horizon-client/src/screen_draw.rs::paint	gap: minor: the prepare step is folded into paint's single pass; no separate mesh build
+GuiRenderer.addElementsToMeshes	skip:other		vertex batching by pipeline and scissor; HudBatch appends quads in order
+GuiRenderer.executeDrawRange	port	crates/horizon-client/src/hud.rs::HudRenderer::draw_range	draws a range of the batch with its blend, depth and scissor state
+GuiRenderer.addElementToMesh	skip:other		vertex batching by pipeline and scissor; HudBatch appends quads in order
+GuiRenderer.prepareText	inline	crates/horizon-client/src/screen_draw.rs::paint	text is drawn at its own pose through Draw::Text (batch.text_styled)
+GuiRenderer.prepareItemElements	port	crates/horizon-client/src/item_render/gui.rs::draw	gap: minor: oversized items are drawn unclipped into the HUD batch, not into a picture-in-picture texture
+GuiRenderer.preparePictureInPicture	skip:other		Horizon calls each picture drawer directly (game/perspective.rs draw_player_preview, item_render/gui.rs draw_banner_result); no pool dispatch
+GuiRenderer.preparePictureInPictureState	skip:other		picture-in-picture pool dispatch; Horizon calls each drawer directly
+GuiRenderer.submitBlitFromItemAtlas	inline	crates/horizon-client/src/item_render/gui.rs::draw	the atlas slot blit is the item drawn at its GUI position
+GuiRenderer.prepareItemAtlas	skip:other		item atlas creation and resize; Horizon has no item atlas
+GuiRenderer.getGuiScaleInvalidatingItemAtlasIfChanged	skip:other		item atlas invalidation on GUI scale change; Horizon has no item atlas
+GuiRenderer.executeDraw	port	crates/horizon-client/src/hud.rs::HudRenderer::draw_range	one pipeline, vertex buffer, scissor and index range draw
+GuiRenderer.scissorChanged	skip:other		batching compare of scissor rectangles
+GuiRenderer.enableScissor	port	crates/horizon-client/src/hud.rs::HudBatch::clip_since	gap: minor: the rectangle arrives already intersected with the outer scissor (GuiGraphicsExtractor); a nested clip replaces the outer one in paint
+GuiRenderer.close	skip:other		GPU resource release
+TextureSetup.singleTextureWithLightmap	skip:other		GPU texture binding with the lightmap; Horizon's lighting is in the mesh
+TextureSetup.getSortKey	skip:other		draw sort key for batching; Horizon appends in order
+GuiBookModelRenderer.renderToTexture	skip:other		no GUI caller in the 26.3 sources (graphics.bookModel is never called)
+GuiEntityRenderer.renderToTexture	port	crates/horizon-client/src/game/perspective.rs::Game::draw_player_preview	gap: player: the smithing-table armor stand preview (SmithingScreen) is not drawn; only the player model
+GuiProfilerChartRenderer.renderToTexture	skip:debug		the profiler pie chart (F3 profiler screen)
+GuiSkinRenderer.renderToTexture	missing		player: Options > Skin Customisation has no rotating player model; options_ui.rs lists that entry without a page
+OversizedItemRenderer.renderToTexture	port	crates/horizon-client/src/item_render/gui.rs::draw	gap: minor: oversized items are drawn unclipped into the HUD batch, not via a picture-in-picture texture
+OversizedItemRenderer.textureIsReadyToBlit	skip:other		cache check for the picture-in-picture texture; Horizon redraws from the item model
+PictureInPictureRenderer.blitTexture	skip:other		picture-in-picture texture blit; Horizon draws each preview into the batch directly (draw_player_preview, draw_banner_result)
+PictureInPictureRenderer.prepareTexturesAndProjection	skip:other		GPU texture allocation for a picture-in-picture
+PictureInPictureRenderer.close	skip:other		GPU texture release
+AccessibilityOnboardingScreen.init	missing		player: first launch shows the accessibility onboarding (onboardAccessibility defaults to true in options_file.rs) with narrator, Sounds, Accessibility, Language and Continue; Horizon has no such screen (options_fixes.rs only turns it off for old files)
+AccessibilityOnboardingScreen.setInitialFocus	missing		minor: keyboard focus starts on the narrator button; part of the missing onboarding screen
+AccessibilityOnboardingScreen.closeAndSetScreen	missing		player: the Sounds, Accessibility and Language buttons on the onboarding screen; part of the missing screen
+AccessibilityOnboardingScreen.extractRenderState	missing		player: the onboarding screen fades in over 2 s, fades out on Continue, and draws the logo
+AccessibilityOnboardingScreen.handleInitialNarrationDelay	skip:other		screen-reader narration; Horizon has no narration output
+AlertScreen	missing		unsure: no alert screen (title, message, OK) found in Horizon; vanilla callers are world-open, recovery and pack errors (WorldOpenFlows.java, RecoverWorldDataScreen.java, PackSelectionScreen.java)
+BackupConfirmScreen	missing		unsure: no backup question before opening a world that needs one (WorldOpenFlows.java:375, EditWorldScreen.java:111); Horizon's backup is only Make Backup (title.rs)
+BanNoticeScreens	missing		unsure: no ban or suspension notice for a multiplayer ban, forced name change or banned skin; Horizon reads no BanDetails or profile action (Gui.java addInitialScreens)
+ChatScreen.removed	missing		player: unfinished chat text is kept when the chat is interrupted or with Save Chat Drafts on; Horizon's close_chat (game/chat.rs) drops it
+ChatScreen.shouldDiscardDraft	missing		player: decides whether closing chat keeps the typed text as a draft; Horizon has no draft state
+ChatScreen.insertText	port	crates/horizon-client/src/chat.rs::ChatScreen::type_text	insert at the cursor; replace=true (setValue) is ChatScreen::suggest_command in Horizon
+ChatScreen.formatChat	missing		minor: a restored draft is drawn grey italic; Horizon has no draft state (see ChatScreen.removed)
+ChatScreen.updateNarrationState	skip:other		screen-reader narration; Horizon has no narration output

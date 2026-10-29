@@ -1,0 +1,149 @@
+LoomMenu.<init>	port	crates/horizon-client/src/menu.rs::Menu::new	the loom's banner, dye, pattern and result slots are laid out for Kind::Loom in the constructor
+LoomMenu.clickMenuButton	port	crates/horizon-client/src/menu.rs::Menu::button	pattern index check and selection; the select sound is played by game/loom.rs::Game::loom_button
+LoomMenu.isValidPatternIndex	inline	crates/horizon-client/src/menu.rs::Menu::button	the range check is inline in button
+LoomMenu.quickMoveStack	inline	crates/horizon-client/src/menu.rs::Menu::quick_move	the Kind::Loom arm
+LoomMenu.removed	port	crates/horizon-client/src/game/stations.rs::Game::close_station	input stacks are given back or dropped when the station closes
+MenuType.register	skip:data		menu type registry bootstrap
+MerchantContainer.isEmpty	skip:java		container emptiness helper; Horizon checks the stacks it needs directly
+MerchantContainer.setItem	inline	crates/horizon-client/src/menu.rs::Menu::slot_changed	the store is the generic put; the payment update is merchant_update, run from slot_changed for every merchant slot
+MerchantMenu.quickMoveStack	inline	crates/horizon-client/src/menu.rs::Menu::quick_move	the Kind::Merchant arm; a result shift-click also queues the trade sound event
+MerchantMenu.playTradeSound	missing		player: a shift-click trade should play the villager yes sound; the menu queues Event::TradeSound and game/trading.rs drops it with an empty arm
+MerchantResultSlot.remove	port	crates/horizon-client/src/menu.rs::Menu::remove	gap: minor: the removeCount tally that feeds the crafted statistic is not kept
+MerchantResultSlot.mayPickup	port	crates/horizon-client/src/menu.rs::Menu::may_pickup	the Role::MerchantResult arm
+ResultSlot.remove	port	crates/horizon-client/src/menu.rs::Menu::remove	gap: minor: the removeCount tally for the crafted statistic is not kept
+ResultSlot.safeClone	skip:other		onCraftedBy only matters for MAP_POST_PROCESSING, which only cartography results carry; map_crafted covers that take
+ResultSlot.checkTakeAchievements	port	crates/horizon-client/src/game.rs::Game::award_crafted	gap: minor: the recipe is awarded; the crafted statistic count from onCraftedBy is not added on this take
+ResultSlot.copyAllInputItems	inline	crates/horizon-client/src/crafting.rs::Recipes::remainders	gap: minor: vanilla copies every input when no recipe matches on the server; remainders returns none for an unmatched recipe
+ResultSlot.getRemainingItems	port	crates/horizon-client/src/crafting.rs::Recipes::remainders	container remainders and the special banner and book copies
+Slot.safeTake	port	crates/horizon-client/src/menu.rs::Menu::safe_take	
+SlotRanges.create	inline	crates/horizon-command/src/args.rs::slot_ranges	a range is a name and size pair built in slot_ranges
+SlotRanges.addSlotRange	inline	crates/horizon-command/src/args.rs::slot_ranges	the range closure adds the numbered names and the wildcard
+SlotRanges.tryRead	inline	crates/horizon-command/src/args.rs::ArgType::parse	the Slots and Slot arms read a name and check the range exists
+SmithingMenu.createInputSlotDefinitions	port	crates/horizon-client/src/menu.rs::Menu::new	the three input slots and the result slot; the input tests run in may_place (Role::SmithInput)
+SmithingMenu.getRelevantItems	inline	crates/horizon-client/src/menu.rs::Menu::smith_result	the three input stacks are read directly
+SmithingMenu.createRecipeInput	inline	crates/horizon-client/src/menu.rs::Menu::smith_result	the recipe input is passed to smithing_result
+SmithingMenu.shrinkStackInSlot	inline	crates/horizon-client/src/menu.rs::Menu::on_take	the SmithingMenu take arm removes one of each input
+SmithingMenu.canTakeItemForPickAll	port	crates/horizon-client/src/menu.rs::Menu::can_take_for_pick_all	the result slot is excluded
+SmithingMenu.canMoveIntoInputSlots	inline	crates/horizon-client/src/menu.rs::Menu::quick_move	the Anvil or Smithing arm checks for an empty input the stack fits
+StonecutterMenu.hasInputItem	inline	crates/horizon-client/src/game/stations.rs::Station::stonecutter_changed	the draw flag; the list scroll resets on the same input and recipe check
+StonecutterMenu.isValidRecipeIndex	inline	crates/horizon-client/src/menu.rs::Menu::button	the stonecutter arm checks the recipe index
+StonecutterMenu.setupRecipeList	port	crates/horizon-client/src/menu.rs::Menu::stone_changed	recipes for the input are selected and the selection and result reset
+StonecutterMenu.canTakeItemForPickAll	port	crates/horizon-client/src/menu.rs::Menu::can_take_for_pick_all	the result slot is excluded
+StonecutterMenu.quickMoveStack	inline	crates/horizon-client/src/menu.rs::Menu::quick_move	the Kind::Stonecutter arm
+StonecutterMenu.removed	port	crates/horizon-client/src/game/stations.rs::Game::close_station	input stacks are given back when the station closes; the result is derived and not kept
+ArrowItem.asProjectile	port	crates/horizon-client/src/game/dispenser.rs::Game::shoot_projectile_item	dispensed arrows are built in the arrow arm of the item shot
+BlockItem.updateBlockEntityComponents	port	crates/horizon-client/src/block_entity_item.rs::place	the placed block entity takes the item's components
+BlockItem.canPlace	port	crates/horizon-world/src/level/place.rs::Sim::place	the placement checks, including the survive check, run in Sim::place
+BlockItem.onDestroyed	missing		unsure: a container item whose item entity is destroyed should spill its contents; no Horizon code does this
+BoatItem.getBoat	port	crates/horizon-client/src/game/boats.rs::Game::place_boat	boat placed at the hit point with the item's stack config
+BucketItem.playEmptySound	port	crates/horizon-world/src/level/buckets.rs::Sim::empty_sound	
+BundleItem.getWeightSafe	port	crates/horizon-items/src/bundle.rs::Contents::weight_fraction	float fraction; vanilla compares an exact Fraction
+BundleItem.getBarWidth	port	crates/horizon-items/src/bundle.rs::Contents::bar	
+BundleItem.getBarColor	port	crates/horizon-items/src/bundle.rs::Contents::bar	
+BundleItem.removeOneItemFromBundle	port	crates/horizon-items/src/bundle.rs::Contents::remove_one	
+BundleItem.getTooltipImage	port	crates/horizon-items/src/bundle.rs::tooltip_layout	gap: minor: the tooltip_display rule that hides the bundle contents is not checked here
+BundleItem.onDestroyed	missing		unsure: a bundle whose item entity is destroyed should spill its contents; no Horizon code does this
+BundleItem.playRemoveOneSound	port	crates/horizon-client/src/game.rs::Game::drop_bundle_content	the menu queues the same sound in menu/bundle.rs
+BundleItem.playInsertSound	port	crates/horizon-client/src/menu/bundle.rs::Menu::carried_bundle_click	queues the insert or insert-fail sound
+BundleItem.playDropContentsSound	port	crates/horizon-client/src/game.rs::Game::drop_bundle_content	
+CompassItem.isFoil	port	crates/horizon-assets/src/item_model.rs::Resolve::has_foil	a compass with a lodestone_tracker component glints
+CrossbowItem.tryLoadProjectiles	port	crates/horizon-client/src/game/crossbow.rs::Game::tick_crossbow	the drawn ammo is stored on the crossbow once charged
+CrossbowItem.shootProjectile	port	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	
+CrossbowItem.getProjectileShotVector	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	the multishot spread is rotated inline from the view and up vectors
+CrossbowItem.createProjectile	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	gap: player: crossbow arrows keep the normal arrow hit sound; the crossbow hit sound (item.crossbow.hit) is never set
+CrossbowItem.getShotPitch	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	the shot pitch per index is inline
+CrossbowItem.getRandomShotPitch	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	the random pitch formula is inline
+CrossbowItem.getPowerForTime	inline	crates/horizon-client/src/game/crossbow.rs::Game::tick_crossbow	the charge fraction capped at one is the tick check against the charge time
+DyeColor.getMixedColor	missing		player: a baby sheep, wolf or cat from parents of two dye colours gets a mixed colour; Horizon has no breeding dye mix (only sheep_color for spawns)
+DyeColor.findColorMixInRecipes	missing		player: part of the same breeding dye mix; the crafting recipe lookup for two dyes is not done for offspring
+FireworkRocketItem.createDispenseConfig	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_projectile	rocket config: offset 0.5000099, uncertainty 1, power 0.5, event 1004
+FireworkRocketItem.getEntityJustOutsideOfBlockPos	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_position	the position just outside the dispenser on the facing side
+HangingEntityItem.mayPlace	port	crates/horizon-client/src/game/paintings.rs::Game::place_painting	gap: player: the horizontal-face rule is checked for paintings only; place_item_frame has no vertical-face test
+HangingEntityItem.appendHoverText	missing		player: hovering a painting item shows no title, author or size line in its tooltip
+Item.getDestroySpeed	port	crates/horizon-items/src/items.rs::Items::mining_speed	
+Item.finishUsingItem	port	crates/horizon-client/src/game.rs::Game::consume_held	the consumable effects are applied by apply_consume_effect
+Item.getBarColor	port	crates/horizon-client/src/hud_overlays.rs::damage_bar	width and hue from the damage fraction
+Item.mineBlock	port	crates/horizon-client/src/game.rs::Game::mine_block_with_held	
+Item.isCorrectToolForDrops	port	crates/horizon-items/src/items.rs::Items::correct_for_drops	
+Item.getUseAnimation	port	crates/horizon-items/src/use_animation.rs::consumable_animation	consumable animation; the block and spear poses are handled by the item pose code
+Item.getPlayerPOVHitResult	port	crates/horizon-client/src/game.rs::Game::pick	the view ray from the eyes; the fluid variant is Game::pick_fluid
+Item.Properties.food	skip:data		registration builder; Horizon reads item data from tables
+Item.Properties.usingConvertsTo	skip:data		registration builder
+Item.Properties.durability	skip:data		registration builder
+Item.Properties.craftRemainder	skip:data		registration builder
+Item.Properties.fireResistant	skip:data		registration builder; resists_fire reads the data
+Item.Properties.jukeboxPlayable	skip:data		registration builder
+Item.Properties.repairable	skip:data		registration builder
+Item.Properties.axe	skip:data		registration builder
+Item.Properties.hoe	skip:data		registration builder
+Item.Properties.shovel	skip:data		registration builder
+Item.Properties.spawnEgg	skip:data		registration builder
+Item.Properties.humanoidArmor	skip:data		registration builder
+Item.Properties.wolfArmor	skip:data		registration builder
+Item.Properties.horseArmor	skip:data		registration builder
+Item.Properties.nautilusArmor	skip:data		registration builder
+Item.Properties.requiredFeatures	skip:data		registration builder
+Item.Properties.delayedHolderComponent	skip:data		registration builder
+Item.Properties.loweredMobVisibility	missing		unsure: the mob_visibility component is not read by Horizon's mob targeting
+Item.Properties.finalizeInitializer	skip:data		registration builder
+Item.TooltipContext.of	skip:java		tooltip context factory; Horizon passes the level and player to the tooltip functions
+ItemStack.validateStrict	skip:java		codec-side validation of components and stack size
+ItemStack.hasNonDefault	skip:other		component presence query; Horizon reads stack fields directly
+ItemStack.validateComponents	skip:java		codec-side validation
+ItemStack.validateContainedItemSizes	skip:java		codec-side validation
+ItemStack.getDamageValue	skip:other		field accessor; Horizon keeps damage on the stack
+ItemStack.setDamageValue	skip:other		field write
+ItemStack.isBroken	inline	crates/horizon-client/src/game.rs::Game::damage_held	the break test (damage at or over max) is in damage_held
+ItemStack.nextDamageWillBreak	inline	crates/horizon-client/src/game/trident.rs::Game::use_trident	gap: minor: only the trident's check is ported here
+ItemStack.processDurabilityChange	port	crates/horizon-client/src/game/enchant_effects.rs::Game::durability_loss	the Unbreaking-adjusted loss
+ItemStack.applyDamage	port	crates/horizon-client/src/game.rs::Game::damage_held	gap: minor: no item durability advancement trigger fires
+ItemStack.hurtAndConvertOnBreak	missing		unsure: a carrot or fungus on a stick that breaks should become a fishing rod; no conversion was found
+ItemStack.hurtEnemy	port	crates/horizon-client/src/game/mace.rs::Game::weapon_wear	the per-hit durability loss of a weapon
+ItemStack.interactLivingEntity	port	crates/horizon-client/src/game.rs::Game::interact_entity	equip-on-interact is in the mob paths (nautili.rs, ghasts.rs)
+ItemStack.copy	skip:java		value copy
+ItemStack.copyWithCount	skip:java		value copy with a count
+ItemStack.transmuteCopyIgnoreEmpty	port	crates/horizon-items/src/item_data.rs::ItemStack::transmute	keeps the components, changes the item
+ItemStack.listMatches	skip:java		element-wise list equality for CraftingInput; Horizon compares recipe inputs directly
+ItemStack.matchesIgnoringComponents	port	crates/horizon-items/src/item_data.rs::ItemStack::same_item_same_components	gap: minor: no predicate for ignored component types
+ItemStack.lenientOptionalFieldOf	skip:java		codec helper
+ItemStack.hashItemAndComponents	skip:java		hash for collections
+ItemStack.hashStackList	skip:java		hash for collections
+ItemStack.onCraftedBy	inline	crates/horizon-client/src/game.rs::Game::click_inventory	gap: minor: the crafted statistic is added only on the inventory grid craft path here
+ItemStack.set	skip:other		component write; Horizon stores component data in typed fields
+ItemStack.update	skip:java		functional update helper
+ItemStack.applyComponentsAndValidate	missing		unsure: a validated component patch has no single Horizon counterpart; /item modify is a separate path
+ItemStack.getStyledHoverName	port	crates/horizon-client/src/game/stations.rs::Game::stack_hover_name	gap: minor: plain text; the rarity colour and italic style are not applied here
+ItemStack.addToTooltip	port	crates/horizon-client/src/item_tooltip.rs::lines	
+ItemStack.addUnitComponentToTooltip	inline	crates/horizon-client/src/game/stations.rs::Game::stack_tooltip_lines	unit lines such as unbreakable, gated by the tooltip display
+ItemStack.canPlaceOnBlockInAdventureMode	missing		player: in adventure mode a block can be placed only when the held item's can_place_on list allows it; Horizon does not read that component
+ItemStack.canBreakBlockInAdventureMode	missing		player: in adventure mode a block can be broken only when the held item's can_break list allows it; Horizon does not read that component
+ItemStack.getDamageSource	missing		unsure: a stack's damage_type component is not read when a weapon hits; no Horizon reader found
+ItemStackTemplate.fromNonEmptyStack	port	crates/horizon-items/src/item_data.rs::template_tag	stack to template tag
+ItemStackTemplate.withCount	skip:java		record copy with a new count
+ItemStackTemplate.apply	port	crates/horizon-assets/src/item_model.rs::stack_from_template	
+ItemUtils.onContainerDestroyed	missing		unsure: destroyed container items do not spill their contents; see BlockItem.onDestroyed
+Items.registerBlock	skip:data		item registry bootstrap
+Items.registerItem	skip:data		item registry bootstrap
+JukeboxSong.hasFinished	port	crates/horizon-items/src/items.rs::Song::finished	
+JukeboxSongPlayer.setSongWithoutPlaying	missing		unsure: no load path restores a jukebox's song start tick
+JukeboxSongPlayer.play	port	crates/horizon-client/src/game/jukebox.rs::Game::start_song	the song starts at the jukebox with its sound
+JukeboxSongPlayer.shouldEmitJukeboxPlayingEvent	inline	crates/horizon-client/src/game/jukebox.rs::Game::tick_jukebox	
+JukeboxSongPlayer.spawnMusicParticles	inline	crates/horizon-client/src/game/jukebox.rs::Game::tick_jukebox	the note particle is emitted in tick_jukebox
+LeadItem.bindPlayerMobs	port	crates/horizon-client/src/game/leads.rs::Game::interact_knot	
+MaceItem.createAttributes	skip:data		attribute modifiers come from the item data
+MaceItem.calculateImpactPosition	inline	crates/horizon-client/src/game/mace.rs::Game::mace_hurt_enemy	the earlier impact below the player is kept
+MaceItem.knockbackPredicate	port	crates/horizon-client/src/game/mace.rs::Game::smash_knockback	the nearby entity filter for the smash
+MapItem.create	port	crates/horizon-client/src/game/maps.rs::Game::register_exploration_maps	
+MapItem.createNewSavedData	port	crates/horizon-client/src/game/maps.rs::MapData::fresh	
+MapItem.getCorrectStateForFluidBlock	inline	crates/horizon-client/src/game/maps.rs::Game::update_map	the map colour pass
+MapItem.inventoryTick	port	crates/horizon-client/src/game/maps.rs::Game::tick_maps	
+MapItem.lockMap	port	crates/horizon-client/src/menu.rs::Menu::map_crafted	the lock branch of the post processing
+MapItem.useOn	missing		player: using a map on a banner block should toggle that banner's marker on the map; Horizon has no banner toggle
+MobBucketItem.emptyContents	port	crates/horizon-world/src/level/buckets.rs::Sim::bucket_empty	the MobWater and Nothing contents
+PotionItem.getDefaultInstance	skip:data		default stack data
+PotionItem.useOn	missing		player: a water bottle used on a block that turns to mud should make mud; no such conversion was found in potions.rs
+PotionItem.getName	port	crates/horizon-client/src/game/stations.rs::Game::stack_hover_name	potion name from the contents
+ProjectileItem.DispenseConfig.Builder.build	inline	crates/horizon-client/src/game/dispenser.rs::Game::dispense_projectile	per-item dispense config
+ProjectileWeaponItem.getHeldProjectile	port	crates/horizon-client/src/game/crossbow.rs::Game::projectile_slot	offhand first, then the held slot
+ProjectileWeaponItem.createProjectile	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	the arrow from the ammo, with the weapon's piercing
+ShieldItem.getName	missing		player: a shield with a banner base colour is named after that colour; Horizon names every shield the same

@@ -1,0 +1,150 @@
+SectionStorage.unpackPendingLoads	missing		minor: POI region files are written but never read back; POI come from blocks (poi_sections.rs), so saved POI claims are not restored
+SectionStorage.flushAll	inline	crates/horizon-client/src/game.rs::Game::save_level	saves modified chunks with their POI and flushes the writer
+SectionStorage.getOrLoad	port	crates/horizon-client/src/poi_sections.rs::PoiSections::get	gap: minor: the section's POI list is derived from its blocks, not loaded from the POI file
+SectionStorage.getOrCreate	skip:other		no POI record to create; PoiSections::get derives each section's list from its blocks
+SectionStorage.prefetch	skip:java		async prefetch of POI files; nothing is loaded from disk, so there is nothing to prefetch
+SectionStorage.unpackChunk	missing		minor: POI region files are never read back; POI come from blocks (poi_sections.rs), so saved POI claims are not restored
+SectionStorage.tryRead	missing		minor: POI region files are never read back; POI come from blocks (poi_sections.rs), so saved POI claims are not restored
+SectionStorage.writeChunk	port	crates/horizon-client/src/save.rs::SaveDir::save_poi	queues the chunk's POI records to the region writer; claims kept by resolve_poi
+SectionStorage.setDirty	inline	crates/horizon-client/src/game.rs::Game::update_world	the chunk modified list marks chunks to save together with their POI
+SectionStorage.PackedChunk.parse	missing		minor: POI region files are never read back, so POI ticket claims are not restored on load
+SerializableChunkData.parse	port	crates/horizon-client/src/save.rs::decode_column	gap: minor: entity tags are read by Persistent::load (load_entities), not here
+SerializableChunkData.logErrors	skip:debug		logs load problems; Horizon warns with log::warn where a problem is found
+SerializableChunkData.copyOf	skip:java		snapshot copy for the async writer; Horizon shares the chunk as Arc<Chunk> in Record::Chunk
+SerializableChunkData.saveTicks	port	crates/horizon-client/src/save.rs::tick_list	builds the block_ticks and fluid_ticks tags
+SerializableChunkData.getChunkStatusFromTag	inline	crates/horizon-client/src/save.rs::decode_with	gap: minor: decode_with only checks that Status is full and does not return the status; partial statuses go to decode_proto
+SerializableChunkData.postLoadChunk	inline	crates/horizon-client/src/save.rs::decode_column	gap: minor: decodes the block entities here; entity tags are attached by Persistent::load
+SerializableChunkData.packStructureData	inline	crates/horizon-client/src/save.rs::encode_with	writes structures.starts and structures.References
+SerializableChunkData.unpackStructureStart	skip:other		starts are written but not read back; worldgen regenerates them from the seed (vanillagen.rs)
+SerializableChunkData.unpackStructureReferences	inline	crates/horizon-client/src/save.rs::decode_column	gap: minor: reads the references but does not drop ones more than 8 chunks away
+SerializableChunkData.packOffsets	inline	crates/horizon-client/src/save.rs::encode_proto	packs the PostProcessing marks per section
+SimpleRegionStorage.write	port	crates/horizon-client/src/save.rs::SaveDir::queue	queues the record for the region writer thread
+DimensionType.<init>	skip:data		validates a dimension type's numbers when datapack data loads; Horizon uses fixed dimension data
+DimensionType.createDirectCodec	skip:java		codec for the dimension type JSON
+EnderDragonFight.createDefault	inline	crates/horizon-client/src/game/dragon.rs::Game::load_fight	the defaults load_fight uses when no saved fight exists (scan on, no gateways yet)
+EnderDragonFight.<init>	inline	crates/horizon-client/src/game/dragon.rs::Game::load_fight	reads the saved fight fields
+EnderDragonFight.init	inline	crates/horizon-client/src/game/dragon.rs::Game::load_fight	gap: minor: the gateway shuffle is here; the boss bar object and player predicate are fight_has_players and dragon_boss_progress
+EnderDragonFight.scanState	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_fight	gap: minor: sets previously_killed from end_portal_active; does not spawn the inactive portal or discard a stray dragon
+EnderDragonFight.findOrCreateDragon	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_fight	gap: minor: no lookup for an existing dragon; Horizon holds one fight dragon
+EnderDragonFight.setRespawnStage	port	crates/horizon-client/src/game/dragon.rs::Game::set_respawn	gap: minor: the END stage (new dragon, summoned-entity trigger) is not set here; finish_respawn ends the respawn and the trigger is not fired
+EnderDragonFight.hasActiveExitPortal	port	crates/horizon-client/src/game/dragon.rs::Game::end_portal_active	gap: minor: checks one column at the origin for bedrock and portal blocks, not portal block entities over 17x17 chunks
+EnderDragonFight.findExitPortal	port	crates/horizon-client/src/game/dragon.rs::Game::exit_portal	gap: minor: returns the remembered portal origin; there is no pattern search of the chunks
+EnderDragonFight.isArenaLoaded	port	crates/horizon-client/src/game/dragon.rs::Game::arena_loaded	gap: minor: checks a 4x4 block of lit chunks, not full status plus loaded entities
+EnderDragonFight.updatePlayers	port	crates/horizon-client/src/game/dragon.rs::Game::fight_has_players	gap: minor: the boss bar's player set is not kept; dragon_boss_progress checks each player's distance
+EnderDragonFight.updateCrystalCount	port	crates/horizon-client/src/game/dragon.rs::Game::count_crystals	counts crystals on the spike tops
+EnderDragonFight.spawnNewGateway	inline	crates/horizon-client/src/game/dragon.rs::Game::dragon_killed	gap: minor: pops the next gateway and its position; placing it is place_gateway_at (end.rs)
+EnderDragonFight.spawnExitPortal	port	crates/horizon-client/src/game/end.rs::Game::activate_exit_portal	gap: minor: places the active podium only; try_respawn places the inactive one
+EnderDragonFight.createNewDragon	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_fight	creates the dragon over the podium with a random yaw; Dragon::new builds it
+EnderDragonFight.updateDragon	port	crates/horizon-client/src/game/dragon.rs::Game::dragon_boss_progress	gap: minor: returns the health fraction for the bar; the dragon's custom name is not used
+EnderDragonFight.abortRespawnSequence	port	crates/horizon-client/src/game/dragon.rs::Game::abort_respawn	clears the respawn, resets the spike crystals and reactivates the portal
+EnderDragonFight.respawnDragon	port	crates/horizon-client/src/game/dragon.rs::Game::try_respawn	turns the portal bedrock back to end stone, takes the crystals and starts the respawn
+EnderDragonFight.resetSpikeCrystals	port	crates/horizon-client/src/game/dragon.rs::Game::reset_spike_crystals	makes spike crystals vulnerable again and clears their beams
+Visibility.fromFullChunkStatus	missing		unsure: Horizon has entity_ticking checks in ticket_levels.rs but no TICKING/TRACKED/HIDDEN split; not clear whether entities in loaded, non-ticking chunks stay visible
+GameEvent.register	skip:data		registers a game event with its default radius; Horizon reads events from fixed tables (notification_radius)
+GameEventDispatcher.post	port	crates/horizon-client/src/game/sculk.rs::Game::post_game_event	delivers the event to sensors, shriekers and wardens within the radius
+GameEventDispatcher.handleGameEventMessagesInQueue	inline	crates/horizon-client/src/game/sculk.rs::Game::post_game_event	gap: minor: no sort by distance before delivery; the selector keeps the nearest candidate, which only differs on ties
+VibrationSystem.Listener.forceScheduleVibration	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_stand_on	a step on a sensor schedules the step event after the sensor's own checks
+VibrationSystem.Listener.scheduleVibration	port	crates/horizon-client/src/sculk.rs::Data::schedule	adds the candidate to the selector; the distance is computed by sculk_listen
+VibrationSystem.Ticker.trySelectAndScheduleVibration	port	crates/horizon-client/src/sculk.rs::Data::tick	gap: minor: picks the chosen candidate and travel time; the particle is sent by tick_sculk_block
+VibrationSystem.Ticker.tryReloadVibrationParticle	missing		minor: the travelling vibration particle is sent once when the trip starts; vanilla resends it until a player receives it, which matters only for players who arrive mid-trip
+VibrationSystem.Ticker.receiveVibration	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_receive	gap: minor: the adjacent-chunk hold-back is in Data::tick, not here
+VibrationSystem.Ticker.areAdjacentChunksTicking	inline	crates/horizon-client/src/game/sculk.rs::Game::tick_sculk_blocks	computes the adjacent flag per sensor from the 3x3 block-ticking chunks
+GameRules.codec	skip:java		codec for the saved game rules; to_nbt and from_nbt do the read and write
+GameRules.get	port	crates/horizon-client-core/src/gamerules.rs::GameRules::get	returns the rule's value, or None for an unknown rule
+GameRules.set	port	crates/horizon-client-core/src/gamerules.rs::GameRules::set	gap: minor: the change is not sent to connected clients; GameRuleValues goes out only on a client's request
+GameRules.setAll	skip:debug		only the gametest framework copies whole rule sets
+GameRules.visitGameRuleTypes	skip:other		visits rules to build brigadier argument types; horizon-command builds its own command tree
+GameRules.registerBoolean	skip:data		registry registration of a boolean rule; Horizon's rules are a fixed table
+GameRules.registerInteger	skip:data		registry registration of an integer rule; Horizon's rules are a fixed table
+GameRules.register	skip:data		registry registration; Horizon's rules are a fixed table
+blockpredicates/BlockPredicate.allOf	skip:java		builder for a predicate; Horizon decodes predicate JSON into its enum (decode_with_blocks)
+blockpredicates/BlockPredicate.anyOf	skip:java		builder for a predicate; Horizon decodes predicate JSON into its enum (decode_with_blocks)
+blockpredicates/BlockPredicate.matchesBlocks	skip:java		builder for a predicate; Horizon decodes predicate JSON into its enum (decode_with_blocks)
+blockpredicates/BlockPredicate.matchesTag	skip:java		builder for a predicate; Horizon decodes predicate JSON into its enum (decode_with_blocks)
+blockpredicates/BlockPredicate.matchesFluids	skip:java		builder for a predicate; Horizon decodes predicate JSON into its enum (decode_with_blocks)
+blockpredicates/BlockPredicate.hasSturdyFace	skip:java		builder for a predicate; Horizon decodes predicate JSON into its enum (decode_with_blocks)
+blockpredicates/BlockPredicate.solid	skip:java		builder for a predicate; Horizon decodes predicate JSON into its enum (decode_with_blocks)
+WorldCarver.canReach	port	crates/horizon-core/src/carving/ellipsoid.rs::can_reach	the same reach test for a carver step
+DensityVolume.indexUnchecked	port	crates/horizon-core/src/noise/volume.rs::DensityVolume::index	same index formula; Horizon's version is bounds-checked
+DensityVolume.maxBlockX	port	crates/horizon-core/src/noise/volume.rs::DensityVolume::maximum	the x component of maximum
+DensityVolume.maxBlockY	port	crates/horizon-core/src/noise/volume.rs::DensityVolume::maximum	the y component of maximum
+DensityVolume.maxBlockZ	port	crates/horizon-core/src/noise/volume.rs::DensityVolume::maximum	the z component of maximum
+DensityVolume.intersects	port	crates/horizon-core/src/density/beardifier.rs::StructureBounds::intersects	the box test Beardifier uses against a volume
+DensityVolume.containsBlockRelative	inline	crates/horizon-core/src/noise/volume.rs::DensityVolume::index_of_block	the range and step checks
+DistanceMetric.compute	port	crates/horizon-core/src/density/terrain_noise.rs::DistanceMetric::compute3	the 3D overload; compute2 is the 2D one
+SamplerContext.getCacheCell	port	crates/horizon-core/src/density/cache.rs::SamplerContext::prepare_cache	checks and grows the cache slots for a cache id
+BlockColumnFeature.layer	skip:java		builder for a column layer; decode reads the layers from JSON
+BlockColumnFeature.simple	skip:java		builder for a one-layer column; decode reads the feature from JSON
+BlockPileFeature.mayPlaceOn	inline	crates/horizon-world/src/worldgen/block_pile.rs::BlockPileFeature::try_place	the support test: a path below is a coin flip, otherwise a sturdy top face
+EndIslandFeature.place	port	crates/horizon-client/src/game/end.rs::Game::place_end_island	the end stone blob with a seed from the position
+EndPodiumFeature.dropPreviousAndSetBlock	port	crates/horizon-world/src/worldgen/end_podium.rs::EndPodiumFeature::replace	breaks the old block and sets the new one when they differ
+EndSpikeFeature.EndSpike.isCenterWithinChunk	inline	crates/horizon-world/src/worldgen/end_spike.rs::EndSpikeFeature::place	the chunk check of each spike's centre
+EndSpikeFeature.SpikeCacheLoader.load	port	crates/horizon-world/src/worldgen/end_spike.rs::spikes_for_seed	the spike layout for a seed
+FallenTreeFeature.placeFallenTree	port	crates/horizon-world/src/worldgen/tree/fallen.rs::FallenTreeFeature::place	stump, log and decorators
+FallenTreeFeature.setGroundHeightForFallenLogStartPos	inline	crates/horizon-world/src/worldgen/tree/fallen.rs::FallenTreeFeature::place	the search down for ground under the log start
+FallenTreeFeature.placeFallenLog	port	crates/horizon-world/src/worldgen/tree/fallen.rs::FallenTreeFeature::place_log	gap: minor: places one log per call; the loop over the length and the log decorators are in place
+FallenTreeFeature.Builder.build	skip:java		builder for the feature
+FossilFeature.countEmptyCorners	inline	crates/horizon-world/src/worldgen/structure/features.rs::FossilFeature::place	counts empty corners against max_empty_corners_allowed
+HugeFungusFeature.isReplaceable	port	crates/horizon-world/src/worldgen/fungus.rs::HugeFungusFeature::replaceable	replaceable blocks, plus the plant test when asked
+HugeFungusFeature.placeHatDropBlock	port	crates/horizon-world/src/worldgen/fungus.rs::HugeFungusFeature::hat_drop	the hat drop roll and the optional weeping vines
+IcebergFeature.removeFloatingSnowLayer	inline	crates/horizon-world/src/worldgen/iceberg.rs::IcebergFeature::carve	removes the snow above a carved iceberg block
+IcebergFeature.setIcebergBlock	port	crates/horizon-world/src/worldgen/iceberg.rs::IcebergFeature::generate_block	sets ice, snow or the water block for one position
+IcebergFeature.getEllipseC	inline	crates/horizon-world/src/worldgen/iceberg.rs::IcebergFeature::generate_block	the ellipse c adjustment near the top
+IcebergFeature.signedDistanceCircle	inline	crates/horizon-world/src/worldgen/iceberg.rs::IcebergFeature::generate_block	the circle branch of the signed distance
+IcebergFeature.signedDistanceEllipse	port	crates/horizon-world/src/worldgen/iceberg.rs::signed_ellipse	the rotated ellipse distance
+IcebergFeature.heightDependentRadiusEllipse	inline	crates/horizon-world/src/worldgen/iceberg.rs::IcebergFeature::place	the ellipse radius per height, in the ellipse branch of place
+IcebergFeature.isIcebergState	port	crates/horizon-world/src/worldgen/iceberg.rs::IcebergFeature::iceberg_state	packed ice, snow block or blue ice
+LargeDripstoneFeature.makeDripstone	inline	crates/horizon-world/src/worldgen/dripstone.rs::LargeDripstoneFeature::place	samples bluntness and height scale and builds the column
+LargeDripstoneFeature.placeDebugMarkers	skip:debug		debug markers (diamond, gold and creeper head blocks) for the wind offset
+LargeDripstoneFeature.LargeDripstone.isSuitableForWind	inline	crates/horizon-world/src/worldgen/dripstone.rs::LargeDripstoneFeature::place	the radius and bluntness test that enables wind
+MultifaceGrowthFeature.validateBlock	skip:java		codec check that the block is a multiface block
+MultifaceGrowthFeature.validDirections	port	crates/horizon-world/src/worldgen/vegetation.rs::MultifaceGrowthFeature::decode	the directions from the ceiling, floor and horizontal flags, built once at decode
+MultifaceGrowthFeature.getShuffledDirectionsExcept	inline	crates/horizon-world/src/worldgen/vegetation.rs::MultifaceGrowthFeature::place	the shuffled list without the excluded direction
+OverlayFeature.getSubFeatures	skip:data		lists sub-features for datagen and inspection; placement does not use it
+OverlayFeature.place	inline	crates/horizon-world/src/worldgen/feature_graph.rs::FeatureDefinition::evaluate	places each overlaid feature in turn and reports whether any placed
+ReplaceBlobsFeature.findTarget	inline	crates/horizon-world/src/worldgen/replace_blobs.rs::ReplaceBlobsFeature::place	the walk down from the origin to the first target block
+RootSystemFeature.isAllowedTreeSpace	port	crates/horizon-world/src/worldgen/root_system.rs::RootSystemFeature::space_for_tree	air, or water low enough, above the origin for the tree
+RootSystemFeature.placeDirt	inline	crates/horizon-world/src/worldgen/root_system.rs::RootSystemFeature::dirt_and_tree	the rooted dirt column up to the target height
+RootSystemFeature.placeRoots	port	crates/horizon-world/src/worldgen/root_system.rs::RootSystemFeature::hanging_roots	the hanging roots below the canopy
+ScatteredOreFeature.offsetTargetPos	inline	crates/horizon-world/src/worldgen/ore_feature.rs::ScatteredOreFeature::place	the random offset per axis, rounded as Math.round
+SpeleothemClusterFeature.canBeAdjacentToWater	port	crates/horizon-world/src/worldgen/dripstone.rs::SpeleothemClusterFeature::adjacent_ok	base stone or water next to the cluster
+SpeleothemClusterFeature.replaceBlocksWithBaseBlocks	port	crates/horizon-world/src/worldgen/dripstone.rs::SpeleothemClusterFeature::replace_with_base	turns a run of replaceable blocks into the base block
+SpeleothemClusterFeature.getChanceOfStalagmiteOrStalactite	inline	crates/horizon-world/src/worldgen/dripstone.rs::SpeleothemClusterFeature::place	the chance from the distance to the cluster edge
+SpeleothemFeature.getTipDirection	inline	crates/horizon-world/src/worldgen/speleothem.rs::SpeleothemFeature::place	picks up or down from the base blocks above and below
+SpeleothemFeature.createPatchOfBaseBlocks	inline	crates/horizon-world/src/worldgen/speleothem.rs::SpeleothemFeature::place	the base block patch with its directional spread
+SpeleothemUtils.isCircleMostlyEmbeddedInStone	port	crates/horizon-world/src/worldgen/dripstone.rs::LargeDripstoneFeature::circle_embedded	the ring of the circle that must be inside stone
+SpeleothemUtils.buildBaseToTipColumn	port	crates/horizon-world/src/worldgen/dripstone.rs::Speleothem::grow	builds the base, middle, frustum and tip blocks in order
+SpeleothemUtils.placeBaseBlockIfPossible	port	crates/horizon-world/src/worldgen/dripstone.rs::Speleothem::place_base_if_possible	sets the base block where a replaceable block is
+SpeleothemUtils.createPointedBlock	port	crates/horizon-world/src/worldgen/dripstone.rs::Speleothem::pointed_state	the pointed block for a direction and thickness
+SpeleothemUtils.isNeitherEmptyNorWater	port	crates/horizon-world/src/worldgen/dripstone.rs::Speleothem::empty_or_water	the negation of empty_or_water
+TemplateFeature.simple	skip:java		builder for a single-template feature; decode reads it from JSON
+TemplateFeature.getRotatedOffset	inline	crates/horizon-world/src/worldgen/structure/features.rs::TemplateFeature::place	the rotated half-size offset of the template
+TreeFeature.isAirOrLeaves	inline	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::dark_oak	the air-or-leaves test before a dark oak log
+UnderwaterMagmaFeature.getFloorY	port	crates/horizon-world/src/worldgen/underwater_magma.rs::UnderwaterMagmaFeature::scan	scans down through water to the floor
+UnderwaterMagmaFeature.isValidPlacement	port	crates/horizon-world/src/worldgen/underwater_magma.rs::UnderwaterMagmaFeature::valid	not in water or air, covered below and hidden from the sides
+UnderwaterMagmaFeature.isWaterOrAir	inline	crates/horizon-world/src/worldgen/underwater_magma.rs::UnderwaterMagmaFeature::valid	the water-or-air rejection at the start
+UnderwaterMagmaFeature.isVisibleFromOutside	port	crates/horizon-world/src/worldgen/underwater_magma.rs::UnderwaterMagmaFeature::occluded	the face occlusion test
+VegetationPatchFeature.distributeVegetation	inline	crates/horizon-world/src/worldgen/vegetation.rs::VegetationPatchFeature::place	the chance loop over the surface positions
+WaterloggedVegetationPatchFeature.placeGroundPatch	inline	crates/horizon-world/src/worldgen/vegetation.rs::VegetationPatchFeature::place	the ground patch (ground_patch) and then the water conversion of the surface
+WaterloggedVegetationPatchFeature.isExposed	inline	crates/horizon-world/src/worldgen/vegetation.rs::VegetationPatchFeature::place	the exposed test over the four sides and below
+WaterloggedVegetationPatchFeature.isExposedDirection	inline	crates/horizon-world/src/worldgen/vegetation.rs::VegetationPatchFeature::place	the exposed test for one face
+FeatureSize.minClippedHeightCodec	skip:java		codec for min_clipped_height
+FoliagePlacer.foliagePlacerParts	skip:java		codec fields for radius and offset
+FoliagePlacer.shouldSkipLocationSigned	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::skip_signed	the skip test for a leaf position, with the double trunk case
+RootPlacer.getPotentiallyWaterloggedState	port	crates/horizon-world/src/worldgen/tree.rs::RootPlacer::waterlogged	sets waterlogged from the water at the position
+BlockStateProvider.of	skip:java		wraps one state as a provider; decode builds providers from JSON
+NoiseProvider.noiseProviderCodec	skip:java		codec fields for seed, noise, scale and states
+NoiseProvider.getRandomState	port	crates/horizon-world/src/worldgen/state_provider/noise.rs::index	maps the noise value to an index in the states
+TreeDecorator.Context.placeVine	port	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::place_vine	places a vine on the given face
+TreeDecorator.Context.isWaterOrWaterNearby	inline	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::mushroom_replaceable	the water test over the centre and four sides
+TrunkPlacer.placeBelowTrunkBlock	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::place_below_trunk	places the block below the trunk when the provider gives one
+FlatLevelGeneratorSettings.validateHeight	skip:java		codec check that layers total at most 4064; flat.rs clamps each layer to that instead
+FlatLevelGeneratorSettings.withBiomeAndLayers	port	crates/horizon-client/src/title/flat.rs::FlatSettings::parse	gap: minor: builds the layers and biome from the preset text; structure overrides and decorations come from the base
+FlatLevelGeneratorSettings.adjustGenerationSettings	missing		player: superflat layers and decorations are saved with the world but no code applies them, so the generated world does not get the flat layers or its decorations
+FlatLevelGeneratorSettings.updateLayers	missing		player: nothing expands the flat layers into the world's block layers (see adjustGenerationSettings)
+MaterialRuleContext.getBiome	port	crates/horizon-world/src/worldgen/material_condition.rs::Context::biome	the biome at the position, cached per column
+MaterialRuleContext.getMinSurfaceLevel	port	crates/horizon-world/src/worldgen/material_condition.rs::Context::minimum_surface_level	the preliminary surface level minus the depth, cached per column
+MaterialRuleContext.getNoiseSampler	port	crates/horizon-world/src/worldgen/material_condition.rs::Context::bind_noise	binds a noise by name and dimension, once
+MaterialRuleContext.createNoiseSampler2d	port	crates/horizon-world/src/worldgen/material_condition.rs::Context::noise	the 2D noise sample, cached per column
+MaterialRuleContext.createNoiseSampler3d	port	crates/horizon-world/src/worldgen/material_condition.rs::Context::noise	the 3D noise sample, cached per block
+MaterialRuleContext.getDensitiesInChunk	skip:java		prefill buffer for density sampling; Horizon samples the density per block

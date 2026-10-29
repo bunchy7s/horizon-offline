@@ -36,6 +36,14 @@ impl SamplerContext {
             ..Self::cached()
         }
     }
+    /// Keeps each y-fixed slice's plane (a function of x and z only), so that
+    /// sampling the same x/z lattice again, at other heights or another
+    /// vertical step, reuses it. For one evaluation over one graph: far
+    /// previews sample a tile coarsely, then again around its surface.
+    pub fn with_planes(mut self) -> Self {
+        self.planes = Some(Default::default());
+        self
+    }
     pub fn clear_caches(&mut self) {
         if let Some(caches) = &mut self.caches {
             caches.clear();

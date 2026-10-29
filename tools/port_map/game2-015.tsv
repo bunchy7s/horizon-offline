@@ -1,0 +1,141 @@
+PointedDripstoneBlock.fallOn	port	crates/horizon-world/src/block_landing.rs::BlockLandingRegistry::fall_on	stalagmite tip landing damage (fall + 2.5, multiplier 2.0) in the DripstoneTip rule
+PointedDripstoneBlock.randomTick	port	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_random_tick	fluid transfer and stalagmite growth both run from the random tick
+PointedDripstoneBlock.findRootBlock	inline	crates/horizon-world/src/level/speleothem.rs::Sim::dripstone_fluid_above	root search is the find_block_vertical call inside the fluid lookup
+PointedDripstoneBlock.findFillableCauldronBelowStalactiteTip	port	crates/horizon-world/src/level/speleothem.rs::Sim::dripstone_find_cauldron	
+PointedDripstoneBlock.findStalactiteTipAboveCauldron	inline	crates/horizon-world/src/level/speleothem.rs::Sim::cauldron_tick	tip search upward from the cauldron folded into the cauldron tick
+PointedDripstoneBlock.getCauldronFillFluidType	inline	crates/horizon-world/src/level/speleothem.rs::Sim::cauldron_tick	water or lava filter on the fluid above folded into the cauldron tick
+PointedDripstoneBlock.canGrow	inline	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_grow	gap: minor: checks the fluid two blocks above is water, not that it is a source block
+PointedDripstoneBlock.getDripParticle	port	crates/horizon-client/src/game/level_particles.rs::Game::dripstone_drip_particle	
+PotentSulfurBlock.isSourceIfFluid	inline	crates/horizon-world/src/level/shapes.rs::Sim::potent_sulfur_state	source_if_fluid check inside the state rule
+PotentSulfurBlock.onPlace	missing		player: placing a continuous sulfur geyser block gives no geyser start sound and no block-activate game event; no erupting state ever starts in Horizon
+PotentSulfurBlock.spawnBubbleParticlesAt	inline	crates/horizon-client/src/animate_tick.rs::block_animate_tick	two sulfur bubbles in the potent sulfur arm; add_visible is the always-visible add
+PotentSulfurBlock.triggerEvent	missing		minor: only stores the eruption tick that the geyser plume timing reads; geysers never erupt in Horizon (see getTicker)
+PotentSulfurBlock.getTicker	missing		player: wet or dormant sulfur never makes nearby players nauseous from noxious gas; periodic geysers never erupt and continuous ones do not launch entities or play the plume
+PowderSnowBlock.skipRendering	port	crates/horizon-world/src/block_render.rs::FaceVisibility::skips	same_block skip kind from the block data
+PowderSnowBlock.fallOn	port	crates/horizon-world/src/block_landing.rs::BlockLandingRegistry::fall_on	powder snow landing sound from 4 blocks, small or big by 7
+PowderSnowBlock.getEntityInsideCollisionShape	inline	crates/horizon-client/src/motion.rs::MotionWorld::check_inside_blocks	gap: minor: each powder snow cell is swept as a full box; vanilla uses the entity-context shape, which for falling entities over 2.5 blocks is a 0.9 tall box
+RailBlock.updateState	port	crates/horizon-world/src/level/rails.rs::Sim::rail_update_state	
+RailBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	rail shape rotation from the generated state table, as PoweredRailBlock.rotate
+RailBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	rail shape mirror from the generated state table, as PoweredRailBlock.rotate
+RailBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+RailState.updateConnections	port	crates/horizon-world/src/level/rails.rs::Sim::rail_connections	
+RailState.hasRail	inline	crates/horizon-world/src/level/rails.rs::Sim::rail_count_potential_connections	rail test at the position, above and below folded into the count
+RailState.getRail	port	crates/horizon-world/src/level/rails.rs::Sim::rail_get	
+RailState.hasConnection	port	crates/horizon-world/src/level/rails.rs::Sim::rail_has_connection	
+RailState.countPotentialConnections	port	crates/horizon-world/src/level/rails.rs::Sim::rail_count_potential_connections	
+RailState.connectTo	port	crates/horizon-world/src/level/rails.rs::Sim::rail_connect_to	
+ScaffoldingBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+ScaffoldingBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	distance, bottom and waterlogged for the Scaffolding arm
+ScaffoldingBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	waterlogged water tick and the one-tick schedule
+ScaffoldingBlock.tick	missing		unsure: Sim::tick_block has no Scaffolding arm, so the distance and bottom are not recomputed each tick and the fall or break at distance 7 may be missing (player would see scaffolding fall or break when its support goes)
+ScaffoldingBlock.getCollisionShape	port	crates/horizon-world/src/block_collision.rs::ScaffoldingCollision::shape	
+ScaffoldingBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::RegistryFluidWorld::fluid_state	waterlogged state from block data
+RedStoneOreBlock.interact	port	crates/horizon-world/src/level/interact.rs::Behaviours::attack_block	gap: player: no red dust burst when the ore lights; the lit set is in attack_block and game/sculk.rs step_on_redstone_ore
+RedStoneOreBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	
+RedStoneOreBlock.spawnAfterBreak	inline	crates/horizon-world/src/level/removal.rs::break_experience	ore experience (1 to 5) for the break is in break_experience
+RedStoneOreBlock.spawnParticles	missing		player: no red dust particles burst around a redstone ore when it lights from mining, stepping on it, or a right-click with an item
+RedstoneWireBlock.makeShapes	skip:data		wire shapes are per-state data from the block tables
+RedstoneWireBlock.getMissingConnections	inline	crates/horizon-world/src/level/redstone.rs::Sim::wire_connection_state	the missing-side loop of the connection state
+RedstoneWireBlock.updateShape	port	crates/horizon-world/src/level/redstone.rs::Sim::redstone_wire_update_shape	
+RedstoneWireBlock.isCross	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_is_cross	
+RedstoneWireBlock.isDot	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_is_dot	
+RedstoneWireBlock.getConnectingSide	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_connecting_side	
+RedstoneWireBlock.canSurvive	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_can_survive_on	checks the block below through the same sturdy-face test
+RedstoneWireBlock.canSurviveOn	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_can_survive_on	
+RedstoneWireBlock.updatePowerStrength	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_update_power	gap: minor: only the default evaluator; the experimental evaluator behind the redstone experiments flag is not modelled
+RedstoneWireBlock.getBlockSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_block_signal	
+RedstoneWireBlock.checkCornerChangeAt	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_check_corner	
+RedstoneWireBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	wire arm of the placed-block hook
+RedstoneWireBlock.affectNeighborsAfterRemoval	port	crates/horizon-world/src/level/hooks.rs::Sim::affect_neighbors_after_removal	wire arm of the removal hook
+RedstoneWireBlock.updateNeighborsOfNeighboringWires	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_update_neighbors_of_neighboring_wires	
+RedstoneWireBlock.neighborChanged	port	crates/horizon-world/src/level/hooks.rs::Sim::neighbor_changed	gap: minor: no block-is-this check for the experimental evaluator
+RedstoneWireBlock.getDirectSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::state_direct_signal	zero while the wire signal is off
+RedstoneWireBlock.getSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_signal	
+RedstoneWireBlock.shouldConnectTo	port	crates/horizon-world/src/level/redstone.rs::Sim::should_wire_connect_to	
+RedstoneWireBlock.spawnParticlesAlongLine	inline	crates/horizon-client/src/animate_tick.rs::block_animate_tick	the dust line closure in the redstone wire arm
+RedstoneWireBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	redstone wire arm: dust per connected side by power colour
+RedstoneWireBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	rotation from the generated state table, as PoweredRailBlock.rotate
+RedstoneWireBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	mirror from the generated state table
+RedstoneWireBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+RedstoneWireBlock.updatesOnShapeChange	port	crates/horizon-world/src/level/interact.rs::Sim::wire_use	the cross or dot toggle on right-click calls the shape-change update
+RespawnAnchorBlock.canBeCharged	inline	crates/horizon-client/src/game/respawn_anchor.rs::Game::use_respawn_anchor	the charge below four check before a glowstone charge
+RespawnAnchorBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	
+RespawnAnchorBlock.getScaledChargeLevel	inline	crates/horizon-world/src/level/redstone.rs::Sim::analog_output	the charges over four times 15 comparator value
+SaplingBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	sapling arm: tree can grow and the minimum height fits
+SaplingBlock.isBonemealSuccess	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_success	
+SculkBlock.getDecayPenalty	inline	crates/horizon-world/src/level/sculk.rs::Sim::sculk_attempt_use_charge	the decay penalty is computed inside the sculk charge branch
+SculkCatalystBlock.spawnAfterBreak	inline	crates/horizon-world/src/level/removal.rs::break_experience	catalyst experience of 5 in break_experience
+SculkSensorBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	waterlogged from the clicked fluid
+SculkSensorBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::RegistryFluidWorld::fluid_state	waterlogged state from block data
+SculkSensorBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	sensor arm: clears a stored power on placement
+SculkSensorBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	waterlogged water tick
+SculkSensorBlock.updateNeighbours	port	crates/horizon-world/src/level/sculk.rs::Sim::sensor_update_neighbours	
+SculkSensorBlock.getTicker	port	crates/horizon-client/src/game/sculk.rs::Game::tick_sculk_block	the vibration tick: pending vibrations start and are received here; the cooldown is the block tick in horizon-world tick.rs
+SculkSensorBlock.getDirectSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::state_direct_signal	the upward signal comes from the generated strong facts
+SculkSensorBlock.tryResonateVibration	port	crates/horizon-client/src/game/sculk.rs::Game::activate_sensor	resonator game event and amethyst sound; the sensor activation is in the same fn
+SculkSensorBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+SculkSensorBlock.spawnAfterBreak	inline	crates/horizon-world/src/level/removal.rs::break_experience	sensor experience of 5 in break_experience
+SculkShriekerBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+SculkShriekerBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	waterlogged water tick
+SculkShriekerBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	waterlogged from the clicked fluid
+SculkShriekerBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::RegistryFluidWorld::fluid_state	waterlogged state from block data
+SculkShriekerBlock.spawnAfterBreak	inline	crates/horizon-world/src/level/removal.rs::break_experience	shrieker experience of 5 in break_experience
+SculkShriekerBlock.getTicker	port	crates/horizon-client/src/game/sculk.rs::Game::tick_sculk_block	the vibration tick for shriekers
+SculkSpreader.save	port	crates/horizon-client/src/sculk.rs::cursors_to_nbt	the cursors tag of a catalyst: pos, charge, decay and update delays, facings
+SculkSpreader.ChargeCursor.shouldUpdate	port	crates/horizon-world/src/level/sculk.rs::Sim::sculk_cursor_update	gap: minor: the world generation case is in worldgen/sculk.rs; this is the live tick gate
+SculkSpreader.ChargeCursor.mergeWith	inline	crates/horizon-world/src/level/sculk.rs::Sim::sculk_update_cursors	the merge of cursors on the same position in the update loop
+SculkSpreader.ChargeCursor.getBlockBehaviour	port	crates/horizon-world/src/level/sculk.rs::Sim::sculk_behaviour	
+SculkSpreader.ChargeCursor.canMoveToPos	port	crates/horizon-world/src/worldgen/sculk.rs::SculkPatchFeature::valid_movement	the 12 block horizontal limit during world generation
+SculkSpreader.ChargeCursor.isMovementUnobstructed	port	crates/horizon-world/src/level/sculk.rs::Sim::sculk_unobstructed_move	
+SculkSpreader.ChargeCursor.isUnobstructed	inline	crates/horizon-world/src/level/sculk.rs::Sim::sculk_unobstructed_move	the single face test inside the movement check
+SculkVeinBlock.attemptUseCharge	port	crates/horizon-world/src/level/sculk.rs::Sim::sculk_attempt_use_charge	vein behaviour arm
+SculkVeinBlock.SculkVeinSpreaderConfig.stateCanBeReplaced	port	crates/horizon-world/src/level/sculk.rs::Sim::sculk_can_spread_into	
+SelectableSlotContainer.getRelativeHitCoordinatesForBlockFace	inline	crates/horizon-world/src/level/interact.rs::hit_slot	face coordinates of the click, folded into hit_slot
+SelectableSlotContainer.getSection	inline	crates/horizon-world/src/level/interact.rs::hit_slot	section clamp folded into hit_slot
+SeaPickleBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	adds a pickle to a same block; waterlogged from the clicked fluid
+SeaPickleBlock.mayPlaceOn	port	crates/horizon-world/src/level/survive.rs::Sim::may_place_on	
+SeaPickleBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	sea pickle arm, checks the block below
+SeaPickleBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+SeaPickleBlock.canBeReplaced	port	crates/horizon-world/src/level/place.rs::Sim::can_be_replaced	a pickle is replaceable when stacking one more
+SeaPickleBlock.getShape	skip:data		per-state shape table from the vanilla data
+SeaPickleBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::RegistryFluidWorld::fluid_state	waterlogged state from block data
+SeaPickleBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+SeaPickleBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	sea pickle arm: waterlogged and coral block below
+ShelfBlock.isPathfindable	skip:data		path types come from the per-state path data (mobs/path.rs)
+ShelfBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+ShelfBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	shelf arm of the placement rules
+ShelfBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	facing rotation from the generated state table
+ShelfBlock.useItemOn	missing		player: right-clicking a shelf with an item does nothing: the item is not put on a slot, a filled slot is not taken out, and a powered shelf does not swap with the hotbar; interact.rs has no shelf item use
+ShelfBlock.swapSingleItem	missing		player: the held item is not exchanged with the item in the clicked shelf slot
+ShelfBlock.swapHotbar	missing		player: a powered shelf chain does not swap its items with the hotbar
+ShelfBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::RegistryFluidWorld::fluid_state	waterlogged state from block data
+ShelfBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
+ShulkerBoxBlock.useWithoutItem	port	crates/horizon-client/src/game.rs::Game::open_menu	opens the box and awards the open stat; canOpen via shulker_can_open
+ShulkerBoxBlock.playerWillDestroy	port	crates/horizon-world/src/level/removal.rs::pre_remove	gap: minor: only classifies the box as keeping its contents; the break itself is not in this fn
+ShulkerBoxBlock.getDrops	port	crates/horizon-world/src/level/removal.rs::pre_remove	gap: minor: the contents kept on the dropped box come from the same kind; the loot drop is not traced here
+ShulkerBoxBlock.getBlockSupportShape	missing		unsure: shulker_is_closed returns None in the level and the client, so an open box keeps the full cube as its support shape
+ShulkerBoxBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	facing rotation from the generated state table
+SideChainPartBlock.addBlocksConnectingTowards	inline	crates/horizon-world/src/level/shelf.rs::Sim::shelf_chain_size	the walk that counts connected shelves
+SideChainPartBlock.canConnect	inline	crates/horizon-world/src/level/shelf.rs::Sim::shelf_on_powering_up	chain length test before connecting
+SideChainPartBlock.isBeingUpdatedByNeighbor	inline	crates/horizon-world/src/level/shelf.rs::Sim::shelf_on_powering_up	checks for a connected neighbour before the power-up join
+SideChainPartBlock.getNeighbors	skip:java		neighbour cache object; Horizon builds its Neighbors struct at each caller
+SideChainPartBlock.Neighbors.isConnectableToThisBlock	inline	crates/horizon-world/src/level/shelf.rs::Sim::chain_neighbor	connectable and same facing test
+SideChainPartBlock.Neighbors.createNewNeighbor	port	crates/horizon-world/src/level/shelf.rs::Sim::chain_neighbor	
+SideChainPartBlock.Neighbors.getOrCreateNeighbor	port	crates/horizon-world/src/level/shelf.rs::Sim::chain_neighbor	cached lookup per position
+SideChainPartBlock.Neighbors.left	inline	crates/horizon-world/src/level/shelf.rs::Sim::chain_neighbor	left direction and steps
+SideChainPartBlock.Neighbors.right	inline	crates/horizon-world/src/level/shelf.rs::Sim::chain_neighbor	right direction and steps
+SideChainPartBlock.SideChainNeighbor.connectToTheRight	port	crates/horizon-world/src/level/shelf.rs::Part::connected_to_the_right	
+SideChainPartBlock.SideChainNeighbor.connectToTheLeft	port	crates/horizon-world/src/level/shelf.rs::Part::connected_to_the_left	
+SideChainPartBlock.SideChainNeighbor.disconnectFromRight	port	crates/horizon-world/src/level/shelf.rs::Part::disconnected_from_the_right	
+SideChainPartBlock.SideChainNeighbor.disconnectFromLeft	port	crates/horizon-world/src/level/shelf.rs::Part::disconnected_from_the_left	
+SignBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	waterlogged water tick
+SignBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::RegistryFluidWorld::fluid_state	waterlogged state from block data
+SignBlock.otherPlayerIsEditingSign	missing		unsure: minor: no check that another player is editing the sign; sign_edit.rs tracks sign_editing per connection only
+SignBlock.setPlacedBy	port	crates/horizon-client/src/game.rs::Game::use_hand	gap: minor: the sign editor opens after a sign is placed; no allowed-editor player is stored
+SnifferEggBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	sniffer egg arm: moss boost, place event and the hatch timer
+SnowLayerBlock.isPathfindable	skip:data		path types come from the per-state path data (mobs/path.rs)
+SnowLayerBlock.getShadeBrightness	missing		unsure: minor: no shade brightness lookup for snow layers found; vanilla returns 0.2 for a full eight layer block
+SnowLayerBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	snow layer arm: air when it cannot survive
+SnowLayerBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	
+SnowLayerBlock.canBeReplaced	port	crates/horizon-world/src/level/place.rs::Sim::can_be_replaced	
+SnowLayerBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	

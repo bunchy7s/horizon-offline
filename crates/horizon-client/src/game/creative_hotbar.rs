@@ -25,7 +25,11 @@ impl Game<'_> {
             return;
         }
         rows[index] = self.inventory[..hotbar::SIZE].to_vec();
-        let _ = hotbar::save(&path, &rows);
+        if let Err(e) = hotbar::save(&path, &rows) {
+            // saveHotbar sets the message inside its try, so a failed save says nothing.
+            log::warn!("the creative hotbar was not saved: {e}");
+            return;
+        }
         let key = |mapping: &str| keybinds::display_name(self.settings.keys.get(mapping));
         let message = Text::translate(
             "inventory.hotbarSaved",

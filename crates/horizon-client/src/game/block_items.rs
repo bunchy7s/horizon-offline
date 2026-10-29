@@ -153,5 +153,6 @@ impl Game<'_> {
             };
         }
         self.world.block_entities.insert(key, entity);
+        self.update_spawner_display(key);
     }
 }

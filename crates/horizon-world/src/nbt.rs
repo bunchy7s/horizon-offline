@@ -111,6 +111,18 @@ impl Limits {
         }
     }
 
+    /// Chunks, entities, POI and the world's `.dat` files: vanilla reads and
+    /// writes them with `NbtAccounter.unlimitedHeap()` (`NbtIo.read`), so a
+    /// chunk past the default node cap (a few thousand full containers) still
+    /// loads. The byte cap stays as the only guard on the decompressed data.
+    pub fn saved() -> Self {
+        Self {
+            max_bytes: 1 << 30,
+            max_nodes: usize::MAX,
+            max_depth: 512,
+        }
+    }
+
     /// Structure templates (`structure/*.nbt`): vanilla reads them with
     /// `NbtAccounter.unlimitedHeap()` (TemplateSource.readStructure), and
     /// mods ship templates past the default node cap (YUNG's Better Ocean
@@ -628,13 +640,18 @@ pub fn parse_snbt(text: &str) -> Result<(Tag, usize), String> {
     let mut p = Snbt {
         s: text.as_bytes(),
         i: 0,
+        depth: 0,
     };
     let tag = p.value()?;
     Ok((tag, p.i))
 }
+/// Nesting deeper than NBT's own limit (`NbtAccounter`'s 512) is refused
+/// rather than overflowing the stack.
+const SNBT_MAX_DEPTH: usize = 512;
 struct Snbt<'a> {
     s: &'a [u8],
     i: usize,
+    depth: usize,
 }
 impl Snbt<'_> {
     fn skip(&mut self) {
@@ -696,60 +713,22 @@ impl Snbt<'_> {
     fn value(&mut self) -> Result<Tag, String> {
         match self.peek() {
             Some(b'{') => {
-                self.i += 1;
-                let mut map = Compound::new();
-                if self.peek() == Some(b'}') {
-                    self.i += 1;
-                    return Ok(Tag::Compound(map));
+                if self.depth >= SNBT_MAX_DEPTH {
+                    return Err(format!("tag nesting too deep at {}", self.i));
                 }
-                loop {
-                    let key = self.string()?;
-                    self.expect(b':')?;
-                    map.insert(JavaString::from(key.as_str()), self.value()?);
-                    match self.peek() {
-                        Some(b',') => self.i += 1,
-                        Some(b'}') => {
-                            self.i += 1;
-                            return Ok(Tag::Compound(map));
-                        }
-                        _ => return Err(format!("expected ',' or '}}' at {}", self.i)),
-                    }
-                }
+                self.depth += 1;
+                let tag = self.compound();
+                self.depth -= 1;
+                tag
             }
             Some(b'[') => {
-                self.i += 1;
-                let typed = match (self.s.get(self.i), self.s.get(self.i + 1)) {
-                    (Some(&t @ (b'B' | b'I' | b'L')), Some(b';')) => {
-                        self.i += 2;
-                        Some(t)
-                    }
-                    _ => None,
-                };
-                let mut items = Vec::new();
-                if self.peek() != Some(b']') {
-                    loop {
-                        items.push(self.value()?);
-                        match self.peek() {
-                            Some(b',') => self.i += 1,
-                            Some(b']') => break,
-                            _ => return Err(format!("expected ',' or ']' at {}", self.i)),
-                        }
-                    }
+                if self.depth >= SNBT_MAX_DEPTH {
+                    return Err(format!("tag nesting too deep at {}", self.i));
                 }
-                self.i += 1;
-                let long = |t: &Tag| match *t {
-                    Tag::Byte(v) => i64::from(v),
-                    Tag::Short(v) => i64::from(v),
-                    Tag::Int(v) => i64::from(v),
-                    Tag::Long(v) => v,
-                    _ => 0,
-                };
-                Ok(match typed {
-                    Some(b'B') => Tag::ByteArray(items.iter().map(|t| long(t) as u8).collect()),
-                    Some(b'I') => Tag::IntArray(items.iter().map(|t| long(t) as i32).collect()),
-                    Some(_) => Tag::LongArray(items.iter().map(long).collect()),
-                    None => Tag::List(items),
-                })
+                self.depth += 1;
+                let tag = self.list();
+                self.depth -= 1;
+                tag
             }
             Some(b'"' | b'\'') => Ok(Tag::String(JavaString::from(self.string()?.as_str()))),
             _ => {
@@ -757,6 +736,62 @@ impl Snbt<'_> {
                 Ok(Self::scalar(&word))
             }
         }
+    }
+    fn compound(&mut self) -> Result<Tag, String> {
+        self.i += 1;
+        let mut map = Compound::new();
+        if self.peek() == Some(b'}') {
+            self.i += 1;
+            return Ok(Tag::Compound(map));
+        }
+        loop {
+            let key = self.string()?;
+            self.expect(b':')?;
+            map.insert(JavaString::from(key.as_str()), self.value()?);
+            match self.peek() {
+                Some(b',') => self.i += 1,
+                Some(b'}') => {
+                    self.i += 1;
+                    return Ok(Tag::Compound(map));
+                }
+                _ => return Err(format!("expected ',' or '}}' at {}", self.i)),
+            }
+        }
+    }
+    fn list(&mut self) -> Result<Tag, String> {
+        self.i += 1;
+        let typed = match (self.s.get(self.i), self.s.get(self.i + 1)) {
+            (Some(&t @ (b'B' | b'I' | b'L')), Some(b';')) => {
+                self.i += 2;
+                Some(t)
+            }
+            _ => None,
+        };
+        let mut items = Vec::new();
+        if self.peek() != Some(b']') {
+            loop {
+                items.push(self.value()?);
+                match self.peek() {
+                    Some(b',') => self.i += 1,
+                    Some(b']') => break,
+                    _ => return Err(format!("expected ',' or ']' at {}", self.i)),
+                }
+            }
+        }
+        self.i += 1;
+        let long = |t: &Tag| match *t {
+            Tag::Byte(v) => i64::from(v),
+            Tag::Short(v) => i64::from(v),
+            Tag::Int(v) => i64::from(v),
+            Tag::Long(v) => v,
+            _ => 0,
+        };
+        Ok(match typed {
+            Some(b'B') => Tag::ByteArray(items.iter().map(|t| long(t) as u8).collect()),
+            Some(b'I') => Tag::IntArray(items.iter().map(|t| long(t) as i32).collect()),
+            Some(_) => Tag::LongArray(items.iter().map(long).collect()),
+            None => Tag::List(items),
+        })
     }
     /// A bare word: a typed number, a boolean, or else a string.
     fn scalar(word: &str) -> Tag {
@@ -770,6 +805,14 @@ impl Snbt<'_> {
             Some(c @ (b'b' | b's' | b'l' | b'f' | b'd')) => (&word[..word.len() - 1], Some(*c)),
             _ => (word, None),
         };
+        // Only digits (and an exponent) make a number: a word like `nan` or
+        // `infd` that Rust's float parse would take is a string here.
+        if body
+            .bytes()
+            .any(|c| c.is_ascii_alphabetic() && c != b'e' && c != b'E')
+        {
+            return Tag::String(JavaString::from(word));
+        }
         let parsed = match suffix {
             Some(b'b') => body.parse::<i8>().ok().map(Tag::Byte),
             Some(b's') => body.parse::<i16>().ok().map(Tag::Short),
@@ -980,5 +1023,30 @@ mod tests {
             panic!()
         };
         assert_eq!(d[0].get("e"), Some(&Tag::Float(2.5f32.to_bits())));
+    }
+    #[test]
+    fn snbt_nesting_is_bounded() {
+        let nest = |n: usize| format!("{}1{}", "[".repeat(n), "]".repeat(n));
+        assert!(parse_snbt(&nest(512)).is_ok());
+        assert!(parse_snbt(&nest(513)).is_err());
+        // Far past any limit it errs instead of overflowing the stack.
+        assert!(parse_snbt(&nest(100_000)).is_err());
+    }
+    #[test]
+    fn snbt_bare_words_stay_strings() {
+        for word in ["nan", "NaN", "inf", "infd", "NaNf", "Infinityd", "nand"] {
+            assert_eq!(
+                parse_snbt(word).unwrap().0,
+                Tag::String(JavaString::from(word)),
+                "{word}"
+            );
+        }
+        assert_eq!(
+            parse_snbt("1e5").unwrap().0,
+            Tag::Double(100000f64.to_bits())
+        );
+        assert_eq!(parse_snbt("1.5f").unwrap().0, Tag::Float(1.5f32.to_bits()));
+        assert_eq!(parse_snbt("3b").unwrap().0, Tag::Byte(3));
+        assert_eq!(parse_snbt("-2L").unwrap().0, Tag::Long(-2));
     }
 }

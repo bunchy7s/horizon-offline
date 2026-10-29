@@ -1,0 +1,139 @@
+SmithingTemplateItem.createArmorTrimTemplate	inline	crates/horizon-client/src/game/stations.rs::Game::draw_station	gap: player: the empty template slot cycles the armour icons in vanilla (SmithingScreen); Horizon draws one fixed netherite icon, and the additions slot gets no icon
+SmithingTemplateItem.createNetheriteUpgradeTemplate	inline	crates/horizon-client/src/game/stations.rs::Game::draw_station	gap: player: no cycling tool and armour icons and no ingot icon for the additions slot; Horizon draws one fixed netherite icon in the template slot
+SmithingTemplateItem.createNetheriteUpgradeIconList	missing		player: an empty template slot in the smithing table does not cycle through the 11 tool and armour icons (SmithingScreen ticks baseIcon); Horizon shows one fixed netherite icon
+SpawnEggItem.spawnMob	port	crates/horizon-client/src/game/creatures.rs::Game::use_spawn_egg	gap: minor: no ENTITY_PLACE game event (sculk sensors do not hear the egg); consumes the egg and spawns the mob on the clicked face
+SpawnEggItem.getType	port	crates/horizon-client/src/game/creatures.rs::Game::use_spawn_egg	kind taken from the item id suffix (*_spawn_egg), not an ENTITY_DATA component
+TridentItem.createAttributes	skip:data		attack damage 8 and attack speed -2.9 are item table data (horizon-items attack_speed modifier)
+TridentItem.asProjectile	skip:other		ProjectileItem override that no code calls: no dispenser behaviour is registered for the trident in vanilla
+WindChargeItem.asProjectile	port	crates/horizon-client/src/game/dispenser.rs::Game::shoot_projectile_item	gap: minor: aims with the level random as vanilla does, then shoots with the dispenser uncertainty (6.67); vanilla's shoot is a no-op for wind charges, so the spread is wider in Horizon
+WindChargeItem.createDispenseConfig	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_projectile	position function, uncertainty 6.6666665, power 1.0 and event 1051 match
+alchemy/Potion.hasInstantEffects	inline	crates/horizon-client/src/game/potions.rs::Game::splash	the instant check is written inline for the splash level event and sound (2007/1054 vs 2002/1053)
+PotionContents.createItemStack	port	crates/horizon-items/src/item_data.rs::ItemStack::with_potion	item stack plus the potion in its data
+PotionContents.is	inline	crates/horizon-client/src/cauldron.rs::interact	gap: minor: only the water check is here; other callers compare the potion id themselves (dispenser.rs, Enderman)
+PotionContents.isPotionWithoutCustomEffects	inline	crates/horizon-client/src/effects.rs::PlayerEffects::potion_effects	Horizon has no custom effects on a potion stack, so this is always the potion alone
+PotionContents.getAllEffects	port	crates/horizon-client/src/effects.rs::PlayerEffects::potion_effects	gap: minor: the potion's own effect list only; no custom effects
+PotionContents.withPotion	port	crates/horizon-items/src/item_data.rs::ItemStack::with_potion	sets the potion and keeps the other data
+PotionContents.withEffectAdded	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_breath	gap: minor: the dragon fireball cloud's instant damage (12) is hard-coded in the tick, not an added effect; the breath cloud's 6 is the same path
+PotionContents.getColorOptional	port	crates/horizon-client-core/src/potions.rs::potion_color	amplifier-weighted mix; base colour when there are no effects
+PotionContents.hasEffects	inline	crates/horizon-client/src/game/potions.rs::Game::splash	a lingering cloud is made only when the potion has effects
+PotionContents.getPotionDescription	port	crates/horizon-client/src/brewing.rs::tooltip	effect name with potency; joined with a space, not the potion.withAmplifier translation
+PotionContents.onConsume	port	crates/horizon-client/src/game/potions.rs::Game::tick_drinking	gap: minor: duration scale is always 1.0; POTION_DURATION_SCALE is not read
+AttackRange.defaultFor	inline	crates/horizon-client/src/game/hand.rs::attack_range_contains	gap: minor: fixed reach 0 to 3 with a 0.3 margin; no entity interaction range attribute
+AttackRange.getClosesetHit	port	crates/horizon-client/src/game/hand.rs::GameHands::hit	gap: minor: uses the crosshair's entity or block, not the closest hit along the attack range
+AttackRange.effectiveMaxRange	inline	crates/horizon-client/src/game/hand.rs::attack_range_contains	creative or survival reach; the mob factor is not used
+BlockItemStateProperties.with	port	crates/horizon-client/src/game/block_items.rs::Game::picked_stack	gap: minor: writes only honey_level for beehives and bee nests (BeehiveBlock.getCloneItemStack)
+BlockItemStateProperties.get	port	crates/horizon-client/src/item_tooltip.rs::honey_line	reads honey_level only
+BlockItemStateProperties.apply	port	crates/horizon-client/src/game/block_items.rs::Game::apply_item_block_state	sets the item's block state properties on the placed block
+BlockItemStateProperties.updateState	inline	crates/horizon-client/src/game/block_items.rs::Game::apply_item_block_state	the per-property set, only for properties the block has
+BlocksAttacks.onBlocked	port	crates/horizon-client/src/game/shield.rs::Game::after_block	gap: minor: block sound plays on this client only
+BlocksAttacks.hurtBlockingItem	port	crates/horizon-client/src/game/shield.rs::Game::after_block	item damage by the damage function, shield breaks at max damage; gap: minor: no ITEM_USED stat
+BlocksAttacks.disableBlockingForTicks	port	crates/horizon-client/src/game/shield.rs::Game::blocked_by_attacker	disable seconds times disable scale, rounded to ticks, sets the item cooldown
+BlocksAttacks.resolveBlockedDamage	port	crates/horizon-world/src/blocking_rules.rs::BlockingRules::resolve	damage reductions by angle and damage type
+BundleContents.computeContentWeight	port	crates/horizon-items/src/bundle.rs::contents_weight	sum of item weights times counts; nested bundles add 1/16
+BundleContents.getNumberOfItemsToShow	port	crates/horizon-items/src/bundle.rs::Contents::shown_count	grid rule with 11 or 12 cells and the last-row gap
+BundleContents.getSelectedItem	port	crates/horizon-items/src/bundle.rs::Contents::selected	returns the selected index; the stack is items() at that index
+BundleContents.copyWithContents	skip:other		no callers in the vanilla source
+BundleContents.asMutable	port	crates/horizon-items/src/bundle.rs::Contents::of	contents, weight and selection copied into the working state
+BundleContents.equals	skip:java		value equality; Horizon compares the item data directly
+BundleContents.Mutable.clearItems	skip:other		no callers in the vanilla source
+BundleContents.Mutable.findStackIndexWithinRange	inline	crates/horizon-items/src/bundle.rs::Contents::try_insert	the merge search over all stacks, only for stackable undamaged items
+BundleContents.Mutable.getMaxAmountToAdd	port	crates/horizon-items/src/bundle.rs::Contents::room_for	remaining weight over the item's weight, rounded down, at least 0
+BundleContents.Mutable.tryInsert	port	crates/horizon-items/src/bundle.rs::Contents::try_insert	inserts what fits to the front, merged with its kind
+BundleContents.Mutable.tryTransfer	port	crates/horizon-client/src/menu/bundle.rs::Menu::carried_bundle_click	the slot's stack moves in as far as it fits; the slot's own take rules apply
+BundleContents.Mutable.toggleSelectedItem	port	crates/horizon-items/src/bundle.rs::toggle_selected	selects the index, or clears the selection when it is selected already or out of range
+BundleContents.Mutable.indexIsOutsideAllowedBounds	inline	crates/horizon-items/src/bundle.rs::toggle_selected	the bounds test is the inside check
+BundleContents.Mutable.getStackedWeight	port	crates/horizon-items/src/bundle.rs::Weight::times	weight times a count
+BundleContents.Mutable.setItem	missing		minor: a slot write into a bundle (container setItem, reached by /item replace) skips the weight limit and merge; Horizon's /item command has no bundle handling
+BundleContents.Mutable.addSlotWithItem	missing		minor: adding a new bundle slot (container path, /item) skips the weight check; Horizon's /item command has no bundle handling
+BundleContents.Mutable.getWeightWithAddedItems	inline	crates/horizon-items/src/bundle.rs::Contents::try_insert	the weight after adding must stay at or below one, computed from room_for
+BundleContents.Mutable.mergeIdenticalStacks	inline	crates/horizon-items/src/bundle.rs::Contents::try_insert	gap: minor: merges on insert only; no flatten pass for container writes
+BundleContents.Mutable.toImmutable	port	crates/horizon-items/src/bundle.rs::Contents::store	writes the contents and selection back into the component
+ChargedProjectiles.ofNonEmpty	port	crates/horizon-client/src/game/crossbow.rs::Game::tick_crossbow	loads the drawn ammo into the crossbow (Multishot draws three); empty stacks are not filtered here
+ChargedProjectiles.contains	port	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	the firework rocket check that sets the shot power
+ChargedProjectiles.copyWithContents	skip:other		no callers in the vanilla source
+ChargedProjectiles.asMutable	skip:other		no callers in the vanilla source
+ChargedProjectiles.Mutable.addSlotWithItem	skip:other		no callers in the vanilla source
+ChargedProjectiles.Mutable.toImmutable	skip:other		no callers in the vanilla source
+Consumable.Builder.build	port	crates/horizon-items/src/items.rs::Items::load_with	reads consume_seconds (1.6 default), the animation, sound and particles from the item JSON; effects are added separately
+DyedItemColor.getOrDefault	port	crates/horizon-assets/src/item_model.rs::Resolve::tint	the dyed_color component with the default tint (leather) when unset
+FireworkExplosion.getColorName	port	crates/horizon-client/src/item_tooltip.rs::firework_lines	dye name from the firework colour; unknown colours read as custom colour
+FireworkExplosion.withFadeColors	port	crates/horizon-client/src/crafting.rs::Special::assemble	sets the fade colours of the star-fade recipe result
+ItemContainerContents.fromSlots	port	crates/horizon-items/src/item_data.rs::decode_components	reads the container slot list from its NBT; only non-empty slots are kept as pairs
+ItemContainerContents.fromItems	port	crates/horizon-client/src/block_entity_item.rs::collect	writes the non-empty slots of the container into the item's components
+ItemContainerContents.findLastNonEmptySlot	skip:java		trims trailing empty slots; Horizon keeps only the non-empty slot pairs
+ItemContainerContents.asSlots	port	crates/horizon-items/src/item_data.rs::components_tag	writes the non-empty slots as minecraft:container entries
+ItemContainerContents.createStackFromSlot	port	crates/horizon-client/src/block_entity_item.rs::place	reads a slot's stack into the placed container
+ItemContainerContents.copyInto	port	crates/horizon-client/src/block_entity_item.rs::place	copies the container items into the placed block entity
+ItemContainerContents.itemCopies	skip:other		no callers in the vanilla source
+ItemContainerContents.asMutable	skip:other		no callers in the vanilla source
+ItemContainerContents.equals	skip:java		value equality; Horizon compares the item data directly
+KineticWeapon.makeLocalHitSound	port	crates/horizon-client/src/game/spear.rs::Game::kinetic_hit_feedback	the local hit sound, at most once per ten ticks per entity
+KineticWeapon.computeDamageUseDuration	missing		unsure: the use duration (delay plus the damage window) is not computed in Horizon's use_spear or spear_tick; the windows are checked one by one
+KineticWeapon.Condition.test	port	crates/horizon-client/src/spear.rs::Condition::test	tick, attacker speed and relative speed against the scaled minimums
+PiercingWeapon.makeHitSound	port	crates/horizon-client/src/game/spear.rs::Game::jab	gap: minor: the hit sound plays at this player's feet only; vanilla plays it for everyone nearby
+ResolvableProfile.createUnresolved	port	crates/horizon-client/src/skins.rs::parse_profile	keeps a name or id as the unresolved key, resolved later
+ResolvableProfile.createPartialProfile	port	crates/horizon-client/src/skins.rs::parse_profile	id, else the name's offline UUID, else nil
+ResolvableProfile.Dynamic.hashCode	skip:java		hash of the key and skin patch; Horizon compares them directly
+ResolvableProfile.Static.name	skip:other		no callers in the vanilla source
+ResolvableProfile.Static.equals	skip:java		value equality
+ResolvableProfile.Static.hashCode	skip:java		hash for collections
+Tool.Rule.minesAndDrops	port	crates/horizon-items/src/items.rs::Items::load_with	rule read from the item JSON: speed and correct_for_drops set to true
+TooltipDisplay.withHidden	port	crates/horizon-client/src/game/commands/items.rs::Game::apply_item_modifier	gap: minor: only the /item modify toggle_tooltips path; the loot-table toggle function is not ported, and the raid banner's hidden pattern is read in item_tooltip shows()
+WrittenBookContent.craftCopy	port	crates/horizon-client/src/crafting.rs::Special::assemble	book copy: generation plus one, pages kept
+WrittenBookContent.resolveForItem	missing		minor: selectors in a written book's text (@p and so on) are not resolved when the book reaches a player; the raw text shows
+WrittenBookContent.resolve	missing		minor: no selector resolution for written book pages; the raw text shows
+WrittenBookContent.markResolved	missing		minor: resolved flag is not kept, so a book is never marked as resolved
+WrittenBookContent.resolvePage	missing		minor: no per-page selector resolution, and no drop of pages over 32767 characters
+WrittenBookContent.isPageTooLarge	missing		minor: no check that a resolved page stays under the 32767 character limit
+WrittenBookContent.getPages	port	crates/horizon-client/src/game/books.rs::view_pages	gap: minor: returns the stored pages; the filtered-text choice (filterEnabled) is not modelled
+WrittenBookContent.withReplacedPages	missing		minor: loot function set_written_book_pages is not in the loot modifiers, so a loot book gets no pages
+BookCloningRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	BookCloning arm: one written book within the allowed generations, plus material
+BookCloningRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	copies the book with generation plus one; material count sets the copies
+BookCloningRecipe.getRemainingItems	port	crates/horizon-client/src/crafting.rs::Recipes::remainders	the first written book is kept as one copy (BookCloning arm); the crafting remainder item is kept too
+CraftingInput.getItem	port	crates/horizon-client/src/crafting.rs::Input::get	reads the grid cell by x and y instead of a slot index
+CraftingInput.equals	skip:java		value equality
+CraftingInput.hashCode	skip:java		hash for collections
+Ingredient.testOptionalIngredient	port	crates/horizon-client/src/crafting.rs::Ingredient::test	the caller treats a missing ingredient as an empty slot
+Ingredient.equals	skip:java		value equality
+Ingredient.of	port	crates/horizon-client/src/crafting.rs::Ingredient::of	ingredient from item ids
+Ingredient.displayForSingleItem	skip:other		no callers in the vanilla source
+Ingredient.getSingleItem	missing		unsure: returns the one item of a single-item ingredient; no Horizon function found in this pass
+PlacementInfo.create	port	crates/horizon-client/src/crafting.rs::Placement::of	placement for one ingredient, none when it is empty
+PotionIngredient.test	port	crates/horizon-client/src/brewing.rs::PotionIngredient::test	item id and the potion filter
+PotionIngredient.of	port	crates/horizon-client/src/brewing.rs::PotionIngredient::parse	built from the recipe JSON, with the potion filter
+PotionIngredient.isPotionInput	port	crates/horizon-client/src/brewing.rs::Brewing::load	bottle input set (Brewing.inputs) built at load
+Recipe.BookInfo.mapCodec	skip:java		codec
+RecipeManager.finalizeRecipeLoading	port	crates/horizon-client/src/crafting.rs::Recipes::load	loads the recipes and their placements at load
+RecipeManager.filterDisabled	missing		minor: recipes whose ingredients sit behind a disabled feature flag are not hidden; Horizon's recipe loading has no feature flag check
+RecipeManager.isIngredientEnabled	missing		minor: no feature flag check for ingredients in recipe loading
+RecipeManager.byKeyTyped	port	crates/horizon-client/src/crafting.rs::Recipes::recipe_matches	gap: minor: lookup by id; no recipe type check
+RecipeManager.listDisplaysForRecipe	port	crates/horizon-client/src/recipe_book.rs::Book::entry	the entry holds the recipe's displays
+RecipeManager.IngredientCollector.accept	skip:other		collects ingredients for the synced property sets; Horizon's client reads its own recipe and brewing tables
+RepairItemRecipe.canCombine	port	crates/horizon-client/src/crafting.rs::Special::repair_pair	two items of the same kind that can combine
+RepairItemRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	repair arm: combined durability and the bonus
+ShapedRecipePattern.of	port	crates/horizon-client/src/crafting.rs::Recipes::load	pattern read from the recipe JSON at load
+ShapedRecipePattern.unpack	port	crates/horizon-client/src/crafting.rs::Recipes::load	pattern cells read at load, empty where the key is blank
+ShapedRecipePattern.firstNonEmpty	port	crates/horizon-client/src/crafting.rs::shrink	trims empty rows and columns at both ends
+ShapedRecipePattern.lastNonEmpty	port	crates/horizon-client/src/crafting.rs::shrink	trims empty rows and columns at both ends
+ShapedRecipePattern.matches	port	crates/horizon-client/src/crafting.rs::Recipes::assemble_if_matches	shaped arm: exact size, cell tests, mirrored match
+SmithingTransformRecipe.display	missing		unsure: the recipe book slot displays for a smithing transform are not built in Horizon's recipe book; the smithing table uses StationRecipes::smithing_result
+SmithingTrimRecipe.display	missing		unsure: the recipe book slot displays for a smithing trim are not built in Horizon's recipe book; the smithing table uses StationRecipes::smithing_result
+TransmuteRecipe.computeResultSize	port	crates/horizon-client/src/crafting.rs::Special::assemble	result count plus the material count when it is added
+TransmuteRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	Transmute arm: one input and the material list
+TransmuteRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	Transmute arm: result with the input's components
+TransmuteRecipe.resultDisplay	port	crates/horizon-client/src/recipe_book.rs::RecipeIndex::result	the recipe's result id
+TransmuteRecipe.createPlacementInfo	port	crates/horizon-client/src/crafting.rs::Recipes::placement	the placement of the input and the materials
+RecipeDisplay.isEnabled	missing		minor: no feature flag check, so a display for a disabled feature still shows
+SlotDisplay.applyDemoTransformation	port	crates/horizon-client/src/stations.rs::StationRecipes::trim_demo	gap: minor: only the trim demo draws (up to 256 tries); the dyed demo is not modelled
+SlotDisplay.AnyFuel.resolve	missing		unsure: no any-fuel display list found in Horizon's recipe book
+SlotDisplay.Composite.resolve	missing		unsure: no composite display list found in Horizon's recipe book
+SlotDisplay.DyedSlotDemo.resolve	missing		unsure: no dyed demo display found in Horizon's recipe book
+SlotDisplay.ItemSlotDisplay.resolve	port	crates/horizon-client/src/recipe_book.rs::Book::items_of	the item of a single-item slot
+SlotDisplay.ItemStackSlotDisplay.resolve	port	crates/horizon-client/src/recipe_book.rs::Book::items_of	gap: minor: keeps item ids only; the stack's components are not carried into the display
+SlotDisplay.OnlyWithComponent.resolve	missing		unsure: no display that filters by an item component found in Horizon's recipe book
+SlotDisplay.SmithingTrimDemoSlotDisplay.resolve	port	crates/horizon-client/src/stations.rs::StationRecipes::trim_demo	a random base trimmed by a random material
+SlotDisplay.WithAnyPotion.resolve	missing		unsure: no any-potion display list found in Horizon's recipe book
+SlotDisplay.WithRemainder.resolve	missing		unsure: no remainder display found in Horizon's recipe book; remainders exist in Recipes::remainders for play
+SlotDisplay.WithRemainder.isEnabled	missing		minor: no feature flag check for the remainder display
+BlockPlaceContext.at	port	crates/horizon-world/src/level/place.rs::Sim::placement_at	the placement position and face from the clicked block
+UseOnContext.isSecondaryUseActive	port	crates/horizon-client/src/game.rs::Game::use_hand	the shift key sets the context's sneaking flag

@@ -60,9 +60,15 @@ pub fn download(
     fetch_manifest(pins, &manifest, fetch, log)?;
     let manifest = read_json(&manifest)?;
     let client = &manifest["downloads"]["client"];
+    // A version Horizon doesn't pin takes its client's sha1 from its version file, itself
+    // checked against the sha1 Mojang's version list gives (`Pins::for_version`).
+    let client_sha1 = match pins.client_sha1.as_str() {
+        "" => text(client, "sha1")?,
+        pinned => pinned.to_string(),
+    };
     let mut game = vec![File {
         url: text(client, "url")?,
-        sha1: pins.client_sha1.clone(),
+        sha1: client_sha1,
         size: client["size"].as_u64(),
         path: versions.join(format!("{v}.jar")),
     }];
@@ -70,22 +76,40 @@ pub fn download(
         .as_array()
         .ok_or("The version file has no libraries")?;
     for library in libraries.iter().filter(|l| allowed(l, os)) {
-        let artifact = &library["downloads"]["artifact"];
-        if artifact.is_null() {
-            continue;
+        // Before 1.19 a library's natives for this system are a classifier of its own.
+        let native = native_classifier(library, os)
+            .map(|key| &library["downloads"]["classifiers"][key.as_str()]);
+        for artifact in [Some(&library["downloads"]["artifact"]), native]
+            .into_iter()
+            .flatten()
+            .filter(|a| !a.is_null())
+        {
+            game.push(File {
+                url: text(artifact, "url")?,
+                sha1: text(artifact, "sha1")?,
+                size: artifact["size"].as_u64(),
+                path: dir
+                    .join("libraries")
+                    .join(relative(&text(artifact, "path")?)?),
+            });
         }
+    }
+    let libraries = game.len() - 1;
+    // The logging setup the game is started with (`logging.client.argument`): for 1.7 to 1.18,
+    // Mojang's fixed one is what keeps Log4Shell out.
+    let logging = &manifest["logging"]["client"]["file"];
+    if !logging.is_null() {
         game.push(File {
-            url: text(artifact, "url")?,
-            sha1: text(artifact, "sha1")?,
-            size: artifact["size"].as_u64(),
+            url: text(logging, "url")?,
+            sha1: text(logging, "sha1")?,
+            size: logging["size"].as_u64(),
             path: dir
-                .join("libraries")
-                .join(relative(&text(artifact, "path")?)?),
+                .join("assets/log_configs")
+                .join(relative(&text(logging, "id")?)?),
         });
     }
     log(format!(
-        "Downloading Minecraft {v} from Mojang: the game and {} libraries",
-        game.len() - 1
+        "Downloading Minecraft {v} from Mojang: the game and {libraries} libraries"
     ));
     fetch_all(&game, jobs, fetch, cancel, log)?;
     let index = &manifest["assetIndex"];
@@ -112,7 +136,7 @@ pub fn download(
 }
 
 /// Mojang's name for this system in its Java runtime index.
-fn java_platform() -> Option<&'static str> {
+pub(crate) fn java_platform() -> Option<&'static str> {
     Some(match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => "mac-os-arm64",
         ("macos", "x86_64") => "mac-os",
@@ -244,7 +268,7 @@ fn text(v: &Value, key: &str) -> Result<String, String> {
 }
 
 /// A path from the version file, refused if it could leave the folder.
-fn relative(path: &str) -> Result<PathBuf, String> {
+pub(crate) fn relative(path: &str) -> Result<PathBuf, String> {
     let safe = !path.contains('\\')
         && Path::new(path)
             .components()
@@ -263,6 +287,19 @@ fn allowed(library: &Value, os: &str) -> bool {
         .iter()
         .rfind(|rule| rule["os"]["name"].as_str().is_none_or(|name| name == os))
         .is_some_and(|rule| rule["action"] == "allow")
+}
+
+/// The classifier holding a library's natives for `os` (`natives-osx`), from its `natives` map;
+/// `${arch}` is this system's word size, as old versions name Windows' natives.
+pub(crate) fn native_classifier(library: &Value, os: &str) -> Option<String> {
+    let arch = if cfg!(target_pointer_width = "64") {
+        "64"
+    } else {
+        "32"
+    };
+    library["natives"][os]
+        .as_str()
+        .map(|key| key.replace("${arch}", arch))
 }
 
 /// The asset index's objects, once each.

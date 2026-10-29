@@ -38,6 +38,11 @@ pub struct WorldOptions {
     pub bonus_chest: bool,
     /// `getGameRules`: the Game Rules screen's values, saved with the world.
     pub rules: crate::gamerules::GameRules,
+    /// The Data Packs screen's selection, lowest priority first.
+    pub data_packs: Vec<String>,
+    /// The folder of packs for the new world (vanilla's `mcworld-`
+    /// temporary folder), made when Data Packs first opens.
+    pub pack_dir: Option<std::path::PathBuf>,
 }
 impl Default for WorldOptions {
     fn default() -> Self {
@@ -51,6 +56,8 @@ impl Default for WorldOptions {
             structures: true,
             bonus_chest: false,
             rules: crate::gamerules::GameRules::default(),
+            data_packs: vec!["vanilla".into()],
+            pack_dir: None,
         }
     }
 }
@@ -286,7 +293,7 @@ pub(super) fn buttons(w: f32, h: f32, creative: bool, o: &WorldOptions) -> Vec<B
                 28,
             ),
         ],
-        // Experiments and data packs have no screens yet.
+        // Experiments have no screen yet.
         _ => [
             "selectWorld.gameRules",
             "selectWorld.experiments",
@@ -300,7 +307,7 @@ pub(super) fn buttons(w: f32, h: f32, creative: bool, o: &WorldOptions) -> Vec<B
                 gy + 28.0 * i as f32,
                 210.0,
                 tr(key),
-                i == 0,
+                i != 1,
                 29 + i as u8,
             )
         })
@@ -358,7 +365,7 @@ impl Title {
         let (x0, tw) = tabs(w);
         let right = x0 + tw * TABS.len() as f32;
         for (x, width) in [(0.0, x0), (right, w - right)] {
-            ui::tiled(
+            ui::tiled_sized(
                 batch,
                 atlas,
                 "gui/header_separator",
@@ -366,7 +373,7 @@ impl Title {
                 TAB_BAR - 2.0,
                 width,
                 2.0,
-                32.0,
+                [32.0, 2.0],
                 u32::MAX,
             );
         }
@@ -441,7 +448,7 @@ impl Title {
             _ => {}
         }
         // The footer separator, drawn over the screen.
-        ui::tiled(
+        ui::tiled_sized(
             batch,
             atlas,
             "gui/footer_separator",
@@ -449,7 +456,7 @@ impl Title {
             h - FOOTER - 2.0,
             w,
             2.0,
-            32.0,
+            [32.0, 2.0],
             u32::MAX,
         );
     }

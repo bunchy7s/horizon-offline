@@ -164,7 +164,7 @@ impl Game<'_> {
             (p.position.x - start[0]) as f32,
             (p.position.z - start[2]) as f32,
         );
-        self.avatar.tick();
+        self.avatar.tick(start);
         self.avatar
             .update_bob(ground && alive && !swimming, velocity);
         if riding {

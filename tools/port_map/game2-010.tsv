@@ -1,0 +1,140 @@
+Enchantment.getSlotItems	inline	crates/horizon-world/src/loot.rs::LootData::enchantment_level	slot filter and item lookup folded into the best-level loop
+Enchantment.matchingSlot	inline	crates/horizon-world/src/loot.rs::LootData::enchantment_level	slot_in_group test; location and attribute code test slots inline
+Enchantment.isImmuneToDamage	port	crates/horizon-client/src/game/enchant_effects.rs::Game::wears_burn_from_stepping_immunity	gap: minor: ignores the effect's requirements and damage source; frost_walker is the only damage_immunity enchantment
+Enchantment.modifyDamageProtection	port	crates/horizon-items/src/enchant.rs::Enchantments::modify_value_with	armor protection is summed per damage type in apply_effect_status (potions.rs)
+Enchantment.doPostPiercingAttack	port	crates/horizon-client/src/game/enchant_effects.rs::Game::post_piercing_attack	gap: minor: the effect's own requirements are not read; Lunge's checks are hard-coded
+Enchantment.tick	port	crates/horizon-client/src/game/enchant_effects.rs::Game::tick_soul_speed	gap: minor: only Soul Speed's tick effects; it is the only tick effect in the data
+Enchantment.onProjectileSpawned	port	crates/horizon-client/src/game/enchant_effects.rs::Game::bow_projectile_ignite	Flame's ignite; the only projectile_spawned effect in the data
+Enchantment.onHitBlock	port	crates/horizon-client/src/game/trident.rs::Game::channel_rod_hit	Channeling's lightning rod hit; the only hit_block effect in the data
+Enchantment.modifyItemFilteredCount	port	crates/horizon-items/src/enchant.rs::Enchantments::modify_value_with	one enchantment's effects for one component, item context
+Enchantment.modifyEntityFilteredValue	port	crates/horizon-items/src/enchant.rs::Enchantments::modify_value_with	one enchantment's effects for one component, entity context
+Enchantment.modifyDamageFilteredValue	port	crates/horizon-items/src/enchant.rs::Enchantments::modify_value_with	one enchantment's effects for one component, damage context
+Enchantment.locationContext	skip:java		LootParams builder; Horizon passes plain values to location_requirements
+Enchantment.entityContext	skip:java		LootParams builder; Horizon passes an EffectContext struct
+Enchantment.blockHitContext	skip:java		LootParams builder; Horizon passes an EffectContext struct
+Enchantment.applyEffects	inline	crates/horizon-items/src/enchant.rs::Enchantments::modify_value_with	condition check and apply loop folded into modify_value_with
+Enchantment.stopLocationBasedEffects	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::tick_soul_speed	gap: minor: only Soul Speed; the boots-changed branch removes its modifiers
+Enchantment.FloatAction.asGeneric	skip:java		lambda adapter for float effects
+Enchantment.Builder	skip:data		datagen builder; Horizon reads enchantment JSON
+LevelBasedValue.Exponent.calculate	port	crates/horizon-items/src/enchant.rs::level_value	minecraft:exponent: base to the power
+LevelBasedValue.Fraction.calculate	port	crates/horizon-items/src/enchant.rs::level_value	minecraft:fraction; zero denominator gives 0
+LevelBasedValue.Linear.calculate	port	crates/horizon-items/src/enchant.rs::level_value	minecraft:linear
+LevelBasedValue.Lookup.calculate	port	crates/horizon-items/src/enchant.rs::level_value	minecraft:lookup with fallback
+ChangeItemDamage.apply	port	crates/horizon-client/src/game.rs::Game::damage_held	gap: minor: the held item only; Soul Speed's boots use wear_boots and Thorns its own path
+EnchantmentAttributeEffect.getModifier	port	crates/horizon-items/src/enchant.rs::Enchantments::attributes	slot suffix on the id is added in apply_enchantment_attributes
+EnchantmentAttributeEffect.onChangedBlock	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::tick_soul_speed	modifiers switch on there (Soul Speed only)
+EnchantmentAttributeEffect.onDeactivated	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::tick_soul_speed	modifiers switch off there (Soul Speed only)
+EnchantmentAttributeEffect.makeAttributeMap	skip:java		multimap builder for one modifier
+EnchantmentHelper.updateEnchantments	port	crates/horizon-items/src/item_data.rs::ItemStack::enchant	gap: minor: sets one enchantment; no bulk consumer form
+EnchantmentHelper.processAmmoUse	port	crates/horizon-client/src/game/enchant_effects.rs::Game::bow_enchantments	Infinity as a flag; the ammo count change is decided by the caller
+EnchantmentHelper.processBlockExperience	inline	crates/horizon-client/src/game.rs::Game::break_block_as_player	Silk Touch zeroes the XP at the call site; spawners keep it
+EnchantmentHelper.processMobExperience	skip:other		no enchantment in the data uses mob_experience, so the amount never changes
+EnchantmentHelper.createBook	missing		player: the creative menu has no enchanted book for each enchantment (CreativeModeTabs); creative.rs lists none
+EnchantmentHelper.runIterationOnItem	port	crates/horizon-items/src/item_data.rs::ItemStack::enchantments	the (enchantment, level) iteration; callers loop over it
+EnchantmentHelper.runIterationOnEquipment	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::apply_enchantment_attributes	gap: minor: worn armor only; hand slots are not read
+EnchantmentHelper.isImmuneToDamage	port	crates/horizon-client/src/game/enchant_effects.rs::Game::wears_burn_from_stepping_immunity	gap: minor: worn armor only; no requirements or damage source check
+EnchantmentHelper.modifyKnockback	port	crates/horizon-client/src/game/enchant_effects.rs::Game::extra_knockback	gap: minor: the player's held weapon; mob weapons are read in mobs/gear.rs
+EnchantmentHelper.doPostAttackEffects	port	crates/horizon-client/src/game/enchant_effects.rs::Game::post_attack	gap: minor: wind burst, thorns and Channeling's victim effect are separate fns
+EnchantmentHelper.doPostAttackEffectsWithItemSourceOnBreak	port	crates/horizon-client/src/game/enchant_effects.rs::Game::post_attack	gap: minor: melee hits with the held item only; projectile and attacker-less hits are not here
+EnchantmentHelper.stopLocationBasedEffects	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::tick_soul_speed	gap: minor: only Soul Speed; the boots-changed branch stops it
+EnchantmentHelper.tickEffects	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::tick_soul_speed	gap: minor: only Soul Speed's tick effect; it is the only one in the data
+EnchantmentHelper.processProjectileCount	port	crates/horizon-client/src/game/crossbow.rs::Game::tick_crossbow	gap: minor: Multishot's three shots are hard-coded, not read from projectile_count
+EnchantmentHelper.processProjectileSpread	port	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	gap: minor: 10 degrees hard-coded, not read from projectile_spread (same value)
+EnchantmentHelper.getPiercingCount	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	projectile_piercing read for the arrow's pierce level there
+EnchantmentHelper.onHitBlock	port	crates/horizon-client/src/game/trident.rs::Game::channel_rod_hit	Channeling's lightning rod hit; the only hit_block effect in the data
+EnchantmentHelper.modifyDurabilityToRepairFromXp	port	crates/horizon-client/src/game/enchant_effects.rs::Game::mending	Mending's repair with XP
+EnchantmentHelper.getFishingLuckBonus	port	crates/horizon-client/src/game/fishing.rs::Game::use_fishing_rod	Luck of the Sea read when the rod is cast
+EnchantmentHelper.getFishingTimeReduction	port	crates/horizon-client/src/game/fishing.rs::Game::use_fishing_rod	Lure ticks read at cast; used by catching_fish
+EnchantmentHelper.getTridentReturnToOwnerAcceleration	port	crates/horizon-client/src/game/trident.rs::ThrownTrident::loyalty_pull	Loyalty level pull and acceleration
+EnchantmentHelper.modifyCrossbowChargingTime	port	crates/horizon-client/src/game/crossbow.rs::Game::charge_ticks	Quick Charge: 1.25 s minus 0.25 s per level
+EnchantmentHelper.getTridentSpinAttackStrength	inline	crates/horizon-client/src/game/trident.rs::Game::release_trident	Riptide's strength 1.5 + 0.75 per level above the first, folded into the release
+EnchantmentHelper.hasTag	port	crates/horizon-items/src/enchant.rs::Enchantments::in_tag	per enchantment id; callers loop over the stack
+EnchantmentHelper.has	port	crates/horizon-items/src/enchant.rs::Enchantments::has_component	any enchantment on the stack with the component
+EnchantmentHelper.pickHighestLevel	port	crates/horizon-client/src/game/crossbow.rs::Game::charging_sounds	gap: minor: Quick Charge sounds only; the trident sound is hard-coded in release_trident (riptide_N)
+EnchantmentHelper.getHighestLevel	inline	crates/horizon-client/src/game/crossbow.rs::Game::charging_sounds	reads the quick_charge level directly
+EnchantmentHelper.filterCompatibleEnchantments	inline	crates/horizon-items/src/enchant.rs::Enchantments::select	exclusivity filter folded into the selection loop
+EnchantmentHelper.isEnchantmentCompatible	port	crates/horizon-items/src/enchant.rs::Enchantments::compatible	pair check; the /enchant command loops over the existing ones
+EnchantmentHelper.enchantItemFromProvider	port	crates/horizon-client/src/game/mob_gear.rs::Game::enchant_spawn_equipment	gap: minor: mob spawn gear only; pillager, vindicator, skeleton trap and enderman providers are not read here
+Equippable.llamaSwag	skip:data		datagen factory for the carpet equippable data
+Equippable.saddle	skip:data		datagen factory for the saddle equippable data
+Equippable.harness	skip:data		datagen factory for the harness equippable data
+Equippable.equipOnTarget	port	crates/horizon-client/src/game/ghasts.rs::Game::interact_happy_ghast	gap: minor: the harness on a happy ghast only; saddles are put on in mounts.rs and nautili.rs
+Equippable.canBeEquippedBy	port	crates/horizon-client/src/game/mount_menu.rs::shows_saddle	gap: minor: the saddle slot's entity check only; the armour swap has no entity test
+Equippable.Builder	skip:data		datagen builder for equippable data
+ItemCost.withComponents	skip:data		datagen helper; no runtime caller in 26.3
+ItemCost.test	port	crates/horizon-client/src/merchant.rs::ItemCost::test	item match, then the stack data when the cost has data
+MerchantOffer.<init>	skip:java		constructor; Horizon builds the offer in merchant.rs
+MerchantOffer.writeToStream	skip:java		wire encoding (stream codec)
+MerchantOffer.createFromStream	skip:java		wire decoding (stream codec)
+MerchantOffers.copy	skip:java		list copy
+VillagerTrade.builder	skip:data		datagen factory for trade data
+VillagerTrade.Builder	skip:data		datagen builder for trade data
+BaseCommandBlock.createSource	inline	crates/horizon-client/src/game/command_blocks.rs::Game::command_block_success	the track_output gate that decides whether the source exists
+BaseCommandBlock.CloseableCommandBlockSource.acceptsSuccess	port	crates/horizon-client/src/game/command_blocks.rs::Game::command_block_success	track_output and send_command_feedback; a removed block gets no output
+BaseCommandBlock.CloseableCommandBlockSource.shouldInformAdmins	port	crates/horizon-client/src/game/command_blocks.rs::Game::command_block_success	command_block_output rule, with feedback on
+BaseSpawner.setEntityData	port	crates/horizon-client/src/mobs/spawner.rs::Spawner::set_entity_id	
+BaseSpawner.getOrCreateDisplayEntity	port	crates/horizon-client/src/game/spawner.rs::Game::update_spawner_display	display mob made per spawner from its next spawn data
+BaseSpawner.onEventTriggered	port	crates/horizon-client/src/mobs/spawner.rs::Spawner::client_event	block event 1 resets the client's delay
+BaseSpawner.getOrCreateNextSpawnData	port	crates/horizon-client/src/mobs/spawner.rs::Spawner::next_or_create	next spawn data picked once and kept
+Level.isInWorldBounds	port	crates/horizon-world/src/level/update.rs::Sim::is_in_valid_bounds	height and horizontal range
+Level.isInValidBounds	port	crates/horizon-world/src/level/update.rs::Sim::is_in_valid_bounds	chunk-level bounds folded into the same range
+Level.isInWorldBoundsHorizontal	inline	crates/horizon-world/src/level/update.rs::Sim::is_in_valid_bounds	the -30000000..30000000 test
+Level.isInValidBoundsHorizontal	inline	crates/horizon-world/src/level/update.rs::Sim::is_in_valid_bounds	chunk validity folded into the block range
+Level.getChunk	missing		unsure: no getter for a full chunk object found; block reads go through World::block
+Level.getFluidState	port	crates/horizon-client/src/game.rs::Column::state	gap: minor: the isInValidBounds check is not repeated here
+Level.isDarkOutside	port	crates/horizon-client/src/game.rs::GameLevel::sky_darken	gap: minor: the sky darkness value; the fixed-time dimension check is not here
+Level.playSound	port	crates/horizon-world/src/level/update.rs::Sim::sound	
+Level.playSeededSound	missing		unsure: no seeded sound path found; Sim::sound takes no seed
+Level.addBlockEntityTicker	port	crates/horizon-client/src/game.rs::GameLevel::load_block_entity	the ticker comes with the block entity load
+Level.guardEntityTick	skip:debug		crash-report wrapper around an entity tick
+Level.getBlockEntity	skip:other		bare block_entities map lookup at each caller; no port of its own
+Level.setBlockEntity	port	crates/horizon-client/src/game.rs::GameLevel::load_block_entity	
+Level.loadedAndEntityCanStandOnFace	missing		unsure: no face-sturdy test for placed hanging entities found
+Level.getWorldBorderAdjustedRespawnData	missing		unsure: respawn clamp to the world border not found
+Level.hasEntities	missing		unsure: no entity-in-box test found for this use
+Level.getClockTimeTicks	port	crates/horizon-client/src/game.rs::GameLevel::day_time	day time; no separate clock time
+Level.getThunderLevel	port	crates/horizon-client/src/world.rs::World::levels	thunder scaled by rain
+Level.setThunderLevel	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	weather game event sets the thunder level
+Level.setRainLevel	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	weather game event sets the rain level
+Level.fillReportDetails	skip:debug		crash-report details
+BlockGetter.getBlockEntity	skip:other		bare block_entities map lookup at each caller
+BlockGetter.isBlockInLine	skip:other		no caller in 26.3 code
+BlockGetter.clipWithInteractionOverride	missing		unsure: no interaction-shape override found for the pick ray; clip_ray not checked in depth
+BlockGetter.traverseBlocks	port	crates/horizon-core/src/geometry/traversal.rs::traverse_blocks	
+BlockGetter.forEachBlockIntersectedBetween	port	crates/horizon-core/src/geometry/sweep.rs::sweep_intersected_blocks	
+BlockGetter.addCollisionsAlongTravel	inline	crates/horizon-client/src/collisions.rs::SceneCollisions::resolve_with_context	gap: minor: the shape list along the path is built inside the resolver
+BlockGetter.getFurthestCorner	port	crates/horizon-core/src/geometry/sweep.rs::furthest_corner	
+ChunkPos.maxFromRegion	missing		unsure: region scan bound in IOWorker; not checked against save.rs
+ChunkPos.isValid	inline	crates/horizon-world/src/level/update.rs::Sim::is_in_valid_bounds	horizontal chunk range folded into the block range
+ChunkPos.hash	skip:java		hash code for ColumnPos keys
+ChunkPos.getRegionX	port	crates/horizon-core/src/position.rs::ChunkPos::region	
+ChunkPos.getRegionZ	port	crates/horizon-core/src/position.rs::ChunkPos::region	
+ChunkPos.getBlockAt	skip:other		no caller in 26.3 code
+ChunkPos.contains	port	crates/horizon-core/src/position.rs::BlockPos::chunk	a block is in a chunk when its chunk() is that chunk
+ChunkPos.getChessboardDistance	inline	crates/horizon-client/src/ticket_levels.rs::compute	Chebyshev distance folded into the ticket level loop
+ChunkPos.distanceSquared	missing		unsure: caller not identified in 26.3 sources; no port located
+CollisionGetter.isUnobstructed	port	crates/horizon-client/src/game.rs::GameLevel::is_unobstructed	the state-based overload
+CollisionGetter.noBorderCollision	port	crates/horizon-client/src/collisions.rs::EntityCollisions::movement_border	border shape when inside close to the border
+CollisionGetter.getPreMoveCollisions	inline	crates/horizon-client/src/collisions.rs::SceneCollisions::resolve_with_context	gap: minor: entity and block shapes are not returned as a list; the resolver takes them together
+CollisionGetter.getBlockAndLiquidCollisions	port	crates/horizon-client/src/collisions.rs::no_collision_or_liquid	gap: minor: a yes or no test, not the shape list
+CollisionGetter.getBlockCollisionsFromContext	port	crates/horizon-client/src/collisions.rs::SceneCollisions::collision_block	gap: minor: per-block shape; the box walk is not here
+CollisionGetter.clipIncludingBorder	missing		unsure: no world-border clamp of a ray found in clip_ray
+CollisionGetter.collidesWithSuffocatingBlock	port	crates/horizon-client/src/collisions.rs::SceneCollisions::is_suffocating	
+EntityGetter.getEntitiesOfClass	skip:other		class filter repeated at each caller over the entity lists; no shared lookup
+EntityGetter.getPlayerByUUID	skip:other		uuid find repeated at each caller (e.g. allays.rs)
+Explosion.getIndirectSourceEntity	inline	crates/horizon-client/src/game/explosion.rs::Game::explosion_hurt_entities	the projectile owner rule is folded into the hurt loop
+GameType.byName	port	crates/horizon-command/src/args.rs::GameMode::from_name	name lookup; the default is the caller's
+GameType.isValidId	missing		minor: no id check; set_mode_id falls back to survival for unknown ids
+LevelAccessor.createTick	port	crates/horizon-world/src/level/update.rs::Sim::schedule_tick	the scheduled tick; no tick object is returned
+LevelHeightAccessor.isOutsideBuildHeight	port	crates/horizon-world/src/level/query.rs::Sim::is_inside_build_height	negated
+LevelReader.getHeight	port	crates/horizon-client/src/world.rs::World::world_surface	gap: minor: WORLD_SURFACE only; other heightmap types not read here
+LevelReader.getBlockStatesIfLoaded	port	crates/horizon-client/src/world.rs::World::loaded	gap: minor: the loaded check only; the states are read with World::block
+LevelReader.getNoiseBiome	skip:other		no caller in 26.3 code
+LevelReader.getHeightmapPos	port	crates/horizon-client/src/world.rs::World::world_surface	gap: minor: the height only; the BlockPos is built by the caller
+LevelReader.getChunk	missing		unsure: same as Level.getChunk
+LevelReader.findBlocksInBoxByManhattanDistance	missing		unsure: no block search by Manhattan distance found in Horizon
+LevelWriter.destroyBlock	port	crates/horizon-world/src/level/update.rs::Sim::destroy_block	
+LocalMobCapCalculator.getPlayersNear	port	crates/horizon-client/src/mobs/spawn_selection.rs::SpawnState::players_near	
+LocalMobCapCalculator.addMob	port	crates/horizon-client/src/mobs/spawn_selection.rs::SpawnState::add_local	
+LocalMobCapCalculator.MobCounts.add	port	crates/horizon-client/src/mobs/spawn_selection.rs::SpawnState::add_local	per-player count
+LocalMobCapCalculator.MobCounts.canSpawn	port	crates/horizon-client/src/mobs/spawn_selection.rs::SpawnState::can_spawn_local	

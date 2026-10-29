@@ -70,7 +70,7 @@ pub fn on_stop_attacking(m: &Mob, w: &MobWorld, target: Who, events: &mut Vec<Mo
                 .intersects(p.bounds)
         })
     {
-        events.push(MobEvent::AxolotlSupportPlayer);
+        events.push(MobEvent::AxolotlSupportPlayer { mob: m.id });
     }
 }
 /// BinaryAnimator(10, IN_OUT_SINE), plus the seven exclusive baby animation states.

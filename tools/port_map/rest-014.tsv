@@ -1,0 +1,149 @@
+ServerScoreboard.onScoreChanged	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	score packet for tracked objectives, sent as the diff
+ServerScoreboard.onPlayerRemoved	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	reset-all becomes one ResetScore per tracked objective; same client result
+ServerScoreboard.onPlayerScoreRemoved	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	ResetScore for one tracked objective
+ServerScoreboard.addPlayerToTeam	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	team method 3 (join) for the new member
+ServerScoreboard.removePlayerFromTeam	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	team method 4 (leave)
+ServerScoreboard.onObjectiveChanged	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	objective method 2 when its display changes
+ServerScoreboard.onObjectiveRemoved	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	objective method 1 when it leaves every display slot
+ServerScoreboard.onTeamAdded	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	team method 0 (create) to everyone
+ServerScoreboard.onTeamChanged	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	team method 2 (update parameters); waypoints in Waypoints::tick_level
+ServerScoreboard.onTeamRemoved	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	team method 1 (remove)
+ServerScoreboard.storeToSaveDataIfDirty	port	crates/horizon-client/src/game/scoreboard.rs::Game::save_scoreboard	gap: minor: saves the board on every save, no dirty flag; same file
+ServerScoreboard.getStartTrackingPackets	inline	crates/horizon-client/src/lan/scoreboard.rs::View::changes	objective, display slot and score packets come from the diff
+ServerScoreboard.startTrackingObjective	inline	crates/horizon-client/src/lan/scoreboard.rs::View::changes	no per-objective call; a newly displayed objective appears in the next diff
+ServerScoreboard.getStopTrackingPackets	inline	crates/horizon-client/src/lan/scoreboard.rs::View::changes	objective method 1 and display resets come from the diff
+ServerScoreboard.stopTrackingObjective	inline	crates/horizon-client/src/lan/scoreboard.rs::View::changes	objective removed from the next diff
+ServerScoreboard.getObjectiveDisplaySlotCount	inline	crates/horizon-client/src/lan/scoreboard.rs::View::of	tracked set = objectives in any display slot
+ServerScoreboard.updatePlayerWaypoint	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::tick_level	team change remakes the player's waypoint connections, found by the per-tick diff
+ServerScoreboard.updateTeamWaypoints	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::tick_level	every player on a changed team, via the per-tick diff
+ServerTickRateManager.updateJoiningPlayer	port	crates/horizon-client/src/lan/hub.rs::Hub::send_level_info	sends ticking state and step to the joining guest
+SuppressedExceptionCollector.addEntry	skip:server		feeds the system report's suppressed-exception section; no player-facing behaviour
+SuppressedExceptionCollector.dump	skip:server		system report section only
+WorldLoader.PackConfig.createResourceManager	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	discovers packs and rebuilds the data store; no resource manager object
+AdvancementVisibilityEvaluator.evaluateVisibility	port	crates/horizon-client/src/advancements.rs::Tree::visible	done, ancestors and near unhidden advancements in one walk
+AdvancementVisibilityEvaluator.evaluateVisibilityRule	inline	crates/horizon-client/src/advancements.rs::Tree::visible	rule match inside the walk
+AdvancementVisibilityEvaluator.evaluateVisiblityForUnfinishedNode	inline	crates/horizon-client/src/advancements.rs::Tree::visible	two-level check on the top three rules, in the walk
+CustomBossEvent.addPlayer	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_set	players arm stores the UUID set; viewer packets from publish_boss_bars
+CustomBossEvent.removePlayer	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_set	players arm replaces the set without the removed UUID
+CustomBossEvent.removeAllPlayers	inline	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_command	bossbar remove drops the bar for every viewer on the next publish; no separate clear
+CustomBossEvent.setValue	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_set	value arm; progress is clamped in BossBar::progress
+CustomBossEvent.setMax	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_set	max arm; progress clamped in BossBar::progress
+CustomBossEvent.setPlayers	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_set	players arm
+CustomBossEvent.load	port	crates/horizon-client-core/src/bossbar.rs::BossBars::unpack	restores saved bars; UUIDs minted from the id
+CustomBossEvents.onPlayerDisconnect	port	crates/horizon-client/src/game/bossbars.rs::Game::publish_boss_bars	a disconnected viewer leaves boss_viewers and the sent map
+ChaseClient.start	skip:debug		/chase remote-control client, a developer tool
+ChaseClient.stop	skip:debug		/chase remote-control client, a developer tool
+ChaseClient.run	skip:debug		/chase remote-control client, a developer tool
+ChaseClient.handleMessage	skip:debug		/chase remote-control client, a developer tool
+ChaseClient.handleTeleport	skip:debug		/chase remote-control client, a developer tool
+ChaseClient.parseTarget	skip:debug		/chase remote-control client, a developer tool
+ChaseClient.executeCommand	skip:debug		/chase remote-control client, a developer tool
+ChaseServer.start	skip:debug		/chase remote-control server, a developer tool
+ChaseServer.runSender	skip:debug		/chase remote-control server, a developer tool
+ChaseServer.runAcceptor	skip:debug		/chase remote-control server, a developer tool
+ChaseServer.getPlayerPosition	skip:debug		/chase remote-control server, a developer tool
+ChaseServer.PlayerPosition.format	skip:debug		/chase remote-control wire format, a developer tool
+AdvancementCommands.performCriterion	port	crates/horizon-client/src/game/advancements.rs::Game::grant_advancement	grant path with a criterion; the revoke path is Game::revoke_advancement
+AdvancementCommands.getAdvancements	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_advancement	parents, target, then children, walked inside cmd_advancement
+AdvancementCommands.addChildren	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_advancement	subtree walk (nested add fn) inside cmd_advancement
+AdvancementCommands.Action.<init>	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_advancement	per-action message keys built from grant/revoke inside cmd_advancement
+AdvancementCommands.Action.perform	port	crates/horizon-client/src/game/commands.rs::Game::cmd_advancement	loops the targets, counts changes, quiet when no single advancement
+ArgProvider.buildList	skip:java		list builder; tree_data.rs providers builds the entity, block and storage branches directly
+AttributeCommand.register	port	crates/horizon-command/src/tree_world.rs::attribute	attribute syntax tree
+AttributeCommand.getAttributeInstance	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_attribute	instance lookup and no-attribute error inside cmd_attribute
+AttributeCommand.getLivingEntity	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_attribute	non-living target error inside cmd_attribute
+AttributeCommand.getEntityWithAttribute	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_attribute	has-attribute check inside cmd_attribute
+AttributeCommand.getAttributeValue	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_attribute	get arm, value times scale
+AttributeCommand.getAttributeBase	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_attribute	base get arm, base times scale
+AttributeCommand.getAttributeModifier	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_attribute	modifier value get arm
+AttributeCommand.setAttributeBase	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_attribute	base set arm
+AttributeCommand.resetAttributeBase	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_attribute	base reset arm
+AttributeCommand.addModifier	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_attribute	modifier add arm, already-present error
+AttributeCommand.removeModifier	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_attribute	modifier remove arm
+BanIpCommands.register	missing		minor: /ban-ip is not in the command tree; Horizon has no ban list
+BanIpCommands.banIpOrName	missing		minor: operator ban-by-IP or name; no ban list in Horizon
+BanListCommands.register	missing		minor: /banlist is not in the command tree; Horizon has no ban list
+BanPlayerCommands.register	missing		minor: /ban is not in the command tree; Horizon has no ban list
+BossBarCommands.register	port	crates/horizon-command/src/tree_misc.rs::bossbar	bossbar syntax tree
+BossBarCommands.getValue	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_command	bossbar.get value arm
+BossBarCommands.getMax	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_command	bossbar.get max arm
+BossBarCommands.setValue	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_set	value arm; unchanged error
+BossBarCommands.setMax	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_set	max arm; unchanged error
+BossBarCommands.setColor	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_set	color arm; unchanged error
+BossBarCommands.setStyle	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_set	style arm; unchanged error
+BossBarCommands.setName	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_set	name arm; unchanged error
+BossBarCommands.createBar	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_command	bossbar.add arm, already-exists error
+BossBarCommands.removeBar	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_command	bossbar.remove arm
+BossBarCommands.getBossBar	port	crates/horizon-client/src/game/bossbars.rs::Game::bar_checked	lookup with does-not-exist error
+ChaseCommand.register	skip:debug		/chase syntax, a developer tool
+ChaseCommand.stop	skip:debug		/chase stop, a developer tool
+ChaseCommand.alreadyRunning	skip:debug		/chase state check, a developer tool
+ChaseCommand.lead	skip:debug		/chase lead, a developer tool
+ChaseCommand.follow	skip:debug		/chase follow, a developer tool
+ClearInventoryCommands.register	port	crates/horizon-command/src/vanilla.rs::registered	/clear syntax (vanilla.rs line 319)
+CloneCommands.register	port	crates/horizon-command/src/vanilla.rs::registered	/clone syntax root
+CloneCommands.beginEndDestinationAndModeSuffix	port	crates/horizon-command/src/vanilla.rs::clone_begin	begin, end, to dimension
+CloneCommands.getLoadedDimensionAndPosition	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_clone	position resolve (block_pos_arg) inside cmd_clone
+CloneCommands.destinationAndStrictSuffix	port	crates/horizon-command/src/vanilla.rs::clone_destination	destination and strict
+CloneCommands.modeSuffix	port	crates/horizon-command/src/vanilla.rs::clone_mask	replace, masked, filtered
+CloneCommands.wrapWithCloneMode	port	crates/horizon-command/src/vanilla.rs::clone_mode	force, move, normal
+CommandResponseTracker.track	skip:java		result aggregation; each command counts its own targets
+CommandResponseTracker.firstElement	skip:java		single-target check; each command decides singular or plural text
+CommandResponseTracker.elementCount	skip:java		target count; each command counts its own targets
+CommandResponseTracker.messages	skip:java		message builder; Horizon writes each command's feedback inline
+CommandResponseTracker.dispatch	skip:java		singular or plural message choice; done per command
+CommandResponseTracker.sendFeedback	skip:java		zero-target failure and feedback are written per command
+CommandResponseTracker.MessagesWithArg.throwIfZero	skip:java		zero-target error; written per command
+CommandResponseTracker.MessagesWithArgs.throwIfZero	skip:java		zero-target error; written per command
+ComputeCommand.computeAsFloat	port	crates/horizon-client/src/game/commands/compute.rs::Game::cmd_compute	float value, floor(value * scale), exact and inexact feedback
+ComputeCommand.throwInvalidValue	inline	crates/horizon-client/src/game/commands/compute.rs::Game::cmd_compute	invalid-value message closure inside cmd_compute
+DamageCommand.register	port	crates/horizon-command/src/tree_world.rs::damage	damage syntax tree
+DataPackCommand.createPack	missing		minor: /datapack create is in the tree but writes no pack folder or pack.mcmeta
+DataPackCommand.enablePack	port	crates/horizon-client/src/game/functions.rs::Game::cmd_datapack	datapack.enable arm; apply_pack_change reloads
+DataPackCommand.disablePack	port	crates/horizon-client/src/game/functions.rs::Game::cmd_datapack	disable branch; apply_pack_change reloads
+DataPackCommand.getPack	port	crates/horizon-client/src/game/functions.rs::Game::cmd_datapack	unknown, already enabled or disabled, and feature checks
+DeOpCommands.register	missing		minor: /deop is not in the in-game tree; op lists are edited by the standalone server CLI
+DebugCommand.start	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_debug	profiler start, already-running error
+DebugCommand.stop	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_debug	profiler stop, ticks and tps
+DebugCommand.TraceCustomExecutor.runGuarded	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_debug_function	trace file under debug/ with one line per call
+DebugCommand.Tracer.printIndent	inline	crates/horizon-client/src/game/commands/extra.rs::Game::trace_function	indent closure inside trace_function
+DebugCommand.Tracer.onCommand	port	crates/horizon-client/src/game/commands/extra.rs::Game::trace_function	[C] line
+DebugCommand.Tracer.onReturn	inline	crates/horizon-client/src/game/commands/extra.rs::Game::trace_function	result appended to the [C] line
+DebugCommand.Tracer.onCall	port	crates/horizon-client/src/game/commands/extra.rs::Game::trace_function	[F] line with size
+DebugCommand.Tracer.onError	port	crates/horizon-client/src/game/commands/extra.rs::Game::trace_function	[E] line
+DebugCommand.Tracer.sendSystemMessage	missing		minor: no [M] lines for system messages in the trace file
+DebugConfigCommand.register	skip:debug		/debugconfig, a developer tool
+DebugConfigCommand.getUuidsInConfig	skip:debug		/debugconfig, a developer tool
+DebugConfigCommand.config	skip:debug		/debugconfig, a developer tool
+DebugConfigCommand.findConfigPlayer	skip:debug		/debugconfig, a developer tool
+DebugConfigCommand.unconfig	skip:debug		/debugconfig, a developer tool
+DebugConfigCommand.showDialog	skip:debug		/debugconfig, a developer tool
+DebugMobSpawningCommand.register	skip:debug		/debugmobspawning, a developer tool
+DebugPathCommand.register	skip:debug		/debugpath, a developer tool
+DebugPathCommand.fillBlocks	skip:debug		/debugpath, a developer tool
+DefaultGameModeCommands.setMode	port	crates/horizon-client/src/game/commands.rs::Game::execute_command	gap: unsure: calls set_default_game_mode (lan.rs), which also sets the host's creative flag; vanilla only changes the default for new players
+DialogCommand.showDialog	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_dialog	gap: player: open_dialog only sets the host's dialog state; other targets are counted but never sent the dialog
+DialogCommand.clearDialog	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_dialog	gap: player: close_dialog only closes the host's dialog; guests get no clear packet
+DifficultyCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	difficulty syntax (vanilla.rs line 284)
+DifficultyCommand.setDifficulty	port	crates/horizon-client/src/game/commands.rs::Game::cmd_difficulty	already-same error, set, hostile mobs removed on peaceful
+EffectCommands.register	port	crates/horizon-command/src/vanilla.rs::registered	effect syntax
+EffectCommands.computeDurationInTicks	port	crates/horizon-client/src/game/commands/effects.rs::Game::cmd_effect_give	duration arm inside cmd_effect_give
+EffectCommands.clearEffect	port	crates/horizon-client/src/game/commands/effects.rs::Game::cmd_effect_clear	clear one effect; tracker feedback
+EmoteCommands.register	port	crates/horizon-command/src/vanilla.rs::registered	/me syntax; emote text in cmd_say (commands.rs)
+EnchantCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	enchant syntax (vanilla.rs line 189)
+net/minecraft/server/commands/ExecuteCommand#wrapStores	port	crates/horizon-command/src/tree_execute.rs::store	execute store syntax
+net/minecraft/server/commands/ExecuteCommand#storeValue	port	crates/horizon-client/src/game/commands/execute.rs::Game::store_value	score and bossbar store targets
+net/minecraft/server/commands/ExecuteCommand#storeData	port	crates/horizon-client/src/game/commands/execute.rs::Game::store_value	data target store with int, float, short, long, double tags
+net/minecraft/server/commands/ExecuteCommand#isChunkLoaded	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_matches	gap: unsure: tests the streaming lit set; vanilla needs ENTITY_TICKING status and loaded entities
+net/minecraft/server/commands/ExecuteCommand#countItems	port	crates/horizon-client/src/game/commands/items.rs::Game::condition_items	item count predicate
+net/minecraft/server/commands/ExecuteCommand#checkScore	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_score	score comparison, both score holders
+net/minecraft/server/commands/ExecuteCommand#checkStopwatch	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_stopwatch	stopwatch range check
+net/minecraft/server/commands/ExecuteCommand#checkCustomPredicate	port	crates/horizon-client/src/game/functions.rs::Game::check_predicate	predicate check
+net/minecraft/server/commands/ExecuteCommand#addConditional	port	crates/horizon-client/src/game/commands/execute.rs::Game::run_conditional_terminal	pass and fail messages, count
+net/minecraft/server/commands/ExecuteCommand#addIfBlocksConditional	port	crates/horizon-client/src/game/commands/execute.rs::Game::run_conditional_terminal	if and unless blocks through the shared terminal
+net/minecraft/server/commands/ExecuteCommand#checkIfRegions	inline	crates/horizon-client/src/game/commands/execute.rs::Game::run_conditional_terminal	pass_count message folded into the terminal
+net/minecraft/server/commands/ExecuteCommand#checkUnlessRegions	inline	crates/horizon-client/src/game/commands/execute.rs::Game::run_conditional_terminal	fail_count error folded into the terminal
+net/minecraft/server/commands/ExecuteCommand#checkRegions	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_blocks	32768 area limit, block and block-entity compare
+net/minecraft/server/commands/ExecuteCommand#spawnEntityAndRedirect	port	crates/horizon-client/src/game/commands/execute.rs::Game::modify	summon arm, then the redirected source
+net/minecraft/server/commands/ExecuteCommand#scheduleFunctionConditionsAndTest	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_function	gap: minor: runs the function inline and keeps sources by its result; no queued per-source instantiation
+ExecuteCommand.ExecuteIfFunctionCustomModifier.apply	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_function	function condition as a modifier

@@ -155,7 +155,7 @@ impl MapData {
         m.unlimited = self.unlimited;
         m
     }
-    /// `MapItemSavedData.locked`: the same pixels, locked.
+    /// `MapItemSavedData.locked`: the same pixels and banner markers, locked.
     pub(super) fn locked_copy(&self) -> MapData {
         let mut m = MapData::fresh(
             f64::from(self.center[0]),
@@ -165,6 +165,7 @@ impl MapData {
         );
         m.center = self.center;
         m.colors = self.colors.clone();
+        m.banners = self.banners.clone();
         m.tracking = self.tracking;
         m.unlimited = self.unlimited;
         m.locked = true;

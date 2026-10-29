@@ -1,0 +1,11 @@
+LocationPredicate.matches	port	crates/horizon-client/src/advancements.rs::location	position, biome, structure, dimension and block checks for advancement criteria
+MultiLineEditBox.setValue	missing		minor: unsure: book pages keep their own text in books.rs; no multi-line box setter found
+TransferableSelectionList.PackEntry.mouseClicked	inline	crates/horizon-client/src/pack_screen.rs::PackScreen::click	entry select, move arrows and double-click transfer
+CompoundTag.getIntArray	skip:java		typed NBT accessor; Rust matches Tag::IntArray where it reads one
+Component.toFlatList	skip:java		Horizon Text already keeps flat styled spans
+Style.withColor	port	crates/horizon-client-core/src/text.rs::Text::with_color	colour on the text span
+MinecraftServer.halt	port	crates/horizon-client/src/game/integrated.rs::Integrated::halt	stop the integrated server and wait for it
+DedicatedPlayerList.loadOps	inline	crates/horizon-server-files/src/user_lists.rs::UserList::load	ops.json through the shared user-list loader
+ServerStatsCounter.toJson	inline	crates/horizon-client/src/game/stats.rs::Stats::write	stats JSON built while saving
+LevelChunk.getFluidState	port	crates/horizon-world/src/level/mod.rs::Behaviours::fluid	fluid state of a block state
+Fox.getBreedOffspring	inline	crates/horizon-client/src/game/creatures.rs::Game::breed	the Fox arm: either parent's variant on a coin flip

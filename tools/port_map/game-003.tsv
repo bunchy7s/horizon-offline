@@ -1,0 +1,146 @@
+ServerPlayerGameMode.changeGameModeForPlayer	port	crates/horizon-client/src/game/commands.rs::Game::set_game_mode	same-mode check, mode switch, abilities; a LAN guest goes through Hub::set_game_mode which also broadcasts PlayerInfo UPDATE_GAME_MODE
+ServerPlayerGameMode.setGameModeForPlayer	port	crates/horizon-client/src/game/game_mode.rs::Game::set_mode	previous mode kept, GameType.updatePlayerAbilities applied
+ServerPlayerGameMode.isInRangeOfGround	missing		minor: spectator to creative near the ground keeps flying (set_mode always sets flying); vanilla stops flying within 1 block of the ground
+ServerPlayerGameMode.incrementDestroyProgress	inline	crates/horizon-client/src/game/lan_actions.rs::Game::guest_dig_feedback	gap: minor: crack stage is the client formula (progress*10 - 1), so other players' cracks on a guest's block run one stage behind the server value
+ServerPlayerGameMode.debugLogging	skip:debug		DEBUG_BLOCK_BREAK logging
+ServerPlayerGameMode.abortDestroyBlock	inline	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	the abort action clears the guest's crack for everyone; no separate check of a mismatched destroy position
+ServerPlayerGameMode.destroyAndAck	missing		minor: guest_destroy ignores whether the break succeeded, so a refused break never sends the block back to the guest
+SimulationChunkTracker.getLevel	port	crates/horizon-client/src/ticket_levels.rs::Map::get	simulation level per chunk, 33 where no ticket reaches
+SimulationChunkTracker.setLevel	inline	crates/horizon-client/src/ticket_levels.rs::compute	the whole level map is rebuilt from player and forced tickets instead of updated per node
+ThreadedLevelLightEngine.checkBlock	inline	crates/horizon-client/src/light.rs::relight	a block change relights resident chunks directly, no queued PRE_UPDATE task
+ThreadedLevelLightEngine.updateChunkStatus	skip:other		Horizon lights a chunk in one flood fill and keeps no per-section light state to reset
+ThreadedLevelLightEngine.updateSectionStatus	skip:other		no per-section empty flags: light_chunk reads the sections directly
+ThreadedLevelLightEngine.propagateLightSources	inline	crates/horizon-client/src/light.rs::light_chunk	light_chunk seeds sky and block sources and propagates in one pass
+ThreadedLevelLightEngine.setLightEnabled	skip:other		no light-enabled flag per chunk; relight only touches resident, lit chunks
+ThreadedLevelLightEngine.queueSectionData	inline	crates/horizon-client/src/light.rs::update_light_layers	light layers from a chunk packet are applied at once, not queued
+ThreadedLevelLightEngine.addTask	skip:java		light thread task queue
+ThreadedLevelLightEngine.retainData	skip:other		no retained light data between chunk statuses
+ThreadedLevelLightEngine.initializeLight	skip:other		INITIALIZE_LIGHT step marks sections and enables light; Horizon has no such step before light_chunk
+ThreadedLevelLightEngine.lightChunk	port	crates/horizon-client/src/light.rs::light_chunk	the chunk's light is computed from its 3x3 neighbourhood
+ThreadedLevelLightEngine.tryScheduleUpdate	skip:java		schedules the light thread
+ThreadedLevelLightEngine.runUpdate	inline	crates/horizon-client/src/light.rs::relight	runLightUpdates: decrease then increase passes, run directly on the changed positions
+ThreadedLevelLightEngine.waitForPendingTasks	skip:java		future that completes when the light queue drains
+ThrottlingChunkTaskDispatcher.popTasks	skip:other		caps chunk tasks in flight; Horizon schedules chunk work on its own worker pool
+ThrottlingChunkTaskDispatcher.getDebugStatus	skip:debug		
+Ticket.toString	skip:debug		
+Ticket.decreaseTicksLeft	missing		minor: only player and forced tickets exist; timed tickets (ender pearl 40, portal 300, post teleport 5 ticks) are not modelled
+Ticket.isTimedOut	missing		minor: no timed tickets, so nothing expires
+WorldGenRegion.<init>	port	crates/horizon-world/src/worldgen/feature_region.rs::TerrainRegion::new	the region is a set of chunks around the centre
+WorldGenRegion.hasChunk	port	crates/horizon-world/src/worldgen/feature_region.rs::TerrainRegion::chunk	a chunk is there when it is in the region's index, not by the step's dependency distance
+WorldGenRegion.warnIfReadOutsideWriteZone	skip:debug		logs an unsafe terrain read
+WorldGenRegion.findBlocksIn	skip:debug		only adds the read-zone warnings to the default scan
+WorldGenRegion.isWithinWriteZone	port	crates/horizon-world/src/worldgen/write_zone.rs::GenerationWriteZone::contains_block	Chebyshev distance to the centre chunk within the write radius
+LevelLoadProgressTracker.start	inline	crates/horizon-client/src/level_loading.rs::progress	weights 10 + player chunks; no persistent (forced) chunk stage
+LevelLoadProgressTracker.update	inline	crates/horizon-client/src/level_loading.rs::progress	player chunks ready out of 49
+LevelLoadProgressTracker.finishSegment	inline	crates/horizon-client/src/level_loading.rs::progress	the 10 weight prepare segment counts as finished
+LevelLoadProgressTracker.tracksStage	inline	crates/horizon-client/src/level_loading.rs::progress	both stages tracked, player chunks included
+LevelLoadProgressTracker.updateProgress	port	crates/horizon-client/src/level_loading.rs::progress	
+LoggingLevelLoadListener	skip:server		console progress log of a dedicated server or integrated server start
+CompoundContainer.isEmpty	port	crates/horizon-client/src/game/machines.rs::Containers::is_empty	a View of both halves is empty when every slot is
+CompoundContainer.contains	inline	crates/horizon-client/src/game/block_entity_anims.rs::Game::container_openers_changed	an opener of a chest counts on both halves (chest_other_half)
+CompoundContainer.getItem	port	crates/horizon-client/src/game/machines.rs::Containers::get	View::locate picks the half; lan/menu.rs Slots::get does the same for a guest's menu
+CompoundContainer.removeItem	inline	crates/horizon-client/src/game/machines.rs::Game::slot_mut_at	View::locate picks the half, the caller splits the stack
+CompoundContainer.removeItemNoUpdate	inline	crates/horizon-client/src/game/machines.rs::Game::slot_mut_at	View::locate picks the half, the caller takes the slot
+CompoundContainer.setItem	inline	crates/horizon-client/src/game/machines.rs::Game::slot_mut_at	View::locate picks the half
+CompoundContainer.stillValid	port	crates/horizon-client/src/lan/menu.rs::Slots::still_valid	both halves must still be there and in reach
+CompoundContainer.canPlaceItem	port	crates/horizon-client/src/game/machines.rs::Containers::can_place	
+Container.countItem	port	crates/horizon-client/src/mobs/villager.rs::Ext::count_item	villager inventory only, the one caller that needs it
+Container.hasAnyOf	inline	crates/horizon-client/src/mobs/villager.rs::Ext::take_half_stack	TradeWithVillager's hasAnyOf gate: no wanted item in the inventory, nothing is thrown
+Container.hasAnyMatching	inline	crates/horizon-client/src/mobs/villager_brain.rs::harvest_tick	Villager.hasFarmSeeds gate: a farmer sows only when a plantable seed is in the inventory; the hopper checks of chiseled bookshelf and jukebox canTakeItem are not ported as such
+Container.getSlot	port	crates/horizon-client/src/game/commands/items.rs::Game::slot_get	/item and execute if items read a container slot by number
+Container.ContainerIterator.next	skip:java		iterator over slots
+ContainerHelper.removeItem	skip:java		NonNullList helper: split a stack in a slot Vec; block entities take from their own slot vector
+ContainerHelper.takeItem	skip:java		NonNullList helper: Option::take on the slot
+ContainerHelper.clearOrCountMatchingItems	port	crates/horizon-client/src/game/commands.rs::Game::clear_matching	/clear over main, armor, offhand, crafting grid and carried stack, count only when max is 0
+DifficultyInstance.isHard	skip:other		no vanilla caller (isHarderThan is what Illusioner uses)
+DifficultyInstance.getSpecialMultiplier	port	crates/horizon-client/src/mobs/spawning.rs::LocalDifficulty::special	
+DifficultyInstance.calculateDifficulty	port	crates/horizon-client/src/mobs/spawning.rs::LocalDifficulty::new	
+InteractionHand.asArm	inline	crates/horizon-client/src/mobs/ai.rs::Mob::swing_hand	off_hand != main arm left; the player's first person hand does the same in game.rs hand_geometry
+InteractionResult.Success.heldItemTransformedTo	skip:java		result builder; Horizon replaces the held item in place where the item is used
+ItemStackWithSlot.isValidInContainer	port	crates/horizon-client-core/src/block_entity_nbt.rs::items	slots outside 0..size are dropped when items load
+LockCode.canUnlock	missing		minor: a lock on a container is kept in the NBT but never checked, so any player opens a command-locked chest
+RandomSequences.createSequence	port	crates/horizon-items/src/random_sequences.rs::create	
+RandomSequences.DirtyMarkingRandomSource.nextInt	skip:java		marks the saved data dirty on each draw; Horizon saves every sequence
+RandomSequences.DirtyMarkingRandomSource.equals	skip:java		wrapper equality
+RandomizableContainer.trySaveLootTable	port	crates/horizon-client-core/src/block_entity_nbt.rs::Fields::loot_table	saves LootTable and a non-zero seed, no items
+SimpleContainer.getItem	port	crates/horizon-world/src/simple_container.rs::SimpleContainer::get	library port; villager and piglin inventories are plain vectors
+SimpleContainer.removeAllItems	port	crates/horizon-world/src/simple_container.rs::SimpleContainer::remove_all	
+SimpleContainer.removeItemNoUpdate	port	crates/horizon-world/src/simple_container.rs::SimpleContainer::remove_no_update	
+SimpleContainer.setItem	port	crates/horizon-world/src/simple_container.rs::SimpleContainer::set	
+SimpleContainer.isEmpty	port	crates/horizon-world/src/simple_container.rs::SimpleContainer::is_empty	
+SimpleContainer.fillStackedContents	skip:other		no vanilla caller: SimpleContainer is never a recipe input
+SimpleContainer.toString	skip:debug		
+SimpleContainer.moveItemToEmptySlots	inline	crates/horizon-world/src/simple_container.rs::SimpleContainer::add	second pass of addItem; the villager's Ext::add_item does the same
+SimpleContainer.moveItemToOccupiedSlotsWithSameType	inline	crates/horizon-world/src/simple_container.rs::SimpleContainer::add	first pass of addItem
+SimpleContainer.moveItemsBetweenStacks	inline	crates/horizon-world/src/simple_container.rs::SimpleContainer::add	the grow and shrink with the per-stack limit
+SimpleContainer.fromItemList	inline	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	villager and piglin Inventory read; the piglin list is cut to 8 instead of re-added
+SimpleContainer.storeAsItemList	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	villager and piglin Inventory written
+Stopwatches.unpack	port	crates/horizon-client/src/stopwatches.rs::Stopwatches::load	
+Stopwatches.pack	port	crates/horizon-client/src/stopwatches.rs::Stopwatches::save	
+Stopwatches.add	port	crates/horizon-client/src/stopwatches.rs::Stopwatches::create	
+Stopwatches.update	port	crates/horizon-client/src/stopwatches.rs::Stopwatches::restart	only the restart update that /stopwatch uses
+Stopwatches.remove	port	crates/horizon-client/src/stopwatches.rs::Stopwatches::remove	
+Stopwatches.isDirty	inline	crates/horizon-client/src/stopwatches.rs::Stopwatches::save	save skips the write when not dirty and empty
+AttributeType.ofInterpolated	skip:data		attribute type definitions and codecs
+AttributeType.ofNotInterpolated	skip:data		attribute type definitions and codecs
+AttributeType.createModifierCodec	skip:data		attribute type definitions and codecs
+AttributeType.checkAllowedModifier	skip:data		attribute type definitions and codecs
+BedRule.Rule.test	inline	crates/horizon-client/src/game.rs::Game::try_sleep	WHEN_DARK is the hard-coded night or thunder check; ALWAYS and NEVER are in bed_sets_spawn and the dimension checks
+EnvironmentAttribute.valueCodec	skip:data		codec
+EnvironmentAttribute.Builder.build	skip:data		attribute definition builder
+EnvironmentAttributeMap.applyModifier	inline	crates/horizon-client/src/environment.rs::Environment::value	gap: minor: only multiply and override are applied for visual tracks; and, or and maximum tracks are read by their own users
+EnvironmentAttributeMap.equals	skip:java		
+EnvironmentAttributeMap.Builder.modify	skip:java		builder
+EnvironmentAttributeMap.Builder.build	skip:java		builder
+EnvironmentAttributeMap.Entry.createCodec	skip:data		codec
+EnvironmentAttributeMap.Entry.createFullCodec	skip:data		codec
+EnvironmentAttributeProbe.reset	skip:other		Horizon keeps no probe state: render recomputes the biome weights each frame
+EnvironmentAttributeProbe.getValue	inline	crates/horizon-client/src/game.rs::Game::render	sky, fog and water fog are blended from Gaussian biome weights at the camera each frame, no last and new tick lerp
+EnvironmentAttributeProbe.ValueProbe.getValueFromLevel	inline	crates/horizon-client/src/environment.rs::Environment::sample	dimension and timeline value; biome blend is applied by the caller
+EnvironmentAttributeProbe.ValueProbe.tick	port	crates/horizon-client/src/biome.rs::gaussian_weights	the per-tick Gaussian sampling of noise biomes around the camera
+EnvironmentAttributeProbe.ValueProbe.get	inline	crates/horizon-client/src/game.rs::Game::render	per frame values from the camera position instead of lerping last and new tick values
+EnvironmentAttributeReader.getValue	skip:java		overload that centres a BlockPos and passes no interpolator
+EnvironmentAttributeSystem.bakeLayerSampler	skip:java		folds leading constant layers into the base value; load_dimension builds its base values the same way
+EnvironmentAttributeSystem.addStaticLayers	inline	crates/horizon-client/src/environment.rs::Environment::load_dimension	dimension attributes become base values; biome attributes are read in Biomes::load
+EnvironmentAttributeSystem.addDynamicLayers	inline	crates/horizon-client/src/environment.rs::Environment::sample	gap: minor: only day.json drives the visual attributes here; moon, early game and villager timelines are read by moon, patrol and villager code; weather is apply_weather
+EnvironmentAttributeSystem.addBiomeLayer	inline	crates/horizon-client/src/biome.rs::Biomes::load	biome attributes (sky, fog, water fog, spawns, fire burnout) are read into BiomeInfo
+EnvironmentAttributeSystem.addBiomeLayerForAttribute	inline	crates/horizon-client/src/biome.rs::blend_rgb	gap: minor: only sky, fog and water fog colours are blended by Gaussian weights; other biome attributes use the biome at the position
+EnvironmentAttributeSystem.getDimensionValue	inline	crates/horizon-client/src/environment.rs::Environment::sample	
+EnvironmentAttributeSystem.getValue	inline	crates/horizon-client/src/environment.rs::Environment::sample	the sky state at a time of day; other attributes are read straight from dimension and biome data by their users
+EnvironmentAttributeSystem.getConstantBaseValue	skip:debug		VisibleForTesting
+EnvironmentAttributeSystem.isAffectedByPosition	skip:debug		VisibleForTesting
+EnvironmentAttributeSystem.Builder.addConstantLayer	inline	crates/horizon-client/src/environment.rs::Environment::load_dimension	dimension attributes inserted as base values
+EnvironmentAttributeSystem.Builder.addConstantEntry	inline	crates/horizon-client/src/environment.rs::Environment::load_dimension	
+EnvironmentAttributeSystem.Builder.addLayer	skip:java		builder
+EnvironmentAttributeSystem.Builder.addTimelineLayer	inline	crates/horizon-client/src/environment.rs::Environment::load_dimension	day timeline tracks loaded (overworld only)
+EnvironmentAttributeSystem.Builder.addTimelineLayerForAttribute	inline	crates/horizon-client/src/environment.rs::Environment::load_dimension	one Track per attribute with its easing
+EnvironmentAttributeSystem.ValueSampler.getDimensionValue	inline	crates/horizon-client/src/environment.rs::Environment::sample	no per-tick cache: recomputed per frame
+EnvironmentAttributeSystem.ValueSampler.getValue	inline	crates/horizon-client/src/environment.rs::Environment::sample	
+EnvironmentAttributeSystem.ValueSampler.computeValuePositional	inline	crates/horizon-client/src/game.rs::Game::render	base, timeline track, then biome blend, then weather, in that order
+EnvironmentAttributeSystem.ValueSampler.computeValueNotPositional	inline	crates/horizon-client/src/environment.rs::Environment::sample	base then timeline track
+EnvironmentAttributes.register	skip:data		attribute registry
+WeatherAttributes.addBuiltinLayers	port	crates/horizon-client/src/environment.rs::apply_weather	rain and thunder layers over sky, fog, cloud, sky light, stars and sunrise; bees staying in the hive is bees_stay_in_hive in bee.rs
+WeatherAttributes.addLayer	port	crates/horizon-client/src/environment.rs::apply_weather	rain level minus thunder level, then thunder level, each lerped over the value
+BooleanModifier.apply	port	crates/horizon-client/src/patrol.rs::BoolTrack::apply	and, or, xor, nand, nor, xnor over the timeline track value
+ColorModifier.BlendToGray.lerp	skip:other		only lerps blend_to_gray arguments between keyframes; no timeline uses that modifier
+ListModifier.Append.apply	inline	crates/horizon-client/src/animate_tick.rs::AnimateTables::load	a biome's ambient_particles list is its argument over an empty dimension list
+MobSpawnSettingsModifier.Overlay.apply	inline	crates/horizon-client/src/biome.rs::Biomes::load	no dimension sets natural_mob_spawns, so the overlay over the empty default is the biome's own spawns
+ClockTimeMarker.getRepetitionCount	skip:other		no vanilla caller
+ClockTimeMarker.resolveTimeToMoveTo	port	crates/horizon-client/src/game/chat.rs::TimeMarker::resolve	
+ClockTimeMarker.occursAt	port	crates/horizon-client/src/game/chat.rs::TimeMarker::occurs_at	
+ClockTimeMarker.durationToNext	inline	crates/horizon-client/src/game/chat.rs::TimeMarker::resolve	the d > 0 else period + d step
+ServerClockManager.init	inline	crates/horizon-client/src/game/chat.rs::Game::build_registries	overworld timelines and their time markers are loaded; the End clock runs with game time
+ServerClockManager.getInstance	skip:java		clock lookup; Horizon keeps one overworld clock in ui.clock
+ServerClockManager.setTotalTicks	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_time	/time set <ticks>
+ServerClockManager.moveToTimeMarker	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_time	/time set <marker>: not found, already there, or moved
+ServerClockManager.addTicks	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_time	/time add, floored at 0
+ServerClockManager.isAtTimeMarker	inline	crates/horizon-client/src/game/raids.rs::Game::tick_village_siege	ROLL_VILLAGE_SIEGE marker as tick 18000 of the day
+ServerClockManager.commandTimeMarkersForClock	inline	crates/horizon-client/src/game/chat.rs::Game::build_registries	markers with show_in_commands go to the command suggestions
+ServerClockManager.ServerClockInstance.loadFrom	port	crates/horizon-client/src/game/chat.rs::Game::load_world_state	total ticks come from level data; rate, partial tick and paused are read from world_clocks.dat
+ServerClockManager.ServerClockInstance.packState	port	crates/horizon-client/src/game/chat.rs::Game::save_world_state	
+WorldClocks.bootstrap	skip:data		clock registration
+CombatTracker.getMessageForAssistedFall	port	crates/horizon-client/src/game/combat.rs::Game::combat_death_message_for	gap: minor: the .item variants of the fell assist and finish messages are never used, a named weapon is not shown
+CombatTracker.getCombatDuration	skip:other		only feeds ClientboundPlayerCombatEndPacket, which the client ignores
+DamageSource.getLocalizedDeathMessage	port	crates/horizon-client/src/game/combat.rs::Game::combat_death_message_for	gap: minor: no .item variant when the killer holds a custom-named item
+DamageSource.isCreativePlayer	port	crates/horizon-world/src/damage_source.rs::DamageSource::creative_player	
+DamageSource.is	port	crates/horizon-world/src/damage_source.rs::DamageSource::in_tag	tag form; the key form is is_type

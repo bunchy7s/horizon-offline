@@ -181,6 +181,10 @@ impl EndState {
             survive: false,
         });
     }
+    /// Where each eye in flight was last tick and is now (the hitbox view).
+    pub(super) fn eye_motions(&self) -> impl Iterator<Item = (glam::DVec3, glam::DVec3)> + '_ {
+        self.eyes.iter().map(|e| (e.previous, e.position))
+    }
     /// `EyeOfEnder.tick` on a server's client: it moves by its last known
     /// motion; only the server steers it.
     pub(super) fn step_remote_eyes(&mut self) {
@@ -329,6 +333,13 @@ impl Game<'_> {
             .clone()
     }
 
+    /// EnderEyeItem.use's `getPlayerPOVHitResult`: whether the block aimed
+    /// at is an End portal frame (the use passes there).
+    pub(super) fn aims_at_end_portal_frame(&self) -> bool {
+        self.pick()
+            .is_some_and(|hit| &*self.block_name(hit.pos) == "minecraft:end_portal_frame")
+    }
+
     /// EnderEyeItem.useOn: fill an empty End portal frame, then light the
     /// portal when the ring of twelve filled frames is complete.
     pub(super) fn use_ender_eye(&mut self, stack: &ItemStack, use_on_block: bool) -> Result<bool> {
@@ -345,7 +356,12 @@ impl Game<'_> {
             if matches!(self.guest_use, Some(super::GuestUse::OnBlock(_))) {
                 return Ok(false);
             }
-            // EnderEyeItem.use: throw the eye towards the nearest stronghold.
+            // EnderEyeItem.use: startUsingItem (getUseDuration 0, so the use
+            // lasts until the button lets go), then the eye is thrown towards
+            // the nearest stronghold if there is one (CONSUME without).
+            if self.using.is_none() {
+                self.using = Some((self.held_slot(), 0));
+            }
             self.throw_ender_eye();
             return Ok(true);
         };
@@ -376,14 +392,8 @@ impl Game<'_> {
         }
         self.consume_held();
         self.swing_arm();
-        let center = hit.pos.map(|v| f64::from(v) + 0.5);
-        // LevelEvent 1503: END_PORTAL_FRAME_FILL.
-        self.audio.play(
-            "minecraft:block.end_portal_frame.fill",
-            Some(center),
-            1.0,
-            1.0,
-        );
+        // EnderEyeItem.useOn emits this event for all nearby players.
+        self.level_event_at(1503, hit.pos, 0);
         if let Some(c) = self.portal_ring_center(hit.pos) {
             for dz in -1..=1 {
                 for dx in -1..=1 {

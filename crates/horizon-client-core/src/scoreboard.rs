@@ -662,10 +662,22 @@ pub fn name_shown(own: Option<&Team>, viewer: Option<&Team>, v: NameView) -> boo
     }
     !v.hud_hidden && !v.is_camera && visible && !v.is_vehicle
 }
-/// `ServerPlayer.die`: whether a player's death message reaches the player
-/// themselves (the team broadcasts leave out the dying player).
-pub fn own_death_message_shown(team: Option<&Team>) -> bool {
-    team.is_none_or(|t| t.death_message_visibility == Visibility::Always)
+/// `ServerPlayer.die`: whether `other` hears the death message of `dying`
+/// (`broadcastSystemMessage`, `broadcastSystemToTeam` or
+/// `broadcastSystemToAllExceptTeam`, by the team's death message visibility).
+pub fn death_message_reaches(board: &Scoreboard, dying: &str, other: &str) -> bool {
+    let Some(team) = board.players_team(dying) else {
+        return true;
+    };
+    let same_team = board
+        .players_team(other)
+        .is_some_and(|t| t.name == team.name);
+    match team.death_message_visibility {
+        Visibility::Always => true,
+        Visibility::Never => false,
+        Visibility::HideForOtherTeams => same_team && other != dying,
+        Visibility::HideForOwnTeam => !same_team,
+    }
 }
 
 // ---- objectives and scores ---------------------------------------------

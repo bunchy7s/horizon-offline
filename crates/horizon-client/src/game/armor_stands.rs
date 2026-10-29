@@ -2,7 +2,7 @@
 //! falling, `interactAt` equipment swaps by clicked height, the two-hit break
 //! of `hurtServer` (creative breaks at once), and `ArmorStandRenderer` with
 //! the default pose, the hit wobble and humanoid armor layers.
-use super::{Game, view_vector};
+use super::Game;
 use horizon_client::{
     entities::ArmorStand,
     items::ItemStack,
@@ -153,7 +153,13 @@ impl Game<'_> {
     pub(super) fn worn_armor_layers(&self, m: &Mob) -> Vec<(&Part, [f32; 4], u32)> {
         let e = &m.extra;
         self.armor_layers(
-            [&e.head, &e.chest, &e.legs, &e.feet].map(|s| s.as_deref().map(|i| (i, None))),
+            [
+                (e.head.as_deref(), e.armor[0].as_ref()),
+                (e.chest.as_deref(), e.armor[1].as_ref()),
+                (e.legs.as_deref(), e.armor[2].as_ref()),
+                (e.feet.as_deref(), e.armor[3].as_ref()),
+            ]
+            .map(|(item, stack)| item.map(|i| (i, stack))),
         )
     }
     /// The layers of the armour items `worn` (with their stacks when known,
@@ -220,6 +226,7 @@ impl Game<'_> {
             .armor
             .iter()
             .chain(guests.flat_map(|g| g.armor.iter()))
+            .chain(self.mobs.iter().flat_map(|m| m.extra.armor.iter()))
             .zip(
                 ["helmet", "chestplate", "leggings", "boots"]
                     .into_iter()
@@ -367,8 +374,7 @@ impl Game<'_> {
     }
     /// The armor stand under the crosshair, its distance and the hit point.
     pub(super) fn armor_stand_hit(&self) -> Option<(usize, f64, [f64; 3])> {
-        let eye = self.eye_position()?;
-        let dir = view_vector(self.yaw, self.pitch);
+        let (eye, dir) = self.aim()?;
         let reach: f64 = if self.creative { 5.0 } else { 3.0 };
         let mut best: Option<(usize, f64, [f64; 3])> = None;
         for (i, a) in self.armor_stands.iter().enumerate() {
@@ -504,6 +510,25 @@ impl Game<'_> {
         if !self.before_block(d) || self.mob_hit().is_some_and(|m| m.1 < d) {
             return false;
         }
+        // The stand's box and id, before the hit may remove it.
+        let (area, id) = (self.armor_stands[i].bounds(), self.armor_stands[i].id);
+        let (_, _, _, magic) = self.melee_damage("minecraft:armor_stand", true);
+        let hurt = self.punch_armor_stand(i);
+        if hurt {
+            self.attack_effects(
+                area,
+                Some(id as i32),
+                super::mace::Spared::Stand(id),
+                magic.then_some(id as i32),
+            );
+            self.swing_arm();
+        }
+        hurt
+    }
+    /// `ArmorStand.hurtServer` for a player's attack (also a sweep's): a
+    /// creative player breaks it, otherwise the first hit wobbles it and a
+    /// second within five ticks breaks it.
+    pub(super) fn punch_armor_stand(&mut self, i: usize) -> bool {
         let time = self.world.game_time;
         let at = self.armor_stands[i].position;
         let at = [at.x, at.y, at.z];
@@ -591,9 +616,6 @@ impl Game<'_> {
         };
         for a in &self.armor_stands {
             let entity_start = out.len();
-            if a.invisible {
-                continue;
-            }
             // ArmorStand.shouldRenderAtSqrDistance: 256 times the box's mean
             // edge (4 for a marker's empty box), whatever the entity distance.
             // LivingEntityRenderer grows the culling box by 0.5 for a dragon head.
@@ -665,16 +687,20 @@ impl Game<'_> {
                 a.position.z.floor() as i32,
             );
             let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
-            horizon_client::mobs::render::draw(
-                model,
-                base,
-                &poses,
-                wood,
-                0xFFFF_FFFF,
-                packed,
-                0,
-                out,
-            );
+            // LivingEntityRenderer.submit: an invisible stand has no body render type, but its
+            // layers (held items, custom head, armour) are submitted all the same.
+            if !a.invisible {
+                horizon_client::mobs::render::draw(
+                    model,
+                    base,
+                    &poses,
+                    wood,
+                    0xFFFF_FFFF,
+                    packed,
+                    0,
+                    out,
+                );
+            }
             self.armor_stand_items(a, model, base, &posed, packed, out);
             // HumanoidArmorLayer: head, chest, legs, feet.
             for (slot, layer) in [

@@ -920,8 +920,8 @@ pub fn set_slot_enchantments(m: &mut Mob, slot: usize, levels: gear::Levels) {
     gear::set(m, gear_slot(slot), levels);
 }
 /// `EquipmentUser.equip` for one rolled stack: `setItemSlot` puts the item in
-/// `slot` with its own enchantments, then the slot's drop chance is stored
-/// when the table names one.
+/// `slot` with its own enchantments and trim (set_components), then the
+/// slot's drop chance is stored when the table names one.
 pub fn equip_stack(
     m: &mut Mob,
     slot: usize,
@@ -936,6 +936,17 @@ pub fn equip_stack(
             .map(|(id, level)| (Arc::from(id.as_str()), (*level).max(0) as u32))
             .collect();
         gear::set(m, gear_slot(slot), levels);
+        let trim = stack
+            .components
+            .iter()
+            .find(|(id, _)| id == "minecraft:trim")
+            .and_then(|(_, v)| {
+                Some((
+                    Arc::from(v["material"].as_str()?),
+                    Arc::from(v["pattern"].as_str()?),
+                ))
+            });
+        gear::set_trim(m, gear_slot(slot), trim);
     }
     if let Some(chance) = drop_chance {
         set_drop_chance(m, slot, chance);

@@ -42,6 +42,8 @@ pub(super) fn facets(query: &Query) -> String {
         None => {}
     }
     let loaders: Vec<String> = match &f.loader {
+        // Quilt loads Fabric mods: what runs on Quilt.
+        Some(l) if l == "quilt" => vec!["categories:quilt".into(), "categories:fabric".into()],
         Some(l) => vec![format!("categories:{l}")],
         None => details::default_loaders(query.kind)
             .iter()

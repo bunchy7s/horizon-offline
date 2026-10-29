@@ -2,12 +2,13 @@
 //! blocks and bring them to their player (or a liked note block), dance to
 //! jukeboxes and duplicate when given an amethyst shard mid-dance.
 use super::{
-    Mob,
+    Mob, MobEvent, MobWorld,
     anim::{Poses, State},
     control::MoveKind,
     goals::{Cx, Goal, LookAtPlayer, MOVE, Panic, RandomLookAround, Stroll, goal_clone},
     nav::NavKind,
 };
+use horizon_core::geometry::Vec3;
 use horizon_core::geometry::trig::Mth;
 
 // Allay state: `main_hand` the held item, `ints[1]` how many it carries,
@@ -132,6 +133,14 @@ impl Goal for StayClose {
             m.nav_move_to(cx.w, p, 2.25);
         }
     }
+}
+/// `Allay.travel`: `travelFlying(input, getSpeed())` — the airborne speed is
+/// the one the move control set this tick, and no gravity applies, so an
+/// allay never falls under its own travel.
+pub fn travel(m: &mut Mob, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>) -> bool {
+    let speed = m.ai.speed;
+    m.travel_flying_speeds(w, input, events, 0.02, 0.02, speed);
+    true
 }
 /// `Allay.aiStep` / `tick`: healing, cooldowns, the hold and spin clocks.
 pub fn ai_step(m: &mut Mob) {

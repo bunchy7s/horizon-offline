@@ -468,6 +468,34 @@ mod tests {
     }
 
     #[test]
+    fn a_new_level_stops_menu_music_and_waits_for_game_music() {
+        let (mut engine, mut backend) = (engine(), Null::default());
+        let mut m = MusicManager::new(2);
+        let menu = Music::menu();
+        m.start_playing(
+            &menu,
+            &mut Bound {
+                engine: &mut engine,
+                backend: &mut backend,
+            },
+        );
+        // Minecraft.setLevel -> SoundManager.stop(); the next tick has a player.
+        engine.stop_all(&mut backend);
+        let game = Music::game();
+        m.tick(
+            Some(&game),
+            1.0,
+            true,
+            &mut Bound {
+                engine: &mut engine,
+                backend: &mut backend,
+            },
+        );
+        assert!(m.current_instance().is_none());
+        assert!((12000..=24000).contains(&m.next_song_delay()));
+    }
+
+    #[test]
     fn zero_music_volume_fades_out_and_stops() {
         let (mut engine, mut backend) = (engine(), Null::default());
         let mut m = MusicManager::new(3);

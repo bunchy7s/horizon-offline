@@ -3,3 +3,6 @@
 # The private keys exist only as the RELEASE_SIGNING_KEY secret(s) of the repository's `release` environment.
 # Changing this file needs Ludovic's review (.github/CODEOWNERS).
 MU4oiIQcCxkZvbwSjjXs7SySCuM6ywRQ3nGaJYZG0gw=
+# This fork's releases are signed with its own key (the RELEASE_SIGNING_KEY secret of the fork's
+# repository, no environment), so launchers built here accept the fork's updates.
+2zza2dKGwE0Crcvnatub8fU8Vk0rkExjzK1t+iN2BXk=

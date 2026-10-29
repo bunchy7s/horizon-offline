@@ -129,14 +129,22 @@ impl Game<'_> {
         let dropped = std::mem::take(&mut menu.dropped);
         let equipped = std::mem::take(&mut menu.equipped);
         let brewed = std::mem::take(&mut menu.brewed);
+        let crafted = std::mem::take(&mut menu.crafted);
         menu.drops.clear();
-        menu.crafted.clear();
         store_player(menu, &mut host.hub.guests[gi]);
         if !brewed.is_empty() {
             let conn = host.hub.guests[gi].conn;
             self.as_guest(host, conn, |g| {
                 for stack in &brewed {
                     g.trigger_brewed_potion(stack);
+                }
+            });
+        }
+        if !crafted.is_empty() {
+            let conn = host.hub.guests[gi].conn;
+            self.as_guest(host, conn, |g| {
+                for (recipe, ingredients) in &crafted {
+                    g.trigger_recipe_crafted(recipe, ingredients);
                 }
             });
         }
@@ -242,6 +250,9 @@ impl Game<'_> {
             _ => None,
         };
         if host.hub.guests[gi].spectator() {
+            // handleContainerClick: nothing changes, and sendAllDataToRemote
+            // takes back what the client predicted.
+            host.hub.resend_menu(conn, p.container, &self.world);
             return true;
         }
         let mut menu = host

@@ -8,7 +8,7 @@ use horizon_client::{
     Result,
     clipboard::EditShortcut,
     confirm_screen::Confirm,
-    dialog::{AfterAction, Click, Control, Dialog, InputValue},
+    dialog::{AfterAction, Body, Click, Control, Dialog, InputValue, Kind},
     dialog_screen::{BOX, Layout, Part, WARNING_SPRITES, waiting_button},
     hud::{HudBatch, rgba},
     text::Text,
@@ -26,6 +26,8 @@ struct Open {
     fields: Vec<Option<ui::EditBox>>,
     focus: Option<usize>,
     scroll: ui::Scroll,
+    /// The number range input whose slider is held.
+    dragging: Option<usize>,
 }
 
 /// The dialog screens a server can open.
@@ -36,6 +38,17 @@ pub(super) struct DialogState {
     waiting: Option<Instant>,
     /// `DialogScreen.WarningScreen`, over the dialog.
     warning: bool,
+}
+
+/// `CycleButton.cycleValue`: the next option (`delta` 1) or the one before
+/// it, wrapping.
+fn cycle(open: &mut Open, input: usize, delta: i32) {
+    let Control::SingleOption { options, .. } = &open.dialog.inputs[input].control else {
+        return;
+    };
+    if let Some(InputValue::Option(i)) = open.values.get_mut(input) {
+        *i = (*i as i32 + delta).rem_euclid(options.len().max(1) as i32) as usize;
+    }
 }
 
 fn warning_texts() -> (Text, Text, [Text; 2]) {
@@ -57,10 +70,35 @@ impl Game<'_> {
     /// `showDialog`: the dialog replaces an open one (and a waiting screen);
     /// under the warning screen, it is what Back returns to.
     pub(super) fn show_dialog(&mut self, tag: &Tag) {
-        let Some(dialog) = Dialog::parse(tag) else {
+        let Some(mut dialog) = Dialog::parse(tag) else {
             log::warn!("Horizon: failed to show dialog for data {tag:?}");
             return;
         };
+        if let Kind::DialogList { dialogs, .. } = &dialog.kind {
+            let entries = self.remote.as_ref().map(|r| {
+                let list = r.registries.registries.get("minecraft:dialog");
+                let by_id = |id: &str| {
+                    let name = if id.contains(':') {
+                        id.to_owned()
+                    } else {
+                        format!("minecraft:{id}")
+                    };
+                    list?.iter().find(|(n, _)| *n == name)?.1.clone()
+                };
+                let by_tag = |name: &str| {
+                    let name = if name.contains(':') {
+                        name.to_owned()
+                    } else {
+                        format!("minecraft:{name}")
+                    };
+                    let ids = r.registries.dialog_tags.get(&name).into_iter().flatten();
+                    ids.filter_map(|&i| list?.get(usize::try_from(i).ok()?)?.1.clone())
+                        .collect()
+                };
+                Dialog::list_entries(dialogs, &by_tag, &by_id)
+            });
+            dialog.set_list(&entries.unwrap_or_default());
+        }
         let values = dialog.inputs.iter().map(|i| i.control.initial()).collect();
         let fields = dialog
             .inputs
@@ -87,6 +125,7 @@ impl Game<'_> {
             fields,
             focus: None,
             scroll: ui::Scroll::default(),
+            dragging: None,
         });
         self.dialogs.waiting = None;
         self.capture(false);
@@ -123,6 +162,17 @@ impl Game<'_> {
     /// `DialogScreen.runAction`: the click event, then the screen the dialog's
     /// `after_action` leaves.
     fn run_dialog_action(&mut self, click: Option<Click>, after: AfterAction) -> Result<()> {
+        // defaultHandleClickEvent: an open_url never sets the screen itself, so
+        // the dialog stays unless the confirmation takes over (Web Links off,
+        // or Prompt on Links off, opens nothing or the browser behind it).
+        if let Some(Click::OpenUrl(url)) = &click
+            && !(self.settings.chat_links && self.settings.file.bool("chatLinksPrompt"))
+        {
+            if self.settings.chat_links {
+                super::packs::open_uri(url);
+            }
+            return Ok(());
+        }
         match after {
             AfterAction::None => {}
             AfterAction::Close => self.dialogs.open = None,
@@ -153,7 +203,11 @@ impl Game<'_> {
                 use horizon_client::clipboard::Clipboard;
                 self.clipboard.set(&value);
             }
-            Some(other) => log::info!("Horizon: dialog action {other:?} is not supported yet"),
+            // ConfirmLinkScreen over the screen the dialog leaves.
+            Some(Click::OpenUrl(url)) => self.click_url(url),
+            // Screen.insertText: the screen after the dialog takes no text.
+            Some(Click::SuggestCommand(_)) => {}
+            Some(other) => log::error!("Don't know how to handle {other:?}"),
             None => {}
         }
         if !self.dialog_open() {
@@ -262,7 +316,8 @@ impl Game<'_> {
         let Some(layout) = self.dialog_layout() else {
             return;
         };
-        let Some(open) = self.dialogs.open.as_mut() else {
+        // Out of `self` while it draws: an item body draws through `self`.
+        let Some(mut open) = self.dialogs.open.take() else {
             return;
         };
         let atlas = &self.gui.atlas;
@@ -291,6 +346,7 @@ impl Game<'_> {
         let buttons = open.dialog.buttons();
         let in_area = |y: f32| y >= ay && y < ay + ah;
         let mut tooltip = None;
+        let mut item_tip = None;
         let mut start = None;
         for (part, clipped) in layout.placed(open.scroll.amount) {
             if clipped && start.is_none() {
@@ -333,6 +389,64 @@ impl Game<'_> {
                         true,
                     );
                 }
+                Part::Cycle { input, rect } => {
+                    let [x, y, cw, ch] = rect;
+                    let hover = in_area(cursor.1) && ui::hovered(cursor, x, y, cw, ch);
+                    let Some(label) = open
+                        .values
+                        .get(input)
+                        .and_then(|v| open.dialog.inputs[input].control.message(v))
+                    else {
+                        continue;
+                    };
+                    ui::button(batch, atlas, x, y, cw, ch, &label, true, hover);
+                }
+                Part::Slider { input, rect } => {
+                    let [x, y, sw, sh] = rect;
+                    let hover = in_area(cursor.1) && ui::hovered(cursor, x, y, sw, sh);
+                    let Some((InputValue::Slider(position), Some(label))) = open
+                        .values
+                        .get(input)
+                        .map(|v| (v.clone(), open.dialog.inputs[input].control.message(v)))
+                    else {
+                        continue;
+                    };
+                    let held = open.dragging == Some(input);
+                    ui::slider(
+                        batch,
+                        atlas,
+                        x,
+                        y,
+                        sw,
+                        &label,
+                        position,
+                        hover || held,
+                        true,
+                    );
+                }
+                Part::Item { body, rect } => {
+                    let [x, y, iw, ih] = rect;
+                    let Some(Body::Item {
+                        item,
+                        show_decorations,
+                        show_tooltip,
+                        ..
+                    }) = open.dialog.body.get(body)
+                    else {
+                        continue;
+                    };
+                    let Some(stack) = horizon_items::item_nbt::item_from_nbt(item) else {
+                        continue;
+                    };
+                    // ItemDisplayWidget: the item at its corner, then its decorations.
+                    self.draw_item_model(batch, &stack, x, y);
+                    if *show_decorations {
+                        self.draw_item_decorations(batch, &stack, x, y, None);
+                    }
+                    if *show_tooltip && in_area(cursor.1) && ui::hovered(cursor, x, y, iw, ih) {
+                        item_tip = Some(stack);
+                    }
+                }
                 Part::Button { index, rect } => {
                     let [x, y, bw, bh] = rect;
                     let hover =
@@ -370,6 +484,10 @@ impl Game<'_> {
                 .map(|l| l.0)
                 .collect();
             ui::tooltip(batch, atlas, &lines, cursor);
+        }
+        self.dialogs.open = Some(open);
+        if let Some(stack) = item_tip {
+            self.draw_stack_tooltip(batch, &stack, cursor.0, cursor.1);
         }
     }
 
@@ -420,6 +538,7 @@ impl Game<'_> {
             self.dialogs.warning = true;
             return Ok(());
         }
+        let shift = self.modifiers.shift_key();
         let Some(open) = self.dialogs.open.as_mut() else {
             return Ok(());
         };
@@ -450,6 +569,23 @@ impl Game<'_> {
                     }
                     action = Some(None);
                 }
+                Part::Cycle {
+                    input,
+                    rect: [x, y, w, h],
+                } if ui::hovered(cursor, x, y, w, h) => {
+                    // CycleButton.onPress: Shift goes back.
+                    cycle(open, input, if shift { -1 } else { 1 });
+                    action = Some(None);
+                }
+                Part::Slider {
+                    input,
+                    rect: [x, y, w, h],
+                } if ui::hovered(cursor, x, y, w, h) => {
+                    open.dragging = Some(input);
+                    if let Some(v) = open.values.get_mut(input) {
+                        *v = InputValue::Slider(ui::slider_value(x, w, cursor.0));
+                    }
+                }
                 Part::Button {
                     index,
                     rect: [x, y, w, h],
@@ -479,14 +615,62 @@ impl Game<'_> {
         self.run_dialog_action(click, after)
     }
 
-    /// The mouse wheel over a dialog: its body scrolls 10 a step.
+    /// The mouse wheel over a dialog: a cycle button under it takes the
+    /// step, else the body scrolls 10 a step.
     pub(super) fn dialog_scroll(&mut self, delta: f32) {
         let Some(layout) = self.dialog_layout() else {
             return;
         };
+        let cursor = self.cursor;
         if let Some(open) = self.dialogs.open.as_mut() {
             let [_, ay, _, ah] = layout.area;
+            if delta != 0.0 && cursor.1 >= ay && cursor.1 < ay + ah {
+                let hovered = layout
+                    .placed(open.scroll.amount)
+                    .find_map(|(part, _)| match part {
+                        Part::Cycle {
+                            input,
+                            rect: [x, y, w, h],
+                        } if ui::hovered(cursor, x, y, w, h) => Some(input),
+                        _ => None,
+                    });
+                if let Some(input) = hovered {
+                    // CycleButton.mouseScrolled: up goes back.
+                    cycle(open, input, if delta > 0.0 { -1 } else { 1 });
+                    return;
+                }
+            }
             open.scroll.wheel(delta, 10.0, ay, ay + ah, layout.content);
+        }
+    }
+
+    /// The pointer moved with a slider held (`AbstractSliderButton.onDrag`).
+    pub(super) fn dialog_drag(&mut self) {
+        let Some(input) = self.dialogs.open.as_ref().and_then(|o| o.dragging) else {
+            return;
+        };
+        let Some(layout) = self.dialog_layout() else {
+            return;
+        };
+        let x = self.cursor.0;
+        let Some(open) = self.dialogs.open.as_mut() else {
+            return;
+        };
+        let slider = layout.body.iter().find_map(|p| match p {
+            Part::Slider { input: i, rect } if *i == input => Some(*rect),
+            _ => None,
+        });
+        if let (Some([sx, _, sw, _]), Some(value)) = (slider, open.values.get_mut(input)) {
+            *value = InputValue::Slider(ui::slider_value(sx, sw, x));
+        }
+    }
+
+    /// The left button released: a held slider lets go and clicks.
+    pub(super) fn dialog_release(&mut self) {
+        if let Some(open) = self.dialogs.open.as_mut()
+            && open.dragging.take().is_some()
+        {
+            self.audio.play_button_click();
         }
     }
 

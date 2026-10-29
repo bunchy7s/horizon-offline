@@ -1,0 +1,149 @@
+VillagerRenderer.getShadowRadius	missing		minor: baby villagers keep the full shadow radius; shadows.rs shadow_params takes no baby flag
+VillagerRenderer.extractRenderState	port	crates/horizon-client/src/mobs/villager.rs::anim	unhappy head shake read here; gap: player: no held item is read (Horizon villagers carry none)
+WanderingTraderRenderer.extractRenderState	port	crates/horizon-client/src/mobs/render.rs::render_with	the trader's unhappy counter is never ticked in vanilla (only Villager ticks it), so nothing is read
+WardenRenderer.<init>	port	crates/horizon-client/src/mobs/warden.rs::emissive_layers	the four emissive layers: bioluminescent, pulsating spots, tendrils, heart
+WardenRenderer.extractRenderState	port	crates/horizon-client/src/mobs/warden.rs::anim	tendril and heart clocks and the animation states (roar, sniff, emerge, dig, attack, sonic boom)
+WindChargeRenderer.submit	port	crates/horizon-client/src/game/wind.rs::Game::wind_charge_geometry	gap: player: the wind texture does not scroll (no xOffset), the charge is drawn with a fixed texture
+WitchRenderer.extractRenderState	port	crates/horizon-client/src/mobs/witch.rs::anim	nose wobble; gap: player: the held potion is not drawn (see WitchItemLayer.applyTranslation)
+WitherBossRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/wither.rs::texture	invulnerable blink texture
+WitherBossRenderer.extractRenderState	port	crates/horizon-client/src/mobs/wither.rs::anim	invulnerable clock feeds the texture and scale; the powered glow is render.rs::energy_swirl
+WitherSkullRenderer.createSkullLayer	skip:data		the skull model is baked into entity-models.json
+WitherSkullRenderer.submit	port	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	gap: player: the skull is drawn as a flat sprite (Projectile::item_sprite), not the 3D skull model
+WitherSkullRenderer.extractRenderState	port	crates/horizon-client/src/projectiles.rs::Projectile::item_sprite	the dangerous (blue) skull texture is chosen here; gap: player: skull turns are not drawn (sprite only)
+WolfRenderer.getModelTint	port	crates/horizon-client/src/mobs/tame.rs::tint	wet shade as a vertex colour
+WolfRenderer.extractRenderState	port	crates/horizon-client/src/mobs/tame.rs::anim	tail angle, head roll and shake body roll; texture, collar and armour are read at draw
+ZombieNautilusRenderer.bakeModels	skip:data		models are baked into entity-models.json
+ZombieNautilusRenderer.submit	port	crates/horizon-client/src/mobs/render.rs::body	model chosen by variant
+ZombieNautilusRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::body	texture by variant
+ZombieNautilusRenderer.extractRenderState	port	crates/horizon-client/src/mobs/render.rs::layers	saddle and armour layers
+ZombieVillagerRenderer.extractRenderState	port	crates/horizon-client/src/mobs/render.rs::shaking	converting shake; type and profession are in layers, aggressive arms in anim
+ZombieVillagerRenderer.isShaking	port	crates/horizon-client/src/mobs/render.rs::shaking	converting zombie villagers shake
+BlockDecorationLayer.submit	missing		player: a block placed on a copper golem's antenna is not drawn; Horizon reads the antenna slot only as the flower
+BreezeEyesLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	breeze eyes layer, full bright
+BreezeWindLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	gap: player: the wind layer does not scroll (no texture offset, as noted in layers)
+CapeLayer.hasLayer	missing		player: capes are never drawn; skin cape textures are downloaded (skins.rs) but no draw reads them
+CapeLayer.submit	missing		player: capes are never drawn (see CapeLayer.hasLayer)
+CarriedBlockLayer.submit	port	crates/horizon-client/src/game/mob_blocks.rs::Game::mob_block_geometry	the enderman's carried block
+CatCollarLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	dyed collar
+CrossedArmsItemLayer.submit	missing		player: a villager or wandering trader never shows an item in its folded arms (Horizon villagers carry nothing and the villager model has no right_arm for the hand lookup)
+CrossedArmsItemLayer.applyTranslation	missing		player: no crossed-arms item placement (see CrossedArmsItemLayer.submit)
+CustomHeadLayer.submit	missing		player: a skull or head in the head slot (player, zombie, creeper, dragon heads) is not drawn on players or mobs; only the snow golem pumpkin and mooshroom mushrooms are placed
+CustomHeadLayer.resolveSkullRenderType	missing		player: player-head skins on worn heads are never resolved (no worn heads are drawn, see CustomHeadLayer.submit)
+Deadmau5EarsLayer.submit	missing		minor: only a player named deadmau5 gets ears; the name tag lift for them is missing too
+DolphinCarryingItemLayer.submit	missing		player: a dolphin carrying an item shows nothing (the dolphin model has no arm bones for the hand lookup)
+DrownedOuterLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	drowned outer layer, adult and baby
+EnergySwirlLayer.submit	port	crates/horizon-client/src/mobs/render.rs::energy_swirl	charged creeper and powered wither swirl, drawn in render_visible
+EquipmentLayerRenderer.renderLayers	port	crates/horizon-client/src/game/armor_stands.rs::Game::armor_layers	gap: player: the leather overlay (layer 1 of the equipment asset) is never drawn, only layer 0
+EquipmentLayerRenderer.getColorForLayer	port	crates/horizon-client/src/game/armor_stands.rs::Game::armor_layers	gap: player: a dyed leather piece is drawn in the undyed brown; the stack's dyed colour is not read
+EquipmentLayerRenderer.TrimTextureKey.createTextureWithNoPalette	port	crates/horizon-client/src/trims.rs::TrimTexture::generate	a trim with no palette is used as its own texture
+EyesLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	spider, enderman and phantom eyes
+FoxHeldItemLayer.submit	missing		player: a fox's food in its mouth (berries, fish) is not drawn; the fox model has no arm bones for the hand lookup
+HorseMarkingLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	horse markings layer
+HumanoidArmorLayer.shouldRender	port	crates/horizon-client/src/mobs/render.rs::humanoid_armor	slot read from the item id suffix (_helmet and so on); players use Game::armor_layers
+HumanoidArmorLayer.submit	port	crates/horizon-client/src/mobs/render.rs::humanoid_armor	armour for mobs; players use Game::armor_layers
+HumanoidArmorLayer.renderArmorPiece	port	crates/horizon-client/src/mobs/render.rs::humanoid_armor	one armour piece per slot with its layer model
+HumanoidArmorLayer.getArmorModel	port	crates/horizon-client/src/mobs/render.rs::humanoid_armor	armour model is the body's #helmet, #chestplate, #leggings or #boots part
+IronGolemCrackinessLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	crack levels via golem::crackiness
+IronGolemFlowerLayer.submit	missing		player: an iron golem offering a poppy raises its arm (golem anim) but no poppy is drawn in it
+ItemInHandLayer.submit	port	crates/horizon-client/src/game/mob_blocks.rs::Game::held_item_geometry	both hands through the item pipeline
+ItemInHandLayer.useBabyOffset	port	crates/horizon-client/src/mobs/render.rs::hand_base	baby hand offset
+LivingEntityEmissiveLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	emissive layers drawn full bright; warden alpha is in warden::emissive_layers
+LlamaDecorLayer.submit	port	crates/horizon-client/src/mobs/llama.rs::decor	carpet, or the trader llama's blanket
+LlamaDecorLayer.renderEquipment	port	crates/horizon-client/src/mobs/llama.rs::decor	same decor model and texture
+MushroomCowMushroomLayer.submitMushroomBlock	port	crates/horizon-client/src/game/mob_blocks.rs::Game::worn_block_geometry	mushrooms on an adult mooshroom
+PandaHoldsItemLayer.submit	port	crates/horizon-client/src/mobs/panda.rs::item_offset	item in the mouth of a sitting panda, with the eating bob
+ParrotOnShoulderLayer.submit	missing		player: a tamed parrot on a player's shoulder is not drawn
+ParrotOnShoulderLayer.submitOnShoulder	missing		player: a parrot on a player's shoulder is not drawn (see ParrotOnShoulderLayer.submit)
+PlayerItemInHandLayer.submitArmWithItem	port	crates/horizon-client/src/game/mob_blocks.rs::Game::held_item_geometry	gap: player: the spyglass raised to the eye is not drawn (see renderItemHeldToEye)
+PlayerItemInHandLayer.renderItemHeldToEye	missing		player: another player using a spyglass does not hold it at the eye in third person; Horizon has no held-on-head state
+RenderLayer.coloredCutoutModelCopyLayerRender	port	crates/horizon-client/src/mobs/render.rs::render_visible	coloured cutout layers drawn in render_visible
+RenderLayer.renderColoredCutoutModel	port	crates/horizon-client/src/mobs/render.rs::render_visible	coloured cutout layers drawn in render_visible
+RopesLayer.submit	missing		player: a harnessed happy ghast that holds a leash shows no rope model on its body
+SheepWoolLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	gap: minor: the outline-only pass for an invisible glowing sheep is not drawn
+SheepWoolUndercoatLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	gap: player: a sheep named jeb_ gets no undercoat while its wool is white (vanilla always draws it for jeb_)
+SimpleEquipmentLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	pig, strider and nautilus saddles and the happy ghast harness
+SkeletonClothingLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	stray and bogged overlay
+SlimeOuterLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	translucent outer slime cube
+SnowGolemHeadLayer.submit	port	crates/horizon-client/src/game/mob_blocks.rs::Game::worn_block_geometry	carved pumpkin on the snow golem
+SpinAttackEffectLayer.submit	port	crates/horizon-client/src/game/perspective.rs::Game::spin_attack_geometry	riptide spin model
+StuckInBodyLayer.submitStuckItem	missing		player: arrows stuck in a player's body are not drawn (Horizon keeps no stuck-arrow count)
+StuckInBodyLayer.submit	missing		player: arrows stuck in a player's body are not drawn (see submitStuckItem)
+SulfurCubeInnerLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	gap: player: a block swallowed by a sulfur cube is not drawn inside the shell (sulfur_cube::inner returns nothing when the cube has a body)
+TropicalFishPatternLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	pattern on the small or large model, tinted
+VillagerProfessionLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	type, profession and level layers; hat masks applied in render_visible
+VillagerProfessionLayer.getIdentifier	port	crates/horizon-client/src/mobs/render.rs::layers	texture paths built per type, profession and level
+VillagerProfessionLayer.getHatData	port	crates/horizon-client/src/mobs/villager_hats.rs::VillagerHats::load	hat metadata read from the resources
+WingsLayer.submit	port	crates/horizon-client/src/game/perspective.rs::Game::player_elytra_geometry	gap: minor: the wings texture comes from the equipment asset; a skin's own elytra or cape texture is not used
+WingsLayer.getPlayerElytraTexture	port	crates/horizon-client/src/game/perspective.rs::Game::player_elytra_geometry	gap: minor: a skin elytra or cape texture is never chosen
+WitchItemLayer.applyTranslation	missing		player: a witch's potion (drunk or about to be thrown) is not drawn; the witch model has no right_arm for the hand lookup
+WolfArmorLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	gap: minor: the armour texture is fixed to the armadillo scute; the equipment asset is not read
+WolfArmorLayer.maybeRenderCracks	port	crates/horizon-client/src/mobs/render.rs::layers	cracks at three damage levels
+WolfCollarLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	dyed collar
+AvatarRenderer.<init>	port	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	gap: player: no cape, ears, worn head, parrot or stuck-arrow layer; armour, held items, wings and spin are drawn
+AvatarRenderer.getRenderOffset	port	crates/horizon-client/src/game/perspective.rs::Game::tick_player_model	gap: minor: other players are not lowered 0.125 when sneaking; only the local model is
+AvatarRenderer.submitNameDisplay	port	crates/horizon-client/src/game/names.rs::Game::name_tag_geometry	gap: minor: the 10 unit lift for ears is not applied (no ears)
+AvatarRenderer.extractRenderState	port	crates/horizon-client/src/mobs.rs::Mob::tick_avatar_pose	glide count, wings and swim read here; gap: player: arrow and stinger counts, parrots, cape, ears and the spyglass use are not read
+AvatarRenderer.shouldShowName	port	crates/horizon-client/src/game/names.rs::Game::name_tags	name tags for players and named mobs
+AvatarRenderer.extractFlightData	port	crates/horizon-client/src/mobs/render.rs::base_transform_at	glide time drives the tilt; gap: player: the body does not turn toward the flight direction (no flying yaw)
+AvatarRenderer.extractCapeState	missing		player: capes are never drawn, so the cape flap and lean are never used
+AvatarRenderer.renderRightHand	port	crates/horizon-client/src/game.rs::Game::hand_geometry	first-person arm; gap: minor: no 0.1 radian arm tilt or sleeve toggle in hand_geometry
+AvatarRenderer.renderLeftHand	port	crates/horizon-client/src/game.rs::Game::hand_geometry	first-person arm; gap: minor: no 0.1 radian arm tilt or sleeve toggle in hand_geometry
+AvatarRenderer.renderHand	port	crates/horizon-client/src/game.rs::Game::hand_geometry	first-person arm; gap: minor: no 0.1 radian arm tilt or sleeve toggle in hand_geometry
+AvatarRenderer.isEntityUpsideDown	port	crates/horizon-client/src/mobs/render.rs::base_transform_at	Dinnerbone and Grumm flip; gap: minor: the cape-shown check is missing and the flip applies to every mob
+ArmedEntityRenderState.getArmPose	port	crates/horizon-client/src/mobs/anim.rs::setup	arm poses are chosen per species and hand inside setup
+ArmedEntityRenderState.extractArmedEntityRenderState	port	crates/horizon-client/src/mobs/anim.rs::state	swing and main arm; the held items are read in Game::held_item_geometry
+AvatarRenderState.fallFlyingScale	port	crates/horizon-client/src/mobs/render.rs::base_transform_at	glide scale: ticks squared over 100, clamped to 1
+EnderDragonRenderState.getHeadPartYOffset	port	crates/horizon-client/src/game/dragon.rs::Game::dragon_geometry	sitting, landing and the part 6 cases
+EntityRenderState.fillCrashReportCategory	skip:debug		crash report detail only
+HumanoidRenderState.ticksUsingItem	port	crates/horizon-client/src/game/mob_blocks.rs::Game::held_item_geometry	use time for the hand that is using an item
+ItemClusterRenderState.extractItemGroupRenderState	port	crates/horizon-client/src/item_render.rs::rendered_amount	rendered count of the stack; the seed is taken in cluster_poses
+SheepRenderState.getWoolColor	port	crates/horizon-client/src/mobs/render.rs::sheep_wool_rgb	gap: player: a jeb_ sheep does not cycle through the rainbow (ColorLerper)
+BabyModelTransform.apply	skip:data		baby meshes are baked into entity-models.json
+HumanoidModel.createMesh	skip:data		humanoid mesh is baked into entity-models.json
+HumanoidModel.createArmorMeshSet	skip:data		armour meshes are baked into entity-models.json
+HumanoidModel.createBaseArmorMesh	skip:data		armour mesh is baked into entity-models.json
+HumanoidModel.createBabyArmorMesh	skip:data		baby armour mesh is baked into entity-models.json
+HumanoidModel.setupAttackAnimation	port	crates/horizon-client/src/mobs/anim.rs::humanoid	body sway and the swinging arm
+Model.resetPose	port	crates/horizon-client/src/mobs/anim.rs::Poses::reset	resets every part to its rest pose
+QuadrupedModel.createBodyMesh	skip:data		quadruped mesh is baked into entity-models.json
+QuadrupedModel.createLegs	skip:data		leg meshes are baked into entity-models.json
+BatModel.createBodyLayer	skip:data		bat model is baked into entity-models.json
+AllayModel.createBodyLayer	skip:data		allay model is baked into entity-models.json
+AllayModel.translateToHand	port	crates/horizon-client/src/mobs/render.rs::held_item_transform	gap: player: the allay's own hand transform (0.7 scale, forearm offset) is not applied; the humanoid hand offset is used
+AdultArmadilloModel.createBodyLayer	skip:data		armadillo model is baked into entity-models.json
+BabyArmadilloModel.createBodyLayer	skip:data		baby armadillo model is baked into entity-models.json
+AdultAxolotlModel.setupAnim	port	crates/horizon-client/src/mobs/body_anim.rs::axolotl	the axolotl pose dispatch
+AdultAxolotlModel.setupLayStillOnGroundAnimation	port	crates/horizon-client/src/mobs/body_anim.rs::axolotl_lay	lay-still pose on the ground
+AdultAxolotlModel.setupGroundCrawlingAnimation	port	crates/horizon-client/src/mobs/body_anim.rs::axolotl_crawl	ground crawl pose
+AdultAxolotlModel.setupWaterHoveringAnimation	port	crates/horizon-client/src/mobs/body_anim.rs::axolotl_hover	hovering in water
+AdultAxolotlModel.setupSwimmingAnimation	port	crates/horizon-client/src/mobs/body_anim.rs::axolotl_swim	swimming pose
+AdultAxolotlModel.setupPlayDeadAnimation	port	crates/horizon-client/src/mobs/body_anim.rs::axolotl_dead	playing dead
+AdultAxolotlModel.applyMirrorLegRotations	port	crates/horizon-client/src/mobs/body_anim.rs::axolotl	mirrored leg rotations, inline in axolotl
+AdultBeeModel.bobUpAndDown	port	crates/horizon-client/src/mobs/body_anim.rs::bee	adult antennae wiggle (not for babies)
+BeeModel.bobUpAndDown	port	crates/horizon-client/src/mobs/body_anim.rs::bee	bone, bob and leg swing
+BeeStingerModel.createBodyLayer	skip:data		stinger model is baked into entity-models.json
+AdultCamelModel.createBodyMesh	skip:data		camel mesh is baked into entity-models.json
+BabyCamelModel.createBodyLayer	skip:data		baby camel model is baked into entity-models.json
+CamelModel.applyHeadRotation	port	crates/horizon-client/src/mobs/camel.rs::anim	head clamp and the jump cooldown lift
+CamelSaddleModel.createSaddleLayer	skip:data		saddle model is baked into entity-models.json
+AdultChickenModel.setupAnim	port	crates/horizon-client/src/mobs/anim.rs::head	head pitch and yaw from the state
+AdultChickenModel.createBaseChickenModel	skip:data		chicken mesh is baked into entity-models.json
+BabyChickenModel.createBodyLayer	skip:data		baby chicken model is baked into entity-models.json
+ChickenModel.setupAnim	port	crates/horizon-client/src/mobs/anim.rs::setup	leg swing and wing flap
+ColdChickenModel.createBodyLayer	skip:data		cold chicken model is baked into entity-models.json
+BabyCowModel.createBodyLayer	skip:data		baby cow model is baked into entity-models.json
+ColdCowModel.createBodyLayer	skip:data		cold cow model is baked into entity-models.json
+CowModel.createBaseCowModel	skip:data		cow mesh is baked into entity-models.json
+WarmCowModel.createBodyLayer	skip:data		warm cow model is baked into entity-models.json
+BabyDolphinModel.createBodyLayer	skip:data		baby dolphin model is baked into entity-models.json
+DolphinModel.createBodyLayer	skip:data		dolphin model is baked into entity-models.json
+DolphinModel.setupAnim	port	crates/horizon-client/src/mobs/aquatic.rs::anim	body turn and, while moving, the tail and fin swing; gap: minor: moving is read from horizontal velocity, not the isMoving flag
+AbstractEquineModel.createBodyMesh	skip:data		equine mesh is baked into entity-models.json
+AbstractEquineModel.animateHeadPartsPlacement	port	crates/horizon-client/src/mobs/equine.rs::anim	head part placement while eating and standing
+BabyDonkeyModel.setupAnim	port	crates/horizon-client/src/mobs/equine.rs::anim	baby donkey head pitch of -30 degrees and head part pose
+BabyDonkeyModel.offsetLegPositionWhenStanding	port	crates/horizon-client/src/mobs/equine.rs::anim	hind leg heights when standing
+BabyDonkeyModel.animateHeadPartsPlacement	port	crates/horizon-client/src/mobs/equine.rs::anim	baby donkey head part placement
+BabyHorseModel.createBabyMesh	skip:data		baby horse mesh is baked into entity-models.json
+BabyHorseModel.animateHeadPartsPlacement	port	crates/horizon-client/src/mobs/equine.rs::anim	baby horse head part placement
+DonkeyModel.createBodyLayer	skip:data		donkey model is baked into entity-models.json
+DonkeyModel.setupAnim	port	crates/horizon-client/src/mobs/equine.rs::anim	donkey pose

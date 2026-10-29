@@ -211,6 +211,9 @@ pub fn project(entry: &Entry, src: &Sources) -> Result<Project, Vec<String>> {
     let mut versions = Vec::new();
     for v in &entry.versions {
         match version(entry, v, src) {
+            // A mod that turned native keeps its `.hmod` versions published, but the index offers
+            // only its native ones: a launcher never installs a `.hmod` as a native mod.
+            Ok(_) if file_kind(entry, v) != entry.kind => {}
             Ok(v) => versions.push(v),
             Err(e) => errors.push(format!("{id} {}: {e}", v.version)),
         }
@@ -235,6 +238,15 @@ pub fn project(entry: &Entry, src: &Sources) -> Result<Project, Vec<String>> {
     })
 }
 
+/// The kind of a version's file: the project's, but a `.hmod` of a mod that turned native
+/// (`review`) is a WebAssembly mod's.
+fn file_kind(entry: &Entry, v: &EntryVersion) -> Kind {
+    match entry.kind {
+        Kind::NativeMod if v.file.ends_with(".hmod") => Kind::Mod,
+        _ => entry.kind.clone(),
+    }
+}
+
 fn version(entry: &Entry, v: &EntryVersion, src: &Sources) -> Result<Version, String> {
     if !plain_version(&v.version) {
         return Err("a version is letters, digits, '.', '-' and '_'".into());
@@ -256,7 +268,7 @@ fn version(entry: &Entry, v: &EntryVersion, src: &Sources) -> Result<Version, St
         (None, Some(_)) => return Err("signed, but the project has no key".into()),
         (None, None) => {}
     }
-    let facts = inspect(&entry.kind, &path)?;
+    let facts = inspect(&file_kind(entry, v), &path)?;
     if facts.id.as_ref().is_some_and(|id| *id != entry.id) {
         return Err(format!(
             "the file's id is {:?}, not {:?}",
@@ -343,8 +355,9 @@ pub struct Review {
 
 /// Compares the entries of a pull request (`head`) with `main`'s (`base`):
 /// a published file never changes and is never removed (take it down in
-/// `revoked.toml`), a project's kind never changes, and changes by someone
-/// who isn't an owner, or to owners and keys, are pointed out.
+/// `revoked.toml`), a project's kind never changes but for a mod turning
+/// native (its next versions are `.hnmod`s), and changes by someone who
+/// isn't an owner, or to owners and keys, are pointed out.
 pub fn review(base: &[Entry], head: &[Entry], author: &str) -> Review {
     let mut r = Review::default();
     for old in base {
@@ -365,7 +378,12 @@ pub fn review(base: &[Entry], head: &[Entry], author: &str) -> Review {
                 old.owners.join(", ")
             ));
         }
-        if new.kind != old.kind {
+        if (&old.kind, &new.kind) == (&Kind::Mod, &Kind::NativeMod) {
+            r.notes.push(format!(
+                "{}: turns native; its .hmod versions stay published, and launchers keep the installed copies",
+                old.id
+            ));
+        } else if new.kind != old.kind {
             r.errors.push(format!("{}: its kind can't change", old.id));
         }
         for v in &old.versions {

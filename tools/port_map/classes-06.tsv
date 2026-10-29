@@ -1,0 +1,188 @@
+SplineFunction.PointSplineInput.sampleCoordinate	inline	crates/horizon-core/src/density/spline.rs::SplineSampler::sample_value	per-point coordinate lookup in the sample closure
+SplineFunction.Sampler.sampleValue	port	crates/horizon-core/src/density/spline.rs::SplineSampler::sample_value	
+SplineFunction.Sampler.sampleVolume	port	crates/horizon-core/src/density/spline.rs::SplineSampler::sample_volume	
+UnaryFunction.compileSampler	inline	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::compile_raw	unary arm of compile_raw
+UnaryFunction.range	port	crates/horizon-core/src/density/graph/mod.rs::DensityGraph::range	unary interval arm
+UnaryFunction.rewriteChildren	port	crates/horizon-core/src/density/graph/compiler.rs::DensityCompiler::rewrite_children	
+UnaryFunction.AbsSampler.sampleVolume	inline	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	one generic unary sampler; Abs is a UnaryOp arm
+UnaryFunction.CubeSampler.sampleVolume	inline	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	one generic unary sampler
+UnaryFunction.LeakyReLUSampler.sampleValue	inline	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_value	LeakyRelu arm of UnaryOp::apply
+UnaryFunction.LeakyReLUSampler.sampleVolume	inline	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	one generic unary sampler
+UnaryFunction.LogSampler.sampleValue	inline	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_value	Log arm of UnaryOp::apply
+UnaryFunction.LogSampler.sampleVolume	inline	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	one generic unary sampler
+UnaryFunction.NegateSampler.sampleVolume	inline	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	one generic unary sampler
+UnaryFunction.ReciprocalSampler.sampleVolume	inline	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	one generic unary sampler
+UnaryFunction.SignSampler.sampleVolume	inline	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	one generic unary sampler
+UnaryFunction.SqrtSampler.sampleVolume	inline	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	one generic unary sampler
+UnaryFunction.SquareSampler.sampleVolume	inline	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	one generic unary sampler
+UnaryFunction.SqueezeSampler.apply	inline	crates/horizon-core/src/density/arithmetic.rs::UnaryOp::apply	Squeeze arm
+UnaryFunction.SqueezeSampler.sampleVolume	inline	crates/horizon-core/src/density/arithmetic.rs::UnarySampler::sample_volume	one generic unary sampler
+AbstractHugeMushroomFeature.getTreeHeight	inline	crates/horizon-world/src/worldgen/vegetation.rs::HugeMushroomFeature::place	height roll at the start of place
+AbstractHugeMushroomFeature.isValidPosition	inline	crates/horizon-world/src/worldgen/vegetation.rs::HugeMushroomFeature::place	base and clearance checks
+AbstractHugeMushroomFeature.place	port	crates/horizon-world/src/worldgen/vegetation.rs::HugeMushroomFeature::place	
+AbstractHugeMushroomFeature.placeMushroomBlock	port	crates/horizon-world/src/worldgen/vegetation.rs::HugeMushroomFeature::place_block	
+AbstractHugeMushroomFeature.placeTrunk	inline	crates/horizon-world/src/worldgen/vegetation.rs::HugeMushroomFeature::place	stem loop
+AbstractOreFeature.canPlaceOre	inline	crates/horizon-world/src/worldgen/ore_feature.rs::OreFeature::do_place	target rule test and air check in the block loop
+AbstractOreFeature.checkNeighbors	inline	crates/horizon-world/src/worldgen/ore_feature.rs::OreFeature::do_place	six-neighbour air scan
+AbstractOreFeature.makeCodec	skip:java		codec builder
+AbstractOreFeature.shouldSkipAirCheck	port	crates/horizon-world/src/worldgen/ore_feature.rs::skip_air_check	
+CoralClawFeature.place	port	crates/horizon-world/src/worldgen/vegetation.rs::CoralFeature::place	
+CoralTreeFeature.place	port	crates/horizon-world/src/worldgen/vegetation.rs::CoralFeature::place	
+CuboidPlacement.modify	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::modify_inner	Cuboid arm
+FeatureCountTracker	skip:debug		feature count debug log, no game behaviour
+HugeBrownMushroomFeature.makeCap	inline	crates/horizon-world/src/worldgen/vegetation.rs::HugeMushroomFeature::place	non-red cap branch
+HugeRedMushroomFeature.getTreeRadiusForHeight	port	crates/horizon-world/src/worldgen/vegetation.rs::HugeMushroomFeature::radius_for_height	
+HugeRedMushroomFeature.makeCap	inline	crates/horizon-world/src/worldgen/vegetation.rs::HugeMushroomFeature::place	red cap loop
+ProjectedRandomPatchySquare.place	port	crates/horizon-world/src/worldgen/projected.rs::ProjectedPatchySquareFeature::place	
+RandomBooleanSelectorFeature.getSubFeatures	port	crates/horizon-world/src/worldgen/live.rs::nested_features	gap: minor: walks nested feature names from the JSON, not feature objects
+RandomBooleanSelectorFeature.place	port	crates/horizon-world/src/worldgen/feature_graph.rs::FeatureDefinition::evaluate	BooleanChoice arm
+RandomNeighborSpreadFeature.place	port	crates/horizon-world/src/worldgen/feature_graph.rs::FeatureDefinition::evaluate	NeighborSpread arm
+RandomSelectorFeature.getSubFeatures	port	crates/horizon-world/src/worldgen/live.rs::nested_features	gap: minor: walks nested feature names from the JSON, not feature objects
+RandomSelectorFeature.place	port	crates/horizon-world/src/worldgen/feature_graph.rs::FeatureDefinition::evaluate	RandomChoice arm
+SequenceFeature.getSubFeatures	port	crates/horizon-world/src/worldgen/live.rs::nested_features	gap: minor: walks nested feature names from the JSON, not feature objects
+SequenceFeature.place	port	crates/horizon-world/src/worldgen/feature_graph.rs::FeatureDefinition::evaluate	Sequence arm
+SimpleRandomSelectorFeature.getSubFeatures	port	crates/horizon-world/src/worldgen/live.rs::nested_features	gap: minor: walks nested feature names from the JSON, not feature objects
+SimpleRandomSelectorFeature.place	port	crates/horizon-world/src/worldgen/feature_graph.rs::FeatureDefinition::evaluate	RandomChoice arm (simple selector decodes there)
+SingleBlockPillarFeature.place	port	crates/horizon-world/src/worldgen/feature_graph.rs::FeatureDefinition::evaluate	Pillar arm
+VoidStartPlatformFeature.place	port	crates/horizon-world/src/worldgen/feature.rs::BasicFeature::place	VoidStartPlatform arm
+WeightedRandomSelectorFeature.getSubFeatures	port	crates/horizon-world/src/worldgen/live.rs::nested_features	gap: minor: walks nested feature names from the JSON, not feature objects
+WeightedRandomSelectorFeature.place	port	crates/horizon-world/src/worldgen/feature_graph.rs::FeatureDefinition::evaluate	WeightedChoice arm
+ThreeLayersFeatureSize.getSizeAtHeight	port	crates/horizon-world/src/worldgen/tree.rs::FeatureSize::size_at_height	ThreeLayers arm
+AcaciaFoliagePlacer.createFoliage	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::create_foliage	Acacia arm
+AcaciaFoliagePlacer.shouldSkipLocation	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::skip	Acacia arm
+BlobFoliagePlacer.blobParts	skip:java		codec part builder
+BlobFoliagePlacer.createFoliage	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::create_foliage	Blob arm
+BlobFoliagePlacer.shouldSkipLocation	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::skip	Blob arm
+BushFoliagePlacer.createFoliage	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::create_foliage	Bush arm
+BushFoliagePlacer.shouldSkipLocation	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::skip	Bush arm
+CherryFoliagePlacer.createFoliage	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::create_foliage	Cherry arm
+CherryFoliagePlacer.shouldSkipLocation	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::skip	Cherry arm
+DarkOakFoliagePlacer.createFoliage	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::create_foliage	DarkOak arm
+DarkOakFoliagePlacer.shouldSkipLocation	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::skip	DarkOak arm
+DarkOakFoliagePlacer.shouldSkipLocationSigned	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::skip_signed	
+FancyFoliagePlacer.createFoliage	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::create_foliage	Fancy arm
+FancyFoliagePlacer.shouldSkipLocation	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::skip	Fancy arm
+MegaJungleFoliagePlacer.createFoliage	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::create_foliage	MegaJungle arm
+MegaJungleFoliagePlacer.shouldSkipLocation	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::skip	MegaJungle arm
+MegaPineFoliagePlacer.createFoliage	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::create_foliage	MegaPine arm
+MegaPineFoliagePlacer.shouldSkipLocation	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::skip	MegaPine arm
+PineFoliagePlacer.createFoliage	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::create_foliage	Pine arm
+PineFoliagePlacer.foliageRadius	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::foliage_radius	
+PineFoliagePlacer.shouldSkipLocation	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::skip	Pine arm
+PoplarFoliagePlacer.createFoliage	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::create_foliage	Poplar arm
+PoplarFoliagePlacer.getCornerBlocksToCutForRhombusShape	port	crates/horizon-world/src/worldgen/tree/foliage.rs::Poplar::corner_cut	
+PoplarFoliagePlacer.isLeftLowerCornerOrRightTopCorner	inline	crates/horizon-world/src/worldgen/tree/foliage.rs::Poplar::corner_cut	corner tests inlined in corner_cut
+PoplarFoliagePlacer.isLeftTopCornerOrRightLowerCorner	inline	crates/horizon-world/src/worldgen/tree/foliage.rs::Poplar::corner_cut	corner tests inlined in corner_cut
+PoplarFoliagePlacer.isWithinRhombusShape	port	crates/horizon-world/src/worldgen/tree/foliage.rs::Poplar::within	
+PoplarFoliagePlacer.placeLeavesRow	port	crates/horizon-world/src/worldgen/tree/foliage.rs::Poplar::row	
+PoplarFoliagePlacer.replaceLeavesWithLog	port	crates/horizon-world/src/worldgen/tree/foliage.rs::Poplar::replace_with_log	
+PoplarFoliagePlacer.shouldRowBePartialRhombusShape	port	crates/horizon-world/src/worldgen/tree/foliage.rs::Poplar::partial_row	
+PoplarFoliagePlacer.shouldSkipLocation	port	crates/horizon-world/src/worldgen/tree/foliage.rs::Poplar::skip	
+PoplarFoliagePlacer.tryPlaceLog	inline	crates/horizon-world/src/worldgen/tree/foliage.rs::Poplar::replace_with_log	log set inside the replace loop
+RandomSpreadFoliagePlacer.createFoliage	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::create_foliage	RandomSpread arm
+SpruceFoliagePlacer.createFoliage	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::create_foliage	Spruce arm
+SpruceFoliagePlacer.shouldSkipLocation	port	crates/horizon-world/src/worldgen/tree/foliage.rs::FoliagePlacer::skip	Spruce arm
+MangroveRootPlacer.canPlaceRoot	port	crates/horizon-world/src/worldgen/tree.rs::RootPlacer::can_place_root	
+MangroveRootPlacer.placeRoot	port	crates/horizon-world/src/worldgen/tree.rs::RootPlacer::place_root	
+MangroveRootPlacer.placeRoots	port	crates/horizon-world/src/worldgen/tree.rs::RootPlacer::place_roots	
+MangroveRootPlacer.potentialRootPositions	port	crates/horizon-world/src/worldgen/tree.rs::RootPlacer::potential	
+MangroveRootPlacer.simulateRoots	port	crates/horizon-world/src/worldgen/tree.rs::RootPlacer::simulate	
+CopyPropertiesProvider.getState	port	crates/horizon-world/src/worldgen/state_provider.rs::BlockStateProvider::get_optional_state	CopyProperties arm
+DualNoiseProvider.getSlowNoiseValue	inline	crates/horizon-world/src/worldgen/state_provider/noise.rs::NoiseProvider::sample	slow noise sampled in the Dual arm
+DualNoiseProvider.getState	port	crates/horizon-world/src/worldgen/state_provider/noise.rs::NoiseProvider::sample	Dual arm
+NoiseBasedStateProvider.getNoiseValue	inline	crates/horizon-world/src/worldgen/state_provider/noise.rs::NoiseProvider::sample	fast noise sample shared by all noise kinds
+NoiseBasedStateProvider.noiseCodec	skip:java		codec builder
+NoiseThresholdProvider.getState	port	crates/horizon-world/src/worldgen/state_provider/noise.rs::NoiseProvider::sample	Threshold arm
+RandomBlockProvider.getState	port	crates/horizon-world/src/worldgen/state_provider.rs::BlockStateProvider::get_optional_state	RandomBlock arm
+RandomizedIntStateProvider.findProperty	inline	crates/horizon-world/src/worldgen/state_provider.rs::BlockStateProvider::get_optional_state	property lookup in the RandomizedInt arm
+RandomizedIntStateProvider.getState	port	crates/horizon-world/src/worldgen/state_provider.rs::BlockStateProvider::get_optional_state	RandomizedInt arm
+RotatedBlockProvider.getState	port	crates/horizon-world/src/worldgen/state_provider.rs::BlockStateProvider::get_optional_state	Rotated arm
+RuleBasedStateProvider.builder	skip:java		builder API; Horizon decodes rule_based JSON
+RuleBasedStateProvider.getOptionalState	port	crates/horizon-world/src/worldgen/state_provider.rs::BlockStateProvider::get_optional_state	RuleBased arm
+RuleBasedStateProvider.getState	port	crates/horizon-world/src/worldgen/state_provider.rs::BlockStateProvider::get_optional_state	RuleBased arm
+RuleBasedStateProvider.ifTrueThenProvide	skip:java		builder API; Horizon decodes rule_based JSON
+RuleBasedStateProvider.Builder	skip:java		builder API; Horizon decodes rule_based JSON
+AlterGroundDecorator.place	port	crates/horizon-world/src/worldgen/tree/decorator.rs::TreeDecorator::place	AlterGround arm
+AlterGroundDecorator.placeBlockAt	inline	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::circle	single set inside the circle loop
+AlterGroundDecorator.placeCircle	port	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::circle	
+AttachedToLeavesDecorator.hasRequiredEmptyBlocks	inline	crates/horizon-world/src/worldgen/tree/decorator.rs::TreeDecorator::place	required_empty check in AttachedToLeaves arm
+AttachedToLeavesDecorator.place	port	crates/horizon-world/src/worldgen/tree/decorator.rs::TreeDecorator::place	AttachedToLeaves arm
+AttachedToLogsDecorator.place	port	crates/horizon-world/src/worldgen/tree/decorator.rs::TreeDecorator::place	AttachedToLogs arm
+CocoaDecorator.place	port	crates/horizon-world/src/worldgen/tree/decorator.rs::TreeDecorator::place	Cocoa arm
+CreakingHeartDecorator.place	port	crates/horizon-world/src/worldgen/tree/decorator.rs::TreeDecorator::place	CreakingHeart arm
+LeaveVineDecorator.addHangingVine	port	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::place_vine	
+LeaveVineDecorator.place	port	crates/horizon-world/src/worldgen/tree/decorator.rs::TreeDecorator::place	LeaveVine arm
+PaleMossDecorator.addMossHanger	port	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::moss_hanger	
+PaleMossDecorator.place	port	crates/horizon-world/src/worldgen/tree/decorator.rs::TreeDecorator::place	PaleMoss arm
+PlaceOnGroundDecorator.attemptToPlaceBlockAbove	inline	crates/horizon-world/src/worldgen/tree/decorator.rs::TreeDecorator::place	PlaceOnGround arm
+PlaceOnGroundDecorator.place	port	crates/horizon-world/src/worldgen/tree/decorator.rs::TreeDecorator::place	PlaceOnGround arm
+ShelfMushroomDecorator.hasHorizontallyAdjacentShelfMushroom	port	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::adjacent_mushroom	
+ShelfMushroomDecorator.isBlockReplaceableWithShelfMushroom	port	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::mushroom_replaceable	
+ShelfMushroomDecorator.isFallenLog	inline	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::shelf_mushroom	fallen-log test (all logs at one y)
+ShelfMushroomDecorator.isWithinDecoratableHeight	inline	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::shelf_mushroom	height offset 1 to 4 test
+ShelfMushroomDecorator.perpendicularToFallenLog	inline	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::shelf_mushroom	fallen-log facings
+ShelfMushroomDecorator.pickTwoPerpendicularDirections	inline	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::shelf_mushroom	standing-tree facings
+ShelfMushroomDecorator.place	port	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::shelf_mushroom	
+ShelfMushroomDecorator.placeMushroom	port	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::place_mushroom	
+ShelfMushroomDecorator.placeOnFallenLog	inline	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::shelf_mushroom	fallen-log branch
+ShelfMushroomDecorator.placeOnStandingTree	inline	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::shelf_mushroom	standing-tree branch
+ShelfMushroomDecorator.tryPlaceMushroomOnFallenTree	inline	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::shelf_mushroom	fallen-log branch test and place
+ShelfMushroomDecorator.tryPlaceMushroomOnStandingTree	inline	crates/horizon-world/src/worldgen/tree/decorator.rs::Decorate::shelf_mushroom	standing-tree branch test and place
+TrunkVineDecorator.place	port	crates/horizon-world/src/worldgen/tree/decorator.rs::TreeDecorator::place	TrunkVine arm
+BendingTrunkPlacer.placeTrunk	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::place_trunk	Bending arm
+CherryTrunkPlacer.generateBranch	inline	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::cherry	branch loop in cherry
+CherryTrunkPlacer.placeTrunk	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::cherry	
+DarkOakTrunkPlacer.placeTrunk	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::dark_oak	
+FancyTrunkPlacer.getLogAxis	port	crates/horizon-world/src/worldgen/tree/trunk.rs::log_axis	
+FancyTrunkPlacer.getSteps	inline	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::make_limb	step count inside make_limb
+FancyTrunkPlacer.makeBranches	inline	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::fancy	branch loop at the end of fancy
+FancyTrunkPlacer.makeLimb	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::make_limb	
+FancyTrunkPlacer.treeShape	port	crates/horizon-world/src/worldgen/tree/trunk.rs::tree_shape	
+FancyTrunkPlacer.trimBranches	port	crates/horizon-world/src/worldgen/tree/trunk.rs::trim_branches	
+ForkingTrunkPlacer.placeTrunk	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::forking	
+GiantTrunkPlacer.placeLogIfFreeWithOffset	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::place_log_if_free	gap: minor: the offset is added by giant before this call
+GiantTrunkPlacer.placeTrunk	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::giant	
+MegaJungleTrunkPlacer.placeTrunk	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::place_trunk	MegaJungle arm
+PoplarTrunkPlacer.getShuffledBranchDirections	inline	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::place_trunk	shuffle of horizontal directions in the Poplar arm
+PoplarTrunkPlacer.placeTrunk	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::place_trunk	Poplar arm
+StraightTrunkPlacer.placeTrunk	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::place_trunk	Straight arm
+UpwardsBranchingTrunkPlacer.placeBranch	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::upwards_branch	
+UpwardsBranchingTrunkPlacer.placeTrunk	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::place_trunk	UpwardsBranching arm
+UpwardsBranchingTrunkPlacer.validTreePos	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::valid_tree_pos	
+FlatLayerInfo.heightLimited	missing		minor: no per-layer clamp to the max height; flat settings only cap the total at the build height
+FlatLayerInfo.toString	skip:debug		debug text
+FlatLevelGeneratorPresets.Bootstrap	skip:data		registry bootstrap of the preset list
+BiasedToBottomHeight.sample	port	crates/horizon-world/src/worldgen/height_provider.rs::HeightProvider::sample	BiasedToBottom arm
+TrapezoidHeight.of	skip:java		factory helper; Horizon decodes the trapezoid JSON
+TrapezoidHeight.sample	port	crates/horizon-world/src/worldgen/height_provider.rs::HeightProvider::sample	Trapezoid arm
+TrapezoidHeight.toString	skip:debug		debug text
+UniformHeight.sample	port	crates/horizon-world/src/worldgen/height_provider.rs::HeightProvider::sample	Uniform arm
+VeryBiasedToBottomHeight.sample	port	crates/horizon-world/src/worldgen/height_provider.rs::HeightProvider::sample	VeryBiasedToBottom arm
+MaterialRules	skip:data		rule builders for the vanilla surface-rule bootstrap; Horizon reads the material rule JSON
+BiomeCondition.canNeverMatch	inline	crates/horizon-world/src/worldgen/material_condition.rs::Compiled::compile	Biome arm, constant false when biomes are disjoint
+BiomeCondition.compile	port	crates/horizon-world/src/worldgen/material_condition.rs::Compiled::compile	Biome arm
+BiomeCondition.willAlwaysMatch	inline	crates/horizon-world/src/worldgen/material_condition.rs::Compiled::compile	Biome arm, constant true when biomes are a subset
+NoiseThresholdCondition.compile	port	crates/horizon-world/src/worldgen/material_condition.rs::Compiled::compile	Noise arm
+NotCondition.compile	port	crates/horizon-world/src/worldgen/material_condition.rs::Compiled::compile	Not arm
+StoneDepthCondition.compile	port	crates/horizon-world/src/worldgen/material_condition.rs::Compiled::compile	keeps the StoneDepth config; the depth test is Compiled::test
+VerticalGradientCondition.compile	port	crates/horizon-world/src/worldgen/material_condition.rs::Compiled::compile	Gradient arm
+ConditionRule.compile	port	crates/horizon-world/src/worldgen/material_condition/rule.rs::CompiledRule::compile	Condition arm
+OreVeinRule.compile	port	crates/horizon-world/src/worldgen/material_condition/rule.rs::CompiledRule::compile	OreVein arm
+OreVeinRule.VeinType.create	skip:data		factory the bootstrap uses for vein rules; Horizon reads the ore vein JSON
+SequenceRule.compile	port	crates/horizon-world/src/worldgen/material_condition/rule.rs::CompiledRule::compile	Sequence arm
+BiomeFilter.shouldPlace	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::modify_inner	Biome arm
+CountOnEveryLayerPlacement.findOnGroundYPosition	port	crates/horizon-world/src/worldgen/placement/layer.rs::ground	
+CountOnEveryLayerPlacement.isEmpty	inline	crates/horizon-world/src/level/feature_world.rs::LevelFeatureWorld::layer_block	empty layer test (air, water, lava)
+CountOnEveryLayerPlacement.modify	port	crates/horizon-world/src/worldgen/placement/layer.rs::modify	
+EnvironmentScanPlacement.modify	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::modify_inner	EnvironmentScan arm
+EnvironmentScanPlacement.scanningFor	skip:java		factory helper; Horizon decodes the environment_scan JSON
+FixedPlacement.isSameChunk	inline	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::modify_inner	chunk test in the Fixed arm
+FixedPlacement.modify	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::modify_inner	Fixed arm
+HeightmapPlacement.modify	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::modify_inner	Heightmap arm
+InSquarePlacement.modify	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::modify_inner	InSquare arm
+NoiseBasedCountPlacement.count	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::repetitions	NoiseBasedCount arm
+NoiseThresholdCountPlacement.count	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::repetitions	NoiseThresholdCount arm
+OffsetPlacement.modify	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::modify_inner	Offset arm
+OffsetPlacement.of	skip:java		factory helper; Horizon decodes the offset JSON
+RandomlySelectedPlacement.modify	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::modify_inner	RandomlySelected arm
+RarityFilter.shouldPlace	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::modify_inner	Rarity arm

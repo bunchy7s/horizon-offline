@@ -16,6 +16,7 @@ use super::{
     nav::NavKind,
     path::PathType,
 };
+use crate::beehive::BeehiveExt;
 use horizon_core::random::{LegacyRandom, RandomSource};
 use std::collections::HashMap;
 

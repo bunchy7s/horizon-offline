@@ -71,10 +71,24 @@ impl Game<'_> {
         )
         .max(0.0) as u32
     }
+    /// `ItemStack.hurtAndBreak` for the player's `stack`: the wear Unbreaking
+    /// leaves, and `ItemDurabilityTrigger` when some is left (`applyDamage`).
+    pub(super) fn wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
+        let loss = self.durability_loss(stack, amount);
+        if loss > 0 {
+            self.trigger_item_durability(stack);
+        }
+        loss
+    }
     /// `getEnchantedDamage - base`: damage bonus of the held weapon against a mob type.
     pub(super) fn enchant_damage_bonus(&mut self, target: &str) -> f32 {
+        self.enchanted_damage(target, 0.0)
+    }
+    /// `Player.getEnchantedDamage`: `base` run through the held weapon's
+    /// damage effects against a mob type.
+    pub(super) fn enchanted_damage(&mut self, target: &str, base: f32) -> f32 {
         let Some(held) = self.held().cloned() else {
-            return 0.0;
+            return base;
         };
         let ctx = EffectContext {
             this: Some(target),
@@ -90,7 +104,7 @@ impl Game<'_> {
             "minecraft:damage",
             &ctx,
             &mut self.world.random,
-            0.0,
+            base,
         )
     }
     /// Strength / weakness on the attack damage attribute.
@@ -456,7 +470,7 @@ impl Game<'_> {
             }
             hits.push(1.0 + self.world.random.next_float() * 4.0);
             // ChangeItemDamage -> ItemStack.hurtAndBreak: unbreaking applies.
-            let loss = self.durability_loss(&stack, 2);
+            let loss = self.wear(&stack, 2);
             if let Some(s) = self.armor[slot].as_mut() {
                 s.damage += loss;
                 if self
@@ -541,7 +555,7 @@ impl Game<'_> {
     /// `ammo` is the item being fired: `Enchantment.itemContext` hands it to the
     /// `ammo_use` conditions as the tool, so Infinity only frees plain arrows.
     pub(super) fn bow_enchantments(&mut self, ammo: &str) -> (f64, bool) {
-        let Some(bow) = self.inventory[self.selected].clone() else {
+        let Some(bow) = self.held().cloned() else {
             return (0.0, false);
         };
         let e = &self.res.stations().enchantments;
@@ -576,7 +590,7 @@ impl Game<'_> {
     /// `EnchantmentHelper.onProjectileSpawned` ignite effects of the held bow
     /// (flame): the seconds the new arrow burns for.
     pub(super) fn bow_projectile_ignite(&mut self) -> Option<f32> {
-        let bow = self.inventory[self.selected].clone()?;
+        let bow = self.held().cloned()?;
         let ctx = EffectContext {
             this: Some("minecraft:arrow"),
             items: Some(self.res.items()),
@@ -714,7 +728,7 @@ impl Game<'_> {
         let Some(stack) = self.armor[3].clone() else {
             return;
         };
-        let loss = self.durability_loss(&stack, amount);
+        let loss = self.wear(&stack, amount);
         let max = self
             .res
             .items()

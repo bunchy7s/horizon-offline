@@ -8,9 +8,9 @@ use horizon_client::{
     containers::BlockEntity,
     mobs::{
         Mob, Who,
-        spawner::{Spawner, SpawnerAdded, SpawnerEvent, SpawnerSpawn},
+        spawner::{SpawnDataExt, Spawner, SpawnerAdded, SpawnerEvent, SpawnerExt, SpawnerSpawn},
         spawning,
-        trial_spawner::TrialState,
+        trial_spawner::{TrialSpawnerExt, TrialState},
     },
     particles::{ParticleOptions, ParticleType},
 };
@@ -407,8 +407,39 @@ impl Game<'_> {
         }
         // sendBlockUpdated(3) and the player's block_change game event.
         self.spawner_block_updated(key);
+        self.update_spawner_display(key);
         self.post_block_game_event("minecraft:block_change", pos, Some(Who::Player), None);
         Some(true)
+    }
+    /// Ticks spawners and trial spawners near the player on a remote client (`tick_remote`).
+    pub(super) fn tick_remote_spawners(&mut self) {
+        let Some(p) = self.player.as_ref() else {
+            return;
+        };
+        let center = [
+            p.position.x.floor() as i32,
+            p.position.y.floor() as i32,
+            p.position.z.floor() as i32,
+        ];
+        let mut keys = Vec::new();
+        let mut trial_keys = Vec::new();
+        for (&pos, be) in &self.world.block_entities {
+            let d = (pos.0 - center[0])
+                .abs()
+                .max((pos.1 - center[1]).abs())
+                .max((pos.2 - center[2]).abs());
+            if d <= 64 {
+                match be {
+                    BlockEntity::Spawner(_) => keys.push(pos),
+                    BlockEntity::TrialSpawner(_) => trial_keys.push(pos),
+                    _ => {}
+                }
+            }
+        }
+        self.client_tick_spawners(&keys);
+        for key in trial_keys {
+            self.client_tick_trial_spawner(key);
+        }
     }
     /// `SpawnerRenderer` and `TrialSpawnerRenderer`: the next mob of every
     /// spawner near the camera, small and turning.

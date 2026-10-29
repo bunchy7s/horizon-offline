@@ -1,6 +1,7 @@
 //! Horses, donkeys, mules and the undead horses (`AbstractHorse`): random
 //! stats, coat colours and markings, eating, rearing, taming by riding,
 //! the ridden movement and jump, offspring stats and `AbstractEquineModel`.
+use super::finalize::{Attr, set_base};
 use super::{
     Mob, MobEvent, MobWorld, Species,
     anim::{Poses, State},
@@ -70,12 +71,21 @@ pub fn max_temper(s: Species) -> i32 {
         100
     }
 }
-/// `canPerformRearing`: not donkeys or mules.
+/// `canPerformRearing`: every `AbstractHorse` but llamas (and camels).
 fn can_rear(s: Species) -> bool {
     matches!(
         s,
-        Species::Horse | Species::SkeletonHorse | Species::ZombieHorse
+        Species::Horse
+            | Species::Donkey
+            | Species::Mule
+            | Species::SkeletonHorse
+            | Species::ZombieHorse
     )
+}
+/// `AbstractHorse.isImmobile`: no goals while it eats or rears. A mount its
+/// rider steers still takes their input (`travelRidden`).
+pub fn immobile(m: &Mob) -> bool {
+    can_rear(m.species()) && (m.extra.flag || m.extra.counter > 0) && !controlled(m)
 }
 pub fn register(m: &mut Mob) {
     if super::camel::is_camel(m.species()) {
@@ -116,20 +126,22 @@ pub fn register(m: &mut Mob) {
 }
 /// `randomizeAttributes` of each class: horses roll health, speed and jump,
 /// donkeys and mules only health (their jump stays 0.5), skeleton horses only
-/// the jump, zombie horses a smaller jump and their own speed.
+/// the jump, zombie horses a smaller jump and their own speed. The health and
+/// speed are attribute bases (`setBaseValue`), so the server syncs them to
+/// the clients that draw the mount's hearts.
 pub fn finalize(m: &mut Mob) {
     let species = m.species();
     let r = &mut m.random;
-    if matches!(species, Species::Horse | Species::Donkey | Species::Mule) {
-        m.attrs.max_health = 15.0
-            + r.next_int_bound(8).unwrap_or(0) as f32
-            + r.next_int_bound(9).unwrap_or(0) as f32;
-    }
+    let health = matches!(species, Species::Horse | Species::Donkey | Species::Mule).then(|| {
+        15.0 + r.next_int_bound(8).unwrap_or(0) as f32 + r.next_int_bound(9).unwrap_or(0) as f32
+    });
+    let mut speed = None;
     match species {
         Species::Horse => {
-            m.attrs.speed =
+            speed = Some(
                 (0.45 + r.next_double() * 0.3 + r.next_double() * 0.3 + r.next_double() * 0.3)
-                    * 0.25;
+                    * 0.25,
+            );
             m.extra.vector[0] =
                 0.4 + r.next_double() * 0.2 + r.next_double() * 0.2 + r.next_double() * 0.2;
             m.extra.variant = r.next_int_bound(7).unwrap_or(0) as u8;
@@ -141,13 +153,20 @@ pub fn finalize(m: &mut Mob) {
             let d = 0.066_666_666_666_666_67;
             m.extra.vector[0] =
                 0.5 + r.next_double() * d + r.next_double() * d + r.next_double() * d;
-            m.attrs.speed =
-                (9.0 + r.next_double() + r.next_double() + r.next_double()) / f64::from(42.16f32);
+            speed = Some(
+                (9.0 + r.next_double() + r.next_double() + r.next_double()) / f64::from(42.16f32),
+            );
         }
         _ => {
             m.extra.vector[0] =
                 0.4 + r.next_double() * 0.2 + r.next_double() * 0.2 + r.next_double() * 0.2
         }
+    }
+    if let Some(health) = health {
+        set_base(m, Attr::MaxHealth, f64::from(health));
+    }
+    if let Some(speed) = speed {
+        set_base(m, Attr::MovementSpeed, speed);
     }
     m.health = m.attrs.max_health;
 }
@@ -168,16 +187,18 @@ pub fn offspring(a: f64, b: f64, min: f64, max: f64, r: &mut impl RandomSource) 
 }
 /// `AbstractHorse.setOffspringAttributes` from two parents.
 pub fn inherit(child: &mut Mob, a: &Mob, b: &Mob, r: &mut impl RandomSource) {
-    child.attrs.max_health = offspring(
+    let health = offspring(
         f64::from(a.attrs.max_health),
         f64::from(b.attrs.max_health),
         15.0,
         30.0,
         r,
-    ) as f32;
+    );
+    set_base(child, Attr::MaxHealth, f64::from(health as f32));
     child.health = child.attrs.max_health;
     child.extra.vector[0] = offspring(a.extra.vector[0], b.extra.vector[0], 0.4, 1.0, r);
-    child.attrs.speed = offspring(a.attrs.speed, b.attrs.speed, 0.1125, 0.3375, r);
+    let speed = offspring(a.attrs.speed, b.attrs.speed, 0.1125, 0.3375, r);
+    set_base(child, Attr::MovementSpeed, speed);
 }
 /// The rider controls the mount: saddled, with a player on it.
 pub fn controlled(m: &Mob) -> bool {
@@ -283,7 +304,7 @@ impl Goal for RunAroundLikeCrazy {
         make_mad(m, cx.events);
     }
 }
-/// `AbstractHorse.makeMad`: rear with the angry sound.
+/// `AbstractHorse.makeMad`: rear with the angry sound (`makeSound`).
 pub fn make_mad(m: &mut Mob, events: &mut Vec<MobEvent>) {
     if m.extra.counter > 0 {
         return;
@@ -304,6 +325,57 @@ pub fn make_mad(m: &mut Mob, events: &mut Vec<MobEvent>) {
     };
     m.voice(sound, events);
 }
+/// What `Horse`, `AbstractChestedHorse` (donkeys, mules, llamas) and
+/// `ZombieHorse.mobInteract` do with a held item before
+/// `AbstractHorse.mobInteract`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeldItem {
+    /// `isFood`: `fedFood`, whether it eats or not.
+    Feed,
+    /// Untamed: `makeMad` instead of taking the rider.
+    Refused,
+}
+/// That branch for a click with `item` (empty for none): no rider, not
+/// opening a tamed adult's inventory (`sneaking`), not a baby while the
+/// player holds a golden dandelion (`dandelion`; zombie horses skip that
+/// check). An untamed mount is made mad here.
+pub fn held_item(
+    m: &mut Mob,
+    item: &str,
+    sneaking: bool,
+    dandelion: bool,
+    events: &mut Vec<MobEvent>,
+) -> Option<HeldItem> {
+    let species = m.species();
+    let checks_dandelion = match species {
+        Species::Horse | Species::Donkey | Species::Mule => true,
+        Species::Llama | Species::TraderLlama => true,
+        Species::ZombieHorse => false,
+        _ => return None,
+    };
+    let open_inventory = !m.is_baby() && m.extra.tame && sneaking;
+    if m.rider.is_some()
+        || open_inventory
+        || (checks_dandelion && m.is_baby() && dandelion)
+        || item.is_empty()
+    {
+        return None;
+    }
+    // ZombieHorse.isFood: the zombie_horse_food tag.
+    let food = if species == Species::ZombieHorse {
+        item == "minecraft:red_mushroom"
+    } else {
+        m.kind.food.iter().any(|f| f == item)
+    };
+    if food {
+        return Some(HeldItem::Feed);
+    }
+    if m.extra.tame {
+        return None;
+    }
+    make_mad(m, events);
+    Some(HeldItem::Refused)
+}
 /// `RandomStandGoal`.
 #[derive(Clone, Debug)]
 struct RandomStand {
@@ -318,7 +390,7 @@ impl Goal for RandomStand {
         self.next += 1;
         if self.next > 0 && m.random.next_int_bound(1000).unwrap_or(1000) < self.next {
             self.next = -m.kind.ambient_interval;
-            return m.random.next_int_bound(10).unwrap_or(1) == 0;
+            return !immobile(m) && m.random.next_int_bound(10).unwrap_or(1) == 0;
         }
         false
     }
@@ -782,5 +854,39 @@ pub fn anim(m: &Mob, s: &State, p: &mut Poses) {
             "head_parts",
             standing * (PI / 12.0 + head_x) + eating * (PI / 2.0 + s.age.msin() * 0.05) + base,
         );
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mobs::finalize::base_value;
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    fn horse(species: Species) -> Mob {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let k = Arc::make_mut(&mut kind);
+        k.species = species;
+        k.max_health = 53.0;
+        Mob::new(1, kind, Vec3::ZERO, 0.0)
+    }
+
+    /// The rolled health is the attribute's base, which the server syncs: a
+    /// rider's client draws the horse's hearts from it, not the type's 53.
+    #[test]
+    fn rolled_health_and_speed_are_attribute_bases() {
+        for species in [Species::Horse, Species::Donkey, Species::Mule] {
+            let mut m = horse(species);
+            finalize(&mut m);
+            assert!((15.0..=30.0).contains(&m.attrs.max_health));
+            assert_eq!(
+                base_value(&m, Attr::MaxHealth),
+                f64::from(m.attrs.max_health)
+            );
+            assert_eq!(m.health, m.attrs.max_health);
+        }
+        let mut m = horse(Species::Horse);
+        finalize(&mut m);
+        assert_eq!(base_value(&m, Attr::MovementSpeed), m.attrs.speed);
     }
 }

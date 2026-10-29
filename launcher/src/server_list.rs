@@ -10,6 +10,11 @@ use std::fs;
 use std::path::Path;
 
 const FILE: &str = "servers.dat";
+/// Horizon's official survival server, named and placed as the game lists it.
+pub const OFFICIAL: (&str, &str) = ("Horizon Official", "horizon.bunchy7s.dev");
+/// Beside servers.dat once the official server was offered, so a player who removes it never
+/// gets it back. The game writes the same file.
+const OFFICIAL_MARKER: &str = "horizon_official_server.txt";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Server {
@@ -40,25 +45,59 @@ fn hidden(entry: &Compound) -> bool {
     matches!(entry.get(&key("hidden")), Some(Tag::Byte(b)) if *b != 0)
 }
 
+fn entry(name: &str, ip: &str) -> Compound {
+    [
+        (key("name"), Tag::String(name.into())),
+        (key("ip"), Tag::String(ip.into())),
+        (key("hidden"), Tag::Byte(0)),
+    ]
+    .into_iter()
+    .collect()
+}
+
+/// An address as the game connects to it: any case, 25565 when no port is given.
+fn same_address(a: &str, b: &str) -> bool {
+    let norm = |ip: &str| {
+        let ip = ip.trim().to_ascii_lowercase();
+        ip.strip_suffix(":25565").map(str::to_owned).unwrap_or(ip)
+    };
+    norm(a) == norm(b)
+}
+
 impl List {
     /// The list in `home`; empty when there is none or it can't be read, as the game does.
     pub fn load(home: &Path) -> List {
-        let entries = fs::read(home.join(FILE))
-            .ok()
-            .and_then(|bytes| nbt::read_named(&bytes, Limits::default()).ok())
-            .and_then(|(root, _)| match root.tag.get("servers") {
-                Some(Tag::List(list)) => Some(
-                    list.iter()
-                        .filter_map(|t| match t {
-                            Tag::Compound(c) => Some(c.clone()),
-                            _ => None,
-                        })
-                        .collect(),
-                ),
-                _ => None,
-            })
-            .unwrap_or_default();
-        List { entries }
+        Self::read(home).unwrap_or(List {
+            entries: Vec::new(),
+        })
+    }
+
+    /// The list in `home`, empty when there is none; none when the file is there but can't be read.
+    fn read(home: &Path) -> Option<List> {
+        let bytes = match fs::read(home.join(FILE)) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(_) => return None,
+        };
+        let entries = match bytes.is_empty() {
+            true => Vec::new(),
+            false => match nbt::read_named(&bytes, Limits::default())
+                .ok()?
+                .0
+                .tag
+                .get("servers")
+            {
+                Some(Tag::List(list)) => list
+                    .iter()
+                    .filter_map(|t| match t {
+                        Tag::Compound(c) => Some(c.clone()),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            },
+        };
+        Some(List { entries })
     }
 
     /// The servers the Multiplayer screen shows, in its order.
@@ -92,14 +131,7 @@ impl List {
             .iter()
             .rposition(|e| !hidden(e))
             .map_or(0, |i| i + 1);
-        let entry: Compound = [
-            (key("name"), Tag::String(name.into())),
-            (key("ip"), Tag::String(ip.into())),
-            (key("hidden"), Tag::Byte(0)),
-        ]
-        .into_iter()
-        .collect();
-        self.entries.insert(at, entry);
+        self.entries.insert(at, entry(name, ip));
         Ok(())
     }
 
@@ -138,6 +170,22 @@ impl List {
             .and_then(|()| fs::rename(&new, &current));
         written.map_err(|e| format!("Could not save the server list: {e}"))
     }
+}
+
+/// Puts the official server first in the list in `home`, once: not again after the player removes
+/// it, and not when the list already has its address. A list that can't be read is left alone.
+pub fn add_official(home: &Path) -> Result<(), String> {
+    let marker = home.join(OFFICIAL_MARKER);
+    if marker.exists() {
+        return Ok(());
+    }
+    let (name, address) = OFFICIAL;
+    let mut list = List::read(home).ok_or("The server list can't be read.")?;
+    if !list.servers().iter().any(|s| same_address(&s.ip, address)) {
+        list.entries.insert(0, entry(name, address));
+        list.save(home)?;
+    }
+    fs::write(marker, format!("{address}\n")).map_err(|e| e.to_string())
 }
 
 /// The shown server a command names: its position from 1, its name (any case) or its address.

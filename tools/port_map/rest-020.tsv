@@ -1,0 +1,149 @@
+PlayerList.updateEntireScoreboard	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	the join is View::changes against the guest's empty view, sent from game/scoreboard.rs lan_sync_scoreboard
+PlayerList.loadPlayerData	port	crates/horizon-client/src/lan/playerdata.rs::load	gap: minor: the single-player owner's saved level is applied in Game::lan_guest_joined instead
+PlayerList.save	port	crates/horizon-client/src/game/lan.rs::Game::save_guest	player file, advancements and statistics of a guest
+PlayerList.disconnectAllPlayersWithProfile	port	crates/horizon-client/src/lan/hub.rs::Hub::poll	kicks every connection of the uuid on NetEvent::Duplicate; the refusal of a second login is Shared::try_admit (lan/mod.rs)
+PlayerList.broadcastSystemToTeam	missing		player: when a dead player's team hides death messages from other teams, its own members should read the death in chat; Horizon sends it to nobody (game/lan_actions.rs guest_die sends only when the team shows its own death)
+PlayerList.broadcastSystemToAllExceptTeam	missing		player: when a dead player's team hides death messages from its own team, players outside the team should read the death in chat; Horizon sends it to nobody
+PlayerList.getPlayerNamesArray	skip:server		the GS4 query reply's player list; RCON and query server code; Horizon has no RCON or GS4 query port
+PlayerList.op	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	the op arm: list add, reply, and sync_ops (permission level push to the hub)
+PlayerList.deop	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	the deop arm: list remove, reply, sync_ops and kick_unlisted_players
+PlayerList.saveAll	port	crates/horizon-client/src/game/dedicated.rs::Game::stop_dedicated	gap: minor: /save-all (save-all arm of console_command) writes the world only; players are saved on leave and when the server stops
+PlayerList.getPlayersWithAddress	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	the ban-ip arm filters the guests by address
+PlayerList.getPlayerStats	inline	crates/horizon-client/src/game/lan.rs::Game::load_guest_records	statistics are read when the guest joins, not on first use
+PlayerList.locateStatsFile	missing		minor: a name-based stats or advancements file from old versions is not moved to the uuid file (player_json takes only the uuid)
+PlayerList.getPlayerAdvancements	inline	crates/horizon-client/src/game/lan.rs::Game::load_guest_records	advancements are read when the guest joins, not on first use
+PlayerList.getPlayer	port	crates/horizon-client/src/game/commands/players.rs::Game::target_by_uuid	gap: minor: the uuid lookup also returns entities (selector fallback); the name overload is Game::player_named
+PlayerList.reloadResources	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: player: /reload re-reads the datapacks but sends no tags or recipes to connected players and does not reload advancements; the sync data is loaded once per process (game/lan.rs SYNC), so new tags and recipes wait for a restart
+ProfileResolver.Cached.fetchByName	port	crates/horizon-client/src/game/dedicated.rs::Game::resolve	name to profile through the user cache, else the profile service (profiles::find_by_name)
+ServerOpList.getUserList	skip:ui		tab-completion names only (DeOpCommands suggestions); the console has no completion
+ServerOpList.add	port	crates/horizon-server-files/src/user_lists.rs::UserList::add	gap: minor: the Opped reply and the permission push are in console_command's op arm
+ServerOpList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserList::remove	gap: minor: the Deopped reply, sync_ops and the kick are in console_command's deop arm
+ServerOpList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+ServerOpList.canBypassPlayerLimit	port	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	the bypasses_limit closure: an op entry with bypassesPlayerLimit; read by Shared::try_admit
+ServerOpListEntry.serialize	port	crates/horizon-server-files/src/user_lists.rs::OpEntry::serialize	level and bypassesPlayerLimit keys
+SleepStatus.areEnoughDeepSleeping	port	crates/horizon-client/src/game/lan_actions.rs::Game::enough_slept	counts players asleep for 100 ticks (sleep_counts) against sleepers_needed
+StoredUserList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+StoredUserList.removeExpired	port	crates/horizon-server-files/src/user_lists.rs::UserList::get	expired entries are dropped on each get, as vanilla
+UserBanList.getUserList	skip:ui		tab-completion names only (PardonCommand suggestions)
+UserBanList.add	port	crates/horizon-server-files/src/user_lists.rs::UserList::add	gap: minor: the banned notice and the kick are in console_command's ban arm
+UserBanList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserList::remove	gap: minor: the unbanned notice is in console_command's pardon arm
+UserBanList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+UserBanListEntry.serialize	port	crates/horizon-server-files/src/user_lists.rs::BanEntry::serialize	the player's name and the ban fields
+UserBanListEntry.getDisplayName	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	the banlist arm prints the name; Horizon entries always carry one, so no Unknown-user fallback
+UserWhiteList.add	port	crates/horizon-server-files/src/user_lists.rs::UserList::add	gap: minor: the allowlist notice is in console_whitelist's add arm
+UserWhiteList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserList::remove	gap: minor: the notice is in console_whitelist's remove arm
+UserWhiteList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+UserWhiteList.getUserList	skip:ui		tab-completion names only (WhitelistCommand suggestions)
+NetworkDataOutputStream.writeString	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
+PktUtils.stringFromByteArray	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
+PktUtils.intFromByteArray	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
+PktUtils.intFromNetworkByteArray	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
+PktUtils.toHexString	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
+RconConsoleSource.createCommandSourceStack	skip:server		RCON command source; RCON and query server code; Horizon has no RCON or GS4 query port
+GenericThread.start	skip:server		thread helper of the RCON and query servers; RCON and query server code; Horizon has no RCON or GS4 query port
+GenericThread.stop	skip:server		thread helper of the RCON and query servers; RCON and query server code; Horizon has no RCON or GS4 query port
+QueryThreadGs4.create	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
+QueryThreadGs4.sendTo	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
+QueryThreadGs4.processPacket	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
+QueryThreadGs4.buildRuleResponse	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
+QueryThreadGs4.validChallenge	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
+QueryThreadGs4.sendChallenge	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
+QueryThreadGs4.pruneChallenges	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
+QueryThreadGs4.run	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
+QueryThreadGs4.start	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
+QueryThreadGs4.recoverSocketError	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
+QueryThreadGs4.initSocket	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
+RconClient.run	skip:server		RCON client connection; RCON and query server code; Horizon has no RCON or GS4 query port
+RconClient.send	skip:server		RCON client connection; RCON and query server code; Horizon has no RCON or GS4 query port
+RconClient.sendCmdResponse	skip:server		RCON client connection; RCON and query server code; Horizon has no RCON or GS4 query port
+RconClient.closeSocket	skip:server		RCON client connection; RCON and query server code; Horizon has no RCON or GS4 query port
+RconThread.clearClients	skip:server		RCON listener; RCON and query server code; Horizon has no RCON or GS4 query port
+RconThread.run	skip:server		RCON listener; RCON and query server code; Horizon has no RCON or GS4 query port
+RconThread.create	skip:server		RCON listener; RCON and query server code; Horizon has no RCON or GS4 query port
+RconThread.stop	skip:server		RCON listener; RCON and query server code; Horizon has no RCON or GS4 query port
+RconThread.closeSocket	skip:server		RCON listener; RCON and query server code; Horizon has no RCON or GS4 query port
+ServerWaypointManager.trackWaypoint	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::track	
+ServerWaypointManager.updateWaypoint	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::update_waypoint	
+ServerWaypointManager.untrackWaypoint	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::untrack	
+ServerWaypointManager.addPlayer	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::add_player	
+ServerWaypointManager.updatePlayer	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::update_player	
+ServerWaypointManager.removePlayer	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::remove_player	
+ServerWaypointManager.remakeConnections	inline	crates/horizon-client/src/lan/waypoints.rs::Waypoints::tick_level	called on scoreboard team changes; the per-tick update re-checks every connection instead
+ServerWaypointManager.createConnection	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::create_connection	
+ServerWaypointManager.updateConnection	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::update_or_create	
+SoundEvent.create	skip:data		registry object construction; Horizon's sound_events.rs models sounds.json entries, not SoundEvent objects
+SoundEvent.getRange	missing		minor: no fixed-range sound events (fixed_range is not read anywhere); attenuation comes from the sounds.json value (Sound::attenuation_distance)
+SoundEvents.register	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
+SoundEvents.registerForHolder	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
+SoundEvents.registerGoatHornSoundVariants	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
+SoundEvents.registerWolfSoundVariants	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
+SoundEvents.registerChickenSoundVariants	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
+SoundEvents.registerCowSoundVariants	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
+SoundEvents.registerPigSoundVariants	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
+SoundEvents.registerCatSoundVariants	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
+RecipeBook.setBookSetting	port	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	the RecipeBookChangeSettings arm sets open and filtering for the book
+RecipeBookSettings.getSettings	skip:java		accessor: the four books are arrays indexed by BookType::index in recipe_book.rs
+RecipeBookSettings.updateSettings	inline	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	the open and filtering writes of the change-settings arm
+RecipeBookSettings.copy	skip:java		value copy of a plain struct; no separate copy step
+RecipeBookSettings.replaceFrom	inline	crates/horizon-client/src/recipe_book.rs::Settings::read_valid	the flags and recipe sets of a loaded book
+RecipeBookSettings.TypeSettings.codec	skip:java		NBT codec builder; Settings::read_valid and Settings::write use the same keys
+ServerRecipeBook.loadRecipes	port	crates/horizon-client/src/recipe_book.rs::Settings::read_valid	gap: minor: recipes that fail the validator are dropped without vanilla's error log
+ServerRecipeBook.pack	port	crates/horizon-client/src/recipe_book.rs::Settings::write	the saved compound of the book
+ServerRecipeBook.apply	inline	crates/horizon-client/src/recipe_book.rs::Settings::read_valid	replaces the book's known and highlighted recipes on load
+ServerStatsCounter.createTypedStatsCodec	skip:java		codec builder for the stats map
+ServerStatsCounter.parse	port	crates/horizon-client/src/game/stats.rs::Stats::read	gap: minor: no data fixer runs on old stats files
+Stat.equals	skip:java		Horizon keys stats by name strings; there are no Stat objects to compare
+StatType.get	skip:java		instance cache of Stat objects; Horizon keys stats by name strings
+Stats.makeCustomStat	skip:data		registration of custom stat ids
+Stats.makeRegistryStatType	skip:data		registration of stat types
+StatsCounter.increment	port	crates/horizon-client/src/game/stats.rs::Stats::add	saturating add, as vanilla's clamp at Integer.MAX_VALUE
+StatsCounter.getValue	port	crates/horizon-client/src/game/stats.rs::Stats::get	the count of a stat, 0 when missing
+BlockItemTagId.create	skip:data		tag key constructors; Horizon reads tag files by name
+net/minecraft/tags/TagEntry#visitRequiredDependencies	inline	crates/horizon-world/src/worldgen/tags.rs::TagDefinitions::build	the required tag edges built in TagDefinitions::build
+net/minecraft/tags/TagEntry#visitOptionalDependencies	inline	crates/horizon-world/src/worldgen/tags.rs::TagDefinitions::build	the optional tag edges built in TagDefinitions::build
+net/minecraft/tags/TagEntry#verifyIfPresent	inline	crates/horizon-world/src/worldgen/tags.rs::TagDefinitions::build	a missing required entry leaves its tag in the missing list
+net/minecraft/tags/TagEntry#toString	port	crates/horizon-world/src/worldgen/tags.rs::TagEntry::display	the # prefix, the id and the ? for optional entries
+TagKey.hashedCodec	skip:java		codec for #tag names; TagEntry::from_json parses the same prefix
+TagLoader.load	port	crates/horizon-items/src/items.rs::load_tag_lists	gap: minor: the remove list of tag files is not read (TagFile has no remove field)
+TagLoader.loadTagsForExistingRegistries	skip:data		registry-wide reload plumbing; Items::load_with loads each kind by itself
+TagLoader.loadTagsForRegistry	port	crates/horizon-items/src/items.rs::load_tags	one registry's tags from the data folder
+TagLoader.wrapTags	skip:java		wraps tag keys in a map; no separate step in Horizon
+TagLoader.loadPendingTags	skip:data		pending-tag reload plumbing (Registry.PendingTags); Horizon has no registry layer
+TagLoader.buildUpdatedLookups	skip:data		registry lookup layer for reloads; Horizon has none
+TagLoader.findTagsForRegistry	skip:data		lookup helper of the reload layer; Horizon has none
+TagLoader.ElementLookup.fromGetters	skip:java		lookup adapter over the registry getters
+TagLoader.SortingEntry.visitRequiredDependencies	inline	crates/horizon-world/src/worldgen/tags.rs::TagDefinitions::build	the edges of the sort in TagDefinitions::build
+TagLoader.SortingEntry.visitOptionalDependencies	inline	crates/horizon-world/src/worldgen/tags.rs::TagDefinitions::build	the edges of the sort in TagDefinitions::build
+TagNetworkSerialization.serializeToNetwork	port	crates/horizon-client/src/lan/data.rs::SyncData::load_tags	tag ids per registry, with # references expanded
+TagNetworkSerialization.deserializeTagsFromNetwork	missing		minor: the client never reads UpdateTags (only lan/conn.rs sends it), so tags from a server are not applied; Horizon loads its own tag files (items.rs load_tag_lists)
+ARGB.linearChannelMean	port	crates/horizon-client/src/mipmap.rs::mean_linear	the linear-light mean of four samples for one channel
+ARGB.addRgb	skip:other		int overload has no caller in 26.3; ColorModifier uses the Vector3fc and Vector4fc overloads
+ARGB.subtractRgb	skip:other		int overload has no caller in 26.3; ColorModifier uses the Vector3fc and Vector4fc overloads
+ARGB.greyscale	skip:other		int overload has no caller in 26.3; ColorModifier uses the vector overloads
+ARGB.alphaBlend	skip:other		int overload has no caller in 26.3; ColorModifier uses the Vector4fc overload
+ARGB.alphaBlendChannel	skip:other		private helper of alphaBlend, which has no caller in 26.3
+ARGB.linearLerp	skip:other		no caller in 26.3
+ARGB.vector4fFromARGB32	port	crates/horizon-client/src/game/lan_particles.rs::rgba	ARGB int to float colour, used for particle option colours; the colour codecs have no counterpart
+ARGB.setVector4fFromARGB32	skip:ui		clear colour of the start-up loading overlay; drawing only
+ARGB.toABGR	port	crates/horizon-client/src/hud_layout.rs::abgr	swaps red and blue into the HUD's packed colour
+AbstractListBuilder.add	skip:java		DataResult list builder of the codec layer
+AbstractListBuilder.withErrorsFrom	skip:java		DataResult list builder of the codec layer
+AbstractListBuilder.build	skip:java		DataResult list builder of the codec layer
+ArrayListDeque.verifyIndexInRange	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.set	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.add	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.grow	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.remove	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.removeIf	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.copyCount	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.replaceAll	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.forEach	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.removeFirst	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.removeLast	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.getFirst	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.getLast	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.removeFirstOccurrence	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.removeLastOccurrence	skip:java		Java collection internals; Horizon uses std collections
+ArrayListDeque.DescendingIterator.next	skip:java		Java collection iterator
+ArrayListDeque.ReversedView.subList	skip:java		Java collection view
+ArrayListDeque.ReversedView.reverseIndex	skip:java		Java collection view

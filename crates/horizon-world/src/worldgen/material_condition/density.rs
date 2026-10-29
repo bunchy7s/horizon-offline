@@ -31,6 +31,36 @@ impl<S: MaterialSurfaceQueries> MaterialDensitySources<S> {
     pub fn sampler_context_mut(&mut self) -> &mut SamplerContext {
         &mut self.context
     }
+    /// Re-target the per-cell bindings to one block. A carver reuses one worker
+    /// across every restored dirt block, so the 1×1×1 volumes the bindings and
+    /// the preliminary plane sample must follow the cell; the compiled rule is
+    /// kept.
+    pub fn retarget(&mut self, position: [i32; 3]) -> Result<(), DecodeError> {
+        let volume = DensityVolume::new([1; 3], position, [1; 3])
+            .map_err(|_| DecodeError::Field("material density volume"))?;
+        let plane = DensityVolume::new([1; 3], [position[0], 0, position[2]], [1; 3])
+            .map_err(|_| DecodeError::Field("material preliminary plane"))?;
+        self.expected = volume;
+        self.plane = plane;
+        // The plane is sampled lazily at the new x/z.
+        self.buffer = None;
+        let mut sampled = vec![false; self.buffers.len()];
+        let mut pending = Vec::new();
+        for bound in &self.densities {
+            let Some(buffer) = bound.buffer else { continue };
+            if sampled.get(buffer).copied().unwrap_or(true) {
+                continue;
+            }
+            sampled[buffer] = true;
+            pending.push((bound.sampler.clone(), buffer));
+        }
+        for (sampler, buffer) in pending {
+            let out = &mut self.buffers[buffer];
+            out.resize(volume.size(), 0.0);
+            sampler.sample_volume(&mut self.context, out, volume)?;
+        }
+        Ok(())
+    }
     pub fn into_parts(self) -> (S, SamplerContext) {
         (self.surface, self.context)
     }

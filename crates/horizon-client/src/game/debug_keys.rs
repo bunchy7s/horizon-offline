@@ -416,6 +416,13 @@ impl Game<'_> {
                 ],
             );
         }
+        // Horizon's own: HDR's output while the setting is on, under the GPU (a group of its
+        // own would move others to the other column).
+        if self.settings.horizon.hdr
+            && let Some(r) = self.renderer.as_ref()
+        {
+            d.group("system", [r.hdr_line()]);
+        }
         // Horizon's own: the shader pack's GPU time per pass (an empty group would move others).
         let pass_lines = self.renderer.as_ref().map_or_else(Vec::new, |r| {
             debug_overlay::shader_pass_lines(&r.shader_pass_times())
@@ -915,6 +922,17 @@ impl Game<'_> {
                 0.13,
                 false,
                 (t.pitch, t.yaw),
+            );
+        }
+        // EntityType.EYE_OF_ENDER: 0.25 by 0.25, never turned.
+        for (previous, now) in self.end.eye_motions() {
+            let v = |p: glam::DVec3| Vec3::new(p.x, p.y, p.z);
+            g.hitbox(
+                at(v(previous), v(now)),
+                (0.25, 0.25),
+                0.2125,
+                false,
+                (0.0, 0.0),
             );
         }
         for r in &self.rockets {

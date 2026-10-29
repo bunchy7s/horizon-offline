@@ -8,7 +8,7 @@ use super::{
     int_range, number_text, optional,
     placement::{PlacementContext, PlacementQueryError},
     required,
-    tree::{TreeDecoder, TreeResult, kind, read, unit_float, write},
+    tree::{TreeDecoder, TreeResult, kind, read, scan_column, unit_float, write},
     tree_blocks::{self as tb, TreeBlocks},
     value_provider::{FloatProvider, IntProvider},
 };
@@ -85,14 +85,11 @@ impl Speleothem {
         if !self.empty_or_water(read(world, pos)?) {
             return Ok(None);
         }
+        // Column.scan: up to range - 1 empty blocks from pos, then the edge.
         let mut scan = |step: i32| -> TreeResult<Option<i32>, W::Error> {
-            let mut p = pos;
-            let mut i = 1;
-            while i < range && self.empty_or_water(read(world, p)?) {
-                p[1] = p[1].wrapping_add(step);
-                i += 1;
-            }
-            Ok(edge(self, read(world, p)?).then_some(p[1]))
+            let y = scan_column(world, pos, step, range - 1, |s| self.empty_or_water(s))?;
+            let p = [pos[0], y, pos[2]];
+            Ok(edge(self, read(world, p)?).then_some(y))
         };
         let ceiling = scan(1)?;
         let floor = scan(-1)?;

@@ -67,9 +67,11 @@ impl Game<'_> {
             self.nautilus_sound(index, sound);
             return true;
         }
-        // Shift-use on a tame one opens its (saddle and armour) screen.
+        // AbstractNautilus.mobInteract: shift + use on a tame adult opens its
+        // saddle and armour screen (openCustomInventoryScreen).
         if tame && sneaking {
-            return false;
+            self.open_mount_menu(index);
+            return true;
         }
         if !item.is_empty() {
             if !tame && food {

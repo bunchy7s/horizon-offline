@@ -162,6 +162,93 @@ mod tests {
         put_cure(&mut map, Some(cure));
         assert_eq!(parse_cure(&Tag::Compound(map)), Some(cure));
     }
+    /// `ZombieVillager.tick` counts the cure down before `Zombie.tick`,
+    /// whatever the AI: a `NoAI` zombie villager finishes curing too (#3429).
+    #[test]
+    fn a_no_ai_zombie_villager_still_cures() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-types.json").exists()
+            || !root.join("movement-properties.nbt").exists()
+        {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let registry = assets.registry;
+        let facts = crate::blocks::BlockFacts::load(&root, registry).unwrap();
+        let motion = crate::motion::MotionResources::load(&root, &assets).unwrap();
+        let data = super::super::MobData::load(&root, &facts);
+        let types = super::super::MobTypes::load(&root).unwrap();
+        let biomes = crate::biome::Biomes::load(&root).unwrap();
+        let items = crate::items::Items::load(&root, registry, &facts).unwrap();
+        let collision = crate::collisions::load(&root, registry).unwrap();
+        let air = registry.default_state("minecraft:air").unwrap();
+        let world = crate::world::World::new(air, 0);
+        let lid_openers = std::collections::HashMap::new();
+        let w = MobWorld {
+            teams: Default::default(),
+            world: &world,
+            registry,
+            facts: &facts,
+            fluid_tables: &motion.fluids,
+            movement: &motion.blocks,
+            collision: &collision,
+            data: &data,
+            player: None,
+            nearest_player: None,
+            others: &[],
+            others_grid: None,
+            others_index: None,
+            daylight: true,
+            monsters_burn: false,
+            game_time: 1000,
+            day_time: 18000,
+            raining: false,
+            thundering: false,
+            nether: false,
+            block_tags: &items.block_tags,
+            biomes: &biomes,
+            mob_griefing: true,
+            mob_drops: true,
+            max_entity_cramming: 24,
+            difficulty: super::super::spawning::LocalDifficulty::new(2, 18000, 0, 0.0),
+            end: false,
+            world_seed: 0,
+            sea_level: 63,
+            items: Some(&items),
+            lid_openers: &lid_openers,
+        };
+        for no_ai in [false, true] {
+            let kind = std::sync::Arc::new(types.types["minecraft:zombie_villager"].clone());
+            let mut m = Mob::new(
+                1,
+                kind,
+                horizon_core::geometry::Vec3::new(0.5, 0.0, 0.5),
+                0.0,
+            );
+            m.persistent = true;
+            m.no_ai = no_ai;
+            start_converting(&mut m, None, 3, &mut Vec::new());
+            let mut level_random = horizon_core::random::LegacyRandom::new(0);
+            let mut ticks = 0;
+            while ticks < 10 {
+                let mut events = Vec::new();
+                m.tick(&w, &mut level_random, &mut events);
+                ticks += 1;
+                if events
+                    .iter()
+                    .any(|e| matches!(e, MobEvent::CureZombieVillager { mob: 1 }))
+                {
+                    break;
+                }
+            }
+            assert!(
+                ticks <= 3,
+                "no_ai={no_ai}: the cure must finish within its 3 ticks, took {ticks}"
+            );
+        }
+    }
     #[test]
     fn no_cure_saves_minus_one() {
         let mut map = Compound::new();

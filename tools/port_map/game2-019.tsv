@@ -1,0 +1,146 @@
+state/predicate/BlockPredicate.test	inline	crates/horizon-client/src/game/end.rs::Game::podium_level	bedrock check only; the exit-portal 7x5 pattern is approximated by a bedrock count in podium_level
+Property.value	skip:java	-	wraps a value in a Property.Value record; Horizon keeps property names and value strings instead (state lookups are StateProperties::value)
+Property.toString	skip:debug	-	debug string for error text only
+Property.hashCode	skip:java	-	cached Java hash of class and name
+Property.parseValue	inline	crates/horizon-client/src/game/persist.rs::Game::state_from_nbt	gap: minor: whole-state lookup from Name and Properties; an invalid property falls back to the default state instead of keeping the valid ones
+RotationSegment.convertToDirection	inline	crates/horizon-world/src/level/place.rs::Sim::placement_class	ceiling hanging sign placement maps the above sign's segment 0/4/8/12 to a direction inline
+SideChainPart.whenDisconnectedFromTheRight	port	crates/horizon-world/src/level/shelf.rs::Part::disconnected_from_the_right	same table
+SideChainPart.whenDisconnectedFromTheLeft	port	crates/horizon-world/src/level/shelf.rs::Part::disconnected_from_the_left	same table
+BlockScanUtils.sectionBasedScan	inline	crates/horizon-world/src/level/timeline.rs::box_scan_order	gap: minor: only the visiting order; no section skip, no abort, no virtual AIR outside the world bounds
+BlockScanUtils.findBlocksInSection	inline	crates/horizon-client/src/light.rs::light_chunk	gap: minor: section loop only for light emitters; no generic predicate and consumer
+BlockScanUtils.findBlocksWithCache	inline	crates/horizon-client/src/mobs/world.rs::MobWorld::nearest_block	gap: minor: first match in Manhattan box order, used by mob goals; explicit position lists are not generalised
+WorldBorder.getDistanceToBorder	port	crates/horizon-core/src/geometry/border.rs::BorderGeometry::distance_to_border	-
+WorldBorder.lerpSizeBetween	port	crates/horizon-client/src/worldborder.rs::WorldBorder::lerp_between	-
+WorldBorder.setSafeZone	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_worldborder	plain field write in the /worldborder damage buffer arm; no listener notification
+WorldBorder.setDamagePerBlock	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_worldborder	plain field write in the /worldborder damage amount arm; no listener notification
+WorldBorder.setWarningTime	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_worldborder	plain field write in the /worldborder warning time arm; no listener notification
+WorldBorder.setWarningBlocks	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_worldborder	plain field write in the /worldborder warning distance arm; no listener notification
+WorldBorder.applyInitialSettings	inline	crates/horizon-client/src/worldborder.rs::WorldBorder::unpack	saved settings restored on every load; no initialized flag
+WorldBorder.MovingBorderExtent.getMinX	port	crates/horizon-core/src/geometry/border.rs::BorderGeometry::bounds	bounds returns all four edges
+WorldBorder.MovingBorderExtent.getMinZ	port	crates/horizon-core/src/geometry/border.rs::BorderGeometry::bounds	bounds returns all four edges
+WorldBorder.MovingBorderExtent.getMaxX	port	crates/horizon-core/src/geometry/border.rs::BorderGeometry::bounds	bounds returns all four edges
+WorldBorder.MovingBorderExtent.getMaxZ	port	crates/horizon-core/src/geometry/border.rs::BorderGeometry::bounds	bounds returns all four edges
+WorldBorder.MovingBorderExtent.calculateSize	port	crates/horizon-core/src/geometry/border.rs::BorderGeometry::moving_size	-
+WorldBorder.MovingBorderExtent.getLerpSpeed	port	crates/horizon-core/src/geometry/border.rs::BorderGeometry::lerp_speed	-
+WorldBorder.MovingBorderExtent.update	port	crates/horizon-core/src/geometry/border.rs::BorderGeometry::tick	-
+WorldBorder.MovingBorderExtent.getCollisionShape	port	crates/horizon-core/src/geometry/border.rs::BorderGeometry::collision_shape	-
+WorldBorder.StaticBorderExtent.updateBox	port	crates/horizon-core/src/geometry/border.rs::BorderGeometry::stationary	computes the static bounds and collision shape
+CarvingMask.getIndex	inline	crates/horizon-core/src/carving.rs::CarvingMask::carve	index formula is computed inside carve
+CarvingMask.visit	port	crates/horizon-core/src/carving.rs::CarvingMask::try_visit_mut	-
+CarvingMask.visitSegment	port	crates/horizon-core/src/carving.rs::Cursor::next	splits runs into per-column bottom and top
+ChunkAccess.getHighestSectionPosition	port	crates/horizon-world/src/worldgen/terrain.rs::TerrainChunk::highest_section_y	-
+ChunkAccess.replaceMissingSections	skip:java	-	sections are allocated up front, so there are no null slots to fill
+ChunkAccess.getBlockEntitiesPos	inline	crates/horizon-client/src/save.rs::chunks_with_block_entities	gap: minor: block entity positions are read from the chunk's list when saving; no separate position set
+ChunkAccess.getOrCreateHeightmapUnprimed	port	crates/horizon-world/src/worldgen/terrain.rs::TerrainChunk::ensure_heightmap	-
+ChunkAccess.getHeight	port	crates/horizon-world/src/heightmap.rs::Heightmap::highest_taken	-
+ChunkAccess.addReferenceForStructure	inline	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::references	references are derived from the starts on each call; nothing is stored per chunk
+ChunkAccess.isYSpaceEmpty	skip:java	-	only a shortcut for PathNavigationRegion's all-air check; the block reads themselves are unchanged
+ChunkAccess.setBlockEntityNbt	port	crates/horizon-world/src/worldgen/generator_decoration.rs::World::set_block_entity	gap: minor: replaces any entry at the position; vanilla keeps a live block entity and stores NBT only as pending
+ChunkAccess.findBlockLightSources	port	crates/horizon-client/src/light.rs::light_chunk	light emitters are seeded from the palette in one pass over the region
+ChunkAccess.findBlocks	inline	crates/horizon-client/src/light.rs::light_chunk	gap: minor: only the light-emitter predicate; no generic predicate and consumer
+ChunkAccess.collectBiomesInPalette	port	crates/horizon-world/src/worldgen/biome_chunk.rs::BiomeRegion::present_in_chunk	one chunk at a time, sorted; the caller gathers the region
+ChunkAccess.carverBiome	port	crates/horizon-world/src/worldgen/generator.rs::Pipeline::carver_biome	-
+ChunkAccess.fillBiomesFromNoise	port	crates/horizon-world/src/worldgen/biome_chunk.rs::BiomeChunk::fill	-
+ChunkAccess.getOrCreateOffsetList	inline	crates/horizon-world/src/worldgen/terrain.rs::TerrainChunk::mark_postprocessing	lists exist for every section up front
+ChunkGenerator.createBiomes	skip:java	-	async wrapper around doCreateBiomes (CompletableFuture)
+ChunkGenerator.doCreateBiomes	port	crates/horizon-world/src/worldgen/generator.rs::Pipeline::biome_chunk	biomes come from the cached per-chunk biome build
+ChunkGenerator.getStructureGeneratingAt	port	crates/horizon-client/src/vanillagen.rs::VanillaTerrain::locate	nearest start search for /locate, via the generator worker
+ChunkGenerator.applyBiomeDecoration	port	crates/horizon-world/src/worldgen/generator_decoration.rs::Decoration::decorate	biome feature placement; structure starts are placed in structure/start.rs
+ChunkGenerator.tryGenerateStructure	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	-
+ChunkGenerator.fetchReferences	missing	-	minor: unsure: new starts begin at 0 references (start.rs); a previous start's reference count is not read
+ChunkGeneratorStructureState.createForFlat	missing	-	unsure: no superflat or flat-preset structure path found in worldgen
+ChunkGeneratorStructureState.createForNormal	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::new	-
+ChunkGeneratorStructureState.hasBiomesForStructureSet	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::new	keeps the sets with a structure in a possible biome
+ChunkGeneratorStructureState.getRingPositionsFor	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::ring_positions	-
+DataLayer.set	port	crates/horizon-client/src/light.rs::set_level	writes one nibble of the packed light byte
+DataLayer.packFilled	inline	crates/horizon-client/src/light.rs::pack_lighting	uniform layers are stored as one packed byte (0xF0 or 0)
+DataLayer.getData	port	crates/horizon-protocol/src/chunk.rs::LightData::layers	-
+DataLayer.copy	skip:java	-	clone of the layer data
+DataLayer.toString	skip:debug	-	debug dump of the layer
+DataLayer.layerToString	skip:debug	-	debug dump of the layer
+DataLayer.isDefinitelyFilledWith	skip:java	-	homogeneity shortcut; Horizon keeps uniform light as one byte
+LevelChunk.<init>	port	crates/horizon-client/src/chunk.rs::Chunk::empty	gap: minor: builds an empty chunk only; loading saved data is in save.rs
+LevelChunk.setUnsavedListener	skip:java	-	save-listener hook; Horizon tracks dirty sections instead
+LevelChunk.markUnsaved	skip:other	-	save bookkeeping only; Horizon tracks dirty sections
+LevelChunk.getTicksForSerialization	port	crates/horizon-client/src/save.rs::tick_list	serializes the pending ticks
+LevelChunk.getListenerRegistry	skip:java	-	per-section game-event registry lookup; Horizon dispatches game events by position (update.rs game_event)
+LevelChunk.createBlockEntity	port	crates/horizon-client/src/containers.rs::BlockEntity::for_block	-
+LevelChunk.getBlockEntity	skip:other	-	World.block_entities is read directly by the game (game.rs:764, 4000); no lookup function
+LevelChunk.addAndRegisterBlockEntity	skip:other	-	World.block_entities is written directly (game.rs:1134); no registration step
+LevelChunk.isInLevel	port	crates/horizon-world/src/level/update.rs::Sim::is_in_valid_bounds	-
+LevelChunk.getBlockEntityNbtForSaving	port	crates/horizon-client/src/save.rs::encode_block_entity	-
+LevelChunk.removeGameEventListener	skip:java	-	listener registry bookkeeping; game events dispatch by position
+LevelChunk.removeBlockEntityTicker	skip:java	-	tickers are rebuilt from block state (block_entities.rs tickers)
+LevelChunk.runPostLoad	missing	-	minor: unsure: no post-load step for block entities found
+LevelChunk.replaceBiomes	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_fillbiome	the /fillbiome command replaces the biomes of a region
+LevelChunk.postProcessGeneration	missing	-	player: unsure: post-generation fixups (fluids, block shapes) may not run when a chunk goes live; not confirmed
+LevelChunk.promotePendingBlockEntity	skip:java	-	pending NBT slot; Horizon decodes block entities when they load (save.rs decode_block_entity)
+LevelChunk.unregisterTickContainerFromLevel	skip:java	-	tick container bookkeeping; scheduled ticks live in level/update.rs
+LevelChunk.registerDebugValues	skip:debug	-	debug values only
+LevelChunk.clearAllBlockEntities	missing	-	minor: unsure: no unload step that clears a chunk's block entities was confirmed
+LevelChunk.registerAllBlockEntitiesAfterLevelLoad	skip:java	-	ticker registration after load; Horizon ticks the block entities it holds
+LevelChunk.addGameEventListener	skip:java	-	listener registry; game events dispatch by position
+LevelChunk.updateBlockEntityTicker	skip:java	-	ticker bookkeeping; tickers are rebuilt from block state (block_entities.rs tickers)
+LevelChunk.BoundTickingBlockEntity.tick	port	crates/horizon-client/src/game/block_entity_ticks.rs::Game::tick_block_entities	ticks every loaded block entity in one pass
+LevelChunkSection.recalcBlockCounts	missing	-	minor: unsure: no recount of block counts found; non-air counts are kept while writing
+LevelChunkSection.read	port	crates/horizon-protocol/src/chunk.rs::Section::read	reads block states and biomes together
+LevelChunkSection.readBiomes	inline	crates/horizon-protocol/src/chunk.rs::Section::read	-
+LevelChunkSection.fillBiomesFromNoise	port	crates/horizon-world/src/worldgen/biome_chunk.rs::BiomeChunk::fill	-
+PalettedContainer.codecRO	skip:java	-	codec
+PalettedContainer.codec	skip:java	-	codec
+PalettedContainer.createOrReuseData	inline	crates/horizon-core/src/paletted.rs::PalettedContainer::resize	storage and palette are built inside resize
+PalettedContainer.getAndSet	port	crates/horizon-core/src/paletted.rs::PalettedContainer::set	set returns the previous value
+PalettedContainer.set	port	crates/horizon-core/src/paletted.rs::PalettedContainer::set	-
+PalettedContainer.get	port	crates/horizon-core/src/paletted.rs::PalettedContainer::get	-
+PalettedContainer.getAll	missing	-	minor: no Horizon caller needs the distinct values; has() answers predicate queries
+PalettedContainer.reencodeContents	inline	crates/horizon-core/src/paletted.rs::PalettedContainer::resize	palette ids are remapped inside resize
+PalettedContainer.forEachInPalette	inline	crates/horizon-world/src/worldgen/biome_chunk.rs::BiomeRegion::present_in_chunk	gap: minor: no palette walk; collects distinct stored values across the sections
+PalettedContainer.recreate	port	crates/horizon-core/src/paletted.rs::PalettedContainer::new	new container with the same strategy holding one value
+PalettedContainer.count	missing	-	minor: unsure: per-value counts for recalcBlockCounts not found
+PalettedContainer.Data.copyFrom	inline	crates/horizon-core/src/paletted.rs::PalettedContainer::resize	copies the old values into the new storage
+PalettedContainer.Data.getSerializedSize	skip:java	-	byte count for the Java packet buffer; Horizon writes the wire form via to_wire
+PalettedContainer.Data.copy	skip:java	-	clone of the storage and palette
+ProtoChunk.getTicksForSerialization	port	crates/horizon-world/src/worldgen/terrain.rs::TerrainChunk::block_ticks	gap: minor: returns the tick lists; no packing for serialization
+ProtoChunk.setBlockEntity	port	crates/horizon-world/src/worldgen/generator_decoration.rs::World::set_block_entity	-
+ProtoChunk.addEntity	port	crates/horizon-world/src/worldgen/generator_decoration.rs::World::add_entity	-
+ProtoChunk.setStartForStructure	missing	-	minor: unsure: no below-zero retrogen bounds check on structure starts found
+ProtoChunk.setPersistedStatus	missing	-	minor: unsure: no setter for a proto chunk's persisted status found
+ProtoChunk.packOffsetCoordinates	inline	crates/horizon-world/src/worldgen/terrain.rs::TerrainChunk::mark_postprocessing	the packed x|y|z offset is built inline
+ProtoChunk.unpackOffsetCoordinates	missing	-	minor: unsure: no replay of stored post-process offsets found
+ProtoChunk.markPosForPostProcessing	port	crates/horizon-world/src/worldgen/terrain.rs::TerrainChunk::mark_postprocessing	-
+ProtoChunk.getBlockEntityNbtForSaving	missing	-	minor: unsure: no proto chunk block entity NBT save step found
+ProtoChunk.removeBlockEntity	inline	crates/horizon-world/src/worldgen/generator_decoration.rs::World::set_block	entry is dropped when the block at the position changes
+Strategy.getIndex	port	crates/horizon-client/src/chunk.rs::index	block form (y<<8 | z<<4 | x); the biome form is biome_chunk.rs::index
+ChunkStatus.register	skip:data	-	status registry entry
+ChunkStatus.getStatusList	skip:data	-	status list is the ALL constant in chunk_status.rs
+EntityStorage.storeEntities	port	crates/horizon-client/src/save.rs::SaveDir::save_entities	-
+EntityStorage.reportSaveFailureIfPresent	skip:other	-	error reporting plumbing; failures come back as Result from save_entities
+EntityStorage.reportLoadFailureIfPresent	skip:other	-	error reporting plumbing; failures come back as Result from load_entities
+IOWorker.isOldChunkAround	missing	-	minor: unsure: no old-chunk scan around a position found
+IOWorker.getOrCreateOldDataForRegion	skip:java	-	cache of old-chunk data per region
+IOWorker.createOldDataForRegion	skip:java	-	cache of old-chunk data per region
+IOWorker.isOldChunk	missing	-	minor: unsure: same old-chunk check as isOldChunkAround; not found
+IOWorker.store	port	crates/horizon-client/src/save.rs::write_region_records	-
+IOWorker.loadAsync	port	crates/horizon-client/src/streaming.rs::ChunkGenerator::load	gap: minor: the saved-chunk hook only; the disk read is in save.rs
+IOWorker.synchronize	skip:java	-	waits for queued async writes; Horizon's save takes a wait flag (streaming.rs Streaming::save)
+IOWorker.scanChunk	missing	-	minor: unsure: no chunk scan step found
+IOWorker.submitThrowingTask	skip:java	-	Java future wrapper around submitTask
+IOWorker.submitTask	port	crates/horizon-client/src/streaming.rs::Streaming::submit	-
+IOWorker.storePendingChunk	skip:java	-	pending-write map of the Java worker
+IOWorker.tellStorePending	skip:java	-	pending-write counter of the Java worker
+IOWorker.runStore	skip:java	-	Java writer thread loop
+IOWorker.close	skip:java	-	closes the Java worker thread and file handles
+IOWorker.waitForShutdown	skip:java	-	Java thread join
+RegionFile.<init>	port	crates/horizon-world/src/region.rs::RegionFile::from_file	-
+RegionFile.getExternalChunkPath	port	crates/horizon-world/src/region.rs::external_path	-
+RegionFile.getChunkDataInputStream	port	crates/horizon-world/src/region.rs::RegionFile::read	-
+RegionFile.createChunkInputStream	inline	crates/horizon-world/src/region.rs::RegionFile::read	-
+RegionFile.createExternalChunkInputStream	inline	crates/horizon-world/src/region.rs::RegionFile::read	-
+RegionFile.doesChunkExist	port	crates/horizon-world/src/region.rs::RegionFile::read	existence is a read that returns None when the chunk is absent
+RegionFile.getChunkDataOutputStream	skip:java	-	Java stream factory; RegionFile::write takes the record directly
+RegionFile.createExternalStub	inline	crates/horizon-world/src/region.rs::RegionFile::write	-
+RegionFile.writeToExternalFile	inline	crates/horizon-world/src/region.rs::RegionFile::write	-
+RegionFile.writeHeader	port	crates/horizon-world/src/region.rs::RegionFile::write_header_entry	-
+RegionFile.close	skip:java	-	file handle is released when the RegionFile is dropped
+RegionFile.padToFullSector	inline	crates/horizon-world/src/region.rs::RegionFile::write	last sector is padded with zeros
+RegionFile.ChunkBuffer.close	skip:java	-	Java stream close

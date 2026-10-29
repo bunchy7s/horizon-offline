@@ -50,7 +50,7 @@ impl Game<'_> {
                         json!({
                             "folder": w.folder,
                             "name": w.name,
-                            "mode": if w.creative { "creative" } else { "survival" },
+                            "mode": if w.game_mode == 1 { "creative" } else { "survival" },
                             "last_played": w.modified.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64),
                             "commands": w.commands,
                             "version": w.version,

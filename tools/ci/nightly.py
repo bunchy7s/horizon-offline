@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The opt-in Nightly channel (.github/workflows/nightly-build.yml, docs/release-flow.md "Nightly").
+"""The Nightly, the only build Horizon ships (.github/workflows/nightly-build.yml, docs/release-flow.md "Nightly").
 
     nightly.py pick [--force]      which commit tonight's nightly builds: GitHub outputs and nightly-notes.md
     nightly.py rotate              renames the current `nightly` pre-release to nightly-<its date>, frees the tag
@@ -72,9 +72,9 @@ def output(**values: str) -> None:
             f.write(f"{k}={v}\n")
 
 
-OPT_IN = ("**Opt-in, not a release.** A Nightly can include pull requests not reviewed yet, picked by trusted "
-          "reviewers: it may break. Turn it on in the launcher's settings; your release install and your worlds stay "
-          "as they are. Report bugs with the version the game shows (\"Nightly <date> · <commit>\").")
+PLAYERS = ("The launcher installs it by itself; your worlds stay as they are. A Nightly can include pull requests "
+           "the Team picked before they are merged (below). Report bugs with the version the game shows "
+           "(\"Nightly <date> · <commit>\").")
 
 
 def source_tag(today: str, sha: str) -> str:
@@ -96,7 +96,7 @@ def notes(today: str, chosen: Ref, main: Ref, picked: list[dict], left_out: list
     fixed = [pr for pr in shown if "feature" not in pr["labels"]]
     built = f"main ({main.sha[:7]})" + (f" with {len(picked)} pull requests merged in" if picked else "")
     parts = [f"Nightly {today} · {chosen.sha[:7]}: {built}, built from `{chosen.name}` ({chosen.sha}).",
-             source_line(today, chosen.sha), OPT_IN]
+             source_line(today, chosen.sha), PLAYERS]
     if not shown and not picked:
         parts.append("Nothing new for players on main since the previous Nightly.")
     if new:
@@ -125,8 +125,9 @@ def merged_since(previous: str | None, main: str) -> list[dict]:
     return train.merged_between("game", previous, main)
 
 
-def refresh(entries: list[dict], get, patterns: list[str]) -> tuple[list[dict], list[str]]:
-    """The scheduled nightly's set: each pull request at its newest head; merged, closed and refused ones out."""
+def refresh(entries: list[dict], get, patterns: list[str], team: set[str]) -> tuple[list[dict], list[str]]:
+    """The scheduled nightly's set: each pull request at its newest approved head (the Team's or Ludovic's agents'
+    approval, ns.approvers); a newer head nobody approved yet waits, merged, closed and refused ones are out."""
     kept, left_out = [], []
     for e in entries:
         pr = get(e["number"])
@@ -134,8 +135,15 @@ def refresh(entries: list[dict], get, patterns: list[str]) -> tuple[list[dict], 
             left_out.append(f"#{e['number']} {e['title']}: merged, so it's in main")
         elif why := ns.check(pr, e["number"], patterns):
             left_out.append(f"{why}: left out")
-        else:
+        elif ns.approvers(pr, pr.head, team):
             kept.append({**e, "head": pr.head, "title": pr.title})
+        elif ns.approvers(pr, e["head"], team):
+            kept.append(e)
+            left_out.append(f"#{e['number']} {e['title']}: its new head {pr.head[:7]} isn't approved yet, so the "
+                            f"approved {e['head'][:7]} stays")
+        else:
+            left_out.append(f"#{e['number']} {e['title']}: no approving review from the Team or Ludovic's agents at "
+                            "its head: left out")
     return kept, left_out
 
 
@@ -184,7 +192,7 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
     name = "(unchanged)"
     if build:
         done = ns.builds_today(today)
-        if len(done) >= ns.MAX_BUILDS_PER_DAY and event != "schedule":
+        if len(done) >= ns.MAX_BUILDS_PER_DAY and event != "schedule" and os.environ.get("NIGHTLY_URGENT") != "true":
             stop(repo, issue, f"{len(done)} Nightly builds today already, the most a day takes: the next scheduled "
                               "one (20:17 UTC) builds the set.")
         name = ns.next_build(today, done)
@@ -231,7 +239,8 @@ def pick(force: bool) -> None:
         get = ns.lookup(repo)
 
         def fresh(st: dict, builds: str):
-            kept, out = refresh(st.get("prs", []), get, patterns)
+            team = ns.read_reviewers(Path(ns.REVIEWERS).read_text() if Path(ns.REVIEWERS).exists() else "").logins
+            kept, out = refresh(st.get("prs", []), get, patterns, team)
             left_out[:] = out
             if kept == st.get("prs", []):
                 return None

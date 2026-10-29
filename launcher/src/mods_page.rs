@@ -4,13 +4,15 @@
 //! signed and what it may do), install it with its checksum checked, turn Horizon mods on and
 //! off, and update or remove what was installed (`horizon_launcher::browser`). Imported modpacks
 //! are listed on its Modpacks tab.
-use super::servers_page::{type_key, Key};
+use super::line_edit::{self, Key, LineEdit};
 use super::*;
 use horizon_launcher::browser::{
-    self, horizon, installed, java, Kind as PackKind, Project, Query, SourceId, Support,
+    self, horizon, installed, java, java_instance, Kind as PackKind, Project, Query, SourceId,
+    Support,
 };
 use horizon_launcher::modpacks;
 use horizon_port_pack::check::Check;
+use java_instance::Target;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -57,7 +59,7 @@ pub(super) enum Checking {
 pub(super) struct Mods {
     pub(super) kind: PackKind,
     pub(super) source: SourceId,
-    text: String,
+    text: LineEdit,
     focus: FocusHandle,
     pub(super) focused: bool,
     everything: bool,
@@ -75,6 +77,9 @@ pub(super) struct Mods {
     loaded: bool,
     /// The game folder the browser installs into and lists: the selected instance's.
     home: Option<PathBuf>,
+    /// The selected Java instance's version and loader: its mods and resource packs are the
+    /// source's own files for them, put in as they are.
+    pub(super) java: Option<Target>,
     /// Its worlds (folder, name), the last played first, and the one data packs go into.
     worlds: Vec<(PathBuf, String)>,
     world: Option<PathBuf>,
@@ -83,6 +88,8 @@ pub(super) struct Mods {
     message: Option<Result<String, String>>,
     updates: HashMap<(SourceId, String), String>,
     confirm_remove: Option<String>,
+    /// A native mod's Install waiting for the one-time notice (`native_mods::needs_notice`).
+    native_notice: Option<(SourceId, String, Option<Project>)>,
     /// Java mods' checks, by source and project.
     pub(super) checks: HashMap<(SourceId, String), Checking>,
     /// Horizon registry projects' trust and capabilities, by id ([`horizon::trust_and_capabilities`]).
@@ -144,7 +151,7 @@ impl Mods {
                 Ok("horizon") => SourceId::Horizon,
                 _ => SourceId::Modrinth,
             },
-            text: String::new(),
+            text: LineEdit::new(String::new(), 100, 40),
             focus: cx.focus_handle().tab_index(0).tab_stop(true),
             focused: false,
             everything: false,
@@ -160,10 +167,12 @@ impl Mods {
             installed: Vec::new(),
             loaded: false,
             home: None,
+            java: None,
             worlds: Vec::new(),
             world: None,
             busy: None,
             message: None,
+            native_notice: None,
             updates: HashMap::new(),
             confirm_remove: None,
             checks: HashMap::new(),
@@ -184,8 +193,29 @@ impl Mods {
             .find(|e| e.source == p.source && e.project == p.id)
     }
 
-    /// How well a result runs: a Java mod's from its check once it has one.
+    /// The Java instance `kind` goes into as files, when one is selected.
+    pub(super) fn java_for(&self, kind: PackKind) -> Option<&Target> {
+        self.java.as_ref().filter(|t| t.takes(kind))
+    }
+
+    /// Whether a Java mod's check is still to come before it can be installed.
+    pub(super) fn checking(&self, p: &Project) -> bool {
+        self.java_for(p.kind).is_none()
+            && p.kind == PackKind::Mod
+            && p.source != SourceId::Horizon
+            && matches!(
+                self.checks.get(&(p.source, p.id.clone())),
+                None | Some(Checking::Running)
+            )
+            && p.support().installable()
+    }
+
+    /// How well a result runs: a Java mod's from its check once it has one. In a Java
+    /// instance, a result was searched for its version and loader: installing checks the file.
     pub(super) fn support(&self, p: &Project) -> Support {
+        if self.java_for(p.kind).is_some() {
+            return Support::Works;
+        }
         let metadata = p.support();
         if p.kind != PackKind::Mod || p.source == SourceId::Horizon || !metadata.installable() {
             return metadata;
@@ -269,6 +299,7 @@ impl Launcher {
         let mut to_check = Vec::new();
         let mut loaded = Vec::new();
         let mut done = false;
+        let mut native_on = false;
         while let Ok(event) = self.mods.rx.try_recv() {
             changed = true;
             let m = &mut self.mods;
@@ -299,6 +330,7 @@ impl Launcher {
                     m.busy = None;
                     m.message = Some(result);
                     m.installed = installed::Installed::load(&m.home()).entries;
+                    native_on = native_mods::turns_on(native_on, &m.installed);
                     m.installed_list.reset();
                     if modpack {
                         // The Modpacks page reads its list again.
@@ -325,6 +357,12 @@ impl Launcher {
                     m.installed_list.reset();
                 }
             }
+        }
+        // A native mod installed: Native mods turn on, so Settings offers its Build.
+        if native_on && !self.settings.native_mods {
+            self.settings.native_mods = true;
+            self.settings.native_mods_noticed = true;
+            self.settings.save();
         }
         // `HORIZON_LAUNCHER_PROJECT=<slug>` (with `HORIZON_LAUNCHER_PAGE=mods`): opens that
         // project's page once a search finds it, for screenshots.
@@ -363,14 +401,26 @@ impl Launcher {
             m.results_list.reset();
             m.installed_list.reset();
         }
-        let query = Query {
-            everything: m.everything,
-            offset,
-            limit: PAGE,
-            filters: m.browse.filters.clone(),
-            ..Query::new(&m.text, m.kind)
+        let query = match m.java_for(m.kind) {
+            Some(target) => Query {
+                offset,
+                limit: PAGE,
+                ..target.search(m.text.text(), m.kind, &m.browse.filters)
+            },
+            None => Query {
+                everything: m.everything,
+                offset,
+                limit: PAGE,
+                filters: m.browse.filters.clone(),
+                ..Query::new(m.text.text(), m.kind)
+            },
         };
-        let (tx, search, source) = (m.tx.clone(), m.search, m.source);
+        // A Java instance's files are Modrinth's; Horizon's registry is for Horizon.
+        let source = match m.java_for(m.kind) {
+            Some(_) => SourceId::Modrinth,
+            None => m.source,
+        };
+        let (tx, search) = (m.tx.clone(), m.search);
         std::thread::spawn(move || {
             let result = browser::source(source)
                 .ok_or_else(|| format!("{} isn't set up.", source.label()))
@@ -413,9 +463,21 @@ impl Launcher {
         });
     }
 
-    /// Turns a Horizon mod the browser installed on or off, as the game's Options > Mods does.
+    /// Turns a Horizon mod the browser installed on or off, as the game's Options > Mods does;
+    /// in a Java instance, renames its file.
     fn mods_switch(&mut self, e: &installed::Entry) {
         let home = self.mods.home();
+        if self.mods.java.is_some() {
+            let on = !java_instance::is_on(&home, e);
+            self.mods.message = Some(java_instance::set_on(&home, e, on).map(|()| {
+                format!(
+                    "{} is {}. The game reads this when it starts.",
+                    e.title,
+                    if on { "on" } else { "off" }
+                )
+            }));
+            return;
+        }
         let Some(id) = horizon::mod_id(e) else {
             return;
         };
@@ -440,6 +502,9 @@ impl Launcher {
     /// a cached check answers at once, else the jar is downloaded and read.
     fn mods_check(&mut self, found: Vec<Project>) {
         let m = &mut self.mods;
+        if m.java.is_some() {
+            return;
+        }
         let todo: Vec<Project> = found
             .into_iter()
             .filter(|p| p.kind == PackKind::Mod && p.source != SourceId::Horizon)
@@ -494,13 +559,18 @@ impl Launcher {
             return;
         }
         let tx = self.mods.tx.clone();
+        let java = self.mods.java.clone();
         std::thread::spawn(move || {
             let mut found = HashMap::new();
             for e in entries {
                 let Some(source) = browser::source(e.source) else {
                     continue;
                 };
-                if let Ok(Some(v)) = installed::update_for(&*source, &e) {
+                let newer = match &java {
+                    Some(target) => java_instance::update_for(&*source, target, &e),
+                    None => installed::update_for(&*source, &e),
+                };
+                if let Ok(Some(v)) = newer {
                     found.insert((e.source, e.project.clone()), v.number);
                 }
             }
@@ -531,6 +601,7 @@ impl Launcher {
         self.mods.updates.clear();
         let tx = self.mods.tx.clone();
         let home = self.mods.home();
+        let java = self.mods.java.clone();
         std::thread::spawn(move || {
             let count = todo.len();
             let (mut done, mut failed) = (Vec::new(), Vec::new());
@@ -546,7 +617,12 @@ impl Launcher {
                     .ok_or_else(|| format!("{} isn't set up", source_id.label()))
                     .and_then(|source| {
                         let p = source.project(&id)?;
-                        installed::install(&*source, &p, true, &home, &step)
+                        match &java {
+                            Some(target) => {
+                                java_instance::install(&*source, target, &p, &home, &step)
+                            }
+                            None => installed::install(&*source, &p, true, &home, &step),
+                        }
                     });
                 match updated {
                     Ok(entries) => done.extend(
@@ -578,6 +654,18 @@ impl Launcher {
         if self.mods.busy.is_some() {
             return;
         }
+        // The first native mod: what it starts, before anything is installed.
+        let first_native = source == SourceId::Horizon
+            && native_mods::needs_notice(
+                self.settings.native_mods,
+                self.settings.native_mods_noticed,
+            )
+            && horizon::is_native_mod(&id);
+        if first_native {
+            self.mods.native_notice = Some((source, id, known));
+            return;
+        }
+        self.mods.native_notice = None;
         self.mods.message = None;
         self.mods.busy = Some((id.clone(), format!("Asking {}…", source.label()), 0.));
         self.mods.updates.remove(&(source, id.clone()));
@@ -589,6 +677,7 @@ impl Launcher {
             .map(|tag| backend::resources(tag));
         let tx = self.mods.tx.clone();
         let home = self.mods.home();
+        let java = self.mods.java.clone();
         let world = self.mods.world.clone().and_then(|path| {
             let (_, name) = self.mods.worlds.iter().find(|(p, _)| *p == path)?;
             Some((path, name.clone()))
@@ -609,6 +698,17 @@ impl Launcher {
                         Some(p) => p,
                         None => source.project(&id)?,
                     };
+                    if let Some(target) = java.as_ref().filter(|t| t.takes(p.kind)) {
+                        let done = java_instance::install(&*source, target, &p, &home, &progress)?;
+                        let names: Vec<String> = done
+                            .iter()
+                            .map(|e| format!("{} {}", e.title, e.number))
+                            .collect();
+                        return Ok(format!(
+                            "Installed {}, checksums checked.",
+                            names.join(", ")
+                        ));
+                    }
                     if p.kind == PackKind::DataPack {
                         let (world, name) =
                             world.ok_or("Pick the world the data pack goes into first.")?;
@@ -686,11 +786,7 @@ impl Launcher {
         let t = self.theme;
         let m = &self.mods;
         let focused = m.focused;
-        let shown: String = {
-            let chars: Vec<char> = m.text.chars().collect();
-            chars[chars.len().saturating_sub(40)..].iter().collect()
-        };
-        div()
+        let field = div()
             .id("mods-search")
             .track_focus(&m.focus)
             .flex()
@@ -706,51 +802,45 @@ impl Launcher {
             .text_size(px(theme::UI.px))
             .cursor_text()
             .child(blocks::icon("search", 18., t.muted))
-            .child(if m.text.is_empty() && !focused {
-                div().text_color(t.muted).child("Search, then Enter")
-            } else {
-                div().text_color(t.ink).child(shown)
-            })
-            .when(focused, |d| {
-                d.child(div().flex_none().w(px(1.)).h(px(16.)).bg(t.ink))
-            })
+            .child(line_edit::content(
+                &m.text,
+                &t,
+                focused,
+                false,
+                false,
+                "Search, then Enter",
+            ))
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                 window.focus(&this.mods.focus);
                 cx.notify();
             }))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                let k = &ev.keystroke;
-                let command = k.modifiers.control || k.modifiers.platform;
-                match type_key(
-                    &mut this.mods.text,
-                    false,
-                    &k.key,
-                    k.key_char.as_deref(),
-                    command,
-                ) {
+                match line_edit::handle(&mut this.mods.text, ev, cx) {
                     Key::Enter => this.mods_search(0),
                     Key::Escape => window.blur(),
-                    Key::Paste => {
-                        if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                            let line = text.lines().next().unwrap_or_default().trim().to_string();
-                            this.mods.text.push_str(&line);
-                        }
-                    }
-                    Key::Edited => {}
                     Key::Pass => return,
-                }
-                if let Some((at, _)) = this.mods.text.char_indices().nth(100) {
-                    this.mods.text.truncate(at);
+                    _ => {}
                 }
                 cx.stop_propagation();
                 cx.notify();
-            }))
+            }));
+        line_edit::mouse(field, cx, |this| &mut this.mods.text)
     }
 
     pub(super) fn mods_page(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         // Packs and mods go into the selected instance: picking another reads its list.
         let home = self.selected_instance().map(|i| i.home.clone());
+        let java = self
+            .selected_instance()
+            .and_then(|i| i.java.as_ref())
+            .map(|j| j.target());
+        // Another version or loader: other results.
+        if self.mods.loaded && java != self.mods.java {
+            self.mods.java = java.clone();
+            self.mods_search(0);
+        }
+        self.mods.java = java;
         if !self.mods.loaded || (home.is_some() && self.mods.home != home) {
             self.mods.home = home;
             self.mods.installed = installed::Installed::load(&self.mods.home()).entries;
@@ -818,7 +908,9 @@ impl Launcher {
             }));
         // CurseForge support is coming soon: shown, inert, never searched (like the Microsoft
         // account's "Coming soon").
-        let source_note = (self.mods.kind != PackKind::DataPack)
+        // A Java instance's mods and resource packs come from Modrinth, for its version.
+        let java = self.mods.java_for(self.mods.kind).is_some();
+        let source_note = (self.mods.kind != PackKind::DataPack && !java)
             .then(|| div().flex().child(self.mods_source_switch(cx)));
         // The registry lists only what was made for Horizon: no "everything", no Modrinth filters.
         let registry = self.mods.source == SourceId::Horizon;
@@ -834,7 +926,7 @@ impl Launcher {
                     .items_center()
                     .gap(px(12.))
                     .child(self.mods_field(cx))
-                    .when(!registry, |d| d.child(toggle)),
+                    .when(!registry && !java, |d| d.child(toggle)),
             )
             .children(source_note)
             .children(filters)
@@ -849,6 +941,7 @@ impl Launcher {
                 .child(header)
                 .child(div().flex().flex_col().child(kinds).child(body))
         };
+        let body = body.children(self.native_notice(cx));
         if let Some(project) = self.mods_project_page(cx) {
             return page(body.children(self.mods_busy_plate()).child(project));
         }
@@ -926,6 +1019,56 @@ impl Launcher {
     }
 
     /// The install under way and the last install's answer.
+    /// The one-time notice before the first native mod is installed: what the build takes. Its
+    /// button installs the mod; Native mods then turn on.
+    fn native_notice(&self, cx: &mut Context<Self>) -> Option<Div> {
+        self.mods.native_notice.as_ref()?;
+        let t = self.theme;
+        Some(
+            plate(&t)
+                .flex()
+                .flex_col()
+                .gap(px(10.))
+                .p(px(16.))
+                .text_size(px(theme::UI.px))
+                .text_color(t.ink)
+                .child(tr(native_mods::NOTICE).to_string())
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .child(
+                            button(
+                                "native-notice-install",
+                                "Install and turn on native mods",
+                                Kind::Primary,
+                                &t,
+                            )
+                            .on_click(cx.listener(
+                                |this, _: &ClickEvent, _, cx| {
+                                    this.settings.native_mods_noticed = true;
+                                    this.settings.save();
+                                    if let Some((source, id, known)) =
+                                        this.mods.native_notice.take()
+                                    {
+                                        this.mods_install(source, id, known);
+                                    }
+                                    cx.notify();
+                                },
+                            )),
+                        )
+                        .child(
+                            button("native-notice-cancel", "Cancel", Kind::Secondary, &t).on_click(
+                                cx.listener(|this, _: &ClickEvent, _, cx| {
+                                    this.mods.native_notice = None;
+                                    cx.notify();
+                                }),
+                            ),
+                        ),
+                ),
+        )
+    }
+
     pub(super) fn mods_busy_plate(&self) -> Vec<Div> {
         let t = self.theme;
         let mut out = Vec::new();
@@ -1020,9 +1163,11 @@ impl Launcher {
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 if this.mods.confirm_remove.as_ref() == Some(&id) {
                     let home = this.mods.home();
-                    this.mods.message = Some(
-                        installed::remove(&home, &id).map(|e| format!("Removed {}.", e.title)),
-                    );
+                    let removed = match this.mods.java {
+                        Some(_) => java_instance::remove(&home, &id),
+                        None => installed::remove(&home, &id),
+                    };
+                    this.mods.message = Some(removed.map(|e| format!("Removed {}.", e.title)));
                     this.mods.installed = installed::Installed::load(&home).entries;
                     this.mods.installed_list.reset();
                     this.mods.confirm_remove = None;
@@ -1031,9 +1176,15 @@ impl Launcher {
                 }
                 cx.notify();
             }));
-            if e.source == SourceId::Horizon && e.kind == PackKind::Mod {
-                let on =
-                    horizon::mod_id(e).is_some_and(|id| java::is_enabled(&self.mods.home(), id));
+            let on = match &self.mods.java {
+                _ if e.kind != PackKind::Mod => None,
+                Some(_) => Some(java_instance::is_on(&self.mods.home(), e)),
+                None if e.source == SourceId::Horizon => Some(
+                    horizon::mod_id(e).is_some_and(|id| java::is_enabled(&self.mods.home(), id)),
+                ),
+                None => None,
+            };
+            if let Some(on) = on {
                 let entry = e.clone();
                 right = right.child(
                     div()
@@ -1142,6 +1293,11 @@ impl Launcher {
         if m.results.is_empty() {
             let line = if m.searching || !m.searched {
                 "Searching…"
+            } else if let Some(target) = m.java_for(m.kind) {
+                return centered(
+                    &format!("Nothing found for {}.", target.describe(m.kind)),
+                    &t,
+                );
             } else if m.source == SourceId::Horizon {
                 "Nothing in Horizon's registry matches yet."
             } else if m.everything {
@@ -1161,13 +1317,7 @@ impl Launcher {
             let m = &self.mods;
             let busy = m.busy.as_ref().map(|b| b.0.as_str());
             let support = m.support(p);
-            let checking = p.kind == PackKind::Mod
-                && p.source != SourceId::Horizon
-                && matches!(
-                    m.checks.get(&(p.source, p.id.clone())),
-                    None | Some(Checking::Running)
-                )
-                && p.support().installable();
+            let checking = m.checking(p);
             let color = match support {
                 Support::Works => t.success,
                 Support::Partial(_) => t.warn,

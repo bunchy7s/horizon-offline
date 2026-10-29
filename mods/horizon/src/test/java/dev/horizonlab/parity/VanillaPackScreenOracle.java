@@ -309,7 +309,7 @@ public final class VanillaPackScreenOracle {
         List<String> initial = new ArrayList<>();
         for (var s : c.getAsJsonArray("selected")) initial.add(s.getAsString());
         repository.setSelected(initial);
-        var screen = new PackSelectionScreen(repository, r -> { }, Path.of(c.get("dir").getAsString()), Component.translatable("resourcePack.title"));
+        var screen = new PackSelectionScreen(repository, r -> { }, Path.of(c.get("dir").getAsString()), Component.translatable(c.get("title").getAsString()));
         gui.setScreen(screen);
         // PackSelectionScreen.loadPackIcon: a pack with a pack.png gets its own texture.
         @SuppressWarnings("unchecked")

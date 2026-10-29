@@ -1,6 +1,8 @@
 from pathlib import Path
+import json
 import os
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -145,6 +147,14 @@ class ParityRunnerTests(unittest.TestCase):
         with mock.patch.object(parity.sys, "platform", "darwin"):
             self.assertEqual(parity.platform_skips(config), {"options": "libm"})
 
+    def test_termination_signals_are_caught_where_they_exist(self):
+        for numbers in ({"SIGTERM": 15, "SIGHUP": 1}, {"SIGTERM": 15}):  # Windows has no SIGHUP
+            handled = []
+            fake = SimpleNamespace(**numbers, signal=lambda number, _handler: handled.append(number))
+            with self.subTest(numbers=numbers), mock.patch.object(parity, "signal", fake):
+                parity.exit_on_termination()
+                self.assertEqual(handled, list(numbers.values()))
+
     def test_a_hosts_excludes_are_skipped_when_it_runs_parity_itself(self):
         config = {"hosts": {"playhorizon": {"exclude": {"remote_fireworks": "starved"}}, "macmini": {"exclude": {}}}}
         with mock.patch.object(parity.sys, "platform", "linux"):
@@ -175,6 +185,74 @@ class ParityRunnerTests(unittest.TestCase):
                     (here / "x.rs").write_text("changed")
                     state = {"harnesses": {}, "hashes": {}}
                     self.assertTrue(parity.stale("x", state, parity.Hasher(state["hashes"]), "env"))
+
+
+class DependencyPathTests(unittest.TestCase):
+    def test_traced_dependencies_use_repository_posix_paths(self):
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(parity, "ROOT", Path(temp).resolve()):
+            source = Path(temp, "crates/w/src/lib.rs")
+            source.parent.mkdir(parents=True)
+            source.write_text("")
+            trace = {"modules": [str(source)], "read": [], "commands": []}
+            self.assertEqual(parity.dependencies(trace), (["crates/w/src/lib.rs"], []))
+
+    def test_legacy_local_and_shared_paths_select_without_rewriting_records(self):
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(parity, "ROOT", Path(temp)), \
+                mock.patch.object(parity, "SHARED", Path(temp, "shared")):
+            root = Path(temp)
+            found = {name: root / "tools" / f"test_{name}_parity.py" for name in ("local", "shared", "empty")}
+            record = {"dependencies": [r"crates\w\src\lib.rs#keep:used"], "key": "recorded-content-key"}
+            local = root / "state.json"
+            local.write_text(json.dumps({"local": record, "empty": {"dependencies": []}}), encoding="utf-8")
+            shared = parity.SHARED / "dependencies/shared.json"
+            shared.parent.mkdir(parents=True)
+            shared.write_text(json.dumps(record), encoding="utf-8")
+            records = json.loads(local.read_text(encoding="utf-8"))
+            before = local.read_bytes(), shared.read_bytes()
+            self.assertEqual(parity.affected_harnesses(found, records, {"crates/w/src/lib.rs"}, reach=False),
+                             {"local", "shared"})
+            self.assertEqual(parity.affected_harnesses(found, records, {"crates/w/src/other.rs"}, reach=False), set())
+            self.assertEqual(records, {"local": record, "empty": {"dependencies": []}})
+            self.assertEqual((local.read_bytes(), shared.read_bytes()), before)
+
+    def test_changed_probes_and_oracles_accept_legacy_separators(self):
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(parity, "ROOT", Path(temp)):
+            found = {"probe": Path(temp, "tools/test_probe_parity.py")}
+            for path in ("crates/w/examples/probe.rs", "crates/w/src/bin/probe.rs",
+                         "mods/horizon/src/test/java/Oracle.java"):
+                with self.subTest(path=path), mock.patch.object(parity, "changed_files", return_value={path}):
+                    records = {"probe": {"dependencies": [path.replace("/", "\\")]}}
+                    self.assertEqual(parity.changed_harnesses(found, records, "main"), {"probe"})
+            with mock.patch.object(parity, "changed_files", return_value={"crates/w/examples/probe.rs"}):
+                records = {"probe": {"dependencies": [r"crates\w\examples\probe.rs#keep:used"]}}
+                self.assertEqual(parity.changed_harnesses(found, records, "main"), {"probe"})
+
+    def test_legacy_probe_records_still_narrow_to_reachable_sources(self):
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(parity, "ROOT", Path(temp)), \
+                mock.patch.object(parity, "SHARED", Path(temp, "shared")), \
+                mock.patch.object(parity, "STATE_DIR", Path(temp, "state")):
+            root = Path(temp)
+            files = {
+                "crates/horizon-world/Cargo.toml": '[package]\nname = "horizon-world"\n'
+                                                   '\n[[example]]\nname = "world_probe"\npath = "examples/probe.rs"\n',
+                "crates/horizon-world/src/lib.rs": "pub mod used;\npub mod unused;\n",
+                "crates/horizon-world/src/used.rs": "pub fn f() {}\n",
+                "crates/horizon-world/src/unused.rs": "pub fn f() {}\n",
+                "crates/horizon-world/examples/probe.rs": "fn main() { horizon_world::used::f(); }\n",
+            }
+            for path, text in files.items():
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text, encoding="utf-8")
+            dependencies = [path.replace("/", "\\") for path in files]
+            dependencies[1] += "#keep:used"
+            record = {"dependencies": dependencies, "artifacts": [["example", "probe", "release"]]}
+            found = {"probe": root / "tools/test_probe_parity.py"}
+            for path, expected in (("crates/horizon-world/src/used.rs", {"probe"}),
+                                   ("crates/horizon-world/src/unused.rs", set())):
+                with self.subTest(path=path):
+                    self.assertEqual(parity.affected_harnesses(found, {"probe": record}, {path}), expected)
+            self.assertEqual(record["dependencies"], dependencies)
 
 
 class RustScopeTests(unittest.TestCase):

@@ -32,7 +32,11 @@ The opening, then Play ([clip](docs/opening.webm)):
   system's libraries, the asset index and the assets. Every file must have the size and sha1
   Mojang lists. The Play page shows how far it is and has Cancel; files already whole are kept,
   so the next try goes on from there. **From my install** prepares from the player's own launcher
-  instead, and an install that lacks the version falls back to the download. Without an owner,
+  instead, and an install that lacks the version falls back to the download. **Play** on a version
+  not prepared yet does it all for an owner, as the official launcher does: it prepares from the
+  install when there is one, else downloads (with Mojang's Java when no Java 25 is installed), then
+  starts the game. With no install on the computer the Play page offers the download alone and the
+  Minecraft folder row says none is needed. Without an owner,
   the Play page asks to sign in first. `horizon-launcher prepare --download`.
 - **Mods**: search Modrinth (CurseForge support is coming soon) for resource
   packs and modpacks, each marked Works, Partly or Doesn't run in
@@ -149,7 +153,7 @@ The opening, then Play ([clip](docs/opening.webm)):
   white on the Play button at 4.5:1 and the accent at 3:1 on every background (a test holds every
   accent in both looks to it). The picture is copied into the data folder.
   `horizon-launcher settings accent NAME`, `settings background PATH|default`.
-- **Language**: English, French and Russian (the languages Horizon's own game menus have).
+- **Language**: English, French, Russian, German, Spanish and Ukrainian.
   The window follows the system's language unless the player picks one in Settings > Launcher
   (each named in itself); a string a table lacks shows in English. The tables are
   `launcher/lang/<code>.json`, English text to its translation, Horizon's own; a test fails when
@@ -193,6 +197,12 @@ The opening, then Play ([clip](docs/opening.webm)):
   step through) with **Copy** (the picture, to the clipboard), **Open**, **Show in folder** and
   **Delete** (to the trash, after a confirmation). From the command line:
   `horizon-launcher screenshots [list|delete] [--instance <name>]`.
+- **Java** (for the Minecraft: Java Edition instances to come): the runtime a version's JSON asks for
+  (`javaVersion`: its major exactly, Java 8 before that field), found among Mojang's runtimes Horizon
+  downloaded (`minecraft/runtime/` in its data folder, the one preparing uses) and the Java homes installed
+  on this computer, read from their `release` files without starting them; when none has that major,
+  Mojang's runtime is downloaded; an instance may name its own Java home instead.
+  `horizon-launcher java [list|install]`.
 - **Multiplayer**: Home lists the selected instance's servers, the game's own Multiplayer list
   (`servers.dat`, each with the picture the game last saw). **Join** starts the game straight into
   one; **Add server** and **Remove** (after a confirmation) change the file the game reads,
@@ -303,6 +313,9 @@ and don't set `%ERRORLEVEL%` / `$LASTEXITCODE`. Scripts that need the exit code 
     horizon-launcher account offline                play without an account
     horizon-launcher instance [list]                the instances and their game folders (* = Play starts it)
     horizon-launcher instance create <name> [--copy <instance>]   empty, or a copy of one's worlds, options and packs
+    horizon-launcher instance create <name> --minecraft <1.21.4|latest|latest-snapshot>   a Minecraft: Java Edition instance
+    horizon-launcher instance versions [--snapshots] [--old]   the Java Edition versions, from Mojang's list (kept for offline)
+    horizon-launcher instance java <instance> [--home <dir>|--auto] [--memory <MiB>] [--args "<jvm args>"]
     horizon-launcher instance rename|icon|group <instance> <value>  icon: a block or item name, #rrggbb or none
     horizon-launcher instance select <instance>     make Play start it
     horizon-launcher instance version <instance> <tag|latest>   keep it on one installed version, or follow updates
@@ -312,6 +325,8 @@ and don't set `%ERRORLEVEL%` / `$LASTEXITCODE`. Scripts that need the exit code 
     horizon-launcher packs add <file> | on|off|remove <pack> [--kind shader]
     horizon-launcher screenshots [list] [--instance <name>]   an instance's screenshots, the newest first
     horizon-launcher screenshots delete <name> [--instance <name>]   moves it to the trash
+    horizon-launcher java [list]          Java runtimes: Mojang's (downloaded by Horizon) and installed ones
+    horizon-launcher java install <21|java-runtime-delta>   downloads Mojang's runtime, each file sha1-checked
     horizon-launcher multiplayer [list] [--instance <name>]   the servers in an instance's Multiplayer list
     horizon-launcher multiplayer add <address> [--name <name>] | remove <server>
     horizon-launcher modpack [list]                 the imported packs and their coverage

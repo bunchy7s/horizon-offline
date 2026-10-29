@@ -55,7 +55,8 @@ impl Game<'_> {
         let (Some(eye), Some(p)) = (self.eye_position(), self.player.as_ref()) else {
             return Ok(false);
         };
-        let (velocity, on_ground, pos) = (p.velocity, p.ground.on_ground, p.position);
+        let (on_ground, pos) = (p.ground.on_ground, p.position);
+        let velocity = self.known_player_movement();
         let start = Vec3::new(pos.x, eye[1], pos.z);
         let mut proj = Projectile::new(ProjectileKind::WindCharge, start, Some(Who::Player));
         proj.shoot_from_rotation(
@@ -412,6 +413,7 @@ impl Game<'_> {
         // fall; any other burst ends the grace of the last impulse.
         let at = p.position;
         p.impulse.set_ignore_fall_damage(wind_charge, Some(at));
+        self.adv.marks.blast = Some(([at.x, at.y, at.z], wind_charge));
         Some(push)
     }
     /// The burst: knockback, the blocks that react, the gust and the sound.

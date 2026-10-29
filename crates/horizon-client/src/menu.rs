@@ -286,8 +286,9 @@ pub struct Menu {
     /// Sounds the player makes (a bundle's insert and remove), for the
     /// caller to play at the player as `Entity.playSound`.
     pub player_sounds: Vec<&'static str>,
-    /// Recipes whose result was taken (`awardUsedRecipes`), for the caller.
-    pub crafted: Vec<String>,
+    /// Recipes whose result was taken (`awardUsedRecipes`) and the stacks that
+    /// went into each, for the caller.
+    pub crafted: Vec<(String, Vec<Option<ItemStack>>)>,
     /// Potions taken from a brewing stand's bottle slots
     /// (`PotionSlot.onTake`), for the caller.
     pub brewed: Vec<ItemStack>,
@@ -1527,8 +1528,10 @@ impl Menu {
             // StonecutterMenu's result onTake: awardUsedRecipes, one input
             // used up, the result again for the selected recipe.
             if let Some(r) = self.stone.used {
-                self.crafted
-                    .push(env.station_recipes.stonecutting[r].id.clone());
+                self.crafted.push((
+                    env.station_recipes.stonecutting[r].id.clone(),
+                    vec![self.containers[MAIN][0].clone()],
+                ));
             }
             if self.remove(env, 0, 1).is_some() {
                 self.stone_setup_result(env, self.data[0]);
@@ -1554,6 +1557,17 @@ impl Menu {
         }
         if self.slots[s].role == Role::CombineResult {
             // SmithingMenu.onTake: awardUsedRecipes, then one of each input.
+            if self.kind == Kind::Smithing {
+                let inputs = [0, 1, 2].map(|i| self.containers[MAIN][i].clone());
+                if let Some((id, _)) = env.station_recipes.smithing_recipe(
+                    env.enchantments,
+                    inputs[0].as_ref(),
+                    inputs[1].as_ref(),
+                    inputs[2].as_ref(),
+                ) {
+                    self.crafted.push((id.to_owned(), inputs.to_vec()));
+                }
+            }
             for i in 0..3 {
                 if let Some(mut stack) = self.containers[MAIN][i].clone() {
                     stack.count -= 1;
@@ -1595,7 +1609,7 @@ impl Menu {
         let n = self.grid_size;
         let grid = self.containers[GRID].clone();
         if let Some((id, _)) = env.recipes.find(&grid, n) {
-            self.crafted.push(format!("minecraft:{id}"));
+            self.crafted.push((format!("minecraft:{id}"), grid.clone()));
         }
         let remaining = env
             .recipes

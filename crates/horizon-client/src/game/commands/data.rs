@@ -317,6 +317,7 @@ impl Game<'_> {
                 if let Some((_, mut new)) = save::decode_block_entity(&tag) {
                     self.take_loot_table(key, &tag, &mut new);
                     self.world.block_entities.insert(key, new);
+                    self.update_spawner_display(key);
                     let state = self.world.block(p[0], p[1], p[2]);
                     // Redraw what shows the block entity (signs, banners).
                     let _ = self.world.set(p[0], p[1], p[2], state);

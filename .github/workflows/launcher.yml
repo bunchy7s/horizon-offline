@@ -178,9 +178,11 @@ jobs:
           retry "$launcher" install latest
           "$launcher" versions --installed
           "$launcher" links --json
-          clients=("$HORIZON_LAUNCHER_HOME"/versions/v*/horizon-client*)
+          # `install latest` is the Nightly since #3342 (versions/nightly-<date>-<commit>), a vX.Y.Z before.
+          clients=("$HORIZON_LAUNCHER_HOME"/versions/*/horizon-client*)
           client="${clients[0]}"
           echo "installed client: $client"
+          [[ -f "$client" ]] || { echo "::error::no game installed under versions/"; exit 1; }
           # The game's Linux build is the game's to keep portable (release.yml checks it): a
           # release linked to a Nix store is a warning here, not a broken launcher.
           soft() { if [[ "$RUNNER_OS" == "Linux" ]]; then "$@" || echo "::warning::$* failed"; else "$@"; fi; }

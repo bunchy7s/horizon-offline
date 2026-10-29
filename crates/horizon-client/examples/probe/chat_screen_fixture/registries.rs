@@ -43,6 +43,7 @@ pub fn registries(r: &Value, permission: u8) -> Registries {
     reg.timelines = strings(&r["timelines"]);
     reg.dimensions = strings(&r["dimensions"]);
     reg.players = strings(&r["players"]);
+    reg.selected_entities = strings(&r["selected_entities"]);
     reg.teams = strings(&r["teams"]);
     reg.objectives = strings(&r["objectives"]);
     reg.tracked = strings(&r["tracked"]);

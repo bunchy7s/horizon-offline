@@ -1,0 +1,150 @@
+ServerData.write	port	crates/horizon-protocol/src/servers.rs::ServerEntry::to_tag	gap: minor: no acceptedCodeOfConduct entry (Horizon never stores code of conduct acceptance)
+ServerData.read	port	crates/horizon-protocol/src/servers.rs::ServerEntry::from_tag	gap: minor: acceptedCodeOfConduct is not read
+ServerData.copyNameIconFrom	inline	crates/horizon-client/src/multiplayer.rs::Screen::click	the Edit save writes name, ip and pack setting and keeps the icon
+ServerData.copyFrom	inline	crates/horizon-client/src/multiplayer.rs::Screen::click	Edit opens the form pre-filled from the entry (name, ip, pack setting)
+ServerData.validateIcon	port	crates/horizon-client/src/multiplayer.rs::icon_pixels	gap: minor: only 64x64 PNGs are kept; vanilla keeps any PNG up to 1024x1024 in servers.dat
+ServerList.get	missing		minor: Direct Connect never looks up a saved entry by address, so its saved pack setting and icon are not used
+ServerList.unhide	missing		minor: no hidden-server list (vanilla keeps up to 16 direct-join entries)
+ServerList.remove	port	crates/horizon-client/src/multiplayer.rs::Screen::click	Delete confirm removes the selected row and saves
+ServerList.add	port	crates/horizon-client/src/multiplayer.rs::Screen::click	gap: minor: direct-join entries are not kept hidden (hidden=true)
+ServerList.swap	port	crates/horizon-client/src/multiplayer.rs::Screen::click	arrow click on a row swaps it with its neighbour and saves
+ServerList.set	missing		minor: no write-back of one saved entry by name and address (only the code-of-conduct save uses it)
+ServerStatusPinger.pingServer	port	crates/horizon-client/src/multiplayer.rs::ping_all	gap: minor: no unknown-host message; one thread per server with a 5 s timeout
+ServerStatusPinger.onPingFailed	port	crates/horizon-client/src/multiplayer.rs::ping_all	failed ping stores Ping::Failed, shown as can't-connect in the row
+ServerStatusPinger.pingLegacyServer	missing		player: a server that answers only the old legacy ping shows as incompatible with its version and player count in vanilla; Horizon shows it as unreachable
+ServerStatusPinger.tick	skip:other		Horizon pings on plain threads, so there are no connections to tick
+ServerStatusPinger.removeAll	skip:other		pings are not cancelled on screen close; threads end on their own timeout
+SessionSearchTrees.rebuildAfterLanguageChange	skip:java		creative search reads names at query time, so there are no trees to rebuild
+SessionSearchTrees.getTooltipLines	inline	crates/horizon-client/src/creative.rs::Creative::from_json	search lines come pre-stripped from the export and are read here
+SessionSearchTrees.updateCreativeTags	inline	crates/horizon-client/src/creative.rs::Creative::from_json	tag index comes from the export's tag lists
+SessionSearchTrees.updateCreativeTooltips	inline	crates/horizon-client/src/creative.rs::Creative::from_json	name index comes from the export's tooltip lines
+ChatAbilities.selectVisibleMessages	port	crates/horizon-client/src/chat.rs::ChatAbilities::shows	source filter: client lines always, player and server lines per the abilities
+ChatAbilities.Builder.build	inline	crates/horizon-client/src/chat.rs::ChatAbilities::new	restrictions come from the Chat option alone; new() maps the visibility to them
+ChatListener.tick	missing		player: the Chat Delay option does nothing; lines show at once instead of after the delay
+ChatListener.setMessageDelay	missing		player: no delayed-message queue, so Chat Delay has no effect
+ChatListener.flushQueue	missing		player: no queue to flush (part of Chat Delay)
+ChatListener.removeFromDelayedMessageQueue	missing		minor: only matters while a delayed message is queued
+ChatListener.handleMessage	missing		player: nothing is held back, so Chat Delay is ignored
+ChatListener.handlePlayerChatMessage	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	gap: player: no Only Show Secure Chat filter, no server filter-mask text, no block or friend-only hiding of chat lines
+ChatListener.handleChatMessageError	missing		player: a signed chat line that fails validation shows no red chat.validation_error line; Horizon checks no chat signatures (rare on most servers)
+ChatListener.handleDisguisedChatMessage	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	gap: minor: no narration and no chat log entry
+ChatListener.showMessageToPlayer	port	crates/horizon-client/src/game/remote.rs::Game::chat_line	gap: player: trust, block, friend-only and secure-only checks are not run before showing
+ChatListener.evaluateTrustLevel	missing		player: no secure, modified or not-secure marking, so unsigned lines show with no Not Secure bar and Only Show Secure Chat does nothing
+ChatListener.logPlayerMessage	skip:service		feeds the chat log that chat reports read
+ChatListener.logSystemMessage	skip:service		feeds the chat log that chat reports read
+ChatListener.handleSystemMessage	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	gap: minor: hide-matched-names and friend filtering are not applied to system lines
+ChatListener.guessChatUUID	skip:service		social lookup of a name in a system line, used only for blocking and hiding
+ChatListener.isSenderLocalPlayer	missing		minor: only feeds the trust level check
+ChatLog.codec	skip:java		serializer of the chat log
+ChatLog.loggedChatEvents	skip:service		chat log for chat reports
+ChatLog.push	skip:service		chat log for chat reports
+ChatLog.lookup	skip:service		chat log for chat reports
+ChatTrustLevel.evaluate	missing		player: no Not Secure or Modified marking on chat lines, and Only Show Secure Chat does nothing (see createTag)
+ChatTrustLevel.isModified	missing		minor: only feeds the Modified marking
+ChatTrustLevel.containsModifiedStyle	missing		minor: only feeds the Modified marking
+ChatTrustLevel.createTag	missing		player: no grey Not Secure bar or Modified tag on player chat lines
+GuiMessage.splitLines	port	crates/horizon-client/src/chat.rs::Chat::add_lines	gap: minor: no width reserved for a tag icon; Horizon draws no icon tags
+GuiMessageTag.chatModified	missing		minor: no Modified tag text or icon (needs the trust check)
+GuiMessageTag.Icon.extractRenderState	missing		minor: the chat_modified icon is never drawn
+LoggedChatMessage.Player.toContentComponent	skip:service		chat report view of a logged line
+LoggedChatMessage.Player.toNarrationComponent	skip:service		chat report view of a logged line
+LoggedChatMessage.Player.toHeadingComponent	skip:service		chat report view of a logged line
+LoggedChatMessage.Player.getTimeComponent	skip:service		chat report view of a logged line
+AbuseReportSender.Services.send	skip:service		chat and player reporting
+AbuseReportSender.Services.getErrorDescription	skip:service		chat and player reporting
+BanReason.byId	skip:service		chat and player reporting
+ChatReport.toggleReported	skip:service		chat and player reporting
+ChatReport.copy	skip:service		chat and player reporting
+ChatReport.Builder.hasContent	skip:service		chat and player reporting
+ChatReport.Builder.checkBuildable	skip:service		chat and player reporting
+ChatReport.Builder.build	skip:service		chat and player reporting
+ChatReport.Builder.buildEvidence	skip:service		chat and player reporting
+ChatReport.Builder.buildReportedChatMessage	skip:service		chat and player reporting
+ChatReportContextBuilder.collectAllContext	skip:service		chat and player reporting
+ChatReportContextBuilder.acceptContext	skip:service		chat and player reporting
+ChatReportContextBuilder.Collector.accept	skip:service		chat and player reporting
+ChatReportContextBuilder.Collector.isComplete	skip:service		chat and player reporting
+NameReport.copy	skip:service		chat and player reporting
+NameReport.Builder.checkBuildable	skip:service		chat and player reporting
+NameReport.Builder.build	skip:service		chat and player reporting
+ReportEnvironment.thirdPartyServerInfo	skip:service		chat and player reporting
+ReportEnvironment.realmInfo	skip:service		chat and player reporting
+ReportEnvironment.getClientVersion	skip:service		chat and player reporting
+ReportReason.getIncompatibleCategories	skip:service		chat and player reporting
+ReportingContext.create	skip:service		chat and player reporting
+ReportingContext.draftReportHandled	skip:service		chat and player reporting
+ReportingContext.hasDraftReportFor	skip:service		chat and player reporting
+SkinReport.copy	skip:service		chat and player reporting
+SkinReport.Builder.hasContent	skip:service		chat and player reporting
+SkinReport.Builder.checkBuildable	skip:service		chat and player reporting
+SkinReport.Builder.build	skip:service		chat and player reporting
+BlockStatePredictionHandler.updateKnownServerState	port	crates/horizon-client/src/game/remote.rs::Game::server_block	a predicted block keeps its predicted state; the server state is remembered
+BlockStatePredictionHandler.startPredicting	port	crates/horizon-client/src/game/remote.rs::Game::predict_break	gap: minor: the sequence number is passed in by the caller instead of counted here
+AddressCheck.createFromService	missing		minor: no block-list suppliers are loaded, so no address is refused on connect
+ServerAddress.isValidAddress	port	crates/horizon-protocol/src/servers.rs::parse_address	gap: minor: no IDN check on the host name
+ServerAddress.equals	skip:java		value equality; Horizon compares the strings
+ServerNameResolver.resolveAddress	port	crates/horizon-protocol/src/resolver.rs::resolve	gap: minor: no block-list check on the resolved address
+ServerRedirectHandler.createDnsSrvRedirectHandler	port	crates/horizon-protocol/src/resolver.rs::srv_redirect	SRV lookup of _minecraft._tcp on port 25565
+AbstractBoatRenderer.submit	port	crates/horizon-client/src/game/boats.rs::Game::boat_geometry	gap: player: no bubble-column wobble (bubbleAngle tilt); the rest of the transform, hurt tilt and paddles are drawn
+AbstractBoatRenderer.extractRenderState	inline	crates/horizon-client/src/game/boats.rs::Game::boat_geometry	gap: player: bubbleAngle is not read, so boats in bubble columns do not wobble
+AbstractCubeMobRenderer.downscaleSlightly	port	crates/horizon-client/src/mobs/cube.rs::scale	slime only: the 0.999 scale and small lift
+AbstractCubeMobRenderer.applySizeAndSquish	port	crates/horizon-client/src/mobs/cube.rs::scale	size and squish scale
+AbstractCubeMobRenderer.extractRenderState	port	crates/horizon-client/src/mobs/cube.rs::scale	squish and size are read from the mob at draw time
+AbstractHoglinRenderer.extractRenderState	port	crates/horizon-client/src/mobs/piglin.rs::hoglin_anim	the headbutt count (anim_ticks) drives the head pose
+AbstractHorseRenderer.extractRenderState	port	crates/horizon-client/src/mobs/equine.rs::anim	eat, stand and mouth poses; saddle and armour come from render.rs layers
+AbstractMinecartRenderer.submit	port	crates/horizon-client/src/game/minecarts.rs::Game::cart_geometry	gap: player: no hurt tilt when a cart is hit (hurt_time is not read here); minor: no per-cart offset jitter
+AbstractMinecartRenderer.newRender	missing		minor: experimental minecart movement (new render path) is not implemented
+AbstractMinecartRenderer.oldRender	port	crates/horizon-client/src/game/minecarts.rs::Game::cart_geometry	rail-based draw is the path Horizon has
+AbstractMinecartRenderer.newExtractState	missing		minor: experimental minecart movement (new render path) is not implemented
+AbstractMinecartRenderer.oldExtractState	port	crates/horizon-client/src/game/minecarts.rs::Game::cart_geometry	rail front and back points are taken from the cart's rail position
+AbstractMinecartRenderer.getRenderOffset	missing		minor: only the new render path offsets the cart
+AbstractSkeletonRenderer.extractRenderState	port	crates/horizon-client/src/mobs/anim.rs::setup	gap: player: a skeleton's freeze-conversion shake (its isShaking) is not drawn; the aggressive and bow flags are read in setup
+AbstractSkeletonRenderer.getArmPose	port	crates/horizon-client/src/mobs/anim.rs::setup	bow-and-arrow arm pose when aggressive with a bow
+AbstractZombieRenderer.extractRenderState	port	crates/horizon-client/src/mobs/anim.rs::setup	aggressive arms (zombie arm pose)
+AbstractZombieRenderer.isShaking	port	crates/horizon-client/src/mobs/render.rs::shaking	converting zombies and husks shake
+AgeableMobRenderer.submit	port	crates/horizon-client/src/mobs/render.rs::body	baby or adult model choice
+AllayRenderer.extractRenderState	port	crates/horizon-client/src/mobs/allay.rs::animate	dance, spin and hold clocks
+ArmadilloRenderer.extractRenderState	port	crates/horizon-client/src/mobs/armadillo.rs::animate	roll-out, roll-up and peek states; hiding_in_shell covers the shell flag
+ArmorModelSet.get	skip:java		container lookup of baked models
+ArmorModelSet.map	skip:java		container of baked models
+ArmorModelSet.putFrom	skip:java		container of baked models
+ArmorModelSet.bake	skip:data		models are loaded from Horizon's assets, not baked from layer locations
+ArmorStandRenderer.extractRenderState	port	crates/horizon-client/src/game/armor_stands.rs::Game::armor_stand_geometry	wiggle, small, marker and poses are read there
+ArmorStandRenderer.submit	port	crates/horizon-client/src/game/armor_stands.rs::Game::armor_stand_geometry	small or big model
+ArmorStandRenderer.setupRotations	port	crates/horizon-client/src/game/armor_stands.rs::Game::armor_stand_geometry	the wiggle turn after a hit
+ArmorStandRenderer.getRenderType	port	crates/horizon-client/src/game/armor_stands.rs::Game::armor_stand_geometry	gap: minor: the translucent marker variant is not split out
+ArrowRenderer.submit	inline	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	the arrow model is drawn here, turned by its yaw and pitch
+ArrowRenderer.extractRenderState	inline	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	arrow yaw and pitch are read here
+AxolotlRenderer.extractRenderState	port	crates/horizon-client/src/mobs/axolotl.rs::Animation::tick	in-water, on-ground, moving and playing-dead factors are updated here; poses in body_anim::axolotl
+BatRenderer.extractRenderState	port	crates/horizon-client/src/mobs/bat.rs::setup_animation_states	flying and resting states; resting() is the flag
+BeeRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::bee	stinger, wings on the ground, angry and roll read there
+BreezeRenderer.extractRenderState	port	crates/horizon-client/src/mobs/breeze.rs::anim	idle, shoot, slide, inhale and long-jump states
+CamelRenderer.createCamelSaddleLayer	port	crates/horizon-client/src/mobs/render.rs::layers	camel uses the equine saddle branch
+CamelRenderer.extractAdditionalState	port	crates/horizon-client/src/mobs/camel.rs::animation_states	sit, stand, idle and dash states; the dash cooldown is in dash()
+CatRenderer.extractRenderState	port	crates/horizon-client/src/mobs/tame.rs::anim	gap: player: sitting and roll poses are drawn; lie-down (lieDownAmount) and relaxed poses are not, so a cat never lies down
+ChickenRenderer.bakeModels	skip:data		models are loaded from Horizon's assets
+ChickenRenderer.submit	port	crates/horizon-client/src/mobs/render.rs::body	adult, baby and cold model choice
+ChickenRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::body	texture by variant and age
+ChickenRenderer.extractRenderState	port	crates/horizon-client/src/mobs/anim.rs::setup	wing flap and flap speed; the variant is read in render.rs::body
+CodRenderer.setupRotations	missing		player: a cod out of water is not turned onto its side and in water does not sway; salmon and tropical fish share this
+CopperGolemRenderer.extractRenderState	port	crates/horizon-client/src/mobs/copper_golem.rs::anim	chest and idle animation states; the weathering texture comes from texture()
+CowRenderer.bakeModels	skip:data		models are loaded from Horizon's assets
+CowRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::body	variant texture, baby texture for babies
+CowRenderer.extractRenderState	port	crates/horizon-client/src/mobs/render.rs::body	variant is read there
+CowRenderer.submit	port	crates/horizon-client/src/mobs/render.rs::body	model per variant and age
+CreakingRenderer.extractRenderState	port	crates/horizon-client/src/mobs/creaking.rs::animate	attack, invulnerability and death clocks
+CreeperRenderer.extractRenderState	port	crates/horizon-client/src/overlay.rs::creeper_progress	white flash from swelling; the charged layer is in render.rs (energy swirl)
+CushionRenderer.extractRenderState	port	crates/horizon-client/src/game/cushions.rs::Game::cushion_geometry	yaw and colour texture are read there
+CushionRenderer.submit	port	crates/horizon-client/src/game/cushions.rs::Game::cushion_geometry	turned to its facing and drawn
+DisplayRenderer.getSkyLightLevel	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	brightness override
+DisplayRenderer.getBlockLightLevel	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	brightness override
+DisplayRenderer.getShadowRadius	missing		minor: display shadows are not drawn (shadow_radius is stored and not read)
+DisplayRenderer.getShadowStrength	missing		minor: display shadows are not drawn (shadow_strength is stored and not read)
+DisplayRenderer.submit	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	gap: player: only text displays are drawn; block and item displays are not
+DisplayRenderer.calculateOrientation	port	crates/horizon-client/src/text_display.rs::TextDisplayData::matrix	billboard orientation (fixed, horizontal, vertical, center)
+DisplayRenderer.extractRenderState	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	interpolation progress and the entity yaw and pitch are read there
+DisplayRenderer.BlockDisplayRenderer.extractRenderState	missing		player: block display entities are invisible; the remote path tracks only text displays
+DisplayRenderer.ItemDisplayRenderer.extractRenderState	missing		player: item display entities are invisible
+DisplayRenderer.ItemDisplayRenderer.submitInner	missing		player: item displays draw nothing
+DisplayRenderer.TextDisplayRenderer.extractRenderState	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	render state comes from the text display's metadata
+DisplayRenderer.TextDisplayRenderer.submitInner	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	text, background and opacity

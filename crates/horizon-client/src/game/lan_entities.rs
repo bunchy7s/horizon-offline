@@ -7,6 +7,7 @@ use super::Game;
 use horizon_client::lan::{
     entity::{EntityState, Riding, States},
     hub::Hub,
+    playerdata::ints_uuid,
 };
 use horizon_protocol::entity_data::{Value, serializer};
 use horizon_world::nbt::Tag;
@@ -153,8 +154,15 @@ impl Game<'_> {
             );
             e.head_yaw = a.yaw;
             e.velocity = [a.velocity.x, a.velocity.y, a.velocity.z];
+            let mut flags = 0i8;
             if a.fire_ticks > 0 {
-                e.meta.push((0, serializer::BYTE, Value::Byte(1)));
+                flags |= 1;
+            }
+            if a.invisible {
+                flags |= 0x20;
+            }
+            if flags != 0 {
+                e.meta.push((0, serializer::BYTE, Value::Byte(flags)));
             }
             // LivingEntity.DATA_HEALTH_ID: 1 until the stand's max health is set.
             e.meta.push((9, serializer::FLOAT, Value::Float(a.health)));
@@ -167,6 +175,24 @@ impl Game<'_> {
                 e.meta.push((15, serializer::BYTE, Value::Byte(flags)));
             }
             e.meta.extend(stand_poses(a));
+            // Entity.DATA_CUSTOM_NAME and DATA_CUSTOM_NAME_VISIBLE: a hologram's text.
+            if let Some(name) = &a.custom_name {
+                e.meta.push((
+                    2,
+                    serializer::OPTIONAL_COMPONENT,
+                    Value::OptText(Some(horizon_client::scoreboard::json_to_tag(
+                        &name.component(),
+                    ))),
+                ));
+                if a.name_visible {
+                    e.meta.push((3, serializer::BOOLEAN, Value::Bool(true)));
+                }
+            }
+            // A name taken away or hidden again (`/data`) is sent as none / false.
+            e.defaults
+                .push((2, serializer::OPTIONAL_COMPONENT, Value::OptText(None)));
+            e.defaults
+                .push((3, serializer::BOOLEAN, Value::Bool(false)));
             // A pose put back to its default (`/data`) is sent as that default.
             e.defaults.push((15, serializer::BYTE, Value::Byte(0)));
             for (i, default) in horizon_client::entities::ArmorStand::DEFAULT_POSE
@@ -203,6 +229,9 @@ impl Game<'_> {
                 _ => 0.0,
             };
             e.data = i32::from(f.facing);
+            if f.invisible {
+                e.meta.push((0, serializer::BYTE, Value::Byte(0x20)));
+            }
             // HangingEntity.DATA_DIRECTION, south by default.
             if f.facing != 3 {
                 e.meta
@@ -270,6 +299,16 @@ impl Game<'_> {
 }
 
 impl Game<'_> {
+    /// `ClientboundAddEntityPacket(Entity, ServerEntity, int)`: the entity's
+    /// own UUID (`Entity.getUUID`), the one `/data`, saves and UUID
+    /// selectors use, so a client can name it back (the crosshair UUID that
+    /// `ClientSuggestionProvider.getSelectedEntities` suggests).
+    pub(super) fn lan_entity_uuids(&mut self, states: &mut States) {
+        for e in states.as_mut_slice() {
+            e.uuid = ints_uuid(self.uuid_for(e.id as u32));
+        }
+    }
+
     /// Gives the entities Horizon keeps without an id one (`Entity.id`, from
     /// the same counter as the rest) before they are first tracked.
     pub(super) fn lan_assign_ids(&mut self) {
@@ -425,9 +464,12 @@ impl Game<'_> {
             let mut e = state(t.id, "minecraft:trident", at(t.position), t.yaw, false);
             e.pitch = t.pitch;
             e.velocity = at(t.velocity);
-            // Projectile.getAddEntityPacket: the owner's id; a trident here is
-            // always the host player's.
-            e.data = owner(Some(horizon_client::mobs::Who::Player));
+            // Projectile.getAddEntityPacket: the owner's id, the guest's that
+            // threw it.
+            e.data = match t.guest.and_then(|conn| hub.guest(conn)) {
+                Some(g) => g.entity_id,
+                None => owner(Some(horizon_client::mobs::Who::Player)),
+            };
             e.meta = arrow_meta(false, t.no_physics, 0, t.in_ground);
             // ThrownTrident.ID_LOYALTY and ID_FOIL.
             if t.loyalty != 0 {

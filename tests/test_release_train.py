@@ -269,5 +269,34 @@ class ReleaseTrainTests(unittest.TestCase):
                           "`shaderpacks` folder are left where they are.\n", body)
 
 
+
+
+class NightlyTrainTests(unittest.TestCase):
+    """Since 2026-10-28 the train decides when a Nightly goes out (release.yml starts nightly-build.yml)."""
+
+    PRS = [{"number": 1, "labels": [], "paths": ["crates/x.rs"]}]
+
+    def test_one_build_at_a_time_and_twelve_a_day(self):
+        self.assertEqual(train.nightly_decision(True, "5 pull requests", self.PRS, None, 3)[:2], (True, "5 pull requests"))
+        release, reason, _ = train.nightly_decision(True, "5", self.PRS, 4242, 3)
+        self.assertFalse(release)
+        self.assertIn("run 4242", reason)
+        release, reason, urgent = train.nightly_decision(True, "5", self.PRS, None, 12)
+        self.assertFalse(release)
+        self.assertFalse(urgent)
+        self.assertIn("12 Nightlies today", reason)
+        self.assertEqual(train.nightly_decision(False, "waiting", self.PRS, None, 0)[:2], (False, "waiting"))
+
+    def test_release_now_and_force_pass_the_cap_but_not_a_running_build(self):
+        urgent = [{"number": 2, "labels": ["release-now"], "paths": ["crates/x.rs"]}]
+        self.assertEqual(train.nightly_decision(True, "release-now: #2", urgent, None, 12), (True, "release-now: #2", True))
+        self.assertTrue(train.nightly_decision(True, "forced", self.PRS, None, 30, force=True)[0])
+        self.assertFalse(train.nightly_decision(True, "forced", self.PRS, 7, 0, force=True)[0])
+
+    def test_the_cap_is_the_nightly_sets(self):
+        from tools.ci import nightly_set
+        self.assertEqual(train.NIGHTLY_CAP, nightly_set.MAX_BUILDS_PER_DAY)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,143 @@
+PlayerHurtEntityTrigger.TriggerInstance.playerHurtEntityWithDamage	skip:data		criterion factory; Horizon reads the criterion from the advancement JSON
+PlayerHurtEntityTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_player_hurt_entity	player, damage and victim predicates through advancements.rs damage and conditions
+PlayerInteractTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_item_entity	gap: player: fires player_interacted_with_entity only; player_sheared_equipment (remove_wolf_armor) is never fired
+PlayerInteractTrigger.TriggerInstance.itemUsedOnEntity	skip:data		criterion factory
+PlayerInteractTrigger.TriggerInstance.equipmentSheared	skip:data		criterion factory; the sheared trigger it feeds is never fired, see PlayerInteractTrigger.trigger
+PlayerInteractTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_item_entity	item and entity predicates
+PlayerTrigger.TriggerInstance.located	skip:data		criterion factory
+PlayerTrigger.TriggerInstance.walkOnBlockWithEquipment	skip:data		criterion factory
+RecipeCraftedTrigger.trigger	port	crates/horizon-client/src/game/machines/crafter.rs::Game::crafter_eject	gap: player: only the crafter block fires; player crafting never fires recipe_crafted, so the trim and decorated pot advancements are not granted
+RecipeCraftedTrigger.TriggerInstance.craftedItem	skip:data		criterion factory
+RecipeCraftedTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/machines/crafter.rs::recipe_matches	gap: minor: recipe id only; ingredient predicates are not checked
+RecipeUnlockedTrigger.unlocked	skip:data		criterion factory
+RecipeUnlockedTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::recipe_unlocked	matched by recipe id
+ShotCrossbowTrigger.TriggerInstance.shotCrossbow	skip:data		criterion factory
+ShotCrossbowTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_item	fired from crossbow.rs with the shot item
+SlideDownBlockTrigger.TriggerInstance.slidesDownBlock	skip:data		criterion factory
+SlideDownBlockTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_honey_slide	block and state match
+SpearMobsTrigger.TriggerInstance.matches	missing		player: the spear_many_mobs advancement is never granted; spear hits do not count the mobs they hit (spear.rs fires no trigger)
+SummonedEntityTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_entity	summoned_entity fired from wither.rs
+SummonedEntityTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_entity	entity predicate
+TameAnimalTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_entity	tame_animal fired from creatures.rs, nautili.rs and mounts.rs
+TameAnimalTrigger.TriggerInstance.tamedAnimal	skip:data		criterion factory
+TameAnimalTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_entity	entity predicate
+TargetBlockTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_target_hit	fired from creatures.rs on projectile hit
+TargetBlockTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_target_hit	signal strength and projectile predicates
+TradeTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_trade	fired from trading.rs
+TradeTrigger.TriggerInstance.tradedWithVillager	skip:data		criterion factory
+TradeTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_trade	villager and item predicates
+UsedEnderEyeTrigger.trigger	missing		minor: no 26.3 advancement uses used_ender_eye; ender eye use (end.rs) fires no trigger
+UsedTotemTrigger.TriggerInstance.usedTotem	skip:data		criterion factory
+UsedTotemTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_item	fired from totem.rs
+UsingItemTrigger.TriggerInstance.lookingAt	skip:data		criterion factory
+UsingItemTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_using_item	item and looking-at predicates
+Camera.createProjectionMatrixForCulling	port	crates/horizon-client/src/gfx.rs::Renderer::camera_frustum	gap: minor: the max(FOV, option FOV) rule is not in this fn
+Camera.prepareCullFrustum	port	crates/horizon-client/src/gfx.rs::Renderer::camera_frustum	gap: minor: no captured frustum (F3+U kill and capture)
+Camera.setPosition	inline	crates/horizon-client/src/camera.rs::Camera::align_with_entity	the position is stored there
+Camera.getViewRotationMatrix	port	crates/horizon-client/src/camera.rs::view_matrix	
+Camera.NearPlane.getPointOnPlane	inline	crates/horizon-client/src/game/fishing.rs::Game::fishing_line	only the fishing line's anchor uses it
+ClientBootstrap.bootstrap	skip:data		registry bootstrap
+ClientRecipeBook.rebuildCollections	port	crates/horizon-client/src/recipe_book.rs::ClientBook::collections	tab collections built per call
+ClientRecipeBook.categorizeAndGroupRecipes	port	crates/horizon-client/src/recipe_book.rs::ClientBook::collections	grouping by category and group id
+CommandHistory.addCommand	port	crates/horizon-client/src/chat.rs::Chat::add_recent	no repeats; keeps the last 50 saved commands
+CommandHistory.save	inline	crates/horizon-client/src/chat.rs::Chat::add_recent	writes command_history.txt there
+ComponentCollector.getResult	skip:java		collector helper
+DebugQueryHandler.handleResponse	skip:debug		F3 NBT query: packet ids exist in horizon-protocol but nothing sends them
+DebugQueryHandler.startTransaction	skip:debug		F3 NBT query transaction; see handleResponse
+DebugQueryHandler.queryEntityTag	skip:debug		F3 entity NBT query; see handleResponse
+DebugQueryHandler.queryBlockEntityTag	skip:debug		F3 block entity NBT query; see handleResponse
+DeltaTracker.Timer.pause	port	crates/horizon-client/src/clock.rs::Timer::update_pause_state	residual kept while paused
+DeltaTracker.Timer.unPause	port	crates/horizon-client/src/clock.rs::Timer::update_pause_state	residual restored on resume
+GameNarrator	missing		minor: no text-to-speech; the narrator option is stored but nothing is spoken
+HotbarManager.get	port	crates/horizon-client/src/hotbar.rs::load	file loaded when the creative hotbar opens (creative_hotbar.rs)
+KeyMapping.forAllKeyMappings	port	crates/horizon-client-input/src/keybinds.rs::KeyBinds::mappings_for	one key drives every mapping bound to it
+KeyMapping.setAll	missing		player: held keys are not re-read when the window regains focus; after alt-tab with a move key held, the walk stops until the key is pressed again
+KeyMapping.resetMapping	skip:other		no lookup table to rebuild; mappings_for reads the current keys
+KeyMapping.compareTo	skip:ui		controls list order is the MAPPINGS table order in keybinds.rs
+KeyMapping.createNameSupplier	skip:ui		key label supplier
+KeyMapping.matches	port	crates/horizon-client-input/src/keybinds.rs::KeyBinds::mappings_for	keyboard key to mapping
+KeyMapping.matchesMouse	port	crates/horizon-client-input/src/keybinds.rs::KeyBinds::mappings_for	mouse buttons bound by name
+KeyMapping.registerMapping	skip:java		mapping table registration
+KeyMapping.Category.register	skip:data		category registry
+KeyboardHandler.handleChunkDebugKeys	missing		minor: F3+E, F, L, M, O, U, V, W do nothing (section paths, fog, smart cull, multi-draw, octree, frustum, section visibility, wireframe); no keybinds exist for them
+KeyboardHandler.copyCreateBlockCommand	port	crates/horizon-client/src/game/debug_keys.rs::Game::copy_recreate_command	
+KeyboardHandler.copyCreateEntityCommand	port	crates/horizon-client/src/game/debug_keys.rs::Game::copy_recreate_command	
+KeyboardHandler.charTyped	port	crates/horizon-client/src/game.rs::Game::window_event	typed text routed to the open screen
+KeyboardHandler.textInput	port	crates/horizon-client/src/game.rs::Game::window_event	typed text routed to the open screen
+KeyboardHandler.textEditing	missing		player: no IME composition; Japanese or Chinese text shows nothing until it is committed
+KeyboardHandler.submitPreeditEvent	missing		player: no IME preedit event reaches any screen
+Minecraft.<init>	inline	crates/horizon-client/src/game.rs::run_loading	gap: minor: no unclean-start recovery; startedCleanly is only a default in options_file.rs
+Minecraft.onGameLoadFinished	missing		minor: startedCleanly is never written after load
+Minecraft.createTitle	missing		minor: the window title is always Horizon (with_title in game.rs), no version or world type
+Minecraft.createUserApiService	skip:service		
+Minecraft.abortResourcePackRecovery	missing		minor: no automatic abort when a pack keeps failing; errors stay on the Packs page
+Minecraft.addResourcePackLoadFailToast	port	crates/horizon-client/src/game/packs.rs::Game::reload_packs	gap: minor: the failure is a Packs-page error, not a toast
+Minecraft.triggerResourcePackRecovery	missing		minor: a failing pack at runtime is not removed; reload_packs only reports reload errors
+Minecraft.run	port	crates/horizon-client/src/game.rs::run	the main loop
+Minecraft.saveReport	port	crates/horizon-client/src/crash.rs::Report::save	
+Minecraft.saveReportAndShutdownSoundManager	port	crates/horizon-client/src/crash.rs::Report::save	gap: minor: sound shutdown is not part of Report::save
+Minecraft.selfTest	skip:debug		dev self-test, disabled in vanilla (the IS_RUNNING_IN_IDE && false check)
+Minecraft.exitWorldAndClose	port	crates/horizon-client/src/game.rs::Game::close_world	
+Minecraft.close	port	crates/horizon-client/src/game.rs::Game::finish_close_world	shutdown of the session
+Minecraft.renderFrame	port	crates/horizon-client/src/game.rs::Game::render	
+Minecraft.pauseIfInactive	port	crates/horizon-client/src/game.rs::Game::window_event	gap: minor: pauses at the focus-lost event, not after 500 ms without focus
+Minecraft.constructProfiler	skip:debug		profiler plumbing
+Minecraft.finishProfilers	skip:debug		profiler plumbing
+Minecraft.resizeGui	port	crates/horizon-client-input/src/window.rs::calculate_scale	gap: minor: GUI scale only; no screen resize or mouse resync in this fn
+Minecraft.emergencySave	missing		unsure: no world save before a crash report was found; the panic path only writes the report
+Minecraft.debugClientMetricsStart	skip:debug		metrics recording
+Minecraft.archiveProfilingReport	skip:debug		profiling archive
+Minecraft.isLevelRunningNormally	port	crates/horizon-client/src/clock.rs::TickRateManager::runs_normally	
+Minecraft.isMultiplayerServer	skip:other		no single predicate; remote and LAN code test their own state
+Minecraft.getQuickActionsDialog	missing		minor: no key.quickActions binding, so the quick actions dialog cannot open
+Minecraft.disconnectFromWorld	port	crates/horizon-client/src/game/remote.rs::Game::leave_server	gap: minor: only the remote exit; local worlds exit via close_world
+Minecraft.disconnectWithProgressScreen	inline	crates/horizon-client/src/game.rs::Game::close_world	the exit is folded into the world close
+Minecraft.clearClientLevel	inline	crates/horizon-client/src/game/remote.rs::Game::leave_server	level teardown is part of leave_server
+Minecraft.setScreenAndShow	skip:other		Horizon switches the screen field; no forced frame render needed
+Minecraft.updateLevelInEngines	skip:other		one world state in Horizon; no engines to update
+Minecraft.telemetryOptInExtra	skip:service		
+Minecraft.extraTelemetryAvailable	skip:service		
+Minecraft.allowsTelemetry	skip:service		
+Minecraft.allowsMultiplayer	skip:service		
+Minecraft.allowsRealms	skip:service		
+Minecraft.friendsEnabled	skip:service		
+Minecraft.handleGlobalKeyPress	port	crates/horizon-client/src/game.rs::Game::key_pressed	F11 and F2 shortcuts; the friends key is service
+Minecraft.toggleFullscreen	port	crates/horizon-client/src/game/options.rs::Game::toggle_fullscreen	
+Minecraft.toggleFriendsScreen	skip:service		
+Minecraft.allowChatOnlyWithFriend	skip:service		
+Minecraft.isNameBanned	skip:service		
+Minecraft.isBlocked	skip:service		
+Minecraft.isFriendOnlyRestricted	skip:service		
+Minecraft.isLocalOrUnknownPlayer	skip:service		
+Minecraft.fillReport	skip:debug		crash report details; crash.rs writes its own report
+Minecraft.formatSeconds	skip:debug		report helper
+Minecraft.fillUptime	skip:debug		report helper
+Minecraft.fillSystemReport	skip:debug		system report text
+Minecraft.updateReportEnvironment	skip:service		reporting context for chat reports
+Minecraft.getGameProfile	skip:service		Mojang profile fetch; Horizon's account is local (auth.rs)
+Minecraft.showOnlyReducedInfo	port	crates/horizon-client/src/game/debug_keys.rs::Game::reduced_debug_info	
+Minecraft.grabPanoramixScreenshot	skip:debug		only runs with SharedConstants.DEBUG_PANORAMA_SCREENSHOT
+Minecraft.onTextInputFocusChange	missing		minor: no IME, so nothing to re-submit on focus
+Minecraft.getTickTargetMillis	port	crates/horizon-client/src/clock.rs::TickRateManager::milliseconds_per_tick	gap: minor: the max with the default tick time is not in this fn
+MouseHandler.fillMousePositionDetails	skip:debug		crash report mouse details
+MouseHandler.onDrop	missing		minor: dropping files on the window does nothing; no drop event is handled
+MouseHandler.getScaledYPos	port	crates/horizon-client-input/src/window.rs::scaled_pos	
+MouseHandler.resyncMousePosition	skip:other		winit reports the cursor position; no SDL global-state resync
+MouseHandler.releaseMouse	port	crates/horizon-client/src/game.rs::Game::capture	release path (capture false)
+MouseHandler.drawDebugMouseInfo	skip:debug		F3 mouse coordinates
+NarratorStatus.shouldNarrateSystemOrChat	missing		minor: no narrator output
+OptionInstance.createBoolean	skip:data		option definitions live in options_file.rs
+OptionInstance.createButton	skip:ui		widget creation
+OptionInstance.AltEnum.validateValue	port	crates/horizon-client/src/options_file.rs::Spec::validate	
+OptionInstance.ClampingLazyMaxIntRange.codec	skip:java		codec
+OptionInstance.ClampingLazyMaxIntRange.valueListSupplier	skip:ui		widget value list
+OptionInstance.CycleableValueSet.createButton	port	crates/horizon-client/src/options_ui.rs::Opt::cycle	gap: minor: cycle() does not save; the caller decides
+OptionInstance.IntRange.validateValue	port	crates/horizon-client/src/options_file.rs::Spec::validate	
+OptionInstance.IntRangeBase.toSliderValue	port	crates/horizon-client/src/options_ui.rs::Opt::slider_position	
+OptionInstance.IntRangeBase.fromSliderValue	port	crates/horizon-client/src/options_ui.rs::Opt::set_slider	
+OptionInstance.OptionInstanceSliderButton.updateMessage	skip:ui		label and tooltip text
+OptionInstance.OptionInstanceSliderButton.applyValue	port	crates/horizon-client/src/options_ui.rs::delays_apply	gap: minor: values apply at once; the 600 ms delay only holds the handle
+OptionInstance.OptionInstanceSliderButton.applyUnsavedValue	port	crates/horizon-client/src/options_ui.rs::set_slider	
+OptionInstance.OptionInstanceSliderButton.resetValue	port	crates/horizon-client/src/options_ui.rs::OptionsUi::slider_shown	
+OptionInstance.OptionInstanceSliderButton.extractWidgetRenderState	port	crates/horizon-client/src/options_ui.rs::slider_unsnapped	gap: minor: no deferred apply after 600 ms; only the handle display
+OptionInstance.OptionInstanceSliderButton.keyPressed	missing		unsure: no arrow-key slider control found in options_ui.rs or game.rs

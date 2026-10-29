@@ -959,3 +959,54 @@ fn binary_bulk_preserves_child_failure_order_and_output() {
         );
     }
 }
+/// A y-fixed slice's plane, kept by `SamplerContext::with_planes`, gives the
+/// values fresh sampling gives at other heights and vertical steps, and is
+/// sampled once for one x/z lattice.
+#[test]
+fn kept_planes_match_fresh_slices_across_vertical_lattices() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    #[derive(Debug)]
+    struct Counted(NoiseSampler, AtomicUsize);
+    impl DensitySampler for Counted {
+        fn sample_value(&self, c: &mut SamplerContext, p: [i32; 3]) -> Result<f32, SampleError> {
+            self.0.sample_value(c, p)
+        }
+        fn sample_volume(
+            &self,
+            c: &mut SamplerContext,
+            out: &mut [f32],
+            v: DensityVolume,
+        ) -> Result<(), SampleError> {
+            self.1.fetch_add(1, Ordering::Relaxed);
+            self.0.sample_volume(c, out, v)
+        }
+    }
+    let input = Arc::new(Counted(
+        NoiseSampler {
+            noise: Arc::new(PerlinNoise::new(&mut LegacyRandom::new(5))),
+            xz_scale: 0.3,
+            y_scale: 0.7,
+        },
+        AtomicUsize::new(0),
+    ));
+    let slice = slice::SliceSampler {
+        input: input.clone(),
+        axes: slice::SliceAxes::Y(0),
+    };
+    let lattices = [
+        DensityVolume::new([5, 9, 4], [-8, -64, 12], [4, 64, 4]).unwrap(),
+        DensityVolume::new([5, 17, 4], [-8, 0, 12], [4, 8, 4]).unwrap(),
+    ];
+    let mut kept = SamplerContext::sparse().with_planes();
+    for (i, volume) in lattices.into_iter().enumerate() {
+        let mut fresh = vec![0.0; volume.size()];
+        slice
+            .sample_volume(&mut SamplerContext::sparse(), &mut fresh, volume)
+            .unwrap();
+        let mut reused = vec![1.0; volume.size()];
+        slice.sample_volume(&mut kept, &mut reused, volume).unwrap();
+        assert_eq!(fresh, reused, "lattice {i}");
+    }
+    // Two fresh evaluations and one kept plane.
+    assert_eq!(input.1.load(Ordering::Relaxed), 3);
+}

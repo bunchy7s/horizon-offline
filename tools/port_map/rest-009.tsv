@@ -1,0 +1,149 @@
+PowerParticleOption.codec	skip:java		codec of the command and NBT form, default power 1.0
+PowerParticleOption.streamCodec	port	crates/horizon-protocol/src/entity_data.rs::read_value	gap: minor: decode side only (the Scalar arm used by dragon_breath)
+SpellParticleOption.codec	skip:java		codec of the command and NBT form: optional colour and power
+SpellParticleOption.streamCodec	port	crates/horizon-protocol/src/entity_data.rs::read_value	gap: minor: decode side only (the ColorPower arm)
+SpellParticleOption.create	port	crates/horizon-client/src/particles.rs::ParticleOptions::colored	gap: minor: takes RGBA with no power argument; power is set by the caller through scale
+BootstrapRegistry.get	skip:data		bootstrap registry used at datagen; Horizon reads registry data from tables
+BootstrapRegistry.FrozenStorage.get	skip:data		bootstrap registry storage at datagen; Horizon reads registry data from tables
+BootstrapRegistry.RegistrationStorage.get	skip:data		bootstrap registry storage at datagen; Horizon reads registry data from tables
+BuiltInRegistries.registerDefaulted	skip:data		startup registration of built-in registries; Horizon ships registry data as tables
+BuiltInRegistries.registerDefaultedWithIntrusiveHolders	skip:data		startup registration of built-in registries; Horizon ships registry data as tables
+BuiltInRegistries.internalRegister	skip:data		startup registration of built-in registries; Horizon ships registry data as tables
+BuiltInRegistries.createContents	skip:data		bootstrap loader run; Horizon ships registry data as tables
+BuiltInRegistries.freeze	skip:data		bootstrap freeze of built-in registries; Horizon ships registry data as tables
+BuiltInRegistries.validate	skip:data		startup sanity check of registry contents; Horizon ships registry data as tables
+ConcurrentHolderGetter.get	skip:java		thread-safe cache over a holder getter
+EmptyTagLookupWrapper.wrap	skip:data		registry lookup with tags stripped, used when vanilla builds registries from patches; Horizon does not build registries
+PatchedRegistry.get	skip:data		patched registry from data packs; Horizon reads registry data from tables
+PatchedRegistry.createLazyFullPatchedRegistries	skip:data		builds patched registries from data packs; Horizon reads registry data from tables
+PatchedRegistry.applyPatches	skip:data		applies data-pack registry patches; Horizon reads registry data from tables
+PatchedRegistry.LazyHolder.value	skip:java		lazy clone cache for a patched holder
+HolderSetCodec.directCodec	skip:java		codec helper for holder lists
+HolderSetCodec.decode	skip:java		codec decode of tag or list references
+HolderSetCodec.lookupTag	skip:data		resolves a tag key against the registry; Horizon resolves tag references by name in its data readers (loot.rs::holder_set)
+HolderSetCodec.encode	skip:java		codec encode of holder sets
+RegistryCodecs.holder	skip:java		codec factory for registry references
+RegistryFileCodec.encode	skip:java		codec encode of registry file references
+RegistryFileCodec.decode	skip:java		codec decode of registry file references (inline definitions allowed)
+RegistryFixedCodec.encode	skip:java		codec encode of fixed registry references
+RegistryFixedCodec.decode	skip:java		codec decode of fixed registry references
+CircleGizmo.emit	missing		minor: debug circle gizmo (F3 debug renderers only); gizmos.rs has no circle primitive
+GizmoStyle.hasStroke	skip:other		style predicate; Horizon debug lines always carry one width (gizmos.rs::Line), so there is no stroke to test
+Gizmos.addGizmo	skip:other		registration into vanilla's thread-local collector; Horizon's gizmos.rs::Gizmos holds the lines directly
+Gizmos.rect	missing		minor: debug rectangles (F3 debug renderers only); gizmos.rs draws cuboid edges only, no faces
+Gizmos.billboardTextOverBlock	missing		minor: debug text above a block (debug renderers only); gizmos.rs has no billboard text
+Gizmos.billboardTextOverMob	missing		minor: debug text above a mob (debug renderers only); gizmos.rs has no billboard text
+Gizmos.TemporaryCollection.close	skip:other		restores vanilla's thread-local gizmo collector; Horizon has no collector stack
+LineGizmo.emit	port	crates/horizon-client/src/gizmos.rs::Gizmos::line	gap: minor: no alpha multiplier, so debug lines do not fade
+PointGizmo.emit	missing		minor: debug point gizmo (F3 debug renderers only); gizmos.rs has no point primitive
+RectGizmo.fromCuboidFace	missing		minor: face rectangle for debug rects (F3 debug renderers only); not ported
+RectGizmo.emit	missing		minor: filled and outlined debug quads (F3 debug renderers only); gizmos.rs has no quad primitive
+SimpleGizmoCollector.add	skip:other		adds to vanilla's per-frame gizmo collector; Horizon has no collector object, gizmos.rs::Gizmos holds the lines
+SimpleGizmoCollector.drainGizmos	skip:other		per-frame hand-off and expiry of vanilla's collector; Horizon's debug gizmos have no expiry
+SimpleGizmoCollector.GizmoInstance.persistForMillis	missing		minor: debug gizmos that stay on screen for a set time (F3 debug renderers only); gizmos.rs has no expiry
+SimpleGizmoCollector.GizmoInstance.getAlphaMultiplier	missing		minor: fade-out of persisted debug gizmos; gizmos.rs has no fade
+TextGizmo.emit	missing		minor: debug text gizmo (F3 debug renderers only); gizmos.rs has no text primitive
+TextGizmo.Style.withLeftAlignment	missing		minor: left-aligned debug label text (debug renderers only); no text style in gizmos.rs
+DeprecatedTranslationsInfo.loadFromJson	port	crates/horizon-client-core/src/lang.rs::apply_deprecated	parses and applies the deprecated list in one fn; vanilla throws on a bad file, Horizon ignores it
+DeprecatedTranslationsInfo.loadFromResource	inline	crates/horizon-client-core/src/lang.rs::Language::load	reads assets/minecraft/lang/deprecated.json from the first source that has it, then applies it
+Language.parseTranslations	port	crates/horizon-client-core/src/lang.rs::Language::load	reads each lang file from every source; a file that fails to parse is skipped
+Language.loadFromJson	port	crates/horizon-client-core/src/lang.rs::Language::load	gap: minor: component-valued entries (arrays or objects) are not kept; serde_json rejects the whole file, so its other entries are lost
+ByteArrayTag.copy	skip:java		Clone on Tag replaces copy()
+ByteArrayTag.equals	skip:java		PartialEq derive replaces equals()
+ByteArrayTag.setTag	port	crates/horizon-client-core/src/nbt_path.rs::set_tag	gap: minor: writes through an NBT path node; returns a change count, not a boolean for non-numeric tags
+ByteArrayTag.addTag	port	crates/horizon-client-core/src/nbt_path.rs::NbtPath::insert	gap: minor: inserts through the /data path, not a per-array add
+ByteArrayTag.remove	port	crates/horizon-client-core/src/nbt_path.rs::remove_tag	gap: minor: removal through an index node; returns a count, not the removed tag
+CompoundTag.write	port	crates/horizon-world/src/nbt.rs::Writer::payload	the Compound arm writes each entry and the End byte
+CompoundTag.sizeInBytes	skip:other		memory-size estimate for vanilla's NbtAccounter quota; Horizon's Limits count wire bytes and nodes
+CompoundTag.getByteOr	port	crates/horizon-world/src/datafix/dynamic.rs::as_number	gap: minor: the default and the i8 narrowing (Number::byte_value) are left to the caller
+CompoundTag.getShortOr	port	crates/horizon-world/src/datafix/dynamic.rs::as_number	gap: minor: the default and the i16 narrowing are left to the caller
+CompoundTag.getLongOr	port	crates/horizon-world/src/datafix/dynamic.rs::as_long	the key lookup is done by the caller
+CompoundTag.getFloatOr	port	crates/horizon-world/src/datafix/dynamic.rs::as_float	the key lookup is done by the caller
+CompoundTag.getDoubleOr	port	crates/horizon-world/src/datafix/dynamic.rs::as_double	the key lookup is done by the caller
+CompoundTag.getStringOr	port	crates/horizon-world/src/datafix/dynamic.rs::as_string	the key lookup is done by the caller
+CompoundTag.getByteArray	port	crates/horizon-world/src/datafix/dynamic.rs::as_byte_buffer	minor: also accepts number lists; vanilla takes a ByteArrayTag only
+CompoundTag.getLongArray	port	crates/horizon-world/src/datafix/dynamic.rs::as_long_stream	minor: also accepts number lists; vanilla takes a LongArrayTag only
+CompoundTag.getCompound	port	crates/horizon-world/src/datafix/dynamic.rs::map	the key lookup is done by the caller (dynamic.rs::get)
+CompoundTag.getList	port	crates/horizon-world/src/datafix/dynamic.rs::stream	gap: minor: returns copies of the elements, not the list tag; number arrays also pass
+CompoundTag.getBooleanOr	port	crates/horizon-client-core/src/block_entity_nbt.rs::flag	minor: reads the int value of any numeric tag; vanilla reads the byte, which differs only beyond a byte
+CompoundTag.copy	skip:java		Clone on Tag replaces copy()
+CompoundTag.equals	skip:java		PartialEq derive replaces equals()
+CompoundTag.writeNamedTag	port	crates/horizon-world/src/nbt.rs::Writer::payload	the Compound arm writes each entry's id and name before its payload
+CompoundTag.readNamedTagData	port	crates/horizon-world/src/nbt.rs::Reader::payload	the read error is an Error value, not a crash report
+CompoundTag.accept	port	crates/horizon-client-core/src/snbt.rs::visit	gap: minor: the StreamTagVisitor overload (entry-by-entry walk) is not ported
+CompoundTag.store	skip:java		codec-based save; Horizon writes fields explicitly (block_entity_nbt.rs Fields::put)
+CompoundTag.storeNullable	skip:java		codec-based save of an optional value; Horizon writes fields explicitly
+CompoundTag.read	skip:java		codec-based load; Horizon reads fields explicitly (block_entity_nbt.rs helpers)
+IntArrayTag.write	port	crates/horizon-world/src/nbt.rs::Writer::payload	the IntArray arm writes the count, then the ints
+IntArrayTag.copy	skip:java		Clone on Tag replaces copy()
+IntArrayTag.equals	skip:java		PartialEq derive replaces equals()
+IntArrayTag.setTag	port	crates/horizon-client-core/src/nbt_path.rs::set_tag	gap: minor: writes through an NBT path node; returns a change count
+IntArrayTag.addTag	port	crates/horizon-client-core/src/nbt_path.rs::NbtPath::insert	gap: minor: inserts through the /data path, not a per-array add
+IntArrayTag.remove	port	crates/horizon-client-core/src/nbt_path.rs::remove_tag	gap: minor: removal through an index node; returns a count, not the removed tag
+ListTag.tryUnwrap	inline	crates/horizon-world/src/nbt.rs::Reader::payload	a list element that is a single "" compound is unwrapped while it is read
+ListTag.isWrapper	inline	crates/horizon-world/src/nbt.rs::Reader::payload	same single-""-key test as the read-side unwrap; the write side tests it in Writer::payload
+ListTag.write	port	crates/horizon-world/src/nbt.rs::Writer::payload	the List arm writes the element type, the count, then the elements, wrapping mixed-list compounds
+ListTag.identifyRawElementType	port	crates/horizon-world/src/nbt.rs::Writer::payload	the List arm uses the first element's type, or 10 when the elements differ
+ListTag.addAndUnwrap	inline	crates/horizon-world/src/nbt.rs::Reader::payload	elements are unwrapped as they are read; there is no in-memory add that unwraps
+ListTag.sizeInBytes	skip:other		memory-size estimate for vanilla's NbtAccounter; Horizon counts wire bytes and nodes
+ListTag.getCompound	port	crates/horizon-world/src/datafix/dynamic.rs::map	the index lookup is done by the caller
+ListTag.getList	port	crates/horizon-world/src/datafix/dynamic.rs::stream	gap: minor: returns copies of the elements, not the list tag; number arrays also pass
+ListTag.getShortOr	port	crates/horizon-world/src/datafix/dynamic.rs::as_number	gap: minor: the default and the i16 narrowing are left to the caller
+ListTag.getIntOr	port	crates/horizon-world/src/datafix/dynamic.rs::as_int	the index lookup is done by the caller
+ListTag.getIntArray	port	crates/horizon-world/src/datafix/dynamic.rs::as_int_stream	minor: also accepts number lists
+ListTag.getLongArray	port	crates/horizon-world/src/datafix/dynamic.rs::as_long_stream	minor: also accepts number lists
+ListTag.getDoubleOr	port	crates/horizon-world/src/datafix/dynamic.rs::as_double	the index lookup is done by the caller
+ListTag.getFloatOr	port	crates/horizon-world/src/datafix/dynamic.rs::as_float	the index lookup is done by the caller
+ListTag.getStringOr	port	crates/horizon-world/src/datafix/dynamic.rs::as_string	the index lookup is done by the caller
+ListTag.getNullable	skip:java		bounds-checked element access; Rust slice get and Option
+ListTag.copy	skip:java		Clone on Tag replaces copy()
+ListTag.equals	skip:java		PartialEq derive replaces equals()
+ListTag.compoundStream	port	crates/horizon-world/src/datafix/dynamic.rs::stream	gap: minor: returns the elements; the compound-only filter is done by the caller
+ListTag.accept	port	crates/horizon-client-core/src/snbt.rs::visit	gap: minor: the StreamTagVisitor overload (entry-by-entry walk) is not ported
+LongArrayTag.write	port	crates/horizon-world/src/nbt.rs::Writer::payload	the LongArray arm writes the count, then the longs
+LongArrayTag.copy	skip:java		Clone on Tag replaces copy()
+LongArrayTag.equals	skip:java		PartialEq derive replaces equals()
+LongArrayTag.setTag	port	crates/horizon-client-core/src/nbt_path.rs::set_tag	gap: minor: writes through an NBT path node; returns a change count
+LongArrayTag.addTag	port	crates/horizon-client-core/src/nbt_path.rs::NbtPath::insert	gap: minor: inserts through the /data path, not a per-array add
+LongArrayTag.remove	port	crates/horizon-client-core/src/nbt_path.rs::remove_tag	gap: minor: removal through an index node; returns a count, not the removed tag
+NbtAccounter.accountBytes	inline	crates/horizon-world/src/nbt.rs::Reader::take	gap: minor: counts wire bytes against max_bytes; vanilla counts an in-memory size estimate, so the same limit trips at other sizes
+NbtAccounter.pushDepth	inline	crates/horizon-world/src/nbt.rs::Reader::payload	the depth check for list and compound arms; depth is passed down as a parameter
+NbtAccounter.popDepth	inline	crates/horizon-world/src/nbt.rs::Reader::payload	nothing to pop: depth is a parameter, not a counter
+NbtIo.createDecompressorStream	port	crates/horizon-world/src/compression.rs::Compression::decode	gap: minor: decodes the whole buffer at once, not a stream
+NbtIo.createCompressorStream	port	crates/horizon-world/src/compression.rs::Compression::encode	gap: minor: encodes the whole buffer at once, not a stream
+NbtIo.parseCompressed	port	crates/horizon-world/src/nbt.rs::read_named_streaming	gap: minor: decompression is the caller's Compression::decode; the visitor only streams lists under one key
+NbtIo.parse	port	crates/horizon-world/src/nbt.rs::read_named_streaming	gap: minor: visitor callbacks are not generic; only lists under one key are streamed
+NbtIo.writeAnyTag	port	crates/horizon-world/src/nbt.rs::write_network	type byte then the payload, no name
+NbtIo.writeUnnamedTag	port	crates/horizon-world/src/nbt.rs::write_named	written with an empty name
+NbtIo.readUnnamedTag	port	crates/horizon-world/src/nbt.rs::read_network	type byte then the payload, no name
+NbtIo.readTagSafe	port	crates/horizon-world/src/nbt.rs::read_network	an IOException becomes an Error value, not a crash report
+NbtIo.StringFallbackDataOutput.writeUTF	port	crates/horizon-world/src/nbt.rs::Writer::string	gap: minor: a string over 65535 bytes fails the write; vanilla writes "" and logs
+NbtOps.getNumberValue	port	crates/horizon-world/src/datafix/dynamic.rs::as_number	
+NbtOps.getStringValue	port	crates/horizon-world/src/datafix/dynamic.rs::as_str	
+NbtOps.mergeToList	skip:java		DynamicOps list builder used by codecs; Horizon builds lists directly in datafix
+NbtOps.mergeToMap	port	crates/horizon-world/src/datafix/dynamic.rs::set	gap: minor: one field; returns no error for a non-map or a non-string key
+NbtOps.getMapValues	port	crates/horizon-world/src/datafix/dynamic.rs::map	the (key, value) pairs are built by the caller
+NbtOps.getMapEntries	port	crates/horizon-world/src/datafix/dynamic.rs::map	the entries are walked by the caller
+NbtOps.getMap	port	crates/horizon-world/src/datafix/dynamic.rs::map	the MapLike view is built by the caller
+NbtOps.createMap	port	crates/horizon-world/src/nbt.rs::Tag::compound	builds a compound from name and value pairs
+NbtOps.getList	port	crates/horizon-world/src/datafix/dynamic.rs::stream	gap: minor: returns copies of the elements; number arrays also pass
+NbtOps.getByteBuffer	port	crates/horizon-world/src/datafix/dynamic.rs::as_byte_buffer	
+NbtOps.createByteList	skip:java		builds a Tag::ByteArray from a buffer; Horizon constructs the array directly
+NbtOps.getIntStream	port	crates/horizon-world/src/datafix/dynamic.rs::as_int_stream	
+NbtOps.getLongStream	port	crates/horizon-world/src/datafix/dynamic.rs::as_long_stream	
+NbtOps.remove	port	crates/horizon-world/src/datafix/dynamic.rs::remove	
+NbtOps.createCollector	skip:java		typed-list collector for list merges (keeps byte, int and long arrays); Horizon has no DynamicOps list builder
+NbtOps.ByteListCollector.accept	skip:java		collector builder for typed byte lists
+NbtOps.IntListCollector.accept	skip:java		collector builder for typed int lists
+NbtOps.ListCollector.acceptAll	skip:java		collector builder for list merges
+NbtOps.LongListCollector.accept	skip:java		collector builder for typed long lists
+NbtOps.NbtRecordBuilder.build	skip:java		record builder for codecs
+NbtUtils.setValueHelper	port	crates/horizon-world/src/worldgen/structure/template.rs::read_state	a valid property value is set; a bad one keeps the default and the warning is not logged
+NbtUtils.writeStateProperties	port	crates/horizon-world/src/datafix/block_state_data.rs::State::to_tag	Properties written only when the state has any
+NbtUtils.writeBlockState	port	crates/horizon-world/src/datafix/block_state_data.rs::State::to_tag	{Name, Properties}
+NbtUtils.packStructureTemplate	missing		minor: writes the packed palette form of a structure template (string palette, sorted blocks); Horizon's template code only reads templates
+NbtUtils.unpackStructureTemplate	port	crates/horizon-world/src/worldgen/structure/template.rs::StructureTemplate::from_nbt	gap: minor: reads the unpacked palette and blocks only; a packed string palette with its data list is not read and its states load as air
+NbtUtils.packBlockState	missing		minor: writes name{key:value} palette strings; Horizon has no state-to-string writer for templates
+NbtUtils.unpackBlockState	port	crates/horizon-world/src/worldgen/structure/template.rs::parse_state_string	gap: minor: resolves the text to a state id, not an NBT state; invalid text gives None
+NbtUtils.addCurrentDataVersion	inline	crates/horizon-world/src/datafix/files.rs::add_versions	gap: minor: add_versions stamps level.dat only, and it also sets LastPlayed and Version
+NbtUtils.addDataVersion	inline	crates/horizon-world/src/datafix/mod.rs::update_chunk_to	gap: minor: stamps chunks only; the same stamp is in update_region_tag_to and update_player_to

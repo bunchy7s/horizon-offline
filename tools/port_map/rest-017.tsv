@@ -1,0 +1,107 @@
+DedicatedServer.readCodeOfConducts	missing		player: with enable-code-of-conduct=true a joining player gets no code of conduct; the codeofconduct folder is never read
+DedicatedServer.setEnforceWhitelist	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.setUsingWhitelist	port	crates/horizon-client/src/game/dedicated.rs::Game::console_whitelist	console whitelist on|off; store_property writes white-list back
+DedicatedServer.saveAllChunks	port	crates/horizon-client/src/game.rs::Game::save_game	gap: minor: no save notifications to the JSON-RPC management API
+DedicatedServer.sendLowDiskSpaceWarning	missing		minor: admin-level players get no low disk space warning; LOW_DISK_SPACE_WARNING exists only as a packet id in ids.rs
+DedicatedServer.setAllowFlight	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.setDifficulty	port	crates/horizon-client/src/game/commands.rs::Game::cmd_difficulty	the /difficulty command; gap: minor: the new value is not written back to server.properties
+DedicatedServer.setViewDistance	skip:server		JSON-RPC management API only; view-distance is read at start
+DedicatedServer.setSimulationDistance	skip:server		JSON-RPC management API only; simulation-distance is read at start
+DedicatedServer.fillServerSystemReport	skip:debug		adds rows to the system report of a server crash report; Horizon writes no server crash report
+DedicatedServer.dumpServerProperties	skip:debug		writes server.properties.txt into the debug report only
+DedicatedServer.onServerExit	inline	crates/horizon-client/src/game/dedicated.rs::Game::stop_dedicated	gap: minor: closes no RCON, query, GUI or JSON-RPC; the LAN pinger and listener are closed by lan_close
+DedicatedServer.setMaxPlayers	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.setSpawnProtectionRadius	skip:server		JSON-RPC management API only; spawn-protection is read at start and used by Game::under_spawn_protection
+DedicatedServer.setRepliesToStatus	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.setHidesOnlinePlayers	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.setOperatorUserPermissions	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.setPlayerIdleTimeout	missing		minor: no /setidletimeout command in Horizon's command tree; player-idle-timeout is read once at start
+DedicatedServer.setStatusHeartbeatInterval	skip:server		JSON-RPC management API only (status heartbeat)
+DedicatedServer.setMotd	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.enforceSecureProfile	inline	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	gap: minor: services.canValidateProfileKeys() is not part of the check
+DedicatedServer.convertOldUsers	skip:other		one-time import of pre-1.7 .txt user lists; Horizon reads only the json lists in user_lists.rs
+DedicatedServer.runCommand	skip:server		RCON only; Horizon has no RCON (the stdin console is Game::console_command)
+DedicatedServer.setEntityBroadcastRangePercentage	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.createTextFilterForPlayer	skip:service		external chat filter service; Horizon has no text filter
+DedicatedServer.setForceGameMode	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.setGameMode	port	crates/horizon-client/src/game/lan.rs::Game::set_default_game_mode	the /defaultgamemode command; gap: minor: the value is not written back to server.properties
+DedicatedServer.setAcceptsTransfers	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.setPauseWhenEmptySeconds	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.createServerLinks	inline	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	builds the bug-report server link from bug-report-link (dedicated.rs 636-646)
+DedicatedServer.parseBugReportLink	port	crates/horizon-client/src/game/server_links.rs::valid_untrusted_uri	a yes or no check of the link; the caller builds the link in run_dedicated
+DedicatedServerProperties.getDatapackConfig	inline	crates/horizon-server-files/src/properties.rs::ServerProperties::new	splits initial-enabled-packs and initial-disabled-packs
+DedicatedServerProperties.deserializePermission	port	crates/horizon-server-files/src/properties.rs::Reader::permission	gap: minor: numbers clamp to 0 to 4; PermissionLevel.byId is not compared
+DedicatedServerProperties.WorldDimensionData.create	port	crates/horizon-client/src/game/dedicated.rs::Game::write_world_gen	gap: minor: only the preset pick by level-type is mapped; the flat-settings replacement is not compared
+ServerWatchdog.run	missing		minor: max-tick-time is read (properties.rs) but no watchdog runs; a stuck tick is never reported or stopped
+ServerWatchdog.createWatchdogCrashReport	missing		minor: builds the thread-dump crash report for the watchdog only; Horizon has no watchdog
+ServerWatchdog.exit	missing		minor: halts the process 10 s after a stuck tick (watchdog only)
+Settings.dispatchNumberOrString	inline	crates/horizon-server-files/src/properties.rs::ServerProperties::new	the difficulty parse in ServerProperties::new does this job inline
+Settings.getLegacy	port	crates/horizon-server-files/src/properties.rs::Reader::legacy	returns the raw value and removes the key; the caller parses it
+Settings.get	port	crates/horizon-server-files/src/properties.rs::Reader::get	reads with a default and writes the value back to the properties map
+Settings.getMutable	port	crates/horizon-server-files/src/properties.rs::Reader::get	gap: minor: no mutable handle; ServerProperties::update changes one key instead
+Dialogs.bootstrap	skip:data		registry bootstrap of the built-in dialogs; Horizon builds its dialogs in code
+Action.ValueGetter.of	skip:other		fixed-string overload with no vanilla caller in the sources (only the Supplier overload is used); live values come from Control::substitution
+CommandTemplate.createAction	port	crates/horizon-client/src/dialog.rs::Action::click	the RunCommand arm: substitute over the input values
+CustomAll.createAction	port	crates/horizon-client/src/dialog.rs::Action::click	the Custom arm: additions plus each input's tag
+ParsedTemplate.parse	inline	crates/horizon-client/src/dialog.rs::Action::parse	gap: minor: the dynamic/run_command template is kept without a StringTemplate syntax check
+DialogBodyTypes.bootstrap	skip:data		registers the item and plain_message body codecs; Body::parse dispatches them in dialog.rs
+NumberRangeInput.computeLabel	missing		unsure: label_format is parsed (dialog.rs) but no code formats it, so the slider value label may be missing
+NumberRangeInput.RangeInfo.isOutOfRange	inline	crates/horizon-client/src/dialog.rs::Control::scaled	the range test that keeps the snapped value inside the slider
+NumberRangeInput.RangeInfo.initialScaledValue	inline	crates/horizon-client/src/dialog.rs::Control::scaled	the first value (initial or the midpoint) used by the step snap
+MinecraftServerGui.showFrameFor	skip:server		server window (Swing); Horizon has no server GUI
+MinecraftServerGui.buildInfoPanel	skip:server		server window (Swing); Horizon has no server GUI
+MinecraftServerGui.buildPlayerPanel	skip:server		server window (Swing); Horizon has no server GUI
+MinecraftServerGui.buildChatPanel	skip:server		server window (Swing); Horizon has no server GUI
+MinecraftServerGui.print	skip:server		server window (Swing); Horizon has no server GUI
+PlayerListComponent.tick	skip:server		server window (Swing); Horizon has no server GUI
+StatsComponent.tick	skip:server		server window (Swing); Horizon has no server GUI
+StatsComponent.paint	skip:server		server window (Swing); Horizon has no server GUI
+EventLoopGroupHolder.createThreadFactory	skip:java		Netty thread factory; Horizon uses std threads
+EventLoopGroupHolder.eventLoopGroup	skip:java		lazy Netty event loop group; Horizon has no Netty
+Filterable.codec	skip:data		NBT codec for the raw and filtered pair; Horizon keeps only the raw text
+Filterable.from	inline	crates/horizon-protocol/src/item.rs::filterable	gap: minor: the filtered copy is read and dropped; only the raw text is kept
+Filterable.get	skip:service		returns the filtered copy, which only the external text filter makes; Horizon uses the raw text
+Filterable.map	skip:java		pure helper over the raw and filtered texts
+Filterable.resolve	skip:java		pure helper over the raw and filtered texts
+LegacyProtocolUtils.writeLegacyString	inline	crates/horizon-client/src/lan/conn.rs::serve_legacy	the length-prefixed UTF-16BE string of the reply
+LegacyProtocolUtils.readLegacyString	inline	crates/horizon-client/src/lan/conn.rs::serve_legacy	the in_string reader of the 1.6 payload
+LegacyQueryHandler.channelRead	port	crates/horizon-client/src/lan/conn.rs::serve_legacy	gap: minor: runs on the first byte peeked by serve(), not as a Netty handler; replies only while status is on
+LegacyQueryHandler.readCustomPayloadPacket	inline	crates/horizon-client/src/lan/conn.rs::serve_legacy	the MC|PingHost check and its length rules
+LegacyQueryHandler.createVersion0Response	inline	crates/horizon-client/src/lan/conn.rs::serve_legacy	the motd, count and max reply when only 0xFE arrived
+LegacyQueryHandler.createVersion1Response	inline	crates/horizon-client/src/lan/conn.rs::serve_legacy	the 0xFF-marked version reply with protocol 127
+LegacyQueryHandler.createLegacyDisconnectPacket	inline	crates/horizon-client/src/lan/conn.rs::serve_legacy	the 0xFF packet with the length-prefixed string
+LegacyTextFilter.createTextFilterFromConfig	skip:service		external chat filter (text-filtering-config); Horizon has no text filter
+LegacyTextFilter.processJoinOrLeave	skip:service		external chat filter service; Horizon has no text filter
+LegacyTextFilter.processRequest	skip:service		external chat filter service; Horizon has no text filter
+LegacyTextFilter.filterText	skip:service		external chat filter service; Horizon has no text filter
+MemoryServerHandshakePacketListenerImpl.handleIntention	inline	crates/horizon-client/src/lan/conn.rs::serve_connection	gap: minor: the in-memory connection accepts every intention; vanilla throws for anything but login
+PlayerChunkSender.sendChunk	inline	crates/horizon-client/src/lan/hub.rs::Hub::update_chunks	gap: minor: the debug synchronizer and the chunk-sent event are not ported
+PlayerChunkSender.collectChunksToSend	port	crates/horizon-client/src/lan/hub.rs::Hub::next_batch	closest first within the batch quota; gap: minor: the in-memory player is cut to the quota too, vanilla sends it all pending chunks
+PlayerSafetyServiceTextFilter.createTextFilterFromConfig	skip:service		external chat filter service (Microsoft identity, text-filtering-config); Horizon has no text filter
+PlayerSafetyServiceTextFilter.filterText	skip:service		external chat filter service; Horizon has no text filter
+ServerCommandSuggestionsProvider.tick	inline	crates/horizon-client/src/game/lan_actions.rs::Game::guest_suggestions	gap: minor: no per-tick budget; every request is answered when it arrives
+ServerCommandSuggestionsProvider.tryProcessRequest	port	crates/horizon-client/src/game/lan_actions.rs::Game::guest_suggestions	parses the command (after an optional slash) and gets its suggestions
+ServerCommandSuggestionsProvider.limitSuggestionCount	missing		minor: vanilla keeps the first 1000 suggestions; Horizon sends them all
+ServerCommandSuggestionsProvider.trySchedule	inline	crates/horizon-client/src/game/lan_actions.rs::Game::guest_suggestions	gap: minor: no hop to the server thread; the request is handled on its packet
+ServerCommandSuggestionsProvider.request	port	crates/horizon-client/src/game/lan_actions.rs::Game::guest_suggestions	gap: minor: no coalescing of rapid requests; vanilla keeps only the newest text
+ServerCommonPacketListenerImpl.onDisconnect	inline	crates/horizon-client/src/game/integrated.rs::Integrated::halt	gap: minor: unsure: whether a dropped local connection halts the server is not checked
+ServerCommonPacketListenerImpl.onPacketError	missing		unsure: vanilla records the exception for the crash report (reportPacketHandlingException); Horizon keeps no record of a failing packet
+ServerCommonPacketListenerImpl.handleKeepAlive	inline	crates/horizon-client/src/lan/conn.rs::write_loop	gap: minor: read_loop stores the id and write_loop sets the latency; a wrong id is not an instant disconnect
+ServerCommonPacketListenerImpl.handleCustomClickAction	skip:debug		vanilla only logs at debug (the NeoForge hook is mod API); Horizon drops the packet
+ServerCommonPacketListenerImpl.keepConnectionAlive	port	crates/horizon-client/src/lan/conn.rs::write_loop	gap: minor: times out after 30 s without an answer; vanilla after 15 s
+ServerCommonPacketListenerImpl.checkIfClosed	inline	crates/horizon-client/src/lan/conn.rs::write_loop	gap: minor: the 15 s close timeout is covered by the 30 s keep-alive timeout
+ServerCommonPacketListenerImpl.createCookie	inline	crates/horizon-client/src/lan/conn.rs::login_and_configure	builds the Parts (profile, client information, brand); latency and transferred are not kept
+ServerConfigurationPacketListenerImpl.returnToWorld	inline	crates/horizon-client/src/lan/conn.rs::login_and_configure	queues the join steps after configuration; play() takes over in Horizon
+ServerConfigurationPacketListenerImpl.addOptionalTasks	inline	crates/horizon-client/src/lan/conn.rs::login_and_configure	gap: player: no code of conduct task (enable-code-of-conduct); the resource pack offer is there, mod tasks are not
+ServerConfigurationPacketListenerImpl.handleResourcePackResponse	inline	crates/horizon-client/src/lan/conn.rs::offer_pack	the pack answer loop; a terminal answer ends the pack step
+ServerConfigurationPacketListenerImpl.handleSelectKnownPacks	inline	crates/horizon-client/src/lan/conn.rs::login_and_configure	reads the client's known packs and sends the registry data for them
+ServerConfigurationPacketListenerImpl.handleConfigurationFinished	inline	crates/horizon-client/src/lan/conn.rs::login_and_configure	the FinishConfiguration wait; the join checks run in serve_login
+ServerConfigurationPacketListenerImpl.startNextTask	inline	crates/horizon-client/src/lan/conn.rs::login_and_configure	the configuration steps run in order, with no task queue
+ServerConfigurationPacketListenerImpl.finishCurrentTask	inline	crates/horizon-client/src/lan/conn.rs::login_and_configure	the configuration steps run in order, with no task queue
+ServerConnectionListener.stop	port	crates/horizon-client/src/lan/mod.rs::Lan::stop	gap: minor: stops the listener and sets the shared stop flag; channels are not closed one by one
+ServerConnectionListener.stopTcpServerListener	port	crates/horizon-client/src/lan/mod.rs::Lan::stop_listening	closes the network listener; connections already in, the local one included, stay
+ServerConnectionListener.tick	inline	crates/horizon-client/src/lan/mod.rs::Lan::poll	gap: minor: reports Left events; no Internal server error disconnect when a packet fails
+ServerConnectionListener.addPendingConnections	skip:java		queue of accepted sockets; Horizon starts one thread per connection
+ServerConnectionListener.getSessionId	missing		minor: vanilla sends one random session id per server run in login finished; Horizon sends the player's uuid
+ServerConnectionListener.LatencySimulator.delayDownstream	skip:debug		dev latency simulator behind SharedConstants.DEBUG_FAKE_LATENCY_MS
+ServerConnectionListener.LatencySimulator.onTimeout	skip:debug		dev latency simulator behind SharedConstants.DEBUG_FAKE_LATENCY_MS

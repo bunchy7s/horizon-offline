@@ -1,0 +1,147 @@
+AbstractCommandBlockEditScreen.getUsageNarration	skip:ui		narration text of the command suggestions
+AbstractCommandBlockEditScreen.resize	skip:ui		re-init on window resize; Horizon redraws the screen every frame and keeps the text
+AbstractCommandBlockEditScreen.updatePreviousOutput	port	crates/horizon-client/src/game/command_blocks.rs::CommandBlockScreen::show_previous	
+AbstractCommandBlockEditScreen.onDone	port	crates/horizon-client/src/game/command_blocks.rs::Game::set_command_block	sends the packet and clears last output when not tracking; close is close_command_block
+AbstractCommandBlockEditScreen.mouseScrolled	missing		no command suggestion list in the command block screen, so no wheel scrolling of suggestions
+AbstractCommandBlockEditScreen.mouseClicked	port	crates/horizon-client/src/game/command_blocks.rs::Game::command_block_click	buttons only; clicking inside the command box does not move the cursor and there are no suggestions to click
+AbstractCommandBlockEditScreen.extractRenderState	port	crates/horizon-client/src/game/command_blocks.rs::Game::draw_command_block	
+AbstractContainerScreen.extractRenderState	port	crates/horizon-client/src/game.rs::Game::draw_inventory	contents, carried item, tooltip in vanilla order
+AbstractContainerScreen.extractContents	inline	crates/horizon-client/src/game.rs::Game::draw_inventory	labels, slots and hover highlight
+AbstractContainerScreen.extractCarriedItem	port	crates/horizon-client/src/game.rs::Game::draw_carried	shows what a quick-craft drag leaves in hand
+AbstractContainerScreen.extractSlots	port	crates/horizon-client/src/game.rs::Game::draw_inventory_slots	
+AbstractContainerScreen.mouseScrolled	port	crates/horizon-client/src/game/bundles.rs::Game::bundle_scroll	the bundle wheel is the only ItemSlotMouseAction
+AbstractContainerScreen.extractSlotHighlightBack	missing		hover highlight is a flat 50% white square on top of the item; vanilla draws the 24x24 slot_highlight_back sprite behind it, and Slot.isHighlightable is not modelled
+AbstractContainerScreen.extractSlotHighlightFront	missing		no slot_highlight_front sprite over the item (see extractSlotHighlightBack)
+AbstractContainerScreen.extractTooltip	port	crates/horizon-client/src/game/stations.rs::Game::draw_slot_tooltip	skipped while a stack is carried, even over a bundle
+AbstractContainerScreen.showTooltipWithItemInHand	missing		hovering a bundle while carrying a stack shows no tooltip; vanilla still shows the bundle contents
+AbstractContainerScreen.extractFloatingItem	port	crates/horizon-client/src/game.rs::Game::draw_carried	carried stack drawn at cursor minus 8
+AbstractContainerScreen.extractLabels	inline	crates/horizon-client/src/game.rs::Game::draw_inventory	title and Inventory labels are drawn per screen kind
+AbstractContainerScreen.recalculateQuickCraftRemaining	port	crates/horizon-client/src/menu.rs::Menu::quick_craft_preview	returns the count left in hand
+AbstractContainerScreen.getHoveredSlot	port	crates/horizon-client/src/game.rs::Game::slot_at	
+AbstractContainerScreen.slotClicked	port	crates/horizon-client/src/game.rs::Game::menu_ops	includes the bundle unselect of onMouseClickAction; sent to the server on a remote game
+AbstractContainerScreen.mouseClicked	port	crates/horizon-client/src/game.rs::Game::inventory_press	press logic is container_screen::Clicks::press; double click gathers, Shift double click quick-moves all
+AbstractContainerScreen.mouseDragged	port	crates/horizon-client/src/game.rs::Game::inventory_drag_move	
+AbstractContainerScreen.isHovering	port	crates/horizon-client/src/game.rs::Game::slot_at	hit box is the 16x16 slot; vanilla uses 18x18 (one pixel more each side), so the border between slots hits nothing
+AbstractContainerScreen.onMouseClickAction	inline	crates/horizon-client/src/game.rs::Game::menu_ops	Shift click or swap clears a bundle's selection
+AbstractContainerScreen.keyPressed	port	crates/horizon-client/src/game.rs::Game::inventory_hotkey	number keys, F and Q over a slot; keyPickItem bound to a keyboard key does not clone the hovered slot
+AbstractContainerScreen.checkHotbarKeyPressed	port	crates/horizon-client/src/game.rs::Game::inventory_hotkey	hotbar and off hand swaps while the hand is empty
+AbstractContainerScreen.removed	port	crates/horizon-client/src/game.rs::Game::close_container	carried stack and crafting grid go back to the inventory or are thrown
+AbstractContainerScreen.tick	missing		no closeContainer for a dead player: death only swaps to the death screen, so a chest or furnace open at death stays counted as open (lid up)
+AbstractContainerScreen.quickCraftToSlots	port	crates/horizon-client/src/game.rs::Game::inventory_release	start, one add per slot, end
+AbstractContainerScreen.onClose	port	crates/horizon-client/src/game.rs::Game::close_container	closes the container and clears the bundle selection
+AbstractFurnaceScreen.init	inline	crates/horizon-client/src/game.rs::Game::draw_inventory	furnace arm centres the title
+AbstractFurnaceScreen.getRecipeBookButtonPosition	port	crates/horizon-client/src/game/recipe_book.rs::Game::book_button_pos	
+AbstractFurnaceScreen.extractBackground	inline	crates/horizon-client/src/game.rs::Game::draw_inventory	furnace arm draws the flame and the arrow
+AbstractMountInventoryScreen.extractBackground	port	crates/horizon-client/src/game/mount_menu.rs::Game::draw_mount_background	texture, chest slots, saddle and armor slot frames, mount preview
+AbstractMountInventoryScreen.extractRenderState	inline	crates/horizon-client/src/game/mount_menu.rs::Game::draw_mount_background	the preview follows the cursor position
+AbstractRecipeBookScreen.init	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_shift	narrow test and left position shift
+AbstractRecipeBookScreen.initButton	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_click	the green button toggles the book; its place is book_button_pos
+AbstractRecipeBookScreen.extractRenderState	port	crates/horizon-client/src/game/recipe_book.rs::Game::draw_recipe_book	in a narrow window with the book open the slots are still drawn; vanilla hides them
+AbstractRecipeBookScreen.extractSlots	port	crates/horizon-client/src/game/recipe_book.rs::Game::draw_ghost	ghost recipe among the slots
+AbstractRecipeBookScreen.charTyped	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_text	
+AbstractRecipeBookScreen.keyPressed	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_key	
+AbstractRecipeBookScreen.isInputCaptured	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_search_focused	
+AbstractRecipeBookScreen.mouseDragged	missing		dragging inside the recipe search box does not select text
+AbstractRecipeBookScreen.isHovering	missing		in a narrow window with the book open the slots under the book can still be hovered and clicked; vanilla disables them
+AbstractRecipeBookScreen.slotClicked	inline	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_click	clicking a crafting slot drops the ghost recipe; done on mouse press only
+AbstractSignEditScreen.<init>	port	crates/horizon-client/src/game/sign_edit.rs::Game::open_sign_editor	lines, wood type and text colour come from the sign
+AbstractSignEditScreen.init	inline	crates/horizon-client/src/game/sign_edit.rs::Game::draw_sign_editor	Done button is laid out here and handled in sign_edit_click
+AbstractSignEditScreen.isValid	missing		the editor stays open when the sign is broken or the player ends up out of range; vanilla closes it each tick and sends the text
+AbstractSignEditScreen.keyPressed	port	crates/horizon-client/src/game/sign_edit.rs::Game::sign_input	Up, Down and Enter move between lines
+AbstractSignEditScreen.preeditUpdated	missing		no IME composition text while typing on a sign
+AbstractSignEditScreen.extractRenderState	port	crates/horizon-client/src/game/sign_edit.rs::Game::draw_sign_editor	
+AbstractSignEditScreen.extractSign	inline	crates/horizon-client/src/game/sign_edit.rs::Game::draw_sign_editor	sign sprite and text scale
+AbstractSignEditScreen.extractSignText	inline	crates/horizon-client/src/game/sign_edit.rs::Game::draw_sign_editor	cursor at the end of a line is a bar; vanilla draws an underscore there; no bidirectional shaping
+AnvilScreen.subInit	port	crates/horizon-client/src/game/stations.rs::anvil_box	50 character unbordered rename box
+AnvilScreen.resize	skip:ui		re-init on window resize
+AnvilScreen.extractBackground	inline	crates/horizon-client/src/game/stations.rs::Game::draw_station	text field sprite, disabled without an input
+AnvilScreen.extractErrorIcon	inline	crates/horizon-client/src/game/stations.rs::Game::draw_station	error sprite when there is input and no result
+BeaconScreen.addBeaconButton	skip:ui		widget list bookkeeping; buttons() lists the power buttons
+BeaconScreen.init	port	crates/horizon-client/src/game/beacon.rs::buttons	tier rows, upgrade, confirm and cancel positions
+BeaconScreen.updateButtons	inline	crates/horizon-client/src/game/beacon.rs::Game::draw_beacon	active and selected state is worked out each frame and on click
+BeaconScreen.extractLabels	inline	crates/horizon-client/src/game/beacon.rs::Game::draw_beacon	primary and secondary power labels
+BeaconScreen.extractBackground	inline	crates/horizon-client/src/game/beacon.rs::Game::draw_beacon	background and the five payment item icons
+BeaconScreen.BeaconConfirmButton.onPress	port	crates/horizon-client/src/game/beacon.rs::Game::confirm_beacon	sends the chosen powers on a server and closes
+BeaconScreen.BeaconConfirmButton.updateStatus	inline	crates/horizon-client/src/game/beacon.rs::Game::draw_beacon	active when a payment is in the slot and a primary power is chosen
+BeaconScreen.BeaconPowerButton.setEffect	inline	crates/horizon-client/src/game/beacon.rs::Game::draw_beacon	icon and tooltip follow the chosen effect
+BeaconScreen.BeaconPowerButton.onPress	port	crates/horizon-client/src/game/beacon.rs::Game::beacon_click	selecting a primary clears a different secondary
+BeaconScreen.BeaconPowerButton.extractIcon	inline	crates/horizon-client/src/game/beacon.rs::Game::draw_beacon	
+BeaconScreen.BeaconPowerButton.updateStatus	inline	crates/horizon-client/src/game/beacon.rs::Game::draw_beacon	unlocked by pyramid level, selected by the chosen power
+BeaconScreen.BeaconScreenButton.extractContents	inline	crates/horizon-client/src/game/beacon.rs::Game::draw_beacon	disabled, selected, highlighted and normal sprites
+BeaconScreen.BeaconSpriteScreenButton.extractIcon	inline	crates/horizon-client/src/game/beacon.rs::Game::draw_beacon	confirm and cancel icons; their Done and Cancel tooltips are not shown
+BeaconScreen.BeaconUpgradePowerButton.updateStatus	inline	crates/horizon-client/src/game/beacon.rs::Game::draw_beacon	shown once a primary is chosen; its tooltip lacks the II suffix
+BookEditScreen.init	inline	crates/horizon-client/src/game/books.rs::Game::book_click	page box, page buttons, Sign and Done layout (drawn in draw_book)
+BookEditScreen.getNarrationMessage	skip:ui		narration
+BookEditScreen.getPageNumberMessage	inline	crates/horizon-client/src/game/books.rs::Game::draw_book	page indicator text
+BookEditScreen.pageBack	port	crates/horizon-client/src/game/books.rs::Game::turn_page	
+BookEditScreen.pageForward	port	crates/horizon-client/src/game/books.rs::Game::turn_page	adds a page up to 100 when on the last one
+BookEditScreen.updatePageContent	inline	crates/horizon-client/src/game/books.rs::Game::turn_page	loads the page text into the edit box
+BookEditScreen.eraseEmptyTrailingPages	inline	crates/horizon-client/src/game/books.rs::Game::save_book	keeps at least one page
+BookEditScreen.updateLocalCopy	inline	crates/horizon-client/src/game/books.rs::Game::write_book	the book in hand takes the pages
+BookEditScreen.appendPageToBook	inline	crates/horizon-client/src/game/books.rs::Game::turn_page	pushes an empty page below the 100 page cap
+BookEditScreen.extractRenderState	port	crates/horizon-client/src/game/books.rs::Game::draw_book	
+BookEditScreen.visitText	inline	crates/horizon-client/src/game/books.rs::Game::draw_book	page number at the top right
+BookEditScreen.extractBackground	inline	crates/horizon-client/src/game/books.rs::Game::draw_book	book texture
+BookSignScreen.init	port	crates/horizon-client/src/game/books.rs::book_title_box	15 character centred title box; Sign and Cancel buttons are in book_click
+BookSignScreen.saveChanges	port	crates/horizon-client/src/game/books.rs::Game::save_book	sign=true sends the title with the pages
+BookSignScreen.extractRenderState	inline	crates/horizon-client/src/game/books.rs::Game::draw_book	title prompt, by author line, finalize warning
+BookSignScreen.extractBackground	inline	crates/horizon-client/src/game/books.rs::Game::draw_book	
+BookViewScreen.setBookAccess	port	crates/horizon-client/src/game/books.rs::Game::remote_lectern_book	lectern book changed
+BookViewScreen.setPage	port	crates/horizon-client/src/game/books.rs::Game::remote_lectern_page	lectern page changed
+BookViewScreen.getNarrationMessage	skip:ui		narration
+BookViewScreen.createMenuControls	inline	crates/horizon-client/src/game/books.rs::Game::book_click	Done button (Done and Take Book on a lectern)
+BookViewScreen.createPageControlButtons	inline	crates/horizon-client/src/game/books.rs::Game::draw_book	page buttons, hit tests in book_click
+BookViewScreen.pageBack	port	crates/horizon-client/src/game/books.rs::Game::turn_page	
+BookViewScreen.pageForward	port	crates/horizon-client/src/game/books.rs::Game::turn_page	
+BookViewScreen.updateButtonVisibility	inline	crates/horizon-client/src/game/books.rs::Game::draw_book	back and forward shown by the page index
+BookViewScreen.keyPressed	port	crates/horizon-client/src/game/books.rs::Game::book_input	PageUp and PageDown turn pages
+BookViewScreen.extractRenderState	port	crates/horizon-client/src/game/books.rs::Game::draw_book	
+BookViewScreen.visitText	inline	crates/horizon-client/src/game/books.rs::Game::draw_book	page lines and page indicator; links are found by book_link_at
+BookViewScreen.extractBackground	inline	crates/horizon-client/src/game/books.rs::Game::draw_book	
+BookViewScreen.BookAccess.getPage	inline	crates/horizon-client/src/game/books.rs::Game::draw_book	pages.get(page) with an empty page past the end
+BookViewScreen.BookAccess.fromItem	port	crates/horizon-client/src/game/books.rs::view_pages	written book components or writable book text
+BrewingStandScreen.init	inline	crates/horizon-client/src/game/stations.rs::Game::draw_station	brewing arm centres the title
+BrewingStandScreen.extractBackground	inline	crates/horizon-client/src/game/stations.rs::Game::draw_station	fuel bar, progress arrow and bubbles
+CartographyTableScreen.extractResultingMap	port	crates/horizon-client/src/game/cartography.rs::Game::draw_cartography	
+CartographyTableScreen.extractMap	inline	crates/horizon-client/src/game/cartography.rs::Game::draw_cartography	preview drawn from the map texture
+CommandBlockEditScreen.addExtraControls	port	crates/horizon-client/src/game/command_blocks.rs::CommandBlockScreen::buttons	mode, conditional and auto buttons
+CommandBlockEditScreen.enableControls	skip:other		Horizon opens the screen with the block data in hand, so the controls are never disabled while waiting for the server
+CommandBlockEditScreen.updateGui	inline	crates/horizon-client/src/game/command_blocks.rs::Game::open_command_block	fills the box and buttons from the block entity
+CommandBlockEditScreen.populateAndSendPacket	port	crates/horizon-client/src/game/command_blocks.rs::Game::set_command_block	SetCommandBlock on a server, applied here otherwise
+ContainerScreen.extractBackground	port	crates/horizon-client/src/game/storage.rs::Game::draw_chest_screen	
+CrafterScreen.init	inline	crates/horizon-client/src/game/machines/crafter.rs::Game::draw_crafter_screen	title centred
+CrafterScreen.updateSlotState	port	crates/horizon-client/src/game/machines/crafter.rs::Game::crafter_slot_clicked	menu state, ContainerSlotStateChanged and the click sound
+CrafterScreen.extractSlot	port	crates/horizon-client/src/screen_layout.rs::crafter	disabled slot sprite; no pointing-hand cursor over crafter slots
+CrafterScreen.extractDisabledSlot	port	crates/horizon-client/src/screen_layout.rs::crafter	
+CrafterScreen.extractRenderState	port	crates/horizon-client/src/game/machines/crafter.rs::Game::draw_crafter_screen	the Click to disable slot tooltip is crafter_tooltip
+CrafterScreen.extractRedstone	port	crates/horizon-client/src/screen_layout.rs::crafter	powered or unpowered arrow
+CraftingScreen.getRecipeBookButtonPosition	port	crates/horizon-client/src/game/recipe_book.rs::Game::book_button_pos	
+CraftingScreen.extractBackground	inline	crates/horizon-client/src/game.rs::Game::draw_inventory	crafting table texture
+CreativeModeInventoryScreen.tryRefreshInvalidatedTabs	missing		tabs are read once from creative-inventory.json; they are not rebuilt when feature flags, permissions or datapacks change (no Operator Utilities tab)
+CreativeModeInventoryScreen.tryRebuildTabContents	missing		same as tryRefreshInvalidatedTabs; the search trees are not rebuilt either
+CreativeModeInventoryScreen.refreshCurrentTabContents	inline	crates/horizon-client/src/creative.rs::Creative::items	the grid is worked out again when the tab, search or language changed
+CreativeModeInventoryScreen.containerTick	missing		the creative screen stays open if the player is no longer in creative (vanilla swaps to the survival inventory); no tab refresh
+CreativeModeInventoryScreen.init	port	crates/horizon-client/src/creative.rs::Creative::reopen	fresh search box and scrollbar when the screen opens
+CreativeModeInventoryScreen.resize	skip:ui		re-init on window resize keeping search text and scroll row
+CreativeModeInventoryScreen.removed	skip:other		unregisters the slot listener; Horizon sends the creative slots to the server from its own tick
+CreativeModeInventoryScreen.charTyped	port	crates/horizon-client/src/game/clipboard.rs::Game::creative_search_edit	
+CreativeModeInventoryScreen.preeditUpdated	missing		no IME composition text in the search box
+CreativeModeInventoryScreen.isInputCaptured	inline	crates/horizon-client/src/game/debug_keys.rs::Game::debug_key	typing gate for the search tab; vanilla only uses it to stop the friends hotkey
+CreativeModeInventoryScreen.updateVisibleTags	missing		a # tag search does not list the matching tags in item tooltips
+CreativeModeInventoryScreen.extractLabels	inline	crates/horizon-client/src/game.rs::Game::draw_creative	tab title at 8,6 except on the inventory tab
+CreativeModeInventoryScreen.mouseReleased	port	crates/horizon-client/src/creative.rs::Creative::release	ends the scrollbar drag; tabs are selected on press, not on release
+CreativeModeInventoryScreen.mouseScrolled	port	crates/horizon-client/src/creative.rs::Creative::wheel	
+CreativeModeInventoryScreen.hasClickedOutside	port	crates/horizon-client/src/game.rs::Game::clicked_outside	creative window size; tab clicks are handled before it in click_creative
+CreativeModeInventoryScreen.mouseDragged	port	crates/horizon-client/src/creative.rs::Creative::drag_scrollbar	
+CreativeModeInventoryScreen.extractRenderState	port	crates/horizon-client/src/game.rs::Game::draw_creative	trash tooltip text is fixed English; no pointing-hand or resize cursor over tabs and the scrollbar
+CreativeModeInventoryScreen.getTooltipFromContainerItem	missing		item tooltips in the creative screen do not list the tabs that hold the item (blue lines) or, in a # search, the matching tags (purple)
+CreativeModeInventoryScreen.getTabY	port	crates/horizon-client/src/creative.rs::Creative::tab_position	click area uses the drawn tab position, 4 px off vanilla's -32 / image height
+CreativeModeInventoryScreen.checkTabClicked	inline	crates/horizon-client/src/game.rs::Game::click_creative	loop over the tab rectangles
+CreativeModeInventoryScreen.checkTabHovering	inline	crates/horizon-client/src/game.rs::Game::draw_creative	tab title tooltip
+CreativeModeInventoryScreen.extractTabButton	inline	crates/horizon-client/src/game.rs::Game::draw_creative	tab sprite and icon item
+CreativeModeInventoryScreen.CustomCreativeSlot.mayPickup	missing		no CREATIVE_SLOT_LOCK or disabled-feature refusal on display slots; only matters for the saved hotbars tab, which Horizon does not have
+CreativeModeInventoryScreen.ItemPickerMenu.getRowIndexForScroll	port	crates/horizon-client/src/creative.rs::Creative::first_row	
+CreativeModeInventoryScreen.ItemPickerMenu.scrollTo	inline	crates/horizon-client/src/creative.rs::Creative::first_row	display slots are read from the first visible row when drawn and clicked
+CyclingSlotBackground	missing		empty smithing table slots do not cycle hint icons: only a static netherite upgrade template icon shows, none for base item or addition
+DispenserScreen.init	inline	crates/horizon-client/src/game/machines.rs::Game::draw_machine_screen	title centred
+DispenserScreen.extractBackground	port	crates/horizon-client/src/game/machines.rs::Game::draw_machine_screen	

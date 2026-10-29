@@ -1,0 +1,146 @@
+MaterialRuleContext.LazyXZCondition.test	inline	crates/horizon-world/src/worldgen/material_condition.rs::Compiled::test	result cached per column revision (Hole, Steep); the compute is the Compiled kind
+MaterialRuleContext.LazyYCondition.test	inline	crates/horizon-world/src/worldgen/material_condition.rs::Compiled::test	result cached per block revision (stone depth, water, gradient, biome, y); the compute is the Compiled kind
+MaterialSystem.buildSurface	port	crates/horizon-world/src/worldgen/material_stage.rs::build_surface	vanilla X/Z/descending-Y surface pass with the eroded-badlands and frozen-ocean hooks
+MaterialSystem.getSurfaceGradientX	inline	crates/horizon-world/src/worldgen/material_stage.rs::build_columns	gx from first_available neighbours (clamped to 0..15) computed per column before update_xz
+MaterialSystem.getSurfaceGradientZ	inline	crates/horizon-world/src/worldgen/material_stage.rs::build_columns	gz from first_available neighbours (clamped to 0..15) computed per column before update_xz
+MaterialSystem.isStone	inline	crates/horizon-world/src/worldgen/material_stage.rs::build_columns	the not-air and no-fluid test is written inline in the stone-ceiling lookahead
+MaterialSystem.erodedBadlandsExtension	port	crates/horizon-world/src/worldgen/material_extensions.rs::MaterialExtensions::eroded_badlands	pillar buffer and roof noise, fills air up to the extension top
+MaterialSystem.getBand	port	crates/horizon-world/src/worldgen/material_surface.rs::MaterialSurface::band	clay band lookup with the offset noise
+BoundingBox.intersectingChunks	skip:other		gametest and test-instance block chunk forcing only, not normal play
+BoundingBox.encapsulatingPositions	inline	crates/horizon-world/src/worldgen/tree.rs::TreeFeature::place	bounds fold over roots, trunks, foliage and decorations written inline before update_leaves
+BoundingBox.encapsulatingBoxes	port	crates/horizon-world/src/worldgen/structure/temple.rs::union	slice in, box out; vanilla returns Optional.empty for no boxes, union indexes boxes[0]
+BoundingBox.encapsulating	port	crates/horizon-world/src/worldgen/structure.rs::BoundingBox::encapsulate	mutates self instead of returning a new box
+BoundingBox.move	port	crates/horizon-world/src/worldgen/structure.rs::BoundingBox::moved	returns a new box; vanilla mutates in place
+BoundingBox.inflatedBy	port	crates/horizon-world/src/worldgen/structure.rs::BoundingBox::inflated	takes xz and y amounts; vanilla callers all pass equal x and z
+BoundingBox.getLength	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_clone	size vector computed inline for clone; no execute-if-blocks port
+BoundingBox.getCenter	port	crates/horizon-world/src/worldgen/structure.rs::BoundingBox::center	
+BoundingBox.forAllCorners	port	crates/horizon-world/src/worldgen/structure.rs::BoundingBox::corners	corner order differs; the empty-corner count lives in FossilFeature::place
+BoundingBox.toString	skip:debug		debug string
+BoundingBox.equals	skip:java		derived PartialEq
+BoundingBox.hashCode	skip:java		derived Hash
+PoolElementStructurePiece.move	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolPiece::moved	gap: minor: only the vertical move; dx and dz are dropped (the one vanilla caller moves in y only)
+PoolElementStructurePiece.toString	skip:debug		debug string
+ScatteredFeaturePiece.addAdditionalSaveData	port	crates/horizon-world/src/worldgen/structure/simple.rs::Scattered::saved	width, height, depth and height position in the tag
+ScatteredFeaturePiece.updateHeightPositionToLowestGroundHeight	port	crates/horizon-world/src/worldgen/structure/simple.rs::Scattered::lowest_ground	lowest motion-blocking height over the box, then moves the box
+Structure.simpleCodec	skip:java		codec
+Structure.onTopOfChunkCenterWithoutBiomeCheck	port	crates/horizon-world/src/worldgen/structure/start.rs::top_of_chunk_center	the biome test is added in front of the same height read; no separate no-check path
+Structure.getMeanFirstOccupiedHeight	inline	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	corner heights summed and divided by 4 in the shipwreck branch
+Structure.getLowestY	inline	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	min of the corner heights taken per structure branch
+Structure.getLowestYIn5by5Box	inline	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	5x5 rotation offsets and corner min in the mansion and end city branches
+Structure.GenerationContext.makeRandom	inline	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	random seeded with set_large_feature_seed for the chunk
+Structure.GenerationContext.isValidBiome	inline	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	start position quart checked against the structure's biomes
+Structure.GenerationContext.couldStructureExistInColumn	port	crates/horizon-world/src/worldgen/generator.rs::StructureQueries::column_has_valid_biome	scans quart y from min to max for a valid biome
+Structure.GenerationContext.couldValidBiomeExistInTerrainColumn	port	crates/horizon-world/src/worldgen/generator.rs::StructureQueries::column_has_valid_biome	column from min_y minus 1 to max_y
+Structure.GenerationStub.getPiecesBuilder	skip:java		builder over a plain Vec of pieces
+Structure.StructureSettings.Builder.build	skip:java		settings builder
+StructurePiece.getBlock	port	crates/horizon-world/src/worldgen/structure/legacy.rs::PieceFrame::get	air outside the chunk box, else the world block
+StructurePiece.isReplaceableByStructures	inline	crates/horizon-world/src/worldgen/structure/legacy.rs::PieceFrame::fill_column_down	air, liquid, glow lichen and seagrass test written inline in the fill loop
+StructurePiece.createBoundingBox	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureStart::new	box of all pieces
+StructurePiece.findCollisionPiece	inline	crates/horizon-world/src/worldgen/structure/end_city.rs::Assembly::children	first piece whose box intersects, with the depth test inline; the fortress builder keeps its bool check in Builder::collides
+StructurePiece.setOrientation	port	crates/horizon-world/src/worldgen/structure/legacy.rs::PieceFrame::new	mirror and rotation from the orientation; set at construction
+StructureSet.entry	skip:java		record constructor for a weighted selection entry
+StructureStart.loadStaticStart	missing		minor: starts are written on save (save.rs) but never read back, so saved piece state is not restored on load
+StructureStart.getBoundingBox	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureStart::new	the box is a field set here, inflated for terrain-adapting structures
+TemplateStructurePiece.move	inline	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolPiece::moved	template position moved with the box in the same call
+RandomSpreadStructurePlacement.validate	skip:data		codec check that spacing exceeds separation
+RandomSpreadStructurePlacement.isPlacementChunk	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::structure_chunk	candidate chunk equals the source chunk; exclusion zones are a separate flag
+StructurePlacement.getLocatePos	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::locate	reports the chunk's minimum block x and z at y 0; locate offset is zero
+JigsawPlacement.isStartTooCloseToWorldHeightLimits	inline	crates/horizon-world/src/worldgen/structure/jigsaw.rs::assemble_drawing	padding check on the centre piece box, same test
+JigsawPlacement.getRandomNamedJigsaw	inline	crates/horizon-world/src/worldgen/structure/jigsaw.rs::assemble_drawing	first shuffled jigsaw with the start jigsaw name anchors the centre piece
+JigsawPlacement.Placer.tryPlacingChildren	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::Placer::children	per jigsaw: target pool and fallback, candidates, rotations, expansion hack and bounds
+SinglePoolElement.encodeTemplate	skip:java		codec encode of the template id
+SinglePoolElement.getTemplate	port	crates/horizon-world/src/worldgen/structure.rs::StructureResources::template	cached template lookup by id
+SinglePoolElement.getDataMarkers	skip:other		data-mode markers go to StructurePoolElement.handleDataMarker, which is empty for pool elements
+SinglePoolElement.getShuffledJigsawBlocks	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolElement::shuffled_jigsaws	shuffle then stable sort by selection priority
+SinglePoolElement.getBoundingBox	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolElement::bounding_box	
+BuriedTreasurePieces.BuriedTreasurePiece.isLiquid	port	crates/horizon-world/src/worldgen/structure/legacy.rs::PieceContext::is_liquid	water and lava test
+DesertPyramidPiece.addAdditionalSaveData	port	crates/horizon-world/src/worldgen/structure/temple.rs::DesertPyramidPiece::save	hasPlacedChest0 to 3 tags
+DesertPyramidPiece.addCellar	inline	crates/horizon-world/src/worldgen/structure/temple.rs::DesertPyramidPiece::post_process	stairs then room, in the cellar block of post_process
+DesertPyramidPiece.addCellarStairs	inline	crates/horizon-world/src/worldgen/structure/temple.rs::DesertPyramidPiece::post_process	sandstone stairs and sand steps, variant draw from the level random
+DesertPyramidPiece.addCellarRoom	inline	crates/horizon-world/src/worldgen/structure/temple.rs::DesertPyramidPiece::post_process	cellar room blocks inside post_process
+DesertPyramidPiece.placeSand	inline	crates/horizon-world/src/worldgen/structure/temple.rs::DesertPyramidPiece::sand_positions	each suspicious sand position is added in the list here
+DesertPyramidPiece.placeSandBox	inline	crates/horizon-world/src/worldgen/structure/temple.rs::DesertPyramidPiece::sand_positions	box fill of candidate sand positions
+DesertPyramidPiece.placeCollapsedRoofPiece	inline	crates/horizon-world/src/worldgen/structure/temple.rs::DesertPyramidPiece::post_process	sandstone with chance 0.33, else sand
+EndCityPieces.EndCityPiece.makeSettings	inline	crates/horizon-world/src/worldgen/structure/end_city.rs::pieces	ignore list chosen by the overwrite flag
+EndCityPieces.EndCityPiece.addAdditionalSaveData	port	crates/horizon-world/src/worldgen/structure/end_city.rs::EndCityPiece::save	rotation and OW flag, plus GD
+EndCityPieces.EndCityPiece.handleDataMarker	port	crates/horizon-world/src/worldgen/structure/end_city.rs::EndCityPiece::post_process	gap: minor: no Level.isInSpawnableBounds check before sentry and elytra spawns; sentry, elytra and chest markers are done
+IglooPieces.IglooPiece.makeSettings	inline	crates/horizon-world/src/worldgen/structure/simple.rs::igloo_pieces	rotation, pivot and ignore processor set when the piece is built
+IglooPieces.IglooPiece.addAdditionalSaveData	port	crates/horizon-world/src/worldgen/structure/simple.rs::TemplatePiece::saved	Rot tag for the igloo handler
+IglooPieces.IglooPiece.handleDataMarker	port	crates/horizon-world/src/worldgen/structure/simple.rs::TemplatePiece::post_process	chest marker clears the block and sets the igloo chest loot below
+JungleTemplePiece.addAdditionalSaveData	port	crates/horizon-world/src/worldgen/structure/temple.rs::JungleTemplePiece::save	four placed flags
+JungleTemplePiece.MossStoneSelector.next	inline	crates/horizon-world/src/worldgen/structure/temple.rs::JungleTemplePiece::post_process	cobblestone at 0.4, else mossy cobblestone, in the stone box fill
+MineshaftPieces.MineShaftCorridor.addAdditionalSaveData	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::save	
+MineshaftPieces.MineShaftCorridor.findCorridorSize	inline	crates/horizon-world/src/worldgen/structure/mineshaft.rs::Builder::create	corridor length drawn as 2 to 4, then shortened until the box is free
+MineshaftPieces.MineShaftCorridor.addChildren	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::Builder::add_children	
+MineshaftPieces.MineShaftCorridor.postProcess	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::corridor	
+MineshaftPieces.MineShaftCorridor.placeDoubleLowerOrUpperSupport	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::double_support	
+MineshaftPieces.MineShaftCorridor.fillColumnDown	skip:other		override never called: no mineshaft piece calls fillColumnDown in vanilla
+MineshaftPieces.MineShaftCorridor.fillColumnBetween	inline	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::pillar_or_chain	the fill loops written inline
+MineshaftPieces.MineShaftCorridor.canHangChainBelow	inline	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::pillar_or_chain	centre sturdy below and not falling test, inline
+MineshaftPieces.MineShaftCorridor.maybePlaceCobWeb	inline	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::corridor	cobweb chance and sturdy-neighbour test written in the corridor body
+MineshaftPieces.MineShaftCorridor.hasSturdyNeighbours	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::sturdy_neighbours	
+MineshaftPieces.MineShaftCrossing.addAdditionalSaveData	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::save	
+MineshaftPieces.MineShaftCrossing.findCrossing	inline	crates/horizon-world/src/worldgen/structure/mineshaft.rs::Builder::create	crossing arm of the random shaft piece
+MineshaftPieces.MineShaftCrossing.addChildren	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::Builder::add_children	
+MineshaftPieces.MineShaftCrossing.postProcess	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::crossing	
+MineshaftPieces.MineShaftCrossing.placeSupportPillar	inline	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::crossing	corner pillars where air is above, written in the crossing body
+MineshaftPieces.MineShaftPiece.canBeReplaced	inline	crates/horizon-world/src/worldgen/structure/legacy.rs::PieceFrame::place	keep list (planks, log, fence, chain) checked in place
+MineshaftPieces.MineShaftPiece.isSupportingBox	inline	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::support	air-above test for x 0 to 2, in the support body
+MineshaftPieces.MineShaftPiece.isInInvalidLocation	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::invalid	blocking biome at the box centre and liquid test
+MineshaftPieces.MineShaftRoom.addChildren	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::Builder::add_children	
+MineshaftPieces.MineShaftRoom.postProcess	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::room	
+MineshaftPieces.MineShaftRoom.move	inline	crates/horizon-world/src/worldgen/structure/mineshaft.rs::generate	the vertical move of the room and its entrance boxes happens in generate
+MineshaftPieces.MineShaftRoom.addAdditionalSaveData	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::save	
+MineshaftPieces.MineShaftStairs.findStairs	inline	crates/horizon-world/src/worldgen/structure/mineshaft.rs::Builder::create	stairs arm of the random shaft piece
+MineshaftPieces.MineShaftStairs.addChildren	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::Builder::add_children	
+MineshaftPieces.MineShaftStairs.postProcess	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::MineshaftPiece::stairs	
+MineshaftStructure.generatePiecesAndAdjust	port	crates/horizon-world/src/worldgen/structure/mineshaft.rs::generate	
+NetherFortressPieces.BridgeCrossing.addChildren	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::add_children	
+NetherFortressPieces.BridgeCrossing.createPiece	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	box check and collision test, then the piece
+NetherFortressPieces.BridgeStraight.addChildren	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::add_children	
+NetherFortressPieces.BridgeStraight.createPiece	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	
+NetherFortressPieces.CastleCorridorStairsPiece.addChildren	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::add_children	
+NetherFortressPieces.CastleCorridorStairsPiece.createPiece	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	
+NetherFortressPieces.CastleCorridorTBalconyPiece.addChildren	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::add_children	
+NetherFortressPieces.CastleCorridorTBalconyPiece.createPiece	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	
+NetherFortressPieces.CastleEntrance.addChildren	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::add_children	
+NetherFortressPieces.CastleEntrance.createPiece	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	
+NetherFortressPieces.CastleSmallCorridorCrossingPiece.addChildren	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::add_children	
+NetherFortressPieces.CastleSmallCorridorCrossingPiece.createPiece	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	
+NetherFortressPieces.CastleSmallCorridorLeftTurnPiece.addChildren	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::add_children	
+NetherFortressPieces.CastleSmallCorridorLeftTurnPiece.createPiece	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	
+NetherFortressPieces.CastleSmallCorridorPiece.addChildren	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::add_children	
+NetherFortressPieces.CastleSmallCorridorPiece.createPiece	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	
+NetherFortressPieces.CastleSmallCorridorRightTurnPiece.addChildren	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::add_children	
+NetherFortressPieces.CastleSmallCorridorRightTurnPiece.createPiece	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	
+NetherFortressPieces.CastleStalkRoom.addChildren	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::add_children	
+NetherFortressPieces.CastleStalkRoom.createPiece	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	
+NetherFortressPieces.MonsterThrone.createPiece	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	
+NetherFortressPieces.NetherBridgePiece.updatePieceWeight	inline	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::generate_piece	weight total, or -1 when no piece can still be placed, computed at the top of generate_piece
+NetherFortressPieces.NetherBridgePiece.generateChildForward	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::forward	foot from the bounding box and orientation, then add
+NetherFortressPieces.NetherBridgePiece.generateChildLeft	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::side	left side: west for north and south facing
+NetherFortressPieces.NetherBridgePiece.generateChildRight	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::side	right side: east for north and south facing
+NetherFortressPieces.RoomCrossing.addChildren	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::add_children	
+NetherFortressPieces.RoomCrossing.createPiece	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	
+NetherFortressPieces.StairsRoom.addChildren	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::add_children	
+NetherFortressPieces.StairsRoom.createPiece	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	
+NetherFortressStructure.findGenerationPoint	port	crates/horizon-world/src/worldgen/structure/fortress.rs::generate	builds the start and pieces for the chunk; the stub position is set by the start code
+NetherFossilPieces.NetherFossilPiece.addAdditionalSaveData	port	crates/horizon-world/src/worldgen/structure/nether_fossil.rs::NetherFossilPiece::save	
+OceanMonumentPieces.MonumentBuilding.<init>	port	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::new	frame, room graph and wing and penthouse children
+OceanMonumentPieces.MonumentBuilding.generateRoomGraph	inline	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::new	room grid, connections and source search built in the constructor
+OceanMonumentPieces.MonumentBuilding.generateWing	port	crates/horizon-world/src/worldgen/structure/monument.rs::wing	
+OceanMonumentPieces.MonumentBuilding.generateEntranceArchs	inline	crates/horizon-world/src/worldgen/structure/monument.rs::building	entrance arches block in building
+OceanMonumentPieces.MonumentBuilding.generateEntranceWall	inline	crates/horizon-world/src/worldgen/structure/monument.rs::building	entrance wall block in building
+OceanMonumentPieces.MonumentBuilding.generateRoofPiece	inline	crates/horizon-world/src/worldgen/structure/monument.rs::building	roof block in building
+OceanMonumentPieces.MonumentBuilding.generateLowerWall	inline	crates/horizon-world/src/worldgen/structure/monument.rs::building	lower wall block in building
+OceanMonumentPieces.MonumentBuilding.generateMiddleWall	inline	crates/horizon-world/src/worldgen/structure/monument.rs::building	middle wall block in building
+OceanMonumentPieces.MonumentBuilding.generateUpperWall	inline	crates/horizon-world/src/worldgen/structure/monument.rs::building	upper wall block in building
+OceanMonumentPieces.OceanMonumentPiece.makeBoundingBox	port	crates/horizon-world/src/worldgen/structure/monument.rs::room_box	room box keyed by room index and direction
+OceanMonumentPieces.OceanMonumentPiece.generateWaterBox	port	crates/horizon-world/src/worldgen/structure/monument.rs::W::water	ice and water kept, air above sea level
+OceanMonumentPieces.OceanMonumentPiece.generateDefaultFloor	port	crates/horizon-world/src/worldgen/structure/monument.rs::W::floor	
+OceanMonumentPieces.OceanMonumentPiece.generateBoxOnFillOnly	port	crates/horizon-world/src/worldgen/structure/monument.rs::W::fill_only	
+OceanMonumentPieces.OceanMonumentPiece.chunkIntersects	port	crates/horizon-world/src/worldgen/structure/monument.rs::W::hits	
+OceanMonumentStructure.findGenerationPoint	inline	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	surrounding biome check around the chunk centre, then the top-of-chunk stub
+OceanMonumentStructure.createTopPiece	inline	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	MonumentBuilding::new at the chunk corner minus 29 with a random direction
+OceanRuinPieces.archyRuleProcessor	inline	crates/horizon-world/src/worldgen/structure/ocean_ruin.rs::processors	sand to suspicious sand with loot and a cap of 5 in the warm branch, cold bricks in the other
+OceanRuinPieces.allPositions	inline	crates/horizon-world/src/worldgen/structure/ocean_ruin.rs::pieces	eight cluster offsets drawn inline before the ruins count

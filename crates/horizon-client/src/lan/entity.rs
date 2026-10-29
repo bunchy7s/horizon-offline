@@ -128,6 +128,9 @@ impl States {
     pub fn as_slice(&self) -> &[EntityState] {
         &self.list[..self.len]
     }
+    pub fn as_mut_slice(&mut self) -> &mut [EntityState] {
+        &mut self.list[..self.len]
+    }
 }
 
 impl Extend<EntityState> for States {

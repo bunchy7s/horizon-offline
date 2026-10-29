@@ -170,6 +170,10 @@ struct Launcher {
     /// The version being deleted on a background thread. It is already out of `installed`, so
     /// nothing can launch, select or prepare it, and its row can't install or remove it again.
     removing: Option<String>,
+    /// What each installed version takes on disk, measured on a thread for the Versions page, and
+    /// the installed list it was measured for.
+    disk: Vec<(String, u64)>,
+    disk_for: Vec<String>,
     install_error: Option<(String, String)>,
     /// Native mods (`native_mods`): the build's step while it runs, why it failed, and the
     /// warning before a build while it is open, with the mods it names.
@@ -207,7 +211,8 @@ struct Launcher {
     accounts: Accounts,
     sign_in: Option<SignIn>,
     sign_in_state: Option<SignInState>,
-    keychain: bool,
+    /// What to say when the keychain doesn't keep sign-ins ([`account::no_keychain`]).
+    keychain: Option<String>,
     /// Whether an account here owns the game, by the keychain's last answers (the owner gate);
     /// none until the keychain has been read.
     owner: Option<bool>,
@@ -217,11 +222,14 @@ struct Launcher {
     /// (`dev_options`) for this run.
     dev_clicks: u8,
     dev_options: bool,
-    /// The game is waiting for its session (a token renewal) before it starts.
+    /// The game is waiting for its session (a token renewal), or a Java instance for its files
+    /// and Java (`start_java`), before it starts.
     starting_client: Option<String>,
+    /// Play was pressed on a version not prepared yet: it starts once this preparation ends well.
+    play_when_prepared: Option<String>,
     /// Join a friend: the code typed on the Play page, and the one the game
     /// starting now joins.
-    friend_code: String,
+    friend_code: line_edit::LineEdit,
     friend_focused: bool,
     friend_focus: FocusHandle,
     joining: Option<String>,
@@ -229,12 +237,14 @@ struct Launcher {
     quick_play: Option<(&'static str, String)>,
     /// The instance the running game plays and when it started: its play time grows on exit.
     client_run: Option<(String, Instant)>,
+    /// The running game's instance variables, for its post-exit command.
+    client_vars: horizon_launcher::launch::Vars,
     /// Settings' Game arguments field: the line, whether it has focus, and its focus handle.
     args_input: line_edit::LineEdit,
     args_focused: bool,
     args_focus: FocusHandle,
     /// Settings' Proxy field, the same way (`proxy`).
-    proxy_input: String,
+    proxy_input: line_edit::LineEdit,
     proxy_focused: bool,
     proxy_focus: FocusHandle,
     /// Opt-in data collection: the player's answer and Settings' section (`collection`).
@@ -389,6 +399,8 @@ impl Launcher {
             installed,
             installing: None,
             removing: None,
+            disk: Vec::new(),
+            disk_for: Vec::new(),
             install_error: None,
             native_step: None,
             native_error: None,
@@ -401,7 +413,11 @@ impl Launcher {
             args_input: line_edit::LineEdit::new(settings.game_args.clone(), 1024, 38),
             args_focused: false,
             args_focus: cx.focus_handle(),
-            proxy_input: settings.proxy.clone().unwrap_or_default(),
+            proxy_input: line_edit::LineEdit::new(
+                settings.proxy.clone().unwrap_or_default(),
+                256,
+                44,
+            ),
             proxy_focused: false,
             proxy_focus: cx.focus_handle(),
             settings,
@@ -420,18 +436,20 @@ impl Launcher {
             accounts: Accounts::load(),
             sign_in: None,
             sign_in_state: None,
-            keychain: true,
+            keychain: None,
             owner: None,
             owner_screen_open: false,
             dev_clicks: 0,
             dev_options: false,
             starting_client: None,
-            friend_code: String::new(),
+            play_when_prepared: None,
+            friend_code: line_edit::LineEdit::new(String::new(), 256, 32),
             friend_focused: false,
             friend_focus: cx.focus_handle(),
             joining: None,
             quick_play: None,
             client_run: None,
+            client_vars: Vec::new(),
             collection: collection::Collection::load(),
             agents: agents_page::AgentsUi::default(),
             playing: None,
@@ -480,7 +498,7 @@ impl Launcher {
         let accounts = this.accounts.clone();
         std::thread::spawn(move || {
             let store = account::store();
-            let _ = keychain_tx.send(Msg::Keychain(store.persistent()));
+            let _ = keychain_tx.send(Msg::Keychain(account::no_keychain()));
             let _ = keychain_tx.send(Msg::Owner(accounts.has_owner(store)));
         });
         std::thread::spawn(move || {
@@ -665,9 +683,32 @@ impl Launcher {
                 Msg::Links(links) => self.links = links,
                 // The page reads is_prepared when drawn; `changed` redraws it.
                 Msg::Reused(_) => self.installed = backend::installed(),
-                Msg::Keychain(persistent) => self.keychain = persistent,
+                Msg::Keychain(said) => self.keychain = said,
                 Msg::Owner(owns) => self.owner = Some(owns),
                 Msg::Playing(playing) => self.playing = playing,
+                Msg::JavaGame(id, home, cmd) => {
+                    self.starting_client = None;
+                    let spawned = cmd.and_then(|(cmd, vars)| {
+                        self.client_vars = vars;
+                        backend::spawn(Job::Client, cmd, self.tx.clone())
+                    });
+                    match spawned {
+                        Ok(r) => {
+                            self.client = Some(r);
+                            self.client_home = Some(home);
+                            self.client_run = Some((id, Instant::now()));
+                            self.client_error = account::take_unsaved();
+                            self.step_aside(cx);
+                        }
+                        Err(e) => {
+                            if e == account::NoOwner.to_string() {
+                                self.owner = Some(false);
+                                self.owner_screen_open = true;
+                            }
+                            self.client_error = Some(e);
+                        }
+                    }
+                }
                 Msg::Session(session) => {
                     if let Some(tag) = self.starting_client.take() {
                         let mut cmd = backend::client_command(&tag);
@@ -693,6 +734,8 @@ impl Launcher {
                         // Still play, offline, and say why.
                         if let Some(e) = offline {
                             self.client_error = Some(format!("Playing offline: {e}"));
+                        } else if let Some(e) = account::take_unsaved() {
+                            self.client_error = Some(e);
                         }
                         self.accounts = Accounts::load();
                         // An offline name the player picked (the quick switch).
@@ -731,11 +774,15 @@ impl Launcher {
                         backend::append_game_args(&mut cmd);
                         // Last, around every argument: the instance's pre-launch command,
                         // wrapper and variables.
-                        let launch = run
+                        let instance = run
                             .as_ref()
-                            .and_then(|id| instances::list().into_iter().find(|i| &i.id == id))
-                            .map(|i| i.launch)
+                            .and_then(|id| instances::list().into_iter().find(|i| &i.id == id));
+                        self.client_vars = instance
+                            .as_ref()
+                            .map(|i| i.vars(cmd.get_program()))
                             .unwrap_or_default();
+                        cmd.envs(self.client_vars.iter().map(|(k, v)| (k, v)));
+                        let launch = instance.map(|i| i.launch).unwrap_or_default();
                         let cmd = horizon_launcher::launch::wrap(cmd, &launch);
                         self.client_home = cmd.get_current_dir().map(|d| d.to_path_buf());
                         match backend::spawn(Job::Client, cmd, self.tx.clone()) {
@@ -774,6 +821,11 @@ impl Launcher {
                                 self.settings.selected = Some(tag);
                             }
                             self.settings.save();
+                            // After the save: the selected version is never pruned.
+                            let tx = self.tx.clone();
+                            std::thread::spawn(move || {
+                                let _ = tx.send(Msg::Pruned(backend::prune_old_versions()));
+                            });
                         }
                         Err(e) => self.install_error = Some((tag, e)),
                     }
@@ -787,6 +839,12 @@ impl Launcher {
                         selection_after_removal(&self.installed, Settings::load().selected);
                     if let Err(e) = result {
                         self.install_error = Some((tag, e));
+                    }
+                }
+                Msg::DiskUse(disk) => self.disk = disk,
+                Msg::Pruned(gone) => {
+                    if !gone.is_empty() {
+                        self.installed = backend::installed();
                     }
                 }
                 Msg::Updates(Ok(updates)) => {
@@ -831,6 +889,8 @@ impl Launcher {
                     }
                 }
                 Msg::PackDone(result) => self.pack_done(result),
+                // Old versions log their session; it never reaches the window.
+                Msg::Line(_, line) if line.contains("Session ID is") => {}
                 Msg::Line(job, line) => {
                     if job == Job::Client && line.starts_with(perf::GAME_FIRST_FRAME) {
                         if let Some(pressed) = self.play_pressed.take() {
@@ -852,6 +912,13 @@ impl Launcher {
                     match job {
                         Job::Prepare => {
                             self.preparing = false;
+                            // Play pressed before the version was prepared plays now.
+                            if let Some(tag) = self.play_when_prepared.take() {
+                                if error.is_none() && backend::is_prepared(&tag) {
+                                    self.starting_pack = None;
+                                    self.start_client(tag);
+                                }
+                            }
                             if let (None, Some(started)) = (&error, self.prepare_started.take()) {
                                 self.perf.record_since("launcher.prepare_ms", started);
                             }
@@ -875,9 +942,16 @@ impl Launcher {
                             self.multiplayer.stale();
                             self.screenshots.stale();
                             self.game_packs.stale();
+                            let vars = std::mem::take(&mut self.client_vars);
                             if let Some((id, started)) = self.client_run.take() {
                                 if let Err(e) = instances::record_play(&id, started.elapsed()) {
                                     eprintln!("Play time not saved: {e}");
+                                }
+                                if let Some(i) = instances::list().into_iter().find(|i| i.id == id)
+                                {
+                                    horizon_launcher::launch::run_after_exit(
+                                        &i.launch, &i.home, &vars,
+                                    );
                                 }
                                 self.reload_instances();
                             }
@@ -1080,14 +1154,81 @@ impl Launcher {
     }
 
     fn play(&mut self) {
+        let java = self
+            .selected_instance()
+            .filter(|i| i.java.is_some())
+            .cloned();
+        if let Some(instance) = java {
+            // Mojang's game: no Horizon version or preparation, only no game already running.
+            // It joins a server; a friend's code and opening a world are Horizon's.
+            self.joining = None;
+            let server = self
+                .quick_play
+                .take()
+                .filter(|(flag, _)| *flag == "--server")
+                .map(|(_, ip)| ip);
+            if self.client.is_some() || self.starting_client.is_some() {
+                return;
+            }
+            self.starting_pack = None;
+            self.start_java(instance, server);
+            return;
+        }
         let Some(tag) = self.selected().cloned() else {
             return;
         };
-        if self.client.is_some() || self.starting_client.is_some() {
+        if !self.can_start(&tag) {
             return;
         }
         self.starting_pack = None;
         self.start_client(tag);
+    }
+
+    /// Starts a Java instance's Minecraft, joining `server` if given: its files and Java first
+    /// (downloaded the first time, their lines in the log), then `drain` starts the game when
+    /// the command arrives.
+    fn start_java(&mut self, instance: instances::Instance, server: Option<String>) {
+        self.client_error = None;
+        self.crash = None;
+        self.prepare_log.clear();
+        self.client_started =
+            Some(std::time::SystemTime::now() - std::time::Duration::from_secs(2));
+        self.starting_client = Some(instance.id.clone());
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let log = |line: String| {
+                let _ = tx.send(Msg::Line(Job::Client, line));
+            };
+            let cmd = backend::java_game(&instance, server.as_deref(), &log).map(|mut cmd| {
+                let vars = instance.vars(cmd.get_program());
+                cmd.envs(vars.iter().map(|(k, v)| (k, v)));
+                (horizon_launcher::launch::wrap(cmd, &instance.launch), vars)
+            });
+            let _ = tx.send(Msg::JavaGame(instance.id, instance.home, cmd));
+        });
+    }
+
+    /// Whether `tag` can start now ([`starts_now`]): prepared, no preparation under way, no game
+    /// running or starting.
+    pub(crate) fn can_start(&self, tag: &str) -> bool {
+        let running = self.client.is_some() || self.starting_client.is_some();
+        starts_now(backend::is_prepared(tag), self.preparing, running)
+    }
+
+    /// Whether the selected instance's version can start now, from a shortcut (a server's Join,
+    /// a world's Play, a friend's code): Horizon's only, never a Java instance.
+    pub(crate) fn can_start_selected(&self) -> bool {
+        self.selected_instance().is_none_or(|i| i.java.is_none())
+            && self.selected().is_some_and(|tag| self.can_start(tag))
+    }
+
+    /// Whether a server's Join starts the selected instance now: a Java instance too, as Play
+    /// would (no game running or starting).
+    pub(crate) fn can_join_selected(&self) -> bool {
+        match self.selected_instance() {
+            Some(i) if i.java.is_some() => self.client.is_none() && self.starting_client.is_none(),
+            _ => self.can_start_selected(),
+        }
     }
 
     /// Starts the game: the session first (a network round trip when the token needs
@@ -1242,7 +1383,10 @@ fn version_tag(tag: &str) -> Div {
         .text_size(px(22.))
         .line_height(px(28.))
         .font_weight(FontWeight::MEDIUM)
-        .child(tag.trim_start_matches('v').to_string())
+        .child(
+            horizon_launcher::nightly::label(tag)
+                .unwrap_or_else(|| tag.trim_start_matches('v').to_string()),
+        )
 }
 
 /// Horizon's mark: two stems, their reflection below, and the horizon across in the accent.
@@ -1364,17 +1508,61 @@ fn button(
 /// Copies to the clipboard, or into `HORIZON_LAUNCHER_CLIPBOARD` when a test run sets it
 /// (`horizon_launcher::desktop_seams`).
 fn copy_to_clipboard(cx: &mut App, item: gpui::ClipboardItem) {
-    let Some(file) = horizon_launcher::desktop_seams::clipboard_file() else {
-        cx.write_to_clipboard(item);
+    if let Some(file) = horizon_launcher::desktop_seams::clipboard_file() {
+        let bytes = match item.entries().first() {
+            Some(gpui::ClipboardEntry::Image(image)) => image.bytes.clone(),
+            _ => item.text().unwrap_or_default().into_bytes(),
+        };
+        if let Err(e) = std::fs::write(&file, bytes) {
+            eprintln!("{}: {e}", file.display());
+        }
         return;
-    };
-    let bytes = match item.entries().first() {
-        Some(gpui::ClipboardEntry::Image(image)) => image.bytes.clone(),
-        _ => item.text().unwrap_or_default().into_bytes(),
-    };
-    if let Err(e) = std::fs::write(&file, bytes) {
-        eprintln!("{}: {e}", file.display());
     }
+    cx.write_to_clipboard(item.clone());
+    #[cfg(target_os = "linux")]
+    if let Some(text) = item.text() {
+        sync_system_clipboard(text);
+    }
+}
+
+/// GPUI's Wayland clipboard sends the last key press's serial, which a compositor ignores
+/// after a mouse click: hand the text to the desktop's own tool too, the first one present
+/// for this session (`wl-copy` on Wayland, `xclip` or `xsel` on X11).
+#[cfg(target_os = "linux")]
+fn sync_system_clipboard(text: String) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    const TOOLS: [(&str, &str, &[&str]); 3] = [
+        ("WAYLAND_DISPLAY", "wl-copy", &[]),
+        ("DISPLAY", "xclip", &["-selection", "clipboard"]),
+        ("DISPLAY", "xsel", &["--clipboard", "--input"]),
+    ];
+    if text.is_empty() {
+        return;
+    }
+    // Off the UI thread: a tool can take its time.
+    std::thread::spawn(move || {
+        for (session, tool, args) in TOOLS {
+            if std::env::var_os(session).is_none() {
+                continue;
+            }
+            let Ok(mut child) = Command::new(tool)
+                .args(args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            else {
+                continue;
+            };
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            if child.wait().is_ok_and(|status| status.success()) {
+                return;
+            }
+        }
+    });
 }
 
 /// An on/off switch: a square knob sliding in a sunk track that turns violet when on.
@@ -1473,6 +1661,34 @@ fn segments<T: Copy + PartialEq + 'static>(
                 .child(div().relative().child(tr(label)))
                 .on_click(move |_: &ClickEvent, window, cx| pick(value, window, cx))
         }))
+}
+
+/// What the Play button does for the selected version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlayPress {
+    Play,
+    /// Not prepared, for an account that owns the game: prepare it (from the player's install,
+    /// else downloaded from Mojang for that account), then play, as the official launcher does.
+    PrepareThenPlay,
+    /// Not prepared and no owner (signing in comes first), or busy preparing or playing.
+    Nothing,
+}
+
+/// `owner`: whether an account here owns the game, by the keychain (`Launcher::owner`).
+fn play_press(prepared: bool, owner: Option<bool>, busy: bool) -> PlayPress {
+    match (prepared, owner) {
+        _ if busy => PlayPress::Nothing,
+        (true, _) => PlayPress::Play,
+        (false, Some(true)) => PlayPress::PrepareThenPlay,
+        (false, _) => PlayPress::Nothing,
+    }
+}
+
+/// Whether a shortcut that starts the game at once (a server's Join, a world's Play, a friend's
+/// code, a pack's Play) starts it now: only when Play would play. Never while a preparation runs:
+/// the game would open on half-written files.
+fn starts_now(prepared: bool, preparing: bool, running: bool) -> bool {
+    play_press(prepared, None, preparing || running) == PlayPress::Play
 }
 
 /// The selected version once one has been removed: the saved choice if it is still installed,
@@ -2200,7 +2416,13 @@ impl Launcher {
 
     fn play_page(&mut self, banner_width: f32, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
-        let Some(tag) = self.selected().cloned() else {
+        // A Java instance plays Mojang's game: no Horizon version, nothing of Horizon's to prepare.
+        let java = self.selected_instance().and_then(|i| i.java.clone());
+        let Some(tag) = self
+            .selected()
+            .cloned()
+            .or_else(|| java.is_some().then(String::new))
+        else {
             // No hero without a version: the page starts below the top bar like the others.
             return div()
                 .flex()
@@ -2224,8 +2446,13 @@ impl Launcher {
         let prepared = backend::is_prepared(&tag);
         // Prepared without sounds (#1035): Prepare again is the fix, so it stands out.
         let silent = prepared && !backend::has_sounds(&tag);
-        let version = backend::game_version(&tag);
-        let hero = self.hero(&tag, &version, prepared, cx);
+        let version = java
+            .as_ref()
+            .map_or_else(|| backend::game_version(&tag), |j| j.minecraft.clone());
+        let hero = match java {
+            Some(_) => self.hero("", &version, true, cx),
+            None => self.hero(&tag, &version, prepared, cx),
+        };
         let running = self.client.is_some() || self.starting_client.is_some();
         let play_label = if running { "Running" } else { "Play" };
         // The label clears the icon in every language ("Играть" is wider than "Play").
@@ -2243,14 +2470,27 @@ impl Launcher {
                     .top(px(17.))
                     .child(blocks::icon("play", 22., t.on_face)),
             );
-        if !prepared || self.preparing || running {
-            play = disabled(play);
-        } else {
-            play = play.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                this.picker_open = false;
-                this.play();
-                cx.notify();
-            }));
+        match play_press(
+            prepared || java.is_some(),
+            self.owner,
+            self.preparing || running,
+        ) {
+            PlayPress::Nothing => play = disabled(play),
+            PlayPress::Play => {
+                play = play.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.picker_open = false;
+                    this.play();
+                    cx.notify();
+                }))
+            }
+            PlayPress::PrepareThenPlay => {
+                play = play.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.picker_open = false;
+                    this.play_when_prepared = this.selected().cloned();
+                    this.prepare(backend::MinecraftFrom::Install);
+                    cx.notify();
+                }))
+            }
         }
         let actions = div()
             .flex()
@@ -2278,8 +2518,14 @@ impl Launcher {
         let first = (!prepared && !self.preparing)
             .then_some(self.owner_shown())
             .flatten();
+        // No launcher folder with Minecraft on this computer: an owner needs none.
+        let no_install = self.settings.minecraft_dir.is_none();
         let resources_value = match first {
             _ if self.preparing => tr("Preparing…").to_string(),
+            Some(_) if no_install => trf(
+                "Not prepared. Play downloads Minecraft {version} from Mojang and prepares it.",
+                &[("version", &version)],
+            ),
             Some(_) => trf(
                 "Not prepared. Horizon can download Minecraft {version} from Mojang, or use your own install.",
                 &[("version", &version)],
@@ -2305,6 +2551,18 @@ impl Launcher {
             }));
         }
         let prepare = match first {
+            Some(_) if no_install => div().child(
+                button(
+                    "prepare-download",
+                    "Download and prepare",
+                    Kind::Secondary,
+                    &t,
+                )
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.prepare(backend::MinecraftFrom::Mojang);
+                    cx.notify();
+                })),
+            ),
             Some(_) => div()
                 .flex()
                 .gap(px(8.))
@@ -2330,12 +2588,15 @@ impl Launcher {
                 ),
             None => div().child(prepare),
         };
+        let owner = self.owner == Some(true);
         let minecraft = self.settings.minecraft_dir.as_deref().map_or_else(
             || {
                 div()
-                    .child(tr(
-                        "Not found. Choose the folder where your launcher keeps Minecraft.",
-                    ))
+                    .child(if owner {
+                        tr("None needed: Horizon downloads Minecraft from Mojang for your account.")
+                    } else {
+                        tr("Not found. Choose the folder where your launcher keeps Minecraft.")
+                    })
                     .into_any_element()
             },
             |p| {
@@ -2351,15 +2612,31 @@ impl Launcher {
             .child(section_title("Ready to play", "check", &t).mb(px(12.)))
             .children(self.instance_row(1, cx))
             .children(self.export_panel(cx))
-            .children(self.launch_panel(cx))
-            .child(index_row(
+            .children(self.launch_panel(cx));
+        rows = match &java {
+            Some(java) => rows.child(index_row(
                 2,
-                tr("Resources"),
-                Some(div().child(resources_value).into_any_element()),
-                Some(prepare.into_any_element()),
+                tr("Game"),
+                Some(
+                    div()
+                        .child(trf(
+                            "Minecraft {version} (Java Edition). Play downloads it from Mojang for your account the first time, with the Java it needs.",
+                            &[("version", &java.minecraft)],
+                        ))
+                        .into_any_element(),
+                ),
+                None,
                 &t,
-            ))
-            .child(index_row(
+            )),
+            None => rows
+                .child(index_row(
+                    2,
+                    tr("Resources"),
+                    Some(div().child(resources_value).into_any_element()),
+                    Some(prepare.into_any_element()),
+                    &t,
+                ))
+                .child(index_row(
                 3,
                 tr("Minecraft folder"),
                 Some(minecraft),
@@ -2369,9 +2646,12 @@ impl Launcher {
                         .into_any_element(),
                 ),
                 &t,
-            ));
+            )),
+        };
         {
-            rows = rows.child(self.join_friend_row(prepared && !running, cx));
+            if java.is_none() {
+                rows = rows.child(self.join_friend_row(self.can_start(&tag), cx));
+            }
             // The top bar shows who plays; a row only when there is something to do about it:
             // no account that owns the game (Play needs one), or offline.
             if self.owner_shown() == Some(false) {
@@ -2650,7 +2930,8 @@ impl Launcher {
             .child(body)
     }
 
-    /// The Play page's focal point: what will start, and a line from its notes.
+    /// The Play page's focal point: what will start, and a line from its notes. No `tag`: a Java
+    /// instance's Minecraft.
     fn hero(&self, tag: &str, version: &str, prepared: bool, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let summary = match &self.releases {
@@ -2660,7 +2941,11 @@ impl Launcher {
                 .and_then(|r| backend::notes_summary(&r.body)),
             _ => None,
         };
-        let title = "Horizon";
+        let title = if tag.is_empty() {
+            "Minecraft"
+        } else {
+            "Horizon"
+        };
         // Never squeezed by the rows below: the ping notice can make it tall.
         let mut hero = div()
             .flex()
@@ -2805,6 +3090,13 @@ impl Launcher {
                 cx.notify();
             }),
         );
+        let prune = switch("auto-prune", self.settings.auto_prune(), &t).on_click(cx.listener(
+            |this, _: &ClickEvent, _, cx| {
+                this.settings.prune_old_versions = Some(!this.settings.auto_prune());
+                this.settings.save();
+                cx.notify();
+            },
+        ));
         let opening = switch("opening", !self.settings.skip_opening, &t).on_click(cx.listener(
             |this, _: &ClickEvent, _, cx| {
                 this.settings.skip_opening = !this.settings.skip_opening;
@@ -2953,6 +3245,20 @@ impl Launcher {
                             "Your selected version only changes if you were playing the newest one.",
                         )),
                         Some(toggle.into_any_element()),
+                        &t,
+                    ))
+                    .child(index_row(
+                        n + 2,
+                        tr("Delete old versions automatically"),
+                        Some(
+                            div()
+                                .child(trf(
+                                    "Keeps the {count} newest, the one in use and the ones your instances use. Deleted versions install again from the Versions page.",
+                                    &[("count", &self.settings.keep_newest().to_string())],
+                                ))
+                                .into_any_element(),
+                        ),
+                        Some(prune.into_any_element()),
                         &t,
                     ))
                     .child(group("Launcher", "monitor"))
@@ -3114,7 +3420,7 @@ impl Launcher {
             .child(div().text_color(t.danger).child(tr("These mods will run with full access to your computer").to_string()))
             .child(tr("They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.").to_string())
             .child(trf("Mods: {mods}", &[("mods", &list)]))
-            .child(tr("The build compiles the game: about ten minutes and a few GB of disk the first time, a few minutes after that.").to_string());
+            .child(tr("The build compiles the game: 20 to 30 minutes and a few GB of disk the first time (it downloads Rust), a few minutes after that.").to_string());
         let mut buttons = div().flex().gap(px(8.)).mt(px(4.));
         if mods.is_ok() {
             buttons = buttons.child(
@@ -3217,52 +3523,34 @@ impl Launcher {
             .font_family(theme::MONO)
             .text_size(px(12.))
             .cursor_text()
-            .child(if self.proxy_input.is_empty() && !focused {
-                div()
-                    .text_color(t.muted)
-                    .child("For example http://127.0.0.1:7890")
-            } else {
-                // The end of a long line stays in view while typing.
-                let chars: Vec<char> = self.proxy_input.chars().collect();
-                let shown: String = chars[chars.len().saturating_sub(44)..].iter().collect();
-                div().text_color(t.ink).child(shown)
-            })
-            .when(focused, |d| d.child(div().w(px(1.)).h(px(14.)).bg(t.ink)))
+            .child(line_edit::content(
+                &self.proxy_input,
+                &t,
+                focused,
+                false,
+                false,
+                "For example http://127.0.0.1:7890",
+            ))
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                 window.focus(&this.proxy_focus);
                 cx.notify();
             }))
-            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                let k = &ev.keystroke;
-                let paste = k.key == "v" && (k.modifiers.control || k.modifiers.platform);
-                match k.key.as_str() {
-                    "backspace" => {
-                        this.proxy_input.pop();
-                    }
-                    _ if paste => {
-                        if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                            // A copied line, not a copied page: the field takes one address.
-                            let line = text.lines().next().unwrap_or(&text);
-                            this.proxy_input.push_str(line.trim());
-                        }
-                    }
-                    _ if !k.modifiers.control && !k.modifiers.platform => {
-                        if let Some(ch) = &k.key_char {
-                            this.proxy_input.push_str(ch);
-                        }
-                    }
-                    _ => return,
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                match line_edit::handle(&mut this.proxy_input, ev, cx) {
+                    line_edit::Key::Pass => return,
+                    line_edit::Key::Escape => window.blur(),
+                    line_edit::Key::Edited => this.save_proxy(),
+                    _ => {}
                 }
-                // `truncate` counts bytes, and a cut inside a character panics: count characters.
-                if this.proxy_input.chars().count() > 256 {
-                    this.proxy_input = this.proxy_input.chars().take(256).collect();
-                }
-                this.save_proxy();
                 cx.stop_propagation();
                 cx.notify();
             }));
+        let field = line_edit::mouse(field, cx, |this| &mut this.proxy_input);
         // A half-typed address is no reason to complain; one left behind is.
-        let detail = match (focused, horizon_launcher::proxy::refuse(&self.proxy_input)) {
+        let detail = match (
+            focused,
+            horizon_launcher::proxy::refuse(self.proxy_input.text()),
+        ) {
             (false, Some(why)) => div().text_color(t.danger).child(why).into_any_element(),
             _ => div()
                 .child(
@@ -3278,7 +3566,7 @@ impl Launcher {
     /// Keeps the Proxy field in `settings.json`, and tells the parts that build their own agents
     /// (`horizon-port-pack`) which proxy to use.
     fn save_proxy(&mut self) {
-        let value = self.proxy_input.trim().to_owned();
+        let value = self.proxy_input.text().trim().to_owned();
         self.settings.proxy = (!value.is_empty()).then_some(value);
         self.settings.save();
         horizon_launcher::proxy::announce(self.settings.proxy.clone());
@@ -3381,15 +3669,14 @@ impl Launcher {
             )),
             None => div().child(tr("Add another account.")),
         };
-        let detail = if self.keychain || self.accounts.accounts.is_empty() {
-            detail
-        } else {
-            div()
+        let detail = match self.keychain.clone() {
+            Some(said) if !self.accounts.accounts.is_empty() => div()
                 .flex()
                 .flex_col()
                 .gap(px(4.))
                 .child(detail)
-                .child(div().child(account::NO_KEYCHAIN))
+                .child(div().child(said)),
+            _ => detail,
         };
         let action = if !configured {
             None
@@ -3474,46 +3761,30 @@ impl Launcher {
             .font_family(theme::MONO)
             .text_size(px(12.))
             .cursor_text()
-            .child(if self.friend_code.is_empty() && !focused {
-                div().text_color(t.muted).child(tr("Paste an invite code"))
-            } else {
-                // The end of a long code stays in view while typing.
-                let shown: String = {
-                    let chars: Vec<char> = self.friend_code.chars().collect();
-                    chars[chars.len().saturating_sub(30)..].iter().collect()
-                };
-                div().text_color(t.ink).child(shown)
-            })
-            .when(focused, |d| d.child(div().w(px(1.)).h(px(14.)).bg(t.ink)))
+            .child(line_edit::content(
+                &self.friend_code,
+                &t,
+                focused,
+                false,
+                false,
+                "Paste an invite code",
+            ))
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                 window.focus(&this.friend_focus);
                 cx.notify();
             }))
-            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                let k = &ev.keystroke;
-                let paste = k.key == "v" && (k.modifiers.control || k.modifiers.platform);
-                match k.key.as_str() {
-                    "enter" => this.join_friend(),
-                    "backspace" => {
-                        this.friend_code.pop();
-                    }
-                    _ if paste => {
-                        if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                            this.friend_code.push_str(text.trim());
-                        }
-                    }
-                    _ if !k.modifiers.control && !k.modifiers.platform => {
-                        if let Some(ch) = &k.key_char {
-                            this.friend_code.push_str(ch);
-                        }
-                    }
-                    _ => return,
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                match line_edit::handle(&mut this.friend_code, ev, cx) {
+                    line_edit::Key::Pass => return,
+                    line_edit::Key::Enter => this.join_friend(),
+                    line_edit::Key::Escape => window.blur(),
+                    _ => {}
                 }
-                this.friend_code.truncate(256);
                 cx.stop_propagation();
                 cx.notify();
             }));
-        let valid = horizon_friends::invite::parse(&self.friend_code).is_some();
+        let field = line_edit::mouse(field, cx, |this| &mut this.friend_code);
+        let valid = horizon_friends::invite::parse(self.friend_code.text()).is_some();
         let mut join = button("join-friend", "Join", Kind::Secondary, &t);
         if can_play && valid {
             join = join.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
@@ -3555,10 +3826,10 @@ impl Launcher {
     }
 
     fn join_friend(&mut self) {
-        if horizon_friends::invite::parse(&self.friend_code).is_none() {
+        if horizon_friends::invite::parse(self.friend_code.text()).is_none() {
             return;
         }
-        self.joining = Some(self.friend_code.clone());
+        self.joining = Some(self.friend_code.text().to_string());
         self.play();
         if self.starting_client.is_none() {
             self.joining = None;
@@ -3572,7 +3843,36 @@ impl Launcher {
             "Builds from GitHub. Each one installs into its own folder.",
             &t,
         );
-        let page = div().flex().flex_col().gap(px(32.)).child(header);
+        // Measured again when the installed versions change.
+        if self.disk_for != self.installed {
+            self.disk_for = self.installed.clone();
+            let (tags, tx) = (self.installed.clone(), self.tx.clone());
+            std::thread::spawn(move || {
+                let disk = tags.into_iter().map(|t| {
+                    let n = backend::disk_use(&t);
+                    (t, n)
+                });
+                let _ = tx.send(Msg::DiskUse(disk.collect()));
+            });
+        }
+        let on_disk = |tag: &String| {
+            let found = self.disk.iter().find(|(t, _)| t == tag);
+            found
+                .filter(|_| self.installed.contains(tag))
+                .map(|(_, n)| *n)
+        };
+        let used: u64 = self.installed.iter().filter_map(on_disk).sum();
+        let page = div()
+            .flex()
+            .flex_col()
+            .gap(px(32.))
+            .child(header)
+            .children((used > 0).then(|| {
+                text(theme::UI).text_color(t.muted).child(trf(
+                    "Installed versions use {size}.",
+                    &[("size", &megabytes(used))],
+                ))
+            }));
         let releases = match &self.releases {
             Load::Loading => return page.child(centered("Loading releases…", &t)),
             Load::Failed(e) => {
@@ -3609,6 +3909,9 @@ impl Launcher {
                 let mut meta = vec![release.date.clone()];
                 if let Some((_, size)) = release.asset {
                     meta.push(megabytes(size));
+                }
+                if let Some(n) = on_disk(&tag) {
+                    meta.push(trf("{size} on disk", &[("size", &megabytes(n))]));
                 }
                 let summary = release
                     .name
@@ -4304,6 +4607,39 @@ mod tests {
             super::selection_after_removal(&[], Some("v0.2.47".into())),
             None
         );
+    }
+
+    /// An owner's Play works on a version not prepared yet: it prepares it (downloading
+    /// Minecraft from Mojang when this computer has no install), then plays. Without an owner
+    /// it stays off: signing in comes first.
+    #[test]
+    fn play_prepares_first_for_an_owner() {
+        use super::{play_press, PlayPress};
+        assert_eq!(play_press(true, Some(true), false), PlayPress::Play);
+        assert_eq!(play_press(true, None, false), PlayPress::Play);
+        assert_eq!(
+            play_press(false, Some(true), false),
+            PlayPress::PrepareThenPlay
+        );
+        assert_eq!(play_press(false, Some(false), false), PlayPress::Nothing);
+        assert_eq!(play_press(false, None, false), PlayPress::Nothing);
+        assert_eq!(play_press(false, Some(true), true), PlayPress::Nothing);
+        assert_eq!(play_press(true, Some(true), true), PlayPress::Nothing);
+    }
+
+    /// A server's Join (and every other shortcut) waits like Play: not while the version's
+    /// first download and preparation run (#horizon-bugs, 0.2.23: a white window opened).
+    #[test]
+    fn shortcuts_start_only_when_play_would() {
+        use super::starts_now;
+        assert!(starts_now(true, false, false));
+        assert!(
+            !starts_now(false, true, false),
+            "first-time setup under way"
+        );
+        assert!(!starts_now(true, true, false), "prepared again under way");
+        assert!(!starts_now(false, false, false), "not prepared");
+        assert!(!starts_now(true, false, true), "already running");
     }
 
     #[test]

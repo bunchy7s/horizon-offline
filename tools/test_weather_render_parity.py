@@ -32,7 +32,7 @@ def make_input(build):
 def main():
     harness.differential("weather-render-parity", "VanillaWeatherRenderOracle", "weather_fixture", make_input,
                          "Rain/snow column instances and quad vertices; not full framebuffer parity.",
-                         sources=[lab.ROOT / "crates/horizon-client/src/weather.rs"])
+                         sources=[lab.ROOT / "crates/horizon-client-render/src/weather.rs"])
 
 
 if __name__ == "__main__":

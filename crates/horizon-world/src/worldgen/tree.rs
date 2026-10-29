@@ -49,6 +49,18 @@ pub(crate) fn read<W: FeatureWorld>(
 ) -> TreeResult<BlockStateId, W::Error> {
     world.block(position).map_err(world_error)
 }
+/// `FeatureWorld::scan_column`.
+pub(crate) fn scan_column<W: FeatureWorld>(
+    world: &mut W,
+    position: [i32; 3],
+    step: i32,
+    limit: i32,
+    keep: impl FnMut(BlockStateId) -> bool,
+) -> TreeResult<i32, W::Error> {
+    world
+        .scan_column(position, step, limit, keep)
+        .map_err(world_error)
+}
 pub(crate) fn write<W: FeatureWorld>(
     world: &mut W,
     position: [i32; 3],

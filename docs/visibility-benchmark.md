@@ -1,6 +1,6 @@
 # Section visibility shortcuts
 
-The helper in `crates/horizon-client/src/mesher.rs` returns the same 36 face-pair bits
+The helper in `crates/horizon-client-render/src/mesher.rs` returns the same 36 face-pair bits
 as the original flood fill. It initializes its visited map with opaque cells,
 resolving state opacity once per cell, and returns directly for fully open or
 fully closed sections. During traversal, touching all six faces ends the fill;

@@ -925,24 +925,7 @@ impl Game<'_> {
                 Ok(1)
             }
             "say" | "me" | "msg" => self.cmd_say(id, ctx),
-            "list" => {
-                let names = if ctx.has("uuids") {
-                    Text::translate(
-                        "commands.list.nameAndId",
-                        &[
-                            Text::literal(PLAYER_NAME),
-                            Text::literal(self.player_uuid_string()),
-                        ],
-                    )
-                } else {
-                    Text::literal(PLAYER_NAME)
-                };
-                self.system_message(Text::translate(
-                    "commands.list.players",
-                    &[Text::literal("1"), Text::literal("8"), names],
-                ));
-                Ok(1)
-            }
+            "list" => self.cmd_list(ctx),
             _ => Err(err("command.failed", &[])),
         }
     }
@@ -1376,7 +1359,8 @@ impl Game<'_> {
             self.player = Some(player);
             return Err(err("command.failed", &[]));
         }
-        self.trigger_dimension(from, dimension);
+        let at = player.position;
+        self.trigger_dimension(from, dimension, [at.x, at.y, at.z]);
         let target = Vec3::new(pos[0], pos[1], pos[2]);
         player.position = target;
         player.velocity = Vec3::ZERO;
@@ -1928,7 +1912,10 @@ impl Game<'_> {
     fn spawned_mark(&self) -> (u32, usize) {
         (
             self.next_entity,
-            self.tnts.len() + self.falling.len() + self.creatures.projectiles.len(),
+            self.tnts.len()
+                + self.falling.len()
+                + self.creatures.projectiles.len()
+                + self.rockets.len(),
         )
     }
     /// BlockStateArgument -> registry state.
@@ -2082,8 +2069,52 @@ impl Game<'_> {
             return false;
         }
         self.world.block_entities.insert(key, new);
+        self.update_spawner_display(key);
         self.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
         true
+    }
+    /// `RandomizableContainer.unpackLootTable` for a player who opens a
+    /// container: a roll the container still holds fires
+    /// `player_generates_container_loot` for its table, and from then on the
+    /// container saves its items, not the table.
+    pub(super) fn unpack_opened_loot(&mut self, key: (i32, i32, i32), name: &str) {
+        let Some(rolled) = self
+            .world
+            .chunks
+            .get(&(key.0 >> 4, key.2 >> 4))
+            .and_then(|c| c.saved.as_ref())
+            .and_then(|s| s.rolled_loot.iter().find(|r| r.pos == key))
+            .cloned()
+        else {
+            return;
+        };
+        // The roll is still there only while the container holds exactly its items.
+        let still_rolled = self
+            .world
+            .block_entities
+            .get_mut(&key)
+            .is_some_and(|entity| {
+                let mut tag = horizon_client::save::encode_block_entity(key, entity, name);
+                match &mut tag {
+                    horizon_world::nbt::Tag::Compound(map) => rolled.restore(map),
+                    _ => false,
+                }
+            });
+        if still_rolled {
+            self.trigger_loot_table(&rolled.table);
+        }
+        let Some(chunk) = self.world.chunks.get_mut(&(key.0 >> 4, key.2 >> 4)) else {
+            return;
+        };
+        let chunk = std::sync::Arc::make_mut(chunk);
+        let mut extras = chunk
+            .saved
+            .take()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .unwrap_or_default();
+        extras.rolled_loot.retain(|r| r.pos != key);
+        chunk.saved = Some(std::sync::Arc::new(extras));
+        self.world.modified.insert((key.0 >> 4, key.2 >> 4));
     }
     /// RandomizableContainer.tryLoadLootTable for a tag a command gives a
     /// container (`setblock`, `data`): an empty container with a `LootTable`
@@ -2573,6 +2604,9 @@ impl Game<'_> {
             )));
         }
         self.ui.difficulty = i;
+        // The level data holds the world's difficulty: it survives the
+        // reopen, so it follows the command.
+        self.level.set_difficulty(i);
         self.sync_rules();
         if i == 0 {
             // Peaceful removes hostile mobs.
@@ -3091,6 +3125,63 @@ impl Game<'_> {
             }
         }
         out
+    }
+    /// ListPlayersCommand: every online player, the host of a hosted world
+    /// first and then the guests in join order, with the count and the max.
+    fn cmd_list(&mut self, ctx: &Context) -> R<i32> {
+        // A single-player owner is a placed guest of the in-process server, so
+        // it is the host and needs no entry of its own.
+        let owner_listed = self
+            .lan
+            .as_ref()
+            .is_some_and(|h| h.hub.singleplayer_owner.is_some());
+        // The host is online unless this is a dedicated server, which has none.
+        let host = (self.options.dedicated.is_none() && !owner_listed).then(|| match &self.lan {
+            Some(h) => (h.host_uuid, h.host_name.clone()),
+            None => (self.player_uuid(), PLAYER_NAME.to_owned()),
+        });
+        let guests = self
+            .lan
+            .iter()
+            .flat_map(|h| h.hub.guests.iter())
+            .filter(|g| g.placed)
+            .map(|g| (g.uuid, g.name.clone()));
+        let players: Vec<(u128, String)> = host.into_iter().chain(guests).collect();
+        let max = self
+            .lan
+            .as_ref()
+            .map_or(horizon_client::lan::MAX_PLAYERS, |h| {
+                h.hub.lan.shared.max_players()
+            });
+        let uuids = ctx.has("uuids");
+        let mut names = Text::empty();
+        for (k, (uuid, name)) in players.iter().enumerate() {
+            if k > 0 {
+                // ComponentUtils.formatList: gray commas.
+                names.push(Text::colored(", ", text::GRAY));
+            }
+            if uuids {
+                names.push(Text::translate(
+                    "commands.list.nameAndId",
+                    &[
+                        Text::literal(name.as_str()),
+                        Text::literal(horizon_protocol::crypto::uuid_string(*uuid)),
+                    ],
+                ));
+            } else {
+                names.push(self.player_text(name, *uuid));
+            }
+        }
+        let count = players.len();
+        self.system_message(Text::translate(
+            "commands.list.players",
+            &[
+                Text::literal(count.to_string()),
+                Text::literal(max.to_string()),
+                names,
+            ],
+        ));
+        Ok(count as i32)
     }
     fn cmd_say(&mut self, id: &str, ctx: &Context) -> R<i32> {
         let raw = match ctx.get(if id == "me" { "action" } else { "message" }) {

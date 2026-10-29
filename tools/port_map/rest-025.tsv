@@ -1,0 +1,14 @@
+PistonMovingBlockEntity.moveCollidedEntities	port	crates/horizon-client/src/game/piston_push.rs::Game::push_for_piston	push loop; per-box distance from crates/horizon-world/src/piston_push.rs::collided_amount
+SideChainPart.whenConnectedToTheRight	port	crates/horizon-world/src/level/shelf.rs::Part::connected_to_the_right	same arms as vanilla
+SideChainPart.whenConnectedToTheLeft	port	crates/horizon-world/src/level/shelf.rs::Part::connected_to_the_left	same arms as vanilla
+ProtoChunk.getFluidState	port	crates/horizon-world/src/worldgen/feature_region.rs::TerrainRegion::fluid_state	gap: minor: read through the region's block queries; no chunk-level accessor, fluid comes from the block state
+ProtoChunk.getNoiseBiome	port	crates/horizon-world/src/worldgen/generator.rs::ProtoChunk::biome_id_at	gap: minor: takes block coordinates (quart shift inside); no check that the BIOMES status was reached, vanilla throws before it
+StructureTemplate.Palette.jigsaws	port	crates/horizon-world/src/worldgen/structure/template.rs::StructureTemplate::jigsaws	per-palette OnceLock stands in for cachedJigsaws
+SkyLightEngine.updateSourcesInColumn	inline	crates/horizon-client/src/light.rs::relight_region	column loop finds the lowest sky source and reseeds cells above and below it
+FlyNodeEvaluator.findAcceptedNode	port	crates/horizon-client/src/mobs/path.rs::Finder::fly_accepted	cost, walkable +1 and node update match vanilla
+LevelStorageSource.writeGameRules	port	crates/horizon-client-core/src/gamerules.rs::GameRules::save	gap: minor: writes in place with no temp-file swap; no runtime caller, the game saves rules through level.game_rules in level.dat
+LevelStorageSource.readLevelSummary	port	crates/horizon-client/src/title.rs::list_worlds	gap: player: a world whose level.dat cannot be read is left out of the list; vanilla lists it as corrupted; symlinked worlds are not flagged
+LevelStorageSource.readLightweightData	port	crates/horizon-client/src/save.rs::read_dat	gap: minor: reads the whole level.dat; Player and WorldGenSettings are not skipped
+LevelStorageSource.validateAndCreateAccess	missing		minor: opening a world does not refuse a folder holding symbolic links, vanilla does; backup and delete do check links (title/world_management.rs)
+SavedDataStorage.scheduleSave	inline	crates/horizon-client/src/game.rs::Game::save_game_metadata	gap: minor: each saved-data file is written directly on every save; no dirty check and no async batching
+TrackedWaypoint.ChunkWaypoint.writeContents	port	crates/horizon-protocol/src/packets/play.rs::TrackedWaypoint::write	chunk arm writes varint 2, then x and z

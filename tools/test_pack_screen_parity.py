@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Compare the resource pack screen's drawing with the vanilla client's.
 
-Each case is a pack repository (titles and descriptions as text components,
+Each case is a title (the resource pack screen's, or the data pack screen's
+Create World opens), a pack repository (titles and descriptions as text components,
 with legacy formatting codes, colours and styles; pack sources; compatible,
 too old, too new or unknown packs; required, fixed and positioned packs;
 icons), an initial selection, a GUI size, in a world or not, and what the
@@ -119,7 +120,9 @@ def cases(count):
                             (rng.randint(cx - 154, cx + 154), height - 26 + rng.randint(0, 19)),
                             (rng.randint(cx - 160, cx + 160), rng.randint(height // 2 - 30, height // 2 + 60))])
         out.append({'width': width, 'height': height, 'inWorld': rng.random() < 0.3, 'packs': packs, 'selected': selected,
-                    'actions': actions, 'mouse': list(mouse), 'blink': rng.choice([0, 100, 400, 650])})
+                    'actions': actions, 'mouse': list(mouse), 'blink': rng.choice([0, 100, 400, 650]),
+                    # Create World's Data Packs screen is the same screen under its own title.
+                    'title': 'dataPack.title' if n % 4 == 3 else 'resourcePack.title'})
     return out
 
 
@@ -161,7 +164,7 @@ def main():
     for e in sorted(set(errors))[:5]:
         print('ORACLE ERROR', e[:1500])
     for c, v, r in bad[:args.detail]:
-        brief = {k: c[k] for k in ('width', 'height', 'inWorld', 'selected', 'actions', 'mouse', 'blink')}
+        brief = {k: c[k] for k in ('title', 'width', 'height', 'inWorld', 'selected', 'actions', 'mouse', 'blink')}
         print('MISMATCH', json.dumps(brief)[:1500])
         if v.get('screen') != r.get('screen'):
             print(f'   screen: vanilla {v.get("screen")} | horizon {r.get("screen")}')

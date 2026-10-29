@@ -11,7 +11,7 @@
 use crate::manifest::{Capability, MANIFEST, Manifest};
 use serde::Deserialize;
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     io::Read,
     path::{Path, PathBuf},
 };
@@ -116,6 +116,8 @@ struct ItemFile {
     template: String,
     max_stack_size: Option<u8>,
     rarity: Option<Rarity>,
+    #[serde(default)]
+    components: BTreeMap<String, serde_json::Value>,
 }
 
 /// An item the mod adds: a vanilla template item's components under a new
@@ -127,6 +129,8 @@ pub struct Item {
     pub template: String,
     pub max_stack_size: Option<u8>,
     pub rarity: Option<Rarity>,
+    /// A 26.3 data component patch over the template's: `!minecraft:<type>` removes one.
+    pub components: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug)]
@@ -344,6 +348,7 @@ impl Content {
             if file.max_stack_size.is_some_and(|n| !(1..=99).contains(&n)) {
                 return Err(format!("{name}: max_stack_size is 1 to 99"));
             }
+            check_components(&file.components).map_err(|e| format!("{name}: {e}"))?;
             if !ids.insert(item.clone()) {
                 return Err(format!("{name}: {item} is also a block's item"));
             }
@@ -352,10 +357,33 @@ impl Content {
                 template: file.template,
                 max_stack_size: file.max_stack_size,
                 rarity: file.rarity,
+                components: file.components,
             });
         }
         Ok(())
     }
+}
+
+/// Vanilla component types only, removals as `{}`, none the item file has its own key for.
+fn check_components(components: &BTreeMap<String, serde_json::Value>) -> Result<(), String> {
+    for (key, value) in components {
+        let (removed, kind) = match key.strip_prefix('!') {
+            Some(kind) => (true, kind),
+            None => (false, key.as_str()),
+        };
+        if !vanilla_id(kind) {
+            return Err(format!(
+                "component {key:?} is not a vanilla type (minecraft:...)"
+            ));
+        }
+        if let Some(own @ ("max_stack_size" | "rarity")) = kind.strip_prefix("minecraft:") {
+            return Err(format!("component {key:?}: set {own} instead"));
+        }
+        if removed && !value.as_object().is_some_and(|o| o.is_empty()) {
+            return Err(format!("component {key:?}: a removal's value is {{}}"));
+        }
+    }
+    Ok(())
 }
 
 fn check_block(file: &BlockFile) -> Result<(), String> {
@@ -482,6 +510,29 @@ capabilities = ["registries"]
         );
         assert_eq!(content.items[0].id, "ruby:ruby");
         assert_eq!(content.items[0].rarity, Some(Rarity::Uncommon));
+        assert!(content.items[0].components.is_empty());
+    }
+
+    #[test]
+    fn items_patch_their_template_components() {
+        let sword = br#"{"template": "minecraft:iron_sword", "components": {
+            "minecraft:max_damage": 900,
+            "minecraft:attribute_modifiers": [{"type": "minecraft:attack_damage",
+                "id": "minecraft:base_attack_damage", "amount": 7.0,
+                "operation": "add_value", "slot": "mainhand"}],
+            "!minecraft:repairable": {}}}"#;
+        let files: &[(&str, &[u8])] = &[("data/ruby/horizon/item/ruby_sword.json", sword)];
+        let content = hmod("components", MANIFEST_TEXT, files).unwrap();
+        let components = &content.items[0].components;
+        assert_eq!(
+            components.keys().collect::<Vec<_>>(),
+            [
+                "!minecraft:repairable",
+                "minecraft:attribute_modifiers",
+                "minecraft:max_damage"
+            ]
+        );
+        assert_eq!(components["minecraft:max_damage"], 900);
     }
 
     #[test]
@@ -556,6 +607,37 @@ capabilities = ["registries"]
                 br#"{"template": "minecraft:stick", "max_stack_size": 100}"#,
             )],
         );
+        for (case, components, why) in [
+            (
+                "modded-component",
+                r#"{"ruby:mana": 3}"#,
+                "not a vanilla type",
+            ),
+            (
+                "bare-component",
+                r#"{"max_damage": 3}"#,
+                "not a vanilla type",
+            ),
+            (
+                "own-key",
+                r#"{"minecraft:rarity": "epic"}"#,
+                "set rarity instead",
+            ),
+            (
+                "own-removal",
+                r#"{"!minecraft:max_stack_size": {}}"#,
+                "set max_stack_size",
+            ),
+            (
+                "removal-value",
+                r#"{"!minecraft:food": true}"#,
+                "a removal's value is {}",
+            ),
+        ] {
+            let item = format!(r#"{{"template": "minecraft:stick", "components": {components}}}"#);
+            let e = refused(case, &[("data/ruby/horizon/item/a.json", item.as_bytes())]);
+            assert!(e.contains(why), "{case}: {e}");
+        }
     }
 
     #[test]

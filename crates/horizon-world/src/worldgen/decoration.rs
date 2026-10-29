@@ -65,6 +65,14 @@ impl FeatureDecorationPlan {
         Ok(Self { biomes, steps })
     }
 
+    /// The step and the step-local index vanilla mixes into `set_feature_seed`.
+    pub(super) fn seed(&self, feature: FeatureIdentity) -> Option<(usize, usize)> {
+        self.steps
+            .iter()
+            .enumerate()
+            .find_map(|(step, data)| data.index(feature).map(|index| (index, step)))
+    }
+
     /// Execute the feature branch of chunk decoration with structures disabled.
     /// The callback must place the identified root with a biome-check context.
     /// It receives one shared placer and the correctly reseeded random stream;

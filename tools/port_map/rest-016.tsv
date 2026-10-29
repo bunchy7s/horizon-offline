@@ -1,0 +1,123 @@
+SpreadPlayersCommand.Position.dist	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	helper folded into the spread loop
+SpreadPlayersCommand.Position.normalize	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	helper folded into the spread loop
+SpreadPlayersCommand.Position.getLength	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	helper folded into the spread loop
+SpreadPlayersCommand.Position.moveAway	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	helper folded into the spread loop
+SpreadPlayersCommand.Position.clamp	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	helper folded into the spread loop
+SpreadPlayersCommand.Position.randomize	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	helper folded into the spread loop
+StopCommand.register	port	crates/horizon-client/src/game/dedicated.rs::Game::console_command	gap: minor: /stop only from the dedicated console; no in-game /stop node
+StopSoundCommand.register	port	crates/horizon-command/src/tree_world.rs::sounds	/stopsound command tree
+StopwatchCommand.createStopwatch	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_stopwatch	stopwatch.create arm
+StopwatchCommand.queryStopwatch	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_stopwatch	stopwatch.query arm
+StopwatchCommand.restartStopwatch	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_stopwatch	stopwatch.restart arm
+StopwatchCommand.removeStopwatch	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_stopwatch	default arm: remove
+SummonCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	root summon node
+SummonCommand.spawnEntity	port	crates/horizon-client/src/game/commands.rs::Game::cmd_summon	commands.summon.success
+SwingCommand.register	port	crates/horizon-command/src/tree_world.rs::rotate_swing	/swing command tree
+SwingCommand.handSwing	port	crates/horizon-command/src/tree_world.rs::rotate_swing	gap: minor: hand literal is parsed but cmd_swing ignores it; only the main-hand swing plays
+SwingCommand.swing	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_swing	gap: minor: ignores hand, animation and duration; mobs get the swing flag, the player swings the main arm
+TagCommand.getTags	inline	crates/horizon-client/src/game/commands/data.rs::Game::cmd_tag	union of tags over targets for list
+TagCommand.addTag	port	crates/horizon-client/src/game/commands/data.rs::Game::cmd_tag	tag.add arm
+TagCommand.removeTag	port	crates/horizon-client/src/game/commands/data.rs::Game::cmd_tag	tag.remove arm
+TagCommand.listTags	port	crates/horizon-client/src/game/commands/data.rs::Game::cmd_tag	default arm: list
+TeamCommand.leaveTeam	port	crates/horizon-client/src/scoreboard_cmd.rs::team	team.leave arm
+TeamCommand.joinTeam	port	crates/horizon-client/src/scoreboard_cmd.rs::team	team.join arm
+TeamCommand.setNameTagVisibility	port	crates/horizon-client/src/scoreboard_cmd.rs::team_modify	team.modify arm
+TeamCommand.setDeathMessageVisibility	port	crates/horizon-client/src/scoreboard_cmd.rs::team_modify	team.modify arm
+TeamCommand.setCollision	port	crates/horizon-client/src/scoreboard_cmd.rs::team_modify	team.modify arm
+TeamCommand.setFriendlySight	port	crates/horizon-client/src/scoreboard_cmd.rs::team_modify	team.modify arm
+TeamCommand.setFriendlyFire	port	crates/horizon-client/src/scoreboard_cmd.rs::team_modify	team.modify arm
+TeamCommand.setDisplayName	port	crates/horizon-client/src/scoreboard_cmd.rs::team_modify	team.modify arm
+TeamCommand.setColor	port	crates/horizon-client/src/scoreboard_cmd.rs::team_modify	team.modify arm
+TeamCommand.clearColor	port	crates/horizon-client/src/scoreboard_cmd.rs::team_modify	team.modify arm
+TeamCommand.setPrefix	port	crates/horizon-client/src/scoreboard_cmd.rs::team_modify	team.modify arm
+TeamCommand.setSuffix	port	crates/horizon-client/src/scoreboard_cmd.rs::team_modify	team.modify arm
+TeamCommand.emptyTeam	port	crates/horizon-client/src/scoreboard_cmd.rs::team	team.empty arm
+TeamCommand.deleteTeam	port	crates/horizon-client/src/scoreboard_cmd.rs::team	team.remove arm
+TeamMsgCommand.sendMessage	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_teammsg	gap: minor: only the local player can receive; no per-receiver chat filtering
+TeleportCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	teleport and tp nodes
+TeleportCommand.teleportToPos	port	crates/horizon-client/src/game/commands.rs::Game::cmd_teleport	location arm
+TeleportCommand.getRelatives	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_teleport	relative coords resolved from the source up front; same end position
+TeleportCommand.performTeleport	port	crates/horizon-client/src/game/commands.rs::Game::teleport_to_in_level	gap: minor: zeroes all velocity and clears on_ground for a player; vanilla keeps horizontal motion, sets on_ground, stops mob navigation, skips Y reset while fall-flying
+TickCommand.nanosToMilisString	port	crates/horizon-client/src/game/commands/misc.rs::millis	one-decimal millisecond string
+TickCommand.setTickingRate	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_tick	tick.rate arm
+TickCommand.step	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_tick	tick.step arm
+TickCommand.stopStepping	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_tick	tick.step.stop default arm
+TickCommand.stopSprinting	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_tick	tick.sprint.stop arm
+TimeCommand.suggestTimelines	port	crates/horizon-command/src/args.rs::ArgType::suggest	gap: minor: lists every timeline id, not only the ids of the parsed clock
+TimeCommand.queryGameTime	port	crates/horizon-client/src/game/commands.rs::Game::cmd_time	time.query.gametime arm
+TimeCommand.queryTime	port	crates/horizon-client/src/game/commands.rs::Game::cmd_time	time.query.time arm
+TimeCommand.queryTimelineTicks	port	crates/horizon-client/src/game/commands.rs::Game::cmd_time	time.query.timeline arm
+TimeCommand.queryTimelineRepetitions	port	crates/horizon-client/src/game/commands.rs::Game::cmd_time	time.query.repetition arm
+TimeCommand.setTotalTicks	port	crates/horizon-client/src/game/commands.rs::Game::cmd_time	time.set arm
+TimeCommand.addTime	port	crates/horizon-client/src/game/commands.rs::Game::cmd_time	time.add arm
+TimeCommand.setTimeToTimeMarker	port	crates/horizon-client/src/game/commands.rs::Game::cmd_time	time.set.marker arm
+TimeCommand.setRate	port	crates/horizon-client/src/game/commands.rs::Game::cmd_time	time.rate arm
+TimeCommand.getDefaultClock	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_time	overworld clock; the Nether has no default clock
+TitleCommand.sendPacketToPlayers	port	crates/horizon-client/src/game/commands/text_commands.rs::Game::titles_or_packet	per-player send
+TitleCommand.showTitle	port	crates/horizon-client/src/game/commands/text_commands.rs::Game::cmd_title	title, subtitle and actionbar
+TitleCommand.setTimes	port	crates/horizon-client/src/game/commands/text_commands.rs::Game::cmd_title	times arm
+TransferCommand.register	missing		minor: no /transfer node; the client follows an incoming transfer (net.rs) but no command sends one
+TransferCommand.transfer	missing		minor: no command sends a ClientboundTransferPacket to a player
+TriggerCommand.suggestObjectives	port	crates/horizon-command/src/lib.rs::Suggests::suggest	Suggests::Triggers arm
+TriggerCommand.addValue	port	crates/horizon-client/src/scoreboard_cmd.rs::trigger	trigger.add arm
+TriggerCommand.setValue	port	crates/horizon-client/src/scoreboard_cmd.rs::trigger	trigger.set arm
+TriggerCommand.simpleTrigger	port	crates/horizon-client/src/scoreboard_cmd.rs::trigger	trigger arm without a sub-command
+TriggerCommand.getScore	inline	crates/horizon-client/src/scoreboard_cmd.rs::trigger	primed check and lock
+VersionCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	version node
+WardenSpawnTrackerCommand.setWarningLevel	port	crates/horizon-client/src/game/sculk.rs::Game::cmd_warden_spawn_tracker	set arm
+WardenSpawnTrackerCommand.resetTracker	port	crates/horizon-client/src/game/sculk.rs::Game::cmd_warden_spawn_tracker	clear arm
+WaypointCommand.setWaypointStyle	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_waypoint	style arm of the modify branch
+WaypointCommand.setWaypointColor	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_waypoint	color arm of the modify branch
+WaypointCommand.resetWaypointColor	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_waypoint	color reset arm
+WeatherCommand.getDuration	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_weather	default duration sample
+WeatherCommand.setClear	port	crates/horizon-client/src/game/commands.rs::Game::cmd_weather	clear branch
+WeatherCommand.setRain	port	crates/horizon-client/src/game/commands.rs::Game::cmd_weather	rain branch
+WeatherCommand.setThunder	port	crates/horizon-client/src/game/commands.rs::Game::cmd_weather	thunder branch
+WhitelistCommand.register	port	crates/horizon-client/src/game/dedicated.rs::Game::console_command	gap: minor: console only; no in-game /whitelist node
+WhitelistCommand.reload	port	crates/horizon-client/src/game/dedicated.rs::Game::console_whitelist	reload arm
+WhitelistCommand.addPlayers	port	crates/horizon-client/src/game/dedicated.rs::Game::console_whitelist	gap: minor: one name per command, not a target list
+WhitelistCommand.removePlayers	port	crates/horizon-client/src/game/dedicated.rs::Game::console_whitelist	gap: minor: one name per command, not a target list
+WhitelistCommand.enableWhitelist	port	crates/horizon-client/src/game/dedicated.rs::Game::console_whitelist	on arm
+WhitelistCommand.disableWhitelist	port	crates/horizon-client/src/game/dedicated.rs::Game::console_whitelist	off arm
+WorldBorderCommand.setDamageBuffer	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::cmd_worldborder	damage buffer arm
+WorldBorderCommand.setDamageAmount	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::cmd_worldborder	damage amount arm
+WorldBorderCommand.setWarningTime	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::cmd_worldborder	warning time arm
+WorldBorderCommand.setWarningDistance	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::cmd_worldborder	warning distance arm
+WorldBorderCommand.getSize	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::cmd_worldborder	worldborder.get arm
+WorldBorderCommand.formatTicksToSeconds	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::ticks_to_seconds	%.2f of ticks / 20
+BlockDataAccessor.setData	port	crates/horizon-client/src/game/commands/data.rs::Game::set_data_of	block arm
+BlockDataAccessor.getModifiedSuccess	port	crates/horizon-client/src/game/commands/data.rs::Game::modified_text	block message
+BlockDataAccessor.getPrintSuccess	port	crates/horizon-client/src/game/commands/data.rs::Game::query_text	block query message
+DataCommands.stringifyTagList	inline	crates/horizon-client/src/game/commands/data.rs::Game::cmd_data_modify	string branch of modify
+DataCommands.validatedSubstring	port	crates/horizon-client/src/data_cmd.rs::substring	
+DataCommands.resolveSourcePath	inline	crates/horizon-client/src/game/commands/data.rs::Game::cmd_data_modify	sourcePath resolution
+DataCommands.manipulateData	port	crates/horizon-client/src/game/commands/data.rs::Game::cmd_data_modify	modify arm
+DataCommands.removeData	port	crates/horizon-client/src/game/commands/data.rs::Game::cmd_data_in	data.remove arm
+DataCommands.getData	port	crates/horizon-client/src/data_cmd.rs::get_value	count of list, compound, string or numeric
+DataCommands.getNumeric	port	crates/horizon-client/src/data_cmd.rs::scaled_value	floor of numeric times scale
+DataCommands.mergeData	port	crates/horizon-client/src/game/commands/data.rs::Game::cmd_data_in	data.merge arm
+net/minecraft/server/commands/data/EntityDataAccessor#setData	port	crates/horizon-client/src/game/commands/data.rs::Game::apply_entity_nbt	refuses players
+net/minecraft/server/commands/data/EntityDataAccessor#getModifiedSuccess	port	crates/horizon-client/src/game/commands/data.rs::Game::modified_text	entity message
+net/minecraft/server/commands/data/EntityDataAccessor#getPrintSuccess	port	crates/horizon-client/src/game/commands/data.rs::Game::query_text	entity query message
+StorageDataAccessor.getModifiedSuccess	port	crates/horizon-client/src/game/commands/data.rs::Game::modified_text	storage message
+StorageDataAccessor.getPrintSuccess	port	crates/horizon-client/src/game/commands/data.rs::Game::query_text	storage query message
+BlockItemAccessor.getBlockSlots	inline	crates/horizon-client/src/game/commands/items.rs::Game::slots_named	block owner branch
+BlockItemAccessor.setItems	inline	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item	block write
+BlockItemAccessor.getReplaceSuccess	inline	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item	block replace feedback
+BlockItemAccessor.getContainer	inline	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item	not_a_container check
+EntityItemAccessor.getSlots	port	crates/horizon-client/src/game/commands/items.rs::Game::slots_named	entity owner branch
+EntityItemAccessor.setItems	inline	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item	entity write
+EntityItemAccessor.getReplaceSuccess	inline	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item	entity replace feedback
+ItemCommands.wrapSetItems	port	crates/horizon-command/src/tree_misc.rs::item	/item tree
+ItemCommands.setItems	port	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item	item replace
+ItemCommands.modifyItems	port	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item_modify	item modify
+ItemCommands.getItems	inline	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item	from-source branch
+ItemCommands.getSlotsFromProvider	port	crates/horizon-client/src/game/commands/items.rs::Game::slots_named	slot name matching
+DedicatedPlayerList.saveIpBanList	port	crates/horizon-server-files/src/user_lists.rs::UserList::save	ban and list saves go through UserList::save
+DedicatedPlayerList.saveUserBanList	port	crates/horizon-server-files/src/user_lists.rs::UserList::save	
+DedicatedPlayerList.loadIpBanList	port	crates/horizon-server-files/src/user_lists.rs::UserList::load	
+DedicatedPlayerList.loadUserBanList	port	crates/horizon-server-files/src/user_lists.rs::UserList::load	
+DedicatedPlayerList.saveOps	port	crates/horizon-server-files/src/user_lists.rs::UserList::save	
+DedicatedPlayerList.loadWhiteList	port	crates/horizon-server-files/src/user_lists.rs::UserList::load	startup and console reload
+DedicatedPlayerList.saveWhiteList	port	crates/horizon-server-files/src/user_lists.rs::UserList::save	
+DedicatedPlayerList.isWhiteListed	port	crates/horizon-client/src/game/dedicated.rs::Lists::whitelisted	

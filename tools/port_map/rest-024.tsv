@@ -1,0 +1,150 @@
+EventLogDirectory.open	skip:service		telemetry log directory (TelemetryLogManager); not gameplay
+EventLogDirectory.listFiles	skip:service		telemetry log directory (TelemetryLogManager); not gameplay
+EventLogDirectory.parseFile	skip:service		telemetry log directory (TelemetryLogManager); not gameplay
+EventLogDirectory.tryCompress	skip:service		telemetry log directory (TelemetryLogManager); not gameplay
+EventLogDirectory.writeCompressed	skip:service		telemetry log directory (TelemetryLogManager); not gameplay
+EventLogDirectory.createNewFile	skip:service		telemetry log directory (TelemetryLogManager); not gameplay
+EventLogDirectory.CompressedFile.openReader	skip:service		telemetry log directory (TelemetryLogManager); not gameplay
+EventLogDirectory.FileId.parse	skip:service		telemetry log directory (TelemetryLogManager); not gameplay
+EventLogDirectory.FileList.prune	skip:service		telemetry log directory (TelemetryLogManager); not gameplay
+EventLogDirectory.FileList.compressAll	skip:service		telemetry log directory (TelemetryLogManager); not gameplay
+EventLogDirectory.RawFile.openChannel	skip:service		telemetry log directory (TelemetryLogManager); not gameplay
+EventLogDirectory.RawFile.openReader	skip:service		telemetry log directory (TelemetryLogManager); not gameplay
+EventLogDirectory.RawFile.compress	skip:service		telemetry log directory (TelemetryLogManager); not gameplay
+JsonEventLog.open	port	crates/horizon-client/src/server_packs/download.rs::append_log	gap: minor: log.json is opened per entry, not once per queue
+JsonEventLog.openReader	skip:other		no vanilla caller; nothing reads download log.json back
+JsonEventLogReader.create	skip:other		reader used only by JsonEventLog.openReader, which has no callers
+MinecraftServerStatistics.registerJmxMonitoring	skip:server		JMX MBean registration
+MinecraftServerStatistics.getAttribute	skip:server		JMX MBean attribute
+MinecraftServerStatistics.getAttributes	skip:server		JMX MBean attributes
+MinecraftServerStatistics.AttributeDescription.asMBeanAttributeInfo	skip:server		JMX MBean attribute info
+CachedParseState.getCacheForPosition	skip:java		per-position memo array; Horizon memoises in a HashMap keyed by (position, rule) in State::parse
+CachedParseState.acquireControl	inline	crates/horizon-command/src/packrat.rs::State::term	per-alternative cut flag; State::term Alt arm pushes one onto controls
+CachedParseState.PositionCache.findKeyIndex	skip:java		per-position cache lookup; State::parse uses a HashMap
+CachedParseState.PositionCache.allocateNewEntry	skip:java		per-position cache storage; State::parse uses a HashMap
+DelayedException.create	port	crates/horizon-command/src/packrat.rs::State::first_error	Reason::Delayed keeps the key and args; first_error builds the exception at the error cursor
+Dictionary.put	port	crates/horizon-command/src/packrat.rs::Grammar::put	rejects a rule defined twice, as vanilla does
+Dictionary.checkAllBound	skip:debug		grammar validation; State::parse panics on an unbound rule when reached
+Dictionary.getOrThrow	skip:other		no vanilla caller; Grammar::id resolves names
+Dictionary.Reference.parse	port	crates/horizon-command/src/packrat.rs::State::term	Named arm: parses the rule and stores its value under the name
+ErrorCollector.LongestOnly.discardErrorsFromShorterParse	port	crates/horizon-command/src/packrat.rs::State::discard_shorter	
+ErrorCollector.LongestOnly.store	port	crates/horizon-command/src/packrat.rs::State::store	
+ErrorCollector.LongestOnly.addErrorEntry	inline	crates/horizon-command/src/packrat.rs::State::store	stored errors are pushed to State::errors at the last cursor
+ErrorCollector.LongestOnly.entries	inline	crates/horizon-command/src/packrat.rs::Grammar::parse_for_suggestions_with	gap: minor: the furthest-cursor entries are read here for suggestions; command errors take the first in State::first_error
+ParseState.parseTopRule	port	crates/horizon-command/src/packrat.rs::State::parse_top	gap: minor: no single-frame scope check
+Rule.fromTerm	port	crates/horizon-command/src/packrat.rs::Grammar::put_term	Rule::Term holds the term and its action
+Rule.WrappedTerm.parse	port	crates/horizon-command/src/packrat.rs::State::parse	Term arm: push frame, run term, run action, pop frame
+Scope.valueIndexForAny	port	crates/horizon-command/src/packrat.rs::Scope::value_index	
+Scope.ensureCapacity	skip:java		growable stack array
+Scope.getOrThrow	port	crates/horizon-command/src/packrat.rs::Scope::get	returns None instead of throwing; callers unwrap
+Scope.getOrDefault	port	crates/horizon-command/src/packrat.rs::Scope::get	gap: minor: no fallback argument; callers supply unwrap_or
+Scope.getAnyOrThrow	port	crates/horizon-command/src/packrat.rs::Scope::get_any	returns None instead of throwing
+Scope.toString	skip:debug		debug text of the scope stack
+Scope.lastFrame	skip:other		no vanilla caller; unused helper
+Scope.hasOnlySingleFrame	skip:debug		invariant check used only by parseTopRule
+Scope.validateStructure	skip:debug		assert-only structure check
+Term.repeated	skip:java		factory; Horizon builds Term::Repeated directly in snbt.rs
+Term.repeatedWithTrailingSeparator	skip:java		factory; Horizon builds Term::RepeatedSep directly in snbt.rs
+Term.repeatedWithoutTrailingSeparator	skip:java		factory; Horizon builds Term::RepeatedSep directly in snbt.rs
+Term.Alternative.parse	port	crates/horizon-command/src/packrat.rs::State::term	one arm of State::term
+Term.LookAhead.parse	port	crates/horizon-command/src/packrat.rs::State::term	one arm of State::term
+Term.Maybe.parse	port	crates/horizon-command/src/packrat.rs::State::term	one arm of State::term
+Term.Repeated.parse	port	crates/horizon-command/src/packrat.rs::State::term	one arm of State::term
+Term.RepeatedWithSeparator.parse	port	crates/horizon-command/src/packrat.rs::State::term	one arm of State::term
+Term.Sequence.parse	port	crates/horizon-command/src/packrat.rs::State::term	one arm of State::term
+GreedyPatternParseRule.parse	port	crates/horizon-command/src/snbt.rs::greedy	gap: minor: same character class as UNICODE_NAME; the Character.codePointOf step is missing, so \N{...} names always fail
+GreedyPredicateParseRule.parse	port	crates/horizon-command/src/snbt.rs::greedy	
+NumberRunParseRule.parse	port	crates/horizon-command/src/snbt.rs::number_run	
+StringReaderTerms.TerminalCharacters.parse	port	crates/horizon-command/src/packrat.rs::State::term	Chars arm
+StringReaderTerms.TerminalWord.parse	port	crates/horizon-command/src/packrat.rs::State::term	Word arm
+TagParseRule.parse	port	crates/horizon-command/src/snbt.rs::parse_tag_argument	gap: minor: the parser error is returned, not stored at the mark in the packrat state
+UnquotedStringParseRule.parse	port	crates/horizon-command/src/snbt.rs::grammar	custom rule 'unquoted_string': non-empty check only, no minimum-size parameter
+net/minecraft/util/random/Weighted#codec	skip:java		codec; WeightedList::decode_inner reads data and weight per entry
+WeightedList.map	port	crates/horizon-assets/src/blockstate/choice.rs::Choice::map	keeps weights and maps values; used for variant model lists
+WeightedList.entryToNonEmptyListCodec	port	crates/horizon-world/src/worldgen/weighted.rs::WeightedList::build	rejects a list whose total weight is zero
+WeightedList.contains	missing		minor: unsure: canSpawnMobAt checks a pack's mob type is still in the mobs list at the new position; Horizon's group loop (spawn_selection.rs ~1079-1156) carries the entry and no membership test was found
+WeightedList.equals	skip:java		equality of a Java collection
+WeightedList.hashCode	skip:java		hash of a Java collection
+WeightedList.Builder.add	skip:java		builder; WeightedList::new takes (value, weight) pairs
+WeightedList.Compact.get	inline	crates/horizon-world/src/worldgen/weighted.rs::WeightedList::sample	cumulative walk; sample() draws and walks
+WeightedRandom.getTotalWeight	port	crates/horizon-world/src/worldgen/weighted.rs::WeightedList::build	checked total weight; error instead of throwing above i32 max
+WeightedRandom.getRandomItem	port	crates/horizon-world/src/worldgen/weighted.rs::OptionalWeightedList::sample	no draw and None when the total is zero, else one draw
+WeightedRandom.getWeightedItem	inline	crates/horizon-world/src/worldgen/weighted.rs::WeightedList::sample	cumulative search after the draw
+AbstractConsecutiveExecutor.canBeScheduled	skip:other		Java executor queue plumbing; Horizon threads are Rust threads and channels
+AbstractConsecutiveExecutor.pollTask	skip:other		Java executor queue plumbing; Horizon threads are Rust threads and channels
+AbstractConsecutiveExecutor.run	skip:other		Java executor queue plumbing; Horizon threads are Rust threads and channels
+AbstractConsecutiveExecutor.runAll	skip:other		Java executor queue plumbing; Horizon threads are Rust threads and channels
+AbstractConsecutiveExecutor.registerForExecution	skip:other		Java executor queue plumbing; Horizon threads are Rust threads and channels
+AbstractConsecutiveExecutor.hasWork	skip:other		Java executor queue plumbing; Horizon threads are Rust threads and channels
+AbstractConsecutiveExecutor.toString	skip:debug		debug text
+BlockableEventLoop.submit	skip:other		Java task queue of the server thread; Horizon has no BlockableEventLoop equivalent
+BlockableEventLoop.executeBlocking	skip:other		Java task queue of the server thread; Horizon has no BlockableEventLoop equivalent
+BlockableEventLoop.execute	skip:other		Java task queue of the server thread; Horizon has no BlockableEventLoop equivalent
+BlockableEventLoop.pollTask	skip:other		Java task queue of the server thread; Horizon has no BlockableEventLoop equivalent
+BlockableEventLoop.managedBlock	skip:other		Java task queue of the server thread; Horizon has no BlockableEventLoop equivalent
+BlockableEventLoop.doRunTask	skip:other		Java task queue of the server thread; Horizon has no BlockableEventLoop equivalent
+BlockableEventLoop.isNonRecoverable	skip:other		classifies Java Throwables (OutOfMemory, StackOverflow); Rust aborts instead
+BlockableEventLoop.throwDelayedException	skip:debug		crash report relay between threads
+BlockableEventLoop.relayDelayCrash	skip:debug		crash report relay between threads
+ParallelMapTransform.schedule	skip:other		parallel map over Java futures; Horizon uses Rust threads
+ParallelMapTransform.BatchedTaskSplitter.scheduleBatch	skip:other		parallel map over Java futures; Horizon uses Rust threads
+ParallelMapTransform.BatchedTaskSplitter.batchSize	skip:other		parallel map over Java futures; Horizon uses Rust threads
+ParallelMapTransform.BatchedTaskSplitter.createTask	skip:other		parallel map over Java futures; Horizon uses Rust threads
+ParallelMapTransform.BatchedTaskSplitter.scheduleFinalOperation	skip:other		parallel map over Java futures; Horizon uses Rust threads
+ParallelMapTransform.Container.put	skip:other		parallel map over Java futures; Horizon uses Rust threads
+ParallelMapTransform.Container.applyOperation	skip:other		parallel map over Java futures; Horizon uses Rust threads
+ParallelMapTransform.Container.copyOut	skip:other		parallel map over Java futures; Horizon uses Rust threads
+ParallelMapTransform.SingleTaskSplitter.scheduleBatch	skip:other		parallel map over Java futures; Horizon uses Rust threads
+ParallelMapTransform.SingleTaskSplitter.scheduleFinalOperation	skip:other		parallel map over Java futures; Horizon uses Rust threads
+ParallelMapTransform.SplitterBase.scheduleTasks	skip:other		parallel map over Java futures; Horizon uses Rust threads
+PriorityConsecutiveExecutor.scheduleWithResult	skip:other		Java priority executor plumbing
+ReentrantBlockableEventLoop.doRunTask	skip:other		reentrancy counter of the Java task loop
+StrictQueue.FixedPriorityQueue.pop	skip:other		Java priority queue plumbing
+StrictQueue.FixedPriorityQueue.push	skip:other		Java priority queue plumbing
+TaskScheduler.scheduleWithResult	skip:other		Java future plumbing over schedule()
+BiasedToBottomInt.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::IntProvider::sample	BiasedToBottom arm
+ClampedNormalFloat.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::FloatProvider::sample	ClampedNormal arm
+ClampedNormalInt.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::IntProvider::sample	ClampedNormal arm
+ConstantFloat.of	port	crates/horizon-world/src/worldgen/value_provider.rs::FloatProvider::from_json	Constant arm normalises -0.0 to 0.0 as vanilla's ZERO does
+FloatProviders.codec	missing		minor: unsure: min/max range check is per caller in Horizon (carver.rs:80-89 checks a few bounds); no generic check
+IntProviders.validateCodec	missing		minor: unsure: min/max range check is per caller in Horizon; no generic check
+IntProviders.validate	missing		minor: unsure: min/max range check is per caller in Horizon; no generic check
+MultipliedFloats.sample	missing		minor: unsure: SoundManager multiplies a wrapped sound's volume and pitch by the outer sound's; no nested product found in Horizon
+TrapezoidFloat.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::FloatProvider::sample	Trapezoid arm
+TrapezoidInt.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::IntProvider::sample	Trapezoid arm
+UniformFloat.of	port	crates/horizon-world/src/worldgen/value_provider.rs::FloatProvider::from_json	Uniform arm rejects max <= min
+VeryBiasedToBottomInt.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::IntProvider::sample	BiasedToBottom arm with the extra draw
+RegionStorageUpgrader.init	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	gap: minor: region folder and storage are set up per call; no progress object
+RegionStorageUpgrader.upgrade	port	crates/horizon-world/src/datafix/files.rs::upgrade_regions	gap: minor: no progress, cancel or recreate mode
+RegionStorageUpgrader.createStorage	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	gap: minor: in-place storage only; the recreate-region-files option is not ported
+RegionStorageUpgrader.getFilesToProcess	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	lists the .mca files; progress totals are not kept
+RegionStorageUpgrader.getAllChunkPositions	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	walks region files and their chunks
+RegionStorageUpgrader.processOnePosition	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	per-chunk fix through the closure; counts are not kept
+RegionStorageUpgrader.tryProcessOnePosition	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	gap: minor: every chunk is rewritten, not only the changed ones
+RegionStorageUpgrader.onFileFinished	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	rename of the staged file over the old one; recreate mode absent
+RegionStorageUpgrader.Builder.addTagModifier	skip:java		builder
+RegionStorageUpgrader.Builder.copy	skip:java		builder
+RegionStorageUpgrader.Builder.build	skip:java		builder
+UpgradeProgress.addTotalFileFixOperations	skip:ui		progress counters for an upgrade progress bar Horizon does not show
+UpgradeProgress.incrementFinishedOperationsBy	skip:ui		progress counters for an upgrade progress bar Horizon does not show
+UpgradeProgress.reset	skip:ui		progress counters for an upgrade progress bar Horizon does not show
+UpgradeProgress.logProgress	skip:other		logs progress and sends JSON-RPC notifications; Horizon upgrades synchronously
+UpgradeProgress.FileFixStats.getProgress	skip:ui		progress fraction for the upgrade screen
+UpgradeStatusTranslator.translate	skip:ui		translatable status text for the upgrade screen
+UpgradeStatusTranslator.Messages.forStatus	skip:ui		translatable status text for the upgrade screen
+WorldUpgrader.getDataFixContextTag	port	crates/horizon-world/src/datafix/files.rs::generators	gap: minor: returns (dimension, generator type) pairs, not the context compound
+WorldUpgrader.verifyChunkPosAndEraseCache	missing		minor: Optimize World's cache erase (Heightmaps, isLightOn, BlockLight, SkyLight) is not in Horizon's datafix
+WorldUpgrader.verifyChunkPos	skip:other		only logs a warning for a chunk with a wrong stored position
+WorldUpgrader.work	port	crates/horizon-world/src/datafix/files.rs::upgrade_world	gap: minor: no Optimize World pass and no progress; upgrade_world runs the file fixes then the data upgrade
+WorldUpgrader.upgradeLevels	inline	crates/horizon-world/src/datafix/files.rs::upgrade_world	per-dimension loop folded into upgrade_world
+LongJumpUtil.isClearTransition	missing		minor: unsure: only the frog and goat long jumps (LongJumpToRandomPos) call it; Horizon has no such jump (frog.rs has only Croak and ShootTongue)
+Cushion.isAnchorBuried	inline	crates/horizon-client/src/cushion.rs::can_place	the resting-slab test; can_place returns false when the slab is covered
+FishingHook.calculateOpenWater	port	crates/horizon-client/src/game/fishing.rs::Game::calculate_open_water	
+AbstractContainerMenu.getRedstoneSignalFromBlockEntity	port	crates/horizon-client/src/game/machines.rs::container_signal	block entity containers for the comparator; 0 when there is none
+CreativeModeTabs.validate	skip:data		bootstrap check of creative tab positions
+BundleContents.Mutable.removeOne	port	crates/horizon-items/src/bundle.rs::Contents::remove_one	selected stack or the first; nothing is selected afterwards
+LevelAccessor.neighborShapeChanged	port	crates/horizon-world/src/level/update.rs::Sim::neighbor_shape_changed	minor: unsure: updateLimit - 1 is applied by the callers (set_block_limit), not here; redstone.rs passes its limit straight through
+LevelHeightAccessor.isInsideBuildHeight	port	crates/horizon-world/src/level/query.rs::Sim::is_inside_build_height	takes the y; the BlockPos overload is the caller's pos.y
+Block.shouldRenderFace	port	crates/horizon-world/src/block_render.rs::FaceVisibility::should_render_face	gap: minor: uses precomputed face flags and the cutout flag, not vanilla's EmptyBlockGetter path
+MultifaceBlock.availableFaces	port	crates/horizon-world/src/level/sculk.rs::Sim::available_faces	
+BeehiveBlockEntity.tickOccupants	port	crates/horizon-client/src/beehive.rs::Beehive::server_tick	ticks each bee and releases the finished ones in order

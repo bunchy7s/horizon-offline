@@ -292,7 +292,7 @@ def mod_features(crates):
 
 # What horizon-client's full content-root tests load (mod_content_tests.rs). They take minutes on prepared data, so
 # they are #[ignore]d and run here only when one of these changes.
-CONTENT_ROOT = ("crates/horizon-client/src/mod_content", "crates/horizon-client/src/assets.rs", "crates/horizon-items/",
+CONTENT_ROOT = ("crates/horizon-client/src/mod_content", "crates/horizon-client-render/src/assets.rs", "crates/horizon-items/",
                 "crates/horizon-mods/", "crates/horizon-assets/")
 CONTENT_ROOT_TESTS = "cargo test --locked -p horizon-client --features horizon-client/mods --lib mod_content::tests:: -- --ignored"
 

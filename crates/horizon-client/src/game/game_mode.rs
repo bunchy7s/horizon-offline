@@ -3,6 +3,22 @@
 use super::{Game, Screen};
 use horizon_client::command::args::GameMode;
 
+pub(super) fn mode_id_of(mode: GameMode) -> i32 {
+    match mode {
+        GameMode::Survival => 0,
+        GameMode::Creative => 1,
+        GameMode::Adventure => 2,
+        GameMode::Spectator => 3,
+    }
+}
+pub(super) fn mode_from_id(id: i32) -> GameMode {
+    match id {
+        1 => GameMode::Creative,
+        2 => GameMode::Adventure,
+        3 => GameMode::Spectator,
+        _ => GameMode::Survival,
+    }
+}
 impl Game<'_> {
     pub(super) fn spectator(&self) -> bool {
         self.mode == GameMode::Spectator
@@ -12,21 +28,10 @@ impl Game<'_> {
         matches!(self.mode, GameMode::Survival | GameMode::Creative)
     }
     pub(super) fn mode_id(&self) -> i32 {
-        match self.mode {
-            GameMode::Survival => 0,
-            GameMode::Creative => 1,
-            GameMode::Adventure => 2,
-            GameMode::Spectator => 3,
-        }
+        mode_id_of(self.mode)
     }
     pub(super) fn set_mode_id(&mut self, id: i32) {
-        let mode = match id {
-            1 => GameMode::Creative,
-            2 => GameMode::Adventure,
-            3 => GameMode::Spectator,
-            _ => GameMode::Survival,
-        };
-        self.set_mode(mode);
+        self.set_mode(mode_from_id(id));
     }
     /// `ServerPlayer.setGameMode` and `GameType.updatePlayerAbilities`.
     pub(super) fn set_mode(&mut self, mode: GameMode) {

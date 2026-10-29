@@ -783,6 +783,7 @@ impl B {
                 m.swing();
                 let mut gcx = Cx {
                     w,
+                    lr: cx.lr,
                     events: cx.events,
                 };
                 super::ai::do_hurt_target(m, target, &mut gcx);

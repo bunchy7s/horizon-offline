@@ -283,6 +283,47 @@ pub(super) fn world_data_used() {
     *PRELOAD.lock().unwrap_or_else(|e| e.into_inner()) = Preload::Used;
 }
 
+/// A server's world opens: the loot tables its first placed block or broken
+/// container needs (`loot_data`) are read on a helper thread while the
+/// connection is made, so the game thread never waits on them (~0.6 s on a
+/// phone). Kept from then on, as a local world keeps them.
+pub(super) fn preload_server_loot(resources: &std::path::Path) {
+    world_data_used();
+    if horizon_client::structure_blocks::loaded_loot_data().is_some() {
+        return;
+    }
+    let resources = resources.to_owned();
+    let spawned = std::thread::Builder::new()
+        .name("Loot preload".into())
+        .spawn(move || {
+            horizon_threads::behind_server();
+            let _ = horizon_client::structure_blocks::loot_data(&resources);
+        });
+    if let Err(e) = spawned {
+        log::warn!("Horizon: loot preload: {e}");
+    }
+}
+
+/// The worldgen entries of the world's enabled data packs, logging what
+/// the generator leaves out of them.
+fn world_worldgen_overrides(
+    world_root: &std::path::Path,
+    biomes: &horizon_client::biome::Biomes,
+) -> horizon_world::worldgen::overrides::WorldgenOverrides {
+    let packs = horizon_client::datapack::discover(world_root);
+    let enabled = horizon_client::datapack::enabled_ids(world_root, &packs);
+    let enabled: Vec<_> = enabled
+        .iter()
+        .filter_map(|id| packs.iter().find(|p| &p.id == id))
+        .collect();
+    let (overrides, warnings) =
+        horizon_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b));
+    for warning in warnings {
+        log::warn!("Horizon: data pack worldgen: {warning}");
+    }
+    overrides
+}
+
 pub(super) fn make_streaming(
     res: &Resources,
     pack: &PackResources,
@@ -334,8 +375,14 @@ pub(super) fn make_streaming(
         // WorldOptions.generateStructures, from the world's settings.
         let structures =
             horizon_client::save::WorldGen::read(world_root).is_none_or(|w| w.structures);
-        let inner = Arc::new(VanillaTerrain::for_world(&options.resources.join("worldgen"), pack.assets.registry, res.biomes(), seed, dim.id(), structures).map_err(|e| {
-                format!("{e}\nPrepare the worldgen bundle with the launcher, or: horizon-prepare --prepare")
+        let preset = horizon_client::save::WorldGen::preset(world_root);
+        let overrides = world_worldgen_overrides(world_root, res.biomes());
+        let inner = Arc::new(VanillaTerrain::for_world_with(&options.resources.join("worldgen"), &overrides, pack.assets.registry, res.biomes(), seed, preset, dim.id(), structures).map_err(|e| {
+                if overrides.is_empty() {
+                    format!("{e}\nPrepare the worldgen bundle with the launcher, or: horizon-prepare --prepare")
+                } else {
+                    format!("{e}\nThe world's data packs change its world generation: one of them may not be made for this version")
+                }
             })?);
         if dim == Dim::Overworld && structures {
             inner.search_rings_behind();

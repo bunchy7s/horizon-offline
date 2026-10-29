@@ -364,14 +364,24 @@ impl Game<'_> {
         }
     }
 
-    /// `Villager.setLastHurtByMob` and `ServerLevel.onReputationEvent`: a hit
-    /// from the player counts against it with the villager that was hit.
-    pub(super) fn villager_reputation_tick(&mut self) {
-        let Some(uuid) = self.level.player_uuid else {
-            return;
+    /// The UUID of the player who last hurt a mob (`last_hurt_by_player`:
+    /// None for the host, else the guest's connection): the reputation a
+    /// villager keeps is that player's, the one trading looks up.
+    fn player_uuid_of(&self, who: Option<u32>) -> Option<[i32; 4]> {
+        let uuid = match who {
+            None => return self.level.player_uuid,
+            // While that guest acts its own UUID is swapped in.
+            Some(conn) if self.lan_acting == Some(conn) => self.lan_acting_uuid?,
+            Some(conn) => self.lan.as_ref()?.hub.guest(conn)?.uuid,
         };
+        Some(horizon_client::lan::playerdata::uuid_ints(uuid))
+    }
+    /// `Villager.setLastHurtByMob` and `ServerLevel.onReputationEvent`: a hit
+    /// from a player counts against that player with the villager that was hit.
+    pub(super) fn villager_reputation_tick(&mut self) {
         let mut angry = Vec::new();
-        for m in &mut self.mobs {
+        for i in 0..self.mobs.len() {
+            let m = &self.mobs[i];
             if m.species() != Species::Villager
                 || m.ai.last_hurt_by != Some(horizon_client::mobs::Who::Player)
             {
@@ -380,17 +390,22 @@ impl Game<'_> {
             let time = m.ai.last_hurt_by_time;
             let alive = m.alive();
             let at = m.id;
-            let e = villager::ext_mut(m);
-            if e.hurt_seen != time {
-                e.hurt_seen = time;
-                e.gossips.add(
-                    uuid,
-                    GossipType::MinorNegative,
-                    gossip::REPUTATION_CHANGE_PER_EVENT,
-                );
-                if alive {
-                    angry.push(at);
-                }
+            if villager::ext(m).is_some_and(|e| e.hurt_seen == time) {
+                continue;
+            }
+            let hurt_by = self.last_hurt_by_player.get(&at).copied().flatten();
+            let Some(uuid) = self.player_uuid_of(hurt_by) else {
+                continue;
+            };
+            let e = villager::ext_mut(&mut self.mobs[i]);
+            e.hurt_seen = time;
+            e.gossips.add(
+                uuid,
+                GossipType::MinorNegative,
+                gossip::REPUTATION_CHANGE_PER_EVENT,
+            );
+            if alive {
+                angry.push(at);
             }
         }
         // Villager.setLastHurtByMob: entity event 13.
@@ -400,11 +415,12 @@ impl Game<'_> {
     }
     /// `Villager.tellWitnessesThatIWasMurdered`: the villagers that saw a
     /// player kill one remember it as a major wrong.
-    pub(super) fn villager_murdered(&mut self, victim: &Mob, by_player: bool) {
+    /// `killer` is the guest connection that last hurt it (None: the host).
+    pub(super) fn villager_murdered(&mut self, victim: &Mob, by_player: bool, killer: Option<u32>) {
         if victim.species() != Species::Villager || !by_player {
             return;
         }
-        let Some(uuid) = self.level.player_uuid else {
+        let Some(uuid) = self.player_uuid_of(killer) else {
             return;
         };
         let eye = Vec3::new(victim.position.x, victim.eye_y(), victim.position.z);
@@ -468,5 +484,37 @@ impl Game<'_> {
     /// The Hero of the Village amplifier of the player, if any.
     pub(super) fn hero_amplifier(&self) -> Option<i32> {
         self.potions.effects.amplifier("hero_of_the_village")
+    }
+    /// `AbstractBedBlock.kickVillagerOutOfBed`: the first sleeping villager
+    /// whose box touches the bed's head block wakes up
+    /// (`Villager.stopSleeping`). Whether one did.
+    pub(super) fn kick_villager_out_of_bed(&mut self, head: [i32; 3]) -> bool {
+        let min = Vec3::new(f64::from(head[0]), f64::from(head[1]), f64::from(head[2]));
+        let max = Vec3::new(min.x + 1.0, min.y + 1.0, min.z + 1.0);
+        let Some(i) = self.mobs.iter().position(|m| {
+            m.species() == Species::Villager
+                && villager::sleeping(m)
+                && m.bounds().intersects_corners(min, max)
+        }) else {
+            return false;
+        };
+        let id = self.mobs[i].id;
+        self.wake_villager(id);
+        true
+    }
+    /// `LivingEntity.stopSleeping` for the villager `id`, outside its own
+    /// tick: it stands up and its bed is no longer occupied.
+    pub(super) fn wake_villager(&mut self, id: u32) {
+        let Some(i) = self.mobs.iter().position(|m| m.id == id) else {
+            return;
+        };
+        let mut mobs = std::mem::take(&mut self.mobs);
+        let mut events = Vec::new();
+        villager::stop_sleeping(&mut mobs[i], &self.mob_world_base(&[]), &mut events);
+        villager_brain::woken(&mut mobs[i], self.world.game_time);
+        self.mobs = mobs;
+        if let Err(e) = self.handle_mob_events(events) {
+            log::warn!("waking villager {id}: {e}");
+        }
     }
 }

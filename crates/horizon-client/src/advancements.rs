@@ -877,6 +877,22 @@ pub fn item_entity(
         && item(&v["item"], stack, w)
 }
 
+/// `RecipeCraftedTrigger.TriggerInstance.matches`: each ingredient predicate
+/// takes a different one of the stacks used, in order.
+pub fn recipe_ingredients(v: &Value, used: &[ItemView], w: &dyn World) -> bool {
+    let Some(preds) = v.as_array() else {
+        return true;
+    };
+    let mut remaining: Vec<&ItemView> = used.iter().collect();
+    preds.iter().all(|p| {
+        let Some(i) = remaining.iter().position(|it| item(p, it, w)) else {
+            return false;
+        };
+        remaining.remove(i);
+        true
+    })
+}
+
 /// A `ContextAwarePredicate`: a list of loot conditions (or one condition).
 pub fn conditions(v: &Value, ctx: &Entities, w: &dyn World) -> bool {
     match v {

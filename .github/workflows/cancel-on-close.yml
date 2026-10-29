@@ -16,12 +16,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           BRANCH: ${{ github.event.pull_request.head.ref }}
-          SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
+          # Every head the pull request had, not only its last: a run-parity label added on an older head left that
+          # run queued after the merge (#3104, 2026-10-29). Its branch in its own repository names its runs (another
+          # fork can have a branch of the same name).
           for status in queued in_progress waiting pending requested; do
-            gh run list -R "$REPO" --branch "$BRANCH" --status "$status" --limit 100 \
-              --json databaseId,event,headSha \
-              -q ".[] | select(.event == \"pull_request\" and .headSha == \"$SHA\") | .databaseId"
+            gh api -X GET "repos/$REPO/actions/runs" -f branch="$BRANCH" -f event=pull_request -f status="$status" \
+              -f per_page=100 --jq ".workflow_runs[] | select(.head_repository.full_name == \"$HEAD_REPO\") | .id"
           done | sort -u | while read -r id; do
             gh run cancel -R "$REPO" "$id" || true
           done

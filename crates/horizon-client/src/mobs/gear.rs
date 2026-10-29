@@ -18,15 +18,19 @@ pub const ARMOR: [usize; 4] = [HEAD, CHEST, LEGS, FEET];
 pub const KEYS: [&str; 6] = ["mainhand", "offhand", "head", "chest", "legs", "feet"];
 
 pub type Levels = Vec<(Arc<str>, u32)>;
+/// An armour trim: (`trim_material`, `trim_pattern`) ids.
+pub type Trim = (Arc<str>, Arc<str>);
 
-/// The enchantments of each equipment slot.
+/// The enchantments and trims of each equipment slot.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Gear {
     pub slots: [Levels; 6],
+    /// The `minecraft:trim` of each slot's item (a loot table's set_components).
+    pub trims: [Option<Trim>; 6],
 }
 impl Gear {
     pub fn is_empty(&self) -> bool {
-        self.slots.iter().all(Vec::is_empty)
+        self.slots.iter().all(Vec::is_empty) && self.trims.iter().all(Option::is_none)
     }
     pub fn level(&self, slot: usize, id: &str) -> u32 {
         self.slots[slot]
@@ -54,10 +58,20 @@ pub fn level(m: &Mob, slot: usize, id: &str) -> u32 {
 pub fn enchanted(m: &Mob, slot: usize) -> bool {
     gear(m).is_some_and(|g| !g.slots[slot].is_empty())
 }
-/// Replace the enchantments of a slot; an empty list removes them.
+/// Replace the enchantments of a slot; an empty list removes them. The slot's
+/// item is new, so its trim goes too (`set_trim` puts one back).
 pub fn set(m: &mut Mob, slot: usize, levels: Levels) {
     let g = m.extra.gear.get_or_insert_with(Box::default);
     g.slots[slot] = levels;
+    g.trims[slot] = None;
+    if g.is_empty() {
+        m.extra.gear = None;
+    }
+}
+/// Set (None removes) the trim of a slot's item.
+pub fn set_trim(m: &mut Mob, slot: usize, trim: Option<Trim>) {
+    let g = m.extra.gear.get_or_insert_with(Box::default);
+    g.trims[slot] = trim;
     if g.is_empty() {
         m.extra.gear = None;
     }
@@ -159,16 +173,21 @@ pub fn protection(m: &Mob, kind: DamageKind) -> f32 {
     protection_points(g, kind).min(20.0)
 }
 pub fn protection_points(g: &Gear, kind: DamageKind) -> f32 {
-    if kind == DamageKind::Generic {
+    // Protection's `damage_protection` skips #bypasses_invulnerability.
+    if kind == DamageKind::Generic || kind.bypasses_invulnerability() {
         return 0.0;
     }
     let fire = matches!(
         kind,
-        DamageKind::OnFire | DamageKind::InFire | DamageKind::Lava | DamageKind::Fireball
+        DamageKind::OnFire
+            | DamageKind::InFire
+            | DamageKind::Lava
+            | DamageKind::Fireball
+            | DamageKind::SulfurCubeHot
     );
     let projectile = matches!(
         kind,
-        DamageKind::Arrow | DamageKind::Thrown | DamageKind::Fireball
+        DamageKind::Arrow | DamageKind::Thrown | DamageKind::Fireball | DamageKind::WindCharge
     );
     let mut total = 0.0;
     for slot in ARMOR {
@@ -177,9 +196,17 @@ pub fn protection_points(g: &Gear, kind: DamageKind) -> f32 {
             total += match &**id {
                 "minecraft:protection" => l,
                 "minecraft:fire_protection" if fire => 2.0 * l,
-                "minecraft:blast_protection" if kind == DamageKind::Explosion => 2.0 * l,
+                "minecraft:blast_protection"
+                    if matches!(kind, DamageKind::Explosion | DamageKind::Fireworks) =>
+                {
+                    2.0 * l
+                }
                 "minecraft:projectile_protection" if projectile => 2.0 * l,
-                "minecraft:feather_falling" if kind == DamageKind::Fall => 3.0 * l,
+                "minecraft:feather_falling"
+                    if matches!(kind, DamageKind::Fall | DamageKind::Stalagmite) =>
+                {
+                    3.0 * l
+                }
                 _ => 0.0,
             };
         }

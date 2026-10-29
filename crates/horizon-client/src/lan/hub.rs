@@ -493,6 +493,18 @@ impl Hub {
             overlay: false,
         }));
     }
+    /// A system message for the guests `hears` picks by name
+    /// (`PlayerList.broadcastSystemToTeam` and its kin).
+    pub fn system_message_to(&self, content: Tag, hears: impl Fn(&str) -> bool) {
+        let body = C::SystemChat(play::SystemChat {
+            content,
+            overlay: false,
+        })
+        .encode();
+        for g in self.guests.iter().filter(|g| g.placed && hears(&g.name)) {
+            g.sender.send(body.clone());
+        }
+    }
     /// `ServerPlayer.sendOverlayMessage` to every guest (the action bar).
     pub fn overlay_message(&self, content: Tag) {
         self.broadcast(&C::SystemChat(play::SystemChat {
@@ -1566,10 +1578,15 @@ impl Hub {
             }
             // Block entities with data the client shows.
             for &(x, y, z) in &positions {
-                let Some(entity) = world.block_entities.get(&(x, y, z)) else {
-                    continue;
+                // A decorated pot is no block entity: its tag is the chunk's saved one.
+                let tag = match world.block_entities.get(&(x, y, z)) {
+                    Some(entity) => super::chunks::entity_tag(entity),
+                    None => world
+                        .chunks
+                        .get(&(x >> 4, z >> 4))
+                        .and_then(|c| super::chunks::pot_tag(c, (x, y, z))),
                 };
-                let Some(tag) = super::chunks::entity_tag(entity) else {
+                let Some(tag) = tag else {
                     continue;
                 };
                 let state = world.block(x, y, z).0;
@@ -2216,13 +2233,16 @@ impl Hub {
                 // game's, run after this pass. A move queued behind it is checked
                 // against the block the player just broke and falls through, so it
                 // would be sent back; it waits for the next tick, when the block is
-                // gone, as vanilla handles the two packets in order.
+                // gone, as vanilla handles the packets in order. So does everything
+                // queued before that move: the arm swing (Punch) comes between the dig
+                // and the move.
                 S::PlayerAction(p) if p.action <= 3 => {
                     events.push(HostEvent::Packet(conn, Box::new(S::PlayerAction(p))));
-                    if matches!(
-                        self.guests[i].inbox.front(),
-                        Some(S::MovePlayerPos(_) | S::MovePlayerPosRot(_))
-                    ) {
+                    if self.guests[i]
+                        .inbox
+                        .iter()
+                        .any(|p| matches!(p, S::MovePlayerPos(_) | S::MovePlayerPosRot(_)))
+                    {
                         break;
                     }
                 }
@@ -2544,6 +2564,10 @@ impl Hub {
         let g = &mut self.guests[i];
         // PlayerList.respawn: into the level in place (the respawn level).
         g.dimension = self.config.dimension.clone();
+        // ServerLevel.removePlayerImmediately: the dead player's
+        // Entity.setRemoved (KILLED) stops its riding; the new player rides
+        // nothing.
+        g.stop_riding();
         // ServerLevel.removePlayerImmediately: every entity paired with the dead player is
         // removed (ServerEntity.removePairing, one packet each). Its chunks are dropped
         // without ForgetLevelChunk (PlayerChunkSender.dropChunk skips dead players): the

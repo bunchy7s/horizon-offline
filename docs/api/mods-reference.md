@@ -377,7 +377,7 @@ Any four-cornered shape (a wheel's segment, an arrow): the corners in order roun
 
 | Field | Type | |
 | --- | --- | --- |
-| `sprite` | `string` | One of the game's GUI sprites, as `gui/sprites/` names them (`hud/heart/full`, `widget/button`), the resource packs' versions included. An unknown one draws nothing. |
+| `sprite` | `string` | One of the game's GUI sprites, as `gui/sprites/` names them (`hud/heart/full`, `widget/button`), the resource packs' versions included, drawn over `rect` as vanilla draws it: nine-sliced when its `gui.scaling` says so (`tooltip/frame`, `widget/button`: the borders keep their size), stretched otherwise. An unknown one draws nothing. |
 | `rect` | `rect` |  |
 | `color` | `u32` | A tint, 0xAARRGGBB: 0xFFFFFFFF draws it as it is. |
 

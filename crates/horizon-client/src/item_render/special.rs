@@ -556,11 +556,14 @@ pub(super) fn submit(
             } else {
                 "entity/shield/shield_base_nopattern"
             };
-            let foil = if has_foil && !has_patterns {
-                Foil::Standard
-            } else {
-                Foil::None
-            };
+            // Without patterns: `entitySolidGlint`. With them, vanilla draws
+            // `patternedShieldGlint` last, the glint alone over the finished
+            // plate. A foil quad here is its texture with the glint over it
+            // (the GUI adds the glint masked by the layer's alpha, the world
+            // shader composites it), so every layer carries the foil: each
+            // pixel ends with the glint once, over the layers below it.
+            // Redrawing the base with the foil would cover the patterns.
+            let foil = if has_foil { Foil::Standard } else { Foil::None };
             part("shield", &none, base, white, foil);
             if has_patterns {
                 part(
@@ -568,16 +571,12 @@ pub(super) fn submit(
                     &none,
                     "entity/shield/base",
                     dye(base_color.unwrap_or("white")),
-                    Foil::None,
+                    foil,
                 );
                 for (pattern, color) in patterns.into_iter().take(16) {
                     if let Some(t) = pattern_texture(host, false, &pattern) {
-                        part("shield", &none, &t, dye(&color), Foil::None);
+                        part("shield", &none, &t, dye(&color), foil);
                     }
-                }
-                if has_foil {
-                    // `patternedShieldGlint`: the glint alone over the model.
-                    part("shield", &none, base, white, Foil::Standard);
                 }
             }
         }
@@ -687,6 +686,105 @@ mod tests {
                 quads[0].normal
             );
         }
+    }
+    /// `ShieldSpecialRenderer.submit` of an enchanted shield with a banner:
+    /// the glint goes over the patterns, and nothing covers them after.
+    #[test]
+    fn an_enchanted_banner_shield_keeps_its_patterns_under_the_glint() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-shield-glint-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        std::fs::write(
+            root.join("entity-models.json"),
+            serde_json::json!({"minecraft:shield#main": {
+                "pose": [0, 0, 0, 0, 0, 0, 1, 1, 1],
+                "polygons": [[[0, 0, 0, 0, 0], [1, 0, 0, 1, 0],
+                              [1, 1, 0, 1, 1], [0, 1, 0, 0, 1]]],
+                "children": {}
+            }})
+            .to_string(),
+        )
+        .unwrap();
+        let library = crate::model_library::ParsedModels::default().into_item_library();
+        let renderer = ItemRenderer::load_with_library(&root, library).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+        let textures = [
+            "entity/shield/shield_base",
+            "entity/shield/shield_base_nopattern",
+            "entity/shield/base",
+            "entity/shield/stripe_bottom",
+        ];
+        // A sprite per texture, told apart by its u0.
+        let sprites: HashMap<String, Rect> = textures
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let u0 = i as f32 / 8.0;
+                let rect = Rect {
+                    u0,
+                    v0: 0.0,
+                    u1: u0 + 0.1,
+                    v1: 0.1,
+                    w: 16,
+                    h: 16,
+                };
+                ((*t).to_owned(), rect)
+            })
+            .collect();
+        let drawn = |argument: Value, has_foil: bool| {
+            let mut quads: Vec<ItemQuad> = Vec::new();
+            submit(
+                &renderer,
+                &SpecialModel {
+                    kind: SpecialKind::Shield,
+                },
+                &argument,
+                has_foil,
+                Mat4::IDENTITY,
+                &sprites,
+                &super::super::NoHost,
+                &mut quads,
+            );
+            quads
+                .iter()
+                .map(|q| {
+                    let texture = textures
+                        .iter()
+                        .find(|t| sprites[**t].u0 == q.uv[0][0].min(q.uv[1][0]))
+                        .unwrap();
+                    (*texture, q.foil)
+                })
+                .collect::<Vec<_>>()
+        };
+        let banner = serde_json::json!({
+            "minecraft:base_color": "red",
+            "minecraft:banner_patterns": [{
+                "pattern": {"asset_id": "minecraft:stripe_bottom",
+                            "translation_key": "block.minecraft.banner.stripe_bottom"},
+                "color": "blue"
+            }]
+        });
+        assert_eq!(
+            drawn(banner.clone(), true),
+            [
+                ("entity/shield/shield_base", Foil::Standard),
+                ("entity/shield/base", Foil::Standard),
+                ("entity/shield/stripe_bottom", Foil::Standard),
+            ]
+        );
+        assert_eq!(
+            drawn(banner, false),
+            [
+                ("entity/shield/shield_base", Foil::None),
+                ("entity/shield/base", Foil::None),
+                ("entity/shield/stripe_bottom", Foil::None),
+            ]
+        );
+        assert_eq!(
+            drawn(Value::Null, true),
+            [("entity/shield/shield_base_nopattern", Foil::Standard)]
+        );
     }
     /// `DecoratedPotRenderer` draws every part with `RenderTypes.entitySolid`,
     /// whose pipeline culls back faces: the pot's flat `top` and `bottom`

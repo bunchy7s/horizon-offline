@@ -244,6 +244,33 @@ fn a_review_protects_published_files() {
 }
 
 #[test]
+fn a_mod_may_turn_native_once() {
+    let base: Entry = toml::from_str(&hud_entry()).unwrap();
+    let mut native = base.clone();
+    native.kind = Kind::NativeMod;
+    let mut next = native.versions[0].clone();
+    next.version = "2.0.0".into();
+    next.file = "coords_hud-2.0.0.hnmod".into();
+    native.versions.insert(0, next);
+    let r = review(
+        std::slice::from_ref(&base),
+        std::slice::from_ref(&native),
+        "ludovic111",
+    );
+    assert!(r.errors.is_empty(), "{r:?}");
+    assert!(r.notes.iter().any(|n| n.contains("turns native")), "{r:?}");
+    // Its .hmod versions are a WebAssembly mod's files; the new ones native.
+    assert_eq!(file_kind(&native, &native.versions[1]), Kind::Mod);
+    assert_eq!(file_kind(&native, &native.versions[0]), Kind::NativeMod);
+    // And never back.
+    let r = review(&[native], &[base], "ludovic111");
+    assert!(
+        r.errors.iter().any(|e| e.contains("kind can't change")),
+        "{r:?}"
+    );
+}
+
+#[test]
 fn only_open_kinds_are_taken() {
     assert!(open(&Kind::Mod).is_ok() && open(&Kind::ResourcePack).is_ok());
     assert!(open(&Kind::Shader).is_ok());

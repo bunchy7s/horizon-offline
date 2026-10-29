@@ -68,7 +68,7 @@ impl Game<'_> {
             yaw.cos() * pitch.cos(),
         ]
     }
-    /// `FogRenderer.setupFog` for the frame's camera.
+    /// `FogRenderer.setupFog` for the frame's camera, and Horizon's Fog option.
     pub(super) fn frame_fog(
         &self,
         camera: glam::DVec3,
@@ -90,36 +90,56 @@ impl Game<'_> {
         } else {
             self.res.fog()
         };
-        horizon_client::fog::setup_fog(
-            tables,
-            &self.fog,
-            &FogInputs {
-                fog_type,
-                sky,
-                water_fog_color,
-                biome,
-                render_distance_chunks: self.terrain_distance(),
-                distant_terrain: self.lod.is_some(),
-                cloud_range_chunks: self.settings.cloud_range,
-                camera_y: camera.y,
-                min_y: self.level_min_y(),
-                flat: self.level_flat(),
-                forward: forward.map(|c| c as f32),
-                rain,
-                thunder,
-                skybox: self.dim == Dim::Overworld,
-                blindness: self
-                    .potions
-                    .effects
-                    .get("blindness")
-                    .map(|effect| (effect.duration, effect.duration == -1)),
-                darkness: self.darkness_fog(),
-                darken_world: self
-                    .boss_overlay
-                    .darken_amount(self.clock.fraction() as f32),
-                boss_world_fog: self.boss_overlay.should_create_world_fog(),
-            },
-        )
+        let input = FogInputs {
+            fog_type,
+            sky,
+            water_fog_color,
+            biome,
+            render_distance_chunks: self.terrain_distance(),
+            distant_terrain: self.lod.is_some(),
+            cloud_range_chunks: self.settings.cloud_range,
+            camera_y: camera.y,
+            min_y: self.level_min_y(),
+            flat: self.level_flat(),
+            forward: forward.map(|c| c as f32),
+            rain,
+            thunder,
+            skybox: self.dim == Dim::Overworld,
+            blindness: self
+                .potions
+                .effects
+                .get("blindness")
+                .map(|effect| (effect.duration, effect.duration == -1)),
+            darkness: self.darkness_fog(),
+            darken_world: self
+                .boss_overlay
+                .darken_amount(self.clock.fraction() as f32),
+            boss_world_fog: self.boss_overlay.should_create_world_fog(),
+            spectator: self.spectator(),
+            fire_resistance: self.potions.effects.get("fire_resistance").is_some(),
+            night_vision: self.fog_night_vision(),
+        };
+        let mut fog = horizon_client::fog::setup_fog(tables, &self.fog, &input);
+        if !self.settings.horizon.fog {
+            horizon_client::fog::clear_distance_fog(&mut fog, &input);
+        }
+        fog
+    }
+    /// `FogRenderer.computeFogColor`'s night vision brightenFactor:
+    /// `GameRenderer.nightVisionScale`, but not while Darkness is on.
+    fn fog_night_vision(&self) -> f32 {
+        let partial = self.clock.fraction() as f32;
+        match self.potions.effects.get("night_vision") {
+            Some(e) if self.potions.effects.get("darkness").is_none() => {
+                // MobEffectInstance.endsWithin(200); -1 is infinite.
+                if e.duration < 0 || e.duration > 200 {
+                    1.0
+                } else {
+                    0.7 + ((e.duration as f32 - partial) * std::f32::consts::PI * 0.2).sin() * 0.3
+                }
+            }
+            _ => 0.0,
+        }
     }
     /// `ClientLevelData.isFlat`: on the server thread, the world-wide flag.
     fn level_flat(&self) -> bool {

@@ -102,6 +102,8 @@ impl Game {
             self.audio.play("hit", None, 1.0, 1.0);
         }
     }
+    // Tutorial.onDestroyBlock (tutorial.rs): the hints play no part in mining.
+    fn tutorial_destroy<T>(&mut self, _: T, _: f32) {}
 METHOD
 }
 fn main() {

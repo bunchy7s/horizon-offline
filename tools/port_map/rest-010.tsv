@@ -1,0 +1,150 @@
+SnbtGrammar.cleanAndAppend	inline	crates/horizon-command/src/snbt.rs::grammar	float text: underscores dropped in the float action
+SnbtGrammar.parseUnsignedShort	inline	crates/horizon-command/src/snbt.rs::IntLit::create	unsigned short arm: value must fit 16 bits
+SnbtGrammar.createFloat	port	crates/horizon-command/src/snbt.rs::float_tag	gap: minor: the text is built in the grammar's float action; float_tag types it
+SnbtGrammar.convertFloat	inline	crates/horizon-command/src/snbt.rs::float_tag	float arm; non-finite values rejected
+SnbtGrammar.convertDouble	inline	crates/horizon-command/src/snbt.rs::float_tag	double arm; non-finite values rejected
+SnbtGrammar.joinList	skip:java		joins parser parts as a string
+SnbtGrammar.ArrayPrefix.isAllowed	inline	crates/horizon-command/src/snbt.rs::array	allowed element suffixes per array kind
+SnbtGrammar.ArrayPrefix.buildNumber	inline	crates/horizon-command/src/snbt.rs::array	element type check, then the value
+SnbtGrammar.ArrayPrefix.computeType	inline	crates/horizon-command/src/snbt.rs::array	default type when the element has no suffix
+SnbtGrammar.IntegerLiteral.cleanupDigits	port	crates/horizon-command/src/snbt.rs::IntLit::cleaned	sign and underscores
+SnbtPrinterTagVisitor.visitByteArray	skip:data		datagen .snbt writer only (NbtUtils.structureToSnbt); Horizon writes no .snbt
+SnbtPrinterTagVisitor.visitIntArray	skip:data		datagen .snbt writer only (NbtUtils.structureToSnbt); Horizon writes no .snbt
+SnbtPrinterTagVisitor.visitLongArray	skip:data		datagen .snbt writer only (NbtUtils.structureToSnbt); Horizon writes no .snbt
+SnbtPrinterTagVisitor.visitList	skip:data		datagen .snbt writer only (NbtUtils.structureToSnbt); Horizon writes no .snbt
+SnbtPrinterTagVisitor.visitCompound	skip:data		datagen .snbt writer only (NbtUtils.structureToSnbt); Horizon writes no .snbt
+SnbtPrinterTagVisitor.getKeys	skip:data		structure key order for .snbt files; Horizon writes no .snbt
+StringTagVisitor.visitByteArray	inline	crates/horizon-client-core/src/snbt.rs::visit	compact [B;..B] form
+StringTagVisitor.visitIntArray	inline	crates/horizon-client-core/src/snbt.rs::visit	compact [I;..] form
+StringTagVisitor.visitLongArray	inline	crates/horizon-client-core/src/snbt.rs::visit	compact [L;..L] form
+StringTagVisitor.visitList	inline	crates/horizon-client-core/src/snbt.rs::visit	compact list form
+StringTagVisitor.visitCompound	inline	crates/horizon-client-core/src/snbt.rs::visit	compact form; keys sorted
+StringTagVisitor.handleKeyEscape	port	crates/horizon-client-core/src/snbt.rs::unquoted_key	decides bare or quoted key; quote_and_escape does the quoting
+Tag.acceptAsRoot	skip:java		streaming visitor entry point; Horizon reads whole trees
+Tag.asBoolean	port	crates/horizon-world/src/datafix/dynamic.rs::as_bool_opt	non-zero number is true
+TagParser.castToCompoundOrThrow	inline	crates/horizon-command/src/snbt.rs::parse_compound_argument	expected-compound error
+TagParser.parseCompoundFully	port	crates/horizon-command/src/snbt.rs::parse_fully	gap: minor: returns any tag; callers check for a compound
+TagType.parseRoot	skip:java		streaming root parse; Horizon reads whole trees
+TagType.StaticSize.skip	skip:java		streaming skip; Horizon reads whole trees
+TagType.VariableSize.skip	skip:java		streaming skip; Horizon reads whole trees
+TagTypes.getType	inline	crates/horizon-world/src/nbt.rs::Reader::payload	tag id dispatch; unknown id is an error
+TextComponentTagVisitor.visitByte	inline	crates/horizon-client-core/src/snbt.rs::Pretty::visit	number arm: gold value, red suffix
+TextComponentTagVisitor.visitShort	inline	crates/horizon-client-core/src/snbt.rs::Pretty::visit	number arm: gold value, red suffix
+TextComponentTagVisitor.visitLong	inline	crates/horizon-client-core/src/snbt.rs::Pretty::visit	number arm: gold value, red suffix
+TextComponentTagVisitor.visitFloat	inline	crates/horizon-client-core/src/snbt.rs::Pretty::visit	number arm: gold value, red suffix
+TextComponentTagVisitor.visitDouble	inline	crates/horizon-client-core/src/snbt.rs::Pretty::visit	number arm: gold value, red suffix
+TextComponentTagVisitor.visitByteArray	port	crates/horizon-client-core/src/snbt.rs::Pretty::array	128-element cap with <...>
+TextComponentTagVisitor.visitIntArray	port	crates/horizon-client-core/src/snbt.rs::Pretty::array	128-element cap with <...>
+TextComponentTagVisitor.visitLongArray	port	crates/horizon-client-core/src/snbt.rs::Pretty::array	128-element cap with <...>
+TextComponentTagVisitor.shouldWrapListElements	inline	crates/horizon-client-core/src/snbt.rs::Pretty::list	wrap when under 8 elements and one is not numeric
+TextComponentTagVisitor.appendSubTag	port	crates/horizon-client-core/src/snbt.rs::Pretty::sub	depth and indent tracking
+TextComponentTagVisitor.RichStyling.overrideToken	inline	crates/horizon-client-core/src/snbt.rs::Pretty::number	token colours are fixed in code; nothing to override
+CollectFields.visitEntry	skip:java		streaming field filter for speed; Horizon reads whole tags
+CollectFields.visitContainerEnd	skip:java		streaming field filter for speed; Horizon reads whole tags
+CollectToTag.visit	skip:java		streaming tag builder; Horizon parses to a tree directly
+CollectToTag.visitEntry	skip:java		streaming tag builder; Horizon parses to a tree directly
+CollectToTag.enterContainerIfNeeded	skip:java		streaming tag builder; Horizon parses to a tree directly
+CollectToTag.visitContainerEnd	skip:java		streaming tag builder; Horizon parses to a tree directly
+FieldTree.addEntry	skip:java		field selection tree for streaming reads
+SkipFields.visitEntry	skip:java		streaming field skip for speed; Horizon reads whole tags
+SkipFields.visitContainerEnd	skip:java		streaming field skip for speed; Horizon reads whole tags
+CipherBase.bufToByte	skip:java		Netty buffer to byte array
+CipherBase.decipher	port	crates/horizon-protocol/src/crypto.rs::Cfb8::decrypt	inbound CFB8; applied in ConnReader::recv
+CipherBase.encipher	port	crates/horizon-protocol/src/crypto.rs::Cfb8::encrypt	outbound CFB8; applied in ConnWriter::send_contents
+CompressionDecoder.decode	port	crates/horizon-protocol/src/frame.rs::decompress	threshold and size checks, exact length
+CompressionDecoder.setupInflaterInput	skip:java		ByteBuffer plumbing for the inflater
+CompressionDecoder.inflate	inline	crates/horizon-protocol/src/frame.rs::decompress	zlib inflate with the declared-length check
+net/minecraft/network/Connection#channelActive	skip:other		Netty channel open; the blocking Connection is connected before use
+net/minecraft/network/Connection#exceptionCaught	inline	crates/horizon-client/src/net.rs::run	gap: player: a failed read or malformed packet shows Horizon's raw error text, not vanilla's Timed out or Internal Exception disconnect
+net/minecraft/network/Connection#channelRead0	port	crates/horizon-client/src/net.rs::receive_play	play-phase dispatch; gap: minor: configuration packets dispatch in configure
+net/minecraft/network/Connection#validateListener	skip:other		the per-phase decode enums fix the listener's side and protocol
+net/minecraft/network/Connection#syncAfterConfigurationChange	skip:other		Netty future sync
+net/minecraft/network/Connection#setupInboundProtocol	inline	crates/horizon-client/src/net.rs::run	phase switch: the decode enum used for each phase
+net/minecraft/network/Connection#setupOutboundProtocol	inline	crates/horizon-client/src/net.rs::run	phase switch: the encode enum used for each phase
+net/minecraft/network/Connection#setListenerForServerboundHandshake	inline	crates/horizon-client/src/lan/conn.rs::serve_connection	the handshake intent picks the path
+net/minecraft/network/Connection#initiateServerboundPlayConnection	port	crates/horizon-client/src/net.rs::run	handshake intention and login hello; transfer intent via the TRANSFER flag
+net/minecraft/network/Connection#initiateServerboundConnection	port	crates/horizon-client/src/net.rs::run	handshake intention and login hello
+net/minecraft/network/Connection#runOnceConnected	inline	crates/horizon-client/src/net.rs::run	the action runs at once: the socket is connected before run sends
+net/minecraft/network/Connection#sendPacket	port	crates/horizon-protocol/src/connection.rs::ConnWriter::send	compression framing, then the write
+net/minecraft/network/Connection#doSendPacket	port	crates/horizon-protocol/src/connection.rs::ConnWriter::send_contents	write, count and encrypt
+net/minecraft/network/Connection#flushChannel	inline	crates/horizon-protocol/src/connection.rs::ConnWriter::send_contents	every send writes at once (TCP_NODELAY); no flush step
+net/minecraft/network/Connection#flush	inline	crates/horizon-protocol/src/connection.rs::ConnWriter::send_contents	every send writes at once (TCP_NODELAY); no flush step
+net/minecraft/network/Connection#flushQueue	skip:other		pending actions exist only while disconnected; run is always connected
+net/minecraft/network/Connection#tick	skip:other		the receive thread blocks in recv instead of ticking
+net/minecraft/network/Connection#tickSecond	skip:debug		packet averages for the F3 screen; debug_keys samples raw counters per tick
+net/minecraft/network/Connection#getLoggableAddress	port	crates/horizon-client/src/lan/conn.rs::user_name	gap: minor: name with address or withheld; no local form
+net/minecraft/network/Connection#disconnect	port	crates/horizon-client/src/lan/conn.rs::PlayerSender::disconnect	gap: minor: server-side kick; the client's own close is Session::disconnect
+net/minecraft/network/Connection#isMemoryConnection	port	crates/horizon-protocol/src/connection.rs::Connection::is_memory	in-memory pipe
+net/minecraft/network/Connection#connectToServer	port	crates/horizon-protocol/src/connection.rs::Connection::connect_addresses	gap: minor: the SRV lookup is in connect_server
+net/minecraft/network/Connection#configurePacketHandler	skip:other		Netty handler workaround
+net/minecraft/network/Connection#configureSerialization	skip:other		Netty pipeline; framing is in frame.rs and ConnReader/ConnWriter
+net/minecraft/network/Connection#createFrameDecoder	skip:other		Netty frame decoder choice; in-memory pipes use the same framing
+net/minecraft/network/Connection#connectToLocalServer	port	crates/horizon-protocol/src/connection.rs::Connection::local	the pipe comes from lan/mod.rs Lan::connect_local
+net/minecraft/network/Connection#fromChannel	port	crates/horizon-protocol/src/connection.rs::Connection::from_stream	gap: minor: the 30 s read timeout is set in lan/conn.rs::serve_connection
+net/minecraft/network/Connection#setEncryptionKey	port	crates/horizon-protocol/src/connection.rs::Connection::enable_encryption	CFB8 both directions
+net/minecraft/network/Connection#isConnected	inline	crates/horizon-client/src/net.rs::Session::send	no connected flag: sends stop once the writer is gone
+net/minecraft/network/Connection#setupCompression	port	crates/horizon-protocol/src/connection.rs::Connection::set_compression	negative threshold turns compression off
+net/minecraft/network/Connection#handleDisconnection	inline	crates/horizon-client/src/net.rs::Session::start	the thread ends and reports Disconnected with the reason
+FriendlyByteBuf.readWithCodec	skip:java		DataFixer codec plumbing; Horizon has its typed Codec trait
+FriendlyByteBuf.writeWithCodec	skip:java		DataFixer codec plumbing; Horizon has its typed Codec trait
+FriendlyByteBuf.readLenientJsonWithCodec	skip:java		codec plumbing for lenient JSON
+FriendlyByteBuf.writeJsonWithCodec	skip:java		codec plumbing for JSON
+FriendlyByteBuf.readWithCount	skip:java		count loop; the List codec does it
+FriendlyByteBuf.writeEnumSet	port	crates/horizon-protocol/src/packets/play.rs::PlayerInfoUpdate::write	action flags as one byte (8 actions fit)
+FriendlyByteBuf.readEnumSet	port	crates/horizon-protocol/src/packets/play.rs::PlayerInfoUpdate::read	action flags as one byte (8 actions fit)
+FriendlyByteBuf.writeOptional	port	crates/horizon-protocol/src/buf.rs::Opt::write	boolean flag, then the value
+FriendlyByteBuf.writeEither	port	crates/horizon-protocol/src/packets/play.rs::TrackedWaypoint::write	gap: minor: only the waypoint identifier; no generic Either codec
+FriendlyByteBuf.readEither	port	crates/horizon-protocol/src/packets/play.rs::TrackedWaypoint::read	gap: minor: only the waypoint identifier; no generic Either codec
+FriendlyByteBuf.readNullable	port	crates/horizon-protocol/src/buf.rs::Opt::read	boolean flag, then the value
+FriendlyByteBuf.writeNullable	port	crates/horizon-protocol/src/buf.rs::Opt::write	boolean flag, then the value
+FriendlyByteBuf.readByteArray	port	crates/horizon-protocol/src/buf.rs::Reader::byte_array	VarInt length, then bytes
+FriendlyByteBuf.writeByteArray	port	crates/horizon-protocol/src/buf.rs::Writer::byte_array	VarInt length, then bytes
+FriendlyByteBuf.writeVarIntArray	port	crates/horizon-protocol/src/buf.rs::List::write	VarInt count, then VarInts
+FriendlyByteBuf.readVarIntArray	port	crates/horizon-protocol/src/buf.rs::List::read	count checked against the bytes left
+FriendlyByteBuf.writeLongArray	port	crates/horizon-protocol/src/buf.rs::Writer::long_array	VarInt count, then longs
+FriendlyByteBuf.writeFixedSizeLongArray	inline	crates/horizon-protocol/src/buf.rs::Writer::long_array	the element loop of long_array; no separate fixed-size write
+FriendlyByteBuf.readLongArray	port	crates/horizon-protocol/src/buf.rs::Reader::long_array	VarInt count, then longs
+FriendlyByteBuf.readFixedSizeLongArray	port	crates/horizon-protocol/src/buf.rs::Reader::fixed_longs	longs without a count
+FriendlyByteBuf.writeBlockPos	port	crates/horizon-protocol/src/buf.rs::Pos::write	packed x, z, y in one long
+FriendlyByteBuf.writeChunkPos	port	crates/horizon-protocol/src/buf.rs::ChunkPos::write	packed x and z in one long
+FriendlyByteBuf.readGlobalPos	port	crates/horizon-protocol/src/buf.rs::Pos::read	gap: minor: reads only the block position; the dimension is read by the GlobalPos packet! struct in play.rs
+FriendlyByteBuf.readVector3f	missing		player: item, block and text displays get no server-set scale or translation; Horizon reads no display transforms (no Vector3f codec)
+FriendlyByteBuf.writeVector3f	missing		player: item, block and text displays get no server-set scale or translation; Horizon reads no display transforms (no Vector3f codec)
+FriendlyByteBuf.readQuaternion	missing		player: display entities get no server-set rotation; Horizon has no Quaternion codec
+FriendlyByteBuf.writeQuaternion	missing		player: display entities get no server-set rotation; Horizon has no Quaternion codec
+FriendlyByteBuf.writeUUID	port	crates/horizon-protocol/src/buf.rs::Writer::uuid	two longs
+FriendlyByteBuf.readUUID	port	crates/horizon-protocol/src/buf.rs::Reader::uuid	two longs
+FriendlyByteBuf.writeNbt	port	crates/horizon-protocol/src/buf.rs::Writer::nbt	null is written as End
+FriendlyByteBuf.readNbt	port	crates/horizon-protocol/src/buf.rs::Reader::nbt	gap: minor: accepts any root tag; no compound-only check
+FriendlyByteBuf.writeUtf	port	crates/horizon-protocol/src/buf.rs::Writer::string	gap: minor: no max-length check on write
+FriendlyByteBuf.readFixedBitSet	port	crates/horizon-protocol/src/packets/play.rs::Fixed3::read	gap: minor: only the 3-byte set LastSeenUpdate uses; the action set reads a flag byte
+FriendlyByteBuf.writeFixedBitSet	port	crates/horizon-protocol/src/packets/play.rs::Fixed3::write	gap: minor: only the 3-byte set LastSeenUpdate uses
+FriendlyByteBuf.writeContainerId	port	crates/horizon-protocol/src/buf.rs::Writer::varint	container id as a VarInt
+FriendlyByteBuf.ensureWritable	skip:java		Netty buffer capacity
+FriendlyByteBuf.getBytes	skip:java		Netty buffer accessor
+FriendlyByteBuf.setBytes	skip:java		Netty buffer accessor
+FriendlyByteBuf.readBytes	skip:java		Netty buffer accessor
+FriendlyByteBuf.writeBytes	skip:java		Netty buffer accessor
+FriendlyByteBuf.bytesBefore	skip:java		Netty buffer search
+FriendlyByteBuf.forEachByte	skip:java		Netty buffer search
+FriendlyByteBuf.forEachByteDesc	skip:java		Netty buffer search
+FriendlyByteBuf.toString	skip:java		Netty buffer text
+FriendlyByteBuf.retain	skip:java		Netty reference counting
+FriendlyByteBuf.touch	skip:java		Netty leak detection
+HashedPatchMap.create	port	crates/horizon-protocol/src/item.rs::Hashed::of	gap: player: component hashes are never sent (added stays empty), so a vanilla server resyncs a slot that holds components
+HashedPatchMap.matches	port	crates/horizon-client/src/lan/containers.rs::Hub::hashed_matches	gap: minor: compares item id and count only, not the component patch
+HashedStack.create	port	crates/horizon-protocol/src/item.rs::Hashed::of	gap: player: component hashes are never sent, so a vanilla server resyncs a slot that holds components
+HashedStack.ActualItem.matches	port	crates/horizon-client/src/lan/containers.rs::Hub::hashed_matches	gap: minor: compares item id and count only, not the component patch
+HiddenByteBuf.pack	skip:java		Netty in-memory channel wrapper
+HiddenByteBuf.unpack	skip:java		Netty in-memory channel wrapper
+HiddenByteBuf.retain	skip:java		Netty reference counting
+HiddenByteBuf.touch	skip:java		Netty leak detection
+MonitoredLocalFrameDecoder.channelRead	port	crates/horizon-protocol/src/connection.rs::ConnReader::recv	bytes_in counter for the bandwidth chart
+PacketBundlePacker.decode	inline	crates/horizon-client/src/net.rs::receive_play	gap: minor: BundleDelimiter is dropped; bundled packets are dispatched one by one
+PacketBundleUnpacker.encode	port	crates/horizon-client/src/lan/entity.rs::ServerEntity::send_changes	gap: minor: delimiters only around the projectile motion and power pair
+PacketDecoder.decode	port	crates/horizon-protocol/src/packets/mod.rs::decode	rejects leftover bytes (larger than expected)
+PacketEncoder.encode	port	crates/horizon-protocol/src/packets/mod.rs::encode	gap: minor: no error log and no skippable-packet path
+PacketListener.fillCrashReport	skip:debug		crash report category
+PacketProcessor.scheduleIfPossible	port	crates/horizon-client/src/lan/conn.rs::read_loop	gap: minor: no shutdown rejection here; the hand-off is Hub::poll
+PacketProcessor.processQueuedPackets	port	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	per guest; at most 400 packets per tick, the rest wait
+PacketProcessor.ListenerAndPacket.handle	inline	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	gap: minor: no per-packet error catch; a failing handler does not become a disconnect

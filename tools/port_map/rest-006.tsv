@@ -1,0 +1,150 @@
+MessageArgument.getMessage	port	crates/horizon-client/src/game/commands.rs::Game::expand_selectors	gap: minor: plain text only, no chat signing or text filter
+MessageArgument.resolveChatMessage	port	crates/horizon-client/src/game/commands.rs::Game::cmd_say	gap: minor: no chat signing, decorator or text filter
+MessageArgument.resolveSignedMessage	missing		minor: signed chat (signature, ChatDecorator, text filter) is not ported; /say sends plain text
+MessageArgument.resolveDisguisedMessage	missing		minor: ChatDecorator for unsigned messages is not ported
+MessageArgument.filterPlainText	missing		minor: text filtering service is not ported
+MessageArgument.Message.toComponent	port	crates/horizon-client/src/game/commands.rs::Game::expand_selectors	@-selector expansion into names
+NbtPathArgument.readUnquotedName	port	crates/horizon-client-core/src/nbt_path.rs::parse_node	unquoted node name read in the bare-name arm of parse_node
+NbtPathArgument.isAllowedInUnquotedName	inline	crates/horizon-client-core/src/nbt_path.rs::parse_node	the excluded-character set of parse_node's bare-name arm
+NbtPathArgument.AllElementsNode.getTag	port	crates/horizon-client-core/src/nbt_path.rs::NbtPath::step	Node::AllElements arm of step
+NbtPathArgument.AllElementsNode.getOrCreateTag	port	crates/horizon-client-core/src/nbt_path.rs::step_mut	Node::AllElements arm of step_mut
+NbtPathArgument.CompoundChildNode.getTag	port	crates/horizon-client-core/src/nbt_path.rs::NbtPath::step	Node::Child arm of step
+NbtPathArgument.CompoundChildNode.getOrCreateTag	port	crates/horizon-client-core/src/nbt_path.rs::step_mut	Node::Child arm of step_mut
+NbtPathArgument.IndexedElementNode.getTag	port	crates/horizon-client-core/src/nbt_path.rs::NbtPath::step	Node::Index arm of step
+NbtPathArgument.MatchElementNode.getTag	port	crates/horizon-client-core/src/nbt_path.rs::NbtPath::step	Node::MatchElement arm of step
+NbtPathArgument.MatchElementNode.getOrCreateTag	port	crates/horizon-client-core/src/nbt_path.rs::step_mut	Node::MatchElement arm of step_mut
+NbtPathArgument.MatchObjectNode.getTag	port	crates/horizon-client-core/src/nbt_path.rs::NbtPath::step	Node::MatchChild arm of step
+NbtPathArgument.MatchObjectNode.getOrCreateTag	port	crates/horizon-client-core/src/nbt_path.rs::step_mut	Node::MatchChild arm of step_mut
+NbtPathArgument.MatchRootObjectNode.getTag	port	crates/horizon-client-core/src/nbt_path.rs::NbtPath::step	Node::MatchRoot arm of step
+NbtPathArgument.NbtPath.get	port	crates/horizon-client-core/src/nbt_path.rs::NbtPath::get	
+NbtPathArgument.NbtPath.countMatching	port	crates/horizon-client-core/src/nbt_path.rs::NbtPath::count	
+NbtPathArgument.NbtPath.getOrCreateParents	port	crates/horizon-client-core/src/nbt_path.rs::NbtPath::visit_parents	parents of the last node, created when missing
+NbtPathArgument.NbtPath.apply	inline	crates/horizon-client-core/src/nbt_path.rs::NbtPath::set	per-parent sum of changes; remove sums the same way
+NbtPathArgument.NbtPath.isTooDeep	port	crates/horizon-client-core/src/nbt_path.rs::too_deep	
+NbtPathArgument.Node.getOrCreate	inline	crates/horizon-client-core/src/nbt_path.rs::NbtPath::descend	walk that creates missing tags node by node
+NbtPathArgument.Node.collect	inline	crates/horizon-client-core/src/nbt_path.rs::NbtPath::read_steps	per-node collection loop of the read walk
+ObjectiveArgument.getObjective	port	crates/horizon-client/src/scoreboard_cmd.rs::objective_name	
+ObjectiveArgument.getWritableObjective	port	crates/horizon-client/src/scoreboard_cmd.rs::writable_objective	
+ObjectiveArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	ArgType::Objective arm
+ObjectiveCriteriaArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	ArgType::Criteria arm: custom, team kill and stat criteria
+OperationArgument.getOperation	port	crates/horizon-client/src/scoreboard_cmd.rs::players	gap: minor: the operation string is read inside players, no separate accessor
+OperationArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	ArgType::Operation arm (OPERATIONS)
+OperationArgument.getSimpleOperation	port	crates/horizon-client/src/scoreboard_cmd.rs::apply_operation	floor division and positive modulo as in Mth
+ParticleArgument.readParticleType	port	crates/horizon-command/src/args.rs::ArgType::parse	ArgType::Particle arm: id, registry check, options
+ParticleArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	ArgType::Particle arm
+ResourceArgument.getResource	port	crates/horizon-command/src/args.rs::ArgType::parse	ArgType::Resource arm checks the registry
+ResourceKeyArgument.key	skip:java		builder: Horizon names the registry in the ArgType::ResKey variant
+ResourceKeyArgument.getRegistryKey	port	crates/horizon-command/src/args.rs::ArgType::parse	gap: minor: ResKey arm does not check membership; consumers do
+ResourceKeyArgument.resolveKey	port	crates/horizon-command/src/args.rs::ArgType::parse	gap: minor: registry lookup is done by the consumer (cmd_recipe, cmd_advancement)
+ResourceKeyArgument.getRecipe	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_recipe	gap: minor: checks learnable recipes, not every non-special recipe
+ResourceKeyArgument.getAdvancement	port	crates/horizon-client/src/game/commands.rs::Game::cmd_advancement	advancementNotFound lookup
+ResourceOrIdArgument.createGrammar	port	crates/horizon-command/src/codec.rs::resource_or_id	id or inline value
+ResourceOrTagArgument.getResourceOrTag	port	crates/horizon-command/src/args.rs::ArgType::parse	ArgType::ResOrTag arm
+ResourceOrTagArgument.ResourceResult.cast	skip:java		generic unchecked cast; the registry check is in the ArgType::ResOrTag arm
+ResourceOrTagArgument.TagResult.cast	skip:java		generic unchecked cast; the registry check is in the ArgType::ResOrTag arm
+ResourceOrTagKeyArgument.getResourceOrTagKey	port	crates/horizon-command/src/args.rs::ArgType::parse	ArgType::ResOrTagKey arm (key only)
+ResourceSelectorArgument.readPattern	port	crates/horizon-command/src/args.rs::ArgType::parse	ArgType::ResourceSelector arm reads the pattern
+ResourceSelectorArgument.isAllowedPatternCharacter	inline	crates/horizon-command/src/args.rs::ArgType::parse	the id-char or * or ? test in the ResourceSelector arm
+ScoreHolderArgument.getNamesWithDefaultWildcard	port	crates/horizon-client/src/scoreboard_cmd.rs::holders	default_wildcard true
+ScoreHolderArgument.Info.serializeToNetwork	port	crates/horizon-client/src/lan/commands.rs::properties	score_holder flag written as u8
+ScoreHolderArgument.Info.deserializeFromNetwork	port	crates/horizon-command/src/network.rs::argument_type	score_holder multiple flag read from the packet
+ScoreHolderArgument.SelectorResult.getNames	port	crates/horizon-client/src/scoreboard_cmd.rs::resolve_holders	selector holders; empty is an error
+SlotSourceArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	ArgType::SlotSource arm
+StringRepresentableArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	ArgType::Enum and StrEnum arms
+StringRepresentableArgument.getExamples	skip:other		Brigadier examples API; no player-visible output in vanilla play
+SwingAnimationArgument.parse	port	crates/horizon-command/src/args.rs::ArgType::parse	StrEnum arm with argument.swing_animation.invalid
+SwingAnimationArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	StrEnum arm
+TeamArgument.getTeam	port	crates/horizon-client/src/scoreboard_cmd.rs::team_name	
+TeamArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	ArgType::Team arm
+TimeArgument.time	skip:java		builder: Horizon names ArgType::Time in the command tree
+TimeArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	ArgType::Time arm
+BlockInput.test	port	crates/horizon-client/src/game/commands.rs::Game::block_matches	gap: minor: block-entity NBT of the input is not compared
+BlockInput.overwriteWithDefinedProperties	missing		unsure: vanilla BlockInput.place keeps neighbour-updated shape properties when the command sets only some; Horizon resolves the given state directly (Game::block_state)
+BlockPredicateArgument.parse	port	crates/horizon-command/src/block.rs::parse	
+BlockPredicateArgument.BlockPredicate.test	port	crates/horizon-client/src/game/commands.rs::Game::block_matches	gap: minor: block-entity NBT is not compared
+BlockPredicateArgument.TagPredicate.test	port	crates/horizon-client/src/game/commands.rs::Game::block_matches	gap: minor: block-entity NBT is not compared
+BlockStateArgument.parse	port	crates/horizon-command/src/block.rs::parse	
+BlockStateParser.parseForTesting	port	crates/horizon-command/src/block.rs::parse	for_testing = true, tags allowed
+BlockStateParser.suggestPropertyNameOrEnd	inline	crates/horizon-command/src/block.rs::BlockParser::fill_suggestions	property name suggestions and ]
+BlockStateParser.suggestVaguePropertyNameOrEnd	inline	crates/horizon-command/src/block.rs::BlockParser::fill_suggestions	vague (tag) property name suggestions
+BlockStateParser.suggestPropertyName	inline	crates/horizon-command/src/block.rs::BlockParser::fill_suggestions	
+BlockStateParser.suggestVaguePropertyName	inline	crates/horizon-command/src/block.rs::BlockParser::fill_suggestions	
+BlockStateParser.suggestOpenNbt	inline	crates/horizon-command/src/block.rs::BlockParser::fill_suggestions	{ suggestion for block entities
+BlockStateParser.suggestEquals	inline	crates/horizon-command/src/block.rs::BlockParser::fill_suggestions	
+BlockStateParser.suggestNextPropertyOrEnd	inline	crates/horizon-command/src/block.rs::BlockParser::fill_suggestions	
+BlockStateParser.addSuggestions	port	crates/horizon-command/src/block.rs::add_values	
+BlockStateParser.suggestVaguePropertyValue	inline	crates/horizon-command/src/block.rs::BlockParser::fill_suggestions	
+BlockStateParser.suggestOpenVaguePropertiesOrNbt	inline	crates/horizon-command/src/block.rs::BlockParser::fill_suggestions	
+BlockStateParser.suggestOpenPropertiesOrNbt	inline	crates/horizon-command/src/block.rs::BlockParser::fill_suggestions	
+BlockStateParser.suggestBlockIdOrTag	inline	crates/horizon-command/src/block.rs::BlockParser::fill_suggestions	BlockIdOrTag suggestion
+BlockStateParser.setValue	inline	crates/horizon-command/src/block.rs::BlockParser::read_properties	value check and store into properties
+BlockStateParser.serialize	port	crates/horizon-client/src/game/blockctl.rs::Game::state_text	name[prop=value,...]
+BlockPosArgument.getSpawnablePos	missing		minor: no spawnable-bounds check for /spawnpoint and /setworldspawn positions
+BlockPosArgument.parse	port	crates/horizon-command/src/args.rs::ArgType::parse	ArgType::BlockPos arm
+BlockPosArgument.listSuggestions	port	crates/horizon-command/src/args.rs::suggest_coordinates	3D block coordinates
+ColumnPosArgument.getColumnPos	port	crates/horizon-client/src/game/commands.rs::Game::block_pos_arg	gap: minor: returns the full block position; callers drop y
+ColumnPosArgument.listSuggestions	port	crates/horizon-command/src/args.rs::suggest_coordinates	2D coordinates
+LocalCoordinates.apply	port	crates/horizon-command/src/args.rs::Coordinates::position	Local arm: ^ offsets from the source position and rotation
+Vec2Argument.getVec2	port	crates/horizon-client/src/game/commands.rs::Game::resolve_coords	gap: minor: returns the 3D position; callers keep x and z
+Vec2Argument.listSuggestions	port	crates/horizon-command/src/args.rs::suggest_coordinates	2D coordinates
+Vec3Argument.vec3	skip:java		builder: Horizon names ArgType::Vec3 in the command tree
+Vec3Argument.parse	port	crates/horizon-command/src/args.rs::ArgType::parse	ArgType::Vec3 arm (local or world)
+Vec3Argument.listSuggestions	port	crates/horizon-command/src/args.rs::suggest_coordinates	3D coordinates
+WorldCoordinate.get	port	crates/horizon-command/src/args.rs::Coord::get	
+WorldCoordinate.parseDouble	port	crates/horizon-command/src/args.rs::parse_coord_double	center correction for whole numbers
+WorldCoordinates.getPosition	port	crates/horizon-command/src/args.rs::Coordinates::position	
+WorldCoordinates.getRotation	port	crates/horizon-command/src/args.rs::Coordinates::rotation	
+WorldCoordinates.parseInt	port	crates/horizon-command/src/args.rs::parse_world	block = true
+WorldCoordinates.parseDouble	port	crates/horizon-command/src/args.rs::parse_world	block = false, center per axis
+WorldCoordinates.absolute	skip:java		builder: Horizon constructs Coordinates::World with absolute Coord values
+FunctionArgument.getFunction	port	crates/horizon-client/src/game/functions.rs::Game::functions_named	arguments.function.unknown
+FunctionArgument.getFunctionTag	port	crates/horizon-client/src/game/functions.rs::Game::functions_named	player: an unknown #tag is empty here, so /function says no functions; vanilla says arguments.function.tag.unknown
+ItemInput.createItemStack	missing		player: /item replace ... with <item> <count> accepts counts up to 99 above the item's max stack; vanilla rejects them (arguments.item.overstacked)
+ItemParser.State.readItem	port	crates/horizon-command/src/item.rs::ItemState::parse	item id check
+ItemParser.State.readComponent	inline	crates/horizon-command/src/item.rs::ItemState::read_components	component value decode and malformed error
+ItemParser.State.suggestStartComponents	inline	crates/horizon-command/src/item.rs::ItemState::fill	[ suggestion
+ItemParser.State.suggestNextOrEndComponents	inline	crates/horizon-command/src/item.rs::ItemState::fill	, and ] suggestions
+ItemParser.State.suggestAssignment	inline	crates/horizon-command/src/item.rs::ItemState::fill	= suggestion
+ItemParser.State.suggestComponentAssignmentOrRemoval	port	crates/horizon-command/src/item.rs::ItemState::suggest_component	gap: minor: the ! removal suggestion is in ItemState::fill
+ItemPredicateArgument.createComponentExistencePredicate	port	crates/horizon-command/src/item.rs::predicate_grammar	exists: predicate for a component id
+ItemPredicateArgument.ComponentWrapper.create	port	crates/horizon-command/src/item.rs::predicate_grammar	component value predicate built from the codec
+ItemPredicateArgument.ComponentWrapper.decode	port	crates/horizon-command/src/item.rs::decode_component	
+ItemPredicateArgument.Context.forElementType	port	crates/horizon-client/src/game/commands.rs::Game::item_matches	item id match
+ItemPredicateArgument.Context.forTagType	port	crates/horizon-client/src/game/commands.rs::Game::item_matches	item tag match
+ItemPredicateArgument.Context.lookupComponentType	port	crates/horizon-command/src/item.rs::lookup	component id lookup and validation
+ItemPredicateArgument.Context.lookupPredicateType	port	crates/horizon-command/src/item.rs::lookup	predicate id lookup and validation
+ItemPredicateArgument.Context.listComponentTypes	port	crates/horizon-command/src/item.rs::ItemState::suggest_component	persistent (non-transient) component names
+ItemPredicateArgument.PredicateWrapper.decode	port	crates/horizon-command/src/item.rs::decode_predicate	
+net/minecraft/commands/arguments/selector/EntitySelector#checkPermissions	inline	crates/horizon-command/src/selector.rs::SelectorParser::parse	@ selectors refused without permission, checked at parse time
+net/minecraft/commands/arguments/selector/EntitySelector#findSingleEntity	port	crates/horizon-client/src/game/commands.rs::Game::entities	gap: minor: no single-entity check here; callers check argument.entity.toomany
+net/minecraft/commands/arguments/selector/EntitySelector#findEntities	port	crates/horizon-client/src/game/commands.rs::Game::select	
+net/minecraft/commands/arguments/selector/EntitySelector#addEntities	inline	crates/horizon-client/src/game/commands.rs::Game::select	per-level collection with the result limit
+net/minecraft/commands/arguments/selector/EntitySelector#findSinglePlayer	port	crates/horizon-client/src/game/commands.rs::Game::entities	gap: minor: no single-player check here
+net/minecraft/commands/arguments/selector/EntitySelector#findPlayers	port	crates/horizon-client/src/game/commands.rs::Game::select	players only when the selector has no entities
+net/minecraft/commands/arguments/selector/EntitySelector#getPredicate	port	crates/horizon-client/src/game/commands.rs::Game::select_in_level	type, name, gamemode, level, distance and box filters
+net/minecraft/commands/arguments/selector/EntitySelector#sortAndLimit	inline	crates/horizon-client/src/game/commands.rs::Game::select	sort kinds and the limit
+EntitySelectorParser.allowSelectors	inline	crates/horizon-command/src/args.rs::ArgType::parse	reg.permission >= 2 at each selector call site
+EntitySelectorParser.createAabb	inline	crates/horizon-client/src/game/commands.rs::Game::select_in_level	dx, dy, dz box from the origin
+EntitySelectorParser.finalizePredicates	port	crates/horizon-client/src/game/commands.rs::Game::select_in_level	player: x_rotation and y_rotation are parsed but never filter the selection; the level filter is here
+EntitySelectorParser.createRotationPredicate	missing		player: x_rotation and y_rotation ranges are parsed but never applied, so @e[y_rotation=...] selects regardless of facing
+EntitySelectorParser.shouldInvertValue	port	crates/horizon-command/src/selector.rs::SelectorParser::should_invert	
+EntitySelectorParser.fillSelectorSuggestions	port	crates/horizon-command/src/selector.rs::SelectorParser::fill_selectors	
+EntitySelectorParser.suggestNameOrSelector	inline	crates/horizon-command/src/selector.rs::SelectorParser::fill_suggestions	
+EntitySelectorParser.suggestName	inline	crates/horizon-command/src/selector.rs::SelectorParser::fill_suggestions	
+EntitySelectorParser.suggestSelector	inline	crates/horizon-command/src/selector.rs::SelectorParser::fill_suggestions	
+EntitySelectorParser.suggestOptionsKeyOrClose	inline	crates/horizon-command/src/selector.rs::SelectorParser::fill_suggestions	option names and ]
+EntitySelectorParser.suggestOptionsNextOrClose	inline	crates/horizon-command/src/selector.rs::SelectorParser::fill_suggestions	, and ] suggestions
+EntitySelectorOptions.register	skip:data		option table is a const list (OPTIONS) in selector.rs
+EntitySelectorOptions.rollbackAndThrow	port	crates/horizon-command/src/selector.rs::rollback	
+EntitySelectorOptions.get	inline	crates/horizon-command/src/selector.rs::SelectorParser::parse_options	unknown and inapplicable option checks via can_use
+ChainModifiers.setFlag	inline	crates/horizon-client/src/game/commands/execute.rs::Game::run_execute	forked flag set while walking the chain
+CustomCommandExecutor.WithErrorHandling.run	port	crates/horizon-client/src/game/commands/execute.rs::Game::run_leaf	error sends failure to the store callbacks
+ExecutionContext.createTopFrame	skip:java		frame object of the queue; Horizon keeps the return value and depth in exec state
+ExecutionContext.queueInitialFunctionCall	port	crates/horizon-client/src/game/functions.rs::Game::run_function_by_id	
+ExecutionContext.queueInitialCommandExecution	port	crates/horizon-client/src/game/commands.rs::Game::run_command	
+ExecutionContext.queueNext	skip:java		work queue of the 26.x engine; Horizon recurses through run_chain
+ExecutionContext.discardAtDepthOrHigher	port	crates/horizon-client/src/game/commands/execute.rs::Game::finish_return	return discards the rest of the frame
+ExecutionContext.runCommandQueue	port	crates/horizon-client/src/game/commands/execute.rs::Game::run_chain	gap: minor: stops with command.failed at max_command_sequence_length; no queue overflow limit
+ExecutionContext.pushNewCommands	skip:java		queue bookkeeping of the 26.x engine
+BuildContexts.execute	port	crates/horizon-client/src/game/commands/execute.rs::Game::run_execute	walk of the execute modifiers, then the leaf command
+BuildContexts.traceCommandStart	skip:debug		command tracer callback

@@ -29,9 +29,18 @@ impl Launcher {
         let Some(i) = self.selected_instance().cloned() else {
             return;
         };
-        *self.servers.text(Field::PreLaunch) = i.launch.pre_launch.clone();
-        *self.servers.text(Field::Wrapper) = i.launch.wrapper.clone();
-        *self.servers.text(Field::LaunchEnv) = launch::env_line(&i.launch.env);
+        self.servers
+            .text(Field::PreLaunch)
+            .set(i.launch.pre_launch.clone());
+        self.servers
+            .text(Field::Wrapper)
+            .set(i.launch.wrapper.clone());
+        self.servers
+            .text(Field::LaunchEnv)
+            .set(launch::env_line(&i.launch.env));
+        self.servers
+            .text(Field::PostExit)
+            .set(i.launch.post_exit.clone());
         self.launch = Some(LaunchPanel {
             instance: i.id,
             saved: None,
@@ -45,12 +54,14 @@ impl Launcher {
         };
         let pre = self.servers.value(Field::PreLaunch).trim().to_string();
         let wrapper = self.servers.value(Field::Wrapper).trim().to_string();
+        let post_exit = self.servers.value(Field::PostExit).trim().to_string();
         let saved = launch::parse_env(self.servers.value(Field::LaunchEnv)).and_then(|env| {
             instances::edit(&id, |m| {
                 m.launch = launch::Launch {
                     pre_launch: pre,
                     wrapper,
                     env,
+                    post_exit,
                     ..m.launch.clone()
                 }
             })
@@ -199,7 +210,15 @@ impl Launcher {
             "Environment variables",
             Field::LaunchEnv,
             "For example NAME=value OTHER=\"two words\"",
-            "For the game and both commands above.",
+            "For the game and the commands; INST_NAME, INST_DIR and the other instance variables are set too.",
+        );
+        let post = row(
+            self,
+            cx,
+            "After the game",
+            Field::PostExit,
+            "For example ./backup.sh",
+            "A shell command, run in the instance's folder once the game has exited.",
         );
         let save = button("launch-save", "Save", Kind::Secondary, &t).on_click(cx.listener(
             |this, _: &ClickEvent, _, cx| {
@@ -223,6 +242,7 @@ impl Launcher {
                 .child(pre)
                 .child(wrapper)
                 .child(env)
+                .child(post)
                 .children(self.linux_switches(cx))
                 .child(
                     div()

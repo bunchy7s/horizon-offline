@@ -697,6 +697,26 @@ impl Behaviours {
         if self.data(state).chain.contains(&Class::CopperGolemStatue) {
             return self.turn_statue(level, ticks, pos, state, item);
         }
+        // RespawnAnchorBlock.useItemOn: glowstone (`isRespawnFuel`) charges an
+        // anchor below 4 charges (`canBeCharged`) and the click ends there.
+        if item == Some("minecraft:glowstone")
+            && self.data(state).chain.contains(&Class::RespawnAnchor)
+            && self.table.int(state, self.props.charges) < 4
+        {
+            // RespawnAnchorBlock.charge.
+            let charges = self.table.int(state, self.props.charges);
+            let next = self.table.set_int(state, self.props.charges, charges + 1);
+            let mut sim = self.sim(level, ticks);
+            sim.set_block_and_update(pos, next);
+            sim.game_event_state(pos, "minecraft:block_change", next);
+            sim.sound(
+                pos,
+                &"minecraft:block.respawn_anchor.charge".into(),
+                1.0,
+                1.0,
+            );
+            return InteractionResult::Success;
+        }
         // NoteBlock.useItemOn: a mob head on the top face is placed, not tuned
         // (`#minecraft:noteblock_top_instruments`).
         if face == Direction::Up

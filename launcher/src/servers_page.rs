@@ -1,6 +1,7 @@
 //! The Servers page: create a server in one dialog, then start, stop and watch it, give friends its
 //! address, manage who may join, change its settings, back it up and update it, all with buttons. Every
 //! action runs `horizon-server` or calls the running server's control API (`horizon_launcher::servers`).
+use super::line_edit::{self, Key, LineEdit};
 use super::*;
 use horizon_launcher::heads;
 use horizon_launcher::servers::{
@@ -44,13 +45,14 @@ pub(super) enum Field {
     PreLaunch,
     Wrapper,
     LaunchEnv,
+    PostExit,
     /// Settings' new offline name (`switch_page.rs`).
     OfflineName,
     DeleteServer,
 }
 
 impl Field {
-    const ALL: [Field; 19] = [
+    const ALL: [Field; 20] = [
         Field::Name,
         Field::Seed,
         Field::Players,
@@ -68,6 +70,7 @@ impl Field {
         Field::PreLaunch,
         Field::Wrapper,
         Field::LaunchEnv,
+        Field::PostExit,
         Field::OfflineName,
         Field::DeleteServer,
     ];
@@ -189,7 +192,7 @@ pub(super) struct Servers {
     /// `update --check` is under way.
     checking: bool,
     pvp: Option<bool>,
-    texts: HashMap<Field, String>,
+    texts: HashMap<Field, LineEdit>,
     focus: HashMap<Field, FocusHandle>,
     focused: Option<Field>,
     /// The field to put the keyboard in on the next frame.
@@ -250,12 +253,12 @@ impl Servers {
         }
     }
 
-    pub(super) fn text(&mut self, f: Field) -> &mut String {
+    pub(super) fn text(&mut self, f: Field) -> &mut LineEdit {
         self.texts.entry(f).or_default()
     }
 
     pub(super) fn value(&self, f: Field) -> &str {
-        self.texts.get(&f).map_or("", String::as_str)
+        self.texts.get(&f).map_or("", LineEdit::text)
     }
 
     /// Which field has the keyboard, read every frame.
@@ -330,65 +333,6 @@ fn bytes(n: u64) -> String {
 }
 
 /// A backup's date and kind from its name (`2026-10-19_11-28-57-manual.zip`, UTC), for people.
-/// What a key did in a one-line field.
-#[derive(Debug, PartialEq)]
-pub(super) enum Key {
-    Enter,
-    Escape,
-    /// Command/Ctrl-V: the caller pastes the clipboard's first line.
-    Paste,
-    Edited,
-    /// Not the field's: Tab (focus), arrows, shortcuts.
-    Pass,
-}
-
-/// Types `key` into `text`. A `selected` suggestion is replaced by what's typed or pasted, and
-/// cleared by Backspace.
-pub(super) fn type_key(
-    text: &mut String,
-    selected: bool,
-    key: &str,
-    key_char: Option<&str>,
-    command: bool,
-) -> Key {
-    let replace = |text: &mut String| {
-        if selected {
-            text.clear();
-        }
-    };
-    match key {
-        "enter" => Key::Enter,
-        "escape" => Key::Escape,
-        "v" if command => {
-            replace(text);
-            Key::Paste
-        }
-        "backspace" => {
-            if selected {
-                text.clear();
-            } else {
-                text.pop();
-            }
-            Key::Edited
-        }
-        _ if command => Key::Pass,
-        // Not every platform gives Space a character.
-        "space" => {
-            replace(text);
-            text.push(' ');
-            Key::Edited
-        }
-        _ => match key_char {
-            Some(ch) if !ch.is_empty() && !ch.chars().any(char::is_control) => {
-                replace(text);
-                text.push_str(ch);
-                Key::Edited
-            }
-            _ => Key::Pass,
-        },
-    }
-}
-
 fn backup_label(b: &Backup) -> (String, String) {
     let stem = b.name.trim_end_matches(".zip");
     let (when, kind) = match stem.get(..19) {
@@ -419,13 +363,6 @@ fn uptime(secs: u64) -> String {
         60..3600 => format!("{} min", secs / 60),
         3600..86_400 => format!("{} h {:02} min", secs / 3600, secs / 60 % 60),
         _ => format!("{} d {} h", secs / 86_400, secs / 3600 % 24),
-    }
-}
-
-/// Keeps a field's text to 256 characters.
-fn clip(text: &mut String) {
-    if let Some((at, _)) = text.char_indices().nth(256) {
-        text.truncate(at);
     }
 }
 
@@ -844,10 +781,12 @@ impl Launcher {
         } else {
             format!("Server {}", self.servers.list.len() + 1)
         };
-        *self.servers.text(Field::Name) = name;
+        self.servers.text(Field::Name).set(name);
         self.servers.selected = Some(Field::Name);
-        self.servers.text(Field::Seed).clear();
-        *self.servers.text(Field::Players) = own_name(&self.accounts).unwrap_or_default();
+        self.servers.text(Field::Seed).set(String::new());
+        self.servers
+            .text(Field::Players)
+            .set(own_name(&self.accounts).unwrap_or_default());
         self.servers.problem = None;
         self.servers.create_scroll = Scrollbar::default();
         self.servers.create = Some(Create {
@@ -944,16 +883,8 @@ impl Launcher {
         let focused = self.servers.focused == Some(f);
         let selected = focused && self.servers.selected == Some(f);
         let invalid = self.servers.invalid.is_some_and(|(g, _)| g == f);
-        let value = self.servers.value(f).to_string();
-        let shown: String = {
-            let chars: Vec<char> = value.chars().collect();
-            if f == Field::Token {
-                "•".repeat(chars.len().min(40))
-            } else {
-                chars[chars.len().saturating_sub(60)..].iter().collect()
-            }
-        };
-        div()
+        self.servers.text(f).show(((width - 24.) / 7.5) as usize);
+        let field = div()
             .id(SharedString::from(format!("field-{f:?}")))
             .track_focus(&handle)
             .flex()
@@ -974,19 +905,14 @@ impl Launcher {
             .bg(t.surface)
             .text_size(px(theme::UI.px))
             .cursor_text()
-            .child(if value.is_empty() && !focused {
-                div().text_color(t.muted).child(placeholder)
-            } else {
-                div()
-                    .text_color(t.ink)
-                    .when(selected, |d| {
-                        d.rounded(px(2.)).bg(t.accent.opacity(theme::SELECTION))
-                    })
-                    .child(shown)
-            })
-            .when(focused, |d| {
-                d.child(div().flex_none().w(px(1.)).h(px(16.)).bg(t.ink))
-            })
+            .child(line_edit::content(
+                self.servers.text(f),
+                &t,
+                focused,
+                selected,
+                f == Field::Token,
+                placeholder,
+            ))
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                 // A click puts the caret in: the suggestion is no longer selected.
                 if matches!(ev, ClickEvent::Mouse(_)) {
@@ -998,20 +924,16 @@ impl Launcher {
                 cx.notify();
             }))
             .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, window, cx| {
-                let k = &ev.keystroke;
-                let command = k.modifiers.control || k.modifiers.platform;
-                if k.key != "enter" && this.servers.invalid.is_some_and(|(g, _)| g == f) {
+                if ev.keystroke.key != "enter" && this.servers.invalid.is_some_and(|(g, _)| g == f)
+                {
                     this.servers.invalid = None;
                 }
+                // A suggestion is selected: what's typed or pasted replaces it.
                 let selected = this.servers.selected.take() == Some(f);
-                let typed = type_key(
-                    this.servers.text(f),
-                    selected,
-                    &k.key,
-                    k.key_char.as_deref(),
-                    command,
-                );
-                match typed {
+                if selected {
+                    this.servers.text(f).select_all();
+                }
+                match line_edit::handle(this.servers.text(f), ev, cx) {
                     Key::Enter if matches!(f, Field::InstanceName | Field::InstanceGroup) => {
                         this.save_instance(cx)
                     }
@@ -1024,20 +946,14 @@ impl Launcher {
                         this.instance_escape();
                         window.blur();
                     }
-                    Key::Paste => {
-                        if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                            let line = text.lines().next().unwrap_or_default().trim().to_string();
-                            this.servers.text(f).push_str(&line);
-                        }
-                    }
-                    Key::Edited => {}
                     // Tab and the rest go on to the window: Tab moves the focus.
                     Key::Pass => return,
+                    _ => {}
                 }
-                clip(this.servers.text(f));
                 cx.stop_propagation();
                 cx.notify();
-            }))
+            }));
+        line_edit::mouse(field, cx, move |this| this.servers.text(f))
     }
 
     /// Escape closes the Create dialog. Whether it did.
@@ -1058,7 +974,7 @@ impl Launcher {
         match f {
             Field::Name | Field::Seed | Field::Players => self.create_server(),
             Field::Command => {
-                let line = std::mem::take(self.servers.text(Field::Command));
+                let line = self.servers.text(Field::Command).take();
                 let line = line.trim().trim_start_matches('/').to_string();
                 if !line.is_empty() {
                     self.api_command(line);
@@ -1081,7 +997,9 @@ impl Launcher {
             | Field::InstanceGroup
             | Field::ConsoleSearch
             | Field::DeleteServer => {}
-            Field::PreLaunch | Field::Wrapper | Field::LaunchEnv => self.save_launch(),
+            Field::PreLaunch | Field::Wrapper | Field::LaunchEnv | Field::PostExit => {
+                self.save_launch()
+            }
             Field::OfflineName => self.offline_name_enter(),
             Field::ServerName | Field::ServerAddress => self.add_server(),
         }
@@ -1110,7 +1028,7 @@ impl Launcher {
             ));
             return;
         }
-        self.servers.text(Field::AddPlayer).clear();
+        self.servers.text(Field::AddPlayer).set(String::new());
         self.server_command(
             &format!("Letting {name} in"),
             vec!["whitelist".into(), "add".into(), name],
@@ -2217,12 +2135,14 @@ impl Launcher {
         if self.servers.focused != Some(Field::Motd)
             && !self.servers.texts.contains_key(&Field::Motd)
         {
-            *self.servers.text(Field::Motd) = self.servers.shown("server", "motd");
+            let motd = self.servers.shown("server", "motd");
+            self.servers.text(Field::Motd).set(motd);
         }
         if self.servers.focused != Some(Field::Port)
             && !self.servers.texts.contains_key(&Field::Port)
         {
-            *self.servers.text(Field::Port) = self.servers.shown("server", "port");
+            let port = self.servers.shown("server", "port");
+            self.servers.text(Field::Port).set(port);
         }
         let save = |id: &'static str, f: Field, cx: &mut Context<Self>| {
             button(id, "Save", Kind::Secondary, &t).on_click(cx.listener(
@@ -2439,7 +2359,7 @@ impl Launcher {
             let delete = if ready {
                 delete.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.servers.confirm_delete = true;
-                    this.servers.text(Field::DeleteServer).clear();
+                    this.servers.text(Field::DeleteServer).set(String::new());
                     this.focus_handle(Field::DeleteServer, cx);
                     this.servers.focus_soon = Some(Field::DeleteServer);
                     cx.notify();
@@ -3191,61 +3111,5 @@ mod tests {
         assert_eq!(backup_label(&b("odd.zip")), ("odd".into(), String::new()));
         assert_eq!(bytes(5_292_542), "5.3 MB");
         assert_eq!(uptime(3725), "1 h 02 min");
-        let mut long = "é".repeat(300);
-        clip(&mut long);
-        assert_eq!(long.chars().count(), 256);
-    }
-
-    /// The keyboard in a one-line field, as the Create dialog, Players, Settings and the console use it.
-    #[test]
-    fn fields_type_as_people_expect() {
-        let mut text = String::from("My server");
-        // The suggestion is selected: the first letter replaces it.
-        assert_eq!(
-            type_key(&mut text, true, "f", Some("F"), false),
-            Key::Edited
-        );
-        assert_eq!(text, "F");
-        // Space, which some platforms send without a character.
-        assert_eq!(
-            type_key(&mut text, false, "space", None, false),
-            Key::Edited
-        );
-        assert_eq!(
-            type_key(&mut text, false, "n", Some("N"), false),
-            Key::Edited
-        );
-        assert_eq!(text, "F N");
-        assert_eq!(
-            type_key(&mut text, false, "backspace", None, false),
-            Key::Edited
-        );
-        assert_eq!(text, "F ");
-        // Backspace on a suggestion clears it all.
-        let mut text = String::from("Server 2");
-        type_key(&mut text, true, "backspace", None, false);
-        assert_eq!(text, "");
-        // Paste replaces a suggestion too; the caller adds the clipboard.
-        let mut text = String::from("Server 2");
-        assert_eq!(type_key(&mut text, true, "v", Some("v"), true), Key::Paste);
-        assert_eq!(text, "");
-        // Tab, arrows and shortcuts aren't the field's: Tab moves the focus.
-        let mut text = String::from("Ludo");
-        for (key, ch, command) in [
-            ("tab", Some("\t"), false),
-            ("left", None, false),
-            ("a", Some("a"), true),
-        ] {
-            assert_eq!(type_key(&mut text, false, key, ch, command), Key::Pass);
-        }
-        assert_eq!(
-            type_key(&mut text, true, "enter", Some("\n"), false),
-            Key::Enter
-        );
-        assert_eq!(
-            type_key(&mut text, false, "escape", None, false),
-            Key::Escape
-        );
-        assert_eq!(text, "Ludo");
     }
 }

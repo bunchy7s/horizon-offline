@@ -1,0 +1,147 @@
+AbstractNautilus.createAttributes	skip:data		attributes come from the entity type table (MobType in mobs.rs)
+AbstractNautilus.checkNautilusSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Nautilus arm: sea level minus 25 to minus 5, water below and above; only the nautilus has a placement (the zombie nautilus has none of its own)
+AbstractNautilus.canUseSlot	port	crates/horizon-client/src/game/dispenser.rs::mob_can_use_slot	saddle and body slots need an alive, grown, tame nautilus
+AbstractNautilus.canDispenserEquipIntoSlot	port	crates/horizon-client/src/game/dispenser.rs::mob_can_dispenser_equip	body and saddle always, other slots only with pick_up_loot
+AbstractNautilus.getControllingPassenger	port	crates/horizon-client/src/mobs/nautilus.rs::controlled	a rider on a saddled nautilus
+AbstractNautilus.getRiddenSpeed	inline	crates/horizon-client/src/mobs/nautilus.rs::ridden	0.0325 in water, 0.02 on land, times the movement speed
+AbstractNautilus.doPlayerRide	inline	crates/horizon-client/src/game/nautili.rs::Game::interact_nautilus	the player mounts it and a lead breaks; there is no home to clear
+AbstractNautilus.getNautilusRestrictionRadius	missing		player: a tame nautilus is never kept near its home, so it wanders off instead of staying within 32 blocks (16 for a baby or a saddled one)
+AbstractNautilus.checkRestriction	missing		player: no home is set for a tame nautilus (ai.home is only set by leads and happy ghasts), see getNautilusRestrictionRadius
+AbstractNautilus.applyEffects	inline	crates/horizon-client/src/mobs/nautilus.rs::ai_step	the rider gets breath of the nautilus for 60 ticks, refreshed every 40 ticks
+AbstractNautilus.onPlayerJump	inline	crates/horizon-client/src/game/mounts.rs::Game::charge_mount_jump	the charged jump scale (0.4 to 1.0) goes to the rider input; the dash itself waits for its cooldown in nautilus::ridden
+AbstractNautilus.executeRidersJump	port	crates/horizon-client/src/mobs/nautilus.rs::dash	gap: minor: the push leaves out getBlockSpeedFactor (soul sand, honey); 1.2 in water, 0.5 on land, 40 tick cooldown, dashing flag
+AbstractNautilus.handleStartJump	inline	crates/horizon-client/src/mobs/nautilus.rs::ai_step	the dash sound plays on the tick after the dash (scratch[1]); no game event
+AbstractNautilus.onSyncedDataUpdated	skip:other		client mirror of the dash flag; the nautilus keeps its own dash clock (anim_ticks) and the jump bar uses mount.jump_ticks
+AbstractNautilus.tryToTame	inline	crates/horizon-client/src/game/nautili.rs::Game::interact_nautilus	one chance in three, taming particles (event 7 or 6), eating sound, tame_animal trigger
+AbstractNautilus.hurtServer	port	crates/horizon-client/src/mobs/nautilus.rs::after_hurt	angry at the attacker for 400 ticks
+AbstractNautilus.finalizeSpawn	port	crates/horizon-client/src/mobs/nautilus.rs::finalize	attack target cooldown of 2400 to 3600 ticks
+AbstractNautilus.getEquipSound	port	crates/horizon-client/src/mobs/nautilus.rs::saddle_sound	underwater saddle sound while the eyes are in water
+AbstractNautilus.createInventory	skip:other		getInventoryColumns is 0, so the container has no slots; saddle and armour are equipment slots
+AbstractNautilus.openCustomInventoryScreen	missing		player: shift-use on a tame nautilus or the inventory key while riding opens no screen (has_mount_menu is horses and llamas only), so a saddle or armour put on cannot be taken off again
+AbstractNautilus.getSlot	skip:other		slots 500 and up address the container, which has no slots; every other slot is an equipment slot
+AbstractNautilus.isAggravated	missing		minor: only feeds canBeLeashed; a charging or angry nautilus can still be leashed (leash.rs::can_be_leashed has no nautilus arm)
+Nautilus.customServerAiStep	inline	crates/horizon-client/src/mobs/nautilus.rs::register	the goal list replaces the brain and its fight or idle switch; the cooldowns tick in ai_step
+Nautilus.getAmbientSound	port	crates/horizon-client/src/mobs/nautilus.rs::sounds	by age and by under water or on land
+Nautilus.getHurtSound	port	crates/horizon-client/src/mobs/nautilus.rs::sounds	by age and by under water or on land
+Nautilus.getDeathSound	port	crates/horizon-client/src/mobs/nautilus.rs::sounds	by age and by under water or on land
+Nautilus.playEatingSound	port	crates/horizon-client/src/mobs/nautilus.rs::eat_sound	baby and adult eat sounds
+Nautilus.baseTick	inline	crates/horizon-client/src/mobs/ai.rs::base_tick	gap: minor: dries out on land through the generic needs_water air supply, so the damage is the drown kind instead of dry_out and a no-AI nautilus dries out too
+NautilusAi.initCoreActivity	inline	crates/horizon-client/src/mobs/nautilus.rs::register	panic 1.6 is a goal; the look and move sinks are the generic controls and the cooldown counters tick in ai_step
+NautilusAi.initIdleActivity	inline	crates/horizon-client/src/mobs/nautilus.rs::register	gap: minor: breed 0.4, tempt 1.3, swim stroll 1.0 and the target pick (find_target), but SetWalkTargetFromLookTarget is not ported so it does not swim toward what it looks at
+NautilusAi.initFightActivity	inline	crates/horizon-client/src/mobs/nautilus.rs::register	the Charge goal: speed 0.6, 12 block range, 80 tick cooldown, only without love or temptation
+NautilusAi.isHostileTarget	inline	crates/horizon-client/src/mobs/nautilus.rs::find_target	a pufferfish in water (the nautilus_hostiles tag holds only the pufferfish)
+ZombieNautilus.defineSynchedData	skip:other		synched variant id; Horizon keeps the variant in extra.variant and reads it from the server's data in remote_mob_data.rs
+ZombieNautilus.get	skip:other		reads the variant as a data component for predicates; Horizon has no entity component view
+ZombieNautilus.applyImplicitComponent	missing		minor: a spawn egg's zombie_nautilus_variant component is not applied (only bucketed mobs read item components)
+ZombieNautilus.finalizeSpawn	port	crates/horizon-client/src/mobs/nautilus.rs::finalize	warm variant in warm oceans (coral), temperate elsewhere
+ZombieNautilusAi.initCoreActivity	inline	crates/horizon-client/src/mobs/nautilus.rs::register	zombie arm: no panic; the cooldown counters tick in ai_step
+ZombieNautilusAi.initIdleActivity	inline	crates/horizon-client/src/mobs/nautilus.rs::register	zombie arm: tempt 0.9, swim stroll 1.0, target pick in find_target; no breeding
+ZombieNautilusAi.initFightActivity	inline	crates/horizon-client/src/mobs/nautilus.rs::register	zombie arm: Charge goal at speed 0.5
+ZombieNautilusVariants.bootstrap	skip:data		variant registry; Horizon has VARIANTS in nautilus.rs and the biome tag in spawning.rs
+Panda.setMainGene	skip:other		stores the gene id in extra.variant; the random re-roll for an id above 6 never happens
+Panda.setHiddenGene	skip:other		stores the gene id in extra.variant2; the random re-roll for an id above 6 never happens
+Panda.defineSynchedData	skip:other		synched flags, counters and genes; Horizon keeps them in the panda State and extra.variant, extra.variant2
+Panda.getFlag	port	crates/horizon-client/src/mobs/panda.rs::flag	reads the DATA_ID_FLAGS bit (set_flag writes it)
+Panda.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	MainGene and HiddenGene by name
+Panda.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	MainGene and HiddenGene by name, normal when absent
+Panda.addEatingParticles	inline	crates/horizon-client/src/mobs/panda.rs::handle_eating	eat sound every 5 ticks and the six crumbs (crumbs)
+Panda.updateSitAmount	inline	crates/horizon-client/src/mobs/panda.rs::update_amounts	sit amount rises 0.15 and falls 0.19 a tick
+Panda.updateOnBackAnimation	inline	crates/horizon-client/src/mobs/panda.rs::update_amounts	on-back amount, same steps
+Panda.updateRollAmount	inline	crates/horizon-client/src/mobs/panda.rs::update_amounts	roll amount, same steps
+Panda.pickUpItem	inline	crates/horizon-client/src/game/pandas.rs::Game::tick_pandas	takes a panda_eats_from_ground item at its feet with an empty mouth (mob_griefing), guaranteed drop
+Panda.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	random main and hidden genes, set_attributes, ageable group with 0.2 chance
+Panda.setGeneFromParents	port	crates/horizon-client/src/mobs/panda.rs::inherit	genes from both parents with a 1 in 32 re-roll each; the one-parent branch is never reached
+Panda.PandaAttackGoal.canUse	port	crates/horizon-client/src/mobs/panda.rs::When::can_use	melee attack only while can_perform_action
+Panda.PandaAvoidGoal.canUse	port	crates/horizon-client/src/mobs/panda.rs::When::can_use	avoid goals only for a worried panda that can perform an action
+Parrot.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	random one of five variants, ageable group without babies
+Parrot.createAttributes	skip:data		attributes (health 6, flying speed 0.4) come from the entity type table
+Parrot.createNavigation	missing		player: parrots have no flying navigation or flying move control, so they walk and hop on the ground and never fly to where a path through the air would lead
+Parrot.calculateFlapping	missing		player: flap and flap_speed are only updated for chickens, so a parrot's wings never flap and a falling one does not glide (no 0.6 fall damping)
+Parrot.checkParrotSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Parrot arm: parrots_spawnable_on below and bright enough
+Parrot.onFlap	missing		player: no parrot wing sound while flying (entity.parrot.fly at 0.15), no next_flap tracking
+Parrot.hurtServer	missing		player: a hit does not stand a sitting tame parrot up (only wolves reset sitting in tame::after_hurt)
+Parrot.get	skip:other		reads the variant as a data component for predicates; Horizon has no entity component view
+Parrot.applyImplicitComponent	missing		minor: a spawn egg's parrot_variant component is not applied (only bucketed mobs read item components)
+Parrot.defineSynchedData	skip:other		synched variant id; Horizon keeps it in extra.variant (remote_mob_data.rs reads index 20)
+Parrot.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::read_variant	Variant clamped to 0 to 4, red and blue when absent
+Parrot.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: minor: no parrot arm, the lead attaches at the full eye height instead of 0.5 times it
+Parrot.ParrotWanderGoal.getPosition	missing		player: parrots wander with a ground stroll (Stroll::avoiding_water in tame.rs::register_parrot), so they never pick a flying position or one of the tree perches
+Parrot.ParrotWanderGoal.getTreePos	missing		player: parrots never fly to settle on leaves or logs nearby
+ShoulderRidingEntity.setEntityOnShoulder	port	crates/horizon-client/src/game/shoulders.rs::Game::parrot_to_shoulder	saved into the first free ShoulderEntityLeft or ShoulderEntityRight slot, the parrot removed from the world
+Pig.registerGoals	port	crates/horizon-client/src/mobs/farm.rs::register	Species::Pig arm: float, panic 1.25, breed, two temptations (stick and food), follow parent, stroll, look
+Pig.getControllingPassenger	port	crates/horizon-client/src/mobs/equine.rs::controlled	saddled and the rider holds the carrot on a stick (r.steer)
+Pig.onSyncedDataUpdated	missing		minor: a server's pig does not start its client boost timer from the synched boost time (remote.rs reads only the strider's flag there)
+Pig.defineSynchedData	skip:other		synched boost time, variant and sound variant; Horizon keeps them in extra.counter, extra.counter2, extra.variant and extra.sound_variant
+Pig.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	variant, sound_variant and the saddle in equipment
+Pig.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	variant, sound_variant and the saddle
+Pig.mobInteract	port	crates/horizon-client/src/game/mounts.rs::Game::interact_steerable	gap: player: a saddled pig is mounted even when the click holds its food, so it cannot be fed or bred while saddled (vanilla feeds first)
+Pig.canUseSlot	port	crates/horizon-client/src/game/dispenser.rs::mob_can_use_slot	the saddle needs an alive, grown pig
+Pig.canDispenserEquipIntoSlot	port	crates/horizon-client/src/game/dispenser.rs::mob_can_dispenser_equip	the saddle always
+Pig.getEquipSound	port	crates/horizon-client/src/game/dispenser.rs::equip_sound	entity.pig.saddle
+Pig.thunderHit	port	crates/horizon-client/src/game/lightning.rs::Game::thunder_hit	a pig outside peaceful becomes a zombified piglin
+Pig.tickRidden	inline	crates/horizon-client/src/mobs/equine.rs::ridden_step	turns to the rider's yaw, pitch halved, and ticks the boost
+Pig.getRiddenSpeed	inline	crates/horizon-client/src/mobs/equine.rs::ridden_step	movement speed times 0.225 times the boost factor
+Pig.getBreedOffspring	port	crates/horizon-client/src/game/creatures.rs::Game::breed	gap: minor: the baby always takes the first parent's variant, not either parent's by a coin
+Pig.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: minor: no pig arm, the lead attaches at the full eye height instead of 0.6 times it
+Pig.getSoundSet	inline	crates/horizon-client/src/mobs/ai.rs::voice_sounds	gap: player: only the baby or adult classic sounds are used, so mini and big sound variants (chosen and saved) never sound different
+Pig.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	variant by biome tag and a random sound variant
+PigSoundVariants.bootstrap	skip:data		sound variant registry; names come from finalize::sound_variants
+PigVariants.bootstrap	skip:data		variant registry; the variants and their biome tags are read from data
+PigVariants.register	skip:data		registry helper
+PolarBear.createAttributes	skip:data		attributes come from the entity type table
+PolarBear.checkPolarBearSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::PolarBear arm: ice-block rule in the alternate biomes, animal rule elsewhere
+PolarBear.getDefaultDimensions	missing		minor: the box of a rearing bear stays its normal height (vanilla grows it up to twice with the stand animation); Mob::dims has no polar bear arm
+PolarBear.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	ageable group with chance 1.0 (the PolarBear and Ocelot arm)
+Rabbit.getJumpPower	port	crates/horizon-client/src/mobs/rabbit.rs::jump_scale	0.5 toward higher ground or a wall, 0.2 when slow, else 0.3, divided by 0.42 (jump_power adds the block factor and boost)
+Rabbit.getJumpCompletion	skip:other		only copied into the render state; the rabbit model plays the hop and idle keyframe animations instead
+Rabbit.setSpeedModifier	inline	crates/horizon-client/src/mobs/rabbit.rs::prepare_move	speed modifier is zeroed on the ground and restored in flight; 1.5 in water
+Rabbit.setJumping	inline	crates/horizon-client/src/mobs/rabbit.rs::start_jumping	the jump sound with pitch times 0.8 plays when the hop starts
+Rabbit.defineSynchedData	skip:other		synched variant id; Horizon keeps it in extra.variant (remote_mob_data.rs reads index 18)
+Rabbit.facePoint	inline	crates/horizon-client/src/mobs/rabbit.rs::server_ai_step	yaw set toward the wanted or next path point before each hop
+Rabbit.setLandingDelay	inline	crates/horizon-client/src/mobs/rabbit.rs::server_ai_step	10 ticks, 3 when the speed modifier is 2.2 or more
+Rabbit.createAttributes	skip:data		attributes come from the entity type table
+Rabbit.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	RabbitType; MoreCarrotTicks is kept at 0
+Rabbit.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	gap: minor: RabbitType (0 to 5 and 99) is read but MoreCarrotTicks is ignored
+Rabbit.playAttackSound	missing		minor: only the killer bunny plays it and Horizon has no killer bunny behaviour
+Rabbit.getBreedOffspring	port	crates/horizon-client/src/game/creatures.rs::Game::breed	gap: minor: the baby always takes the first parent's coat; vanilla takes either parent's and one time in 20 rolls a biome coat
+Rabbit.setVariant	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	gap: player: variant 99 (killer bunny, from /summon or a save) only changes the texture: no armour 8, no plus 5 attack, no melee or target goals, no Killer Bunny name
+Rabbit.get	skip:other		reads the variant as a data component for predicates; Horizon has no entity component view
+Rabbit.applyImplicitComponent	missing		minor: a spawn egg's rabbit variant component is not applied (only bucketed mobs read item components)
+Rabbit.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	variant by biome, shared across a group
+Rabbit.getRandomRabbitVariant	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	white and white splotched in snowy biomes, gold in deserts, else brown, salt or black
+Rabbit.checkRabbitSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Rabbit arm: rabbits_spawnable_on below and bright enough
+Rabbit.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: minor: no rabbit arm, the lead attaches at the full eye height instead of 0.6 times it
+Rabbit.shouldPlayIdleAnimation	inline	crates/horizon-client/src/mobs/rabbit.rs::base_tick	idle timeout over, not leashed, not no-AI
+Rabbit.RabbitAvoidEntityGoal.canUse	missing		player: rabbits never run from players (8 blocks), wolves (10) or monsters (4); no avoid goal is registered for them
+Rabbit.RaidGardenGoal.canUse	missing		player: rabbits never walk to ripe carrot crops to eat them; no MoreCarrotTicks clock
+Rabbit.RaidGardenGoal.tick	missing		player: a rabbit never eats carrots, so ripe carrots are never knocked back or destroyed by rabbits
+Rabbit.RaidGardenGoal.isValidTarget	missing		player: part of the missing carrot raid (a ripe carrot on a crop-supporting block)
+Sheep.registerGoals	port	crates/horizon-client/src/mobs/farm.rs::register	Species::Sheep arm: float, panic, breed, tempt, follow parent, eat block, stroll, look
+Sheep.aiStep	inline	crates/horizon-client/src/mobs/ai.rs::species_ai_step	the eat animation counter (anim_ticks) counts down each tick
+Sheep.handleEntityEvent	missing		player: on a server a sheep never lowers its head to eat grass, because entity event 10 is not handled in remote.rs (the integrated server sets anim_ticks itself)
+Sheep.getHeadEatPositionScale	inline	crates/horizon-client/src/mobs/anim.rs::setup	Anim::Sheep arm: head drops by 9 times the scale (halved for a lamb)
+Sheep.getHeadEatAngleScale	inline	crates/horizon-client/src/mobs/anim.rs::setup	Anim::Sheep arm: head tilt of pi/5 with the nibbling wobble
+Sheep.mobInteract	port	crates/horizon-client/src/game/creatures.rs::Game::interact_mob	shears drop the shearing loot and set sheared; a dye recolours an unsheared sheep
+Sheep.setColor	skip:other		stores the 4-bit wool colour in extra.color
+Sheep.get	skip:other		reads the colour as a data component for predicates; Horizon has no entity component view
+Sheep.applyImplicitComponent	missing		minor: a spawn egg's sheep colour component is not applied (only bucketed mobs read item components)
+Sheep.isSheared	skip:other		reads extra.sheared
+Sheep.setSheared	skip:other		writes extra.sheared (shear, regrow and nbt set it directly)
+Sheep.getBreedOffspring	port	crates/horizon-client/src/game/creatures.rs::Game::breed	gap: player: a lamb always takes the first parent's wool colour; vanilla mixes the two (red and blue give purple)
+Sheep.ate	port	crates/horizon-client/src/mobs/ai.rs::ate	wool grows back and a lamb ages up by 60 seconds
+Sheep.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	wool colour from the biome's climate (farm::sheep_color)
+SheepColorSpawnRules.commonColors	inline	crates/horizon-client/src/mobs/farm.rs::sheep_color	the 82 weight tail: the common colour, pink one time in 500
+SheepColorSpawnRules.getSheepColorConfiguration	port	crates/horizon-client/src/mobs/farm.rs::sheep_color	the three climate tables; the climate itself is picked in Ctx::finalize from the warm and cold farm animal tags
+SheepColorSpawnRules.weighted	inline	crates/horizon-client/src/mobs/farm.rs::sheep_color	the weighted pick is the running subtraction over the list
+Sniffer.defineSynchedData	skip:other		synched state and seed drop tick; Horizon keeps them in extra.variant and extra.ints[3]
+Sniffer.onPathfindingStart	inline	crates/horizon-client/src/mobs/sniffer.rs::ai_step	water is passable only while it is on fire or in water; reset each tick (the onPathfindingDone part)
+Sniffer.canPlayDiggingSound	inline	crates/horizon-client/src/game/sniffers.rs::Game::tick_sniffer_effects	gap: minor: the digging sound is a one-shot at the start of the dig (SnifferSoundInstance is not kept), so it is not cut off when the sniffer stops or gets a target
+Sniffer.resetAnimations	inline	crates/horizon-client/src/mobs/sniffer.rs::animate	all five animation states stop when the state changes
+Sniffer.onScentingStart	inline	crates/horizon-client/src/mobs/animal_brain.rs::transition	scenting sound, pitch 1.3 for a baby
+Sniffer.onDiggingStart	inline	crates/horizon-client/src/mobs/animal_brain.rs::transition	the seed drop is set 120 ticks ahead (ints[3]); the client sound starts from the animation in tick_sniffer_effects
+Sniffer.dropSeed	inline	crates/horizon-client/src/mobs/sniffer.rs::ai_step	gift loot sniffer_digging at the head block and the drop seed sound when the tick comes
+Sniffer.storeExploredPosition	inline	crates/horizon-client/src/mobs/animal_brain.rs::B::do_stop	the on-pos is put in front of the explored list, kept to 20
+Sniffer.jumpFromGround	missing		minor: no sniffer arm in Mob::jump_from_ground, so its hop gets no extra forward nudge (moveRelative 0.1 forward) when it moves slowly
+Sniffer.mobInteract	inline	crates/horizon-client/src/mobs/ai.rs::eating_sound	the eating sound plays when the food was taken (feed_animal)
+Sniffer.playEatingSound	port	crates/horizon-client/src/mobs/ai.rs::eating_sound	Species::Sniffer arm: entity.sniffer.eat with pitch 0.8 to 1.2
+Sniffer.playSearchingSound	port	crates/horizon-client/src/game/sniffers.rs::Game::tick_sniffer_effects	searching sound every 20 ticks while searching, near any player

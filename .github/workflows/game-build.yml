@@ -37,9 +37,10 @@ permissions:
 jobs:
   exporters:
     # This runner holds the maintainer's own pinned Minecraft jars. Only our classes leave it. An untrusted build
-    # goes to the Mac mini runner that already runs pull requests' parity jobs (macOS + horizon-game:
-    # ludovics-mac-mini), never the release runner (MAC_RUNNER: ludovics-mac-mini-release) nor parity-main's.
-    runs-on: ${{ inputs.trusted && vars.MAC_RUNNER || fromJSON('["self-hosted", "macOS", "horizon-game"]') }}
+    # goes to the Mac mini's nightly runner (macOS + horizon-nightly: ludovics-mac-mini-nightly, beside the one that
+    # runs pull requests' parity jobs, so a nightly never waits behind their queue), never the release runner
+    # (MAC_RUNNER: ludovics-mac-mini-release) nor parity-main's.
+    runs-on: ${{ inputs.trusted && vars.MAC_RUNNER || fromJSON('["self-hosted", "macOS", "horizon-nightly"]') }}
     # Three full preparations (two isolated, one batched) besides the compile.
     timeout-minutes: 60
     steps:
@@ -103,7 +104,7 @@ jobs:
             mac: true
             dir: horizon-macos-arm64
             asset: horizon-macos-arm64.zip
-    runs-on: ${{ matrix.mac && (inputs.trusted && vars.MAC_RUNNER || fromJSON('["self-hosted", "macOS", "horizon-game"]')) || matrix.os }}
+    runs-on: ${{ matrix.mac && (inputs.trusted && vars.MAC_RUNNER || fromJSON('["self-hosted", "macOS", "horizon-nightly"]')) || matrix.os }}
     # Notarizing the zip can take a few minutes.
     timeout-minutes: ${{ matrix.mac && 60 || 40 }}
     env:

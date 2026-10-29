@@ -204,9 +204,15 @@ public final class VanillaChunkGenerationOracle {
         Path out = Path.of(args[1]);
         long seed = Long.parseLong(args[2]);
         String dimension = args[3];
-        var repo = ServerPacksSource.createVanillaTrustedRepository();
+        // HORIZON_DATAPACKS: a world's datapacks folder, every pack in it enabled after vanilla in name order.
+        String datapacks = System.getenv("HORIZON_DATAPACKS");
+        var repo = datapacks == null ? ServerPacksSource.createVanillaTrustedRepository()
+            : ServerPacksSource.createPackRepository(Path.of(datapacks), new net.minecraft.world.level.validation.DirectoryValidator(path -> true));
         repo.reload();
-        repo.setSelected(List.of("vanilla"));
+        var selected = new ArrayList<String>(List.of("vanilla"));
+        repo.getAvailableIds().stream().filter(id -> id.startsWith("file/")).sorted().forEach(selected::add);
+        repo.setSelected(selected);
+        if (!repo.getSelectedIds().containsAll(selected)) throw new IllegalStateException("packs not selected: " + selected + " vs " + repo.getSelectedIds());
         var resources = new MultiPackResourceManager(PackType.SERVER_DATA, repo.openAllSelected());
         var layers = RegistryLayer.createRegistryAccess();
         var staticTags = TagLoader.loadTagsForExistingRegistries(resources, layers.getLayer(RegistryLayer.STATIC));

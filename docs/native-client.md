@@ -15,7 +15,7 @@ missing; [Rust rewrite status](rust-parity.md) has the details.
 ## Run from a checkout
 
 Use current stable Rust (1.90+) and JDK 25 (Python 3.10+ only for the development
-harnesses). Horizon never
+harnesses). A checkout never
 downloads the game: resource preparation imports **your own copy** (the 26.3
 client from your official launcher install, and the 26.3 server jar you
 downloaded yourself; see [Build from source](../README.md#build-from-source)),
@@ -48,7 +48,7 @@ Development builds that link quickly: `cargo build --profile fast -p horizon-cli
 | `--world NAME` | World folder under `saves/` (default "New World"); reopened if it exists |
 | `--seed N` | Seed for a new world (numbers or text, like vanilla) |
 | `--creative` | Creative mode (instant breaking, pick block) |
-| `--render-distance N` | Chunks, 2..64 (default 12) |
+| `--render-distance N` | Chunks, 2..128 (default 12) |
 | `--resources PATH` | Prepared resource directory |
 
 | Control | Action |

@@ -1,0 +1,150 @@
+ContainerEventHandler.getChildAt	port	crates/horizon-client/src/pack_screen.rs::PackScreen::button_at	gap: minor: says whether a button is under the pointer; list rows are hit-tested in PackScreen::click
+ContainerEventHandler.mouseReleased	port	crates/horizon-client/src/pack_screen.rs::PackScreen::release	gap: minor: only clears list scrollbar holds; no focused child gets the release
+ContainerEventHandler.mouseDragged	port	crates/horizon-client/src/pack_screen.rs::PackScreen::drag	drags a held list scrollbar
+ContainerEventHandler.mouseScrolled	port	crates/horizon-client/src/pack_screen.rs::PackScreen::scroll	list under the pointer scrolls 18 px per notch
+ContainerEventHandler.keyPressed	port	crates/horizon-client/src/pack_screen.rs::PackScreen::shortcut	gap: minor: only Ctrl+A/C/V/X here; Backspace is PackScreen::erase
+ContainerEventHandler.keyReleased	skip:other		no widget in the pack screen acts on key release
+ContainerEventHandler.charTyped	port	crates/horizon-client/src/pack_screen.rs::PackScreen::type_text	typed text goes to the search box when it has focus
+ContainerEventHandler.preeditUpdated	missing		minor: no IME composition (preedit) anywhere in Horizon
+ContainerEventHandler.getBorderForArrowNavigation	missing		minor: arrow keys do not move focus; pack screen focus is set by clicks (PackScreen::set_focus)
+ContainerEventHandler.getCurrentFocusPath	missing		minor: no focus path; PackScreen::focus is read only inside the screen
+ContainerEventHandler.nextFocusPath	missing		minor: Tab and arrow keys do not move focus between search, lists and buttons
+ContainerEventHandler.handleTabNavigation	missing		minor: Tab does not move focus (same gap as nextFocusPath)
+ContainerEventHandler.handleArrowNavigation	missing		minor: arrow keys do not move focus (same gap)
+ContainerEventHandler.nextFocusPathVaguelyInDirection	missing		minor: no directional focus search (same gap)
+SpectatorGui.extractPage	port	crates/horizon-client/src/spectator_menu.rs::SpectatorGui::hotbar	the nine-slot page with its frame and selection
+SpectatorGui.extractSlot	inline	crates/horizon-client/src/spectator_menu.rs::SpectatorGui::hotbar	icon and key label drawn in the hotbar loop
+MenuTabBar.extractWidgetRenderState	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	header separators and tab row drawn inside draw_create
+MenuTabBar.Builder.addTab	skip:java		builder
+MenuTabBar.Builder.addTabs	skip:java		builder
+MenuTabBar.Builder.build	skip:java		builder
+MenuTabBar.MenuTabButton.extractWidgetRenderState	inline	crates/horizon-client/src/title/create_world.rs::Title::draw_create	tab loop: sprite by selected and hover state, underline, label
+MenuTabBar.MenuTabButton.renderMenuBackground	inline	crates/horizon-client/src/title/create_world.rs::Title::draw_create	menu background inside the selected tab
+MenuTabBar.MenuTabButton.renderLabel	inline	crates/horizon-client/src/title/create_world.rs::Title::draw_create	label centred, 3 px lower on unselected tabs
+MenuTabBar.MenuTabButton.renderFocusUnderline	inline	crates/horizon-client/src/title/create_world.rs::Title::draw_create	1 px underline under the selected tab label
+TabManager.setTabArea	skip:ui		tab area layout; create world computes the tab row on every draw (tabs())
+TabManager.setCurrentTab	port	crates/horizon-client/src/title.rs::Title::click	a click on a tab sets options.tab
+TabNavigationBar.arrangeElements	skip:ui		layout of the tab row
+TabNavigationBar.isMouseOver	port	crates/horizon-client/src/title/create_world.rs::tab_at	pointer over a tab
+TabNavigationBar.setFocused	missing		minor: the tab row cannot take keyboard focus
+TabNavigationBar.nextFocusPath	missing		minor: the Tab key never reaches the tab row
+TabNavigationBar.narrationPriority	skip:other		screen-reader narration; Horizon has no narrator
+TabNavigationBar.updateWidgetNarration	skip:other		screen-reader narration; Horizon has no narrator
+TabNavigationBar.narrateListElementPosition	skip:other		screen-reader narration; Horizon has no narrator
+TabNavigationBar.extractWidgetRenderState	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	tab row drawn in draw_create
+TabNavigationBar.selectTab	port	crates/horizon-client/src/title.rs::Title::click	gap: minor: only clicks pick a tab; no select by index (Ctrl+number, init)
+TabNavigationBar.setTabActiveState	missing		minor: tabs cannot be disabled; vanilla StatsScreen.java:91-93 disables two tabs, Horizon's stats tabs stay clickable
+TabNavigationBar.setTabTooltip	missing		minor: the tab row has no per-tab tooltip
+TabNavigationBar.keyPressed	missing		minor: Ctrl+1 to 9 and Ctrl+Tab do not switch create-world tabs
+TabNavigationBar.getNextTabIndex	missing		minor: index math for Ctrl+number and Ctrl+Tab, which Horizon lacks
+TabNavigationBar.currentTabIndex	skip:other		accessor; Horizon keeps the open tab in options.tab
+TabNavigationBar.currentTabButton	skip:other		accessor; Horizon draws the tabs from options.tab
+TabNavigationBar.Builder.addTab	skip:java		builder
+TabNavigationBar.Builder.build	skip:java		builder
+AdvancementToast.update	port	crates/horizon-client/src/game/advancements.rs::Toast::wants_show	5 s visible, scaled by the notification time option
+AdvancementToast.isChallengeAdvancement	inline	crates/horizon-client/src/game/advancements.rs::Game::draw_toasts	challenge check for the sound when a toast enters a slot
+AdvancementToast.extractRenderState	port	crates/horizon-client/src/game/advancements.rs::Game::draw_toast	gap: player: a long title is one line; vanilla wraps it and fades the frame label into it over 1.5 s
+FriendToast.update	skip:service		friend toasts: social, Horizon has no friends system
+FriendToast.extractRenderState	skip:service		friend toasts: social, Horizon has no friends system
+FriendToast.add	skip:service		friend toasts: social, Horizon has no friends system
+FriendToast.showFriendRequestSent	skip:service		friend toasts: social, Horizon has no friends system
+FriendToast.showFriendRequestReceived	skip:service		friend toasts: social, Horizon has no friends system
+FriendToast.showFriendRequestAccepted	skip:service		friend toasts: social, Horizon has no friends system
+FriendToast.showFriendAdded	skip:service		friend toasts: social, Horizon has no friends system
+NowPlayingToast.extractToast	missing		player: no Now Playing toast is drawn; with Music Toast on (default Never) the song name never shows
+NowPlayingToast.tickMusicNotes	missing		player: the music notes beside the Now Playing toast are never drawn
+NowPlayingToast.showToast	missing		player: nothing shows the toast when a song starts (same gap as extractToast)
+NowPlayingToast.update	missing		player: the toast is never shown, so it never times out (same gap)
+RecipeToast.update	port	crates/horizon-client/src/game/advancements.rs::Toast::wants_show	recipe toast visibility; the cycling index is Toast::displayed_recipe
+RecipeToast.extractRenderState	port	crates/horizon-client/src/game/advancements.rs::Game::draw_toast	recipe branch: station at 0.6 scale over the cycling result
+SystemToast.height	missing		minor: no multi-line height; a system toast always takes one 32 px slot
+SystemToast.extractRenderState	port	crates/horizon-client/src/toasts.rs::SystemToast::draw	gap: minor: one line per title and message, no wrapping
+SystemToast.extractTextLines	inline	crates/horizon-client/src/toasts.rs::SystemToast::draw	text lines drawn in draw
+SystemToast.recalculateWidth	inline	crates/horizon-client/src/toasts.rs::SystemToast::draw	width from the widest line, at least 160, plus 30
+SystemToast.onFileDropFailure	missing		minor: Horizon takes no dropped files, so this toast never shows
+SystemToast.onChunkLoadFailure	missing		minor: no chunk load-failure toast; failures only log
+SystemToast.onChunkSaveFailure	missing		minor: failed chunk saves only log (save.rs warn); no toast
+ToastManager.findFreeSlotsIndex	port	crates/horizon-client/src/game/advancements.rs::Game::draw_toasts	gap: minor: one 32 px slot per toast; no search for consecutive slots
+ToastManager.getToast	inline	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_toast	only the recipe toast lookup (find is_recipe); system toasts are kept by their owners
+ToastManager.showNowPlayingToast	port	crates/horizon-client/src/music.rs::MusicManager::show_now_playing_toast_if_needed	gap: player: the request goes to toast_requests and nothing draws it
+ToastManager.initializeMusicToast	missing		player: with Music Toast set to Pause or Pause and Toast (default Never) the Now Playing toast is never created
+ToastManager.setMusicToastDisplayState	missing		player: the Music Toast setting does nothing in Horizon (same gap)
+ToastManager.ToastInstance.resetToast	port	crates/horizon-client/src/toasts.rs::SystemToast::reset	gap: minor: text and display timer restart; the slide-in does not
+ToastManager.ToastInstance.calculateVisiblePortion	port	crates/horizon-client/src/toasts.rs::Slide::update	600 ms, squared ease in and out
+ToastManager.ToastInstance.extractRenderState	port	crates/horizon-client/src/game/advancements.rs::Game::draw_toast	slide x and slot y; system toasts slide in SystemToast::draw
+TutorialToast.update	missing		player: new worlds show no movement or look tutorial toasts (vanilla tutorialStep defaults to movement)
+TutorialToast.extractRenderState	missing		player: same gap; the tutorial toast is never drawn
+AtlasGlyphProvider.Instance.renderSprite	missing		minor: sprite-font glyphs (atlas sprite objects in text) are not parsed
+CodepointMap.get	skip:java		codepoint lookup table; Horizon uses HashMap and BTreeSet
+CodepointMap.put	skip:java		codepoint lookup table; Horizon uses HashMap and BTreeSet
+CodepointMap.computeIfAbsent	skip:java		codepoint lookup table; Horizon uses HashMap and BTreeSet
+CodepointMap.remove	skip:java		codepoint lookup table; Horizon uses HashMap and BTreeSet
+CodepointMap.forEach	skip:java		codepoint lookup table; Horizon uses HashMap and BTreeSet
+CodepointMap.keySet	skip:java		codepoint lookup table; Horizon uses HashMap and BTreeSet
+FontManager.createFontSet	port	crates/horizon-client/src/font.rs::Font::load_set	a font's providers into a set
+FontManager.reload	port	crates/horizon-client/src/hud.rs::HudAtlas::pack	fonts are rebuilt with the atlas (Font::load at hud.rs:582); no async reload
+FontManager.safeLoad	inline	crates/horizon-client/src/font.rs::Font::load_set	a TrueType provider that fails to load is dropped; a bitmap sheet that fails warns
+FontManager.resolveProviders	port	crates/horizon-client/src/font.rs::providers	reference expansion in order, depth 8; no dependency sort
+FontManager.finalizeProviderLoading	skip:java		prewarm of glyph lookups; the fallback is the missing box that Font::resolve gives
+FontManager.getFontOptions	port	crates/horizon-client/src/game/options.rs::Game::apply_ui_settings	force unicode and japanese flags read from settings
+FontManager.apply	port	crates/horizon-client/src/hud.rs::HudAtlas::pack	new font sets replace the old ones with the atlas
+FontManager.updateOptions	port	crates/horizon-client/src/game/options.rs::Game::apply_ui_settings	sets the Font uniform and japanese flags when they change (options.rs:299-301)
+FontManager.loadResourceStack	inline	crates/horizon-client/src/font.rs::providers	gap: minor: one fonts.json per font id from the resource root, not a stack of packs
+FontManager.getSpriteFont	missing		minor: atlas sprite fonts (sprite objects in text) are not parsed; they draw the missing box
+FontManager.close	skip:java		Rust drop frees the atlas, font sets and providers
+FontManager.BuilderResult.resolve	port	crates/horizon-client/src/font.rs::providers	reference builders expanded in place
+FontManager.BuilderResult.mergeFilters	inline	crates/horizon-client/src/font.rs::providers	the reference's filter merged onto each expanded provider
+FontManager.CachedFontProvider.getGlyphSource	port	crates/horizon-client/src/font.rs::Font::glyph_in	gap: minor: atlas sprite and player descriptions fall back to the missing glyph
+FontManager.CachedFontProvider.glyphs	skip:java		one-entry lookup cache
+FontManager.CachedFontProvider.effect	port	crates/horizon-client/src/font.rs::Font::white	the white glyph under underline and strikethrough
+FontManager.UnresolvedBuilderBundle.add	skip:java		collects builders; providers() reads them directly
+FontManager.UnresolvedBuilderBundle.listBuilders	skip:java		collects builders
+FontManager.UnresolvedBuilderBundle.resolve	port	crates/horizon-client/src/font.rs::providers	reference expansion for the bundle
+FontOption.Filter.apply	port	crates/horizon-client/src/font.rs::Filter::passes	option match per provider
+FontOption.Filter.merge	inline	crates/horizon-client/src/font.rs::providers	filter merge while expanding references
+FontSet.reload	port	crates/horizon-client/src/font.rs::Font::load_set	providers into the font set
+FontSet.resetTextures	port	crates/horizon-client/src/font.rs::Font::reset_cache	glyph cache and atlas cursor cleared
+FontSet.selectProviders	port	crates/horizon-client/src/font.rs::Font::glyphs_by_width	gap: minor: width buckets hold only Space and atlas bitmap glyphs, so TrueType and unihex never appear as obfuscated characters
+FontSet.hasFishyAdvance	missing		minor: no check for advances under 0 or over 32
+FontSet.computeGlyphInfo	port	crates/horizon-client/src/font.rs::Font::resolve	gap: minor: no skip of a glyph with a fishy advance in favour of a later provider
+FontSet.DelayedBake.get	skip:java		lazy bake into the atlas; Font::resolve bakes at once
+FontTexture.dumpContents	skip:debug		writes the atlas to a PNG for debugging
+GlyphRenderTypes.createForGrayscaleTexture	skip:ui		one textured quad path for all glyphs (hud.rs text_styled)
+GlyphRenderTypes.createForColorTexture	skip:ui		one textured quad path for all glyphs (hud.rs text_styled)
+GlyphRenderTypes.select	port	crates/horizon-client/src/game/names.rs::Game::name_tag_geometry	gap: minor: normal and see-through only; polygon-offset text has no draw path
+GlyphStitcher.reset	port	crates/horizon-client/src/font.rs::Font::reset_cache	atlas cursor rewound
+GlyphStitcher.stitch	port	crates/horizon-client/src/font.rs::Region::place	rectangle placed in the atlas region
+PlainTextRenderable.render	port	crates/horizon-client/src/hud.rs::HudBatch::text_styled	shadow pass first, then the front text
+PlayerGlyphProvider.Instance.renderSprite	missing		minor: player-head text objects are not parsed
+PlayerGlyphProvider.Instance.renderQuad	missing		minor: no player-head glyphs (same gap)
+TextFieldHelper.charTyped	inline	crates/horizon-client/src/game/sign_edit.rs::Game::sign_input	typed-text branch; EditBox::insert_text filters the text
+TextFieldHelper.moveBy	inline	crates/horizon-client/src/ui.rs::EditBox::key	arrow keys; Ctrl moves by word
+TextFieldHelper.moveByChars	inline	crates/horizon-client/src/ui.rs::EditBox::key	arrow keys, Home and End
+TextFieldHelper.moveByWords	inline	crates/horizon-client/src/ui.rs::EditBox::key	Ctrl+arrow word moves
+TextFieldHelper.removeFromCursor	inline	crates/horizon-client/src/ui.rs::EditBox::key	Backspace and Delete
+TextFieldHelper.removeWordsFromCursor	inline	crates/horizon-client/src/ui.rs::EditBox::key	Ctrl+Backspace and Ctrl+Delete
+TextFieldHelper.removeCharsFromCursor	port	crates/horizon-client/src/ui.rs::EditBox::delete_chars	deletes the selection or n characters
+TextFieldHelper.cut	port	crates/horizon-client-input/src/clipboard.rs::apply	Cut arm: copy the selection, then clear it
+TextFieldHelper.paste	port	crates/horizon-client-input/src/clipboard.rs::apply	Paste arm: insert the clipboard text
+TextFieldHelper.getSelected	port	crates/horizon-client/src/ui.rs::EditBox::selected_text	
+TextFieldHelper.deleteSelection	inline	crates/horizon-client/src/ui.rs::EditBox::delete_chars	selection branch
+TextFieldHelper.setCursorToEnd	port	crates/horizon-client/src/ui.rs::EditBox::move_cursor_to_end	
+TextFieldHelper.setCursorPos	port	crates/horizon-client/src/ui.rs::EditBox::set_cursor	no vanilla caller (callers 0)
+TextFieldHelper.setSelectionRange	skip:other		no vanilla caller; Horizon sets cursor and highlight separately (EditBox::set_cursor)
+BakedSheetGlyph.left	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	glyph edge with bold thickness and italic shear
+BakedSheetGlyph.top	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	glyph edge with bold thickness and italic shear
+BakedSheetGlyph.right	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	glyph edge with bold thickness and italic shear
+BakedSheetGlyph.bottom	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	glyph edge with bold thickness and italic shear
+BakedSheetGlyph.renderChar	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	shadow pass, bold double draw, italic shear
+BakedSheetGlyph.render	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	glyph quad with shear and bold
+BakedSheetGlyph.renderEffect	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	underline and strikethrough rectangles
+BakedSheetGlyph.buildEffect	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	rectangle quad of an effect
+BakedSheetGlyph.createGlyph	skip:java		factory for a glyph instance
+BakedSheetGlyph.createEffect	skip:java		factory for an effect instance
+BakedSheetGlyph.EffectInstance.right	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	underline end: pen x plus advance
+BakedSheetGlyph.EffectInstance.bottom	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	underline row, 1 px at pen y plus 8
+BakedSheetGlyph.GlyphInstance.activeRight	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	advance including the bold offset
+SpecialGlyphs.generate	port	crates/horizon-client/src/font.rs::Font::white	gap: minor: white texel only; the missing-box outline is drawn in HudBatch::text_styled, not generated
+BitmapProvider.Definition.validateDimensions	missing		minor: no check of the bitmap grid; a ragged grid loads
+BitmapProvider.Definition.validate	missing		minor: no check that ascent is at most height
+BitmapProvider.Definition.getActualGlyphWidth	port	crates/horizon-client/src/font.rs::used_width	rightmost column with any visible pixel

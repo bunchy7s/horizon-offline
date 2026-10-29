@@ -204,7 +204,7 @@ mod run {
                 && let Some(p) = &self.player
             {
                 out.push(ServerPlayer {
-                    id: self.player_uuid_string(),
+                    id: uuid_string(self.player_uuid()),
                     name: crate::game::chat::PLAYER_NAME.to_owned(),
                     x: p.position.x,
                     y: p.position.y,
@@ -272,7 +272,7 @@ mod run {
             for event in std::mem::take(&mut self.mods.events) {
                 let who = |w: &Who| {
                     let id = match w {
-                        Who::Local => self.player_uuid_string(),
+                        Who::Local => uuid_string(self.player_uuid()),
                         Who::Uuid(u) => uuid_string(*u),
                         Who::Conn(c) => {
                             let guests = self.lan.iter().flat_map(|h| &h.hub.guests);
@@ -490,7 +490,7 @@ mod run {
             let local = self.options.execution_role.is_client()
                 && self.remote.is_none()
                 && self.player.is_some();
-            if local && self.player_uuid_string() == id {
+            if local && uuid_string(self.player_uuid()) == id {
                 self.add_mod_chat_line(line);
                 return;
             }

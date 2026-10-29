@@ -27,6 +27,22 @@ impl Game<'_> {
             m.alt_key() || held([KeyCode::AltLeft, KeyCode::AltRight]),
         )
     }
+    /// Whether the held keys let a key's text through to the focused field
+    /// (`clipboard::types_text`): not with the edit modifier, unless it is
+    /// part of AltGr.
+    pub(super) fn types_text(&self) -> bool {
+        let held = |keys: [KeyCode; 2]| keys.iter().any(|k| self.physical_keys.contains(k));
+        let edit = if cfg!(target_os = "macos") {
+            held([KeyCode::SuperLeft, KeyCode::SuperRight])
+        } else {
+            held([KeyCode::ControlLeft, KeyCode::ControlRight])
+        };
+        clipboard::types_text(
+            edit,
+            held([KeyCode::AltLeft, KeyCode::AltRight]),
+            clipboard::ALTGR_IS_CTRL_ALT,
+        )
+    }
     /// A shortcut in an append-only field limited to `max_chars` characters
     /// (an `EditBox` with `setMaxLength`). True when the value changed.
     pub(super) fn append_shortcut(

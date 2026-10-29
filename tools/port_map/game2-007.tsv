@@ -1,0 +1,147 @@
+AbstractBoat.setInitialPos	port	crates/horizon-client/src/game/boats.rs::Boat::new	spawn sets the position and its previous copy; velocity and yaw start at zero
+AbstractBoat.defineSynchedData	skip:java		SynchedEntityData definitions; Horizon keeps paddle, hurt and input state on the Boat struct
+AbstractBoat.getPassengerAttachmentPoint	port	crates/horizon-client/src/game/boats.rs::Boat::seat	seat height and the two-seat offsets, +0.2 for an animal; chest boat's 0.15 is included
+AbstractBoat.onAboveBubbleColumn	missing		player: a boat over a bubble column is not lifted or pushed down and no splash plays on it; Horizon has no bubble column for boats
+AbstractBoat.animateHurt	port	crates/horizon-client/src/game/boats.rs::Game::hurt_boat	sets the hurt wobble and time; gap: minor: uses the server damage x10, no separate client x11 wobble value
+AbstractBoat.tickBubbleColumn	missing		player: a boat in a bubble column does not rise or sink and ejects no passengers from a down column; Horizon has no bubble time on boats
+AbstractBoat.handleEntityEvent	missing		player: the bubble column effect event (71 or 72) never reaches a boat, same gap as the bubble column lift
+AbstractBoat.handleBubbleColumnEffect	missing		player: a boat in an up or down bubble column keeps its speed; Horizon never changes its vertical velocity from a column
+AbstractBoat.setPaddleState	inline	crates/horizon-client/src/game/boats.rs::Game::tick_boat	paddle flags are set from the rider's input inside the controlled branch
+AbstractBoat.getLeashOffset	missing		player: a lead can be tied to a boat in vanilla (AbstractBoat is Leashable); Horizon leads only mobs
+AbstractBoat.getStatus	port	crates/horizon-client/src/game/boats.rs::Game::boat_status	in air, in water, under water or on land
+AbstractBoat.getWaterLevelAbove	port	crates/horizon-client/src/game/boats.rs::Game::water_level_above	
+AbstractBoat.getGroundFriction	inline	crates/horizon-client/src/game/boats.rs::Game::boat_status	land friction is the average of the full blocks under the hull
+AbstractBoat.checkInWater	inline	crates/horizon-client/src/game/boats.rs::Game::boat_status	sets the water level and reports the in-water status
+AbstractBoat.isUnderwater	inline	crates/horizon-client/src/game/boats.rs::Game::boat_status	the under-water and flowing-water check runs first in boat_status
+AbstractBoat.floatBoat	inline	crates/horizon-client/src/game/boats.rs::Game::tick_boat	buoyancy, friction and the first-water-touch snap are in tick_boat
+AbstractBoat.controlBoat	inline	crates/horizon-client/src/game/boats.rs::Game::tick_boat	steering, acceleration and paddle flags in the controlled branch of tick_boat
+AbstractBoat.getDismountLocationForPassenger	port	crates/horizon-client/src/game/boats.rs::Game::boat_dismount_target	gap: minor: no dismount pose check; the floor and water tests are there
+AbstractBoat.clampRotation	inline	crates/horizon-client/src/game/boats.rs::Game::tick_riding	the rider's yaw is clamped to 105 degrees off the boat; mobs get the head clamp in boat_passengers.rs seat_boat_mobs
+AbstractBoat.calculatePassengerBodyYRot	inline	crates/horizon-client/src/game/boat_passengers.rs::Game::seat_boat_mobs	animal turned 90 or 270 degrees when the boat is full
+AbstractBoat.onPassengerTurned	inline	crates/horizon-client/src/game/boats.rs::Game::tick_riding	the rider's turn is clamped each tick
+AbstractBoat.remove	inline	crates/horizon-client/src/game/boats.rs::Game::hurt_boat	destroyed boats eject mobs and drop the boat; gap: minor: no leash drop, since boats cannot be leashed here
+AbstractBoat.checkFallDamage	missing		minor: boats keep no fall distance; boats take no fall damage either way
+AbstractBoat.getPaddleState	port	crates/horizon-client/src/game/boats.rs::Boat::rowing_time	paddle flag, set only while a rider drives
+AbstractBoat.getControllingPassenger	inline	crates/horizon-client/src/game/boats.rs::Game::tick_riding	the riding player is the controller; mobs never steer
+AbstractBoat.setInput	inline	crates/horizon-client/src/game/boats.rs::Game::tick_riding	input flags are copied from the keys each tick
+AbstractBoat.isUnderWater	port	crates/horizon-client/src/game/boats.rs::Boat::under_water	
+AbstractBoat.modifyPassengerFluidInteractionBox	missing		minor: a rider's water check still uses the whole body; horizon-world boat_passenger_box exists but no game code calls it
+AbstractChestBoat.remove	inline	crates/horizon-client/src/game/boats.rs::Game::hurt_boat	a destroyed chest boat spills its 27 slots
+AbstractChestBoat.openCustomInventoryScreen	inline	crates/horizon-client/src/game/boats.rs::Game::interact_boat	sneaking opens the chest; gap: minor: no piglin anger
+AbstractChestBoat.createMenu	inline	crates/horizon-client/src/game/boats.rs::Game::interact_boat	the chest container is set up there; gap: minor: no spectator or loot table check
+AbstractMinecart.setInitialPos	port	crates/horizon-client/src/game/minecarts.rs::Minecart::new	spawn sets the position and its previous copy
+AbstractMinecart.createMinecart	port	crates/horizon-client/src/game/minecarts.rs::Game::place_minecart	placing on a rail: the rail offset for slopes and the item's kind; gap: minor: no rail snap, which only the experimental behaviour does
+AbstractMinecart.defineSynchedData	skip:java		synched display block and offset; Horizon keeps the kind and its display offset on the Minecart struct
+AbstractMinecart.getPassengerAttachmentPoint	missing		minor: a villager or wandering trader in a cart sits at a lowered seat in vanilla; Horizon seats only the player in a cart
+AbstractMinecart.getDismountLocationForPassenger	port	crates/horizon-client/src/game/minecarts.rs::Game::dismount_cart	beside the cart, else on top; gap: minor: the side comes from the yaw, and there is no pose or ceiling check
+AbstractMinecart.getBlockSpeedFactor	missing		minor: a cart that has left the rails takes no block speed factor (soul sand, honey); on rails the factor is 1.0 in vanilla and Horizon has no such slowdown
+AbstractMinecart.animateHurt	port	crates/horizon-client/src/game/minecarts.rs::Game::hurt_cart	sets the hurt wobble and time; gap: minor: the damage is the server x10, with no separate client wobble value
+AbstractMinecart.getCurrentBlockPosOrRailBelow	port	crates/horizon-client/src/game/minecarts.rs::Game::rail_block	the rail one block below counts; the experimental y offset is not used
+AbstractMinecart.comeOffTrack	port	crates/horizon-client/src/game/minecarts.rs::Game::come_off_track	clamps speed, halves it on the ground, moves and drags in the air
+AbstractMinecart.move	port	crates/horizon-client/src/game/minecarts.rs::Game::move_cart	collision movement only; gap: minor: no push or pickup during the move, which push_carts and the cart tick do instead
+AbstractMinecart.applyEffectsFromBlocks	inline	crates/horizon-client/src/game/minecarts.rs::Game::cart_lava_tick	lava is applied there; gap: minor: other block effects on a cart (cobweb, berry bush, bubble column) are not applied
+AbstractMinecart.getRedstoneDirection	skip:other		used only by the experimental NewMinecartBehavior; Horizon runs the old track behaviour
+AbstractMinecart.applyNaturalSlowdown	port	crates/horizon-client/src/game/minecarts.rs::Game::natural_slowdown	slowdown per ride state, the furnace push and water
+AbstractMinecart.readAdditionalSaveData	port	crates/horizon-client/src/game/minecarts.rs::Minecart::from_nbt	flipped and HasTicked read back; gap: minor: a custom display block and offset are not kept
+AbstractMinecart.addAdditionalSaveData	port	crates/horizon-client/src/game/minecarts.rs::Minecart::to_nbt	flipped and HasTicked written; gap: minor: a custom display block and offset are not saved
+AbstractMinecart.pushOtherMinecart	port	crates/horizon-client/src/game/minecarts.rs::Game::push_from_cart	cart against cart push with the furnace case; the old-movement facing check is used
+Minecart.interact	port	crates/horizon-client/src/game/minecarts.rs::Game::interact_cart	a plain rideable cart is boarded unless sneaking or already ridden
+Minecart.activateMinecart	port	crates/horizon-client/src/game/minecarts.rs::Game::activate_cart	a powered activator rail ejects the rider and hurts a rideable cart
+Minecart.tick	port	crates/horizon-client/src/game/minecarts.rs::Game::tick_cart	the per-tick cart update; gap: minor: client rotation smoothing for experimental movement is not modelled
+Minecart.positionRider	port	crates/horizon-client/src/game/minecarts.rs::Game::tick_cart_riding	the rider sits at the cart seat; the rider's turn with the cart is experimental-only
+MinecartBehavior.setDeltaMovement	skip:other		behaviour forwarder; Horizon's Minecart struct holds the velocity directly
+MinecartBehavior.setPos	skip:other		behaviour forwarder; Horizon's Minecart struct holds the position directly
+MinecartHopper.activateMinecart	port	crates/horizon-client/src/game/minecarts.rs::Game::activate_cart	an unpowered activator rail enables the hopper cart
+MinecartHopper.tryConsumeItems	inline	crates/horizon-client/src/game/minecarts.rs::Game::tick_carts	an enabled hopper cart sucks in once a tick
+MinecartHopper.suckInItems	port	crates/horizon-client/src/game/machines.rs::Game::hopper_cart_suck	container above first, then item entities at the hopper and the cart's box
+MinecartTNT.explode	port	crates/horizon-client/src/game/minecarts.rs::Game::explode_cart	power 4 plus speed, with the cart gone before the blast; gap: minor: the saved explosion power and speed factor are not applied
+MinecartTNT.handleEntityEvent	port	crates/horizon-client/src/game/minecarts.rs::Game::prime_cart	event 70 primes the fuse; Horizon primes locally with the same sound
+MinecartTNT.primeFuse	port	crates/horizon-client/src/game/minecarts.rs::Game::prime_cart	fuse 80 and the primed sound; gap: minor: no ignition source is recorded for who caused the blast
+MinecartTNT.getBlockExplosionResistance	missing		minor: a primed TNT cart on rails gives rails zero blast resistance in vanilla; Horizon's blast uses the rail's normal resistance
+MinecartTNT.shouldBlockExplode	missing		minor: a primed TNT cart on rails does not block the blast in vanilla; Horizon's blast ray is not changed by a cart on rails
+MinecartTNT.readAdditionalSaveData	port	crates/horizon-client/src/game/minecarts.rs::Minecart::from_nbt	fuse read back; gap: minor: explosion_power and explosion_speed_factor are not read
+MinecartTNT.addAdditionalSaveData	port	crates/horizon-client/src/game/minecarts.rs::Minecart::to_nbt	fuse written; gap: minor: explosion_power and explosion_speed_factor are not written
+MinecartTNT.damageSourceIgnitesTnt	port	crates/horizon-client/src/game/minecarts.rs::Game::hurt_cart	the fire flag from the caller primes the cart instead of breaking it
+OldMinecartBehavior.tick	port	crates/horizon-client/src/game/minecarts.rs::Game::tick_cart	gravity, track or off-track move, activator rail, yaw from motion and the flip
+OldMinecartBehavior.getMotionDirection	inline	crates/horizon-client/src/game/minecarts.rs::Game::dismount_cart	the dismount side is the cart's facing, taken from its yaw
+OldMinecartBehavior.getKnownMovement	skip:other		client-side clamp of the known movement for networking; Horizon simulates carts itself
+FoodData.add	port	crates/horizon-world/src/food.rs::FoodData::eat_properties	food points and saturation are added and clamped to 0..20 and to the food level
+FoodData.readAdditionalSaveData	port	crates/horizon-world/src/food_storage.rs::FoodData::read_nbt	food level, tick timer, saturation and exhaustion read back
+FoodData.addAdditionalSaveData	port	crates/horizon-world/src/food_storage.rs::FoodData::write_nbt	food level, tick timer, saturation and exhaustion written
+FoodProperties.Builder.build	skip:java		builder for the food component; the saturation rule (nutrition times modifier times 2) is in food.rs FoodData::eat
+AbstractContainerMenu.addInventoryHotbarSlots	skip:ui		slot layout and positions only; Horizon indexes the player's slots in Menu::new and draws them in draw_inventory_slots
+AbstractContainerMenu.addInventoryExtendedSlots	skip:ui		slot layout and positions only; Horizon indexes the player's slots in Menu::new and draws them in draw_inventory_slots
+AbstractContainerMenu.addStandardInventorySlots	skip:ui		slot layout and positions only; Horizon indexes the player's slots in Menu::new and draws them in draw_inventory_slots
+AbstractContainerMenu.stillValid	port	crates/horizon-client/src/lan/menu.rs::Slots::still_valid	the container's block is still there and within 4 blocks of the player
+AbstractContainerMenu.getType	port	crates/horizon-client/src/menu.rs::Menu::kind	the menu's kind as its type
+AbstractContainerMenu.checkContainerSize	skip:other		construction sanity check; Horizon's container sizes come from fixed tables
+AbstractContainerMenu.checkContainerDataCount	skip:other		construction sanity check; Horizon's data counts come from fixed tables
+AbstractContainerMenu.isValidSlotIndex	inline	crates/horizon-client/src/menu.rs::Menu::click	an index inside the menu or -999 for a click outside the window
+AbstractContainerMenu.addSlot	inline	crates/horizon-client/src/menu.rs::Menu::new	slots are built per kind when the menu is made
+AbstractContainerMenu.addDataSlot	skip:java		registers a DataSlot object; progress values are set directly by Menu::set_data
+AbstractContainerMenu.addDataSlots	skip:java		registers DataSlot objects for a ContainerData; progress values are set directly by Menu::set_data
+AbstractContainerMenu.addSlotListener	skip:java		listener list for local screens; a viewer reads the menu state directly
+AbstractContainerMenu.setSynchronizer	inline	crates/horizon-client/src/lan/containers.rs::Hub::open_container	the synchroniser is the guest's connection; opening sends the full content at once
+AbstractContainerMenu.sendAllDataToRemote	port	crates/horizon-client/src/lan/containers.rs::Hub::send_menu_content	all slots, the carried stack and the menu state in one packet
+AbstractContainerMenu.getItems	inline	crates/horizon-client/src/lan/containers.rs::Hub::send_menu_content	the item list for the content packet is built there
+AbstractContainerMenu.broadcastFullState	port	crates/horizon-client/src/lan/containers.rs::Hub::send_menu_content	a full resend of the contents; gap: minor: no separate local listener pass
+AbstractContainerMenu.updateDataSlotListeners	skip:java		local listener dispatch for data changes; the wire side is ContainerSetData in sync_container_data
+AbstractContainerMenu.triggerSlotListeners	skip:java		local listener dispatch for slot changes; the wire side is the slot diff in sync_containers
+AbstractContainerMenu.synchronizeSlotToRemote	port	crates/horizon-client/src/lan/containers.rs::Hub::sync_containers	sends each changed slot with a new state id
+AbstractContainerMenu.synchronizeDataSlotToRemote	port	crates/horizon-client/src/lan/containers.rs::Hub::sync_container_data	sends each changed furnace, brewing or crafter value
+AbstractContainerMenu.synchronizeCarriedToRemote	inline	crates/horizon-client/src/lan/containers.rs::Hub::answer_click	the cursor item is sent after a click when it differs; gap: minor: no sync on other carried changes
+AbstractContainerMenu.setRemoteSlotUnsafe	port	crates/horizon-client/src/game/remote.rs::Game::set_menu_slot	the server's slot update is applied; gap: minor: no hashed copy of the remote slot is kept
+AbstractContainerMenu.getClickAction	inline	crates/horizon-client/src/menu.rs::Menu::click	button 0 is the primary action, 1 the secondary
+AbstractContainerMenu.tryItemClickBehaviourOverride	port	crates/horizon-client/src/menu/bundle.rs::Menu::bundle_click	a bundle takes or puts items on a click on another stack; the NeoForge event is not modelled
+AbstractContainerMenu.initializeContents	port	crates/horizon-client/src/game/remote.rs::Game::set_menu_slot	the server's full content is applied to the open menu
+AbstractContainerMenu.isValidQuickcraftType	inline	crates/horizon-client/src/menu.rs::Menu::click	drag types 0 and 1 always, type 2 only in creative
+AbstractContainerMenu.canItemQuickReplace	port	crates/horizon-client/src/menu.rs::Menu::quick_replace	a slot takes the stack when empty or the same item with room
+AbstractContainerMenu.transferState	skip:other		copies the remote-slot cache back to the player's inventory on close; Horizon's guest inventory is the one copy
+AbstractContainerMenu.findSlot	skip:other		looks up a menu index for the held slot; Horizon's menus use fixed player slot indexes
+AbstractContainerMenu.incrementStateId	inline	crates/horizon-client/src/lan/containers.rs::Hub::send_menu_content	the state id goes up with each content packet; sync_containers does the same per slot change
+AbstractFurnaceMenu.fillCraftSlotsStackedContents	port	crates/horizon-client/src/menu/place.rs::Menu::stacked_contents	the recipe book's stacked contents are counted from the menu; gap: minor: the furnace's own slots are not counted
+AbstractFurnaceMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for furnace slots, with the smeltable, fuel and inventory rules
+AbstractFurnaceMenu.getBurnProgress	skip:ui		flame fraction for the screen; game.rs draw_inventory draws it from the furnace timers
+AbstractFurnaceMenu.getLitProgress	skip:ui		arrow fraction for the screen; game.rs draw_inventory draws it from the furnace timers
+AbstractFurnaceMenu.handlePlacement	port	crates/horizon-client/src/menu/place.rs::Menu::place_recipe	recipe book placement into the furnace input and fuel
+AnvilMenu.createInputSlotDefinitions	skip:ui		slot positions and the accept-all rule; positions come from station_slot_position and the accept rules from slot_rules
+AnvilMenu.validateName	port	crates/horizon-client/src/menu.rs::Menu::rename	name filtered of formatting codes and capped at 50 UTF-16 units
+ArmorSlot.setByPlayer	port	crates/horizon-client/src/menu.rs::Menu::set_by_player_from	an equipment change runs onEquipItem only when the item changes
+ArmorSlot.mayPickup	port	crates/horizon-client/src/menu.rs::Menu::may_pickup	a cursed armour piece cannot be taken out in survival; creative can
+BeaconMenu.decodeEffect	port	crates/horizon-client/src/game/lan_stations.rs::Game::lan_station_beacon	effect id from the registry, 0 for none; an unknown id fails the packet
+BrewingStandMenu.<init>	inline	crates/horizon-client/src/menu.rs::Menu::new	the brewing stand's slots and data are built per kind when the menu is made
+BrewingStandMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for the brewing stand's potion, ingredient and fuel slots
+CartographyTableMenu.setupResultSlot	port	crates/horizon-client/src/menu.rs::Menu::carto_changed	the map copy, scale or lock result from a paper, glass pane or map
+CartographyTableMenu.canTakeItemForPickAll	port	crates/horizon-client/src/menu.rs::Menu::can_take_for_pick_all	the result slot is never picked up in bulk
+CartographyTableMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for the cartography slots
+CartographyTableMenu.removed	inline	crates/horizon-client/src/game/stations.rs::Game::close_station	the inputs go back when the table closes
+CrafterMenu.addSlots	inline	crates/horizon-client/src/menu.rs::Menu::new	the 3x3 grid, the result and the data are set up when the crafter menu is made
+CrafterMenu.isSlotDisabled	inline	crates/horizon-client/src/game/machines/crafter.rs::Game::crafter_slot_clicked	a disabled slot refuses a click; the disabled flags are read there
+CrafterMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for the crafter's grid slots
+CraftingMenu.slotsChanged	port	crates/horizon-client/src/menu.rs::Menu::inventory_slots_changed	the crafting result is recomputed when the grid changes
+CraftingMenu.finishPlacingRecipe	inline	crates/horizon-client/src/menu/place.rs::Menu::place_recipe	the result is recomputed once the placed recipe is in the grid
+CraftingMenu.removed	port	crates/horizon-client/src/game/lan_crafting.rs::Game::lan_crafting_closed	the grid goes back when the table closes; the host side of a guest's table
+CraftingMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for the crafting grid and result
+CraftingMenu.canTakeItemForPickAll	port	crates/horizon-client/src/menu.rs::Menu::can_take_for_pick_all	the result slot is never picked up in bulk
+DispenserMenu.add3x3GridSlots	inline	crates/horizon-client/src/menu.rs::Menu::new	the 3x3 dispenser grid is set up when the menu is made
+DispenserMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for the dispenser grid
+EnchantmentMenu.<init>	inline	crates/horizon-client/src/game/stations.rs::Game::open_station	slots and the offers are set up when the table opens
+EnchantmentMenu.getGoldCount	inline	crates/horizon-client/src/menu.rs::Menu::enchant_click	the lapis count is checked against the enchant cost there
+EnchantmentMenu.removed	inline	crates/horizon-client/src/game/stations.rs::Game::close_station	the inputs go back when the table closes
+EnchantmentMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for the enchanting slots, with lapis and the item slot
+FurnaceResultSlot.remove	port	crates/horizon-client/src/game.rs::Game::award_furnace_recipes	the furnace output's experience is awarded from the recorded recipe uses; gap: minor: no per-slot taken count
+GrindstoneMenu.mergeItems	port	crates/horizon-client/src/stations.rs::grindstone_result	two repairable items merge into one with the summed durability
+GrindstoneMenu.mergeEnchantsFrom	inline	crates/horizon-client/src/stations.rs::grindstone_result	the second item's enchantments merge in, curses only when the target lacks them
+GrindstoneMenu.removed	inline	crates/horizon-client/src/game/stations.rs::Game::close_station	the repair inputs go back when the grindstone closes
+GrindstoneMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for the grindstone inputs and result
+HopperMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for the hopper's five slots
+HorseInventoryMenu.<init>	port	crates/horizon-client/src/game/lan_mount_menu.rs::Game::mount_engine_menu	saddle, armour and the chest columns are set for the mount
+InventoryMenu.isHotbarSlot	inline	crates/horizon-client/src/menu.rs::Menu::quick_move	the hotbar range check is inline in the shift-click arm
+InventoryMenu.slotsChanged	port	crates/horizon-client/src/menu.rs::Menu::inventory_slots_changed	the crafting result is recomputed when the grid changes
+InventoryMenu.removed	port	crates/horizon-client/src/game/lan_crafting.rs::Game::lan_crafting_closed	the window-0 craft grid goes back when the inventory closes; the host side of a guest's inventory
+InventoryMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for the inventory, armour, grid and offhand
+InventoryMenu.canTakeItemForPickAll	port	crates/horizon-client/src/menu.rs::Menu::can_take_for_pick_all	the result slot is never picked up in bulk
+ItemCombinerMenu.createInputSlots	inline	crates/horizon-client/src/menu.rs::Menu::new	the anvil's input slots are set up when the menu is made; mayPlace is Menu::may_place
+ItemCombinerMenu.createResultSlot	inline	crates/horizon-client/src/menu.rs::Menu::new	the result slot is set up when the menu is made and takes no placed items
+ItemCombinerMenu.removed	inline	crates/horizon-client/src/game/stations.rs::Game::close_station	the input items go back when the station closes
+ItemCombinerMenu.stillValid	port	crates/horizon-client/src/lan/menu.rs::Slots::still_valid	the station's block is still there and within 4 blocks of the player

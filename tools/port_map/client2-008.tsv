@@ -1,0 +1,149 @@
+EquipmentClientInfo.Layer.leatherDyeable	skip:data		equipment asset factory; Horizon reads the equipment JSON in armor_stands.rs
+EquipmentClientInfo.Layer.onlyIfDyed	skip:data		equipment asset factory; Horizon reads the equipment JSON in armor_stands.rs
+EquipmentClientInfo.Layer.getTextureLocation	port	crates/horizon-client/src/game/armor_stands.rs::ArmorStandAssets::load	builds entity/equipment/<kind>/<texture>; gap: minor: only humanoid, humanoid_leggings and wings are read here
+EquipmentClientInfo.TrimOverride.validate	skip:java		codec validator; TrimOverride::list keeps an override with neither texture nor palette (minor)
+EquipmentClientInfo.TrimPredicate.validate	skip:java		codec validator; TrimOverride::list keeps a predicate with neither material nor pattern (minor)
+EquipmentClientInfo.TrimPredicate.matches	port	crates/horizon-client/src/trims.rs::TrimOverride::matches	material and pattern id comparison
+ModelBakery.bakeModels	port	crates/horizon-client/src/models/catalog.rs::StateModels::from_facts_with_models	bakes block states; gap: minor: items and standalone models bake in separate fns (item_bake.rs::bake_item_model)
+ModelBakery.ModelBakerImpl.getModel	port	crates/horizon-assets/src/resolve.rs::ModelLibrary::resolve	an unknown id falls back to the missing model
+ModelDiscovery.createAndQueueWrapper	inline	crates/horizon-client/src/model_library.rs::ParsedModels::block_models	parent queue; no wrapper object is kept
+ModelDiscovery.addSpecialModel	inline	crates/horizon-assets/src/resolve.rs::ModelLibrary::with_shared_item_generator	gap: minor: only builtin/generated is registered; a non-root special model is not rejected
+ModelDiscovery.resolve	port	crates/horizon-assets/src/resolve.rs::ModelLibrary::resolve	resolved per model id, not as a batch map
+ModelDiscovery.discoverDependencies	inline	crates/horizon-client/src/model_library.rs::ParsedModels::block_models	pushes each model's parent until the set is complete
+ModelDiscovery.propagateValidity	port	crates/horizon-assets/src/resolve.rs::ModelLibrary::resolve	a chain that reaches a cycle is an error when resolved
+ModelDiscovery.ModelWrapper.updateSlot	skip:java		per-model result cache
+ModelDiscovery.ModelWrapper.getSimpleProperty	skip:java		per-model result cache
+ModelDiscovery.ModelWrapper.resolveParticleMaterial	port	crates/horizon-client/src/models/catalog.rs::StateModels::from_facts_with_models	block particle sprite; the item side is item_bake.rs::bake_item_model
+ModelDiscovery.ModelWrapper.bakeDefaultState	skip:java		cache of the identity-rotation geometry
+ModelDiscovery.ModelWrapper.bakeTopGeometry	port	crates/horizon-assets/src/bake.rs::bake_block_model	bakes with the blockstate rotation; per-state cache skipped
+ModelGroupCollector.build	skip:java		groups states for shared baked geometry; Horizon has no model-group ids
+ModelGroupCollector.GroupKey.create	skip:java		group key of build
+ModelGroupCollector.GroupKey.getColoringValues	skip:java		group key of build
+ModelManager.reload	port	crates/horizon-client/src/assets.rs::RenderAssets::load	one synchronous load: models, block states, item infos, then bake and store
+ModelManager.loadBlockModels	port	crates/horizon-client/src/model_library.rs::ParsedModels::load	every models/**.json by id, parsed in parallel
+ModelManager.discoverModelDependencies	port	crates/horizon-client/src/model_library.rs::ParsedModels::block_models	referenced models and their parents
+ModelManager.loadModels	port	crates/horizon-client/src/models/catalog.rs::StateModels::from_facts_with_models	bakes block states and their models
+ModelManager.createBlockStateToModelDispatch	inline	crates/horizon-client/src/models/catalog.rs::StateModels::from_facts_with_models	missing model for a state without a baked model
+ModelManager.buildModelGroups	skip:java		wrapper of ModelGroupCollector.build; render sharing only
+ModelManager.apply	inline	crates/horizon-client/src/assets.rs::RenderAssets::load	the baked result is stored in the returned struct
+ModelManager.requiresRender	skip:java		render-skip optimisation for equal model groups; no visible effect
+ResolvedModel.findTopTextureSlots	port	crates/horizon-assets/src/resolve.rs::ModelLibrary::resolve	texture slots merged along the parent chain
+ResolvedModel.findTopAmbientOcclusion	port	crates/horizon-assets/src/resolve.rs::ModelLibrary::resolve	ambient occlusion from the first model that sets it, default true
+ResolvedModel.findTopGuiLight	port	crates/horizon-assets/src/resolve.rs::ModelLibrary::resolve	gui_light from the first model that sets it, default side
+ResolvedModel.findTopGeometry	port	crates/horizon-assets/src/resolve.rs::ModelLibrary::resolve	first element list up the parent chain
+ResolvedModel.resolveParticleMaterial	port	crates/horizon-client/src/models/catalog.rs::StateModels::from_facts_with_models	block particle slot; the item side is item_bake.rs::bake_item_model
+ResolvedModel.findTopTransform	port	crates/horizon-assets/src/resolve.rs::ModelLibrary::resolve	display transform per context, inherited up the chain
+ResolvedModel.findTopTransforms	port	crates/horizon-assets/src/resolve.rs::ModelLibrary::resolve	display transforms for every context
+SimpleModelWrapper.bake	port	crates/horizon-assets/src/bake.rs::bake_block_model	gap: minor: no rejection of block models that use non-block sprites
+SimpleModelWrapper.findNonBlockSprites	missing		minor: vanilla replaces a block model whose quads use sprites outside the block atlas; Horizon keeps every sprite
+UnbakedModel.GuiLight.getByName	port	crates/horizon-assets/src/model.rs::CuboidModel::decode	front and side only; other values are an error
+CuboidFace.Deserializer.deserialize	port	crates/horizon-assets/src/model.rs::Face::decode	texture, cullface, tintindex and rotation
+CuboidFace.Deserializer.getUVs	port	crates/horizon-assets/src/model.rs::Face::decode	uv as four numbers; absent uses default_uv in bake.rs
+CuboidFace.UVs.getVertexU	inline	crates/horizon-assets/src/bake.rs::bake_face	the U corner is picked in bake_face
+CuboidFace.UVs.getVertexV	inline	crates/horizon-assets/src/bake.rs::bake_face	the V corner is picked in bake_face
+CuboidModel.Deserializer.deserialize	port	crates/horizon-assets/src/model.rs::CuboidModel::decode	whole model JSON
+CuboidModel.Deserializer.getTextureMap	port	crates/horizon-assets/src/model.rs::CuboidModel::decode	each textures entry through texture()
+CuboidModel.Deserializer.getAmbientOcclusion	port	crates/horizon-assets/src/model.rs::CuboidModel::decode	ambientocclusion flag
+CuboidModel.Deserializer.getElements	port	crates/horizon-assets/src/model.rs::CuboidModel::decode	elements list with null entries
+CuboidModelElement.Deserializer.deserialize	port	crates/horizon-assets/src/model.rs::Element::decode	whole element JSON
+CuboidModelElement.Deserializer.getShadeDirectionOverride	port	crates/horizon-assets/src/model.rs::Element::decode	shade_direction_override
+CuboidModelElement.Deserializer.getRotation	port	crates/horizon-assets/src/model.rs::ElementRotation::decode	rotation object
+CuboidModelElement.Deserializer.getAxis	port	crates/horizon-assets/src/model.rs::ElementRotation::decode	axis x, y or z
+CuboidModelElement.Deserializer.getFaces	port	crates/horizon-assets/src/model.rs::Element::decode	faces object
+CuboidModelElement.Deserializer.filterNullFromFaces	inline	crates/horizon-assets/src/model.rs::Element::decode	null faces are kept as None through nullable()
+CuboidModelElement.Deserializer.getFacing	port	crates/horizon-assets/src/model.rs::Element::decode	face names through Direction::by_name
+CuboidModelElement.Deserializer.getPosition	port	crates/horizon-assets/src/model.rs::Element::decode	from and to, bounded to -16..32
+CuboidModelElement.Deserializer.getVector3f	port	crates/horizon-assets/src/json.rs::vector	three-number array
+CuboidRotation.computeTransform	port	crates/horizon-assets/src/bake.rs::ElementMatrix::from_rotation	rotation matrix, then rescale when set
+CuboidRotation.computeRescale	inline	crates/horizon-assets/src/bake.rs::ElementMatrix::from_rotation	per-axis rescale inside from_rotation
+CuboidRotation.scaleFactorForAxis	inline	crates/horizon-assets/src/bake.rs::ElementMatrix::from_rotation	per-axis factor inside from_rotation
+CuboidRotation.EulerXYZRotation.transformation	port	crates/horizon-assets/src/bake.rs::ElementMatrix::from_rotation	Euler XYZ branch
+CuboidRotation.SingleAxisRotation.transformation	port	crates/horizon-assets/src/bake.rs::ElementMatrix::from_rotation	single-axis branch
+FaceBakery.defaultFaceUV	port	crates/horizon-assets/src/bake.rs::default_uv	default face UVs by direction
+FaceBakery.computeMaterialTransparency	port	crates/horizon-client/src/sprites.rs::Sprites::region_opaque	gap: minor: only the opaque-region check; force_translucent is not applied here
+FaceBakery.bakeVertex	inline	crates/horizon-assets/src/bake.rs::bake_face	vertex position and UV inside bake_face
+FaceBakery.rotateVertexBy	inline	crates/horizon-assets/src/bake.rs::bake_face	element rotation about its origin
+FaceBakery.calculateFacing	port	crates/horizon-assets/src/bake.rs::facing	quad normal, then closest direction
+FaceBakery.findClosestDirection	port	crates/horizon-assets/src/bake.rs::facing	closest axis direction with a non-negative dot
+FaceBakery.recalculateWinding	inline	crates/horizon-assets/src/bake.rs::bake_face	corner reorder for unrotated elements
+FaceBakery.findVertex	inline	crates/horizon-assets/src/bake.rs::bake_face	search inside the winding reorder
+FaceBakery.swap	inline	crates/horizon-assets/src/bake.rs::bake_face	swap inside the winding reorder
+ItemModelGenerator.bake	port	crates/horizon-assets/src/item_bake.rs::bake_item_model	layer loop of generated item models
+ItemModelGenerator.bakeSideFaces	port	crates/horizon-assets/src/item_bake.rs::extrude_layer	side faces of one layer
+ItemModelGenerator.getSideFaces	inline	crates/horizon-assets/src/item_bake.rs::extrude_layer	edge collection inside extrude_layer
+ItemModelGenerator.checkTransition	inline	crates/horizon-assets/src/item_bake.rs::extrude_layer	transparent neighbour check inside extrude_layer
+ItemModelGenerator.isTransparent	port	crates/horizon-assets/src/item_bake.rs::SpriteMask::transparent	alpha mask lookup
+ItemModelGenerator.ItemLayerKey.compute	skip:java		layer bake cache key; Horizon bakes each item model once
+ItemTransform.Deserializer.deserialize	port	crates/horizon-assets/src/model.rs::ItemTransform::decode	rotation, translation and scale
+ItemTransform.Deserializer.getVector3f	port	crates/horizon-assets/src/json.rs::vector	three-number array
+ItemTransforms.Deserializer.deserialize	port	crates/horizon-assets/src/model.rs::ItemTransforms::decode	display contexts
+ItemTransforms.Deserializer.getTransform	port	crates/horizon-assets/src/item_bake.rs::BakedItemModel::transform	transform for one display context
+BakedQuad.position	skip:java		record accessor; ModelQuad.positions field
+BakedQuad.packedUV	skip:java		record accessor; ModelQuad.uv field
+BakedQuad.MaterialInfo.of	port	crates/horizon-client/src/item_render.rs::FileSprites::translucent	gap: minor: picks solid or translucent only; no per-material render type or glint sheet
+BakedQuad.MaterialInfo.flags	skip:java		translucent and animated bit flags used to skip work; Horizon ticks animated textures by its setting
+ItemQuads.split	port	crates/horizon-client/src/item_render.rs::submit_quads	quads with translucent sprites go to the translucent pass
+QuadCollection.computeMaterialFlags	skip:java		flag bits of the quad list; see BakedQuad.MaterialInfo.flags
+QuadCollection.getQuads	port	crates/horizon-client/src/mesher.rs::Mesher::mesh	quads filtered by cull direction
+QuadCollection.materialFlags	skip:java		cached flag bits
+QuadCollection.Builder.addAll	skip:java		collection builder
+QuadCollection.Builder.createFromSublists	skip:java		sublist layout of a quad collection
+AtlasManager.getAtlasOrThrow	skip:java		atlas map lookup; Horizon keeps one sprite table
+AtlasManager.forEach	skip:java		map iteration
+AtlasManager.close	skip:java		GPU release; freed with its owner
+AtlasManager.get	port	crates/horizon-client/src/sprites.rs::Sprites::insert	sprite layer added on first use; missing texture when it fails to load
+AtlasManager.prepareSharedState	skip:java		future-based stitch plumbing
+AtlasManager.reload	skip:java		async reload; sprites load synchronously in RenderAssets::load
+AtlasManager.updateSpriteMaps	port	crates/horizon-client/src/sprites.rs::Sprites::finish	lays out every layer at one size; gap: minor: no duplicate-sprite warning
+AtlasManager.AtlasEntry.scheduleLoad	port	crates/horizon-client/src/sprites.rs::Sprites::insert	gap: minor: sprites load on demand, not per atlas source
+AtlasManager.PendingStitch.joinAndUpload	skip:java		future join
+AtlasManager.PendingStitchResults.joinAndUpload	skip:java		future join
+MaterialBaker.get	port	crates/horizon-assets/src/item_bake.rs::bake_item_model	sprite that is not known falls back to missingno
+MaterialBaker.bake	skip:java		Material.Baked wrapper
+MaterialBaker.bakeForAtlas	skip:java		Material.Baked wrapper for an atlas
+MaterialBaker.resolveSlot	port	crates/horizon-assets/src/resolve.rs::ResolvedCuboidModel::material	named texture slot lookup
+MaterialBaker.logMissingTextures	skip:debug		log of missing texture slots only
+TextureSlots.getMaterial	port	crates/horizon-assets/src/resolve.rs::ResolvedCuboidModel::material	named texture slot lookup
+TextureSlots.parseTextureMap	port	crates/horizon-assets/src/model.rs::CuboidModel::decode	textures object
+TextureSlots.parseEntry	port	crates/horizon-assets/src/model.rs::texture	# reference or sprite material
+TextureSlots.Data.Builder.addReference	skip:java		builder
+TextureSlots.Data.Builder.addTexture	skip:java		builder
+TextureSlots.Data.Builder.build	skip:java		builder
+TextureSlots.Resolver.resolve	port	crates/horizon-assets/src/resolve.rs::ModelLibrary::resolve	alias chain resolution; the batch hint (horizon-protocol resolver.rs) is a DNS resolver and is not this
+resources/palette/Palette.listAndLoad	port	crates/horizon-client/src/trims.rs::TrimTexture::generate	gap: minor: palettes load on demand, none listed up front
+resources/palette/Palette.tryLoad	port	crates/horizon-client/src/trims.rs::TrimTexture::generate	gap: minor: a broken palette skips the recolour instead of an empty palette
+resources/palette/Palette.load	port	crates/horizon-client/src/trims.rs::TrimTexture::generate	palette PNG read as ARGB
+PaletteMapping.apply	port	crates/horizon-assets/src/palette.rs::apply_palette	colour swap; alpha scaled by the target's alpha
+PalettedTextureManager.loadBaseTexture	port	crates/horizon-client/src/trims.rs::TrimTexture::generate	base texture and its base_palette from the mcmeta
+PalettedTextureManager.allocateSlot	port	crates/horizon-client/src/sprites.rs::Sprites::insert	gap: minor: one array layer per texture, no dynamic atlas tree
+PalettedTextureManager.close	skip:java		GPU release
+PalettedTextureManager.reload	port	crates/horizon-client/src/game/armor_stands.rs::ArmorStandAssets::reload_trims	trim data reloaded; models kept
+PalettedTextureManager.AtlasTexture.dumpContents	skip:debug		debug dump
+PalettedTextureManager.Slot.getU	skip:java		UV accessor of a dynamic atlas slot; Horizon uses sprite rects
+PalettedTextureManager.Slot.getV	skip:java		UV accessor of a dynamic atlas slot; Horizon uses sprite rects
+DownloadedPackSource.configureSource	inline	crates/horizon-client/src/game/server_packs.rs::Game::start_pack_reload	pack list staged for the reload; empty when none
+DownloadedPackSource.onRecovery	port	crates/horizon-client/src/server_packs.rs::ServerPacks::reloaded	reloads the packs that were active after a failure
+DownloadedPackSource.onRecoveryFailure	port	crates/horizon-client/src/server_packs.rs::ServerPacks::reloaded	second failure leaves the server's packs inactive
+DownloadedPackSource.waitForPackFeedback	skip:java		future over the feedback callback; replies go through ServerPacks::take_replies
+ServerPackManager.markExistingPacksAsRemoved	inline	crates/horizon-client/src/server_packs.rs::ServerPacks::push	packs with the same id are removed as ServerReplaced
+ServerPackManager.pushPack	port	crates/horizon-client/src/server_packs.rs::ServerPacks::push	declined prompt answers DECLINED
+ServerPackManager.pushLocalPack	missing		player: a world's own resource pack (resources.zip in the save) is not loaded when the world opens
+ServerPackManager.pushNewPack	inline	crates/horizon-client/src/server_packs.rs::ServerPacks::push	adds the pack and accepts it when allowed
+ServerPackManager.findPackInfo	inline	crates/horizon-client/src/server_packs.rs::ServerPacks::pop	finds the live pack with the id
+ServerPackManager.popPack	port	crates/horizon-client/src/server_packs.rs::ServerPacks::pop	marks the pack ServerRemoved
+ServerPackManager.allowServerPacks	port	crates/horizon-client/src/server_packs.rs::ServerPacks::allow	prompt allowed; accepts the waiting packs
+ServerPackManager.rejectServerPacks	port	crates/horizon-client/src/server_packs.rs::ServerPacks::reject	prompt declined; removes the unaccepted packs
+ServerPackManager.cleanupRemovedPacks	inline	crates/horizon-client/src/server_packs.rs::ServerPacks::tick	forgets removed packs and reports why
+ServerPackManager.updateDownloads	port	crates/horizon-client/src/server_packs.rs::ServerPacks::tick	gap: minor: returns the download requests; the download itself starts in game/server_packs.rs::Game::start_pack_downloads
+AbstractSoundInstance.getOrResolve	port	crates/horizon-client/src/sound_engine.rs::SoundEngine::resolve	event lookup, then a random sound from it
+BeeSoundInstance.tick	port	crates/horizon-client/src/sound_engine.rs::SoundInstance::tick	Ticking::Bee follows the bee; pitch and volume from speed
+DirectionalSoundInstance.setPosition	port	crates/horizon-client/src/game/end.rs::Game::tick_end	gap: minor: the end flash plays without a position, so the 10-block offset toward the view is not kept
+ElytraOnPlayerSoundInstance.tick	missing		player: no elytra wind loop (entity.elytra.flying) while gliding; gliding is silent
+EntityBoundSoundInstance.tick	missing		minor: a sound tied to an entity does not follow it; it stays at its start point
+RidingEntitySoundInstance.tick	missing		player: no riding loop for a happy ghast or nautilus (HAPPY_GHAST_RIDING, NAUTILUS_RIDING)
+RidingMinecartSoundInstance.shoudlPlaySound	port	crates/horizon-client/src/sound_engine.rs::SoundInstance::tick	RidingMinecart arm; the predicate is always true for OldMinecartBehavior, Horizon's only minecart
+SnifferSoundInstance.tick	port	crates/horizon-client/src/game/sniffers.rs::Game::tick_sniffer_effects	gap: player: the digging sound plays once when digging starts; vanilla loops it while digging
+Sound.Type.getByName	port	crates/horizon-client/src/sound_events.rs::parse_sound	type file or event; other values reject the sound
+SoundEventRegistrationSerializer.deserialize	port	crates/horizon-client/src/sound_events.rs::parse_file	replace and subtitle per event
+SoundEventRegistrationSerializer.getSounds	inline	crates/horizon-client/src/sound_events.rs::parse_file	sounds array inside parse_file
+SoundEventRegistrationSerializer.getType	inline	crates/horizon-client/src/sound_events.rs::parse_sound	type field inside parse_sound

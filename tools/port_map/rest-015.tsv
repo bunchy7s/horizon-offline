@@ -1,0 +1,149 @@
+ExperienceCommand.addExperience	port	crates/horizon-client/src/game/commands.rs::Game::change_experience	add branch of the per-player change; loop and feedback in cmd_experience
+ExperienceCommand.setExperience	port	crates/horizon-client/src/game/commands.rs::Game::change_experience	set branch; refuses points that do not fit the level; loop and feedback in cmd_experience
+ExperienceCommand.Type.<init>	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_experience	per-unit (points or levels) keys chosen in cmd_experience
+ExperienceCommand.Type.queryResponse	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_experience	query message built in the query branch of cmd_experience
+FetchProfileCommand.resolveName	missing		player: /fetchprofile name <name> always reports the profile as not found; no profile lookup
+FetchProfileCommand.resolveId	missing		player: /fetchprofile id <uuid> always reports the profile as not found; no profile lookup
+FetchProfileCommand.printForEntity	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_fetchprofile	entity branch: player profile links; other entities get no_profile error
+FillBiomeCommand.register	port	crates/horizon-command/src/tree_world.rs::fillbiome	syntax of /fillbiome incl. replace filter
+FillBiomeCommand.quantize	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_fillbiome	quart snap (v >> 2) << 2 done in cmd_fillbiome
+FillBiomeCommand.makeResolver	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_fillbiome	biome cells inside the box set in cmd_fillbiome, filter honoured
+FillCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	fill literal with replace/keep/filter/mode branches
+FillCommand.fillBlocks	port	crates/horizon-client/src/game/commands.rs::Game::cmd_fill	fill with area limit, hollow/outline/destroy/strict/keep modes
+ForceLoadCommand.register	port	crates/horizon-command/src/tree_world.rs::forceload	syntax of /forceload add|remove|query
+ForceLoadCommand.queryForceLoad	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_forceload	query branch of cmd_forceload
+ForceLoadCommand.removeAll	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_forceload	remove.all branch of cmd_forceload
+ForceLoadCommand.changeForceLoad	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_forceload	add/remove over a chunk box with the 256-chunk limit
+FunctionCommand.register	port	crates/horizon-command/src/tree_misc.rs::function	syntax of /function incl. with <source> [path]
+FunctionCommand.getArgumentTag	inline	crates/horizon-client/src/game/functions.rs::Game::cmd_function	with <path> branch reads the tag and rejects non-compound
+FunctionCommand.queueFunctions	inline	crates/horizon-client/src/game/functions.rs::Game::cmd_function	no-return path runs in cmd_function; return path goes through run_return_run
+FunctionCommand.instantiateAndQueueFunctions	port	crates/horizon-client/src/game/functions.rs::Game::run_function	instantiates with arguments and runs; instantiation failure reported
+FunctionCommand.decorateOutputIfNeeded	inline	crates/horizon-client/src/game/functions.rs::Game::cmd_function	per-function result message when a value comes back
+FunctionCommand.queueFunctionsAsReturn	port	crates/horizon-client/src/game/commands/execute.rs::Game::run_return_run	gap: minor: several functions under 'return run' return their sum; vanilla hands each result to the frame
+FunctionCommand.queueFunctionsNoReturn	inline	crates/horizon-client/src/game/functions.rs::Game::cmd_function	sums results into the caller's callback
+GameModeCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	gamemode literal with gamemode and target arguments
+GameModeCommand.setMode	port	crates/horizon-client/src/game/commands.rs::Game::cmd_gamemode	sets each target's mode and counts changes
+GameRuleCommand.buildRuleArguments	port	crates/horizon-command/src/vanilla.rs::registered	one literal per rule (name and minecraft: id) with a value argument
+GameRuleCommand.setRule	port	crates/horizon-client/src/game/commands.rs::Game::cmd_gamerule	set branch: refuses an unchanged value
+GameRuleCommand.queryRule	port	crates/horizon-client/src/game/commands.rs::Game::cmd_gamerule	query branch of cmd_gamerule
+GiveCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	give literal with targets, item and count
+GiveCommand.giveItem	port	crates/horizon-client/src/game/commands.rs::Game::cmd_give	stack limit x100, overflow dropped at the player, pickup sound
+HelpCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	help literal; usage text is Game::cmd_help
+JfrCommand.startJfr	skip:server		JVM flight recorder profiler; Horizon has its own /jfr in extra.rs
+KillCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	kill literal with optional targets
+KillCommand.kill	port	crates/horizon-client/src/game/commands.rs::Game::cmd_kill	kills each target and reports the count
+ListPlayersCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	list literal with uuids branch
+ListPlayersCommand.listPlayersWithUuids	inline	crates/horizon-client/src/game/commands.rs::Game::execute_command	gap: minor: the 'list' arm always shows the one local player out of 8 (hard-coded), no server player list
+ListPlayersCommand.format	inline	crates/horizon-client/src/game/commands.rs::Game::execute_command	gap: minor: same hard-coded 1 of 8 summary as the list arm
+LocateCommand.getHolders	port	crates/horizon-client/src/game/commands.rs::Game::structure_tag	gap: minor: resolves a #tag to its structures; an unknown id is not validated here
+LocateCommand.showLocateResult	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_locate	distance (2D for structures, 3D for biomes) and the success message
+LocateCommand.dist	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_locate	floored horizontal distance computed in cmd_locate
+LookAt.LookAtEntity.perform	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_rotate	facing-entity branch of cmd_rotate; look_at does the yaw and pitch math
+LootCommand.register	port	crates/horizon-command/src/tree_world.rs::loot	loot literal with loot/mine/kill/fish/replace/insert/give/spawn
+LootCommand.addTargets	port	crates/horizon-command/src/tree_world.rs::loot	replace entity|block, insert, give, spawn subcommands
+LootCommand.blockDistribute	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_loot	insert branch of cmd_loot
+LootCommand.distributeToContainer	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_loot	gap: minor: insert branch fills slots without container.canPlaceItem checks
+LootCommand.blockReplace	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_loot	replace block branch of cmd_loot
+LootCommand.canMergeItems	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_loot	same item and components check inside the insert branch
+LootCommand.playerGive	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_loot	give branch of cmd_loot
+LootCommand.setSlots	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_loot	replace entity branch of cmd_loot
+LootCommand.entityReplace	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_loot	replace entity branch of cmd_loot
+LootCommand.dropInWorld	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_loot	spawn branch: items with pickup delay 10
+LootCommand.getSourceHandItem	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::tool_stack	mainhand or offhand of the source, or the tool argument
+LootCommand.dropBlockLoot	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_loot	loot.mine branch of cmd_loot
+LootCommand.dropKillLoot	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_loot	loot.kill branch of cmd_loot
+LootCommand.dropChestLoot	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_loot	loot.loot branch of cmd_loot
+LootCommand.dropFishingLoot	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_loot	loot.fish branch of cmd_loot
+LootCommand.drop	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_loot	shared drop and feedback at the end of cmd_loot
+LootContextSources.ContextDecorator.createParams	port	crates/horizon-client/src/game/commands/compute.rs::Game::compute_context	gap: minor: keeps only the block and entity picks; no origin or this-entity loot params
+LootContextSources.ContextDecorator.createContext	inline	crates/horizon-client/src/game/commands/compute.rs::Game::compute_context	gap: minor: no LootContext is built
+MsgCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	msg literal with tell and w aliases
+OpCommand.register	missing		minor: no in-game /op literal; ops are set with the horizon-server CLI
+OpCommand.opPlayers	port	crates/horizon-server/src/lists.rs::run	gap: minor: CLI op only (ops.json); no in-game /op
+PardonCommand.register	missing		minor: no in-game /pardon literal
+PardonCommand.pardonPlayers	missing		minor: no pardon path; ban lists exist only as server files (horizon-server-files user_lists.rs)
+PardonIpCommand.register	missing		minor: no in-game /pardon-ip literal
+PardonIpCommand.unban	missing		minor: no pardon-ip path; ban lists exist only as server files
+ParticleCommand.register	port	crates/horizon-command/src/tree_world.rs::particle	particle syntax with viewers, force and normal; execution in cmd_particle
+PerfCommand.register	skip:server		profiler for the dedicated server; not a game behaviour
+PerfCommand.startProfilingDedicatedServer	skip:server		profiler for the dedicated server; not a game behaviour
+PerfCommand.stopProfilingDedicatedServer	skip:server		profiler for the dedicated server; not a game behaviour
+PerfCommand.saveResults	skip:server		profiler for the dedicated server; not a game behaviour
+PerfCommand.whenStopped	skip:server		profiler for the dedicated server; not a game behaviour
+PlaceCommand.placeJigsaw	port	crates/horizon-client/src/game/commands/place.rs::Game::cmd_place_generated	place.jigsaw branch: pool check, generation, success message
+PlaceCommand.placeStructure	missing		player: /place structure checks the id then always fails (Structure.generate is not wired to the live level)
+PlaceCommand.placeTemplate	port	crates/horizon-client/src/game/commands/place.rs::Game::cmd_place	template placement with rotation, mirror, integrity and strict
+PlaySoundCommand.register	port	crates/horizon-command/src/tree_world.rs::sounds	playsound literal with a sound-source literal per source
+PlaySoundCommand.source	port	crates/horizon-command/src/tree_world.rs::sounds	per-source literal with targets, pos, volume, pitch, minVolume
+PlaySoundCommand.playSound	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_playsound	range 16 (16 x volume above 1), minVolume fallback, one seed for all players
+PostEffectCommand.addPostEffect	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_posteffect	gap: player: the effect is stored and listed, but nothing draws it
+PostEffectCommand.clearPostEffect	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_posteffect	gap: player: the cleared list is never drawn anyway
+PostEffectCommand.removePostEffect	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_posteffect	gap: player: the removed effect was never drawn
+PublishCommand.getSuccessMessage	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_publish	published-port message with a copy-on-click port
+RaidCommand.glow	port	crates/horizon-client/src/game/raids.rs::Game::raid_glow	glowing for 1000 ticks, amplifier 1, on the raid's raiders (via cmd_raid raid.glow)
+RaidCommand.setRaidOmenLevel	port	crates/horizon-client/src/game/commands/raid.rs::Game::cmd_raid	raid.setomen branch
+RaidCommand.spawnLeader	port	crates/horizon-client/src/game/commands/raid.rs::Game::cmd_raid	raid.spawnleader branch: patrol leader and banner
+RaidCommand.playSound	port	crates/horizon-client/src/game/commands/raid.rs::Game::cmd_raid	gap: minor: plays the horn whatever the type argument says; vanilla plays it only for 'local'
+RaidCommand.start	port	crates/horizon-client/src/game/commands/raid.rs::Game::cmd_raid	raid.start branch
+RaidCommand.stop	port	crates/horizon-client/src/game/commands/raid.rs::Game::cmd_raid	raid.stop branch
+RaidCommand.check	port	crates/horizon-client/src/game/commands/raid.rs::Game::cmd_raid	raid.check branch with the status line
+RandomCommand.register	port	crates/horizon-command/src/tree_misc.rs::register	random literal: value, roll and reset with sequence and seed syntax
+RandomCommand.drawRandomValueTree	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_random	value and roll branches of cmd_random
+RandomCommand.suggestRandomSequence	port	crates/horizon-command/src/args.rs::ArgType::suggest	gap: minor: suggests the registry's sequence ids, not the sequences this world has created
+RandomCommand.resetSequence	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_random	reset with a sequence (and seed) branch
+RandomCommand.resetAllSequences	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_random	reset.* branch without seed
+RandomCommand.resetAllSequencesAndSetNewDefaults	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_random	reset.* branch with a seed sets the defaults then clears
+RecipeCommand.register	port	crates/horizon-command/src/tree_world.rs::recipe	recipe give|take literals with recipe and * arguments
+RecipeCommand.giveRecipes	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_recipe	give branch; recipes added through change_recipes
+RecipeCommand.takeRecipes	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_recipe	take branch; recipes removed through change_recipes
+ReloadCommand.discoverNewPacks	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: enables newly found packs that are not disabled; no NeoForge reorder of new packs
+ReloadCommand.register	port	crates/horizon-command/src/tree_misc.rs::register	reload literal
+ReturnCommand.ReturnFailCustomExecutor.run	port	crates/horizon-client/src/game/functions.rs::Game::cmd_return	return fail branch: finish_return with no value
+ReturnCommand.ReturnFromCommandCustomModifier.apply	port	crates/horizon-client/src/game/commands/execute.rs::Game::run_return_run	return run: the command's result becomes the frame's return
+ReturnCommand.ReturnValueCustomExecutor.run	port	crates/horizon-client/src/game/functions.rs::Game::cmd_return	return value branch: finish_return with the value
+RideCommand.mount	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_ride	mount branch with already-riding, player and loop checks
+RideCommand.dismount	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_ride	dismount branch
+RotateCommand.register	port	crates/horizon-command/src/tree_world.rs::rotate_swing	rotate literal with entity, facing and rotation syntax
+SaveAllCommand.register	port	crates/horizon-client/src/game.rs::Game::save_game_metadata	gap: minor: the full save exists here (level, advancements, scoreboard, world state) but no /save-all literal reaches it
+SayCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	say literal; message delivery is Game::cmd_say
+ScheduleCommand.remove	port	crates/horizon-client/src/game/functions.rs::Game::cmd_schedule	schedule.clear branch: removes by id, failure when none
+ScoreboardCommand.createRenderTypeModify	port	crates/horizon-command/src/tree_scoreboard.rs::scoreboard	rendertype literal per render type
+ScoreboardCommand.suggestTriggers	port	crates/horizon-command/src/lib.rs::Suggests::suggest	lists trigger objectives that are unlocked for the targets
+ScoreboardCommand.getScore	port	crates/horizon-client/src/scoreboard_cmd.rs::players	players get branch
+ScoreboardCommand.performOperation	port	crates/horizon-client/src/scoreboard_cmd.rs::players	players operation branch applying apply_operation per target and source
+ScoreboardCommand.enableTrigger	port	crates/horizon-client/src/scoreboard_cmd.rs::players	players enable branch
+ScoreboardCommand.resetScores	port	crates/horizon-client/src/scoreboard_cmd.rs::players	players reset without objective
+ScoreboardCommand.resetScore	port	crates/horizon-client/src/scoreboard_cmd.rs::players	players reset with objective
+ScoreboardCommand.setScore	port	crates/horizon-client/src/scoreboard_cmd.rs::players	players set branch
+ScoreboardCommand.setScoreDisplay	port	crates/horizon-client/src/scoreboard_cmd.rs::players	players display name branch
+ScoreboardCommand.setScoreNumberFormat	port	crates/horizon-client/src/scoreboard_cmd.rs::players	players display numberformat branch
+ScoreboardCommand.addScore	port	crates/horizon-client/src/scoreboard_cmd.rs::players	players add branch
+ScoreboardCommand.removeScore	port	crates/horizon-client/src/scoreboard_cmd.rs::players	players remove branch
+ScoreboardCommand.clearDisplaySlot	port	crates/horizon-client/src/scoreboard_cmd.rs::scoreboard	objectives setdisplay branch without objective
+ScoreboardCommand.setDisplaySlot	port	crates/horizon-client/src/scoreboard_cmd.rs::scoreboard	objectives setdisplay branch with objective
+ScoreboardCommand.setDisplayName	port	crates/horizon-client/src/scoreboard_cmd.rs::scoreboard	objectives modify displayname branch
+ScoreboardCommand.setDisplayAutoUpdate	port	crates/horizon-client/src/scoreboard_cmd.rs::scoreboard	objectives modify displayautoupdate branch
+ScoreboardCommand.setObjectiveFormat	port	crates/horizon-client/src/scoreboard_cmd.rs::scoreboard	objectives modify numberformat branch
+ScoreboardCommand.setRenderType	port	crates/horizon-client/src/scoreboard_cmd.rs::scoreboard	objectives modify rendertype branch
+ScoreboardCommand.removeObjective	port	crates/horizon-client/src/scoreboard_cmd.rs::scoreboard	objectives remove branch
+ScoreboardCommand.addObjective	port	crates/horizon-client/src/scoreboard_cmd.rs::scoreboard	objectives add branch
+SeedCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	seed literal; the seed text is the seed arm of execute_command
+ServerPackCommand.register	missing		minor: no /serverpack literal
+ServerPackCommand.sendToAllConnections	missing		minor: no pack packets are sent to connected clients by any command
+ServerPackCommand.pushPack	missing		minor: no push; ResourcePackPush exists only in horizon-protocol
+ServerPackCommand.popPack	missing		minor: no pop; ResourcePackPop exists only in horizon-protocol
+SetBlockCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	setblock literal with destroy, keep, replace and strict
+SetBlockCommand.setBlock	port	crates/horizon-client/src/game/commands.rs::Game::cmd_setblock	destroy, keep, replace, strict and block entity NBT
+SetPlayerIdleTimeoutCommand.register	missing		minor: no /setidletimeout literal; server.properties keeps player-idle-timeout only
+SetPlayerIdleTimeoutCommand.setIdleTimeout	missing		minor: no in-game idle timeout change
+SetSpawnCommand.setSpawn	port	crates/horizon-client/src/game/commands.rs::Game::cmd_spawnpoint	forced spawn per target, overworld spawn or respawn anchor by dimension
+SetWorldSpawnCommand.setSpawn	port	crates/horizon-client/src/game/commands.rs::Game::cmd_setworldspawn	world spawn with angle and the fallback respawn update
+SpawnArmorTrimsCommand.register	missing		minor: no /spawn_armor_trims literal (test command for trim patterns)
+SpawnArmorTrimsCommand.spawnArmorTrim	missing		minor: no armor stands are spawned for trim patterns
+SpawnArmorTrimsCommand.spawnArmorTrims	missing		minor: no armor stands are spawned for trim patterns
+SpawnArmorTrimsCommand.findEquippableItemsWithAssets	missing		minor: no scan of equippable armor items for trims
+SpreadPlayersCommand.spreadPlayers	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	spreads targets around the centre with spread distance, max range and max height
+SpreadPlayersCommand.getNumberOfTeams	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	team count via team_of in respectTeams mode
+SpreadPlayersCommand.spreadPositions	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	collision loop with the 10000-iteration cap, clamp and safe-spot check
+SpreadPlayersCommand.setPlayerPositions	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	teleports each target and computes the average distance
+SpreadPlayersCommand.createInitialPositions	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	random start points in the box

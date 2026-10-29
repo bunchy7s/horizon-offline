@@ -177,6 +177,24 @@ pub fn install(
         return super::java::install(source, project, everything, home, progress);
     }
     let steps = plan(source, project, everything)?;
+    put(
+        source,
+        steps,
+        home,
+        &|kind| kind.folder().expect("plan keeps folder kinds"),
+        progress,
+    )
+}
+
+/// Downloads each step's file into `home`, in the folder `folder` names for its kind, and lists
+/// it: what was already there at that version is kept, an older version replaced.
+pub(super) fn put(
+    source: &dyn Source,
+    steps: Vec<Step>,
+    home: &Path,
+    folder: &dyn Fn(Kind) -> &'static str,
+    progress: &dyn Fn(&str, f32),
+) -> Result<Vec<Entry>, String> {
     let mut installed = Installed::load(home);
     let mut done = Vec::new();
     for step in steps {
@@ -190,7 +208,7 @@ pub fn install(
             .version
             .file()
             .expect("pick keeps versions with a file");
-        let folder_name = p.kind.folder().expect("plan keeps folder kinds");
+        let folder_name = folder(p.kind);
         let name = safe_name(&file.name)
             .ok_or_else(|| format!("{:?} isn't a plain file name.", file.name))?;
         let relative = format!("{folder_name}/{name}");
@@ -261,6 +279,10 @@ pub fn remove(home: &Path, name: &str) -> Result<Entry, String> {
         }
     }
     if let Some(id) = super::horizon::mod_id(&entry).filter(|_| entry.source == SourceId::Horizon) {
+        // The `.hmod` a mod that turned native left behind (horizon::install_version).
+        if entry.file.ends_with(".hnmod") {
+            let _ = fs::remove_file(home.join(super::java::MODS_DIR).join(format!("{id}.hmod")));
+        }
         super::java::set_enabled(home, id, false)?;
     }
     installed

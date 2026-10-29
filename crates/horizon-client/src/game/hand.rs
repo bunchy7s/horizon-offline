@@ -10,12 +10,14 @@ use horizon_client::{
     first_person::{Hand, HandWorld, Hit, SwingAnimation, UseResult, swing_duration},
     items::ItemStack,
 };
+use horizon_core::geometry::{Aabb, Vec3};
 
 /// The off hand's place in `visible_hands` (the main hand uses its hotbar slot).
 const OFFHAND: usize = usize::MAX;
 
-/// `AttackRange.isInRange`: float bounds, then inclusive double comparison.
-fn attack_range_contains(range: &serde_json::Value, distance: f64, creative: bool) -> bool {
+/// `AttackRange.effectiveMinRange`, `effectiveMaxRange` (for a player) and
+/// `hitboxMargin` of an `attack_range` component.
+fn attack_reach(range: &serde_json::Value, creative: bool) -> (f32, f32, f32) {
     let value = |key: &str, default: f32| range[key].as_f64().map_or(default, |v| v as f32);
     let (min, max) = if creative {
         (
@@ -25,13 +27,45 @@ fn attack_range_contains(range: &serde_json::Value, distance: f64, creative: boo
     } else {
         (value("min_reach", 0.0), value("max_reach", 3.0))
     };
-    let margin = value("hitbox_margin", 0.3);
+    (min, max, value("hitbox_margin", 0.3))
+}
+
+fn v3(v: [f64; 3]) -> Vec3 {
+    Vec3::new(v[0], v[1], v[2])
+}
+
+/// `LocalPlayer.raycastHitResult` with an item that has an attack range
+/// (`AttackRange.getClosesetHit`): the distance from the eye to the nearest
+/// box hit along the item's own `reach`, which goes past the plain pick's
+/// 3 blocks (a spear's 4.5). A miss falls back to the plain pick (`None`).
+fn reach_pick(
+    boxes: &[(usize, Aabb)],
+    eye: Vec3,
+    look: Vec3,
+    movement: Vec3,
+    reach: (f32, f32, f32),
+    clip: impl Fn(Vec3, Vec3) -> Option<Vec3>,
+) -> Option<f64> {
+    super::spear::hits_in_reach(boxes, eye, look, movement, reach, clip)
+        .into_iter()
+        .map(|(_, at)| eye.distance_squared(at).sqrt())
+        .reduce(f64::min)
+}
+
+/// `AttackRange.isInRange`: float bounds, then inclusive double comparison.
+fn attack_range_contains(range: &serde_json::Value, distance: f64, creative: bool) -> bool {
+    let (min, max, margin) = attack_reach(range, creative);
     distance >= f64::from(min - margin) && distance <= f64::from(max + margin)
 }
 
 impl Game<'_> {
     /// Opening a screen stops breaking before the next game tick (which may pause).
     pub(super) fn stop_mining(&mut self) {
+        if self.clicks.destroying.active {
+            let pos = self.clicks.destroying.pos;
+            let state = self.world.block(pos[0], pos[1], pos[2]);
+            self.tutorial_destroy(state, -1.0);
+        }
         let mut destroying = std::mem::take(&mut self.clicks.destroying);
         destroying.stop(&mut GameHands {
             game: self,
@@ -112,6 +146,12 @@ impl Game<'_> {
             progress: d.progress,
             ticks: d.ticks as u32,
         });
+        if let Some(mining) = &self.mining {
+            let pos = mining.pos;
+            let progress = mining.progress;
+            let state = self.world.block(pos[0], pos[1], pos[2]);
+            self.tutorial_destroy(state, progress);
+        }
         Ok(())
     }
     /// `BlockBehaviour.getDestroyProgress` with `Player.getDestroySpeed`.
@@ -261,10 +301,6 @@ impl Game<'_> {
     /// it is alive (the nearest entity under the crosshair, before any block).
     pub(super) fn crosshair_living(&self) -> Option<bool> {
         let nearest = |hits: &[Option<f64>]| hits.iter().flatten().copied().reduce(f64::min);
-        let living = nearest(&[
-            self.mob_hit().map(|h| h.1),
-            self.armor_stand_hit().map(|h| h.1),
-        ])?;
         let other = nearest(&[
             self.painting_hit().map(|h| h.1),
             self.frame_hit().map(|h| h.1),
@@ -272,24 +308,49 @@ impl Game<'_> {
             self.cart_hit().map(|h| h.1),
             self.dragon_hit().map(|h| h.1),
         ]);
-        if !self.before_block(living) || other.is_some_and(|o| o <= living) {
-            return None;
-        }
         let active = self
             .using
             .and_then(|(slot, _)| self.inventory.get(slot).and_then(Option::as_ref))
             .or_else(|| self.held());
-        if let Some(stack) = active {
-            let components = self
-                .pack
+        let range = active.and_then(|stack| {
+            self.pack
                 .item_renderer
                 .models
-                .components(&horizon_client::item_render::stack_view(stack));
-            if let Some(range) = components.get("minecraft:attack_range")
-                && !attack_range_contains(range, living, self.creative)
-            {
-                return None;
-            }
+                .components(&horizon_client::item_render::stack_view(stack))
+                .get("minecraft:attack_range")
+                .cloned()
+        });
+        let spear = range.as_ref().and_then(|r| {
+            let eye = self.eye_position()?;
+            let look = super::view_vector(self.yaw, self.pitch);
+            let reach = attack_reach(r, self.creative);
+            let boxes = self.hittable_mob_boxes();
+            let clip = |from: Vec3, to: Vec3| {
+                let length = from.distance_squared(to).sqrt();
+                let d = to.subtract(from).scale(1.0 / length);
+                (length > 0.0)
+                    .then(|| self.clip_ray([from.x, from.y, from.z], [d.x, d.y, d.z], length))
+                    .flatten()
+                    .map(|hit| Vec3::new(hit.point[0], hit.point[1], hit.point[2]))
+            };
+            let movement = self.known_player_movement();
+            reach_pick(&boxes, v3(eye), v3(look), movement, reach, clip)
+        });
+        let living = match spear {
+            Some(distance) => distance,
+            None => nearest(&[
+                self.mob_hit().map(|h| h.1),
+                self.armor_stand_hit().map(|h| h.1),
+            ])?,
+        };
+        if (spear.is_none() && !self.before_block(living)) || other.is_some_and(|o| o <= living) {
+            return None;
+        }
+        // Hud.extractCrosshair: with an attack range, the hit must be in it.
+        if let Some(range) = &range
+            && !attack_range_contains(range, living, self.creative)
+        {
+            return None;
         }
         // Only alive mobs are hit, so a picked living entity is alive.
         Some(true)
@@ -324,12 +385,12 @@ impl Game<'_> {
         let Some(hit) = self.pick() else {
             return false;
         };
-        let name = &*self
+        let id = &*self
             .res
             .facts()
             .get(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
             .name;
-        let name = name.trim_start_matches("minecraft:");
+        let name = id.trim_start_matches("minecraft:");
         match name {
             // BlockBehaviour.getMenuProvider and `instanceof Portal`.
             "crafting_table" | "enchanting_table" | "anvil" | "chipped_anvil" | "damaged_anvil"
@@ -338,8 +399,9 @@ impl Game<'_> {
             | "dispenser" | "dropper" | "crafter" | "lectern" | "beacon" | "nether_portal"
             | "end_portal" | "end_gateway" => true,
             // ChestBlock.getMenuProvider: none while a redstone conductor
-            // sits on top of either half (a sitting cat aside).
-            "chest" | "trapped_chest" => {
+            // sits on top of either half (a sitting cat aside). Copper
+            // chests are `ChestBlock`s too.
+            _ if horizon_client::containers::is_chest_block(id) => {
                 let key = (hit.pos[0], hit.pos[1], hit.pos[2]);
                 let blocked = |p: (i32, i32, i32)| {
                     let above = self.world.block(p.0, p.1 + 1, p.2);
@@ -527,6 +589,8 @@ impl HandWorld for GameHands<'_, '_> {
         {
             return false;
         }
+        let state = self.game.world.block(pos[0], pos[1], pos[2]);
+        self.game.tutorial_destroy(state, 1.0);
         let r = self.game.break_block(pos);
         self.keep(r);
         true
@@ -562,6 +626,40 @@ impl HandWorld for GameHands<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A zombie-sized box whose near face is `distance` blocks ahead of an
+    /// eye at the origin looking along +z.
+    fn mob_ahead(distance: f64) -> Vec<(usize, Aabb)> {
+        let min = Vec3::new(-0.3, -1.0, distance);
+        vec![(0, Aabb::new(min, min.add_vector(Vec3::new(0.6, 1.95, 0.6))))]
+    }
+
+    #[test]
+    fn a_spear_picks_a_mob_past_the_plain_reach() {
+        // #3209: a mob 4 blocks ahead is out of the plain pick's 3 blocks but
+        // within a spear's attack range (min 2, max 4.5, margin 0.125), so the
+        // crosshair picks it and the attack indicator shows.
+        let spear = serde_json::json!({
+            "min_reach": 2.0, "max_reach": 4.5,
+            "min_creative_reach": 2.0, "max_creative_reach": 6.5,
+            "hitbox_margin": 0.125,
+        });
+        let (eye, look) = (Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0));
+        let boxes = mob_ahead(4.0);
+        let reach = attack_reach(&spear, false);
+        let pick = reach_pick(&boxes, eye, look, Vec3::ZERO, reach, |_, _| None);
+        assert_eq!(pick, Some(4.0));
+        assert!(attack_range_contains(&spear, 4.0, false));
+        // Past the maximum plus the margin: no pick.
+        let far = mob_ahead(4.7);
+        assert_eq!(
+            reach_pick(&far, eye, look, Vec3::ZERO, reach, |_, _| None),
+            None
+        );
+        // A block nearer than the minimum reach takes the pick.
+        let wall = |from: Vec3, _: Vec3| Some(from.add_vector(Vec3::new(0.0, 0.0, 1.0)));
+        assert_eq!(reach_pick(&boxes, eye, look, Vec3::ZERO, reach, wall), None);
+    }
 
     #[test]
     fn attack_range_uses_inclusive_float_bounds() {

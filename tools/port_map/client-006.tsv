@@ -1,0 +1,150 @@
+EquineSaddleModel.createSaddleLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+EquineSaddleModel.setupAnim	missing		player: a saddled horse with nobody riding it shows its reins (left and right saddle lines); vanilla hides them until it is ridden (render.rs draws the whole #saddle layer)
+AdultFelineModel.createBodyMesh	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BabyFelineModel.createBabyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+CodModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+CodModel.setupAnim	port	crates/horizon-client/src/mobs/aquatic.rs::anim	aquatic setup arm for this species (fin/tail swing by age)
+PufferfishBigModel.setupAnim	port	crates/horizon-client/src/mobs/aquatic.rs::anim	aquatic setup arm for this species (fin/tail swing by age)
+PufferfishMidModel.setupAnim	port	crates/horizon-client/src/mobs/aquatic.rs::anim	aquatic setup arm for this species (fin/tail swing by age)
+PufferfishSmallModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+PufferfishSmallModel.setupAnim	port	crates/horizon-client/src/mobs/aquatic.rs::anim	aquatic setup arm for this species (fin/tail swing by age)
+SalmonModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+SalmonModel.setupAnim	port	crates/horizon-client/src/mobs/aquatic.rs::anim	aquatic setup arm for this species (fin/tail swing by age)
+TropicalFishLargeModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+TropicalFishLargeModel.setupAnim	port	crates/horizon-client/src/mobs/aquatic.rs::anim	aquatic setup arm for this species (fin/tail swing by age)
+TropicalFishSmallModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+TropicalFishSmallModel.setupAnim	port	crates/horizon-client/src/mobs/aquatic.rs::anim	aquatic setup arm for this species (fin/tail swing by age)
+AdultFoxModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+AdultFoxModel.setSittingPose	port	crates/horizon-client/src/mobs/body_anim.rs::fox	fox pose branch (adult and baby) in the one fox pose function
+AdultFoxModel.setSleepingPose	port	crates/horizon-client/src/mobs/body_anim.rs::fox	fox pose branch (adult and baby) in the one fox pose function
+AdultFoxModel.setWalkingPose	port	crates/horizon-client/src/mobs/body_anim.rs::fox	fox pose branch (adult and baby) in the one fox pose function
+AdultFoxModel.setCrouchingPose	port	crates/horizon-client/src/mobs/body_anim.rs::fox	fox pose branch (adult and baby) in the one fox pose function
+AdultFoxModel.setPouncingPose	port	crates/horizon-client/src/mobs/body_anim.rs::fox	fox pose branch (adult and baby) in the one fox pose function
+BabyFoxModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BabyFoxModel.setSittingPose	port	crates/horizon-client/src/mobs/body_anim.rs::fox	fox pose branch (adult and baby) in the one fox pose function
+BabyFoxModel.setSleepingPose	port	crates/horizon-client/src/mobs/body_anim.rs::fox	fox pose branch (adult and baby) in the one fox pose function
+BabyFoxModel.setWalkingPose	port	crates/horizon-client/src/mobs/body_anim.rs::fox	fox pose branch (adult and baby) in the one fox pose function
+BabyFoxModel.setCrouchingPose	port	crates/horizon-client/src/mobs/body_anim.rs::fox	fox pose branch (adult and baby) in the one fox pose function
+FoxModel.setSleepingPose	port	crates/horizon-client/src/mobs/body_anim.rs::fox	fox pose branch (adult and baby) in the one fox pose function
+FoxModel.setWalkingPose	port	crates/horizon-client/src/mobs/body_anim.rs::fox	fox pose branch (adult and baby) in the one fox pose function
+FoxModel.setCrouchingPose	port	crates/horizon-client/src/mobs/body_anim.rs::fox	fox pose branch (adult and baby) in the one fox pose function
+FrogModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+TadpoleModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+TadpoleModel.setupAnim	port	crates/horizon-client/src/mobs/aquatic.rs::anim	aquatic setup arm for this species (fin/tail swing by age)
+HappyGhastHarnessModel.createHarnessLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+HappyGhastModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BabyGoatModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+GoatModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+GoatModel.setupAnim	port	crates/horizon-client/src/mobs/body_anim.rs::goat	horn visibility and ramming head pitch
+CopperGolemModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+CopperGolemModel.createRunningPoseBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+CopperGolemModel.createSittingPoseBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+CopperGolemModel.createStarPoseBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+CopperGolemModel.translateToHand	missing		player: an item a copper golem holds sits at the humanoid hand offset; vanilla turns it (IDLE) or scales it to 0.55 with its own grip (mobs/render.rs hand_base has only the vex case)
+CopperGolemModel.translateToHead	skip:other		only CustomHeadLayer calls it, and a copper golem has no head slot (its only extra slot is the antenna)
+CopperGolemModel.applyBlockOnAntennaTransform	missing		player: a block or flower on the copper golem antenna is not drawn; vanilla draws it with BlockDecorationLayer (nothing in mobs/render.rs draws the antenna item)
+IronGolemModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+SnowGolemModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+LlamaSpitModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+NautilusArmorModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+NautilusModel.createBodyMesh	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+NautilusModel.createBabyBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+NautilusModel.applyBodyRotation	inline	crates/horizon-client/src/mobs/nautilus.rs::anim	body yaw/pitch clamped to 10 degrees, inside the nautilus setupAnim
+NautilusSaddleModel.createSaddleLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BabyPandaModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+PandaModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+ParrotModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+ParrotModel.prepare	port	crates/horizon-client/src/mobs/body_anim.rs::parrot	sitting, flying and party leg/body offsets
+ParrotModel.getPose	inline	crates/horizon-client/src/mobs/body_anim.rs::anim	pose chosen where the parrot is animated: party, sitting, flying (not on ground), standing
+BabyPigModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+ColdPigModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+PigModel.createBasePigModel	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BabyPolarBearModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+PolarBearModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+AdultRabbitModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BabyRabbitModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BabySheepModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+SheepFurModel.createFurLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+SheepFurModel.setupAnim	port	crates/horizon-client/src/mobs/anim.rs::setup	Anim::Sheep arm: head lowered while eating grass
+SheepModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+SheepModel.setupAnim	port	crates/horizon-client/src/mobs/anim.rs::setup	Anim::Sheep arm: head lowered while eating grass
+SnifferModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+SniffletModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BabySquidModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+SquidModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+SquidModel.setupAnim	port	crates/horizon-client/src/mobs/aquatic.rs::anim	aquatic setup arm for this species (fin/tail swing by age)
+AdultTurtleModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BabyTurtleModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+TurtleModel.setupAnim	port	crates/horizon-client/src/mobs/body_anim.rs::turtle	walk swing on land, paddling in water, egg belly
+AdultWolfModel.setSittingPose	port	crates/horizon-client/src/mobs/tame.rs::anim	adult upper body raised when sitting
+AdultWolfModel.shakeOffWater	port	crates/horizon-client/src/mobs/tame.rs::anim	shake roll of head, body and tail (body_roll)
+BabyWolfModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BabyWolfModel.shakeOffWater	port	crates/horizon-client/src/mobs/tame.rs::anim	shake roll of head, body and tail (body_roll)
+BabyWolfModel.setSittingPose	port	crates/horizon-client/src/mobs/tame.rs::anim	baby sitting pose: body xRot minus pi/2
+WolfModel.setSittingPose	port	crates/horizon-client/src/mobs/tame.rs::anim	sitting pose, adult and baby
+EvokerFangsModel.setupAnim	port	crates/horizon-client/src/game/fangs.rs::Game::fangs_geometry	jaws, base sink and pre-scale
+SpearAnimations.thirdPersonAttackHand	missing		player: a spear stab shows the whack swing on other players and mobs; the arm does not thrust (STAB arm pose absent, only WHACK in mobs/anim.rs)
+SpearAnimations.firstPersonAttack	missing		player: when you stab with a spear your own hand does not thrust forward; the default swing plays instead (first_person.rs has no STAB pose)
+SpearAnimations.UseParams.fromKineticWeapon	port	crates/horizon-client/src/spear.rs::UseParams::of	the charge timeline and sway values
+SpinAttackEffectModel.createLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+EntityModelSet.bakeLayer	skip:data		baking a layer; Horizon loads each layer from entity-models.json via load_model
+LayerDefinitions.createRoots	skip:data		layer registry; Horizon names layers by string key (minecraft:x#main)
+ModelLayers.register	skip:data		layer id registry; Horizon uses string keys
+ModelLayers.registerArmorSet	skip:data		layer id registry; Horizon uses string keys
+ModelPart.storePose	skip:other		no callers in vanilla; a snapshot of the current pose that nothing reads
+ModelPart.loadPose	port	crates/horizon-client/src/mobs.rs::Part::parse	reads the pose from the model data; the reset per frame is Poses::reset
+ModelPart.getChild	port	crates/horizon-client/src/block_entity_render.rs::ModelPart::child	named child lookup (Option instead of a throw)
+ModelPart.compile	port	crates/horizon-client/src/mobs/render.rs::draw_normals	emits each polygon with the posed transform; skipDraw gating
+ModelPart.offsetRotation	port	crates/horizon-client/src/mobs/keyframes.rs::Animation::apply	Target::Rotation channel adds to xRot/yRot/zRot
+ModelPart.offsetScale	port	crates/horizon-client/src/mobs/keyframes.rs::Animation::apply	Target::Scale channel adds to the scale
+ModelPart.getAllParts	inline	crates/horizon-client/src/mobs/anim.rs::Poses::reset	the part list Model.resetPose walks; Poses::reset refills the whole name map instead
+ModelPart.createPartLookup	inline	crates/horizon-client/src/mobs/anim.rs::Poses::reset	gap: minor: duplicate part names keep the last part here, the first in vanilla (the name map is built by the same walk)
+ModelPart.addAllChildren	inline	crates/horizon-client/src/mobs/anim.rs::Poses::reset	gap: minor: duplicate part names keep the last part here, the first in vanilla (the name map is built by the same walk)
+ModelPart.Cube.<init>	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource (cube faces are precomputed polygons)
+ModelPart.Cube.compile	port	crates/horizon-client/src/mobs/render.rs::draw_normals	six faces emitted from the posed part (polygons in Horizon)
+ModelPart.Polygon.<init>	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource (polygons are precomputed)
+ModelPart.Vertex.remap	skip:data		UV normalisation done when entity-models.json is generated
+PartPose.offsetAndRotation	skip:data		pose builder; baked poses come from entity-models.json
+PartPose.translated	skip:data		pose builder; baked poses come from entity-models.json
+PartPose.withScale	skip:data		pose builder; baked poses come from entity-models.json
+PartPose.scaled	skip:data		pose builder; baked poses come from entity-models.json
+CubeDefinition.bake	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+CubeDeformation.extend	skip:java		builder value for cube inflation, folded into the baked geometry
+CubeListBuilder.addBox	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+LayerDefinition.bakeRoot	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+MeshTransformer.scaling	skip:data		baby scaling applied when entity-models.json is generated
+PartDefinition.addOrReplaceChild	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+PartDefinition.clearRecursively	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+PartDefinition.clearChild	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+PartDefinition.retainPartsAndChildren	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+PartDefinition.retainExactParts	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+PartDefinition.bake	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+PartDefinition.transformed	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+UVPair.pack	skip:java		packs two texture coordinates for the builder; Horizon stores normalised UVs
+BlazeModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BreezeModel.createBaseMesh	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BreezeModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BreezeModel.createWindLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BreezeModel.createEyesLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+CreakingModel.createMesh	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+CreakingModel.createEyesLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+CreeperModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+CreeperModel.setupAnim	port	crates/horizon-client/src/mobs/anim.rs::setup	Anim::Creeper arm: head and legs
+EnderDragonModel.<init>	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+EnderDragonModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+EnderDragonModel.poseLimbs	inline	crates/horizon-client/src/game/dragon.rs::Game::dragon_geometry	leg and foot pitches inside the dragon pose
+EndermanModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+EndermiteModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+GhastModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+GuardianModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+GuardianModel.setupSpikes	inline	crates/horizon-client/src/mobs/guardian.rs::anim	spike offsets and positions, inside the guardian setupAnim
+GuardianModel.getSpikeOffset	inline	crates/horizon-client/src/mobs/guardian.rs::anim	spike offsets and positions, inside the guardian setupAnim
+GuardianModel.getSpikeY	inline	crates/horizon-client/src/mobs/guardian.rs::anim	spike offsets and positions, inside the guardian setupAnim
+BabyHoglinModel.animateHeadbutt	inline	crates/horizon-client/src/mobs/piglin.rs::hoglin_anim	baby head lift in the headbutt; adult head lerp is in the same fn
+BabyHoglinModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+HoglinModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+IllagerModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+AbstractPiglinModel.removeEars	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource (ears are part of the baked piglin head)
+AbstractPiglinModel.addHead	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+AdultPiglinModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
+BabyPiglinModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource

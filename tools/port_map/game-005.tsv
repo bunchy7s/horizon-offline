@@ -1,0 +1,143 @@
+Entity.<init>	port	crates/horizon-client/src/mobs.rs::Mob::new	mobs only; players and projectiles are built by their own structs and the synched defaults (flags, air, name, pose) are plain fields
+Entity.isColliding	missing		minor: a block change that a server refuses and that comes back inside the player does not snap the player to the position of the prediction (end_predictions only restores the block)
+Entity.canInteractWithLevel	inline	crates/horizon-client/src/mobs/leash.rs::tick	gap: minor: only the leashed mob's life is tested (a dead one drops its lead); a dead or spectating holder is not tested
+Entity.unRide	inline	crates/horizon-client/src/game/consume.rs::Game::stop_riding	gap: minor: the player's half (boat, minecart or mob mount); riders of a vehicle are let go by sync_riders and eject_boat_mobs
+Entity.addTag	port	crates/horizon-client/src/game/commands/data.rs::Game::cmd_tag	the tag.add branch, with the 1024 tag limit
+Entity.equals	skip:java		entities are compared by id
+Entity.setRot	skip:other		plain setter; yaw and pitch are struct fields and the callers clamp pitch
+Entity.reapplyPosition	skip:other		bounding boxes are built from the position on demand (Mob::bounds_at), so there is no cached box to refresh
+Entity.commonTick	inline	crates/horizon-client/src/mobs/ai.rs::tick	previous position and rotations saved and age counted; invulnerable time counts down in base_tick; remote mobs do the same in tick_remote_entities
+Entity.computeSpeed	missing		minor: lastKnownSpeed is not tracked; only FollowPlayerRiddenEntityGoal reads it and Horizon has no such goal
+Entity.setSharedFlagOnFire	inline	crates/horizon-client/src/game/lan.rs::mob_meta	gap: minor: flag 0x01 is fire_ticks > 0, packed only when a mob goes to LAN guests; HasVisualFire is not read
+Entity.isSupportedBy	inline	crates/horizon-client/src/game/piston_push.rs::Game::push_body	supporting block equal to the piston's block decides whether the body rides it
+Entity.getBlockBounciness	port	crates/horizon-world/src/movement_restitution.rs::restitute_movement	gap: player: only the player uses block restitution; mobs ignore it (Mob::do_move says so), so a mob falling on a slime block or bed does not bounce
+Entity.addMovementThisTick	port	crates/horizon-world/src/entity_move.rs::MovementHistory::add	the 100 record cap merges the first two (MovementHistory); only the player keeps a history, mobs and arrows sweep from the start to the end of their move
+Entity.hasMovedHorizontallyRecently	missing		player: dolphins never swim after and escort a boat or nautilus a player is steering (no FollowPlayerRiddenEntityGoal); nothing tracks horizontal speed
+Entity.isStateClimbable	port	crates/horizon-world/src/movement_emission.rs::climbable	climbable tag or powder snow
+Entity.applyPistonMovementRestriction	port	crates/horizon-world/src/piston_movement.rs::PistonMovement::limit	the 0.51 per axis budget for each game tick
+Entity.getAvailableSpaceBelow	missing		player: /gamemode creative from spectator while standing on the ground leaves the player flying (vanilla drops flight when the ground is under 1 block away and nothing blocks the box)
+Entity.collectAllColliders	inline	crates/horizon-world/src/world_movement.rs::resolve_world_movement	entity, border and block shapes are gathered inside resolve_world_movement; no standalone list exists, and the creative flight drop on a mode switch has no use of it
+Entity.collideWithShapes	port	crates/horizon-core/src/geometry/movement.rs::resolve_shape_movement	axis step order from the movement size
+Entity.debugBlockIntersection	skip:debug		debug subscription for the entity block intersection overlay
+Entity.gameEvent	port	crates/horizon-client/src/game/sculk.rs::Game::post_entity_event	gap: minor: only players and mobs (Who) can be the source
+Entity.playMuffledStepSound	port	crates/horizon-client/src/motion.rs::MotionWorld::walking_step_sound	gap: minor: players only; mobs play the floor block's own step and never the muffled floor sound under snow, carpet or other combination blocks
+Entity.shouldPlayAmethystStepSound	port	crates/horizon-client/src/motion.rs::MotionWorld::walking_step_sound	gap: minor: only the player chimes on crystal blocks; mobs walking on amethyst stay silent
+Entity.isInClouds	missing		minor: a happy ghast above the cloud layer should heal a point a second like in rain; only rain and snow count
+Entity.updateSwimming	port	crates/horizon-world/src/swimming.rs::update	the player goes through update_player; mobs never swim in the player sense
+Entity.doWaterSplashEffect	port	crates/horizon-world/src/water_splash.rs::water_splash	sound, bubbles, splashes and the splash event; arrows, mobs and the player each supply a world
+Entity.spawnSprintParticle	port	crates/horizon-client/src/game/client_ambient.rs::Game::sprint_dust	gap: minor: players only; sprinting cats and ocelots raise no block dust
+Entity.absSnapTo	skip:other		plain position setter; Horizon writes position and previous position fields directly
+Entity.absSnapRotationTo	skip:other		plain rotation setter with the pitch clamp; teleports clamp pitch where they set it
+Entity.snapTo	skip:other		plain position and rotation setter; spawns and teleports write the fields (Mob::new, teleport_to_in_level)
+Entity.setOldPos	skip:other		previous position is a field set where a move starts
+Entity.setOldRot	skip:other		previous rotations are fields set where a tick starts
+Entity.distanceToSqr	port	crates/horizon-client/src/mobs.rs::Mob::distance_sqr	plain arithmetic; other entities use Vec3::distance_squared
+Entity.hurtOrSimulate	skip:other		dispatches to the server or client hurt; the owning side applies damage directly
+Entity.calculateViewQuaternion	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::apply_piercing_effect	its only use is the lunge enchantment's apply_impulse, which rotates the direction by pitch then yaw by hand
+Entity.getPosition	port	crates/horizon-core/src/geometry/mod.rs::Vec3::lerp	previous to current position at the frame fraction
+Entity.awardKillScore	inline	crates/horizon-client/src/game.rs::Game::tick	the player's death branch fires entity_killed_player with the killer's type
+Entity.shouldRender	port	crates/horizon-client/src/game/entity_culling.rs::Game::entity_in_view	range from default_range (64 times the mean box edge times the view scale), then the frustum
+Entity.saveAsPassenger	port	crates/horizon-client/src/game/persist.rs::Game::mob_tree_nbt	a mob with its riders nested under Passengers; players and unsaved types are skipped
+Entity.getEncodeId	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	the id written is the mob type's id
+Entity.dropAllLeashConnections	port	crates/horizon-client/src/game/dispenser.rs::Game::shear_off_leashes	gap: minor: only shears (dispenser) reach it; a firework used while gliding does not drop the player's leads
+Entity.canCollideWith	inline	crates/horizon-client/src/game/ghasts.rs::Game::player_entity_collisions	gap: player: the entities a player cannot walk through are boats and happy ghasts only; a live shulker (canBeCollidedWith) is not solid, so the player walks through it
+Entity.getDefaultPassengerAttachmentPoint	inline	crates/horizon-client/src/mobs/riders.rs::passenger_attachment	one point per vehicle, so the passenger index is always 0; default is the top of the box
+Entity.ejectPassengers	port	crates/horizon-client/src/game/boat_passengers.rs::Game::eject_boat_mobs	gap: minor: boats place riders at the dismount spot; when a mob vehicle dies sync_riders only lets go and the rider stays where it was seated
+Entity.removeVehicle	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::dismount_mob	gap: minor: no entity_dismount game event, so sculk sensors and wardens never hear a dismount
+Entity.moveOrInterpolateTo	port	crates/horizon-world/src/stepped_interpolation.rs::SteppedInterpolation::interpolate_to	living entities from a server; boats and other objects use a three tick Lerp
+Entity.getHandHoldingItemAngle	missing		player: the rocket of a gliding player starts at the player's position, not 0.5 block out toward the hand holding it, so its trail sparks and burst start slightly off
+Entity.teleportToPortalDestination	inline	crates/horizon-client/src/game/nether_portal.rs::Game::send_through_portal	may_enter checks isAllowedToEnterPortal; the entity is saved and waits for its dimension
+Entity.getDimensionChangingDelay	inline	crates/horizon-client/src/game/nether_portal.rs::Game::set_portal_cooldown	300 ticks for entities (ENTITY_DELAY) and 10 for the player (PLAYER_DELAY); a vehicle with the player on it never goes through a portal
+Entity.getSharedFlag	inline	crates/horizon-client/src/game/lan.rs::mob_meta	flags are separate fields (fire_ticks, invisible, glowing, sprinting) packed into the shared flags byte only for LAN guests
+Entity.setSharedFlag	inline	crates/horizon-client/src/game/lan.rs::mob_meta	flags are separate fields (fire_ticks, invisible, glowing, sprinting) packed into the shared flags byte only for LAN guests
+Entity.handleOnInsideBubbleColumn	port	crates/horizon-client/src/motion/fluids.rs::bubble_column_push	mobs, items and pearls; arrows have Ticker::bubble_column and the player motion/environment.rs
+Entity.removeAction	skip:other		a mob's custom name is kept as plain text, so it carries no click event; other entities show the stored CustomName as it is
+Entity.getName	inline	crates/horizon-client/src/game/commands.rs::Game::target_name	custom name, else the entity type's translated name
+Entity.toString	skip:debug		debug text
+Entity.isInvulnerableToBase	port	crates/horizon-world/src/damage_immunity.rs::base_immunity	removed, invulnerable without bypass, fire immune and fall immune
+Entity.copyPosition	inline	crates/horizon-client/src/game/dispenser.rs::Game::convert_mob	a converted mob takes the old one's position, previous position and yaws; zombie villager cures copy them in zombie_villagers.rs
+Entity.restoreFrom	inline	crates/horizon-client/src/game/nether_portal.rs::Game::resolve_arrivals	the saved tag is loaded again as the new entity; PortalCooldown is written into the tag
+Entity.teleport	inline	crates/horizon-client/src/game/commands.rs::Game::teleport_to_in_level	gap: minor: same level /tp only; a riding mob is not dismounted first, so it is pulled back onto its vehicle next tick (the player does stop riding); portals use send_through_portal
+Entity.teleportSameDimension	inline	crates/horizon-client/src/game/commands.rs::Game::teleport_to_in_level	position, rotation and old rotation set; riders are re-seated each tick by position_riders
+Entity.teleportSpectators	inline	crates/horizon-client/src/game/commands/extra.rs::Game::tick_camera	a spectator's camera follows its target every tick, so no teleport is needed; it drops when the target is gone
+Entity.calculatePassengerTransition	inline	crates/horizon-client/src/game/passengers.rs::Game::position_riders	riders are seated on the vehicle each tick instead of getting an offset transition
+Entity.sendTeleportTransitionToPlayers	inline	crates/horizon-client/src/lan/entity.rs::ServerEntity::send_changes	a LAN guest sees a teleport as an EntityPositionSync when the jump is too big for a relative move; no ClientboundTeleportEntity is sent
+Entity.forceSetRotation	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_rotate	/rotate goes through teleport_to_in_level with the new rotation; the pitch of non-players is not clamped separately
+Entity.placePortalTicket	skip:other		only one dimension is loaded at a time; arriving entities wait in portals.arrivals until resolve_arrivals can place them
+Entity.canTeleport	inline	crates/horizon-client/src/game/end.rs::Game::tick_end	leaving the End before the credits have been seen shows the credits instead of teleporting the player
+Entity.fillCrashReportCategory	skip:debug		crash report detail
+Entity.teleportPassengers	inline	crates/horizon-client/src/game/passengers.rs::Game::position_riders	riders and riders of riders are seated again each tick
+Entity.teleportRelative	port	crates/horizon-client/src/landing.rs::MotionWorld::teleport_relative	gap: minor: only the player is lifted out of a block that turns solid; mobs are lifted by trample_farmland, dropped items and boats are not
+Entity.fixupDimensions	inline	crates/horizon-client/src/mobs/living.rs::Mob::dims	dimensions are worked out on each call from size, age and pose, so there is nothing to refresh after a slime resize
+Entity.createHoverEvent	inline	crates/horizon-client/src/game/lan_trading.rs::Game::merchant_display_name	gap: minor: only players and merchants get the show_entity hover in chat; other mobs' names have none
+Entity.getInterpolatedBoundingBox	port	crates/horizon-client/src/game/entity_culling.rs::Game::standing_entity_in_view	the box is moved to the interpolated position for culling
+Entity.getFirstPassenger	inline	crates/horizon-client/src/game/passengers.rs::Game::sync_riders	gap: minor: one rider id per mob vehicle (extra.rider), not a list
+Entity.hasPassenger	inline	crates/horizon-client/src/game/passengers.rs::Game::sync_riders	gap: minor: one rider id per mob vehicle (extra.rider); the player's vehicle is Game.riding
+Entity.hasIndirectPassenger	skip:other		vehicle chains are seated by position_riders in three passes; no separate lookup is kept
+Entity.isLocalInstanceAuthoritative	port	crates/horizon-client/src/motion.rs::MotionWorld::locally_authoritative	the player's server copy is not authoritative; mobs are always local
+Entity.isLocalClientAuthoritative	inline	crates/horizon-client/src/motion.rs::MotionWorld::locally_authoritative	a ridden vehicle's passenger check is not modelled; the player's own copy decides
+Entity.isClientAuthoritative	skip:other		the host trusts its own player and LAN guests send their moves; there is no per-vehicle authority switch
+Entity.canSimulateMovement	port	crates/horizon-client/src/motion.rs::MotionWorld::can_simulate	gap: minor: always true; the move simulation type of vehicles and remote entities is not consulted
+Entity.getCollisionHorizontalEscapeVector	inline	crates/horizon-client/src/game/boats.rs::Game::boat_dismount_target	gap: minor: only boats use the formula; horses and striders use a plain side offset in dismount_mount
+Entity.getControlledVehicle	skip:other		the player's vehicle is Game.riding and a mob's is extra.mount; the controlling passenger is the first rider
+Entity.createCommandSourceStackForNameResolution	inline	crates/horizon-client/src/game/scoreboard.rs::Game::resolve_component	gap: minor: selector and score parts resolve from the player's view, not from the entity's own position and no-permission source
+Entity.touchingUnloadedChunk	missing		minor: fall damage checks and spectator ticks are not skipped at the edge of the loaded area (a LAN guest there)
+Entity.getX	skip:other		plain position field read
+Entity.getRandomY	skip:other		a random point in the box; each effect draws its own offsets inline
+Entity.getZ	skip:other		plain position field read
+Entity.getRandomZ	skip:other		a random point in the box; each effect draws its own offsets inline
+Entity.getRopeHoldPosition	inline	crates/horizon-client/src/game/leads.rs::Game::leash_geometry	a mob holder's end is its interpolated position plus 0.7 of its eye height; a player's comes from player_rope_hold
+Entity.setYRot	skip:other		plain setter; yaw is a struct field
+Entity.getClientPosition	port	crates/horizon-world/src/stepped_interpolation.rs::SteppedInterpolation::heading	the interpolation target while it runs, else the entity's position
+Entity.shouldBeSaved	inline	crates/horizon-client/src/game/persist.rs::Game::put_mob_passengers	riders are saved inside their vehicle's tag, not on their own
+Entity.lerpPositionAndRotationStep	inline	crates/horizon-client/src/game/remote.rs::Game::tick_remote_entities	boats, minecarts, projectiles and orbs of a server step toward the packet's target by 1/steps each tick
+Entity.applyImplicitComponents	missing		player: a spawn egg (or armor stand, boat or minecart item) renamed in an anvil spawns an unnamed entity; the item's custom_name and custom_data are not applied
+Entity.applyImplicitComponent	missing		player: custom_name and custom_data of a placed item are not applied to the new entity; only name tags (name_mob) and buckets copy data
+Entity.applyImplicitComponentIfPresent	missing		player: same gap, no item component reaches a freshly spawned entity
+EntityAttachments.scale	missing		minor: attachment points are not scaled with the mob, so riders on a resized or baby vehicle sit at the unscaled height
+EntityAttachments.getNullable	inline	crates/horizon-client/src/game/names.rs::Game::name_tags	gap: minor: only the NAME_TAG default (0.5 above the height) is used, so a sniffer's tag (offset 2.05) sits 0.2 too high
+EntityAttachments.get	inline	crates/horizon-client/src/mobs/riders.rs::passenger_attachment	the point is always found: the species table or the top of the box
+EntityAttachments.getAverage	inline	crates/horizon-client/src/mobs/riders.rs::passenger_attachment	gap: minor: one point; a sheared harness or sulfur cube item spawns at the mob's centre or box top rather than at the average passenger point
+EntityAttachments.getClamped	inline	crates/horizon-client/src/mobs/riders.rs::seat	the point turned by the vehicle's yaw and added to its position
+EntityAttachments.Builder.attach	inline	crates/horizon-client/src/mobs/riders.rs::passenger_attachment	attachment points are a match per species; only PASSENGER (and VEHICLE in vehicle_attachment) exist
+EntityAttachments.Builder.build	inline	crates/horizon-client/src/mobs/riders.rs::passenger_attachment	the fallback when a species has no point is the top of its box
+EntityDimensions.scale	port	crates/horizon-client/src/mobs/living.rs::Mob::dims	baby and size scaling multiply width, height and eye height; gap: minor: attachments are not scaled
+EntityDimensions.withEyeHeight	skip:data		eye heights come from entity-types.json (MobType.eye_height)
+EntityDimensions.withAttachments	inline	crates/horizon-client/src/mobs/riders.rs::passenger_attachment	attachments are a per species table, not part of a dimensions value
+EntityEquipment.isEmpty	port	crates/horizon-world/src/player_inventory.rs::PlayerInventory::is_empty	
+EntityEquipment.tick	port	crates/horizon-world/src/inventory_tick.rs::tick_equipment	gap: minor: the player's worn items only; items on mobs never tick
+EntityEquipment.dropAll	port	crates/horizon-client/src/game.rs::Game::drop_inventory	the main inventory, armour and off hand are thrown in random directions on death (Inventory.dropAll)
+EntityFluidInteraction.getOrCreateTrackerFor	inline	crates/horizon-world/src/entity_fluid.rs::EntityFluidInteraction::update	a tracker is found or pushed while scanning the box
+EntityFluidInteraction.getCurrentAccumulatorFor	inline	crates/horizon-world/src/entity_fluid.rs::EntityFluidInteraction::new	one accumulator is made per fluid tag up front
+EntityFluidInteraction.CurrentAccumulator.accumulate	port	crates/horizon-world/src/entity_fluid.rs::CurrentAccumulator::accumulate	
+EntityFluidInteraction.Tracker.reset	inline	crates/horizon-world/src/entity_fluid.rs::EntityFluidInteraction::update	the retain_mut at the start: idle trackers are dropped, the others get height 0 and eyes outside
+EntityReference.of	skip:java		references are plain UUID arrays (extra.owner), looked up when used
+EntityReference.getEntity	port	crates/horizon-client/src/game/persist.rs::Game::mob_by_uuid	gap: minor: mobs only; the player is matched by its own UUID where it is needed
+EntityReference.resolve	skip:java		class cast check
+EntityReference.store	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	Owner is written as an int array UUID
+EntityReference.readWithOldOwnerConversion	inline	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	gap: minor: Owner is read as an int array UUID; an owner saved as a player name (worlds from before 1.7.6) is not converted
+EntityReference.equals	skip:java		UUIDs are compared directly
+world/entity/EntitySelector.withinDistance	port	crates/horizon-client/src/game/dragon.rs::Game::fight_has_players	the 192 block range around (0, 128, 0) for the dragon fight's valid players
+EntityType.appendCustomEntityStackConfig	missing		player: a spawn egg or entity item with an entity_data component spawns a plain entity (use_spawn_egg ignores the stack's data)
+EntityType.updateCustomEntityTag	missing		player: entity_data of a spawn egg (from /give or a data pack) is never loaded into the spawned entity
+EntityType.getDescription	inline	crates/horizon-client/src/game/commands.rs::Game::target_name	entity.<namespace>.<name> translated
+EntityType.toShortString	skip:debug		only a game test message uses it
+EntityType.loadPassengersRecursive	port	crates/horizon-client/src/game/persist.rs::Game::load_mob	riders under Passengers are loaded after the vehicle; gap: minor: only mobs Horizon simulates, the rest stay in the tag
+EntityType.loadEntitiesRecursive	inline	crates/horizon-client/src/game/persist.rs::Game::load_mob	chunk entity lists, spawner and structure entities load each tag through load_mob
+EntityType.loadStaticEntity	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	a bad tag gives None instead of an exception
+EntityType.Builder.passengerAttachments	inline	crates/horizon-client/src/mobs/riders.rs::passenger_attachment	per species heights for the vehicles that carry riders; others use the box top
+EntityType.Builder.attach	inline	crates/horizon-client/src/mobs/riders.rs::passenger_attachment	only the PASSENGER point is a table; NAME_TAG and the rest use their defaults
+EntityType.Builder.build	skip:data		entity types are read from entity-types.json (MobType) instead of being built in code
+EquipmentSlot.isArmor	skip:other		slots are plain head, chest, legs and feet constants; armour logic names them (Ctx::armor)
+EquipmentSlot.byName	skip:data		slot names are read as strings from data and NBT
+EquipmentSlotGroup.bySlot	inline	crates/horizon-client/src/game/lan_attributes.rs::slot_in_group	a slot is its own group, so the test is group == slot
+EquipmentTable.createForAllSlots	skip:data		drop chances come from the loot and entity data
+ExperienceOrb.<init>	port	crates/horizon-client/src/game.rs::Game::add_orb	random yaw and motion from the orb's own random; gap: minor: no rough direction offset and no unstuck when the orb spawns inside a block
+ExperienceOrb.unstuckIfPossible	missing		minor: an orb that spawns inside blocks (a kill in a 1x1 hole) is not nudged to the nearest free spot; Mob has free_position, orbs do not use it
+ExperienceOrb.awardWithDirection	port	crates/horizon-client/src/game.rs::Game::spawn_orbs	gap: minor: the rough direction is never given, so xp bottle orbs do not fly away from the surface they hit
+ExperienceOrb.setUnderwaterMovement	port	crates/horizon-client/src/entities.rs::ExperienceOrb::tick	gap: minor: tests the block at the orb's feet, not its eyes
+ExperienceOrb.hurtServer	missing		player: xp orbs have no health, so explosions, fire and lava never destroy them (vanilla orbs have 5)
+ExperienceOrb.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::orb_to_nbt	gap: minor: Health is always written as 5
+ExperienceOrb.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::orbs_from_nbt	gap: minor: Health is ignored
+HumanoidArm.getOpposite	inline	crates/horizon-client/src/game.rs::Game::hand_geometry	the main hand's side is main_hand_left; the off hand is the other side
+InsideBlockEffectApplier.StepBasedCollector.flushStep	port	crates/horizon-client/src/arrows.rs::Collector::flush	gap: minor: the arrow collector has four effects (clear freeze, fire, lava, extinguish); the player's collector sits in motion.rs check_inside_blocks

@@ -987,7 +987,7 @@ impl Game<'_> {
             "minecraft:firework_rocket" => {
                 let mut shot = Projectile::new(ProjectileKind::Snowball, at, None);
                 shot.shoot(&mut own, dir, power, uncertainty);
-                self.launch_angled_rocket(at, shot.velocity, &one);
+                self.launch_angled_rocket(at, shot.velocity, &one, None);
             }
             _ => {
                 let kind = match item.as_str() {
@@ -2140,6 +2140,11 @@ pub(super) fn tipped_effect(stack: &ItemStack) -> Option<(&'static str, i32)> {
             def.effects
                 .iter()
                 .find(|(id, _, _)| !horizon_client::brewing::effect(id).is_some_and(|e| e.instant))
-                .map(|(id, duration, _)| (*id, (duration / 8).max(1)))
+                .map(|(id, duration, _)| {
+                    (
+                        horizon_client::brewing::namespaced(id),
+                        (duration / 8).max(1),
+                    )
+                })
         })
 }

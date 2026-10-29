@@ -1,0 +1,32 @@
+WorldSelectionList.pollLevelsIgnoreErrors	inline	crates/horizon-client/src/title.rs::list_worlds	the list is read at once, so there is no pending state; a world whose level.dat fails to read is skipped; the upload filter is Realms only, not ported
+WorldSelectionList.extractWidgetRenderState	inline	crates/horizon-client/src/title.rs::Title::draw	the list comes from recent_worlds, re-read at most every 2 seconds, not on every frame
+WorldSelectionList.handleNewLevels	inline	crates/horizon-client/src/title.rs::Title::enter_singleplayer	no worlds opens the new-world screen; otherwise the list is Mode::Select; the Realms upload empty entry is skipped
+WorldSelectionList.updateFilter	inline	crates/horizon-client/src/title.rs::Title::visible_worlds	the search text is applied at each draw; there is no refill step
+WorldSelectionList.loadLevels	inline	crates/horizon-client/src/title.rs::list_worlds	gap: minor: an unreadable saves folder shows no worlds instead of the Unable to load error screen
+WorldSelectionList.fillLevels	inline	crates/horizon-client/src/title.rs::Title::search_changed	gap: minor: any search edit clears the selection; vanilla keeps it while its world still matches the filter
+WorldSelectionList.filterAccepts	port	crates/horizon-client/src/title.rs::Title::matches_search	
+WorldSelectionList.handleLevelLoadFailure	inline	crates/horizon-client/src/title.rs::Title::failed	gap: minor: list_worlds never fails, so the Unable to load screen never shows
+WorldSelectionList.setSelected	inline	crates/horizon-client/src/title.rs::Title::click_action	selection is set on the row click path and cleared by search edits
+WorldSelectionList.getSelectedOpt	inline	crates/horizon-client/src/title.rs::Title::click_action	the selected world is looked up by index in the Select arms
+WorldSelectionList.updateWidgetNarration	skip:ui		narration only; Horizon has no narrator output
+WorldSelectionList.Builder.build	skip:java		builder for the list constructor
+WorldSelectionList.LoadingHeader.extractContent	skip:other		saves are read at once, so the loading header is never shown
+WorldSelectionList.NoWorldsEntry.extractContent	skip:service		empty entry of the Realms world upload list only
+WorldSelectionList.WorldListEntry.<init>	port	crates/horizon-client/src/title.rs::Title::draw	gap: minor: no hover tooltip on overflowing name, folder or info text; the name, folder and date, and mode and version lines are drawn
+WorldSelectionList.WorldListEntry.validateIconFile	port	crates/horizon-client/src/title.rs::Title::icon	gap: minor: no symlink check; an icon that is not a decodable 64x64 image shows the unknown-server icon
+WorldSelectionList.WorldListEntry.getNarration	skip:ui		narration text only; Horizon has no narrator output
+WorldSelectionList.WorldListEntry.keyPressed	missing		player: Enter or Space on a selected world does nothing (title Enter only confirms a rename), so keyboard players cannot join from the list
+WorldSelectionList.WorldListEntry.canInteract	missing		player: vanilla greys out locked and incompatible worlds and will not open them; Horizon's list_worlds has no lock or compatibility check, so Play opens every listed world
+WorldSelectionList.WorldListEntry.joinWorld	port	crates/horizon-client/src/title.rs::Title::click_action	gap: minor: no warning for a symlinked world before it opens
+WorldSelectionList.WorldListEntry.deleteWorld	port	crates/horizon-client/src/title.rs::Title::click_action	gap: minor: no progress screen while the world is deleted
+WorldSelectionList.WorldListEntry.doDeleteWorld	port	crates/horizon-client/src/title.rs::Title::confirm_delete	gap: minor: a failed delete shows the error screen, not the world delete failure toast
+WorldSelectionList.WorldListEntry.editWorld	port	crates/horizon-client/src/title.rs::Title::click_action	gap: minor: no data-read screen and no access-failure toast
+WorldSelectionList.WorldListEntry.recreateWorld	port	crates/horizon-client/src/title.rs::Title::click_action	gap: player: Re-Create takes the name, seed, mode and options into Create; no old-customized-world confirm, no datapack copy, and an unreadable world does nothing instead of showing an alert
+WorldSelectionList.WorldListEntry.loadIcon	port	crates/horizon-client/src/title.rs::Title::icon	icon.png is decoded at draw time and cached by modification time; gap: minor: no symlink check
+PlayerMenuItem.extractIcon	port	crates/horizon-client/src/spectator_menu.rs::icon	Item::Player arm: face at 2,2 size 12; vanilla ignores brightness, but only enabled players are listed, so no difference
+SpectatorMenu.getItems	inline	crates/horizon-client/src/spectator_menu.rs::SpectatorGui::hotbar	the nine-slot loop; each slot is read through SpectatorMenu::item
+SpectatorPage.getItem	inline	crates/horizon-client/src/spectator_menu.rs::SpectatorMenu::item	the page bounds check and the empty-slot fallback are folded into item
+TeleportToPlayerMenuCategory.extractIcon	port	crates/horizon-client/src/spectator_menu.rs::icon	Item::TeleportToPlayer arm: teleport_to_player sprite at 16x16 with brightness and alpha tint
+TeleportToTeamMenuCategory.extractIcon	port	crates/horizon-client/src/spectator_menu.rs::icon	Item::TeleportToTeam arm: teleport_to_team sprite at 16x16 with brightness and alpha tint
+TeleportToTeamMenuCategory.TeamSelectionItem.create	port	crates/horizon-client/src/game/spectator.rs::Game::new_spectator_menu	team members come from the tab list, non-spectators only; no members means no entry; the icon is a random member's skin
+TeleportToTeamMenuCategory.TeamSelectionItem.extractIcon	port	crates/horizon-client/src/spectator_menu.rs::icon	Item::Team arm: team colour fill at 1,1 to 15,15 scaled by brightness, then the face

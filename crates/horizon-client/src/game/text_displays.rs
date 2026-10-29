@@ -1,10 +1,10 @@
 //! Server text displays: metadata, interpolation, billboard transforms and world text.
 use super::Game;
 use horizon_client::{
-    hud::{HudBatch, rgba},
+    gfx::TEXT_POLYGON_OFFSET_OVERLAY,
+    hud::HudBatch,
     mesher::Vertex,
-    text::Text,
-    text_display::{Align, TextDisplayData},
+    text_display::{self, Lines, TextDisplayData},
 };
 use horizon_protocol::entity_data::Value;
 
@@ -32,12 +32,6 @@ pub(super) struct RemoteTextDisplay {
     /// `TextDisplay.clientDisplayCache`: the split lines, until the render
     /// state changes.
     lines: Option<Lines>,
-}
-
-/// `TextDisplay.CachedInfo`: each line and its width, and the widest.
-struct Lines {
-    lines: Vec<(Text, f32)>,
-    width: f32,
 }
 
 /// `Display.RENDER_STATE_IDS` and `TextDisplay.TEXT_RENDER_STATE_IDS`: the
@@ -157,6 +151,7 @@ impl Game<'_> {
         see_through: &mut Vec<Vertex>,
     ) {
         self.text_display_vertices = 0;
+        self.mark_translucent_entity(normal.len(), "minecraft:text_display");
         let atlas = &self.gui.atlas;
         let front = self.camera_type == super::perspective::CameraType::ThirdPersonFront;
         let angles = if front {
@@ -177,69 +172,23 @@ impl Game<'_> {
                 display.old_rotation[i]
                     + angle(display.rotation[i] - display.old_rotation[i]) * partial as f32
             });
-            let mut matrix = glam::Mat4::from_translation((position - camera).as_vec3())
+            let lines = display
+                .lines
+                .get_or_insert_with(|| Lines::split(&atlas.font, &d.text, d.line_width));
+            let matrix = glam::Mat4::from_translation((position - camera).as_vec3())
                 * d.matrix(rotation, angles)
-                * glam::Mat4::from_rotation_y(std::f32::consts::PI)
-                * glam::Mat4::from_scale(glam::Vec3::splat(-0.025));
+                * lines.pose();
             if !matrix.is_finite() {
                 continue;
             }
-            // TextDisplayRenderer.splitLines: Font.split, no indent on wrapped lines.
-            let Lines { lines, width } = display.lines.get_or_insert_with(|| {
-                let lines: Vec<_> = atlas
-                    .font
-                    .split(&d.text, d.line_width as f32)
-                    .into_iter()
-                    .map(|line| {
-                        let width = atlas.font.width_text(&line).ceil();
-                        (line, width)
-                    })
-                    .collect();
-                let width = lines.iter().map(|l| l.1).fold(0.0, f32::max);
-                Lines { lines, width }
-            });
-            let width = *width;
-            let height = lines.len() as f32 * 10.0 - 1.0;
-            matrix *=
-                glam::Mat4::from_translation(glam::Vec3::new(1.0 - width / 2.0, -height, 0.0));
             let mut batch = HudBatch::new([1, 1]);
-            let bg = if d.flags & 4 != 0 {
-                self.settings.text_background(0.25)
-            } else {
-                d.background as u32
-            };
-            if bg != 0 {
-                batch.fill(
-                    atlas,
-                    // submitTextBackground(-1, -1, width, height): corners, not a size.
-                    -1.0,
-                    -1.0,
-                    width + 1.0,
-                    height + 1.0,
-                    rgba(
-                        (bg >> 16) as u8,
-                        (bg >> 8) as u8,
-                        bg as u8,
-                        (bg >> 24) as u8,
-                    ),
-                );
-            }
-            let align = d.align();
-            for (i, (line, line_width)) in lines.iter().enumerate() {
-                let x = match align {
-                    Align::Left => 0.0,
-                    Align::Right => width - line_width,
-                    Align::Center => (width - line_width) / 2.0,
-                };
-                batch.text_styled(
-                    atlas,
-                    line,
-                    x,
-                    i as f32 * 10.0,
-                    rgba(255, 255, 255, d.opacity as u8),
-                    d.flags & 1 != 0,
-                );
-            }
+            text_display::draw(
+                &mut batch,
+                atlas,
+                &d,
+                lines,
+                self.settings.text_background(0.25),
+            );
             let world_light = self.world.light(
                 position.x.floor() as i32,
                 position.y.floor() as i32,
@@ -251,11 +200,12 @@ impl Game<'_> {
                 ((d.brightness as u32 >> 20 & 15) * 16)
                     | (((d.brightness as u32 >> 4 & 15) * 16) << 8)
             };
+            // Font.DisplayMode: SEE_THROUGH over everything, else POLYGON_OFFSET.
             let through = d.flags & 2 != 0;
-            let out = if through {
-                &mut *see_through
+            let (out, layer) = if through {
+                (&mut *see_through, 2)
             } else {
-                &mut *normal
+                (&mut *normal, TEXT_POLYGON_OFFSET_OVERLAY)
             };
             for quad in batch.vertices.as_chunks::<6>().0 {
                 for i in [0, 1, 2, 5] {
@@ -267,7 +217,7 @@ impl Game<'_> {
                         uv: v.uv,
                         color: v.color,
                         light,
-                        layer: if through { 2 } else { 0 },
+                        layer,
                         normal: [0; 4],
 
                         glint_uv: [0.0, 0.0],

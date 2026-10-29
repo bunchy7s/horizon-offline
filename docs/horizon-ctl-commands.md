@@ -125,7 +125,7 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 | `potion ITEM POTION` | `potion` | Give a potion item | `item` (potion, splash_potion, lingering_potion, tipped_arrow, required): which item<br>`potion` (string, required): potion id |
 | `fill X1 Y1 Z1 X2 Y2 Z2 BLOCK` | `fill` (destructive) | Set a box of loaded blocks | `x1` (integer, required): corner X<br>`y1` (integer, required): corner Y<br>`z1` (integer, required): corner Z<br>`x2` (integer, required): opposite X<br>`y2` (integer, required): opposite Y<br>`z2` (integer, required): opposite Z<br>`block` (string, required): block state |
 | `container X Y Z [ITEM COUNT]` | `container` | List a container's items, or add items to it | `x` (integer, required): block X<br>`y` (integer, required): block Y<br>`z` (integer, required): block Z<br>`item` (string): item to add<br>`count` (integer): how many |
-| `render-distance N` | CLI only | Chunks, 2..64 | `chunks` (integer, required): render distance |
+| `render-distance N` | CLI only | Chunks, 2..128 | `chunks` (integer, required): render distance |
 | `wait TICKS` | `wait` | Wait until TICKS game ticks have passed (20 per second) | `ticks` (integer, required): game ticks |
 
 ## Scripting and benchmarks

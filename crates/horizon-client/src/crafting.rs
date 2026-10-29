@@ -27,7 +27,7 @@ impl Ingredient {
     pub fn of(items: Vec<String>) -> Self {
         Self(items.iter().cloned().collect(), items)
     }
-    fn parse(v: &Value, items: &Items) -> Option<Self> {
+    pub(crate) fn parse(v: &Value, items: &Items) -> Option<Self> {
         let mut list: Vec<String> = Vec::new();
         let mut add = |s: &str| {
             let more: Vec<String> = match s.strip_prefix('#') {
@@ -43,14 +43,6 @@ impl Ingredient {
         match v {
             Value::String(s) => add(s),
             Value::Array(a) => a.iter().filter_map(Value::as_str).for_each(&mut add),
-            Value::Object(o) => {
-                if let Some(s) = o.get("item").and_then(Value::as_str) {
-                    add(s);
-                }
-                if let Some(t) = o.get("tag").and_then(Value::as_str) {
-                    add(&format!("#{t}"));
-                }
-            }
             _ => return None,
         }
         (!list.is_empty()).then(|| Self::of(list))

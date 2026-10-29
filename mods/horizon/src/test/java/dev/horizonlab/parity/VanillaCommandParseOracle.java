@@ -67,6 +67,8 @@ import net.minecraft.world.phys.Vec3;
 public final class VanillaCommandParseOracle {
     static sun.misc.Unsafe unsafe;
     static final String[] PLAYERS = {"Player", "Steve", "Alex"};
+    /** ClientSuggestionProvider.getSelectedEntities: the crosshair entity's UUID. */
+    static final String[] SELECTED = {"0b9c6a7e-3d1f-4a2b-9c8d-7e6f5a4b3c2d"};
     static final String[] TEAMS = {"red", "blue"};
     static final String[] OBJECTIVES = {"kills", "health", "obj"};
     static final String[] TRACKED = {"#total", "Steve", "fake"};
@@ -83,6 +85,7 @@ public final class VanillaCommandParseOracle {
             this.lookup = lookup;
         }
         @Override public Collection<String> getOnlinePlayerNames() { return new ArrayList<>(List.of(PLAYERS)); }
+        @Override public Collection<String> getSelectedEntities() { return new ArrayList<>(List.of(SELECTED)); }
         @Override public Collection<String> getAllTeams() { return new ArrayList<>(List.of(TEAMS)); }
         @Override public RegistryAccess registryAccess() { return access; }
         @Override public Set<ResourceKey<Level>> levels() { return Set.of(Level.OVERWORLD, Level.NETHER, Level.END); }
@@ -374,6 +377,7 @@ public final class VanillaCommandParseOracle {
         o.add("timelines", dynamic(access, Registries.TIMELINE));
         o.add("dimensions", arr("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"));
         o.add("players", arr(PLAYERS));
+        o.add("selected_entities", arr(SELECTED));
         o.add("teams", arr(TEAMS));
         o.add("objectives", arr(OBJECTIVES));
         o.add("tracked", arr(TRACKED));

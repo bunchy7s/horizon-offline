@@ -1,0 +1,149 @@
+Registry.byNameCodec	skip:java		codec over the registry by name
+Registry.referenceHolderWithLifecycle	skip:java		codec helper with lifecycle
+Registry.safeCastToReference	skip:java		codec helper
+Registry.keys	skip:java		DynamicOps key stream, no ops in Horizon
+Registry.getOptional	skip:java		Optional wrapper of get
+Registry.getValueOrThrow	skip:java		throwing lookup wrapper
+Registry.register	skip:data		bootstrap registration of built-in entries; Horizon reads registry tables
+Registry.registerForHolder	skip:data		bootstrap registration of built-in entries; Horizon reads registry tables
+RegistryAccess.lookupOrThrow	skip:java		lookup wrapper
+RegistryAccess.ImmutableRegistryAccess.lookup	skip:java		map lookup over registries
+RegistrySetBuilder.add	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
+RegistrySetBuilder.buildProviderWithContext	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
+RegistrySetBuilder.build	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
+RegistrySetBuilder.findRegistriesMissingFromPatch	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
+RegistrySetBuilder.buildPatch	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
+RegistrySetBuilder.BootstrappedRegistryState.create	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
+RegistrySetBuilder.BootstrappedRegistryState.bindHolders	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
+RegistrySetBuilder.BootstrappedRegistryState.errorOnMissingHolders	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
+RegistrySetBuilder.BootstrappedRegistryState.validatePatchHolders	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
+RegistrySetBuilder.BuildState.createAndApply	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
+RegistrySetBuilder.BuildState.create	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
+RegistrySetBuilder.BuildState.throwOnError	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
+RegistrySetBuilder.BuildState.createBootstrap	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
+RegistrySynchronization.packRegistries	inline	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	gap: minor: packs every registry SyncData holds; the synchronized-registry list is not checked here
+RegistrySynchronization.packRegistry	port	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	gap: minor: known_pack leaves out contents for every entry; vanilla checks each entry's known pack
+RegistrySynchronization.networkSafeRegistries	inline	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	gap: minor: unsure which registries count as networkable; decided when SyncData is built
+SectionPos.offset	inline	crates/horizon-client/src/light.rs::Region::slot	gap: minor: the light engine reaches neighbour sections by block coordinate; the SectionTracker walk is not checked
+SectionPos.sectionRelativePos	port	crates/horizon-core/src/position.rs::BlockPos::section_relative	
+SectionPos.relativeToBlockPos	port	crates/horizon-core/src/position.rs::SectionPos::relative_to_block	
+SectionPos.blockToSection	port	crates/horizon-core/src/position.rs::BlockPos::section	on the unpacked position; the long is SectionPos::pack of it
+SectionPos.origin	inline	crates/horizon-client/src/gfx/resident.rs::origin	gap: minor: camera-relative origin; the block corner is the same sum without the camera
+SectionPos.asLong	port	crates/horizon-core/src/position.rs::SectionPos::pack	asLong(BlockPos): BlockPos::section then this pack; bit layout matches
+SectionPos.blocksInside	inline	crates/horizon-client/src/mobs/villager_brain.rs::chunk_pois	the POI scan visits every block of each section
+SectionPos.aroundChunk	missing		minor: unsure: ensureLoadedAndValid pre-loads POI chunks around a point; Horizon's chunk_pois reads loaded chunks only
+SectionPos.betweenClosedStream	skip:java		Java stream over a 3-D section box; the loops in pois_in_range and chunk_pois do the iteration
+SectionPos.aroundAndAtBlockPos	port	crates/horizon-client/src/light.rs::LightChanges::dirty_sections	the sections within one block of a changed cell
+TypedInstance.is	skip:java		holder type checks; Horizon compares registry names
+UUIDUtil.leastMostToIntArray	port	crates/horizon-client/src/lan/playerdata.rs::uuid_ints	
+UUIDUtil.uuidToByteArray	port	crates/horizon-protocol/src/buf.rs::Writer::uuid	writes into the buffer instead of returning bytes
+UUIDUtil.readUUID	port	crates/horizon-client/src/lan/playerdata.rs::ints_uuid	gap: minor: no length check here; the input is already [i32; 4]
+Vec3i.offsetCodec	skip:java		codec with a range check
+Vec3i.equals	skip:java		derived equality on BlockPos
+Vec3i.subtract	skip:other		trivial: offset by the negated vector; Horizon has no integer subtract
+Vec3i.multiply	inline	crates/horizon-world/src/worldgen/structure/features.rs::TemplateFeature::place	gap: minor: only the scalar form, unit normal times size/2 in the template pivot step
+Vec3i.cross	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	gap: minor: the pattern's right axis is enumerated as X or Z, not computed; the redstone Orientation caller is not checked
+Vec3i.distToCenterSqr	inline	crates/horizon-client/src/mobs/doors.rs::closer_to_center	gap: minor: returns only the closer-than test, not the squared distance
+Vec3i.distToLowCornerSqr	inline	crates/horizon-world/src/worldgen/end_spike.rs::EndSpikeFeature::place_spike	the spike radius test
+Vec3i.distChessboard	inline	crates/horizon-world/src/level/sculk.rs::Sim::sculk_update_cursors	gap: minor: only the sculk cursor distance; GlobalPos.isWithinDistance is not covered
+Vec3i.differsHorizontally	missing		minor: unsure: used by TryFindLand-style AI filters; no horizontal-differ check found in Horizon's mob AI
+Vec3i.toString	skip:debug		debug string
+CauldronInteraction.Dispatcher.put	skip:java		item-to-interaction table; Horizon matches items in cauldron.rs::interact
+CauldronInteractions.newDispatcher	skip:java		table constructor
+CauldronInteractions.bootStrap	inline	crates/horizon-client/src/cauldron.rs::interact	gap: minor: posts no FLUID_PICKUP/FLUID_PLACE game event (Game::use_on_cauldron)
+CauldronInteractions.addDefaultInteractions	inline	crates/horizon-client/src/cauldron.rs::interact	the lava, water and powder snow bucket arms for every cauldron kind
+CauldronInteractions.fillBucket	inline	crates/horizon-client/src/cauldron.rs::interact	gap: minor: posts no FLUID_PICKUP/FLUID_PLACE game event (Game::use_on_cauldron)
+CauldronInteractions.emptyBucket	inline	crates/horizon-client/src/cauldron.rs::interact	gap: minor: posts no FLUID_PICKUP/FLUID_PLACE game event (Game::use_on_cauldron)
+CauldronInteractions.fillWaterInteraction	inline	crates/horizon-client/src/cauldron.rs::interact	gap: minor: posts no FLUID_PICKUP/FLUID_PLACE game event (Game::use_on_cauldron)
+CauldronInteractions.fillLavaInteraction	inline	crates/horizon-client/src/cauldron.rs::interact	gap: minor: posts no FLUID_PICKUP/FLUID_PLACE game event (Game::use_on_cauldron)
+CauldronInteractions.fillPowderSnowInteraction	inline	crates/horizon-client/src/cauldron.rs::interact	gap: minor: posts no FLUID_PICKUP/FLUID_PLACE game event (Game::use_on_cauldron)
+CauldronInteractions.shulkerBoxInteraction	inline	crates/horizon-client/src/cauldron.rs::interact	gap: minor: posts no FLUID_PICKUP/FLUID_PLACE game event (Game::use_on_cauldron)
+CauldronInteractions.bannerInteraction	inline	crates/horizon-client/src/cauldron.rs::interact	gap: minor: posts no FLUID_PICKUP/FLUID_PLACE game event (Game::use_on_cauldron)
+CauldronInteractions.dyedItemIteration	inline	crates/horizon-client/src/cauldron.rs::interact	gap: minor: posts no FLUID_PICKUP/FLUID_PLACE game event (Game::use_on_cauldron)
+BlockTransformer.playerHasBlockingItemUseIntent	port	crates/horizon-client/src/game.rs::Game::block_transform	gap: minor: checks the off-hand shield for any hand; vanilla checks the main hand only
+BlockTransformer.BlockTransformData.builder	skip:java		builder
+BlockTransformer.BlockTransformData.Builder.build	skip:java		builder
+DataComponentExactPredicate.someOf	skip:data		builds an exact predicate from a stack; used for datagen-made predicates
+DataComponentExactPredicate.equals	skip:java		equality
+DataComponentExactPredicate.Builder.expect	skip:java		builder
+DataComponentGetter.getTyped	skip:java		typed read; Horizon reads typed StackData fields
+DataComponentHolder.getAllOfType	skip:java		stream over components
+DataComponentInitializers.runInitializers	skip:data		item default component initializers; Horizon reads item defaults from its tables
+DataComponentInitializers.registryEmpty	skip:data		item default component initializers; Horizon reads item defaults from its tables
+DataComponentInitializers.addBuilder	skip:data		item default component initializers; Horizon reads item defaults from its tables
+DataComponentInitializers.build	skip:data		item default component initializers; Horizon reads item defaults from its tables
+DataComponentInitializers.createInitializerForRegistry	skip:data		item default component initializers; Horizon reads item defaults from its tables
+DataComponentInitializers.Initializer.andThen	skip:data		item default component initializers; Horizon reads item defaults from its tables
+DataComponentInitializers.Initializer.add	skip:data		item default component initializers; Horizon reads item defaults from its tables
+DataComponentInitializers.SingleComponentInitializer.asInitializer	skip:data		item default component initializers; Horizon reads item defaults from its tables
+DataComponentLookup.getOrCreateStorage	skip:java		cache
+DataComponentLookup.scanForComponents	skip:java		index build behind the lookup
+DataComponentLookup.findAll	missing		minor: unsure: DyeColor mixing and the recipe fuel list read it; Horizon finds dyes and fuels by name and table
+DataComponentLookup.ComponentStorage.findMatching	missing		minor: unsure: spawn egg from an entity type; Horizon builds egg ids by name
+DataComponentMap.makeCodecFromMap	skip:java		codec
+DataComponentMap.iterator	skip:java		iterator
+DataComponentMap.Builder.setUnchecked	skip:java		builder
+DataComponentMap.Builder.addAll	skip:java		builder
+DataComponentMap.Builder.buildFromMapTrusted	skip:java		builder
+DataComponentPatch.getFromPatchAndPrototype	skip:java		patch-or-default read; typed StackData fields plus the item table cover it
+DataComponentPatch.forget	missing		minor: unsure: BlockEntity.setComponents strips implicit components with forget; not checked in Horizon's block entity placement
+DataComponentPatch.split	skip:java		added and removed parts kept as separate fields (protocol Stack.removed, StackData)
+DataComponentPatch.equals	skip:java		equality
+DataComponentPatch.toString	skip:debug		debug string
+DataComponentPatch.Builder.set	skip:java		builder
+DataComponentPatch.Builder.build	skip:java		builder
+DataComponentType.codecOrThrow	skip:java		codec
+DataComponentType.Builder.build	skip:data		component type registration
+PatchedDataComponentMap.fromPatch	port	crates/horizon-items/src/item_data.rs::decode_components	gap: minor: defaults come from the item table, not a prototype map
+PatchedDataComponentMap.isPatchSanitized	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
+PatchedDataComponentMap.set	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
+PatchedDataComponentMap.remove	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
+PatchedDataComponentMap.applyPatch	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
+PatchedDataComponentMap.restorePatch	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
+PatchedDataComponentMap.setAll	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
+PatchedDataComponentMap.ensureMapOwnership	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
+PatchedDataComponentMap.keySet	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
+PatchedDataComponentMap.iterator	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
+PatchedDataComponentMap.size	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
+PatchedDataComponentMap.asPatch	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
+PatchedDataComponentMap.copy	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
+PatchedDataComponentMap.equals	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
+TypedDataComponent.encodeValue	skip:java		codec
+AttributeModifiersPredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
+AttributeModifiersPredicate.EntryPredicate.test	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
+BundlePredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
+ContainerPredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
+net/minecraft/core/component/predicates/DamagePredicate#matches	inline	crates/horizon-client/src/advancements.rs::item	gap: minor: only the damage range; the durability range (max damage minus damage) is not checked
+DataComponentPredicate.Single.wrapCodec	skip:java		codec
+DataComponentPredicate.Type.unpackType	skip:java		codec helper
+EnchantmentsPredicate.matches	inline	crates/horizon-client/src/advancements.rs::item	the enchantments predicate inside item()
+FireworkExplosionPredicate.FireworkPredicate.test	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
+FireworksPredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
+JukeboxPlayablePredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
+PotionsPredicate.matches	port	crates/horizon-client/src/advancements.rs::potions	
+WritableBookPredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
+WrittenBookPredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
+BoatDispenseItemBehavior.execute	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_boat	
+DefaultDispenseItemBehavior.dispense	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_default	the click and dispense events of dispense_default
+DefaultDispenseItemBehavior.addToInventoryOrDispense	port	crates/horizon-client/src/game/dispenser.rs::Game::consume_with_remainder	
+EquipmentDispenseItemBehavior.execute	inline	crates/horizon-client/src/game/dispenser.rs::Game::dispense_default_method	the equippable branch of dispense_default_method
+FlintAndSteelDispenseItemBehavior.execute	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_flint_and_steel	
+FlintAndSteelDispenseItemBehavior.tryIgniteExplosiveEntities	inline	crates/horizon-client/src/game/dispenser.rs::Game::dispense_flint_and_steel	the sulfur cube priming branch
+MinecartDispenseItemBehavior.execute	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_minecart	
+MinecartDispenseItemBehavior.getRailShape	inline	crates/horizon-client/src/game/dispenser.rs::Game::dispense_minecart	the slope test on the rail
+ProjectileDispenseBehavior.execute	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_projectile	
+ProjectileDispenseBehavior.playSound	inline	crates/horizon-client/src/game/dispenser.rs::Game::dispense_projectile	returns the level event that dispense_item posts
+ShearsDispenseItemBehavior.execute	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_shears	
+ShearsDispenseItemBehavior.tryShearBeehive	port	crates/horizon-client/src/game/dispenser.rs::Game::shear_beehive	
+ShulkerBoxDispenseBehavior.execute	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_shulker_box	
+SpawnEggItemBehavior.execute	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_spawn_egg	
+SulfurCubeBlockDispenseItemBehavior.execute	inline	crates/horizon-client/src/game/dispenser.rs::Game::dispense_default_method	the swallow branch of dispense_default_method
+BlockParticleOption.codec	skip:java		codec; the field check is horizon-command args.rs::particle_options
+BlockParticleOption.streamCodec	port	crates/horizon-protocol/src/entity_data.rs::Particle::read	read side of the stream codec
+ColorParticleOption.codec	skip:java		codec; the field check is horizon-command args.rs::particle_options
+ColorParticleOption.streamCodec	port	crates/horizon-protocol/src/entity_data.rs::Particle::read	read side of the stream codec
+GeyserBaseParticleOptions.streamCodec	port	crates/horizon-protocol/src/entity_data.rs::Particle::read	read side of the stream codec
+GeyserParticleOptions.codec	skip:java		codec; the field check is horizon-command args.rs::particle_options
+GeyserParticleOptions.streamCodec	port	crates/horizon-protocol/src/entity_data.rs::Particle::read	read side of the stream codec
+ItemParticleOption.codec	skip:java		codec; the field check is horizon-command args.rs::particle_options
+ItemParticleOption.streamCodec	port	crates/horizon-protocol/src/entity_data.rs::Particle::read	read side of the stream codec

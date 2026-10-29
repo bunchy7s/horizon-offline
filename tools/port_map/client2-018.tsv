@@ -1,0 +1,65 @@
+GhostSlots.extractTooltip	missing		player: hovering a ghost ingredient or result in the crafting grid or furnace shows no item tooltip; the ghost draw has no tooltip call and draw_slot_tooltip reads only real slots
+GhostSlots.GhostSlot.getItem	port	crates/horizon-client/src/recipe_book_screen.rs::ghost	the stack cycles with index % items; empty ghost slots are dropped in Book::ghost
+OverlayRecipeComponent.mouseClicked	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_click	left click places the overlay's recipe; right click and outside clicks close the overlay
+OverlayRecipeComponent.OverlayCraftingRecipeButton.calculateIngredientsPositions	port	crates/horizon-client/src/recipe_book_screen.rs::overlay_cells	shaped recipes use the 3x3 grid cells, shapeless ones i % 3 and i / 3; empty ingredients are dropped
+OverlayRecipeComponent.OverlayCraftingRecipeButton.getSprite	port	crates/horizon-client/src/recipe_book_screen.rs::overlay	crafting_overlay sprite by craftable and hover
+OverlayRecipeComponent.OverlayRecipeButton.createGridPos	port	crates/horizon-client/src/recipe_book_screen.rs::overlay	cell at 3 + 7x, 3 + 7y inside the 24 px button
+OverlayRecipeComponent.OverlayRecipeButton.extractWidgetRenderState	port	crates/horizon-client/src/recipe_book_screen.rs::overlay	cells drawn as items at 0.375 scale, each cycling its stacks by index
+OverlayRecipeComponent.OverlaySmeltingRecipeButton.getSprite	port	crates/horizon-client/src/recipe_book_screen.rs::overlay	furnace_overlay sprites by craftable and hover
+RecipeBookComponent.init	inline	crates/horizon-client/src/game/recipe_book.rs::Game::ensure_book	the book and search box are built on first use; the open flag is Game::book_open and the views come from refresh_book_view
+RecipeBookComponent.initVisuals	inline	crates/horizon-client/src/game/recipe_book.rs::Game::refresh_book_view	tabs, buttons and page are rebuilt when inventory, grid, filter, tab, search text or known recipes change; the search box is drawn by screen::draw
+RecipeBookComponent.setVisible	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_click	the book button flips the open flag and sends the settings; closing clears the overlay; gap: minor: a server settings packet sets the flag without clearing the overlay or page
+RecipeBookComponent.slotClicked	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_click	a click on a grid, result or furnace slot clears the ghost recipe and the last placed recipe (is_book_slot)
+RecipeBookComponent.selectMatchingRecipes	inline	crates/horizon-client/src/game/recipe_book.rs::Game::build_view	a recipe is selected when it fits the crafting grid; craftable comes from Book::can_craft against book_available
+RecipeBookComponent.updateCollections	port	crates/horizon-client/src/game/recipe_book.rs::Game::build_view	collections filtered by the search (Book::collection_matches) and by the craftable filter; callers reset the page on tab and filter changes
+RecipeBookComponent.updateTabs	inline	crates/horizon-client/src/game/recipe_book.rs::Game::build_view	tab visibility; positions are in Game::tab_pos and the squeeze in Game::start_new_recipe_animations
+RecipeBookComponent.tick	port	crates/horizon-client/src/game/recipe_book.rs::Game::draw_recipe_book	advances the swap time and the squeezes; the inventory-changed refresh is the hash in refresh_book_view
+RecipeBookComponent.extractTooltip	port	crates/horizon-client/src/game/recipe_book.rs::Game::draw_book_panel	gap: player: no tooltip for ghost slots (GhostSlots.extractTooltip); the page's recipe tooltip is the ItemTooltip call
+RecipeBookComponent.mouseClicked	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_click	gap: player: in the narrow layout vanilla closes the book after placing a recipe (isOffsetNextToMainGUI is false); Horizon keeps it open
+RecipeBookComponent.mouseDragged	missing		player: dragging across the recipe search box does not select text; EditBox::drag_to is used only by the title screen
+RecipeBookComponent.onTabButtonPress	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_click	a tab click selects the tab and resets the page to 0
+RecipeBookComponent.replaceSelected	inline	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_click	sets recipe_ui.tab, so one tab is selected at a time
+RecipeBookComponent.toggleFiltering	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_click	the craftable filter button flips the filter, sends the settings and resets the page
+RecipeBookComponent.keyPressed	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_key	search box keys and KeyT focus (Game::recipe_focus_search); gap: player: Enter and Space do not place the last clicked recipe (lastRecipe); gap: player: Escape does not close only the book in the narrow layout
+RecipeBookComponent.charTyped	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_key	typed text enters the search box from the key event; gap: minor: no separate char event, so no IME text
+RecipeBookComponent.preeditUpdated	missing		minor: no IME composition in the recipe search box
+RecipeBookComponent.capturesInput	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_search_focused	true while the search box has focus
+RecipeBookComponent.checkSearchStringUpdate	inline	crates/horizon-client/src/game/recipe_book.rs::Game::refresh_book_view	the search text is part of the view key, so a change rebuilds the buttons
+RecipeBookComponent.pirateSpeechForThePeople	missing		minor: typing excitedze in the recipe search switches the game to pirate English (en_pt); Horizon has no language switch from the book
+RecipeBookComponent.recipesUpdated	inline	crates/horizon-client/src/game/recipe_book.rs::Game::refresh_book_view	new or removed known recipes change client_version, which rebuilds the tabs and buttons
+RecipeBookComponent.updateNarration	skip:other		screen-reader narration; Horizon has no narration output
+RecipeBookPage.init	inline	crates/horizon-client/src/game/recipe_book.rs::Game::button_pos	button places (5 per row, 25 px apart) are computed here; arrow places are fixed in recipe_book_click and screen::draw
+RecipeBookPage.updateCollections	inline	crates/horizon-client/src/game/recipe_book.rs::Game::refresh_book_view	page count is div_ceil(20) of the buttons; the page is reset to 0 when it is past the end
+RecipeBookPage.updateButtonsForPage	port	crates/horizon-client/src/game/recipe_book.rs::Game::draw_book_panel	the page's buttons are skip(page * 20).take(20)
+RecipeBookPage.updateArrowButtons	port	crates/horizon-client/src/recipe_book_screen.rs::draw	arrows show when there is more than one page and the page is not the first or the last
+RecipeBookPage.mouseClicked	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_click	page arrows; right click opens the overlay when the button has more than one recipe; left click places
+RecipeBookTabButton.extractContents	port	crates/horizon-client/src/recipe_book_screen.rs::draw	tab sprite, the 2 px shift when selected, and the squeeze pose
+RecipeBookTabButton.extractIcon	port	crates/horizon-client/src/recipe_book_screen.rs::draw	one or two fake item icons at offsets 9, or 3 and 14, shifted 2 px when selected
+RecipeBookTabButton.updateVisibility	port	crates/horizon-client/src/game/recipe_book.rs::Game::build_view	a tab is shown when a collection of its category has a selected recipe
+RecipeButton.extractWidgetRenderState	port	crates/horizon-client/src/recipe_book_screen.rs::draw	sprite by craftable and by several recipes, squeeze pose, same-result item under the fake item
+RecipeButton.getCurrentRecipe	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_click	the entry at swap_index % entries
+RecipeButton.getTooltipText	port	crates/horizon-client/src/game/recipe_book.rs::Game::paint_book	ItemTooltip: the stack's tooltip, then Right Click for More when there are several recipes
+RecipeButton.updateWidgetNarration	skip:other		screen-reader narration; Horizon has no narration output
+RecipeButton.isValidClickButton	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_click	left and right clicks only; a middle click does nothing here
+RecipeButton.ResolvedEntry.selectItem	port	crates/horizon-client/src/recipe_book_screen.rs::display_stack	the stack at offset % count; display_stack first picks the recipe from index % count
+RecipeCollection.selectRecipes	inline	crates/horizon-client/src/game/recipe_book.rs::Game::build_view	selected when the recipe fits the crafting grid; craftable from Book::can_craft against the stock
+RecipeCollection.getSelectedRecipes	inline	crates/horizon-client/src/game/recipe_book.rs::Game::build_view	entries kept per view: selected ones, and only craftable ones when filtering
+AbstractReportScreen	skip:service		chat and skin abuse reporting screens; Horizon has no reporting
+AbstractReportScreen.DiscardReportWarningScreen	skip:service		abuse report discard warning; Horizon has no reporting
+ChatReportScreen	skip:service		chat abuse reporting screen; Horizon has no reporting
+ChatSelectionLogFiller	skip:service		chat log filler for the report selection; Horizon has no reporting
+ChatSelectionScreen	skip:service		chat message selection for a report; Horizon has no reporting
+ChatSelectionScreen.ChatSelectionList	skip:service		chat message list of the report screen; Horizon has no reporting
+ChatSelectionScreen.ChatSelectionList.DividerEntry	skip:service		divider row of the report chat list; Horizon has no reporting
+ChatSelectionScreen.ChatSelectionList.MessageEntry	skip:service		message row of the report chat list; Horizon has no reporting
+ChatSelectionScreen.ChatSelectionList.MessageHeadingEntry	skip:service		heading row of the report chat list; Horizon has no reporting
+NameReportScreen	skip:service		player name abuse report screen; Horizon has no reporting
+ReportPlayerScreen	skip:service		player abuse report screen; Horizon has no reporting
+ReportReasonSelectionScreen	skip:service		abuse report reason screen; Horizon has no reporting
+ReportReasonSelectionScreen.ReasonSelectionList	skip:service		reason list of the report screen; Horizon has no reporting
+ReportReasonSelectionScreen.ReasonSelectionList.Entry	skip:service		reason row of the report screen; Horizon has no reporting
+SkinReportScreen	skip:service		skin abuse report screen; Horizon has no reporting
+PlayerEntry	skip:service		social list row with report, hide and status; Horizon has no social list
+PlayerSocialManager	skip:service		Mojang social manager: block, friends and message hiding; Horizon has none of it
+PresenceHandler	skip:service		online presence sharing with the service; Horizon has none
+RemoteFriendListUpdateHandler	skip:service		friend list polling and toasts from the service; Horizon has no friend list (its relay is separate)

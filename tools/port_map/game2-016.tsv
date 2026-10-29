@@ -1,0 +1,150 @@
+SpeleothemBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+SpeleothemBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Speleothem arm: waterlogged tick, then tip direction and thickness.
+SpeleothemBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Speleothem arm picks tip direction and thickness.
+SpeleothemBlock.calculateTipDirection	inline	crates/horizon-world/src/level/place.rs::Sim::placement_class	Tip direction choice is inside the placement arm.
+SpeleothemBlock.isSpeleothemWithDirection	port	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_with	
+SpeleothemBlock.onProjectileHit	missing		player: a thrown trident faster than 0.6 that hits pointed dripstone should break it. Horizon's trident only sticks in the block (game/trident.rs), so the dripstone stays.
+SpeleothemBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	Speleothem arm: a stalagmite that cannot survive breaks, else a falling stalactite starts.
+SpeleothemBlock.isTip	port	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_is_tip	
+SpeleothemBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::RegistryFluidWorld::fluid_state	waterlogged fluid from block data
+SpeleothemBlock.getShape	port	crates/horizon-world/src/interaction_shapes.rs::InteractionShapes::shape	shape per state from the table
+SpeleothemBlock.isStalactiteStartPos	inline	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_random_tick	The start test is the `start` check inside the random tick.
+SpeleothemBlock.growStalactiteOrStalagmiteIfPossible	port	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_grow	
+SpeleothemBlock.findTip	port	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_find_tip	
+SpeleothemBlock.canTipGrow	port	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_can_tip_grow	
+SpeleothemBlock.isUnmergedTipWithDirection	port	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_unmerged_tip	
+SpeleothemBlock.grow	port	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_grow_to	
+SpeleothemBlock.createSpeleothem	port	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_create	
+SpeleothemBlock.createMergedTips	inline	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_grow_to	The merged tip pair is the unmerged-tip branch of grow_to.
+SpeleothemBlock.growStalagmiteBelow	port	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_grow_stalagmite_below	
+SpeleothemBlock.isFreeHangingStalactite	port	crates/horizon-world/src/level/speleothem.rs::Sim::is_free_hanging_stalactite	
+SpongeBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	Sponge arm absorbs water when the old state differs.
+SpongeBlock.neighborChanged	port	crates/horizon-world/src/level/hooks.rs::Sim::neighbor_changed	Sponge arm calls sponge_try_absorb.
+SpongeBlock.removeWaterBreadthFirstSearch	port	crates/horizon-world/src/level/hooks.rs::Sim::sponge_remove_water	
+StairBlock.getShape	port	crates/horizon-world/src/interaction_shapes.rs::InteractionShapes::shape	shape per state from the table
+StairBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Stair arm of the placement rules.
+StairBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Stair arm of the update rules (straight, inner, outer).
+StairBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+StairBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	
+StairBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+StairBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::RegistryFluidWorld::fluid_state	waterlogged fluid from block data
+StrawBedBlock.getShape	port	crates/horizon-world/src/interaction_shapes.rs::InteractionShapes::shape	head and foot shapes per state from the table
+StrawBedBlock.getSleepHeight	missing		minor: sleep height is not computed per bed. tick_sleep (game.rs) puts every sleeper at head y + 0.5625; vanilla uses the bed shape top plus 0.125.
+StructureBlock.useWithoutItem	missing		player: in creative, clicking a structure block should open its editor. Horizon has no structure block behaviour, so nothing opens.
+StructureBlock.setPlacedBy	missing		minor: the placer is not stored as the structure block's author.
+StructureBlock.neighborChanged	missing		player: a redstone pulse should save, load or clear the structure. Horizon never triggers a structure block.
+StructureBlock.trigger	missing		player: a structure block in Load mode that gets a pulse should place its structure. Horizon does nothing.
+SweetBerryBushBlock.getShape	port	crates/horizon-world/src/interaction_shapes.rs::InteractionShapes::shape	shape per age from the table
+SweetBerryBushBlock.isRandomlyTicking	port	crates/horizon-world/src/level/mod.rs::Behaviours::is_randomly_ticking	RANDOM_TICKS flag from block data
+SweetBerryBushBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	SweetBerry arm: 1 in 5 growth at light 9 or more.
+SweetBerryBushBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	SweetBerry kind: age below 3.
+SweetBerryBushBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	SweetBerry kind: age plus one, capped at 3.
+TallDryGrassBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	TallDryGrass kind spreads short dry grass to a spreadable neighbour.
+TallGrassBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	TallGrass kind: grown block fits and the space above is empty.
+TargetBlock.updateRedstoneOutput	port	crates/horizon-world/src/level/redstone.rs::Sim::target_projectile_hit	Strength from the hit point, then power set and reset scheduled.
+TargetBlock.getRedstoneStrength	inline	crates/horizon-world/src/level/redstone.rs::Sim::target_projectile_hit	Distance and strength math is inside target_projectile_hit.
+TargetBlock.setOutputPower	inline	crates/horizon-world/src/level/redstone.rs::Sim::target_projectile_hit	Sets power and schedules the reset inside target_projectile_hit.
+TargetBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	Target arm: power goes back to 0.
+TargetBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	Target arm: power reset on a new placement.
+TntBlock.onPlace	port	crates/horizon-world/src/level/redstone.rs::Sim::tnt_check	Tnt arm of on_place: primes and removes TNT when powered.
+TntBlock.neighborChanged	port	crates/horizon-world/src/level/redstone.rs::Sim::tnt_check	Tnt arm of neighbor_changed.
+TntBlock.onProjectileHit	port	crates/horizon-client/src/game/creatures.rs::Game::arrow_event	gap: minor: only the burning-arrow case reaches TNT here (BlockReaction::PrimeTnt in arrows.rs).
+TrialSpawnerBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+TrialSpawnerBlock.getTicker	port	crates/horizon-client/src/game/trial_spawner.rs::Game::tick_trial_spawner	the per-tick trial spawner update
+TripWireBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	TripWire arm connects to neighbours.
+TripWireBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	TripWire arm: horizontal connections.
+TripWireBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	TripWire arm: updates the source hooks.
+TripWireBlock.affectNeighborsAfterRemoval	port	crates/horizon-world/src/level/hooks.rs::Sim::affect_neighbors_after_removal	TripWire arm: source update with the wire powered.
+TripWireBlock.playerWillDestroy	missing		player: cutting a tripwire with shears should disarm it, so its hooks stay quiet. Horizon's break path never sets DISARMED (rails.rs reads it), so the hooks still fire.
+TripWireBlock.entityInside	port	crates/horizon-world/src/level/hooks.rs::Sim::entity_inside	gap: minor: counts every entity in the box; vanilla skips entities that ignore block triggers.
+TripWireBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	TripWire arm: tripwire_tick re-checks while powered.
+TripWireBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+TripWireBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	
+TripWireBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+TripWireHookBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	TripWireHook arm: sturdy face behind the hook.
+TripWireHookBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Hook arm: breaks off when it cannot survive.
+TripWireHookBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Hook arm picks a facing that can survive.
+TripWireHookBlock.notifyNeighbors	port	crates/horizon-world/src/level/rails.rs::Sim::tripwire_hook_notify	
+TripWireHookBlock.getDirectSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::state_direct_signal	strong power from per-state data (powered and facing)
+TripWireHookBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+TripWireHookBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+TurtleEggBlock.stepOn	missing		player: walking onto turtle eggs without sneaking should crack them (1 in 100 per step). Horizon's motion step_event does nothing, so eggs never break underfoot.
+TurtleEggBlock.destroyEgg	port	crates/horizon-world/src/block_landing.rs::BlockLandingRegistry::fall_on	gap: player: only the fall roll (1 in 3) is here; the 1 in 100 step roll from stepOn is missing.
+TurtleEggBlock.decreaseEggs	inline	crates/horizon-world/src/block_landing.rs::BlockLandingRegistry::fall_on	One egg fewer, or the block removed, inside the TurtleEgg rule.
+TurtleEggBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	TurtleEgg arm: crack level event on sand.
+TurtleEggBlock.shouldUpdateHatchLevel	inline	crates/horizon-world/src/level/timeline.rs::Sim::turtle_egg_tick	The hatch chance check opens turtle_egg_tick.
+TurtleEggBlock.playerDestroy	missing		player: breaking a stack of 2 to 4 turtle eggs in survival should remove one egg and leave the rest. Horizon removes the whole stack (hooks.rs player_destroy).
+TurtleEggBlock.canBeReplaced	port	crates/horizon-world/src/level/place.rs::Sim::can_be_replaced	TurtleEgg arm: adds an egg to a stack below 4.
+TurtleEggBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	TurtleEgg arm adds an egg to a stack.
+TurtleEggBlock.getShape	port	crates/horizon-world/src/interaction_shapes.rs::InteractionShapes::shape	shape per egg count from the table
+TurtleEggBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+TurtleEggBlock.canDestroyEgg	inline	crates/horizon-world/src/block_landing.rs::BlockLandingRegistry::fall_on	Entity check (turtle, bat, player protection, griefing) is in the TurtleEgg rule.
+VaultBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+VaultBlock.getTicker	port	crates/horizon-client/src/game/vault.rs::Game::tick_vault	the per-tick vault update
+VaultBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+VegetationBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Vegetation arm: breaks when it cannot survive.
+VegetationBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Vegetation arm: checks the block below.
+VegetationBlock.isPathfindable	skip:data		per-state path type is exported state data (StateData.path)
+VineBlock.makeShapes	skip:java		builds the VoxelShape arrays; shapes are data
+VineBlock.countFaces	port	crates/horizon-world/src/level/survive.rs::Sim::vine_count_faces	
+VineBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Vine arm: horizontal faces from the neighbour.
+VineBlock.copyRandomFaces	inline	crates/horizon-world/src/level/tick.rs::Sim::vine_random_tick	Random face copy is the spread step of vine_random_tick.
+VineBlock.hasHorizontalConnection	inline	crates/horizon-world/src/level/tick.rs::Sim::vine_random_tick	Check after the copy, inside vine_random_tick.
+VineBlock.canSpread	port	crates/horizon-world/src/level/tick.rs::Sim::vine_can_spread	
+VineBlock.canBeReplaced	port	crates/horizon-world/src/level/place.rs::Sim::can_be_replaced	Vine arm: a clicked vine with a free face.
+VineBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Vine arm picks a supported face.
+VineBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+VineBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+VineBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	
+WallBlock.makeShapes	skip:java		builds the VoxelShape arrays; shapes are data
+WallBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Wall arm connects to neighbours and sets the post.
+WallBlock.topUpdate	port	crates/horizon-world/src/level/shapes.rs::Sim::wall_shape	Up-neighbour case; wall_shape is the shared core of the update.
+WallBlock.sideUpdate	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Side-neighbour branch of the Wall arm.
+WallBlock.shouldRaisePost	inline	crates/horizon-world/src/level/shapes.rs::Sim::wall_shape	Post rule is the last step of wall_shape.
+WallBlock.updateSides	inline	crates/horizon-world/src/level/shapes.rs::Sim::wall_shape	Side values are set inside wall_shape.
+WallBlock.makeWallState	inline	crates/horizon-world/src/level/shapes.rs::Sim::wall_shape	none, low or tall per side inside wall_shape.
+WallBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::RegistryFluidWorld::fluid_state	waterlogged fluid from block data
+WallBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
+WallBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
+WallBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	
+WeatheringCopper.getFirst	port	crates/horizon-world/src/level/tick.rs::Sim::copper_stepped	all_the_way walk back to the first oxidation stage.
+WeatheringCopper.WeatherState.forEach	skip:java		enum iteration helper; Rust walks the state list directly
+WitherSkullBlock.canSpawnMob	inline	crates/horizon-client/src/game/dispenser.rs::Game::dispense_wither_skull	Height, difficulty and soul base checks are in dispense_wither_skull.
+WitherSkullBlock.getOrCreateWitherFull	inline	crates/horizon-client/src/game/wither.rs::Game::check_wither_spawn	Full pattern is matched inline in check_wither_spawn.
+AbstractFurnaceBlockEntity.consumeFuel	inline	crates/horizon-client/src/furnace.rs::Furnace::tick	Fuel count drops by one when a burn starts; bucket remainder in the same branch.
+AbstractFurnaceBlockEntity.canBurn	inline	crates/horizon-client/src/furnace.rs::Furnace::tick	Output slot check (same item, room left) inside tick.
+AbstractFurnaceBlockEntity.getTotalCookTime	port	crates/horizon-client/src/furnace.rs::total_time	
+AbstractFurnaceBlockEntity.getSlotsForFace	port	crates/horizon-client/src/game/machines.rs::View::slots_for_face	Furnace faces: down 2 and 1, up 0, sides 1.
+AbstractFurnaceBlockEntity.canTakeItemThroughFace	port	crates/horizon-client/src/game/machines.rs::Containers::can_take	
+AbstractFurnaceBlockEntity.canPlaceItem	port	crates/horizon-client/src/game/machines.rs::Containers::can_place	Furnace arm: output refused, fuel slot takes fuel or a bucket.
+AbstractFurnaceBlockEntity.setRecipeUsed	inline	crates/horizon-client/src/furnace.rs::Furnace::tick	The recipe count goes up at each finished smelt.
+AbstractFurnaceBlockEntity.awardUsedRecipesAndPopExperience	port	crates/horizon-client/src/game.rs::Game::award_furnace_recipes	gap: minor: pays the experience and clears the used recipes; the recipe unlock and recipe-crafted trigger are not in this fn.
+AbstractFurnaceBlockEntity.getRecipesToAwardAndPopExperience	port	crates/horizon-client/src/furnace.rs::Furnace::recipe_experience	gap: minor: returns counts and experience, not the recipe list.
+AbstractFurnaceBlockEntity.fillStackedContents	port	crates/horizon-client/src/menu/place.rs::Menu::stacked_contents	Furnace arm counts all three slots.
+BannerBlockEntity.saveAdditional	port	crates/horizon-client-core/src/block_entity_nbt.rs::canonical	banner arm of the saved NBT form
+BannerBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	banner patterns and name from item components
+BannerBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	banner patterns and name to item components
+BaseContainerBlockEntity.loadAdditional	port	crates/horizon-client-core/src/block_entity_nbt.rs::items	container slots from the saved list
+BaseContainerBlockEntity.saveAdditional	port	crates/horizon-client-core/src/block_entity_nbt.rs::canonical	container NBT in its saved form
+BaseContainerBlockEntity.sendChestLockedNotifications	missing		minor: a chest with a Lock tag should refuse to open with a message. Horizon has no Lock check; chest_menu_blocked (game/storage.rs) only looks at the block above.
+BaseContainerBlockEntity.isEmpty	port	crates/horizon-client/src/game/machines.rs::Containers::is_empty	
+BaseContainerBlockEntity.removeItem	port	crates/horizon-client/src/game/machines.rs::Game::take_one	gap: minor: takes one item, not a chosen count.
+BaseContainerBlockEntity.createMenu	port	crates/horizon-client/src/game.rs::Game::open_menu	opens the container's screen
+BaseContainerBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	container items, name and lock from item components
+BaseContainerBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	container items, name and lock to item components
+BaseContainerBlockEntity.getLootContext	port	crates/horizon-client/src/structure_blocks.rs::roll_container	position seed and biome feed the loot table roll.
+BeaconBlockEntity.updateBase	port	crates/horizon-client/src/game/beacon.rs::Game::beacon_base	counts the pyramid levels (steps 1 to 4)
+BeaconBlockEntity.storeEffect	port	crates/horizon-client/src/save.rs::encode_block_entity	primary and secondary written to the beacon tag
+BeaconBlockEntity.loadEffect	port	crates/horizon-client/src/save.rs::decode_block_entity	primary and secondary read from the beacon tag
+BeaconBlockEntity.createMenu	port	crates/horizon-client/src/game/beacon.rs::Game::beacon_opened	
+BeaconBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	beacon name and lock from item components
+BeaconBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	beacon name and lock to item components
+BeehiveBlockEntity.setChanged	port	crates/horizon-client/src/game/beehives.rs::Game::tick_beehive	fire check runs every tick here instead of on each setChanged; releases with EMERGENCY.
+BeehiveBlockEntity.releaseAllOccupants	port	crates/horizon-client/src/beehive.rs::Beehive::release_all	
+BeehiveBlockEntity.loadAdditional	port	crates/horizon-client/src/beehive.rs::Beehive::from_nbt	
+BeehiveBlockEntity.saveAdditional	port	crates/horizon-client/src/beehive.rs::Beehive::to_nbt	
+BeehiveBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	bees from item components
+BeehiveBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	bees to item components
+BeehiveBlockEntity.BeeData.toOccupant	skip:java		BeeData is a wrapper; Horizon stores the Occupant itself in the hive.
+BeehiveBlockEntity.Occupant.setBeeReleaseData	inline	crates/horizon-client/src/beehive.rs::release	Ticks inside the hive count towards age and love, inside release.
+BeehiveBlockEntity.Occupant.updateBeeAge	inline	crates/horizon-client/src/beehive.rs::release	Age moves towards zero inside release.

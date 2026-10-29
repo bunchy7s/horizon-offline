@@ -798,7 +798,9 @@ fn java_split(s: &str) -> Vec<&str> {
     parts
 }
 /// SharedSuggestionProvider.suggestCoordinates / suggest2DCoordinates: the
-/// candidates `ty` parses completely.
+/// candidates `ty` parses completely. `relevant` arguments (block and column
+/// positions) offer the targeted block (`getRelevantCoordinates`), the others
+/// (`Vec3`, `Vec2`) the exact hit point (`getAbsoluteCoordinates`).
 fn suggest_coordinates(
     builder: &mut SuggestionsBuilder,
     reg: &Registries,
@@ -811,6 +813,8 @@ fn suggest_coordinates(
         ["^".into(), "^".into(), "^".into()]
     } else if let (true, Some(t)) = (relevant, reg.target_block) {
         [t[0].to_string(), t[1].to_string(), t[2].to_string()]
+    } else if let (false, Some(p)) = (relevant, &reg.target_point) {
+        p.clone()
     } else {
         ["~".into(), "~".into(), "~".into()]
     };
@@ -1662,10 +1666,15 @@ impl ArgType {
         let _ = context;
         match self {
             ArgType::Bool => builder.suggest_matching(["true", "false"]),
-            ArgType::Entity { .. } => {
-                let players = reg.players.clone();
+            ArgType::Entity { players, .. } => {
+                // EntityArgument.listSuggestions: the online player names,
+                // then (unless players only) getSelectedEntities.
+                let mut names = reg.players.clone();
+                if !players {
+                    names.extend(reg.selected_entities.iter().cloned());
+                }
                 super::selector::suggest(builder, reg, &|b| {
-                    b.suggest_matching(players.iter().map(String::as_str))
+                    b.suggest_matching(names.iter().map(String::as_str))
                 });
             }
             ArgType::BlockPos => suggest_coordinates(builder, reg, self, true),

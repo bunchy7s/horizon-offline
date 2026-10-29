@@ -6,11 +6,15 @@ from tools.ci import nightly
 from tools.ci import nightly_set as ns
 
 NOW = "2026-10-28T12:00:00+00:00"
+TEAM = {"kacpherek", "rdbtcvs", "online5277", "levzzz5154"}
 PATTERNS = ns.guarded_patterns((Path(__file__).resolve().parents[1] / ".github/CODEOWNERS").read_text())
 
 
-def pr(n, head="h", state="open", files=("crates/horizon-world/src/lib.rs",), base="main"):
-    return ns.PullRequest(n, state, f"{head}{n}", f"Fix {n}", f"dev{n}", base, list(files))
+def pr(n, head="h", state="open", files=("crates/horizon-world/src/lib.rs",), base="main", approved_by=("rdbtcvs",),
+       approved_at=None):
+    sha = f"{head}{n}"
+    return ns.PullRequest(n, state, sha, f"Fix {n}", f"dev{n}", base, list(files),
+                          {who: approved_at or sha for who in approved_by})
 
 
 def lookup(*prs):
@@ -19,7 +23,7 @@ def lookup(*prs):
 
 
 def run(state, text, login="kacpherek", *prs):
-    return ns.apply(state, ns.parse(text), login, NOW, lookup(*prs), PATTERNS)
+    return ns.apply(state, ns.parse(text), login, NOW, lookup(*prs), PATTERNS, TEAM)
 
 T = dt.datetime(2026, 10, 28, 12, 0, tzinfo=dt.timezone.utc)
 
@@ -76,10 +80,18 @@ class ScheduledTests(unittest.TestCase):
         state = run({}, "/nightly 1 2 3 4", "kacpherek", pr(1), pr(2), pr(3), pr(4)).state
         get = lookup(pr(1, head="new"), pr(2, state="merged"), pr(3, state="closed"),
                      pr(4, files=[".github/workflows/x.yml"]))
-        kept, left_out = nightly.refresh(state["prs"], get, PATTERNS)
+        kept, left_out = nightly.refresh(state["prs"], get, PATTERNS, TEAM)
         self.assertEqual([(e["number"], e["head"]) for e in kept], [(1, "new1")])
         self.assertEqual(len(left_out), 3)
         self.assertIn("merged", left_out[0])
+
+    def test_a_new_head_waits_for_its_review_and_unreviewed_ones_drop(self):
+        state = run({}, "/nightly 1 2", "kacpherek", pr(1), pr(2)).state
+        get = lookup(pr(1, head="new", approved_at="h1"), pr(2, head="new", approved_by=()))
+        kept, left_out = nightly.refresh(state["prs"], get, PATTERNS, TEAM)
+        self.assertEqual([(e["number"], e["head"]) for e in kept], [(1, "h1")])
+        self.assertIn("isn't approved yet", left_out[0])
+        self.assertIn("no approving review", left_out[1])
 
     def test_notes_list_each_pull_request_and_who_picked_it(self):
         prs = run({}, "/nightly 1 2", "kacpherek", pr(1), pr(2)).state["prs"]
@@ -102,8 +114,11 @@ class UntrustedBuildTests(unittest.TestCase):
     def setUp(self):
         self.game = (WORKFLOWS / "game-build.yml").read_text()
 
-    def test_only_the_release_is_trusted(self):
-        self.assertIn("trusted: true", (WORKFLOWS / "release.yml").read_text())
+    def test_no_nightly_build_is_trusted(self):
+        # The train only starts `nightly build` (Nightly only since 2026-10-28); it builds nothing itself.
+        release = (WORKFLOWS / "release.yml").read_text()
+        self.assertNotIn("game-build.yml", release)
+        self.assertIn("gh workflow run nightly-build.yml", release)
         nightly_build = (WORKFLOWS / "nightly-build.yml").read_text()
         self.assertIn("trusted: false", nightly_build)
         self.assertNotIn("trusted: true", nightly_build)
@@ -117,9 +132,10 @@ class UntrustedBuildTests(unittest.TestCase):
     def test_an_untrusted_build_never_runs_on_the_release_runner(self):
         runs_on = [line for line in self.game.splitlines() if "runs-on:" in line]
         self.assertEqual(len(runs_on), 2)
-        pr_runner = "fromJSON('[\"self-hosted\", \"macOS\", \"horizon-game\"]')"
+        # The nightly's own runner: never the release runner, and never behind pull requests' parity queue.
+        nightly_runner = "fromJSON('[\"self-hosted\", \"macOS\", \"horizon-nightly\"]')"
         for line in runs_on:
-            self.assertIn(f"inputs.trusted && vars.MAC_RUNNER || {pr_runner}", line)
+            self.assertIn(f"inputs.trusted && vars.MAC_RUNNER || {nightly_runner}", line)
 
     def test_a_trusted_build_never_reads_the_shared_sccache(self):
         calls = self.game.count("bash tools/ci/runner-env.sh")

@@ -120,8 +120,11 @@ class Services:
                     if ok:
                         return self.reply(200, {'id': PLAYER_UUID, 'name': query['username'], 'properties': []})
                     return self.reply(204)
-                with services.lock:
-                    services.log.append(('unknown', url.path))
+                # A bare `GET /` is a local tool probing every new port (T3 Code does, on the Mac mini), not
+                # the game: none of the services has a root.
+                if url.path != '/':
+                    with services.lock:
+                        services.log.append(('unknown', url.path))
                 self.reply(404, {'error': 'NotFound', 'path': url.path})
 
             def do_POST(self):

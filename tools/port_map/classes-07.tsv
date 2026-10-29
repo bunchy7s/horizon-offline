@@ -1,0 +1,189 @@
+RepeatingPlacement.modify	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::modify_inner	repeat arm for Count and the noise counts emits the count
+SurfaceRelativeThresholdFilter.shouldPlace	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::modify_inner	SurfaceRelative arm: y between heightmap plus min and max
+SurfaceWaterDepthFilter.shouldPlace	port	crates/horizon-world/src/worldgen/placement.rs::PlacementModifier::modify_inner	SurfaceWaterDepth arm
+WorldPreset	skip:data		data-pack preset record; bundled world_presets carry the dimensions and generator.rs builds one dimension by name
+WorldPresets.fromSettings	skip:data		names a preset from its dimensions; Horizon loads presets by name
+WorldPresets.getNormalOverworld	port	crates/horizon-world/src/worldgen/generator.rs::OverworldGenerator::new	builds the normal preset's overworld directly; no LevelStem object
+WorldPresets.Bootstrap	skip:data		datagen bootstrap that registers the presets
+SinglePieceStructure.findGenerationPoint	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	DesertPyramid/JungleTemple arm: valid biome, sea-level check, stub on the surface
+SinglePieceStructure.generatePieces	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	same arm builds the piece at the chunk corner
+structure/StructureCheck.canCreateStructure	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	no start when the arm returns None
+structure/StructureCheck.checkStart	missing		player: an explorer map (skip_existing_chunks, default on) can point at a structure the player already reached; the reference check is not ported
+structure/StructureCheck.checkStructureInfo	missing		player: requireUnreferenced is ignored, so explorer maps do not skip known structures (see checkStart)
+structure/StructureCheck.incrementReference	missing		player: no reference counts per chunk, so explorer maps do not skip structures already reached
+structure/StructureCheck.loadStructures	skip:other		reads saved starts for the storage cache; Horizon places saved starts with use_saved_start
+structure/StructureCheck.onStructureLoad	missing		player: starts loaded in a chunk do not record references (see incrementReference)
+structure/StructureCheck.storeFullResults	skip:other		cache write for the storage check
+structure/StructureCheck.tryLoadFromStorage	skip:other		chunk NBT scan for the storage cache; Horizon places saved starts with use_saved_start
+PiecesContainer.isInsidePiece	inline	crates/horizon-world/src/worldgen/generator_decoration.rs::World::add_entity	start-piece box test that feeds the mob finalize hook
+PiecesContainer.load	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::use_saved_start	gap: minor: only jigsaw pool pieces are read back; legacy piece types are not
+PiecesContainer.save	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureStart::save	writes the Children list of the start
+StructurePieceSerializationContext	skip:java		record bundling server services for piece NBT; Horizon passes its resources explicitly
+StructurePiecesBuilder.moveBelowSeaLevel	inline	crates/horizon-world/src/worldgen/structure/mineshaft.rs::generate	sea-level drop of the pieces; stronghold::generate has the same step
+StructurePiecesBuilder.offsetPiecesVertically	inline	crates/horizon-world/src/worldgen/structure/mineshaft.rs::generate	moves every piece by the same dy
+AbstractSpreadingStructurePlacement.applyAdditionalChunkRestrictions	inline	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::structure_chunk	frequency reduction step of the chunk test
+AbstractSpreadingStructurePlacement.applyInteractionsWithOtherStructures	inline	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::structure_chunk	exclusion zone and avoid checks
+AbstractSpreadingStructurePlacement.isStructureChunk	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::is_structure_chunk	
+AbstractSpreadingStructurePlacement.legacyArbitrarySaltProbabilityReducer	port	crates/horizon-world/src/worldgen/structure/start.rs::reduce	Legacy2 arm
+AbstractSpreadingStructurePlacement.legacyPillagerOutpostReducer	port	crates/horizon-world/src/worldgen/structure/start.rs::reduce	Legacy1 arm
+AbstractSpreadingStructurePlacement.legacyProbabilityReducerWithDouble	port	crates/horizon-world/src/worldgen/structure/start.rs::reduce	Legacy3 arm
+AbstractSpreadingStructurePlacement.probabilityReducer	port	crates/horizon-world/src/worldgen/structure/start.rs::reduce	Default arm
+ConcentricRingsStructurePlacement.isPlacementChunk	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::structure_chunk	ConcentricRings arm: chunk must be in the set's ring positions
+DimensionOriginStructurePlacement	missing		minor: dimension_origin placement decodes as Unsupported in start.rs, so such a structure never places; no bundled structure file in the repo uses it
+RandomSpreadType.evaluate	inline	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::potential_chunk	spread closure: linear, or triangular as the mean of two draws
+StructurePlacements	skip:data		registers placement codecs; Horizon decodes placement type names in start.rs
+FeaturePoolElement.getBoundingBox	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolElement::bounding_box	Feature arm, zero size
+FeaturePoolElement.getShuffledJigsawBlocks	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolElement::shuffled_jigsaws	Feature arm: one rollable empty jigsaw
+JigsawJunction.equals	skip:java		value equality
+JigsawJunction.hashCode	skip:java		hashing for Java collections
+JigsawJunction.toString	skip:debug		debug text
+LegacySinglePoolElement.getSettings	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::place_element	Single arm, legacy branch: structure-block ignore is replaced by structure and air ignore after jigsaw replacement
+ListPoolElement.getBoundingBox	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolElement::bounding_box	List arm, skips empty elements
+ListPoolElement.getShuffledJigsawBlocks	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolElement::shuffled_jigsaws	List arm: first element only
+ListPoolElement.getSize	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolElement::size	List arm: per-axis maximum
+ListPoolElement.place	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::place_element	List arm
+ListPoolElement.setProjectionOnEachElement	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolElement::decode	children take the list's projection while decoding
+ListPoolElement.toString	skip:debug		debug text
+StructurePoolElement.getProjection	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolElement::projection	
+StructurePoolElement.legacy	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolElement::decode	legacy_single_pool_element kind
+StructurePoolElement.single	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolElement::decode	single_pool_element kind
+StructureTemplatePool.<init>	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::Pools::get	builds each Pool from its raw templates
+StructureTemplatePool.getMaxSize	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::Pool::max_size	
+StructureTemplatePool.getRandomTemplate	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::Pool::random_template	
+PoolAliasBinding.direct	port	crates/horizon-world/src/worldgen/structure/start.rs::resolve_aliases	minecraft:direct arm
+PoolAliasBinding.random	port	crates/horizon-world/src/worldgen/structure/start.rs::resolve_aliases	minecraft:random arm: weighted pick
+PoolAliasBindings	skip:data		datagen bootstrap that registers alias targets as pools
+RandomGroupPoolAlias.allTargets	skip:data		lists alias targets for bootstrap registration
+RandomGroupPoolAlias.forEachResolved	port	crates/horizon-world/src/worldgen/structure/start.rs::resolve_aliases	minecraft:random_group arm
+BuriedTreasureStructure.generatePieces	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	BuriedTreasure arm
+EndCityStructure.findGenerationPoint	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	EndCity arm: biome column and height checks
+EndCityStructure.generatePieces	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	EndCity arm calls end_city::pieces
+IglooStructure.findGenerationPoint	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	Igloo arm
+IglooStructure.generatePieces	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	Igloo arm
+JigsawStructure.findGenerationPoint	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	Jigsaw arm: start height, checks, assembly
+JigsawStructure.verifyRange	skip:java		codec validation of the size limit
+NetherFortressPieces.findAndCreateBridgePieceFactory	port	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::create	Kind dispatch to the bridge piece
+NetherFortressPieces.PieceWeight.doPlace	inline	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::generate_piece	placement check: max is 0 or count below max
+NetherFortressPieces.PieceWeight.isValid	inline	crates/horizon-world/src/worldgen/structure/fortress.rs::Builder::generate_piece	entry is dropped once count reaches max
+OceanMonumentPieces.FitDoubleXRoom.create	inline	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::new	DoubleX branch of the layout chain
+OceanMonumentPieces.FitDoubleXRoom.fits	inline	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::new	DoubleX branch condition
+OceanMonumentPieces.FitDoubleXYRoom.create	inline	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::new	DoubleXY branch of the layout chain
+OceanMonumentPieces.FitDoubleXYRoom.fits	inline	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::new	DoubleXY branch condition
+OceanMonumentPieces.FitDoubleYRoom.create	inline	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::new	DoubleY branch of the layout chain
+OceanMonumentPieces.FitDoubleYRoom.fits	inline	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::new	DoubleY branch condition
+OceanMonumentPieces.FitDoubleYZRoom.create	inline	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::new	DoubleYZ branch of the layout chain
+OceanMonumentPieces.FitDoubleYZRoom.fits	inline	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::new	DoubleYZ branch condition
+OceanMonumentPieces.FitDoubleZRoom.create	inline	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::new	DoubleZ branch of the layout chain
+OceanMonumentPieces.FitDoubleZRoom.fits	inline	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::new	DoubleZ branch condition
+OceanMonumentPieces.FitSimpleTopRoom.fits	inline	crates/horizon-world/src/worldgen/structure/monument.rs::MonumentBuilding::new	SimpleTop branch: no openings
+OceanMonumentPieces.OceanMonumentCoreRoom.postProcess	port	crates/horizon-world/src/worldgen/structure/monument.rs::room	Core arm
+OceanMonumentPieces.OceanMonumentDoubleXRoom.postProcess	port	crates/horizon-world/src/worldgen/structure/monument.rs::room	DoubleX arm
+OceanMonumentPieces.OceanMonumentDoubleXYRoom.postProcess	port	crates/horizon-world/src/worldgen/structure/monument.rs::room	DoubleXY arm
+OceanMonumentPieces.OceanMonumentDoubleYRoom.postProcess	port	crates/horizon-world/src/worldgen/structure/monument.rs::room	DoubleY arm
+OceanMonumentPieces.OceanMonumentDoubleYZRoom.postProcess	port	crates/horizon-world/src/worldgen/structure/monument.rs::room	DoubleYZ arm
+OceanMonumentPieces.OceanMonumentDoubleZRoom.postProcess	port	crates/horizon-world/src/worldgen/structure/monument.rs::room	DoubleZ arm
+OceanMonumentPieces.OceanMonumentEntryRoom.postProcess	port	crates/horizon-world/src/worldgen/structure/monument.rs::room	Entry arm
+OceanMonumentPieces.OceanMonumentPenthouse.postProcess	port	crates/horizon-world/src/worldgen/structure/monument.rs::room	Penthouse arm
+OceanMonumentPieces.OceanMonumentSimpleRoom.postProcess	port	crates/horizon-world/src/worldgen/structure/monument.rs::room	Simple arm
+OceanMonumentPieces.OceanMonumentSimpleTopRoom.postProcess	port	crates/horizon-world/src/worldgen/structure/monument.rs::room	SimpleTop arm
+OceanMonumentPieces.OceanMonumentWingRoom.postProcess	port	crates/horizon-world/src/worldgen/structure/monument.rs::room	Wing arms
+OceanMonumentPieces.RoomDefinition.countOpenings	inline	crates/horizon-world/src/worldgen/structure/monument.rs::room	count of open sides inside the Simple arm
+OceanMonumentPieces.RoomDefinition.findSource	port	crates/horizon-world/src/worldgen/structure/monument.rs::Graph::find_source	
+OceanMonumentPieces.RoomDefinition.setConnection	port	crates/horizon-world/src/worldgen/structure/monument.rs::Graph::connect	
+OceanMonumentPieces.RoomDefinition.updateOpenings	port	crates/horizon-world/src/worldgen/structure/monument.rs::Graph::update_openings	
+OceanRuinStructure.findGenerationPoint	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	OceanRuin arm
+OceanRuinStructure.generatePieces	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	OceanRuin arm
+ShipwreckStructure.findGenerationPoint	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	Shipwreck arm: world surface when beached
+ShipwreckStructure.generatePieces	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	Shipwreck arm, including the too-big height
+SwampHutStructure.generatePieces	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	SwampHut arm
+AllOfRuleTest.test	port	crates/horizon-world/src/worldgen/rule_test.rs::RuleTest::test	All arm
+AnyOfRuleTest.test	port	crates/horizon-world/src/worldgen/rule_test.rs::RuleTest::test	Any arm
+AxisAlignedLinearPosTest.test	port	crates/horizon-world/src/worldgen/structure/processor.rs::PosRule::test	Linear arm with an axis
+BlockAgeProcessor.getRandomBlock	inline	crates/horizon-world/src/worldgen/structure/processor.rs::block_age	random pick inside the mossy branch
+BlockAgeProcessor.getRandomFacingStairs	inline	crates/horizon-world/src/worldgen/structure/processor.rs::block_age	random stairs with facing, inside the stairs branch
+BlockAgeProcessor.maybeReplaceFullStoneBlock	inline	crates/horizon-world/src/worldgen/structure/processor.rs::block_age	full stone branch
+BlockAgeProcessor.maybeReplaceSlab	inline	crates/horizon-world/src/worldgen/structure/processor.rs::block_age	slab branch
+BlockAgeProcessor.maybeReplaceStairs	inline	crates/horizon-world/src/worldgen/structure/processor.rs::block_age	stairs branch
+BlockAgeProcessor.maybeReplaceWall	inline	crates/horizon-world/src/worldgen/structure/processor.rs::block_age	wall branch
+BlockAgeProcessor.processBlock	port	crates/horizon-world/src/worldgen/structure/processor.rs::process_block	BlockAge arm calls block_age
+BlockIgnoreProcessor.processBlock	port	crates/horizon-world/src/worldgen/structure/processor.rs::process_block	BlockIgnore arm
+BlockRotProcessor.processBlock	port	crates/horizon-world/src/worldgen/structure/processor.rs::process_block	BlockRot arm
+CappedProcessor.finalizeProcessing	inline	crates/horizon-world/src/worldgen/structure/processor.rs::process_infos	post-pass over the Capped processors, after the block loop
+GravityProcessor.processBlock	port	crates/horizon-world/src/worldgen/structure/processor.rs::process_block	Gravity arm
+HeightMatchTest.test	port	crates/horizon-world/src/worldgen/rule_test.rs::RuleTest::test	Height arm
+LavaSubmergedBlockProcessor.processBlock	port	crates/horizon-world/src/worldgen/structure/processor.rs::process_block	LavaSubmerged arm
+LinearPosTest.test	port	crates/horizon-world/src/worldgen/structure/processor.rs::PosRule::test	Linear arm
+NotRuleTest.test	port	crates/horizon-world/src/worldgen/rule_test.rs::RuleTest::test	Not arm
+ProcessorRule.test	port	crates/horizon-world/src/worldgen/structure/processor.rs::process_block	Rule arm: input, location and position tests
+ProtectedBlockProcessor.processBlock	port	crates/horizon-world/src/worldgen/structure/processor.rs::process_block	Protected arm
+RandomBlockMatchTest.test	port	crates/horizon-world/src/worldgen/rule_test.rs::RuleTest::test	RandomStates arm
+RandomBlockStateMatchTest.test	port	crates/horizon-world/src/worldgen/rule_test.rs::RuleTest::test	RandomState arm
+RuleProcessor.processBlock	port	crates/horizon-world/src/worldgen/structure/processor.rs::process_block	Rule arm
+RuleTest.either	skip:java		builder over allOf, anyOf and not; bundled data holds the expanded form
+DirectoryTemplateSource	skip:data		loads templates from a datapack folder; Horizon reads its prepared template bundle (structure.rs StructureResources::template)
+ResourceManagerTemplateSource	skip:data		loads templates through the resource manager; Horizon reads its prepared template bundle
+TemplatePathFactory	skip:data		builds file paths for template loading; Horizon reads a prepared bundle
+TemplateSource	skip:data		template file loading and SNBT reading; Horizon reads a prepared bundle
+AppendLoot.apply	port	crates/horizon-world/src/worldgen/structure/processor.rs::Modifier::apply	AppendLoot arm
+AppendStatic.apply	port	crates/horizon-world/src/worldgen/structure/processor.rs::Modifier::apply	AppendStatic arm
+GradientNoise.wrap	port	crates/horizon-core/src/noise/mod.rs::wrap	Far Lands off
+GradientNoise.Gradient.dot	port	crates/horizon-core/src/noise/mod.rs::dot	3D dot of a gradient
+GradientNoise.Gradient.dotXz	inline	crates/horizon-core/src/noise/perlin.rs::SmearedPerlinNoise::get2	2D dot: get2 samples the 3D corner dots at y 0; no separate dotXz
+LegacyFbmInitializer.createForLegacyNetherBiome	port	crates/horizon-core/src/noise/normal.rs::create_legacy_fbm	
+NoiseUtils.biasTowardsExtreme	skip:other		no caller in the vanilla 26.3 sources
+NoiseUtils.parityNoiseOctaveConfigString	skip:debug		debug text
+BlockLightEngine.checkNode	inline	crates/horizon-client/src/light.rs::relight_layer	neighbour checks in both passes
+BlockLightEngine.getEmission	port	crates/horizon-client/src/light.rs::LightTables::emission	
+BlockLightEngine.propagateDecrease	port	crates/horizon-client/src/light.rs::relight_layer	decrease pass, sky false
+BlockLightEngine.propagateIncrease	port	crates/horizon-client/src/light.rs::relight_layer	increase pass, sky false
+BlockLightEngine.propagateLightSources	inline	crates/horizon-client/src/light.rs::relight_layer	emission seeds for cleared cells
+BlockLightSectionStorage.getLightValue	port	crates/horizon-client/src/light.rs::level	
+DataLayerStorageMap	skip:java		cache of light data layers keyed by section
+DynamicGraphMinFixedPoint.checkEdge	inline	crates/horizon-client/src/light.rs::relight_layer	edge test inside the passes
+DynamicGraphMinFixedPoint.checkNeighbor	inline	crates/horizon-client/src/light.rs::relight_layer	neighbour test inside the passes
+DynamicGraphMinFixedPoint.removeFromQueue	skip:java		queue bookkeeping; the passes never remove queued entries
+DynamicGraphMinFixedPoint.removeIf	skip:java		queue bookkeeping
+DynamicGraphMinFixedPoint.runUpdates	port	crates/horizon-client/src/light.rs::relight_layer	runs the decrease and increase passes
+LayerLightSectionStorage	skip:other		per-section light data bookkeeping; Horizon keeps light in chunk sections (light.rs apply_lighting, light_chunk)
+LayerLightSectionStorage.SectionState	skip:other		section state flags of the light storage; no Horizon equivalent needed
+LeveledPriorityQueue	skip:java		priority queue of light levels; relight_layer runs two FIFO passes
+SkyLightEngine.addSourcesAbove	inline	crates/horizon-client/src/light.rs::relight_region	column sources loop
+SkyLightEngine.checkNode	inline	crates/horizon-client/src/light.rs::relight_layer	neighbour checks in the sky passes
+SkyLightEngine.countEmptySectionsBelowIfAtBorder	skip:java		shortcut over empty sections; Horizon relights a region directly
+SkyLightEngine.crossedSectionEdge	port	crates/horizon-client/src/light.rs::LightChanges::class	edge flags of a changed cell
+SkyLightEngine.getChunkSources	skip:java		per-chunk source cache; lowest_sky_source computes each column on demand
+SkyLightEngine.getLowestSourceY	port	crates/horizon-client/src/light.rs::lowest_sky_source	
+SkyLightEngine.propagateDecrease	port	crates/horizon-client/src/light.rs::relight_layer	decrease pass, sky true
+SkyLightEngine.propagateFromEmptySections	inline	crates/horizon-client/src/light.rs::relight_region	sky seeds below the source in each column
+SkyLightEngine.propagateIncrease	port	crates/horizon-client/src/light.rs::relight_layer	increase pass, sky true
+SkyLightEngine.propagateLightSources	inline	crates/horizon-client/src/light.rs::relight_layer	sky sources inside the cleared area
+SkyLightEngine.removeSourcesBelow	inline	crates/horizon-client/src/light.rs::relight_region	column sources loop
+SkyLightEngine.setLightEnabled	skip:other		light is computed when a chunk loads (light_chunk); no per-chunk enable flag
+SkyLightSectionStorage	skip:other		sky data layer bookkeeping per section; Horizon keeps light in chunk sections
+SkyLightSectionStorage.SkyDataLayerStorageMap	skip:java		copy of sky data layers; collection plumbing
+SpatialLongSet.InternalMap	skip:java		hash set internals for section positions
+NodeEvaluator.getNode	port	crates/horizon-client/src/mobs/path.rs::Finder::node	
+NodeEvaluator.getPathType	port	crates/horizon-client/src/mobs/path.rs::Finder::path_type	
+NodeEvaluator.getTargetNodeAt	port	crates/horizon-client/src/mobs/path.rs::Finder::node	target lookup is the same arena lookup
+NodeEvaluator.prepare	port	crates/horizon-client/src/mobs/path.rs::Finder::new	per-query state
+PathTypeCache.compute	port	crates/horizon-client/src/mobs/path.rs::Finder::compute_path_type	
+PathTypeCache.get	port	crates/horizon-client/src/mobs/path.rs::Finder::cached	
+PathTypeCache.getOrCompute	port	crates/horizon-client/src/mobs/path.rs::Finder::cached	
+PathTypeCache.invalidate	skip:java		the cache lives for one query, so nothing is invalidated
+SwimNodeEvaluator.findAcceptedNode	port	crates/horizon-client/src/mobs/path.rs::Finder::swim_accepted	
+SwimNodeEvaluator.getCachedBlockType	port	crates/horizon-client/src/mobs/path.rs::Finder::cached	
+SwimNodeEvaluator.getNeighbors	port	crates/horizon-client/src/mobs/path.rs::Finder::swim_neighbors	
+SwimNodeEvaluator.getPathTypeOfMob	port	crates/horizon-client/src/mobs/path.rs::Finder::path_type_of_mob	
+SwimNodeEvaluator.getStart	port	crates/horizon-client/src/mobs/path.rs::Finder::start	Swim arm
+SwimNodeEvaluator.hasMalus	inline	crates/horizon-client/src/mobs/path.rs::Finder::swim_neighbors	diagonal check on both sides
+CollectingNeighborUpdater.addAndRun	port	crates/horizon-world/src/level/update.rs::Sim::add_and_run	
+CollectingNeighborUpdater.neighborChanged	port	crates/horizon-world/src/level/update.rs::Sim::neighbor_changed_at	Simple update
+CollectingNeighborUpdater.runUpdates	port	crates/horizon-world/src/level/update.rs::Sim::run_updates	
+CollectingNeighborUpdater.shapeUpdate	port	crates/horizon-world/src/level/update.rs::Sim::neighbor_shape_changed	
+CollectingNeighborUpdater.updateNeighborsAtExceptFromFacing	port	crates/horizon-world/src/level/update.rs::Sim::update_neighbors_at_except	
+CollectingNeighborUpdater.FullNeighborUpdate.runNext	port	crates/horizon-world/src/level/update.rs::Update::next	Full arm
+CollectingNeighborUpdater.MultiNeighborUpdate.forEachUpdatedPos	inline	crates/horizon-world/src/level/update.rs::Update::next	Multi arm steps the index and skips the facing side
+CollectingNeighborUpdater.MultiNeighborUpdate.runNext	port	crates/horizon-world/src/level/update.rs::Update::next	Multi arm
+CollectingNeighborUpdater.ShapeUpdate.runNext	port	crates/horizon-world/src/level/update.rs::Update::next	Shape arm
+CollectingNeighborUpdater.SimpleNeighborUpdate.runNext	port	crates/horizon-world/src/level/update.rs::Update::next	Simple arm
+ExperimentalRedstoneUtils.initialOrientation	skip:other		returns null unless the Redstone Experiments feature flag is on; Horizon has no such flag

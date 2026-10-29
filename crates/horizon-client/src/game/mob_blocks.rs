@@ -1,6 +1,6 @@
 //! Blocks mobs carry: block items in a hand (`ItemInHandLayer`) and the
-//! block an enderman holds (`CarriedBlockLayer`), drawn as shaded cubes like
-//! dropped block items. Also the block models mobs wear (`SnowGolemHeadLayer`,
+//! block an enderman holds (`CarriedBlockLayer`), drawn as baked block models.
+//! Also the block models mobs wear (`SnowGolemHeadLayer`,
 //! `MushroomCowMushroomLayer`).
 use super::Game;
 use horizon_client::{
@@ -8,46 +8,6 @@ use horizon_client::{
     mesher::Vertex,
     mobs::{Mob, Species, render},
 };
-
-/// The six faces of the unit cube with their shade: top, bottom, the two
-/// z faces, the two x faces.
-const FACES: [([[f32; 3]; 4], f32, u8); 6] = [
-    (
-        [[0., 1., 1.], [1., 1., 1.], [1., 1., 0.], [0., 1., 0.]],
-        1.0,
-        0,
-    ),
-    (
-        [[0., 0., 0.], [1., 0., 0.], [1., 0., 1.], [0., 0., 1.]],
-        0.5,
-        0,
-    ),
-    (
-        [[1., 0., 0.], [0., 0., 0.], [0., 1., 0.], [1., 1., 0.]],
-        0.8,
-        1,
-    ),
-    (
-        [[0., 0., 1.], [1., 0., 1.], [1., 1., 1.], [0., 1., 1.]],
-        0.8,
-        1,
-    ),
-    (
-        [[0., 0., 0.], [0., 0., 1.], [0., 1., 1.], [0., 1., 0.]],
-        0.6,
-        2,
-    ),
-    (
-        [[1., 0., 1.], [1., 0., 0.], [1., 1., 0.], [1., 1., 1.]],
-        0.6,
-        2,
-    ),
-];
-/// The sprites of a cube's top, z sides and x sides, and the top's tint.
-struct Cube<'a> {
-    sprites: [&'a str; 3],
-    tint: u32,
-}
 
 /// `CustomHeadLayer.translateToHead` and the banner's `head` display.
 fn banner_matrix(head: glam::Mat4) -> glam::Mat4 {
@@ -178,38 +138,6 @@ impl Game<'_> {
             render::draw(flag, m, &flag_poses, r, color, light, 0, out);
         }
     }
-    fn push_cube(
-        &self,
-        t: glam::Mat4,
-        cube: &Cube,
-        light: u32,
-        overlay: u32,
-        out: &mut Vec<Vertex>,
-    ) {
-        for (corners, shade, side) in FACES {
-            let name = cube.sprites[usize::from(side)];
-            let Some(r) = self.gui.atlas.sprites.get(name).copied() else {
-                continue;
-            };
-            let tint = if side == 0 { cube.tint } else { 0xFF_FFFF };
-            let c = |sft: u32| (((tint >> sft) & 255) as f32 * shade) as u32;
-            let color = 0xFF00_0000 | c(0) << 16 | c(8) << 8 | c(16);
-            let uvs = [[r.u0, r.v1], [r.u1, r.v1], [r.u1, r.v0], [r.u0, r.v0]];
-            for (corner, uv) in corners.iter().zip(uvs) {
-                let p = t.transform_point3(glam::Vec3::from(*corner));
-                out.push(Vertex {
-                    normal: [0; 4],
-                    pos: p.to_array(),
-                    uv,
-                    layer: overlay,
-                    color,
-                    light,
-
-                    glint_uv: [0.0, 0.0],
-                });
-            }
-        }
-    }
     /// The blocks one mob holds or carries.
     pub(super) fn mob_block_geometry(
         &self,
@@ -222,11 +150,13 @@ impl Game<'_> {
         self.captain_banner_geometry(mob, camera, alpha, light, out);
         self.held_item_geometry(mob, camera, alpha, light, true, out);
         self.worn_block_geometry(mob, camera, alpha, light, out);
+        self.golem_flower_geometry(mob, camera, alpha, light, out);
         if mob.species() == Species::Enderman
             && let Some(state) = mob.extra.carried
-            && let Some((sprite, tint)) = self.block_face_sprite(state)
+            && let Some((_, tint)) = self.block_face_sprite(state)
         {
-            // CarriedBlockLayer: OverlayTexture.NO_OVERLAY, never the hurt tint.
+            // CarriedBlockLayer: OverlayTexture.NO_OVERLAY, never the hurt tint;
+            // the block's baked model (seed 42) on the unit cube, not centred.
             let base = render::base_transform(mob, alpha as f32, camera);
             let t = base
                 * glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.6875, -0.75))
@@ -234,19 +164,42 @@ impl Game<'_> {
                 * glam::Mat4::from_rotation_y(45.0f32.to_radians())
                 * glam::Mat4::from_translation(glam::Vec3::new(0.25, 0.1875, 0.25))
                 * glam::Mat4::from_scale(glam::Vec3::new(-0.5, -0.5, 0.5))
-                * glam::Mat4::from_rotation_y(90.0f32.to_radians())
-                * glam::Mat4::from_translation(glam::Vec3::splat(-0.5));
-            self.push_cube(
-                t,
-                &Cube {
-                    sprites: [&sprite, &sprite, &sprite],
-                    tint,
-                },
-                light,
-                0,
-                out,
-            );
+                * glam::Mat4::from_rotation_y(90.0f32.to_radians());
+            self.block_model_vertices_tinted(state, 42, t, light, true, tint, out);
         }
+    }
+    /// `IronGolemFlowerLayer`: the poppy in the right arm while the golem
+    /// offers it (`getOfferFlowerTick() > 0`), drawn with `NO_OVERLAY`.
+    fn golem_flower_geometry(
+        &self,
+        mob: &Mob,
+        camera: glam::DVec3,
+        alpha: f64,
+        light: u32,
+        out: &mut Vec<Vertex>,
+    ) {
+        use glam::{Mat4, Vec3};
+        if mob.species() != Species::IronGolem
+            || mob.extra.counter <= 0
+            || horizon_client::mobs::trader::is_invisible(mob)
+        {
+            return;
+        }
+        let Some(state) = self.pack.assets.registry.default_state("minecraft:poppy") else {
+            return;
+        };
+        let Some(arm) =
+            render::part_transform(mob, alpha as f32, camera, self.res.mob_data(), "right_arm")
+        else {
+            return;
+        };
+        let t = arm
+            * Mat4::from_translation(Vec3::new(-1.1875, 1.0625, -0.9375))
+            * Mat4::from_translation(Vec3::splat(0.5))
+            * Mat4::from_scale(Vec3::splat(0.5))
+            * Mat4::from_rotation_x((-90.0f32).to_radians())
+            * Mat4::from_translation(Vec3::splat(-0.5));
+        self.block_model_vertices(state, 42, t, light, true, out);
     }
     /// `SnowGolemHeadLayer` and `MushroomCowMushroomLayer`: the carved pumpkin
     /// on a snow golem's head, and the mushrooms on an adult mooshroom's back
@@ -387,9 +340,10 @@ impl Game<'_> {
                 owner.crossbow_charge_duration = 25;
             }
             use horizon_assets::item_model::DisplayContext as Context;
-            // PandaHoldsItemLayer shows the item as it lies on the ground.
+            // PandaHoldsItemLayer and FoxHeldItemLayer show the item as it lies
+            // on the ground.
             let (context, ordinal) = match (mob.species(), left) {
-                (Species::Panda, _) => (Context::Ground, 7),
+                (Species::Panda | Species::Fox, _) => (Context::Ground, 7),
                 (_, true) => (Context::ThirdPersonLeftHand, 1),
                 (_, false) => (Context::ThirdPersonRightHand, 2),
             };

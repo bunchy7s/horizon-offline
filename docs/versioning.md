@@ -7,6 +7,11 @@ Until 0.2 the game was tagged by date (`v2026.10.19.15`) and the launcher counte
 From 0.2 both follow [semantic versioning](https://semver.org) and share one release line: **Horizon 0.2.x** is the
 game and the launcher of the 0.2 line.
 
+**Since 2026-10-28 the game ships only Nightlies** ([release-flow.md](release-flow.md#nightly-only)): no new `vX.Y.Z`
+game tag is made, and a game build is named `nightly-<date>-<commit>` (its release title, "Nightly <date> ·
+<commit>"), which launchers and servers rank after every `vX.Y.Z`. The launcher keeps its `launcher@X.Y.Z` tags on
+the release line. What follows describes the `vX.Y.Z` game tags as they were.
+
 ## Tags
 
 | | Game | Launcher |

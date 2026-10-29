@@ -1,0 +1,154 @@
+ExperimentalRedstoneWireEvaluator	missing		minor: only worlds with the Redstone Experiments flag use this evaluator; Horizon has no experimental wire evaluator
+InstantNeighborUpdater	skip:other		never instantiated in vanilla 26.3; Level always uses CollectingNeighborUpdater
+NeighborUpdater.executeShapeUpdate	port	crates/horizon-world/src/level/update.rs::Sim::execute	Shape arm: wire skip flag, then update_shape and update_or_destroy
+NeighborUpdater.executeUpdate	port	crates/horizon-world/src/level/hooks.rs::Sim::neighbor_changed	per-block neighbour change dispatch
+NeighborUpdater.updateNeighborsAtExceptFromFacing	port	crates/horizon-world/src/level/update.rs::Sim::update_neighbors_at_except	
+Orientation.<init>	skip:java		constructor of the experimental redstone orientation value
+Orientation.generateContext	missing		minor: builds the orientation lookup of the experimental wire evaluator only
+Orientation.generateIndex	skip:java		index arithmetic for the orientation table
+Orientation.toString	skip:debug		debug string
+Orientation.withFrontAdjustSideBias	missing		minor: experimental redstone orientation transform; only the experimental evaluator uses it
+Orientation.withFrontPreserveUp	missing		minor: experimental redstone orientation transform; only the experimental evaluator uses it
+RedstoneWireEvaluator.getIncomingWireSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_incoming_signal	
+RedstoneWireEvaluator.getWireSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_power_of	
+SavedDataType	skip:java		equals over the saved-data type record; Horizon keys saved data by name
+WanderingTraderData.setSpawnChance	inline	crates/horizon-client/src/game/wandering_trader.rs::Game::tick_wandering_trader	field write of spawn_chance inside the tick; no setter
+WanderingTraderData.setSpawnDelay	inline	crates/horizon-client/src/game/wandering_trader.rs::Game::tick_wandering_trader	field write of spawn_delay inside the tick; no setter
+MapBanner.fromWorld	missing		player: using a map on a placed banner adds no banner marker to the map (MapItem.useOn toggle is not ported)
+MapBanner.getDecoration	missing		player: banner markers would show the dye colour icon; maps.rs has no banner decoration types
+MapBanner.getId	missing		minor: key string of a banner marker, only used by the marker feature
+MapDecorationTypes	skip:data		registry of map decoration types; maps.rs keeps its own DECORATION_TYPES table
+MapId.addToTooltip	missing		player: map tooltips show no 'Map #id', 'Locked' or advanced scale lines
+MapIndex.getNextMapId	port	crates/horizon-client/src/game/maps.rs::Game::next_map_id	
+DerivedLevelData	skip:debug		crash report category
+LevelData	skip:debug		crash report category
+LevelStorageSource.createAccess	port	crates/horizon-client/src/save.rs::SessionLock::acquire	gap: minor: takes the folder's session lock; there is no separate access object
+LevelStorageSource.createDefault	skip:java		factory for the source with its symlink validator
+LevelStorageSource.findLevelCandidates	inline	crates/horizon-client/src/title.rs::list_worlds	folders with a readable level.dat
+LevelStorageSource.getFileModificationTime	inline	crates/horizon-client/src/title.rs::list_worlds	level.dat mtime, used when LastPlayed is absent
+LevelStorageSource.getLevelDataAndDimensions	port	crates/horizon-client/src/save.rs::Level::read	gap: minor: reads level.dat; dimension and world-gen registry setup happen elsewhere
+LevelStorageSource.isNewLevelIdAcceptable	port	crates/horizon-client/src/title.rs::Title::target_folder	gap: minor: sanitises the name and picks a free folder instead of rejecting it
+LevelStorageSource.levelExists	inline	crates/horizon-client/src/title.rs::Title::target_folder	folder-exists check
+LevelStorageSource.loadLevelSummaries	port	crates/horizon-client/src/title.rs::list_worlds	
+LevelStorageSource.makeLevelSummary	inline	crates/horizon-client/src/title.rs::list_worlds	per-folder name, version, mode and last played
+LevelStorageSource.parseFeatureFlagsFromSummary	missing		unsure: list_worlds does not read enabled_features, so experimental worlds are not flagged
+LevelStorageSource.parseValidator	skip:other		symlink allow-list (allowed_symlinks.txt); Horizon does not read that file
+LevelStorageSource.readDataConfig	missing		minor: the world's own enabled datapacks and features are not read back from level.dat
+LevelSummary.backupStatus	missing		player: opening a world from an older version gives no 'back up first' prompt; the upgrade runs straight away (world_loading.rs)
+LevelSummary.compareTo	inline	crates/horizon-client/src/title.rs::list_worlds	newest first by last played
+LevelSummary.createInfo	missing		unsure: row status text (locked, needs conversion) is not carried in WorldEntry
+LevelSummary.getLevelName	inline	crates/horizon-client/src/title.rs::list_worlds	WorldEntry.name
+LevelSummary.getWorldVersionName	inline	crates/horizon-client/src/title.rs::list_worlds	WorldEntry.version from Version.Name
+LevelSummary.isDisabled	missing		unsure: list_worlds drops folders whose level.dat does not read instead of showing them disabled
+LevelVersion.parse	inline	crates/horizon-client/src/title.rs::list_worlds	reads Version.Name only
+PrimaryLevelData.createTag	port	crates/horizon-client/src/save.rs::Level::write	
+PrimaryLevelData.setModdedInfo	inline	crates/horizon-client/src/save.rs::Level::write	gap: minor: writes WasModded 0 and the brand list; there is no modded save state
+PrimaryLevelData.stringCollectionToTag	inline	crates/horizon-client/src/save.rs::Level::write	ServerBrands and DataPacks lists
+PrimaryLevelData.writeLastPlayed	inline	crates/horizon-client/src/save.rs::Level::write	LastPlayed
+PrimaryLevelData.writeVersionHistory	inline	crates/horizon-client/src/save.rs::Level::write	version_history
+PrimaryLevelData.writeVersionTag	inline	crates/horizon-client/src/save.rs::Level::write	Version compound
+ServerLevelData	skip:debug		crash report category
+TagValueInput	skip:java		NBT read helpers; Horizon reads Tag values directly
+TagValueInput.CompoundListWrapper	skip:java		NBT list wrapper; Horizon reads Tag values directly
+TagValueInput.ListWrapper	skip:java		NBT list wrapper; Horizon reads Tag values directly
+TagValueInput.TypedListWrapper	skip:java		NBT list wrapper; Horizon reads Tag values directly
+TagValueOutput	skip:java		NBT write helpers; Horizon writes Tag values directly
+TagValueOutput.ListWrapper	skip:java		NBT write wrapper
+TagValueOutput.TypedListWrapper	skip:java		NBT write wrapper
+WorldData	skip:debug		crash report category
+BuiltInLootTables.register	skip:data		registers built-in loot table keys; Horizon reads tables from data files
+ContainerComponentManipulator	missing		minor: set_contents and modify_contents, which no vanilla loot table uses
+ContainerComponentManipulator.ComponentSlotCollection	missing		minor: slot helpers of set_contents and modify_contents, which no vanilla loot table uses
+FloatRangePredicate.Line.createPredicate	missing		minor: float range with number-provider bounds; Horizon does not evaluate these bounds
+FloatRangePredicate.Line.test	missing		minor: float range check with number-provider bounds
+FloatRangePredicate.Line.validate	skip:data		validation at datapack load
+IntLimit.createLimiter	port	crates/horizon-world/src/loot.rs::Context::run	gap: minor: limit_count arm reads literal min and max only
+IntLimit.validate	skip:data		validation at datapack load
+IntRangePredicate.Line.createPredicate	inline	crates/horizon-world/src/loot.rs::int_bounds	gap: minor: literal bounds only; number-provider bounds are not evaluated
+IntRangePredicate.Line.test	port	crates/horizon-world/src/loot.rs::int_bounds	gap: minor: literal bounds only
+IntRangePredicate.Line.validate	skip:data		validation at datapack load
+LootContextArg.ArgCodecBuilder	skip:java		codec builders for context arguments
+LootContextArg.Getter.get	skip:java		codec getter for a context argument
+LootDataType	skip:data		validation of loot data at datapack load
+LootParams.addDynamicDrops	port	crates/horizon-client/src/game/spill.rs::Pending::dynamic	gap: minor: decorated pot sherds only; shulker contents are attached by Pending::attach
+LootParams.Builder	skip:java		builder for loot params
+Validatable	skip:data		validation at datapack load
+ValidationContext	skip:data		validation at datapack load
+ValidationContextSource	skip:data		validation at datapack load
+AlternativesEntry.alternatives	skip:java		builder
+AlternativesEntry.compose	port	crates/horizon-world/src/loot.rs::Context::expand	alternatives arm
+AlternativesEntry.validate	skip:data		validation at datapack load
+ComposableEntryContainer	skip:java		container combinators; Horizon expands entries in Context::expand
+CompositeEntryBase.createCodec	skip:java		codec
+CompositeEntryBase.validate	skip:data		validation at datapack load
+DynamicLoot.dynamicEntry	skip:java		builder
+EntryGroup.compose	port	crates/horizon-world/src/loot.rs::Context::expand	group arm
+ExpandableContainerBase.expandRaw	inline	crates/horizon-world/src/loot.rs::Context::expand	expansion of raw entries
+ExpandableContainerBase.expandableFields	skip:java		codec fields
+NestedLootTable.addExpandedEntries	inline	crates/horizon-world/src/loot.rs::Context::expand	loot_table arm
+NestedLootTable.lootTableReference	skip:java		codec factory
+SequentialEntry.compose	port	crates/horizon-world/src/loot.rs::Context::expand	sequence arm
+SlotLoot.createItemStack	missing		minor: slot entries (copies of container slot items); no vanilla loot table uses one
+UniformContainerBase.uniformFields	skip:java		codec fields
+UniformContainerBase.DummyBuilder.build	skip:java		builder
+UniformContainerBase.EntryBase.getWeight	inline	crates/horizon-world/src/loot.rs::Context::add_random_item	weight with luck, in add_random_item
+ApplyBonusCount.addBonusBinomialDistributionCount	skip:java		builder
+ApplyBonusCount.addUniformBonusCount	skip:java		builder
+ApplyBonusCount.run	port	crates/horizon-items/src/items.rs::LootContext::modifiers	apply_bonus arm
+ApplyBonusCount.BinomialWithBonusCount.calculateNewCount	inline	crates/horizon-items/src/items.rs::LootContext::modifiers	binomial_with_bonus_count formula
+ApplyBonusCount.OreDrops.calculateNewCount	inline	crates/horizon-items/src/items.rs::LootContext::modifiers	ore_drops formula
+ApplyBonusCount.UniformBonusCount.calculateNewCount	inline	crates/horizon-items/src/items.rs::LootContext::modifiers	uniform_bonus_count formula
+ApplyExplosionDecay.run	port	crates/horizon-items/src/items.rs::LootContext::modifiers	explosion_decay arm
+CopyBlockState.run	port	crates/horizon-items/src/items.rs::LootContext::modifiers	copy_state arm; copies the listed properties
+CopyBlockState.Builder	skip:java		builder (build, copy)
+CopyComponentsFunction.run	port	crates/horizon-client/src/game/spill.rs::Pending::record	gap: minor: copies only what spill.rs keeps for block entities (shulker, banner, names, heads, bees)
+CopyComponentsFunction.Builder	skip:java		builder (build, exclude, include)
+CopyCustomDataFunction.run	missing		minor: no vanilla loot table or item modifier uses copy_custom_data
+CopyCustomDataFunction.copyData	skip:java		builder factory
+CopyCustomDataFunction.Builder.copy	skip:java		builder
+CopyCustomDataFunction.CopyOperation.apply	missing		minor: part of copy_custom_data, which is not ported
+CopyNameFunction.run	missing		minor: no vanilla loot table uses copy_name
+EnchantedCountIncreaseFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	enchanted_count_increase arm
+EnchantedCountIncreaseFunction.Builder.build	skip:java		builder
+FillPlayerHead.run	missing		minor: no vanilla loot table uses fill_player_head
+FilteredFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	filtered arm
+FilteredFunction.Builder.build	skip:java		builder
+FunctionUserBuilder	skip:java		builder interface (apply, buildFunction)
+LimitCount.run	port	crates/horizon-world/src/loot.rs::Context::run	gap: minor: limit_count arm reads literal min and max only
+LootItemConditionalFunction.apply	port	crates/horizon-world/src/loot.rs::Context::modify	condition check, then run
+LootItemConditionalFunction.commonFields	skip:java		codec fields
+LootItemFunction.decorate	port	crates/horizon-world/src/loot.rs::Context::modify	function applied to a drop
+ModifyContainerContents.run	missing		minor: no vanilla loot table uses modify_contents
+SequenceFunction.compose	port	crates/horizon-world/src/loot.rs::Context::run	sequence arm
+SetAttributesFunction	missing		minor: set_attributes is not ported; no vanilla loot table uses it
+SetAttributesFunction.ModifierBuilder.build	skip:java		builder
+SetBannerPatternFunction.run	missing		minor: banner pattern layers from loot are not set; no vanilla loot table uses set_banner_pattern
+SetBannerPatternFunction.Builder	skip:java		builder
+SetBookCoverFunction.apply	missing		minor: no vanilla loot table uses set_book_cover
+SetComponentsFunction.run	port	crates/horizon-client/src/game/commands/items.rs::Game::apply_item_modifier	gap: player: only /item modify runs it; loot tables (trial chamber copper trim) do not apply the components
+SetComponentsFunction.setComponent	skip:java		builder factory
+SetContainerContents.run	missing		minor: no vanilla loot table uses set_contents
+SetContainerContents.Builder	skip:java		builder
+SetContainerLootTable	missing		minor: no vanilla loot table uses set_loot_table
+SetCustomDataFunction.run	port	crates/horizon-client/src/game/commands/items.rs::Game::apply_item_modifier	gap: minor: only /item modify runs it; no loot table uses set_custom_data
+SetCustomModelDataFunction.apply	missing		minor: custom_model_data changes from loot; no vanilla loot table uses it
+SetCustomModelDataFunction.run	missing		minor: custom_model_data changes from loot; no vanilla loot table uses it
+SetCustomModelDataFunction.validate	skip:data		validation at datapack load
+SetEnchantmentsFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	set_enchantments arm
+SetEnchantmentsFunction.validate	skip:data		validation at datapack load
+SetEnchantmentsFunction.Builder	skip:java		builder
+SetFireworkExplosionFunction.apply	missing		minor: no vanilla loot table uses set_firework_explosion
+SetFireworksFunction.apply	missing		minor: no vanilla loot table uses set_fireworks
+SetInstrumentFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	gap: player: only draws the random option; the goat horn's instrument component is never set (pillager outpost horns)
+SetItemCountFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	set_count arm
+SetItemCountFunction.setCount	skip:java		builder factory
+SetItemDamageFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	set_damage arm
+SetItemDamageFunction.setDamage	skip:java		builder factory
+SetLoreFunction.run	port	crates/horizon-client/src/game/commands/items.rs::Game::apply_item_modifier	gap: minor: only /item modify runs set_lore; no loot table uses it
+SetLoreFunction.updateLore	inline	crates/horizon-client/src/game/commands/items.rs::Game::apply_item_modifier	set_lore arm, list_operation
+SetLoreFunction.getReferencedContextParams	skip:data		validation of referenced context params
+SetLoreFunction.Builder	skip:java		builder
+SetOminousBottleAmplifierFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	set_ominous_bottle_amplifier arm
+SetRandomDyesFunction.run	port	crates/horizon-client/src/merchant.rs::Trades::apply_modifier	set_random_dyes arm
+SetRandomPotionFunction.run	port	crates/horizon-client/src/merchant.rs::Trades::apply_modifier	set_random_potion arm
+SetStewEffectFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	set_stew_effect arm

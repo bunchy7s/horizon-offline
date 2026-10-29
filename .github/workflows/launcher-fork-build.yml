@@ -1,17 +1,33 @@
 name: launcher-fork-build
-# Builds this fork's launcher on Windows and Linux by hand (the upstream launcher.yml needs this
-# fork's missing signing secrets and its own macOS runner, so it never publishes here). The
-# archives are uploaded as workflow artifacts; with `publish` and a tag they are also attached
-# to a release with that tag.
+# Builds and publishes this fork's launcher on Linux, macOS and Windows. The upstream launcher.yml
+# expects upstream's Mac mini and release environment; this workflow uses GitHub-hosted runners and
+# the fork's own RELEASE_SIGNING_KEY repository secret. Releases are signed checksum releases that
+# this fork's launcher accepts and updates itself from (launcher/src/backend.rs REPO).
+#
+# A push to main that changes the launcher (or a crate it builds in) decides, builds, signs and
+# publishes by itself. Run it by hand with dry_run=true to build without publishing.
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'launcher/**'
+      - 'crates/horizon-bench/**'
+      - 'crates/horizon-friends/**'
+      - 'crates/horizon-mods/**'
+      - 'crates/horizon-port-pack/**'
+      - 'crates/horizon-prepare/**'
+      - 'crates/horizon-release-sign/**'
+      - 'crates/horizon-telemetry/**'
+      - 'crates/horizon-theme/**'
+      - '.github/workflows/launcher-fork-build.yml'
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag when publishing (empty: artifacts only)"
-        required: false
-        default: ""
-      publish:
-        description: Attach the archives to a release
+      dry_run:
+        description: Build everything but publish nothing
+        type: boolean
+        default: false
+      force:
+        description: Release even without launcher changes or while paused
         type: boolean
         default: false
 
@@ -22,8 +38,47 @@ env:
   # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
   HORIZON_TELEMETRY_URL: "off"
 
+concurrency:
+  group: launcher-fork-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  decide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+      tag: ${{ steps.decide.outputs.tag }}
+      head: ${{ steps.decide.outputs.head }}
+      version: ${{ steps.decide.outputs.version }}
+      dry_run: ${{ steps.mode.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: mode
+        run: echo "dry_run=${{ github.ref != 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.dry_run) }}" >> "$GITHUB_OUTPUT"
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASES_PAUSED: ${{ vars.RELEASES_PAUSED }}
+          HEAD_SHA: ${{ (github.event_name == 'push' || steps.mode.outputs.dry_run == 'true') && github.sha || '' }}
+          FORCE: ${{ inputs.force && 'yes' || '' }}
+        run: |
+          python3 tools/release_train.py decide --kind launcher ${HEAD_SHA:+--head "$HEAD_SHA"} ${FORCE:+--force} | tee decision.json
+          echo "### $(jq -r '.reason' decision.json)" >> "$GITHUB_STEP_SUMMARY"
+          tag=$(jq -r '.tag' decision.json)
+          version=${tag#launcher-v}
+          version=${version#launcher@}
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if [[ "${{ steps.mode.outputs.dry_run }}" == true ]]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "head=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: decide
+    if: needs.decide.outputs.release == 'true'
     name: build ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -33,6 +88,10 @@ jobs:
             os: ubuntu-22.04
             asset: horizon-launcher-linux-x86_64.tar.gz
             binary: horizon-launcher
+          - name: macos
+            os: macos-14
+            asset: horizon-launcher-macos-arm64.zip
+            binary: horizon-launcher
           - name: windows
             os: windows-latest
             asset: horizon-launcher-windows-x64.zip
@@ -41,20 +100,24 @@ jobs:
             # which only the Visual C++ redistributable installs.
             rustflags: -C target-feature=+crt-static
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: ${{ matrix.name == 'macos' && 60 || 40 }}
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
+      HORIZON_LAUNCHER_VERSION: ${{ needs.decide.outputs.version }}
+      HORIZON_LAUNCHER_TAG: ${{ needs.decide.outputs.tag }}
     defaults:
       run:
         working-directory: launcher
         shell: bash
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decide.outputs.head }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: launcher
-          shared-key: launcher-${{ matrix.name }}
+          shared-key: launcher-fork-${{ matrix.name }}
       - name: Linux libraries GPUI links to
         if: runner.os == 'Linux'
         run: |
@@ -62,6 +125,12 @@ jobs:
           sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev
       - run: cargo test --release --locked
       - run: cargo build --release --locked
+      - name: The version is the release's
+        run: |
+          out=$(target/release/${{ matrix.binary }} --version)
+          echo "$out"
+          expected="${HORIZON_LAUNCHER_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}"
+          [[ "$out" == "horizon-launcher $expected" ]] || { echo "::error::expected horizon-launcher $expected"; exit 1; }
       - name: Package
         run: |
           rm -rf dist out && mkdir -p dist out
@@ -78,20 +147,64 @@ jobs:
           path: launcher/out/*
           retention-days: 7
 
-  release:
-    needs: build
-    if: inputs.publish && inputs.tag != ''
+  sign:
+    needs: [decide, build]
+    if: needs.decide.outputs.release == 'true' && needs.decide.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            tools/ci/sign_release.sh
+            crates/horizon-release-sign
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - name: Publish
+      - name: Sign the checksums (SHA256SUMS, SHA256SUMS.sig)
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_SIGNING_KEY_NEXT: ${{ secrets.RELEASE_SIGNING_KEY_NEXT }}
+          TAG: ${{ needs.decide.outputs.tag }}
+        run: bash tools/ci/sign_release.sh "$TAG" dist/horizon-launcher-*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signature
+          path: dist/SHA256SUMS*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [decide, build, sign]
+    if: needs.decide.outputs.release == 'true' && needs.decide.outputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Notes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ inputs.tag }}" --target "$GITHUB_SHA" \
-            --title "First test" --notes "" || true
-          gh release upload "${{ inputs.tag }}" dist/horizon-launcher-* --clobber
+          python3 tools/release_train.py notes --kind launcher --tag "${{ needs.decide.outputs.tag }}" \
+            --head "${{ needs.decide.outputs.head }}" --out notes > /dev/null
+          { echo "## $(cat notes/title.txt)"; echo; cat notes/body.md; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: The signature, checked as launchers check it
+        env:
+          TAG: ${{ needs.decide.outputs.tag }}
+        run: cargo run --locked --quiet -p horizon-release-sign -- verify --tag "$TAG" --publishing dist
+      - name: Publish ${{ needs.decide.outputs.tag }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.decide.outputs.tag }}
+        run: |
+          signature=(); [[ -f dist/SHA256SUMS.sig ]] && signature=(dist/SHA256SUMS.sig)
+          gh release create "$TAG" --target "${{ needs.decide.outputs.head }}" --title "$(cat notes/title.txt)" \
+            --notes-file notes/body.md --latest=false dist/horizon-launcher-* dist/SHA256SUMS "${signature[@]}"

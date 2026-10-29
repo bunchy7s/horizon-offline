@@ -5,6 +5,7 @@ use crate::{
     chunk::{Chunk, Light, MIN_Y, SECTIONS, Section},
     containers::BlockEntity,
     fast_hash::FxHashMap,
+    mobs::spawner::{SpawnDataExt, SpawnerExt},
 };
 use horizon_protocol::{
     buf::{BitSet, Codec, List, Writer, set_bit},
@@ -824,6 +825,7 @@ impl ChunkEncoder {
                     tag: block_entities
                         .get(&pos)
                         .and_then(entity_tag)
+                        .or_else(|| pot_tag(chunk, pos))
                         .unwrap_or(Tag::End),
                 });
             }
@@ -938,6 +940,28 @@ pub fn entity_tag(entity: &BlockEntity) -> Option<Tag> {
     match entity {
         BlockEntity::Sign(sign) => Some(Tag::compound(sign.encode())),
         BlockEntity::Spawner(s) => Some(s.update_tag()),
+        // BannerBlockEntity.getUpdateTag: saveWithoutMetadata, so the patterns,
+        // the custom name and the components.
+        BlockEntity::Banner(b) => {
+            let mut entries = Vec::new();
+            if !b.layers.is_empty() {
+                entries.push(("patterns", crate::banner::layers_to_nbt(&b.layers)));
+            }
+            if let Some(name) = &b.name {
+                entries.push(("CustomName", Tag::String(name.as_str().into())));
+            }
+            entries.push(("components", Tag::Compound(b.components.clone())));
+            Some(Tag::compound(entries))
+        }
+        // VaultBlockEntity.getUpdateTag: the shared data, which holds the display item.
+        BlockEntity::Vault(v) => Some(v.update_tag()),
+        // TrialSpawnerStateData.getUpdateTag: the spawn data the mob is drawn from.
+        // next_mob_spawns_at (ACTIVE only) is left out: nothing in the client
+        // reads it, and the block state it depends on is not known here.
+        BlockEntity::TrialSpawner(t) => t
+            .next_spawn_data
+            .as_ref()
+            .map(|d| Tag::compound([("spawn_data", d.encode())])),
         // SkullBlockEntity: the profile is the whole reason a head differs.
         BlockEntity::Skull(s) => {
             let mut entries = Vec::new();
@@ -960,6 +984,22 @@ pub fn entity_tag(entity: &BlockEntity) -> Option<Tag> {
         )])),
         _ => None,
     }
+}
+
+/// The update tag of the decorated pot at `pos` (DecoratedPotBlockEntity.getUpdateTag,
+/// saveCustomOnly). A pot is not a block entity here: its tag is the chunk's saved one.
+pub fn pot_tag(chunk: &Chunk, pos: (i32, i32, i32)) -> Option<Tag> {
+    let at = chunk.saved.as_ref()?.block_entities.iter().find(|t| {
+        t.get("id") == Some(&Tag::String("minecraft:decorated_pot".into()))
+            && t.get("x") == Some(&Tag::Int(pos.0))
+            && t.get("y") == Some(&Tag::Int(pos.1))
+            && t.get("z") == Some(&Tag::Int(pos.2))
+    })?;
+    let entries: Vec<_> = ["sherds", "LootTable", "LootTableSeed", "item"]
+        .into_iter()
+        .filter_map(|k| Some((k, at.get(k)?.clone())))
+        .collect();
+    (!entries.is_empty()).then(|| Tag::compound(entries))
 }
 
 /// Light sections run from one below the world to one above it. A layer

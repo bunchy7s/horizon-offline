@@ -158,9 +158,10 @@ of the main action. The game's menus keep `LIGHT` and `DARK`.
 
 - **Pixel type for what names and what you act on.** Headings, navigation, buttons and the
   wordmark use Pixelify Sans (OFL; Medium, SemiBold, Bold); paragraphs and numbers stay in Geist
-  and Geist Mono so long text reads easily. The bundled copies add the two uppercase Cyrillic
-  letters upstream leaves out, О and П: the Latin O's glyph and the lowercase п lifted to that
-  weight's cap height, so a Russian heading stays in the pixel face.
+  and Geist Mono so long text reads easily. The bundled copies add the three uppercase Cyrillic
+  letters upstream leaves out, О, П and І: the Latin O's glyph, the lowercase п lifted to that
+  weight's cap height, and the Latin I's glyph, so a Russian or Ukrainian heading stays in the
+  pixel face.
 - **Blocks, not rounded cards.** Every surface is square: a 2 px dark outline, a 2 px light bevel
   along the top and a darker lip along the bottom. The main action is the violet face with its own
   bevel and a 4 px lip; it sinks a pixel when pressed. Code and fields are sunk wells.

@@ -142,6 +142,26 @@ fn installs_checked_turns_on_and_removes() {
 }
 
 #[test]
+fn a_mod_that_turned_native_keeps_its_hmod_until_removed() {
+    assert!(stays(true, "horizon-mods/coords_hud.hmod"));
+    assert!(!stays(false, "horizon-mods/coords_hud.hmod"));
+    assert!(!stays(true, "horizon-native-mods/coords_hud.hnmod"));
+    let index = sample();
+    let home = scratch("turned-native");
+    install_from(&index, true, None, &hud(&index), &home, &|_, _| {}).unwrap();
+    // As install_version leaves it after the native update.
+    let mut list = installed::Installed::load(&home);
+    list.entries[0].file = "horizon-native-mods/coords_hud.hnmod".into();
+    list.save(&home).unwrap();
+    fs::create_dir_all(home.join("horizon-native-mods")).unwrap();
+    fs::write(home.join("horizon-native-mods/coords_hud.hnmod"), "").unwrap();
+    installed::remove(&home, "coords_hud").unwrap();
+    assert!(!home.join("horizon-native-mods/coords_hud.hnmod").exists());
+    assert!(!home.join("horizon-mods/coords_hud.hmod").exists());
+    fs::remove_dir_all(&home).unwrap();
+}
+
+#[test]
 fn installs_a_shader_pack_into_shaderpacks() {
     let index = sample();
     let home = scratch("shader");

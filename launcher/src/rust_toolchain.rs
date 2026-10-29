@@ -8,6 +8,10 @@
 //! folder. No rustup, nothing installed on the system or added to the PATH: the launcher calls this
 //! cargo with its own `CARGO_HOME`. The pins come from the channel manifest of [`VERSION`]
 //! (`https://static.rust-lang.org/dist/channel-rust-<VERSION>.toml`, `[pkg.<name>.target.<host>]`).
+//!
+//! On Windows it also brings MinGW-w64 ([`MINGW`]): `rust-mingw` only links. The game needs a C
+//! compiler (`ring`, `hidapi` and wasmtime build C with `cc`), and `windows-sys`' `raw-dylib`
+//! imports need `dlltool`, which runs the GNU assembler; `rust-mingw` has neither.
 use crate::backend;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,7 +26,26 @@ const DIST: &str = "https://static.rust-lang.org/dist/2026-10-15";
 pub struct Host {
     pub target: &'static str,
     components: &'static [(&'static str, &'static str)],
+    /// The C toolchain it brings besides Rust's components, unpacked into [`MINGW_DIR`].
+    mingw: Option<&'static Mingw>,
 }
+
+/// A MinGW-w64 release: one zip, pinned by its SHA-256.
+pub struct Mingw {
+    pub version: &'static str,
+    url: &'static str,
+    sha256: &'static str,
+}
+
+/// WinLibs' build of GCC and binutils on MinGW-w64 (MSVCRT, the C runtime `rust-mingw` links
+/// against; POSIX threads; SEH), the release's `mingw64/` folder without its documentation.
+pub const MINGW: Mingw = Mingw {
+    version: "GCC 16.2.0, MinGW-w64 14.0.0 (WinLibs r3)",
+    url: "https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-23.1.3-14.0.0-msvcrt-r3/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64msvcrt-14.0.0-r3.zip",
+    sha256: "62af32ea58acdea1318ea5dd8eb7017eaee694dd40b269d52a59c769dcfefb82",
+};
+/// Where MinGW-w64 goes in the toolchain, as the zip names it.
+const MINGW_DIR: &str = "mingw64";
 
 const HOSTS: &[Host] = &[
     Host {
@@ -41,6 +64,7 @@ const HOSTS: &[Host] = &[
                 "c124006d63885ba1029aca49efd59e93be6b2b171c379318ff94a00ef5eba664",
             ),
         ],
+        mingw: None,
     },
     Host {
         target: "x86_64-unknown-linux-gnu",
@@ -58,6 +82,7 @@ const HOSTS: &[Host] = &[
                 "d1290c05994a59c029e562cb75be1bddc6fb11a4c501e1b7b0f61d119c6cbb12",
             ),
         ],
+        mingw: None,
     },
     Host {
         target: "x86_64-pc-windows-gnu",
@@ -79,6 +104,7 @@ const HOSTS: &[Host] = &[
                 "30263d7bb4fd0bf63a153afe36d7fc102f929a7d42781651c6b3a03a414ba428",
             ),
         ],
+        mingw: Some(&MINGW),
     },
 ];
 
@@ -109,13 +135,21 @@ impl Toolchain {
         self.dir.join("bin").join(exe("cargo"))
     }
 
+    /// MinGW-w64's programs (gcc, as, dlltool), when the toolchain brings it (Windows).
+    pub fn mingw_bin(&self) -> PathBuf {
+        self.dir.join(MINGW_DIR).join("bin")
+    }
+
     /// `program` (this toolchain's cargo, or a tool built with it) set up to use only this
-    /// toolchain: its rustc, the launcher's Cargo home, and none of the player's rustup or
-    /// compiler-wrapper settings.
+    /// toolchain: its rustc, its MinGW-w64 where it has one, the launcher's Cargo home, and none of
+    /// the player's rustup or compiler-wrapper settings.
     pub fn command(&self, program: &Path) -> Command {
         let mut cmd = Command::new(program);
         let path = std::env::var_os("PATH").unwrap_or_default();
-        let paths = std::iter::once(self.dir.join("bin")).chain(std::env::split_paths(&path));
+        let mingw = Some(self.mingw_bin()).filter(|bin| bin.is_dir());
+        let paths = std::iter::once(self.dir.join("bin"))
+            .chain(mingw)
+            .chain(std::env::split_paths(&path));
         cmd.env("PATH", std::env::join_paths(paths).unwrap_or(path))
             .env("RUSTC", self.dir.join("bin").join(exe("rustc")))
             .env("CARGO_HOME", cargo_home());
@@ -164,10 +198,13 @@ fn dir_for(host: &Host) -> PathBuf {
 
 const COMPLETE: &str = ".installed";
 
-/// The toolchain, when it is installed.
+/// The toolchain, when it is installed. A Windows one from before MinGW-w64 isn't: installing
+/// again brings it.
 pub fn installed() -> Option<Toolchain> {
-    let dir = dir_for(host()?);
-    dir.join(COMPLETE).is_file().then_some(Toolchain { dir })
+    let host = host()?;
+    let toolchain = Toolchain { dir: dir_for(host) };
+    let mingw = host.mingw.is_none() || toolchain.mingw_bin().join(exe("gcc")).is_file();
+    (toolchain.dir.join(COMPLETE).is_file() && mingw).then_some(toolchain)
 }
 
 /// Downloads, checks and unpacks the pinned toolchain (once); `progress` gets the fraction done.
@@ -186,7 +223,7 @@ pub fn install(progress: impl Fn(f32)) -> Result<Toolchain, String> {
     let partial = root().join(format!(".{VERSION}-{}.partial", host.target));
     let _ = fs::remove_dir_all(&partial);
     fs::create_dir_all(&partial).map_err(|e| e.to_string())?;
-    let count = host.components.len() as f32;
+    let count = (host.components.len() + usize::from(host.mingw.is_some())) as f32;
     for (i, (name, sha256)) in host.components.iter().enumerate() {
         let file = format!("{name}-{VERSION}-{}.tar.gz", host.target);
         let archive = root().join(format!(".{file}"));
@@ -196,6 +233,16 @@ pub fn install(progress: impl Fn(f32)) -> Result<Toolchain, String> {
         let unpacked = unpack(&archive, &partial);
         let _ = fs::remove_file(&archive);
         unpacked.map_err(|e| format!("Rust {VERSION} ({name}): {e}"))?;
+    }
+    if let Some(mingw) = host.mingw {
+        let archive = root().join(".mingw.zip");
+        let done = host.components.len() as f32;
+        let step = |f: f32| progress((done + f) / count);
+        backend::download(mingw.url, 0, mingw.sha256, &archive, &step)
+            .map_err(|e| format!("MinGW-w64 ({}): {e}", mingw.version))?;
+        let unpacked = unpack_mingw(&archive, &partial);
+        let _ = fs::remove_file(&archive);
+        unpacked.map_err(|e| format!("MinGW-w64 ({}): {e}", mingw.version))?;
     }
     fs::write(partial.join(COMPLETE), VERSION).map_err(|e| e.to_string())?;
     let _ = fs::remove_dir_all(&dir);
@@ -246,9 +293,50 @@ fn component_path(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Unpacks MinGW-w64's zip into `prefix`: its `mingw64/` folder, documentation left out.
+fn unpack_mingw(archive: &Path, prefix: &Path) -> Result<(), String> {
+    let file = fs::File::open(archive).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+        let Some(relative) = entry.enclosed_name().and_then(|p| mingw_path(&p)) else {
+            continue;
+        };
+        let to = prefix.join(&relative);
+        if entry.is_dir() {
+            fs::create_dir_all(&to).map_err(|e| e.to_string())?;
+            continue;
+        }
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut out = fs::File::create(&to).map_err(|e| format!("{}: {e}", relative.display()))?;
+        std::io::copy(&mut entry, &mut out).map_err(|e| format!("{}: {e}", relative.display()))?;
+    }
+    Ok(())
+}
+
+/// Where a file of MinGW-w64's zip goes, relative to the prefix: `mingw64/bin/gcc.exe` as it is.
+/// None for its documentation (`mingw64/share/`, 50 MB of the 925), the folder itself and anything
+/// outside `mingw64/`.
+fn mingw_path(path: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let parts: Vec<&std::ffi::OsStr> = path
+        .components()
+        .map(|c| match c {
+            Component::Normal(name) => Some(name),
+            _ => None,
+        })
+        .collect::<Option<_>>()?;
+    match parts.as_slice() {
+        [top, first, ..] if *top == MINGW_DIR && *first != "share" => Some(parts.iter().collect()),
+        _ => None,
+    }
+}
+
 /// Whether this computer can link what the toolchain compiles: Rust brings its compiler, but uses
 /// the system's linker on macOS (the Command Line Tools) and Linux (`cc`). Windows' `windows-gnu`
-/// toolchain brings its own.
+/// toolchain brings its own, and MinGW-w64 for C and import libraries ([`MINGW`]).
 pub fn linker() -> Result<(), String> {
     let ok = |program: &str, args: &[&str]| {
         Command::new(program)
@@ -307,6 +395,17 @@ mod tests {
         let windows = HOSTS.iter().find(|h| h.target.contains("windows")).unwrap();
         assert!(windows.target.ends_with("-gnu"), "no Visual Studio needed");
         assert!(windows.components.iter().any(|c| c.0 == "rust-mingw"));
+        // Only Windows brings a C toolchain; macOS and Linux use the system's.
+        for host in HOSTS {
+            assert_eq!(host.mingw.is_some(), host.target.contains("windows"));
+        }
+        let mingw = windows.mingw.unwrap();
+        assert!(mingw.sha256.len() == 64 && mingw.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert!(mingw.url.starts_with("https://") && mingw.url.ends_with(".zip"));
+        assert!(
+            mingw.url.contains("msvcrt"),
+            "the C runtime rust-mingw links against"
+        );
         if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
             assert_eq!(host().unwrap().target, "aarch64-apple-darwin");
         }
@@ -403,5 +502,74 @@ mod tests {
             Some(toolchain.dir.join("bin"))
         );
         assert!(get("CARGO_HOME").flatten().unwrap().ends_with("cargo"));
+    }
+
+    #[test]
+    fn mingw_files_land_under_mingw64_without_the_documentation() {
+        let at = |p: &str| mingw_path(Path::new(p));
+        assert_eq!(
+            at("mingw64/bin/gcc.exe"),
+            Some(PathBuf::from("mingw64/bin/gcc.exe"))
+        );
+        assert_eq!(
+            at("mingw64/libexec/gcc/x86_64-w64-mingw32/16.2.0/cc1.exe"),
+            Some(PathBuf::from(
+                "mingw64/libexec/gcc/x86_64-w64-mingw32/16.2.0/cc1.exe"
+            ))
+        );
+        for skipped in [
+            "mingw64",
+            "mingw64/share/doc/gcc.html",
+            "other/bin/gcc.exe",
+            "mingw64/../evil.exe",
+            "/mingw64/bin/gcc.exe",
+        ] {
+            assert_eq!(at(skipped), None, "{skipped}");
+        }
+    }
+
+    #[test]
+    fn a_mingw_zip_unpacks_its_programs_and_not_its_documentation() {
+        let dir = std::env::temp_dir().join(format!("horizon-mingw-unpack-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let archive = dir.join("mingw.zip");
+        let mut zip = zip::ZipWriter::new(fs::File::create(&archive).unwrap());
+        let options = zip::write::SimpleFileOptions::default();
+        zip.add_directory("mingw64/bin/", options).unwrap();
+        for (path, body) in [
+            ("mingw64/bin/gcc.exe", "gcc"),
+            ("mingw64/share/doc/readme.txt", "docs"),
+            ("licenses/readme.txt", "outside"),
+        ] {
+            zip.start_file(path, options).unwrap();
+            zip.write_all(body.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+        let prefix = dir.join("prefix");
+        unpack_mingw(&archive, &prefix).unwrap();
+        assert_eq!(
+            fs::read_to_string(prefix.join("mingw64/bin/gcc.exe")).unwrap(),
+            "gcc"
+        );
+        assert!(!prefix.join("mingw64/share").exists() && !prefix.join("licenses").exists());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_command_puts_mingw_after_rust_when_the_toolchain_has_it() {
+        let dir = std::env::temp_dir().join(format!("horizon-mingw-path-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let toolchain = Toolchain { dir: dir.clone() };
+        fs::create_dir_all(toolchain.mingw_bin()).unwrap();
+        let cmd = toolchain.command(&toolchain.cargo());
+        let path = cmd
+            .get_envs()
+            .find(|(k, _)| *k == "PATH")
+            .and_then(|(_, v)| v)
+            .unwrap();
+        let first: Vec<PathBuf> = std::env::split_paths(path).take(2).collect();
+        assert_eq!(first, [dir.join("bin"), toolchain.mingw_bin()]);
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

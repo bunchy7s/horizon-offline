@@ -1,0 +1,149 @@
+RemotePlayer.shouldRenderAtSqrDistance	missing		unsure: no remote-player cull distance (box x 10 x 64 x view scale) found in game/remote.rs
+RemotePlayer.aiStep	missing		unsure: remote players are drawn from Mob records in game/remote.rs; no per-tick motion lerp or push step found
+RemotePlayer.lerpMotion	missing		unsure: no lerp of received remote-player motion found in game/remote.rs
+Hotbar.storeFrom	port	crates/horizon-client/src/game/creative_hotbar.rs::Game::hotbar_load_or_save	save copies the nine slots into the hotbar.nbt row
+Hotbar.isEmpty	missing		player: an empty creative Toolbar row shows no paper hint with the save key (no inventory.hotbarInfo in Horizon)
+ClientMetricsSamplersProvider.registerStaticSamplers	skip:debug		F3 metrics samplers
+ClientMetricsSamplersProvider.samplers	skip:debug		F3 metrics samplers
+QuickPlay.connect	port	crates/horizon-client/src/game.rs::Options::read	gap: minor: no Realms variant and no latest-world fallback
+QuickPlay.getLatestSingleplayerWorld	missing		minor: a quick play with no world id does not pick the newest world
+QuickPlay.joinMultiplayerWorld	port	crates/horizon-client/src/game.rs::Options::read	gap: minor: the server is not added to the server list
+QuickPlay.joinRealmsWorld	skip:service		Realms
+QuickPlayLog.log	skip:other		writes the launcher's quick play session file; Horizon keeps none
+FullTextSearchTree.searchIdentifier	port	crates/horizon-client/src/recipe_book.rs::Book::collection_matches	recipe-book namespace:path search; the creative search is Creative::search_results
+IdSearchTree.search	port	crates/horizon-client/src/creative.rs::Creative::search_results	# tag branch; plain text goes to the name search
+IdSearchTree.searchIdentifier	port	crates/horizon-client/src/creative.rs::Creative::search_results	#namespace:path tag search
+IdentifierSearchTree.create	inline	crates/horizon-client/src/creative.rs::Creative::from_legacy	builds the search index with the item list
+IntersectionIterator.computeNext	inline	crates/horizon-client/src/creative.rs::Creative::search_results	namespace and path matches intersected by filter
+MergingUniqueIterator.computeNext	inline	crates/horizon-client/src/creative.rs::Creative::search_results	one match per item, found by any/filter
+SearchTree.plainText	inline	crates/horizon-client/src/creative.rs::Creative::search_results	name search over tooltip lines
+SuffixArray.add	skip:java		suffix array index build; Horizon scans the item list
+SuffixArray.generate	skip:java		suffix array construction; Horizon scans the item list
+SuffixArray.print	skip:debug		suffix array debug dump
+SuffixArray.getString	skip:debug		suffix array debug text
+SuffixArray.compare	skip:java		binary-search helper of the suffix array
+SuffixArray.search	port	crates/horizon-client/src/creative.rs::Creative::search_results	substring match by linear scan, same matches in tab order
+IntegratedPlayerList.canPlayerLogin	inline	crates/horizon-client/src/lan/mod.rs::Shared::try_admit	gap: minor: no owner-name check; duplicate logins are matched by uuid
+IntegratedServer.processPacketsAndTick	skip:debug		gizmo collector for debug draws
+IntegratedServer.fillServerSystemReport	skip:debug		system report for crash reports
+IntegratedServer.getPersonalGameMode	port	crates/horizon-client/src/game/integrated.rs::Game::server_options	owner's game mode, read from the guest record
+IntegratedServer.updateGameModeBasedOnPermission	inline	crates/horizon-client/src/game/lan.rs::Game::lan_guest_joined	gap: player: a guest already in the world keeps their mode when force-gamemode or the default mode changes; only a join applies it
+IntegratedServer.updatePermissions	port	crates/horizon-client/src/lan/hub.rs::Hub::resend_commands	permission level and commands sent to every guest
+IntegratedServer.setDefaultGameType	port	crates/horizon-client/src/game/lan.rs::Game::set_default_game_mode	
+IntegratedServer.isSingleplayerOwner	missing		unsure: the owner is kept by uuid in hub.singleplayer_owner; no name-based check found
+IntegratedServer.getScaledTrackingDistance	missing		player: the Entity Distance option is not applied to what a LAN host tracks
+IntegratedServer.getForcedGameType	inline	crates/horizon-client/src/game/lan.rs::Game::lan_guest_joined	forced mode is sent when a guest joins
+IntegratedServer.selectLevelLoadFocusPos	missing		unsure: no load focus at the owner's saved position found in game/integrated.rs open_integrated
+IntegratedServer.reportChunkLoadFailure	missing		player: no low-disk-space toast when a chunk fails to load (LOW_DISK_SPACE_WARNING is only an id constant)
+IntegratedServer.reportChunkSaveFailure	missing		player: no low-disk-space toast when a chunk fails to save
+LanServerDetection.LanServerDetector.run	port	crates/horizon-client/src/lan/discovery.rs::listen	receive loop for LAN announcements
+LanServerDetection.LanServerList.takeDirtyServers	skip:java		dirty flag; Scanner::games returns a copy on each call
+LanServerPinger.run	port	crates/horizon-client/src/lan/discovery.rs::Pinger::start	announce loop on a thread until dropped
+ChannelAccess.createHandle	port	crates/horizon-client/src/audio.rs::MixerBackend::create	gap: minor: the streaming flag is ignored
+ChannelAccess.executeOnChannels	skip:other		sound executor thread; the mixer is shared under a lock
+ChannelAccess.ChannelHandle.execute	port	crates/horizon-client/src/audio.rs::MixerBackend::with	runs the action on the channel when it exists
+ChunkedSampleByteBuf.accept	skip:java		16-bit PCM buffer; Horizon mixes f32 samples
+ChunkedSampleByteBuf.get	skip:java		16-bit PCM buffer; Horizon mixes f32 samples
+FloatSampleSource.read	inline	crates/horizon-client/src/audio.rs::decode	decoded buffer; decode reads the whole file
+FloatSampleSource.readAll	inline	crates/horizon-client/src/audio.rs::decode	decoded buffer; decode reads the whole file
+JOrbisAudioStream.<init>	port	crates/horizon-client/src/audio.rs::decode	Ogg decoded by symphonia, not JOrbis
+JOrbisAudioStream.readToBuffer	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.readPage	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.readIdentificationPacket	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.readPacket	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.getSamplesToWrite	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.readChunk	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.copyAnyChannels	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.copyMono	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.copyStereo	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
+LoopingAudioStream.read	port	crates/horizon-client/src/audio.rs::attach	gap: minor: the looping flag is set on the channel; the buffer loops, no stream is reopened
+MusicManager.canReplace	inline	crates/horizon-client/src/music.rs::MusicManager::tick	replace only when the new track differs from the playing one
+MusicManager.getCurrentMusicTranslationKey	port	crates/horizon-client/src/music.rs::MusicManager::current	gap: minor: returns the sound id; the short translation key is not built
+SoundBufferLibrary.getCompleteBuffer	port	crates/horizon-client/src/audio.rs::decode	cached in SoundCache
+SoundBufferLibrary.getStream	inline	crates/horizon-client/src/audio.rs::decode	gap: minor: the whole file is decoded; no stream
+SoundBufferLibrary.clear	inline	crates/horizon-client/src/audio.rs::Audio::reload	the cache is emptied on reload
+SoundBufferLibrary.preload	skip:java		sounds decode on demand
+SoundBufferLibrary.enumerate	port	crates/horizon-client/src/audio.rs::Audio::census	sound buffer census for debug output
+SoundBufferLibrary.DebugOutput.Counter.accountBuffer	inline	crates/horizon-client/src/audio.rs::Audio::census	counts buffers and sizes
+SoundEngine.reload	port	crates/horizon-client/src/audio.rs::Audio::reload	stops sounds and reads the new resource root
+SoundEngine.loadLibrary	port	crates/horizon-client/src/audio.rs::Audio::with_output	opens the output device
+SoundEngine.shouldChangeDevice	missing		player: when the output device is lost or the system default changes, vanilla reopens sound output; Horizon's Audio has no device watch
+SoundEngine.notifyListeners	port	crates/horizon-client/src/sound_engine.rs::SoundEngine::notify	subtitle and listener notification with range
+SoundEngine.updateSource	port	crates/horizon-client/src/audio.rs::Audio::set_listener	listener position and orientation
+SoundEngineExecutor.createThread	skip:other		sound thread creation; Horizon's audio runs on the cpal callback
+SoundEngineExecutor.run	skip:other		sound thread loop; Horizon's audio runs on the cpal callback
+SoundEngineExecutor.shutDown	skip:other		sound thread shutdown; Horizon's audio runs on the cpal callback
+SoundManager.prepare	port	crates/horizon-client/src/sound_events.rs::SoundRegistry::load	reads sounds.json per namespace
+SoundManager.apply	port	crates/horizon-client/src/audio.rs::Audio::reload	applies the registry and reloads the engine
+SoundManager.validateSoundResource	inline	crates/horizon-client/src/sound_events.rs::SoundRegistry::add_file	file existence check through the exists closure
+SoundManager.Preparations.handleRegistration	port	crates/horizon-client/src/sound_events.rs::SoundRegistry::add_file	replace flag and sound entries
+SoundManager.Preparations.apply	inline	crates/horizon-client/src/sound_events.rs::SoundRegistry::load	registry replaced with the prepared one
+SoundPreviewHandler.preview	missing		player: moving a category volume slider in Options plays no preview sound (Options.java calls SoundPreviewHandler.preview)
+SoundPreviewHandler.stopOtherCategoryPreview	missing		minor: part of the volume preview
+WeighedSoundEvents.preloadIfRequired	skip:java		preload is a cache; Horizon decodes on demand
+CraftPlanksTutorialStep.tick	missing		player: a new survival world shows no craft-planks tutorial toast; Horizon has no tutorial steps (tutorialStep is only stored in options)
+CraftPlanksTutorialStep.hasCraftedPlanksPreviously	missing		minor: part of the craft-planks tutorial
+FindTreeTutorialStepInstance.tick	missing		player: no find-a-tree tutorial toast
+FindTreeTutorialStepInstance.onLookAt	missing		minor: part of the find-a-tree tutorial
+FindTreeTutorialStepInstance.hasPunchedTreesPreviously	missing		minor: part of the find-a-tree tutorial
+MovementTutorialStepInstance.tick	missing		player: no move and look tutorial toasts
+MovementTutorialStepInstance.clear	missing		minor: part of the movement tutorial
+MovementTutorialStepInstance.onInput	missing		minor: part of the movement tutorial
+MovementTutorialStepInstance.onMouse	missing		minor: part of the movement tutorial
+OpenInventoryTutorialStep.tick	missing		player: no open-inventory tutorial toast
+PunchTreeTutorialStepInstance.tick	missing		player: no punch-a-tree tutorial toast
+PunchTreeTutorialStepInstance.onDestroyBlock	missing		minor: part of the punch-a-tree tutorial
+Tutorial.onLookAt	missing		minor: tutorial driver; no tutorial exists
+Tutorial.onDestroyBlock	missing		minor: tutorial driver; no tutorial exists
+Tutorial.stop	missing		minor: tutorial driver; no tutorial exists
+Tutorial.start	missing		minor: tutorial driver; no tutorial exists
+Tutorial.tick	missing		player: the tutorial driver that shows the first toasts is absent
+Tutorial.setStep	missing		minor: tutorial driver; no tutorial exists
+Tutorial.isSurvival	missing		minor: only the tutorial asks whether the player is in survival
+TutorialSteps.getByName	port	crates/horizon-client/src/options_file.rs::OptionsFile::try_apply	tutorialStep name read from options
+ClientWaypointManager.updateWaypoint	port	crates/horizon-client/src/locator_bar.rs::ClientWaypoints::apply	updates a tracked waypoint by id
+ClientWaypointManager.forEachWaypoint	port	crates/horizon-client/src/locator_bar.rs::ClientWaypoints::draw	drawn farthest first
+ArgumentVisitor.visitArguments	port	crates/horizon-client/src/game/lan_chat.rs::Game::signable_arguments	collects the message arguments of a command
+ArgumentVisitor.visitNodeArguments	inline	crates/horizon-client/src/game/lan_chat.rs::Game::signable_arguments	per-node walk folded into the collector
+CacheableFunction.get	skip:java		caches the resolved function; no behaviour of its own
+CacheableFunction.equals	skip:java		identity helper for the function cache
+CommandResultCallback.chain	inline	crates/horizon-client/src/game/commands/execute.rs::Game::deliver	callbacks are chained and called in deliver
+CommandSourceStack.withSource	port	crates/horizon-client/src/game/commands/execute.rs::Game::with_source	source swapped for a call
+CommandSourceStack.withEntity	inline	crates/horizon-client/src/game/commands/execute.rs::Game::modify	execute as
+CommandSourceStack.withPosition	inline	crates/horizon-client/src/game/commands/execute.rs::Game::modify	execute at and positioned
+CommandSourceStack.withRotation	inline	crates/horizon-client/src/game/commands/execute.rs::Game::modify	execute rotated
+CommandSourceStack.withCallback	inline	crates/horizon-client/src/game/commands/execute.rs::Game::run_leaf	result callback set per leaf
+CommandSourceStack.withPermission	missing		minor: unsure: no per-source permission level found in execute.rs
+CommandSourceStack.withAnchor	inline	crates/horizon-client/src/game/commands/execute.rs::Game::modify	execute anchored
+CommandSourceStack.withSigningContext	skip:service		chat message signing
+CommandSourceStack.getPlayer	port	crates/horizon-client/src/game/commands/players.rs::Game::source_entity	the source entity; callers check for a player
+CommandSourceStack.shouldFilterMessageTo	skip:service		chat text filtering
+CommandSourceStack.sendChatMessage	port	crates/horizon-client/src/lan/hub.rs::Hub::chat	gap: minor: console and command block sources are not sent here
+CommandSourceStack.suggestRegistryElements	port	crates/horizon-command/src/args.rs::suggest_resources	registry tags and elements
+CommandSourceStack.getLookup	skip:data		registry lookup; registries come from tables
+Commands.<init>	port	crates/horizon-command/src/vanilla.rs::build	registers the command tree
+Commands.mapSource	inline	crates/horizon-client/src/game/commands/execute.rs::Game::with_source	source mapped onto the parse
+Commands.performPrefixedCommand	port	crates/horizon-client/src/game/commands.rs::Game::run_command	the leading slash is trimmed by the callers
+Commands.finishParsing	port	crates/horizon-client/src/game/commands.rs::Game::syntax_failure	parse error with the <--[HERE] context
+Commands.executeCommandInContext	port	crates/horizon-client/src/game/commands/execute.rs::Game::run_chain	gap: minor: max_command_forks is not enforced
+Commands.validate	skip:debug		startup check of the command tree
+Commands.createCompilationContext	skip:data		datapack compile-time context
+ParserUtils.readWhile	port	crates/horizon-command/src/lib.rs::Reader::read_unquoted_string	reads while characters are allowed
+SharedSuggestionProvider.suggestRegistryElements	port	crates/horizon-command/src/args.rs::suggest_resources	registry tags and elements
+SharedSuggestionProvider.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	suggestions per argument type
+SharedSuggestionProvider.suggest2DCoordinates	port	crates/horizon-command/src/args.rs::suggest_coordinates	x z suggestions
+AngleArgument.SingleAngle.getAngle	port	crates/horizon-command/src/args.rs::Coord::get	gap: minor: the wrap to -180..180 is not confirmed
+ArgumentSignatures.signCommand	skip:service		chat message signing
+DimensionArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	dimension suggestions
+DimensionArgument.getDimension	inline	crates/horizon-client/src/game/commands/execute.rs::Game::modify	dimension resolved where execute in reads it
+EntityAnchorArgument.parse	port	crates/horizon-command/src/args.rs::ArgType::parse	eyes or feet
+EntityArgument.parse	port	crates/horizon-command/src/args.rs::ArgType::parse	the selector is read by selector.rs::parse
+EntityArgument.listSuggestions	port	crates/horizon-command/src/selector.rs::suggest	selector and player name suggestions
+EntityArgument.Info.serializeToNetwork	port	crates/horizon-client/src/lan/commands.rs::properties	entity flags: single and players only
+EntityArgument.Info.deserializeFromNetwork	port	crates/horizon-command/src/network.rs::argument_type	entity flags of a received command tree
+EntityArgument.Info.serializeToJson	skip:data		JSON of the argument template; Horizon reads tree data from files
+GameModeArgument.parse	port	crates/horizon-command/src/args.rs::ArgType::parse	game mode name
+GameModeArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	game mode suggestions
+GameProfileArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	player name suggestions
+GameProfileArgument.SelectorResult.getNames	missing		player: op, deop, ban and whitelist are not in Horizon's command tree (no such literal in horizon-command)
+HeightmapTypeArgument.keptTypes	port	crates/horizon-command/src/network.rs::argument_type	heightmap type choices

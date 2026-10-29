@@ -246,9 +246,15 @@ impl Game<'_> {
         self.paint_screen(batch, ox, oy, background, true);
         let atlas = &self.gui.atlas;
         let grey = rgba(64, 64, 64, 255);
-        let title = self.container_title(self.translate("container.crafter", "Crafter"));
-        let tw = HudBatch::text_width(atlas, &title);
-        batch.text(
+        // A server's crafter menu has the title it was given.
+        let title = self.remote_menu_title().unwrap_or_else(|| {
+            horizon_client::text::Text::literal(
+                self.container_title(self.translate("container.crafter", "Crafter")),
+            )
+            .resolve_legacy()
+        });
+        let tw = atlas.font.width_text(&title);
+        batch.text_styled(
             atlas,
             &title,
             ox + ((176.0 - tw) / 2.0).trunc(),

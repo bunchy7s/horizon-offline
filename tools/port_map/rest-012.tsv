@@ -1,0 +1,149 @@
+IdDispatchCodec.decode	skip:java		codec dispatch; packet_enum! matches the id in packets/mod.rs
+IdDispatchCodec.encode	skip:java		codec dispatch; packet_enum! encode in packets/mod.rs
+IdDispatchCodec.Builder.add	skip:java		codec registration builder
+IdDispatchCodec.Builder.build	skip:java		codec registration builder
+StreamCodec.composite	skip:java		codec combinator; packet! macro in buf.rs does the field mapping
+PacketUtils.ensureRunningOnSameThread	skip:other		packets are handled on the game loop; no reschedule path needed
+PacketUtils.makeReportedException	skip:debug		crash report wrapper
+PacketUtils.fillCrashReport	skip:debug		crash report details
+ProtocolCodecBuilder.add	skip:java		codec registration builder
+ProtocolInfoBuilder.addPacket	skip:java		protocol registration; packet ids are static in ids.rs
+ProtocolInfoBuilder.withBundlePacket	missing		minor: bundle delimiter is a no-op (net.rs BundleDelimiter arm); bundled packets are applied one by one
+ProtocolInfoBuilder.buildPacketCodec	skip:java		codec construction
+ProtocolInfoBuilder.buildUnbound	skip:java		protocol construction; enum variants in packet_enum!
+ProtocolInfoBuilder.protocol	skip:java		protocol builder entry point
+ProtocolInfoBuilder.contextProtocol	skip:java		protocol builder entry point
+ProtocolInfoBuilder.CodecEntry.addToBuilder	skip:java		codec construction
+ClientboundStoreCookiePacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! StoreCookie {key Ident, payload Bytes}
+ClientboundTransferPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! Transfer {host Str, port VarInt}
+ServerboundResourcePackPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! ResourcePackResponse {id Uuid, action VarInt}
+CustomPacketPayload.codec	skip:java		StreamCodec factory; packet! macro and Codec trait cover it
+DiscardedPayload.codec	missing		minor: no 32767-byte cap on unknown custom payloads; Unknown keeps the raw bytes
+ServerboundCookieResponsePacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! CookieResponse {key Ident, payload Option<Bytes>}
+ClientboundAddEntityPacket.<init>	port	crates/horizon-client/src/lan/entity.rs::ServerEntity::pairing	builds the spawn packet from the entity state
+ClientboundAddEntityPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! AddEntity (play.rs) in the vanilla field order
+ClientboundAddTransientBlockPacket.write	missing		player: a temporary block the server sends never appears; Horizon has no such packet (ids.rs only)
+ClientboundAnimatePacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! Animate {id VarInt, action UByte}
+ClientboundBlockDestructionPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! BlockDestruction {id, pos, progress}
+ClientboundBlockEntityDataPacket.create	missing		player: block entity changes after load (sign text, banner, chest name) are not sent to other players; the LAN host has no BlockEntityData sender
+ClientboundBlockEventPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! BlockEvent {pos, b0, b1, block}
+ClientboundBossEventPacket.createUpdateProgressPacket	missing		player: boss bar progress is never sent to other players; the LAN host has no BossEvent sender
+ClientboundBossEventPacket.createUpdateNamePacket	missing		player: boss bar name changes are never sent to other players; the LAN host has no BossEvent sender
+ClientboundBossEventPacket.createUpdateStylePacket	missing		player: boss bar colour and overlay changes are never sent to other players; the LAN host has no BossEvent sender
+ClientboundBossEventPacket.createUpdatePropertiesPacket	missing		player: boss bar fog, music and darkening flags are never sent to other players; the LAN host has no BossEvent sender
+ClientboundBossEventPacket.encodeProperties	port	crates/horizon-protocol/src/packets/play.rs::boss_flags	the three flag bits (darken, music, fog)
+ClientboundBossEventPacket.AddOperation.dispatch	missing		player: boss bars from a server (wither, dragon fight) never appear; remote.rs has no BossEvent arm
+ClientboundChunksBiomesPacket.ChunkBiomeData.calculateChunkSize	missing		minor: biome-only chunk updates are never sent; no ChunksBiomes packet in ids.rs
+ClientboundChunksBiomesPacket.ChunkBiomeData.extractChunkData	missing		minor: biome-only chunk updates are never sent; no ChunksBiomes packet in ids.rs
+ClientboundCommandSuggestionsPacket.toSuggestions	port	crates/horizon-client/src/game/remote.rs::Game::handle_command_suggestions	start, length and tooltip become the suggestion range
+ClientboundCommandsPacket.validateEntries	missing		minor: an impossible command tree is not rejected; from_packet skips bad child indexes
+ClientboundCommandsPacket.enumerateNodes	port	crates/horizon-client/src/lan/commands.rs::CommandTree::packet_with	breadth-first node ids on the LAN host
+ClientboundCommandsPacket.createEntries	port	crates/horizon-client/src/lan/commands.rs::CommandTree::packet_with	builds the node list for the LAN host's Commands packet
+ClientboundCommandsPacket.createEntry	inline	crates/horizon-client/src/lan/commands.rs::CommandTree::packet_with	flags, redirect and children are set in the final node map
+ClientboundCommandsPacket.getRoot	port	crates/horizon-command/src/network.rs::from_packet	the packet's root becomes the client's dispatcher root
+ClientboundCommandsPacket.ArgumentNodeStub.serializeCap	port	crates/horizon-client/src/lan/commands.rs::properties	argument parser property bytes
+ClientboundCommandsPacket.Entry.canBuild	inline	crates/horizon-command/src/network.rs::from_packet	gap: minor: no build-order check; children and redirects resolve recursively
+ClientboundCommandsPacket.Entry.canResolve	inline	crates/horizon-command/src/network.rs::from_packet	gap: minor: no build-order check; children and redirects resolve recursively
+ClientboundCommandsPacket.NodeResolver.resolve	port	crates/horizon-command/src/network.rs::from_packet	builds the client's tree from the packet nodes
+ClientboundContainerSetDataPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! ContainerSetData {container VarInt, id Short, value Short}
+ClientboundContainerSetSlotPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! ContainerSetSlot {container, state, slot, item Slot}
+ClientboundDamageEventPacket.getSource	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	gap: minor: DamageSource is not rebuilt; the hurt sound comes from the host's sound packet
+ClientboundDebugSamplePacket.write	skip:debug		F3 debug chart sample; Horizon has no debug subscription
+ClientboundEntityEventPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! EntityEvent {id Int, event Byte}
+ClientboundEntityPositionSyncPacket.of	port	crates/horizon-client/src/lan/entity.rs::ServerEntity::send_changes	builds the position sync for the LAN host
+ClientboundGameEventPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! GameEvent {event UByte, param Float}
+ClientboundHurtAnimationPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! HurtAnimation {id VarInt, yaw Float}
+ClientboundLevelChunkPacketData.calculateChunkSize	skip:java		buffer sizing; Vec grows as sections are written
+ClientboundLevelChunkPacketData.extractChunkData	port	crates/horizon-protocol/src/chunk.rs::ChunkData::from_sections	gap: minor: no writer-index length check
+ClientboundLevelChunkPacketData.forEachBlockEntityTag	port	crates/horizon-client/src/game/remote_chunks.rs::Game::remote_chunk	block entities of a chunk are applied when the chunk arrives
+ClientboundLevelEventPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! LevelEvent {kind Int, pos, data Int, global Bool}
+ClientboundLightUpdatePacketData.prepareSectionData	port	crates/horizon-client/src/lan/chunks.rs::light_data	builds the light layers the section mask marks
+ClientboundMapItemDataPacket.applyToMap	port	crates/horizon-client/src/game/maps.rs::Game::remote_map_item_data	decorations and colour patch applied to the map
+ClientboundMoveEntityPacket.Pos.read	port	crates/horizon-protocol/src/packets/play.rs::read_inner	MoveEntityPos read
+ClientboundMoveEntityPacket.Pos.write	port	crates/horizon-protocol/src/packets/play.rs::write_inner	MoveEntityPos write
+ClientboundMoveEntityPacket.PosRot.read	port	crates/horizon-protocol/src/packets/play.rs::read_inner	MoveEntityPosRot read
+ClientboundMoveEntityPacket.PosRot.write	port	crates/horizon-protocol/src/packets/play.rs::write_inner	MoveEntityPosRot write
+ClientboundMoveEntityPacket.Rot.read	port	crates/horizon-protocol/src/packets/play.rs::read_inner	MoveEntityRot read
+ClientboundMoveEntityPacket.Rot.write	port	crates/horizon-protocol/src/packets/play.rs::write_inner	MoveEntityRot write
+ClientboundPlayerAbilitiesPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! PlayerAbilities {flags Byte, flying speed, walking speed}; flag bits packed by the sender
+ClientboundPlayerInfoUpdatePacket.createPlayerInitializing	port	crates/horizon-client/src/lan/hub.rs::Hub::place_new_player	sends every action (INFO_ACTIONS) to a newcomer
+ClientboundPlayerInfoUpdatePacket.entryCodec	port	crates/horizon-protocol/src/packets/play.rs::PlayerInfoUpdate::write	per-entry write in action order
+ClientboundPlayerInfoUpdatePacket.toString	skip:debug		debug string
+ClientboundPlayerInfoUpdatePacket.EntryBuilder.build	inline	crates/horizon-protocol/src/packets/play.rs::PlayerInfoUpdate::read	entry fields read in action order
+ClientboundPlayerLookAtPacket.<init>	missing		player: a server's facing command (e.g. teleport facing an entity) does not turn the client's view
+ClientboundPlayerLookAtPacket.write	missing		player: same as the constructor; the view is never turned by the server
+ClientboundPlayerLookAtPacket.getPosition	missing		player: same as the constructor; the view is never turned by the server
+ClientboundRotateHeadPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! RotateHead {id VarInt, head_yaw Byte}
+ClientboundSectionBlocksUpdatePacket.<init>	port	crates/horizon-client/src/lan/hub.rs::Hub::broadcast_block_changes	builds the section's change list from the changed blocks
+ClientboundSectionBlocksUpdatePacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SectionBlocksUpdate (play.rs) with SectionPos and VarLong changes
+ClientboundSectionBlocksUpdatePacket.runUpdates	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	applies each change at its section position
+ClientboundSetChunkCacheCenterPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SetChunkCacheCenter {x VarInt, z VarInt}
+ClientboundSetEntityDataPacket.pack	port	crates/horizon-protocol/src/entity_data.rs::EntityData::write	entries then 0xFF terminator
+ClientboundSetEntityDataPacket.unpack	port	crates/horizon-protocol/src/entity_data.rs::EntityData::read	entries until 0xFF
+ClientboundSetExperiencePacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SetExperience {progress Float, level, total VarInt}
+ClientboundSetHealthPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SetHealth {health, food VarInt, saturation}
+ClientboundSetPlayerTeamPacket.createAddOrModifyPacket	missing		player: team changes made on the host (name, colours, friendly fire, members) do not reach guests; the LAN host never sends team packets
+ClientboundSetPlayerTeamPacket.createPlayerPacket	missing		player: adding or removing a player from a team does not reach guests; the LAN host never sends team packets
+ClientboundSetPlayerTeamPacket.shouldHavePlayerList	port	crates/horizon-protocol/src/packets/play.rs::SetPlayerTeam::read	the player list is read only for methods 0, 3 and 4
+ClientboundSetTitlesAnimationPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! TitlesAnimation {fade_in, stay, fade_out Int}
+ClientboundSoundEntityPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SoundEntity with the sound holder
+ClientboundSoundPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! Sound with the sound holder and fixed-point position
+ClientboundTagQueryPacket.write	missing		minor: answers to F3+I NBT queries are not handled; Horizon has no tag_query packet (ids.rs only)
+ClientboundTakeItemEntityPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! TakeItemEntity {item, player, amount VarInt}
+DebugEntityNameGenerator.getEntityName	skip:debug		debug name for entities
+ServerboundBlockEntityTagQueryPacket.write	missing		minor: the F3+I block NBT query is not sent; Horizon has no such packet (ids.rs only)
+ServerboundEntityTagQueryPacket.write	missing		minor: the F3+I entity NBT query is not sent; Horizon has no such packet (ids.rs only)
+ServerboundJigsawGeneratePacket.write	missing		minor: no jigsaw generate packet; the client has no jigsaw screen (only block_entity_nbt reads jigsaw data)
+ServerboundMovePlayerPacket.packFlags	inline	crates/horizon-client/src/player_sync.rs::PositionSender::update	on-ground and horizontal-collision bits set when the move is sent
+ServerboundPlayerActionPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! PlayerAction {action VarInt, pos, direction UByte, sequence VarInt}
+ServerboundPlayerCommandPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! PlayerCommand {id, action, data VarInt}
+ServerboundSeenAdvancementsPacket.write	missing		minor: the advancement tab the player opened is not sent; Horizon has no seen_advancements packet (ids.rs only)
+ServerboundSetCommandMinecartPacket.write	missing		minor: minecart command block edits are not sent; Horizon has no such packet (ids.rs only)
+ServerboundSetCommandMinecartPacket.getCommandBlock	missing		minor: minecart command block edits are not sent; Horizon has no such packet (ids.rs only)
+ServerboundSetJigsawBlockPacket.write	missing		minor: jigsaw block edits are not sent; no packet and no jigsaw screen in the client
+ServerboundSetStructureBlockPacket.<init>	missing		minor: structure block settings are not sent; no packet and no structure block screen in the client
+ServerboundSetStructureBlockPacket.write	missing		minor: structure block settings are not sent; no packet and no structure block screen in the client
+VecDelta.Stepped.hasDeltaX	skip:other		no callers in vanilla
+VecDelta.Stepped.hasDeltaZ	skip:other		no callers in vanilla
+VecDelta.Stepped.tryEncode	missing		minor: the LAN host sends only linear deltas (send_changes); no stepped path is encoded
+VecDeltaCodec.isDeltaTooBig	inline	crates/horizon-client/src/lan/entity.rs::ServerEntity::send_changes	the i16 range check on each delta
+VecDeltaCodec.tryEncode	inline	crates/horizon-client/src/lan/entity.rs::ServerEntity::send_changes	gap: minor: linear positions only; stepped paths are not encoded
+ClientIntent.byId	missing		minor: an unknown handshake intent is not rejected; the intent stays a raw number in handshake.rs
+ClientIntent.id	skip:other		constants STATUS, LOGIN and TRANSFER in handshake.rs
+ClientIntentionPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! Intention {protocol, host, port, intent}
+ClientboundCustomQueryPacket.readUnknownPayload	missing		minor: no 1 MiB cap on unknown login query payloads; CustomQuery keeps the raw data
+ClientboundCustomQueryPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! CustomQuery {transaction, channel Ident, data Rest}
+ClientboundHelloPacket.write	port	crates/horizon-protocol/src/buf.rs::write	login hello packet! fields in vanilla order
+ServerboundCustomQueryAnswerPacket.read	port	crates/horizon-protocol/src/buf.rs::read	gap: minor: payload stays raw (Opt<Rest>); no per-channel reader
+ServerboundCustomQueryAnswerPacket.readUnknownPayload	missing		minor: no 1 MiB cap on unknown login query answers; the payload stays raw
+ServerboundCustomQueryAnswerPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! CustomQueryAnswer {transaction, payload Opt<Rest>}
+ServerboundHelloPacket.write	port	crates/horizon-protocol/src/buf.rs::write	login start packet! name and profile id
+ServerboundKeyPacket.write	port	crates/horizon-protocol/src/buf.rs::write	login key packet! encrypted secret and challenge
+net/minecraft/network/syncher/EntityDataAccessor#equals	skip:java		typed accessor equality; Rust derives it
+SynchedEntityData.defineId	skip:other		entity data ids are fixed in code per entity type, not defined at class load
+SynchedEntityData.set	inline	crates/horizon-client/src/lan/entity.rs::ServerEntity::send_changes	gap: minor: no per-value dirty flag; the metadata list is compared each tick
+SynchedEntityData.packDirty	port	crates/horizon-client/src/lan/entity.rs::ServerEntity::send_changes	sends the changed metadata values
+SynchedEntityData.getNonDefaultValues	port	crates/horizon-client/src/lan/entity.rs::ServerEntity::pairing	non-empty metadata goes out with the spawn
+SynchedEntityData.assignValues	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	applies the values to the entity by index
+SynchedEntityData.assignValue	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	gap: minor: no serializer type check
+SynchedEntityData.Builder.define	skip:other		entity data ids and defaults are fixed per entity type in Horizon
+SynchedEntityData.Builder.build	skip:other		entity data ids and defaults are fixed per entity type in Horizon
+SynchedEntityData.DataValue.create	skip:java		copies a value; Rust owns the value
+SynchedEntityData.DataValue.write	port	crates/horizon-protocol/src/entity_data.rs::EntityData::write	id, serializer id and value
+SynchedEntityData.DataValue.read	port	crates/horizon-protocol/src/entity_data.rs::EntityData::read	id, serializer id and value
+RealmsConnect.connect	skip:service		Realms
+RealmsConnect.abort	skip:service		Realms
+RealmsConnect.tick	skip:service		Realms
+RepeatedNarrator.narrate	skip:other		accessibility narration; Horizon has no narrator
+ServerPlaceRecipe.tryPlaceRecipe	port	crates/horizon-client/src/menu/place.rs::Menu::place_recipe	places when craftable, else clears the grid and shows the ghost
+ServerPlaceRecipe.clearGrid	port	crates/horizon-client/src/menu/place.rs::Menu::clear_grid	returns the grid to the inventory
+ServerPlaceRecipe.clampToMaxStackSize	inline	crates/horizon-client/src/menu/place.rs::Menu::place	gap: minor: clamps by the slot's stack, not by each candidate item
+ServerPlaceRecipe.calculateAmountToCraft	port	crates/horizon-client/src/menu/place.rs::Menu::place	the amount placed from the grid's smallest stack
+ServerPlaceRecipe.moveItemToGrid	port	crates/horizon-client/src/menu/place.rs::Menu::move_item_to_grid	moves one ingredient stack into a grid slot
+ServerPlaceRecipe.testClearGrid	port	crates/horizon-client/src/menu/place.rs::Menu::test_clear_grid	checks the grid can be emptied into the inventory
+ServerPlaceRecipe.getAmountOfFreeSlotsInInventory	inline	crates/horizon-client/src/menu/place.rs::Menu::test_clear_grid	free_in_inventory is counted there
+BlockItemId.create	skip:data		registry keys; Horizon names items by string id
+DelegatingOps.convertTo	skip:java		codec ops wrapper
+DelegatingOps.mergeToList	skip:java		codec ops wrapper
+DelegatingOps.mergeToMap	skip:java		codec ops wrapper
+DelegatingOps.createMap	skip:java		codec ops wrapper

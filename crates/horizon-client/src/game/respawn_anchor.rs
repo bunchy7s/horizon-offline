@@ -132,6 +132,15 @@ impl Game<'_> {
             .play("minecraft:block.respawn_anchor.charge", Some(at), 1.0, 1.0);
         Ok(())
     }
+    /// `RespawnAnchorBlock.useItemOn`'s test: `held` is glowstone
+    /// (`isRespawnFuel`) and the block at `pos` is an anchor that takes another
+    /// charge (`canBeCharged`).
+    pub(super) fn anchor_takes(&self, pos: [i32; 3], held: Option<&ItemStack>) -> bool {
+        let state = self.world.block(pos[0], pos[1], pos[2]);
+        held.is_some_and(|s| &*s.item == "minecraft:glowstone")
+            && self.is_anchor(state)
+            && self.anchor_charges(state) < 4
+    }
     /// `RespawnAnchorBlock.useItemOn` with `held` in the hand that acts.
     pub(super) fn use_respawn_anchor(
         &mut self,
@@ -303,11 +312,7 @@ impl Game<'_> {
         center: [f64; 3],
         water_at: Option<[i32; 3]>,
     ) -> Result<()> {
-        let interaction = if self.ui.rules.bool("block_explosion_drop_decay") {
-            super::explosion::BlockInteraction::DestroyWithDecay
-        } else {
-            super::explosion::BlockInteraction::Destroy
-        };
+        let interaction = self.destroy_type("block_explosion_drop_decay");
         self.server_explode_as(
             center,
             5.0,

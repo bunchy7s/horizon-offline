@@ -80,7 +80,7 @@ class RepositoryRoadmap(unittest.TestCase):
 
     def test_generated_files_match_the_toml(self):
         for path, text in roadmap.outputs(roadmap.load()).items():
-            self.assertEqual(path.read_text(), text, f"{path.name} is out of date: run `python3 tools/roadmap.py build`")
+            self.assertEqual(path.read_text(encoding="utf-8"), text, f"{path.name} is out of date: run `python3 tools/roadmap.py build`")
 
     def test_site_data_has_every_item_in_one_line_text(self):
         data = json.loads(roadmap.site_data(tomllib.loads(SAMPLE)))

@@ -5,7 +5,7 @@
 //! usage: mob_ai_probe RESOURCES SCENARIOS OUTPUT
 use horizon_client::{
     assets::Assets,
-    beehive::HiveHost,
+    beehive::{BeehiveExt, HiveHost},
     biome::Biomes,
     blocks::BlockFacts,
     chunk::{Chunk, HEIGHT, MIN_Y},
@@ -67,8 +67,9 @@ struct Scenario {
     /// The player hits a mob for 1 at the start of a tick: (tick, mob index).
     hurts: Vec<(i32, usize)>,
     /// The player feeds an animal at the start of a tick (Animal.mobInteract):
-    /// (tick, mob index); the scenario only feeds each animal its food.
-    feeds: Vec<(i32, usize)>,
+    /// (tick, mob index, None); the scenario only feeds each animal its food.
+    /// `interact` uses another item on a horse: (tick, mob index, Some(item)).
+    feeds: Vec<(i32, usize, Option<String>)>,
     hand: Option<String>,
     mobs: Vec<MobSpec>,
 }
@@ -108,7 +109,14 @@ fn parse(text: &str) -> Vec<Scenario> {
             }
             "heart" => s.hearts.push(f.iter().map(|x| (*x).to_owned()).collect()),
             "hurt" => s.hurts.push((f[1].parse().unwrap(), f[2].parse().unwrap())),
-            "feed" => s.feeds.push((f[1].parse().unwrap(), f[2].parse().unwrap())),
+            "feed" => s
+                .feeds
+                .push((f[1].parse().unwrap(), f[2].parse().unwrap(), None)),
+            "interact" => s.feeds.push((
+                f[1].parse().unwrap(),
+                f[2].parse().unwrap(),
+                Some(f[3].to_owned()),
+            )),
             "player" => {
                 s.player = Some([
                     f[1].parse().unwrap(),
@@ -725,6 +733,15 @@ fn print(out: &mut String, t: i32, i: usize, m: &Mob, player_down: bool, now: i6
             .map_or("-".into(), |p| format!("{},{},{}", p[0], p[1], p[2]));
         let _ = write!(out, "\tcg {} {held} {opened}", m.extra.variant3);
     }
+    if m.species() == Species::Wolf {
+        // NeutralMob anger left (the angry texture), -1 when calm.
+        let anger = if m.extra.anger > 0 {
+            i64::from(m.extra.anger)
+        } else {
+            -1
+        };
+        let _ = write!(out, "\twolf {anger}");
+    }
     if let Some(b) = horizon_client::mobs::bee::get(m) {
         let anger = if b.anger_end > 0 {
             b.anger_end - now
@@ -1112,6 +1129,7 @@ pub fn main() -> horizon_client::Result<()> {
                     others_grid: $grid,
                     others_index: None,
                     daylight: (world.day_time.rem_euclid(24000)) < 12000,
+                    monsters_burn: !(12542..23460).contains(&world.day_time.rem_euclid(24000)),
                     game_time: world.game_time,
                     day_time: world.day_time,
                     raining: s.rain,
@@ -1208,8 +1226,20 @@ pub fn main() -> horizon_client::Result<()> {
                 }
                 events.append(&mut mobs[i].outbox);
             }
-            for &(tick, i) in &s.feeds {
+            for (tick, i, item) in &s.feeds {
+                let (tick, i) = (*tick, *i);
                 if tick != t || i >= mobs.len() || mobs[i].removed {
+                    continue;
+                }
+                // Horse.mobInteract's held-item branch (makeMad).
+                if let Some(item) = item {
+                    horizon_client::mobs::equine::held_item(
+                        &mut mobs[i],
+                        item,
+                        false,
+                        item == "minecraft:golden_dandelion",
+                        &mut events,
+                    );
                     continue;
                 }
                 if let Some(Some((name, volume, pitch))) =

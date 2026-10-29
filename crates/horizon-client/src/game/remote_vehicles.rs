@@ -9,7 +9,7 @@
 //! server (`LocalPlayer.tick`: `ServerboundMoveVehiclePacket`,
 //! `AbstractBoat.tick`: `ServerboundPaddleBoatPacket`). A minecart moves on
 //! the server with the rider's input, and the rider sits in it.
-use super::{Game, Keys, ray_box, view_vector};
+use super::{Game, Keys, ray_box};
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_protocol::packets::play::{self, Serverbound as S};
 
@@ -26,8 +26,7 @@ impl Game<'_> {
     /// The nearest boat, minecart, item frame, armor stand or painting the
     /// view hits within reach; also End crystals when attacking.
     pub(super) fn remote_object_hit(&self, attacking: bool) -> Option<ObjectHit> {
-        let eye = self.eye_position()?;
-        let dir = view_vector(self.yaw, self.pitch);
+        let (eye, dir) = self.aim()?;
         let at = |d: f64| {
             [
                 eye[0] + dir[0] * d,

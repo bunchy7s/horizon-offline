@@ -959,6 +959,7 @@ impl Game<'_> {
         };
         let ctrl = self.keys.contains(&winit::keyboard::KeyCode::ControlLeft);
         let shortcut = self.edit_shortcut(event);
+        let types_text = self.types_text();
         let Some(o) = self.world_options.as_mut() else {
             return;
         };
@@ -970,7 +971,7 @@ impl Game<'_> {
                 None => {
                     let mut handled = false;
                     rules.edit(|b| handled = b.key(key, ctrl, false));
-                    if !handled && !ctrl {
+                    if !handled && types_text {
                         self.world_options_text(event.text.as_deref());
                     }
                 }
@@ -984,7 +985,7 @@ impl Game<'_> {
             o.port.shortcut(shortcut, &mut self.clipboard);
             return;
         }
-        if !o.port.key(key, ctrl, false) && !ctrl {
+        if !o.port.key(key, ctrl, false) && types_text {
             self.world_options_text(event.text.as_deref());
         }
     }

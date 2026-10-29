@@ -9,6 +9,7 @@ members = [
     "crates/horizon-client",
     "crates/horizon-client-core",
     "crates/horizon-client-input",
+    "crates/horizon-client-render",
     "crates/horizon-command",
     "crates/horizon-items",
     "crates/horizon-server-files",

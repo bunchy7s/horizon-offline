@@ -1,5 +1,5 @@
 //! The horse inventory for a server's players (`ServerPlayer.openHorseInventory`):
-//! shift + use on a tamed horse, donkey, mule, camel or llama, or the
+//! shift + use on a tamed horse, donkey, mule, camel, llama or nautilus, or the
 //! inventory key while riding one (`ServerboundPlayerCommandPacket`
 //! OPEN_INVENTORY), opens `HorseInventoryMenu` over the mount with
 //! `ClientboundMountScreenOpenPacket`. Clicks run on the menu engine

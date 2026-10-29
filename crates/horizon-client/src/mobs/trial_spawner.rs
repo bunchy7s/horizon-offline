@@ -11,7 +11,7 @@
 use super::{
     spawn_rules::{self, Reason},
     spawn_selection,
-    spawner::{self, SpawnData, SpawnerLevel, SpawnerSpawn},
+    spawner::{self, SpawnData, SpawnDataExt, SpawnerLevel, SpawnerSpawn},
 };
 pub use crate::chunk::block_entity::{ConfigSlot, TrialConfig, TrialSpawner};
 use horizon_core::{position::BlockPos, random::RandomSource};
@@ -33,32 +33,23 @@ const TICKS_BETWEEN_ITEM_SPAWNERS: i64 = 160;
 /// Bad Omen.
 pub const TRIAL_OMEN_TICKS_PER_LEVEL: i32 = 18000;
 
-impl Default for TrialConfig {
-    /// `TrialSpawnerConfig.Builder`'s defaults.
-    fn default() -> Self {
-        Self {
-            spawn_range: 4,
-            total_mobs: 6.0,
-            simultaneous_mobs: 2.0,
-            total_mobs_added_per_player: 2.0,
-            simultaneous_mobs_added_per_player: 1.0,
-            ticks_between_spawn: 40,
-            spawn_potentials: Vec::new(),
-            loot_tables_to_eject: vec![
-                ("minecraft:spawners/trial_chamber/consumables".into(), 1),
-                ("minecraft:spawners/trial_chamber/key".into(), 1),
-            ],
-            items_to_drop_when_ominous:
-                "minecraft:spawners/trial_chamber/items_to_drop_when_ominous".into(),
-        }
-    }
-}
-impl TrialConfig {
+/// `TrialSpawnerConfig`'s codec and targets, over the data in `chunk::block_entity`.
+pub trait TrialConfigExt: Sized {
     /// `TrialSpawnerConfig.DIRECT_CODEC`; None when the tag is not a
     /// compound. Read as `TagValueInput` does, keeping the partial result:
     /// a field that fails to decode takes its default, and the list entries
     /// that fail are dropped.
-    pub fn decode(tag: &Tag) -> Option<Self> {
+    fn decode(tag: &Tag) -> Option<Self>;
+    /// `TrialSpawnerConfig.DIRECT_CODEC`'s encoding: the fields that differ
+    /// from their defaults (`optionalFieldOf` with a default).
+    fn encode(&self) -> Tag;
+    /// `calculateTargetTotalMobs`.
+    fn target_total_mobs(&self, additional_players: i32) -> i32;
+    /// `calculateTargetSimultaneousMobs`.
+    fn target_simultaneous_mobs(&self, additional_players: i32) -> i32;
+}
+impl TrialConfigExt for TrialConfig {
+    fn decode(tag: &Tag) -> Option<Self> {
         let Tag::Compound(_) = tag else {
             return None;
         };
@@ -106,9 +97,7 @@ impl TrialConfig {
                 .unwrap_or(d.items_to_drop_when_ominous),
         })
     }
-    /// `TrialSpawnerConfig.DIRECT_CODEC`'s encoding: the fields that differ
-    /// from their defaults (`optionalFieldOf` with a default).
-    pub fn encode(&self) -> Tag {
+    fn encode(&self) -> Tag {
         let d = Self::default();
         let mut out = Vec::new();
         if self.spawn_range != d.spawn_range {
@@ -167,13 +156,11 @@ impl TrialConfig {
         }
         Tag::compound(out)
     }
-    /// `calculateTargetTotalMobs`.
-    pub fn target_total_mobs(&self, additional_players: i32) -> i32 {
+    fn target_total_mobs(&self, additional_players: i32) -> i32 {
         (self.total_mobs + self.total_mobs_added_per_player * additional_players as f32).floor()
             as i32
     }
-    /// `calculateTargetSimultaneousMobs`.
-    pub fn target_simultaneous_mobs(&self, additional_players: i32) -> i32 {
+    fn target_simultaneous_mobs(&self, additional_players: i32) -> i32 {
         (self.simultaneous_mobs
             + self.simultaneous_mobs_added_per_player * additional_players as f32)
             .floor() as i32
@@ -375,29 +362,6 @@ pub trait TrialSpawnerLevel: SpawnerLevel {
     fn seed(&self) -> i64;
 }
 
-impl Default for TrialSpawner {
-    fn default() -> Self {
-        Self {
-            normal: ConfigSlot::default(),
-            ominous: ConfigSlot::default(),
-            target_cooldown_length: 36000,
-            required_player_range: 14,
-            detected_players: Vec::new(),
-            current_mobs: Vec::new(),
-            cooldown_ends_at: 0,
-            next_mob_spawns_at: 0,
-            total_mobs_spawned: 0,
-            next_spawn_data: None,
-            ejecting_loot_table: None,
-            is_ominous: false,
-            has_display: false,
-            spin: 0.0,
-            o_spin: 0.0,
-            dispensing: None,
-        }
-    }
-}
-
 fn uuids(tag: Option<&Tag>) -> Vec<Uuid> {
     let Some(Tag::List(list)) = tag else {
         return Vec::new();
@@ -417,13 +381,119 @@ fn encode_uuids(list: &[Uuid]) -> Tag {
     Tag::List(list.iter().map(|u| Tag::IntArray(u.to_vec())).collect())
 }
 
-impl TrialSpawner {
+/// `TrialSpawner`'s behaviour, over the data in `chunk::block_entity`.
+pub trait TrialSpawnerExt: Sized {
     /// `TrialSpawner.load`, with the configs of [`load_registry`].
-    pub fn load(tag: &Tag) -> Self {
+    fn load(tag: &Tag) -> Self;
+    /// `TrialSpawner.load`. `registry` resolves a config id.
+    fn load_with(tag: &Tag, registry: &dyn Fn(&str) -> Option<TrialConfig>) -> Self;
+    /// `TrialSpawner.store`: the state data's fields that differ from their
+    /// defaults, then the configs.
+    fn save(&self) -> Vec<(&'static str, Tag)>;
+    /// `TrialSpawnerStateData.getUpdateTag`.
+    fn update_tag(&self, state: TrialState) -> Tag;
+    /// `activeConfig`.
+    fn active_config(&self) -> &TrialConfig;
+    /// `overrideEntityToSpawn` (a spawn egg's `setEntityId`): the data resets
+    /// and both configs spawn only `id` (`withSpawning`), saved inline as
+    /// `Holder.direct`. The caller then sets the state to `inactive`.
+    fn override_entity(&mut self, id: &str);
+    /// `resetStatistics`.
+    fn reset_statistics(&mut self);
+    /// `reset`.
+    fn reset(&mut self);
+    /// `getOrCreateNextSpawnData`: a potential at random, else empty data.
+    fn next_or_create(
+        &mut self,
+        random: &mut impl RandomSource,
+        events: &mut Vec<TrialEvent>,
+    ) -> &SpawnData;
+    /// `hasMobToSpawn`.
+    fn has_mob_to_spawn(
+        &mut self,
+        random: &mut impl RandomSource,
+        events: &mut Vec<TrialEvent>,
+    ) -> bool;
+    /// `canSpawnInLevel`.
+    fn can_spawn_in_level<L: TrialSpawnerLevel>(l: &L) -> bool;
+    /// `PlayerDetector.NO_CREATIVE_PLAYERS.detect`.
+    fn detect<L: TrialSpawnerLevel>(&self, l: &L, pos: [i32; 3], line_of_sight: bool) -> Vec<Uuid>;
+    /// `tryDetectPlayers`, every 20 ticks: a player seen with Trial Omen or
+    /// Bad Omen turns the spawner ominous.
+    fn try_detect_players<L: TrialSpawnerLevel>(
+        &mut self,
+        l: &L,
+        pos: [i32; 3],
+        state: TrialState,
+        events: &mut Vec<TrialEvent>,
+    );
+    /// `applyOminous`, then `resetAfterBecomingOminous`: the spawner's mobs
+    /// vanish and the ominous config starts over.
+    fn apply_ominous<L: TrialSpawnerLevel>(
+        &mut self,
+        l: &L,
+        pos: [i32; 3],
+        events: &mut Vec<TrialEvent>,
+    );
+    /// `TrialSpawnerState.spawnOminousOminousItemSpawner`: every tick an item
+    /// is drawn; once the item spawner cooldown is over, an ominous item
+    /// spawner appears above a player or one of the spawner's mobs.
+    fn spawn_ominous_item_spawner<L: TrialSpawnerLevel, R: RandomSource>(
+        &mut self,
+        l: &L,
+        random: &mut R,
+        pos: [i32; 3],
+        events: &mut Vec<TrialEvent>,
+    );
+    /// `calculatePositionToSpawnSpawner`: above a player in range or one of
+    /// the spawner's mobs (a coin decides which), under the first block in
+    /// the way, unless that spot is solid.
+    fn item_spawner_position<L: TrialSpawnerLevel, R: RandomSource>(
+        &self,
+        l: &L,
+        random: &mut R,
+        pos: [i32; 3],
+    ) -> Option<[f64; 3]>;
+    /// `TrialSpawner.tickServer`: the next state of the block.
+    #[allow(clippy::too_many_arguments)]
+    fn server_tick<L: TrialSpawnerLevel, R: RandomSource>(
+        &mut self,
+        l: &L,
+        random: &mut R,
+        pos: [i32; 3],
+        state: TrialState,
+        ominous: bool,
+        spawn: &mut dyn FnMut(&L, &SpawnerSpawn) -> Option<Uuid>,
+        eject: &mut dyn FnMut(&str, &mut R) -> bool,
+        events: &mut Vec<TrialEvent>,
+    ) -> TrialState;
+    /// `TrialSpawnerState.tickAndGetNext`.
+    #[allow(clippy::too_many_arguments)]
+    fn tick_and_get_next<L: TrialSpawnerLevel, R: RandomSource>(
+        &mut self,
+        l: &L,
+        random: &mut R,
+        pos: [i32; 3],
+        state: TrialState,
+        spawn: &mut dyn FnMut(&L, &SpawnerSpawn) -> Option<Uuid>,
+        eject: &mut dyn FnMut(&str, &mut R) -> bool,
+        events: &mut Vec<TrialEvent>,
+    ) -> TrialState;
+    /// `TrialSpawner.spawnMob`: the UUID of the mob added, if one was.
+    fn spawn_mob<L: TrialSpawnerLevel, R: RandomSource>(
+        &mut self,
+        l: &L,
+        random: &mut R,
+        pos: [i32; 3],
+        spawn: &mut dyn FnMut(&L, &SpawnerSpawn) -> Option<Uuid>,
+        events: &mut Vec<TrialEvent>,
+    ) -> Option<Uuid>;
+}
+impl TrialSpawnerExt for TrialSpawner {
+    fn load(tag: &Tag) -> Self {
         Self::load_with(tag, &registry_config)
     }
-    /// `TrialSpawner.load`. `registry` resolves a config id.
-    pub fn load_with(tag: &Tag, registry: &dyn Fn(&str) -> Option<TrialConfig>) -> Self {
+    fn load_with(tag: &Tag, registry: &dyn Fn(&str) -> Option<TrialConfig>) -> Self {
         let long = |k: &str| match tag.get(k) {
             Some(Tag::Long(v)) => *v,
             t => spawner::number(t).unwrap_or(0),
@@ -466,9 +536,7 @@ impl TrialSpawner {
         s.required_player_range = int("required_player_range", 14, 1, 128);
         s
     }
-    /// `TrialSpawner.store`: the state data's fields that differ from their
-    /// defaults, then the configs.
-    pub fn save(&self) -> Vec<(&'static str, Tag)> {
+    fn save(&self) -> Vec<(&'static str, Tag)> {
         let mut out = Vec::new();
         if !self.detected_players.is_empty() {
             out.push(("registered_players", encode_uuids(&self.detected_players)));
@@ -513,8 +581,7 @@ impl TrialSpawner {
         }
         out
     }
-    /// `TrialSpawnerStateData.getUpdateTag`.
-    pub fn update_tag(&self, state: TrialState) -> Tag {
+    fn update_tag(&self, state: TrialState) -> Tag {
         let mut out = Compound::new();
         if state == TrialState::Active {
             out.insert(
@@ -527,31 +594,25 @@ impl TrialSpawner {
         }
         Tag::Compound(out)
     }
-    /// `activeConfig`.
-    pub fn active_config(&self) -> &TrialConfig {
+    fn active_config(&self) -> &TrialConfig {
         if self.is_ominous {
             &self.ominous.config
         } else {
             &self.normal.config
         }
     }
-    /// `resetStatistics`.
     fn reset_statistics(&mut self) {
         self.detected_players.clear();
         self.total_mobs_spawned = 0;
         self.next_mob_spawns_at = 0;
         self.cooldown_ends_at = 0;
     }
-    /// `reset`.
     fn reset(&mut self) {
         self.current_mobs.clear();
         self.next_spawn_data = None;
         self.reset_statistics();
     }
-    /// `overrideEntityToSpawn` (a spawn egg's `setEntityId`): the data resets
-    /// and both configs spawn only `id` (`withSpawning`), saved inline as
-    /// `Holder.direct`. The caller then sets the state to `inactive`.
-    pub fn override_entity(&mut self, id: &str) {
+    fn override_entity(&mut self, id: &str) {
         self.reset();
         for slot in [&mut self.normal, &mut self.ominous] {
             let mut entity = Compound::new();
@@ -560,7 +621,6 @@ impl TrialSpawner {
             slot.saved = Some(slot.config.encode());
         }
     }
-    /// `getOrCreateNextSpawnData`: a potential at random, else empty data.
     fn next_or_create(
         &mut self,
         random: &mut impl RandomSource,
@@ -575,7 +635,6 @@ impl TrialSpawner {
         }
         self.next_spawn_data.get_or_insert_default()
     }
-    /// `hasMobToSpawn`.
     fn has_mob_to_spawn(
         &mut self,
         random: &mut impl RandomSource,
@@ -585,11 +644,9 @@ impl TrialSpawner {
             // WeightedList.isEmpty: a total weight of 0.
             || self.active_config().spawn_potentials.iter().any(|(_, w)| *w > 0)
     }
-    /// `canSpawnInLevel`.
     fn can_spawn_in_level<L: TrialSpawnerLevel>(l: &L) -> bool {
         l.spawner_blocks_work() && !l.peaceful() && l.mob_spawning()
     }
-    /// `PlayerDetector.NO_CREATIVE_PLAYERS.detect`.
     fn detect<L: TrialSpawnerLevel>(&self, l: &L, pos: [i32; 3], line_of_sight: bool) -> Vec<Uuid> {
         let range = f64::from(self.required_player_range);
         l.players()
@@ -604,8 +661,6 @@ impl TrialSpawner {
             .map(|p| p.uuid)
             .collect()
     }
-    /// `tryDetectPlayers`, every 20 ticks: a player seen with Trial Omen or
-    /// Bad Omen turns the spawner ominous.
     fn try_detect_players<L: TrialSpawnerLevel>(
         &mut self,
         l: &L,
@@ -678,8 +733,6 @@ impl TrialSpawner {
             }
         }
     }
-    /// `applyOminous`, then `resetAfterBecomingOminous`: the spawner's mobs
-    /// vanish and the ominous config starts over.
     fn apply_ominous<L: TrialSpawnerLevel>(
         &mut self,
         l: &L,
@@ -713,9 +766,6 @@ impl TrialSpawner {
         events.push(TrialEvent::BlockUpdated);
         self.cooldown_ends_at = now + TICKS_BETWEEN_ITEM_SPAWNERS;
     }
-    /// `TrialSpawnerState.spawnOminousOminousItemSpawner`: every tick an item
-    /// is drawn; once the item spawner cooldown is over, an ominous item
-    /// spawner appears above a player or one of the spawner's mobs.
     fn spawn_ominous_item_spawner<L: TrialSpawnerLevel, R: RandomSource>(
         &mut self,
         l: &L,
@@ -767,9 +817,6 @@ impl TrialSpawner {
         ));
         self.cooldown_ends_at = l.game_time() + TICKS_BETWEEN_ITEM_SPAWNERS;
     }
-    /// `calculatePositionToSpawnSpawner`: above a player in range or one of
-    /// the spawner's mobs (a coin decides which), under the first block in
-    /// the way, unless that spot is solid.
     fn item_spawner_position<L: TrialSpawnerLevel, R: RandomSource>(
         &self,
         l: &L,
@@ -817,9 +864,8 @@ impl TrialSpawner {
         l.no_block_collision(down.map(|v| v.floor() as i32))
             .then_some(down)
     }
-    /// `TrialSpawner.tickServer`: the next state of the block.
     #[allow(clippy::too_many_arguments)]
-    pub fn server_tick<L: TrialSpawnerLevel, R: RandomSource>(
+    fn server_tick<L: TrialSpawnerLevel, R: RandomSource>(
         &mut self,
         l: &L,
         random: &mut R,
@@ -845,7 +891,6 @@ impl TrialSpawner {
         }
         self.tick_and_get_next(l, random, pos, state, spawn, eject, events)
     }
-    /// `TrialSpawnerState.tickAndGetNext`.
     #[allow(clippy::too_many_arguments)]
     fn tick_and_get_next<L: TrialSpawnerLevel, R: RandomSource>(
         &mut self,
@@ -979,7 +1024,6 @@ impl TrialSpawner {
             }
         }
     }
-    /// `TrialSpawner.spawnMob`: the UUID of the mob added, if one was.
     fn spawn_mob<L: TrialSpawnerLevel, R: RandomSource>(
         &mut self,
         l: &L,

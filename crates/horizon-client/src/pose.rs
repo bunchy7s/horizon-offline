@@ -167,4 +167,12 @@ impl MotionWorld<'_, '_, '_> {
         };
         self.player.set_pose(pose)
     }
+    /// The pose part of `Player.tick` for a passenger (`Entity.rideTick` runs
+    /// `tick`, not the travel): `Entity.updateSwimming` stops a swim, since it
+    /// needs `!isPassenger()`, and `updatePlayerPose` follows. A player who
+    /// boards a boat while swimming sits up instead of lying under it (#3308).
+    pub fn passenger_pose_tick(&mut self) -> Result<()> {
+        self.player.swimming = false;
+        self.update_player_pose()
+    }
 }

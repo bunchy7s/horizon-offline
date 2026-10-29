@@ -91,6 +91,7 @@ pub fn effect(id: &str) -> Option<&'static EffectDef> {
 /// Namespaced effect ids for mob effect storage.
 pub fn namespaced(id: &'static str) -> &'static str {
     static IDS: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    let key = id.strip_prefix("minecraft:").unwrap_or(id);
     IDS.get_or_init(|| {
         EFFECTS
             .iter()
@@ -102,7 +103,7 @@ pub fn namespaced(id: &'static str) -> &'static str {
             })
             .collect()
     })
-    .get(id)
+    .get(key)
     .copied()
     .unwrap_or(id)
 }

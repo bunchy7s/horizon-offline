@@ -1,6 +1,7 @@
 //! Compiled material rule composition, sharing the condition worker's context.
 use super::{
     Compiled, Context, Facts, MaterialCondition, MaterialConditions, MaterialSurfaceQueries,
+    density::MaterialDensitySources,
 };
 use crate::{registry::BlockStateId, worldgen::DecodeError};
 use horizon_core::{
@@ -364,6 +365,12 @@ where
             rules: (first..self.rules.len()).collect(),
             surface,
         })
+    }
+}
+impl<R: RandomSource, T: MaterialSurfaceQueries> MaterialConditions<R, MaterialDensitySources<T>> {
+    /// Re-target the per-cell density bindings for a reused worker.
+    pub fn retarget_surface_densities(&mut self, position: [i32; 3]) -> Result<(), DecodeError> {
+        self.context.surface.retarget(position)
     }
 }
 impl<R: RandomSource, S: MaterialSurfaceQueries> MaterialConditions<R, S> {

@@ -13,6 +13,7 @@ pub mod horizon;
 pub mod images;
 pub mod installed;
 pub mod java;
+pub mod java_instance;
 pub mod modrinth;
 
 use serde::{Deserialize, Serialize};
