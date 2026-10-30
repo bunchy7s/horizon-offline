@@ -49,11 +49,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASES_PAUSED: ${{ vars.RELEASES_PAUSED }}
-          HEAD_SHA: ${{ (github.event_name == 'push' || steps.mode.outputs.dry_run == 'true') && github.sha || '' }}
-          # A push here already matched the launcher paths, so release that exact commit:
-          # there is no pull request for release_train to find on a fork's direct merge.
+          # Always build the commit that was dispatched: this fork does not run the checks workflow,
+          # so release_train cannot look up a green commit on main.
+          HEAD_SHA: ${{ github.sha }}
+          # A fork's direct merge has no pull request for release_train to find; release the exact commit.
           FORCE: ${{ (github.event_name == 'push' || inputs.force) && 'yes' || '' }}
         run: |
+          set -o pipefail
           python3 tools/release_train.py decide --kind launcher ${HEAD_SHA:+--head "$HEAD_SHA"} ${FORCE:+--force} | tee decision.json
           echo "### $(jq -r '.reason' decision.json)" >> "$GITHUB_STEP_SUMMARY"
           tag=$(jq -r '.tag' decision.json)
