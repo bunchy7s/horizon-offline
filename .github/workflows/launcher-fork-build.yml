@@ -4,22 +4,9 @@ name: launcher-fork-build
 # the fork's own RELEASE_SIGNING_KEY repository secret. Releases are signed checksum releases that
 # this fork's launcher accepts and updates itself from (launcher/src/backend.rs REPO).
 #
-# A push to main that changes the launcher (or a crate it builds in) decides, builds, signs and
-# publishes by itself. Run it by hand with dry_run=true to build without publishing.
+# This fork builds only on demand: there is no push or schedule trigger, so a push can never start
+# a build or publish a release by itself. Run it by hand with dry_run=true to build without publishing.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'launcher/**'
-      - 'crates/horizon-bench/**'
-      - 'crates/horizon-friends/**'
-      - 'crates/horizon-mods/**'
-      - 'crates/horizon-port-pack/**'
-      - 'crates/horizon-prepare/**'
-      - 'crates/horizon-release-sign/**'
-      - 'crates/horizon-telemetry/**'
-      - 'crates/horizon-theme/**'
-      - '.github/workflows/launcher-fork-build.yml'
   workflow_dispatch:
     inputs:
       dry_run:
