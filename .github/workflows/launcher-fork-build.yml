@@ -24,6 +24,8 @@ permissions:
 env:
   # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
   HORIZON_TELEMETRY_URL: "off"
+  # This fork's history is upstream's, so its pull request numbers are not in this repository.
+  HORIZON_RELEASE_SKIP_PRS: "1"
 
 concurrency:
   group: launcher-fork-${{ github.ref }}

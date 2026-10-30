@@ -464,6 +464,10 @@ def gather(kind, head, releases=None):
     paths."""
     releases = published_releases() if releases is None else releases
     last = last_release(releases, kind)
+    if os.environ.get("HORIZON_RELEASE_SKIP_PRS") == "1":
+        # A fork whose main is upstream's history cannot resolve those pull requests; skip the walk
+        # rather than trying (and failing) once per inherited merge commit.
+        return last, []
     base = last["tag_name"] if last else run("git", "rev-list", "--max-parents=0", head).split()[0]
     return last, merged_between(kind, base, head)
 
