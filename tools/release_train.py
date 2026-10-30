@@ -228,8 +228,14 @@ def changed_paths(commit):
 
 
 def pull_request(number):
-    data = gh_json("pr", "view", str(number), "--repo", REPO, "--json",
-                   "number,title,url,labels,closingIssuesReferences,author,mergedAt")
+    try:
+        data = gh_json("pr", "view", str(number), "--repo", REPO, "--json",
+                       "number,title,url,labels,closingIssuesReferences,author,mergedAt")
+    except SystemExit as error:
+        # The number is not a pull request in this repository (a fork's inherited upstream history).
+        if "Could not resolve to a PullRequest" not in str(error):
+            raise
+        return None
     return {
         "number": data["number"],
         "title": data["title"].strip(),
@@ -468,6 +474,10 @@ def merged_between(kind, base, head):
     prs = []
     for number, commit in merged_pull_requests(base, head):
         pr = pull_request(number)
+        if pr is None:
+            # A fork's history carries upstream's merge commits, whose numbers do not exist in the fork.
+            # They still changed files, but there is no title, labels or author to show for them.
+            continue
         pr["paths"] = [path for path in changed_paths(commit) if player_facing(path, kind, exporter_paths)]
         prs.append(pr)
     return prs
