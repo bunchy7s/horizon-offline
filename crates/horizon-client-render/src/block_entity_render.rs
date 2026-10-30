@@ -865,13 +865,23 @@ const VIEW_DISTANCE: f64 = 64.0;
 
 impl BlockEntityRenderer {
     pub fn load(root: &Path, registry: &BlockRegistry) -> crate::Result<Self> {
+        let visibility = crate::models::load_visibility(root, registry)?;
+        Self::load_with_visibility(root, registry, visibility)
+    }
+    /// [`BlockEntityRenderer::load`] over the face visibility the meshes use
+    /// (`MeshTables::visibility`): a clone shares its shapes and their faces.
+    pub fn load_with_visibility(
+        root: &Path,
+        registry: &BlockRegistry,
+        visibility: FaceVisibility,
+    ) -> crate::Result<Self> {
         let all: Value = serde_json::from_slice(&std::fs::read(root.join("entity-models.json"))?)?;
         let models = MODELS
             .iter()
             .filter_map(|(key, layer)| all.get(*layer).map(|v| (*key, ModelPart::parse(v))))
             .collect();
         let mut renderer = Self::new(models, registry);
-        renderer.visibility = Some(Mutex::new(crate::models::load_visibility(root, registry)?));
+        renderer.visibility = Some(Mutex::new(visibility));
         // Sherd items: provides_pottery_pattern -> decorated_pot_pattern asset id.
         if let Ok(bytes) = std::fs::read(root.join("items.json")) {
             let items: Value = serde_json::from_slice(&bytes)?;
@@ -2363,6 +2373,7 @@ mod tests {
             lines: [line.into(), "two".into(), String::new(), "four".into()],
             color: 3,
             glowing,
+            ..Default::default()
         };
         let first_text = crate::signs::SignData {
             front: text("one", false),

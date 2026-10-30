@@ -231,6 +231,32 @@ impl ServerPacks {
         }
         self.update = true;
     }
+    /// `ServerPackManager.pushLocalPack`: a pack already on disk, taken as
+    /// downloaded (a world's own `resourcepacks/resources.zip`).
+    pub fn push_local(&mut self, id: u128, path: PathBuf) {
+        if self.prompt == Prompt::Declined {
+            self.report(id, action::DECLINED);
+            return;
+        }
+        for pack in self.packs.iter_mut().filter(|p| p.id == id) {
+            pack.remove(Removal::ServerReplaced);
+        }
+        self.packs.push(Pack {
+            id,
+            // Never downloaded: the file is already on disk.
+            url: String::new(),
+            sha1: None,
+            path: Some(path),
+            removal: None,
+            download: Download::Done,
+            activation: Activation::Inactive,
+            accepted: false,
+        });
+        if self.prompt == Prompt::Allowed {
+            self.accept(self.packs.len() - 1);
+        }
+        self.update = true;
+    }
     fn accept(&mut self, i: usize) {
         self.packs[i].accepted = true;
         let id = self.packs[i].id;

@@ -12,6 +12,7 @@ use horizon_client::{
     menu::place::Stacked,
     recipe_book::{Book, BookType, ClientBook, Display, RecipeIndex, Tab},
 };
+use horizon_world::loot::PackOverlay;
 use serde_json::Value;
 use std::{fmt::Write as _, fs, path::Path};
 
@@ -20,9 +21,9 @@ pub fn main() -> horizon_client::Result<()> {
     let usage = "usage: recipe_book_view_fixture RESOURCES CASES OUTPUT";
     let root = Path::new(args.get(1).ok_or(usage)?);
     let cases = fs::read_to_string(args.get(2).ok_or(usage)?)?;
-    let items = Items::catalog(root)?;
-    let recipes = Recipes::load(root, &items)?;
-    let index = RecipeIndex::load(root);
+    let items = Items::catalog(root, &PackOverlay::NONE)?;
+    let recipes = Recipes::load(root, &items, &PackOverlay::NONE)?;
+    let index = RecipeIndex::load(root, &PackOverlay::NONE);
     let mut book = Book::build(&recipes, &items);
     book.set_display_ids(&index);
     let max = |s: &horizon_client::items::ItemStack| items.get(&s.item).map_or(64, |i| i.max_stack);

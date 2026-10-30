@@ -74,6 +74,19 @@ including examples. The dependency scope includes optional, platform, build and 
 Tests run library, binary, integration and doc tests without building unrelated example executables. Shared Cargo
 configuration and toolchain changes select the whole workspace; CI also keeps its workspace-wide checks.
 
+## Claim before you start
+
+Work is tracked in GitHub issues, and an issue that is assigned is taken (so is one with the `in progress` label:
+claimed on Discord with Kira's `/claim`): pick another, or ask its holder in the thread. Before you start, comment
+**`/claim`** on the issue; you are assigned at once, no role needed. No issue for your work yet? Open one (a line is
+enough), then claim it. `/unclaim` gives it back.
+
+A claim with no open pull request linking the issue (`Fixes #123` in the description, or a draft) is released after
+5 days, with a comment: open a draft early. You can hold 5 open issues at a time. Agents claim the same way.
+
+When your pull request changes the same functions as another open one, or closes the same issue, a bot comment names
+it (edited on every push, never repeated): talk to its author in the thread before you both finish the same work.
+
 ## Pull requests
 
 - **Small.** One change per pull request, under about 500 lines of code where you can; split bigger work into
@@ -82,8 +95,12 @@ configuration and toolchain changes select the whole workspace; CI also keeps it
   can see.
 - **Tick "Allow edits by maintainers".** When something small is left (a lint, a rebase, a nit) we push the fixup
   ourselves instead of sending it back to you; only design questions come back.
-- **Labels** (we set them if you can't): `feature` when players get something new (it appears under "New" in the
-  release notes), `skip-release` when players see no change (tooling, docs, tests), nothing for a fix.
+- **Tick its kind** in the template: `parity` (Horizon now does what vanilla does), `bug` (a crash or breakage),
+  `perf`, `feature` (new for players), `extra` (Horizon-only, off by default), `tooling` or `docs`. A workflow sets
+  that label, and area labels (`launcher`, `mobs`, `worldgen`, `rendering`...) from the paths you change.
+  `label:parity` is the list of real progress toward vanilla.
+- **Release labels** (we set them if you can't): `feature` also puts it under "New" in the release notes,
+  `skip-release` when players see no change (tooling, docs, tests), nothing for a fix.
   `release-now` is for crash fixes that shouldn't wait. pr_ready suggests one.
 
 Who reviews and merges: the Horizon Team, on CI for ordinary pull requests; risky ones (saves, network, world
@@ -102,4 +119,4 @@ new pushes, we add it again.
 ## Talk to us
 
 [Discord](https://discord.gg/HcTeMZxe5E) for questions and ideas, [issues](https://github.com/horizon-rust/horizon/issues)
-for bugs. If you want to take something on, say so in its issue so nobody else starts the same work.
+for bugs. To take something on, `/claim` its issue ([above](#claim-before-you-start)).

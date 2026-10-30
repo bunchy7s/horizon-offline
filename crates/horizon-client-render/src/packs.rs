@@ -581,7 +581,15 @@ fn build_overlay_uncached(
                     Some(p) => link(p, &target)?,
                     None => {
                         if let Some(Some(z)) = zips.get(*owner) {
-                            fs::write(&target, z.read(inner)?)?;
+                            // One unreadable entry costs that file, not the
+                            // pack: an error here failed the build and the
+                            // reload dropped every server pack in the stack.
+                            match z.read(inner) {
+                                Ok(bytes) => fs::write(&target, bytes)?,
+                                Err(e) => log::warn!(
+                                    "Horizon: skipping unreadable pack entry {inner}: {e}"
+                                ),
+                            }
                         }
                     }
                 }

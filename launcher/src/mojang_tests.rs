@@ -567,3 +567,38 @@ fn any_listed_version_comes_with_its_natives() {
     assert!(refused.unwrap_err().contains("old.jar"));
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_download_goes_on_past_an_asset_that_keeps_failing() {
+    let (pins, mut files) = mojang();
+    // The sound is gone from the server; the language still comes.
+    let hash = sha1_hex(SOUND);
+    files.remove(&format!("{OBJECTS}/{}/{hash}", &hash[..2]));
+    let server = Server {
+        files,
+        asked: Mutex::new(Vec::new()),
+    };
+    let dir = scratch("tolerant");
+    let logged = Mutex::new(Vec::new());
+    download(
+        &pins,
+        &dir,
+        "linux",
+        1,
+        &|url| server.fetch(url),
+        &GO,
+        &|line| logged.lock().unwrap().push(line),
+    )
+    .unwrap();
+    let lang = sha1_hex(LANG);
+    assert!(dir
+        .join("assets/objects")
+        .join(&lang[..2])
+        .join(&lang)
+        .is_file());
+    let sound = server.asked().iter().filter(|u| u.ends_with(&hash)).count();
+    assert_eq!(sound, 3, "tried three times");
+    let last = logged.lock().unwrap().last().cloned().unwrap();
+    assert!(last.contains("1 of 2 files failed"), "{last}");
+    fs::remove_dir_all(&dir).unwrap();
+}

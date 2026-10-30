@@ -121,7 +121,7 @@ impl Game<'_> {
             horizon_world::level::flags::UPDATE_CLIENTS,
         );
         // The remainders come from the grid as it was before anything moved.
-        let remainders = self.res.recipes().remainders(&recipe, &grid, 3);
+        let remainders = self.recipes().remainders(&recipe, &grid, 3);
         self.crafter_eject(key, facing, result, &recipe);
         for rest in remainders.into_iter().flatten() {
             self.crafter_eject(key, facing, rest, &recipe);
@@ -203,7 +203,7 @@ impl Game<'_> {
     pub(in crate::game) fn crafter_result(&self) -> Option<ItemStack> {
         let key = self.container?;
         let c = self.crafter_at(key)?;
-        self.res.recipes().craft(&c.items, 3)
+        self.recipes().craft(&c.items, 3)
     }
     fn crafter_open(&self) -> bool {
         matches!(self.container_kind(), Some(BlockEntity::Crafter(_)))

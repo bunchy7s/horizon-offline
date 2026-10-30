@@ -1,150 +1,150 @@
-TextureAtlas.createTexture	inline	crates/horizon-client/src/sprites.rs::Sprites::finish	gap: minor: no GPU texture objects or mip views; array size and mip count are set in finish
-TextureAtlas.upload	inline	crates/horizon-client/src/sprites.rs::Sprites::finish	gap: minor: no GPU upload or animated UBOs; sprites are inserted before finish
-TextureAtlas.uploadInitialContents	inline	crates/horizon-client/src/sprites.rs::Sprites::finish	static frames copied into the array pixels
+TextureAtlas.createTexture	inline	crates/horizon-client-render/src/sprites.rs::Sprites::finish	gap: minor: no GPU texture objects or mip views; array size and mip count are set in finish
+TextureAtlas.upload	inline	crates/horizon-client-render/src/sprites.rs::Sprites::finish	gap: minor: no GPU upload or animated UBOs; sprites are inserted before finish
+TextureAtlas.uploadInitialContents	inline	crates/horizon-client-render/src/sprites.rs::Sprites::finish	static frames copied into the array pixels
 TextureAtlas.dumpContents	skip:debug		DEBUG_DUMP_TEXTURE_ATLAS PNG dump
 TextureAtlas.dumpSpriteNames	skip:debug		DEBUG_DUMP_TEXTURE_ATLAS name list
-TextureAtlas.cycleAnimationFrames	port	crates/horizon-client/src/gfx/animate.rs::SpriteAnimator::animate	advances every animated layer to the frame for the tick
-TextureAtlas.uploadAnimationFrames	port	crates/horizon-client/src/gfx/animate.rs::mix_level	per mip level frame mix (drawToAtlas)
-TextureAtlas.getSprite	port	crates/horizon-client/src/sprites.rs::Sprites::insert	gap: minor: loads a texture on first lookup; vanilla returns the missing sprite for names not in the atlas
+TextureAtlas.cycleAnimationFrames	port	crates/horizon-client-render/src/gfx/animate.rs::SpriteAnimator::animate	advances every animated layer to the frame for the tick
+TextureAtlas.uploadAnimationFrames	port	crates/horizon-client-render/src/gfx/animate.rs::mix_level	per mip level frame mix (drawToAtlas)
+TextureAtlas.getSprite	port	crates/horizon-client-render/src/sprites.rs::Sprites::insert	gap: minor: loads a texture on first lookup; vanilla returns the missing sprite for names not in the atlas
 TextureAtlas.clearTextureData	skip:java		frees sprite and UBO memory; Rust ownership
 TextureAtlas.releaseTextures	skip:java		frees GPU mip views; Rust ownership
-TextureAtlasSprite.getV	inline	crates/horizon-client/src/particles.rs::ParticleEngine::render	gap: minor: only the particle quad V lerp is here; other getV callers keep their own lerp
+TextureAtlasSprite.getV	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::render	gap: minor: only the particle quad V lerp is here; other getV callers keep their own lerp
 TextureAtlasSprite.toString	skip:debug		debug string
 TextureAtlasSprite.uploadSpriteUbo	skip:other		GPU uniform block for the atlas blit; Horizon samples its layer array and SpriteAnimator computes frames, so no UBO is needed
-TextureContents.load	port	crates/horizon-client/src/sprites.rs::Sprites::load	reads the PNG and the .mcmeta animation section
-TextureManager.registerAndLoad	port	crates/horizon-client/src/sprites.rs::Sprites::insert	loads the texture into a layer and registers it by name
-TextureManager.loadContentsSafe	inline	crates/horizon-client/src/sprites.rs::Sprites::insert	missing texture fallback when a texture does not load
-TextureManager.register	inline	crates/horizon-client/src/sprites.rs::Sprites::insert	adds the layer under its name
+TextureContents.load	port	crates/horizon-client-render/src/sprites.rs::Sprites::load	reads the PNG and the .mcmeta animation section
+TextureManager.registerAndLoad	port	crates/horizon-client-render/src/sprites.rs::Sprites::insert	loads the texture into a layer and registers it by name
+TextureManager.loadContentsSafe	inline	crates/horizon-client-render/src/sprites.rs::Sprites::insert	missing texture fallback when a texture does not load
+TextureManager.register	inline	crates/horizon-client-render/src/sprites.rs::Sprites::insert	adds the layer under its name
 TextureManager.safeClose	skip:java		closes a texture object; Rust ownership
-TextureManager.getTexture	port	crates/horizon-client/src/sprites.rs::Sprites::insert	loads on first use, as SimpleTexture does
-TextureManager.tick	port	crates/horizon-client/src/gfx/animate.rs::SpriteAnimator::animate	gap: minor: animated layers advance in the per frame animate pass; there is no tickable texture list
+TextureManager.getTexture	port	crates/horizon-client-render/src/sprites.rs::Sprites::insert	loads on first use, as SimpleTexture does
+TextureManager.tick	port	crates/horizon-client-render/src/gfx/animate.rs::SpriteAnimator::animate	gap: minor: animated layers advance in the per frame animate pass; there is no tickable texture list
 TextureManager.release	skip:java		drops one texture object; Rust ownership
 TextureManager.close	skip:java		drops all texture objects; Rust ownership
-TextureManager.reload	port	crates/horizon-client/src/assets.rs::Assets::reload	gap: minor: rebuilds every render asset synchronously; no pending futures
+TextureManager.reload	port	crates/horizon-client-render/src/assets.rs::Assets::reload	gap: minor: rebuilds every render asset synchronously; no pending futures
 TextureManager.dumpAllSheets	skip:debug		debug dump of every atlas
 TextureManager.scheduleLoad	skip:other		asynchronous texture preparation; Horizon loads each texture on the calling thread in Sprites::insert
-SpriteSource.Output.add	port	crates/horizon-client/src/atlas_sources.rs::list	records a sprite id and its origin; a later source with the same id replaces it
-SpriteSourceList.load	port	crates/horizon-client/src/atlas_sources.rs::atlases	gap: minor: reads one resource root's atlases/*.json, not every pack's stacked definitions
-DirectoryLister.run	port	crates/horizon-client/src/atlas_sources.rs::list	Directory arm: textures under source/ get the prefix
+SpriteSource.Output.add	port	crates/horizon-client-render/src/atlas_sources.rs::list	records a sprite id and its origin; a later source with the same id replaces it
+SpriteSourceList.load	port	crates/horizon-client-render/src/atlas_sources.rs::atlases	gap: minor: reads one resource root's atlases/*.json, not every pack's stacked definitions
+DirectoryLister.run	port	crates/horizon-client-render/src/atlas_sources.rs::list	Directory arm: textures under source/ get the prefix
 LazyLoadedImage.get	skip:java		shared image cache; generate reads the source texture each time it builds a sprite
 LazyLoadedImage.release	skip:java		releases the shared image cache
-PalettedPermutations.loadPaletteEntryFromImage	inline	crates/horizon-client/src/atlas_sources.rs::generate	palette images are loaded inside the Paletted arm of generate
-PalettedPermutations.PalettedSpriteSupplier.get	port	crates/horizon-client/src/atlas_sources.rs::generate	Paletted arm: base colours mapped through the palette pair (apply_palette)
-SingleFile.run	port	crates/horizon-client/src/atlas_sources.rs::list	Single arm: the sprite named by the resource, or its sprite id
-Unstitcher.run	port	crates/horizon-client/src/atlas_sources.rs::list	Unstitch arm: one sprite per region of the texture
-Unstitcher.RegionInstance.get	port	crates/horizon-client/src/atlas_sources.rs::generate	Region arm: the region cut out of the texture
-AshParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Ash arm
-AttackSweepParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	SweepAttack uses the HugeExplosion behaviour: age, then sprite from age
-AttackSweepParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	SweepAttack arm: size from xAux
-BaseAshSmokeParticle.<init>	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Smoke, Ash, WhiteAsh and DustPlume arms: motion, GrowIn size, lifetime
-BreakingItemParticle.CobwebProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	ItemCobweb arm; the layer comes from item_sprites (game/item_particles.rs)
-BreakingItemParticle.ItemParticleProvider.getSprite	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Item arms pick a layer with the engine random; ItemCobweb, ItemSlime and ItemSnowball read item_sprites
-BreakingItemParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Item arm
-BreakingItemParticle.SlimeProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	ItemSlime arm
-BreakingItemParticle.SnowballProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	ItemSnowball arm
-BreakingItemParticle.SulfurCubeProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	SulfurCubeGoo arm: the first sprite of its set
-BubbleColumnUpParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	BubbleColumnUp arm: removed once it leaves water
-BubbleColumnUpParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	BubbleColumnUp arm
-BubbleParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	Bubble arm: rises, drag 0.85, removed out of water
-BubbleParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Bubble arm
-BubblePopParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	BubblePop arm
-BubblePopParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	BubblePop arm
-CampfireSmokeParticle.CosyProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	CampfireCosySmoke arm, alpha 0.9
-CampfireSmokeParticle.SignalProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	CampfireSignalSmoke arm, alpha 0.95
-CritParticle.<init>	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Crit arm; the constructor tick runs on the next engine tick (pre_tick)
-CritParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	Crit arm: green and blue fade
-CritParticle.DamageIndicatorProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	DamageIndicator arm; lifetime 20 from after_constructor_tick
-CritParticle.MagicProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	EnchantedHit arm; red and green scaled by after_constructor_tick
-CritParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Crit arm
-DragonBreathParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	DragonBreath arm: hit-ground flag and friction
-DragonBreathParticle.getQuadSize	port	crates/horizon-client/src/particles.rs::Particle::quad_size	GrowIn size curve
-DragonBreathParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	DragonBreath arm; power through set_power
-DripParticle.getLightCoords	port	crates/horizon-client/src/particles.rs::Particle::light_coords	Block15 for the glowing tears; World for the rest
-DripParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	Behaviour::Drip: pre move, gravity and move, post move, fluid check
-DripParticle.preMoveUpdate	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	Drip: lifetime countdown and removal
-DripParticle.CoolingDripHangParticle.preMoveUpdate	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	Drip CoolingHang stage: red, green and blue fade
-DripParticle.DripHangParticle.preMoveUpdate	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	Drip Hang stage: spawns the falling drip when the countdown ends
-DripParticle.DripHangParticle.postMoveUpdate	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	Drip Hang stage: velocity times 0.02
-DripParticle.DripstoneFallAndLandParticle.postMoveUpdate	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	FallAndLand stage with the dripstone land sound
-DripParticle.DripstoneLavaFallProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	FallingDripstoneLava arm
-DripParticle.DripstoneLavaHangProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	DrippingDripstoneLava arm
-DripParticle.DripstoneWaterFallProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	FallingDripstoneWater arm
-DripParticle.DripstoneWaterHangProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	DrippingDripstoneWater arm
-DripParticle.FallAndLandParticle.postMoveUpdate	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	FallAndLand stage: removed on the ground, spawns the land particle
-DripParticle.HoneyFallAndLandParticle.postMoveUpdate	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	FallAndLand for FallingHoney: beehive drip sound
-DripParticle.LavaFallProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	FallingLava arm
-DripParticle.LavaHangProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	DrippingLava arm
-DripParticle.LavaLandProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	LandingLava arm
-DripParticle.ObsidianTearFallProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	FallingObsidianTear arm
-DripParticle.ObsidianTearHangProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	DrippingObsidianTear arm
-DripParticle.ObsidianTearLandProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	LandingObsidianTear arm
-DripParticle.SporeBlossomFallProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	FallingSporeBlossom arm
-DripParticle.WaterFallProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	FallingWater arm
-DripParticle.WaterHangProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	DrippingWater arm
-DustColorTransitionParticle.randomizeColor	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	DustColorTransition arm: the randomize closure for from and to colours
-DustColorTransitionParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	DustColorTransition arm
-DustParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Dust arm
-DustParticleBase.randomizeColor	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Dust and DustColorTransition arms: the randomize closure
-DustParticleBase.getQuadSize	port	crates/horizon-client/src/particles.rs::Particle::quad_size	GrowIn size curve
-DustPlumeParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	DustPlume arm, base 1.0
+PalettedPermutations.loadPaletteEntryFromImage	inline	crates/horizon-client-render/src/atlas_sources.rs::generate	palette images are loaded inside the Paletted arm of generate
+PalettedPermutations.PalettedSpriteSupplier.get	port	crates/horizon-client-render/src/atlas_sources.rs::generate	Paletted arm: base colours mapped through the palette pair (apply_palette)
+SingleFile.run	port	crates/horizon-client-render/src/atlas_sources.rs::list	Single arm: the sprite named by the resource, or its sprite id
+Unstitcher.run	port	crates/horizon-client-render/src/atlas_sources.rs::list	Unstitch arm: one sprite per region of the texture
+Unstitcher.RegionInstance.get	port	crates/horizon-client-render/src/atlas_sources.rs::generate	Region arm: the region cut out of the texture
+AshParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Ash arm
+AttackSweepParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	SweepAttack uses the HugeExplosion behaviour: age, then sprite from age
+AttackSweepParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	SweepAttack arm: size from xAux
+BaseAshSmokeParticle.<init>	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Smoke, Ash, WhiteAsh and DustPlume arms: motion, GrowIn size, lifetime
+BreakingItemParticle.CobwebProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	ItemCobweb arm; the layer comes from item_sprites (game/item_particles.rs)
+BreakingItemParticle.ItemParticleProvider.getSprite	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Item arms pick a layer with the engine random; ItemCobweb, ItemSlime and ItemSnowball read item_sprites
+BreakingItemParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Item arm
+BreakingItemParticle.SlimeProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	ItemSlime arm
+BreakingItemParticle.SnowballProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	ItemSnowball arm
+BreakingItemParticle.SulfurCubeProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	SulfurCubeGoo arm: the first sprite of its set
+BubbleColumnUpParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	BubbleColumnUp arm: removed once it leaves water
+BubbleColumnUpParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	BubbleColumnUp arm
+BubbleParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	Bubble arm: rises, drag 0.85, removed out of water
+BubbleParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Bubble arm
+BubblePopParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	BubblePop arm
+BubblePopParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	BubblePop arm
+CampfireSmokeParticle.CosyProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	CampfireCosySmoke arm, alpha 0.9
+CampfireSmokeParticle.SignalProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	CampfireSignalSmoke arm, alpha 0.95
+CritParticle.<init>	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Crit arm; the constructor tick runs on the next engine tick (pre_tick)
+CritParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	Crit arm: green and blue fade
+CritParticle.DamageIndicatorProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	DamageIndicator arm; lifetime 20 from after_constructor_tick
+CritParticle.MagicProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	EnchantedHit arm; red and green scaled by after_constructor_tick
+CritParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Crit arm
+DragonBreathParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	DragonBreath arm: hit-ground flag and friction
+DragonBreathParticle.getQuadSize	port	crates/horizon-client-render/src/particles.rs::Particle::quad_size	GrowIn size curve
+DragonBreathParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	DragonBreath arm; power through set_power
+DripParticle.getLightCoords	port	crates/horizon-client-render/src/particles.rs::Particle::light_coords	Block15 for the glowing tears; World for the rest
+DripParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	Behaviour::Drip: pre move, gravity and move, post move, fluid check
+DripParticle.preMoveUpdate	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	Drip: lifetime countdown and removal
+DripParticle.CoolingDripHangParticle.preMoveUpdate	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	Drip CoolingHang stage: red, green and blue fade
+DripParticle.DripHangParticle.preMoveUpdate	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	Drip Hang stage: spawns the falling drip when the countdown ends
+DripParticle.DripHangParticle.postMoveUpdate	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	Drip Hang stage: velocity times 0.02
+DripParticle.DripstoneFallAndLandParticle.postMoveUpdate	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	FallAndLand stage with the dripstone land sound
+DripParticle.DripstoneLavaFallProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	FallingDripstoneLava arm
+DripParticle.DripstoneLavaHangProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	DrippingDripstoneLava arm
+DripParticle.DripstoneWaterFallProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	FallingDripstoneWater arm
+DripParticle.DripstoneWaterHangProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	DrippingDripstoneWater arm
+DripParticle.FallAndLandParticle.postMoveUpdate	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	FallAndLand stage: removed on the ground, spawns the land particle
+DripParticle.HoneyFallAndLandParticle.postMoveUpdate	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	FallAndLand for FallingHoney: beehive drip sound
+DripParticle.LavaFallProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	FallingLava arm
+DripParticle.LavaHangProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	DrippingLava arm
+DripParticle.LavaLandProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	LandingLava arm
+DripParticle.ObsidianTearFallProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	FallingObsidianTear arm
+DripParticle.ObsidianTearHangProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	DrippingObsidianTear arm
+DripParticle.ObsidianTearLandProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	LandingObsidianTear arm
+DripParticle.SporeBlossomFallProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	FallingSporeBlossom arm
+DripParticle.WaterFallProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	FallingWater arm
+DripParticle.WaterHangProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	DrippingWater arm
+DustColorTransitionParticle.randomizeColor	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	DustColorTransition arm: the randomize closure for from and to colours
+DustColorTransitionParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	DustColorTransition arm
+DustParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Dust arm
+DustParticleBase.randomizeColor	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Dust and DustColorTransition arms: the randomize closure
+DustParticleBase.getQuadSize	port	crates/horizon-client-render/src/particles.rs::Particle::quad_size	GrowIn size curve
+DustPlumeParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	DustPlume arm, base 1.0
 ElderGuardianParticleGroup.extractRenderState	port	crates/horizon-client/src/game/mob_blocks.rs::Game::elder_apparition_geometry	gap: minor: one apparition timer that a new curse resets, so two curses show one ghost
 ElderGuardianParticleGroup.ElderGuardianParticleRenderState.fromParticle	port	crates/horizon-client/src/game/mob_blocks.rs::Game::elder_apparition_geometry	fade, camera pose and offsets
 ElderGuardianParticleGroup.State.submit	port	crates/horizon-client/src/game/mob_blocks.rs::Game::elder_apparition_geometry	draws the guardian model
-EmissiveRisingParticle.getLightCoords	port	crates/horizon-client/src/particles.rs::Particle::light_coords	Block15 for sculk soul only (the SculkSoul arm)
-EmissiveRisingParticle.EmissiveProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	SculkSoul arm of the Soul arms
-EmissiveRisingParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Soul arm
-EndRodParticle.move	port	crates/horizon-client/src/particles.rs::Particle::move_by	free_move: moves the box without collision
-EndRodParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	EndRod arm
-ExplodeParticle.<init>	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Poof and Spit arms: puff motion, size and lifetime
-ExplodeParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Poof arm
-FallingDustParticle.getQuadSize	port	crates/horizon-client/src/particles.rs::Particle::quad_size	GrowIn size curve
-FallingDustParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	FallingDust arm: roll and gravity clamp
-FallingDustParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	gap: minor: the invisible-block skip and the tint lookup happen in animate_tick (Animate::Falling), not here
-FallingLeavesParticle.CherryProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	CherryLeaves arm
-FallingLeavesParticle.PaleOakProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	PaleOakLeaves arm
-FallingLeavesParticle.PoplarProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	RedPoplarLeaves, OrangePoplarLeaves and YellowPoplarLeaves arms
-FallingLeavesParticle.TintedLeavesProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	TintedLeaves arm with the option colour
-FallingParticle.<init>	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Leaves arm: size, gravity, start velocity, flow and swirl
-FallingParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	Leaves arm: wind, spin and removal on the ground
-FireflyParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	Firefly arm: removed in a solid block, fade, random drift
-FireflyParticle.FireflyProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Firefly arm
-FireworkParticles.FlashProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Flash arm
-FireworkParticles.SparkProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Firework arm, alpha 0.99
-FireworkParticles.Starter.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_starters	launch sound, a burst every 2 ticks, flash, twinkle sound at the end
-FireworkParticles.Starter.isFarAwayFromCamera	inline	crates/horizon-client/src/particles.rs::ParticleEngine::fireworks	gap: minor: the distance is taken when the rocket is launched, not on each tick
-FireworkParticles.Starter.createParticleBall	port	crates/horizon-client/src/particles.rs::ParticleEngine::spark_ball	
-FireworkParticles.Starter.createParticleShape	port	crates/horizon-client/src/particles.rs::ParticleEngine::spark_shape	
-FireworkParticles.Starter.createParticleBurst	inline	crates/horizon-client/src/particles.rs::ParticleEngine::tick_starters	Burst shape arm of tick_starters
-FlameParticle.move	port	crates/horizon-client/src/particles.rs::Particle::move_by	free_move: moves the box without collision
-FlameParticle.getQuadSize	port	crates/horizon-client/src/particles.rs::Particle::quad_size	Flame size curve
-FlameParticle.getLightCoords	port	crates/horizon-client/src/particles.rs::Particle::light_coords	AgeEmission light
-FlameParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Flame arm (also copper and soul fire flame)
-FlameParticle.SmallFlameProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	SmallFlame arm, scaled 0.5
-FlyStraightTowardsParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	FlyStraight arm: position and colour lerp
-FlyStraightTowardsParticle.OminousSpawnProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	OminousSpawning arm
-FlyTowardsPositionParticle.<init>	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Enchant, Nautilus and VaultConnection arms
-FlyTowardsPositionParticle.move	port	crates/horizon-client/src/particles.rs::Particle::move_by	free_move: moves the box without collision
-FlyTowardsPositionParticle.getLightCoords	port	crates/horizon-client/src/particles.rs::Particle::light_coords	AgeEmission4 for enchant and nautilus; Block15 for vault connection
-FlyTowardsPositionParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	FlyTowards arm
-FlyTowardsPositionParticle.extract	port	crates/horizon-client/src/particles.rs::ParticleEngine::render	alpha from the lifetime curve at draw time
-FlyTowardsPositionParticle.EnchantProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Enchant arm
-FlyTowardsPositionParticle.NautilusProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Nautilus arm
-FlyTowardsPositionParticle.VaultConnectionProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	VaultConnection arm: block light, lifetime alpha, scale 1.5
+EmissiveRisingParticle.getLightCoords	port	crates/horizon-client-render/src/particles.rs::Particle::light_coords	Block15 for sculk soul only (the SculkSoul arm)
+EmissiveRisingParticle.EmissiveProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	SculkSoul arm of the Soul arms
+EmissiveRisingParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Soul arm
+EndRodParticle.move	port	crates/horizon-client-render/src/particles.rs::Particle::move_by	free_move: moves the box without collision
+EndRodParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	EndRod arm
+ExplodeParticle.<init>	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Poof and Spit arms: puff motion, size and lifetime
+ExplodeParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Poof arm
+FallingDustParticle.getQuadSize	port	crates/horizon-client-render/src/particles.rs::Particle::quad_size	GrowIn size curve
+FallingDustParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	FallingDust arm: roll and gravity clamp
+FallingDustParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	gap: minor: the invisible-block skip and the tint lookup happen in animate_tick (Animate::Falling), not here
+FallingLeavesParticle.CherryProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	CherryLeaves arm
+FallingLeavesParticle.PaleOakProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	PaleOakLeaves arm
+FallingLeavesParticle.PoplarProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	RedPoplarLeaves, OrangePoplarLeaves and YellowPoplarLeaves arms
+FallingLeavesParticle.TintedLeavesProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	TintedLeaves arm with the option colour
+FallingParticle.<init>	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Leaves arm: size, gravity, start velocity, flow and swirl
+FallingParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	Leaves arm: wind, spin and removal on the ground
+FireflyParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	Firefly arm: removed in a solid block, fade, random drift
+FireflyParticle.FireflyProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Firefly arm
+FireworkParticles.FlashProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Flash arm
+FireworkParticles.SparkProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Firework arm, alpha 0.99
+FireworkParticles.Starter.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_starters	launch sound, a burst every 2 ticks, flash, twinkle sound at the end
+FireworkParticles.Starter.isFarAwayFromCamera	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::fireworks	gap: minor: the distance is taken when the rocket is launched, not on each tick
+FireworkParticles.Starter.createParticleBall	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::spark_ball	
+FireworkParticles.Starter.createParticleShape	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::spark_shape	
+FireworkParticles.Starter.createParticleBurst	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_starters	Burst shape arm of tick_starters
+FlameParticle.move	port	crates/horizon-client-render/src/particles.rs::Particle::move_by	free_move: moves the box without collision
+FlameParticle.getQuadSize	port	crates/horizon-client-render/src/particles.rs::Particle::quad_size	Flame size curve
+FlameParticle.getLightCoords	port	crates/horizon-client-render/src/particles.rs::Particle::light_coords	AgeEmission light
+FlameParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Flame arm (also copper and soul fire flame)
+FlameParticle.SmallFlameProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	SmallFlame arm, scaled 0.5
+FlyStraightTowardsParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	FlyStraight arm: position and colour lerp
+FlyStraightTowardsParticle.OminousSpawnProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	OminousSpawning arm
+FlyTowardsPositionParticle.<init>	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Enchant, Nautilus and VaultConnection arms
+FlyTowardsPositionParticle.move	port	crates/horizon-client-render/src/particles.rs::Particle::move_by	free_move: moves the box without collision
+FlyTowardsPositionParticle.getLightCoords	port	crates/horizon-client-render/src/particles.rs::Particle::light_coords	AgeEmission4 for enchant and nautilus; Block15 for vault connection
+FlyTowardsPositionParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	FlyTowards arm
+FlyTowardsPositionParticle.extract	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::render	alpha from the lifetime curve at draw time
+FlyTowardsPositionParticle.EnchantProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Enchant arm
+FlyTowardsPositionParticle.NautilusProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Nautilus arm
+FlyTowardsPositionParticle.VaultConnectionProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	VaultConnection arm: block light, lifetime alpha, scale 1.5
 GeyserBaseParticle.Provider.createParticle	missing		player: sulfur geysers do not erupt here: no water column, base puff or eruption sound (only the potent sulfur block state exists), and the geyser particle types are not in ParticleType
 GeyserEruptionParticle.tick	missing		player: the water column of a geyser eruption is not drawn; no geyser particle types exist here
 GeyserEruptionParticle.Provider.createParticle	missing		player: no geyser eruption particle is made
 GeyserPlumeParticle.<init>	missing		player: no water plume is made when a sulfur geyser erupts
 GeyserPlumeParticle.tick	missing		player: the plume does not rise, spray or fall back
 GeyserPlumeParticle.Provider.createParticle	missing		player: no water plume is made when a sulfur geyser erupts
-GlowParticle.getLightCoords	port	crates/horizon-client/src/particles.rs::Particle::light_coords	AgeEmission light (glow, wax, electric spark)
-GlowParticle.ElectricSparkProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	ElectricSpark arm
-GlowParticle.GlowSquidProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Glow arm
-GlowParticle.WaxOffProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	WaxOff arm
-GlowParticle.WaxOnProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	WaxOn arm
-GustParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	HugeExplosion behaviour: age, then sprite from age
-GustParticle.SmallProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	SmallGust arm, scaled 0.15
-GustSeedParticle.tick	port	crates/horizon-client/src/particles.rs::ParticleEngine::tick_particle	GustSeed arm: a gust every tick or two, then removal
-GustSeedParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	GustEmitterLarge and GustEmitterSmall arms: scale, lifetime, delay
-HeartParticle.getQuadSize	port	crates/horizon-client/src/particles.rs::Particle::quad_size	GrowIn size curve
-HeartParticle.AngryVillagerProvider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	AngryVillager arm, raised 0.5; the default colour is already white
-HeartParticle.Provider.createParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::make	Heart arm
+GlowParticle.getLightCoords	port	crates/horizon-client-render/src/particles.rs::Particle::light_coords	AgeEmission light (glow, wax, electric spark)
+GlowParticle.ElectricSparkProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	ElectricSpark arm
+GlowParticle.GlowSquidProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Glow arm
+GlowParticle.WaxOffProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	WaxOff arm
+GlowParticle.WaxOnProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	WaxOn arm
+GustParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	HugeExplosion behaviour: age, then sprite from age
+GustParticle.SmallProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	SmallGust arm, scaled 0.15
+GustSeedParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	GustSeed arm: a gust every tick or two, then removal
+GustSeedParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	GustEmitterLarge and GustEmitterSmall arms: scale, lifetime, delay
+HeartParticle.getQuadSize	port	crates/horizon-client-render/src/particles.rs::Particle::quad_size	GrowIn size curve
+HeartParticle.AngryVillagerProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	AngryVillager arm, raised 0.5; the default colour is already white
+HeartParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Heart arm

@@ -1,6 +1,6 @@
 //! `Level.tickBlockEntities` for the block entities ticked together here
 //! (hoppers, crafters, jukeboxes, beacons, creaking hearts, spawners, trial
-//! spawners, vaults, beehives and furnaces): only those whose state has a
+//! spawners, vaults, beehives, furnaces and potent sulfur): only those whose state has a
 //! ticker, in vanilla's list order (`horizon_client::block_entities`), in
 //! chunks that tick blocks. Sculk, brewing stands and pistons tick in their
 //! own passes.
@@ -64,6 +64,14 @@ impl Game<'_> {
                 Some(BlockEntity::Brewing(_)) => self.tick_brewing_stand(pos)?,
                 Some(BlockEntity::DaylightDetector) => self.tick_daylight_detector(pos),
                 Some(BlockEntity::Campfire(_)) => self.tick_campfire(pos)?,
+                Some(BlockEntity::PotentSulfur(_)) => {
+                    self.tick_potent_sulfur(pos)?;
+                    // A window that simulates the world itself is its own
+                    // client; a server's clients tick it on their own.
+                    if self.options.execution_role.is_client() {
+                        self.client_tick_potent_sulfur(pos);
+                    }
+                }
                 _ => {}
             }
         }
@@ -105,6 +113,14 @@ impl Game<'_> {
                     // Lit, cookTick; unlit, cooldownTick.
                     | "minecraft:campfire"
                     | "minecraft:soul_campfire" => Ticking::Yes,
+                    // Every state but dry has a ticker.
+                    "minecraft:potent_sulfur" => {
+                        let dry = registry
+                            .state(state)
+                            .and_then(|s| s.properties.get("potent_sulfur_state"))
+                            .is_some_and(|v| v == "dry");
+                        if dry { Ticking::Idle } else { Ticking::Yes }
+                    }
                     "minecraft:jukebox" => {
                         let record = registry
                             .state(state)
@@ -141,7 +157,11 @@ impl Game<'_> {
         let Some(BlockEntity::Furnace(f)) = self.world.block_entities.get_mut(&pos) else {
             return Ok(());
         };
-        let Some(lit) = f.tick(self.res.recipes(), self.res.items(), self.res.providers()) else {
+        let Some(lit) = f.tick(
+            world_recipes!(self),
+            world_items!(self),
+            self.res.providers(),
+        ) else {
             return Ok(());
         };
         let state = self.world.block(pos.0, pos.1, pos.2);

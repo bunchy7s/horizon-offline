@@ -111,6 +111,16 @@ pub fn drive(m: &mut Mob, w: &MobWorld) {
         m.nav_move_to_entity(w, [t.position.x, t.position.y, t.position.z], 0, 1.0);
     }
 }
+/// `Mob.getControllingPassenger` for a mob on its back: the rider, unless it
+/// is in `#non_controlling_rider` (`Entity.canControlVehicle`).
+pub fn mob_controlled(m: &Mob, w: &MobWorld) -> bool {
+    m.extra.rider.and_then(|r| w.seen(r)).is_some_and(|r| {
+        !matches!(
+            r.species,
+            Species::Slime | Species::MagmaCube | Species::SulfurCube
+        )
+    })
+}
 /// `Mob.requiresCustomPersistence`: a passenger never despawns.
 pub fn keeps_alive(m: &Mob) -> bool {
     m.extra.mount.is_some()

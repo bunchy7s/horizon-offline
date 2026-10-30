@@ -1,38 +1,38 @@
-Projection.setupPerspective	inline	crates/horizon-client/src/camera.rs::perspective	gap: minor: the dirty-flag cache and the stored fov/near/far are not kept; the matrix is built from the arguments per call
+Projection.setupPerspective	inline	crates/horizon-client-render/src/camera.rs::perspective	gap: minor: the dirty-flag cache and the stored fov/near/far are not kept; the matrix is built from the arguments per call
 Projection.setupOrtho	skip:ui		GUI draws in pixels through Horizon's own HUD pipeline; no ortho projection state of its own
 Projection.getMatrixVersion	skip:java		matrix version counter for the dirty-check cache
 ProjectionMatrixBuffer.getBuffer	skip:other		GPU buffer handle getter; Horizon owns its uniform buffers in gfx.rs
-ProjectionMatrixBuffer.writeBuffer	port	crates/horizon-client/src/gfx/upload.rs::Uploads::buffer	gap: minor: the caller decides which uniform receives the projection
+ProjectionMatrixBuffer.writeBuffer	port	crates/horizon-client-render/src/gfx/upload.rs::Uploads::buffer	gap: minor: the caller decides which uniform receives the projection
 Rect2i.intersect	skip:ui		GUI clip rectangle math; Horizon clips each draw in hud.rs (clip_since), no rectangle type
 Rect2i.contains	skip:ui		GUI hit test on a rectangle; Horizon's widgets hit-test in their own UI code
 RenderPipelines.register	skip:data		pipeline registry; Horizon creates its pipelines in gfx.rs
 RunningTrimmedMean.registerValueAndGetMean	skip:debug		frame-time smoothing helper; no vanilla caller in this source tree
-ScreenEffectRenderer.submit	port	crates/horizon-client/src/screen_effects.rs::ScreenEffects::build	gap: minor: the item activation is not built here (see renderItemActivationAnimation)
+ScreenEffectRenderer.submit	port	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	gap: minor: the item activation is not built here (see renderItemActivationAnimation)
 ScreenEffectRenderer.renderItemActivationAnimation	missing		player: when a totem of undying saves the player, the totem does not pop up in front of the screen; Horizon only plays the totem particles and sound (game/totem.rs totem_event)
-ScreenEffectRenderer.submitWater	inline	crates/horizon-client/src/screen_effects.rs::ScreenEffects::build	underwater overlay branch (misc/underwater)
-ScreenEffectRenderer.submitFire	inline	crates/horizon-client/src/screen_effects.rs::ScreenEffects::build	first-person fire overlay branch (block/fire_1, two quads)
-ScreenEffectRenderer.buildFireQuad	inline	crates/horizon-client/src/screen_effects.rs::ScreenEffects::build	the two fire quads' corners and offsets
-ScreenEffectRenderer.buildSpriteQuad	inline	crates/horizon-client/src/screen_effects.rs::ScreenEffects::build	hand_quad closure: sprite rect and uv for overlay quads
-ScreenEffectRenderer.buildQuad	inline	crates/horizon-client/src/screen_effects.rs::ScreenEffects::build	hand_quad closure: corners, uv and colour of one overlay quad
+ScreenEffectRenderer.submitWater	inline	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	underwater overlay branch (misc/underwater)
+ScreenEffectRenderer.submitFire	inline	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	first-person fire overlay branch (block/fire_1, two quads)
+ScreenEffectRenderer.buildFireQuad	inline	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	the two fire quads' corners and offsets
+ScreenEffectRenderer.buildSpriteQuad	inline	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	hand_quad closure: sprite rect and uv for overlay quads
+ScreenEffectRenderer.buildQuad	inline	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	hand_quad closure: corners, uv and colour of one overlay quad
 SectionBufferBuilderPool.allocate	skip:java		heap-sized pool of section builders; Horizon's mesher uses its own worker threads
-SectionOcclusionGraph.waitAndReset	port	crates/horizon-client/src/gfx/occlusion.rs::Occlusion::clear	gap: minor: clear discards a running search instead of waiting for it
+SectionOcclusionGraph.waitAndReset	port	crates/horizon-client-render/src/gfx/occlusion.rs::Occlusion::clear	gap: minor: clear discards a running search instead of waiting for it
 SectionOcclusionGraph.expectedChunks	missing		unsure: Horizon's occlusion graph keeps no list of sections waiting on chunk loads (streaming.rs has its own waiting set)
-SectionOcclusionGraph.invalidateIfNeeded	port	crates/horizon-client/src/gfx/occlusion.rs::Occlusion::update	gap: minor: the search is keyed on camera section and radius only; fov and smart-cull changes do not restart it
-SectionOcclusionGraph.addSectionsInFrustum	port	crates/horizon-client/src/gfx/occlusion.rs::Occlusion::contains	gap: minor: the frustum test is not here; the caller builds the visible list
-SectionOcclusionGraph.schedulePropagationFrom	port	crates/horizon-client/src/gfx/occlusion.rs::Occlusion::changed	queues the changed section; propagation runs in propagate_changes
-SectionOcclusionGraph.scheduleFullUpdate	port	crates/horizon-client/src/gfx/occlusion.rs::Occlusion::start	gap: minor: the full search goes to a worker and is collected later (collect), not to a background executor
-SectionOcclusionGraph.runPartialUpdate	port	crates/horizon-client/src/gfx/occlusion.rs::Occlusion::propagate_changes	gap: minor: chunk-load waiting is not handled here (see expectedChunks)
-SectionOcclusionGraph.initializeQueueForFullUpdate	port	crates/horizon-client/src/gfx/occlusion.rs::Graph::seed_outside	gap: minor: seeds the sections around a camera outside the world; the camera-inside seed is in Graph::search
-SectionOcclusionGraph.runUpdates	port	crates/horizon-client/src/gfx/occlusion.rs::Graph::propagate	gap: minor: BFS over face directions; vanilla's distant-section ray check for smart cull is not checked here
-SectionOcclusionGraph.getRelativeFrom	inline	crates/horizon-client/src/gfx/occlusion.rs::Graph::propagate	neighbour lookup inside the BFS
-SectionOcclusionGraph.updateEmptySections	port	crates/horizon-client/src/gfx/occlusion.rs::Occlusion::set	gap: minor: empty sections are not kept in a separate set; their visibility arrives through set
+SectionOcclusionGraph.invalidateIfNeeded	port	crates/horizon-client-render/src/gfx/occlusion.rs::Occlusion::update	gap: minor: the search is keyed on camera section and radius only; fov and smart-cull changes do not restart it
+SectionOcclusionGraph.addSectionsInFrustum	port	crates/horizon-client-render/src/gfx/occlusion.rs::Occlusion::contains	gap: minor: the frustum test is not here; the caller builds the visible list
+SectionOcclusionGraph.schedulePropagationFrom	port	crates/horizon-client-render/src/gfx/occlusion.rs::Occlusion::changed	queues the changed section; propagation runs in propagate_changes
+SectionOcclusionGraph.scheduleFullUpdate	port	crates/horizon-client-render/src/gfx/occlusion.rs::Occlusion::start	gap: minor: the full search goes to a worker and is collected later (collect), not to a background executor
+SectionOcclusionGraph.runPartialUpdate	port	crates/horizon-client-render/src/gfx/occlusion.rs::Occlusion::propagate_changes	gap: minor: chunk-load waiting is not handled here (see expectedChunks)
+SectionOcclusionGraph.initializeQueueForFullUpdate	port	crates/horizon-client-render/src/gfx/occlusion.rs::Graph::seed_outside	gap: minor: seeds the sections around a camera outside the world; the camera-inside seed is in Graph::search
+SectionOcclusionGraph.runUpdates	port	crates/horizon-client-render/src/gfx/occlusion.rs::Graph::propagate	gap: minor: BFS over face directions; vanilla's distant-section ray check for smart cull is not checked here
+SectionOcclusionGraph.getRelativeFrom	inline	crates/horizon-client-render/src/gfx/occlusion.rs::Graph::propagate	neighbour lookup inside the BFS
+SectionOcclusionGraph.updateEmptySections	port	crates/horizon-client-render/src/gfx/occlusion.rs::Occlusion::set	gap: minor: empty sections are not kept in a separate set; their visibility arrives through set
 SectionOcclusionGraph.updateLoadedChunks	missing		unsure: no loaded-chunk set for the occlusion graph found in gfx/occlusion.rs
-SectionOcclusionGraph.Node.setDirections	inline	crates/horizon-client/src/gfx/occlusion.rs::Graph::propagate	face direction bits kept per section in directions[]
-SectionOcclusionGraph.Node.hasDirection	inline	crates/horizon-client/src/gfx/occlusion.rs::Graph::propagate	face direction bit test inside the BFS
-SectionOcclusionGraph.Node.addSourceDirection	inline	crates/horizon-client/src/gfx/occlusion.rs::Graph::propagate	entered-face bits kept per section in entered[]
-SectionOcclusionGraph.Node.hasSourceDirection	inline	crates/horizon-client/src/gfx/occlusion.rs::Graph::propagate	entered-face bit test inside the BFS
+SectionOcclusionGraph.Node.setDirections	inline	crates/horizon-client-render/src/gfx/occlusion.rs::Graph::propagate	face direction bits kept per section in directions[]
+SectionOcclusionGraph.Node.hasDirection	inline	crates/horizon-client-render/src/gfx/occlusion.rs::Graph::propagate	face direction bit test inside the BFS
+SectionOcclusionGraph.Node.addSourceDirection	inline	crates/horizon-client-render/src/gfx/occlusion.rs::Graph::propagate	entered-face bits kept per section in entered[]
+SectionOcclusionGraph.Node.hasSourceDirection	inline	crates/horizon-client-render/src/gfx/occlusion.rs::Graph::propagate	entered-face bit test inside the BFS
 SectionOcclusionGraph.Node.equals	skip:java		node equality for vanilla's hash sets; Horizon indexes sections by position
-SectionOcclusionGraph.SectionToNodeMap.get	port	crates/horizon-client/src/gfx/occlusion.rs::Graph::index	gap: minor: a per-section array index instead of a map
+SectionOcclusionGraph.SectionToNodeMap.get	port	crates/horizon-client-render/src/gfx/occlusion.rs::Graph::index	gap: minor: a per-section array index instead of a map
 ShaderDefines.withOverrides	skip:other		merges GLSL #define sets; Horizon's WGSL uses override constants
 ShaderDefines.asSourceDirectives	skip:other		emits GLSL #define text; Horizon has no GLSL source
 ShaderDefines.isEmpty	skip:other		helper for the define set; see ShaderDefines
@@ -51,22 +51,22 @@ ShaderManager.getPostChain	missing		minor: spectator entity post effects (creepe
 ShaderManager.PostChainCache.getOrLoadPostChain	missing		minor: cache for the spectator entity post effects Horizon lacks
 ShaderManager.PostChainCache.loadPostChain	missing		minor: loads the spectator entity post effects Horizon lacks
 ShaderManager.PostChainCache.close	skip:other		releases post chains; Horizon has none
-Sheets.chooseSprite	port	crates/horizon-client/src/block_entity_render.rs::classify	gap: minor: the Christmas chest texture is picked outside this fn (block_entity_render.rs extended_christmas)
-SkyRenderer.<init>	inline	crates/horizon-client/src/gfx/pack_sky.rs::PackSky::new	gap: minor: builds the disc, sunset fan, stars and void up front; sun and moon quads are built per frame in game.rs celestial_geometry
-SkyRenderer.extractRenderState	port	crates/horizon-client/src/environment.rs::Environment::sample	gap: minor: the End flash state is read in game/end.rs (end_flash_sky)
-SkyRenderer.render	port	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	sky pass; the frame's sky and dark-disc flags come from Game::render
-SkyRenderer.renderSkyDisc	port	crates/horizon-client/src/gfx/pack_sky.rs::disc	top sky disc fan, sky colour from PackSky::prepare
-SkyRenderer.renderDarkDisc	inline	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	dark disc pipeline (fs_dark_disc) drawn when frame.dark_disc is set
+Sheets.chooseSprite	port	crates/horizon-client-render/src/block_entity_render.rs::classify	gap: minor: the Christmas chest texture is picked outside this fn (block_entity_render.rs extended_christmas)
+SkyRenderer.<init>	inline	crates/horizon-client-render/src/gfx/pack_sky.rs::PackSky::new	gap: minor: builds the disc, sunset fan, stars and void up front; sun and moon quads are built per frame in game.rs celestial_geometry
+SkyRenderer.extractRenderState	port	crates/horizon-client-render/src/environment.rs::Environment::sample	gap: minor: the End flash state is read in game/end.rs (end_flash_sky)
+SkyRenderer.render	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	sky pass; the frame's sky and dark-disc flags come from Game::render
+SkyRenderer.renderSkyDisc	port	crates/horizon-client-render/src/gfx/pack_sky.rs::disc	top sky disc fan, sky colour from PackSky::prepare
+SkyRenderer.renderDarkDisc	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	dark disc pipeline (fs_dark_disc) drawn when frame.dark_disc is set
 SkyRenderer.renderSun	port	crates/horizon-client/src/game.rs::Game::celestial_geometry	sun quad 100 blocks out, half-size 30, faded by rain
 SkyRenderer.renderMoon	port	crates/horizon-client/src/game.rs::Game::celestial_geometry	moon quad 100 blocks out, half-size 20, faded by rain
 SkyRenderer.applyCelestialBodyTransform	inline	crates/horizon-client/src/game.rs::Game::celestial_geometry	the body frame: rotate Y -90, then X by the body's angle
-SkyRenderer.drawCelestialBody	inline	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	draws the body quads with the celestial pipeline
-SkyRenderer.renderSunriseAndSunset	port	crates/horizon-client/src/gfx/pack_sky.rs::PackSky::prepare	sunset fan turned to the sun's horizon and its alpha uploaded as sunrise
-SkyRenderer.renderEndSky	port	crates/horizon-client/src/gfx/end_sky.rs::EndSky::draw	End sky cube
-SkyRenderer.buildSunriseFan	port	crates/horizon-client/src/gfx/pack_sky.rs::PackSky::new	gap: minor: a unit 16-segment fan; the 120 and -40 block shape is not built here
+SkyRenderer.drawCelestialBody	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	draws the body quads with the celestial pipeline
+SkyRenderer.renderSunriseAndSunset	port	crates/horizon-client-render/src/gfx/pack_sky.rs::PackSky::prepare	sunset fan turned to the sun's horizon and its alpha uploaded as sunrise
+SkyRenderer.renderEndSky	port	crates/horizon-client-render/src/gfx/end_sky.rs::EndSky::draw	End sky cube
+SkyRenderer.buildSunriseFan	port	crates/horizon-client-render/src/gfx/pack_sky.rs::PackSky::new	gap: minor: a unit 16-segment fan; the 120 and -40 block shape is not built here
 SkyRenderer.buildCelestialQuad	port	crates/horizon-client/src/game.rs::Game::celestial_geometry	sprite quad for the sun and moon (body closure)
 SkyRenderer.buildMoonPhases	port	crates/horizon-client/src/game.rs::Game::celestial_geometry	gap: minor: picks the phase from day time (day_time / 24000), not from the environment's moon phase value
-SkyRenderer.buildSkyDisc	port	crates/horizon-client/src/gfx/pack_sky.rs::disc	16-block disc fan (top and bottom)
+SkyRenderer.buildSkyDisc	port	crates/horizon-client-render/src/gfx/pack_sky.rs::disc	16-block disc fan (top and bottom)
 SkyRenderer.close	skip:other		releases sky buffers; Rust drops the wgpu buffers
 SpriteCoordinateExpander.addVertex	skip:other		no callers in this vanilla tree; UV wrapper for sprite quads
 SpriteCoordinateExpander.setColor	skip:other		no callers in this vanilla tree; see addVertex
@@ -75,18 +75,18 @@ SpriteMapper.apply	skip:other		atlas id plumbing; Horizon looks sprites up by na
 StagedVertexBuffer.appendDraw	skip:other		staging draw object; Horizon's arena allocates vertex ranges directly
 StagedVertexBuffer.getVertexBuilder	skip:other		builder for the next mesh; Horizon's mesher writes straight into the section mesh
 StagedVertexBuffer.finishLastVertexBuilder	skip:other		closes the last mesh builder; see getVertexBuilder
-StagedVertexBuffer.upload	port	crates/horizon-client/src/gfx/arena.rs::Arena::alloc	gap: minor: vertex ranges come from the arena; the copy is Uploads::buffer
-StagedVertexBuffer.uploadDrawsToBuffers	inline	crates/horizon-client/src/gfx/upload.rs::Uploads::buffer	copies the staged vertex data into the buffers
-StagedVertexBuffer.decodeSortingPoints	port	crates/horizon-client/src/gfx/translucency.rs::quad_center	gap: minor: the centre of one quad from two corners; reading the vertex buffer itself is not here
+StagedVertexBuffer.upload	port	crates/horizon-client-render/src/gfx/arena.rs::Arena::alloc	gap: minor: vertex ranges come from the arena; the copy is Uploads::buffer
+StagedVertexBuffer.uploadDrawsToBuffers	inline	crates/horizon-client-render/src/gfx/upload.rs::Uploads::buffer	copies the staged vertex data into the buffers
+StagedVertexBuffer.decodeSortingPoints	port	crates/horizon-client-render/src/gfx/translucency.rs::quad_center	gap: minor: the centre of one quad from two corners; reading the vertex buffer itself is not here
 StagedVertexBuffer.getExecuteInfo	skip:other		describes a draw for execution; Horizon issues draws in gfx.rs::Renderer::draw_sections
-StagedVertexBuffer.requestIndexCount	port	crates/horizon-client/src/gfx/arena.rs::Arena::indices	gap: minor: the index buffer is sized when created, not requested per draw
-StagedVertexBuffer.endFrame	port	crates/horizon-client/src/gfx/arena.rs::Arena::trim	gap: minor: releases unused pages; no fence-based recycling
+StagedVertexBuffer.requestIndexCount	port	crates/horizon-client-render/src/gfx/arena.rs::Arena::indices	gap: minor: the index buffer is sized when created, not requested per draw
+StagedVertexBuffer.endFrame	port	crates/horizon-client-render/src/gfx/arena.rs::Arena::trim	gap: minor: releases unused pages; no fence-based recycling
 StagedVertexBuffer.close	skip:other		releases buffers; Rust drops them
 StagedVertexBuffer.Draw.append	skip:other		accumulates mesh counts for one draw; Horizon counts vertices in the arena
 StagedVertexBuffer.ExecuteInfo.indexBuffer	skip:other		picks the index buffer for a draw; Horizon keeps its own index buffers
-StagedVertexBuffer.GpuBufferPool.tryRecycleBuffers	port	crates/horizon-client/src/gfx/arena.rs::FreeList::give_all	gap: minor: freed ranges return to the free list at once; no fence wait
-StagedVertexBuffer.GpuBufferPool.acquire	port	crates/horizon-client/src/gfx/arena.rs::Arena::alloc	gap: minor: allocates a range in an existing page instead of a new buffer per size
-StagedVertexBuffer.GpuBufferPool.takeBestAvailable	port	crates/horizon-client/src/gfx/arena.rs::FreeList::take	gap: minor: first fit, where vanilla takes the smallest buffer that fits
+StagedVertexBuffer.GpuBufferPool.tryRecycleBuffers	port	crates/horizon-client-render/src/gfx/arena.rs::FreeList::give_all	gap: minor: freed ranges return to the free list at once; no fence wait
+StagedVertexBuffer.GpuBufferPool.acquire	port	crates/horizon-client-render/src/gfx/arena.rs::Arena::alloc	gap: minor: allocates a range in an existing page instead of a new buffer per size
+StagedVertexBuffer.GpuBufferPool.takeBestAvailable	port	crates/horizon-client-render/src/gfx/arena.rs::FreeList::take	gap: minor: first fit, where vanilla takes the smallest buffer that fits
 StagedVertexBuffer.GpuBufferPool.endFrame	skip:other		fence bookkeeping for GPU reuse; Horizon's arena releases ranges directly
 StagedVertexBuffer.GpuBufferPool.close	skip:other		releases buffers; Rust drops them
 StagedVertexBuffer.GpuBufferPool.PendingRecycle.tryRecycle	skip:other		fence wait for GPU reuse; Horizon has no fence here
@@ -103,10 +103,10 @@ SubmitNodeCollection.submitLeash	port	crates/horizon-client/src/game/leads.rs::G
 SubmitNodeCollection.submitModel	port	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	mob models
 SubmitNodeCollection.submitCrumblingOverlay	port	crates/horizon-client/src/game.rs::Game::cracks	block break cracks (destroy_stage sprites) over a block
 SubmitNodeCollection.submitMovingBlock	port	crates/horizon-client/src/game/moving_pistons.rs::Game::moving_piston_geometry	moving piston blocks
-SubmitNodeCollection.submitBlockModel	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_block	gap: minor: block models driven by block entities only
-SubmitNodeCollection.getOutlineRenderType	inline	crates/horizon-client/src/gfx.rs::Renderer::draw_outline	one outline pass; the render type choice is folded into it
+SubmitNodeCollection.submitBlockModel	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_block	gap: minor: block models driven by block entities only
+SubmitNodeCollection.getOutlineRenderType	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_outline	one outline pass; the render type choice is folded into it
 SubmitNodeCollection.submitBreakingBlockModel	port	crates/horizon-client/src/game.rs::Game::cracks	gap: minor: drawn as cracks; the block model itself is not redrawn
-SubmitNodeCollection.submitShapeOutline	port	crates/horizon-client/src/gfx.rs::Renderer::draw_outline	block shape outline (selection box)
+SubmitNodeCollection.submitShapeOutline	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_outline	block shape outline (selection box)
 SubmitNodeCollection.submitItem	port	crates/horizon-client/src/game/item_draw.rs::Game::dropped_item_geometry	dropped item entities
 SubmitNodeCollection.submitCustomGeometry	port	crates/horizon-client/src/mobs/guardian.rs::beam_geometry	gap: minor: the guardian beam only; screen overlay quads are built in ScreenEffects::build
 SubmitNodeCollection.submitGizmoPrimitives	skip:debug		debug gizmo overlay
@@ -120,31 +120,31 @@ SubmitNodeStorage.submitCrumblingOverlay	skip:other		submit wrapper; see SubmitN
 SubmitNodeStorage.submitBlockModel	skip:other		submit wrapper; see SubmitNodeCollection.submitBlockModel
 SubmitNodeStorage.submitShapeOutline	skip:other		submit wrapper; see SubmitNodeCollection.submitShapeOutline
 SubmitNodeStorage.submitItem	skip:other		submit wrapper; see SubmitNodeCollection.submitItem
-SubmitNodeStorage.drainPhases	inline	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	the pass order that draws each phase
-ViewArea.releaseAllBuffers	port	crates/horizon-client/src/gfx.rs::Renderer::clear_sections	drops every section's buffers
-ViewArea.repositionCamera	inline	crates/horizon-client/src/gfx/occlusion.rs::Occlusion::update	gap: minor: the occlusion graph restarts on a camera section change; sections are keyed by absolute position, nothing is re-centred
-WeatherEffectRenderer.renderWeather	inline	crates/horizon-client/src/gfx/weather.rs::Weather::draw	draws the rain and snow column ranges
-WeatherEffectRenderer.uploadVertexBuffer	port	crates/horizon-client/src/gfx/weather.rs::Weather::prepare	gap: minor: the buffer grows to the next power of two
-WeatherEffectRenderer.prepare	port	crates/horizon-client/src/weather.rs::column_quad	gap: minor: the column list comes from rain_column and snow_column; this fn builds the quads
-WeatherEffectRenderer.render	port	crates/horizon-client/src/gfx/weather.rs::Weather::draw	draws the rain and snow columns
-WeatherEffectRenderer.createSnowColumnInstance	port	crates/horizon-client/src/weather.rs::snow_column	snow drift and brightened light
-WeatherEffectRenderer.prepareInstances	port	crates/horizon-client/src/weather.rs::column_quad	gap: minor: one column per call; the loop over columns is in the caller
-WorldBorderRenderer.renderOit	inline	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	border wall draw when frame.border is set
-WorldBorderRenderer.prepareRenderPass	inline	crates/horizon-client/src/border_render.rs::BorderRenderer::transforms	the uniforms (colour, offset, texture scroll) for the wall
-WorldBorderRenderer.shouldRebuildWorldBorderBuffer	port	crates/horizon-client/src/border_render.rs::BorderRenderer::prepare	rebuilds when the border moved or was invalidated
-FluidRenderer.getHeight	inline	crates/horizon-client/src/mesher/fluid.rs::tesselate	corner heights from own_height and the neighbour average
-ChunkSectionLayer.byTransparency	inline	crates/horizon-client/src/mesher.rs::Mesher::face	a face goes to the translucent list when it is translucent
-ChunkSectionsToRender.renderGroup	port	crates/horizon-client/src/gfx.rs::Renderer::draw_sections	gap: minor: draws the given page runs; the terrain uniforms are bound by the caller
-ChunkSectionsToRender.renderOit	port	crates/horizon-client/src/gfx.rs::Renderer::draw_sections	gap: minor: the OIT pass set-up is not in this fn
-ChunkSectionsToRender.renderLayers	inline	crates/horizon-client/src/gfx.rs::Renderer::draw_sections	per-layer loop over the page runs
-ChunkSectionsToRender.DrawIndirect.render	port	crates/horizon-client/src/gfx.rs::Renderer::draw_sections	multi-draw indirect branch
-ChunkSectionsToRender.DrawSeparate.render	port	crates/horizon-client/src/gfx.rs::Renderer::draw_sections	per-draw branch without multi-draw
-RenderRegionCache.createRegion	inline	crates/horizon-client/src/mesher.rs::borrow	gap: minor: borrows the 3x3 chunk columns around the section; nothing is copied
+SubmitNodeStorage.drainPhases	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	the pass order that draws each phase
+ViewArea.releaseAllBuffers	port	crates/horizon-client-render/src/gfx.rs::Renderer::clear_sections	drops every section's buffers
+ViewArea.repositionCamera	inline	crates/horizon-client-render/src/gfx/occlusion.rs::Occlusion::update	gap: minor: the occlusion graph restarts on a camera section change; sections are keyed by absolute position, nothing is re-centred
+WeatherEffectRenderer.renderWeather	inline	crates/horizon-client-render/src/gfx/weather.rs::Weather::draw	draws the rain and snow column ranges
+WeatherEffectRenderer.uploadVertexBuffer	port	crates/horizon-client-render/src/gfx/weather.rs::Weather::prepare	gap: minor: the buffer grows to the next power of two
+WeatherEffectRenderer.prepare	port	crates/horizon-client-render/src/weather.rs::column_quad	gap: minor: the column list comes from rain_column and snow_column; this fn builds the quads
+WeatherEffectRenderer.render	port	crates/horizon-client-render/src/gfx/weather.rs::Weather::draw	draws the rain and snow columns
+WeatherEffectRenderer.createSnowColumnInstance	port	crates/horizon-client-render/src/weather.rs::snow_column	snow drift and brightened light
+WeatherEffectRenderer.prepareInstances	port	crates/horizon-client-render/src/weather.rs::column_quad	gap: minor: one column per call; the loop over columns is in the caller
+WorldBorderRenderer.renderOit	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	border wall draw when frame.border is set
+WorldBorderRenderer.prepareRenderPass	inline	crates/horizon-client-render/src/border_render.rs::BorderRenderer::transforms	the uniforms (colour, offset, texture scroll) for the wall
+WorldBorderRenderer.shouldRebuildWorldBorderBuffer	port	crates/horizon-client-render/src/border_render.rs::BorderRenderer::prepare	rebuilds when the border moved or was invalidated
+FluidRenderer.getHeight	inline	crates/horizon-client-render/src/mesher/fluid.rs::tesselate	corner heights from own_height and the neighbour average
+ChunkSectionLayer.byTransparency	inline	crates/horizon-client-render/src/mesher.rs::Mesher::face	a face goes to the translucent list when it is translucent
+ChunkSectionsToRender.renderGroup	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_sections	gap: minor: draws the given page runs; the terrain uniforms are bound by the caller
+ChunkSectionsToRender.renderOit	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_sections	gap: minor: the OIT pass set-up is not in this fn
+ChunkSectionsToRender.renderLayers	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_sections	per-layer loop over the page runs
+ChunkSectionsToRender.DrawIndirect.render	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_sections	multi-draw indirect branch
+ChunkSectionsToRender.DrawSeparate.render	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_sections	per-draw branch without multi-draw
+RenderRegionCache.createRegion	inline	crates/horizon-client-render/src/mesher.rs::borrow	gap: minor: borrows the 3x3 chunk columns around the section; nothing is copied
 RenderRegionCache.getSectionDataCopy	skip:java		per-thread copy cache; Horizon borrows the chunks
-RenderSectionRegion.getBlockState	inline	crates/horizon-client/src/mesher.rs::Mesher::mesh	block reads of the mesh loop
-RenderSectionRegion.getFluidState	port	crates/horizon-client/src/mesher/fluid.rs::FlowView::fluid	fluid read used by the fluid mesher
+RenderSectionRegion.getBlockState	inline	crates/horizon-client-render/src/mesher.rs::Mesher::mesh	block reads of the mesh loop
+RenderSectionRegion.getFluidState	port	crates/horizon-client-render/src/mesher/fluid.rs::FlowView::fluid	fluid read used by the fluid mesher
 RenderSectionRegion.getBlockEntity	skip:other		block entities are drawn from the world's list, not from the section region
 RenderSectionRegion.getSection	skip:java		section copy objects; Horizon borrows chunks
-RenderSectionRegion.index	inline	crates/horizon-client/src/mesher.rs::Mesher::mesh	gap: minor: Horizon indexes 3x3 chunk columns, the section is picked by sy
-SectionCompiler.compile	port	crates/horizon-client/src/mesher.rs::Mesher::mesh	gap: minor: block-entity tiles are not built here; they are drawn by block_entity_render
-SectionCompiler.getOrBeginLayer	inline	crates/horizon-client/src/mesher.rs::Mesher::mesh	per-layer builders created on first use
+RenderSectionRegion.index	inline	crates/horizon-client-render/src/mesher.rs::Mesher::mesh	gap: minor: Horizon indexes 3x3 chunk columns, the section is picked by sy
+SectionCompiler.compile	port	crates/horizon-client-render/src/mesher.rs::Mesher::mesh	gap: minor: block-entity tiles are not built here; they are drawn by block_entity_render
+SectionCompiler.getOrBeginLayer	inline	crates/horizon-client-render/src/mesher.rs::Mesher::mesh	per-layer builders created on first use

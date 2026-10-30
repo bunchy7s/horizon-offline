@@ -66,7 +66,7 @@ impl Manifest {
 
 pub struct Bundle {
     pub manifest: Manifest,
-    /// Validated relative paths; only TOML and Rust beneath `mixins/<id>/`.
+    /// Validated relative paths: Rust and TOML, plus files under `mixins/<id>/data/`.
     pub files: BTreeMap<String, Vec<u8>>,
 }
 
@@ -115,8 +115,13 @@ impl Bundle {
                 .map_err(|e| e.to_string())?;
         manifest.check()?;
         let prefix = format!("mixins/{}/", manifest.id);
+        let data_prefix = format!("{prefix}data/");
         for name in files.keys().filter(|n| n.as_str() != MANIFEST) {
-            if !name.starts_with(&prefix) || !(name.ends_with(".rs") || name.ends_with(".toml")) {
+            if !name.starts_with(&prefix)
+                || !(name.ends_with(".rs")
+                    || name.ends_with(".toml")
+                    || name.starts_with(&data_prefix))
+            {
                 return Err(format!("unexpected native source: {name}"));
             }
         }
@@ -208,12 +213,29 @@ mod tests {
         assert!(facts.capabilities.is_empty());
     }
     #[test]
+    fn accepts_binary_data_in_the_bundle_data_directory() {
+        let bytes = [0, 255, 42];
+        let bundle = read(
+            "data",
+            &[("mixins/veinminer/data/nested/table.bin", &bytes)],
+            &mixin(),
+        )
+        .unwrap();
+        assert_eq!(
+            bundle.files["mixins/veinminer/data/nested/table.bin"],
+            bytes
+        );
+    }
+    #[test]
     fn rejects_path_traversal_and_non_source_payloads() {
         for (i, name) in [
             "../escape.rs",
             "/absolute.rs",
             "mixins/other/hook.rs",
             "mixins/veinminer/code.dll",
+            "mixins/veinminer/data/../code.dll",
+            "mixins/veinminer/database/file.bin",
+            "mixins/other/data/file.bin",
             "mixins\\veinminer\\hook.rs",
         ]
         .iter()

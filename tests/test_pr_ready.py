@@ -9,7 +9,7 @@ PACKAGES = {"horizon-core": "crates/horizon-core", "horizon-client": "crates/hor
             "horizon-theme": "crates/horizon-theme", "xtask": "xtask"}
 LIBRARIES = set(PACKAGES) - {"xtask"}
 DEPENDENCIES = {"horizon-client": {"horizon-core"}}
-MODS = " --features horizon-client/mods,horizon-mods/pack"
+MODS = ""
 CLIPPY = pr_ready.CI_CLIPPY + " && " + pr_ready.CI_CLIPPY_SERVER
 
 
@@ -52,7 +52,7 @@ class PrReadyTests(unittest.TestCase):
         by_name = {step.name: step for step in steps}
         self.assertEqual(by_name["clippy"].command, CLIPPY)
         self.assertEqual(by_name["tests: horizon-client"].command,
-                         "cargo test --locked -p horizon-client --features horizon-client/mods --tests")
+                         "cargo test --locked -p horizon-client --tests")
         self.assertEqual(by_name["doc tests"].command, "cargo test --locked -p horizon-client --doc")
         self.assertIsNone(by_name["doc tests"].status)
 
@@ -81,9 +81,9 @@ class PrReadyTests(unittest.TestCase):
 
     def test_tests_get_the_features_ci_s_workspace_run_gives_them(self):
         self.assertEqual(pr_ready.mod_features(["horizon-world"]), "")
-        self.assertEqual(pr_ready.mod_features(["horizon-client"]), " --features horizon-client/mods")
+        self.assertEqual(pr_ready.mod_features(["horizon-client"]), "")
         self.assertEqual(pr_ready.mod_features(["horizon-mods"]),
-                         " --features horizon-mods/runtime,horizon-mods/pack,horizon-mods/index")
+                         " --features horizon-mods/index")
         self.assertEqual(pr_ready.mod_features(None), MODS)
 
     def test_python_tests_always_run(self):

@@ -1,0 +1,74 @@
+name: claim command
+# `/claim` and `/unclaim` comments: anyone takes an issue before working on it, and a daily run releases the claims
+# older than 5 days that no open pull request links (CONTRIBUTING.md "Claim before you start",
+# tools/ci/claim_command.py).
+#
+# Why no pull request's code runs here, though the token can write:
+# - `issue_comment` and `schedule` always run this file from main, whoever comments and wherever.
+# - It checks out main's script and list only, never a pull request; it reads threads through the API.
+# - The comment's text and author reach the script as env vars, never in a shell line. The token stays in the step
+#   and can only write issues (assignees, comments, reactions).
+on:
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  command:
+    # Every other comment skips here, before a runner starts. Pull requests are answered by the script.
+    if: >-
+      github.event_name == 'issue_comment' && github.event.comment.user.type != 'Bot' && (
+      startsWith(github.event.comment.body, '/claim') ||
+      startsWith(github.event.comment.body, '/unclaim'))
+    # One command per issue at a time, so two `/claim`s can't both find it free. On the job, not the workflow:
+    # the skipped runs of ordinary comments must not cancel a waiting one.
+    concurrency:
+      group: claim-${{ github.event.issue.number }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          sparse-checkout: |
+            .github/trusted-reviewers.txt
+            tools/ci/nightly_set.py
+            tools/ci/claim_command.py
+          sparse-checkout-cone-mode: false
+      - name: Run the command
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ github.event.comment.body }}
+          AUTHOR: ${{ github.event.comment.user.login }}
+          ISSUE: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          REPO: ${{ github.repository }}
+        run: python3 tools/ci/claim_command.py command
+  release:
+    if: github.event_name != 'issue_comment' && github.repository == 'horizon-rust/horizon'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          sparse-checkout: |
+            tools/ci/nightly_set.py
+            tools/ci/claim_command.py
+          sparse-checkout-cone-mode: false
+      - name: Release stale claims
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: python3 tools/ci/claim_command.py release

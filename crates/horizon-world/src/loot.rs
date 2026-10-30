@@ -16,6 +16,35 @@ use std::{
     path::Path,
 };
 
+/// Raw files a world's data packs add over the game's own data, by
+/// `<kind>/<ns>:<path>` (a `recipe/minecraft:stick` key names the file
+/// `data/minecraft/recipe/stick.json`), each id's files in pack order.
+/// `datapack::DataStore.files` is the source; the content tables merge these
+/// over what they read from the resource root, the way
+/// `SimpleJsonResourceReloadListener` and `TagLoader` layer a pack stack.
+#[derive(Clone, Copy, Default)]
+pub struct PackOverlay<'a> {
+    pub files: &'a [(String, Vec<Vec<u8>>)],
+}
+impl PackOverlay<'static> {
+    /// No packs: the tables are the resource root's alone.
+    pub const NONE: Self = Self { files: &[] };
+}
+impl PackOverlay<'_> {
+    /// The overlay's files under `<kind>/`, with the prefix stripped.
+    pub fn kind(&self, kind: &str) -> impl Iterator<Item = (&str, &Vec<Vec<u8>>)> {
+        let prefix = format!("{kind}/");
+        self.files
+            .iter()
+            .filter_map(move |(key, files)| Some((key.strip_prefix(&prefix)?, files)))
+    }
+    /// The last pack's file for an id, which is the one
+    /// `ResourceManager.listMatchingResources` hands out.
+    pub fn top(files: &[Vec<u8>]) -> &[u8] {
+        files.last().map(Vec::as_slice).unwrap_or_default()
+    }
+}
+
 /// One generated item stack.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LootStack {
@@ -277,6 +306,18 @@ fn int_value(v: &Value) -> Option<i64> {
 /// `data/<ns>/<kind>/` of every namespace, as `ns:path`: vanilla's, and in
 /// a content mods' root theirs (docs/modpacks.md), whose chests name their
 /// own loot tables.
+/// A kind's overlay files over what the resource root provided: the top
+/// pack's file for each id replaces the rest (`SimpleJsonResourceReloadListener`
+/// sees one resource per id).
+fn overlay_map(overlay: &PackOverlay, kind: &str, out: &mut HashMap<String, Value>) {
+    for (id, files) in overlay.kind(kind) {
+        let Ok(v) = serde_json::from_slice::<Value>(PackOverlay::top(files)) else {
+            continue;
+        };
+        out.insert(id.to_owned(), v);
+    }
+}
+
 fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::Result<()> {
     let Ok(entries) = fs::read_dir(data) else {
         return Ok(());
@@ -326,16 +367,20 @@ fn cost(v: &Value) -> (i32, i32) {
 impl LootData {
     /// Load from a resource root holding `items.json` and `data/`: loot
     /// tables, item modifiers, predicates, tags and recipes of every
-    /// namespace, vanilla's enchantments.
-    pub fn load(root: &Path) -> io::Result<Self> {
+    /// namespace, vanilla's enchantments. `overlay` adds a world's data
+    /// packs over it.
+    pub fn load(root: &Path, overlay: &PackOverlay) -> io::Result<Self> {
         let all = root.join("data");
         let data = all.join("minecraft");
         let mut tables = HashMap::new();
         load_kind(&all, "loot_table", &mut tables)?;
+        overlay_map(overlay, "loot_table", &mut tables);
         let mut modifiers = HashMap::new();
         load_kind(&all, "item_modifier", &mut modifiers)?;
+        overlay_map(overlay, "item_modifier", &mut modifiers);
         let mut predicates = HashMap::new();
         load_kind(&all, "predicate", &mut predicates)?;
+        overlay_map(overlay, "predicate", &mut predicates);
         let raw: BTreeMap<String, Value> =
             serde_json::from_slice(&fs::read(root.join("items.json"))?)?;
         let items = raw
@@ -400,9 +445,27 @@ impl LootData {
                 let values = value["values"].as_array().cloned().unwrap_or_default();
                 tags.insert((registry.to_owned(), name), values);
             }
+            // The packs' entries join the game's own, in pack order; a
+            // `replace` file drops what the lower sources put in
+            // (`TagLoader.load` walks the resource stack the same way).
+            for (id, files) in overlay.kind(&format!("tags/{registry}")) {
+                let slot = tags
+                    .entry((registry.to_owned(), id.to_owned()))
+                    .or_default();
+                for bytes in files {
+                    let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
+                        continue;
+                    };
+                    if v["replace"].as_bool() == Some(true) {
+                        slot.clear();
+                    }
+                    slot.extend(v["values"].as_array().cloned().unwrap_or_default());
+                }
+            }
         }
         let mut recipes = HashMap::new();
         load_kind(&all, "recipe", &mut recipes)?;
+        overlay_map(overlay, "recipe", &mut recipes);
         let mut ids: Vec<&String> = recipes.keys().collect();
         ids.sort();
         let smelting = ids
@@ -1550,7 +1613,7 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
         assert!(data.has_table("minecraft:chests/village"));
         assert!(data.has_table("kaisyn:village/forest/house"));
         assert!(!data.has_table("minecraft:village/forest/house"));
@@ -1563,7 +1626,7 @@ mod namespace_tests {
             table,
         )
         .unwrap();
-        let data = LootData::load(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
         let filled = data.fill("kaisyn:village/forest/house", 1, 27, None);
         let count: i32 = filled.iter().flatten().map(|s| s.count).sum();
         assert_eq!(count, 3);

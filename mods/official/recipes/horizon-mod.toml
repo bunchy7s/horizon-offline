@@ -1,9 +1,0 @@
-id = "recipes"
-name = "Recipes"
-version = "1.0.0"
-description = "Every item beside your inventory, with a search box. R over an item shows its recipes, U its uses (both rebindable in Controls), and + fills the crafting grid with a recipe you know. In creative mode a click can give you the item (Mod settings). On servers that are not Horizon, it shows this game's own 26.3 recipes; what you know and what + can fill follow the server's recipe book."
-authors = ["Horizon"]
-api = "0.1"
-side = "client"
-capabilities = ["recipes", "ui", "input", "game-read", "chat", "storage"]
-experimental = ["recipes", "ui", "input"]

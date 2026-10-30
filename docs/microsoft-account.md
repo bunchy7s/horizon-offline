@@ -167,8 +167,10 @@ The connecting screen follows vanilla's states: "Connecting to the server..." un
 request, "Logging in..." while joining the session service, "Encrypting...", then "Joining world...".
 Code: `horizon-protocol` (`rsa.rs`, `crypto::server_hash`), `horizon-client` (`auth.rs`, `net.rs`).
 
-Horizon's own dedicated and LAN servers stay offline-mode (they don't verify players with the
-session service); that is separate work.
+Horizon's dedicated server verifies players when `online-mode=true`. A LAN or Play with Friends world
+verifies its guests when the host is signed in, as vanilla's `IntegratedServer` does
+(`OnlineMode::lan`); under an offline name it stays offline-mode. The host's own player joins through
+memory and is never asked to authenticate.
 
 `HORIZON_API_DISCOVERY` overrides the discovery URL, the counterpart of authlib's
 `-Dminecraft.api.discovery.host`; it is how the harness points both the vanilla server and Horizon at

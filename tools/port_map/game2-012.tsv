@@ -142,7 +142,7 @@ ChestBlock.getChestType	inline	crates/horizon-world/src/level/place.rs::Sim::pla
 ChestBlock.getFluidState	port	crates/horizon-world/src/level/mod.rs::Behaviours::fluid	Waterlogged fluid is read from per-state facts.
 ChestBlock.candidatePartnerFacing	port	crates/horizon-world/src/level/place.rs::Sim::chest_candidate_partner_facing	Facing of a single chest on the side, when it can connect.
 ChestBlock.useWithoutItem	port	crates/horizon-client/src/game.rs::Game::open_menu	Opens the chest menu, with the open stat and piglin anger.
-ChestBlock.getTicker	port	crates/horizon-client/src/block_entity_anim.rs::ticker	Client-side lid animation ticker.
+ChestBlock.getTicker	port	crates/horizon-client-render/src/block_entity_anim.rs::ticker	Client-side lid animation ticker.
 ChestBlock.isCatSittingOnChest	port	crates/horizon-client/src/game/storage.rs::Game::chest_blocked_at	A sitting cat above blocks the chest.
 ChestBlock.rotate	skip:data		Rotation is a precomputed table from extracted data.
 ChestBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.

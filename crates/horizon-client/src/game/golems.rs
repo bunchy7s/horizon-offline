@@ -16,42 +16,43 @@ impl Game<'_> {
             "minecraft:carved_pumpkin" | "minecraft:jack_o_lantern"
         )
     }
-    /// The blocks of the golem whose head is at `head` and its spawn base
-    /// (`BlockPattern.find`), snow golems first.
-    fn find_golem(&self, head: [i32; 3]) -> Option<(&'static str, Vec<[i32; 3]>, [i32; 3])> {
-        let below = |n: i32| [head[0], head[1] - n, head[2]];
-        if self.golem_block(below(1)) == "minecraft:snow_block"
-            && self.golem_block(below(2)) == "minecraft:snow_block"
-        {
-            // The pattern ("^", "#", "#") is one column.
-            return Some((
-                "minecraft:snow_golem",
-                vec![head, below(1), below(2)],
-                below(2),
-            ));
+    /// The blocks of the golem completed at `head` and its spawn base
+    /// (`BlockPattern.find`), snow golems first: the snow column ("^", "#",
+    /// "#") spawns at its bottom, the iron T ("~^~", "###", "~#~") under its
+    /// head. The blocks come column by column, top first, as
+    /// `clearPatternBlocks` visits them. With `base`, the head's cell takes
+    /// any block, as in the base patterns (" ", "#", "#") and ("~ ~", "###",
+    /// "~#~") that `canSpawnGolem` checks before the head is there.
+    fn find_golem(
+        &self,
+        head: [i32; 3],
+        base: bool,
+    ) -> Option<(&'static str, Vec<[i32; 3]>, [i32; 3])> {
+        let air = |p: [i32; 3]| self.res.facts().is_air(self.world.block(p[0], p[1], p[2]));
+        let snow = |c: char, p: [i32; 3]| match c {
+            '^' => base || self.is_golem_head(p),
+            _ => self.golem_block(p) == "minecraft:snow_block",
+        };
+        let iron = |c: char, p: [i32; 3]| match c {
+            '^' => base || self.is_golem_head(p),
+            '#' => self.golem_block(p) == "minecraft:iron_block",
+            _ => air(p),
+        };
+        if let Some(cell) = find_pattern(head, &["^", "#", "#"], snow) {
+            let blocks = (0..3).map(|y| cell(0, y)).collect();
+            return Some(("minecraft:snow_golem", blocks, cell(0, 2)));
         }
-        for (ax, az) in [(1, 0), (0, 1)] {
-            let side = |s: i32, row: i32| [head[0] + ax * s, head[1] - row, head[2] + az * s];
-            let arms = (-1..=1).all(|s| self.golem_block(side(s, 1)) == "minecraft:iron_block");
-            let air = |p: [i32; 3]| self.res.facts().is_air(self.world.block(p[0], p[1], p[2]));
-            if arms
-                && self.golem_block(side(0, 2)) == "minecraft:iron_block"
-                && [-1, 1].iter().all(|&s| air(side(s, 0)) && air(side(s, 2)))
-            {
-                // Every cell of ("~^~", "###", "~#~"), the air ones included.
-                let blocks = (-1..=1)
-                    .flat_map(|s| (0..3).map(move |row| (s, row)))
-                    .map(|(s, row)| side(s, row))
-                    .collect();
-                return Some(("minecraft:iron_golem", blocks, side(0, 2)));
-            }
-        }
-        None
+        let cell = find_pattern(head, &["~^~", "###", "~#~"], iron)?;
+        let blocks = (0..3)
+            .flat_map(|x| (0..3).map(move |y| (x, y)))
+            .map(|(x, y)| cell(x, y))
+            .collect();
+        Some(("minecraft:iron_golem", blocks, cell(1, 2)))
     }
     /// `CarvedPumpkinBlock.canSpawnGolem`: a snow or iron golem base, or a
     /// copper block (`#minecraft:copper`) below.
     pub(super) fn can_spawn_golem(&self, head: [i32; 3]) -> bool {
-        self.find_golem(head).is_some() || self.copper_golem_base(head)
+        self.find_golem(head, true).is_some() || self.copper_golem_base(head)
     }
     /// The copper golem pattern ("^", "#"): a block of `#minecraft:copper` under the head.
     fn copper_golem_base(&self, head: [i32; 3]) -> bool {
@@ -68,7 +69,7 @@ impl Game<'_> {
         if !self.is_golem_head(head) {
             return Ok(());
         }
-        let Some((kind, blocks, base)) = self.find_golem(head) else {
+        let Some((kind, blocks, base)) = self.find_golem(head, false) else {
             return self.try_spawn_copper_golem(head);
         };
         // CarvedPumpkinBlock.spawnGolemInWorld
@@ -85,24 +86,25 @@ impl Game<'_> {
         {
             m.extra.player_created = true;
         }
-        self.trigger_golem_summoned(id);
+        self.trigger_summoned(id, 5.0);
         self.update_pattern_blocks(&blocks)
     }
-    /// `CarvedPumpkinBlock.spawnGolemInWorld`: SUMMONED_ENTITY for each player
-    /// whose box is within 5 blocks of the golem's box (the local player here).
-    fn trigger_golem_summoned(&mut self, id: Option<u32>) {
-        let Some(golem) = id
+    /// SUMMONED_ENTITY for each player whose box is within `reach` blocks of
+    /// the built mob's box (the local player here): 5 for golems
+    /// (`CarvedPumpkinBlock.spawnGolemInWorld`), 50 for the wither
+    /// (`WitherSkullBlock.checkSpawn`).
+    pub(super) fn trigger_summoned(&mut self, id: Option<u32>, reach: f64) {
+        let Some(built) = id
             .and_then(|id| self.mobs.iter().find(|m| m.id == id))
             .cloned()
         else {
             return;
         };
         let me = self.player_entity();
-        let half = f64::from(golem.width()) / 2.0;
-        let height = f64::from(golem.height());
-        let reach = 5.0;
+        let half = f64::from(built.width()) / 2.0;
+        let height = f64::from(built.height());
         let [x, y, z] = me.position;
-        let p = golem.position;
+        let p = built.position;
         // The player's box is 0.6 wide and 1.8 tall.
         let near = x + 0.3 >= p.x - half - reach
             && x - 0.3 <= p.x + half + reach
@@ -111,13 +113,13 @@ impl Game<'_> {
             && z + 0.3 >= p.z - half - reach
             && z - 0.3 <= p.z + half + reach;
         if near {
-            let view = self.mob_entity(&golem);
+            let view = self.mob_entity(&built);
             self.trigger_entity("minecraft:summoned_entity", "entity", &view);
         }
     }
     /// Whether placing a golem head at `head` completes a golem.
     pub(super) fn completes_golem(&self, head: [i32; 3]) -> bool {
-        self.find_golem(head).is_some() || self.copper_golem_base(head)
+        self.find_golem(head, true).is_some() || self.copper_golem_base(head)
     }
     /// `Level.setBlock` of the golem head `state` at `head`, then
     /// `CarvedPumpkinBlock.onPlace`. When the head completes a golem, onPlace
@@ -220,7 +222,7 @@ impl Game<'_> {
             f64::from(head[2]) + 0.5,
         ];
         let id = self.create_triggered("minecraft:copper_golem", at, 0.0);
-        self.trigger_golem_summoned(id);
+        self.trigger_summoned(id, 5.0);
         self.update_pattern_blocks(&cells)?;
         let direction = match facing.as_str() {
             "south" => horizon_core::geometry::Direction::South,
@@ -249,5 +251,132 @@ impl Game<'_> {
                 .play("minecraft:entity.copper_golem.spawn", Some(p), 1.0, 1.0);
         }
         self.process_level_events()
+    }
+}
+
+/// `BlockPattern.find` for a one-aisle pattern (`rows`, top first): the
+/// pattern's corner at every block from `pos` to `pos + size - 1` (x fastest,
+/// then y, then z), turned every way (`forwards`, then `up`, in `Direction`
+/// order, never along each other), until every cell passes `test`. The match
+/// gives the block of column x, row y (`BlockPatternMatch.getBlock(x, y, 0)`).
+fn find_pattern(
+    pos: [i32; 3],
+    rows: &[&str],
+    test: impl Fn(char, [i32; 3]) -> bool,
+) -> Option<impl Fn(i32, i32) -> [i32; 3]> {
+    // Direction.values(): down, up, north, south, west, east.
+    const DIRECTIONS: [[i32; 3]; 6] = [
+        [0, -1, 0],
+        [0, 1, 0],
+        [0, 0, -1],
+        [0, 0, 1],
+        [-1, 0, 0],
+        [1, 0, 0],
+    ];
+    let size = rows.len().max(rows[0].len()) as i32;
+    let corners =
+        (0..size).flat_map(|z| (0..size).flat_map(move |y| (0..size).map(move |x| [x, y, z])));
+    for d in corners {
+        let origin = [pos[0] + d[0], pos[1] + d[1], pos[2] + d[2]];
+        for forwards in DIRECTIONS {
+            for up in DIRECTIONS {
+                if up == forwards || up == forwards.map(|v| -v) {
+                    continue;
+                }
+                // translateAndRotate: right is forwards × up, rows go down `up`.
+                let right = [
+                    forwards[1] * up[2] - forwards[2] * up[1],
+                    forwards[2] * up[0] - forwards[0] * up[2],
+                    forwards[0] * up[1] - forwards[1] * up[0],
+                ];
+                let cell =
+                    move |x: i32, y: i32| [0, 1, 2].map(|i| origin[i] - up[i] * y + right[i] * x);
+                let matches = rows.iter().enumerate().all(|(y, row)| {
+                    row.chars()
+                        .enumerate()
+                        .all(|(x, c)| test(c, cell(x as i32, y as i32)))
+                });
+                if matches {
+                    return Some(cell);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_pattern;
+    use std::collections::HashMap;
+
+    const SNOW: [&str; 3] = ["^", "#", "#"];
+    const IRON: [&str; 3] = ["~^~", "###", "~#~"];
+
+    /// `find_pattern` over `blocks` (anything else is air): the cells of the
+    /// match, column by column, top first.
+    fn find(rows: &[&str], head: [i32; 3], blocks: &[([i32; 3], char)]) -> Option<Vec<[i32; 3]>> {
+        let world: HashMap<_, _> = blocks.iter().copied().collect();
+        let at = |p: [i32; 3]| world.get(&p).copied().unwrap_or('~');
+        let cell = find_pattern(head, rows, |c, p| at(p) == c)?;
+        let width = rows[0].len() as i32;
+        Some(
+            (0..width)
+                .flat_map(|x| (0..rows.len() as i32).map(move |y| (x, y)))
+                .map(|(x, y)| cell(x, y))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn a_snow_golem_column_counts_upright_lying_and_upside_down() {
+        let head = [5, 64, 5];
+        for step in [
+            [0, -1, 0],
+            [1, 0, 0],
+            [-1, 0, 0],
+            [0, 0, 1],
+            [0, 0, -1],
+            [0, 1, 0],
+        ] {
+            let at = |n: i32| [0, 1, 2].map(|i| head[i] + step[i] * n);
+            let blocks = [(at(0), '^'), (at(1), '#'), (at(2), '#')];
+            assert_eq!(
+                find(&SNOW, head, &blocks),
+                Some(vec![at(0), at(1), at(2)]),
+                "snow blocks going {step:?} from the head"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bent_or_short_snow_column_is_no_golem() {
+        let head = [0, 0, 0];
+        let bent = [(head, '^'), ([0, -1, 0], '#'), ([1, -1, 0], '#')];
+        assert_eq!(find(&SNOW, head, &bent), None);
+        assert_eq!(find(&SNOW, head, &[(head, '^'), ([0, -1, 0], '#')]), None);
+    }
+
+    #[test]
+    fn an_iron_golem_t_counts_lying_on_its_back() {
+        // Head at the origin, body along +x, arms along z, all at y 0.
+        let head = [0, 0, 0];
+        let blocks = [
+            (head, '^'),
+            ([1, 0, -1], '#'),
+            ([1, 0, 0], '#'),
+            ([1, 0, 1], '#'),
+            ([2, 0, 0], '#'),
+        ];
+        let cells = find(&IRON, head, &blocks).expect("a lying iron golem");
+        // Column 1, rows 0 to 2: the head, the body and the legs.
+        assert_eq!(&cells[3..6], &[[0, 0, 0], [1, 0, 0], [2, 0, 0]]);
+        let mut arms_out = blocks.to_vec();
+        arms_out.push(([2, 0, 1], '#'));
+        assert_eq!(
+            find(&IRON, head, &arms_out),
+            None,
+            "a block beside the legs"
+        );
     }
 }

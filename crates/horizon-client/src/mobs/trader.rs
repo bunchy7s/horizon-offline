@@ -114,11 +114,11 @@ impl Goal for DrinkItem {
         m.extra.using_item > 0
     }
     fn start(&mut self, m: &mut Mob, _: &mut Cx) {
-        m.extra.main_hand = Some(self.item.into());
+        m.extra.set_main_hand(Some(self.item.into()));
         m.extra.using_item = 1;
     }
     fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
-        m.extra.main_hand = None;
+        m.extra.set_main_hand(None);
         m.extra.using_item = 0;
         let pitch = m.random.next_float() * 0.2 + 0.9;
         cx.events

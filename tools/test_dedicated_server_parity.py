@@ -27,7 +27,8 @@ exactly:
 - the status response (MOTD, players, version, favicon) and the ping;
 - the legacy (pre-1.7, 0xFE) ping reply;
 - the login and configuration packets in order (compression, profile,
-  brand, features, known packs, every registry, tags);
+  brand (Horizon's server says "horizon", vanilla's "vanilla"), features,
+  known packs, every registry, tags);
 - the play packets up to the first chunk batch, in order, with entity ids,
   keep-alive ids and times left out (the recipe property sets and
   advancements, which vanilla keeps in hash maps, sorted); the command tree
@@ -477,7 +478,12 @@ def main():
         (build / f'{label}.txt').write_text('\n'.join(results[label]) + '\n', encoding='utf-8')
     client_checks = horizon_client_joins(vanilla_server, binary, world, build, results['vanilla'])
     vanilla, horizon = results['vanilla'], results['horizon']
-    errors = [l for l in vanilla + horizon if l.startswith('error')] + [l for l in client_checks if not l.endswith(': ok')]
+    # The one intended difference: MinecraftServer.getServerModName is "vanilla" there, and Horizon's server names
+    # itself "horizon" as a modded server does (#3756). Check that, then compare the rest as vanilla's.
+    brand = 'config minecraft:custom_payload BrandPayload[brand={}]'
+    errors_brand = [] if brand.format('horizon') in horizon else ['error: Horizon\'s server did not send the brand "horizon"']
+    horizon = [brand.format('vanilla') if l == brand.format('horizon') else l for l in horizon]
+    errors = [l for l in vanilla + horizon if l.startswith('error')] + [l for l in client_checks if not l.endswith(': ok')] + errors_brand
     for line in client_checks:
         print(line)
     differences = []

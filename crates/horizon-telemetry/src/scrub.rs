@@ -261,7 +261,9 @@ fn replace_word(text: &str, word: &str, label: &str) -> String {
         let start = from + found;
         let end = start + needle.len();
         let alone = (start == 0 || !word_byte(bytes[start - 1])) && ends_token(bytes, end);
-        if alone {
+        // A label put in earlier (`<user>` for a user named "user") stays as it is.
+        let label_inside = start > 0 && bytes[start - 1] == b'<' && bytes.get(end) == Some(&b'>');
+        if alone && !label_inside {
             out.push_str(&text[copied..start]);
             out.push_str(label);
             copied = end;
@@ -308,6 +310,12 @@ mod tests {
         );
         assert_eq!(s.scrub("ludovic"), "ludovic");
         assert_eq!(Scrubber::bare().with_user("al").scrub("al"), "al");
+        assert_eq!(
+            Scrubber::bare()
+                .with_user("user")
+                .scrub(r"C:\Users\user\AppData, user"),
+            r"C:\Users\<user>\AppData, <user>"
+        );
     }
 
     #[test]

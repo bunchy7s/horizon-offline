@@ -1,29 +1,29 @@
-ActiveTextCollector.accept	inline	crates/horizon-client/src/screen_draw.rs::text	default overload: left-aligned text at x,y with default parameters
+ActiveTextCollector.accept	inline	crates/horizon-client-render/src/screen_draw.rs::text	default overload: left-aligned text at x,y with default parameters
 ActiveTextCollector.acceptScrolling	missing		minor: forwards to the scrolling helper, which Horizon lacks; long text is clipped
-ActiveTextCollector.acceptScrollingWithDefaultCenter	port	crates/horizon-client/src/ui.rs::centered_text	gap: minor: centres the message; wider text is clipped instead of scrolled
+ActiveTextCollector.acceptScrollingWithDefaultCenter	port	crates/horizon-client-render/src/ui.rs::centered_text	gap: minor: centres the message; wider text is clipped instead of scrolled
 ActiveTextCollector.defaultScrollingHelper	missing		minor: wider text does not slide back and forth; ui.rs centered_text clips it
-ActiveTextCollector.findElementUnderCursor	port	crates/horizon-client/src/chat.rs::Chat::style_at	gap: minor: hit test covers chat lines only; book links use game/books.rs book_link_at
-ActiveTextCollector.isPointInRectangle	port	crates/horizon-client/src/ui.rs::hovered	half-open rectangle test with the same bounds
-ActiveTextCollector.ClickableStyleFinder.accept	port	crates/horizon-client/src/chat.rs::Chat::style_at	gap: minor: only chat lines are searched for click and hover styles
+ActiveTextCollector.findElementUnderCursor	port	crates/horizon-client-render/src/chat.rs::Chat::style_at	gap: minor: hit test covers chat lines only; book links use game/books.rs book_link_at
+ActiveTextCollector.isPointInRectangle	port	crates/horizon-client-render/src/ui.rs::hovered	half-open rectangle test with the same bounds
+ActiveTextCollector.ClickableStyleFinder.accept	port	crates/horizon-client-render/src/chat.rs::Chat::style_at	gap: minor: only chat lines are searched for click and hover styles
 ActiveTextCollector.ClickableStyleFinder.acceptScrolling	missing		minor: no scrolling text (see defaultScrollingHelper)
 ActiveTextCollector.Parameters.withScale	skip:java		record copy-with helper; Horizon has no pose matrix per text
 ActiveTextCollector.Parameters.withOpacity	skip:java		record copy-with helper; opacity is the colour's alpha byte in Horizon
 ActiveTextCollector.Parameters.withScissor	missing		minor: a nested scissor is not intersected with the enclosing rectangle; Draw::Scissor replaces it
 ComponentPath.path	skip:other		focus path builder for nested containers; Horizon focus is a flat per-screen state
 ComponentPath.Path.applyFocus	skip:other		focus path propagation; Horizon focus is a flat per-screen state
-Font.bidirectionalShaping	port	crates/horizon-client/src/bidi.rs::visual_str	Arabic shaping and bidi reorder
+Font.bidirectionalShaping	port	crates/horizon-client-render/src/bidi.rs::visual_str	Arabic shaping and bidi reorder
 Font.prepare8xTextOutline	skip:other		no vanilla 26.3 caller passes a non-zero outline colour; text displays, name tags and map labels pass 0 or a background
-Font.prepareBackground	port	crates/horizon-client/src/hud_overlays.rs::text_with_backdrop	background box behind text; callers pass their own bounds
-Font.getGlyph	port	crates/horizon-client/src/font.rs::Font::glyph_styled	obfuscated glyph is picked in HudBatch::text_styled via random_glyph
+Font.prepareBackground	port	crates/horizon-client-render/src/hud_overlays.rs::text_with_backdrop	background box behind text; callers pass their own bounds
+Font.getGlyph	port	crates/horizon-client-render/src/font.rs::Font::glyph_styled	obfuscated glyph is picked in HudBatch::text_styled via random_glyph
 Font.PreparedTextBuilder.markSize	skip:other		bounds bookkeeping of prepared text; Horizon has no prepared-text object and hit-tests by advance
-Font.PreparedTextBuilder.markBackground	inline	crates/horizon-client/src/hud_overlays.rs::text_with_backdrop	gap: minor: the background box is 2 px around the text; vanilla grows it by 1 px around each glyph
-Font.PreparedTextBuilder.addGlyph	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	glyph quad pushed directly into the batch
-Font.PreparedTextBuilder.addEffect	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	underline and strikethrough rectangles drawn inline
+Font.PreparedTextBuilder.markBackground	inline	crates/horizon-client-render/src/hud_overlays.rs::text_with_backdrop	gap: minor: the background box is 2 px around the text; vanilla grows it by 1 px around each glyph
+Font.PreparedTextBuilder.addGlyph	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	glyph quad pushed directly into the batch
+Font.PreparedTextBuilder.addEffect	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	underline and strikethrough rectangles drawn inline
 Font.PreparedTextBuilder.addEmptyGlyph	skip:other		hit areas for glyphs with no image; Chat::style_at hit-tests by advance width instead
-Font.PreparedTextBuilder.accept	port	crates/horizon-client/src/hud.rs::HudBatch::text_styled	per-character draw with bold, italic, shadow, underline and strikethrough
+Font.PreparedTextBuilder.accept	port	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	per-character draw with bold, italic, shadow, underline and strikethrough
 Font.PreparedTextBuilder.visit	skip:other		visitor over prepared glyphs for draw order and hit tests; Horizon draws straight into the batch
-Font.PreparedTextBuilder.getTextColor	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	style colour with the base colour's alpha
-Font.PreparedTextBuilder.getShadowColor	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	gap: minor: style shadow colour is ignored; shadow is always 0.25 of the text colour
+Font.PreparedTextBuilder.getTextColor	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	style colour with the base colour's alpha
+Font.PreparedTextBuilder.getShadowColor	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	gap: minor: style shadow colour is ignored; shadow is always 0.25 of the text colour
 Font.PreparedTextBuilder.bounds	skip:other		bounds of prepared text for vanilla hit tests; Horizon hit-tests by advance
 Gui.update	skip:other		narrator-only update (handleDelayedNarration); Horizon has no narrator
 Gui.isPausing	port	crates/horizon-client/src/game.rs::Game::pauses_game	gap: minor: checks the open screen only, not the overlay part
@@ -35,115 +35,115 @@ Gui.buildInitialScreens	missing		player: first launch skips vanilla's accessibil
 Gui.addInitialScreens	missing		player: same as buildInitialScreens: no onboarding screen or ban notice is queued
 Gui.canInterruptScreen	missing		minor: unsure: no check that stops a server-opened screen from replacing an open one was found
 Gui.renderActiveTextDebug	skip:debug		debug overlay of text bounds
-GuiGraphicsExtractor.enableScissor	port	crates/horizon-client/src/screen_draw.rs::paint	gap: minor: callers push a rectangle; there is no stack, so enclosing rectangles are not intersected
+GuiGraphicsExtractor.enableScissor	port	crates/horizon-client-render/src/screen_draw.rs::paint	gap: minor: callers push a rectangle; there is no stack, so enclosing rectangles are not intersected
 GuiGraphicsExtractor.outline	missing		minor: unsure: no one-pixel outline draw was found in Horizon's UI
-GuiGraphicsExtractor.innerFill	port	crates/horizon-client/src/hud.rs::HudBatch::fill	gap: minor: one colour only; a second gradient colour (color2) is not drawn
-GuiGraphicsExtractor.textWithWordWrap	port	crates/horizon-client/src/screen_draw.rs::Measure::split	gap: minor: only the wrap; the caller draws each line at y+9
-GuiGraphicsExtractor.blitSprite	port	crates/horizon-client/src/hud.rs::HudBatch::sprite_scaled	gap: minor: tile and nine-slice scaling is in ui.rs (tiled, draw_nine_slice)
-GuiGraphicsExtractor.blitNineSliceInnerSegment	port	crates/horizon-client/src/ui.rs::draw_nine_slice	inner segments of a nine-slice sprite
-GuiGraphicsExtractor.blitTiledSprite	port	crates/horizon-client/src/ui.rs::tiled	
-GuiGraphicsExtractor.innerBlit	port	crates/horizon-client/src/screen_draw.rs::blit	texture rectangle by UV; the atlas lookup is in HudBatch::rect_uv
-GuiGraphicsExtractor.innerTiledBlit	port	crates/horizon-client/src/ui.rs::tile	one tiled quad
+GuiGraphicsExtractor.innerFill	port	crates/horizon-client-render/src/hud.rs::HudBatch::fill	gap: minor: one colour only; a second gradient colour (color2) is not drawn
+GuiGraphicsExtractor.textWithWordWrap	port	crates/horizon-client-render/src/screen_draw.rs::Measure::split	gap: minor: only the wrap; the caller draws each line at y+9
+GuiGraphicsExtractor.blitSprite	port	crates/horizon-client-render/src/hud.rs::HudBatch::sprite_scaled	gap: minor: tile and nine-slice scaling is in ui.rs (tiled, draw_nine_slice)
+GuiGraphicsExtractor.blitNineSliceInnerSegment	port	crates/horizon-client-render/src/ui.rs::draw_nine_slice	inner segments of a nine-slice sprite
+GuiGraphicsExtractor.blitTiledSprite	port	crates/horizon-client-render/src/ui.rs::tiled	
+GuiGraphicsExtractor.innerBlit	port	crates/horizon-client-render/src/screen_draw.rs::blit	texture rectangle by UV; the atlas lookup is in HudBatch::rect_uv
+GuiGraphicsExtractor.innerTiledBlit	port	crates/horizon-client-render/src/ui.rs::tile	one tiled quad
 GuiGraphicsExtractor.item	port	crates/horizon-client/src/game.rs::Game::draw_item	gap: minor: no seed or owner is passed to the item model
 GuiGraphicsExtractor.fakeItem	inline	crates/horizon-client/src/game.rs::Game::draw_item	same as item with no owner
-GuiGraphicsExtractor.itemBar	inline	crates/horizon-client/src/hud_overlays.rs::item_decorations	damage bar drawn in item_decorations
-GuiGraphicsExtractor.itemCount	inline	crates/horizon-client/src/hud_overlays.rs::item_decorations	stack count drawn in item_decorations
+GuiGraphicsExtractor.itemBar	inline	crates/horizon-client-render/src/hud_overlays.rs::item_decorations	damage bar drawn in item_decorations
+GuiGraphicsExtractor.itemCount	inline	crates/horizon-client-render/src/hud_overlays.rs::item_decorations	stack count drawn in item_decorations
 GuiGraphicsExtractor.map	port	crates/horizon-client/src/game/cartography.rs::Game::draw_cartography	gap: player: the map image is drawn only in the cartography preview; map markers (decorations) are not drawn there
 GuiGraphicsExtractor.entity	port	crates/horizon-client/src/game/perspective.rs::Game::draw_player_preview	gap: player: only the local player is previewed; the smithing armour-stand preview has no port
 GuiGraphicsExtractor.skin	missing		minor: no skin customisation preview was found; the inventory preview is draw_player_preview
 GuiGraphicsExtractor.book	missing		player: the enchanting table screen does not draw its open book; Horizon's book drawing is for written books only
 GuiGraphicsExtractor.profilerChart	skip:debug		F3 profiler pie chart; Horizon's debug_chart.rs covers its own charts
-GuiGraphicsExtractor.setTooltipForNextFrame	inline	crates/horizon-client/src/screen_draw.rs::tooltip	the overloads route to the tooltip draw
-GuiGraphicsExtractor.setComponentTooltipForNextFrame	port	crates/horizon-client/src/screen_draw.rs::tooltip	gap: minor: tooltip images (TooltipComponent) are not drawn
-GuiGraphicsExtractor.setTooltipForNextFrameInternal	port	crates/horizon-client/src/ui.rs::tooltip	frame and background sprites beside the cursor
-GuiGraphicsExtractor.extractDeferredElements	port	crates/horizon-client/src/screen_draw.rs::paint	gap: minor: deferred hover effects come from chat only (see componentHoverEffect)
+GuiGraphicsExtractor.setTooltipForNextFrame	inline	crates/horizon-client-render/src/screen_draw.rs::tooltip	the overloads route to the tooltip draw
+GuiGraphicsExtractor.setComponentTooltipForNextFrame	port	crates/horizon-client-render/src/screen_draw.rs::tooltip	gap: minor: tooltip images (TooltipComponent) are not drawn
+GuiGraphicsExtractor.setTooltipForNextFrameInternal	port	crates/horizon-client-render/src/ui.rs::tooltip	frame and background sprites beside the cursor
+GuiGraphicsExtractor.extractDeferredElements	port	crates/horizon-client-render/src/screen_draw.rs::paint	gap: minor: deferred hover effects come from chat only (see componentHoverEffect)
 GuiGraphicsExtractor.componentHoverEffect	port	crates/horizon-client/src/game/chat.rs::Game::draw_chat_screen	gap: player: hover tooltips exist only for text in chat; item and entity hover events show nothing
 GuiGraphicsExtractor.textRendererForWidget	skip:ui		builds a text collector for a widget; Horizon draws widget text directly
 GuiGraphicsExtractor.textRenderer	skip:ui		builds a text collector; Horizon draws text directly
 GuiGraphicsExtractor.createDefaultTextParameters	skip:ui		default pose, opacity and scissor for text; Horizon passes colour and rectangle directly
-GuiGraphicsExtractor.RenderingTextCollector.accept	port	crates/horizon-client/src/screen_draw.rs::text	gap: minor: no hover or click registration here (see Chat::style_at)
+GuiGraphicsExtractor.RenderingTextCollector.accept	port	crates/horizon-client-render/src/screen_draw.rs::text	gap: minor: no hover or click registration here (see Chat::style_at)
 GuiGraphicsExtractor.RenderingTextCollector.acceptScrolling	missing		minor: no scrolling text (see defaultScrollingHelper)
-GuiGraphicsExtractor.ScissorStack.push	inline	crates/horizon-client/src/screen_draw.rs::paint	gap: minor: the pushed rectangle replaces the current one; it is not intersected
-GuiGraphicsExtractor.ScissorStack.pop	inline	crates/horizon-client/src/screen_draw.rs::paint	gap: minor: Draw::NoScissor clears the scissor instead of restoring the enclosing one
+GuiGraphicsExtractor.ScissorStack.push	inline	crates/horizon-client-render/src/screen_draw.rs::paint	gap: minor: the pushed rectangle replaces the current one; it is not intersected
+GuiGraphicsExtractor.ScissorStack.pop	inline	crates/horizon-client-render/src/screen_draw.rs::paint	gap: minor: Draw::NoScissor clears the scissor instead of restoring the enclosing one
 GuiGraphicsExtractor.ScissorStack.containsPoint	missing		minor: hover ignores the scissor, so a widget clipped out of view can still highlight
-Hud.extractHotbarAndDecorations	port	crates/horizon-client/src/hud_layout.rs::hotbar	items and decorations are drawn by Game::draw_item
+Hud.extractHotbarAndDecorations	port	crates/horizon-client-render/src/hud_layout.rs::hotbar	items and decorations are drawn by Game::draw_item
 Hud.<init>	skip:java		constructor state setup
-Hud.extractSubtitleOverlay	port	crates/horizon-client/src/hud_overlays.rs::SubtitleOverlay::extract	
-Hud.extractChat	port	crates/horizon-client/src/chat.rs::Chat::layout	
+Hud.extractSubtitleOverlay	port	crates/horizon-client-render/src/hud_overlays.rs::SubtitleOverlay::extract	
+Hud.extractChat	port	crates/horizon-client-render/src/chat.rs::Chat::layout	
 Hud.getMobEffectSprite	port	crates/horizon-client/src/game/potions.rs::Game::draw_effect_icons	sprite lookup is inside the effect icon draw
 Hud.extractDemoOverlay	skip:other		Horizon has no demo mode, so there is no demo timer overlay
 Hud.getCameraPlayer	missing		minor: unsure: no camera-entity lookup found; the HUD always uses the local player
-Hud.getPlayerVehicleWithHealth	port	crates/horizon-client/src/hud_layout.rs::vehicle_health	gap: minor: the vehicle is chosen by the caller
-Hud.extractArmor	inline	crates/horizon-client/src/hud_layout.rs::HealthHud::layout	armour row inside the health layout
-Hud.extractHearts	inline	crates/horizon-client/src/hud_layout.rs::HealthHud::layout	heart row inside the health layout
-Hud.extractHeart	port	crates/horizon-client/src/hud_layout.rs::heart	heart sprite choice for one heart
-Hud.getAirBubbleYLine	inline	crates/horizon-client/src/hud_layout.rs::HealthHud::layout	air bubble row position
-Hud.getCurrentAirSupplyBubble	inline	crates/horizon-client/src/hud_layout.rs::HealthHud::layout	air bubble count
-Hud.extractFood	inline	crates/horizon-client/src/hud_layout.rs::HealthHud::layout	food row inside the health layout
-Hud.extractTextureOverlay	port	crates/horizon-client/src/hud_overlays.rs::camera_overlays	gap: player: the powder-snow freeze outline is not drawn; only the equippable camera overlay (pumpkin) is
+Hud.getPlayerVehicleWithHealth	port	crates/horizon-client-render/src/hud_layout.rs::vehicle_health	gap: minor: the vehicle is chosen by the caller
+Hud.extractArmor	inline	crates/horizon-client-render/src/hud_layout.rs::HealthHud::layout	armour row inside the health layout
+Hud.extractHearts	inline	crates/horizon-client-render/src/hud_layout.rs::HealthHud::layout	heart row inside the health layout
+Hud.extractHeart	port	crates/horizon-client-render/src/hud_layout.rs::heart	heart sprite choice for one heart
+Hud.getAirBubbleYLine	inline	crates/horizon-client-render/src/hud_layout.rs::HealthHud::layout	air bubble row position
+Hud.getCurrentAirSupplyBubble	inline	crates/horizon-client-render/src/hud_layout.rs::HealthHud::layout	air bubble count
+Hud.extractFood	inline	crates/horizon-client-render/src/hud_layout.rs::HealthHud::layout	food row inside the health layout
+Hud.extractTextureOverlay	port	crates/horizon-client-render/src/hud_overlays.rs::camera_overlays	gap: player: the powder-snow freeze outline is not drawn; only the equippable camera overlay (pumpkin) is
 Hud.extractSlot	port	crates/horizon-client/src/game.rs::Game::draw_slot_item	
-Hud.setNowPlaying	port	crates/horizon-client/src/hud_overlays.rs::Titles::set_overlay	the animate flag gives the rainbow colour
+Hud.setNowPlaying	port	crates/horizon-client-render/src/hud_overlays.rs::Titles::set_overlay	the animate flag gives the rainbow colour
 Hud.onDisconnected	missing		minor: unsure: no HUD reset on disconnect found; titles clear only on the ClearTitles packet
 Hud.willPrioritizeJumpInfo	port	crates/horizon-client/src/locator_bar.rs::ContextualBar::next	the jumping input comes from Game::mount_jumping
-Hud.HeartType.getSprite	port	crates/horizon-client/src/hud_layout.rs::heart	
-Hud.HeartType.forPlayer	inline	crates/horizon-client/src/hud_layout.rs::HealthHud::layout	heart kind comes from the health inputs
-AbstractButton.extractDefaultSprite	port	crates/horizon-client/src/screen_draw.rs::button	disabled, highlighted and normal sprites
+Hud.HeartType.getSprite	port	crates/horizon-client-render/src/hud_layout.rs::heart	
+Hud.HeartType.forPlayer	inline	crates/horizon-client-render/src/hud_layout.rs::HealthHud::layout	heart kind comes from the health inputs
+AbstractButton.extractDefaultSprite	port	crates/horizon-client-render/src/screen_draw.rs::button	disabled, highlighted and normal sprites
 AbstractButton.keyPressed	missing		minor: Enter or Space does not press a focused button; Enter only confirms a title text edit
-AbstractContainerWidget.setFocused	port	crates/horizon-client/src/pack_screen.rs::PackScreen::set_focus	gap: minor: screen-level focus only; no child-container focus
-AbstractContainerWidget.mouseClicked	port	crates/horizon-client/src/ui.rs::Scroll::press	gap: minor: child click dispatch is per screen; only the scrollbar press is here
-AbstractScrollArea.isOverScrollbar	inline	crates/horizon-client/src/ui.rs::Scroll::press	scrollbar column test folded into the press
-AbstractScrollArea.scrollBarY	port	crates/horizon-client/src/ui.rs::scrollbar_thumb	thumb top
-AbstractScrollArea.extractScrollbar	port	crates/horizon-client/src/ui.rs::scrollbar	gap: minor: no disabled-scroller sprite and no cursor request
+AbstractContainerWidget.setFocused	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::set_focus	gap: minor: screen-level focus only; no child-container focus
+AbstractContainerWidget.mouseClicked	port	crates/horizon-client-render/src/ui.rs::Scroll::press	gap: minor: child click dispatch is per screen; only the scrollbar press is here
+AbstractScrollArea.isOverScrollbar	inline	crates/horizon-client-render/src/ui.rs::Scroll::press	scrollbar column test folded into the press
+AbstractScrollArea.scrollBarY	port	crates/horizon-client-render/src/ui.rs::scrollbar_thumb	thumb top
+AbstractScrollArea.extractScrollbar	port	crates/horizon-client-render/src/ui.rs::scrollbar	gap: minor: no disabled-scroller sprite and no cursor request
 AbstractScrollArea.defaultSettings	skip:java		settings record builder; the sizes are constants in ui.rs
 AbstractSelectionList.swap	port	crates/horizon-client/src/multiplayer.rs::Screen::click	gap: minor: mouse move up or down works; keyboard Shift+arrow reorder is not ported
 AbstractSelectionList.clearEntriesExcept	skip:other		only the stats screen calls it; Horizon's stats screen draws its rows directly
-AbstractSelectionList.replaceEntries	port	crates/horizon-client/src/pack_screen.rs::PackScreen::update_list	
-AbstractSelectionList.getNextY	port	crates/horizon-client/src/pack_screen.rs::List::next_y	
-AbstractSelectionList.addEntry	port	crates/horizon-client/src/pack_screen.rs::List::add	
+AbstractSelectionList.replaceEntries	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::update_list	
+AbstractSelectionList.getNextY	port	crates/horizon-client-render/src/pack_screen.rs::List::next_y	
+AbstractSelectionList.addEntry	port	crates/horizon-client-render/src/pack_screen.rs::List::add	
 AbstractSelectionList.addEntryToTop	skip:service		only the chat report selection screen calls it; Horizon has no chat reporting
-AbstractSelectionList.repositionEntries	port	crates/horizon-client/src/pack_screen.rs::List::reposition	
+AbstractSelectionList.repositionEntries	port	crates/horizon-client-render/src/pack_screen.rs::List::reposition	
 AbstractSelectionList.removeEntryFromTop	skip:service		only the chat report selection screen calls it; Horizon has no chat reporting
-AbstractSelectionList.updateSizeAndPosition	port	crates/horizon-client/src/pack_screen.rs::List::update_size	
-AbstractSelectionList.extractListSeparators	port	crates/horizon-client/src/pack_screen.rs::PackScreen::draw_list	header and footer separators, with the in-world variant
-AbstractSelectionList.extractListBackground	port	crates/horizon-client/src/pack_screen.rs::PackScreen::draw_list	menu list background sprite
-AbstractSelectionList.enableScissor	port	crates/horizon-client/src/pack_screen.rs::PackScreen::draw_list	scissor clamped to the screen
-AbstractSelectionList.scrollToEntry	port	crates/horizon-client/src/pack_screen.rs::List::scroll_to	
-AbstractSelectionList.setFocused	port	crates/horizon-client/src/pack_screen.rs::PackScreen::set_focus	gap: minor: focusing a row does not select it; vanilla selects the focused entry
+AbstractSelectionList.updateSizeAndPosition	port	crates/horizon-client-render/src/pack_screen.rs::List::update_size	
+AbstractSelectionList.extractListSeparators	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	header and footer separators, with the in-world variant
+AbstractSelectionList.extractListBackground	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	menu list background sprite
+AbstractSelectionList.enableScissor	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	scissor clamped to the screen
+AbstractSelectionList.scrollToEntry	port	crates/horizon-client-render/src/pack_screen.rs::List::scroll_to	
+AbstractSelectionList.setFocused	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::set_focus	gap: minor: focusing a row does not select it; vanilla selects the focused entry
 AbstractSelectionList.nextEntry	missing		minor: arrow keys do not move the selection between rows in the pack or server lists
-AbstractSelectionList.extractListItems	port	crates/horizon-client/src/pack_screen.rs::PackScreen::draw_list	rows culled to the visible band
-AbstractSelectionList.extractItem	port	crates/horizon-client/src/pack_screen.rs::PackScreen::draw_list	selection outline and row content
-AbstractSelectionList.extractSelection	port	crates/horizon-client/src/pack_screen.rs::PackScreen::draw_list	two fills: outline colour and black inner
+AbstractSelectionList.extractListItems	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	rows culled to the visible band
+AbstractSelectionList.extractItem	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	selection outline and row content
+AbstractSelectionList.extractSelection	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	two fills: outline colour and black inner
 AbstractSelectionList.getRowBottom	skip:other		only the LAN-found narration uses it; Horizon has no narrator
 AbstractSelectionList.narrationPriority	skip:other		screen-reader priority; Horizon has no narrator
 AbstractSelectionList.removeEntry	skip:other		rows are rebuilt from the model when they change (update_list, server list), so there is no single-row removal
 AbstractSelectionList.narrateListElementPosition	skip:other		narration only
 AbstractSelectionList.TrackedList.set	skip:java		delegate list wrapper
-AbstractSliderButton.getSprite	inline	crates/horizon-client/src/ui.rs::slider	gap: minor: track highlight follows hover only; keyboard focus does not highlight
-AbstractSliderButton.getHandleSprite	inline	crates/horizon-client/src/ui.rs::slider	gap: minor: handle highlight follows hover only
+AbstractSliderButton.getSprite	inline	crates/horizon-client-render/src/ui.rs::slider	gap: minor: track highlight follows hover only; keyboard focus does not highlight
+AbstractSliderButton.getHandleSprite	inline	crates/horizon-client-render/src/ui.rs::slider	gap: minor: handle highlight follows hover only
 AbstractSliderButton.updateWidgetNarration	skip:other		narration only
-AbstractSliderButton.extractWidgetRenderState	port	crates/horizon-client/src/ui.rs::slider	gap: minor: the label is clipped rather than scrolled
-AbstractSliderButton.handleCursor	port	crates/horizon-client/src/widgets.rs::widget_cursor	gap: minor: no resize cursor while dragging
+AbstractSliderButton.extractWidgetRenderState	port	crates/horizon-client-render/src/ui.rs::slider	gap: minor: the label is clipped rather than scrolled
+AbstractSliderButton.handleCursor	port	crates/horizon-client-render/src/widgets.rs::widget_cursor	gap: minor: no resize cursor while dragging
 AbstractSliderButton.setFocused	missing		minor: keyboard focus does not enable value changes; there is no change-value state
 AbstractSliderButton.keyPressed	missing		minor: Left and Right do not move a focused slider; Enter does not toggle it
-AbstractSliderButton.setValue	port	crates/horizon-client/src/options_ui.rs::set_slider	gap: minor: the 0..1 clamp is done by the caller (ui.rs slider_value)
-AbstractStringWidget.extractWidgetRenderState	port	crates/horizon-client/src/screen_draw.rs::string_widget	gap: minor: hover tooltip and click cursor for styled text are not drawn
+AbstractSliderButton.setValue	port	crates/horizon-client-render/src/options_ui.rs::set_slider	gap: minor: the 0..1 clamp is done by the caller (ui.rs slider_value)
+AbstractStringWidget.extractWidgetRenderState	port	crates/horizon-client-render/src/screen_draw.rs::string_widget	gap: minor: hover tooltip and click cursor for styled text are not drawn
 AbstractStringWidget.onClick	missing		minor: clicking a styled label with a click event does nothing here; book links and chat links do work
 AbstractStringWidget.setMessage	skip:ui		width is measured at draw time
 AbstractStringWidget.handleStyleClick	missing		minor: same as onClick: no click handling for labels
 AbstractTextAreaWidget.mouseClicked	port	crates/horizon-client/src/game/books.rs::Game::book_page_click	gap: minor: a scrollbar press inside the area is not checked
 AbstractTextAreaWidget.keyPressed	port	crates/horizon-client/src/game/books.rs::Game::book_page_key	gap: minor: up and down scroll the area in vanilla; not checked here
 AbstractTextAreaWidget.extractWidgetRenderState	port	crates/horizon-client/src/game/books.rs::Game::draw_book	gap: minor: scroll offset inside the page not verified
-AbstractTextAreaWidget.isMouseOver	port	crates/horizon-client/src/screen_draw.rs::inside	gap: minor: the scrollbar width is not added to the hit area
+AbstractTextAreaWidget.isMouseOver	port	crates/horizon-client-render/src/screen_draw.rs::inside	gap: minor: the scrollbar width is not added to the hit area
 AbstractTextAreaWidget.extractBackground	skip:ui		frame drawn by the book screen; no behaviour
 AbstractTextAreaWidget.extractBorder	skip:ui		frame sprite; no behaviour
 AbstractTextAreaWidget.withinContentAreaTopBottom	skip:ui		visibility cull while drawing lines
-AbstractWidget.extractRenderState	port	crates/horizon-client/src/ui.rs::hovered	gap: minor: the scissor test is not part of the hover check
-AbstractWidget.extractTooltipForNextRenderPass	port	crates/horizon-client/src/ui.rs::tooltip	gap: minor: unsure: widget hover delay not checked
-AbstractWidget.extractScrollingStringOverContents	port	crates/horizon-client/src/ui.rs::centered_text	gap: minor: text is clipped, not scrolled
+AbstractWidget.extractRenderState	port	crates/horizon-client-render/src/ui.rs::hovered	gap: minor: the scissor test is not part of the hover check
+AbstractWidget.extractTooltipForNextRenderPass	port	crates/horizon-client-render/src/ui.rs::tooltip	gap: minor: unsure: widget hover delay not checked
+AbstractWidget.extractScrollingStringOverContents	port	crates/horizon-client-render/src/ui.rs::centered_text	gap: minor: text is clipped, not scrolled
 AbstractWidget.mouseClicked	port	crates/horizon-client/src/title.rs::Title::click	gap: minor: click dispatch is per screen; the press sound is audio.rs Audio::play_button_click
-AbstractWidget.mouseReleased	port	crates/horizon-client/src/ui.rs::Scroll::release	gap: minor: only the scroll release; widget onRelease is per screen
-AbstractWidget.mouseDragged	port	crates/horizon-client/src/ui.rs::Scroll::drag	gap: minor: only scroll drag; widget onDrag is per screen
+AbstractWidget.mouseReleased	port	crates/horizon-client-render/src/ui.rs::Scroll::release	gap: minor: only the scroll release; widget onRelease is per screen
+AbstractWidget.mouseDragged	port	crates/horizon-client-render/src/ui.rs::Scroll::drag	gap: minor: only scroll drag; widget onDrag is per screen
 AbstractWidget.nextFocusPath	missing		minor: unsure: no per-widget focus path; Horizon focus is per screen
-AbstractWidget.isMouseOver	port	crates/horizon-client/src/screen_draw.rs::inside	gap: minor: isActive is checked by the caller
+AbstractWidget.isMouseOver	port	crates/horizon-client-render/src/screen_draw.rs::inside	gap: minor: isActive is checked by the caller
 AbstractWidget.narrationPriority	skip:other		narration only
 AbstractWidget.defaultButtonNarrationText	skip:other		narration only

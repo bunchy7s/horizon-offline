@@ -140,11 +140,11 @@ impl Game<'_> {
             direct_attacker: Some("minecraft:player"),
             is_direct: true,
             damage_type: Some("minecraft:mace_smash"),
-            items: Some(self.res.items()),
+            items: Some(world_items!(self)),
             ..Default::default()
         };
         // EnchantmentHelper.modifyFallBasedDamage(..., 0)
-        let per_block = self.res.stations().enchantments.modify_value(
+        let per_block = world_stations!(self).enchantments.modify_value(
             held.as_ref(),
             "minecraft:smash_damage_per_fallen_block",
             &ctx,
@@ -168,10 +168,10 @@ impl Game<'_> {
                 horizon_client::mobs::DamageKind::Spear => "minecraft:spear",
                 _ => "minecraft:player_attack",
             }),
-            items: Some(self.res.items()),
+            items: Some(world_items!(self)),
             ..Default::default()
         };
-        let enchantments = &self.res.stations().enchantments;
+        let enchantments = &world_stations!(self).enchantments;
         let random = &mut self.world.random;
         // CombatRules.getDamageAfterAbsorb: EnchantmentHelper.modifyArmorEffectiveness.
         let mut breach = |fraction: f32| {
@@ -229,14 +229,7 @@ impl Game<'_> {
             && max > 0
             && !self.creative
         {
-            let loss = self.wear(stack, per_attack);
-            let cell = self.held_mut();
-            if let Some(held) = cell.as_mut() {
-                held.damage += loss;
-                if held.damage >= max {
-                    *cell = None;
-                }
-            }
+            self.damage_held(per_attack);
         }
     }
     /// `MaceItem.hurtEnemy` for a smash: the fall stops and its damage is
@@ -244,9 +237,16 @@ impl Game<'_> {
     /// the knockback around the target.
     fn mace_hurt_enemy(&mut self, index: usize) {
         let target_on_ground = self.mobs[index].on_ground;
-        let Some(p) = self.player.as_mut() else {
-            return;
-        };
+        if let Some(fall) = self.mace_smash_self(target_on_ground) {
+            self.smash_knockback(index, fall);
+        }
+    }
+    /// The attacker's side of `MaceItem.hurtEnemy` for a smash: the fall
+    /// stops, its damage is waived from where the hit landed, and the ground
+    /// or air smash sound plays. The fall distance it was, if there is a
+    /// player.
+    fn mace_smash_self(&mut self, target_on_ground: bool) -> Option<f64> {
+        let p = self.player.as_mut()?;
         p.velocity = Vec3::new(p.velocity.x, f64::from(0.01f32), p.velocity.z);
         // A server player's client is told (ClientboundSetEntityMotionPacket): it moves by
         // itself, so without it a Wind Burst's push would add to the speed of the fall.
@@ -270,7 +270,34 @@ impl Game<'_> {
             "minecraft:item.mace.smash_air"
         };
         self.audio.play(sound, Some(feet), 1.0, 1.0);
-        self.smash_knockback(index, fall);
+        Some(fall)
+    }
+    /// `Player.itemAttackInteraction` after the player's hit hurt another
+    /// player: the weapon's side of it, as `weapon_hit` does for a mob. A
+    /// smash stops the fall and its Wind Burst (a `post_attack` explosion on
+    /// the attacker) launches the attacker.
+    pub(super) fn weapon_hit_player(&mut self, victim_on_ground: bool) {
+        let Some(stack) = self.held().cloned() else {
+            return;
+        };
+        let smash = self.smash_attack();
+        if smash {
+            self.mace_smash_self(victim_on_ground);
+        }
+        if self
+            .res
+            .items()
+            .get(&stack.item)
+            .is_some_and(|i| i.weapon_damage.is_some())
+        {
+            self.stats.add("used", &stack.item, 1);
+        }
+        self.post_attack_bursts(&stack, "minecraft:player");
+        // MaceItem.postHurtEnemy
+        if smash && let Some(p) = self.player.as_mut() {
+            p.fall_distance = 0.0;
+        }
+        self.weapon_wear(&stack);
     }
     /// `MaceItem.knockback`: the dust pillar (level event 2013) under the
     /// target, then every living entity within 3.5 blocks of it but the

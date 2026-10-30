@@ -198,7 +198,8 @@ class ReleaseTrainTests(unittest.TestCase):
         self.assertIn("### Known issues\n- Sound cuts out after an hour.", body)
         self.assertNotIn("#7", body)
         self.assertNotIn("#8", body)
-        self.assertIn("Thanks to @cosmic.", body)
+        self.assertIn("### Contributors\nThanks to @cosmic.", body)
+        self.assertTrue(body.endswith("---\n" + train.DISCLAIMER + "\n"), body)
         self.assertLess(body.index("### New"), body.index("### Fixed"))
         title, _ = train.notes("game", "v2026.10.15.2", [pr(9, "Horizon's mark", labels=["feature"]),
                                                          pr(10, "Game menus", labels=["feature"])], [])

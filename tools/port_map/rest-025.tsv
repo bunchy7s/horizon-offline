@@ -4,7 +4,7 @@ SideChainPart.whenConnectedToTheLeft	port	crates/horizon-world/src/level/shelf.r
 ProtoChunk.getFluidState	port	crates/horizon-world/src/worldgen/feature_region.rs::TerrainRegion::fluid_state	gap: minor: read through the region's block queries; no chunk-level accessor, fluid comes from the block state
 ProtoChunk.getNoiseBiome	port	crates/horizon-world/src/worldgen/generator.rs::ProtoChunk::biome_id_at	gap: minor: takes block coordinates (quart shift inside); no check that the BIOMES status was reached, vanilla throws before it
 StructureTemplate.Palette.jigsaws	port	crates/horizon-world/src/worldgen/structure/template.rs::StructureTemplate::jigsaws	per-palette OnceLock stands in for cachedJigsaws
-SkyLightEngine.updateSourcesInColumn	inline	crates/horizon-client/src/light.rs::relight_region	column loop finds the lowest sky source and reseeds cells above and below it
+SkyLightEngine.updateSourcesInColumn	inline	crates/horizon-client-render/src/light.rs::relight_region	column loop finds the lowest sky source and reseeds cells above and below it
 FlyNodeEvaluator.findAcceptedNode	port	crates/horizon-client/src/mobs/path.rs::Finder::fly_accepted	cost, walkable +1 and node update match vanilla
 LevelStorageSource.writeGameRules	port	crates/horizon-client-core/src/gamerules.rs::GameRules::save	gap: minor: writes in place with no temp-file swap; no runtime caller, the game saves rules through level.game_rules in level.dat
 LevelStorageSource.readLevelSummary	port	crates/horizon-client/src/title.rs::list_worlds	gap: player: a world whose level.dat cannot be read is left out of the list; vanilla lists it as corrupted; symlinked worlds are not flagged

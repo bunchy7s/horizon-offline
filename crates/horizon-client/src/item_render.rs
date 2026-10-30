@@ -453,30 +453,40 @@ pub struct ItemRenderer {
     item_ids: HashMap<String, i32>,
 }
 
-/// Every `items/*.json` client item definition, by identifier.
+/// Every `items/**/*.json` client item definition, by identifier.
 fn load_definitions(root: &Path) -> BTreeMap<String, ClientItem> {
+    fn walk(dir: &Path, rel: &str, namespace: &str, out: &mut BTreeMap<String, ClientItem>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+                continue;
+            };
+            let rel = if rel.is_empty() {
+                name
+            } else {
+                format!("{rel}/{name}")
+            };
+            if path.is_dir() {
+                walk(&path, &rel, namespace, out);
+            } else if let Some(id) = rel.strip_suffix(".json")
+                && let Some(item) = fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|t| ClientItem::from_json(&t).ok())
+            {
+                out.insert(format!("{namespace}:{id}"), item);
+            }
+        }
+    }
     let mut out = BTreeMap::new();
     let Ok(namespaces) = fs::read_dir(root.join("assets")) else {
         return out;
     };
     for ns in namespaces.flatten() {
         let namespace = ns.file_name().to_string_lossy().into_owned();
-        let Ok(files) = fs::read_dir(ns.path().join("items")) else {
-            continue;
-        };
-        for f in files.flatten() {
-            let path = f.path();
-            if path.extension().is_none_or(|e| e != "json") {
-                continue;
-            }
-            let name = path.file_stem().unwrap_or_default().to_string_lossy();
-            if let Some(item) = fs::read_to_string(&path)
-                .ok()
-                .and_then(|t| ClientItem::from_json(&t).ok())
-            {
-                out.insert(format!("{namespace}:{name}"), item);
-            }
-        }
+        walk(&ns.path().join("items"), "", &namespace, &mut out);
     }
     out
 }
@@ -877,6 +887,26 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         assert!(!broken_items.starts_with("item models:"));
         assert!(bad_model.starts_with("item models:"));
+        Ok(())
+    }
+
+    /// Definitions live at any depth (`items/<dir>/<name>.json`), as
+    /// ModelEngine's `modelengine:postman/head` does.
+    #[test]
+    fn item_definitions_load_from_nested_folders() -> crate::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-item-definitions-nested-{}",
+            std::process::id()
+        ));
+        let definitions = root.join("assets/horizon/items");
+        fs::create_dir_all(definitions.join("postman"))?;
+        let empty = r#"{"model":{"type":"minecraft:empty"}}"#;
+        fs::write(definitions.join("top.json"), empty)?;
+        fs::write(definitions.join("postman/head.json"), empty)?;
+        let loaded = load_definitions(&root);
+        let _ = fs::remove_dir_all(&root);
+        assert!(loaded.contains_key("horizon:top"));
+        assert!(loaded.contains_key("horizon:postman/head"));
         Ok(())
     }
 

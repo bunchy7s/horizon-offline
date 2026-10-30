@@ -98,7 +98,7 @@ Player.hurtHelmet	inline	crates/horizon-client/src/game.rs::Game::hurt_armor	gap
 Player.isAboveGround	inline	crates/horizon-world/src/edge_backoff.rs::back_off_from_edge	the on-the-edge test before backing off
 Player.canFallAtLeast	inline	crates/horizon-world/src/edge_backoff.rs::back_off_from_edge	the no-collision drop test at the edge
 Player.deflectProjectile	port	crates/horizon-client/src/game/deflect.rs::Game::attack_redirectable	
-Player.baseDamageScaleFactor	port	crates/horizon-client/src/game.rs::Game::sweep_base_damage	
+Player.baseDamageScaleFactor	inline	crates/horizon-client/src/game/mace.rs::Game::sweep_damage	
 Player.isEffectiveAi	skip:other		client-side AI gate; Horizon has no effective-AI check in its loop
 Player.hasContainerOpen	missing		unsure: the test for an open container menu (not the inventory menu) was not located
 Player.startSleepInBed	port	crates/horizon-client/src/game.rs::Game::try_sleep	

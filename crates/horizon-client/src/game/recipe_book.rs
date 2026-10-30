@@ -206,7 +206,7 @@ impl Game<'_> {
             return;
         }
         self.ensure_book();
-        let index = &self.res.stations().recipe_index;
+        let index = &self.stations().recipe_index;
         let book = self.recipe_ui.book.as_ref();
         // SmithingTrimDemoSlotDisplay draws from a random of its own.
         let mut random = super::dispenser::entity_random();
@@ -225,8 +225,8 @@ impl Game<'_> {
                     })
                     .or_else(|| index.result(id).map(|r| ItemStack::new(r, 1)))
                     .or_else(|| {
-                        self.res.stations().recipes.trim_demo(
-                            &self.res.stations().enchantments,
+                        self.stations().recipes.trim_demo(
+                            &self.stations().enchantments,
                             id,
                             &mut |n| {
                                 horizon_core::random::RandomSource::next_int_bound(
@@ -276,12 +276,12 @@ impl Game<'_> {
                 Kind::Inventory
             });
             let env = Env {
-                items: self.res.items(),
-                recipes: self.res.recipes(),
-                brewing: &self.res.stations().brewing,
-                banners: &self.res.stations().banners,
-                station_recipes: &self.res.stations().recipes,
-                enchantments: &self.res.stations().enchantments,
+                items: self.items(),
+                recipes: self.recipes(),
+                brewing: &self.stations().brewing,
+                banners: &self.stations().banners,
+                station_recipes: &self.stations().recipes,
+                enchantments: &self.stations().enchantments,
                 names: &self.pack.names,
                 trade: None,
                 maps: None,
@@ -311,7 +311,7 @@ impl Game<'_> {
             return;
         }
         let known = &self.level.recipe_book.recipes;
-        let index = &self.res.stations().recipe_index;
+        let index = &world_stations!(self).recipe_index;
         let ui = &mut self.recipe_ui;
         match ui.client_known.as_ref() {
             Some(previous) if previous == known => return,
@@ -339,7 +339,7 @@ impl Game<'_> {
         ui.client_known = Some(known.clone());
         ui.client_version += 1;
     }
-    /// Every entry of the book, in its order (capability `recipes`).
+    /// Every entry of the book, in its order (`native_recipes`).
     pub(super) fn recipe_book_entries(&mut self) -> Vec<Entry> {
         self.ensure_book();
         self.recipe_ui
@@ -348,7 +348,7 @@ impl Game<'_> {
             .map_or_else(Vec::new, |b| b.entries.clone())
     }
     /// The display ids the player's book holds, and a number that changes
-    /// whenever they do (capability `recipes`).
+    /// whenever they do (`native_known_recipes`).
     pub(super) fn recipe_book_displays(&mut self) -> (u64, Vec<i32>) {
         self.sync_client_book();
         (
@@ -358,8 +358,8 @@ impl Game<'_> {
     }
     fn ensure_book(&mut self) {
         if self.recipe_ui.book.is_none() {
-            let mut book = Book::build(self.res.recipes(), self.res.items());
-            book.set_display_ids(&self.res.stations().recipe_index);
+            let mut book = Book::build(self.recipes(), self.items());
+            book.set_display_ids(&self.stations().recipe_index);
             self.recipe_ui.book = Some(book);
         }
         if self.recipe_ui.search.is_none() {
@@ -519,7 +519,7 @@ impl Game<'_> {
                 && !book.collection_matches(&c.entries, &query, &|stack| {
                     horizon_client::item_tooltip::lines(
                         stack,
-                        self.res.items().get(&stack.item),
+                        self.items().get(&stack.item),
                         &|k| self.pack.names.display_get(k),
                     )
                 })
@@ -862,14 +862,14 @@ impl Game<'_> {
         self.recipe_ui.ghost.clear();
         self.place_recipe(book_type, entry_index, use_max);
     }
-    /// Whether the open screen takes `recipes.place`: a crafting grid's
+    /// Whether the open screen takes `native_place_recipe`: a crafting grid's
     /// book (the inventory's or a crafting table's).
     pub(super) fn mod_recipe_screen(&self) -> bool {
         self.screen == Screen::Inventory
             && self.active_book() == Some(BookType::Crafting)
             && !self.spectator()
     }
-    /// `recipes.place`: the book's click on the recipe with this display
+    /// `native_place_recipe`: the book's click on the recipe with this display
     /// id, refused as `handlePlaceRecipe` refuses it (no crafting screen,
     /// not in the player's book; an impossible one in `place_recipe`).
     pub(super) fn mod_place_recipe(&mut self, display_id: i32, all: bool) {
@@ -961,7 +961,7 @@ impl Game<'_> {
                 ui.client.highlight.insert(e.id);
             }
             if e.flags & 1 != 0
-                && let Some(id) = self.res.stations().recipe_index.recipe_of_display(e.id)
+                && let Some(id) = world_stations!(self).recipe_index.recipe_of_display(e.id)
                 && !toast.iter().any(|t| t == id)
             {
                 toast.push(id.to_owned());
@@ -1025,7 +1025,7 @@ impl Game<'_> {
             return;
         };
         let ghost = book
-            .ghost(entry, book_type, grid, fuel_empty, self.res.items())
+            .ghost(entry, book_type, grid, fuel_empty, self.items())
             .into_iter()
             .map(|g| Ghost {
                 slot: match (g.target, book_type) {
@@ -1100,6 +1100,20 @@ impl Game<'_> {
             .collect();
         let calls = screen::ghost(self.swap_index(), ox as i32, oy as i32, big_result, &ghosts);
         self.paint_book(batch, &calls);
+    }
+    /// `GhostSlots.extractTooltip`: the stack a ghost shows on menu slot
+    /// `slot` now, cycling like its draw; only while the open book is visible
+    /// (`RecipeBookComponent.extractTooltip`).
+    pub(super) fn ghost_stack(&self, slot: usize) -> Option<ItemStack> {
+        if !self.book_open(self.active_book()?) {
+            return None;
+        }
+        let ghost = self
+            .recipe_ui
+            .ghost
+            .iter()
+            .find(|g| g.slot == slot && !g.items.is_empty())?;
+        Some(ghost.items[self.swap_index() % ghost.items.len()].clone())
     }
     /// `RecipeBookComponent.extractRenderState` and `extractTooltip`, laid
     /// out by `horizon_client::recipe_book_screen`.

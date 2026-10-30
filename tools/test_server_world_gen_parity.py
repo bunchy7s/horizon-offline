@@ -15,8 +15,8 @@ the worker's number is left out). In a world without structures (`generate-struc
 finds none) and how many of the saved chunks hold structure starts or references (none:
 ChunkStatusTasks.generateStructureStarts does nothing).
 
-Horizon generates the normal and flat presets only: `large_biomes`, `amplified`, `single_biome_surface` and
-`debug_all_block_states` aren't tested.
+Horizon generates the normal, flat, amplified, large-biome and single-biome presets:
+`debug_all_block_states` isn't tested.
 """
 import json
 import os
@@ -61,6 +61,9 @@ CASES = {
         'generator-settings': '{"layers":[{"block":"minecraft:glass","height":5}],"biome":"nowhere"}',
     },
     'normal': {'level-type': 'minecraft:normal', 'level-seed': 'abc', 'generate-structures': 'false'},
+    'amplified': {'level-type': 'minecraft:amplified', 'level-seed': '1'},
+    'large-biomes': {'level-type': 'minecraft:large_biomes', 'level-seed': '2'},
+    'single-biome': {'level-type': 'minecraft:single_biome_surface', 'level-seed': '3'},
     'unknown': {'level-type': 'Some Type', 'level-seed': '42'},
 }
 WORKER = re.compile(r'\[Worker-Main-\d+/(WARN|ERROR)\]: (.*)')
@@ -155,9 +158,10 @@ def main():
         schema=1, minecraft=lock['minecraft']['version'], platform=platform.platform(),
         java=subprocess.check_output(['java', '--version'], text=True).splitlines()[0],
         cases=list(CASES), lines=len(vanilla), output_sha256=lab.digest(build / 'horizon.txt', 'sha256'),
-        scope='a new dedicated-server world: level-type (flat, normal, unknown), a flat world\'s '
-              'generator-settings, generate-structures, as world_gen_settings.dat and the lines logged; without '
-              'structures, locate structure\'s replies and the saved chunks\' structure starts and references.'))
+        scope='a new dedicated-server world: level-type (flat, normal, amplified, large_biomes, '
+              'single_biome_surface, unknown), a flat world\'s generator-settings, generate-structures, as '
+              'world_gen_settings.dat and the lines logged; without structures, locate structure\'s replies and '
+              'the saved chunks\' structure starts and references.'))
     print(f'server world gen: {len(CASES)} cases, {len(vanilla)} lines identical')
 
 

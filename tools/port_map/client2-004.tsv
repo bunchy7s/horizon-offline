@@ -27,27 +27,27 @@ RenderTypeFeatureRenderer.Group	skip:other		GPU render-type batching, as above
 ShadowFeatureRenderer.buildGroup	port	crates/horizon-client/src/shadows.rs::shadow	loop over shadow submits
 ShadowFeatureRenderer.prepare	port	crates/horizon-client/src/shadows.rs::shadow	shadow quads per piece, clamped by the block below
 ShadowFeatureRenderer.shadowVertex	inline	crates/horizon-client/src/shadows.rs::shadow	vertex push folded into shadow
-ShapeOutlineFeatureRenderer.buildGroup	port	crates/horizon-client/src/gfx.rs::outline_vertices	block selection outline edges as line vertices
+ShapeOutlineFeatureRenderer.buildGroup	port	crates/horizon-client-render/src/gfx.rs::outline_vertices	block selection outline edges as line vertices
 TextFeatureRenderer.buildGroup	skip:other		dispatch over text and background submits; each kind is covered below or by Horizon's text draw
 TextFeatureRenderer.renderText	missing		minor: unsure: no outlined-text path found (font.rs, hud.rs, names.rs); the outline colour of a text submit is not drawn
 TextFeatureRenderer.GlyphRenderer.acceptRenderable	skip:other		glyph sink for the text pass; Horizon's font pass draws the glyphs
 FeatureRenderPhase.Output.acceptFeatureGroup	skip:other		phase plumbing: hands sorted groups to the renderer pass
 SimpleFeatureRenderPhase	skip:other		submit, sort, shuffle (debug only) and clear of feature submits; Horizon sorts its own draws
 SimpleFeatureRenderPhase.FeatureSubmits	skip:other		batching bookkeeping of feature submits
-TranslucentFeatureRenderPhase.submit	inline	crates/horizon-client/src/gfx/translucency.rs::Sorter::sort	collects submits; distances are taken in sort
-TranslucentFeatureRenderPhase.sortInto	port	crates/horizon-client/src/gfx/translucency.rs::Sorter::sort	back-to-front by distance, equal distances keep submit order
-TranslucentFeatureRenderPhase.sortIndices	port	crates/horizon-client/src/gfx/translucency.rs::Sorter::sort	far to near, stable on ties
-TranslucentSubmit.computeDistanceToCameraSq	inline	crates/horizon-client/src/gfx/translucency.rs::Sorter::sort	distance from the quad centre to the camera, computed inside sort
+TranslucentFeatureRenderPhase.submit	inline	crates/horizon-client-render/src/gfx/translucency.rs::Sorter::sort	collects submits; distances are taken in sort
+TranslucentFeatureRenderPhase.sortInto	port	crates/horizon-client-render/src/gfx/translucency.rs::Sorter::sort	back-to-front by distance, equal distances keep submit order
+TranslucentFeatureRenderPhase.sortIndices	port	crates/horizon-client-render/src/gfx/translucency.rs::Sorter::sort	far to near, stable on ties
+TranslucentSubmit.computeDistanceToCameraSq	inline	crates/horizon-client-render/src/gfx/translucency.rs::Sorter::sort	distance from the quad centre to the camera, computed inside sort
 FogRenderer.getBuffer	skip:other		selects the fog uniform slice; Horizon hands its fog values to its own shader per frame
 FogRenderer.updateBuffer	skip:other		writes the fog uniform buffer; Horizon's frame_fog passes FogData to its own shader
-AtmosphericFogEnvironment.getBaseColor	port	crates/horizon-client/src/fog.rs::setup_fog	gap: minor: sky fog end uses constant 512 instead of the SKY_FOG_END_DISTANCE attribute
-AtmosphericFogEnvironment.applyWeatherDarken	inline	crates/horizon-client/src/fog.rs::setup_fog	rain and thunder darkening folded into the atmospheric colour
-BlindnessFogEnvironment.setupFog	port	crates/horizon-client/src/fog.rs::setup_fog	blindness distance and sky/cloud ends
-BlindnessFogEnvironment.getModifiedDarkness	inline	crates/horizon-client/src/fog.rs::setup_fog	blindness darkness folded into setup_fog
-LavaFogEnvironment.setupFog	port	crates/horizon-client/src/fog.rs::setup_fog	gap: player: spectator (-8 start, half render distance) and fire resistance (0 to 5) are not applied in lava
+AtmosphericFogEnvironment.getBaseColor	port	crates/horizon-client-render/src/fog.rs::setup_fog	gap: minor: sky fog end uses constant 512 instead of the SKY_FOG_END_DISTANCE attribute
+AtmosphericFogEnvironment.applyWeatherDarken	inline	crates/horizon-client-render/src/fog.rs::setup_fog	rain and thunder darkening folded into the atmospheric colour
+BlindnessFogEnvironment.setupFog	port	crates/horizon-client-render/src/fog.rs::setup_fog	blindness distance and sky/cloud ends
+BlindnessFogEnvironment.getModifiedDarkness	inline	crates/horizon-client-render/src/fog.rs::setup_fog	blindness darkness folded into setup_fog
+LavaFogEnvironment.setupFog	port	crates/horizon-client-render/src/fog.rs::setup_fog	gap: player: spectator (-8 start, half render distance) and fire resistance (0 to 5) are not applied in lava
 MobEffectFogEnvironment.isApplicable	inline	crates/horizon-client/src/game/render_tick.rs::Game::frame_fog	effect gate is where frame_fog builds the blindness and darkness inputs
-PowderedSnowFogEnvironment.setupFog	port	crates/horizon-client/src/fog.rs::setup_fog	gap: player: spectator case (-8 start, half render distance) is not applied
-WaterFogEnvironment.setupFog	port	crates/horizon-client/src/fog.rs::setup_fog	gap: minor: water fog start is fixed at -8; vanilla reads the WATER_FOG_START_DISTANCE attribute
+PowderedSnowFogEnvironment.setupFog	port	crates/horizon-client-render/src/fog.rs::setup_fog	gap: player: spectator case (-8 start, half render distance) is not applied
+WaterFogEnvironment.setupFog	port	crates/horizon-client-render/src/fog.rs::setup_fog	gap: minor: water fog start is fixed at -8; vanilla reads the WATER_FOG_START_DISTANCE attribute
 DrawableGizmoPrimitives.addPoint	missing		minor: debug points are not drawn; Gizmos has no point kind
 DrawableGizmoPrimitives.addLine	port	crates/horizon-client/src/gizmos.rs::Gizmos::line	
 DrawableGizmoPrimitives.addTriangleFan	missing		minor: debug triangle fans are not drawn

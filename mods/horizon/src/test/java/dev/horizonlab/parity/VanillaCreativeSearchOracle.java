@@ -45,7 +45,7 @@ public final class VanillaCreativeSearchOracle {
             var o = new JsonObject();
             o.addProperty("id", BuiltInRegistries.CREATIVE_MODE_TAB.getKey(tab).toString());
             o.addProperty("type", tab.getType().name());
-            o.addProperty("shown", tab.getType() != CreativeModeTab.Type.HOTBAR && tab.shouldDisplay());
+            o.addProperty("shown", tab.shouldDisplay());
             o.addProperty("title", tab.getDisplayName().getString());
             o.addProperty("icon", BuiltInRegistries.ITEM.getKey(tab.getIconItem().getItem()).toString());
             o.addProperty("row", tab.row().name());

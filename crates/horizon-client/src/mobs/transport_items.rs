@@ -75,7 +75,7 @@ pub fn held(m: &Mob) -> Option<&ItemStack> {
 /// `setItemSlot(MAINHAND, ..)`, keeping the rendered copy in step.
 pub fn set_held(m: &mut Mob, stack: Option<ItemStack>) {
     let stack = stack.filter(|s| s.count > 0);
-    m.extra.main_hand = stack.as_ref().map(|s| s.item.clone());
+    m.extra.set_main_hand_stack(stack.clone());
     m.extra.ints[1] = stack.as_ref().map_or(0, |s| s.count as i32);
     if m.extra.items.is_empty() {
         m.extra.items.push(None);

@@ -19,7 +19,7 @@ impl Game<'_> {
             .position(|m| m.id == id && m.species() == Species::Villager)
     }
     fn item_max_stack(&self, item: &str) -> u32 {
-        self.res.items().get(item).map_or(64, |i| i.max_stack)
+        self.items().get(item).map_or(64, |i| i.max_stack)
     }
     /// `WorkAtComposter.useWorkstation`: at a composter the farmer makes
     /// bread, then composts seeds.
@@ -68,7 +68,7 @@ impl Game<'_> {
             return;
         };
         let now = self.world.game_time;
-        let items = self.res.items();
+        let items = world_items!(self);
         let meeting = villager::meet(&mut self.mobs, ia, ib, now, |item| {
             items.get(item).map_or(64, |i| i.max_stack)
         });

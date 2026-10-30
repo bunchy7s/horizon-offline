@@ -11,7 +11,8 @@ use horizon_world::registry::BlockStateId;
 
 impl Game<'_> {
     /// Client `EntityGetter.getEntityCollisions` for the player: the
-    /// entities that `canBeCollidedWith` it, solid happy ghasts and boats
+    /// entities that `canBeCollidedWith` it, solid happy ghasts, living
+    /// shulkers (`Shulker.canBeCollidedWith`) and boats
     /// (`AbstractBoat.canBeCollidedWith`), except the player's own vehicle.
     pub(super) fn player_entity_collisions(&self) -> Vec<Aabb> {
         let Some(p) = &self.player else {
@@ -20,9 +21,10 @@ impl Game<'_> {
         self.mobs
             .iter()
             .filter(|m| {
-                m.species() == horizon_client::mobs::Species::HappyGhast
+                (m.species() == horizon_client::mobs::Species::HappyGhast
                     && Some(m.id) != self.riding
-                    && happy_ghast::collides_with_player(m, p.position.y)
+                    && happy_ghast::collides_with_player(m, p.position.y))
+                    || (m.species() == horizon_client::mobs::Species::Shulker && m.alive())
             })
             .map(|m| m.bounds())
             .chain(

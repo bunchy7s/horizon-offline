@@ -412,6 +412,9 @@ pub trait LevelAccess {
     ) -> Option<(bool, bool)> {
         None
     }
+    /// `PotentSulfurBlockEntity.resetCountdown` for the potent sulfur block
+    /// entity at `pos` (`PotentSulfurBlock.validBlockState`).
+    fn reset_potent_sulfur_countdown(&mut self, _pos: BlockPos) {}
     /// Weak/strong signal of a block-entity-driven source (trapped chest
     /// openers); other sources are evaluated by the library.
     fn block_entity_signal(

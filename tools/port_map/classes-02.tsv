@@ -50,7 +50,7 @@ BannerDuplicateRecipe.getRemainingItems	port	crates/horizon-client/src/crafting.
 BannerDuplicateRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	
 BlastingRecipe.recipeBookCategory	skip:data		book category comes from the recipe JSON (Recipes::load keeps recipes.meta)
 BrewingInput.getItem	skip:java		
-BrewingRecipe.matches	port	crates/horizon-client/src/brewing.rs::Brewing::find	input and reagent both tested
+BrewingRecipe.matches	port	crates/horizon-client-render/src/brewing.rs::Brewing::find	input and reagent both tested
 CraftingRecipe.recipeBookCategory	skip:java		
 DecoratedPotRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	
 DecoratedPotRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	four sherds or bricks in the four pattern cells

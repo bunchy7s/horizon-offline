@@ -660,6 +660,7 @@ mod tests {
     use super::*;
     use crate::lan::{Joined, PlayerSender};
     use horizon_protocol::packets::configuration::ClientInformation;
+    use horizon_world::loot::PackOverlay;
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
     struct ItemRules(Items);
@@ -710,7 +711,9 @@ mod tests {
         }
         let registry = horizon_world::level::data::load_registry(&root).unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, &registry).unwrap();
-        Some(ItemRules(Items::load(&root, &registry, &facts).unwrap()))
+        Some(ItemRules(
+            Items::load(&root, &registry, &facts, &PackOverlay::NONE).unwrap(),
+        ))
     }
 
     fn contents(stack: &Option<ItemStack>) -> Vec<(String, u32)> {

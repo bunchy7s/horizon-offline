@@ -42,21 +42,21 @@ impl Game<'_> {
     /// The selected stack as `Hud.tick` compares it for the name highlight.
     fn held_name(&self) -> Option<HeldName> {
         let stack = self.inventory.get(self.selected)?.as_ref()?;
-        let custom = stack.custom_name();
+        let custom = stack.data().is_some_and(|data| data.custom_name.is_some());
         let default_rarity = self.item_rarity(&stack.item);
         let rarity = item_tooltip::rarity(stack, &default_rarity);
         Some(HeldName {
             item: stack.item.to_string(),
-            hover_name: Text::literal(item_tooltip::name_line(stack, &|key| {
-                self.pack.names.display_get(key)
-            })),
+            hover_name: item_tooltip::styled_name(stack, || {
+                item_tooltip::name_line(stack, &|key| self.pack.names.display_get(key))
+            }),
             rarity_color: match rarity {
                 "uncommon" => text::YELLOW,
                 "rare" => text::AQUA,
                 "epic" => text::LIGHT_PURPLE,
                 _ => text::WHITE,
             },
-            custom_name: custom.is_some(),
+            custom_name: custom,
         })
     }
     /// The title, action bar and selected-item parts of `Hud.tick`.

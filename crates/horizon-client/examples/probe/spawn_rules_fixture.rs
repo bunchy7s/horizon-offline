@@ -14,6 +14,7 @@ use horizon_client::{
     },
 };
 use horizon_core::random::{LegacyRandom, RandomSource};
+use horizon_world::loot::PackOverlay;
 use horizon_world::{chunk::BlockState, registry::BlockStateId};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -147,7 +148,7 @@ pub fn main() -> horizon_client::Result<()> {
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry)?;
     let data = MobData::load(root, &facts);
-    let items = Items::tags_only(root)?;
+    let items = Items::tags_only(root, &PackOverlay::NONE)?;
     let types = MobTypes::load(root)?;
     let mut out = String::new();
     for raw in input.lines() {

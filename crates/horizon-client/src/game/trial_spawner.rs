@@ -10,8 +10,8 @@ use horizon_client::{
         Who,
         spawner::SpawnerSpawn,
         trial_spawner::{
-            Omen, TRIAL_OMEN_TICKS_PER_LEVEL, TrialEvent, TrialPlayer, TrialSpawner,
-            TrialSpawnerExt, TrialSpawnerLevel, TrialState, Uuid,
+            TRIAL_OMEN_TICKS_PER_LEVEL, TrialEvent, TrialPlayer, TrialSpawner, TrialSpawnerExt,
+            TrialSpawnerLevel, TrialState, Uuid,
         },
     },
 };
@@ -41,8 +41,7 @@ impl TrialSpawnerLevel for GameLevel<'_, '_> {
             position: g.position,
             height: g.height,
             alive: g.alive,
-            // Guests carry no effects yet.
-            omen: None,
+            omen: g.omen,
         });
         let (Some(p), Some(view)) = (self.game.player.as_ref(), self.game.player_view()) else {
             return guests.collect();
@@ -56,11 +55,7 @@ impl TrialSpawnerLevel for GameLevel<'_, '_> {
             position: [p.position.x, p.position.y, p.position.z],
             height: p.dimensions.height,
             alive: self.game.level.health > 0.0,
-            omen: if self.game.potions.effects.get("trial_omen").is_some() {
-                Some(Omen::Trial)
-            } else {
-                self.game.potions.effects.get("bad_omen").map(|_| Omen::Bad)
-            },
+            omen: super::lan_mobs::omen_of(&self.game.potions.effects),
         };
         std::iter::once(host).chain(guests).collect()
     }
@@ -91,8 +86,10 @@ impl TrialSpawnerLevel for GameLevel<'_, '_> {
             .is_empty()
     }
     fn loot_items(&self, table: &str, seed: i64) -> Vec<ItemStack> {
-        let Some(loot) = horizon_client::structure_blocks::loot_data(&self.game.options.resources)
-        else {
+        let Some(loot) = horizon_client::structure_blocks::loot_data(
+            &self.game.options.resources,
+            &self.game.pack_files(),
+        ) else {
             return Vec::new();
         };
         loot.roll_split(table, &mut LegacyRandom::new(seed))
@@ -158,7 +155,10 @@ impl Game<'_> {
         let mut ejected: Vec<(ItemStack, [f64; 3])> = Vec::new();
         let next = {
             let level = self.natural_level();
-            let loot = horizon_client::structure_blocks::loot_data(&self.options.resources);
+            let loot = horizon_client::structure_blocks::loot_data(
+                &self.options.resources,
+                &self.pack_files(),
+            );
             let seed = self.level.seed;
             let mut spawn = |l: &GameLevel, r: &SpawnerSpawn| {
                 let added = l.game.plan_spawner_mob(l, r, &mut planned)?;
@@ -247,7 +247,7 @@ impl Game<'_> {
                     let who = by_uuid.get(&uuid).map(|id| Who::Mob(*id));
                     self.post_block_game_event("minecraft:entity_place", at, who, None);
                 }
-                TrialEvent::TrialOmen(_) => self.bad_omen_to_trial_omen(),
+                TrialEvent::TrialOmen(uuid) => self.bad_omen_to_trial_omen(uuid),
                 TrialEvent::Discard(uuid) => {
                     let id = self.persist.uuids.iter().find(|(_, u)| **u == uuid);
                     if let Some((id, _)) = id
@@ -292,22 +292,27 @@ impl Game<'_> {
         self.level_set([key.0, key.1, key.2], id)
     }
     /// `transformBadOmenIntoTrialOmen`: Bad Omen becomes Trial Omen, 15
-    /// minutes per level, with Trial Omen's sound when it is new.
-    fn bad_omen_to_trial_omen(&mut self) {
-        let Some(amplifier) = self.potions.effects.amplifier("bad_omen") else {
-            return;
+    /// minutes per level, with Trial Omen's sound when it is new. `uuid` is
+    /// the player found: the one in the game's frame, else a guest.
+    fn bad_omen_to_trial_omen(&mut self, uuid: Uuid) {
+        let eye = if self.acting_uuid() == uuid {
+            transform_bad_omen(&mut self.potions.effects)
+                .then(|| self.eye_position().unwrap_or_default())
+        } else {
+            let acting = self.lan_acting;
+            let Some(guest) = self.lan.as_mut().and_then(|h| {
+                h.hub.guests.iter_mut().find(|g| {
+                    horizon_client::lan::playerdata::uuid_ints(g.uuid) == uuid
+                        && Some(g.conn) != acting
+                })
+            }) else {
+                return;
+            };
+            let [x, y, z] = guest.position;
+            let eye = [x, y + guest.eye_height(), z];
+            transform_bad_omen(&mut guest.effects).then_some(eye)
         };
-        self.potions.effects.list.retain(|e| e.id != "bad_omen");
-        let new = self.potions.effects.get("trial_omen").is_none();
-        self.potions
-            .effects
-            .add(horizon_client::effects::EffectInstance::new(
-                "trial_omen",
-                TRIAL_OMEN_TICKS_PER_LEVEL * (amplifier + 1),
-                0,
-            ));
-        if new {
-            let eye = self.eye_position().unwrap_or_default();
+        if let Some(eye) = eye {
             self.audio
                 .play("minecraft:event.mob_effect.trial_omen", Some(eye), 1.0, 1.0);
         }
@@ -318,5 +323,46 @@ impl Game<'_> {
             log.push(key);
         }
         self.world.modified.insert((key.0 >> 4, key.2 >> 4));
+    }
+}
+
+/// Swap Bad Omen for Trial Omen on `effects`; true when Trial Omen is new.
+fn transform_bad_omen(effects: &mut horizon_client::effects::PlayerEffects) -> bool {
+    let Some(amplifier) = effects.amplifier("bad_omen") else {
+        return false;
+    };
+    effects.list.retain(|e| e.id != "bad_omen");
+    let new = effects.get("trial_omen").is_none();
+    effects.add(horizon_client::effects::EffectInstance::new(
+        "trial_omen",
+        TRIAL_OMEN_TICKS_PER_LEVEL * (amplifier + 1),
+        0,
+    ));
+    new
+}
+
+#[cfg(test)]
+mod omen_tests {
+    use super::*;
+    use horizon_client::{
+        effects::{EffectInstance, PlayerEffects},
+        mobs::trial_spawner::Omen,
+    };
+
+    #[test]
+    fn bad_omen_becomes_trial_omen_per_level() {
+        let omen_of = super::super::lan_mobs::omen_of;
+        let mut e = PlayerEffects::default();
+        assert_eq!(omen_of(&e), None);
+        e.add(EffectInstance::new("bad_omen", 100, 1));
+        assert_eq!(omen_of(&e), Some(Omen::Bad));
+        assert!(transform_bad_omen(&mut e));
+        assert!(e.get("bad_omen").is_none());
+        assert_eq!(
+            e.get("trial_omen").unwrap().duration,
+            TRIAL_OMEN_TICKS_PER_LEVEL * 2
+        );
+        assert_eq!(omen_of(&e), Some(Omen::Trial));
+        assert!(!transform_bad_omen(&mut e));
     }
 }

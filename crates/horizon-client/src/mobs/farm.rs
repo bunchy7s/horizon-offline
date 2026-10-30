@@ -63,6 +63,8 @@ pub fn register(m: &mut Mob) {
             g.add(6, LookAtPlayer::new(6.0));
             g.add(7, RandomLookAround::default());
             m.extra.egg_time = m.random.next_int_bound(6000).unwrap_or(0) + 6000;
+            // `Chicken()`: water costs nothing.
+            m.set_malus(super::path::PathType::Water, 0.0);
         }
         _ => {}
     }

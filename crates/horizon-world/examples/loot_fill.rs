@@ -2,13 +2,13 @@
 //!
 //! loot_fill <client resource dir> <table[,table...]> <seed>...: prints
 //! `table TABLE SEED` then `fill TABLE SEED SLOT ITEM COUNT DAMAGE [ENCH=LVL...]`.
-use horizon_world::loot::LootData;
+use horizon_world::loot::{LootData, PackOverlay};
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let root = PathBuf::from(args.next().ok_or("client resource directory")?);
-    let data = LootData::load(&root)?;
+    let data = LootData::load(&root, &PackOverlay::NONE)?;
     let tables: Vec<String> = args
         .next()
         .ok_or("table")?

@@ -1,8 +1,0 @@
-id = "welcome"
-name = "Welcome"
-version = "0.1.0"
-description = "Greets each player who joins, announces a newcomer to everyone, /online lists who is on, /mined counts the blocks you broke."
-authors = ["Horizon"]
-api = "0.3"
-side = "server"
-capabilities = ["players", "storage"]

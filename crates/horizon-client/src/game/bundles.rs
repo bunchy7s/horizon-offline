@@ -44,7 +44,7 @@ impl Game<'_> {
             return false;
         }
         let stack = self.slot_mut(slot).clone();
-        let items = self.res.items();
+        let items = self.items();
         let Some(bundle) = stack.filter(|s| items.get(&s.item).is_some_and(|i| i.bundle)) else {
             return false;
         };

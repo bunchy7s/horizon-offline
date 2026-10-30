@@ -10,10 +10,10 @@ IncomingEntry	skip:service		Mojang friends service UI (friend list, requests, pr
 OutgoingEntry	skip:service		Mojang friends service UI (friend list, requests, presence): service. Horizon's Friends button opens its own invite-code screen (game/screens.rs)
 PendingTab	skip:service		Mojang friends service UI (friend list, requests, presence): service. Horizon's Friends button opens its own invite-code screen (game/screens.rs)
 EffectsInInventory.extractRenderState	port	crates/horizon-client/src/game/potions.rs::Game::draw_inventory_effects	panel layout and visibility beside the survival and creative inventories; drawn by inventory_effects::paint
-EffectsInInventory.extractEffects	port	crates/horizon-client/src/inventory_effects.rs::paint	one row per effect: icon, then text and background
-EffectsInInventory.extractBackground	port	crates/horizon-client/src/inventory_effects.rs::background	nine-slice panel background, ambient variant included
-EffectsInInventory.extractText	port	crates/horizon-client/src/inventory_effects.rs::paint	name and duration text, clipping with ..., hover tooltip for compact panels
-EffectsInInventory.getEffectName	inline	crates/horizon-client/src/inventory_effects.rs::panels	name plus level suffix for amplifier 1-9, folded into panels
+EffectsInInventory.extractEffects	port	crates/horizon-client-render/src/inventory_effects.rs::paint	one row per effect: icon, then text and background
+EffectsInInventory.extractBackground	port	crates/horizon-client-render/src/inventory_effects.rs::background	nine-slice panel background, ambient variant included
+EffectsInInventory.extractText	port	crates/horizon-client-render/src/inventory_effects.rs::paint	name and duration text, clipping with ..., hover tooltip for compact panels
+EffectsInInventory.getEffectName	inline	crates/horizon-client-render/src/inventory_effects.rs::panels	name plus level suffix for amplifier 1-9, folded into panels
 EnchantmentNames.getRandomName	inline	crates/horizon-client/src/game/stations.rs::Game::draw_station	galactic word names from the enchant seed (WORDS), drawn in the enchanting option slots
 EnchantmentScreen.init	skip:ui		creates the book model for drawing only; the book itself is not drawn (see extractBook)
 EnchantmentScreen.containerTick	port	crates/horizon-client/src/game/locator_bar.rs::Game::track_experience_display	gap: player: keeps the experience bar up while the table is open; the book tick (tickBook) is not run

@@ -74,8 +74,45 @@ pub enum BlockEntity {
     /// `DaylightDetectorBlockEntity`: no data, only the ticker
     /// (`DaylightDetectorBlock.tickEntity`).
     DaylightDetector,
+    /// Suspicious sand and gravel: saved loot and the transient brushed face.
+    Brushable(Box<Brushable>),
+    /// A shelf holds three displayed item stacks.
+    Shelf(Box<Shelf>),
     /// `ChiseledBookShelfBlockEntity`: a `Container` of six one-book slots.
     ChiseledBookshelf(Box<ChiseledBookshelf>),
+    /// `PotentSulfurBlockEntity` (`game/potent_sulfur.rs`).
+    PotentSulfur(PotentSulfur),
+}
+/// `PotentSulfurBlockEntity`: the seconds left to the geyser's next change of
+/// state (`waitingCountdown`, saved as `countdown`) and the game time of its
+/// last eruption block event, which the client's plume counts from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PotentSulfur {
+    pub waiting_countdown: i32,
+    pub eruption_tick: i64,
+}
+impl Default for PotentSulfur {
+    fn default() -> Self {
+        Self {
+            waiting_countdown: -1,
+            eruption_tick: -1,
+        }
+    }
+}
+/// `BrushableBlockEntity`: the loot table is resolved on the first brush.
+#[derive(Clone, Debug, Default)]
+pub struct Brushable {
+    pub loot_table: Option<horizon_world::nbt::Tag>,
+    pub loot_seed: Option<horizon_world::nbt::Tag>,
+    pub item: Option<ItemStack>,
+    /// Direction's legacy network id; not saved to disk by vanilla.
+    pub hit_direction: Option<i32>,
+}
+/// `ShelfBlockEntity`'s displayed slots and alignment flag.
+#[derive(Clone, Debug, Default)]
+pub struct Shelf {
+    pub items: [Option<ItemStack>; 3],
+    pub align_to_bottom: bool,
 }
 /// `ChiseledBookShelfBlockEntity`: six slots and `lastInteractedSlot`.
 #[derive(Clone, Debug, PartialEq)]
@@ -209,6 +246,8 @@ pub struct SignText {
     /// `DyeColor` id.
     pub color: u8,
     pub glowing: bool,
+    /// The `click_event` in each line's component style, as saved.
+    pub click: [Option<Tag>; 4],
 }
 /// `SignBlockEntity` / `HangingSignBlockEntity` data.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -217,6 +256,8 @@ pub struct SignData {
     pub front: SignText,
     pub back: SignText,
     pub waxed: bool,
+    /// `allow_op_features`: the sign's click events may run commands.
+    pub allow_op_features: bool,
 }
 /// `VibrationInfo`.
 #[derive(Clone, Copy, Debug, PartialEq)]

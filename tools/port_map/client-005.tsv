@@ -27,7 +27,7 @@ CarriedBlockLayer.submit	port	crates/horizon-client/src/game/mob_blocks.rs::Game
 CatCollarLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	dyed collar
 CrossedArmsItemLayer.submit	missing		player: a villager or wandering trader never shows an item in its folded arms (Horizon villagers carry nothing and the villager model has no right_arm for the hand lookup)
 CrossedArmsItemLayer.applyTranslation	missing		player: no crossed-arms item placement (see CrossedArmsItemLayer.submit)
-CustomHeadLayer.submit	missing		player: a skull or head in the head slot (player, zombie, creeper, dragon heads) is not drawn on players or mobs; only the snow golem pumpkin and mooshroom mushrooms are placed
+CustomHeadLayer.submit	port	crates/horizon-client/src/game/mob_blocks.rs::Game::head_item_geometry	non-armour head items (carved pumpkins, mob heads, skulls) on players and mobs
 CustomHeadLayer.resolveSkullRenderType	missing		player: player-head skins on worn heads are never resolved (no worn heads are drawn, see CustomHeadLayer.submit)
 Deadmau5EarsLayer.submit	missing		minor: only a player named deadmau5 gets ears; the name tag lift for them is missing too
 DolphinCarryingItemLayer.submit	missing		player: a dolphin carrying an item shows nothing (the dolphin model has no arm bones for the hand lookup)
@@ -35,7 +35,7 @@ DrownedOuterLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	d
 EnergySwirlLayer.submit	port	crates/horizon-client/src/mobs/render.rs::energy_swirl	charged creeper and powered wither swirl, drawn in render_visible
 EquipmentLayerRenderer.renderLayers	port	crates/horizon-client/src/game/armor_stands.rs::Game::armor_layers	gap: player: the leather overlay (layer 1 of the equipment asset) is never drawn, only layer 0
 EquipmentLayerRenderer.getColorForLayer	port	crates/horizon-client/src/game/armor_stands.rs::Game::armor_layers	gap: player: a dyed leather piece is drawn in the undyed brown; the stack's dyed colour is not read
-EquipmentLayerRenderer.TrimTextureKey.createTextureWithNoPalette	port	crates/horizon-client/src/trims.rs::TrimTexture::generate	a trim with no palette is used as its own texture
+EquipmentLayerRenderer.TrimTextureKey.createTextureWithNoPalette	port	crates/horizon-client-render/src/trims.rs::TrimTexture::generate	a trim with no palette is used as its own texture
 EyesLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	spider, enderman and phantom eyes
 FoxHeldItemLayer.submit	missing		player: a fox's food in its mouth (berries, fish) is not drawn; the fox model has no arm bones for the hand lookup
 HorseMarkingLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	horse markings layer
@@ -73,7 +73,7 @@ TropicalFishPatternLayer.submit	port	crates/horizon-client/src/mobs/render.rs::l
 VillagerProfessionLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	type, profession and level layers; hat masks applied in render_visible
 VillagerProfessionLayer.getIdentifier	port	crates/horizon-client/src/mobs/render.rs::layers	texture paths built per type, profession and level
 VillagerProfessionLayer.getHatData	port	crates/horizon-client/src/mobs/villager_hats.rs::VillagerHats::load	hat metadata read from the resources
-WingsLayer.submit	port	crates/horizon-client/src/game/perspective.rs::Game::player_elytra_geometry	gap: minor: the wings texture comes from the equipment asset; a skin's own elytra or cape texture is not used
+WingsLayer.submit	port	crates/horizon-client/src/game/perspective.rs::Game::wings_geometry	gap: minor: the wings texture comes from the equipment asset; a skin's own elytra or cape texture is not used; players and armour stands only, humanoid mobs draw no wings (#3843)
 WingsLayer.getPlayerElytraTexture	port	crates/horizon-client/src/game/perspective.rs::Game::player_elytra_geometry	gap: minor: a skin elytra or cape texture is never chosen
 WitchItemLayer.applyTranslation	missing		player: a witch's potion (drunk or about to be thrown) is not drawn; the witch model has no right_arm for the hand lookup
 WolfArmorLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	gap: minor: the armour texture is fixed to the armadillo scute; the equipment asset is not read

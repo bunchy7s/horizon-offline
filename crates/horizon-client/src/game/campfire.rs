@@ -32,7 +32,7 @@ impl Game<'_> {
         let Some(held) = self.held().cloned() else {
             return Ok(None);
         };
-        let Some(time) = self.res.recipes().cook(KIND, &held).map(|r| r.time as i32) else {
+        let Some(time) = self.recipes().cook(KIND, &held).map(|r| r.time as i32) else {
             return Ok(None);
         };
         // A client of a server predicts the placing; the server decides.

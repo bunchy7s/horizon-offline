@@ -577,10 +577,10 @@ impl Game<'_> {
                         direct_attacker: Some("minecraft:trident"),
                         is_direct: true,
                         damage_type: Some("minecraft:trident"),
-                        items: Some(self.res.items()),
+                        items: Some(world_items!(self)),
                         ..Default::default()
                     };
-                    let damage = self.res.stations().enchantments.modify_value(
+                    let damage = world_stations!(self).enchantments.modify_value(
                         Some(&t.stack),
                         "minecraft:damage",
                         &ctx,

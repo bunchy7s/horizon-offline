@@ -693,7 +693,7 @@ mod tests {
     #[test]
     fn damaged_or_named_stacks_are_not_counted() {
         let mut named = ItemStack::new("minecraft:stick", 4);
-        named.data_mut().custom_name = Some("x".into());
+        named.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("x".into()));
         let mut damaged = ItemStack::new("minecraft:iron_sword", 1);
         damaged.damage = 3;
         let mut s = Stacked::default();

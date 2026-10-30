@@ -54,6 +54,28 @@ pub fn spawn_egg_op_warning(stack: &crate::items::ItemStack) -> bool {
         )
 }
 
+/// `SpawnEggItem.useOn` on a spawner: the type it sets (`getType`: the egg's
+/// entity data id, else the egg's own type) and, for an op
+/// (`PlayerList.isOp`), that entity data for `Spawner.setEntityData`; anyone
+/// else sets only the type (`setEntityId`).
+pub fn spawn_egg_on_spawner(
+    stack: &crate::items::ItemStack,
+    op: bool,
+) -> (String, Option<Compound>) {
+    let data = match stack.data().and_then(|d| d.other("minecraft:entity_data")) {
+        Some(Tag::Compound(c)) => Some(c),
+        _ => None,
+    };
+    let id = match data.and_then(|c| c.get(&JavaString::from("id"))) {
+        Some(Tag::String(id)) => id.to_string_lossy(),
+        _ => {
+            let kind = stack.item.trim_end_matches("_spawn_egg");
+            format!("minecraft:{}", kind.trim_start_matches("minecraft:"))
+        }
+    };
+    (id, data.filter(|_| op).cloned())
+}
+
 /// `Spawner.getSpawnEntityDisplayName` (`SpawnData.entity.id` of the item's
 /// data, which `ItemStack.addDetailsToTooltip` reads for spawners and trial
 /// spawners alike): the entity type a spawner item spawns.
@@ -464,6 +486,35 @@ mod tests {
         // Data of another type is ignored.
         let chest = saved("{id:\"minecraft:chest\",x:0,y:0,z:0}");
         assert_eq!(place(&chest, &patch, true), chest);
+    }
+
+    #[test]
+    fn a_spawn_egg_sets_its_data_type_and_an_ops_data() {
+        let egg = |entity_data: Option<&str>| {
+            let mut stack = crate::items::ItemStack::new("minecraft:zombie_spawn_egg", 1);
+            if let Some(text) = entity_data {
+                let components = snbt(&format!("{{\"minecraft:entity_data\":{text}}}"));
+                (stack.damage, stack.extra) =
+                    crate::item_data::decode_components(Some(&components));
+            }
+            stack
+        };
+        // A plain egg: its own type, no data, op or not.
+        assert_eq!(
+            spawn_egg_on_spawner(&egg(None), true),
+            ("minecraft:zombie".into(), None)
+        );
+        // Entity data: its type for anyone (getType), its data only for an op.
+        let custom = egg(Some("{id:\"minecraft:skeleton\",CustomName:\"Guard\"}"));
+        let (id, data) = spawn_egg_on_spawner(&custom, false);
+        assert_eq!((id.as_str(), data), ("minecraft:skeleton", None));
+        let (id, data) = spawn_egg_on_spawner(&custom, true);
+        assert_eq!(id, "minecraft:skeleton");
+        let data = data.expect("an op's egg carries its data");
+        assert_eq!(
+            data.get(&JavaString::from("CustomName")),
+            Some(&Tag::String("Guard".into()))
+        );
     }
 
     #[test]

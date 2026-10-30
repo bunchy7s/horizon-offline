@@ -296,7 +296,7 @@ pub(super) fn mob_set_slot(m: &mut Mob, slot: Slot, stack: ItemStack) {
     let item: Arc<str> = stack.item.clone();
     let x = &mut m.extra;
     match slot {
-        Slot::MainHand => x.main_hand = Some(item),
+        Slot::MainHand => x.set_main_hand(Some(item)),
         Slot::OffHand => x.off_hand = Some(item),
         Slot::Feet => x.feet = Some(item),
         Slot::Legs => x.legs = Some(item),
@@ -776,7 +776,7 @@ impl Game<'_> {
     /// `EquipmentDispenseItemBehavior.dispenseEquipment`: the first living
     /// entity in front that `canEquipWithDispenser` gets one of the item.
     fn dispense_equipment(&mut self, pos: Pos, facing: Direction, stack: &mut ItemStack) -> bool {
-        let Some(info) = self.res.items().get(&stack.item) else {
+        let Some(info) = self.items().get(&stack.item) else {
             return false;
         };
         let (Some(slot), true) = (
@@ -1456,30 +1456,14 @@ impl Game<'_> {
             if equipped { CLICK } else { FAIL },
         ))
     }
-    /// `WitherSkullBlock.getOrCreateWitherBase().find(level, pos)`: the soul
-    /// sand T below the row `head` is in.
+    /// `WitherSkullBlock.getOrCreateWitherBase().find(level, pos)`: a soul
+    /// sand T for the skull row, in any orientation.
     fn can_build_wither(&self, head: Pos) -> bool {
-        let soul = |p: Pos| {
-            matches!(
-                &*self.dispenser_block_name(p),
-                "minecraft:soul_sand" | "minecraft:soul_soil"
-            )
-        };
-        let air = |p: Pos| self.res.facts().is_air(self.block_at(p));
-        for (ax, az) in [(1, 0), (0, 1)] {
-            for col in 0..3 {
-                let left = (head.0 - ax * col, head.1, head.2 - az * col);
-                let at = |c: i32, row: i32| (left.0 + ax * c, left.1 - row, left.2 + az * c);
-                if (0..3).all(|c| soul(at(c, 1)))
-                    && soul(at(1, 2))
-                    && air(at(0, 2))
-                    && air(at(2, 2))
-                {
-                    return true;
-                }
-            }
-        }
-        false
+        self.find_wither_pattern(
+            horizon_client::block_pattern::WITHER_BASE,
+            [head.0, head.1, head.2],
+        )
+        .is_some()
     }
     fn dispense_carved_pumpkin(
         &mut self,
@@ -1699,10 +1683,10 @@ impl Game<'_> {
         table: &str,
         held: Option<&ItemStack>,
     ) -> Vec<ItemStack> {
-        match self.res.items().loot_sequence(parent) {
+        match world_items!(self).loot_sequence(parent) {
             Some(sequence) => {
                 let random = self.rand_sequences.get(&sequence, self.level.seed);
-                self.res.items().loot_table_from(table, false, held, random)
+                world_items!(self).loot_table_from(table, false, held, random)
             }
             None => self
                 .res

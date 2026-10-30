@@ -87,7 +87,7 @@ KeyframeTrackSampler.bakeSegments	inline	crates/horizon-client/src/patrol.rs::Bo
 KeyframeTrackSampler.addSegmentsFromKeyframes	inline	crates/horizon-client/src/patrol.rs::BoolTrack::sample	segments are not built; sample reads the keyframes directly
 KeyframeTrackSampler.getSegmentAt	inline	crates/horizon-client/src/patrol.rs::BoolTrack::sample	the keyframe lookup is a scan in sample
 KeyframeTrackSampler.loopTicks	inline	crates/horizon-client/src/patrol.rs::BoolTrack::sample	the period wrap (rem_euclid) inside sample
-LightCoordsUtil.addSmoothBlockEmission	port	crates/horizon-client/src/particles.rs::Particle::light_coords	the age-emission arms add the emitted block light capped at 240
+LightCoordsUtil.addSmoothBlockEmission	port	crates/horizon-client-render/src/particles.rs::Particle::light_coords	the age-emission arms add the emitted block light capped at 240
 LinearCongruentialGenerator.next	inline	crates/horizon-core/src/biome.rs::BiomeZoom::quart_at_block	the g closure is the LCG step; the coordinate is added separately
 MemoryReserve.release	skip:other		frees a JVM heap reserve for OutOfMemoryError; Horizon is native code
 ModCheck.identify	skip:other		brand and jar-signature check for crash reports; Horizon has no such check
@@ -95,7 +95,7 @@ ModCheck.merge	skip:other		brand and jar-signature check for crash reports; Hori
 Mth.absMax	skip:java		pure math helper; Rust abs and max at each use
 Mth.nextFloat	inline	crates/horizon-world/src/loot.rs::Context::float	the float range formula; one copy inlined here, others may inline it too
 Mth.smallestEncompassingPowerOfTwo	skip:java		Rust next_power_of_two at each use; differs only for 0 (vanilla 0, Rust 1)
-Mth.smallestSquareSide	port	crates/horizon-client/src/gfx/pack_atlas.rs::PackAtlas::new	gap: minor: the shader-pack block atlas grid; vanilla's caller is the GUI item atlas, with no Horizon counterpart found
+Mth.smallestSquareSide	port	crates/horizon-client-render/src/gfx/pack_atlas.rs::PackAtlas::new	gap: minor: the shader-pack block atlas grid; vanilla's caller is the GUI item atlas, with no Horizon counterpart found
 Mth.isPowerOfTwo	skip:java		Rust is_power_of_two at each use
 Mth.rayIntersectsAABB	skip:other		minor: no caller in 26.3 (dead helper)
 Mth.fastInvCubeRoot	skip:other		minor: no caller in 26.3 (dead helper)
@@ -113,8 +113,8 @@ NativeModuleLister.queryVersionValue	skip:other		Windows module list for crash r
 NativeModuleLister.queryVersionString	skip:other		Windows module list for crash reports; Horizon has no such report
 NativeModuleLister.addCrashSection	skip:other		Windows module list for crash reports; Horizon has no such report
 NativeModuleLister.NativeModuleInfo.toString	skip:other		Windows module list for crash reports; Horizon has no such report
-ParticleUtils.spawnParticlesOnBlockFace	inline	crates/horizon-client/src/particles.rs::on_block_faces_between	the per-face count and emission fold into the six-face loop
-ParticleUtils.getRandomSpeedRanges	inline	crates/horizon-client/src/particles.rs::on_block_faces_between	the speed draw is written inline in the loop
+ParticleUtils.spawnParticlesOnBlockFace	inline	crates/horizon-client-render/src/particles.rs::on_block_faces_between	the per-face count and emission fold into the six-face loop
+ParticleUtils.getRandomSpeedRanges	inline	crates/horizon-client-render/src/particles.rs::on_block_faces_between	the speed draw is written inline in the loop
 ParticleUtils.spawnParticleBelow	inline	crates/horizon-client/src/animate_tick.rs::block_animate_tick	the leaves drip and falling-dust arms place a particle at y - 0.05 with zero velocity
 PlaceholderLookupProvider.hasRegisteredPlaceholders	skip:data		datagen placeholder lookup for data-driven registries
 PlaceholderLookupProvider.UniversalLookup.get	skip:data		datagen placeholder lookup for data-driven registries
@@ -131,7 +131,7 @@ ProblemReporter.ScopedCollector.close	skip:other		log text for load problems; Ho
 RandomSource.createThreadLocalInstance	port	crates/horizon-client/src/game/dispenser.rs::entity_random	gap: minor: seeds from a uniquifier and the clock, not ThreadLocalRandom
 SegmentedAnglePrecision.isSameAxis	skip:other		minor: no caller in 26.3 (dead helper)
 SegmentedAnglePrecision.fromDirection	port	crates/horizon-world/src/level/place.rs::rotation_segment_of	
-SegmentedAnglePrecision.toDegrees	inline	crates/horizon-client/src/block_entity_render.rs::classify	the segment-to-angle step (segment * 22.5); minor: no wrap to -180..180, same rotation
+SegmentedAnglePrecision.toDegrees	inline	crates/horizon-client-render/src/block_entity_render.rs::classify	the segment-to-angle step (segment * 22.5); minor: no wrap to -180..180, same rotation
 SequencedPriorityIterator.add	inline	crates/horizon-world/src/worldgen/structure/jigsaw.rs::Placer::children	the priority queue insert is inside children
 SequencedPriorityIterator.computeNext	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::Placer::next	gap: minor: the queue is a BTreeMap, not a cache that switches queues
 SequencedPriorityIterator.switchCacheToNextHighestPrioQueue	inline	crates/horizon-world/src/worldgen/structure/jigsaw.rs::Placer::next	BTreeMap last_entry finds the highest priority queue

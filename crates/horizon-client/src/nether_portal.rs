@@ -2,6 +2,10 @@
 //! (`Entity.setAsInsidePortal` / `handlePortal`) for nether portals.
 use horizon_core::position::BlockPos;
 
+/// `Entity.getDimensionChangingDelay`: the portal cooldown of an entity that
+/// went through a portal.
+pub const ENTITY_DELAY: i32 = 300;
+
 /// `PortalProcessor` for a nether portal.
 #[derive(Clone, Copy, Debug)]
 pub struct Process {

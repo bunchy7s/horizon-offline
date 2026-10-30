@@ -69,6 +69,15 @@ pub enum SceneSound {
     BigFall,
 }
 impl SceneSound {
+    /// The sound event of `LivingEntity.getFallDamageSound` for a player, if
+    /// this is one of the two fall sounds.
+    pub fn player_fall_sound(self) -> Option<&'static str> {
+        match self {
+            Self::BigFall => Some("minecraft:entity.player.big_fall"),
+            Self::SmallFall => Some("minecraft:entity.player.small_fall"),
+            Self::Block(_) => None,
+        }
+    }
     fn name(self) -> &'static str {
         match self {
             Self::SmallFall => "small",
@@ -527,5 +536,25 @@ impl LivingFallWorld for FallCall<'_, '_, '_, '_> {
             amount,
         )?;
         Ok(())
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fall_sounds_map_to_player_events() {
+        assert_eq!(
+            SceneSound::BigFall.player_fall_sound(),
+            Some("minecraft:entity.player.big_fall")
+        );
+        assert_eq!(
+            SceneSound::SmallFall.player_fall_sound(),
+            Some("minecraft:entity.player.small_fall")
+        );
+        assert_eq!(
+            SceneSound::Block(LandingSound::HoneyFall).player_fall_sound(),
+            None
+        );
     }
 }

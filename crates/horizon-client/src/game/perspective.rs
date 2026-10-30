@@ -11,6 +11,7 @@ use horizon_client::{
 use horizon_client::{
     hud::HudBatch,
     mobs::{Anim, Brain, Mob, MobType},
+    mouse::Rotation,
     pose::Pose,
 };
 use horizon_core::{
@@ -340,7 +341,9 @@ impl Game<'_> {
             let Some(kind) = self.res.player_type().clone() else {
                 return;
             };
-            self.player_model = Some(Mob::new(0, kind, p.position, self.yaw));
+            let mut m = Mob::new(0, kind, p.position, self.yaw);
+            m.head_pitch = self.pitch;
+            self.player_model = Some(m);
         }
         let crouching = p.pose == Pose::Crouching;
         let position = p.position;
@@ -372,13 +375,13 @@ impl Game<'_> {
             p.pose == Pose::Swimming || (!p.fall_flying && p.pose == Pose::FallFlying);
         let in_water = p.fluids.was_touching_water;
         let (yaw, pitch) = (self.yaw, self.pitch);
-        let main = self.inventory[self.selected]
-            .as_ref()
-            .map(|s| s.item.clone());
+        let main = self.inventory[self.selected].clone();
         let off = self.offhand.as_ref().map(|s| s.item.clone());
+        let armor = self.armor.clone();
         let riding = self.riding.is_some();
         let hurt = p.health.hurt_animation_time;
         let avatar = self.avatar;
+        let previous_position = self.previous_position;
         // LivingEntity.getBedOrientation: the model lies in the bed as
         // another player's does (`villager::sleep_pose`).
         let bed = self.sleeping.map_or(0, |head| self.bed_facing(head));
@@ -387,22 +390,13 @@ impl Game<'_> {
         };
         m.extra.ints[1] = bed;
         m.extra.model_scale = scale;
-        let at = Vec3::new(
-            position.x,
-            position.y - if crouching { 0.125 } else { 0.0 },
-            position.z,
-        );
-        let (dx, dy, dz) = (
-            at.x - m.position.x,
-            at.y - m.position.y,
-            at.z - m.position.z,
-        );
-        let walked = player_walk_distance(m.position, at);
-        m.previous = m.position;
+        // The crouch flag is still last tick's here.
+        let (from, at) =
+            player_model_positions(previous_position, position, m.extra.crouching, crouching);
+        m.previous = from;
         m.position = at;
-        if dx * dx + dy * dy + dz * dz > 100.0 {
-            m.previous = at;
-        }
+        let (dx, dz) = (at.x - m.previous.x, at.z - m.previous.z);
+        let walked = player_walk_distance(m.previous, at);
         m.previous_yaw = m.yaw;
         m.previous_body_yaw = m.body_yaw;
         m.previous_head_yaw = m.head_yaw;
@@ -438,8 +432,14 @@ impl Game<'_> {
         m.age = m.age.wrapping_add(1);
         m.anim.attack_anim_o = attack.0;
         m.anim.attack_anim = attack.1;
-        m.extra.main_hand = main;
+        m.extra.set_main_hand_stack(main);
         m.extra.off_hand = off;
+        m.extra.head = self.armor[0].as_ref().map(|s| s.item.clone());
+        m.extra.chest = self.armor[1].as_ref().map(|s| s.item.clone());
+        m.extra.legs = self.armor[2].as_ref().map(|s| s.item.clone());
+        m.extra.feet = self.armor[3].as_ref().map(|s| s.item.clone());
+        // The worn stacks, for the elytra's glint (`WingsLayer`).
+        m.extra.armor = armor;
         m.extra.crouching = crouching;
         m.extra.passenger = riding;
         m.velocity = velocity;
@@ -465,6 +465,40 @@ impl Game<'_> {
         m.extra.swing_right_arm = swing_right_arm;
         m.extra.swing_stab = self.swing.current.is_some_and(|c| c.animation.kind == 2);
         m.hurt_time = hurt;
+    }
+    /// `Entity.turn` for the player, by the mouse, a pad, the arrow keys or an
+    /// agent's `turn`.
+    /// The model's old pitch is the player's `xRotO`, which the turn moves
+    /// with `xRot` (`turn_rotation`).
+    pub(super) fn turn_player(&mut self, xo: f64, yo: f64) {
+        let pitch_o = self.player_model.as_ref().map(|m| m.previous_head_pitch);
+        let rotation = turn_rotation(self.yaw, self.pitch, pitch_o, xo, yo);
+        self.yaw = rotation.y_rot;
+        self.pitch = rotation.x_rot;
+        if let Some(m) = self.player_model.as_mut() {
+            m.previous_head_pitch = rotation.x_rot_o;
+            m.head_pitch = rotation.x_rot;
+        }
+        // Entity.turn ends in AbstractBoat.onPassengerTurned: clampRotation
+        // keeps the view within 105 degrees of the boat at every turn, not
+        // only at the tick, so it never swings past and back.
+        if let Some(b) = self
+            .riding
+            .and_then(|id| self.boats.iter().find(|b| b.id == id))
+        {
+            let delta = (self.yaw - b.yaw + 180.0).rem_euclid(360.0) - 180.0;
+            self.yaw += delta.clamp(-105.0, 105.0) - delta;
+        }
+    }
+    /// `Entity.setOldRot` after a server sets the player's rotation
+    /// (`handleRotatePlayer`): the model's head snaps to it instead of easing
+    /// in over the next tick.
+    pub(super) fn snap_player_model_pitch(&mut self) {
+        let pitch = self.pitch;
+        if let Some(m) = self.player_model.as_mut() {
+            m.previous_head_pitch = pitch;
+            m.head_pitch = pitch;
+        }
     }
     /// `LevelExtractor`'s skip of the camera entity: the player's own body
     /// is drawn unless the camera is in first person, or while it sleeps.
@@ -539,6 +573,8 @@ impl Game<'_> {
         self.player_elytra_geometry(m, chest, camera, alpha as f32, packed, out);
         self.spin_attack_geometry(m, camera, alpha as f32, packed, out);
         self.held_item_geometry(m, camera, alpha, packed, true, out);
+        // CustomHeadLayer: a pumpkin, skull or other head item.
+        self.head_item_geometry(m, camera, alpha, packed, true, out);
         // LivingEntity.isCurrentlyGlowing: the Glowing effect.
         if self.potions.effects.get("glowing").is_some() {
             let color = super::glowing::team_color(self.own_team());
@@ -627,6 +663,7 @@ impl Game<'_> {
         }
         self.player_elytra_geometry(&m, chest, camera, 1.0, 240 | 240 << 8, &mut verts);
         self.held_item_geometry(&m, camera, 1.0, 240 | 240 << 8, false, &mut verts);
+        self.head_item_geometry(&m, camera, 1.0, 240 | 240 << 8, false, &mut verts);
         let height = if m.extra.crouching { 1.5 } else { 1.8 };
         // PictureInPictureRenderer: the box centre, (size, size, -size);
         // then the translation and Rz(pi) * Rx(y_angle * 20 degrees).
@@ -674,8 +711,53 @@ impl Game<'_> {
         light: u32,
         out: &mut Vec<horizon_client::mesher::Vertex>,
     ) {
+        self.wings_geometry(
+            chest,
+            m.cape.as_deref(),
+            false,
+            horizon_client::mobs::render::base_transform(m, partial, camera),
+            m.extra.elytra.angles(partial),
+            m.extra.crouching,
+            light,
+            self.wings_overlay(
+                m.extra.armor[1]
+                    .as_ref()
+                    .filter(|s| chest == Some(&*s.item)),
+            ),
+            out,
+        );
+    }
+    /// `WingsLayer` draws through `EquipmentLayerRenderer.renderLayers`: the
+    /// armour glint when the worn elytra `hasFoil()`.
+    pub(super) fn wings_overlay(&self, stack: Option<&horizon_client::items::ItemStack>) -> u32 {
+        let item_glint = |item: &str| {
+            let props = &self.res.items().enchantments.props;
+            props.get(item).is_some_and(|p| p.glint)
+        };
+        match stack {
+            Some(s) if s.has_foil(item_glint(&s.item)) => horizon_client::mobs::render::ARMOR_GLINT,
+            _ => 0,
+        }
+    }
+    /// `WingsLayer.submit` for any wearer: the wings of `chest`'s equipment
+    /// asset on `base` (the wearer's model transform), `baby` for the baby
+    /// elytra model. `cape` is a player's own cape texture, which has its
+    /// elytra (`WingsLayer.getPlayerElytraTexture`).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn wings_geometry(
+        &self,
+        chest: Option<&str>,
+        cape: Option<&str>,
+        baby: bool,
+        base: glam::Mat4,
+        angles: [f32; 3],
+        crouching: bool,
+        light: u32,
+        overlay: u32,
+        out: &mut Vec<horizon_client::mesher::Vertex>,
+    ) {
         let Some(asset) = chest
-            .and_then(|item| self.res.items().get(item))
+            .and_then(|item| self.items().get(item))
             .and_then(|i| i.equip_asset.as_ref())
         else {
             return;
@@ -684,18 +766,17 @@ impl Game<'_> {
         let Some((texture, _)) = assets.equipment.get(asset).and_then(|k| k.get("wings")) else {
             return;
         };
-        // WingsLayer.getPlayerElytraTexture: a player's cape texture has its elytra.
         let sprites = &self.gui.atlas.sprites;
-        let rect = m.cape.as_deref().and_then(|c| sprites.get(c));
+        let rect = cape.and_then(|c| sprites.get(c));
         let (Some(model), Some(rect)) = (
-            assets.player.get("elytra"),
+            assets
+                .player
+                .get(if baby { "elytra_baby" } else { "elytra" }),
             rect.or_else(|| sprites.get(texture)),
         ) else {
             return;
         };
-        let base = horizon_client::mobs::render::base_transform(m, partial, camera)
-            * glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, 0.125));
-        let angles = m.extra.elytra.angles(partial);
+        let base = base * glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.0, 0.125));
         horizon_client::mobs::render_model(
             model,
             base,
@@ -703,7 +784,7 @@ impl Game<'_> {
                 let mut p = part.pose;
                 if part.name == "left_wing" || part.name == "right_wing" {
                     let invert = if part.name == "left_wing" { 1.0 } else { -1.0 };
-                    p[1] = if m.extra.crouching { 3.0 } else { 0.0 };
+                    p[1] = if crouching { 3.0 } else { 0.0 };
                     p[3] = angles[0];
                     p[4] = invert * angles[1];
                     p[5] = invert * angles[2];
@@ -712,7 +793,7 @@ impl Game<'_> {
             },
             [rect.u0, rect.v0, rect.u1, rect.v1],
             light,
-            0,
+            overlay,
             out,
         );
     }
@@ -852,6 +933,43 @@ fn player_preview_quads(
     quads
 }
 
+/// `Entity.turn` adds the turn to `xRotO` as well as to `xRot`, so the local
+/// player's `getXRot(partialTick)` follows the mouse every frame instead of
+/// easing in over a tick (#3844), while a change the tick made itself (the
+/// pitch a sleeper lies at) still eases in. `pitch_o` is the model's old
+/// pitch; without a model the old pitch is the pitch.
+fn turn_rotation(yaw: f32, pitch: f32, pitch_o: Option<f32>, xo: f64, yo: f64) -> Rotation {
+    let mut rotation = Rotation {
+        x_rot: pitch,
+        y_rot: yaw,
+        x_rot_o: pitch_o.unwrap_or(pitch),
+        y_rot_o: yaw,
+    };
+    rotation.turn(xo, yo);
+    rotation
+}
+
+/// The player's model's old and new positions for a tick: the player's old
+/// (`Entity.xo`, `yo`, `zo`) and new positions, each 0.125 lower while
+/// crouching. The model is the player itself in vanilla, so
+/// `EntityRenderer.extractRenderState` lerps it from the same old position
+/// `Camera.setup` does, however far it moved: at Levitation 255 (12.75 blocks
+/// a tick) the body keeps up with the camera. A teleport or respawn resets
+/// the old position, and the model jumps with it.
+fn player_model_positions(
+    previous_position: Vec3,
+    position: Vec3,
+    was_crouching: bool,
+    crouching: bool,
+) -> (Vec3, Vec3) {
+    let drop =
+        |p: Vec3, crouching: bool| Vec3::new(p.x, p.y - if crouching { 0.125 } else { 0.0 }, p.z);
+    (
+        drop(previous_position, was_crouching),
+        drop(position, crouching),
+    )
+}
+
 /// The distance `LivingEntity.calculateEntityAnimation` walks the player's
 /// model for a move from `from` to `to`. `omnidirectionalAirMover()` is false
 /// for every player (`Entity`'s, not overridden), so only the horizontal
@@ -866,6 +984,26 @@ fn player_walk_distance(from: Vec3, to: Vec3) -> f32 {
 mod preview_tests {
     use super::*;
     #[test]
+    fn the_player_model_rises_with_the_camera_at_levitation_255() {
+        // LivingEntity.travel at Levitation 255: 0.05 * 255 blocks a tick.
+        let from = Vec3::new(0.5, 80.0, 0.5);
+        let to = Vec3::new(0.5, 92.75, 0.5);
+        // The camera lerps from the old position: so does the body.
+        assert_eq!(
+            player_model_positions(from, to, false, false),
+            (from, to),
+            "the body jumps instead of rising (#3616)"
+        );
+        // Any distance, crouching on both ends.
+        let far = Vec3::new(40.5, 80.0, 0.5);
+        assert_eq!(
+            player_model_positions(from, far, true, true),
+            (Vec3::new(0.5, 79.875, 0.5), Vec3::new(40.5, 79.875, 0.5)),
+        );
+        // A teleport resets the old position to the new one: no sweep.
+        assert_eq!(player_model_positions(to, to, false, false), (to, to));
+    }
+    #[test]
     fn flying_straight_up_does_not_walk_the_player_model() {
         let from = Vec3::new(0.5, 80.0, 0.5);
         // Creative flight straight up (#3302) and straight down.
@@ -874,6 +1012,44 @@ mod preview_tests {
         // Moving sideways while rising walks only the horizontal part.
         let d = player_walk_distance(from, Vec3::new(0.8, 81.0, 0.9));
         assert!((d - 0.5).abs() < 1e-6, "{d}");
+    }
+    /// #3844: `getXRot(partialTick)` after `Entity.turn`, as the model's
+    /// renderer lerps it, with turns before and after the tick.
+    #[test]
+    fn own_head_pitch_follows_the_mouse_between_ticks() {
+        // (pitch, the model's previous head pitch, its head pitch), as
+        // `turn_player` and `tick_player_model` move them.
+        let turn = |(pitch, previous, _): (f32, f32, f32), degrees: f32| {
+            let r = turn_rotation(0.0, pitch, Some(previous), 0.0, f64::from(degrees / 0.15));
+            (r.x_rot, r.x_rot_o, r.x_rot)
+        };
+        let tick = |(pitch, _, head): (f32, f32, f32)| (pitch, head, pitch);
+        let x_rot =
+            |(_, previous, head): (f32, f32, f32), alpha: f32| previous + (head - previous) * alpha;
+        let at = |state, pitch: f32| {
+            for alpha in [0.0, 0.5, 1.0] {
+                let x = x_rot(state, alpha);
+                assert!((x - pitch).abs() < 1e-3, "partial tick {alpha}: {x}");
+            }
+        };
+        // The arrow keys turn before the frame's ticks: the tick then copies
+        // ends that are already in step.
+        let still = (10.0, 10.0, 10.0);
+        let state = tick(turn(still, 30.0));
+        at(state, 40.0);
+        // The mouse turns after the tick: the head is there at once.
+        let state = turn(state, -30.0);
+        at(state, 10.0);
+        // The tick laid the head down from 30 to 0: the turn moves both
+        // ends, and the tick's change still eases in.
+        let state = turn((0.0, 30.0, 0.0), 10.0);
+        assert!((x_rot(state, 0.5) - 25.0).abs() < 1e-3, "{state:?}");
+        // xRotO is clamped as xRot is.
+        let r = turn_rotation(0.0, 60.0, Some(80.0), 0.0, 200.0);
+        assert_eq!((r.x_rot_o, r.x_rot), (90.0, 90.0));
+        // Without a model the old pitch is the pitch.
+        let r = turn_rotation(0.0, 10.0, None, 0.0, 100.0);
+        assert_eq!(r.x_rot_o, r.x_rot);
     }
     #[test]
     fn preview_keeps_crossing_faces_depth_and_clips_without_dropping_faces() {
@@ -960,7 +1136,7 @@ mod preview_tests {
             return;
         };
         let m = Mob::new(1, kind.clone(), Vec3::ZERO, 0.0);
-        let armour = [(&*kind.model, [0.5, 0.5, 0.75, 0.75], u32::MAX)];
+        let armour = [(&*kind.model, [0.5, 0.5, 0.75, 0.75], u32::MAX, 0)];
         let atlas = |_: &str| Some([0.0, 0.0, 0.25, 0.25]);
         let data = horizon_client::mobs::MobData {
             states: Vec::new(),

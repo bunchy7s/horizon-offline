@@ -425,6 +425,32 @@ def mob_riding():
     ]
 
 
+def camel_riders():
+    """A husk riding a camel (#3199): the camel and its rider never push each other
+    (Entity.push skips passengers of the same vehicle), so the camel stays near
+    where it was summoned instead of sliding off backwards, and it never sits down
+    with a controlling passenger (CamelAi.RandomSitting needs none)."""
+    camel = '@e[tag=camel_v,limit=1]'
+    return [
+        # A walled pen, and a camel that cannot walk: only a push would move it.
+        *setup('/fill 0 200 0 15 203 15 minecraft:glass hollow', '/fill 1 203 1 14 203 14 minecraft:air',
+               '/scoreboard objectives add camel_pose dummy',
+               '/summon minecraft:camel 8.0 201 8.0 {Tags:["camel_v"],'
+               'Passengers:[{id:"minecraft:husk",Tags:["camel_r"]}]}',
+               f'/attribute {camel} minecraft:movement_speed base set 0'),
+        {'op': 'tick', 'n': 100},
+        cmd('/execute as @e[tag=camel_r] on vehicle run say carrying'),
+        cmd('/execute if entity @e[tag=camel_v,x=8,y=201,z=8,distance=..4]'),
+        {'op': 'tick', 'n': 500},
+        *setup(f'/execute store result score camel camel_pose run data get entity {camel} LastPoseTick'),
+        # Negative while sitting.
+        cmd('/execute if score camel camel_pose matches ..-1'),
+        cmd('/execute as @e[tag=camel_r] on vehicle run say still carrying'),
+        *setup('/kill @e[tag=camel_r]', '/kill @e[tag=camel_v]', '/scoreboard objectives remove camel_pose',
+               '/fill 0 200 0 15 203 15 minecraft:air'),
+    ]
+
+
 def scores():
     return [
         cmd('/scoreboard objectives add harness dummy'),
@@ -1134,6 +1160,35 @@ def server_clock():
     ]
 
 
+def wither_breaks():
+    """WitherBoss.customServerAiStep 20 ticks after it is hurt: Level.destroyBlock around it, which leaves
+    each cell's fluid (FluidState.createLegacyBlock), so water stays and a waterlogged block turns to water."""
+    return [
+        *setup('/fill 4 206 4 12 217 12 minecraft:glass hollow', '/fill 5 207 5 11 216 11 minecraft:water',
+               '/setblock 7 210 7 minecraft:stone', '/setblock 9 211 9 minecraft:oak_stairs[waterlogged=true]',
+               '/setblock 7 212 9 minecraft:oak_slab[waterlogged=false]'),
+        {'op': 'tick', 'n': 10},
+        *setup('/summon minecraft:wither 8.5 210 8.5 {NoGravity:1b,Tags:["wb"]}'),
+        cmd('/damage @e[tag=wb,limit=1] 1'),
+        # WaterAvoidingRandomFlyingGoal may set off on a stroll (the wither's random is unseeded in vanilla),
+        # which moves the box destroyBlocksTick breaks. Hold it in place each tick until then: customServerAiStep
+        # runs before travel, so the break sees the teleported position.
+        *[op for _ in range(25) for op in (*setup('/tp @e[tag=wb] 8.5 210 8.5'), {'op': 'tick', 'n': 1})],
+        {'op': 'tick', 'n': 15},
+        cmd('/execute if block 8 212 8 minecraft:water'),
+        cmd('/execute if block 9 211 9 minecraft:water'),
+        cmd('/execute if block 9 211 9 minecraft:oak_stairs'),
+        cmd('/execute if block 7 210 7 minecraft:stone'),
+        cmd('/execute if block 7 212 9 minecraft:oak_slab'),
+        # The broken cells' neighbours were updated (setBlock flag 3): the pool flows back in.
+        cmd('/execute if block 7 210 7 minecraft:water'),
+        cmd('/execute if block 7 212 9 minecraft:water'),
+        cmd('/execute if block 6 210 6 minecraft:water'),
+        *setup('/kill @e[tag=wb]', '/fill 4 206 4 12 217 12 minecraft:air'),
+        {'op': 'tick', 'n': 25},
+    ]
+
+
 def ender_dragon():
     """`/kill` on the fight's dragon ends the fight (#3319): `EnderDragon.kill` removes it and calls
     `EnderDragonFight.setDragonKilled`, so no new dragon takes its place, the exit portal opens and the
@@ -1169,6 +1224,7 @@ def groups():
         ('wither spawn', wither_spawn()),
         ('riding teleport', riding_teleport()),
         ('mob riding', mob_riding()),
+        ('camel riders', camel_riders()),
         ('scores, teams and bossbars', scores()),
         ('execute', execute()),
         ('levels', levels()),
@@ -1180,5 +1236,6 @@ def groups():
         ('compute', compute()),
         ('social and scoreboard', social()),
         ('test', test_command()),
+        ('wither breaks', wither_breaks()),
         ('ender dragon', ender_dragon()),
     ]

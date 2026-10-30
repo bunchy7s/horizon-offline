@@ -392,6 +392,11 @@ pub struct Renderer {
     pub last_wait: std::time::Duration,
     /// CPU time of the last `render`, waits excluded.
     pub last_encode: std::time::Duration,
+    /// What the system says about the window's display, watched only while HDR output
+    /// is on; before `window`, so it's dropped first.
+    display: DisplayWatch,
+    /// The watch was just made: the settings' Auto values take what it reported.
+    display_fresh: bool,
     window: Arc<Window>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -423,6 +428,7 @@ pub struct Renderer {
     crosshair_group: wgpu::BindGroup,
     crosshair_globals: wgpu::Buffer,
     entity_pipeline: wgpu::RenderPipeline,
+    hdr_mark_pipeline: wgpu::RenderPipeline,
     weather: weather::Weather,
     crumbling_pipeline: wgpu::RenderPipeline,
     shadow_blob_pipeline: wgpu::RenderPipeline,
@@ -1182,6 +1188,7 @@ impl Renderer {
             }
             surface.configure(&device, &config);
             let hdr_output = hdr::output(&caps);
+            crate::graphics::offer_hdr(hdr_output.is_some());
             if previous.is_none() {
                 log::info!(
                     "Horizon renderer: HDR output {}",
@@ -2121,6 +2128,18 @@ impl Renderer {
             "fs_energy_swirl",
             wgpu::ColorWrites::ALL,
         );
+        // HDR output's mark on light-giving particles (entity.wgsl fs_hdr_mark).
+        let hdr_mark_pipeline = entity_pipeline_with(
+            "HDR particle mark",
+            None,
+            false,
+            wgpu::CompareFunction::GreaterEqual,
+            Default::default(),
+            wgpu::BlendState::REPLACE,
+            false,
+            "fs_hdr_mark",
+            wgpu::ColorWrites::ALPHA,
+        );
         // Attribute 7: 6 is the entity vertex buffer's glint UV.
         let lightning_attributes = wgpu::vertex_attr_array![7=>Float32x3];
         let lightning_vertex = [
@@ -2594,6 +2613,8 @@ impl Renderer {
             ));
         }
         Ok(Self {
+            display: DisplayWatch::default(),
+            display_fresh: false,
             instance,
             adapter,
             surface,
@@ -2632,6 +2653,7 @@ impl Renderer {
             crosshair_group,
             crosshair_globals,
             entity_pipeline,
+            hdr_mark_pipeline,
             weather,
             crumbling_pipeline,
             shadow_blob_pipeline,
@@ -3320,6 +3342,16 @@ impl Renderer {
             } else if let Some(marker) = self.hdr_marker.take() {
                 let _ = std::fs::remove_file(marker);
             }
+            // Only HDR output asks the system about the display, so with HDR off the
+            // game never waits on the compositor for it.
+            self.display = if output.is_some() {
+                let (watch, now) = DisplayWatch::new(&self.window);
+                crate::graphics::report(now);
+                self.display_fresh = true;
+                watch
+            } else {
+                DisplayWatch::default()
+            };
             let format = self.config.format.remove_srgb_suffix();
             self.hdr = output.map(|output| hdr::Hdr::new(&self.device, format, output));
             self.configure_surface();
@@ -3343,6 +3375,20 @@ impl Renderer {
             hdr.black = black;
             self.send_hdr_metadata();
         }
+    }
+    /// Whether what the system reports for the display changed (another output, the
+    /// player recalibrating the desktop): the settings' Auto values follow it then, so
+    /// apply them again.
+    pub fn display_changed(&mut self) -> bool {
+        flush_display_log();
+        if std::mem::take(&mut self.display_fresh) {
+            return true;
+        }
+        let Some(now) = self.display.changed() else {
+            return false;
+        };
+        crate::graphics::report(now);
+        true
     }
     /// `upscale`: output pixels per rendered pixel, for TAA to rebuild (1: native).
     pub fn set_world_post(&mut self, scale: f32, antialias: bool, taa: bool, upscale: f32) {
@@ -4894,6 +4940,10 @@ impl Renderer {
                 pass.set_bind_group(0, &self.entity_group, &[]);
                 pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
                 pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
+                if self.hdr.is_some() {
+                    pass.set_pipeline(&self.hdr_mark_pipeline);
+                    pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
+                }
                 pass.set_bind_group(0, &self.group, &[]);
             }
             if text_quads > 0 {
@@ -5370,6 +5420,16 @@ impl Renderer {
         if let (Some(hdr), Some(f)) = (&self.hdr, &surface_frame) {
             hdr.present(&self.queue, &mut encoder, &f.texture, !frame.title);
         }
+        // With HDR on, a full-frame screenshot gets an HDR10 copy beside it.
+        let hdr_readback = readback
+            .as_ref()
+            .filter(|(request, _)| request.size.is_none())
+            .zip(self.hdr.as_ref())
+            .and_then(|(_, hdr)| {
+                let texture = hdr.capture(&self.device, &self.queue, &mut encoder, !frame.title)?;
+                let size = [self.config.width, self.config.height];
+                Some(copy_frame(&self.device, &mut encoder, &texture, size))
+            });
         let commands = crate::spans::time("encode", || encoder.finish());
         let first_frame = self.first_frame == FirstFrame::Submit;
         if first_frame {
@@ -5388,6 +5448,16 @@ impl Renderer {
             timer.submitted(&self.queue);
         }
         if let Some((request, buffer)) = readback {
+            if let Some(hdr_buffer) = hdr_readback {
+                let hdr_path = hdr_screenshot_path(&request.path);
+                match self.write_hdr_screenshot(&hdr_path, &hdr_buffer) {
+                    Ok(()) => log::info!("Saved HDR screenshot to {}", hdr_path.display()),
+                    Err(e) => log::warn!(
+                        "Horizon renderer: HDR screenshot {}: {e}",
+                        hdr_path.display()
+                    ),
+                }
+            }
             self.screenshot_result = Some(
                 self.write_screenshot(&request, &buffer)
                     .map_err(|e| e.to_string()),
@@ -5496,11 +5566,8 @@ impl Renderer {
             None
         }
     }
-    fn write_screenshot(
-        &self,
-        request: &ScreenshotRequest,
-        buffer: &wgpu::Buffer,
-    ) -> Result<[u32; 2]> {
+    /// The pixels `copy_frame` read back into `buffer`, 4 bytes each, row after row.
+    fn read_frame(&self, buffer: &wgpu::Buffer) -> Result<Vec<[u8; 4]>> {
         let (sender, receiver) = std::sync::mpsc::channel();
         buffer.map_async(wgpu::MapMode::Read, .., move |r| {
             let _ = sender.send(r);
@@ -5513,28 +5580,34 @@ impl Renderer {
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string())?;
         let (width, height, row) = (
-            self.config.width,
-            self.config.height,
+            self.config.width as usize,
+            self.config.height as usize,
             padded_row(self.config.width) as usize,
         );
+        let mut pixels = Vec::with_capacity(width * height);
+        {
+            let data = buffer.get_mapped_range(..).map_err(|e| e.to_string())?;
+            for y in 0..height {
+                pixels.extend_from_slice(data[y * row..y * row + width * 4].as_chunks::<4>().0);
+            }
+        }
+        buffer.unmap();
+        Ok(pixels)
+    }
+    fn write_screenshot(
+        &self,
+        request: &ScreenshotRequest,
+        buffer: &wgpu::Buffer,
+    ) -> Result<[u32; 2]> {
         let bgra = matches!(
             self.config.format.remove_srgb_suffix(),
             wgpu::TextureFormat::Bgra8Unorm
         );
-        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-        {
-            let data = buffer.get_mapped_range(..).map_err(|e| e.to_string())?;
-            for y in 0..height as usize {
-                for px in data[y * row..y * row + width as usize * 4]
-                    .as_chunks::<4>()
-                    .0
-                {
-                    let (r, b) = if bgra { (px[2], px[0]) } else { (px[0], px[2]) };
-                    pixels.extend_from_slice(&[r, px[1], b, 255]);
-                }
-            }
+        let mut pixels = Vec::with_capacity((self.config.width * self.config.height * 4) as usize);
+        for px in self.read_frame(buffer)? {
+            let (r, b) = if bgra { (px[2], px[0]) } else { (px[0], px[2]) };
+            pixels.extend_from_slice(&[r, px[1], b, 255]);
         }
-        buffer.unmap();
         // NativeImage.resizeSubRectTo on takeAutoScreenshot's grab: the icon
         // is the frame's centre square averaged down to its size.
         let (width, height, pixels) = match request.size {
@@ -5555,6 +5628,50 @@ impl Renderer {
         encoder.write_header()?.write_image_data(&pixels)?;
         Ok([width, height])
     }
+    /// The HDR10 copy (`Hdr::capture`) as a 16-bit PNG tagged BT.2020 with PQ (cICP, PNG's
+    /// third edition), with the peak and paper white as its content light levels (cLLI).
+    fn write_hdr_screenshot(&self, path: &std::path::Path, buffer: &wgpu::Buffer) -> Result<()> {
+        let Some(hdr) = &self.hdr else {
+            return Ok(());
+        };
+        let pixels = hdr10_to_rgb16(&self.read_frame(buffer)?);
+        let mut encoder = png::Encoder::new(
+            std::io::BufWriter::new(std::fs::File::create(path)?),
+            self.config.width,
+            self.config.height,
+        );
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Sixteen);
+        let mut writer = encoder.write_header()?;
+        // BT.2020 primaries, PQ, RGB, full range.
+        writer.write_chunk(png::chunk::cICP, &[9, 16, 0, 1])?;
+        let nits = |n: f32| ((n * 10_000.0) as u32).to_be_bytes();
+        let peak = hdr.peak.max(hdr.paper_white);
+        writer.write_chunk(
+            png::chunk::cLLI,
+            &[nits(peak), nits(hdr.paper_white.min(peak))].concat(),
+        )?;
+        writer.write_image_data(&pixels)?;
+        Ok(())
+    }
+}
+/// `screenshots/2026-10-28_12.00.00.png` -> `screenshots/2026-10-28_12.00.00-hdr.png`.
+fn hdr_screenshot_path(path: &std::path::Path) -> PathBuf {
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    path.with_file_name(format!("{stem}-hdr.png"))
+}
+/// `Rgb10a2Unorm` pixels as 16-bit RGB, big-endian as PNG stores it: each 10-bit value
+/// with its top bits repeated below, so 0 stays 0 and 1023 becomes 65535.
+fn hdr10_to_rgb16(pixels: &[[u8; 4]]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(pixels.len() * 6);
+    for &px in pixels {
+        let v = u32::from_le_bytes(px);
+        for shift in [0, 10, 20] {
+            let c = (v >> shift & 0x3ff) as u16;
+            out.extend_from_slice(&(c << 6 | c >> 4).to_be_bytes());
+        }
+    }
+    out
 }
 /// Centre-crop the frame to a square and average it down to `size`.
 pub(crate) fn square_downscale(pixels: &[u8], width: u32, height: u32, size: [u32; 2]) -> Vec<u8> {
@@ -5908,6 +6025,17 @@ mod tests {
         assert_eq!(blend.alpha.dst_factor, wgpu::BlendFactor::Zero);
     }
     #[test]
+    fn hdr_screenshots_keep_every_10_bit_step() {
+        // Rgb10a2Unorm: red in the low 10 bits, then green, then blue.
+        let px = |r: u32, g: u32, b: u32| (r | g << 10 | b << 20 | 3 << 30).to_le_bytes();
+        let out = super::hdr10_to_rgb16(&[px(0, 1023, 512)]);
+        assert_eq!(out, [0, 0, 0xff, 0xff, 0x80, 0x20]);
+        assert_eq!(
+            super::hdr_screenshot_path(std::path::Path::new("screenshots/2026-10-28_12.00.00.png")),
+            std::path::Path::new("screenshots/2026-10-28_12.00.00-hdr.png")
+        );
+    }
+    #[test]
     fn shader_globals_match_the_rust_layout() {
         // terrain.wgsl and entity.wgsl bind the same buffer: same fields, same order.
         let fields = |source: &str| -> Vec<String> {
@@ -6120,5 +6248,105 @@ mod sprite_upload_tests {
             let (chain, _) = mip_chain(animation.pixels(0), size, &[], 0, 1);
             assert_eq!(chain.capacity(), chain.len());
         }
+    }
+}
+
+/// What the system says about the window's display, kept up to date: on Wayland, the
+/// compositor's preferred image description of the surface.
+#[derive(Default)]
+struct DisplayWatch {
+    #[cfg(target_os = "linux")]
+    wayland: Option<horizon_hdr::wayland::Watch>,
+}
+impl DisplayWatch {
+    /// Starts watching, with what the system reports now.
+    fn new(window: &Window) -> (Self, Option<crate::graphics::Reported>) {
+        #[cfg(target_os = "linux")]
+        if let Some((wayland, now)) = horizon_hdr::wayland::Watch::new(window) {
+            let watch = Self {
+                wayland: Some(wayland),
+            };
+            return (watch, now.map(reported));
+        }
+        let _ = window;
+        (Self::default(), None)
+    }
+    /// What the system reports, if that changed since the last call.
+    fn changed(&mut self) -> Option<Option<crate::graphics::Reported>> {
+        #[cfg(target_os = "linux")]
+        if let Some(wayland) = &mut self.wayland {
+            return wayland.changed().map(|now| now.map(reported));
+        }
+        None
+    }
+}
+
+/// The log of what the system reports about the display: one line per change. The
+/// renderer is made anew a few times while the game starts and each asks again, and a
+/// slider dragged in the desktop's settings changes the values many times a second, so
+/// a change within [`DISPLAY_LOG_QUIET`] of the last line waits until the values have
+/// held that long, and only the one they settled on is logged.
+struct DisplayLog {
+    last: String,
+    at: Option<std::time::Instant>,
+    pending: Option<(String, std::time::Instant)>,
+}
+static DISPLAY_LOG: std::sync::Mutex<DisplayLog> = std::sync::Mutex::new(DisplayLog {
+    last: String::new(),
+    at: None,
+    pending: None,
+});
+const DISPLAY_LOG_QUIET: std::time::Duration = std::time::Duration::from_secs(1);
+// Only Wayland's HDR reports call it so far.
+#[cfg(target_os = "linux")]
+fn log_display(line: String) {
+    let now = std::time::Instant::now();
+    let mut log = DISPLAY_LOG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if line == log.last {
+        log.pending = None;
+    } else if log.at.is_none_or(|at| now - at >= DISPLAY_LOG_QUIET) {
+        log::info!("{line}");
+        (log.last, log.at, log.pending) = (line, Some(now), None);
+    } else {
+        log.pending = Some((line, now));
+    }
+}
+/// Logs a change [`log_display`] held back, once the values have held for
+/// [`DISPLAY_LOG_QUIET`].
+fn flush_display_log() {
+    let now = std::time::Instant::now();
+    let mut log = DISPLAY_LOG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((_, since)) = &log.pending
+        && now - *since >= DISPLAY_LOG_QUIET
+        && let Some((line, _)) = log.pending.take()
+    {
+        log::info!("{line}");
+        (log.last, log.at) = (line, Some(now));
+    }
+}
+
+/// What a compositor's luminances mean in HDR output's scale.
+///
+/// KWin maps content's reference white (203 nits in PQ, BT.2408) onto its own, so the
+/// desktop's white is 203 there and the peak is the target's maximum over that ratio.
+/// Checked on KWin. Hyprland (0.57) reports the standard 203, and shows HDR windows below
+/// the SDR white of its desktop (which it doesn't report), so Auto can't match its desktop
+/// there. Other compositors are unchecked. The peak is kept within the settings' lowest and
+/// PQ's top, so the metadata never ends below the black level.
+#[cfg(target_os = "linux")]
+fn reported(l: horizon_hdr::wayland::Luminances) -> crate::graphics::Reported {
+    let peak = (l.target_max * 203.0 / l.reference.max(1.0)).round() as u32;
+    log_display(format!(
+        "Horizon renderer: the compositor shows this window with reference white {} nits, \
+         {}..{} nits: peak {peak} nits in HDR output's scale",
+        l.reference, l.target_min, l.target_max,
+    ));
+    crate::graphics::Reported {
+        paper_white: 203,
+        peak: peak.clamp(200, 10_000),
     }
 }

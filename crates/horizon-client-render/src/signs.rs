@@ -31,7 +31,43 @@ impl Default for SignText {
             lines: Default::default(),
             color: BLACK,
             glowing: false,
+            click: Default::default(),
         }
+    }
+}
+/// The click events `SignBlockEntity.executeClickCommandsIfPresent` acts on.
+#[derive(Debug, PartialEq)]
+pub enum ClickAction<'a> {
+    /// `ClickEvent.RunCommand`.
+    RunCommand(String),
+    /// `ClickEvent.ShowDialog`: a registry id or the dialog itself.
+    ShowDialog(&'a Tag),
+    /// `ClickEvent.Custom`.
+    Custom {
+        id: String,
+        payload: Option<&'a Tag>,
+    },
+}
+/// A saved `click_event` as its action: the three a sign acts on, read the
+/// way `ClickEvent.CODEC` does; any other action or a malformed one is None.
+pub fn click_action(event: &Tag) -> Option<ClickAction<'_>> {
+    let Some(Tag::String(action)) = event.get("action") else {
+        return None;
+    };
+    match action.to_string_lossy().as_str() {
+        "run_command" => match event.get("command") {
+            Some(Tag::String(command)) => Some(ClickAction::RunCommand(command.to_string_lossy())),
+            _ => None,
+        },
+        "show_dialog" => event.get("dialog").map(ClickAction::ShowDialog),
+        "custom" => match event.get("id") {
+            Some(Tag::String(id)) => Some(ClickAction::Custom {
+                id: id.to_string_lossy(),
+                payload: event.get("payload"),
+            }),
+            _ => None,
+        },
+        _ => None,
     }
 }
 impl SignText {
@@ -41,6 +77,14 @@ impl SignText {
     /// `DyeColor.getTextColor` of this side.
     pub fn text_color(&self) -> u32 {
         DYE_TEXT[usize::from(self.color.min(15))].1
+    }
+    /// `SignText.hasAnyClickCommands`: a line whose style has a `run_command`
+    /// click event.
+    pub fn has_any_click_commands(&self) -> bool {
+        self.click
+            .iter()
+            .flatten()
+            .any(|event| matches!(click_action(event), Some(ClickAction::RunCommand(_))))
     }
     /// `AbstractSignRenderer.getDarkColor`.
     pub fn dark_color(&self) -> u32 {
@@ -70,6 +114,13 @@ impl SignData {
     pub fn line_height(&self) -> f32 {
         if self.hanging { 9.0 } else { 10.0 }
     }
+    /// `SignBlockEntity.canExecuteClickCommands`: a waxed sign whose side
+    /// has a `run_command` click event. (Horizon keeps no filtered text, so
+    /// `Player.isTextFilteringEnabled` never selects it.)
+    pub fn can_execute_click_commands(&self, front: bool) -> bool {
+        let side = if front { &self.front } else { &self.back };
+        self.waxed && side.has_any_click_commands()
+    }
     /// NBT entries after the common block-entity header.
     pub fn encode(&self) -> Vec<(&'static str, Tag)> {
         let side = |t: &SignText| {
@@ -79,7 +130,18 @@ impl SignData {
                     Tag::List(
                         t.lines
                             .iter()
-                            .map(|l| Tag::String(l.as_str().into()))
+                            .zip(&t.click)
+                            .map(|(line, click)| {
+                                let text = Tag::String(line.as_str().into());
+                                match click {
+                                    // The line's style keeps its click event.
+                                    Some(event) => Tag::compound([
+                                        ("text", text),
+                                        ("click_event", event.clone()),
+                                    ]),
+                                    None => text,
+                                }
+                            })
                             .collect(),
                     ),
                 ),
@@ -90,19 +152,25 @@ impl SignData {
                 ("has_glowing_text", Tag::Byte(i8::from(t.glowing))),
             ])
         };
-        vec![
+        let mut out = Vec::new();
+        if self.allow_op_features {
+            out.push(("allow_op_features", Tag::Byte(1)));
+        }
+        out.extend([
             ("front_text", side(&self.front)),
             ("back_text", side(&self.back)),
             ("is_waxed", Tag::Byte(i8::from(self.waxed))),
-        ]
+        ]);
+        out
     }
     pub fn decode(&mut self, tag: &Tag) {
         let side = |t: Option<&Tag>| -> SignText {
             let mut out = SignText::default();
             let Some(t) = t else { return out };
             if let Some(Tag::List(messages)) = t.get("messages") {
-                for (line, m) in out.lines.iter_mut().zip(messages) {
+                for ((line, click), m) in out.lines.iter_mut().zip(&mut out.click).zip(messages) {
                     *line = component_text(m);
+                    *click = click_event(m);
                 }
             }
             if let Some(Tag::String(c)) = t.get("color") {
@@ -117,6 +185,21 @@ impl SignData {
         self.front = side(tag.get("front_text"));
         self.back = side(tag.get("back_text"));
         self.waxed = matches!(tag.get("is_waxed"), Some(Tag::Byte(b)) if *b != 0);
+        self.allow_op_features =
+            matches!(tag.get("allow_op_features"), Some(Tag::Byte(b)) if *b != 0);
+    }
+}
+/// The `click_event` in the style of a stored line: the one of a component
+/// object, or of the first component of a list (`createFromList` copies it
+/// and appends the rest as siblings).
+fn click_event(tag: &Tag) -> Option<Tag> {
+    let root = match tag {
+        Tag::List(list) => list.first()?,
+        other => other,
+    };
+    match root.get("click_event") {
+        Some(event @ Tag::Compound(_)) => Some(event.clone()),
+        _ => None,
     }
 }
 /// Plain text of a stored text component (string, `{text: ...}` or JSON string).

@@ -361,3 +361,72 @@ pub fn visual_clip<W: DynamicCollisionWorld>(
     });
     result.ok()
 }
+
+/// Runs `f` with an empty overworld (`others` its mobs) and the mob types,
+/// both from the extracted vanilla data; false, without running it, when
+/// that data is missing.
+#[cfg(test)]
+pub(crate) fn with_test_world(
+    others: &[Seen],
+    f: impl FnOnce(&MobWorld<'_>, &super::MobTypes),
+) -> bool {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../.local/horizon-client")
+        .join(horizon_core::VANILLA_VERSION);
+    if !root.join("entity-types.json").exists() || !root.join("movement-properties.nbt").exists() {
+        return false;
+    }
+    let assets = crate::assets::Assets::load(&root).unwrap();
+    let registry = assets.registry;
+    let facts = BlockFacts::load(&root, registry).unwrap();
+    let motion = crate::motion::MotionResources::load(&root, &assets).unwrap();
+    let data = super::MobData::load(&root, &facts);
+    let types = super::MobTypes::load(&root).unwrap();
+    let biomes = crate::biome::Biomes::load(&root).unwrap();
+    let items = crate::items::Items::load(
+        &root,
+        registry,
+        &facts,
+        &horizon_world::loot::PackOverlay::NONE,
+    )
+    .unwrap();
+    let collision = crate::collisions::load(&root, registry).unwrap();
+    let air = registry.default_state("minecraft:air").unwrap();
+    let world = crate::world::World::new(air, 0);
+    let lid_openers = std::collections::HashMap::new();
+    let w = MobWorld {
+        teams: Default::default(),
+        world: &world,
+        registry,
+        facts: &facts,
+        fluid_tables: &motion.fluids,
+        movement: &motion.blocks,
+        collision: &collision,
+        data: &data,
+        player: None,
+        nearest_player: None,
+        others,
+        others_grid: None,
+        others_index: None,
+        daylight: true,
+        monsters_burn: false,
+        game_time: 1000,
+        day_time: 18000,
+        raining: false,
+        thundering: false,
+        nether: false,
+        block_tags: &items.block_tags,
+        biomes: &biomes,
+        mob_griefing: true,
+        mob_drops: true,
+        max_entity_cramming: 24,
+        difficulty: super::spawning::LocalDifficulty::new(2, 18000, 0, 0.0),
+        end: false,
+        world_seed: 0,
+        sea_level: 63,
+        items: Some(&items),
+        lid_openers: &lid_openers,
+    };
+    f(&w, &types);
+    true
+}

@@ -1,15 +1,15 @@
 BitmapProvider.ImageDataHolder.gpuData	skip:other		GPU staging buffer for a sheet; Horizon copies the sheet pixels into its atlas at load (font.rs load_bitmap)
 FreeTypeUtil	skip:other		FreeType library wrapper (getLibrary, error helpers, setVector, destroy); Horizon rasterizes TrueType with ab_glyph (font.rs load_true_type)
-UnihexProvider.unpackBitsToBytes	port	crates/horizon-client/src/font.rs::Font::rasterize_hex	gap: minor: rows are written as RGBA into the atlas region, not an IntBuffer; same glyph columns
-UnihexProvider.decodeHex	port	crates/horizon-client/src/font.rs::parse_hex_digit	gap: minor: a bad digit skips the whole glyph line (vanilla throws and fails the load)
-UnihexProvider.copyUntil	inline	crates/horizon-client/src/font.rs::parse_hex	line splitting on newline and CR; the .hex text is parsed in one pass
-UnihexProvider.ByteContents.read	inline	crates/horizon-client/src/font.rs::parse_hex	8 px rows (32 hex digits) read by parse_hex
-UnihexProvider.Definition.loadData	port	crates/horizon-client/src/font.rs::load_hex	reads every .hex entry of the zip and applies size_overrides
+UnihexProvider.unpackBitsToBytes	port	crates/horizon-client-render/src/font.rs::Font::rasterize_hex	gap: minor: rows are written as RGBA into the atlas region, not an IntBuffer; same glyph columns
+UnihexProvider.decodeHex	port	crates/horizon-client-render/src/font.rs::parse_hex_digit	gap: minor: a bad digit skips the whole glyph line (vanilla throws and fails the load)
+UnihexProvider.copyUntil	inline	crates/horizon-client-render/src/font.rs::parse_hex	line splitting on newline and CR; the .hex text is parsed in one pass
+UnihexProvider.ByteContents.read	inline	crates/horizon-client-render/src/font.rs::parse_hex	8 px rows (32 hex digits) read by parse_hex
+UnihexProvider.Definition.loadData	port	crates/horizon-client-render/src/font.rs::load_hex	reads every .hex entry of the zip and applies size_overrides
 UnihexProvider.Dimensions.pack	skip:java		packs left and right into one int as a map value; Horizon keeps two fields on HexGlyph
-UnihexProvider.IntContents.read24	port	crates/horizon-client/src/font.rs::parse_hex	6-digit rows (24 bit) handled by parse_hex
-UnihexProvider.IntContents.read32	port	crates/horizon-client/src/font.rs::parse_hex	8-digit rows (32 bit) handled by parse_hex
-UnihexProvider.LineData.mask	inline	crates/horizon-client/src/font.rs::parse_hex	the OR of the rows, used for the glyph width (mask |= row)
-UnihexProvider.ShortContents.read	port	crates/horizon-client/src/font.rs::parse_hex	4-digit rows (16 bit) handled by parse_hex
+UnihexProvider.IntContents.read24	port	crates/horizon-client-render/src/font.rs::parse_hex	6-digit rows (24 bit) handled by parse_hex
+UnihexProvider.IntContents.read32	port	crates/horizon-client-render/src/font.rs::parse_hex	8-digit rows (32 bit) handled by parse_hex
+UnihexProvider.LineData.mask	inline	crates/horizon-client-render/src/font.rs::parse_hex	the OR of the rows, used for the glyph width (mask |= row)
+UnihexProvider.ShortContents.read	port	crates/horizon-client-render/src/font.rs::parse_hex	4-digit rows (16 bit) handled by parse_hex
 AbstractLayout.setX	skip:ui		moves a layout's children with it; Horizon computes positions each frame (dialog_screen.rs Layout::new)
 AbstractLayout.setY	skip:ui		moves a layout's children with it; Horizon computes positions each frame (dialog_screen.rs Layout::new)
 AbstractLayout.AbstractChildWrapper.getHeight	skip:ui		padded child height, layout bookkeeping only
@@ -57,7 +57,7 @@ ScreenRectangle.getCenterInAxis	missing		minor: centre along one axis for keyboa
 ScreenRectangle.intersection	missing		minor: a nested GUI clip is not intersected with the outer one; paint (screen_draw.rs) replaces the clip on each Scissor draw
 ScreenRectangle.intersects	skip:other		no caller in the 26.3 client GUI code; pure geometry predicate
 ScreenRectangle.encompasses	skip:other		used by GuiRenderState for element batching bounds; Horizon appends quads to the HUD batch without it
-ScreenRectangle.containsPoint	port	crates/horizon-client/src/screen_draw.rs::inside	the same half-open point-in-rectangle test
+ScreenRectangle.containsPoint	port	crates/horizon-client-render/src/screen_draw.rs::inside	the same half-open point-in-rectangle test
 ScreenRectangle.transformAxisAligned	skip:other		bounds of a rectangle under a GUI pose, for the GUI scissor; Horizon clips the quads themselves (hud.rs HudBatch::clip_since)
 ScreenRectangle.transformMaxBounds	skip:other		bounds of a rotated rectangle under a GUI pose; Horizon clips the quads themselves (hud.rs HudBatch::clip_since)
 DynamicAtlasAllocator	skip:other		slot allocator for the GUI item atlas; Horizon has no item atlas and draws items into the HUD batch (item_render/gui.rs)
@@ -66,22 +66,22 @@ GuiItemAtlas.tryPrepareFor	skip:other		atlas space check; Horizon has no item at
 GuiItemAtlas.getOrUpdate	inline	crates/horizon-client/src/item_render/gui.rs::draw	gap: minor: vanilla draws each item once into an atlas slot and blits it; Horizon re-submits the item and caches its vertices by position (gui_drawn, DrawnKey)
 GuiItemAtlas.drawToSlot	port	crates/horizon-client/src/item_render/gui.rs::draw_now	the item is clipped to its 16x16 slot unless oversized
 GuiItemAtlas.close	skip:other		GPU texture release; Horizon has no item atlas
-GuiRenderer.render	inline	crates/horizon-client/src/screen_draw.rs::paint	gap: minor: paint has no panorama, blur or GPU upload pass; the frame is one ordered list of draws
+GuiRenderer.render	inline	crates/horizon-client-render/src/screen_draw.rs::paint	gap: minor: paint has no panorama, blur or GPU upload pass; the frame is one ordered list of draws
 GuiRenderer.clearUnusedOversizedItemRenderers	skip:other		GPU renderer cache cleanup; Horizon's gui_drawn cache is bounded (DRAWN_LIMIT)
-GuiRenderer.prepare	inline	crates/horizon-client/src/screen_draw.rs::paint	gap: minor: the prepare step is folded into paint's single pass; no separate mesh build
+GuiRenderer.prepare	inline	crates/horizon-client-render/src/screen_draw.rs::paint	gap: minor: the prepare step is folded into paint's single pass; no separate mesh build
 GuiRenderer.addElementsToMeshes	skip:other		vertex batching by pipeline and scissor; HudBatch appends quads in order
-GuiRenderer.executeDrawRange	port	crates/horizon-client/src/hud.rs::HudRenderer::draw_range	draws a range of the batch with its blend, depth and scissor state
+GuiRenderer.executeDrawRange	port	crates/horizon-client-render/src/hud.rs::HudRenderer::draw_range	draws a range of the batch with its blend, depth and scissor state
 GuiRenderer.addElementToMesh	skip:other		vertex batching by pipeline and scissor; HudBatch appends quads in order
-GuiRenderer.prepareText	inline	crates/horizon-client/src/screen_draw.rs::paint	text is drawn at its own pose through Draw::Text (batch.text_styled)
+GuiRenderer.prepareText	inline	crates/horizon-client-render/src/screen_draw.rs::paint	text is drawn at its own pose through Draw::Text (batch.text_styled)
 GuiRenderer.prepareItemElements	port	crates/horizon-client/src/item_render/gui.rs::draw	gap: minor: oversized items are drawn unclipped into the HUD batch, not into a picture-in-picture texture
 GuiRenderer.preparePictureInPicture	skip:other		Horizon calls each picture drawer directly (game/perspective.rs draw_player_preview, item_render/gui.rs draw_banner_result); no pool dispatch
 GuiRenderer.preparePictureInPictureState	skip:other		picture-in-picture pool dispatch; Horizon calls each drawer directly
 GuiRenderer.submitBlitFromItemAtlas	inline	crates/horizon-client/src/item_render/gui.rs::draw	the atlas slot blit is the item drawn at its GUI position
 GuiRenderer.prepareItemAtlas	skip:other		item atlas creation and resize; Horizon has no item atlas
 GuiRenderer.getGuiScaleInvalidatingItemAtlasIfChanged	skip:other		item atlas invalidation on GUI scale change; Horizon has no item atlas
-GuiRenderer.executeDraw	port	crates/horizon-client/src/hud.rs::HudRenderer::draw_range	one pipeline, vertex buffer, scissor and index range draw
+GuiRenderer.executeDraw	port	crates/horizon-client-render/src/hud.rs::HudRenderer::draw_range	one pipeline, vertex buffer, scissor and index range draw
 GuiRenderer.scissorChanged	skip:other		batching compare of scissor rectangles
-GuiRenderer.enableScissor	port	crates/horizon-client/src/hud.rs::HudBatch::clip_since	gap: minor: the rectangle arrives already intersected with the outer scissor (GuiGraphicsExtractor); a nested clip replaces the outer one in paint
+GuiRenderer.enableScissor	port	crates/horizon-client-render/src/hud.rs::HudBatch::clip_since	gap: minor: the rectangle arrives already intersected with the outer scissor (GuiGraphicsExtractor); a nested clip replaces the outer one in paint
 GuiRenderer.close	skip:other		GPU resource release
 TextureSetup.singleTextureWithLightmap	skip:other		GPU texture binding with the lightmap; Horizon's lighting is in the mesh
 TextureSetup.getSortKey	skip:other		draw sort key for batching; Horizon appends in order
@@ -104,6 +104,6 @@ BackupConfirmScreen	missing		unsure: no backup question before opening a world t
 BanNoticeScreens	missing		unsure: no ban or suspension notice for a multiplayer ban, forced name change or banned skin; Horizon reads no BanDetails or profile action (Gui.java addInitialScreens)
 ChatScreen.removed	missing		player: unfinished chat text is kept when the chat is interrupted or with Save Chat Drafts on; Horizon's close_chat (game/chat.rs) drops it
 ChatScreen.shouldDiscardDraft	missing		player: decides whether closing chat keeps the typed text as a draft; Horizon has no draft state
-ChatScreen.insertText	port	crates/horizon-client/src/chat.rs::ChatScreen::type_text	insert at the cursor; replace=true (setValue) is ChatScreen::suggest_command in Horizon
+ChatScreen.insertText	port	crates/horizon-client-render/src/chat.rs::ChatScreen::type_text	insert at the cursor; replace=true (setValue) is ChatScreen::suggest_command in Horizon
 ChatScreen.formatChat	missing		minor: a restored draft is drawn grey italic; Horizon has no draft state (see ChatScreen.removed)
 ChatScreen.updateNarrationState	skip:other		screen-reader narration; Horizon has no narration output

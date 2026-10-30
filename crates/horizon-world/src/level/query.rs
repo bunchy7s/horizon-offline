@@ -186,16 +186,43 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             None => super::data::ShapeInfo::default(),
         }
     }
+    /// The state whose cached support facts stand in for the block at `pos`.
+    /// Vanilla reads a retracting piston's `moving_piston` block through its
+    /// block entity, whose collision shape contains the extended base; the
+    /// exported facts see no block entity and call every face unsupported,
+    /// which made a lever on the piston's back pop off when it retracted.
+    fn support_state(&self, pos: BlockPos) -> BlockStateId {
+        let state = self.state(pos);
+        if self.b.is_block(state, self.b.named.moving_piston) {
+            if let Some(piston) = self.moving_piston(pos) {
+                // `PistonMovingBlockEntity.getCollisionShape`: only a piston base.
+                if piston.source
+                    && !piston.extending
+                    && (self.b.is_block(piston.moved_state, self.b.named.piston)
+                        || self
+                            .b
+                            .is_block(piston.moved_state, self.b.named.sticky_piston))
+                {
+                    return self
+                        .b
+                        .table
+                        .set_bool(piston.moved_state, self.b.props.extended, true);
+                }
+            }
+        }
+        state
+    }
     pub fn sturdy(&self, pos: BlockPos, direction: Direction) -> bool {
-        self.b.is_face_sturdy(self.state(pos), direction)
+        self.b.is_face_sturdy(self.support_state(pos), direction)
     }
     /// `Block.canSupportRigidBlock(level, below)`.
     pub fn can_support_rigid_block(&self, pos: BlockPos) -> bool {
-        self.b.is_face_sturdy_rigid(self.state(pos), Direction::Up)
+        self.b
+            .is_face_sturdy_rigid(self.support_state(pos), Direction::Up)
     }
     /// `Block.canSupportCenter(level, pos, direction)`.
     pub fn can_support_center(&self, pos: BlockPos, direction: Direction) -> bool {
-        let state = self.state(pos);
+        let state = self.support_state(pos);
         if direction == Direction::Down && self.b.in_set(state, &self.b.tags.unstable_bottom_center)
         {
             return false;

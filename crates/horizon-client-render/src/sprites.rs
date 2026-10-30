@@ -159,12 +159,26 @@ impl Sprites {
     /// up to a power of two and limited to [`MAX_ARRAY_BYTES`]. Smaller
     /// textures are scaled up by whole pixels, so UVs stay per layer.
     pub fn finish(&mut self) {
+        self.lay_out(true);
+    }
+    /// [`Sprites::finish`] for a server, which draws nothing: the layers'
+    /// size, but neither their pixels nor the animations' frames.
+    pub fn finish_without_pixels(&mut self) {
+        self.lay_out(false);
+    }
+    fn lay_out(&mut self, pixels: bool) {
         let layers = self.native.len().max(1) as u64;
         let largest = self.native.iter().map(|n| n.0).max().unwrap_or(SPRITE_SIZE);
         self.minimum_size = self.native.iter().map(|n| n.0).min().unwrap_or(SPRITE_SIZE);
         let mut size = largest.max(SPRITE_SIZE).next_power_of_two();
         while size > SPRITE_SIZE && layers * u64::from(size * size) * 4 > MAX_ARRAY_BYTES {
             size /= 2;
+        }
+        if !pixels {
+            self.pixels = Vec::new();
+            self.animations = Vec::new();
+            self.size = size;
+            return;
         }
         let mut resized = Vec::with_capacity(self.native.len());
         self.pixels.clear();

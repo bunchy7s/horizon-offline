@@ -123,6 +123,16 @@ at a time, with each class's Java source, home files, and Rust functions in them
 for whoever (or whichever agent) writes the next batch file. Set `PORT_LEDGER_OUT` to build into another
 directory, so several people can check their own rows at once.
 
+## Parity harness coverage
+
+A mapped method says where the port is, not that it behaves like vanilla; the parity harnesses check that
+(`tools/test_*_parity.py`: a vanilla oracle in `mods/horizon/src/test/java/dev/horizonlab/parity/` and a Rust
+fixture or probe under `crates/*/examples/` run on the same inputs). The ledger links them: a harness covers a
+ported method when its fixture reaches the port and the vanilla side is in reach (the oracle calls into the
+method, or the harness or oracle names its class). `where` lists a method's harnesses, and
+`gaps --kind untested [--package world/entity]` lists the sure pairs (cited or mapped) with behaviour of their
+own that no harness covers, most-called first: where a new harness would catch the most drift.
+
 ## Bug reports and branches
 
 `issue N` reads a GitHub issue (`gh issue view`), or takes the report's text (`-` reads stdin), drops the

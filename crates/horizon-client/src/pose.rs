@@ -167,6 +167,17 @@ impl MotionWorld<'_, '_, '_> {
         };
         self.player.set_pose(pose)
     }
+    /// The end of a server's copy of a player's tick (`ServerPlayer.doTick`
+    /// runs `Player.tick`): `LivingEntity.aiStep` counts a Riptide spin down,
+    /// `LivingEntity.tick` then runs `refreshDirtyAttributes` (a changed
+    /// `minecraft:scale` rebuilds the box, `onAttributeUpdated`), and
+    /// `Player.tick` ends with `updatePlayerPose`. The server checks the
+    /// player's moves with that box (#3684).
+    pub fn server_player_pose_tick(&mut self) -> Result<()> {
+        self.player.count_down_server_spin();
+        self.player.refresh_attributes()?;
+        self.update_player_pose()
+    }
     /// The pose part of `Player.tick` for a passenger (`Entity.rideTick` runs
     /// `tick`, not the travel): `Entity.updateSwimming` stops a swim, since it
     /// needs `!isPassenger()`, and `updatePlayerPose` follows. A player who

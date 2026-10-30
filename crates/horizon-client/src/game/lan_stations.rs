@@ -276,8 +276,8 @@ impl Game<'_> {
         let seed = host.hub.guests[gi].xp_seed;
         let bookcases = self.count_bookshelves(gs.pos);
         let offers = horizon_client::stations::enchant_offers(
-            &self.res.stations().enchantments,
-            self.res.items(),
+            &self.stations().enchantments,
+            self.items(),
             seed,
             bookcases,
             gs.menu.slot(0),
@@ -303,8 +303,8 @@ impl Game<'_> {
         let g = &host.hub.guests[gi];
         let (seed, creative, conn) = (g.xp_seed, g.creative(), g.conn);
         let Some(enchanted) = horizon_client::stations::apply_enchantment(
-            &self.res.stations().enchantments,
-            self.res.items(),
+            &self.stations().enchantments,
+            self.items(),
             seed,
             button,
             gs.menu.data[button],

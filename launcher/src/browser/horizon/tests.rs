@@ -33,11 +33,19 @@ fn hud(index: &Index) -> Project {
     project_of(index.project("coords_hud").unwrap()).unwrap()
 }
 
+/// Installs the sample's WebAssembly mod as a modpack does: the browser won't, it needs a native
+/// port.
+fn put(index: &Index, local: bool, home: &Path) -> Result<Vec<installed::Entry>, String> {
+    let p = index.project("coords_hud").unwrap();
+    install_version(index, local, p, &p.versions[0], home, &|_, _| {}).map(|e| vec![e])
+}
+
 #[test]
 fn native_registry_entries_are_mods_that_say_they_run_native_code() {
     assert_eq!(kind_of(&index::Kind::NativeMod), Some(Kind::Mod));
     let mut index = sample();
     index.projects[0].kind = index::Kind::NativeMod;
+    index.projects[0].versions[0].file.name = "coords_hud-0.1.0.hnmod".into();
     let found = search(&index, &Query::new("", Kind::Mod));
     assert!(found.iter().any(|p| p.id == index.projects[0].id));
     let entry = |file: &str| {
@@ -75,20 +83,23 @@ fn searches_by_kind_and_words() {
             .map(|p| p.id)
             .collect()
     };
-    assert_eq!(found("", Kind::Mod), ["coords_hud"]);
-    assert_eq!(found("coordinates HUD", Kind::Mod), ["coords_hud"]);
+    // The sample's only mod is a WebAssembly one: it stays in the index, not in the browser.
+    assert!(found("", Kind::Mod).is_empty());
+    assert!(found("coordinates HUD", Kind::Mod).is_empty());
     assert!(found("zoom", Kind::Mod).is_empty());
     // Modpacks under Modpacks; a kind this launcher can't install yet (a world) never.
     assert_eq!(found("", Kind::Modpack), ["cozy"]);
     assert!(found("skyblock", Kind::ResourcePack).is_empty());
     assert_eq!(found("", Kind::Shader), ["glow"]);
-    // The index's download counts, most downloaded first.
+    // The index's download counts, most downloaded first (of native mods: the browser lists them).
     let mut counted = index.clone();
+    counted.projects[0].kind = index::Kind::NativeMod;
+    counted.projects[0].versions[0].file.name = "coords_hud-0.1.0.hnmod".into();
     counted.projects.push(index::Project {
         id: "zoom".into(),
         name: "Zoom".into(),
         downloads: 12_345,
-        ..index.project("coords_hud").unwrap().clone()
+        ..counted.projects[0].clone()
     });
     counted.projects[0].downloads = 80;
     let first = search(&counted, &Query::new("", Kind::Mod));
@@ -104,8 +115,11 @@ fn installs_checked_turns_on_and_removes() {
     let index = sample();
     let home = scratch("install");
     let p = hud(&index);
-    let done = install_from(&index, true, None, &p, &home, &|_, _| {}).unwrap();
+    let e = install_from(&index, true, None, &p, &home, &|_, _| {}).unwrap_err();
+    assert_eq!(e, format!("Coordinates HUD {NEEDS_PORT}."));
+    let done = put(&index, true, &home).unwrap();
     assert_eq!(done[0].file, "horizon-mods/coords_hud.hmod");
+    assert_eq!(done[0].skipped, [format!("its code ({NEEDS_PORT})")]);
     assert_eq!(done[0].verdict.as_deref(), Some("Verified"));
     assert!(done[0].checksum.starts_with("SHA-256:e1135345"));
     assert!(home.join("horizon-mods/coords_hud.hmod").is_file());
@@ -118,7 +132,7 @@ fn installs_checked_turns_on_and_removes() {
         0
     );
     // Installed already: nothing to do.
-    let again = install_from(&index, true, None, &p, &home, &|_, _| {}).unwrap();
+    let again = put(&index, true, &home).unwrap();
     assert_eq!(again, done);
 
     let mut revoked = index.clone();
@@ -148,7 +162,7 @@ fn a_mod_that_turned_native_keeps_its_hmod_until_removed() {
     assert!(!stays(true, "horizon-native-mods/coords_hud.hnmod"));
     let index = sample();
     let home = scratch("turned-native");
-    install_from(&index, true, None, &hud(&index), &home, &|_, _| {}).unwrap();
+    put(&index, true, &home).unwrap();
     // As install_version leaves it after the native update.
     let mut list = installed::Installed::load(&home);
     list.entries[0].file = "horizon-native-mods/coords_hud.hnmod".into();
@@ -199,21 +213,20 @@ fn installs_a_shader_pack_into_shaderpacks() {
 #[test]
 fn refuses_a_changed_file_a_taken_id_and_local_files_from_the_real_registry() {
     let index = sample();
-    let p = hud(&index);
 
     let home = scratch("tampered");
     let mut tampered = index.clone();
     let cozy = tampered.projects[1].versions[0].file.url.clone();
     tampered.projects[0].versions[0].file.url = cozy;
-    let e = install_from(&tampered, true, None, &p, &home, &|_, _| {}).unwrap_err();
+    let e = put(&tampered, true, &home).unwrap_err();
     assert!(e.contains("larger than its source says"), "{e}");
     assert!(!home.join("horizon-mods").exists());
 
-    let e = install_from(&index, false, None, &p, &home, &|_, _| {}).unwrap_err();
+    let e = put(&index, false, &home).unwrap_err();
     assert!(e.contains("file servers"), "{e}");
 
     fs::create_dir_all(home.join("horizon-mods/coords_hud")).unwrap();
-    let e = install_from(&index, true, None, &p, &home, &|_, _| {}).unwrap_err();
+    let e = put(&index, true, &home).unwrap_err();
     assert!(e.contains("already in horizon-mods"), "{e}");
 
     let mut taken_down = index.clone();
@@ -223,7 +236,7 @@ fn refuses_a_changed_file_a_taken_id_and_local_files_from_the_real_registry() {
         reason: "Test.".into(),
         date: String::new(),
     });
-    let e = install_from(&taken_down, true, None, &p, &home, &|_, _| {}).unwrap_err();
+    let e = put(&taken_down, true, &home).unwrap_err();
     assert_eq!(e, "Coordinates HUD was taken down: Test.");
     fs::remove_dir_all(&home).unwrap();
 }
@@ -236,13 +249,23 @@ fn registry_versions_run_when_made_for_this_game() {
     assert_eq!(support(Kind::Mod, &v(GAME), &horizon), Support::Works);
     assert!(!support(Kind::Mod, &v("26.2"), &horizon).installable());
     let index = sample();
-    let p = index.project("coords_hud").unwrap();
-    let versions: Vec<Version> = p
-        .versions
-        .iter()
-        .map(|x| version_of(&index, p, x, None))
-        .collect();
-    assert_eq!(pick(Kind::Mod, &versions, false).unwrap().number, "0.1.0");
+    let versions = |id: &str| -> Vec<Version> {
+        let p = index.project(id).unwrap();
+        p.versions
+            .iter()
+            .map(|x| version_of(&index, p, x, None))
+            .collect()
+    };
+    assert_eq!(
+        pick(Kind::Modpack, &versions("cozy"), false)
+            .unwrap()
+            .number,
+        "1.0.0"
+    );
+    // A WebAssembly mod is never picked: it needs a native port.
+    let hud = versions("coords_hud");
+    assert_eq!(hud[0].blocked.as_deref(), Some(NEEDS_PORT));
+    assert!(pick(Kind::Mod, &hud, false).is_none());
 }
 
 #[test]
@@ -277,9 +300,9 @@ fn versions_for_a_newer_horizon_are_not_installed() {
     );
     assert!(newest(&index, p, Some(1)).is_ok());
     assert!(newest(&index, p, None).is_ok());
+    // In the browser, a WebAssembly mod needs a native port first.
     let v = version_of(&index, p, &p.versions[0], Some(0));
-    assert_eq!(v.blocked.as_deref(), Some(NEEDS_NEWER));
-    assert_eq!(version_of(&index, p, &p.versions[0], Some(1)).blocked, None);
+    assert_eq!(v.blocked.as_deref(), Some(NEEDS_PORT));
 }
 
 #[test]

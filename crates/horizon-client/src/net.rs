@@ -19,6 +19,7 @@ use horizon_protocol::{
 };
 use std::{
     collections::HashMap,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -107,8 +108,18 @@ impl Session {
         auth: Option<Arc<AuthSession>>,
         view_distance: i8,
         lang: Arc<Language>,
+        resources: PathBuf,
     ) -> Self {
-        Self::start(address, name, auth, view_distance, lang, None, None)
+        Self::start(
+            address,
+            name,
+            auth,
+            view_distance,
+            lang,
+            None,
+            None,
+            resources,
+        )
     }
     /// `ConnectScreen.startConnecting` for a `transfer`: the cookies the
     /// server stored carry to the new connection (`TransferState`).
@@ -119,6 +130,7 @@ impl Session {
         view_distance: i8,
         lang: Arc<Language>,
         cookies: Cookies,
+        resources: PathBuf,
     ) -> Self {
         Self::start(
             address,
@@ -128,6 +140,7 @@ impl Session {
             lang,
             None,
             Some(cookies),
+            resources,
         )
     }
     /// Join an integrated server through memory (`Connection.connectToLocalServer`).
@@ -136,8 +149,18 @@ impl Session {
         name: &str,
         view_distance: i8,
         lang: Arc<Language>,
+        resources: PathBuf,
     ) -> Self {
-        Self::start("local", name, None, view_distance, lang, Some(pipe), None)
+        Self::start(
+            "local",
+            name,
+            None,
+            view_distance,
+            lang,
+            Some(pipe),
+            None,
+            resources,
+        )
     }
     fn start(
         address: &str,
@@ -147,6 +170,7 @@ impl Session {
         lang: Arc<Language>,
         local: Option<horizon_protocol::connection::Pipe>,
         cookies: Option<Cookies>,
+        resources: PathBuf,
     ) -> Self {
         let (send, events) = channel();
         let writer = Arc::new(Mutex::new(None));
@@ -176,6 +200,7 @@ impl Session {
                     &thread_counters,
                     &thread_cookies,
                     transferred,
+                    &resources,
                 );
                 let from_server = result.is_ok();
                 let reason = result.unwrap_or_else(|e| e);
@@ -382,6 +407,7 @@ fn run(
     shared_counters: &Mutex<Option<Arc<Counters>>>,
     cookies: &Cookies,
     transferred: bool,
+    resources: &Path,
 ) -> Result<String, String> {
     let (host, port, mut c) = if let Some(pipe) = local {
         (address.to_owned(), 0, Connection::local(pipe))
@@ -517,13 +543,29 @@ fn run(
     .map_err(e)?;
     let (mut reader, writer) = c.split();
     *shared_writer.lock().unwrap() = Some(writer);
-    let registries = configure(&mut reader, shared_writer, configuring, lang, send, cookies)?;
+    let registries = configure(
+        &mut reader,
+        shared_writer,
+        configuring,
+        lang,
+        send,
+        cookies,
+        resources,
+    )?;
     let _ = send.send(Event::Joined {
         registries: Arc::new(registries),
         uuid: profile.uuid,
         name: profile.name,
     });
-    receive_play(&mut reader, shared_writer, configuring, lang, send, cookies)
+    receive_play(
+        &mut reader,
+        shared_writer,
+        configuring,
+        lang,
+        send,
+        cookies,
+        resources,
+    )
 }
 
 fn receive_play(
@@ -533,6 +575,7 @@ fn receive_play(
     lang: &Language,
     send: &Sender<Event>,
     cookies: &Cookies,
+    resources: &Path,
 ) -> Result<String, String> {
     loop {
         let (id, payload) = reader.recv().map_err(|e| e.to_string())?;
@@ -568,8 +611,15 @@ fn receive_play(
                     let _ = w.send(&play::Serverbound::ConfigurationAcknowledged(Empty).encode());
                     configuring.store(true, Ordering::Relaxed);
                 }
-                let registries =
-                    configure(reader, shared_writer, configuring, lang, send, cookies)?;
+                let registries = configure(
+                    reader,
+                    shared_writer,
+                    configuring,
+                    lang,
+                    send,
+                    cookies,
+                    resources,
+                )?;
                 let _ = send.send(Event::Reconfigured(Arc::new(registries)));
             }
             // ClientCommonPacketListenerImpl.handleRequestCookie: the stored
@@ -618,6 +668,7 @@ fn configure(
     lang: &Language,
     send: &Sender<Event>,
     cookies: &Cookies,
+    resources: &Path,
 ) -> Result<Dynamic, String> {
     let mut registries = Dynamic::default();
     let reply = |p: cfg::Serverbound| -> Result<(), String> {
@@ -630,6 +681,14 @@ fn configure(
         let (id, payload) = reader.recv().map_err(|e| e.to_string())?;
         match cfg::Clientbound::decode(id, &payload).map_err(|e| e.to_string())? {
             cfg::Clientbound::KeepAlive(k) => reply(cfg::Serverbound::KeepAlive(k))?,
+            cfg::Clientbound::CustomPayload(p) if p.channel == crate::content_identity::CHANNEL => {
+                let hash = crate::content_identity::identity(resources)
+                    .map_err(|_| crate::content_identity::MISMATCH.to_string())?;
+                reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                    channel: crate::content_identity::CHANNEL.into(),
+                    data: hash.to_vec(),
+                }))?;
+            }
             cfg::Clientbound::CustomPayload(p) => receive_brand(&p, send),
             cfg::Clientbound::Ping(p) => reply(cfg::Serverbound::Pong(p))?,
             // Know no packs: the server then sends every registry entry in full.
@@ -801,6 +860,73 @@ mod tests {
     use super::*;
 
     #[test]
+    fn configuration_answers_the_content_identity_challenge() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-content-identity-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("facts.json"),
+            br#"{"states":[[0,0,0,0,"minecraft:stone"]]}"#,
+        )
+        .unwrap();
+        let expected = crate::content_identity::identity(&root).unwrap();
+        let (client, server) = horizon_protocol::connection::Pipe::pair();
+        let (mut reader, writer) = Connection::local(client).split();
+        let writer = Mutex::new(Some(writer));
+        let thread = std::thread::spawn(move || {
+            let (send, _events) = channel();
+            configure(
+                &mut reader,
+                &writer,
+                &AtomicBool::new(true),
+                &Language::new(),
+                &send,
+                &Cookies::default(),
+                &root,
+            )
+        });
+        let mut server = Connection::local(server);
+        server
+            .send(
+                &cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                    channel: crate::content_identity::CHANNEL.into(),
+                    data: vec![],
+                })
+                .encode(),
+            )
+            .unwrap();
+        server
+            .send(&cfg::Clientbound::Ping(cfg::Ping { id: 17 }).encode())
+            .unwrap();
+        let (id, body) = server.recv().unwrap();
+        assert_eq!(
+            cfg::Serverbound::decode(id, &body).unwrap(),
+            cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                channel: crate::content_identity::CHANNEL.into(),
+                data: expected.to_vec(),
+            })
+        );
+        let (id, body) = server.recv().unwrap();
+        assert_eq!(
+            cfg::Serverbound::decode(id, &body).unwrap(),
+            cfg::Serverbound::Pong(cfg::Ping { id: 17 })
+        );
+        server
+            .send(&cfg::Clientbound::FinishConfiguration(Empty).encode())
+            .unwrap();
+        let (id, body) = server.recv().unwrap();
+        assert_eq!(
+            cfg::Serverbound::decode(id, &body).unwrap(),
+            cfg::Serverbound::FinishConfiguration(Empty)
+        );
+        assert!(thread.join().unwrap().is_ok());
+        std::fs::remove_dir_all(
+            std::env::temp_dir().join(format!("horizon-content-identity-{}", std::process::id())),
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn disconnect_and_drop_do_not_wait_for_a_stalled_reader() {
         // A reader can remain stalled after Windows socket shutdown. It must
         // not delay either an explicit leave or Session's Drop on the UI thread.
@@ -872,6 +998,7 @@ mod tests {
                 &Language::new(),
                 &send,
                 &Cookies::default(),
+                Path::new("."),
             )
         });
         let mut server = Connection::local(server);
@@ -934,6 +1061,7 @@ mod tests {
                 &Language::new(),
                 &send,
                 &Cookies::default(),
+                Path::new("."),
             )
         });
         let mut server = Connection::local(server);
@@ -980,6 +1108,7 @@ mod tests {
                 &Language::new(),
                 &send,
                 &thread_cookies,
+                Path::new("."),
             )
         });
         let mut server = Connection::local(server);

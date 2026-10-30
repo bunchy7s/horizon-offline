@@ -55,6 +55,11 @@ pub fn register(m: &mut Mob) {
     m.ai.targets
         .add(2, NearestTarget::player(false).interval(0));
 }
+/// `WitherBoss.hurtServer`: a wither takes nothing from a `#wither_friends`
+/// mob (the undead, other withers included) that is not a player.
+pub fn shielded_from(victim: Species, attacker: Species) -> bool {
+    victim == Species::Wither && undead(attacker)
+}
 /// `#wither_friends`: the undead.
 fn undead(s: Species) -> bool {
     matches!(
@@ -378,7 +383,10 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
                                 pos: [x, y, z],
                                 drop: true,
                             });
-                            destroyed = true;
+                            // destroyBlock is true when setBlock changed the
+                            // cell: a liquid is already its fluid's block.
+                            let state = w.world.block(x, y, z);
+                            destroyed |= !w.facts.get(state).has_class("LiquidBlock");
                         }
                     }
                 }
@@ -454,4 +462,15 @@ pub fn scale(m: &Mob, alpha: f32) -> f32 {
         s -= (m.extra.counter as f32 - alpha) / INVULNERABLE as f32 * 0.5;
     }
     s
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn wither_ignores_wither_friends_only() {
+        assert!(shielded_from(Species::Wither, Species::Wither));
+        assert!(shielded_from(Species::Wither, Species::Skeleton));
+        assert!(!shielded_from(Species::Wither, Species::Creeper));
+        assert!(!shielded_from(Species::Zombie, Species::Wither));
+    }
 }

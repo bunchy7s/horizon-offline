@@ -171,6 +171,8 @@ public final class VanillaNaturalSpawnOracle {
         int tick = -1;
         List<String> log;
         boolean logColumns;
+        // A WorldGenRegion sees no entities (getEntities is empty).
+        boolean generationRegion;
         int next = 1;
         @Override public RegistryAccess registryAccess() { return registries; }
         @Override public Difficulty getDifficulty() { return difficulty; }
@@ -281,11 +283,13 @@ public final class VanillaNaturalSpawnOracle {
         @Override public Iterable<Entity> getAllEntities() { return entities; }
         @Override public List<Entity> getEntities(Entity except, AABB bb, Predicate<? super Entity> selector) {
             List<Entity> out = new ArrayList<>();
+            if (generationRegion) return out;
             for (Entity e : entities) if (e != except && e.getBoundingBox().intersects(bb) && selector.test(e)) out.add(e);
             return out;
         }
         @Override public <T extends Entity> List<T> getEntities(EntityTypeTest<Entity, T> type, AABB bb, Predicate<? super T> selector) {
             List<T> out = new ArrayList<>();
+            if (generationRegion) return out;
             for (Entity e : entities) {
                 T t = type.tryCast(e);
                 if (t != null && e.getBoundingBox().intersects(bb) && selector.test(t)) out.add(t);
@@ -811,11 +815,13 @@ public final class VanillaNaturalSpawnOracle {
                         vaultCase(level, c, access, blockLookup, mainRandom, log);
                     } else if (mode.equals("gen")) {
                         level.logColumns = true;
+                        level.generationRegion = true;
                         int n = level.entities.size();
                         RandomSource random = RandomSource.create(Long.parseLong(c.getOrDefault("gseed", "0")));
                         BlockPos sourcePos = new BlockPos(chunk.at.getMinBlockX(), level.getMaxY(), chunk.at.getMinBlockZ());
                         NaturalSpawner.spawnMobsForChunkGeneration(level, sourcePos, chunk.at, random);
                         level.logColumns = false;
+                        level.generationRegion = false;
                         for (Entity e : level.entities.subList(n, level.entities.size()))
                             if (e.getVehicle() == null)
                                 log.add("spawn " + BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()) + " " + bits(e.getX()) + " " + bits(e.getY()) + " " + bits(e.getZ()) + " " + yaw(e));

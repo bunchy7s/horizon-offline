@@ -155,7 +155,8 @@ pub fn stop_sleeping(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
             return;
         }
     }
-    m.position.y = f64::from(p[1]) + 0.5625;
+    // The bed's top (getSleepHeight) and 0.125 above it.
+    m.position.y = f64::from(p[1]) + 0.5625 + 0.125;
 }
 /// `LivingEntity.getSleepingPos`: the bed head a sleeper lies in.
 pub fn sleeping_pos(m: &Mob) -> Option<[i32; 3]> {

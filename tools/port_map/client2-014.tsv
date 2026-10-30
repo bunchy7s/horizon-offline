@@ -29,7 +29,7 @@ CreateFlatWorldScreen.DetailsList.HeaderEntry.getNarration	skip:other		narration
 CreateFlatWorldScreen.DetailsList.LayerEntry.extractContent	port	crates/horizon-client/src/title/flat.rs::draw_layers	slot, block name and the Top, Bottom or height label
 CreateFlatWorldScreen.DetailsList.LayerEntry.getDisplayItem	port	crates/horizon-client/src/title/flat.rs::layer_icon	water and lava use the bucket sprites
 CreateFlatWorldScreen.DetailsList.LayerEntry.blitSlot	port	crates/horizon-client/src/title/flat.rs::slot	slot frame and icon
-CreditsAndAttributionScreen.init	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	Credits page: Credits, Attribution and Licenses buttons; gap: unsure whether Attribution and Licenses open links here
+CreditsAndAttributionScreen.init	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	Credits page: Credits, Attribution and Licenses buttons; gap: unsure whether Attribution and Licenses open links here
 CreditsAndAttributionScreen.openCreditsScreen	port	crates/horizon-client/src/game/win.rs::Game::open_win_screen	rolls the credits without the poem, then returns here
 DatapackLoadFailureScreen.init	missing		minor: Horizon loads no data packs, so there is no datapack failure screen
 DatapackLoadFailureScreen.extractRenderState	missing		minor: same as init, no datapack failure screen
@@ -57,9 +57,9 @@ FileFixerAbortedScreen.getNarrationMessage	skip:other		narration text; Horizon h
 FileFixerAbortedScreen.init	missing		minor: no upgrade-aborted screen; Horizon has no world-fixer cancel flow
 FileFixerAbortedScreen.addButtons	missing		minor: Back and Report Bug buttons of the aborted-upgrade screen
 FileFixerAbortedScreen.keyPressed	missing		minor: Escape on the aborted-upgrade screen
-GenericMessageScreen.init	port	crates/horizon-client/src/level_loading.rs::draw_progress	centred message line while a world opens; gap: minor: no progress bar, the text is the loader's stage line
+GenericMessageScreen.init	port	crates/horizon-client-render/src/level_loading.rs::draw_progress	centred message line while a world opens; gap: minor: no progress bar, the text is the loader's stage line
 GenericMessageScreen.repositionElements	skip:ui		layout only
-GenericMessageScreen.extractBackground	port	crates/horizon-client/src/ui.rs::menu_background	the menu background behind the message
+GenericMessageScreen.extractBackground	port	crates/horizon-client-render/src/ui.rs::menu_background	the menu background behind the message
 GenericWaitingScreen.createWaitingWithoutButton	port	crates/horizon-client/src/title.rs::Title::start_backup	backup runs in the background; gap: minor: no waiting screen blocks input while it runs
 GenericWaitingScreen.createWaiting	skip:service		waiting screen while a report is sent (reporting)
 GenericWaitingScreen.createCompleted	skip:service		result screen after a report (reporting)
@@ -71,12 +71,12 @@ GenericWaitingScreen.getNarrationMessage	skip:other		narration text; Horizon has
 InBedChatScreen.init	port	crates/horizon-client/src/game/chat.rs::Game::draw_chat_screen	Leave Bed button over the chat; its click is in chat_click
 InBedChatScreen.onPlayerWokeUp	port	crates/horizon-client/src/game/chat.rs::Game::tick_in_bed_chat	closes the chat, or turns it into the plain chat if text was typed; gap: minor: polled each tick, not on the wake event
 LevelLoadingScreen.updateNarratedWidget	skip:other		narration text; Horizon has no narrator
-LevelLoadingScreen.extractChunksForRendering	port	crates/horizon-client/src/level_loading.rs::draw	chunk status colours; gap: minor: the debug red centre square is not drawn
-LevelLoadingScreen.getNetherPortalSprite	port	crates/horizon-client/src/hud_overlays.rs::portal_overlay	draws the block/nether_portal sprite
+LevelLoadingScreen.extractChunksForRendering	port	crates/horizon-client-render/src/level_loading.rs::draw	chunk status colours; gap: minor: the debug red centre square is not drawn
+LevelLoadingScreen.getNetherPortalSprite	port	crates/horizon-client-render/src/hud_overlays.rs::portal_overlay	draws the block/nether_portal sprite
 LoadingOverlay.extractRenderState	port	crates/horizon-client/src/game.rs::Game::render	the reload screen's progress bar; gap: player: no Mojang logo and no fade in or out
 LoadingOverlay.tick	port	crates/horizon-client/src/game/server_packs.rs::Game::tick_server_packs	finishes the reload; gap: minor: no fade-out before it finishes
 LoadingOverlay.isReadyToFadeOut	missing		minor: no one-second fade-in before the reload can finish
-LoadingOverlay.extractProgressBar	port	crates/horizon-client/src/level_loading.rs::draw_progress	200 by 2 bar; gap: minor: no fade alpha
+LoadingOverlay.extractProgressBar	port	crates/horizon-client-render/src/level_loading.rs::draw_progress	200 by 2 bar; gap: minor: no fade alpha
 LoadingOverlay.LogoTexture.loadContents	skip:other		Horizon ships no Mojang logo (title_edition.rs)
 ManageServerScreen.init	port	crates/horizon-client/src/multiplayer.rs::Screen::buttons	name and address fields, resource packs cycle, Done and Cancel (Screen::Edit arm)
 ManageServerScreen.resize	skip:ui		layout only; Screen::Edit keeps its fields
@@ -127,9 +127,9 @@ Screen.removeWidget	skip:ui		widget list plumbing; Horizon draws each screen fro
 Screen.getTooltipFromItem	port	crates/horizon-client/src/item_tooltip.rs::lines	tooltip lines for an item
 Screen.defaultHandleGameClickEvent	port	crates/horizon-client/src/game/books.rs::Game::book_follow_link	gap: minor: ShowDialog and custom click events are not handled here
 Screen.fadeWidgets	missing		minor: unsure: no fade of widgets found in title.rs
-Screen.extractPanorama	port	crates/horizon-client/src/gfx/panorama.rs::Panorama::draw	the title panorama cube, drawn in the render pass
-Screen.extractMenuBackground	port	crates/horizon-client/src/ui.rs::menu_background	the dirt background with blur
-Screen.extractMenuBackgroundTexture	port	crates/horizon-client/src/ui.rs::menu_background	gap: minor: only the standard background texture
+Screen.extractPanorama	port	crates/horizon-client-render/src/gfx/panorama.rs::Panorama::draw	the title panorama cube, drawn in the render pass
+Screen.extractMenuBackground	port	crates/horizon-client-render/src/ui.rs::menu_background	the dirt background with blur
+Screen.extractMenuBackgroundTexture	port	crates/horizon-client-render/src/ui.rs::menu_background	gap: minor: only the standard background texture
 Screen.isValidCharacterForName	missing		minor: only the structure block name field uses it, and Horizon has no structure block editor
 Screen.scheduleNarration	skip:other		narration timing; Horizon has no narrator
 Screen.shouldRunNarration	skip:other		narration gate; Horizon has no narrator

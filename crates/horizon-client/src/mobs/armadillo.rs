@@ -444,4 +444,15 @@ mod tests {
         }
         assert!(hiding_in_shell(&m), "the model shows the shell");
     }
+
+    #[test]
+    fn campfire_damage_is_fire_and_has_no_knockback_but_does_not_cause_panic() {
+        // `campfire` is in #is_fire and #no_knockback, but in neither
+        // #panic_causes nor #panic_environmental_causes (#4037).
+        let source = Damage::of(DamageKind::Campfire);
+        assert!(source.is_fire());
+        assert!(source.no_knockback());
+        assert!(!source.causes_panic());
+        assert!(!environmental(DamageKind::Campfire));
+    }
 }

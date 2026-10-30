@@ -20,13 +20,12 @@ use std::{
 
 /// The tree the chat parses and completes with: a server's, once it has
 /// sent one (ClientPacketListener.commands), else the game's own.
-pub(super) fn chat_tree<'a>(
-    remote: &'a Option<super::remote::Remote>,
-    mods: &'a super::mods::ModsState,
-) -> &'a horizon_client::command::Dispatcher {
+pub(super) fn chat_tree(
+    remote: &Option<super::remote::Remote>,
+) -> &horizon_client::command::Dispatcher {
     match remote.as_ref().and_then(|r| r.commands.as_ref()) {
-        Some(tree) => mods.remote_dispatcher().unwrap_or(tree),
-        None => mods.dispatcher(),
+        Some(tree) => tree,
+        None => horizon_client::command::vanilla::game_dispatcher(),
     }
 }
 use winit::{
@@ -78,11 +77,20 @@ impl TimeMarker {
         }
     }
 }
+/// `ChatComponent.Draft`: the text the chat box kept, and whether it was a command.
+pub struct ChatDraft {
+    pub text: String,
+    pub command: bool,
+}
 /// UI and command state that lives beside the game.
 #[derive(Default)]
 pub struct UiState {
     pub chat: Chat,
     pub chat_screen: Option<ChatScreen>,
+    /// `ChatComponent.latestDraft`.
+    pub chat_draft: Option<ChatDraft>,
+    /// `ChatScreen.isDraft`: the box opened with the draft and is unchanged since.
+    pub chat_draft_shown: bool,
     /// When the chat screen opened (its input took the focus: the cursor blink).
     pub chat_opened: Option<std::time::Instant>,
     /// The chat screen is `InBedChatScreen`: the sleeper's, with a Leave Bed button.
@@ -467,10 +475,25 @@ impl Game<'_> {
             self.ui.registries.players = names;
         }
     }
+    /// `ChatComponent.createScreen`: T or / opens the chat with the draft kept
+    /// last time, when this method can restore it (a command draft only for
+    /// /), else with its prefix.
+    pub(super) fn open_chat_method(&mut self, prefix: &str) {
+        let command = prefix == "/";
+        let draft = self
+            .ui
+            .chat_draft
+            .as_ref()
+            .filter(|d| !command || d.command)
+            .map(|d| d.text.clone());
+        self.open_chat(draft.as_deref().unwrap_or(prefix));
+        self.ui.chat_draft_shown = draft.is_some() && self.ui.chat_screen.is_some();
+    }
     pub(super) fn open_chat(&mut self, initial: &str) {
         if self.player.is_none() {
             return;
         }
+        self.ui.chat_draft_shown = false;
         self.refresh_dynamic_registries();
         let size = self
             .renderer
@@ -479,7 +502,7 @@ impl Game<'_> {
         let b = HudBatch::new(size);
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: chat_tree(&self.remote, &self.mods),
+            dispatcher: chat_tree(&self.remote),
             registries: &self.ui.registries,
         };
         let mut screen = ChatScreen::new(
@@ -507,11 +530,33 @@ impl Game<'_> {
             self.wake_up();
             return;
         }
+        let text = self
+            .ui
+            .chat_screen
+            .as_ref()
+            .map_or_else(String::new, |s| s.value().to_owned());
+        self.keep_chat_draft(&text);
+        self.ui.chat_draft_shown = false;
         self.ui.chat_screen = None;
         self.ui.chat.reset_scroll();
         if self.screen == Screen::Chat {
             self.screen = Screen::Playing;
             self.capture(true);
+        }
+    }
+    /// `ChatScreen.removed`: the text left in the box becomes the draft when
+    /// Save Chat Drafts is on, else (and when blank) the draft is discarded. A
+    /// draft still shown unchanged stays as it is.
+    fn keep_chat_draft(&mut self, text: &str) {
+        let unchanged =
+            self.ui.chat_draft_shown && self.ui.chat_draft.as_ref().is_some_and(|d| d.text == text);
+        if !self.settings.file.bool("saveChatDrafts") || text.trim().is_empty() {
+            self.ui.chat_draft = None;
+        } else if !unchanged {
+            self.ui.chat_draft = Some(ChatDraft {
+                text: text.to_owned(),
+                command: text.starts_with('/'),
+            });
         }
     }
     /// `Gui.tick`: a sleeper gets `InBedChatScreen`; when the player has
@@ -579,13 +624,12 @@ impl Game<'_> {
         }
     }
     /// A line on the window's own chat when the Chat option lets `source`
-    /// through; running mods hear it.
+    /// through.
     fn local_chat_line(&mut self, text: Text, indicator: Option<u32>, source: ChatSource) {
         if !self.ui.chat.shows(source) {
             return;
         }
         let focused = self.screen == Screen::Chat;
-        let heard = self.mods.running().then(|| text.plain());
         self.ui.chat.add(
             &self.gui.atlas,
             text,
@@ -594,16 +638,13 @@ impl Game<'_> {
             self.ticks,
             focused,
         );
-        if let Some(line) = heard {
-            self.mods_chat(&line);
-        }
     }
     /// Keys while the chat screen is open.
     pub(super) fn chat_key(&mut self, event: &KeyEvent) {
         if let Some(shortcut) = self.edit_shortcut(event) {
             let m = Measure(&self.gui.atlas.font);
             let c = Commands {
-                dispatcher: chat_tree(&self.remote, &self.mods),
+                dispatcher: chat_tree(&self.remote),
                 registries: &self.ui.registries,
             };
             if let Some(screen) = self.ui.chat_screen.as_mut() {
@@ -649,11 +690,15 @@ impl Game<'_> {
         };
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: chat_tree(&self.remote, &self.mods),
+            dispatcher: chat_tree(&self.remote),
             registries: &self.ui.registries,
         };
         match screen.key(&m, &c, &self.ui.chat.recent, key, shift, ctrl) {
-            ChatAction::Close => self.close_chat(),
+            ChatAction::Close => {
+                // Escape: the box still holds its text, which close_chat keeps as the draft.
+                self.ui.chat_screen = Some(screen);
+                self.close_chat();
+            }
             ChatAction::Submit(message) => {
                 // InBedChatScreen sends without closing (`closeOnSubmit` is
                 // false): the box empties and the screen stays.
@@ -662,6 +707,8 @@ impl Game<'_> {
                     self.ui.chat.reset_scroll();
                     self.ui.chat_screen = Some(screen);
                 } else {
+                    // The screen is taken here, so close_chat sees no text: a sent
+                    // message discards the draft (DONE).
                     self.close_chat();
                 }
                 if !message.is_empty() {
@@ -689,7 +736,7 @@ impl Game<'_> {
     ) {
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: chat_tree(&self.remote, &self.mods),
+            dispatcher: chat_tree(&self.remote),
             registries: &self.ui.registries,
         };
         if let Some(screen) = self.ui.chat_screen.as_mut() {
@@ -700,7 +747,7 @@ impl Game<'_> {
     pub(super) fn chat_type(&mut self, text: &str) {
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: chat_tree(&self.remote, &self.mods),
+            dispatcher: chat_tree(&self.remote),
             registries: &self.ui.registries,
         };
         if let Some(screen) = self.ui.chat_screen.as_mut() {
@@ -727,8 +774,8 @@ impl Game<'_> {
             return;
         }
         if let Some(command) = message.strip_prefix('/') {
-            // A client mod's command first, then a server mod's, as on a server.
-            if !self.client_mod_command(command) && !self.local_server_mod_command(command) {
+            // A native mod's command first.
+            if !self.client_mod_command(command) {
                 self.run_command(command);
             }
         } else {
@@ -737,7 +784,6 @@ impl Game<'_> {
                 &[self.player_display_name(), Text::literal(message)],
             );
             let focused = self.screen == Screen::Chat;
-            let heard = self.mods.running().then(|| line.plain());
             self.ui.chat.add(
                 &self.gui.atlas,
                 line,
@@ -746,11 +792,7 @@ impl Game<'_> {
                 self.ticks,
                 focused,
             );
-            if let Some(line) = heard {
-                self.mods_chat(&line);
-            }
             self.lan_host_chat(message);
-            self.mod_player_chat(super::server_mods::Who::Local, message);
         }
     }
     pub(super) fn chat_scroll(&mut self, amount: f32) {
@@ -777,7 +819,7 @@ impl Game<'_> {
         });
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: chat_tree(&self.remote, &self.mods),
+            dispatcher: chat_tree(&self.remote),
             registries: &self.ui.registries,
         };
         if self.ui.in_bed_chat && self.sleeping.is_some() {
@@ -922,7 +964,7 @@ impl Game<'_> {
         }
         if self.remote.is_some() {
             self.send_chat(&format!("/{command}"));
-        } else if !self.local_server_mod_command(command) {
+        } else {
             self.run_command(command);
         }
     }
@@ -942,7 +984,7 @@ impl Game<'_> {
         };
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: chat_tree(&self.remote, &self.mods),
+            dispatcher: chat_tree(&self.remote),
             registries: &self.ui.registries,
         };
         screen.resize(&m, &c, batch.width as i32, batch.height as i32);
@@ -993,7 +1035,7 @@ impl Game<'_> {
                 .hover_item
                 .as_deref()
                 .and_then(horizon_client::item_data::stack_from_hover)
-                .filter(|s| self.res.items().get(&s.item).is_some())
+                .filter(|s| self.items().get(&s.item).is_some())
             {
                 self.draw_stack_tooltip(batch, &stack, self.cursor.0, self.cursor.1);
             }
@@ -1208,6 +1250,20 @@ impl Game<'_> {
             size: None,
         });
         self.ui.screenshot_message = Some(path);
+    }
+    /// `Minecraft.handleGlobalKeyPress`'s screenshot branch: the
+    /// `key.screenshot` mapping (F2 by default) takes the picture before a
+    /// screen or a text box sees the key, and the debug modifier suppresses it.
+    pub(super) fn screenshot_shortcut(&mut self, key: KeyCode, repeat: bool) -> bool {
+        if repeat || self.debug_keys.modifier_down {
+            return false;
+        }
+        if horizon_client::keybinds::key_name(key) != Some(self.settings.keys.get("key.screenshot"))
+        {
+            return false;
+        }
+        self.take_screenshot();
+        true
     }
     /// After a frame: report a finished F2 screenshot in chat.
     pub(super) fn finish_screenshot(&mut self, result: &std::result::Result<[u32; 2], String>) {

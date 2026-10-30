@@ -32,6 +32,10 @@ CHARS = ('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
          ' .,:;!?\'"()[]{}<>-_+=*/\\|@#$%^&~`' 'äöüßéèêñçÅØæ' 'АБВГДабвгдΩλπ')
 COLORS = ['gold', 'red', 'aqua', 'gray', 'dark_gray', 'green', 'white', 'black', '#FFAA00', '#123456', '#E0E0FF']
 LEGACY = '0123456789abcdeflmnor'
+# Style.shadowColor: the packed ARGB ints and the [r, g, b, a] float lists
+# the scoreboard command writes; 0 is NO_SHADOW.
+SHADOWS = [-65536, 0, -1, 2130771712, [1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 0.5],
+           [0.25, 0.75, 0.5, 0.25], [1.0, 1.0, 0.0, 0.0625]]
 
 
 def words(rng, count):
@@ -51,6 +55,8 @@ def part(rng):
             out[key] = rng.random() < 0.8
     if rng.random() < 0.6:
         out['color'] = rng.choice(COLORS)
+    if rng.random() < 0.35:
+        out['shadow_color'] = rng.choice(SHADOWS)
     return out
 
 
@@ -64,6 +70,12 @@ def cases(count):
         {'text': {'text': 'see through'}, 'flags': 3},
         {'text': {'text': 'default background'}, 'flags': 4},
         {'text': {'text': 'faint'}, 'flags': 1, 'opacity': 4, 'background': 0},
+        {'text': {'text': 'red shadow', 'color': 'white', 'shadow_color': -65536}, 'flags': 1},
+        {'text': {'text': 'half green shadow', 'shadow_color': [0.0, 1.0, 0.0, 0.5]}, 'flags': 1},
+        {'text': {'text': 'no shadow', 'shadow_color': 0}, 'flags': 1},
+        {'text': {'text': '§6§l legacy shadow', 'shadow_color': [0.0, 0.0, 1.0, 1.0]}, 'flags': 1},
+        {'text': {'text': 'fading shadow', 'color': 'aqua', 'shadow_color': [1.0, 0.5, 0.0, 0.8]},
+         'flags': 1, 'opacity': 64},
     ]
     out = []
     for n in range(count):

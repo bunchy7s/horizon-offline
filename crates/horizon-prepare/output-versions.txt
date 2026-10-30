@@ -1,3 +1,4 @@
 # OUTPUT_VERSION (src/lib.rs) and the digest of what it prepares (python3 tools/prepare_output.py digest),
 # one line per version, never edited: a change to the prepared files appends the next version.
 1 0a608bf4115a8ed2e2c4f5f2b2609dc10c54e63479af8e56fabaa10af1060389
+2 55f3f28952309654cb7202fcd051e6b90c034c5ee96ec64472cc6a488597254d

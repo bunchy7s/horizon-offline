@@ -15,6 +15,8 @@ status = "now"                   # now | next | later | help-wanted | shipped
 area = "servers"                 # one of the [[area]] ids, listed in the order of priority
 focus = true                     # optional: one of the 3 to 5 Now items in the overview
 ongoing = true                   # optional: a workstream that goes on after its pull requests merge
+owner = "levzzz5154"             # Now items: the GitHub login who leads it (a person, or the account an agent works as)
+issue = "#3911"                  # Now items: the tracking issue that holds the checklist
 plain = """Servers that show dialogs ... will work in Horizon."""   # players' words, at most 240 characters
 dev = """26.3's dialog packets and model (#1720), ..."""             # crates, approach, what is left
 links = ["#1720", "#1734", "docs/hosting.md"]                       # #N, a repository path, or https://
@@ -23,6 +25,9 @@ post = "..."                     # optional: the announcement when it ships, if 
 announce = true                  # optional: when it ships, Kira also posts it on X (`post`, else `plain`)
 ```
 
+- **Short lists** (issue #3859): **Now holds at most 8 items, each with an `owner` and a tracking `issue`**; Next
+  at most 12; everything else is Later or an issue. The owner decides the order of the work inside the item and
+  keeps its tracking issue current (agents help). A Now item without anyone on it moves to Next or Later.
 - **No dates, ever**: Now, Next, Later. The check rejects month names, years, quarters and "next week".
   "Coming soon" is the only phrase for something waiting on someone else (Microsoft sign-in, CurseForge).
 - **Only what is decided.** Ideas stay in issues and in the suggestion queue until they are.
@@ -41,7 +46,7 @@ Whoever moves the work (the orchestrator on each heartbeat, or anyone in their p
    `shipped_in`, on top of the shipped items. It rewrites `roadmap.toml` and ROADMAP.md; open a pull request
    with the change (`skip-release`).
 2. `python3 tools/roadmap.py check`: the file's rules, then GitHub's state of every link. It fails when a
-   link is not an issue or pull request, when a Now item has no open pull request and none merged in the last
+   link is not an issue or pull request, when a tracking issue is not an open issue, when a Now item has no open pull request and none merged in the last
    14 days (link the new work, or move it to Next or Later), and when every link of a Help wanted item is
    closed. It also says which items `sync` will ship once a release has them.
 3. When work starts, opens a pull request or is decided: add or move the item, add its links, then
@@ -54,6 +59,8 @@ Whoever moves the work (the orchestrator on each heartbeat, or anyone in their p
    `2026-43.md`): `# Title`, a paragraph or two for players, then `## Technical` and the same week for
    contributors, with its pull requests. `build` puts it into roadmap/roadmap.json, which the website reads from main; the hub's Journal tab
    shows it among the releases, and `/data/journal.json` carries it to Kira's #updates and to X.
+   In the same pass, `python3 tools/parity_gaps.py readme --write` refreshes the parity headline: the
+   player-visible gaps still open in the port ledger's ten lists (#3512 to #3521), on the README and the website.
 6. Suggestions from the website and Discord reach the maintainers' private channel through Kira (below). A good
    one becomes an item in a normal pull request; none is published automatically.
 

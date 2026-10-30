@@ -53,10 +53,13 @@ struct Out {
     @location(9) light_color: vec4<f32>,
     @location(10) @interpolate(flat) weather_rect: vec4<f32>,
     // The `GLINT_TEXTURING` sample for overlay 7 (item foil), or the model UV
-    // `ARMOR_ENTITY_GLINT_TEXTURING` scrolls for overlay 13 (armour).
+    // `ARMOR_ENTITY_GLINT_TEXTURING` scrolls for overlay 36 (armour).
     @location(11) glint_uv: vec2<f32>,
     // 1 drops the quad's back-facing pixels (Vertex::normal w = 1), like a culling render type.
     @location(12) @interpolate(flat) cull: u32,
+    // HDR tier of a light-giving particle (mesher::hdr_tier), from the overlay's
+    // high bits (particles.rs): fs_hdr_mark marks the frame with it.
+    @location(13) @interpolate(flat) tier: u32,
 }
 // Shipped light.glsl; normals are already transformed and RGBA8_SNORM packed.
 fn entity_light(normal: vec3<f32>, nether: bool) -> f32 {
@@ -126,8 +129,9 @@ fn entity_vertex(position: vec3<f32>, uv: vec2<f32>,
 @vertex fn vs_entity(@location(0) position: vec3<f32>, @location(1) uv: vec2<f32>,
     @location(2) overlay: u32, @location(3) color: vec4<f32>, @location(4) light: vec4<u32>,
     @location(5) normal: vec4<f32>, @location(6) glint_uv: vec2<f32>) -> Out {
-    var out = entity_vertex(position, uv, overlay, color, light, normal);
+    var out = entity_vertex(position, uv, overlay & 0xffffu, color, light, normal);
     out.glint_uv = glint_uv;
+    out.tier = overlay >> 16u;
     return out;
 }
 // Retained bolt-local geometry, translated using the same f64 camera
@@ -250,8 +254,8 @@ fn crumbling_uv(uv: vec2<f32>, packed_origin: vec2<f32>, sprite_size: vec2<f32>,
         // Enchantment glint: item.fsh's GLINT path, sampled from
         // enchanted_glint_item at the `GLINT_TEXTURING` UV.
         color = glint_over(color, textureSample(glint_tex, glint_sampler, in.glint_uv));
-    } else if in.overlay == 13u {
-        // Enchanted armour: enchanted_glint_armor at the scrolling model UV.
+    } else if in.overlay == 36u {
+        // Enchanted armour (mobs::render::ARMOR_GLINT): enchanted_glint_armor at the scrolling model UV.
         color = glint_over(
             color,
             textureSample(glint_armor_tex, glint_sampler, armor_glint_uv(in.glint_uv)),
@@ -277,6 +281,14 @@ fn crumbling_uv(uv: vec2<f32>, packed_origin: vec2<f32>, sprite_size: vec2<f32>,
 @fragment fn fs_outline(in: Out) -> @location(0) vec4<f32> {
     if textureSample(atlas, atlas_sampler, in.uv).a == 0.0 { discard; }
     return vec4(in.color.rgb, 1.0);
+}
+
+// HDR output: a light-giving particle's pixels marked in the frame's alpha the
+// way terrain.wgsl marks a light source's, drawn again after the entities with
+// only alpha written, so its colour stays as blended.
+@fragment fn fs_hdr_mark(in: Out) -> @location(0) vec4<f32> {
+    if in.tier == 0u || textureSample(atlas, atlas_sampler, in.uv).a < 0.1 { discard; }
+    return vec4(0.0, 0.0, 0.0, 0.7 * f32(4u - min(in.tier, 4u)) / 4.0);
 }
 
 fn celestial_color(in: Out) -> vec4<f32> {

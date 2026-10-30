@@ -180,30 +180,6 @@ pub fn slot(source: Option<ImageSource>, name: &str, size: f32, t: &Theme) -> Di
     }
 }
 
-/// Lays the stone texture over an area of `w` by `h` logical pixels.
-pub fn stone(image: std::sync::Arc<gpui::RenderImage>, w: f32, h: f32) -> Div {
-    let step = crate::art::STONE;
-    let (cols, rows) = ((w / step).ceil() as usize, (h / step).ceil() as usize);
-    let mut layer = div()
-        .absolute()
-        .top_0()
-        .left_0()
-        .size_full()
-        .overflow_hidden();
-    for y in 0..rows {
-        for x in 0..cols {
-            layer = layer.child(
-                img(image.clone())
-                    .absolute()
-                    .left(px(x as f32 * step))
-                    .top(px(y as f32 * step))
-                    .size(px(step)),
-            );
-        }
-    }
-    layer
-}
-
 /// A clickable block in the sidebar: an instance or a server.
 pub fn side_item(id: SharedString, selected: bool, t: &Theme) -> Stateful<Div> {
     let t = *t;

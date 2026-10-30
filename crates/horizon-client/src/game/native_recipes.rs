@@ -117,7 +117,7 @@ impl Game<'_> {
     /// creative inventory; a server hears it as `SetCreativeModeSlot`
     /// through the inventory's sync, and refuses it unless creative.
     pub(super) fn mod_give(&mut self, item: &str, count: u32, components: &str) {
-        let Some(max) = self.res.items().get(item).map(|i| i.max_stack) else {
+        let Some(max) = self.items().get(item).map(|i| i.max_stack) else {
             return;
         };
         if !self.creative {
@@ -158,7 +158,7 @@ impl Game<'_> {
 
     fn make_mod_recipes(&mut self) -> Recipes {
         let names = &self.pack.names;
-        let items = self.res.items();
+        let items = self.items();
         let mut tags: HashMap<&str, Vec<String>> = HashMap::new();
         for (tag, members) in &items.item_tags {
             for m in members {
@@ -241,7 +241,7 @@ impl Game<'_> {
             }
             out.push(r);
         }
-        for c in &self.res.recipes().cooking {
+        for c in &self.recipes().cooking {
             if c.kind == "minecraft:campfire_cooking" {
                 let mut r = recipe(format!("minecraft:{}", c.id), RecipeKind::Campfire);
                 r.group = c.group.clone();
@@ -251,7 +251,7 @@ impl Game<'_> {
                 out.push(r);
             }
         }
-        let stations = self.res.stations();
+        let stations = self.stations();
         for s in &stations.recipes.stonecutting {
             let mut r = recipe(s.id.clone(), RecipeKind::Stonecutting);
             r.slots = vec![index.any(&s.input)];
@@ -317,81 +317,6 @@ impl Game<'_> {
         Recipes {
             items: table,
             recipes: out,
-        }
-    }
-}
-
-/// Capability `recipes` of WebAssembly mods: the same tables in the
-/// runtime's types.
-#[cfg(feature = "mods")]
-impl Game<'_> {
-    /// Capability `recipes`'s tables and known displays for this tick's
-    /// snapshot; nothing while no running mod reads them.
-    pub(super) fn mod_recipes(&mut self) -> (Option<Arc<horizon_mods::Recipes>>, Arc<[i32]>) {
-        if !self.mods.mods.wants_recipes() || self.res.rest.get().is_none() {
-            return (None, Arc::from([]));
-        }
-        if self.mods.recipes.is_none() {
-            self.mods.recipes = self.made_recipes().map(|t| Arc::new(wasm::recipes(&t)));
-        }
-        (self.mods.recipes.clone(), self.known_displays())
-    }
-}
-
-/// The native tables as the WebAssembly runtime's.
-#[cfg(feature = "mods")]
-mod wasm {
-    use super::{Recipe, RecipeItem, RecipeKind, RecipeStack, Recipes};
-    use horizon_mods as m;
-
-    fn kind(k: RecipeKind) -> m::RecipeKind {
-        match k {
-            RecipeKind::CraftingShaped => m::RecipeKind::CraftingShaped,
-            RecipeKind::CraftingShapeless => m::RecipeKind::CraftingShapeless,
-            RecipeKind::Smelting => m::RecipeKind::Smelting,
-            RecipeKind::Blasting => m::RecipeKind::Blasting,
-            RecipeKind::Smoking => m::RecipeKind::Smoking,
-            RecipeKind::Campfire => m::RecipeKind::Campfire,
-            RecipeKind::Stonecutting => m::RecipeKind::Stonecutting,
-            RecipeKind::Smithing => m::RecipeKind::Smithing,
-            RecipeKind::Brewing => m::RecipeKind::Brewing,
-        }
-    }
-    fn stacks(list: &[RecipeStack]) -> Vec<m::RecipeStack> {
-        list.iter()
-            .map(|s| m::RecipeStack {
-                item: s.item,
-                count: s.count,
-                components: s.components.clone(),
-            })
-            .collect()
-    }
-    fn recipe(r: &Recipe) -> m::Recipe {
-        m::Recipe {
-            id: r.id.clone(),
-            kind: kind(r.kind),
-            category: r.category.clone(),
-            group: r.group.clone(),
-            width: r.width,
-            height: r.height,
-            slots: r.slots.iter().map(|s| stacks(s)).collect(),
-            results: stacks(&r.results),
-            cooking_time: r.cooking_time,
-            experience: r.experience,
-            book_id: r.book_id,
-        }
-    }
-    fn item(i: &RecipeItem) -> m::RecipeItem {
-        m::RecipeItem {
-            id: i.id.clone(),
-            name: i.name.clone(),
-            tags: i.tags.clone(),
-        }
-    }
-    pub(super) fn recipes(t: &Recipes) -> m::Recipes {
-        m::Recipes {
-            items: t.items.iter().map(item).collect(),
-            recipes: t.recipes.iter().map(recipe).collect(),
         }
     }
 }

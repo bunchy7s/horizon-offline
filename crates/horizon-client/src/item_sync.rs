@@ -112,6 +112,13 @@ fn components_tag(s: &Stack, builtin: &Builtin, synced: &Dynamic) -> Option<Tag>
                 };
                 Tag::List(layers)
             }
+            // `painting/variant`: a synced registry entry, as trims are.
+            Component::PaintingVariant(id) => {
+                let Some(name) = synced.name("minecraft:painting_variant", *id) else {
+                    continue;
+                };
+                Tag::String(name.into())
+            }
             // A shield's `base_color`: the dye's id.
             Component::Int(v) if *kind == component::BASE_COLOR => Tag::String(dye_name(*v).into()),
             Component::Int(v) if *kind == component::RARITY => {
@@ -183,6 +190,18 @@ fn components_tag(s: &Stack, builtin: &Builtin, synced: &Dynamic) -> Option<Tag>
                 ("mob_factor", Tag::Float(v[5].to_bits())),
             ]),
             Component::Profile(p) => profile_tag(p),
+            // SuspiciousStewEffects' NBT: each effect by name and its duration.
+            Component::StewEffects(list) => Tag::List(
+                list.iter()
+                    .filter_map(|(id, duration)| {
+                        let name = builtin.get("minecraft:mob_effect")?.name(*id)?;
+                        Some(Tag::compound([
+                            ("id", Tag::String(name.into())),
+                            ("duration", Tag::Int(*duration)),
+                        ]))
+                    })
+                    .collect(),
+            ),
             // PotionContents' NBT: the potion by name and the custom colour.
             Component::Potion { potion, color, .. } => {
                 let potion = potion.and_then(|id| builtin.get("minecraft:potion")?.name(id));
@@ -523,7 +542,8 @@ mod tests {
     }
 
     /// What a creative client sends (`stack_to_network`) comes back whole on
-    /// the server: damage, both enchantment lists, repair cost, name, trim.
+    /// the server: damage, both enchantment lists, repair cost, name, trim,
+    /// potion and stew effects.
     #[test]
     fn a_creative_stack_keeps_its_components_across_the_wire() {
         let mut components = vec![String::new(); 60];
@@ -539,6 +559,10 @@ mod tests {
                 "minecraft:stored_enchantments",
             ),
             (component::TRIM, "minecraft:trim"),
+            (
+                component::SUSPICIOUS_STEW_EFFECTS,
+                "minecraft:suspicious_stew_effects",
+            ),
         ] {
             components[id as usize] = name.to_owned();
         }
@@ -551,6 +575,7 @@ mod tests {
                         "minecraft:air",
                         "minecraft:diamond_chestplate",
                         "minecraft:splash_potion",
+                        "minecraft:suspicious_stew",
                     ])),
                 ),
                 (
@@ -560,6 +585,10 @@ mod tests {
                 (
                     "minecraft:potion".to_owned(),
                     Ids::from_names(names(&["minecraft:water", "minecraft:swiftness"])),
+                ),
+                (
+                    "minecraft:mob_effect".to_owned(),
+                    Ids::from_names(names(&["minecraft:speed", "minecraft:fire_resistance"])),
                 ),
             ]
             .into(),
@@ -590,7 +619,7 @@ mod tests {
         d.stored_enchantments
             .push((Arc::from("minecraft:sharpness"), 2));
         d.repair_cost = 9;
-        d.custom_name = Some("Keeper".to_owned());
+        d.custom_name = Some(Tag::String("Keeper".into()));
         // A translatable item name reaches the client as the same component.
         let item_name = Tag::compound([("translate", Tag::String("filled_map.monument".into()))]);
         d.other
@@ -623,7 +652,7 @@ mod tests {
             vec![(Arc::from("minecraft:sharpness"), 2)]
         );
         assert_eq!(d.repair_cost, 9);
-        assert_eq!(d.custom_name.as_deref(), Some("Keeper"));
+        assert_eq!(d.custom_name_plain().as_deref(), Some("Keeper"));
         assert_eq!(d.other("minecraft:item_name"), Some(&item_name));
         assert_eq!(
             d.trim,
@@ -641,6 +670,86 @@ mod tests {
         assert_eq!(
             from_network(&wire, &builtin, &dynamic).potion(),
             Some("minecraft:swiftness")
+        );
+        // SuspiciousStewEffects, as a creative tab's stew has them: without
+        // them the server's stew gives no effect when eaten (#3137).
+        let mut stew = ItemStack::new("minecraft:suspicious_stew", 1);
+        stew.data_mut()
+            .stew_effects
+            .push((Arc::from("minecraft:fire_resistance"), 60));
+        let wire = crate::lan::guest::stack_to_network(
+            |name| id("minecraft:item", name).unwrap_or(0),
+            id,
+            &Some(stew),
+        )
+        .unwrap();
+        let back = from_network(&wire, &builtin, &dynamic);
+        assert_eq!(
+            back.data().map(|d| d.stew_effects.clone()),
+            Some(vec![(Arc::from("minecraft:fire_resistance"), 60)])
+        );
+    }
+
+    /// A painting's `painting/variant` (a `painting_variant` holder, id 109)
+    /// crosses the wire both ways: a server's creative slot gets the variant
+    /// its client picked, and a client's tooltip names the server's.
+    #[test]
+    fn a_painting_keeps_its_variant_across_the_wire() {
+        use horizon_protocol::buf::{Codec, Reader, Writer};
+        use horizon_protocol::item::Slot;
+        let mut components = vec![String::new(); 110];
+        components[109] = "minecraft:painting/variant".into();
+        let items = ["minecraft:air", "minecraft:painting"];
+        let builtin = Builtin {
+            registries: [
+                (
+                    "minecraft:item".to_owned(),
+                    Ids::from_names(items.iter().map(|s| s.to_string()).collect()),
+                ),
+                (
+                    "minecraft:data_component_type".to_owned(),
+                    Ids::from_names(components),
+                ),
+            ]
+            .into(),
+        };
+        let variants = ["minecraft:alban", "minecraft:kebab"];
+        let dynamic = Dynamic {
+            registries: [(
+                "minecraft:painting_variant".to_owned(),
+                variants.iter().map(|v| (v.to_string(), None)).collect(),
+            )]
+            .into(),
+            ..Default::default()
+        };
+        // ItemStack.OPTIONAL_STREAM_CODEC: count 1, the painting, one added
+        // component (109: the reference to kebab, its id plus one), none removed.
+        let vanilla = [1u8, 1, 1, 0, 109, 2];
+        let stack = Slot::read(&mut Reader::new(&vanilla)).unwrap().unwrap();
+        let back = from_network(&stack, &builtin, &dynamic);
+        let variant = |s: &ItemStack| {
+            s.data()
+                .and_then(|d| d.other("minecraft:painting/variant"))
+                .cloned()
+        };
+        assert_eq!(variant(&back), Some(Tag::String("minecraft:kebab".into())));
+        let mut alban = ItemStack::new("minecraft:painting", 1);
+        alban.data_mut().set_other(
+            "minecraft:painting/variant",
+            Some(Tag::String("minecraft:alban".into())),
+        );
+        let wire = crate::lan::guest::stack_to_network(
+            |name| items.iter().position(|i| *i == name).unwrap_or(0) as i32,
+            |registry, name| dynamic.id(registry, name),
+            &Some(alban.clone()),
+        );
+        let mut w = Writer::new();
+        Slot::write(&wire, &mut w);
+        assert_eq!(w.data, [1, 1, 1, 0, 109, 1]);
+        let wire = Slot::read(&mut Reader::new(&w.data)).unwrap().unwrap();
+        assert_eq!(
+            variant(&from_network(&wire, &builtin, &dynamic)),
+            variant(&alban)
         );
     }
 }

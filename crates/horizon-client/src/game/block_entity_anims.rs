@@ -33,6 +33,10 @@ impl Game<'_> {
     pub(super) fn block_entity_event(&mut self, pos: [i32; 3], a: i32, b: i32) {
         let state = self.world.block(pos[0], pos[1], pos[2]).0;
         let time = self.world.game_time;
+        // PotentSulfurBlock.triggerEvent.
+        if self.potent_sulfur_eruption_event((pos[0], pos[1], pos[2])) {
+            return;
+        }
         match self.be_anims.ticker(state) {
             Some(Ticker::Lid) => {
                 self.be_anims
@@ -586,6 +590,11 @@ impl Game<'_> {
             at.z.floor() as i32,
         );
         let up = BlockPos::new(p.x, top.floor() as i32, p.z);
+        // A server's client has no live biome features to ask: it answers from
+        // the chunks and the weather it was sent.
+        if self.remote.is_some() {
+            return self.raining_at(p) || self.raining_at(up);
+        }
         self.with_level(|b, level, _| b.is_raining_at(level, p) || b.is_raining_at(level, up))
     }
     /// `ConduitBlockEntity.updateAndAttackTarget`: while the conduit hunts
@@ -782,6 +791,7 @@ impl Game<'_> {
             let mut downloads = self.skin_downloads.borrow_mut();
             if self.gui.atlas.sprites.contains_key(&location) {
                 let _ = downloads.state(skins::Kind::Skin, &url);
+                downloads.drawn(&location);
                 return Some(location);
             }
             // Its slot was evicted: offer the image again.

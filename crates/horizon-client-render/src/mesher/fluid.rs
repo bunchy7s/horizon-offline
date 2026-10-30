@@ -227,8 +227,11 @@ pub(super) fn tesselate(
     } else {
         0xFF_FFFF
     };
-    // Lava emits light level 15.
-    let emission = if water { 0 } else { 15 };
+    let emission = if water {
+        0
+    } else {
+        crate::mesher::INCANDESCENT
+    };
     let color = |by: f32| {
         let rgb = [16, 8, 0].map(|shift| lighting::scale((tint >> shift & 255) as i32, by) as u32);
         crate::mesher::emitting(pack_rgb(rgb), emission)

@@ -1,6 +1,7 @@
 //! Per-tick client visuals: the particle engine, `ClientLevel.animateTick`,
 //! campfire smoke and rain splashes (`ClientLevel.tickWeatherEffects`).
 use super::{Dim, Game};
+use horizon_client::assets::Properties;
 use horizon_client::fog::{FogData, FogInputs, FogType, fog_type, update_rain_fog};
 use horizon_client::{
     animate_tick::{AnimateContext, animate_tick, campfire_particles, marker_particle_target},
@@ -16,13 +17,30 @@ use horizon_client::{
     screen_effects::{ScreenInputs, ScreenQuad, lightmap_brightness},
 };
 use horizon_core::random::{LegacyRandom, RandomSource};
+use horizon_world::{heightmap::HeightmapType, worldgen::terrain::TerrainBlockStates};
 
-/// The first motion-blocking block at or below `from` (Heightmap MOTION_BLOCKING), plus one.
-fn motion_blocking(world: &World, facts: &BlockFacts, x: i32, z: i32, from: i32) -> i32 {
-    motion_blocking_leaves(world, facts, x, z, from, true)
+/// `getHeight(Heightmap.Types.MOTION_BLOCKING, x, z)` from the chunk's
+/// heightmap: one above the highest block in `blocks_motion_in_heightmap` or
+/// holding a fluid, however far above the camera it is.
+pub(super) fn motion_blocking_height(
+    world: &World,
+    properties: &Properties,
+    x: i32,
+    z: i32,
+) -> i32 {
+    world.motion_blocking(x, z, |s| {
+        HeightmapType::MotionBlocking.is_opaque(properties.heightmap_state(s))
+    })
 }
-/// `motion_blocking` where leaves count only for MOTION_BLOCKING, not for
-/// MOTION_BLOCKING_NO_LEAVES.
+/// `ClientLevel.tickWeatherEffects`: the MOTION_BLOCKING height of the column
+/// `x`, `z` when a rain splash may land on it for a camera in block row `y`,
+/// that is above the world's bottom and within 10 blocks of the camera.
+fn splash_height(world: &World, properties: &Properties, x: i32, y: i32, z: i32) -> Option<i32> {
+    let top = motion_blocking_height(world, properties, x, z);
+    (top > MIN_Y && (y - 10..=y + 10).contains(&top)).then_some(top)
+}
+/// The first block at or below `from` that blocks motion (leaves only when
+/// `leaves`, as MOTION_BLOCKING_NO_LEAVES skips them) or holds a fluid, plus one.
 fn motion_blocking_leaves(
     world: &World,
     facts: &BlockFacts,
@@ -272,6 +290,11 @@ impl Game<'_> {
             let brightness = self.eye_brightness(e);
             let inside_portal = self.client_portal_effect();
             self.screen_fx.tick(brightness, inside_portal);
+            // LocalPlayer.aiStep: processPortalCooldown after the transition
+            // effect (a local world's player counts down in handlePortal).
+            if self.remote.is_some() && self.portals.player.cooldown > 0 {
+                self.portals.player.cooldown -= 1;
+            }
             let nausea = self
                 .potions
                 .effects
@@ -328,10 +351,11 @@ impl Game<'_> {
         let world = &self.world;
         let facts = self.res.facts();
         let biomes = self.res.biomes();
+        let properties = &self.pack.assets.properties;
         let raining = rain > 0.2;
         let raining_at = |p: [i32; 3]| {
             raining
-                && motion_blocking(world, facts, p[0], p[2], p[1] + 64) <= p[1]
+                && motion_blocking_height(world, properties, p[0], p[2]) <= p[1]
                 && rains_at(world, biomes, p[0], p[1], p[2])
         };
         let height_no_leaves =
@@ -385,12 +409,10 @@ impl Game<'_> {
                 for _ in 0..count {
                     let x = block[0] + random.next_int_bound(diameter).unwrap_or(0) - radius;
                     let z = block[2] + random.next_int_bound(diameter).unwrap_or(0) - radius;
-                    let top = motion_blocking(world, facts, x, z, block[1] + 64);
-                    if top <= MIN_Y
-                        || top > block[1] + 10
-                        || top < block[1] - 10
-                        || !rains_at(world, biomes, x, top, z)
-                    {
+                    let Some(top) = splash_height(world, properties, x, block[1], z) else {
+                        continue;
+                    };
+                    if !rains_at(world, biomes, x, top, z) {
                         continue;
                     }
                     let below = top - 1;
@@ -438,8 +460,7 @@ impl Game<'_> {
                     self.rain_sound_time += 1;
                     if random.next_int_bound(3).unwrap_or(0) < waited {
                         self.rain_sound_time = 0;
-                        let roof =
-                            motion_blocking(world, facts, block[0], block[2], MIN_Y + HEIGHT);
+                        let roof = motion_blocking_height(world, properties, block[0], block[2]);
                         let (name, volume, pitch) = if at[1] > block[1] + 1 && roof > block[1] {
                             ("minecraft:weather.rain.above", 0.1, 0.5)
                         } else {
@@ -479,5 +500,45 @@ impl Game<'_> {
         for (name, at, volume, pitch) in std::mem::take(&mut self.particles.sounds) {
             self.audio.play(name, Some(at), volume, pitch);
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::{Properties, World, splash_height};
+    use horizon_client::chunk::Chunk;
+    use horizon_world::registry::BlockStateId;
+    use std::sync::Arc;
+
+    /// #3810: under a stone roof more than 64 blocks above the camera, as in a
+    /// deep excavation, MOTION_BLOCKING is the roof, so no rain splash lands on
+    /// the floor; with the roof gone, it does.
+    #[test]
+    fn no_rain_splash_under_a_high_roof() {
+        // State 0 is air, 1 is stone.
+        let properties =
+            Properties::for_tests(&[(true, false, false, false), (false, false, true, true)]);
+        let stone = BlockStateId(1);
+        let mut world = World::new(BlockStateId(0), 0);
+        world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        for x in 0..16 {
+            for z in 0..16 {
+                world.set(x, 0, z, stone).unwrap();
+            }
+        }
+        // The camera stands on the floor, its block at y 1.
+        assert_eq!(splash_height(&world, &properties, 3, 1, 3), Some(1));
+        for roof in [70, 80, 200] {
+            world.set(3, roof, 3, stone).unwrap();
+            assert_eq!(
+                splash_height(&world, &properties, 3, 1, 3),
+                None,
+                "roof at {roof}"
+            );
+            world.set(3, roof, 3, BlockStateId(0)).unwrap();
+        }
+        assert_eq!(splash_height(&world, &properties, 3, 1, 3), Some(1));
+        // A roof within 10 blocks is where the splash lands.
+        world.set(3, 8, 3, stone).unwrap();
+        assert_eq!(splash_height(&world, &properties, 3, 1, 3), Some(9));
     }
 }

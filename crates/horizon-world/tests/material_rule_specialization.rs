@@ -23,10 +23,11 @@ struct Queries {
     biomes: usize,
     fail_binding: bool,
     fail_temperature: bool,
+    any_biome: bool,
 }
 impl MaterialSurfaceQueries for Queries {
     fn possible_biomes(&self) -> Option<BTreeSet<String>> {
-        Some(BTreeSet::from(["minecraft:plains".into()]))
+        (!self.any_biome).then(|| BTreeSet::from(["minecraft:plains".into()]))
     }
     fn surface_depth(&mut self, _: i32, _: i32) -> i32 {
         1
@@ -115,6 +116,22 @@ fn constant_branches_keep_binding_order_and_short_circuit_queries() {
     assert_eq!(q.bindings, [true, true, false, true, true, false]);
     assert_eq!(q.biomes, 0);
     assert_eq!(q.temperatures, 0);
+}
+#[test]
+fn an_empty_biome_list_matches_nothing_on_a_surface_without_biome_ids() {
+    let mut w = worker(Queries {
+        any_biome: true,
+        ..Queries::default()
+    });
+    let rule = w
+        .add_rule(condition(
+            MaterialCondition::Biome(Vec::new()),
+            MaterialRule::Block(BlockStateId(9)),
+        ))
+        .unwrap();
+    w.update_xz(4, 5, 0, 0);
+    w.update_y(1, 1, i32::MIN, 64);
+    assert_eq!(w.try_apply(rule, BlockPos::new(4, 64, 5)), Ok(None));
 }
 #[test]
 fn unreachable_children_still_fail_compilation_without_adding_a_rule() {

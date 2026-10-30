@@ -4,20 +4,20 @@ DamageSources.explosion	inline	crates/horizon-client/src/game/creatures.rs::dama
 FallLocation.blockToFallLocation	port	crates/horizon-client/src/game/combat.rs::Game::fall_location	gap: minor: trapdoors are not mapped to the ladder location, they count as other_climbable
 AbsorptionMobEffect.onEffectStarted	port	crates/horizon-client/src/game/potions.rs::Game::add_player_effect	gap: minor: sets absorption to max(current, 4 * (level + 1)) for the player only; a mob given absorption gets none
 BadOmenMobEffect.applyEffectTick	port	crates/horizon-client/src/game/raids.rs::Game::omen_tick	bad omen in a village (not peaceful, not spectator, raid below max omen level) becomes Raid Omen 600 ticks and records the position
-HealOrHarmMobEffect.applyEffectTick	port	crates/horizon-client/src/effects.rs::periodic	instant_health heals 4 << level, instant_damage hurts 6 << level (magic); mobs get the instant effects from splash and cloud code in potions.rs
-HungerMobEffect.applyEffectTick	port	crates/horizon-client/src/effects.rs::periodic	exhaustion 0.005 * (level + 1) every tick, applied by Game::apply_effect_action; player only like vanilla
+HealOrHarmMobEffect.applyEffectTick	port	crates/horizon-client-render/src/effects.rs::periodic	instant_health heals 4 << level, instant_damage hurts 6 << level (magic); mobs get the instant effects from splash and cloud code in potions.rs
+HungerMobEffect.applyEffectTick	port	crates/horizon-client-render/src/effects.rs::periodic	exhaustion 0.005 * (level + 1) every tick, applied by Game::apply_effect_action; player only like vanilla
 InfestedMobEffect.spawnSilverfish	inline	crates/horizon-client/src/game/potions.rs::Game::infested_hurt	the 10 percent roll and the one or two silverfish thrown along the look direction, with the hurt sound; player and mobs
 MobEffect.getOrCreateDescriptionId	skip:java		lazy translation key cache
-MobEffect.setBlendDuration	inline	crates/horizon-client/src/screen_effects.rs::ScreenEffects::tick_spinning	nausea fades in over 150 and out over 20 ticks, darkness over 22 (sculk.rs::Game::tick_darkness_blend); no other effect blends
+MobEffect.setBlendDuration	inline	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::tick_spinning	nausea fades in over 150 and out over 20 ticks, darkness over 22 (sculk.rs::Game::tick_darkness_blend); no other effect blends
 MobEffect.removeAttributeModifiers	inline	crates/horizon-client/src/game/potions.rs::Game::apply_effect_status	modifiers that left the effect list are removed in the diff loop; horizon-world has an unused kernel (effect_attribute_modifiers.rs::remove_modifiers)
-MobEffectInstance.<init>	port	crates/horizon-client/src/effects.rs::EffectInstance::new	gap: minor: no showIcon flag, so an effect given without particles still shows its icon; amplifier clamps to 0..255
-MobEffectInstance.asDetails	inline	crates/horizon-client/src/effects.rs::PlayerEffects::saved	gap: minor: only id, duration, amplifier, ambient and particles are saved; hidden_effect is lost on save and show_icon is written as the particles flag
-MobEffectInstance.setDetailsFrom	inline	crates/horizon-client/src/effects.rs::EffectInstance::downgrade	copies the hidden effect's details when the active one runs out; the copy constructor is Clone
-MobEffectInstance.isShorterDurationThan	port	crates/horizon-client/src/effects.rs::EffectInstance::shorter_than	
+MobEffectInstance.<init>	port	crates/horizon-client-render/src/effects.rs::EffectInstance::new	gap: minor: no showIcon flag, so an effect given without particles still shows its icon; amplifier clamps to 0..255
+MobEffectInstance.asDetails	inline	crates/horizon-client-render/src/effects.rs::PlayerEffects::saved	gap: minor: only id, duration, amplifier, ambient and particles are saved; hidden_effect is lost on save and show_icon is written as the particles flag
+MobEffectInstance.setDetailsFrom	inline	crates/horizon-client-render/src/effects.rs::EffectInstance::downgrade	copies the hidden effect's details when the active one runs out; the copy constructor is Clone
+MobEffectInstance.isShorterDurationThan	port	crates/horizon-client-render/src/effects.rs::EffectInstance::shorter_than	
 MobEffectInstance.withScaledDuration	inline	crates/horizon-client/src/game/potions.rs::Game::cloud_affect	the scaled closure: floor(duration * 0.25) at least 1 for lingering clouds; fixed 0.25, the stack's potion_duration_scale is not read
 MobEffectInstance.mapDuration	inline	crates/horizon-client/src/game/potions.rs::Game::splash	the (int)(scale * duration + 0.5) of a splash potion on mobs (splash_on_player for the player); potions are never infinite
-MobEffectInstance.tickDownDuration	port	crates/horizon-client/src/effects.rs::EffectInstance::tick_down	hidden effect ticks down too; infinite stays
-MobEffectInstance.downgradeToHiddenEffect	port	crates/horizon-client/src/effects.rs::EffectInstance::downgrade	gap: minor: mobs keep no hidden effects (Mob::add_effect drops a weaker one)
+MobEffectInstance.tickDownDuration	port	crates/horizon-client-render/src/effects.rs::EffectInstance::tick_down	hidden effect ticks down too; infinite stays
+MobEffectInstance.downgradeToHiddenEffect	port	crates/horizon-client-render/src/effects.rs::EffectInstance::downgrade	gap: minor: mobs keep no hidden effects (Mob::add_effect drops a weaker one)
 MobEffectInstance.onMobRemoved	inline	crates/horizon-client/src/game/potions.rs::Game::effects_on_death	oozing, weaving and wind charged run when their bearer dies (player or mob)
 MobEffectInstance.onMobHurt	inline	crates/horizon-client/src/game/potions.rs::Game::infested_hurt	only infested reacts to being hurt; called for the player from combat.rs and for mobs from creatures.rs
 MobEffectInstance.toString	skip:debug		debug string
@@ -26,18 +26,18 @@ MobEffectInstance.hashCode	skip:java		value hash
 MobEffectInstance.BlendState.setImmediate	missing		minor: skipBlending is never used, so nausea and darkness restored on login or a dimension change fade in from 0 instead of starting full
 MobEffectInstance.BlendState.getFactor	port	crates/horizon-client/src/game/fov.rs::Game::nausea_blend	lerp of the previous and current factor; darkness has its own in sculk.rs::Game::darkness_blend
 MobEffectInstance.Details.create	skip:java		record constructor for the codec
-MobEffectUtil.hasDigSpeed	inline	crates/horizon-client/src/effects.rs::PlayerEffects::mining_speed_factor	haste or conduit power, also read for the arm swing duration in first_person.rs
-MobEffectUtil.hasWaterBreathing	inline	crates/horizon-client/src/effects.rs::PlayerEffects::status	water_breathing flag is water breathing or conduit power; breath of the nautilus is its own flag read with it
+MobEffectUtil.hasDigSpeed	inline	crates/horizon-client-render/src/effects.rs::PlayerEffects::mining_speed_factor	haste or conduit power, also read for the arm swing duration in first_person.rs
+MobEffectUtil.hasWaterBreathing	inline	crates/horizon-client-render/src/effects.rs::PlayerEffects::status	water_breathing flag is water breathing or conduit power; breath of the nautilus is its own flag read with it
 MobEffectUtil.shouldEffectsRefillAirsupply	inline	crates/horizon-client/src/motion/environment.rs::MotionWorld::tick_environment_damage	air refills unless only breath of the nautilus is active
 OozingMobEffect.onMobRemoved	inline	crates/horizon-client/src/game/potions.rs::Game::effects_on_death	oozing branch: two slimes, fewer when slimes within 2 blocks fill max_entity_cramming
 OozingMobEffect.spawnSlimeOffspring	inline	crates/horizon-client/src/game/potions.rs::Game::effects_on_death	size 2 slime half a block up
-PoisonMobEffect.applyEffectTick	port	crates/horizon-client/src/effects.rs::periodic	one magic damage while above 1 health; mobs in mobs/ai.rs::tick_effects
-PoisonMobEffect.shouldApplyEffectTickThisTick	port	crates/horizon-client/src/effects.rs::periodic	25 >> level interval
-RegenerationMobEffect.applyEffectTick	port	crates/horizon-client/src/effects.rs::periodic	heal 1; mobs in mobs/ai.rs::tick_effects
-RegenerationMobEffect.shouldApplyEffectTickThisTick	port	crates/horizon-client/src/effects.rs::periodic	50 >> level interval
-SaturationMobEffect.applyEffectTick	port	crates/horizon-client/src/effects.rs::periodic	Eat(level + 1, 1.0) applied to the food data; player only
+PoisonMobEffect.applyEffectTick	port	crates/horizon-client-render/src/effects.rs::periodic	one magic damage while above 1 health; mobs in mobs/ai.rs::tick_effects
+PoisonMobEffect.shouldApplyEffectTickThisTick	port	crates/horizon-client-render/src/effects.rs::periodic	25 >> level interval
+RegenerationMobEffect.applyEffectTick	port	crates/horizon-client-render/src/effects.rs::periodic	heal 1; mobs in mobs/ai.rs::tick_effects
+RegenerationMobEffect.shouldApplyEffectTickThisTick	port	crates/horizon-client-render/src/effects.rs::periodic	50 >> level interval
+SaturationMobEffect.applyEffectTick	port	crates/horizon-client-render/src/effects.rs::periodic	Eat(level + 1, 1.0) applied to the food data; player only
 WeavingMobEffect.onMobRemoved	inline	crates/horizon-client/src/game/potions.rs::Game::effects_on_death	weaving branch (killed, player or mob_griefing) calls spawn_cobwebs_around: 2 or 3 cobwebs among 15 random blocks
-WitherMobEffect.shouldApplyEffectTickThisTick	port	crates/horizon-client/src/effects.rs::periodic	40 >> level interval; mobs in mobs/ai.rs::tick_effects take magic damage, not wither damage
+WitherMobEffect.shouldApplyEffectTickThisTick	port	crates/horizon-client-render/src/effects.rs::periodic	40 >> level interval; mobs in mobs/ai.rs::tick_effects take magic damage, not wither damage
 AbstractInterpolationHandler.adjustInterpolationPosition	skip:other		Horizon moves a remote entity only through SteppedInterpolation, so there is no client-side move to add to the target
 AbstractInterpolationHandler.adjustInterpolationTargetFromDeltas	skip:other		same: the entity never drifts from where the interpolation put it (see SteppedInterpolation::interpolate)
 AbstractInterpolationHandler.setLastPositionAndRotation	skip:other		only feeds the delta adjustments above; Horizon's own last is the start of the step

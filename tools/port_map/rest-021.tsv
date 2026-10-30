@@ -74,14 +74,14 @@ Ease.inOutQuint	missing		minor: named easing reached only through the EasingType
 Ease.outBounce	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
 Ease.outElastic	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
 Ease.outExpo	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
-EasingType.cubicBezier	inline	crates/horizon-client/src/environment.rs::Environment::load_dimension	reads the four control points of a cubic_bezier ease; gap: minor: no range check, see CubicBezierControls.validate
-EasingType.CubicBezier.curveFromControls	inline	crates/horizon-client/src/environment.rs::Easing::apply	the curve coefficients closure
-EasingType.CubicBezier.solveT	inline	crates/horizon-client/src/environment.rs::Easing::apply	Newton steps with the 1e-5 tolerance
-EasingType.CubicBezier.solveTBisect	inline	crates/horizon-client/src/environment.rs::Easing::apply	bisection fallback when Newton does not converge
+EasingType.cubicBezier	inline	crates/horizon-client-render/src/environment.rs::Environment::load_dimension	reads the four control points of a cubic_bezier ease; gap: minor: no range check, see CubicBezierControls.validate
+EasingType.CubicBezier.curveFromControls	inline	crates/horizon-client-render/src/environment.rs::Easing::apply	the curve coefficients closure
+EasingType.CubicBezier.solveT	inline	crates/horizon-client-render/src/environment.rs::Easing::apply	Newton steps with the 1e-5 tolerance
+EasingType.CubicBezier.solveTBisect	inline	crates/horizon-client-render/src/environment.rs::Easing::apply	bisection fallback when Newton does not converge
 EasingType.CubicBezier.equals	skip:java		value equality
 EasingType.CubicBezier.toString	skip:debug		debug string
-EasingType.CubicBezier.CubicCurve.sample	inline	crates/horizon-client/src/environment.rs::Easing::apply	the sample closure
-EasingType.CubicBezier.CubicCurve.sampleGradient	inline	crates/horizon-client/src/environment.rs::Easing::apply	the gradient closure
+EasingType.CubicBezier.CubicCurve.sample	inline	crates/horizon-client-render/src/environment.rs::Easing::apply	the sample closure
+EasingType.CubicBezier.CubicCurve.sampleGradient	inline	crates/horizon-client-render/src/environment.rs::Easing::apply	the gradient closure
 EasingType.CubicBezierControls.validate	missing		minor: vanilla rejects control points outside [0;1] when a timeline loads; Horizon takes any value
 EncoderCache.Key.equals	skip:java		cache key equality
 EncoderCache.Key.hashCode	skip:java		cache key hashing

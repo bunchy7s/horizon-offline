@@ -327,6 +327,7 @@ fn version_of(
         blocked: index
             .revoked(&p.id, &v.file.sha256)
             .map(|r| format!("taken down: {}", r.reason))
+            .or_else(|| needs_port(v).then(|| NEEDS_PORT.to_string()))
             .or_else(|| needs_newer(v, level).then(|| NEEDS_NEWER.to_string())),
     }
 }
@@ -358,6 +359,8 @@ fn search(index: &Index, query: &Query) -> Vec<Project> {
         .iter()
         .filter(|p| kind_of(&p.kind) == Some(query.kind) && matches(p, &query.text))
         .filter(|p| query.everything || p.versions.iter().any(|v| v.game == GAME))
+        // A WebAssembly mod stays in the index for the modpacks that need it, not in the browser.
+        .filter(|p| !p.versions.iter().filter(|v| v.game == GAME).all(needs_port))
         .filter_map(project_of)
         .collect();
     found.sort_by_key(|p| std::cmp::Reverse(p.downloads));
@@ -554,6 +557,9 @@ fn install_from(
         .project(&project.id)
         .ok_or_else(|| format!("{} isn't in Horizon's registry.", project.title))?;
     let v = newest(index, p, level)?;
+    if needs_port(v) {
+        return Err(format!("{} {NEEDS_PORT}.", p.name));
+    }
     install_version(index, local, p, v, home, progress).map(|e| vec![e])
 }
 
@@ -582,6 +588,17 @@ fn newest<'a>(
 }
 
 const NEEDS_NEWER: &str = "needs a newer Horizon than the game you play";
+const NEEDS_PORT: &str = "needs a native port: Horizon doesn't run WebAssembly mods any more";
+
+/// Whether version `v` is a WebAssembly mod with code: a `.hmod` that may do more than add
+/// content. The registry keeps it for the modpacks that need it; a modpack installs it with its
+/// code left out (the game doesn't run it), and the browser neither lists nor installs it.
+pub fn needs_port(v: &index::Version) -> bool {
+    v.file.name.ends_with(".hmod")
+        && v.capabilities
+            .iter()
+            .any(|c| *c != horizon_mods::Capability::Registries)
+}
 
 /// Whether version `v` calls mod API functions a game serving `level` doesn't have.
 fn needs_newer(v: &index::Version, level: Option<u32>) -> bool {
@@ -676,7 +693,10 @@ fn install_version(
         page: project.page.clone(),
         dependency: false,
         verdict: Some(trust_label(trust).into()),
-        skipped: Vec::new(),
+        skipped: match needs_port(v) {
+            true => vec![format!("its code ({NEEDS_PORT})")],
+            false => Vec::new(),
+        },
         namespaces: Vec::new(),
     };
     list.entries.retain(|e| !ours(e));

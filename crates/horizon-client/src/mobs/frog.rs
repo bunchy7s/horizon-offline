@@ -36,7 +36,7 @@ const SCAN_RATE: i32 = 20;
 /// `FrogAi.TIME_BETWEEN_LONG_JUMPS` and the brain memory
 /// `LONG_JUMP_COOLDOWN_TICKS` (saved with the others, as `finalize` sets it).
 const TIME_BETWEEN_LONG_JUMPS: (i32, i32) = (100, 140);
-const LONG_JUMP_COOLDOWN: &str = "long_jump_cooldown";
+const LONG_JUMP_COOLDOWN: &str = "long_jump_cooling_down";
 /// `FrogAi`'s `LongJumpToPreferredBlock`: `MAX_LONG_JUMP_WIDTH`,
 /// `MAX_LONG_JUMP_HEIGHT`, `MAX_JUMP_VELOCITY_MULTIPLIER` and the chance to
 /// look for a lily pad or big dripleaf first.

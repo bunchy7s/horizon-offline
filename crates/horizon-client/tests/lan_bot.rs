@@ -224,7 +224,9 @@ impl Server {
 }
 
 fn server(resources: &Path) -> Server {
-    let sync = Arc::new(SyncData::load(resources).expect("sync data"));
+    let sync = Arc::new(
+        SyncData::load(resources, &horizon_world::loot::PackOverlay::NONE).expect("sync data"),
+    );
     let lan = Lan::start(sync.clone(), 0, "Test - World".into(), 8).unwrap();
     let biomes: Vec<String> = sync
         .dynamic
@@ -449,6 +451,111 @@ fn a_move_behind_a_dig_and_its_swing_waits_for_the_next_tick() {
     // checked against the block and sent back.
     let g = &s.hub.guests[0];
     assert_eq!(g.position, at, "the move was handled before the dig");
+    assert!(
+        matches!(g.inbox.back(), Some(S::MovePlayerPos(_))),
+        "the move left the queue"
+    );
+}
+
+/// The first login packet a client named `name` gets after its hello.
+fn first_login_packet(mut c: Connection, port: u16, name: &str) -> login::Clientbound {
+    c.send(
+        &handshake::Serverbound::Intention(handshake::Intention {
+            protocol: PROTOCOL_VERSION,
+            host: "127.0.0.1".into(),
+            port,
+            intent: handshake::LOGIN,
+        })
+        .encode(),
+    )
+    .unwrap();
+    c.send(
+        &login::Serverbound::Hello(login::ServerHello {
+            name: name.into(),
+            uuid: offline_uuid(name),
+        })
+        .encode(),
+    )
+    .unwrap();
+    let (id, payload) = c.recv().unwrap();
+    login::Clientbound::decode(id, &payload).unwrap()
+}
+
+#[test]
+fn a_signed_in_hosts_lan_authenticates_guests_but_not_its_own_player() {
+    use horizon_client::lan::{NetConfig, OnlineMode};
+    let Some(resources) = resources() else {
+        return;
+    };
+    let sync = Arc::new(
+        SyncData::load(&resources, &horizon_world::loot::PackOverlay::NONE).expect("sync data"),
+    );
+    let net = NetConfig {
+        online: Some(Arc::new(OnlineMode::generate(false).unwrap())),
+        announce: false,
+        ..NetConfig::lan(0, "Test - World".into(), 8)
+    };
+    let lan = Lan::start_with(sync, net).unwrap();
+    let guest = Connection::connect("127.0.0.1", lan.port, Duration::from_secs(5)).unwrap();
+    match first_login_packet(guest, lan.port, "Guest") {
+        login::Clientbound::Hello(h) => assert!(h.should_authenticate),
+        other => panic!("expected an encryption request, got {other:?}"),
+    }
+    let owner = Connection::local(lan.connect_local().unwrap());
+    match first_login_packet(owner, 0, "Host") {
+        login::Clientbound::LoginFinished(p) => assert_eq!(p.profile.uuid, offline_uuid("Host")),
+        other => panic!("expected the owner's login, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_move_behind_a_use_on_a_block_and_its_swing_waits_for_the_next_tick() {
+    let Some(resources) = resources() else {
+        return;
+    };
+    let mut s = server(&resources);
+    let port = s.hub.lan.port;
+    let _bot = run(&mut s, move || connect(port, "Pillar", true));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while s.hub.guests.is_empty() {
+        s.tick(&[]);
+        assert!(Instant::now() < deadline, "guest did not join");
+        thread::yield_now();
+    }
+    s.hub.guests[0].loaded = true;
+    // The join's teleport accepted: the hub takes moves.
+    s.hub.guests[0].awaiting_teleport = None;
+    let at = s.hub.guests[0].position;
+    let below = [
+        at[0].floor() as i32,
+        at[1].floor() as i32 - 1,
+        at[2].floor() as i32,
+    ];
+    // A jump up a pillar as the client sends it in one tick: the click on the block
+    // below from where the player was, the arm swing, then the move up the jump.
+    let inbox = &mut s.hub.guests[0].inbox;
+    inbox.push_back(S::UseItemOn(play::UseItemOn {
+        hand: 0,
+        pos: below,
+        face: 1,
+        cursor: [0.5, 1.0, 0.5],
+        inside: false,
+        world_border: false,
+        sequence: 1,
+    }));
+    inbox.push_back(S::Punch(Empty));
+    inbox.push_back(S::MovePlayerPos(play::MovePlayerPos {
+        x: at[0],
+        y: at[1] + 0.42,
+        z: at[2],
+        flags: 0,
+    }));
+    s.tick(&[]);
+    // The game places the block after the hub's pass: BlockItem.canPlace sees the
+    // player where they clicked from, as their client's prediction did.
+    assert_eq!(s.placed.len(), 1, "the use was not handled");
+    let g = &s.hub.guests[0];
+    assert_eq!(g.position, at, "the move was handled before the use");
     assert!(
         matches!(g.inbox.back(), Some(S::MovePlayerPos(_))),
         "the move left the queue"

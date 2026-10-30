@@ -1,8 +1,0 @@
-id = "predator_missile"
-name = "Predator Missile"
-version = "0.1.0"
-description = "/missile launches a guided missile 60 blocks above you. Steer it with the mouse; it explodes on whatever it hits. Needs cheats (it runs vanilla commands as you)."
-authors = ["Horizon"]
-api = "0.1"
-side = "client"
-capabilities = ["game-read", "hud", "chat", "command"]

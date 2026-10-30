@@ -59,7 +59,7 @@ BoatModel.createChestBoatModel	skip:data		layer baked into entity-models.json, l
 BoatModel.createWaterPatch	skip:data		layer baked into entity-models.json, loaded by key
 RaftModel.createRaftModel	skip:data		bamboo raft is boat/bamboo#main in entity-models.json
 RaftModel.createChestRaftModel	skip:data		bamboo chest raft is chest_boat/bamboo#main in entity-models.json
-BookModel.State.forAnimation	port	crates/horizon-client/src/block_entity_anim.rs::EnchantingBook::render	openness and page flips computed in EnchantingBook::render
+BookModel.State.forAnimation	port	crates/horizon-client-render/src/block_entity_anim.rs::EnchantingBook::render	openness and page flips computed in EnchantingBook::render
 MinecartModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
 ChestModel.createSingleBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
 ChestModel.createDoubleBodyRightLayer	skip:data		layer baked into entity-models.json, loaded by key
@@ -77,11 +77,11 @@ TridentModel.createLayer	skip:data		layer baked into entity-models.json, loaded 
 WindChargeModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
 WindChargeModel.setupAnim	port	crates/horizon-client/src/game/wind.rs::Game::wind_charge_geometry	wind and wind_charge parts spin in opposite directions
 DragonHeadModel.createHeadLayer	skip:data		layer baked into entity-models.json, loaded by key
-DragonHeadModel.setupAnim	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	jaw animation in the skull branch of render_one
-PiglinHeadModel.setupAnim	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	ear flap in the skull branch of render_one
+DragonHeadModel.setupAnim	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	jaw animation in the skull branch of render_one
+PiglinHeadModel.setupAnim	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	ear flap in the skull branch of render_one
 SkullModel.createHeadModel	skip:data		layer baked into entity-models.json, loaded by key
 SkullModel.createHumanoidHeadLayer	skip:data		layer baked into entity-models.json, loaded by key
-SkullModel.setupAnim	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	head yaw and pitch in the skull branch of render_one
+SkullModel.setupAnim	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	head yaw and pitch in the skull branch of render_one
 PlayerCapeModel.createCapeLayer	missing		player: capes never draw; skins.rs downloads the cape texture but nothing draws the cape layer
 PlayerCapeModel.setupAnim	missing		player: the cape does not lean or flap with movement, since no cape is drawn
 PlayerEarsModel.createEarsLayer	missing		minor: extra ears (showExtraEars accounts) are not drawn
@@ -89,12 +89,12 @@ PlayerModel.createMesh	skip:data		layer baked into entity-models.json, loaded by
 PlayerModel.createArmorMeshSet	skip:data		layer baked into entity-models.json, loaded by key
 PlayerModel.setupAnim	port	crates/horizon-client/src/mobs/anim.rs::setup	gap: player: hat, jacket, sleeve and pant toggles (modelPart options) are not read, so a hidden layer still draws; humanoid pose is in the Humanoid branch
 PlayerModel.translateToHand	port	crates/horizon-client/src/mobs/render.rs::hand_base	gap: minor: slim-arm 0.5 pixel hand offset not applied
-BlockModelLighter.prepareQuadAmbientOcclusion	port	crates/horizon-client/src/mesher/lighting.rs::ambient_occlusion	per-vertex AO brightness and smooth light from the corner samples
-BlockModelLighter.prepareQuadFlat	port	crates/horizon-client/src/mesher/lighting.rs::flat	light only; the directional colour is applied in Mesher::face
-BlockModelLighter.prepareQuadShape	port	crates/horizon-client/src/mesher/lighting.rs::shape	face bounds, partial and cubic flags
-BlockModelLighter.getDirectionalBrightness	port	crates/horizon-client/src/mesher/lighting.rs::cardinal	face shade; the shade direction override is read in Mesher::face
-BlockModelLighter.Cache.getLightCoords	port	crates/horizon-client/src/mesher/lighting.rs::coords	packed light for a position
-BlockModelLighter.Cache.getShadeBrightness	port	crates/horizon-client/src/mesher.rs::MeshTables::new	shade per block state (Info.shade), not cached per position
+BlockModelLighter.prepareQuadAmbientOcclusion	port	crates/horizon-client-render/src/mesher/lighting.rs::ambient_occlusion	per-vertex AO brightness and smooth light from the corner samples
+BlockModelLighter.prepareQuadFlat	port	crates/horizon-client-render/src/mesher/lighting.rs::flat	light only; the directional colour is applied in Mesher::face
+BlockModelLighter.prepareQuadShape	port	crates/horizon-client-render/src/mesher/lighting.rs::shape	face bounds, partial and cubic flags
+BlockModelLighter.getDirectionalBrightness	port	crates/horizon-client-render/src/mesher/lighting.rs::cardinal	face shade; the shade direction override is read in Mesher::face
+BlockModelLighter.Cache.getLightCoords	port	crates/horizon-client-render/src/mesher/lighting.rs::coords	packed light for a position
+BlockModelLighter.Cache.getShadeBrightness	port	crates/horizon-client-render/src/mesher.rs::MeshTables::new	shade per block state (Info.shade), not cached per position
 BlockModelRenderState.clear	skip:java		reuse of a pooled render state object
 BlockModelRenderState.tintLayers	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	gap: minor: the caller tints every face with one sprite tint, not per tint index
 BlockModelRenderState.setupModel	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	model parts with the transform matrix
@@ -102,43 +102,43 @@ BlockModelRenderState.submit	port	crates/horizon-client/src/game/minecarts.rs::G
 BlockModelRenderState.submitModel	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	faces written to the vertex list
 BlockModelRenderState.scratchRandomSource	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	seeded variant choice through collect_seeded
 BlockModelResolver.update	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	resolves the seeded model for a block state; light is passed in by the caller
-BlockModelSet.createFallbackModel	port	crates/horizon-client/src/mesher.rs::MeshTables::new	per-state tint sources (Info.tints) and the plain model
-BuiltInBlockModels.special	port	crates/horizon-client/src/block_entity_render.rs::classify	special model name to Kind
-BuiltInBlockModels.createMobHead	port	crates/horizon-client/src/block_entity_render.rs::classify	Skull kind for mob heads
-BuiltInBlockModels.createMobWallHead	port	crates/horizon-client/src/block_entity_render.rs::classify	Skull kind for wall mob heads
-BuiltInBlockModels.createMobHeads	port	crates/horizon-client/src/block_entity_render.rs::classify	Skull kind for the head set
-BuiltInBlockModels.createPlayerHead	port	crates/horizon-client/src/block_entity_render.rs::classify	Skull kind for player heads
-BuiltInBlockModels.createPlayerWallHead	port	crates/horizon-client/src/block_entity_render.rs::classify	Skull kind for wall player heads
-BuiltInBlockModels.createBanner	port	crates/horizon-client/src/block_entity_render.rs::classify	Banner kind
-BuiltInBlockModels.createWallBanner	port	crates/horizon-client/src/block_entity_render.rs::classify	Banner kind for wall banners
-BuiltInBlockModels.createDyedShulkerBox	port	crates/horizon-client/src/block_entity_render.rs::classify	Shulker kind for dyed boxes
-BuiltInBlockModels.createChest	port	crates/horizon-client/src/block_entity_render.rs::classify	Chest kind
-BuiltInBlockModels.createSingletonChest	port	crates/horizon-client/src/block_entity_render.rs::classify	Chest kind, single chest
-BuiltInBlockModels.createXmasChest	port	crates/horizon-client/src/block_entity_render.rs::classify	Chest kind with the Christmas texture
-BuiltInBlockModels.createCopperGolem	port	crates/horizon-client/src/block_entity_render.rs::classify	CopperGolem kind
+BlockModelSet.createFallbackModel	port	crates/horizon-client-render/src/mesher.rs::MeshTables::new	per-state tint sources (Info.tints) and the plain model
+BuiltInBlockModels.special	port	crates/horizon-client-render/src/block_entity_render.rs::classify	special model name to Kind
+BuiltInBlockModels.createMobHead	port	crates/horizon-client-render/src/block_entity_render.rs::classify	Skull kind for mob heads
+BuiltInBlockModels.createMobWallHead	port	crates/horizon-client-render/src/block_entity_render.rs::classify	Skull kind for wall mob heads
+BuiltInBlockModels.createMobHeads	port	crates/horizon-client-render/src/block_entity_render.rs::classify	Skull kind for the head set
+BuiltInBlockModels.createPlayerHead	port	crates/horizon-client-render/src/block_entity_render.rs::classify	Skull kind for player heads
+BuiltInBlockModels.createPlayerWallHead	port	crates/horizon-client-render/src/block_entity_render.rs::classify	Skull kind for wall player heads
+BuiltInBlockModels.createBanner	port	crates/horizon-client-render/src/block_entity_render.rs::classify	Banner kind
+BuiltInBlockModels.createWallBanner	port	crates/horizon-client-render/src/block_entity_render.rs::classify	Banner kind for wall banners
+BuiltInBlockModels.createDyedShulkerBox	port	crates/horizon-client-render/src/block_entity_render.rs::classify	Shulker kind for dyed boxes
+BuiltInBlockModels.createChest	port	crates/horizon-client-render/src/block_entity_render.rs::classify	Chest kind
+BuiltInBlockModels.createSingletonChest	port	crates/horizon-client-render/src/block_entity_render.rs::classify	Chest kind, single chest
+BuiltInBlockModels.createXmasChest	port	crates/horizon-client-render/src/block_entity_render.rs::classify	Chest kind with the Christmas texture
+BuiltInBlockModels.createCopperGolem	port	crates/horizon-client-render/src/block_entity_render.rs::classify	CopperGolem kind
 BuiltInBlockModels.createFlowerBedModel	missing		minor: the 0.25 block shift for a flower bed shown by a copper golem is not applied
-BuiltInBlockModels.createEnchantingTable	port	crates/horizon-client/src/block_entity_render.rs::classify	EnchantingTable kind
-BuiltInBlockModels.specialModelWithPropertyDispatch	port	crates/horizon-client/src/block_entity_render.rs::classify	property dispatch by block state values
+BuiltInBlockModels.createEnchantingTable	port	crates/horizon-client-render/src/block_entity_render.rs::classify	EnchantingTable kind
+BuiltInBlockModels.specialModelWithPropertyDispatch	port	crates/horizon-client-render/src/block_entity_render.rs::classify	property dispatch by block state values
 BuiltInBlockModels.Builder.put	skip:java		builder map of special models
-FluidModel.Unbaked.bake	port	crates/horizon-client/src/mesher.rs::MeshTables::new	gap: minor: water and lava layers hard-wired; translucency picked in fluid tesselate
-FluidModel.Unbaked.getAndValidateMaterial	port	crates/horizon-client/src/mesher.rs::MeshTables::new	sprite lookup through layer(); no separate atlas check
-FluidRenderer.isFaceOccludedByState	port	crates/horizon-client/src/mesher/fluid.rs::occluded_by	fluid face occlusion by the neighbour's face shape
-FluidRenderer.shouldRenderFace	port	crates/horizon-client/src/mesher/fluid.rs::tesselate	render_up, render_down and side checks, neighbour-same-fluid and self occlusion
-FluidRenderer.addFace	inline	crates/horizon-client/src/mesher/fluid.rs::tesselate	quad closure in tesselate
-FluidRenderer.calculateAverageHeight	inline	crates/horizon-client/src/mesher/fluid.rs::tesselate	average closure in tesselate
-FluidRenderer.addWeightedHeight	inline	crates/horizon-client/src/mesher/fluid.rs::tesselate	weighted sum inside the average closure
-FluidRenderer.vertex	inline	crates/horizon-client/src/mesher/fluid.rs::tesselate	vertex built in the quad closure
-FluidStateModelSet.bake	port	crates/horizon-client/src/mesher.rs::MeshTables::new	fluid layers and tints baked per fluid
+FluidModel.Unbaked.bake	port	crates/horizon-client-render/src/mesher.rs::MeshTables::new	gap: minor: water and lava layers hard-wired; translucency picked in fluid tesselate
+FluidModel.Unbaked.getAndValidateMaterial	port	crates/horizon-client-render/src/mesher.rs::MeshTables::new	sprite lookup through layer(); no separate atlas check
+FluidRenderer.isFaceOccludedByState	port	crates/horizon-client-render/src/mesher/fluid.rs::occluded_by	fluid face occlusion by the neighbour's face shape
+FluidRenderer.shouldRenderFace	port	crates/horizon-client-render/src/mesher/fluid.rs::tesselate	render_up, render_down and side checks, neighbour-same-fluid and self occlusion
+FluidRenderer.addFace	inline	crates/horizon-client-render/src/mesher/fluid.rs::tesselate	quad closure in tesselate
+FluidRenderer.calculateAverageHeight	inline	crates/horizon-client-render/src/mesher/fluid.rs::tesselate	average closure in tesselate
+FluidRenderer.addWeightedHeight	inline	crates/horizon-client-render/src/mesher/fluid.rs::tesselate	weighted sum inside the average closure
+FluidRenderer.vertex	inline	crates/horizon-client-render/src/mesher/fluid.rs::tesselate	vertex built in the quad closure
+FluidStateModelSet.bake	port	crates/horizon-client-render/src/mesher.rs::MeshTables::new	fluid layers and tints baked per fluid
 LoadedBlockModels.bake	port	crates/horizon-assets/src/bake.rs::bake_block_model	bakes each block model; the loop over the set is the caller's
-ModelBlockRenderer.tesselateBlock	port	crates/horizon-client/src/mesher.rs::Mesher::mesh	per block: fluids, models, smooth-light choice
-ModelBlockRenderer.configureTintCache	port	crates/horizon-client/src/mesher.rs::Tints::new	per section tint tables
-ModelBlockRenderer.resetTintCache	inline	crates/horizon-client/src/mesher.rs::Tints::new	tables are built fresh per section, no reset
-ModelBlockRenderer.tesselateAmbientOcclusion	port	crates/horizon-client/src/mesher.rs::Mesher::face	AO branch of face
-ModelBlockRenderer.tesselateFlat	port	crates/horizon-client/src/mesher.rs::Mesher::face	flat branch of face
+ModelBlockRenderer.tesselateBlock	port	crates/horizon-client-render/src/mesher.rs::Mesher::mesh	per block: fluids, models, smooth-light choice
+ModelBlockRenderer.configureTintCache	port	crates/horizon-client-render/src/mesher.rs::Tints::new	per section tint tables
+ModelBlockRenderer.resetTintCache	inline	crates/horizon-client-render/src/mesher.rs::Tints::new	tables are built fresh per section, no reset
+ModelBlockRenderer.tesselateAmbientOcclusion	port	crates/horizon-client-render/src/mesher.rs::Mesher::face	AO branch of face
+ModelBlockRenderer.tesselateFlat	port	crates/horizon-client-render/src/mesher.rs::Mesher::face	flat branch of face
 ModelBlockRenderer.shouldRenderFace	port	crates/horizon-world/src/block_render.rs::FaceVisibility::should_render_face	per face visibility, called from Mesher::mesh
-ModelBlockRenderer.putQuadWithTint	port	crates/horizon-client/src/mesher.rs::Mesher::face	tinted vertex write
-ModelBlockRenderer.getTintColor	port	crates/horizon-client/src/mesher.rs::Mesher::tint	tint source index to colour
-ModelBlockRenderer.computeTintColor	port	crates/horizon-client/src/mesher.rs::Tints::get	biome colour average over the blend radius
+ModelBlockRenderer.putQuadWithTint	port	crates/horizon-client-render/src/mesher.rs::Mesher::face	tinted vertex write
+ModelBlockRenderer.getTintColor	port	crates/horizon-client-render/src/mesher.rs::Mesher::tint	tint source index to colour
+ModelBlockRenderer.computeTintColor	port	crates/horizon-client-render/src/mesher.rs::Tints::get	biome colour average over the blend radius
 MovingBlockRenderState.getBlockTint	port	crates/horizon-client/src/game/moving_pistons.rs::Game::moving_block_vertices	gap: minor: tint is the particle colour at the source position, not the biome tint at the moved spot
 MovingBlockRenderState.getBlockState	port	crates/horizon-client/src/game/moving_pistons.rs::Game::moving_piston_blocks	moved block and piston base
 SelectBlockModel.update	missing		minor: display-context switch (copper golem hand, flower bed) is not applied; block items use the normal transform

@@ -41,6 +41,7 @@ struct Game {
 }
 impl Game {
 fn remote_dragon_motion(&mut self, _id: i32, _velocity: [f64; 3]) {}
+fn remote_hook_motion(&mut self, _id: u32, _v: Vec3) -> bool { false }
 METHOD
 }
 fn main() {

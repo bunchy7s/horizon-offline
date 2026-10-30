@@ -202,6 +202,11 @@ pub struct Hub {
     /// `spawn-protection` (dedicated servers): the radius around the world
     /// spawn that only operators may change.
     pub spawn_protection: i32,
+    /// `chat-spam-threshold-seconds` as a TickThrottler threshold (20 a second):
+    /// over it, a guest who is not an operator is kicked. 0 never kicks.
+    pub chat_spam_threshold: i32,
+    /// `command-spam-threshold-seconds`, as `chat_spam_threshold`.
+    pub command_spam_threshold: i32,
     chat_type: i32,
     dimension_type: i32,
     clock_ids: Vec<i32>,
@@ -373,6 +378,8 @@ impl Hub {
             ops: Default::default(),
             entity_range_percent: 100,
             spawn_protection: 0,
+            chat_spam_threshold: 0,
+            command_spam_threshold: 0,
             weather: (false, 0.0, 0.0),
             level_sync: Default::default(),
             chat_type,
@@ -621,7 +628,7 @@ impl Hub {
             latency: Some(latency),
             display_name: Some(None),
             list_order: Some(0),
-            show_hat: Some(true),
+            show_hat: Some(guest.is_none_or(|g| g.info.model_customisation & 0x40 != 0)),
         }
     }
     /// ClientboundPlayerInfoUpdatePacket.createPlayerInitializing: every action.
@@ -629,7 +636,8 @@ impl Hub {
 
     // ---- joining -------------------------------------------------------
 
-    fn spawn_info(&self, i: usize) -> play::SpawnInfo {
+    /// `CommonPlayerSpawnInfo`, with the player's `portalCooldown`.
+    fn spawn_info(&self, i: usize, portal_cooldown: i32) -> play::SpawnInfo {
         let g = &self.guests[i];
         play::SpawnInfo {
             dimension_type: self.dimension_type,
@@ -647,7 +655,7 @@ impl Hub {
                     dimension: dimension.clone(),
                     pos: *pos,
                 }),
-            portal_cooldown: 0,
+            portal_cooldown,
             sea_level: 63,
         }
     }
@@ -715,7 +723,7 @@ impl Hub {
             reduced_debug_info: false,
             show_death_screen: !self.immediate_respawn,
             limited_crafting: false,
-            spawn: self.spawn_info(i),
+            spawn: self.spawn_info(i, 0),
             // MinecraftServer.usesAuthentication, enforceSecureProfile.
             online_mode: self.lan.shared.config.online.is_some(),
             enforces_secure_chat: self.enforces_secure_chat(),
@@ -788,7 +796,7 @@ impl Hub {
             entries: vec![self.player_info(uuid, &name, mode, 0)],
         };
         self.broadcast(&C::PlayerInfoUpdate(newcomer));
-        self.send_level_info(i, ctx);
+        self.send_level_info(i, ctx, true);
         // ServerLevel.addNewPlayer: the chunk tracking starts at the player.
         let g = &mut self.guests[i];
         let (cx, cz) = g.chunk();
@@ -1031,8 +1039,10 @@ impl Hub {
         })
     }
 
-    /// PlayerList.sendLevelInfo.
-    fn send_level_info(&mut self, i: usize, ctx: &TickCtx) {
+    /// PlayerList.sendLevelInfo; `load_start` false holds back
+    /// LEVEL_CHUNKS_LOAD_START for a player who has no position yet
+    /// ([`Self::land`] sends it).
+    fn send_level_info(&mut self, i: usize, ctx: &TickCtx, load_start: bool) {
         let spawn = ctx.spawn;
         let g = &self.guests[i];
         g.send(&C::InitializeBorder(super::border::initialize(ctx.border)));
@@ -1053,10 +1063,12 @@ impl Hub {
                 param: w.thunder_level.1,
             }));
         }
-        g.send(&C::GameEvent(play::GameEvent {
-            event: game_event::LEVEL_CHUNKS_LOAD_START,
-            param: 0.0,
-        }));
+        if load_start {
+            g.send(&C::GameEvent(play::GameEvent {
+                event: game_event::LEVEL_CHUNKS_LOAD_START,
+                param: 0.0,
+            }));
+        }
         // TickRateManager.updateJoiningPlayer.
         g.send(&ticking_state(ctx.tick_rate, ctx.tick_frozen));
         g.send(&C::TickingStep(play::TickingStep {
@@ -2099,6 +2111,15 @@ impl Hub {
         d > f64::from(1.0E-5_f32)
     }
 
+    /// A move still queued for guest `i`, which a packet the game handles
+    /// after this pass must not overtake.
+    fn move_queued(&self, i: usize) -> bool {
+        self.guests[i]
+            .inbox
+            .iter()
+            .any(|p| matches!(p, S::MovePlayerPos(_) | S::MovePlayerPosRot(_)))
+    }
+
     fn process_inbox(&mut self, i: usize, ctx: &mut TickCtx, events: &mut Vec<HostEvent>) {
         // ServerGamePacketListenerImpl.tickPlayer ran between the last
         // tick's packets and these: resetPosition, and the moves it counted.
@@ -2189,7 +2210,14 @@ impl Hub {
                     }
                     g.max_unacknowledged = 10;
                 }
-                S::ClientTickEnd(_) => self.guests[i].position_this_tick = false,
+                S::ClientTickEnd(_) => {
+                    // handleClientTickEnd: no move this tick, no known movement.
+                    let g = &mut self.guests[i];
+                    if !g.position_this_tick {
+                        g.known_movement = [0.0; 3];
+                    }
+                    g.position_this_tick = false;
+                }
                 // ServerGamePacketListenerImpl.handleRecipeBookChangeSettingsPacket.
                 S::RecipeBookChangeSettings(p) => {
                     if let Some(book) = crate::recipe_book::BookType::ALL.get(p.book_type as usize)
@@ -2201,10 +2229,25 @@ impl Hub {
                 }
                 S::ClientInformation(info) => {
                     let g = &mut self.guests[i];
+                    // PlayerModelPart.HAT (bit 6): the tab list shows the hat layer.
+                    let was_hat = g.info.model_customisation & 0x40 != 0;
                     g.view_distance =
                         i32::from(info.view_distance).clamp(2, self.config.view_distance);
                     g.info = info;
                     g.center = None;
+                    let hat = g.info.model_customisation & 0x40 != 0;
+                    let uuid = g.uuid;
+                    // ServerGamePacketListenerImpl.handleClientInformation: UPDATE_HAT to everyone.
+                    if hat != was_hat {
+                        self.broadcast(&C::PlayerInfoUpdate(play::PlayerInfoUpdate {
+                            actions: 128,
+                            entries: vec![play::PlayerInfo {
+                                uuid,
+                                show_hat: Some(hat),
+                                ..Default::default()
+                            }],
+                        }));
+                    }
                 }
                 S::PlayerInput(p) => {
                     self.guests[i].input = p.flags;
@@ -2238,11 +2281,19 @@ impl Hub {
                 // and the move.
                 S::PlayerAction(p) if p.action <= 3 => {
                     events.push(HostEvent::Packet(conn, Box::new(S::PlayerAction(p))));
-                    if self.guests[i]
-                        .inbox
-                        .iter()
-                        .any(|p| matches!(p, S::MovePlayerPos(_) | S::MovePlayerPosRot(_)))
-                    {
+                    if self.move_queued(i) {
+                        break;
+                    }
+                }
+                // handleUseItemOn is the game's too, and BlockItem.canPlace checks
+                // the player's box where they clicked from (Level.isUnobstructed), as
+                // their client's prediction did. After the move behind it, a player
+                // jumping up a pillar was already clear of the cell their client had
+                // refused: the block went down without the place sound that only the
+                // placer's client plays (BlockItem.place's playSound(player, ...)).
+                S::UseItemOn(p) => {
+                    events.push(HostEvent::Packet(conn, Box::new(S::UseItemOn(p))));
+                    if self.move_queued(i) {
                         break;
                     }
                 }
@@ -2279,7 +2330,7 @@ impl Hub {
             }
             g.position_this_tick = true;
         }
-        if !g.loaded && g.ticks == 0 && pos.is_none() {
+        if g.landing || !g.loaded && g.ticks == 0 && pos.is_none() {
             return;
         }
         // updateAwaitingTeleport: moves wait for the client to accept the
@@ -2381,6 +2432,7 @@ impl Hub {
             g.moves_from_ground = g.on_ground;
         }
         g.moves.push((moved, flags & 1 != 0));
+        g.known_movement = moved;
         g.yaw = yaw;
         g.pitch = pitch.clamp(-90.0, 90.0);
         g.head_yaw = g.yaw;
@@ -2559,7 +2611,7 @@ impl Hub {
     /// level loading screen from the Respawn packet until the level info's "level chunks load
     /// start" event and the chunk under the player, so the packets follow vanilla's order.
     pub fn respawn(&mut self, i: usize, at: [f64; 3], ctx: &TickCtx) {
-        let info = self.spawn_info(i);
+        let info = self.spawn_info(i, 0);
         self.close_container_for(i);
         let g = &mut self.guests[i];
         // PlayerList.respawn: into the level in place (the respawn level).
@@ -2621,7 +2673,7 @@ impl Hub {
         g.sent_xp = Some(xp);
         // ServerPlayer.sendPostEffects.
         g.send(&raw(ids::POST_EFFECTS, vec![0]));
-        self.send_level_info(i, ctx);
+        self.send_level_info(i, ctx, true);
         self.send_permission_level(i);
         // ServerLevel.addRespawnedPlayer: the chunk tracking starts again at the player.
         let g = &mut self.guests[i];
@@ -2667,16 +2719,23 @@ impl Hub {
     /// names (`set_dimension`): ClientboundRespawnPacket keeping all data,
     /// then vanilla's packet order. Nothing tracked in the old level is
     /// removed one by one: the client drops its whole level.
+    ///
+    /// Through a `portal`, vanilla finds the exit (an End platform, a Nether
+    /// portal, a spawn column) before the teleport; here it is found once
+    /// the destination has loaded around `at`. Until [`Self::land`] the
+    /// client gets no position, so it stays on its level loading screen
+    /// instead of showing the player in the air at `at`.
     pub fn change_level(
         &mut self,
         i: usize,
         at: [f64; 3],
         yaw: f32,
         pitch: Option<f32>,
-        portal_sound: bool,
+        portal: bool,
+        portal_cooldown: i32,
         ctx: &TickCtx,
     ) {
-        let info = self.spawn_info(i);
+        let info = self.spawn_info(i, portal_cooldown);
         self.close_container_for(i);
         let g = &mut self.guests[i];
         g.dimension = self.config.dimension.clone();
@@ -2700,14 +2759,22 @@ impl Hub {
             locked: ctx.difficulty_locked,
         }));
         self.send_permission_level(i);
-        self.teleport(i, None);
+        if portal {
+            // A teleport still pending from the old level is void: its late
+            // acceptance must not move the player back there.
+            let g = &mut self.guests[i];
+            g.landing = true;
+            g.awaiting_teleport = None;
+        } else {
+            self.teleport(i, None);
+        }
         let g = &mut self.guests[i];
         g.send(&C::PlayerAbilities(play::PlayerAbilities {
             flags: g.ability_flags(),
             flying_speed: 0.05,
             walking_speed: 0.1,
         }));
-        self.send_level_info(i, ctx);
+        self.send_level_info(i, ctx, !portal);
         // PlayerList.sendAllPlayerInfo: the inventory and the held slot.
         self.send_inventory(i);
         let g = &mut self.guests[i];
@@ -2718,15 +2785,6 @@ impl Hub {
         let g = &mut self.guests[i];
         // ServerPlayer.sendPostEffects.
         g.send(&raw(ids::POST_EFFECTS, vec![0]));
-        // TeleportTransition.PLAY_PORTAL_SOUND.
-        if portal_sound {
-            g.send(&C::LevelEvent(play::LevelEvent {
-                kind: 1032,
-                pos: [0, 0, 0],
-                data: 0,
-                global: false,
-            }));
-        }
         // lastSentExp, lastSentHealth and lastSentFood; the client's new
         // player starts with the default air and no absorption.
         g.sent_health = None;
@@ -2739,6 +2797,25 @@ impl Hub {
             z: cz,
         }));
         g.center_sent = Some((cx, cz));
+    }
+
+    /// The rest of a portal's [`Self::change_level`] once its exit is found:
+    /// the position, LEVEL_CHUNKS_LOAD_START (the client's loading screen
+    /// closes once its chunk is in) and TeleportTransition.PLAY_PORTAL_SOUND.
+    pub fn land(&mut self, i: usize, at: [f64; 3]) {
+        self.guests[i].landing = false;
+        self.teleport(i, Some(at));
+        let g = &self.guests[i];
+        g.send(&C::GameEvent(play::GameEvent {
+            event: game_event::LEVEL_CHUNKS_LOAD_START,
+            param: 0.0,
+        }));
+        g.send(&C::LevelEvent(play::LevelEvent {
+            kind: 1032,
+            pos: [0, 0, 0],
+            data: 0,
+            global: false,
+        }));
     }
 }
 
@@ -2782,7 +2859,8 @@ pub fn guest_body(g: &Guest) -> BodyFlags {
         crouching: m.is_some_and(|m| m.pose == crate::pose::Pose::Crouching),
         spin_attack: m.is_some_and(|m| m.auto_spin_attack_ticks > 0),
         on_fire: m.is_some_and(|m| m.fire_ticks > 0),
-        invisible: g.effects.get("invisibility").is_some(),
+        // ServerPlayer.updateInvisibilityStatus: a spectator is always invisible.
+        invisible: g.effects.get("invisibility").is_some() || g.spectator(),
         glowing: g.effects.get("glowing").is_some(),
     }
 }

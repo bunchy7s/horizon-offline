@@ -6,20 +6,20 @@ ContinuationTask.execute	inline	crates/horizon-client/src/game/commands/execute.
 ContinuationTask.schedule	inline	crates/horizon-client/src/game/commands/execute.rs::Game::run_execute	no queue of continuation tasks: run_execute walks the sources in a loop
 net/minecraft/commands/execution/tasks/ExecuteCommand#execute	port	crates/horizon-client/src/game/commands/execute.rs::Game::run_execute	gap: minor: profiler and tracer.onReturn are not reported; forked errors are silenced in the run branch
 IsolatedCall.execute	inline	crates/horizon-client/src/game/functions.rs::Game::run_function	the new depth and the isolated return slot are set up in run_function; if function reaches it through call_function_ref
-CommandFunction.shouldConcatenateNextLine	inline	crates/horizon-client/src/datapack.rs::parse_function	the trailing-backslash join is the continuation loop in parse_function
+CommandFunction.shouldConcatenateNextLine	inline	crates/horizon-client-render/src/datapack.rs::parse_function	the trailing-backslash join is the continuation loop in parse_function
 CommandFunction.checkCommandLineLength	missing		minor: no 2,000,000-character limit on a command line; a longer line is not refused
 CommandFunction.parseCommand	missing		minor: lines are parsed when they run (execute_line), not when the datapack loads; a syntax error fails at run time
-FunctionBuilder.addCommand	inline	crates/horizon-client/src/datapack.rs::parse_function	plain lines are collected in parse_function
-FunctionBuilder.getArgumentIndex	inline	crates/horizon-client/src/datapack.rs::parse_function	macro parameter names are collected in order without duplicates; names, not indices
-FunctionBuilder.convertToIndices	inline	crates/horizon-client/src/datapack.rs::Function::instantiate	parameters are looked up by name in instantiate; there is no index list
-FunctionBuilder.addMacro	inline	crates/horizon-client/src/datapack.rs::parse_function	the $ line branch of parse_function, split by macro_parameters
-FunctionBuilder.build	port	crates/horizon-client/src/datapack.rs::parse_function	returns one Function; Function::is_macro tells a plain function from a macro one
-MacroFunction.lookupValues	inline	crates/horizon-client/src/datapack.rs::Function::instantiate	values are picked by parameter name in instantiate
-MacroFunction.substituteAndParse	port	crates/horizon-client/src/datapack.rs::Function::instantiate	gap: minor: substitutes only; no new function with a per-call id, and lines are parsed when they run
-MacroFunction.MacroEntry.instantiate	port	crates/horizon-client/src/datapack.rs::Function::instantiate	gap: minor: substitutes only; a parse error is raised when the line runs, not as commands.function.error.parse
-StringTemplate.fromString	port	crates/horizon-client/src/datapack.rs::macro_parameters	gap: minor: keeps the variable names only, and accepts a $ line with no $(name) (vanilla rejects it)
-StringTemplate.isValidVariableName	inline	crates/horizon-client/src/datapack.rs::macro_parameters	checks ASCII letters, digits and _; Java also accepts other Unicode letters and digits
-StringTemplate.substitute	port	crates/horizon-client/src/datapack.rs::substitute	gap: minor: no 2,000,000-character length check
+FunctionBuilder.addCommand	inline	crates/horizon-client-render/src/datapack.rs::parse_function	plain lines are collected in parse_function
+FunctionBuilder.getArgumentIndex	inline	crates/horizon-client-render/src/datapack.rs::parse_function	macro parameter names are collected in order without duplicates; names, not indices
+FunctionBuilder.convertToIndices	inline	crates/horizon-client-render/src/datapack.rs::Function::instantiate	parameters are looked up by name in instantiate; there is no index list
+FunctionBuilder.addMacro	inline	crates/horizon-client-render/src/datapack.rs::parse_function	the $ line branch of parse_function, split by macro_parameters
+FunctionBuilder.build	port	crates/horizon-client-render/src/datapack.rs::parse_function	returns one Function; Function::is_macro tells a plain function from a macro one
+MacroFunction.lookupValues	inline	crates/horizon-client-render/src/datapack.rs::Function::instantiate	values are picked by parameter name in instantiate
+MacroFunction.substituteAndParse	port	crates/horizon-client-render/src/datapack.rs::Function::instantiate	gap: minor: substitutes only; no new function with a per-call id, and lines are parsed when they run
+MacroFunction.MacroEntry.instantiate	port	crates/horizon-client-render/src/datapack.rs::Function::instantiate	gap: minor: substitutes only; a parse error is raised when the line runs, not as commands.function.error.parse
+StringTemplate.fromString	port	crates/horizon-client-render/src/datapack.rs::macro_parameters	gap: minor: keeps the variable names only, and accepts a $ line with no $(name) (vanilla rejects it)
+StringTemplate.isValidVariableName	inline	crates/horizon-client-render/src/datapack.rs::macro_parameters	checks ASCII letters, digits and _; Java also accepts other Unicode letters and digits
+StringTemplate.substitute	port	crates/horizon-client-render/src/datapack.rs::substitute	gap: minor: no 2,000,000-character length check
 ArgumentTypeInfos.register	skip:data		bootstrap registration of argument type infos
 ArgumentTypeInfos.byClass	skip:java		lookup by Java class; Horizon's argument types are an enum
 ArgumentUtils.createNumberFlags	inline	crates/horizon-client/src/lan/commands.rs::properties	the min and max presence bits are written inline in properties

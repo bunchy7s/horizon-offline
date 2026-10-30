@@ -18,8 +18,8 @@ SessionSearchTrees.rebuildAfterLanguageChange	skip:java		creative search reads n
 SessionSearchTrees.getTooltipLines	inline	crates/horizon-client/src/creative.rs::Creative::from_json	search lines come pre-stripped from the export and are read here
 SessionSearchTrees.updateCreativeTags	inline	crates/horizon-client/src/creative.rs::Creative::from_json	tag index comes from the export's tag lists
 SessionSearchTrees.updateCreativeTooltips	inline	crates/horizon-client/src/creative.rs::Creative::from_json	name index comes from the export's tooltip lines
-ChatAbilities.selectVisibleMessages	port	crates/horizon-client/src/chat.rs::ChatAbilities::shows	source filter: client lines always, player and server lines per the abilities
-ChatAbilities.Builder.build	inline	crates/horizon-client/src/chat.rs::ChatAbilities::new	restrictions come from the Chat option alone; new() maps the visibility to them
+ChatAbilities.selectVisibleMessages	port	crates/horizon-client-render/src/chat.rs::ChatAbilities::shows	source filter: client lines always, player and server lines per the abilities
+ChatAbilities.Builder.build	inline	crates/horizon-client-render/src/chat.rs::ChatAbilities::new	restrictions come from the Chat option alone; new() maps the visibility to them
 ChatListener.tick	missing		player: the Chat Delay option does nothing; lines show at once instead of after the delay
 ChatListener.setMessageDelay	missing		player: no delayed-message queue, so Chat Delay has no effect
 ChatListener.flushQueue	missing		player: no queue to flush (part of Chat Delay)
@@ -43,7 +43,7 @@ ChatTrustLevel.evaluate	missing		player: no Not Secure or Modified marking on ch
 ChatTrustLevel.isModified	missing		minor: only feeds the Modified marking
 ChatTrustLevel.containsModifiedStyle	missing		minor: only feeds the Modified marking
 ChatTrustLevel.createTag	missing		player: no grey Not Secure bar or Modified tag on player chat lines
-GuiMessage.splitLines	port	crates/horizon-client/src/chat.rs::Chat::add_lines	gap: minor: no width reserved for a tag icon; Horizon draws no icon tags
+GuiMessage.splitLines	port	crates/horizon-client-render/src/chat.rs::Chat::add_lines	gap: minor: no width reserved for a tag icon; Horizon draws no icon tags
 GuiMessageTag.chatModified	missing		minor: no Modified tag text or icon (needs the trust check)
 GuiMessageTag.Icon.extractRenderState	missing		minor: the chat_modified icon is never drawn
 LoggedChatMessage.Player.toContentComponent	skip:service		chat report view of a logged line
@@ -133,7 +133,7 @@ CowRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::bo
 CowRenderer.extractRenderState	port	crates/horizon-client/src/mobs/render.rs::body	variant is read there
 CowRenderer.submit	port	crates/horizon-client/src/mobs/render.rs::body	model per variant and age
 CreakingRenderer.extractRenderState	port	crates/horizon-client/src/mobs/creaking.rs::animate	attack, invulnerability and death clocks
-CreeperRenderer.extractRenderState	port	crates/horizon-client/src/overlay.rs::creeper_progress	white flash from swelling; the charged layer is in render.rs (energy swirl)
+CreeperRenderer.extractRenderState	port	crates/horizon-client-render/src/overlay.rs::creeper_progress	white flash from swelling; the charged layer is in render.rs (energy swirl)
 CushionRenderer.extractRenderState	port	crates/horizon-client/src/game/cushions.rs::Game::cushion_geometry	yaw and colour texture are read there
 CushionRenderer.submit	port	crates/horizon-client/src/game/cushions.rs::Game::cushion_geometry	turned to its facing and drawn
 DisplayRenderer.getSkyLightLevel	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	brightness override

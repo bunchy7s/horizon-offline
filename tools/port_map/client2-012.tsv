@@ -1,10 +1,10 @@
-ContainerEventHandler.getChildAt	port	crates/horizon-client/src/pack_screen.rs::PackScreen::button_at	gap: minor: says whether a button is under the pointer; list rows are hit-tested in PackScreen::click
-ContainerEventHandler.mouseReleased	port	crates/horizon-client/src/pack_screen.rs::PackScreen::release	gap: minor: only clears list scrollbar holds; no focused child gets the release
-ContainerEventHandler.mouseDragged	port	crates/horizon-client/src/pack_screen.rs::PackScreen::drag	drags a held list scrollbar
-ContainerEventHandler.mouseScrolled	port	crates/horizon-client/src/pack_screen.rs::PackScreen::scroll	list under the pointer scrolls 18 px per notch
-ContainerEventHandler.keyPressed	port	crates/horizon-client/src/pack_screen.rs::PackScreen::shortcut	gap: minor: only Ctrl+A/C/V/X here; Backspace is PackScreen::erase
+ContainerEventHandler.getChildAt	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::button_at	gap: minor: says whether a button is under the pointer; list rows are hit-tested in PackScreen::click
+ContainerEventHandler.mouseReleased	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::release	gap: minor: only clears list scrollbar holds; no focused child gets the release
+ContainerEventHandler.mouseDragged	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::drag	drags a held list scrollbar
+ContainerEventHandler.mouseScrolled	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::scroll	list under the pointer scrolls 18 px per notch
+ContainerEventHandler.keyPressed	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::shortcut	gap: minor: only Ctrl+A/C/V/X here; Backspace is PackScreen::erase
 ContainerEventHandler.keyReleased	skip:other		no widget in the pack screen acts on key release
-ContainerEventHandler.charTyped	port	crates/horizon-client/src/pack_screen.rs::PackScreen::type_text	typed text goes to the search box when it has focus
+ContainerEventHandler.charTyped	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::type_text	typed text goes to the search box when it has focus
 ContainerEventHandler.preeditUpdated	missing		minor: no IME composition (preedit) anywhere in Horizon
 ContainerEventHandler.getBorderForArrowNavigation	missing		minor: arrow keys do not move focus; pack screen focus is set by clicks (PackScreen::set_focus)
 ContainerEventHandler.getCurrentFocusPath	missing		minor: no focus path; PackScreen::focus is read only inside the screen
@@ -81,70 +81,70 @@ CodepointMap.computeIfAbsent	skip:java		codepoint lookup table; Horizon uses Has
 CodepointMap.remove	skip:java		codepoint lookup table; Horizon uses HashMap and BTreeSet
 CodepointMap.forEach	skip:java		codepoint lookup table; Horizon uses HashMap and BTreeSet
 CodepointMap.keySet	skip:java		codepoint lookup table; Horizon uses HashMap and BTreeSet
-FontManager.createFontSet	port	crates/horizon-client/src/font.rs::Font::load_set	a font's providers into a set
-FontManager.reload	port	crates/horizon-client/src/hud.rs::HudAtlas::pack	fonts are rebuilt with the atlas (Font::load at hud.rs:582); no async reload
-FontManager.safeLoad	inline	crates/horizon-client/src/font.rs::Font::load_set	a TrueType provider that fails to load is dropped; a bitmap sheet that fails warns
-FontManager.resolveProviders	port	crates/horizon-client/src/font.rs::providers	reference expansion in order, depth 8; no dependency sort
+FontManager.createFontSet	port	crates/horizon-client-render/src/font.rs::Font::load_set	a font's providers into a set
+FontManager.reload	port	crates/horizon-client-render/src/hud.rs::HudAtlas::pack	fonts are rebuilt with the atlas (Font::load at hud.rs:582); no async reload
+FontManager.safeLoad	inline	crates/horizon-client-render/src/font.rs::Font::load_set	a TrueType provider that fails to load is dropped; a bitmap sheet that fails warns
+FontManager.resolveProviders	port	crates/horizon-client-render/src/font.rs::providers	reference expansion in order, depth 8; no dependency sort
 FontManager.finalizeProviderLoading	skip:java		prewarm of glyph lookups; the fallback is the missing box that Font::resolve gives
 FontManager.getFontOptions	port	crates/horizon-client/src/game/options.rs::Game::apply_ui_settings	force unicode and japanese flags read from settings
-FontManager.apply	port	crates/horizon-client/src/hud.rs::HudAtlas::pack	new font sets replace the old ones with the atlas
+FontManager.apply	port	crates/horizon-client-render/src/hud.rs::HudAtlas::pack	new font sets replace the old ones with the atlas
 FontManager.updateOptions	port	crates/horizon-client/src/game/options.rs::Game::apply_ui_settings	sets the Font uniform and japanese flags when they change (options.rs:299-301)
-FontManager.loadResourceStack	inline	crates/horizon-client/src/font.rs::providers	gap: minor: one fonts.json per font id from the resource root, not a stack of packs
+FontManager.loadResourceStack	inline	crates/horizon-client-render/src/font.rs::providers	gap: minor: one fonts.json per font id from the resource root, not a stack of packs
 FontManager.getSpriteFont	missing		minor: atlas sprite fonts (sprite objects in text) are not parsed; they draw the missing box
 FontManager.close	skip:java		Rust drop frees the atlas, font sets and providers
-FontManager.BuilderResult.resolve	port	crates/horizon-client/src/font.rs::providers	reference builders expanded in place
-FontManager.BuilderResult.mergeFilters	inline	crates/horizon-client/src/font.rs::providers	the reference's filter merged onto each expanded provider
-FontManager.CachedFontProvider.getGlyphSource	port	crates/horizon-client/src/font.rs::Font::glyph_in	gap: minor: atlas sprite and player descriptions fall back to the missing glyph
+FontManager.BuilderResult.resolve	port	crates/horizon-client-render/src/font.rs::providers	reference builders expanded in place
+FontManager.BuilderResult.mergeFilters	inline	crates/horizon-client-render/src/font.rs::providers	the reference's filter merged onto each expanded provider
+FontManager.CachedFontProvider.getGlyphSource	port	crates/horizon-client-render/src/font.rs::Font::glyph_in	gap: minor: atlas sprite and player descriptions fall back to the missing glyph
 FontManager.CachedFontProvider.glyphs	skip:java		one-entry lookup cache
-FontManager.CachedFontProvider.effect	port	crates/horizon-client/src/font.rs::Font::white	the white glyph under underline and strikethrough
+FontManager.CachedFontProvider.effect	port	crates/horizon-client-render/src/font.rs::Font::white	the white glyph under underline and strikethrough
 FontManager.UnresolvedBuilderBundle.add	skip:java		collects builders; providers() reads them directly
 FontManager.UnresolvedBuilderBundle.listBuilders	skip:java		collects builders
-FontManager.UnresolvedBuilderBundle.resolve	port	crates/horizon-client/src/font.rs::providers	reference expansion for the bundle
-FontOption.Filter.apply	port	crates/horizon-client/src/font.rs::Filter::passes	option match per provider
-FontOption.Filter.merge	inline	crates/horizon-client/src/font.rs::providers	filter merge while expanding references
-FontSet.reload	port	crates/horizon-client/src/font.rs::Font::load_set	providers into the font set
-FontSet.resetTextures	port	crates/horizon-client/src/font.rs::Font::reset_cache	glyph cache and atlas cursor cleared
-FontSet.selectProviders	port	crates/horizon-client/src/font.rs::Font::glyphs_by_width	gap: minor: width buckets hold only Space and atlas bitmap glyphs, so TrueType and unihex never appear as obfuscated characters
+FontManager.UnresolvedBuilderBundle.resolve	port	crates/horizon-client-render/src/font.rs::providers	reference expansion for the bundle
+FontOption.Filter.apply	port	crates/horizon-client-render/src/font.rs::Filter::passes	option match per provider
+FontOption.Filter.merge	inline	crates/horizon-client-render/src/font.rs::providers	filter merge while expanding references
+FontSet.reload	port	crates/horizon-client-render/src/font.rs::Font::load_set	providers into the font set
+FontSet.resetTextures	port	crates/horizon-client-render/src/font.rs::Font::reset_cache	glyph cache and atlas cursor cleared
+FontSet.selectProviders	port	crates/horizon-client-render/src/font.rs::Font::glyphs_by_width	gap: minor: width buckets hold only Space and atlas bitmap glyphs, so TrueType and unihex never appear as obfuscated characters
 FontSet.hasFishyAdvance	missing		minor: no check for advances under 0 or over 32
-FontSet.computeGlyphInfo	port	crates/horizon-client/src/font.rs::Font::resolve	gap: minor: no skip of a glyph with a fishy advance in favour of a later provider
+FontSet.computeGlyphInfo	port	crates/horizon-client-render/src/font.rs::Font::resolve	gap: minor: no skip of a glyph with a fishy advance in favour of a later provider
 FontSet.DelayedBake.get	skip:java		lazy bake into the atlas; Font::resolve bakes at once
 FontTexture.dumpContents	skip:debug		writes the atlas to a PNG for debugging
 GlyphRenderTypes.createForGrayscaleTexture	skip:ui		one textured quad path for all glyphs (hud.rs text_styled)
 GlyphRenderTypes.createForColorTexture	skip:ui		one textured quad path for all glyphs (hud.rs text_styled)
 GlyphRenderTypes.select	port	crates/horizon-client/src/game/names.rs::Game::name_tag_geometry	gap: minor: normal and see-through only; polygon-offset text has no draw path
-GlyphStitcher.reset	port	crates/horizon-client/src/font.rs::Font::reset_cache	atlas cursor rewound
-GlyphStitcher.stitch	port	crates/horizon-client/src/font.rs::Region::place	rectangle placed in the atlas region
-PlainTextRenderable.render	port	crates/horizon-client/src/hud.rs::HudBatch::text_styled	shadow pass first, then the front text
+GlyphStitcher.reset	port	crates/horizon-client-render/src/font.rs::Font::reset_cache	atlas cursor rewound
+GlyphStitcher.stitch	port	crates/horizon-client-render/src/font.rs::Region::place	rectangle placed in the atlas region
+PlainTextRenderable.render	port	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	shadow pass first, then the front text
 PlayerGlyphProvider.Instance.renderSprite	missing		minor: player-head text objects are not parsed
 PlayerGlyphProvider.Instance.renderQuad	missing		minor: no player-head glyphs (same gap)
 TextFieldHelper.charTyped	inline	crates/horizon-client/src/game/sign_edit.rs::Game::sign_input	typed-text branch; EditBox::insert_text filters the text
-TextFieldHelper.moveBy	inline	crates/horizon-client/src/ui.rs::EditBox::key	arrow keys; Ctrl moves by word
-TextFieldHelper.moveByChars	inline	crates/horizon-client/src/ui.rs::EditBox::key	arrow keys, Home and End
-TextFieldHelper.moveByWords	inline	crates/horizon-client/src/ui.rs::EditBox::key	Ctrl+arrow word moves
-TextFieldHelper.removeFromCursor	inline	crates/horizon-client/src/ui.rs::EditBox::key	Backspace and Delete
-TextFieldHelper.removeWordsFromCursor	inline	crates/horizon-client/src/ui.rs::EditBox::key	Ctrl+Backspace and Ctrl+Delete
-TextFieldHelper.removeCharsFromCursor	port	crates/horizon-client/src/ui.rs::EditBox::delete_chars	deletes the selection or n characters
+TextFieldHelper.moveBy	inline	crates/horizon-client-render/src/ui.rs::EditBox::key	arrow keys; Ctrl moves by word
+TextFieldHelper.moveByChars	inline	crates/horizon-client-render/src/ui.rs::EditBox::key	arrow keys, Home and End
+TextFieldHelper.moveByWords	inline	crates/horizon-client-render/src/ui.rs::EditBox::key	Ctrl+arrow word moves
+TextFieldHelper.removeFromCursor	inline	crates/horizon-client-render/src/ui.rs::EditBox::key	Backspace and Delete
+TextFieldHelper.removeWordsFromCursor	inline	crates/horizon-client-render/src/ui.rs::EditBox::key	Ctrl+Backspace and Ctrl+Delete
+TextFieldHelper.removeCharsFromCursor	port	crates/horizon-client-render/src/ui.rs::EditBox::delete_chars	deletes the selection or n characters
 TextFieldHelper.cut	port	crates/horizon-client-input/src/clipboard.rs::apply	Cut arm: copy the selection, then clear it
 TextFieldHelper.paste	port	crates/horizon-client-input/src/clipboard.rs::apply	Paste arm: insert the clipboard text
-TextFieldHelper.getSelected	port	crates/horizon-client/src/ui.rs::EditBox::selected_text	
-TextFieldHelper.deleteSelection	inline	crates/horizon-client/src/ui.rs::EditBox::delete_chars	selection branch
-TextFieldHelper.setCursorToEnd	port	crates/horizon-client/src/ui.rs::EditBox::move_cursor_to_end	
-TextFieldHelper.setCursorPos	port	crates/horizon-client/src/ui.rs::EditBox::set_cursor	no vanilla caller (callers 0)
+TextFieldHelper.getSelected	port	crates/horizon-client-render/src/ui.rs::EditBox::selected_text	
+TextFieldHelper.deleteSelection	inline	crates/horizon-client-render/src/ui.rs::EditBox::delete_chars	selection branch
+TextFieldHelper.setCursorToEnd	port	crates/horizon-client-render/src/ui.rs::EditBox::move_cursor_to_end	
+TextFieldHelper.setCursorPos	port	crates/horizon-client-render/src/ui.rs::EditBox::set_cursor	no vanilla caller (callers 0)
 TextFieldHelper.setSelectionRange	skip:other		no vanilla caller; Horizon sets cursor and highlight separately (EditBox::set_cursor)
-BakedSheetGlyph.left	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	glyph edge with bold thickness and italic shear
-BakedSheetGlyph.top	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	glyph edge with bold thickness and italic shear
-BakedSheetGlyph.right	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	glyph edge with bold thickness and italic shear
-BakedSheetGlyph.bottom	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	glyph edge with bold thickness and italic shear
-BakedSheetGlyph.renderChar	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	shadow pass, bold double draw, italic shear
-BakedSheetGlyph.render	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	glyph quad with shear and bold
-BakedSheetGlyph.renderEffect	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	underline and strikethrough rectangles
-BakedSheetGlyph.buildEffect	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	rectangle quad of an effect
+BakedSheetGlyph.left	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	glyph edge with bold thickness and italic shear
+BakedSheetGlyph.top	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	glyph edge with bold thickness and italic shear
+BakedSheetGlyph.right	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	glyph edge with bold thickness and italic shear
+BakedSheetGlyph.bottom	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	glyph edge with bold thickness and italic shear
+BakedSheetGlyph.renderChar	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	shadow pass, bold double draw, italic shear
+BakedSheetGlyph.render	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	glyph quad with shear and bold
+BakedSheetGlyph.renderEffect	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	underline and strikethrough rectangles
+BakedSheetGlyph.buildEffect	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	rectangle quad of an effect
 BakedSheetGlyph.createGlyph	skip:java		factory for a glyph instance
 BakedSheetGlyph.createEffect	skip:java		factory for an effect instance
-BakedSheetGlyph.EffectInstance.right	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	underline end: pen x plus advance
-BakedSheetGlyph.EffectInstance.bottom	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	underline row, 1 px at pen y plus 8
-BakedSheetGlyph.GlyphInstance.activeRight	inline	crates/horizon-client/src/hud.rs::HudBatch::text_styled	advance including the bold offset
-SpecialGlyphs.generate	port	crates/horizon-client/src/font.rs::Font::white	gap: minor: white texel only; the missing-box outline is drawn in HudBatch::text_styled, not generated
+BakedSheetGlyph.EffectInstance.right	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	underline end: pen x plus advance
+BakedSheetGlyph.EffectInstance.bottom	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	underline row, 1 px at pen y plus 8
+BakedSheetGlyph.GlyphInstance.activeRight	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	advance including the bold offset
+SpecialGlyphs.generate	port	crates/horizon-client-render/src/font.rs::Font::white	gap: minor: white texel only; the missing-box outline is drawn in HudBatch::text_styled, not generated
 BitmapProvider.Definition.validateDimensions	missing		minor: no check of the bitmap grid; a ragged grid loads
 BitmapProvider.Definition.validate	missing		minor: no check that ascent is at most height
-BitmapProvider.Definition.getActualGlyphWidth	port	crates/horizon-client/src/font.rs::used_width	rightmost column with any visible pixel
+BitmapProvider.Definition.getActualGlyphWidth	port	crates/horizon-client-render/src/font.rs::used_width	rightmost column with any visible pixel

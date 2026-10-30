@@ -204,6 +204,19 @@ impl Projectile {
             }),
         }
     }
+    /// Entity box from the feet (`EntityType.sized` cube of `kind.size()`).
+    pub fn aabb(&self) -> Aabb {
+        let s = self.kind.size();
+        let h = s * 0.5;
+        Aabb::new(
+            Vec3::new(self.position.x - h, self.position.y, self.position.z - h),
+            Vec3::new(
+                self.position.x + h,
+                self.position.y + s,
+                self.position.z + h,
+            ),
+        )
+    }
     /// The arrow's own random from now on (`Entity.random`).
     pub fn with_arrow_random(mut self, random: horizon_core::random::LegacyRandom) -> Self {
         if let Some(a) = self.arrow.as_mut() {
@@ -268,6 +281,38 @@ impl Projectile {
     }
     pub fn is_arrow(&self) -> bool {
         matches!(self.kind, ProjectileKind::Arrow { .. })
+    }
+    /// Whether it is a `SpectralArrow` (its own entity type): a spectral
+    /// arrow's pickup item, or the glowing effect a dispenser shoots with.
+    pub fn is_spectral_arrow(&self) -> bool {
+        let ProjectileKind::Arrow { effect, .. } = &self.kind else {
+            return false;
+        };
+        effect.is_some_and(|(id, _)| id == "minecraft:glowing")
+            || self
+                .arrow
+                .as_ref()
+                .is_some_and(|a| &*a.pickup_item.item == "minecraft:spectral_arrow")
+    }
+    /// `Arrow.ID_EFFECT_COLOR` (`updateColor`): the opaque colour of the
+    /// potion the arrow carries, from its tipped pickup item or the effect a
+    /// stray, bogged or parched adds; -1 for none.
+    pub fn arrow_effect_color(&self) -> i32 {
+        let ProjectileKind::Arrow { effect, .. } = &self.kind else {
+            return -1;
+        };
+        if self.is_spectral_arrow() {
+            return -1;
+        }
+        let rgb = match (effect, &self.arrow) {
+            (Some((id, _)), _) => crate::brewing::effect(id).map(|e| e.color),
+            (None, Some(a)) if &*a.pickup_item.item == "minecraft:tipped_arrow" => a
+                .pickup_item
+                .potion()
+                .map(|p| crate::brewing::potion_color(Some(p))),
+            _ => None,
+        };
+        rgb.map_or(-1, |rgb| (rgb | 0xFF00_0000) as i32)
     }
     pub fn is_fireball(&self) -> bool {
         matches!(
@@ -867,6 +912,35 @@ mod tests {
         p.tick(&Empty(vec![]));
         assert!((p.velocity.x - 0.285).abs() < 1e-9);
         assert!((p.position.x - 0.285).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ender_pearl_hits_a_wind_charge_box() {
+        let mut pearl = Projectile::new(
+            ProjectileKind::EnderPearl,
+            Vec3::new(0.0, 1.0, 0.0),
+            Some(Who::Player),
+        );
+        pearl.left_owner = true;
+        pearl.velocity = Vec3::new(2.0, 0.0, 0.0);
+        let wind = Projectile::new(
+            ProjectileKind::WindCharge,
+            Vec3::new(0.6, 1.0, 0.0),
+            Some(Who::Player),
+        );
+        let w = Empty(vec![(Who::Mob(1), wind.aabb())]);
+        let (keep, hit) = pearl.tick(&w);
+        assert!(!keep, "ThrownEnderpearl.onHit discards the pearl");
+        assert!(
+            matches!(
+                hit,
+                Hit::Entity {
+                    who: Who::Mob(1),
+                    ..
+                }
+            ),
+            "pearl collides with a pickable wind charge"
+        );
     }
 }
 

@@ -1330,6 +1330,9 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
         .collect();
     namespaces.sort();
     overlay.write(MARKER, &serde_json::to_vec(&namespaces)?)?;
+    if mods.iter().any(|m| !m.content.blocks.is_empty()) {
+        overlay.write(crate::content_identity::MARKER, b"1")?;
+    }
     overlay.write(WARNINGS, warnings.join("\n").as_bytes())?;
     Ok(warnings)
 }

@@ -132,6 +132,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             // BellBlockEntity.triggerEvent handles event 1; the caller
             // reports handled events (`runBlockEvents` broadcasts them).
             a == 1
+        } else if data.is(super::classes::Class::PotentSulfur) {
+            // PotentSulfurBlock.triggerEvent: the block entity notes the
+            // eruption's game time (the caller's), and the event is handled.
+            true
         } else {
             false
         }

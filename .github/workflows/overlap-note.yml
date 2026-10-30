@@ -1,0 +1,41 @@
+name: overlap note
+# One comment on a pull request naming the other open pull requests that close the same issue or change the same
+# functions, edited on every push (tools/ci/overlap_note.py, issue #3859).
+#
+# Why no pull request's code runs here, though `pull_request_target` gives a token that can write:
+# - `pull_request_target` runs this file and the script from main, never the pull request's copy.
+# - The checkout is main's (`ref: main`), blobless, with the script alone on disk. The pull requests' heads are fetched
+#   as git objects and only diffed, never checked out; git runs with hooks, fsmonitor, external diff and textconv off.
+# - The rest comes from the API. The token writes the comment only.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  note:
+    if: github.event.pull_request.base.ref == 'main'
+    # A newer push replaces the note being computed.
+    concurrency:
+      group: overlap-note-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+          sparse-checkout: |
+            tools/ci/overlap_note.py
+          sparse-checkout-cone-mode: false
+      - name: Note
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: python3 tools/ci/overlap_note.py event

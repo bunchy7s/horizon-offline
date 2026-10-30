@@ -27,11 +27,11 @@ StructureManager.getAllStructuresAt	inline	crates/horizon-client/src/game/struct
 Biome.getTemperature	port	crates/horizon-world/src/worldgen/biome_temperature.rs::BiomeTemperature::temperature	height adjusted temperature with the 1024 entry cache
 Biome.warmEnoughToRain	port	crates/horizon-world/src/worldgen/biome_temperature.rs::BiomeTemperature::warm_enough_to_rain	temperature at least 0.15
 Biome.shouldMeltFrozenOceanIcebergSlightly	port	crates/horizon-world/src/worldgen/biome_temperature.rs::BiomeTemperature::should_melt_frozen_ocean_iceberg_slightly	temperature above 0.1
-Biome.getGrassColor	port	crates/horizon-client/src/biome.rs::Biomes::grass	the grass modifier on the base colour
-Biome.getBaseGrassColor	inline	crates/horizon-client/src/biome.rs::Biomes::load	the grass_color override, else the colormap sample, resolved at load
-Biome.getGrassColorFromTexture	port	crates/horizon-client/src/biome.rs::sample	grass colormap by clamped temperature and downfall
-Biome.getFoliageColorFromTexture	port	crates/horizon-client/src/biome.rs::sample	foliage colormap by clamped temperature and downfall
-Biome.getDryFoliageColorFromTexture	port	crates/horizon-client/src/biome.rs::sample	dry foliage colormap by clamped temperature and downfall
+Biome.getGrassColor	port	crates/horizon-client-render/src/biome.rs::Biomes::grass	the grass modifier on the base colour
+Biome.getBaseGrassColor	inline	crates/horizon-client-render/src/biome.rs::Biomes::load	the grass_color override, else the colormap sample, resolved at load
+Biome.getGrassColorFromTexture	port	crates/horizon-client-render/src/biome.rs::sample	grass colormap by clamped temperature and downfall
+Biome.getFoliageColorFromTexture	port	crates/horizon-client-render/src/biome.rs::sample	foliage colormap by clamped temperature and downfall
+Biome.getDryFoliageColorFromTexture	port	crates/horizon-client-render/src/biome.rs::sample	dry foliage colormap by clamped temperature and downfall
 Biome.BiomeBuilder.putAttributes	skip:java		builder for the biome bootstrap; Horizon reads biome data
 Biome.BiomeBuilder.build	skip:java		builder for the biome bootstrap; Horizon reads biome data
 Biome.BiomeBuilder.toString	skip:debug		debug text only

@@ -32,11 +32,14 @@ mod owner_page;
 mod packs_page;
 mod partner;
 mod perf;
+mod plate;
 mod screenshots_page;
 mod scrollbar;
 mod servers_page;
 mod shortcut_page;
 mod skin_page;
+mod sky;
+mod specimen;
 mod switch_page;
 mod theme;
 mod themes_page;
@@ -256,6 +259,8 @@ struct Launcher {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     _appearance: Subscription,
+    /// Redraws when the window gains or loses focus: the sky moves only in front.
+    _activation: Subscription,
     /// The session's measurements (`perf.rs`), and when the steps they time began.
     perf: perf::Perf,
     install_started: Option<Instant>,
@@ -299,7 +304,9 @@ struct Launcher {
     /// The player's servers, for the sidebar until the Servers page has read them.
     side_servers: Vec<horizon_launcher::servers::Entry>,
     /// The pixel art made for this window (`art.rs`), and pictures downloaded by URL.
-    art: art::Art,
+    sky: sky::Sky,
+    /// When the sky next asks for a frame, and the timer that will draw it.
+    sky_wake: Option<(Instant, gpui::Task<()>)>,
     /// The window's scale, as of its last frame, for art drawn outside `render`'s reach.
     scale: f32,
 }
@@ -456,6 +463,7 @@ impl Launcher {
             tx,
             rx,
             _appearance: appearance,
+            _activation: cx.observe_window_activation(window, |_, _, cx| cx.notify()),
             perf: perf::Perf::new("session"),
             install_started: None,
             prepare_started: None,
@@ -485,7 +493,8 @@ impl Launcher {
             shortcuts: Default::default(),
             offline_name: offline_name(),
             side_servers: horizon_launcher::servers::list(),
-            art: art::Art::default(),
+            sky: sky::Sky::default(),
+            sky_wake: None,
             scale: window.scale_factor(),
         };
         this.reload_instances();
@@ -2414,7 +2423,7 @@ impl Launcher {
         wrap
     }
 
-    fn play_page(&mut self, banner_width: f32, cx: &mut Context<Self>) -> Div {
+    fn play_page(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         // A Java instance plays Mojang's game: no Horizon version, nothing of Horizon's to prepare.
         let java = self.selected_instance().and_then(|i| i.java.clone());
@@ -2449,8 +2458,15 @@ impl Launcher {
         let version = java
             .as_ref()
             .map_or_else(|| backend::game_version(&tag), |j| j.minecraft.clone());
-        let hero = match java {
-            Some(_) => self.hero("", &version, true, cx),
+        let hero = match &java {
+            // Its own game: the Minecraft version and the loader, never Horizon's.
+            Some(j) => {
+                let game = match &j.loader {
+                    Some(l) => format!("{version} · {} {}", l.kind.name(), l.version),
+                    None => version.clone(),
+                };
+                self.hero("", &game, true, cx)
+            }
             None => self.hero(&tag, &version, prepared, cx),
         };
         let running = self.client.is_some() || self.starting_client.is_some();
@@ -2509,7 +2525,8 @@ impl Launcher {
                     .flex()
                     .items_center()
                     .gap(px(8.))
-                    .child(self.picker(cx))
+                    // Horizon's versions don't apply to a Java instance.
+                    .children(java.is_none().then(|| self.picker(cx)))
                     .child(play),
             );
 
@@ -2695,9 +2712,9 @@ impl Launcher {
             }
         }
 
-        // The banner: Horizon's landscape (`art.rs`) under a veil of the page colour, the hero and
-        // the Play row over it. It reaches the content's edges and the top bar.
-        let (scene, scene_width) = self.art.scene(t.dark, self.scale, banner_width);
+        // The banner: the hero and the Play row over the sky (`sky.rs`), or over the player's
+        // own picture under a veil of the page colour. It reaches the content's edges and the top
+        // bar.
         let veil = |angle: f32, from: f32, to: f32, at: f32| {
             div()
                 .absolute()
@@ -2710,21 +2727,19 @@ impl Launcher {
                     gpui::linear_color_stop(t.page.opacity(to), at),
                 ))
         };
-        let picture = self.home_background();
-        let scene = match picture {
-            Some(path) => gpui::img(path)
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .object_fit(gpui::ObjectFit::Cover),
-            None => gpui::img(scene)
-                .absolute()
-                .bottom_0()
-                .left_0()
-                .w(px(scene_width))
-                .h(px(art::SCENE_HEIGHT as f32 * art::SCENE_TEXEL)),
-        };
+        let picture = self.home_background().map(|path| {
+            [
+                gpui::img(path)
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .object_fit(gpui::ObjectFit::Cover)
+                    .into_any_element(),
+                veil(90., 0.82, 0., 0.62).into_any_element(),
+                veil(180., 0., 0.75, 1.).into_any_element(),
+            ]
+        });
         let banner = div()
             .relative()
             .flex()
@@ -2736,12 +2751,7 @@ impl Launcher {
             .pb(px(28.))
             .gap(px(24.))
             .overflow_hidden()
-            .bg(gpui::rgb(art::sky_top(t.dark)))
-            .border_b_2()
-            .border_color(t.outline)
-            .child(scene)
-            .child(veil(90., 0.82, 0., 0.62))
-            .child(veil(180., 0., 0.75, 1.))
+            .children(picture.into_iter().flatten())
             .child(div().relative().child(hero))
             .child(div().relative().child(actions));
         let mut page = div().flex().flex_col().gap(px(28.)).child(banner);
@@ -3002,7 +3012,8 @@ impl Launcher {
                     .text_color(t.ink_soft)
                     .child(line)
             }));
-        if let Some(release) = &self.updates.horizon {
+        // A Java instance (no Horizon tag) isn't offered Horizon's updates.
+        if let Some(release) = self.updates.horizon.as_ref().filter(|_| !tag.is_empty()) {
             let installing = self.installing.as_ref().filter(|(t, _)| *t == release.tag);
             let line = div()
                 .flex()
@@ -4240,6 +4251,15 @@ fn progress_bar(fraction: Option<(f32, f32)>, t: &Theme) -> Div {
 impl Render for Launcher {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = self.theme;
+        if specimen::wanted() {
+            return div()
+                .flex()
+                .flex_col()
+                .size_full()
+                .bg(t.side)
+                .children(titlebar::render(&t, window))
+                .child(specimen::render(&t));
+        }
         self.scale = window.scale_factor();
         self.perf.frame();
         if self.bench.as_ref().is_some_and(perf::Bench::scrolling) {
@@ -4251,16 +4271,15 @@ impl Render for Launcher {
         self.args_focused = self.args_focus.is_focused(window);
         self.proxy_focused = self.proxy_focus.is_focused(window);
         let size = window.viewport_size();
-        let banner_width = f32::from(size.width) - theme::SIDEBAR - scrollbar::GUTTER;
         let content = match self.page {
-            Page::Play => self.play_page(banner_width, cx),
+            Page::Play => self.play_page(cx),
             Page::Versions => self.versions_page(cx),
             Page::Mods => self.mods_page(cx),
             Page::Servers => self.servers_page(cx),
             Page::Notes => self.notes_page(cx),
             Page::Settings => self.settings_page(cx),
         };
-        self.art.free_replaced(window);
+        self.sky.free_replaced(window);
         // The new page fades in and rises a few pixels.
         let content = div()
             .relative()
@@ -4278,7 +4297,16 @@ impl Render for Launcher {
         if self.opening.is_none() && window.focused(cx).is_none() {
             window.focus(&self.root_focus);
         }
-        let stone = self.art.stone(t.page_rgb, t.dark, window.scale_factor());
+        let (sky, next) = self.sky.render(
+            &t.night,
+            (size.width.into(), size.height.into()),
+            window.scale_factor(),
+            window.is_window_active(),
+            Instant::now(),
+        );
+        if let Some(next) = next {
+            self.wake_sky(next, cx);
+        }
         let topbar = self.topbar(window, cx);
         let sidebar = self.sidebar(window, cx);
         let mut root = div()
@@ -4310,11 +4338,9 @@ impl Render for Launcher {
             .flex()
             .flex_col()
             .size_full()
-            .bg(t.page)
             .font_family(theme::FONT)
             .text_color(t.ink)
             .overflow_hidden()
-            .child(blocks::stone(stone, size.width.into(), size.height.into()))
             .child(
                 div()
                     .relative()
@@ -4433,8 +4459,10 @@ impl Render for Launcher {
         div()
             .flex()
             .flex_col()
+            .relative()
             .size_full()
             .bg(t.side)
+            .child(sky)
             .children(titlebar::render(&t, window))
             .child(root.flex_1().min_h_0())
             .children(titlebar::resize_handles(window))
@@ -4475,6 +4503,22 @@ impl Launcher {
         }
         handle.set_offset(offset);
         window.request_animation_frame();
+    }
+
+    /// Draws the window again in `after`, when the sky next changes, unless a frame comes sooner.
+    fn wake_sky(&mut self, after: Duration, cx: &mut Context<Self>) {
+        let at = Instant::now() + after;
+        if self.sky_wake.as_ref().is_some_and(|(when, _)| *when <= at) {
+            return;
+        }
+        let timer = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(after).await;
+            let _ = this.update(cx, |this, cx| {
+                this.sky_wake = None;
+                cx.notify();
+            });
+        });
+        self.sky_wake = Some((at, timer));
     }
 
     fn skip_opening(&mut self) {
@@ -4540,13 +4584,12 @@ fn main() {
         .run(|cx: &mut App| {
             cx.text_system()
                 .add_fonts(vec![
-                    Cow::Borrowed(horizon_theme::fonts::GEIST_REGULAR),
-                    Cow::Borrowed(horizon_theme::fonts::GEIST_MEDIUM),
-                    Cow::Borrowed(horizon_theme::fonts::GEIST_SEMIBOLD),
                     Cow::Borrowed(horizon_theme::fonts::GEIST_MONO),
-                    Cow::Borrowed(horizon_theme::fonts::PIXEL_MEDIUM),
-                    Cow::Borrowed(horizon_theme::fonts::PIXEL_SEMIBOLD),
-                    Cow::Borrowed(horizon_theme::fonts::PIXEL_BOLD),
+                    Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_REGULAR),
+                    Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_MEDIUM),
+                    Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_SEMIBOLD),
+                    Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_BOLD),
+                    Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_DISPLAY_BOLD),
                 ])
                 .expect("bundled fonts");
             cx.bind_keys(key_bindings());

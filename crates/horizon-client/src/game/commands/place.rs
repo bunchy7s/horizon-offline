@@ -1,11 +1,12 @@
 //! `/place template` (PlaceCommand): a saved structure template placed with
 //! rotation, mirroring and integrity.
-use super::{Arg, Context, Game, R, err};
-use horizon_client::{save, text::Text};
+use super::{Arg, Context, Game, R, Screen, err};
+use horizon_client::{containers::BlockEntity, save, text::Text};
 use horizon_core::random::{LegacyRandom, RandomSource};
 use horizon_world::{
     compression::Compression,
     nbt::{self, Limits, Tag},
+    registry::BlockStateId,
     worldgen::structure::{Mirror, Rotation, StateTransforms, StructureTemplate},
 };
 use std::sync::{Arc, OnceLock};
@@ -182,6 +183,28 @@ impl Game<'_> {
             }
         }
     }
+    /// The barrier step of `StructureTemplate.placeInWorld`, run where a block
+    /// with saved data goes, even over the same state: `LevelChunk.setBlockState`
+    /// removes what is there, with no side effects. A removed jukebox stops its
+    /// song (`place_state` does that itself when the block's name changes), and
+    /// a container screen open on it closes.
+    fn clear_template_block_entity(&mut self, at: [i32; 3], state: BlockStateId) {
+        let key = (at[0], at[1], at[2]);
+        self.world.block_names.remove(&key);
+        let Some(replaced) = self.world.block_entities.remove(&key) else {
+            return;
+        };
+        let previous = self.world.block(at[0], at[1], at[2]);
+        let same_name = self.res.facts().get(previous).name == self.res.facts().get(state).name;
+        if same_name && matches!(replaced, BlockEntity::Jukebox(_)) {
+            self.jukebox_removed(at);
+        }
+        if self.container == Some(key) {
+            self.container_opener_event(key, false);
+            self.container = None;
+            self.screen = Screen::Playing;
+        }
+    }
     pub(super) fn cmd_place(&mut self, ctx: &Context) -> R<i32> {
         let Some(Arg::Resource(id)) = ctx.get("template").cloned() else {
             return Ok(0);
@@ -235,6 +258,9 @@ impl Game<'_> {
                 continue;
             }
             let state = transforms.rotate(transforms.mirror(b.state, mirror), rotation);
+            if b.nbt.is_some() {
+                self.clear_template_block_entity(at, state);
+            }
             if self.place_state(at, state, strict).is_ok() {
                 placed += 1;
             }

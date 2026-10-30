@@ -93,7 +93,7 @@ ModelLayers.register	skip:data		layer id registry; Horizon uses string keys
 ModelLayers.registerArmorSet	skip:data		layer id registry; Horizon uses string keys
 ModelPart.storePose	skip:other		no callers in vanilla; a snapshot of the current pose that nothing reads
 ModelPart.loadPose	port	crates/horizon-client/src/mobs.rs::Part::parse	reads the pose from the model data; the reset per frame is Poses::reset
-ModelPart.getChild	port	crates/horizon-client/src/block_entity_render.rs::ModelPart::child	named child lookup (Option instead of a throw)
+ModelPart.getChild	port	crates/horizon-client-render/src/block_entity_render.rs::ModelPart::child	named child lookup (Option instead of a throw)
 ModelPart.compile	port	crates/horizon-client/src/mobs/render.rs::draw_normals	emits each polygon with the posed transform; skipDraw gating
 ModelPart.offsetRotation	port	crates/horizon-client/src/mobs/keyframes.rs::Animation::apply	Target::Rotation channel adds to xRot/yRot/zRot
 ModelPart.offsetScale	port	crates/horizon-client/src/mobs/keyframes.rs::Animation::apply	Target::Scale channel adds to the scale

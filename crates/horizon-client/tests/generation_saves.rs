@@ -45,6 +45,8 @@ struct Recorder {
     chunks: Mutex<HashMap<(i32, i32), Chunk>>,
     /// Each column as it was when it was finished, once per finish.
     finished: Mutex<HashMap<(i32, i32), Vec<Recorded>>>,
+    /// The proto chunks a light job was given a view of, as they were.
+    viewed: Mutex<Vec<Recorded>>,
 }
 impl Recorder {
     fn save_chunk(&self, chunk: &Chunk) {
@@ -100,6 +102,11 @@ impl ChunkGenerator for Recorder {
     }
     fn is_decorated(&self, proto: &Proto) -> bool {
         proto.downcast_ref::<Recorded>().unwrap().decorated
+    }
+    fn light_view(&self, proto: &Proto) -> Option<Chunk> {
+        let proto = proto.downcast_ref::<Recorded>().unwrap();
+        self.viewed.lock().unwrap().push(proto.clone());
+        Some(Chunk::empty(proto.x, proto.z))
     }
     fn save_protos(&self, protos: &[&Proto]) {
         let mut saved = self.protos.lock().unwrap();
@@ -235,6 +242,46 @@ fn chunks_left_behind_keep_their_decoration() {
         }
     }
     assert!(checked > 200, "only {checked} columns finished");
+}
+
+/// The columns at the edge light against their decorated neighbours past
+/// the area; each such proto chunk is turned into a view once while it stays
+/// as it is, however many columns it neighbours or light jobs wait on it.
+#[test]
+fn proto_chunks_are_viewed_once_per_state() {
+    let Some(root) = resources() else {
+        return;
+    };
+    let assets = Arc::new(Assets::load(&root).unwrap());
+    let render = Arc::new(assets.reload(&root).unwrap());
+    let facts = BlockFacts::load(&root, assets.registry).unwrap();
+    let visibility = models::load_visibility(&root, assets.registry).unwrap();
+    let context = Arc::new(WorkerContext {
+        tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility).unwrap()),
+        light: Arc::new(LightTables::load(&root, assets.registry, &facts).unwrap()),
+        biomes: Arc::new(Biomes::load(&root).unwrap()),
+        assets,
+        render: render.clone(),
+    });
+    let generator = Arc::new(Recorder::default());
+    let mut session = Session::new(generator.clone(), context);
+    for step in 0..=4 {
+        session.settle_at((step * 3, 0));
+    }
+    let viewed = generator.viewed.lock().unwrap();
+    let mut states: Vec<((i32, i32), Vec<(i32, i32)>)> = viewed
+        .iter()
+        .map(|p| ((p.x, p.z), p.writes.clone()))
+        .collect();
+    let total = states.len();
+    states.sort_unstable();
+    states.dedup();
+    assert!(total > 20, "only {total} proto chunks were viewed");
+    assert_eq!(
+        states.len(),
+        total,
+        "a proto chunk was viewed again unchanged"
+    );
 }
 
 /// A saved proto chunk comes back exactly: the bastion region of #249, its

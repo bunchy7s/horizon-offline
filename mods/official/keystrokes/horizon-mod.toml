@@ -1,9 +1,0 @@
-id = "keystrokes"
-name = "Keystrokes"
-version = "1.0.0"
-description = "Your movement keys, mouse buttons and space bar in a corner, lit while held, with clicks per second. Horizon's own, formerly an extra."
-authors = ["Horizon"]
-api = "0.1"
-side = "client"
-capabilities = ["render", "input", "ui", "storage"]
-experimental = ["render", "input", "ui"]

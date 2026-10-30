@@ -72,9 +72,8 @@ pub struct Extras {
     pub zoom_smooth: bool,
     /// Divide mouse turning by the zoom.
     pub zoom_sensitivity: bool,
-    /// The FPS counter and keystrokes extras are official mods now
-    /// (`moved_extras`): their old settings stay here until the game has
-    /// installed the mod for a player who had one on.
+    /// The FPS counter and keystrokes extras are official mods now: their
+    /// old settings stay here, kept as they were.
     pub fps: bool,
     pub fps_corner: Corner,
     /// Also show the minimum and 1% low.
@@ -83,8 +82,8 @@ pub struct Extras {
     pub keystrokes_corner: Corner,
     /// Clicks per second under the mouse buttons.
     pub keystrokes_cps: bool,
-    /// The official mods installed for the extras they replace, by mod id
-    /// (`movedToMods`): each is done once.
+    /// The official mods once installed for the extras they replace, by mod
+    /// id (`movedToMods`).
     pub moved: Vec<String>,
     pub minimap: bool,
     pub minimap_corner: Corner,
@@ -287,7 +286,7 @@ impl Extras {
 }
 
 /// The field-of-view modifier target `Camera.tickFov` eases toward: vanilla's
-/// (`getFieldOfViewModifier`) divided by a mod's zoom (`render.set-zoom`). A
+/// (`getFieldOfViewModifier`) divided by a mod's zoom (`native_zoom`). A
 /// zoom of 1 leaves it as is.
 pub fn fov_target(vanilla: f32, zoom: f32) -> f32 {
     if zoom == 1.0 { vanilla } else { vanilla / zoom }

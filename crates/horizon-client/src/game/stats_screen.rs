@@ -275,6 +275,8 @@ impl Game<'_> {
         let scroll = self.stats_ui.scroll.amount;
         let row_y = |i: usize| top + 4.0 + i as f32 * row_h - scroll;
         let visible = |y: f32| y >= top && y + row_h <= bottom;
+        // The hovered item's tooltip, drawn over the list.
+        let mut tip = None;
         match self.stats_ui.tab {
             0 => {
                 let mut sorted: Vec<(Text, String)> = CUSTOM
@@ -348,6 +350,10 @@ impl Game<'_> {
                         y + 1.0,
                     );
                     self.draw_item(batch, &stack, left + 2.0, y + 2.0);
+                    // `ItemRowWidget.extractTooltip`: the item's tooltip at the slot's corner.
+                    if ui::hovered(self.cursor, left + 1.0, y + 1.0, 18.0, 18.0) {
+                        tip = Some((stack.clone(), left + 19.0, y + 19.0));
+                    }
                     let atlas = &self.gui.atlas;
                     let color = if (i + 1) % 2 == 0 {
                         u32::MAX
@@ -424,6 +430,9 @@ impl Game<'_> {
             self.stats_ui.scroll.amount,
         );
         self.draw_stats_footer(batch, w, h);
+        if let Some((stack, x, y)) = tip {
+            self.draw_stack_tooltip(batch, &stack, x, y);
+        }
     }
     fn draw_stats_footer(&self, batch: &mut HudBatch, w: f32, h: f32) {
         let atlas = &self.gui.atlas;

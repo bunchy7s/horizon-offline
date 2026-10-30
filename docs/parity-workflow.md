@@ -131,8 +131,8 @@ Besides the Vineflower sources in `.local/minecraft/<version>/sources/`, `tools/
 the same path as normal single player. `python3 tools/test_friends.py --client
 target/fast/horizon-client --relay target/fast/horizon-relay --baseline` covers
 plain LAN, direct invitations, a local relay and ended invitations in that mode.
-Both accept `--in-frame` for comparison and retain `--server-thread` for existing
-callers. Run Linux games under `xvfb-run -a` when no display is available. Each
+`lan_e2e.py` still accepts `--in-frame`, which is deprecated (never use it, it will be removed
+soon), and `--server-thread` for existing callers. Run Linux games under `xvfb-run -a` when no display is available. Each
 process gets scratch game, launcher, XDG data and config homes; telemetry, audio
 and launcher self-update are disabled.
 

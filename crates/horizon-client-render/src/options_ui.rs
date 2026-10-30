@@ -170,6 +170,7 @@ impl Opt {
             Opt::RotateWithMinecarts => "rotateWithMinecart",
             Opt::HighContrastBlockOutlines => "highContrastBlockOutline",
             Opt::MusicFrequency => "musicFrequency",
+            Opt::SoundDevice => "soundDevice",
             Opt::OperatorItemsTab => "operatorItemsTab",
             Opt::QuitShortcuts => "quitShortcuts",
             Opt::CtrlClickEmulatesRightClick => "ctrlClickEmulatesRightClick",
@@ -196,6 +197,7 @@ impl Opt {
             Opt::DiscreteScroll => "options.discrete_mouse_scroll",
             Opt::AllowCursorChanges => "options.allowCursorChanges",
             Opt::Volume(_) => "soundCategory.master",
+            Opt::SoundDevice => "options.audioDevice",
             Opt::GuiScale => "options.guiScale",
             Opt::ViewBobbing => "options.viewBobbing",
             Opt::Gamma => "options.gamma",
@@ -252,7 +254,7 @@ impl Opt {
             Opt::NotificationDisplayTime => "options.notifications.display_time",
             Opt::Narrator => "options.narrator",
             Opt::TextBackground => "options.accessibility.text_background",
-            Opt::ChatDelay => "Chat Delay",
+            Opt::ChatDelay => "horizon.options.chat_delay",
             Opt::DistortionEffects => "options.screenEffectScale",
             Opt::FovEffects => "options.fovEffectScale",
             Opt::DarknessPulsing => "options.darknessEffectScale",
@@ -647,6 +649,13 @@ impl Opt {
             Opt::ReducedDebugInfo => on_off(s.reduced_debug_info),
             Opt::HighContrast => on_off(s.high_contrast),
             Opt::ShowSubtitles => on_off(s.show_subtitles),
+            Opt::SoundDevice => {
+                if s.sound_device.is_empty() {
+                    tr("options.audioDevice.default")
+                } else {
+                    Text::literal(&s.sound_device)
+                }
+            }
             Opt::MusicFrequency => tr([
                 "options.music_frequency.default",
                 "options.music_frequency.frequent",
@@ -664,25 +673,25 @@ impl Opt {
             } else {
                 "options.key.hold"
             }),
-            Opt::PadLightbar => Text::literal(match s.controller.lightbar {
-                gamepad::Lightbar::Health => "Health",
-                gamepad::Lightbar::Dimension => "Dimension",
-                gamepad::Lightbar::Off => "Off",
+            Opt::PadLightbar => tr(match s.controller.lightbar {
+                gamepad::Lightbar::Health => "horizon.options.lightbar.health",
+                gamepad::Lightbar::Dimension => "horizon.options.lightbar.dimension",
+                gamepad::Lightbar::Off => "options.off",
             }),
-            Opt::PadGlyphs => Text::literal(match s.controller.glyphs {
-                GlyphStyle::Auto => "Auto",
-                GlyphStyle::Xbox => "Xbox",
-                GlyphStyle::PlayStation => "PlayStation",
-                GlyphStyle::Nintendo => "Nintendo",
+            Opt::PadGlyphs => tr(match s.controller.glyphs {
+                GlyphStyle::Auto => "horizon.options.glyphs.auto",
+                GlyphStyle::Xbox => "horizon.options.glyphs.xbox",
+                GlyphStyle::PlayStation => "horizon.options.glyphs.playstation",
+                GlyphStyle::Nintendo => "horizon.options.glyphs.nintendo",
             }),
-            Opt::PadMenuNav => Text::literal(match s.controller.menu_nav {
-                gamepad::MenuNav::Focus => "Focus",
-                gamepad::MenuNav::Pointer => "Pointer",
+            Opt::PadMenuNav => tr(match s.controller.menu_nav {
+                gamepad::MenuNav::Focus => "horizon.options.menu_focus",
+                gamepad::MenuNav::Pointer => "horizon.options.menu_pointer",
             }),
-            Opt::PadKeyboard => Text::literal(match s.controller.keyboard {
-                gamepad::TextKeyboard::Auto => "Auto",
-                gamepad::TextKeyboard::Horizon => "Horizon",
-                gamepad::TextKeyboard::Steam => "Steam",
+            Opt::PadKeyboard => tr(match s.controller.keyboard {
+                gamepad::TextKeyboard::Auto => "horizon.options.keyboard.auto",
+                gamepad::TextKeyboard::Horizon => "horizon.options.keyboard.horizon",
+                gamepad::TextKeyboard::Steam => "horizon.options.keyboard.steam",
             }),
             _ => Text::empty(),
         }
@@ -851,6 +860,23 @@ impl Opt {
             Opt::ReducedDebugInfo => s.reduced_debug_info = !s.reduced_debug_info,
             Opt::HighContrast => s.high_contrast = !s.high_contrast,
             Opt::ShowSubtitles => s.show_subtitles = !s.show_subtitles,
+            Opt::SoundDevice => {
+                let devices = crate::audio::output_devices();
+                let mut all = vec![String::new()];
+                for d in devices {
+                    if !all.contains(&d) {
+                        all.push(d);
+                    }
+                }
+                let current_idx = all.iter().position(|d| d == &s.sound_device).unwrap_or(0);
+                let count = all.len();
+                let next_idx = if back {
+                    (current_idx + count - 1) % count
+                } else {
+                    (current_idx + 1) % count
+                };
+                s.sound_device = all[next_idx].clone();
+            }
             Opt::MusicFrequency => {
                 let n = next(s.file.int("musicFrequency").clamp(0, 2) as u8, 3);
                 s.file
@@ -993,6 +1019,7 @@ pub enum Page {
     /// Horizon's graphics settings (`graphics_ui`).
     Graphics,
     GraphicsAdvanced,
+    GraphicsHdr,
     /// Horizon's controller settings and button binds.
     Controller,
     PadBinds,
@@ -1027,8 +1054,7 @@ enum Act {
     /// Pick `s.shader_packs[i]`, or turn it off when it is the pick.
     PickShaderPack(usize),
     OpenShaderPackFolder,
-    /// The installed mod's own settings page (capability `ui`), shown as a
-    /// screen: `Event::ModSettings` has the game open it.
+    /// The installed native mod's settings page.
     ModSettings(usize),
     /// A native mod's key (mod, key) waits for a key; a button of its page.
     NativeKey(usize, usize),
@@ -1095,9 +1121,6 @@ pub enum Event {
     /// A shader pack was picked or turned off: save and apply it.
     ShaderPack,
     OpenShaderPackFolder,
-    /// Open the mod's own settings page (capability `ui`): the installed
-    /// mod's index in `mods.installed`.
-    ModSettings(usize),
     /// Native mod `.0`'s page opened: the game asks the mod for its labels
     /// again (they were made with the list, maybe in another language).
     NativeSettings(usize),
@@ -1250,22 +1273,14 @@ fn option_widget(s: &Settings, opt: Opt, x: f32, y: f32, w: f32) -> Widget {
 /// What a button opening one of Horizon's pages says on hover.
 fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
     Some(match page {
-        Page::Horizon => "Horizon's own settings: graphics, controllers, extras and mods.",
-        Page::Graphics => "Graphics, simply: each setting says what it costs.",
-        Page::GraphicsAdvanced => {
-            "Every graphics setting, Horizon's included, with what each costs."
-        }
-        Page::Controller => "Controllers: their buttons, sticks, vibration and menu navigation.",
-        Page::Extras => {
-            "Optional additions, all off by default: the game stays vanilla until you turn one on."
-        }
-        Page::Agent => "Let your own AI agent play: horizon-ctl and MCP clients on this computer.",
-        Page::ShaderPacks => {
-            "Shader packs from the shaderpacks folder: Horizon's own and those in the shaders/ format. One runs at a time."
-        }
-        Page::Mods => {
-            "Mods made for Horizon, from the horizon-mods folder. Each runs in a sandbox and stays off until you turn it on."
-        }
+        Page::Horizon => "horizon.pages.settings.tooltip",
+        Page::Graphics => "horizon.pages.graphics.tooltip",
+        Page::GraphicsAdvanced => "horizon.pages.graphics_advanced.tooltip",
+        Page::Controller => "horizon.pages.controller.tooltip",
+        Page::Extras => "horizon.pages.extras.tooltip",
+        Page::Agent => "horizon.pages.agent.tooltip",
+        Page::ShaderPacks => "horizon.pages.shader_packs.tooltip",
+        Page::Mods => "horizon.pages.mods.tooltip",
         _ => return None,
     })
 }
@@ -1367,7 +1382,10 @@ impl OptionsUi {
         if page == Page::Packs {
             self.pack_screen = None;
         }
-        if matches!(page, Page::Graphics | Page::GraphicsAdvanced) {
+        if matches!(
+            page,
+            Page::Graphics | Page::GraphicsAdvanced | Page::GraphicsHdr
+        ) {
             self.graphics.reset();
         }
     }
@@ -1376,6 +1394,7 @@ impl OptionsUi {
         match page {
             Page::Graphics => Some(crate::graphics_ui::Level::Simple),
             Page::GraphicsAdvanced => Some(crate::graphics_ui::Level::Advanced),
+            Page::GraphicsHdr => Some(crate::graphics_ui::Level::Hdr),
             _ => None,
         }
     }
@@ -1394,16 +1413,16 @@ impl OptionsUi {
             Page::Language => "options.language.title",
             Page::Font => "options.font.title",
             Page::Packs => "resourcePack.title",
-            Page::Mods => "Mods",
+            Page::Mods => "horizon.pages.mods",
             Page::NativeMod(_) => "Mod Settings",
-            Page::ShaderPacks => "Shader Packs",
-            Page::Graphics | Page::GraphicsAdvanced => "options.videoTitle",
-            Page::Controller => "Controller Settings",
-            Page::PadBinds => "Controller Binds",
-            Page::Extras => "Horizon Extras",
+            Page::ShaderPacks => "horizon.pages.shader_packs",
+            Page::Graphics | Page::GraphicsAdvanced | Page::GraphicsHdr => "options.videoTitle",
+            Page::Controller => "horizon.pages.controller",
+            Page::PadBinds => "horizon.pages.controller_binds",
+            Page::Extras => "horizon.pages.extras",
             Page::Credits => "credits_and_attribution.screen.title",
-            Page::Horizon => "Horizon Settings",
-            Page::Agent => "AI Agent",
+            Page::Horizon => "horizon.pages.settings",
+            Page::Agent => "horizon.pages.agent",
         }
     }
     fn scrollbar_x(&self, width: f32) -> f32 {
@@ -1541,21 +1560,23 @@ impl OptionsUi {
             Page::Horizon => {
                 // Two to a row, as vanilla's OptionsList.addSmall lays out
                 // buttons; each opens a page built from vanilla's widgets.
-                let open = |label: &str, page: Page| {
-                    button(0.0, 0.0, 150.0, Text::literal(label), Act::Push(page))
-                };
+                let open =
+                    |key: &str, page: Page| button(0.0, 0.0, 150.0, tr(key), Act::Push(page));
                 vec![
                     Row::Buttons(
-                        open("Graphics...", Page::Graphics),
-                        Some(open("Advanced Graphics...", Page::GraphicsAdvanced)),
+                        open("horizon.pages.open.graphics", Page::Graphics),
+                        Some(open(
+                            "horizon.pages.open.graphics_advanced",
+                            Page::GraphicsAdvanced,
+                        )),
                     ),
                     Row::Buttons(
-                        open("Shader Packs...", Page::ShaderPacks),
-                        Some(open("Controller Settings...", Page::Controller)),
+                        open("horizon.pages.open.shader_packs", Page::ShaderPacks),
+                        Some(open("horizon.pages.open.controller", Page::Controller)),
                     ),
                     Row::Buttons(
-                        open("Extras...", Page::Extras),
-                        Some(open("Mods...", Page::Mods)),
+                        open("horizon.pages.open.extras", Page::Extras),
+                        Some(open("horizon.pages.open.mods", Page::Mods)),
                     ),
                     // No AI hides the AI Agent page and everything AI.
                     Row::Buttons(
@@ -1563,7 +1584,7 @@ impl OptionsUi {
                         Some(if s.extras.no_ai {
                             self.extra_button(s, crate::extras::Item::NoAi)
                         } else {
-                            open("AI Agent...", Page::Agent)
+                            open("horizon.pages.open.agent", Page::Agent)
                         }),
                     ),
                 ]
@@ -1582,7 +1603,7 @@ impl OptionsUi {
                         0.0,
                         0.0,
                         150.0,
-                        Text::literal("Copy Connection Details"),
+                        tr("horizon.agent.copy_details"),
                         Act::CopyAgentDetails,
                     )),
                 )];
@@ -1596,14 +1617,14 @@ impl OptionsUi {
                         0.0,
                         0.0,
                         150.0,
-                        Text::literal("Horizon Graphics..."),
+                        tr("horizon.pages.open.horizon_graphics"),
                         Act::Push(Page::Graphics),
                     ),
                     Some(button(
                         0.0,
                         0.0,
                         150.0,
-                        Text::literal("Advanced Graphics..."),
+                        tr("horizon.pages.open.graphics_advanced"),
                         Act::Push(Page::GraphicsAdvanced),
                     )),
                 )];
@@ -1652,6 +1673,7 @@ impl OptionsUi {
                 rows.extend(pairs(&others));
                 rows.extend(pairs(&[Opt::ShowSubtitles, Opt::DirectionalAudio]));
                 rows.extend(pairs(&[Opt::MusicFrequency, Opt::MusicToast]));
+                rows.push(Row::Big(Opt::SoundDevice));
                 rows
             }
             Page::Skin => {
@@ -1695,7 +1717,7 @@ impl OptionsUi {
                         0.0,
                         0.0,
                         310.0,
-                        Text::literal("Controller Settings..."),
+                        tr("horizon.pages.open.controller"),
                         Act::Push(Page::Controller),
                     ),
                     None,
@@ -1708,7 +1730,7 @@ impl OptionsUi {
                         0.0,
                         0.0,
                         310.0,
-                        Text::literal("Controller Binds..."),
+                        tr("horizon.pages.open.controller_binds"),
                         Act::Push(Page::PadBinds),
                     ),
                     None,
@@ -1766,9 +1788,7 @@ impl OptionsUi {
             Page::Font => pairs(&[Opt::ForceUnicode, Opt::JapaneseGlyphs]),
             Page::Mods => {
                 if s.mods.installed.is_empty() {
-                    return vec![Row::Header(
-                        "No mods: put .hmod files in the horizon-mods folder",
-                    )];
+                    return vec![Row::Header("horizon.mods.empty")];
                 }
                 s.mods
                     .installed
@@ -1778,20 +1798,20 @@ impl OptionsUi {
                         let mut label = Text::literal(format!("{}: ", installed.title))
                             .append(on_off(s.mods.is_on(i)));
                         if installed.problem.is_some() {
-                            label = label.append(" (Stopped)");
+                            label = label.append(tr("horizon.mods.stopped"));
                         } else if installed.dev {
-                            label = label.append(" (Dev)");
+                            label = label.append(tr("horizon.mods.dev"));
                         }
                         let dead = installed.dev || installed.id.is_empty();
-                        // A running mod with a settings page (capability
-                        // `ui`) gets its own button beside the toggle.
-                        if installed.has_settings || installed.native.is_some() {
+                        // A native mod gets its settings page's button beside
+                        // the toggle.
+                        if installed.native.is_some() {
                             let toggle = button(0.0, 0.0, 150.0, label, Act::ToggleMod(i));
                             let settings = button(
                                 0.0,
                                 0.0,
                                 150.0,
-                                Text::literal("Settings"),
+                                tr("horizon.mods.settings"),
                                 Act::ModSettings(i),
                             );
                             Row::Buttons(
@@ -1808,17 +1828,17 @@ impl OptionsUi {
             Page::NativeMod(i) => self.native_rows(s, i),
             Page::ShaderPacks => {
                 if s.shader_packs.is_empty() {
-                    return vec![Row::Header(
-                        "No shader packs: put them in the shaderpacks folder",
-                    )];
+                    return vec![Row::Header("horizon.shader_packs.empty")];
                 }
                 s.shader_packs
                     .iter()
                     .enumerate()
                     .map(|(i, pack)| {
                         let kind = match pack.kind {
-                            crate::shader_pack_list::Kind::Horizon => " (Horizon)",
-                            crate::shader_pack_list::Kind::Classic => "",
+                            crate::shader_pack_list::Kind::Horizon => {
+                                lang::get("horizon.shader_packs.kind_horizon")
+                            }
+                            crate::shader_pack_list::Kind::Classic => String::new(),
                         };
                         let label = Text::literal(format!("{}{kind}: ", pack.title))
                             .append(on_off(s.horizon.shader_pack == pack.file));
@@ -1878,8 +1898,8 @@ impl OptionsUi {
                     // Vanilla's Telemetry Data and Credits slots: Horizon's
                     // settings and its mods, as a mod adds its button here.
                     // Credits & Attribution (WinScreen's credits) follows them.
-                    ("Horizon Settings...", Some(Page::Horizon)),
-                    ("Mods...", Some(Page::Mods)),
+                    ("horizon.pages.open.horizon_settings", Some(Page::Horizon)),
+                    ("horizon.pages.open.mods", Some(Page::Mods)),
                     ("options.credits_and_attribution", Some(Page::Credits)),
                 ];
                 let rows = entries.len().div_ceil(2) as f32;
@@ -2312,18 +2332,12 @@ impl OptionsUi {
                 content = y + self.scroll - top + 2.0;
                 out[list_start..].iter_mut().for_each(|w| w.list = true);
                 let folder = match page {
-                    Page::Mods => Some(("Open Mod Folder", Act::OpenModFolder)),
-                    Page::ShaderPacks => Some(("Open Pack Folder", Act::OpenShaderPackFolder)),
+                    Page::Mods => Some(("horizon.mods.open_folder", Act::OpenModFolder)),
+                    Page::ShaderPacks => Some(("pack.openFolder", Act::OpenShaderPackFolder)),
                     _ => None,
                 };
                 if let Some((label, act)) = folder {
-                    out.push(button(
-                        cx - 154.0,
-                        h - 27.0,
-                        150.0,
-                        Text::literal(label),
-                        act,
-                    ));
+                    out.push(button(cx - 154.0, h - 27.0, 150.0, tr(label), act));
                     out.push(button(cx + 4.0, h - 27.0, 150.0, tr("gui.done"), Act::Done));
                 } else {
                     out.push(done(h - 27.0));
@@ -2436,7 +2450,7 @@ impl OptionsUi {
                 } = &wd.kind
                     && let Some(text) = horizon_page_tooltip(*page)
                 {
-                    tooltip = Some(atlas.font.split(&Text::literal(text), 170.0));
+                    tooltip = Some(atlas.font.split(&tr(text), 170.0));
                 }
                 let key = match &wd.kind {
                     WKind::Button {
@@ -2463,10 +2477,7 @@ impl OptionsUi {
                 } = &wd.kind
                     && !opt.available()
                 {
-                    tooltip = Some(atlas.font.split(
-                        &Text::literal("This feature is not yet available in Horizon."),
-                        170.0,
-                    ));
+                    tooltip = Some(atlas.font.split(&tr("horizon.options.unavailable"), 170.0));
                 }
                 if let WKind::Button {
                     act: Act::ToggleMod(i),
@@ -2607,9 +2618,7 @@ impl OptionsUi {
             if search.value.is_empty() && !search.focused {
                 batch.text_styled(
                     atlas,
-                    &Text::literal("Search settings...")
-                        .with_color(text::GRAY)
-                        .italic(),
+                    &tr("horizon.options.search").with_color(text::GRAY).italic(),
                     search.text_x(),
                     search.text_y(),
                     u32::MAX,
@@ -2656,6 +2665,7 @@ impl OptionsUi {
                     Action::Changed => events.push(Event::Changed),
                     Action::SliderDrag => events.push(Event::SliderDrag),
                     Action::OpenAdvanced => self.push(Page::GraphicsAdvanced),
+                    Action::OpenHdr => self.push(Page::GraphicsHdr),
                     Action::OpenSimple => {
                         if self.stack.len() >= 2
                             && self.stack[self.stack.len() - 2] == Page::Graphics
@@ -2787,26 +2797,7 @@ impl OptionsUi {
                         }
                         Act::Done => events.extend(self.back(s)),
                         Act::Cycle(opt) => {
-                            opt.cycle(s, right, framebuffer);
-                            if opt == Opt::Preset {
-                                apply_preset(s);
-                            }
-                            if opt == Opt::HighContrast {
-                                // Options.highContrast: the built-in pack follows the option.
-                                let on = s.resource_packs.iter().any(|id| id == "high_contrast");
-                                if on != s.high_contrast {
-                                    s.resource_packs.retain(|id| id != "high_contrast");
-                                    if s.high_contrast {
-                                        s.resource_packs.push("high_contrast".into());
-                                    }
-                                    // PackSelectionScreen reads the repository each time it
-                                    // opens: the next one starts from this selection.
-                                    self.pack_selection = s.resource_packs.clone();
-                                    self.pack_screen = None;
-                                    events.push(Event::Packs(s.resource_packs.clone()));
-                                }
-                            }
-                            events.push(Event::Changed);
+                            events.extend(self.cycle_option(s, opt, right, framebuffer));
                         }
                         Act::Extra(item) => {
                             if let Some(name) = item.key_name() {
@@ -2841,12 +2832,8 @@ impl OptionsUi {
                         }
                         Act::ModSettings(i) => {
                             events.push(Event::ButtonClick);
-                            if s.mods.installed.get(i).is_some_and(|m| m.native.is_some()) {
-                                self.push(Page::NativeMod(i));
-                                events.push(Event::NativeSettings(i));
-                            } else {
-                                events.push(Event::ModSettings(i));
-                            }
+                            self.push(Page::NativeMod(i));
+                            events.push(Event::NativeSettings(i));
                         }
                         Act::NativeKey(i, k) => {
                             self.selected_key = Some(NATIVE_KEY);
@@ -2918,6 +2905,77 @@ impl OptionsUi {
         self.scroll -= amount * 18.0;
         self.clamp_scroll(top, bottom, content);
     }
+    /// `CycleButton.cycleValue` on an option, then what the option changes:
+    /// the preset's values, High Contrast's built-in pack.
+    fn cycle_option(
+        &mut self,
+        s: &mut Settings,
+        opt: Opt,
+        back: bool,
+        framebuffer: [i32; 2],
+    ) -> Vec<Event> {
+        let mut events = Vec::new();
+        opt.cycle(s, back, framebuffer);
+        if opt == Opt::Preset {
+            apply_preset(s);
+        }
+        if opt == Opt::HighContrast {
+            // Options.highContrast: the built-in pack follows the option.
+            let on = s.resource_packs.iter().any(|id| id == "high_contrast");
+            if on != s.high_contrast {
+                s.resource_packs.retain(|id| id != "high_contrast");
+                if s.high_contrast {
+                    s.resource_packs.push("high_contrast".into());
+                }
+                // PackSelectionScreen reads the repository each time it
+                // opens: the next one starts from this selection.
+                self.pack_selection = s.resource_packs.clone();
+                self.pack_screen = None;
+                events.push(Event::Packs(s.resource_packs.clone()));
+            }
+        }
+        events.push(Event::Changed);
+        events
+    }
+    /// The mouse wheel at the cursor. Over a cycle button it takes the step
+    /// (`CycleButton.mouseScrolled`: up goes back) and the list stays put.
+    pub fn wheel(
+        &mut self,
+        s: &mut Settings,
+        size: (f32, f32),
+        cursor: (f32, f32),
+        framebuffer: [i32; 2],
+        amount: f32,
+    ) -> Vec<Event> {
+        let plain = self.resource_error.is_none()
+            && Self::graphics_level(self.page()).is_none()
+            && !(self.pack_screen.is_some() && self.stack.last() == Some(&Page::Packs));
+        if !plain {
+            self.scroll_at(s, size, cursor, amount);
+            return Vec::new();
+        }
+        let (widgets, top, bottom, _) = self.layout(s, size.0, size.1);
+        let hovered = widgets.iter().find_map(|wd| match &wd.kind {
+            WKind::Button {
+                active: true,
+                act: Act::Cycle(opt),
+                ..
+            } if ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
+                && !(wd.list && (cursor.1 < top || cursor.1 >= bottom)) =>
+            {
+                Some(*opt)
+            }
+            _ => None,
+        });
+        match hovered {
+            Some(opt) if amount != 0.0 => self.cycle_option(s, opt, amount > 0.0, framebuffer),
+            Some(_) => Vec::new(),
+            None => {
+                self.scroll_at(s, size, cursor, amount);
+                Vec::new()
+            }
+        }
+    }
     /// The mouse wheel at the cursor.
     pub fn scroll_at(&mut self, s: &Settings, size: (f32, f32), cursor: (f32, f32), amount: f32) {
         if self.resource_error.is_some() {
@@ -2933,6 +2991,33 @@ impl OptionsUi {
             }
             _ => self.scroll(s, size, amount),
         }
+    }
+    /// `VideoSettingsScreen.mouseScrolled`: with Ctrl held the wheel steps the GUI scale
+    /// (auto counts as one past the maximum) and the list goes back to the top.
+    pub fn video_wheel_gui_scale(
+        &mut self,
+        s: &mut Settings,
+        framebuffer: [i32; 2],
+        amount: f32,
+    ) -> Vec<Event> {
+        let max = i64::from(crate::window::calculate_scale(
+            framebuffer,
+            0,
+            s.force_unicode,
+        ));
+        let old = if s.gui_scale == 0 {
+            max + 1
+        } else {
+            i64::from(s.gui_scale)
+        };
+        let step = i64::from(amount > 0.0) - i64::from(amount < 0.0);
+        let new = old + step;
+        if new == 0 || new > max {
+            return Vec::new();
+        }
+        s.gui_scale = new as u32;
+        self.scroll = 0.0;
+        vec![Event::Changed]
     }
     /// The pack screen at this GUI size, made on first use.
     fn packs(&mut self, atlas: &HudAtlas, size: (f32, f32)) -> &mut crate::pack_screen::PackScreen {
@@ -3421,8 +3506,15 @@ mod tests {
         ui.show(Page::Mods);
         let empty = ui.layout(&s, size.0, size.1).0;
         assert!(empty.iter().any(|w| {
-            matches!(&w.kind, WKind::Text { text, .. } if text.plain().contains(".hmod"))
+            matches!(&w.kind, WKind::Text { text, .. } if text.plain() == "horizon.mods.empty")
         }));
+        // The empty page points at the bundled key; the English line behind it
+        // is what a player reads, so both halves are checked here.
+        let en = crate::lang::Language::load(&[], "en_us");
+        assert!(
+            en.get("horizon.mods.empty")
+                .is_some_and(|line| line.contains(".hmod"))
+        );
         let open_folder = empty
             .iter()
             .find(|w| {
@@ -3455,7 +3547,6 @@ mod tests {
                 description: "May show HUD panels.".into(),
                 problem: id.is_empty().then(|| "Invalid package".into()),
                 dev,
-                has_settings: false,
                 native: None,
             });
         }
@@ -3523,7 +3614,6 @@ mod tests {
             description: String::new(),
             problem: None,
             dev: false,
-            has_settings: false,
             native: Some(crate::mod_list::NativePage::default()),
         });
         ui.show(Page::Mods);
@@ -4596,5 +4686,30 @@ mod tests {
         }
         ui.stack = vec![Page::Main, Page::Controls];
         assert!(pushes(&mut ui).contains(&Page::Controller));
+    }
+
+    #[test]
+    fn sound_device_button_in_sound_page_and_cycles() {
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        ui.show(Page::Sound);
+        let rows = ui.list_rows(&s);
+        assert!(
+            rows.iter().any(|r| matches!(r, Row::Big(Opt::SoundDevice))),
+            "Sound page should contain Row::Big(Opt::SoundDevice)"
+        );
+        assert_eq!(s.sound_device, "");
+        let devices = crate::audio::output_devices();
+        let count = 1 + devices.len();
+        // Cycling forward 'count' times wraps around back to the initial selection ("")
+        for _ in 0..count {
+            Opt::SoundDevice.cycle(&mut s, false, [854, 480]);
+        }
+        assert_eq!(s.sound_device, "");
+        // Cycling backward 'count' times also wraps around back to ""
+        for _ in 0..count {
+            Opt::SoundDevice.cycle(&mut s, true, [854, 480]);
+        }
+        assert_eq!(s.sound_device, "");
     }
 }

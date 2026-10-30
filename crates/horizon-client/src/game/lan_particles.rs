@@ -217,6 +217,11 @@ impl Game<'_> {
             )),
             T::DragonBreath | T::SculkCharge => Some(ParticleData::Scalar(options.scale)),
             T::Shriek => Some(ParticleData::Delay(options.scale as i32)),
+            T::Geyser | T::GeyserPlume => Some(ParticleData::Geyser(options.geyser?.0)),
+            T::GeyserBase | T::GeyserPoof => {
+                let (water_blocks, burst_impulse_base) = options.geyser?;
+                Some(ParticleData::GeyserBase(water_blocks, burst_impulse_base))
+            }
             T::Item | T::Trail | T::Vibration => return None,
             _ => None,
         };
@@ -266,6 +271,10 @@ impl Game<'_> {
                 ..ParticleOptions::simple(ty)
             },
             Some(ParticleData::Delay(d)) => ParticleOptions::shriek(*d),
+            Some(ParticleData::Geyser(water_blocks)) => ParticleOptions::geyser(ty, *water_blocks),
+            Some(ParticleData::GeyserBase(water_blocks, burst_impulse_base)) => {
+                ParticleOptions::geyser_base(ty, *water_blocks, *burst_impulse_base)
+            }
             Some(ParticleData::Trail(target, color, duration)) => {
                 ParticleOptions::trail(*target, *color as u32 & 0xFF_FFFF, *duration)
             }

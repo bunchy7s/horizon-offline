@@ -125,7 +125,19 @@ pub fn download(
         .and_then(|_| objects(&read_json(&index.path)?, dir))
         .and_then(|objects| {
             log(format!("Downloading the sounds ({} files)", objects.len()));
-            fetch_all(&objects, jobs, fetch, cancel, log)
+            // A connection that fails now and then is tried again, and a file that still fails
+            // does not stop the others: the next download fetches what is left.
+            let retrying = |url: &str| {
+                let mut got = fetch(url);
+                for _ in 0..2 {
+                    if got.is_ok() {
+                        break;
+                    }
+                    got = fetch(url);
+                }
+                got
+            };
+            fetch_each(&objects, jobs, &retrying, cancel, log, false)
         });
     match assets {
         Err(e) if e == CANCELLED => return Err(e),
@@ -358,6 +370,20 @@ fn fetch_all(
     cancel: &AtomicBool,
     log: &dyn Fn(String),
 ) -> Result<(), String> {
+    fetch_each(files, jobs, fetch, cancel, log, true)
+}
+
+/// `fetch_all`, which with `stop_on_error` false goes on past a file that fails and reports how
+/// many did, with the first one's error, once the rest are done.
+fn fetch_each(
+    files: &[File],
+    jobs: usize,
+    fetch: Fetch,
+    cancel: &AtomicBool,
+    log: &dyn Fn(String),
+    stop_on_error: bool,
+) -> Result<(), String> {
+    let errors = AtomicUsize::new(0);
     let next = AtomicUsize::new(0);
     let done = AtomicUsize::new(0);
     let failed = Mutex::new(None);
@@ -368,7 +394,7 @@ fn fetch_all(
             .map(|_| {
                 scope.spawn(|| {
                     while let Some(file) = files.get(next.fetch_add(1, Relaxed)) {
-                        if failed.lock().unwrap().is_some() {
+                        if stop_on_error && failed.lock().unwrap().is_some() {
                             break;
                         }
                         if cancel.load(Relaxed) {
@@ -380,6 +406,7 @@ fn fetch_all(
                                 .map_err(|e| format!("{} {e}", file.url))
                                 .and_then(|body| write_file(&file.path, &body));
                             if let Err(e) = got {
+                                errors.fetch_add(1, Relaxed);
                                 failed.lock().unwrap().get_or_insert(e);
                             }
                         }
@@ -398,7 +425,15 @@ fn fetch_all(
         }
     });
     TOTAL.store(0, Relaxed);
-    failed.into_inner().unwrap().map_or(Ok(()), Err)
+    match failed.into_inner().unwrap() {
+        Some(e) if !stop_on_error && e != CANCELLED => Err(format!(
+            "{} of {} files failed, the first: {e}",
+            errors.load(Relaxed),
+            files.len()
+        )),
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]

@@ -28,7 +28,7 @@ AbstractHorse.executeRidersJump	port	crates/horizon-client/src/mobs/equine.rs::r
 AbstractHorse.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	gap: minor: Tame, Temper and Owner are read; EatingHaystack and Bred are not
 AbstractHorse.setOffspringAttribute	port	crates/horizon-client/src/mobs/equine.rs::inherit	max health, jump strength and speed from both parents
 AbstractHorse.onPlayerJump	inline	crates/horizon-client/src/game/mounts.rs::Game::tick_mount_riding	gap: minor: the rear and the jump sound; donkeys and mules play the horse jump sound
-AbstractHorse.handleEntityEvent	port	crates/horizon-client/src/particles.rs::entity_event_burst	events 7 and 6: hearts and smoke around the mount
+AbstractHorse.handleEntityEvent	port	crates/horizon-client-render/src/particles.rs::entity_event_burst	events 7 and 6: hearts and smoke around the mount
 AbstractHorse.positionRider	port	crates/horizon-client/src/game/mounts.rs::Game::position_rider	gap: minor: the rider's body yaw is not copied from the mount
 AbstractHorse.generateMaxHealth	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::horse_health	
 AbstractHorse.generateJumpStrength	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::horse_jump	
@@ -108,7 +108,7 @@ Ocelot.customServerAiStep	port	crates/horizon-client/src/mobs/tame.rs::cat_anim	
 Ocelot.removeWhenFarAway	missing		minor: ocelots never despawn for distance (vanilla: not trusting and older than 2400 ticks)
 Ocelot.createAttributes	skip:data		attributes come from entity-types.json
 Ocelot.mobInteract	missing		player: raw fish never makes a wild ocelot trust the player (no one in three roll, no hearts or smoke); it only puts the ocelot in love mode
-Ocelot.handleEntityEvent	port	crates/horizon-client/src/particles.rs::entity_event_burst	events 41 and 40: hearts and smoke; nothing sends them without the trust roll
+Ocelot.handleEntityEvent	port	crates/horizon-client-render/src/particles.rs::entity_event_burst	events 41 and 40: hearts and smoke; nothing sends them without the trust roll
 Ocelot.reassessTrustingGoals	missing		player: no player avoidance goal, so wild ocelots never run from the player
 Ocelot.checkSpawnObstruction	port	crates/horizon-client/src/mobs/spawn_selection.rs::spawn_obstruction	unobstructed, no liquid, at or above sea level on grass or leaves
 Ocelot.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	baby chance 1.0 for a group

@@ -14,11 +14,12 @@ use std::f32::consts::PI;
 /// A texture lookup into the shared atlas (name without namespace -> uv rect).
 pub type Atlas<'a> = &'a dyn Fn(&str) -> Option<[f32; 4]>;
 
-/// The overlay code of an enchanted armour layer's glint. 7 and 8 are the
-/// item glint and 9 to 12 Horizon's End-portal and breaking overlays, so 13
-/// marks the `ARMOR_ENTITY_GLINT_TEXTURING` sample: entity.wgsl transforms
-/// the model UV and reads `enchanted_glint_armor`.
-pub const ARMOR_GLINT: u32 = 13;
+/// The overlay code of an enchanted armour layer's glint, past the ones
+/// `gfx/entity_batch.rs` gives materials (13 is the boat water mask, which
+/// draws depth only: armour with 13 vanished; 35 is text pulled toward the
+/// camera). It marks the `ARMOR_ENTITY_GLINT_TEXTURING` sample: entity.wgsl
+/// transforms the model UV and reads `enchanted_glint_armor`.
+pub const ARMOR_GLINT: u32 = 36;
 
 /// `RenderTypes.breezeWind`: the texture of the breeze's wind layer scrolls
 /// by 0.02 of the texture per tick.
@@ -1211,7 +1212,8 @@ pub fn render(
     render_with(m, alpha, camera, atlas, light, data, &[], out);
 }
 /// `render` plus extra layers posed like the body (`HumanoidArmorLayer`:
-/// the armour model's parts copy the body's): (model, texture rect, colour).
+/// the armour model's parts copy the body's): (model, texture rect, colour,
+/// overlay: 0 or `ARMOR_GLINT`, as `EquipmentLayerRenderer` never tints them).
 #[allow(clippy::too_many_arguments)]
 pub fn render_with(
     m: &Mob,
@@ -1220,7 +1222,7 @@ pub fn render_with(
     atlas: Atlas,
     light: u32,
     data: &MobData,
-    extra: &[(&Part, [f32; 4], u32)],
+    extra: &[(&Part, [f32; 4], u32, u32)],
     out: &mut Vec<Vertex>,
 ) {
     // The invisibility effect hides the model (a drinking wandering trader);
@@ -1304,7 +1306,7 @@ pub fn render_layers(
     atlas: Atlas,
     light: u32,
     data: &MobData,
-    extra: &[(&Part, [f32; 4], u32)],
+    extra: &[(&Part, [f32; 4], u32, u32)],
     out: &mut Vec<Vertex>,
 ) {
     let base = base_transform(m, alpha, camera);
@@ -1332,7 +1334,7 @@ fn render_visible(
     atlas: Atlas,
     light: u32,
     data: &MobData,
-    extra: &[(&Part, [f32; 4], u32)],
+    extra: &[(&Part, [f32; 4], u32, u32)],
     body_visible: bool,
     out: &mut Vec<Vertex>,
 ) {
@@ -1365,8 +1367,8 @@ fn render_visible(
     if !shell_last {
         draw_body(out);
     }
-    for (part, uv, color) in extra {
-        draw(part, base, &poses, *uv, *color, light, overlay, out);
+    for (part, uv, color, layer_overlay) in extra {
+        draw(part, base, &poses, *uv, *color, light, *layer_overlay, out);
     }
     let mut all_layers = layers(m);
     // WardenRenderer: the translucent emissive layers fade with the animations.
@@ -1413,7 +1415,7 @@ fn render_visible(
             light
         };
         // EquipmentLayerRenderer draws armour with OverlayTexture.NO_OVERLAY: never
-        // the hurt tint, the armour glint (13) when enchanted.
+        // the hurt tint, the armour glint (`ARMOR_GLINT`) when enchanted.
         let overlay = match armor_slot(&layer.model) {
             Some(slot) if super::gear::enchanted(m, slot) => ARMOR_GLINT,
             Some(_) => 0,
@@ -1951,6 +1953,82 @@ mod tests {
                 (origin.z.abs() - 0.1875 * scale).abs() < 1.0e-4,
                 "size {size}: origin {origin}"
             );
+        }
+    }
+    /// `EquipmentLayerRenderer.renderLayers`: the extra armour layers (a
+    /// player's) take their own overlay, `NO_OVERLAY` or the armour glint,
+    /// never the hurt tint of the body, and the glint samples the model UV.
+    #[test]
+    fn extra_armour_layers_carry_their_glint_not_the_hurt_tint() {
+        // The batch gives these overlays their own materials (13, the water
+        // mask, draws depth only): the glint must not be one of them.
+        use crate::gfx::{
+            ENERGY_SWIRL_OVERLAY, SHADOW_OVERLAY, TEXT_POLYGON_OFFSET_OVERLAY,
+            TRANSLUCENT_GLINT_ITEM_OVERLAY, TRANSLUCENT_ITEM_OVERLAY, TRANSLUCENT_PARTICLE_OVERLAY,
+            WATER_MASK_OVERLAY,
+        };
+        assert!(
+            ![
+                WATER_MASK_OVERLAY,
+                SHADOW_OVERLAY,
+                TRANSLUCENT_PARTICLE_OVERLAY,
+                TRANSLUCENT_ITEM_OVERLAY,
+                TRANSLUCENT_GLINT_ITEM_OVERLAY,
+                ENERGY_SWIRL_OVERLAY,
+                TEXT_POLYGON_OFFSET_OVERLAY,
+            ]
+            .contains(&ARMOR_GLINT)
+        );
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            return;
+        }
+        let types = super::super::MobTypes::load(&root).unwrap();
+        let kind = std::sync::Arc::new(types.types["minecraft:zombie"].clone());
+        let mut mob = Mob::new(1, kind.clone(), horizon_core::geometry::Vec3::ZERO, 0.0);
+        mob.hurt_time = 5;
+        let data = MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: Default::default(),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            villager_hats: Default::default(),
+            pois: Default::default(),
+        };
+        let atlas = |_: &str| Some([0.0, 0.0, 0.25, 0.25]);
+        let part = &kind.model;
+        for overlay in [ARMOR_GLINT, 0] {
+            let mut vertices = Vec::new();
+            render_with(
+                &mob,
+                0.5,
+                glam::DVec3::ZERO,
+                &atlas,
+                0xf0f0,
+                &data,
+                &[(part, [0.5, 0.5, 0.75, 0.75], 0xFFFF_FFFF, overlay)],
+                &mut vertices,
+            );
+            let (armour, body): (Vec<&Vertex>, Vec<&Vertex>) =
+                vertices.iter().partition(|v| v.uv[0] >= 0.5);
+            assert!(!armour.is_empty() && !body.is_empty());
+            // The hurt body keeps its red overlay.
+            let hurt = body_overlay(&mob, 0.5);
+            assert_ne!(hurt, 0);
+            assert!(body.iter().all(|v| v.layer == hurt));
+            assert!(armour.iter().all(|v| v.layer == overlay));
+            // The glint scrolls the layer's model UV (0..1 over the texture).
+            for v in &armour {
+                if overlay == ARMOR_GLINT {
+                    assert!((v.glint_uv[0] - (v.uv[0] - 0.5) * 4.0).abs() < 1e-4);
+                    assert!((v.glint_uv[1] - (v.uv[1] - 0.5) * 4.0).abs() < 1e-4);
+                } else {
+                    assert_eq!(v.glint_uv, [0.0, 0.0]);
+                }
+            }
         }
     }
     #[test]

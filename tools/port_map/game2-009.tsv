@@ -10,13 +10,13 @@ WindChargeItem.createDispenseConfig	port	crates/horizon-client/src/game/dispense
 alchemy/Potion.hasInstantEffects	inline	crates/horizon-client/src/game/potions.rs::Game::splash	the instant check is written inline for the splash level event and sound (2007/1054 vs 2002/1053)
 PotionContents.createItemStack	port	crates/horizon-items/src/item_data.rs::ItemStack::with_potion	item stack plus the potion in its data
 PotionContents.is	inline	crates/horizon-client/src/cauldron.rs::interact	gap: minor: only the water check is here; other callers compare the potion id themselves (dispenser.rs, Enderman)
-PotionContents.isPotionWithoutCustomEffects	inline	crates/horizon-client/src/effects.rs::PlayerEffects::potion_effects	Horizon has no custom effects on a potion stack, so this is always the potion alone
-PotionContents.getAllEffects	port	crates/horizon-client/src/effects.rs::PlayerEffects::potion_effects	gap: minor: the potion's own effect list only; no custom effects
+PotionContents.isPotionWithoutCustomEffects	inline	crates/horizon-client-render/src/effects.rs::PlayerEffects::potion_effects	Horizon has no custom effects on a potion stack, so this is always the potion alone
+PotionContents.getAllEffects	port	crates/horizon-client-render/src/effects.rs::PlayerEffects::potion_effects	gap: minor: the potion's own effect list only; no custom effects
 PotionContents.withPotion	port	crates/horizon-items/src/item_data.rs::ItemStack::with_potion	sets the potion and keeps the other data
 PotionContents.withEffectAdded	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_breath	gap: minor: the dragon fireball cloud's instant damage (12) is hard-coded in the tick, not an added effect; the breath cloud's 6 is the same path
 PotionContents.getColorOptional	port	crates/horizon-client-core/src/potions.rs::potion_color	amplifier-weighted mix; base colour when there are no effects
 PotionContents.hasEffects	inline	crates/horizon-client/src/game/potions.rs::Game::splash	a lingering cloud is made only when the potion has effects
-PotionContents.getPotionDescription	port	crates/horizon-client/src/brewing.rs::tooltip	effect name with potency; joined with a space, not the potion.withAmplifier translation
+PotionContents.getPotionDescription	port	crates/horizon-client-render/src/brewing.rs::tooltip	effect name with potency; joined with a space, not the potion.withAmplifier translation
 PotionContents.onConsume	port	crates/horizon-client/src/game/potions.rs::Game::tick_drinking	gap: minor: duration scale is always 1.0; POTION_DURATION_SCALE is not read
 AttackRange.defaultFor	inline	crates/horizon-client/src/game/hand.rs::attack_range_contains	gap: minor: fixed reach 0 to 3 with a 0.3 margin; no entity interaction range attribute
 AttackRange.getClosesetHit	port	crates/horizon-client/src/game/hand.rs::GameHands::hit	gap: minor: uses the crosshair's entity or block, not the closest hit along the attack range
@@ -71,8 +71,8 @@ KineticWeapon.makeLocalHitSound	port	crates/horizon-client/src/game/spear.rs::Ga
 KineticWeapon.computeDamageUseDuration	missing		unsure: the use duration (delay plus the damage window) is not computed in Horizon's use_spear or spear_tick; the windows are checked one by one
 KineticWeapon.Condition.test	port	crates/horizon-client/src/spear.rs::Condition::test	tick, attacker speed and relative speed against the scaled minimums
 PiercingWeapon.makeHitSound	port	crates/horizon-client/src/game/spear.rs::Game::jab	gap: minor: the hit sound plays at this player's feet only; vanilla plays it for everyone nearby
-ResolvableProfile.createUnresolved	port	crates/horizon-client/src/skins.rs::parse_profile	keeps a name or id as the unresolved key, resolved later
-ResolvableProfile.createPartialProfile	port	crates/horizon-client/src/skins.rs::parse_profile	id, else the name's offline UUID, else nil
+ResolvableProfile.createUnresolved	port	crates/horizon-client-render/src/skins.rs::parse_profile	keeps a name or id as the unresolved key, resolved later
+ResolvableProfile.createPartialProfile	port	crates/horizon-client-render/src/skins.rs::parse_profile	id, else the name's offline UUID, else nil
 ResolvableProfile.Dynamic.hashCode	skip:java		hash of the key and skin patch; Horizon compares them directly
 ResolvableProfile.Static.name	skip:other		no callers in the vanilla source
 ResolvableProfile.Static.equals	skip:java		value equality
@@ -99,9 +99,9 @@ Ingredient.of	port	crates/horizon-client/src/crafting.rs::Ingredient::of	ingredi
 Ingredient.displayForSingleItem	skip:other		no callers in the vanilla source
 Ingredient.getSingleItem	missing		unsure: returns the one item of a single-item ingredient; no Horizon function found in this pass
 PlacementInfo.create	port	crates/horizon-client/src/crafting.rs::Placement::of	placement for one ingredient, none when it is empty
-PotionIngredient.test	port	crates/horizon-client/src/brewing.rs::PotionIngredient::test	item id and the potion filter
-PotionIngredient.of	port	crates/horizon-client/src/brewing.rs::PotionIngredient::parse	built from the recipe JSON, with the potion filter
-PotionIngredient.isPotionInput	port	crates/horizon-client/src/brewing.rs::Brewing::load	bottle input set (Brewing.inputs) built at load
+PotionIngredient.test	port	crates/horizon-client-render/src/brewing.rs::PotionIngredient::test	item id and the potion filter
+PotionIngredient.of	port	crates/horizon-client-render/src/brewing.rs::PotionIngredient::parse	built from the recipe JSON, with the potion filter
+PotionIngredient.isPotionInput	port	crates/horizon-client-render/src/brewing.rs::Brewing::load	bottle input set (Brewing.inputs) built at load
 Recipe.BookInfo.mapCodec	skip:java		codec
 RecipeManager.finalizeRecipeLoading	port	crates/horizon-client/src/crafting.rs::Recipes::load	loads the recipes and their placements at load
 RecipeManager.filterDisabled	missing		minor: recipes whose ingredients sit behind a disabled feature flag are not hidden; Horizon's recipe loading has no feature flag check

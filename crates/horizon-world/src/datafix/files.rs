@@ -589,6 +589,19 @@ fn add_versions(data: &mut Tag) {
 /// needs, then its level.dat at the current version. Returns the DataVersion
 /// the world had.
 pub fn fix_world_files(base: &Path) -> io::Result<i32> {
+    let (loaded, pending) = fix_world_files_deferred(base)?;
+    if let Some(data) = pending {
+        write_dat(&base.join("level.dat"), &Tag::compound([("Data", data)]))?;
+    }
+    Ok(loaded)
+}
+
+/// [`fix_world_files`] without the final level.dat write: returns the loaded
+/// DataVersion and the level data at the current version still to be written
+/// (`None` when the world is already current). A caller that converts the
+/// world's data afterwards writes it last, so a failed upgrade keeps the old
+/// DataVersion and is retried on the next open.
+fn fix_world_files_deferred(base: &Path) -> io::Result<(i32, Option<Tag>)> {
     let root = read_dat(&base.join("level.dat"))?.ok_or_else(|| invalid("missing level.dat"))?;
     let mut data = root
         .get("Data")
@@ -596,7 +609,7 @@ pub fn fix_world_files(base: &Path) -> io::Result<i32> {
         .unwrap_or_else(|| Tag::Compound(Compound::new()));
     let loaded = data_version(&data, -1);
     if loaded >= CURRENT {
-        return Ok(loaded);
+        return Ok((loaded, None));
     }
     let mut from = loaded;
     if requires_file_fixing(loaded) {
@@ -628,8 +641,7 @@ pub fn fix_world_files(base: &Path) -> io::Result<i32> {
     }
     update(Ty::Level, &mut data, from, CURRENT);
     add_versions(&mut data);
-    write_dat(&base.join("level.dat"), &Tag::compound([("Data", data)]))?;
-    Ok(loaded)
+    Ok((loaded, Some(data)))
 }
 
 // ------------------------------------------------------------------ the read-time upgrades
@@ -905,7 +917,45 @@ pub fn upgrade_band(base: &Path, target: i32) -> io::Result<()> {
 
 /// Bring a whole world saved by 1.20 to 26.2 to the 26.3 format in place.
 pub fn upgrade_world(base: &Path) -> io::Result<i32> {
-    let version = fix_world_files(base)?;
+    let (version, pending) = fix_world_files_deferred(base)?;
     upgrade_world_data(base)?;
+    // Stamp the current DataVersion only once everything converted, so a failed
+    // upgrade is retried on the next open.
+    if let Some(data) = pending {
+        write_dat(&base.join("level.dat"), &Tag::compound([("Data", data)]))?;
+    }
     Ok(version)
+}
+
+#[cfg(test)]
+mod upgrade_tests {
+    use super::*;
+
+    fn level_version(base: &Path) -> i32 {
+        let root = read_dat(&base.join("level.dat")).unwrap().unwrap();
+        data_version(root.get("Data").unwrap(), -1)
+    }
+
+    /// A failed data upgrade must keep the old DataVersion so the next open
+    /// retries, and a later successful run stamps the current one.
+    #[test]
+    fn failed_upgrade_keeps_old_data_version() {
+        let base = std::env::temp_dir().join(format!("horizon-upgrade-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let old = 4899;
+        let level = Tag::compound([("Data", Tag::compound([("DataVersion", Tag::Int(old))]))]);
+        write_dat(&base.join("level.dat"), &level).unwrap();
+        let region = base.join("dimensions/minecraft/overworld/region");
+        fs::create_dir_all(&region).unwrap();
+        // Not a valid region file name, so opening it fails mid-upgrade.
+        fs::write(region.join("broken.mca"), b"x").unwrap();
+
+        assert!(upgrade_world(&base).is_err());
+        assert_eq!(level_version(&base), old);
+
+        fs::remove_file(region.join("broken.mca")).unwrap();
+        assert_eq!(upgrade_world(&base).unwrap(), old);
+        assert_eq!(level_version(&base), CURRENT);
+        let _ = fs::remove_dir_all(&base);
+    }
 }

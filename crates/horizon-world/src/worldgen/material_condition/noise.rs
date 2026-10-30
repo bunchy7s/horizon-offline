@@ -70,6 +70,12 @@ impl<P: PositionalRandom, S: MaterialSurfaceQueries> MaterialSurfaceQueries
     fn biome(&mut self, position: BlockPos) -> Result<Option<Arc<str>>, MaterialRuleError> {
         self.surface.biome(position)
     }
+    fn biome_id(&mut self, position: BlockPos) -> Result<Option<u32>, MaterialRuleError> {
+        self.surface.biome_id(position)
+    }
+    fn biome_index(&self, name: &str) -> Option<Option<u32>> {
+        self.surface.biome_index(name)
+    }
     fn melts_frozen_ocean(
         &mut self,
         biome: &str,

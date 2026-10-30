@@ -423,8 +423,30 @@ pub struct DataStore {
     pub predicates: BTreeMap<String, serde_json::Value>,
     /// `item_modifier` files, for `/item modify`.
     pub item_modifiers: BTreeMap<String, serde_json::Value>,
+    /// The content tables' raw files from the packs after the built-in one:
+    /// `recipe/`, `loot_table/`, `advancement/` and `tags/…/` files, by
+    /// `<kind-dir>/<ns>:<path>`, each id's files in pack order. The tables
+    /// merge them over what they read from the resource root.
+    pub files: BTreeMap<String, Vec<Vec<u8>>>,
     /// Functions that failed to parse (id, message), for logging.
     pub errors: Vec<(String, String)>,
+}
+/// `<kind-dir>/<ns>:<path>` for a pack file the content tables read:
+/// `recipe/`, `loot_table/`, `advancement/` or `tags/<sub>/`, where the id
+/// keeps the sub path so a nested tag kind stays addressable.
+fn content_id(file: &str) -> Option<String> {
+    let rest = file.strip_prefix("data/")?;
+    let (ns, rest) = rest.split_once('/')?;
+    let (kind, rest) = rest.split_once('/')?;
+    let kind = match kind {
+        "recipe" | "loot_table" | "advancement" => kind,
+        "tags" => {
+            let (sub, name) = rest.rsplit_once('/')?;
+            return Some(format!("tags/{sub}/{ns}:{}", name.strip_suffix(".json")?));
+        }
+        _ => return None,
+    };
+    Some(format!("{kind}/{ns}:{}", rest.strip_suffix(".json")?))
 }
 /// `ns:path` for a file `data/<ns>/<kind>/<path>.<ext>`.
 fn resource_id(file: &str, kind: &str, ext: &str) -> Option<String> {
@@ -440,7 +462,22 @@ impl DataStore {
     pub fn load(packs: &[&DataPack]) -> Self {
         let mut s = Self::default();
         for pack in packs {
-            for f in pack.list_kinds(&["function", "item_modifier", "predicate", "tags/function"]) {
+            // `tags` walks the whole tags tree, so a `tags/function` file is
+            // listed by both kinds: handle every file once.
+            let mut seen = std::collections::BTreeSet::new();
+            let builtin = pack.id == "vanilla";
+            for f in pack.list_kinds(&[
+                "advancement",
+                "function",
+                "item_modifier",
+                "loot_table",
+                "predicate",
+                "recipe",
+                "tags",
+            ]) {
+                if !seen.insert(f.clone()) {
+                    continue;
+                }
                 if let Some(id) = resource_id(&f, "function", ".mcfunction")
                     && let Some(bytes) = pack.read(&f)
                 {
@@ -470,6 +507,14 @@ impl DataStore {
                     && let Ok(v) = serde_json::from_slice(&bytes)
                 {
                     s.item_modifiers.insert(id, v);
+                } else if !builtin
+                    && let Some(id) = content_id(&f)
+                    && let Some(bytes) = pack.read(&f)
+                {
+                    // The built-in pack's content files are the resource
+                    // root's own, which the tables read from disk; only the
+                    // world's packs come through here.
+                    s.files.entry(id).or_default().push(bytes);
                 }
             }
         }
@@ -479,11 +524,21 @@ impl DataStore {
     /// included, each function once).
     pub fn tag_functions(&self, id: &str) -> Vec<String> {
         let mut out = Vec::new();
-        self.expand(id, &mut out, 0);
+        let mut seen_fns = std::collections::HashSet::new();
+        let mut seen_tags = std::collections::HashSet::new();
+        self.expand(id, &mut out, &mut seen_fns, &mut seen_tags);
         out
     }
-    fn expand(&self, id: &str, out: &mut Vec<String>, depth: usize) {
-        if depth > 16 {
+    /// Depth-first walk keeping first-seen order. Each tag is expanded at most
+    /// once, so reference cycles end and nesting depth is not capped.
+    fn expand<'a>(
+        &'a self,
+        id: &'a str,
+        out: &mut Vec<String>,
+        seen_fns: &mut std::collections::HashSet<&'a str>,
+        seen_tags: &mut std::collections::HashSet<&'a str>,
+    ) {
+        if !seen_tags.insert(id) {
             return;
         }
         let Some(entries) = self.function_tags.get(id) else {
@@ -491,9 +546,9 @@ impl DataStore {
         };
         for (e, required) in entries {
             match e.strip_prefix('#') {
-                Some(inner) => self.expand(inner, out, depth + 1),
+                Some(inner) => self.expand(inner, out, seen_fns, seen_tags),
                 None => {
-                    if (self.functions.contains_key(e) || *required) && !out.contains(e) {
+                    if (self.functions.contains_key(e) || *required) && seen_fns.insert(e) {
                         out.push(e.clone());
                     }
                 }
@@ -765,6 +820,40 @@ mod tests {
         );
         assert!(store.predicates.contains_key("mine:p"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tag_resolution_dedupes_fast_ends_cycles_and_nests_deeply() {
+        let mut store = DataStore::default();
+        let big: Vec<(String, bool)> = (0..50_000)
+            .map(|i| (format!("t:f{}", i % 25_000), true))
+            .collect();
+        store.function_tags.insert("t:big".into(), big);
+        let start = std::time::Instant::now();
+        let got = store.tag_functions("t:big");
+        assert_eq!(got.len(), 25_000);
+        assert_eq!(got[0], "t:f0");
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        // A cycle terminates and keeps first-seen order.
+        store.function_tags.insert(
+            "t:a".into(),
+            vec![("#t:b".into(), true), ("t:x".into(), true)],
+        );
+        store.function_tags.insert(
+            "t:b".into(),
+            vec![("#t:a".into(), true), ("t:y".into(), true)],
+        );
+        assert_eq!(store.tag_functions("t:a"), ["t:y", "t:x"]);
+        // Nesting deeper than the old cap of 16 still resolves.
+        for i in 0..40 {
+            store
+                .function_tags
+                .insert(format!("d:{i}"), vec![(format!("#d:{}", i + 1), true)]);
+        }
+        store
+            .function_tags
+            .insert("d:40".into(), vec![("t:deep".into(), true)]);
+        assert_eq!(store.tag_functions("d:0"), ["t:deep"]);
     }
 
     #[test]

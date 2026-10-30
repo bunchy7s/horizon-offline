@@ -1,8 +1,0 @@
-id = "coords_hud"
-name = "Coordinates HUD"
-version = "0.1.0"
-description = "Your coordinates, facing and the time of day in a corner of the screen. /where puts them in chat, /coords hides or shows the panel."
-authors = ["Horizon"]
-api = "0.1"
-side = "client"
-capabilities = ["game-read", "hud", "chat"]

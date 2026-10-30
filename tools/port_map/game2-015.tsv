@@ -81,7 +81,7 @@ SculkShriekerBlock.getStateForPlacement	port	crates/horizon-world/src/level/plac
 SculkShriekerBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::RegistryFluidWorld::fluid_state	waterlogged state from block data
 SculkShriekerBlock.spawnAfterBreak	inline	crates/horizon-world/src/level/removal.rs::break_experience	shrieker experience of 5 in break_experience
 SculkShriekerBlock.getTicker	port	crates/horizon-client/src/game/sculk.rs::Game::tick_sculk_block	the vibration tick for shriekers
-SculkSpreader.save	port	crates/horizon-client/src/sculk.rs::cursors_to_nbt	the cursors tag of a catalyst: pos, charge, decay and update delays, facings
+SculkSpreader.save	port	crates/horizon-client-render/src/sculk.rs::cursors_to_nbt	the cursors tag of a catalyst: pos, charge, decay and update delays, facings
 SculkSpreader.ChargeCursor.shouldUpdate	port	crates/horizon-world/src/level/sculk.rs::Sim::sculk_cursor_update	gap: minor: the world generation case is in worldgen/sculk.rs; this is the live tick gate
 SculkSpreader.ChargeCursor.mergeWith	inline	crates/horizon-world/src/level/sculk.rs::Sim::sculk_update_cursors	the merge of cursors on the same position in the update loop
 SculkSpreader.ChargeCursor.getBlockBehaviour	port	crates/horizon-world/src/level/sculk.rs::Sim::sculk_behaviour	

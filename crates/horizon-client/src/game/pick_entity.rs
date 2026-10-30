@@ -73,7 +73,7 @@ impl Game<'_> {
         let item = if let Some(m) = self.mobs.iter().find(|m| m.id == id) {
             // Mob.getPickResult: SpawnEggItem.byId.
             let egg = format!("{}_spawn_egg", m.kind.id);
-            return self.res.items().get(&egg).map(|_| ItemStack::new(&egg, 1));
+            return self.items().get(&egg).map(|_| ItemStack::new(&egg, 1));
         } else if let Some(b) = self.boats.iter().find(|b| b.id == id) {
             b.entity_type()
         } else if let Some(c) = self.carts.iter().find(|c| c.id == id) {

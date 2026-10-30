@@ -54,3 +54,40 @@ fn terrain_particles_use_the_particle_sprite_and_vanilla_tint_sources() {
     assert_eq!(tint("minecraft:pink_petals"), None);
     assert_eq!(tint("minecraft:stone"), None);
 }
+
+/// Blocks drawn outside the chunk mesh (moved by a piston) take the chunk
+/// mesher's per-layer tints: a grass block's top and side overlay are tinted
+/// as in the world, not left gray like its particles.
+#[test]
+fn block_tints_match_the_chunk_mesh_for_grass_blocks() {
+    let root =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3");
+    if !root.join("horizon-resources.json").exists() {
+        return;
+    }
+    let assets = Assets::load(&root).unwrap();
+    let render = assets.reload(&root).unwrap();
+    let facts = BlockFacts::load(&root, assets.registry).unwrap();
+    let visibility = crate::models::load_visibility(&root, assets.registry).unwrap();
+    let tables = MeshTables::new(&assets, &render, &facts, visibility).unwrap();
+    let biomes = Biomes::load(&root).unwrap();
+    let state = |name| assets.registry.default_state(name).unwrap();
+    let center = Chunk::empty(0, 0);
+    let mut region = [[None; 3]; 3];
+    region[1][1] = Some(&center);
+    let tints = |name| {
+        tables.block_tints(
+            state(name),
+            [5, 70, 9],
+            &region,
+            &biomes,
+            BiomeZoom::new(0),
+            2,
+        )
+    };
+    let grass = tints("minecraft:grass_block");
+    assert!(grass(0).is_some());
+    assert_eq!(grass(-1), None);
+    assert_eq!(tints("minecraft:spruce_leaves")(0), Some(0x61_9961));
+    assert_eq!(tints("minecraft:stone")(0), None);
+}

@@ -14,7 +14,7 @@ ChatTypeDecoration.outgoingDirectMessage	skip:data		chat_type registry bootstrap
 ChatTypeDecoration.decorate	port	crates/horizon-client/src/game/remote.rs::Game::format_chat	the chat type's translation with its style, on the client when a PlayerChat or DisguisedChat arrives
 ChatTypeDecoration.resolveParameters	port	crates/horizon-client/src/game/remote.rs::Game::format_chat	the parameter list (sender, target, content) built in format_chat
 ClickEvent.Action.filterForSerialization	port	crates/horizon-client-core/src/component.rs::object_style	gap: minor: a disallowed action (open_file) is dropped; vanilla refuses the whole component
-CommonComponents.optionStatus	port	crates/horizon-client/src/options_ui.rs::on_off	options.on / options.off text
+CommonComponents.optionStatus	port	crates/horizon-client-render/src/options_ui.rs::on_off	options.on / options.off text
 CommonComponents.joinForNarration	skip:other		screen-reader narration text; Horizon has no narrator output (the narrator option is only stored)
 Component.tryCollapseToString	skip:java		JSON shape only: Text always writes the object form, which reads the same
 Component.copy	skip:java		clone; Text is Clone

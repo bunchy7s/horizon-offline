@@ -120,7 +120,7 @@ pub fn too_new(level: u32, function: Option<&str>) -> Option<String> {
 
 /// The functions a mod's component imports from Horizon (`horizon:mods/*`),
 /// as `interface.function`, in the component's order.
-#[cfg(any(feature = "runtime", feature = "index"))]
+#[cfg(feature = "index")]
 pub fn imports(wasm: &[u8]) -> Result<Vec<String>, String> {
     use wasmparser::{
         Parser, Payload, Validator, WasmFeatures, component_types::ComponentEntityType,

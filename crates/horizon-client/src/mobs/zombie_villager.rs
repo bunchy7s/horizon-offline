@@ -181,7 +181,13 @@ mod tests {
         let data = super::super::MobData::load(&root, &facts);
         let types = super::super::MobTypes::load(&root).unwrap();
         let biomes = crate::biome::Biomes::load(&root).unwrap();
-        let items = crate::items::Items::load(&root, registry, &facts).unwrap();
+        let items = crate::items::Items::load(
+            &root,
+            registry,
+            &facts,
+            &horizon_world::loot::PackOverlay::NONE,
+        )
+        .unwrap();
         let collision = crate::collisions::load(&root, registry).unwrap();
         let air = registry.default_state("minecraft:air").unwrap();
         let world = crate::world::World::new(air, 0);

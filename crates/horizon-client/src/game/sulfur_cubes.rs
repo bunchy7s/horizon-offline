@@ -52,7 +52,7 @@ impl Game<'_> {
         }
         // shortcut: the body slot retains only an item id; preserve the stack
         // before supporting its block-state components here.
-        let Some(state) = self.res.items().get(item).and_then(|item| item.block) else {
+        let Some(state) = self.items().get(item).and_then(|item| item.block) else {
             return;
         };
         let start = out.len();

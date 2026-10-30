@@ -96,6 +96,15 @@ impl Game<'_> {
         });
     }
     fn server_tick_spawner(&mut self, key: Pos, spawner: &mut Spawner) -> Result<()> {
+        // `BaseSpawner.serverTick` does nothing without an alive player in
+        // range (`isNearPlayer`) or with the rule off: no level to build for it.
+        let at = [key.0, key.1, key.2].map(|c| f64::from(c) + 0.5);
+        let range = f64::from(spawner.required_player_range);
+        if !self.alive_player_near(at[0], at[1], at[2], range)
+            || !self.ui.rules.bool("spawner_blocks_work")
+        {
+            return Ok(());
+        }
         let pos = [key.0, key.1, key.2];
         let mut random = std::mem::replace(
             &mut self.world.random,
@@ -369,9 +378,15 @@ impl Game<'_> {
         };
         self.res.mob_types().contains_key(&id).then_some(id)
     }
-    /// `SpawnEggItem.useOn` on a spawner: the egg sets its mob. None when the
-    /// clicked block has no spawner.
-    pub(super) fn use_spawn_egg_on_spawner(&mut self, pos: [i32; 3], kind: &str) -> Option<bool> {
+    /// `SpawnEggItem.useOn` on a spawner: the egg sets its mob, and an op's
+    /// egg its entity `data` too (`block_entity_item::spawn_egg_on_spawner`).
+    /// None when the clicked block has no spawner.
+    pub(super) fn use_spawn_egg_on_spawner(
+        &mut self,
+        pos: [i32; 3],
+        kind: &str,
+        data: Option<&horizon_world::nbt::Compound>,
+    ) -> Option<bool> {
         let key = (pos[0], pos[1], pos[2]);
         let trial = match self.world.block_entities.get(&key) {
             Some(BlockEntity::Spawner(_)) => false,
@@ -400,7 +415,10 @@ impl Game<'_> {
                 horizon_core::random::LegacyRandom::new(0),
             );
             if let Some(BlockEntity::Spawner(s)) = self.world.block_entities.get_mut(&key) {
-                s.set_entity_id(kind, &mut random, &mut events);
+                match data {
+                    Some(data) => s.set_entity_data(kind, data, &mut random, &mut events),
+                    None => s.set_entity_id(kind, &mut random, &mut events),
+                }
             }
             self.world.random = random;
             let _ = self.apply_spawner_events(key, events, &HashMap::new());
@@ -410,6 +428,13 @@ impl Game<'_> {
         self.update_spawner_display(key);
         self.post_block_game_event("minecraft:block_change", pos, Some(Who::Player), None);
         Some(true)
+    }
+    /// `PlayerList.isOp` for the player acting now: a server's guest by their
+    /// own level, else the window's player.
+    pub(super) fn acting_player_is_op(&self) -> bool {
+        self.lan_acting_permission
+            .unwrap_or(self.ui.registries.permission)
+            > 0
     }
     /// Ticks spawners and trial spawners near the player on a remote client (`tick_remote`).
     pub(super) fn tick_remote_spawners(&mut self) {

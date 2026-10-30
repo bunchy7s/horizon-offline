@@ -1048,6 +1048,23 @@ impl Game<'_> {
         let Some(holder) = self.dialog_holder(dialog) else {
             return;
         };
+        self.send_dialog(targets, &holder);
+    }
+    /// `ServerPlayer.openDialog` for the dialog of a `show_dialog` click
+    /// event (a sign's): a registry id or the dialog itself, opened for the
+    /// player the game acts for.
+    pub(in crate::game) fn show_click_dialog(&mut self, dialog: &horizon_world::nbt::Tag) {
+        let holder = match dialog {
+            horizon_world::nbt::Tag::String(id) => self.dialog_holder(&id.to_string_lossy()),
+            direct => Some(DialogHolder::Direct(direct.clone())),
+        };
+        if let Some(holder) = holder {
+            self.send_dialog(&[Target::Player], &holder);
+        }
+    }
+    /// `ServerPlayer.openDialog` for each target: the packet to a guest, the
+    /// screen to the window's own player.
+    fn send_dialog(&mut self, targets: &[Target], holder: &DialogHolder) {
         let packet = C::ShowDialog(play::ShowDialog {
             dialog: holder.clone(),
         });
@@ -1056,7 +1073,7 @@ impl Game<'_> {
                 Target::Player if self.lan_acting.is_some() => {
                     self.guest_packets.push(packet.clone());
                 }
-                Target::Player => self.show_play_dialog(&holder),
+                Target::Player => self.show_play_dialog(holder),
                 Target::Guest(conn) => {
                     if let Some(host) = self.lan.as_ref() {
                         host.hub.send_to(conn, &packet);

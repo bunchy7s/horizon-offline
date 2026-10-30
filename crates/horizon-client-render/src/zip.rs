@@ -77,19 +77,31 @@ impl Zip {
         // A clone shares the bytes and the central directory: reading needs `&mut`.
         let mut archive = self.archive.clone();
         let mut entry = archive.by_index_raw(index).map_err(invalid)?;
-        let (method, size) = (entry.compression(), entry.size() as usize);
+        let method = entry.compression();
         let mut raw = Vec::with_capacity((entry.compressed_size() as usize).min(self.len));
         entry.read_to_end(&mut raw)?;
         match method {
             CompressionMethod::Stored => Ok(raw),
-            CompressionMethod::Deflated => miniz_oxide::inflate::decompress_to_vec_with_limit(
-                &raw,
-                size.max(1)
-                    .saturating_mul(2)
-                    .saturating_add(1024)
-                    .min(MAX_ENTRY),
-            )
-            .map_err(|_| invalid("corrupt deflate stream")),
+            CompressionMethod::Deflated => {
+                // Java's ZipFile trusts neither size an entry declares: it
+                // inflates the stream to its end and keeps what comes out.
+                // Packs in the wild (a Nexo-generated one served through
+                // Dropbox, for one) carry central-directory sizes that point
+                // at other files, and miniz_oxide, which refuses input past
+                // the stream's end, failed whole entries with "corrupt
+                // deflate stream" and with them the whole pack. Only the
+                // size limit stands between the archive and a zip bomb.
+                let decoder = flate2::read::DeflateDecoder::new(raw.as_slice());
+                let mut decoded = Vec::with_capacity(raw.len().min(MAX_ENTRY));
+                decoder
+                    .take(MAX_ENTRY as u64 + 1)
+                    .read_to_end(&mut decoded)
+                    .map_err(|_| invalid("corrupt deflate stream"))?;
+                if decoded.len() > MAX_ENTRY {
+                    return Err(invalid("entry inflates past the size limit"));
+                }
+                Ok(decoded)
+            }
             _ => Err(invalid("unsupported zip compression")),
         }
     }
@@ -212,6 +224,70 @@ mod tests {
         assert_eq!(zip.read("pack.mcmeta").unwrap(), b"{\"pack\":{}}");
         assert_eq!(zip.read("a/b.txt").unwrap(), b"hello hello hello hello");
         assert!(zip.read("missing").is_err());
+    }
+
+    /// The offset of the central-directory header of `name`.
+    fn central_header(bytes: &[u8], name: &str) -> usize {
+        let mut at = 0;
+        while let Some(i) = bytes[at..]
+            .windows(4)
+            .position(|s| s == [0x50, 0x4b, 0x01, 0x02])
+        {
+            let p = at + i;
+            let nlen = u16::from_le_bytes(bytes[p + 28..p + 30].try_into().unwrap()) as usize;
+            if &bytes[p + 46..p + 46 + nlen] == name.as_bytes() {
+                return p;
+            }
+            at = p + 4;
+        }
+        panic!("no central header for {name}");
+    }
+
+    /// Java's `ZipFile` inflates the stream and keeps what comes out, so a
+    /// central directory that names a size other than the stream's (the
+    /// Nexo pack Dropbox serves for one server does) changes nothing.
+    #[test]
+    fn reads_a_deflate_stream_larger_than_its_declared_size() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(
+                "large.txt",
+                SimpleFileOptions::default().compression_method(CompressionMethod::Deflated),
+            )
+            .unwrap();
+        writer.write_all(&vec![b'x'; 4096]).unwrap();
+        let mut bytes = writer.finish().unwrap().into_inner();
+        let central = central_header(&bytes, "large.txt");
+        bytes[central + 24..central + 28].copy_from_slice(&1u32.to_le_bytes());
+
+        let zip = Zip::from_bytes(bytes).unwrap();
+        assert_eq!(zip.read("large.txt").unwrap(), vec![b'x'; 4096]);
+    }
+
+    /// Some pack writers leave an entry's compressed size longer than its
+    /// deflate stream, so the bytes past the stream's end are part of it.
+    /// Java inflates to the stream's end and ignores them; miniz_oxide
+    /// refused the input and failed the entry, and with it the whole pack.
+    #[test]
+    fn reads_past_trailing_bytes_after_the_deflate_stream() {
+        let mut bytes = written();
+        let name = "Pack-main/assets/minecraft/lang/en_us.json";
+        let central = central_header(&bytes, name);
+        let local =
+            u32::from_le_bytes(bytes[central + 42..central + 46].try_into().unwrap()) as usize;
+        for at in [central + 20, local + 18] {
+            let csize = u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+            bytes[at..at + 4].copy_from_slice(&(csize + 8).to_le_bytes());
+        }
+
+        let zip = Zip::from_bytes(bytes).unwrap();
+        assert_eq!(
+            zip.read(name).unwrap(),
+            "{\"a\":\"b\"}".repeat(100).as_bytes()
+        );
     }
 
     /// Loka's server pack (#3413) names its metadata `pack.mcmeta/`.

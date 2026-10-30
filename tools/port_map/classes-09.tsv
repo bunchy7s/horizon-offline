@@ -71,7 +71,7 @@ floats/Minimum.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compu
 floats/Modulus.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	mod arm
 floats/Product.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	mul arm
 floats/Quotient.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	div arm
-ResolvableFloat.getFromItem	port	crates/horizon-client/src/providers.rs::Providers::speed	furnace fuel speed multiplier (COOKING_FUEL); gap: minor: only the furnace fuel component is read
+ResolvableFloat.getFromItem	port	crates/horizon-client-render/src/providers.rs::Providers::speed	furnace fuel speed multiplier (COOKING_FUEL); gap: minor: only the furnace fuel component is read
 ResolvableFloat.wrap	skip:java		codec helper
 floats/StorageValue	missing		minor: no vanilla data uses storage providers
 floats/Sum.getFloatUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_float	add arm
@@ -83,7 +83,7 @@ ints/BinomialDistributionGenerator.getIntUnsafe	port	crates/horizon-world/src/lo
 ints/BinomialDistributionGenerator.validate	skip:data		datapack validation
 ints/ContextIntProviders.bootstrap	skip:data		registry bootstrap
 ints/ContextIntProviders.compostable	port	crates/horizon-client/src/game/composter.rs::Game::compostable	the item's compostable layer provider; evaluated when the composter takes it (Game::composter_add)
-ints/ContextIntProviders.cooking	port	crates/horizon-client/src/providers.rs::Providers::burn_time	fuel burn times (the cooking/time_* providers)
+ints/ContextIntProviders.cooking	port	crates/horizon-client-render/src/providers.rs::Providers::burn_time	fuel burn times (the cooking/time_* providers)
 ints/Difference.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	sub arm
 ints/EnvironmentAttributeValue	missing		minor: no vanilla data uses environment_attribute providers
 ints/FloorModulus.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	floor_mod arm
@@ -93,7 +93,7 @@ ints/Minimum.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.r
 ints/Modulus.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	mod arm
 ints/Product.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	mul arm
 ints/Quotient.getIntUnsafe	port	crates/horizon-client/src/game/commands/compute.rs::Game::provider_int	div arm
-ResolvableInt.getFromItem	port	crates/horizon-client/src/providers.rs::Providers::burn_time	furnace fuel burn time (COOKING_FUEL); gap: minor: only the furnace fuel component is read
+ResolvableInt.getFromItem	port	crates/horizon-client-render/src/providers.rs::Providers::burn_time	furnace fuel burn time (COOKING_FUEL); gap: minor: only the furnace fuel component is read
 ResolvableInt.wrap	skip:java		codec helper
 ints/ScoreboardValue.getIntUnsafe	missing		minor: no vanilla data uses score providers
 ints/ScoreboardValue.getScoreInfo	missing		minor: no vanilla data uses score providers

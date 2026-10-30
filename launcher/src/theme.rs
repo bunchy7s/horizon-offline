@@ -1,17 +1,21 @@
 //! The launcher's view of Horizon's design tokens (`crates/horizon-theme`, described in
-//! `docs/design-system.md`): the blocky look it shares with the website ("Blocks"), stone-dark or
-//! lavender-light with Horizon's violet, Pixelify Sans for headings and controls, Geist and Geist
-//! Mono for text (all bundled, SIL Open Font License).
+//! `docs/design-system.md`): the night look (`horizon_theme::night`, a night sky or a dawn with
+//! Horizon's violet) in Bricolage Grotesque, with Geist Mono for paths and codes (all bundled, SIL
+//! Open Font License). Screens not rebuilt yet draw the Blocks parts in the night's colours.
 use gpui::{rgb, Hsla, WindowAppearance};
 use horizon_launcher::backend::Appearance;
 use horizon_launcher::themes::Accent;
 use horizon_theme as tokens;
 use std::time::Duration;
 
+pub use tokens::night::{self, Night};
 pub use tokens::{Step, BODY, CAPTION, DISPLAY, HEADING, LABEL, MICRO, TITLE, UI, WORDMARK};
-pub const FONT: &str = tokens::FONT;
+pub const FONT: &str = night::FONT;
+pub const DISPLAY_FONT: &str = night::DISPLAY_FONT;
 pub const MONO: &str = tokens::MONO;
-pub const PIXEL: &str = tokens::PIXEL;
+/// What the Blocks parts set in their pixel face (headings, navigation, buttons) until their
+/// screens are rebuilt: the night's UI family.
+pub const PIXEL: &str = night::FONT;
 
 pub use tokens::{BLOCK_BEVEL as BEVEL, BLOCK_LIP as LIP};
 /// Shapes and controls, shared with the game's menus and the website.
@@ -35,10 +39,8 @@ pub const STAGGER: Duration = tokens::STAGGER;
 
 #[derive(Clone, Copy)]
 pub struct Theme {
-    /// The page behind everything (under its stone texture), and its colour as `0xRRGGBB` for
-    /// the texture.
+    /// The page behind everything the sky doesn't cover.
     pub page: Hsla,
-    pub page_rgb: u32,
     /// Hover plates, fields and the console: the raised panel colour.
     pub plate_soft: Hsla,
     /// Pressed plates, a switch that is off: the button colour.
@@ -68,6 +70,8 @@ pub struct Theme {
     pub face_bevel: Hsla,
     pub face_lip: Hsla,
     pub on_face: Hsla,
+    /// The night look's own tokens (the sky, plates with their opacity), for rebuilt screens.
+    pub night: Night,
     pub dark: bool,
 }
 
@@ -99,17 +103,13 @@ impl Theme {
             WindowAppearance::Light | WindowAppearance::VibrantLight
         );
         let dark = pinned_dark(choice).unwrap_or(system_dark);
-        Self::from(accent.apply(if dark {
-            tokens::BLOCKS_DARK
-        } else {
-            tokens::BLOCKS_LIGHT
-        }))
+        let night = if dark { night::NIGHT } else { night::DAWN };
+        Self::from(accent.apply(night.blocks()), night)
     }
 
-    fn from(p: tokens::Blocks) -> Self {
+    fn from(p: tokens::Blocks, night: Night) -> Self {
         Self {
             page: c(p.page),
-            page_rgb: p.page,
             plate_soft: c(p.raised),
             plate: c(p.button),
             surface: c(p.panel),
@@ -135,6 +135,7 @@ impl Theme {
             face_bevel: c(p.face_bevel),
             face_lip: c(p.face_lip),
             on_face: c(p.on_face),
+            night,
             dark: p.dark,
         }
     }
@@ -161,7 +162,7 @@ mod tests {
     /// field (WCAG 1.4.11 asks 3:1 for those), and text over a selected suggestion.
     #[test]
     fn marks_and_selections_read_clearly() {
-        for p in [tokens::BLOCKS_LIGHT, tokens::BLOCKS_DARK] {
+        for p in [tokens::night::DAWN.blocks(), tokens::night::NIGHT.blocks()] {
             let theme = if p.dark { "dark" } else { "light" };
             for (name, bg) in [
                 ("page", p.page),

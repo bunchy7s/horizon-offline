@@ -87,6 +87,13 @@ impl Ticks {
         self.blocks.add_chunk(pos, blocks)?;
         self.fluids.add_chunk(pos, fluids)
     }
+    /// A moving-piston block entity loaded with its chunk, as a new ticker.
+    pub fn load_moving_piston(&mut self, pos: BlockPos, mut piston: super::pistons::MovingPiston) {
+        self.moving_pistons.retain(|(p, _)| *p != pos);
+        self.next_block_entity_id += 1;
+        piston.id = self.next_block_entity_id;
+        self.moving_pistons.push((pos, piston));
+    }
     /// Register a chunk without saved ticks.
     pub fn add_empty_chunk(&mut self, pos: ChunkPos) -> Result<(), TickError> {
         self.add_chunk(pos, ChunkTicks::default(), ChunkTicks::default())

@@ -12,6 +12,8 @@ pub struct BiomeFacts {
     /// Biome temperature at the position (strays in cold biomes, snow foxes).
     pub temperature: f32,
     pub snowy: bool,
+    /// `#minecraft:spawns_snow_foxes` (`Fox.Variant.byBiome`: snow, else red).
+    pub snow_fox: bool,
     pub swamp: bool,
     pub ocean: bool,
     pub mushroom: bool,
@@ -207,24 +209,24 @@ pub fn finalize(m: &mut Mob, biome: &BiomeFacts, difficulty: &LocalDifficulty) {
             let weapon = if difficulty.hard { 0.05 } else { 0.01 };
             if m.species() != S::Drowned && m.random.next_float() < weapon {
                 let r = m.random.next_int_bound(6).unwrap_or(0);
-                m.extra.main_hand = Some(
+                m.extra.set_main_hand(Some(
                     match r {
                         0 => "minecraft:iron_sword",
                         1 => "minecraft:iron_spear",
                         _ => "minecraft:iron_shovel",
                     }
                     .into(),
-                );
+                ));
             }
             if m.species() == S::Drowned && m.random.next_float() > 0.9 {
-                m.extra.main_hand = Some(
+                m.extra.set_main_hand(Some(
                     if m.random.next_int_bound(16).unwrap_or(1) < 10 {
                         "minecraft:trident"
                     } else {
                         "minecraft:fishing_rod"
                     }
                     .into(),
-                );
+                ));
             }
             if m.species() == S::ZombieVillager {
                 m.extra.variant = villager_type(biome);
@@ -238,28 +240,28 @@ pub fn finalize(m: &mut Mob, biome: &BiomeFacts, difficulty: &LocalDifficulty) {
             let can_break_doors = m.random.next_float() < difficulty.special() * 0.1;
             super::doors::set_can_break_doors(m, can_break_doors);
             let spear = m.random.next_int_bound(20).unwrap_or(1) == 0;
-            m.extra.main_hand = Some(
+            m.extra.set_main_hand(Some(
                 if spear {
                     "minecraft:golden_spear"
                 } else {
                     "minecraft:golden_sword"
                 }
                 .into(),
-            );
+            ));
         }
         // AbstractSkeleton.populateDefaultEquipmentSlots: armour, then a bow.
         S::Skeleton | S::Stray | S::Bogged | S::Parched => {
             populate_armor(m, difficulty);
-            m.extra.main_hand = Some("minecraft:bow".into());
+            m.extra.set_main_hand(Some("minecraft:bow".into()));
             m.extra.pick_up_loot = m.random.next_float() < 0.55 * difficulty.special();
         }
         // WitherSkeleton.populateDefaultEquipmentSlots: a stone sword only.
         S::WitherSkeleton => {
-            m.extra.main_hand = Some("minecraft:stone_sword".into());
+            m.extra.set_main_hand(Some("minecraft:stone_sword".into()));
             m.extra.pick_up_loot = m.random.next_float() < 0.55 * difficulty.special();
         }
         S::Pillager => {
-            m.extra.main_hand = Some("minecraft:crossbow".into());
+            m.extra.set_main_hand(Some("minecraft:crossbow".into()));
             m.extra.pick_up_loot = true;
         }
         S::Horse | S::Donkey | S::Mule | S::SkeletonHorse | S::ZombieHorse => {
@@ -286,26 +288,33 @@ pub fn finalize(m: &mut Mob, biome: &BiomeFacts, difficulty: &LocalDifficulty) {
                 }
             }
             let crossbow = m.random.next_float() < 0.5;
-            m.extra.main_hand = Some(
+            m.extra.set_main_hand(Some(
                 if crossbow {
                     "minecraft:crossbow"
                 } else {
                     "minecraft:golden_sword"
                 }
                 .into(),
-            );
+            ));
         }
         S::PiglinBrute => {
-            m.extra.main_hand = Some("minecraft:golden_axe".into());
+            m.extra.set_main_hand(Some("minecraft:golden_axe".into()));
             m.extra.pick_up_loot = true;
         }
         S::Illusioner => super::illusioner::finalize(m),
-        S::Vindicator => m.extra.main_hand = Some("minecraft:iron_axe".into()),
+        S::Vindicator => m.extra.set_main_hand(Some("minecraft:iron_axe".into())),
         S::Villager => {
             m.extra.variant = villager_type(biome);
             m.extra.pick_up_loot = true;
         }
-        S::Fox | S::Panda | S::Dolphin => m.extra.pick_up_loot = true,
+        // Fox.finalizeSpawn: the variant by biome, then the mouth's item.
+        S::Fox => {
+            m.extra.variant = u8::from(biome.snow_fox);
+            m.extra.pick_up_loot = true;
+            super::fox::populate_default_equipment(m);
+        }
+        S::Panda | S::Dolphin => m.extra.pick_up_loot = true,
+        S::Goat => super::finalize::goat_spawn(m),
         S::TropicalFish => super::aquatic::finalize(m),
         // Salmon.finalizeSpawn: a weighted size (small 30, medium 50, large 15).
         S::Salmon => {

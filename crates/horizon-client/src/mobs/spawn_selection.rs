@@ -539,18 +539,21 @@ pub fn spawn_aabb(s: Species, x: f64, y: f64, z: f64, width: f32, height: f32) -
         Vec3::new(x + half, y + f64::from(scale * height), z + half),
     )
 }
-/// `checkSpawnObstruction` of a freshly created mob with the given box.
+/// `checkSpawnObstruction` of a freshly created mob with the given box, with
+/// the mobs already `spawned` in the way; None in a generation region, which
+/// has no entities (`WorldGenRegion.getEntities`).
 pub(crate) fn spawn_obstruction<L: NaturalLevel>(
     s: Species,
     l: &L,
     bounds: Aabb,
-    spawned: &[Aabb],
+    spawned: Option<&[Aabb]>,
     x: i32,
     y: i32,
     z: i32,
 ) -> bool {
-    let unobstructed =
-        |l: &L| l.unobstructed(bounds) && !spawned.iter().any(|b| b.intersects(bounds));
+    let unobstructed = |l: &L| {
+        spawned.is_none_or(|s| l.unobstructed(bounds) && !s.iter().any(|b| b.intersects(bounds)))
+    };
     match obstruction(s) {
         Obstruction::NoLiquidUnobstructed => !contains_any_liquid(l, bounds) && unobstructed(l),
         Obstruction::Unobstructed => unobstructed(l),
@@ -1084,7 +1087,7 @@ pub fn spawn_category_for_position<L: NaturalLevel, R: RandomSource>(
             let far = distance > despawn && removed_when_far(species);
             if far
                 || !mob_spawn_rules(species, l, x, y, z)
-                || !spawn_obstruction(species, l, bounds, &spawned, x, y, z)
+                || !spawn_obstruction(species, l, bounds, Some(&spawned), x, y, z)
             {
                 continue;
             }
@@ -1237,8 +1240,8 @@ pub enum GenEvent {
     Spawn(String, [f64; 3], f32),
 }
 /// `NaturalSpawner.spawnMobsForChunkGeneration`: creature packs placed on
-/// the chunk's surface. `rules` is the level's own random, which the spawn
-/// predicates draw from.
+/// the chunk's surface. `rules` is the region's random, which the spawn
+/// predicates and `spawn` (finalizeSpawn) draw from.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: RandomSource>(
     l: &L,
@@ -1246,7 +1249,7 @@ pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: Rand
     chunk: (i32, i32),
     random: &mut R,
     rules: &mut Q,
-    spawn: &mut dyn FnMut(&L, &SpawnRequest) -> Option<Spawned>,
+    spawn: &mut dyn FnMut(&L, &SpawnRequest, &mut Q) -> bool,
     trace: &mut dyn FnMut(GenEvent),
 ) {
     if !l.spawn_mobs() {
@@ -1269,7 +1272,6 @@ pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: Rand
         };
         let count = sample_count(&entry, random);
         let mut group_index = 0u32;
-        let mut spawned: Vec<Aabb> = Vec::new();
         let mut x = xo + random.next_int_bound(16).unwrap_or(0);
         let mut z = zo + random.next_int_bound(16).unwrap_or(0);
         let (start_x, start_z) = (x, z);
@@ -1311,7 +1313,7 @@ pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: Rand
                     let yaw = random.next_float() * 360.0;
                     let bounds = spawn_box(fx, fy, fz, width, height);
                     if mob_spawn_rules(species, l, bx, pos[1], bz)
-                        && spawn_obstruction(species, l, bounds, &spawned, bx, pos[1], bz)
+                        && spawn_obstruction(species, l, bounds, None, bx, pos[1], bz)
                     {
                         let request = SpawnRequest {
                             entity: &entry.entity,
@@ -1321,9 +1323,8 @@ pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: Rand
                             group_index,
                             reason: Reason::ChunkGeneration,
                         };
-                        if let Some(result) = spawn(l, &request) {
+                        if spawn(l, &request, rules) {
                             group_index += 1;
-                            spawned.push(result.bounds);
                             trace(GenEvent::Spawn(entry.entity.clone(), [fx, fy, fz], yaw));
                             success = true;
                         }

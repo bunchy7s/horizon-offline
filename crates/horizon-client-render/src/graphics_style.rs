@@ -130,8 +130,9 @@ impl Style {
         label: &Text,
         value: f32,
         hover: bool,
+        active: bool,
     ) {
-        ui::slider(batch, atlas, x, y, w, label, value, hover, true);
+        ui::slider(batch, atlas, x, y, w, label, value, hover && active, active);
     }
     /// The cost tag and the description beside a control, wrapped to two lines.
     pub fn description(

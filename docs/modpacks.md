@@ -7,7 +7,7 @@ pipeline, not a list of hand ports. It takes a pack as players download it and p
 Horizon mods. The pipeline is AI agents in dependency order, each port checked against the
 original mod running in a dev-only Java instance.
 
-This page is the design. It builds on [mods.md](mods.md) (the mod API, WASM in wasmtime, and
+This page is the design. It builds on [mods.md](mods.md) (content mods, native mods, and
 why Java jars cannot run in Horizon, so we port instead). The ATM10 inventory behind the numbers below is
 [modpacks/atm10-mods.csv](modpacks/atm10-mods.csv).
 
@@ -25,8 +25,8 @@ why Java jars cannot run in Horizon, so we port instead). The ATM10 inventory be
    │
    ├─ carry-over (mechanical, no agent): assets/ + data/ upgraded to 26.3 formats,
    │    block and item registrations from the oracle's facts export  →  <mod>.hmod
-   ├─ port (one agent per mod, tiers logic and up): Rust → WASM against the Horizon
-   │    mod API, iterating until its harness passes                  →  <mod>.hmod
+   ├─ port (one agent per mod, tiers logic and up): a Rust native mod (a horizon-mixins
+   │    bundle), iterating until its harness passes                  →  <mod>.hnmod
    ├─ harness per mod: the Java mod in a dev-only NeoForge/Fabric oracle vs the port
    ▼
  coverage report: ported · partial · not yet · not needed, per mod and per class
@@ -56,7 +56,7 @@ was downloaded.
 | Class | What it is | Port? | ATM10 |
 |---|---|---|---:|
 | **content** | adds or changes gameplay: blocks, items, machines, mobs, worldgen, magic | yes: carry-over or agent | **287** |
-| **library** | APIs and code shared by other mods (Architectury, Curios, GeckoLib, Kotlin for Forge, Balm...) | no: maps to the Horizon API or the SDK | **80** |
+| **library** | APIs and code shared by other mods (Architectury, Curios, GeckoLib, Kotlin for Forge, Balm...) | no: maps to Horizon's own code or a native mod | **80** |
 | **integration** | glue between two other mods (JEI plugins, AE2 ↔ Mekanism, Create add-on wiring) | after both sides are ported | **44** |
 | **client-ui** | client-only screens, HUDs, tooltips, maps, recipe viewers | yes: client API, or built in | **32** |
 | **other** | pack tooling and engine features: KubeJS, Almost Unified, shader mods, CTM, crash/version tools | no: folded into the pipeline or the engine | **25** |
@@ -153,12 +153,15 @@ derivative work. These rules are part of the pipeline, not advice to users:
 This is engineering policy, not legal advice. Before anything is published, Ludovic decides,
 with advice if needed.
 
-## The mod API: what packs need, against API 0.1
+## What packs need, and what runs today
 
-API 0.1 is client-side only: `log`, `game` (player and clock), `chat`, `hud`, plus tick,
-frame, chat and command hooks. Server mods do not run yet. What a content pack needs:
+Content mods (`.hmod`, API 0.2) carry data: blocks, items, and everything in the 26.3 data-pack and resource-pack
+formats ([mods.md](mods.md#content-mods-api-02)). Behaviour that needs code is not a content-mod feature: it is
+written as a native mod ([native-mods.md](native-mods.md)), one per ported mod. The "Planned in" column keeps the
+order of the original plan. The rows planned for 0.3 and later were designed as WebAssembly interfaces, which Horizon
+dropped: their "Shape" column is history, and a native mod hooks the game's code instead. What a content pack needs:
 
-| Feature | API 0.1 | Needed by (ATM10 content+integration, by tier) | Planned in | Shape |
+| Feature | Content mod today | Needed by (ATM10 content+integration, by tier) | Planned in | Shape |
 |---|---|---|---|---|
 | Block registry: ids, states, properties, shapes, sounds, light | — | data and up (all 331) | **0.2** | declared in `data/<mod>/horizon/block/*.json`, each from a vanilla *template* block (below) |
 | Item registry, block items | — | data and up | **0.2** | `data/<mod>/horizon/item/*.json`, from a vanilla template item |
@@ -172,22 +175,20 @@ frame, chat and command hooks. Server mods do not run yet. What a content pack n
 | Capabilities: energy (FE), item, fluid handlers on blocks and items | — | machines and up | **0.4** | `capabilities` interface; FE as the common unit, others as mod-defined resources |
 | Data attachments on entities, chunks, levels | — | machines and up | **0.4** | `storage` per entity/chunk/level |
 | Accessory slots (what Curios does) | — | Curios users (6 require it, more use it optionally) | **0.4** | built-in slots API |
-| Mod networking between its client and server halves | — | machines and up | **0.4** | `net` interface (already planned in mods.md) |
+| Mod networking between its client and server halves | — | machines and up | **0.4** | `net` interface |
 | Custom recipe types: machine recipes with their own JSON | — | machines and up | **0.4** | recipe-type registry: the mod declares its JSON schema and a display layout for the recipe viewer |
 | Entities: types, attributes, AI goals and brains, spawning | — | deep (87) | 0.5 | `entity` interface, AI in the mod with vanilla goals reusable |
 | Custom renderers and animated models (block-entity, entity, item; GeckoLib's format) | — | deep | 0.5 | data models (Bedrock geometry + animations), plus a budgeted draw-list interface for the rest |
 | Dimensions: dimension types, levels, chunk generators | — | about 10 (Twilight Forest, Aether, Ad Astra, Undergarden, ...) | 0.5 | JSON part with worldgen; custom generators as mod code |
 | New hooks into vanilla behaviour (what Mixins do) | — | deep | as asked | each becomes a named hook, added for everyone |
-| Client interfaces: `keys`, `target`, `inventory-read`, `ui`, `render`, `world-read` | planned | client tier (38) | 0.2–0.4 | as in [mods.md](mods.md#planned-interfaces) |
+| Client interfaces: `keys`, `target`, `inventory-read`, `ui`, `render`, `world-read` | — | client tier (38) | native mods | hook points in the game, as the official native mods use ([extras.md](extras.md)) |
 
-Two rules from mods.md stay: **the sandbox** (no files, sockets or processes; memory cap; fuel
-per call; a crashing mod stops alone) and **free when unused** (no mods means vanilla code
-paths and the vanilla resource root, so the parity harnesses test the same game).
+One rule stays: **free when unused** (no mods means vanilla code paths and the vanilla resource root, so the parity
+harnesses test the same game).
 
 ### Registries 0.2: data-driven blocks and items
 
-A `.hmod` may now carry `assets/` and `data/` beside (or instead of) `mod.wasm`. A content-only
-mod needs no code:
+A content mod (`.hmod`) carries `assets/` and `data/` and no code:
 
 ```
 ruby.hmod
@@ -713,14 +714,14 @@ For tiers logic, machines and deep, in dependency order, as many agents at once 
 budget allows:
 
 - **Input:** the inventory record, the carried-over data, the oracle's exports and traces, the
-  harness, the Horizon mod API docs, the ports of its dependencies, and the mod's public
+  harness, [native-mods.md](native-mods.md), the ports of its dependencies, and the mod's public
   documentation. Never its code: the agent doesn't decompile, read or quote it.
-- **Output:** a Rust crate in `mods/<id>/port/` built with `cargo horizon-mod build`, and its
-  `.hmod`.
+- **Output:** a native mod, a horizon-mixins bundle started from
+  [horizon-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template), and its `.hnmod`.
 - **Loop:** write → build → run the harness → read the differences → fix, until the harness
-  passes or the agent reports what blocks it. Usually that is an API gap, which becomes an
-  issue against the mod API ("needs a scheduled-tick hook"), the way version ports turn
-  differences into work items.
+  passes or the agent reports what blocks it. Usually that is a place in the game's code the
+  mixins can't reach yet, which becomes an issue ("needs a scheduled-tick hook point"), the way version ports
+  turn differences into work items.
 - **Rules:** the agent writes the port from observed behaviour, the harness and the mod's
   own data files only; ports follow the mod's licence ([Licences](#licences)).
   Players without an AI agent get the carry-over tiers. A port the licence lets us publish can
@@ -1002,8 +1003,8 @@ In scope (each is a PR or a small stack):
 Out of scope for that date, and next in order: the rest of worldgen carry-over (mods'
 structures, sets, pools and features generate now, see step 4; mod biomes, noise and density
 functions, and the structure types written in Java such as YUNG's and Formations', do not yet),
-behaviour callbacks and server events (0.3), block entities, menus, capabilities and net
-(0.4), the first agent-ported logic-tier mod as the pilot of step 5, then machines. Porting all
+behaviour callbacks and server events, block entities, menus, capabilities and net, as
+native mods, the first agent-ported logic-tier mod as the pilot of step 5, then machines. Porting all
 of ATM10 is a campaign. Each step publishes its coverage number; we make no claim beyond what
 the report shows.
 
@@ -1038,7 +1039,7 @@ ATM10 (the launcher's `--dev-mod` carries), seeds 1234 and 2.
 What is missing, ranked by how much a player notices:
 
 1. **Code mods.** 333 of ATM10's 496 mods (machines, magic, mobs, tools, storage): the pack's
-   gameplay. They need behaviour APIs (0.3 and later) and a port per mod.
+   gameplay. They need a native port per mod.
 2. **The 12 mods only on CurseForge**, which the carry has not fetched.
 3. **Plainer structures.** The 605 dropped processors are what makes structures look aged,
    overgrown or fitted to their biome in Java: Formations' biome swaps and block ageing (its

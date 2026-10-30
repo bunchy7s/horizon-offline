@@ -102,9 +102,11 @@ run at once there, and each must finish within 10 seconds however slowly its byt
 
 ## Identity
 
-Like LAN: offline mode. A guest joins with the name their game uses; the host's own profile is reserved.
-Online-mode checks against Mojang's session servers can come later on top of the same tunnel. Every
-tunnelled guest reaches the integrated server from `127.0.0.1`.
+Like LAN, and like vanilla's `IntegratedServer`: a host signed in with a Microsoft account runs the world
+in online mode, so each guest signs in through Mojang's session servers and arrives with their own
+UUID, skin and cape. A host playing under an offline name runs it in offline mode, where a guest joins
+with the name their game uses. Either way the host's own profile is reserved. Every tunnelled guest
+reaches the integrated server from `127.0.0.1`.
 
 ## Relays (optional)
 

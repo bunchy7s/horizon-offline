@@ -7,7 +7,7 @@ section has one page per surface, plus the rules every surface follows:
 
 | Surface | For | API today | Stability | Reference |
 | --- | --- | --- | --- | --- |
-| [Mods](mods.md) | mod authors | WIT `horizon:mods@0.1.0`, manifest `api` 0.1 (code) and 0.2 (content) | preview | [mods-reference.md](mods-reference.md) (generated) |
+| [Mods](../mods.md) | mod authors | content mods: manifest `api` 0.2; native mods: a horizon-mixins bundle ([native-mods.md](../native-mods.md)) | preview (content), experimental (native) | [mods.md](../mods.md) |
 | [Shaders](shaders.md) | shader authors | none yet: packs were removed on 2026-10-24 | planned | none |
 | [Agent control](agent-control.md) | agents, scripts, tests | `horizon-ctl`, its MCP server, the game's control socket | preview | [horizon-ctl-commands.md](../horizon-ctl-commands.md) (generated) |
 | [Servers](server.md) | hosts, panels, bots | `horizon-server` commands, `server.toml`, control API `/api/v1` | stable | [server-reference.md](server-reference.md) (generated) |
@@ -18,13 +18,14 @@ section has one page per surface, plus the rules every surface follows:
 
 - **From the people who use them.** Each API starts from what a mod author, a pack author, a server host or an agent
   needs to do, written down as tasks ("a host backs up the world from a script"), and from how Horizon is built:
-  Rust, wgpu, WebAssembly components and a server thread that runs every world. A function exists because a task
+  Rust, wgpu and a server thread that runs every world. A function exists because a task
   needs it.
 - **Our own design.** Horizon's APIs are not modelled on any other project's. Contributors may know other mod
   loaders, renderers and server platforms exist, but their source and API references are never read, copied or
   paraphrased here, and our names, shapes and docs are not taken from theirs. Vanilla Minecraft 26.3 is the reference for game
   concepts: ids, commands, `server.properties`, data packs and resource packs.
-- **Safe by default.** Mods run in a sandbox and can only use the capabilities their manifest declares; the control
+- **Safe by default.** A content mod is data and runs no code; a native mod runs with the player's rights, so it is
+  off by default, behind a warning and reviewed before the registry lists it; the control
   sockets listen on this computer only, behind a token; nothing here is on by default where it would change vanilla's
   look or behaviour.
 - **Free when unused.** An API nobody uses costs nothing per tick or per frame: no engine, no thread, no allocation.
@@ -37,7 +38,6 @@ A reference page is written by code from the source it describes, and a test fai
 
 | Page | Generated from | Update it with |
 | --- | --- | --- |
-| [mods-reference.md](mods-reference.md) | `crates/horizon-mod-sdk/wit/horizon.wit`, the manifest's capabilities | `HORIZON_WRITE_DOCS=1 cargo test -p horizon-mods --features pack --test api_reference` |
 | [server-reference.md](server-reference.md) | `horizon-server`'s help, `config::TEMPLATE`, `api::ROUTES` | `HORIZON_WRITE_DOCS=1 cargo test -p horizon-server reference` |
 | [horizon-ctl-commands.md](../horizon-ctl-commands.md) | the command table in `crates/horizon-client/src/bin/horizon-ctl/commands.rs` | `horizon-ctl help --markdown > docs/horizon-ctl-commands.md` |
 | [launcher-commands.md](../launcher-commands.md) | `launcher/src/cli.rs` | `HORIZON_WRITE_DOCS=1 cargo test --manifest-path launcher/Cargo.toml the_launcher_reference` |

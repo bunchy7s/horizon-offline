@@ -699,9 +699,11 @@ fn serve_login(
         .as_ref()
         .map(|log| user_name(&hello.name, address, log))
         .unwrap_or_default();
-    // handleHello: online mode authenticates first; offline mode derives the
-    // profile from the name.
-    let (uuid, properties) = match &shared.config.online {
+    // handleHello: online mode authenticates first; offline mode, and the
+    // integrated server's own player through memory, derive the profile
+    // from the name.
+    let online = shared.config.online.as_ref().filter(|_| !c.is_memory());
+    let (uuid, properties) = match online {
         Some(online) => match authenticate(&mut c, shared, online, &hello.name, address, &user) {
             Ok(Ok(profile)) => profile,
             Ok(Err(refused)) => {
@@ -795,8 +797,9 @@ fn login_and_configure(
             channel: "minecraft:brand".into(),
             data: {
                 let mut w = horizon_protocol::buf::Writer::new();
-                // MinecraftServer.getServerModName.
-                w.string("vanilla");
+                // MinecraftServer.getServerModName: "vanilla" there; a modded
+                // server names itself, and Horizon's says "horizon", as its client does.
+                w.string("horizon");
                 w.data
             },
         }),
@@ -853,6 +856,44 @@ fn login_and_configure(
                 data: Vec::new(),
             }),
         )?;
+    }
+    if brand == "horizon"
+        && let Some(hash) = sync.content_identity
+    {
+        send(
+            c,
+            cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                channel: crate::content_identity::CHANNEL.into(),
+                data: hash.to_vec(),
+            }),
+        )?;
+        send(c, cfg::Clientbound::Ping(cfg::Ping { id: 0 }))?;
+        let mut content_match = false;
+        loop {
+            let (id, payload) = c.recv().map_err(e)?;
+            match cfg::Serverbound::decode(id, &payload).map_err(e)? {
+                cfg::Serverbound::CustomPayload(p)
+                    if p.channel == crate::content_identity::CHANNEL =>
+                {
+                    content_match = p.data == hash;
+                }
+                cfg::Serverbound::Pong(p) if p.id == 0 => break,
+                cfg::Serverbound::ClientInformation(i) => info = i,
+                _ => {}
+            }
+        }
+        if !content_match {
+            let reason = horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(
+                crate::content_identity::MISMATCH,
+            ));
+            let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
+            lost(
+                shared,
+                &format!("{name} ({})", uuid_string(uuid)),
+                crate::content_identity::MISMATCH,
+            );
+            return Ok(None);
+        }
     }
     for packet in sync.registry_packets(known_pack) {
         send(c, cfg::Clientbound::RegistryData(packet))?;

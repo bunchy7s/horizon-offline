@@ -1078,6 +1078,21 @@ impl EditBox {
             self.set_cursor(pos, shift);
         }
     }
+    /// `MultilineTextField.selectWordAtCursor` on a book page: the word before
+    /// the cursor is selected, its end found past non-whitespace only
+    /// (`getWordEndPosition`).
+    pub fn select_word_at_cursor(&mut self) {
+        let begin = multiline_word_position(&self.value, -1, self.cursor);
+        let end = begin
+            + self
+                .value
+                .chars()
+                .skip(begin)
+                .take_while(|c| !java_whitespace(*c))
+                .count();
+        self.set_cursor(begin, false);
+        self.set_cursor(end, true);
+    }
     /// EditBox.onDrag: the selection follows the pointer.
     pub fn drag_to(&mut self, atlas: &HudAtlas, x: f32) {
         let pos = self.position_at(atlas, x);

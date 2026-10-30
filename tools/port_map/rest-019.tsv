@@ -3,7 +3,7 @@ LinkFSProvider	skip:other		Java NIO provider of the link filesystem; Horizon rea
 LinkFileSystem	skip:other		link filesystem and its getPath; Horizon builds overlay folders instead (packs.rs::build_overlay)
 LinkFileSystem.Builder	skip:other		builder of the link filesystem tree; no equivalent, see packs.rs::build_overlay
 PackFormat.fullCodec	skip:java		codec for supported_formats; packs.rs::compatible reads the same array
-PackFormat.validateHolderList	inline	crates/horizon-client/src/packs.rs::overlays_of	gap: minor: a broken overlay entry is dropped alone; vanilla rejects the whole overlays list
+PackFormat.validateHolderList	inline	crates/horizon-client-render/src/packs.rs::overlays_of	gap: minor: a broken overlay entry is dropped alone; vanilla rejects the whole overlays list
 PackFormat.lastPreMinorVersion	missing		minor: the 64 and 81 cut-offs feed only the format validators, which Horizon lacks
 PackFormat.packCodec	skip:java		codec wiring; the validation it runs is missing (IntermediaryFormat.validate)
 PackFormat.of	skip:java		constructor; Horizon keeps (major, minor) tuples (packs.rs::RESOURCE_FORMAT)
@@ -17,48 +17,48 @@ PackFormat.IntermediaryFormat.validateOldFormat	missing		player: vanilla refuses
 PackFormat.IntermediaryFormat.validatePackFormatForRange	missing		player: vanilla refuses a pack_format outside its min to max range, or a multi-version pack below format 15; Horizon does not check
 PackMetadataSection.codecForPackType	skip:java		codec for the pack section; packs.rs::pack reads the same fields
 PackMetadataSection.forPackType	skip:java		picks the section type per pack type; Horizon reads one pack section
-BuiltInPackSource.loadPacks	port	crates/horizon-client/src/packs.rs::discover	built-in Programmer Art and High Contrast packs; the vanilla pack is added by game/packs.rs::pack_infos
-BuiltInPackSource.listBundledPacks	inline	crates/horizon-client/src/packs.rs::discover	the two bundled ids, found in the resources folder
-BuiltInPackSource.discoverPacksInPath	inline	crates/horizon-client/src/packs.rs::discover	bundled folder scan, folded into discover
-FolderRepositorySource.loadPacks	port	crates/horizon-client/src/packs.rs::discover	resourcepacks/ folder: folders and zips, sorted by id
-FolderRepositorySource.createDiscoveredFilePackInfo	inline	crates/horizon-client/src/packs.rs::discover	pack id file/<name> and the file name as its title
-FolderRepositorySource.discoverPacks	port	crates/horizon-client/src/packs.rs::discover	folder scan with pack detection
-FolderRepositorySource.FolderPackDetector.createZipPack	inline	crates/horizon-client/src/packs.rs::discover	zip packs by .zip name; the non-default filesystem check does not apply
-Pack.readMetaAndCreate	port	crates/horizon-client/src/packs.rs::pack	reads pack.mcmeta and makes the pack, none when it is missing
-Pack.readPackMetadata	inline	crates/horizon-client/src/packs.rs::pack	gap: minor: no required feature flags, no hidden flag, no fallback when the pack section fails to parse
+BuiltInPackSource.loadPacks	port	crates/horizon-client-render/src/packs.rs::discover	built-in Programmer Art and High Contrast packs; the vanilla pack is added by game/packs.rs::pack_infos
+BuiltInPackSource.listBundledPacks	inline	crates/horizon-client-render/src/packs.rs::discover	the two bundled ids, found in the resources folder
+BuiltInPackSource.discoverPacksInPath	inline	crates/horizon-client-render/src/packs.rs::discover	bundled folder scan, folded into discover
+FolderRepositorySource.loadPacks	port	crates/horizon-client-render/src/packs.rs::discover	resourcepacks/ folder: folders and zips, sorted by id
+FolderRepositorySource.createDiscoveredFilePackInfo	inline	crates/horizon-client-render/src/packs.rs::discover	pack id file/<name> and the file name as its title
+FolderRepositorySource.discoverPacks	port	crates/horizon-client-render/src/packs.rs::discover	folder scan with pack detection
+FolderRepositorySource.FolderPackDetector.createZipPack	inline	crates/horizon-client-render/src/packs.rs::discover	zip packs by .zip name; the non-default filesystem check does not apply
+Pack.readMetaAndCreate	port	crates/horizon-client-render/src/packs.rs::pack	reads pack.mcmeta and makes the pack, none when it is missing
+Pack.readPackMetadata	inline	crates/horizon-client-render/src/packs.rs::pack	gap: minor: no required feature flags, no hidden flag, no fallback when the pack section fails to parse
 Pack.equals	skip:java		identity by pack id; the selection model compares ids
-PackDetector.detectPackResources	inline	crates/horizon-client/src/packs.rs::discover	gap: minor: no symlink validation; a folder without pack.mcmeta is dropped by pack()
+PackDetector.detectPackResources	inline	crates/horizon-client-render/src/packs.rs::discover	gap: minor: no symlink validation; a folder without pack.mcmeta is dropped by pack()
 PackRepository.displayPackList	skip:debug		pack ids for the system report (MinecraftServer)
 PackRepository.reload	port	crates/horizon-client/src/game/packs.rs::Game::refresh_pack_lists	re-discovers the packs and resets the selection
-PackRepository.discoverAvailable	port	crates/horizon-client/src/packs.rs::discover	scans the sources for packs
+PackRepository.discoverAvailable	port	crates/horizon-client-render/src/packs.rs::discover	scans the sources for packs
 PackRepository.isAbleToClearAnyPack	missing		player: when a pack fails at runtime vanilla clears the selected packs with a toast; Horizon keeps them and shows the error in Options (game/packs.rs::reload_packs)
-PackRepository.addPack	inline	crates/horizon-client/src/packs.rs::SelectionModel::activate	gap: minor: vanilla appends by id with no position rules
-PackRepository.removePack	inline	crates/horizon-client/src/packs.rs::SelectionModel::activate	gap: minor: vanilla removes by id even when the pack is required; the screen never offers that
-PackRepository.getAvailablePacks	inline	crates/horizon-client/src/packs.rs::SelectionModel::rebuild	gap: minor: rebuild also adds the required packs
+PackRepository.addPack	inline	crates/horizon-client-render/src/packs.rs::SelectionModel::activate	gap: minor: vanilla appends by id with no position rules
+PackRepository.removePack	inline	crates/horizon-client-render/src/packs.rs::SelectionModel::activate	gap: minor: vanilla removes by id even when the pack is required; the screen never offers that
+PackRepository.getAvailablePacks	inline	crates/horizon-client-render/src/packs.rs::SelectionModel::rebuild	gap: minor: rebuild also adds the required packs
 PackRepository.getRequestedFeatureFlags	missing		minor: no pack feature flags are read, so a pack's requested features are never checked
-PackSource.decorateWithSource	port	crates/horizon-client/src/pack_screen.rs::PackInfo::extended_description	source label after the pack name (built-in, world, server)
-ServerPacksSource.createVanillaPackSource	port	crates/horizon-client/src/datapack.rs::DataPack::builtin	the built-in vanilla data source (id vanilla), used by functions.rs
-ServerPacksSource.createPackRepository	port	crates/horizon-client/src/datapack.rs::discover	gap: minor: finds world datapacks; the enable list is kept by functions.rs::reload_datapacks
+PackSource.decorateWithSource	port	crates/horizon-client-render/src/pack_screen.rs::PackInfo::extended_description	source label after the pack name (built-in, world, server)
+ServerPacksSource.createVanillaPackSource	port	crates/horizon-client-render/src/datapack.rs::DataPack::builtin	the built-in vanilla data source (id vanilla), used by functions.rs
+ServerPacksSource.createPackRepository	port	crates/horizon-client-render/src/datapack.rs::discover	gap: minor: finds world datapacks; the enable list is kept by functions.rs::reload_datapacks
 ServerPacksSource.createVanillaTrustedRepository	skip:other		known-packs reply: Horizon answers SelectKnownPacks with no packs (net.rs), so the server sends every registry entry
-FallbackResourceManager.push	inline	crates/horizon-client/src/packs.rs::build_overlay_uncached	packs layered in load order, last wins
-FallbackResourceManager.pushInternal	inline	crates/horizon-client/src/packs.rs::build_overlay_uncached	same layering, with an optional content filter
-FallbackResourceManager.getResource	inline	crates/horizon-client/src/packs.rs::build_overlay_uncached	the top file per path; a filter stops the search
+FallbackResourceManager.push	inline	crates/horizon-client-render/src/packs.rs::build_overlay_uncached	packs layered in load order, last wins
+FallbackResourceManager.pushInternal	inline	crates/horizon-client-render/src/packs.rs::build_overlay_uncached	same layering, with an optional content filter
+FallbackResourceManager.getResource	inline	crates/horizon-client-render/src/packs.rs::build_overlay_uncached	the top file per path; a filter stops the search
 FallbackResourceManager.wrapForDebug	skip:debug		leak warning on unclosed resource streams
-FallbackResourceManager.getResourceStack	inline	crates/horizon-client/src/packs.rs::build_overlay_uncached	gap: minor: stacks merge only for lang, font, atlases and sounds.json (merge_kind)
+FallbackResourceManager.getResourceStack	inline	crates/horizon-client-render/src/packs.rs::build_overlay_uncached	gap: minor: stacks merge only for lang, font, atlases and sounds.json (merge_kind)
 FallbackResourceManager.getIdentifierFromMetadata	skip:other		maps a .mcmeta sidecar to its resource; each feature strips the suffix itself (ui.rs)
-FallbackResourceManager.listResources	inline	crates/horizon-client/src/packs.rs::build_overlay_uncached	gap: minor: sidecar metadata is not attached; features read their own .png.mcmeta
+FallbackResourceManager.listResources	inline	crates/horizon-client-render/src/packs.rs::build_overlay_uncached	gap: minor: sidecar metadata is not attached; features read their own .png.mcmeta
 FallbackResourceManager.createStackMetadataFinder	skip:other		finds the top sidecar for a resource; each feature reads its own .png.mcmeta (locator_bar.rs)
 FallbackResourceManager.parseMetadata	skip:other		parses a sidecar; each feature parses its own (ui.rs, mipmap.rs); pack.mcmeta goes through packs.rs::read_meta
-FallbackResourceManager.applyPackFiltersToExistingResources	inline	crates/horizon-client/src/packs.rs::build_overlay_uncached	a pack's filter drops files of the packs below it
-FallbackResourceManager.listPackResources	inline	crates/horizon-client/src/packs.rs::build_overlay_uncached	pack_files lists each pack's assets, overlay folders included
-FallbackResourceManager.listResourceStacks	inline	crates/horizon-client/src/packs.rs::build_overlay_uncached	gap: minor: same merge limit as getResourceStack
+FallbackResourceManager.applyPackFiltersToExistingResources	inline	crates/horizon-client-render/src/packs.rs::build_overlay_uncached	a pack's filter drops files of the packs below it
+FallbackResourceManager.listPackResources	inline	crates/horizon-client-render/src/packs.rs::build_overlay_uncached	pack_files lists each pack's assets, overlay folders included
+FallbackResourceManager.listResourceStacks	inline	crates/horizon-client-render/src/packs.rs::build_overlay_uncached	gap: minor: same merge limit as getResourceStack
 FallbackResourceManager.listPacks	skip:java		stream of the pack list; Horizon passes the slice
 FallbackResourceManager.LeakedResourceWarningInputStream.finalize	skip:debug		leak warning when a stream is garbage collected unclosed
-FallbackResourceManager.PackEntry.filterAll	inline	crates/horizon-client/src/packs.rs::build_overlay_uncached	files and stacks are dropped when a filter blocks them
-FallbackResourceManager.PackEntry.isFiltered	port	crates/horizon-client/src/packs.rs::Filter::blocks	one pack's filter test
+FallbackResourceManager.PackEntry.filterAll	inline	crates/horizon-client-render/src/packs.rs::build_overlay_uncached	files and stacks are dropped when a filter blocks them
+FallbackResourceManager.PackEntry.isFiltered	port	crates/horizon-client-render/src/packs.rs::Filter::blocks	one pack's filter test
 IoSupplier.create	skip:java		lambda over Files.newInputStream; Horizon reads files directly
-MultiPackResourceManager.<init>	inline	crates/horizon-client/src/packs.rs::build_overlay_uncached	gap: minor: namespace-only filters are not kept; filters act on each file path
-MultiPackResourceManager.getPackFilterSection	port	crates/horizon-client/src/packs.rs::filter_of	reads the pack's filter section
+MultiPackResourceManager.<init>	inline	crates/horizon-client-render/src/packs.rs::build_overlay_uncached	gap: minor: namespace-only filters are not kept; filters act on each file path
+MultiPackResourceManager.getPackFilterSection	port	crates/horizon-client-render/src/packs.rs::filter_of	reads the pack's filter section
 MultiPackResourceManager.getResource	skip:other		lookups read the built overlay folder (packs.rs::resource_root); no manager object
 MultiPackResourceManager.getResourceStack	skip:other		same overlay folder lookup
 MultiPackResourceManager.listResources	skip:other		same overlay folder listing
@@ -67,14 +67,14 @@ MultiPackResourceManager.checkTrailingDirectoryPath	skip:java		argument check fo
 ProfiledReloadInstance	skip:debug		reload timing log (profiler), which Horizon does not keep
 ReloadableResourceManager.createReload	port	crates/horizon-client/src/game/packs.rs::Game::stage_selected_packs	builds the new overlay root and resources
 Resource	skip:other		lazy stream and sidecar metadata; Horizon reads host files and each feature reads its own .png.mcmeta
-ResourceFilterSection.isNamespaceFiltered	inline	crates/horizon-client/src/packs.rs::Filter::blocks	gap: minor: no namespace-only test; blocks checks the namespace inside a file path
-ResourceFilterSection.isPathFiltered	port	crates/horizon-client/src/packs.rs::Filter::blocks	path test of a filter entry
+ResourceFilterSection.isNamespaceFiltered	inline	crates/horizon-client-render/src/packs.rs::Filter::blocks	gap: minor: no namespace-only test; blocks checks the namespace inside a file path
+ResourceFilterSection.isPathFiltered	port	crates/horizon-client-render/src/packs.rs::Filter::blocks	path test of a filter entry
 ResourceManagerReloadListener.reload	port	crates/horizon-client/src/game/packs.rs::Game::apply_staged_pack	the render-thread apply of a reload
-ResourceMetadata.fromJsonStream	port	crates/horizon-client/src/packs.rs::read_meta	gap: minor: reads pack.mcmeta only; sections are read by key in pack()
+ResourceMetadata.fromJsonStream	port	crates/horizon-client-render/src/packs.rs::read_meta	gap: minor: reads pack.mcmeta only; sections are read by key in pack()
 ResourceMetadata.of	skip:java		map-backed metadata constructor
 ResourceMetadata.getTypedSections	skip:java		typed view over sections; Horizon reads sections by key
 ResourceProvider.getResourceOrThrow	skip:java		Option instead of a thrown FileNotFound
-SimpleJsonResourceReloadListener.prepare	port	crates/horizon-client/src/datapack.rs::DataStore::load	gap: player: only function, item_modifier, predicate and function-tag files are read; recipes, loot tables and advancements from datapacks are not
+SimpleJsonResourceReloadListener.prepare	port	crates/horizon-client-render/src/datapack.rs::DataStore::load	gap: player: only function, item_modifier, predicate and function-tag files are read; recipes, loot tables and advancements from datapacks are not
 SimplePreparableReloadListener.reload	port	crates/horizon-client/src/game/packs.rs::Game::stage_selected_packs	gap: minor: the prepare half; apply_staged_pack does the apply
 SimpleReloadInstance.of	port	crates/horizon-client/src/game/packs.rs::Game::reload_selected_packs	stage then apply, in one call
 SimpleReloadInstance.startTasks	inline	crates/horizon-client/src/game/packs.rs::Game::reload_packs	defers while a world or rest loads; errors go to Options

@@ -1,5 +1,5 @@
 use super::*;
-use horizon_theme::{BLOCKS_DARK, BLOCKS_LIGHT};
+use horizon_theme::night::{DAWN, NIGHT};
 
 fn blend(top: u32, under: u32, alpha: f32) -> u32 {
     let channel = |shift: u32| {
@@ -11,7 +11,7 @@ fn blend(top: u32, under: u32, alpha: f32) -> u32 {
 
 #[test]
 fn every_accent_reads_as_well_as_the_violet() {
-    for base in [BLOCKS_DARK, BLOCKS_LIGHT] {
+    for base in [NIGHT.blocks(), DAWN.blocks()] {
         for accent in Accent::ALL {
             let p = accent.apply(base);
             let what = format!(

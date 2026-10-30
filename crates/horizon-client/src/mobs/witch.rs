@@ -268,7 +268,7 @@ fn drink(m: &mut Mob, cx_events: &mut Vec<MobEvent>, target_far: bool) {
         m.extra.using_item -= 1;
         if m.extra.using_item < 0 {
             m.extra.using_item = 0;
-            if let Some(potion) = m.extra.main_hand.take() {
+            if let Some(potion) = m.extra.take_main_hand() {
                 match potion.as_ref() {
                     "minecraft:water_breathing" => {
                         m.add_effect("minecraft:water_breathing", 3600, 0)
@@ -307,7 +307,7 @@ fn drink(m: &mut Mob, cx_events: &mut Vec<MobEvent>, target_far: bool) {
         None
     };
     if let Some(p) = potion {
-        m.extra.main_hand = Some(p.into());
+        m.extra.set_main_hand(Some(p.into()));
         // PotionItem use duration 32 ticks.
         m.extra.using_item = 32;
         m.extra.flag = true;

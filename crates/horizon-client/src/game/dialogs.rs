@@ -11,7 +11,7 @@ use horizon_client::{
     dialog::{AfterAction, Body, Click, Control, Dialog, InputValue, Kind},
     dialog_screen::{BOX, Layout, Part, WARNING_SPRITES, waiting_button},
     hud::{HudBatch, rgba},
-    text::Text,
+    text::{ClickEvent, Text},
     ui,
 };
 use horizon_world::nbt::Tag;
@@ -544,6 +544,7 @@ impl Game<'_> {
         };
         let [_, ay, _, ah] = layout.area;
         let mut action = None;
+        let mut text_click: Option<ClickEvent> = None;
         open.focus = None;
         for (part, clipped) in layout.placed(open.scroll.amount) {
             if clipped && !(cursor.1 >= ay && cursor.1 < ay + ah) {
@@ -592,11 +593,39 @@ impl Game<'_> {
                 } if ui::hovered(cursor, x, y, w, h) => {
                     action = Some(Some(index));
                 }
+                // AbstractStringWidget.setComponentClickHandler: the click event
+                // of the styled text under a centred message line.
+                Part::Line(line, x, y)
+                    if text_click.is_none()
+                        && cursor.0 >= x
+                        && (0.0..9.0).contains(&(cursor.1 - y)) =>
+                {
+                    let content = line.resolve_legacy();
+                    let mut left = cursor.0 - x;
+                    for (c, style) in content.chars() {
+                        left -= self.gui.atlas.font.advance(c, style);
+                        if left < 0.0 {
+                            text_click = style.click.clone();
+                            break;
+                        }
+                    }
+                }
                 _ => {}
             }
         }
         let Some(action) = action else {
-            return Ok(());
+            // A text click runs its event (DialogScreen.runAction) with no button sound.
+            let click = match text_click {
+                Some(ClickEvent::OpenUrl(url)) => Click::OpenUrl(url),
+                Some(ClickEvent::ChangePage(page)) => Click::ChangePage(page),
+                Some(ClickEvent::SuggestCommand(command)) => Click::SuggestCommand(command),
+                Some(ClickEvent::RunCommand(command)) => Click::RunCommand(command),
+                Some(ClickEvent::CopyToClipboard(value)) => Click::CopyToClipboard(value),
+                Some(ClickEvent::ShowDialog(dialog)) => Click::ShowDialog(dialog),
+                Some(ClickEvent::OpenFile(_)) | None => return Ok(()),
+            };
+            let after = open.dialog.after_action;
+            return self.run_dialog_action(Some(click), after);
         };
         self.audio.play_button_click();
         let Some(index) = action else {

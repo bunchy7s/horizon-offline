@@ -51,7 +51,7 @@ jobs:
         if: steps.rust.outputs.required != 'false'
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       # Dependencies and the workspace's own build, saved from main's runs (pull requests read main's cache).
       - uses: Swatinem/rust-cache@v2
         if: steps.rust.outputs.required != 'false'
@@ -62,8 +62,7 @@ jobs:
         if: steps.rust.outputs.required != 'false'
         run: |
           cargo +stable fmt --all -- --check
-          # With the game's code mods (on in every release build, off by default).
-          cargo +stable clippy --workspace --all-targets --features horizon-client/mods -- -D warnings
+          cargo +stable clippy --workspace --all-targets -- -D warnings
           # The server build (released as horizon-engine): the game without sound or controllers.
           cargo +stable clippy -p horizon-client --all-targets --no-default-features -- -D warnings
       # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which clippy above already
@@ -71,11 +70,11 @@ jobs:
       - name: Test Rust core and voxel kernel correctness
         if: steps.rust.outputs.required != 'false'
         run: |
-          cargo +stable test --workspace --lib --bins --tests --features horizon-client/mods,horizon-mods/pack
+          cargo +stable test --workspace --lib --bins --tests
           # The full content-root tests (#[ignore]d: minutes each on a laptop). The same build as above; they need the
           # prepared vanilla data, so without it they pass at once.
-          cargo +stable test --workspace --lib --features horizon-client/mods,horizon-mods/pack mod_content::tests:: -- --ignored
-          cargo +stable test --workspace --doc --features horizon-client/mods,horizon-mods/pack
+          cargo +stable test --workspace --lib mod_content::tests:: -- --ignored
+          cargo +stable test --workspace --doc
   # The launcher is its own workspace (launcher/Cargo.toml), so verify's cargo runs never build it. A pull request that
   # changes it or a crate it builds is checked here, and so is every push to main: two pull requests can each pass
   # alone and break it together (#2059 and the registry ratings did, 2026-10-26).

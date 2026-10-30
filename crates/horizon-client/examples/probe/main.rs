@@ -19,6 +19,7 @@ mod block_entity_anim_fixture;
 mod block_entity_render_fixture;
 mod block_entity_tickers_fixture;
 mod block_particles_fixture;
+mod block_tint_probe;
 mod block_transform_fixture;
 mod breaking_fixture;
 mod camera_probe;
@@ -113,6 +114,7 @@ probes! {
     block_particles_fixture,
     block_transform_fixture,
     breaking_fixture,
+    block_tint_probe,
     camera_probe,
     squid_client_probe,
     creative_mining_probe,

@@ -105,7 +105,8 @@ impl Pending {
             .is_some_and(|(item, _)| **item == *stack.item)
             && let Some((_, name)) = self.names.remove(&pos)
         {
-            stack.data_mut().custom_name = Some(name);
+            stack.data_mut().custom_name =
+                Some(horizon_world::nbt::Tag::String(name.as_str().into()));
         }
         if self
             .copied
@@ -221,6 +222,12 @@ pub(super) struct Spill {
     /// Block entities the behaviour removed, for the game's own follow-ups
     /// (open screens, playing songs).
     pub(super) removed: Vec<([i32; 3], BlockEntity)>,
+}
+
+impl Spill {
+    pub(super) fn is_empty(&self) -> bool {
+        self.spawns.is_empty() && self.orbs.is_empty() && self.removed.is_empty()
+    }
 }
 
 /// `Block.popResource`: a spot around the block's centre from the level random.
@@ -617,10 +624,7 @@ impl Game<'_> {
     /// Add the item entities the block behaviour spawned and follow up on the
     /// block entities it removed.
     pub(super) fn flush_spill(&mut self) {
-        if self.spill.spawns.is_empty()
-            && self.spill.removed.is_empty()
-            && self.spill.orbs.is_empty()
-        {
+        if self.spill.is_empty() {
             return;
         }
         let spill = std::mem::take(&mut self.spill);

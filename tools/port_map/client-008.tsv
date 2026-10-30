@@ -6,8 +6,8 @@ Variant.SimpleModelState.withUvLock	skip:java		copy-with setter of an immutable 
 VariantMutator.then	skip:java		composes JSON field setters; Variant::decode reads all fields in one pass
 VariantSelector.predicate	port	crates/horizon-assets/src/blockstate/bind.rs::variant_predicate	parses the property clauses; matching against states is in BlockStateDefinition::bind
 WeightedVariants.computeMaterialFlags	skip:java		OR of per-model render flags; Horizon keeps translucency per face (BakedFace in models/catalog.rs)
-WeightedVariants.Unbaked.bake	inline	crates/horizon-client/src/models/catalog.rs::StateModels::load	each weighted variant baked once with its transform; the choice is kept in CompiledChoices
-WeightedVariants.Unbaked.resolveDependencies	inline	crates/horizon-client/src/models/catalog.rs::StateModels::load	model names gathered from all definitions before the block library loads
+WeightedVariants.Unbaked.bake	inline	crates/horizon-client-render/src/models/catalog.rs::StateModels::load	each weighted variant baked once with its transform; the choice is kept in CompiledChoices
+WeightedVariants.Unbaked.resolveDependencies	inline	crates/horizon-client-render/src/models/catalog.rs::StateModels::load	model names gathered from all definitions before the block library loads
 CombinedCondition.instantiate	port	crates/horizon-assets/src/blockstate/bind.rs::BoundCondition::bind	AND and OR branches; the test itself is BoundCondition::matches
 KeyValueCondition.instantiate	port	crates/horizon-assets/src/blockstate/bind.rs::BoundCondition::bind	property lookup per key and the properties branch
 KeyValueCondition.Term.parse	port	crates/horizon-assets/src/blockstate.rs::Condition::decode	reads the leading "!" as negation
@@ -19,37 +19,37 @@ MultiPartModel.SharedBakedState.getFirstModel	port	crates/horizon-assets/src/blo
 MultiPartModel.SharedBakedState.computeMaterialFlags	skip:java		same OR of render flags as WeightedVariants; translucency is kept per face
 MultiPartModel.SharedBakedState.selectModels	port	crates/horizon-assets/src/blockstate/bind.rs::BlockStateDefinition::bind	selected selector indices per state, computed once at load
 MultiPartModel.Unbaked.visualEqualityGroup	skip:java		key for sharing identical visual states; Horizon keys block states by id
-MultiPartModel.Unbaked.resolveDependencies	inline	crates/horizon-client/src/models/catalog.rs::StateModels::load	model names gathered from every multipart selector
-MultiPartModel.Unbaked.bake	inline	crates/horizon-client/src/models/catalog.rs::StateModels::load	shared bake per definition; per-state selection stored in states
+MultiPartModel.Unbaked.resolveDependencies	inline	crates/horizon-client-render/src/models/catalog.rs::StateModels::load	model names gathered from every multipart selector
+MultiPartModel.Unbaked.bake	inline	crates/horizon-client-render/src/models/catalog.rs::StateModels::load	shared bake per definition; per-state selection stored in states
 Selector.instantiate	port	crates/horizon-assets/src/blockstate/bind.rs::BlockStateDefinition::bind	a selector without a condition applies to every state
 BlockStateModelWrapper.update	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	gap: player: no tint layers, so carried or cart blocks with tint sources (grass, leaves) are drawn untinted
 BlockStateModelWrapper.updateTints	missing		player: carried and cart blocks with tint sources (grass, leaves, water) show untinted; Horizon's block_model_vertices has no tint step
 BlockStateModelWrapper.Unbaked.bake	skip:java		builds the wrapper object; Horizon passes the transform straight to block_model_vertices
 CompositeBlockModel.update	missing		player: only block display entities reach this and Horizon draws none, so a special block (chest and similar) shown that way never appears
 CompositeBlockModel.Unbaked.bake	skip:java		builds the composite object; no separate step in Horizon
-ConditionalBlockModel.update	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	Christmas chest texture chosen in the chest branch by extended_christmas()
+ConditionalBlockModel.update	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	Christmas chest texture chosen in the chest branch by extended_christmas()
 ConditionalBlockModel.Unbaked.bake	skip:java		builds the conditional object; the chest branch picks the texture when drawing
 SpecialBlockModelWrapper.Unbaked.bake	skip:data		special models come from exported model data in BlockEntityRenderer::load; no baking step
-AbstractEndPortalRenderer.submitSpecial	port	crates/horizon-client/src/block_entity_render.rs::portal_cube	gap: minor: no outline pass (outlineColor) for the portal faces
-AbstractSignRenderer.submit	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	front and back text drawn in the sign branch via sign_text_calls
-AbstractSignRenderer.isOutlineVisible	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: minor: only the 16-block distance is tested; spyglass scoping in first person does not turn the outline on
-AbstractSignRenderer.extractRenderState	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: minor: the text filtering option is not read; filtered sign lines are not shown
-BannerRenderer.extractRenderState	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	flutter phase from position, game time and partial tick; standing or wall placement
-BannerRenderer.bannerModel	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	wall or standing banner model chosen in the banner branch
-BannerRenderer.flagModel	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	wall or standing flag model chosen in the banner branch
+AbstractEndPortalRenderer.submitSpecial	port	crates/horizon-client-render/src/block_entity_render.rs::portal_cube	gap: minor: no outline pass (outlineColor) for the portal faces
+AbstractSignRenderer.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	front and back text drawn in the sign branch via sign_text_calls
+AbstractSignRenderer.isOutlineVisible	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: minor: only the 16-block distance is tested; spyglass scoping in first person does not turn the outline on
+AbstractSignRenderer.extractRenderState	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: minor: the text filtering option is not read; filtered sign lines are not shown
+BannerRenderer.extractRenderState	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	flutter phase from position, game time and partial tick; standing or wall placement
+BannerRenderer.bannerModel	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	wall or standing banner model chosen in the banner branch
+BannerRenderer.flagModel	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	wall or standing flag model chosen in the banner branch
 BannerRenderer.submitSpecial	port	crates/horizon-client/src/item_render/special.rs::submit	banner as a special item model: base, flag and pattern layers
-BannerRenderer.submitBanner	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	base model, flag and pattern layers; the crumbling overlay is drawn by render_breaking
-BannerRenderer.submitPatternLayer	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	loop over up to 16 pattern layers in the banner branch
-BannerRenderer.modelTransformation	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	translate, turn by angle, scale in the banner branch
+BannerRenderer.submitBanner	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	base model, flag and pattern layers; the crumbling overlay is drawn by render_breaking
+BannerRenderer.submitPatternLayer	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	loop over up to 16 pattern layers in the banner branch
+BannerRenderer.modelTransformation	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	translate, turn by angle, scale in the banner branch
 BeaconRenderer.extractRenderState	inline	crates/horizon-client/src/game/beacon.rs::Game::beacon_geometry	animation time and beam radius scale computed there
 BeaconRenderer.extract	inline	crates/horizon-client/src/game/beacon.rs::Game::beacon_geometry	same time and scale rules, from distance and scoping
-BeaconRenderer.renderQuad	port	crates/horizon-client/src/block_entity_render.rs::beam	solid beam and glow quads per section
-BeaconRenderer.addVertex	port	crates/horizon-client/src/block_entity_render.rs::beam	vertex with colour and full light, emitted by beam's inner emit
-BellRenderer.extractRenderState	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	bell ticks and shake direction read in the bell branch
-BellRenderer.submit	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay while a bell is broken (render_breaking draws only banners and chests)
-BlockEntityRenderDispatcher.getRenderer	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::kind	renderer chosen from the block state
-BlockEntityRenderDispatcher.tryExtractRenderState	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render	gap: minor: distance cull only (256 for gateways); no frustum, type-validity or off-screen test here
-BlockEntityRenderDispatcher.submit	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	draws each kind; no crash report wrapper
+BeaconRenderer.renderQuad	port	crates/horizon-client-render/src/block_entity_render.rs::beam	solid beam and glow quads per section
+BeaconRenderer.addVertex	port	crates/horizon-client-render/src/block_entity_render.rs::beam	vertex with colour and full light, emitted by beam's inner emit
+BellRenderer.extractRenderState	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	bell ticks and shake direction read in the bell branch
+BellRenderer.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay while a bell is broken (render_breaking draws only banners and chests)
+BlockEntityRenderDispatcher.getRenderer	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::kind	renderer chosen from the block state
+BlockEntityRenderDispatcher.tryExtractRenderState	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render	gap: minor: distance cull only (256 for gateways); no frustum, type-validity or off-screen test here
+BlockEntityRenderDispatcher.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	draws each kind; no crash report wrapper
 BlockEntityRenderDispatcher.onResourceManagerReload	missing		minor: block entity models load once in BlockEntityRenderer::load; no reload path found
 BlockEntityRenderers.createEntityRenderers	skip:data		renderer registration table; Horizon's classify table replaces it
 BlockEntityWithBoundingBoxRenderer.extractRenderState	missing		player: game-master players (creative or op) see no structure box, invisible-block or structure-void markers
@@ -57,56 +57,56 @@ BlockEntityWithBoundingBoxRenderer.extract	missing		player: game-master players 
 BlockEntityWithBoundingBoxRenderer.submit	missing		player: game-master players (creative or op) see no structure box, invisible-block or structure-void markers
 BlockEntityWithBoundingBoxRenderer.renderInvisibleBlocks	missing		player: game-master players (creative or op) see no barrier, light or air block markers
 BlockEntityWithBoundingBoxRenderer.renderStructureVoids	missing		player: game-master players (creative or op) see no structure void markers
-BrightnessCombiner.acceptDouble	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	brighter of the two chest halves per channel, in the chest branch
+BrightnessCombiner.acceptDouble	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	brighter of the two chest halves per channel, in the chest branch
 BrushableBlockRenderer.extractRenderState	missing		player: brushing a suspicious block shows no item on its face; the hit side and dust stage are not read
 BrushableBlockRenderer.submit	missing		player: the brushed item never slides out of the block while it is brushed
 BrushableBlockRenderer.translations	missing		player: the per-side slide offset for each dust stage is not computed
 CampfireRenderer.extractRenderState	inline	crates/horizon-client/src/game/campfire.rs::Game::campfire_geometry	facing and per-slot item seed read there
 CampfireRenderer.submit	port	crates/horizon-client/src/game/campfire.rs::Game::campfire_geometry	items on the four sides, drawn within 64 blocks
-ChestRenderer.createModelTransformation	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	chest turn about its centre in the chest branch
+ChestRenderer.createModelTransformation	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	chest turn about its centre in the chest branch
 ConduitRenderer.createEyeLayer	skip:data		model layer; Horizon loads the conduit parts from exported model data in BlockEntityRenderer::load
 ConduitRenderer.createWindLayer	skip:data		model layer; Horizon loads the conduit parts from exported model data in BlockEntityRenderer::load
 ConduitRenderer.createShellLayer	skip:data		model layer; Horizon loads the conduit parts from exported model data in BlockEntityRenderer::load
 ConduitRenderer.createCageLayer	skip:data		model layer; Horizon loads the conduit parts from exported model data in BlockEntityRenderer::load
-ConduitRenderer.submit	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on the conduit (render_breaking draws only banners and chests)
-CopperGolemStatueBlockRenderer.extractRenderState	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	facing, pose and oxidation texture read in the golem branch
-CopperGolemStatueBlockRenderer.submit	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on the statue (render_breaking draws only banners and chests)
-CopperGolemStatueBlockRenderer.createModelTransformation	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	rotation from the opposite facing in the golem branch
+ConduitRenderer.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on the conduit (render_breaking draws only banners and chests)
+CopperGolemStatueBlockRenderer.extractRenderState	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	facing, pose and oxidation texture read in the golem branch
+CopperGolemStatueBlockRenderer.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on the statue (render_breaking draws only banners and chests)
+CopperGolemStatueBlockRenderer.createModelTransformation	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	rotation from the opposite facing in the golem branch
 DecoratedPotRenderer.createBaseLayer	skip:data		pot base model; Horizon loads it from exported model data in BlockEntityRenderer::load
 DecoratedPotRenderer.createSidesLayer	skip:data		pot side models; Horizon loads them from exported model data in BlockEntityRenderer::load
-DecoratedPotRenderer.getSideSprite	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	sherd pattern texture per side from pot_patterns, blank side otherwise
-DecoratedPotRenderer.createModelTransformation	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	pot turn about its centre in the decorated pot branch
+DecoratedPotRenderer.getSideSprite	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	sherd pattern texture per side from pot_patterns, blank side otherwise
+DecoratedPotRenderer.createModelTransformation	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	pot turn about its centre in the decorated pot branch
 DecoratedPotRenderer.getExtents	port	crates/horizon-client/src/item_render/special.rs::extents	decorated pot part extents for the item model bounds
-HangingSignRenderer.extractRenderState	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: minor: the text filtering option is not read
-LecternRenderer.extractRenderState	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	book drawn only when has_book is set, turned by facing
-LecternRenderer.submit	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on the lectern book (render_breaking draws only banners and chests)
+HangingSignRenderer.extractRenderState	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: minor: the text filtering option is not read
+LecternRenderer.extractRenderState	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	book drawn only when has_book is set, turned by facing
+LecternRenderer.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on the lectern book (render_breaking draws only banners and chests)
 PistonHeadRenderer.submit	port	crates/horizon-client/src/game/moving_pistons.rs::Game::moving_piston_geometry	head and base blocks drawn at their offsets
 PistonHeadRenderer.createMovingBlock	port	crates/horizon-client/src/game/moving_pistons.rs::Game::moving_block_vertices	gap: minor: the tint is the particle sprite colour, not the block's tint sources
 ShelfRenderer.extractRenderState	missing		player: items placed on shelf blocks are not kept for drawing; only the comparator signal is handled (game/machines.rs::shelf_signal)
 ShelfRenderer.submit	missing		player: items on shelves are invisible
 ShelfRenderer.submitItem	missing		player: shelf item slots, offsets and scale are not drawn
-ShulkerBoxRenderer.extractRenderState	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	facing, colour texture and lid progress read in the shulker branch
-ShulkerBoxRenderer.submit	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on shulker boxes (render_breaking draws only banners and chests)
-ShulkerBoxRenderer.createModelTransform	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	facing transform in the shulker branch
+ShulkerBoxRenderer.extractRenderState	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	facing, colour texture and lid progress read in the shulker branch
+ShulkerBoxRenderer.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on shulker boxes (render_breaking draws only banners and chests)
+ShulkerBoxRenderer.createModelTransform	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	facing transform in the shulker branch
 ShulkerBoxRenderer.getExtents	port	crates/horizon-client/src/item_render/special.rs::extents	shulker lid pose extents for the item model bounds
 SkullBlockRenderer.createModel	skip:data		skull models; Horizon loads them from exported model data in BlockEntityRenderer::load
-SkullBlockRenderer.extractRenderState	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	type, wall facing and turn read from the skull kind; player skin via scene.skull
-SkullBlockRenderer.submit	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on skulls and heads (render_breaking draws only banners and chests)
-SkullBlockRenderer.submitSkull	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on skulls and heads (render_breaking draws only banners and chests)
-SkullBlockRenderer.resolveSkullRenderType	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	player head skin via scene.skull, otherwise the type's texture
-SkullBlockRenderer.createWallTransformation	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	wall skull offset and turn in the skull branch
-SkullBlockRenderer.createGroundTransformation	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	ground skull turn by segment in the skull branch
+SkullBlockRenderer.extractRenderState	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	type, wall facing and turn read from the skull kind; player skin via scene.skull
+SkullBlockRenderer.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on skulls and heads (render_breaking draws only banners and chests)
+SkullBlockRenderer.submitSkull	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on skulls and heads (render_breaking draws only banners and chests)
+SkullBlockRenderer.resolveSkullRenderType	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	player head skin via scene.skull, otherwise the type's texture
+SkullBlockRenderer.createWallTransformation	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	wall skull offset and turn in the skull branch
+SkullBlockRenderer.createGroundTransformation	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	ground skull turn by segment in the skull branch
 SpawnerRenderer.extractRenderState	port	crates/horizon-client/src/mobs/spawner.rs::display_pose	spin and scale of the display mob
 SpawnerRenderer.submit	port	crates/horizon-client/src/game/spawner.rs::Game::spawner_geometry	display mob at the spawner's centre with spin, tilt and scale
-StandingSignRenderer.extractRenderState	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: minor: the text filtering option is not read
-StandingSignRenderer.createTransformations	inline	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	front and back text transforms per attachment
+StandingSignRenderer.extractRenderState	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: minor: the text filtering option is not read
+StandingSignRenderer.createTransformations	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	front and back text transforms per attachment
 TestInstanceRenderer.extractRenderState	missing		player: creative players placing a test instance block see no beacon beam, box or error markers
 TestInstanceRenderer.submit	missing		player: creative players placing a test instance block see no beacon beam or box
 TestInstanceRenderer.submitErrorMarker	missing		player: red error markers and their text are not drawn
 TestInstanceRenderer.shouldRenderOffScreen	missing		minor: culling policy of a renderer Horizon lacks
 TestInstanceRenderer.shouldRender	missing		minor: culling policy of a renderer Horizon lacks
-TheEndGatewayRenderer.submit	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	beam and visible cube faces in the end gateway branch
-TheEndPortalRenderer.submit	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::render_one	portal slab in the end portal branch
+TheEndGatewayRenderer.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	beam and visible cube faces in the end gateway branch
+TheEndPortalRenderer.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	portal slab in the end portal branch
 TrialSpawnerRenderer.extractRenderState	port	crates/horizon-client/src/mobs/spawner.rs::display_pose	same spin and scale rule as spawners
 TrialSpawnerRenderer.submit	port	crates/horizon-client/src/game/spawner.rs::Game::spawner_geometry	trial spawner display mob drawn in the same pass
 VaultRenderer.extractRenderState	inline	crates/horizon-client/src/game/vault.rs::Game::vault_geometry	display item and spin read there

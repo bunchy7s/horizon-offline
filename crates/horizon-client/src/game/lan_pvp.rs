@@ -107,6 +107,7 @@ impl Game<'_> {
         if let Some(strike) = self.pvp_strike()
             && self.pvp_land(&mut host, Victim::Guest(conn), &strike)
         {
+            self.weapon_hit_player(Self::pvp_victim_on_ground(&host, Victim::Guest(conn), None));
             self.pvp_exhaustion();
             if strike.stops_sprint() {
                 self.stop_sprint_after_extra_knockback();
@@ -114,6 +115,23 @@ impl Game<'_> {
         }
         self.lan = Some(host);
         true
+    }
+
+    /// Whether the player a hit landed on stands on the ground (the host's
+    /// `ground` is passed in as `host_on_ground` when the host is the victim).
+    pub(super) fn pvp_victim_on_ground(
+        host: &LanHost,
+        victim: Victim,
+        host_on_ground: Option<bool>,
+    ) -> bool {
+        match victim {
+            Victim::Host => host_on_ground.unwrap_or(true),
+            Victim::Guest(conn) => host
+                .hub
+                .guest(conn)
+                .and_then(|g| g.motion.as_deref())
+                .is_some_and(|p| p.ground.on_ground),
+        }
     }
 
     /// The player `id` that guest `conn` attacks, if it is one.

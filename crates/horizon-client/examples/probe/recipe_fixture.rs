@@ -10,6 +10,7 @@ use horizon_client::{
     items::Items,
     stations::StationRecipes,
 };
+use horizon_world::loot::PackOverlay;
 use std::{fs, path::Path};
 
 pub fn main() -> horizon_client::Result<()> {
@@ -19,9 +20,9 @@ pub fn main() -> horizon_client::Result<()> {
             .ok_or("usage: recipe_fixture RESOURCES INPUT OUTPUT")?,
     );
     let input = fs::read_to_string(args.get(2).ok_or("missing INPUT")?)?;
-    let items = Items::catalog(root)?;
-    let recipes = Recipes::load(root, &items)?;
-    let stations = StationRecipes::load(root, &items);
+    let items = Items::catalog(root, &PackOverlay::NONE)?;
+    let recipes = Recipes::load(root, &items, &PackOverlay::NONE)?;
+    let stations = StationRecipes::load(root, &items, &PackOverlay::NONE);
     let enchantments = Enchantments::load(root);
     let mut out = String::new();
     for line in input.lines() {

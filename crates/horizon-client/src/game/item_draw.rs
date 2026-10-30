@@ -199,7 +199,7 @@ impl Game<'_> {
     }
     pub(super) fn item_host(&self) -> Host<'_> {
         Host {
-            banners: &self.res.stations().banners,
+            banners: &self.stations().banners,
             sprites: &self.gui.atlas.sprites,
             skins: &self.skin_downloads,
             profiles: &self.skin_profiles,

@@ -119,8 +119,9 @@ fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_enti
             }
             // SnowGolem.DATA_PUMPKIN_ID: 16 while the pumpkin is on.
             (Species::SnowGolem, 16, Value::Byte(flags)) => m.extra.sheared = flags & 16 == 0,
-            // MushroomCow.DATA_TYPE: 0 red, 1 brown.
-            (Species::Mooshroom, 17, Value::Int(variant)) => {
+            // MushroomCow.DATA_TYPE (after AgeableMob's DATA_BABY_ID and
+            // AGE_LOCKED): 0 red, 1 brown.
+            (Species::Mooshroom, 18, Value::Int(variant)) => {
                 m.extra.variant = (*variant == 1) as u8
             }
             // Piglin.DATA_IS_DANCING: the dance pose.
@@ -133,6 +134,8 @@ fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_enti
             // Cat.IS_LYING and RELAX_STATE_ONE.
             (Species::Cat, 21, Value::Bool(lying)) => m.extra.flag = *lying,
             (Species::Cat, 22, Value::Bool(relaxing)) => m.extra.relax_one = *relaxing,
+            // Wolf.DATA_INTERESTED_ID: begging, which tilts the head.
+            (Species::Wolf, 20, Value::Bool(begging)) => m.extra.flag = *begging,
             // Wolf.DATA_COLLAR_COLOR and Cat's.
             (Species::Wolf, 21, Value::Int(c)) | (Species::Cat, 23, Value::Int(c)) => {
                 m.extra.color = (*c & 15) as u8;
@@ -178,6 +181,10 @@ fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_enti
             }
             // Vex.DATA_FLAGS_ID: charging in bit 0.
             (Species::Vex, 16, Value::Byte(flags)) => m.extra.flag = flags & 1 != 0,
+            // GlowSquid.DATA_DARK_TICKS_REMAINING (after AgeableMob's two).
+            (Species::GlowSquid, 18, Value::Int(ticks)) => {
+                horizon_client::mobs::aquatic::set_dark_ticks(m, *ticks);
+            }
             // Creaking.CAN_MOVE, IS_ACTIVE and IS_TEARING_DOWN.
             (Species::Creaking, 16, Value::Bool(can_move)) => m.extra.flag2 = !*can_move,
             (Species::Creaking, 17, Value::Bool(active)) => m.extra.flag = *active,
@@ -524,6 +531,21 @@ mod tests {
     }
 
     #[test]
+    fn a_mooshroom_takes_its_type_after_the_age_lock() {
+        let Some(mut m) = mob("minecraft:mooshroom") else {
+            return;
+        };
+        // AgeableMob.AGE_LOCKED (17) is not the colour.
+        apply(&mut m, &[(17, s::BOOLEAN, Value::Bool(true))]);
+        assert_eq!(m.extra.variant, 0);
+        // MushroomCow.DATA_TYPE (18): what MushroomCow.thunderHit changes.
+        apply(&mut m, &[(18, s::INT, Value::Int(1))]);
+        assert_eq!(m.extra.variant, 1);
+        apply(&mut m, &[(18, s::INT, Value::Int(0))]);
+        assert_eq!(m.extra.variant, 0);
+    }
+
+    #[test]
     fn a_sheep_takes_its_wool_and_a_calf_its_size() {
         let Some(mut m) = mob("minecraft:sheep") else {
             return;
@@ -617,6 +639,35 @@ mod tests {
         );
         assert!(m.extra.tame && m.extra.sitting);
         assert_eq!(m.extra.color, 11);
+    }
+
+    /// Wolf.DATA_INTERESTED_ID: the begging flag reaches the client, whose
+    /// own `Wolf.tick` eases `interestedAngle` toward it (0.4 of the way a
+    /// tick), and `getHeadRollAngle` tilts the head by it.
+    #[test]
+    fn a_wolf_tilts_its_head_while_the_server_says_it_begs() {
+        use horizon_client::mobs::sync::client_tick;
+        let Some(mut m) = mob("minecraft:wolf") else {
+            return;
+        };
+        apply(&mut m, &[(20, s::BOOLEAN, Value::Bool(true))]);
+        client_tick(&mut m, 0);
+        assert!((m.anim.v[tame::INTEREST] - 0.4).abs() < 1e-6);
+        assert_eq!(m.anim.vo[tame::INTEREST], 0.0);
+        client_tick(&mut m, 0);
+        assert!((m.anim.v[tame::INTEREST] - 0.64).abs() < 1e-6);
+        assert!((m.anim.lerp(tame::INTEREST, 0.5) - 0.52).abs() < 1e-6);
+        for _ in 0..30 {
+            client_tick(&mut m, 0);
+        }
+        assert!(m.anim.v[tame::INTEREST] > 0.999);
+        apply(&mut m, &[(20, s::BOOLEAN, Value::Bool(false))]);
+        client_tick(&mut m, 0);
+        assert!(m.anim.v[tame::INTEREST] < 0.61);
+        for _ in 0..30 {
+            client_tick(&mut m, 0);
+        }
+        assert!(m.anim.v[tame::INTEREST] < 0.001);
     }
 
     #[test]

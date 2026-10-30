@@ -94,7 +94,7 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 | `respawn` | `respawn` | Respawn from the death screen | none |
 | `pause` | `pause` | Open the pause menu | none |
 | `resume` | `resume` | Leave the pause menu | none |
-| `options [PAGE]` | `options` | Open the options screen, or one of its pages (Horizon's too) | `page` (main, video, sound, controls, keybinds, controller, controller-binds, mouse, chat, accessibility, language, font, packs, mods, shader-packs, graphics, graphics-advanced, extras, horizon, agent): the page (default: the main options) |
+| `options [PAGE]` | `options` | Open the options screen, or one of its pages (Horizon's too) | `page` (main, video, sound, controls, keybinds, controller, controller-binds, mouse, chat, accessibility, language, font, packs, mods, shader-packs, graphics, graphics-advanced, graphics-hdr, extras, horizon, agent): the page (default: the main options) |
 | `book [next\|back\|take\|done]` | `book` | The open book or lectern: its page text, or press one of its buttons | `action` (next, back, take, done): a button to press |
 | `signedit X Y Z [front\|back]` | `signedit` | Open the sign editor of the sign at X Y Z (then type and close) | `x` (integer, required): block X<br>`y` (integer, required): block Y<br>`z` (integer, required): block Z<br>`side` (front, back): which side |
 | `mount-menu` | `mount_menu` | Open the inventory of the horse, donkey, mule or llama being ridden | none |

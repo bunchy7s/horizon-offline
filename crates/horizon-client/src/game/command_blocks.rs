@@ -30,7 +30,7 @@ type Pos = (i32, i32, i32);
 
 /// The open `CommandBlockEditScreen`.
 pub(super) struct CommandBlockScreen {
-    pos: Pos,
+    pub(super) pos: Pos,
     /// The command box with its `CommandSuggestions`.
     command: ChatScreen,
     /// When the command box was focused, for its cursor's blink.
@@ -112,7 +112,6 @@ impl CommandBlockScreen {
         self.previous.set_value(&shown);
     }
 }
-
 fn state_of(registry: &BlockRegistry, state: BlockStateId) -> Option<&BlockState> {
     registry.state(state)
 }
@@ -240,6 +239,40 @@ impl Game<'_> {
     fn update_output_signal(&mut self, pos: Pos) {
         let at = BlockPos::new(pos.0, pos.1, pos.2);
         self.with_level(|b, level, ticks| b.update_neighbour_for_output_signal(level, ticks, at));
+    }
+    /// `CommandBlockEditScreen.updateGui`: the server's block-entity data
+    /// arrived while the screen is open; refresh the fields from the entity.
+    /// The mode and conditional live in the block state here (vanilla's
+    /// `CommandBlockEntity.Mode`).
+    pub(super) fn update_command_block_screen(&mut self) {
+        let Some(screen_pos) = self.command_block_screen.as_ref().map(|s| s.pos) else {
+            return;
+        };
+        let state = self.block_state_at(screen_pos).map(|s| {
+            (
+                Mode::of_block(&s.name).unwrap_or(Mode::Redstone),
+                conditional(s),
+            )
+        });
+        let block = self.command_block(screen_pos).cloned();
+        let m = Measure(&self.gui.atlas.font);
+        let c = Commands {
+            dispatcher: super::chat::chat_tree(&self.remote),
+            registries: &self.ui.registries,
+        };
+        let Some(screen) = self.command_block_screen.as_mut() else {
+            return;
+        };
+        if let Some((mode, conditional)) = state {
+            screen.mode = mode;
+            screen.conditional = conditional;
+        }
+        if let Some(block) = block {
+            screen.command.suggest_command(&m, &c, &block.command);
+            screen.track_output = block.track_output;
+            screen.auto = block.auto;
+            screen.show_previous(&block);
+        }
     }
 
     /// `CommandBlock.setPlacedBy`: unless the item carried block entity data
@@ -458,7 +491,7 @@ impl Game<'_> {
         let (w, h) = self.gui_size();
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: super::chat::chat_tree(&self.remote, &self.mods),
+            dispatcher: super::chat::chat_tree(&self.remote),
             registries: &self.ui.registries,
         };
         let mut command = ChatScreen::command_block(&m, &c, &block.command, w as i32, h as i32);
@@ -533,7 +566,7 @@ impl Game<'_> {
         // The command box, then its suggestions over the widgets.
         let m = Measure(&atlas.font);
         let c = Commands {
-            dispatcher: super::chat::chat_tree(&self.remote, &self.mods),
+            dispatcher: super::chat::chat_tree(&self.remote),
             registries: &self.ui.registries,
         };
         s.command.resize(&m, &c, w as i32, h as i32);
@@ -566,7 +599,7 @@ impl Game<'_> {
         };
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: super::chat::chat_tree(&self.remote, &self.mods),
+            dispatcher: super::chat::chat_tree(&self.remote),
             registries: &self.ui.registries,
         };
         s.command.server_suggestions(&m, &c, id, range, list);
@@ -580,7 +613,7 @@ impl Game<'_> {
         {
             let m = Measure(&self.gui.atlas.font);
             let c = Commands {
-                dispatcher: super::chat::chat_tree(&self.remote, &self.mods),
+                dispatcher: super::chat::chat_tree(&self.remote),
                 registries: &self.ui.registries,
             };
             let (x, y) = (f64::from(self.cursor.0), f64::from(self.cursor.1));
@@ -653,7 +686,7 @@ impl Game<'_> {
         };
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: super::chat::chat_tree(&self.remote, &self.mods),
+            dispatcher: super::chat::chat_tree(&self.remote),
             registries: &self.ui.registries,
         };
         if s.command.suggestions_key(&m, &c, key, shift) {
@@ -700,7 +733,7 @@ impl Game<'_> {
         };
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
-            dispatcher: super::chat::chat_tree(&self.remote, &self.mods),
+            dispatcher: super::chat::chat_tree(&self.remote),
             registries: &self.ui.registries,
         };
         s.command.type_text(&m, &c, &allowed);

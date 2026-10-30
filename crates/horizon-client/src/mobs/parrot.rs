@@ -1,6 +1,9 @@
-//! What `Parrot.aiStep` adds: imitating the mobs around it (`imitateNearbyMobs`,
-//! the ambient sound of `getAmbient`) and dancing near a playing jukebox.
-use super::{Mob, MobEvent, MobWorld, Species};
+//! Parrots: flying (`FlyingMoveControl`, `FlyingPathNavigation`, the wander
+//! that heads for trees), flapping and gliding down (`calculateFlapping`),
+//! and what `Parrot.aiStep` adds: imitating the mobs around it
+//! (`imitateNearbyMobs`, the ambient sound of `getAmbient`) and dancing near
+//! a playing jukebox.
+use super::{Mob, MobEvent, MobWorld, Species, control::MoveKind, nav::NavKind, path::PathType};
 use horizon_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
@@ -135,4 +138,189 @@ pub fn ambient(m: &mut Mob, w: &MobWorld) -> &'static str {
         return IMITATIONS[i as usize].1;
     }
     "entity.parrot.ambient"
+}
+
+/// `Parrot(EntityType, Level)` with `createNavigation` and `registerGoals`:
+/// a `FlyingMoveControl(10, false)` that lets gravity back on when it has
+/// nowhere to go, and a `FlyingPathNavigation` that floats and opens no doors.
+pub fn register(m: &mut Mob) {
+    m.ai.mov.kind = MoveKind::Flying {
+        max_turn: 10.0,
+        hovers: false,
+    };
+    m.ai.nav.kind = NavKind::Flying;
+    m.ai.nav.can_open_doors = false;
+    m.ai.nav.can_float = true;
+    m.set_malus(PathType::FireInNeighbor, -1.0);
+    m.set_malus(PathType::Fire, -1.0);
+    m.set_malus(PathType::Cocoa, -1.0);
+    super::tame::register_parrot(m);
+}
+
+/// The wings of `Parrot.calculateFlapping`: `flapSpeed` rises in the air and
+/// falls on the ground or a shoulder, `flapping` restarts at 1 in the air and
+/// decays, and `flap` turns by it. A client runs it for the parrots it only
+/// displays.
+pub fn flap(m: &mut Mob) {
+    let grounded = m.on_ground || m.extra.mount.is_some();
+    let a = &mut m.anim;
+    a.flap_o = a.flap;
+    a.flap_speed_o = a.flap_speed;
+    a.flap_speed = (a.flap_speed + if grounded { -1.0 } else { 4.0 } * 0.3).clamp(0.0, 1.0);
+    if !m.on_ground && a.flapping < 1.0 {
+        a.flapping = 1.0;
+    }
+    a.flapping *= 0.9;
+    a.flap += a.flapping * 2.0;
+}
+
+/// `Parrot.calculateFlapping`, after the rest of `aiStep`: the wings, and a
+/// parrot falling through the air glides down at 0.6 of the speed.
+pub fn calculate_flapping(m: &mut Mob) {
+    flap(m);
+    if !m.on_ground && m.velocity.y < 0.0 {
+        m.velocity.y *= 0.6;
+    }
+}
+
+/// `Parrot.isFlapping` and `onFlap` (from `Entity.processFlappingMovement`,
+/// when a move ends in the air): a wing beat each half `flapSpeed` flown.
+pub fn process_flapping(m: &mut Mob, events: &mut Vec<MobEvent>) {
+    if m.ai.steps.fly_dist > m.ai.steps.next_flap {
+        if !m.silent {
+            let at = [m.position.x, m.position.y, m.position.z];
+            events.push(MobEvent::Sound("entity.parrot.fly", at, 0.15, 1.0));
+        }
+        m.ai.steps.next_flap = m.ai.steps.fly_dist + m.anim.flap_speed / 2.0;
+    }
+}
+
+/// `Parrot.ParrotWanderGoal.getPosition`: out of water onto land; otherwise
+/// (all but one time in a thousand) the top of a tree nearby; failing both,
+/// `WaterAvoidingRandomFlyingGoal.getPosition`.
+pub fn wander_pos(m: &mut Mob, w: &MobWorld) -> Option<[f64; 3]> {
+    let mut pos = None;
+    if m.fluids.in_water {
+        pos = m.land_random_pos(w, 15, 15);
+    }
+    // WaterAvoidingRandomStrollGoal.probability.
+    if m.random.next_float() >= 0.001 {
+        pos = tree_pos(m, w);
+    }
+    pos.or_else(|| m.flying_stroll_pos(w))
+}
+
+/// `Parrot.ParrotWanderGoal.getTreePos`: within 3 blocks across and 6 up or
+/// down (x fastest, then y, then z, as `BlockPos.betweenClosed` walks), the
+/// first empty block with an empty one above over leaves or a log.
+fn tree_pos(m: &Mob, w: &MobWorld) -> Option<[f64; 3]> {
+    let (x, y, z) = (m.position.x, m.position.y, m.position.z);
+    let at = [x.floor() as i32, y.floor() as i32, z.floor() as i32];
+    let air = |p: [i32; 3]| {
+        matches!(
+            w.block_name(p[0], p[1], p[2]),
+            "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
+        )
+    };
+    for bz in (z - 3.0).floor() as i32..=(z + 3.0).floor() as i32 {
+        for by in (y - 6.0).floor() as i32..=(y + 6.0).floor() as i32 {
+            for bx in (x - 3.0).floor() as i32..=(x + 3.0).floor() as i32 {
+                let p = [bx, by, bz];
+                if p == at {
+                    continue;
+                }
+                let below = w.block_name(bx, by - 1, bz);
+                let tree = below.ends_with("_leaves") || w.has_tag("minecraft:logs", below);
+                if tree && air(p) && air([bx, by + 1, bz]) {
+                    return Some([f64::from(bx) + 0.5, f64::from(by), f64::from(bz) + 0.5]);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mobs::sensor_scan_tests::kind;
+    use std::sync::Arc;
+
+    fn parrot() -> Mob {
+        let mut k = (*kind()).clone();
+        k.id = "minecraft:parrot".into();
+        k.species = Species::Parrot;
+        k.flags.omnidirectional = true;
+        Mob::new(1, Arc::new(k), Vec3::ZERO, 0.0)
+    }
+
+    /// `Parrot()`: `FlyingMoveControl(this, 10, false)`, the path maluses,
+    /// and `createNavigation`'s `FlyingPathNavigation` (no doors, floats).
+    #[test]
+    fn a_parrot_flies_by_its_navigation_and_move_control() {
+        let m = parrot();
+        assert_eq!(
+            m.ai.mov.kind,
+            MoveKind::Flying {
+                max_turn: 10.0,
+                hovers: false
+            }
+        );
+        assert_eq!(m.ai.nav.kind, NavKind::Flying);
+        assert!(!m.ai.nav.can_open_doors);
+        assert!(m.ai.nav.can_float);
+        for t in [PathType::FireInNeighbor, PathType::Fire, PathType::Cocoa] {
+            assert_eq!(m.malus(t), -1.0);
+        }
+        assert!(m.ai.goals.has("ParrotWander"));
+    }
+
+    /// `Parrot.calculateFlapping`: in the air the wings beat and a fall is
+    /// slowed to 0.6; on the ground or a shoulder they fold.
+    #[test]
+    fn a_falling_parrot_flaps_and_glides() {
+        let mut m = parrot();
+        m.on_ground = false;
+        m.velocity = Vec3::new(0.1, -0.5, 0.0);
+        calculate_flapping(&mut m);
+        assert!((m.velocity.y + 0.3).abs() < 1.0e-12);
+        assert_eq!(m.velocity.x, 0.1);
+        assert_eq!(m.anim.flap_speed, 1.0);
+        assert_eq!(m.anim.flapping, 0.9);
+        assert_eq!(m.anim.flap, 1.8);
+        // Rising is not slowed.
+        m.velocity = Vec3::new(0.0, 0.2, 0.0);
+        calculate_flapping(&mut m);
+        assert_eq!(m.velocity.y, 0.2);
+        assert_eq!(m.anim.flap_o, 1.8);
+        // On a shoulder (a passenger), flapSpeed falls by 0.3 a tick.
+        m.extra.mount = Some(7);
+        calculate_flapping(&mut m);
+        assert!((m.anim.flap_speed - 0.7).abs() < 1.0e-6);
+        m.extra.mount = None;
+        m.on_ground = true;
+        m.velocity = Vec3::new(0.0, -0.0784, 0.0);
+        calculate_flapping(&mut m);
+        assert!((m.anim.flap_speed - 0.4).abs() < 1.0e-6);
+        assert_eq!(m.velocity.y, -0.0784, "no glide on the ground");
+    }
+
+    /// `Parrot.onFlap`: a wing beat (`entity.parrot.fly`, 0.15) each half
+    /// `flapSpeed` flown.
+    #[test]
+    fn it_beats_its_wings_as_it_flies() {
+        let mut m = parrot();
+        m.anim.flap_speed = 1.0;
+        let mut events = Vec::new();
+        m.ai.steps.fly_dist = 0.5;
+        process_flapping(&mut m, &mut events);
+        assert!(events.is_empty(), "nextFlap starts at 1");
+        m.ai.steps.fly_dist = 1.2;
+        process_flapping(&mut m, &mut events);
+        assert!(matches!(
+            events.as_slice(),
+            [MobEvent::Sound("entity.parrot.fly", _, v, _)] if *v == 0.15
+        ));
+        assert!((m.ai.steps.next_flap - 1.7).abs() < 1.0e-6);
+    }
 }

@@ -4,9 +4,9 @@ VillagerTrades	skip:data		trade definitions are data; read from data/minecraft/t
 BlockCollisions.<init>	port	crates/horizon-world/src/block_collision_scan.rs::BlockCollisionScan::new	scan set-up over the box
 BlockCollisions.computeNext	port	crates/horizon-world/src/block_collision_scan.rs::BlockCollisionScan::find_next	next block shape along the box
 BlockCollisions.getChunk	inline	crates/horizon-world/src/block_collision_scan.rs::BlockCollisionScan::find_next	chunk fetch through collision_chunk inside find_next
-CardinalLighting.byFace	port	crates/horizon-client/src/mesher/lighting.rs::cardinal	per-face directional shade; nether flag handled in the same fn
+CardinalLighting.byFace	port	crates/horizon-client-render/src/mesher/lighting.rs::cardinal	per-face directional shade; nether flag handled in the same fn
 ClipContext.getFluidShape	inline	crates/horizon-world/src/world_ray.rs::clip_world	pick_fluid decides canPick; the shape is clipped in clip_world
-ColorMapColorUtil.get	port	crates/horizon-client/src/biome.rs::sample	colormap lookup by temperature and downfall
+ColorMapColorUtil.get	port	crates/horizon-client-render/src/biome.rs::sample	colormap lookup by temperature and downfall
 EntityBasedExplosionDamageCalculator.getBlockExplosionResistance	missing		unsure: source-entity overrides (wither skull, minecart TNT, primed TNT keeping nether portals) are not read; explosion_hit_block uses the block's own resistance
 ExplosionDamageCalculator.getEntityDamageAmount	inline	crates/horizon-client/src/game/explosion.rs::Game::explosion_hurt_entities	damage formula inline; the player copy is in explosion_hurt_player
 LevelSettings.copy	skip:java		immutable record copy; Horizon keeps level fields on its own struct
@@ -103,7 +103,7 @@ BlastFurnaceBlock.openContainer	port	crates/horizon-world/src/level/interact.rs:
 BonemealableFeaturePlacerBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Behaviours::place_feature	places the configured feature
 BrewingStandBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	brewing bubbles
 BrewingStandBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
-BrewingStandBlock.getTicker	port	crates/horizon-client/src/brewing.rs::BrewingStand::brew	the stand's brewing step
+BrewingStandBlock.getTicker	port	crates/horizon-client-render/src/brewing.rs::BrewingStand::brew	the stand's brewing step
 BuddingAmethystBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::budding_amethyst_tick	
 BushBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	
 CactusFlowerBlock.mayPlaceOn	port	crates/horizon-world/src/level/survive.rs::Sim::may_place_on	

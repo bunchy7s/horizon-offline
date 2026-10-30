@@ -65,7 +65,7 @@ impl Game<'_> {
         };
         let at = [at.x, at.y, at.z];
         let equippable = new
-            .and_then(|s| self.res.items().get(&s.item))
+            .and_then(|s| self.items().get(&s.item))
             .and_then(|info| {
                 let own = info.equip_slot.as_deref()?;
                 Some((own == slot, info.equip_sound.clone()))

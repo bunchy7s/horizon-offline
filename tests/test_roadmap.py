@@ -24,6 +24,8 @@ id = "fast"
 title = "Fast"
 status = "now"
 area = "performance"
+owner = "some-dev"
+issue = "#20"
 focus = true
 plain = "Faster."
 dev = """Multiply, \\
@@ -35,6 +37,8 @@ id = "faster"
 title = "Faster"
 status = "now"
 area = "performance"
+owner = "some-dev"
+issue = "#21"
 focus = true
 plain = "Even faster."
 dev = "More (#11)."
@@ -45,6 +49,8 @@ id = "fastest"
 title = "Fastest"
 status = "now"
 area = "performance"
+owner = "some-dev"
+issue = "#22"
 focus = true
 ongoing = true
 plain = "The fastest."
@@ -129,6 +135,35 @@ class Rules(unittest.TestCase):
         self.assertEqual(self.problems(announce=True), [])
         self.assertTrue(any("announce is true or false" in p for p in self.problems(announce="yes")))
 
+    def test_now_items_have_an_owner_and_a_tracking_issue(self):
+        data = tomllib.loads(SAMPLE)
+        del data["item"][0]["owner"]
+        data["item"][1]["issue"] = "3859"
+        data["item"][2]["owner"] = "@not a login"
+        problems = roadmap.validate(data)
+        self.assertIn("item fast: a Now item needs an owner and a tracking issue", problems)
+        self.assertTrue(any(p.startswith("item faster: issue is the tracking issue") for p in problems))
+        self.assertTrue(any(p.startswith("item fastest: owner is one GitHub login") for p in problems))
+        data = tomllib.loads(SAMPLE)
+        data["item"][3]["owner"] = "some-dev"
+        self.assertIn("item old: shipped items have no owner or tracking issue", roadmap.validate(data))
+
+    def test_now_and_next_are_short(self):
+        data = tomllib.loads(SAMPLE)
+        extra = dict(data["item"][0], focus=False)
+        data["item"] += [dict(extra, id=f"now-{i}") for i in range(6)]
+        data["item"] += [dict(extra, id=f"next-{i}", status="next") for i in range(13)]
+        problems = roadmap.validate(data)
+        self.assertIn("Now: 9 items, at most 8: move the rest to Later", problems)
+        self.assertIn("Next: 13 items, at most 12: move the rest to Later", problems)
+
+    def test_owner_and_tracking_issue_are_shown(self):
+        data = tomllib.loads(SAMPLE)
+        self.assertIn("Owner: [some-dev](https://github.com/some-dev) · Tracking: "
+                      "[#20](https://github.com/horizon-rust/horizon/issues/20)", roadmap.render(data))
+        site = json.loads(roadmap.site_data(data))
+        self.assertEqual((site["items"][0]["owner"], site["items"][0]["issue"]), ("some-dev", "#20"))
+
     def test_three_to_five_items_in_focus(self):
         self.assertTrue(any("focus" in p for p in self.problems(focus=False)))
 
@@ -160,11 +195,18 @@ class GitHubState(unittest.TestCase):
         data = tomllib.loads(SAMPLE)
         states = {1: pull("MERGED", "2029-12-01T00:00:00Z"), 10: pull("OPEN"),
                   11: pull("MERGED", "2029-11-01T00:00:00Z"), 12: issue("OPEN"),
-                  13: pull("MERGED", "2030-01-19T00:00:00Z")}
+                  13: pull("MERGED", "2030-01-19T00:00:00Z"), 20: issue("OPEN"), 21: issue("OPEN"), 22: issue("OPEN")}
         problems, notes = roadmap.online_problems(data, states, self.now)
         self.assertEqual(len(problems), 1)
         self.assertIn("faster: stale", problems[0])
         self.assertTrue(any("fastest: ongoing" in note for note in notes))
+
+    def test_the_tracking_issue_is_an_open_issue(self):
+        states = {1: pull("MERGED", "2029-12-01T00:00:00Z"), 10: pull("OPEN"), 11: pull("OPEN"), 12: issue("OPEN"),
+                  13: pull("OPEN"), 20: issue("CLOSED"), 21: pull("OPEN"), 22: issue("OPEN")}
+        problems, _ = roadmap.online_problems(tomllib.loads(SAMPLE), states, self.now)
+        self.assertEqual(sorted(p.split(":")[0] for p in problems), ["item fast", "item faster"])
+        self.assertTrue(all("tracking issue" in p for p in problems))
 
     def test_missing_numbers_are_reported(self):
         problems, _ = roadmap.online_problems(tomllib.loads(SAMPLE), {}, self.now)
@@ -223,7 +265,8 @@ class Sync(unittest.TestCase):
         self.assertEqual([item["id"] for item in new["item"]], ["faster", "fastest", "fast", "old"])
         fast = new["item"][2]
         self.assertEqual((fast["status"], fast["shipped_in"]), ("shipped", "v0.2.9"))
-        self.assertNotIn("focus", fast)
+        for key in ("focus", "owner", "issue"):
+            self.assertNotIn(key, fast)
         self.assertEqual(fast["dev"], "Multiply, not divide (#10).")
         self.assertIn("# ---- Shipped\n\n[[item]]\nid = \"fast\"", text)
 

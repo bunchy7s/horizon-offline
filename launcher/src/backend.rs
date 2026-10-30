@@ -97,7 +97,11 @@ pub(crate) const CLIENT: &str = if cfg!(windows) {
 /// one is set (`proxy`).
 fn agent(url: &str) -> ureq::Agent {
     crate::proxy::agent(
-        ureq::AgentBuilder::new().user_agent(&format!("horizon-launcher/{VERSION}")),
+        ureq::AgentBuilder::new()
+            .user_agent(&format!("horizon-launcher/{VERSION}"))
+            // A connection that goes quiet fails instead of waiting for ever.
+            .timeout_connect(std::time::Duration::from_secs(15))
+            .timeout_read(std::time::Duration::from_secs(60)),
         url,
     )
     .build()
@@ -1022,6 +1026,9 @@ pub fn reuse_prepared_everywhere() -> Vec<(String, String)> {
     let versions = versions_dir();
     let reused = reuse_prepared_in(&versions);
     for tag in installed_in(&versions) {
+        // Here, on the start-up thread, and not in `complete_assets`, which Play also runs: a
+        // download of thousands of files is not for the moment the game is waited for.
+        refill_own_store(&tag);
         complete_assets(&tag);
     }
     reused
@@ -1167,6 +1174,38 @@ pub fn complete_assets(tag: &str) {
     complete_assets_in(&versions_dir(), tag, minecraft_folders, &|line| {
         eprintln!("{line}")
     });
+}
+
+/// Horizon's own download (an owner's) may have stopped before the sounds and the languages,
+/// and the copies of `complete_assets` read them from its store: asked again, once per run, through
+/// the same owner gate as any download from Mojang (`download_for_owner`), which keeps the files
+/// already whole. Called where a download is expected (`reuse_prepared_everywhere`), never on Play.
+fn refill_own_store(tag: &str) {
+    static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let own = data_dir().join("minecraft");
+    let resources = resources_at(&versions_dir().join(tag));
+    if !own.join("assets/indexes").is_dir()
+        || !(lacks_languages(&resources) || !sounds_in(&resources))
+        || ASKED.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        return;
+    }
+    let Some(pins) = read_json(&version_dir(tag).join("research-lock.json"))
+        .and_then(|l| sources::Pins::read(&l))
+    else {
+        return;
+    };
+    let fetch = |url: &str| -> Result<Vec<u8>, String> {
+        let mut body = Vec::new();
+        get(url)?
+            .into_reader()
+            .read_to_end(&mut body)
+            .map_err(|e| e.to_string())?;
+        Ok(body)
+    };
+    if let Err(e) = download_for_owner(&pins, &own, &fetch, &|line| eprintln!("{line}")) {
+        eprintln!("{tag}: the missing assets were not downloaded: {e}");
+    }
 }
 
 /// `folders`: where to look, asked only when the version lacks something.
@@ -3163,9 +3202,32 @@ mod tests {
         assert!(body("download_for").contains("mojang::download("));
         assert!(body("download_for_owner").contains("account::launch("));
         assert!(!body("download_for_owner").contains("launch_for_game("));
-        // `download_for_owner` is defined once and called three times (from the version downloader
-        // and the two prepare paths).
-        assert_eq!(backend.matches("download_for_owner(").count(), 4);
+        // `download_for` is defined once and called once, by `download_for_owner`.
+        assert_eq!(backend.matches("download_for(").count(), 2);
+        assert!(body("download_for_owner").contains("download_for("));
+        // Refilling an incomplete store asks the same gate and names no host or download itself.
+        assert!(body("refill_own_store").contains("download_for_owner("));
+        assert!(!body("refill_own_store").contains("mojang::"));
+        // It runs at start-up, never on Play, which also runs `complete_assets`.
+        let public = |f: &str| {
+            let start = backend
+                .find(&format!(
+                    "
+pub fn {f}("
+                ))
+                .unwrap();
+            &backend[start
+                ..start
+                    + backend[start + 1..]
+                        .find(
+                            "
+}
+",
+                        )
+                        .unwrap()]
+        };
+        assert!(public("reuse_prepared_everywhere").contains("refill_own_store("));
+        assert!(!public("complete_assets").contains("refill_own_store("));
         for host in [
             "piston-data",
             "libraries.minecraft.net",

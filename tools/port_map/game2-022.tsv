@@ -113,35 +113,35 @@ PerlinNoise.parityConfigString	skip:debug		test parity dump
 SimplexNoise.getCornerNoise3D	port	crates/horizon-core/src/noise/simplex.rs::SimplexNoise::corner	
 SimplexNoise.get	port	crates/horizon-core/src/noise/simplex.rs::SimplexNoise::get2	2D simplex
 SmearedPerlinNoise.get	port	crates/horizon-core/src/noise/perlin.rs::SmearedPerlinNoise::get3	fudged y
-ChunkSkyLightSources.fillFrom	inline	crates/horizon-client/src/light.rs::light_chunk	sky light for a loaded chunk computed in light_chunk
-ChunkSkyLightSources.findLowestSourceY	port	crates/horizon-client/src/light.rs::lowest_sky_source	
-ChunkSkyLightSources.update	inline	crates/horizon-client/src/light.rs::relight_region	columns of changed cells are recomputed
-ChunkSkyLightSources.updateEdge	inline	crates/horizon-client/src/light.rs::relight_region	columns of changed cells are recomputed
-ChunkSkyLightSources.findLowestSourceBelow	port	crates/horizon-client/src/light.rs::lowest_sky_source	downward column scan
+ChunkSkyLightSources.fillFrom	inline	crates/horizon-client-render/src/light.rs::light_chunk	sky light for a loaded chunk computed in light_chunk
+ChunkSkyLightSources.findLowestSourceY	port	crates/horizon-client-render/src/light.rs::lowest_sky_source	
+ChunkSkyLightSources.update	inline	crates/horizon-client-render/src/light.rs::relight_region	columns of changed cells are recomputed
+ChunkSkyLightSources.updateEdge	inline	crates/horizon-client-render/src/light.rs::relight_region	columns of changed cells are recomputed
+ChunkSkyLightSources.findLowestSourceBelow	port	crates/horizon-client-render/src/light.rs::lowest_sky_source	downward column scan
 ChunkSkyLightSources.getHighestLowestSourceY	skip:other		vanilla skips filling sections below the highest source; light_chunk floods every cell
-ChunkSkyLightSources.fill	inline	crates/horizon-client/src/light.rs::light_chunk	empty columns lit inside light_chunk
-LevelLightEngine.checkBlock	inline	crates/horizon-client/src/light.rs::relight	changed positions are passed in, no queue
+ChunkSkyLightSources.fill	inline	crates/horizon-client-render/src/light.rs::light_chunk	empty columns lit inside light_chunk
+LevelLightEngine.checkBlock	inline	crates/horizon-client-render/src/light.rs::relight	changed positions are passed in, no queue
 LevelLightEngine.hasLightWork	skip:other		relight runs synchronously; there is no pending work to query
-LevelLightEngine.runLightUpdates	inline	crates/horizon-client/src/light.rs::relight	block then sky pass, run immediately
+LevelLightEngine.runLightUpdates	inline	crates/horizon-client-render/src/light.rs::relight	block then sky pass, run immediately
 LevelLightEngine.updateSectionStatus	skip:other		no section-empty state; relight works cell by cell
-LevelLightEngine.setLightEnabled	inline	crates/horizon-client/src/light.rs::light_chunk	chunk lit when loaded
-LevelLightEngine.propagateLightSources	inline	crates/horizon-client/src/light.rs::light_chunk	emitters seeded inside light_chunk
+LevelLightEngine.setLightEnabled	inline	crates/horizon-client-render/src/light.rs::light_chunk	chunk lit when loaded
+LevelLightEngine.propagateLightSources	inline	crates/horizon-client-render/src/light.rs::light_chunk	emitters seeded inside light_chunk
 LevelLightEngine.getLayerListener	skip:other		listener API; relight returns the changed positions instead
 LevelLightEngine.getDebugData	skip:debug		
 LevelLightEngine.getDebugSectionType	skip:debug		
 LevelLightEngine.retainData	skip:other		no retained light data for unloaded chunks
 LevelLightEngine.getRawBrightness	port	crates/horizon-client/src/mobs/spawn_rules.rs::raw_brightness	
 LevelLightEngine.lightOnInColumn	skip:other		no per-column light readiness flag; chunks are lit whole
-LightEngine.hasDifferentLightProperties	port	crates/horizon-client/src/light.rs::LightTables::differs	
-LightEngine.getState	port	crates/horizon-client/src/light.rs::Region::state	
-LightEngine.getChunk	port	crates/horizon-client/src/light.rs::Region::load	section lookup by key
-LightEngine.runLightUpdates	port	crates/horizon-client/src/light.rs::relight_layer	decrease then increase pass
-LightEngine.propagateIncreases	inline	crates/horizon-client/src/light.rs::relight_layer	increase queue loop
-LightEngine.propagateDecreases	inline	crates/horizon-client/src/light.rs::relight_layer	decrease queue loop
+LightEngine.hasDifferentLightProperties	port	crates/horizon-client-render/src/light.rs::LightTables::differs	
+LightEngine.getState	port	crates/horizon-client-render/src/light.rs::Region::state	
+LightEngine.getChunk	port	crates/horizon-client-render/src/light.rs::Region::load	section lookup by key
+LightEngine.runLightUpdates	port	crates/horizon-client-render/src/light.rs::relight_layer	decrease then increase pass
+LightEngine.propagateIncreases	inline	crates/horizon-client-render/src/light.rs::relight_layer	increase queue loop
+LightEngine.propagateDecreases	inline	crates/horizon-client-render/src/light.rs::relight_layer	decrease queue loop
 LightEngine.hasLightWork	skip:other		relight runs synchronously; no queues to inspect
-LightEngine.QueueEntry.increaseLightFromEmission	inline	crates/horizon-client/src/light.rs::relight_layer	emission seeds for cleared cells
+LightEngine.QueueEntry.increaseLightFromEmission	inline	crates/horizon-client-render/src/light.rs::relight_layer	emission seeds for cleared cells
 LightEngine.QueueEntry.increaseSkipOneDirection	skip:java		packed queue flags; relight_layer checks every neighbour
 LightEngine.QueueEntry.increaseOnlyOneDirection	skip:java		packed queue flags; relight_layer checks every neighbour
-LightEngine.QueueEntry.increaseSkySourceInDirections	inline	crates/horizon-client/src/light.rs::relight_layer	sky sources and straight-down rule
-LightEngine.QueueEntry.shouldPropagateInDirection	port	crates/horizon-client/src/light.rs::LightTables::blocked	inverse: blocked means no propagation
+LightEngine.QueueEntry.increaseSkySourceInDirections	inline	crates/horizon-client-render/src/light.rs::relight_layer	sky sources and straight-down rule
+LightEngine.QueueEntry.shouldPropagateInDirection	port	crates/horizon-client-render/src/light.rs::LightTables::blocked	inverse: blocked means no propagation
 LightEngine.QueueEntry.withoutDirection	skip:java		packed queue flags

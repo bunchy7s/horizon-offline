@@ -1,9 +1,0 @@
-{
-  "template": "minecraft:iron_block",
-  "properties": {
-    "hardness": 4.0,
-    "light": 3,
-    "sounds": "minecraft:amethyst_block",
-    "map_color": 28
-  }
-}

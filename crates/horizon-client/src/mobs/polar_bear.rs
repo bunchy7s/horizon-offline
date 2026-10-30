@@ -182,6 +182,13 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld) {
         stop_being_angry(m);
     }
 }
+/// `NeutralMob.playerDied`: a bear angry at the player (its target, kept in
+/// `flag2` until the anger ends) stops.
+pub fn forgive_dead_player(m: &mut Mob) {
+    if m.extra.flag2 {
+        stop_being_angry(m);
+    }
+}
 /// `NeutralMob.stopBeingAngry`.
 fn stop_being_angry(m: &mut Mob) {
     m.ai.last_hurt_by = None;

@@ -1,28 +1,28 @@
-OptionInstance.SliderableEnum.toSliderValue	port	crates/horizon-client/src/options_ui.rs::Opt::kind	slider position of the graphics preset (index / 3)
+OptionInstance.SliderableEnum.toSliderValue	port	crates/horizon-client-render/src/options_ui.rs::Opt::kind	slider position of the graphics preset (index / 3)
 OptionInstance.SliderableEnum.next	missing		minor: unsure: no next-value step for the graphics preset slider; Opt::cycle has no Preset arm
 OptionInstance.SliderableEnum.previous	missing		minor: unsure: no previous-value step for the graphics preset slider; Opt::cycle has no Preset arm
-OptionInstance.SliderableEnum.fromSliderValue	port	crates/horizon-client/src/options_ui.rs::Opt::set_slider	gap: minor: rounds v*3 where vanilla floors v*4
-OptionInstance.SliderableEnum.validateValue	port	crates/horizon-client/src/options_file.rs::Spec::validate	named spec accepts the four preset indexes
-OptionInstance.SliderableOrCyclableValueSet.createButton	port	crates/horizon-client/src/options_ui.rs::option_widget	cycle or slider button by option kind
-OptionInstance.SliderableValueSet.createButton	port	crates/horizon-client/src/options_ui.rs::option_widget	slider button
-OptionInstance.UnitDouble.validateValue	port	crates/horizon-client/src/options_file.rs::Spec::validate	unit range 0..1
-OptionInstance.UnitDouble.codec	port	crates/horizon-client/src/options_file.rs::codec_double	
+OptionInstance.SliderableEnum.fromSliderValue	port	crates/horizon-client-render/src/options_ui.rs::Opt::set_slider	gap: minor: rounds v*3 where vanilla floors v*4
+OptionInstance.SliderableEnum.validateValue	port	crates/horizon-client-render/src/options_file.rs::Spec::validate	named spec accepts the four preset indexes
+OptionInstance.SliderableOrCyclableValueSet.createButton	port	crates/horizon-client-render/src/options_ui.rs::option_widget	cycle or slider button by option kind
+OptionInstance.SliderableValueSet.createButton	port	crates/horizon-client-render/src/options_ui.rs::option_widget	slider button
+OptionInstance.UnitDouble.validateValue	port	crates/horizon-client-render/src/options_file.rs::Spec::validate	unit range 0..1
+OptionInstance.UnitDouble.codec	port	crates/horizon-client-render/src/options_file.rs::codec_double	
 Options.updateResourcePacks	port	crates/horizon-client/src/game/options.rs::Game::handle_option_events	gap: minor: saves and reloads on every packs event; vanilla only when the list changed
 Options.maxAnisotropyValue	missing		player: no anisotropic filtering setting; textures are sampled without anisotropy
-Options.createSoundSliderOptionInstance	port	crates/horizon-client/src/audio.rs::Audio::sync_volumes	gap: player: no sound preview outside a level and no now-playing toast when master or music changes
-Options.setGraphicsPresetToCustom	inline	crates/horizon-client/src/options_ui.rs::Opt::set_slider	gap: minor: cycle buttons set custom in Opt::cycle as well
-Options.processOptions	inline	crates/horizon-client/src/options_file.rs::OptionsFile::parse	gap: minor: the save direction is OptionsFile::serialize
-Options.dataFix	port	crates/horizon-client/src/options_fixes.rs::update	
+Options.createSoundSliderOptionInstance	port	crates/horizon-client-render/src/audio.rs::Audio::sync_volumes	gap: player: no sound preview outside a level and no now-playing toast when master or music changes
+Options.setGraphicsPresetToCustom	inline	crates/horizon-client-render/src/options_ui.rs::Opt::set_slider	gap: minor: cycle buttons set custom in Opt::cycle as well
+Options.processOptions	inline	crates/horizon-client-render/src/options_file.rs::OptionsFile::parse	gap: minor: the save direction is OptionsFile::serialize
+Options.dataFix	port	crates/horizon-client-render/src/options_fixes.rs::update	
 Options.getFullscreenVideoModeString	missing		player: the window's fullscreen mode is never saved to options.txt (fullscreen_resolution is only read back)
 Options.buildPlayerInformation	port	crates/horizon-client/src/net.rs::run	gap: player: only view distance and chat visibility are sent; language, skin parts, main hand, particles and text filtering stay at defaults
 Options.setModelPart	missing		player: skin layer toggles (hat, jacket, sleeves, pants legs, cape) do not change the drawn skin or the info sent to the server
-Options.loadSelectedResourcePacks	port	crates/horizon-client/src/packs.rs::enabled	gap: minor: dropped packs are not written back to resourcePacks
-Options.readListOfStrings	port	crates/horizon-client/src/options_file.rs::read_list	
+Options.loadSelectedResourcePacks	port	crates/horizon-client-render/src/packs.rs::enabled	gap: minor: dropped packs are not written back to resourcePacks
+Options.readListOfStrings	port	crates/horizon-client-render/src/options_file.rs::read_list	
 Options.dumpOptionsForReport	skip:debug		options dump for the debug report
-Options.pixelValueLabel	port	crates/horizon-client/src/options_ui.rs::chat_px	
-Options.percentValueLabel	port	crates/horizon-client/src/options_ui.rs::percent	
-Options.genericValueLabel	port	crates/horizon-client/src/options_ui.rs::generic	
-Options.percentValueOrOffLabel	port	crates/horizon-client/src/options_ui.rs::Opt::value_text	gap: minor: OFF text is only drawn for sound volumes
+Options.pixelValueLabel	port	crates/horizon-client-render/src/options_ui.rs::chat_px	
+Options.percentValueLabel	port	crates/horizon-client-render/src/options_ui.rs::percent	
+Options.genericValueLabel	port	crates/horizon-client-render/src/options_ui.rs::generic	
+Options.percentValueOrOffLabel	port	crates/horizon-client-render/src/options_ui.rs::Opt::value_text	gap: minor: OFF text is only drawn for sound volumes
 PeriodicNotificationManager.prepare	skip:other		regional play-time notices (REGIONAL_COMPLIANCIES, country check); none ship with the 26.3 assets and Horizon has no equivalent
 PeriodicNotificationManager.apply	skip:other		regional play-time notices (REGIONAL_COMPLIANCIES, country check); none ship with the 26.3 assets and Horizon has no equivalent
 PeriodicNotificationManager.calculateOptimalPeriod	skip:other		regional play-time notices (REGIONAL_COMPLIANCIES, country check); none ship with the 26.3 assets and Horizon has no equivalent
@@ -43,23 +43,23 @@ RotatingSectionStorage.containsSection	skip:java		ring of section nodes; Horizon
 RotatingSectionStorage.getSectionIndex	skip:java		ring of section nodes; Horizon keys dirty sections by coordinates (DirtySections)
 RotatingSectionStorage.forEach	skip:java		ring of section nodes; Horizon keys dirty sections by coordinates (DirtySections)
 Screenshot.grab	port	crates/horizon-client/src/game/chat.rs::Game::take_screenshot	gap: minor: no downscale factor and no callback; the result line comes from finish_screenshot
-Screenshot.takeScreenshot	port	crates/horizon-client/src/gfx.rs::Renderer::write_screenshot	gap: minor: full size only, no downscale factor
+Screenshot.takeScreenshot	port	crates/horizon-client-render/src/gfx.rs::Renderer::write_screenshot	gap: minor: full size only, no downscale factor
 Screenshot.getFile	port	crates/horizon-client/src/game/chat.rs::screenshot_name	minor: UTC instead of local time in the name
 ScrollWheelHandler.getNextScrollWheelSelection	port	crates/horizon-client-input/src/mouse.rs::ScrollWheelHandler::next_selection	
-SectionUpdateTracker.setDirty	port	crates/horizon-client/src/world.rs::DirtySections::insert	gap: minor: the from-player flag that orders remeshing is not kept
+SectionUpdateTracker.setDirty	port	crates/horizon-client-render/src/world.rs::DirtySections::insert	gap: minor: the from-player flag that orders remeshing is not kept
 SectionUpdateTracker.hasAllNeighbors	missing		minor: unsure: no separate neighbour-chunk check found; the mesher works from a 3x3 region
 SectionUpdateTracker.doesChunkExistAt	missing		minor: unsure: see hasAllNeighbors
-SectionUpdateTracker.SectionDirtyState.setDirty	port	crates/horizon-client/src/world.rs::DirtySections::insert	gap: minor: the from-player flag is not kept
+SectionUpdateTracker.SectionDirtyState.setDirty	port	crates/horizon-client-render/src/world.rs::DirtySections::insert	gap: minor: the from-player flag is not kept
 SectionUpdateTracker.SectionDirtyState.setSectionNode	skip:java		section node exists only for the rotating storage; Horizon keys sections by coordinates
-StringSplitter.stringWidth	port	crates/horizon-client/src/font.rs::Font::width	
-StringSplitter.plainIndexAtWidth	port	crates/horizon-client/src/screen_draw.rs::Measure::plain	gap: minor: measures without the style (bold widths)
-StringSplitter.plainTailByWidth	port	crates/horizon-client/src/screen_draw.rs::Measure::plain	gap: minor: same as plainIndexAtWidth, from the end
-StringSplitter.findLineBreak	port	crates/horizon-client/src/block_entity_render.rs::first_line	gap: minor: returns the line text rather than the break index; plain text only
-StringSplitter.getWordPosition	port	crates/horizon-client/src/ui.rs::word_position	gap: minor: always strips spaces; no newline stop
-StringSplitter.FlatComponents.getRemainder	inline	crates/horizon-client/src/font.rs::Font::split	the remainder is produced inside split
-StringSplitter.LineBreakFinder.accept	port	crates/horizon-client/src/font.rs::Font::split_lines	
+StringSplitter.stringWidth	port	crates/horizon-client-render/src/font.rs::Font::width	
+StringSplitter.plainIndexAtWidth	port	crates/horizon-client-render/src/screen_draw.rs::Measure::plain	gap: minor: measures without the style (bold widths)
+StringSplitter.plainTailByWidth	port	crates/horizon-client-render/src/screen_draw.rs::Measure::plain	gap: minor: same as plainIndexAtWidth, from the end
+StringSplitter.findLineBreak	port	crates/horizon-client-render/src/block_entity_render.rs::first_line	gap: minor: returns the line text rather than the break index; plain text only
+StringSplitter.getWordPosition	port	crates/horizon-client-render/src/ui.rs::word_position	gap: minor: always strips spaces; no newline stop
+StringSplitter.FlatComponents.getRemainder	inline	crates/horizon-client-render/src/font.rs::Font::split	the remainder is produced inside split
+StringSplitter.LineBreakFinder.accept	port	crates/horizon-client-render/src/font.rs::Font::split_lines	
 StringSplitter.LineComponent.visit	skip:java		visitor plumbing over FormattedText
-StringSplitter.WidthLimitedCharSink.accept	port	crates/horizon-client/src/screen_draw.rs::Measure::head	
+StringSplitter.WidthLimitedCharSink.accept	port	crates/horizon-client-render/src/screen_draw.rs::Measure::head	
 AnimationDefinition.Builder.addAnimation	skip:java		builder for code-made animations; Horizon parses animation JSON
 KeyframeAnimation.bake	inline	crates/horizon-client/src/mobs/keyframes.rs::Animation::apply	gap: minor: bones are looked up per frame; no check that a bone exists
 KeyframeAnimation.getElapsedSeconds	inline	crates/horizon-client/src/mobs/keyframes.rs::Animation::apply	seconds modulo the length when looping
@@ -67,15 +67,15 @@ KeyframeAnimations.degreeVec	missing		minor: unsure: no degree-to-radian convers
 KeyframeAnimations.scaleVec	missing		minor: unsure: no scale-offset conversion found; see degreeVec
 ColorLerper.getLerpedColor	missing		player: a sheep named jeb_ keeps one colour; no colour cycling exists in Horizon
 ColorLerper.getModifiedColor	missing		minor: only builds ColorLerper's colour tables
-BlockColors.getTintSource	port	crates/horizon-client/src/mesher.rs::Mesher::tint	
+BlockColors.getTintSource	port	crates/horizon-client-render/src/mesher.rs::Mesher::tint	
 BlockColors.register	skip:data		tint sources come from block data in Horizon
 BlockColors.getColoringProperties	skip:other		only ModelGroupCollector uses it to group block states; Horizon bakes each state
-BlockTintCache.getColor	port	crates/horizon-client/src/mesher.rs::Tints::get	
+BlockTintCache.getColor	port	crates/horizon-client-render/src/mesher.rs::Tints::get	
 BlockTintCache.invalidateForChunk	skip:java		the tint cache lives per section job (Tints::new); nothing to invalidate
 BlockTintCache.invalidateAll	skip:java		see invalidateForChunk
 BlockTintCache.findOrCreateChunkCache	skip:java		see invalidateForChunk
 BlockTintCache.CacheData.getLayer	skip:java		see invalidateForChunk
-BlockTintSources.constant	port	crates/horizon-client/src/mesher.rs::Mesher::tint	Tint::Constant arm; the source comes from block data
+BlockTintSources.constant	port	crates/horizon-client-render/src/mesher.rs::Mesher::tint	Tint::Constant arm; the source comes from block data
 CustomModelDataSource.calculate	port	crates/horizon-assets/src/item_model.rs::Resolve::tint	
 Firework.calculate	port	crates/horizon-assets/src/item_model.rs::Resolve::tint	
 ItemTintSources.bootstrap	skip:data		item tint ids are registered from data
@@ -84,7 +84,7 @@ net/minecraft/client/color/item/TeamColor#calculate	port	crates/horizon-assets/s
 ClientAvatarState.moveCloak	missing		minor: no cape lag; capes are not drawn by Horizon's renderer
 ClientMannequin.registerOverrides	skip:other		client-side constructor override; Horizon creates mannequins from the species table
 ClientMannequin.tick	missing		minor: unsure: the mannequin avatar state (walk bob, cloak) is not ticked; skins come from skins.rs
-AbstractSelectionList.getRowLeft	port	crates/horizon-client/src/pack_screen.rs::List::row_left	
+AbstractSelectionList.getRowLeft	port	crates/horizon-client-render/src/pack_screen.rs::List::row_left	
 CycleButton.setValue	skip:ui		widgets read the settings each frame; no separate value setter
 CreateFlatWorldScreen.DetailsList.LayerEntry.getNarration	skip:ui		screen-reader text
 InputQuirks.isQuitShortcutDown	missing		player: the quitShortcuts option is stored but never read; with it off vanilla ignores the quit shortcut

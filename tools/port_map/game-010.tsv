@@ -74,7 +74,7 @@ LandRandomPos.movePosUpOutOfSolid	port	crates/horizon-client/src/mobs/goals.rs::
 RandomPos.generateRandomDirection	port	crates/horizon-client/src/mobs/goals.rs::Mob::random_direction	
 RandomPos.generateRandomDirectionWithinRadians	port	crates/horizon-client/src/mobs/goals.rs::Mob::random_direction_within	
 RandomPos.generateRandomPos	port	crates/horizon-client/src/mobs/goals.rs::Mob::pick_best	best of ten by walk target value
-PoiManager.remove	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	no stored records: a section's POI list is rebuilt from its blocks after an edit
+PoiManager.remove	inline	crates/horizon-client-render/src/poi_sections.rs::PoiSections::get	no stored records: a section's POI list is rebuilt from its blocks after an edit
 PoiManager.findAll	port	crates/horizon-client/src/mobs/villager_brain.rs::pois_in_range	square then sphere filter over the sections' POI blocks, nearest first, with a caller filter
 PoiManager.findAllWithType	port	crates/horizon-client/src/mobs/villager_brain.rs::pois_in_range	returns (type, pos) pairs; only HAS_SPACE occupancy (any-occupancy searches use homes_in_range)
 PoiManager.findAllClosestFirstWithType	port	crates/horizon-client/src/mobs/villager_brain.rs::pois_in_range	sorted by squared distance
@@ -83,8 +83,8 @@ PoiManager.release	inline	crates/horizon-client/src/mobs/villager_brain.rs::PoiM
 PoiManager.getType	port	crates/horizon-client/src/mobs/villager_brain.rs::poi_at	POI kind of the block at a position, from the per-state table
 PoiManager.getDebugPoiInfo	skip:debug		debug screen data
 PoiManager.setDirty	inline	crates/horizon-client/src/mobs/villager_brain.rs::village_sections	village distances are recomputed per query from the taken village POIs, no dirty tracking
-PoiManager.checkConsistencyWithBlocks	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	the list is always built from the blocks, so it cannot drift
-PoiManager.updateFromSection	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	scans the section's blocks for POI states
+PoiManager.checkConsistencyWithBlocks	inline	crates/horizon-client-render/src/poi_sections.rs::PoiSections::get	the list is always built from the blocks, so it cannot drift
+PoiManager.updateFromSection	inline	crates/horizon-client-render/src/poi_sections.rs::PoiSections::get	scans the section's blocks for POI states
 PoiManager.ensureLoadedAndValid	skip:other		no separate POI storage: POIs come from the loaded chunks' blocks
 PoiManager.DistanceTracker.setLevel	inline	crates/horizon-client/src/mobs/villager_brain.rs::sections_to_village	Chebyshev distance in sections to a village section (max 7), computed when asked
 PoiRecord.acquireTicket	inline	crates/horizon-client/src/mobs/villager_brain.rs::tickets	a taken ticket is a villager memory pointing at the POI, counted per search
@@ -93,12 +93,12 @@ PoiRecord.isOccupied	inline	crates/horizon-client/src/mobs/villager_brain.rs::vi
 PoiRecord.equals	skip:java		position equality
 PoiRecord.Packed.unpack	skip:other		POI files are not loaded into records; keep_claims reads free_tickets only to carry claims across a save
 PoiSection.pack	port	crates/horizon-client/src/save.rs::encode_poi	Valid and Records with free_tickets at the max (claims kept by keep_claims)
-PoiSection.getRecords	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	per-section POI list, type filter done by poi_matches
-PoiSection.add	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	list rebuilt from the blocks
-PoiSection.remove	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	list rebuilt from the blocks
+PoiSection.getRecords	inline	crates/horizon-client-render/src/poi_sections.rs::PoiSections::get	per-section POI list, type filter done by poi_matches
+PoiSection.add	inline	crates/horizon-client-render/src/poi_sections.rs::PoiSections::get	list rebuilt from the blocks
+PoiSection.remove	inline	crates/horizon-client-render/src/poi_sections.rs::PoiSections::get	list rebuilt from the blocks
 PoiSection.getFreeTickets	skip:debug		deprecated, debug only
 PoiSection.release	inline	crates/horizon-client/src/mobs/villager_brain.rs::tickets	see PoiManager.release
-PoiSection.refresh	inline	crates/horizon-client/src/poi_sections.rs::PoiSections::get	invalid sections need no refresh, the list is rebuilt from blocks
+PoiSection.refresh	inline	crates/horizon-client-render/src/poi_sections.rs::PoiSections::get	invalid sections need no refresh, the list is rebuilt from blocks
 PoiSection.Packed.unpack	skip:other		POI files are not loaded into sections
 PoiTypes.registerBlockStates	inline	crates/horizon-client/src/save.rs::poi_type	state to POI type and max tickets in one match
 PoiTypes.bootstrap	port	crates/horizon-client/src/save.rs::poi_type	every POI type with its tickets (bed heads of the sixteen colours only, cauldrons, bell 32); villagers use villager_brain::state_poi for jobs, beds and bell
@@ -115,7 +115,7 @@ Dolphin.registerGoals	port	crates/horizon-client/src/mobs/aquatic.rs::register	g
 Dolphin.createAttributes	skip:data		attributes come from the entity tables
 Dolphin.canAttack	missing		minor: a baby dolphin that is hurt can still pick the attacker as target
 Dolphin.pickUpItem	missing		player: a dolphin never picks up an item dropped in the water (pick_up_loot is set but nothing takes the item)
-Dolphin.handleEntityEvent	port	crates/horizon-client/src/particles.rs::entity_event_burst	event 38: seven happy villager particles about the dolphin
+Dolphin.handleEntityEvent	port	crates/horizon-client-render/src/particles.rs::entity_event_burst	event 38: seven happy villager particles about the dolphin
 Dolphin.closeToNextPos	inline	crates/horizon-client/src/mobs/dolphin.rs::SwimToTreasure::tick	nav target within 12 blocks (144 squared) of the dolphin
 Dolphin.DolphinSwimWithPlayerGoal.canContinueToUse	port	crates/horizon-client/src/mobs/dolphin.rs::SwimWithPlayer::can_continue	player still swimming and within 16 blocks
 Dolphin.ItemGoal.drop	missing		player: a dolphin holding an item (from a dispenser) never throws it back with the 40 tick pickup delay

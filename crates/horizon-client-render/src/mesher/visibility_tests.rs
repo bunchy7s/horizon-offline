@@ -77,6 +77,7 @@ fn info(solid: bool) -> Info {
         permeable: false,
         shade: 1.0,
         emission: 0,
+        tier: 0,
         emissive: false,
         fluid: FluidState::EMPTY,
         model: false,

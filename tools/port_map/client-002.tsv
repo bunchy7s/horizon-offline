@@ -14,9 +14,9 @@ ClientPacketListener.setValuesFromPositionPacket	port	crates/horizon-client/src/
 ClientPacketListener.handleRotatePlayer	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	PlayerRotation arm; gap: minor: no ServerboundMovePlayerPacket.Rot reply is sent
 ClientPacketListener.handleChunkBlocksUpdate	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SectionBlocksUpdate arm: each change through the block update
 ClientPacketListener.handleChunksBiomes	missing		player: biome updates for loaded chunks are dropped, so grass, leaves and water keep the old biome colour
-ClientPacketListener.enableChunkLight	inline	crates/horizon-client/src/streaming.rs::Streaming::insert_remote	gap: minor: the air-only section status is not set; every section of the 3x3 columns is marked dirty
+ClientPacketListener.enableChunkLight	inline	crates/horizon-client-render/src/streaming.rs::Streaming::insert_remote	gap: minor: the air-only section status is not set; every section of the 3x3 columns is marked dirty
 ClientPacketListener.handleForgetLevelChunk	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	ForgetLevelChunk arm: Streaming::forget, block entities and renderer columns dropped
-ClientPacketListener.queueLightRemoval	inline	crates/horizon-client/src/streaming.rs::Streaming::forget	gap: minor: the column's light state is dropped with the column; no per-section light clearing
+ClientPacketListener.queueLightRemoval	inline	crates/horizon-client-render/src/streaming.rs::Streaming::forget	gap: minor: the column's light state is dropped with the column; no per-section light clearing
 ClientPacketListener.handleBlockUpdate	port	crates/horizon-client/src/game/remote.rs::Game::server_block	
 ClientPacketListener.handleConfigurationStart	port	crates/horizon-client/src/net.rs::receive_play	gap: player: no reconfiguring screen is shown and the chat state is not stored
 ClientPacketListener.handleSystemChat	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SystemChat arm: overlay to the action bar, otherwise the chat

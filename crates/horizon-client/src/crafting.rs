@@ -9,6 +9,7 @@ use crate::{
     items::{ItemStack, Items},
     particles::{DYE_FIREWORK_COLORS, FireworkExplosion, FireworkShape},
 };
+use horizon_world::loot::PackOverlay;
 use horizon_world::nbt::Tag;
 use serde_json::Value;
 use std::{
@@ -93,6 +94,18 @@ pub struct Template {
     pub damage: u32,
     pub extra: Option<Box<StackData>>,
 }
+/// `ItemStackTemplate.CODEC` count: absent means 1, present must be an
+/// integer in `1..=99` (`ExtraCodecs.intRange(1, 99)`), else the recipe is
+/// not loaded.
+pub(crate) fn template_count(v: &Value) -> Option<u32> {
+    match v.get("count") {
+        None => Some(1),
+        Some(c) => c
+            .as_u64()
+            .filter(|n| (1..=99).contains(n))
+            .map(|n| n as u32),
+    }
+}
 impl Template {
     fn parse(v: &Value) -> Option<Self> {
         let (damage, extra) = match v.get("components") {
@@ -101,7 +114,7 @@ impl Template {
         };
         Some(Self {
             item: v["id"].as_str().map(Arc::from),
-            count: v["count"].as_u64().unwrap_or(1) as u32,
+            count: template_count(v)?,
             damage,
             extra,
         })
@@ -1168,7 +1181,7 @@ fn matches_all(ingredients: &[Ingredient], stacks: &[&ItemStack]) -> bool {
     })
 }
 impl Recipes {
-    pub fn load(root: &Path, items: &Items) -> Result<Self> {
+    pub fn load(root: &Path, items: &Items, overlay: &PackOverlay) -> Result<Self> {
         let mut crafting = Vec::new();
         let mut cooking = Vec::new();
         let mut meta = HashMap::new();
@@ -1181,27 +1194,47 @@ impl Recipes {
             files.sort();
             Ok(files)
         };
+        let stem = |p: &Path| {
+            p.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_owned()
+        };
         // Vanilla's recipes by bare name, then content mods' as `<ns>:<name>`.
-        let mut files: Vec<(String, PathBuf)> = json_files(&root.join("data/minecraft/recipe"))?
-            .into_iter()
-            .map(|p| (String::new(), p))
-            .collect();
+        let mut sources: Vec<(String, Vec<u8>)> = Vec::new();
+        for p in json_files(&root.join("data/minecraft/recipe"))? {
+            sources.push((stem(&p), fs::read(&p)?));
+        }
         for namespace in crate::mod_content::namespaces(root) {
             let dir = root.join(format!("data/{namespace}/recipe"));
             if dir.is_dir() {
-                files.extend(
-                    json_files(&dir)?
-                        .into_iter()
-                        .map(|p| (format!("{namespace}:"), p)),
-                );
+                for p in json_files(&dir)? {
+                    sources.push((format!("{namespace}:{}", stem(&p)), fs::read(&p)?));
+                }
             }
         }
-        for (prefix, path) in files {
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-            let name = format!("{prefix}{stem}");
+        // The world's packs' recipes over the game's own: the top pack's
+        // file for each id replaces it (`SimpleJsonResourceReloadListener`
+        // sees one resource per id, the resource stack's top).
+        for (id, files) in overlay.kind("recipe") {
+            let Some((ns, path)) = id.split_once(':') else {
+                continue;
+            };
+            let name = if ns == "minecraft" {
+                path.to_owned()
+            } else {
+                id.to_owned()
+            };
+            let bytes = PackOverlay::top(files).to_vec();
+            match sources.iter_mut().find(|(n, _)| *n == name) {
+                Some(slot) => slot.1 = bytes,
+                None => sources.push((name, bytes)),
+            }
+        }
+        for (name, bytes) in sources {
             // Vanilla's RecipeManager logs a file that does not parse and
             // goes on ("Couldn't parse data file").
-            let v: Value = match serde_json::from_slice(&fs::read(&path)?) {
+            let v: Value = match serde_json::from_slice(&bytes) {
                 Ok(v) => v,
                 Err(e) => {
                     log::warn!("Horizon: recipe {name} not loaded: {e}");
@@ -1408,7 +1441,7 @@ impl Recipes {
                 )
             })
             .collect();
-        let curses = crate::items::load_tags(root, "enchantment")?
+        let curses = crate::items::load_tags(root, "enchantment", overlay)?
             .remove("minecraft:curse")
             .unwrap_or_default();
         Ok(Self {
@@ -1639,6 +1672,27 @@ impl Recipes {
 mod tests {
     use super::*;
     use crate::banner::BannerLayer;
+
+    #[test]
+    fn result_count_is_bounded_like_vanilla() {
+        let parse = |s: &str| Template::parse(&serde_json::from_str(s).unwrap());
+        assert_eq!(parse(r#"{"id":"minecraft:stone"}"#).unwrap().count, 1);
+        let top = parse(r#"{"id":"minecraft:stone","count":99}"#);
+        assert_eq!(top.unwrap().count, 99);
+        for bad in [
+            "0",
+            "100",
+            "2147483648",
+            "4294967295",
+            "4294967296",
+            "-1",
+            "1.5",
+            "\"2\"",
+        ] {
+            let json = format!(r#"{{"id":"minecraft:stone","count":{bad}}}"#);
+            assert!(parse(&json).is_none(), "count {bad} must be rejected");
+        }
+    }
 
     fn ingredient(items: &[&str]) -> Ingredient {
         Ingredient::of(items.iter().map(|s| (*s).to_owned()).collect())

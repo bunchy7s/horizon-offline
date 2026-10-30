@@ -10,12 +10,12 @@ ClientBundleTooltip.extractProgressbar	port	crates/horizon-client/src/game/stati
 ClientBundleTooltip.getEmptyBundleDescriptionTextHeight	inline	crates/horizon-items/src/bundle.rs::tooltip_layout	gap: minor: fixed at two lines (18 px) instead of measuring the wrapped text
 ClientBundleTooltip.getProgressBarFillText	port	crates/horizon-items/src/bundle.rs::tooltip_layout	empty and full labels (the label field), drawn by draw_bundle_tooltip
 ClientTooltipComponent.create	inline	crates/horizon-client/src/game/stations.rs::Game::draw_stack_tooltip	gap: minor: only bundles and plain text lines get a component here; no ActivePlayersTooltip
-DefaultTooltipPositioner.positionTooltip	port	crates/horizon-client/src/ui.rs::tooltip	gap: minor: also clamps y to at least 4, which vanilla does not do; the text height is Horizon's own estimate
+DefaultTooltipPositioner.positionTooltip	port	crates/horizon-client-render/src/ui.rs::tooltip	gap: minor: also clamps y to at least 4, which vanilla does not do; the text height is Horizon's own estimate
 MenuTooltipPositioner.positionTooltip	missing		minor: widget tooltips (WidgetTooltipHolder) sit beside their widget in vanilla; Horizon's ui::tooltip always places tooltips at the cursor
 MenuTooltipPositioner.getOffset	missing		minor: the widget-relative offset of the same missing positioner
-TooltipRenderUtil.extractTooltipBackground	port	crates/horizon-client/src/ui.rs::tooltip	background and frame sprites (tooltip/background, tooltip/frame)
-TooltipRenderUtil.getBackgroundSprite	inline	crates/horizon-client/src/ui.rs::tooltip	gap: minor: only the default style; no tooltip_style component
-TooltipRenderUtil.getFrameSprite	inline	crates/horizon-client/src/ui.rs::tooltip	gap: minor: only the default style; no tooltip_style component
+TooltipRenderUtil.extractTooltipBackground	port	crates/horizon-client-render/src/ui.rs::tooltip	background and frame sprites (tooltip/background, tooltip/frame)
+TooltipRenderUtil.getBackgroundSprite	inline	crates/horizon-client-render/src/ui.rs::tooltip	gap: minor: only the default style; no tooltip_style component
+TooltipRenderUtil.getFrameSprite	inline	crates/horizon-client-render/src/ui.rs::tooltip	gap: minor: only the default style; no tooltip_style component
 CodeOfConductScreen	missing		player: a server with code of conduct enabled is accepted at once (net.rs CodeOfConduct reply), so the player never sees the text or the Acknowledge and Disconnect choice
 JoinMultiplayerScreen.init	port	crates/horizon-client/src/multiplayer.rs::Screen::buttons	footer buttons and their enabling; server load and LAN scan start are in Screen::list
 JoinMultiplayerScreen.repositionElements	skip:ui		layout only: the list area is computed from the window size each frame (list_area)
@@ -48,13 +48,13 @@ ServerSelectionList.OnlineServerEntry.swap	port	crates/horizon-client/src/multip
 ServerSelectionList.OnlineServerEntry.getNarration	missing		minor: no narrator in Horizon, so no screen-reader text for entries
 ServerSelectionList.OnlineServerEntry.matches	skip:java		selection is kept by index, so no entry identity match is needed
 WarningScreen	missing		player: the warning page vanilla builds for multiplayer (base of SafetyScreen) does not exist in Horizon
-AccessibilityOptionsScreen.options	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	ACCESSIBILITY_OPTIONS list, same options in the same order
+AccessibilityOptionsScreen.options	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	ACCESSIBILITY_OPTIONS list, same options in the same order
 AccessibilityOptionsScreen.init	missing		minor: High Contrast is not greyed out without the high_contrast pack, and Rotate with Minecarts is not greyed out without the minecart feature
-AccessibilityOptionsScreen.addOptions	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	Narrator row with the Controls button, then the rest of the rows
+AccessibilityOptionsScreen.addOptions	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	Narrator row with the Controls button, then the rest of the rows
 AccessibilityOptionsScreen.addFooter	missing		minor: the Accessibility Help link button is absent from the footer
 AccessibilityOptionsScreen.isMinecartOptionEnabled	missing		minor: no minecart feature-flag check; part of the greying-out in init
-ChatOptionsScreen.options	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	gap: minor: Chat Delay and Narrator are on the Accessibility page instead; Chat page rows
-FontOptionsScreen.options	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	Force Unicode Font and Japanese glyph variants
+ChatOptionsScreen.options	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	gap: minor: Chat Delay and Narrator are on the Accessibility page instead; Chat page rows
+FontOptionsScreen.options	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	Force Unicode Font and Japanese glyph variants
 InWorldGameRulesScreen.initContent	port	crates/horizon-client/src/game/lan_screen.rs::Game::world_options_click	GameRules button: a remote world sends REQUEST_GAMERULE_VALUES (action 2); a local world builds RulesScreen from its rules
 InWorldGameRulesScreen.onDone	port	crates/horizon-client/src/game/lan_screen.rs::Game::close_game_rules	Done sends only the changed rules, and only with permission 2 on a remote world
 InWorldGameRulesScreen.collectChangedGameRule	port	crates/horizon-client/src/game_rules_screen.rs::RulesScreen::changes	rules whose value differs from the initial one
@@ -62,34 +62,34 @@ InWorldGameRulesScreen.hasGameRuleChanged	inline	crates/horizon-client/src/game_
 InWorldGameRulesScreen.onGameRuleValuesUpdated	port	crates/horizon-client/src/game/lan_screen.rs::Game::remote_world_options_rules	server values for the rules view (GameRuleValues)
 InWorldGameRulesScreen.initializeGameRuleValue	inline	crates/horizon-client/src/game/lan_screen.rs::Game::remote_world_options_rules	each server value parsed into the rules
 InWorldGameRulesScreen.onGamemasterPermissionChanged	port	crates/horizon-client/src/game/lan_screen.rs::Game::remote_world_options_permission	gap: minor: closes the rules only for a remote world; vanilla closes on any lost permission
-LanguageSelectScreen.addTitle	inline	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	language search box at the top of the Language page
+LanguageSelectScreen.addTitle	inline	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	language search box at the top of the Language page
 LanguageSelectScreen.setInitialFocus	skip:ui		focus only: typed text goes to the language search whatever has focus (type_text)
-LanguageSelectScreen.addContents	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	language rows of the Language page
-LanguageSelectScreen.addFooter	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	gap: minor: unsure whether the translation warning line is drawn; Font... and Done buttons
+LanguageSelectScreen.addContents	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	language rows of the Language page
+LanguageSelectScreen.addFooter	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	gap: minor: unsure whether the translation warning line is drawn; Font... and Done buttons
 LanguageSelectScreen.repositionElements	skip:ui		layout only: rows are laid out from the window size each frame
-LanguageSelectScreen.onDone	port	crates/horizon-client/src/options_ui.rs::OptionsUi::back	Done applies the chosen language (language_choice)
-LanguageSelectScreen.LanguageSelectionList.filterEntries	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	filter by the search text against name and region (Page::Language)
-LanguageSelectScreen.LanguageSelectionList.Entry.extractContent	port	crates/horizon-client/src/options_ui.rs::OptionsUi::draw	the language row's label, centred
+LanguageSelectScreen.onDone	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::back	Done applies the chosen language (language_choice)
+LanguageSelectScreen.LanguageSelectionList.filterEntries	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	filter by the search text against name and region (Page::Language)
+LanguageSelectScreen.LanguageSelectionList.Entry.extractContent	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::draw	the language row's label, centred
 LanguageSelectScreen.LanguageSelectionList.Entry.keyPressed	missing		minor: unsure: no Enter-to-select on language rows found in OptionsUi::key
-LanguageSelectScreen.LanguageSelectionList.Entry.mouseClicked	port	crates/horizon-client/src/options_ui.rs::OptionsUi::click	gap: minor: a second click on the chosen language finishes the page, which stands in for double-click; click selects
-MouseSettingsScreen.options	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	MOUSE_OPTIONS in vanilla order
+LanguageSelectScreen.LanguageSelectionList.Entry.mouseClicked	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::click	gap: minor: a second click on the chosen language finishes the page, which stands in for double-click; click selects
+MouseSettingsScreen.options	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	MOUSE_OPTIONS in vanilla order
 OnlineOptionsScreen	missing		player: Options > Online is greyed out in Horizon, so friends list, friend requests, in-game friend notifications, server listing and Realms notifications cannot be set
-OptionsScreen.init	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	gap: player: the Online button is greyed out and Skin Customisation opens no page; main page rows
+OptionsScreen.init	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	gap: player: the Online button is greyed out and Skin Customisation opens no page; main page rows
 OptionsScreen.createOnlineButton	missing		player: the Online button is greyed out, so Options > Online cannot be opened
-OptionsScreen.openScreenButton	port	crates/horizon-client/src/options_ui.rs::OptionsUi::click	sub-page buttons push their page (Act::Push)
-OptionsSubScreen.init	port	crates/horizon-client/src/options_ui.rs::OptionsUi::push	opening a page resets its scroll, search and page state
-OptionsSubScreen.addContents	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	the page's rows
-OptionsSubScreen.addFooter	inline	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	Done button at the bottom of each page
+OptionsScreen.openScreenButton	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::click	sub-page buttons push their page (Act::Push)
+OptionsSubScreen.init	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::push	opening a page resets its scroll, search and page state
+OptionsSubScreen.addContents	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	the page's rows
+OptionsSubScreen.addFooter	inline	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	Done button at the bottom of each page
 OptionsSubScreen.repositionElements	skip:ui		layout only: rows are laid out from the window size each frame
-OptionsSubScreen.onClose	port	crates/horizon-client/src/options_ui.rs::OptionsUi::back	Done and Escape leave the page and apply its results
+OptionsSubScreen.onClose	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::back	Done and Escape leave the page and apply its results
 SkinCustomizationScreen.addOptions	missing		player: Skin Customisation opens no page in Horizon: no cape, jacket, sleeve, pants or main hand options
-SoundOptionsScreen.addOptions	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	gap: minor: no sound device, directional audio or music toast rows; master and per-source volumes, subtitles, music frequency
-SoundOptionsScreen.getAllSoundOptionsExceptMaster	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	per-source volume rows (Volume(1..))
+SoundOptionsScreen.addOptions	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	gap: minor: no sound device, directional audio or music toast rows; master and per-source volumes, subtitles, music frequency
+SoundOptionsScreen.getAllSoundOptionsExceptMaster	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	per-source volume rows (Volume(1..))
 UnsupportedGraphicsWarningScreen	missing		minor: no GPU warn list in Horizon, so the unsupported-graphics warning never appears when Improved Transparency is turned on
-VideoSettingsScreen.qualityOptions	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	gap: player: no Texture Filtering or Max Anisotropy rows; Video page quality rows
-VideoSettingsScreen.displayOptions	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	gap: player: no Exclusive Fullscreen or Preferred Graphics Backend rows; framerate, vsync, inactivity FPS, GUI scale, fullscreen, gamma
-VideoSettingsScreen.preferenceOptions	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	autosave indicator, vignette, attack indicator, chunk fade-in
-VideoSettingsScreen.addOptions	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	gap: player: no exclusive fullscreen row (see displayOptions); Video page sections with Horizon's Graphics buttons first
+VideoSettingsScreen.qualityOptions	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	gap: player: no Texture Filtering or Max Anisotropy rows; Video page quality rows
+VideoSettingsScreen.displayOptions	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	gap: player: no Exclusive Fullscreen or Preferred Graphics Backend rows; framerate, vsync, inactivity FPS, GUI scale, fullscreen, gamma
+VideoSettingsScreen.preferenceOptions	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	autosave indicator, vignette, attack indicator, chunk fade-in
+VideoSettingsScreen.addOptions	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	gap: player: no exclusive fullscreen row (see displayOptions); Video page sections with Horizon's Graphics buttons first
 VideoSettingsScreen.addTitle	missing		minor: no restart-required line; the option that needs a restart in vanilla (preferred backend) is absent
 VideoSettingsScreen.tick	missing		minor: no anisotropy greying and no restart-required line (see addTitle)
 VideoSettingsScreen.removed	port	crates/horizon-client/src/game/options.rs::Game::apply_ui_settings	gap: minor: applied on every apply, not only when the value changed; no anisotropy or filtering to check; mipmap levels applied to the renderer
@@ -98,41 +98,41 @@ VideoSettingsScreen.mouseScrolled	missing		player: Ctrl with the mouse wheel doe
 VideoSettingsScreen.updateFullscreenButton	skip:ui		rows are rebuilt from Settings on each layout, so there is no fullscreen widget to set
 VideoSettingsScreen.repositionElements	missing		minor: no exclusive fullscreen mode list to rebuild when the window moves to another monitor
 VideoSettingsScreen.updateTransparencyButton	skip:ui		rows are rebuilt from Settings on each layout, so the transparency row reads its value each frame
-ControlsScreen.options	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	gap: player: no Toggle Attack, Toggle Use, Sprint Window, Quit Shortcuts, Ctrl-click or Operator Items rows (the settings exist in options_file.rs); toggle crouch, sprint and auto jump rows
-ControlsScreen.addOptions	port	crates/horizon-client/src/options_ui.rs::OptionsUi::list_rows	Mouse Settings and Key Binds buttons, then the toggles; Horizon adds Controller Settings
-KeyBindsList.CategoryEntry.extractContent	port	crates/horizon-client/src/options_ui.rs::OptionsUi::draw	category header text
-KeyBindsList.KeyEntry.<init>	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	change and reset buttons per key row
-KeyBindsList.KeyEntry.extractContent	port	crates/horizon-client/src/options_ui.rs::OptionsUi::draw	row name and conflict highlight
-KeyBindsList.KeyEntry.refreshEntry	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	conflicts from keys.conflicts; reset enabled when the key is not default
-KeyBindsList.KeyEntry.updateChangeButtonMessage	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	key label, with the > < marker while waiting for a key (selected_key)
-KeyBindsScreen.addContents	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	the key bind rows
-KeyBindsScreen.addFooter	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	Reset All and Done buttons
+ControlsScreen.options	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	gap: player: no Toggle Attack, Toggle Use, Sprint Window, Quit Shortcuts, Ctrl-click or Operator Items rows (the settings exist in options_file.rs); toggle crouch, sprint and auto jump rows
+ControlsScreen.addOptions	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	Mouse Settings and Key Binds buttons, then the toggles; Horizon adds Controller Settings
+KeyBindsList.CategoryEntry.extractContent	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::draw	category header text
+KeyBindsList.KeyEntry.<init>	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	change and reset buttons per key row
+KeyBindsList.KeyEntry.extractContent	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::draw	row name and conflict highlight
+KeyBindsList.KeyEntry.refreshEntry	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	conflicts from keys.conflicts; reset enabled when the key is not default
+KeyBindsList.KeyEntry.updateChangeButtonMessage	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	key label, with the > < marker while waiting for a key (selected_key)
+KeyBindsScreen.addContents	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	the key bind rows
+KeyBindsScreen.addFooter	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	Reset All and Done buttons
 KeyBindsScreen.repositionElements	skip:ui		layout only
-KeyBindsScreen.mouseClicked	port	crates/horizon-client/src/options_ui.rs::OptionsUi::bind_mouse	a mouse button is bound to the key being changed
-KeyBindsScreen.extractRenderState	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	gap: minor: Reset All drawn in layout; its enabled-when-changed check was not confirmed
-PackSelectionModel.getUnselected	port	crates/horizon-client/src/packs.rs::SelectionModel::list	unselected list (list(false)), returned as a slice rather than a stream
-PackSelectionModel.getSelected	port	crates/horizon-client/src/packs.rs::SelectionModel::list	selected list (list(true)), returned as a slice rather than a stream
-PackSelectionModel.updateRepoSelectedList	port	crates/horizon-client/src/packs.rs::SelectionModel::commit	selection written bottom first, as options.txt stores it
+KeyBindsScreen.mouseClicked	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::bind_mouse	a mouse button is bound to the key being changed
+KeyBindsScreen.extractRenderState	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	gap: minor: Reset All drawn in layout; its enabled-when-changed check was not confirmed
+PackSelectionModel.getUnselected	port	crates/horizon-client-render/src/packs.rs::SelectionModel::list	unselected list (list(false)), returned as a slice rather than a stream
+PackSelectionModel.getSelected	port	crates/horizon-client-render/src/packs.rs::SelectionModel::list	selected list (list(true)), returned as a slice rather than a stream
+PackSelectionModel.updateRepoSelectedList	port	crates/horizon-client-render/src/packs.rs::SelectionModel::commit	selection written bottom first, as options.txt stores it
 PackSelectionModel.findNewPacks	port	crates/horizon-client/src/game/packs.rs::Game::refresh_pack_lists	gap: minor: rescans when the options open, not while the screen is open (no folder watch)
 PackSelectionModel.EntryBase.updateHighContrastOptionInstance	missing		minor: selecting the high_contrast pack does not switch the High Contrast option on, as vanilla does
-PackSelectionModel.EntryBase.move	port	crates/horizon-client/src/packs.rs::SelectionModel::move_by	move up or down within the list when the neighbour is not fixed
+PackSelectionModel.EntryBase.move	port	crates/horizon-client-render/src/packs.rs::SelectionModel::move_by	move up or down within the list when the neighbour is not fixed
 PackSelectionScreen.closeWatcher	missing		minor: no folder watcher to close (see PackSelectionScreen.Watcher)
-PackSelectionScreen.setInitialFocus	port	crates/horizon-client/src/pack_screen.rs::PackScreen::set_focus	search box focused on open
-PackSelectionScreen.updateFilteredEntries	port	crates/horizon-client/src/pack_screen.rs::PackScreen::filter	filters both lists by the search text
-PackSelectionScreen.repositionElements	port	crates/horizon-client/src/pack_screen.rs::PackScreen::reposition	search box and both list boxes
+PackSelectionScreen.setInitialFocus	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::set_focus	search box focused on open
+PackSelectionScreen.updateFilteredEntries	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::filter	filters both lists by the search text
+PackSelectionScreen.repositionElements	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::reposition	search box and both list boxes
 PackSelectionScreen.tick	missing		minor: no folder poll; packs added while the screen is open appear only when the options reopen (refresh_pack_lists)
-PackSelectionScreen.reload	port	crates/horizon-client/src/pack_screen.rs::PackScreen::populate	gap: minor: rebuilds both lists; no rescan here (see findNewPacks)
+PackSelectionScreen.reload	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::populate	gap: minor: rebuilds both lists; no rescan here (see findNewPacks)
 PackSelectionScreen.copyPacks	missing		minor: no pack copy into the packs folder; dropped packs are not copied
 PackSelectionScreen.onFilesDrop	missing		minor: dropping pack files onto the screen does nothing; Horizon has no file-drop handling
-PackSelectionScreen.getPackIcon	port	crates/horizon-client/src/pack_screen.rs::load_icon	icons decoded once into PackInfo.icon, then bound as textures (icon_texture)
+PackSelectionScreen.getPackIcon	port	crates/horizon-client-render/src/pack_screen.rs::load_icon	icons decoded once into PackInfo.icon, then bound as textures (icon_texture)
 PackSelectionScreen.Watcher	missing		minor: no WatchService on the packs folder (create, watchDir, pollForChanges)
 TransferableSelectionList.keyPressed	missing		minor: no keyboard entry navigation: keys reach only the search box (type_text, shortcut, erase), not a selected pack
-TransferableSelectionList.HeaderEntry.extractContent	port	crates/horizon-client/src/pack_screen.rs::PackScreen::draw_list	header row (Available or Selected) drawn in the list
+TransferableSelectionList.HeaderEntry.extractContent	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	header row (Available or Selected) drawn in the list
 TransferableSelectionList.PackEntry.getNarration	missing		minor: no narrator in Horizon
 TransferableSelectionList.PackEntry.keyPressed	missing		minor: no keyboard select or move for a pack (Enter, Shift+Up/Down); nothing calls activate or move_by from keys
-TransferableSelectionList.PackEntry.showHoverOverlay	port	crates/horizon-client/src/pack_screen.rs::PackScreen::overlay	overlay shown unless the pack is both fixed and required
+TransferableSelectionList.PackEntry.showHoverOverlay	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::overlay	overlay shown unless the pack is both fixed and required
 TransferableSelectionList.PackEntry.keyboardSelection	missing		minor: no keyboard selection (see PackEntry.keyPressed)
-TransferableSelectionList.PackEntry.handlePackSelection	port	crates/horizon-client/src/pack_screen.rs::PackScreen::entry_click	gap: minor: keyboard path missing (keyboardSelection); icon click selects; an incompatible pack opens the confirmation (open_confirm) first
+TransferableSelectionList.PackEntry.handlePackSelection	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::entry_click	gap: minor: keyboard path missing (keyboardSelection); icon click selects; an incompatible pack opens the confirmation (open_confirm) first
 TransferableSelectionList.PackEntry.shouldTakeFocusAfterInteraction	skip:ui		focus after a click matters only for keyboard entry navigation, which Horizon does not have
 CraftingRecipeBookComponent.isCraftingSlot	missing		minor: unsure: no crafting-slot check found in the recipe book code
 CraftingRecipeBookComponent.fillGhostRecipe	port	crates/horizon-client/src/recipe_book.rs::Book::ghost	crafting branch: shaped recipes placed by place_cells, shapeless in order; result set first

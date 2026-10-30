@@ -28,20 +28,20 @@ Transformation.slerp	port	crates/horizon-client/src/text_display.rs::TextDisplay
 CharPredicate.and	skip:java		Java functional combinator
 CharPredicate.or	skip:java		Java functional combinator
 ChatFormatting.getByCode	inline	crates/horizon-client-core/src/text.rs::Text::legacy	colour codes come from COLORS, format codes from the k-o and r arms, both in the legacy parser
-CrashReport.getDetails	inline	crates/horizon-client/src/crash.rs::Report::text	the report body (details, system section) is built in Report::text
-CrashReport.getExceptionMessage	port	crates/horizon-client/src/crash.rs::stack_lines	enhanced stack text for the error
+CrashReport.getDetails	inline	crates/horizon-client-render/src/crash.rs::Report::text	the report body (details, system section) is built in Report::text
+CrashReport.getExceptionMessage	port	crates/horizon-client-render/src/crash.rs::stack_lines	enhanced stack text for the error
 CrashReport.copyProperties	skip:debug		rebuilds a Throwable for a message rewrite; Rust panics keep their own message
 CrashReport.replaceMessage	skip:debug		rewrites a null NPE, SOE or OOM message to the title; Rust panics carry messages
-CrashReport.getFriendlyReport	port	crates/horizon-client/src/crash.rs::Report::text	the friendly report: header, time, description, exception, details
-CrashReport.saveToFile	port	crates/horizon-client/src/crash.rs::Report::save	writes the report under crash-reports/
+CrashReport.getFriendlyReport	port	crates/horizon-client-render/src/crash.rs::Report::text	the friendly report: header, time, description, exception, details
+CrashReport.saveToFile	port	crates/horizon-client-render/src/crash.rs::Report::save	writes the report under crash-reports/
 CrashReport.addCategory	skip:debug		crash-report category sections; Horizon's report is a flat detail list (crash.rs set_detail)
-CrashReport.forThrowable	port	crates/horizon-client/src/crash.rs::report_error	gap: minor: report_error also writes and delivers the file; forThrowable only builds the object
+CrashReport.forThrowable	port	crates/horizon-client-render/src/crash.rs::report_error	gap: minor: report_error also writes and delivers the file; forThrowable only builds the object
 CrashReport.preload	skip:java		reserves memory and warms the report code so a later crash can be written; Horizon's panic path needs no reserve
 CrashReportCategory.formatLocation	missing		minor: crash details never print world coordinates or chunk and region locations
-CrashReportCategory.setDetail	port	crates/horizon-client/src/crash.rs::set_detail	gap: minor: flat detail list with no category section
+CrashReportCategory.setDetail	port	crates/horizon-client-render/src/crash.rs::set_detail	gap: minor: flat detail list with no category section
 CrashReportCategory.fillInStackTrace	skip:debug		stack trimming for a crash category; Rust panic backtraces are filtered in stack_lines
 CrashReportCategory.validateStackTrace	skip:debug		stack trimming for a crash category; see stack_lines
-CrashReportCategory.getDetails	inline	crates/horizon-client/src/crash.rs::Report::text	category sections are not kept; Report::text writes the details
+CrashReportCategory.getDetails	inline	crates/horizon-client-render/src/crash.rs::Report::text	category sections are not kept; Report::text writes the details
 CrashReportCategory.populateBlockDetails	missing		minor: crash details never record the block state or its location
 DetectedVersion.createBuiltIn	skip:data		version constants come from horizon_core::VANILLA_VERSION and the generated tables
 DetectedVersion.createFromJson	skip:data		version.json is not read; version data is compiled in
@@ -50,29 +50,29 @@ Optionull.first	skip:java		null-safe Java helper
 Optionull.firstOrDefault	skip:java		null-safe Java helper
 Optionull.firstOrElse	skip:java		null-safe Java helper
 Optionull.isNullOrEmpty	skip:java		null-safe Java helper
-net/minecraft/ReportType#getErrorComment	inline	crates/horizon-client/src/crash.rs::Report::text	the header comment is picked from COMMENTS inside Report::text
-net/minecraft/ReportType#appendHeader	port	crates/horizon-client/src/crash.rs::Report::text	writes the report header and comment
+net/minecraft/ReportType#getErrorComment	inline	crates/horizon-client-render/src/crash.rs::Report::text	the header comment is picked from COMMENTS inside Report::text
+net/minecraft/ReportType#appendHeader	port	crates/horizon-client-render/src/crash.rs::Report::text	writes the report header and comment
 SharedConstants.booleanProperty	skip:debug		reads a JVM system property for debug flags
 SharedConstants.debugFlag	skip:debug		debug flag reader
 SharedConstants.debugIntValue	skip:debug		debug value reader
 SharedConstants.setVersion	skip:data		version is a compiled constant
 SharedConstants.debugVoidTerrain	skip:debug		debug world generation switch
-SystemReport.<init>	port	crates/horizon-client/src/crash.rs::system_details	gap: minor: no GPU, storage, process or JVM lines
+SystemReport.<init>	port	crates/horizon-client-render/src/crash.rs::system_details	gap: minor: no GPU, storage, process or JVM lines
 SystemReport.printMemoryUsage	skip:other		JVM heap usage text; a Rust build has no JVM heap
 SystemReport.printJvmFlags	skip:other		JVM input arguments; a Rust build has none
-SystemReport.setDetail	port	crates/horizon-client/src/crash.rs::set_detail	gap: minor: flat detail list
-SystemReport.putHardware	inline	crates/horizon-client/src/crash.rs::system_details	gap: minor: CPU and memory are the only hardware lines kept
-SystemReport.putSoftware	port	crates/horizon-client/src/crash.rs::operating_system	gap: minor: OS name only; no elevated flag or process details
+SystemReport.setDetail	port	crates/horizon-client-render/src/crash.rs::set_detail	gap: minor: flat detail list
+SystemReport.putHardware	inline	crates/horizon-client-render/src/crash.rs::system_details	gap: minor: CPU and memory are the only hardware lines kept
+SystemReport.putSoftware	port	crates/horizon-client-render/src/crash.rs::operating_system	gap: minor: OS name only; no elevated flag or process details
 SystemReport.ignoreErrors	skip:debug		error isolation for diagnostic collection
-SystemReport.putPhysicalMemory	port	crates/horizon-client/src/crash.rs::memory	gap: minor: no per-module memory lines
+SystemReport.putPhysicalMemory	port	crates/horizon-client-render/src/crash.rs::memory	gap: minor: no per-module memory lines
 SystemReport.putVirtualMemory	missing		minor: no virtual or swap memory lines in the crash details
-SystemReport.putMemory	port	crates/horizon-client/src/crash.rs::memory	gap: minor: memory summary only
+SystemReport.putMemory	port	crates/horizon-client-render/src/crash.rs::memory	gap: minor: memory summary only
 SystemReport.putGraphics	missing		minor: no GPU enumeration in the crash details
-SystemReport.putProcessor	port	crates/horizon-client/src/crash.rs::cpu	gap: minor: CPU name and thread count only; no frequency or package counts
+SystemReport.putProcessor	port	crates/horizon-client-render/src/crash.rs::cpu	gap: minor: CPU name and thread count only; no frequency or package counts
 SystemReport.putStorage	missing		minor: no free-space lines for the storage paths
 SystemReport.putProcessDetails	missing		minor: no process load or memory lines in the crash details
 SystemReport.putSpaceForPath	missing		minor: no free-space lines for the storage paths
-SystemReport.appendToCrashReportString	inline	crates/horizon-client/src/crash.rs::Report::text	the system section is written by Report::text
+SystemReport.appendToCrashReportString	inline	crates/horizon-client-render/src/crash.rs::Report::text	the system section is written by Report::text
 SystemReport.toLineSeparatedString	skip:debug		plain-text dump of the system section
 TracingExecutor.forName	skip:debug		Tracy zone and thread naming
 TracingExecutor.shutdownAndAwait	skip:debug		executor shutdown for the profiler wrapper

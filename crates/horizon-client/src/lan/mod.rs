@@ -97,6 +97,29 @@ pub struct OnlineMode {
     pub prevent_proxy: bool,
 }
 
+impl OnlineMode {
+    /// MinecraftServer.initializeKeyPair.
+    pub fn generate(prevent_proxy: bool) -> Result<Self, String> {
+        let key = horizon_protocol::rsa::RsaPrivateKey::generate(1024)
+            .map_err(|e| format!("Failed to generate key pair: {e}"))?;
+        Ok(Self {
+            public_der: key.public_der(),
+            key,
+            prevent_proxy,
+        })
+    }
+    /// IntegratedServer.initServer (`setUsesAuthentication(true)`): a LAN or
+    /// friends world authenticates its guests when the host is signed in;
+    /// an offline name hosts in offline mode.
+    pub fn lan() -> Option<Arc<Self>> {
+        crate::auth::current()?;
+        Self::generate(false)
+            .map_err(|e| log::warn!("LAN stays in offline mode: {e}"))
+            .ok()
+            .map(Arc::new)
+    }
+}
+
 /// The dedicated server's log for the login phase: (thread, level, line)
 /// written as vanilla's Log4j would, and the language that turns a
 /// disconnect reason into its text (Component.getString).
@@ -139,7 +162,7 @@ pub struct NetConfig {
     /// Ops bypass a full server (ServerOpList.canBypassPlayerLimit).
     pub bypasses_limit: Option<Arc<dyn Fn(u128) -> bool + Send + Sync>>,
     pub gate: Option<LoginGate>,
-    /// Online mode: players are authenticated (none on a LAN world).
+    /// Online mode: players are authenticated (a LAN world's when its host is signed in).
     pub online: Option<Arc<OnlineMode>>,
     pub log: Option<NetLog>,
     /// server.properties `resource-pack`: offered to every player during

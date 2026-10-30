@@ -134,7 +134,8 @@ Geist (400, 500, 600) and Geist Mono (400), bundled under the SIL Open Font Lice
 
 ## Surfaces
 
-- **Launcher** (`launcher/`): drawn in the Blocks look below. A top bar (wordmark, the pages as
+- **Launcher** (`launcher/`): moving to the Night look below, screen by screen; screens not rebuilt
+  yet draw the Blocks parts in the night's colours (`Night::blocks`). A top bar (wordmark, the pages as
   tabs, the account chip, Settings), a sidebar (the instances, the hosted servers, the launcher's
   own version and channel at its foot), and the page over a stone texture. Home opens on a pixel
   landscape banner with the hero, the version picker and Play; Mods holds the mod, resource pack
@@ -188,6 +189,64 @@ of the main action. The game's menus keep `LIGHT` and `DARK`.
   with the text colour.
 - **Contrast**: every text colour meets WCAG AA (4.5:1) on the panels, the page and the lightest
   stone shade in both palettes (`blocks_text_meets_wcag_aa_in_both_appearances`).
+
+## Night
+
+The launcher's look from 0.3: a pixel night sky that turns to a sunset at the horizon, with the
+content on top. Its tokens are `horizon_theme::night` (`NIGHT`, and `DAWN` for players who pick
+Light); `tokens.css` carries them as `--night-*`. The game's menus don't use it.
+
+- **The sky is the brand, the content is the UI.** The sky, the stepped sun, the banded clouds and
+  the skyline are pixel art drawn in code on one grid per layer, edges crisp, never smoothed. On
+  top of it the screen is made of what the player owns: instance icons, world thumbnails, server
+  icons, their skin's head, mods and counts. No ornaments, no empty cards.
+- **Plates only where text needs them.** A plate is `card` at its opacity with a 1 px `stroke`;
+  `card_hi` for a selected or raised one. Text sits on the bare sky only over its upper stops
+  (`UNCARDED_STOPS`): the sunset is too bright for light text. A plate cuts each corner in two 4 px
+  steps (`PIXEL_CORNER`), like the art, and its stroke follows the steps. The main action cuts one
+  step; other controls round at 8 (at 1x a step vanishes on a pale fill and looks notched on a thin
+  ring: compared in the specimen).
+- **One accent.** `accent` fills the one main action (Play, Create, Install) and progress;
+  `accent_hi` is the accent as text and the 2 px focus ring. Everything else is ink on plates.
+- **Bricolage Grotesque** (SIL OFL 1.1, `fonts/OFL-BricolageGrotesque.txt`), cut from upstream's
+  variable font by `tools/bake_bricolage.py`: the UI family at optical size 14 (Regular, Medium,
+  SemiBold, Bold) and `Bricolage Grotesque Display` (Bold at optical size 72) for instance and page
+  names. Geist Mono stays for paths, codes and counts. Upstream has no Cyrillic, so the bake merges
+  Geist's (OFL, `fonts/OFL-Geist.txt`) into every cut: the letters drawn like Latin ones reuse
+  Bricolage's, the others are Geist's scaled to Bricolage's cap and x-heights at a matching weight.
+- **Two or three sizes per screen**, from `night::TYPE`:
+
+| Token           | App px | Line | Tracking (web) | Weight | Use |
+|-----------------|--------|------|----------------|--------|-----|
+| `night-display` | 56     | 1.0  | -0.035em       | 700    | instance and page names (display cut) |
+| `night-title`   | 20     | 1.25 | -0.01em        | 700    | section and card heads |
+| `night-ui`      | 14     | 1.45 | -0.005em       | 500    | text, rows, buttons, navigation |
+| `night-caption` | 12     | 1.4  | 0              | 400    | one-line states and details |
+
+- **Colour** (night / dawn). Every text colour reaches AA on both plates over every stop of the sky,
+  and on the upper stops, the page and the sidebar (`night_text_meets_wcag_aa_over_the_sky`).
+
+| Token       | Night     | Dawn      | Use |
+|-------------|-----------|-----------|-----|
+| `sky-0…5`   | `#07061a` `#140f38` `#2a1656` `#5b2a78` `#b0477d` `#f08a5d` | `#c9d3f2` `#dcd8f3` `#ead5ec` `#f5d3d8` `#f9d6bd` `#fbe4c6` | the sky, top to horizon |
+| `card`      | `#15112e` at 84 % | `#fdfcff` at 86 % | plates |
+| `card-hi`   | `#231c4a` at 90 % | `#ffffff` at 94 % | a selected or raised plate |
+| `stroke`, `rule` | `#b9acff` at 12 %, 10 % | `#3b2f78` at 12 %, 10 % | a plate's inner stroke, rules between rows |
+| `ink`       | `#f4f2ff` | `#1b1530` | text |
+| `ink-soft`  | `#cfc9ea` | `#3b3354` | secondary text |
+| `muted`     | `#a59fc6` | `#585071` | labels, details |
+| `accent`    | `#7656fa` | `#5b3fd6` | the main action, progress |
+| `accent-hi` | `#a08cff` | `#5333c9` | accent text, focus ring |
+| `success`, `warn`, `danger` | `#5fd39a` `#f5b45a` `#ff8a78` | `#136336` `#7a4f00` `#a3301d` | Ready, updates, errors |
+
+- **Motion that means something**: the sky drifts slowly and stops when the window is hidden or
+  unfocused; the interface moves only to show cause and effect (a row arrives where it was added,
+  progress fills). Reduced motion: nothing moves. The launcher's sky (`launcher/src/sky.rs`) moves
+  in whole texels on a half-second beat, so it asks for two frames a second at most;
+  `HORIZON_LAUNCHER_MOTION=off` stills it, `always` keeps it moving unfocused (for recordings).
+- **Copy says what happens** ("Downloads 26.3 and Java 21, about 600 MB"), never praises.
+- The specimen (`HORIZON_LAUNCHER_PAGE=specimen horizon-launcher`) draws the type and colours in the
+  launcher itself.
 
 ## The mark
 

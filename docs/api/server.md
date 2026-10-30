@@ -49,8 +49,8 @@ addition; a change to one starts `/api/v2`, served beside `/api/v1`.
 - **Metrics**: a plain-text metrics endpoint any monitoring tool can scrape (TPS, MSPT percentiles, players, chunks,
   entities, RAM, CPU), from the samples `status` already takes.
 - **Backups**: delete and download one; restore a single dimension.
-- **Server mods**: list, turn on and off, and their settings, once the mod API runs on the server
-  ([mods.md](mods.md)).
+- **Mods on a dedicated server**: list, turn on and off, and their settings, once native mods can be built for the
+  server ([mods.md](../mods.md), [native-mods.md](../native-mods.md#multiplayer)).
 - **An MCP server** for the same endpoints, so a host's agent manages the server as it manages the game.
 - **Compatibility tests**: golden replies per endpoint, and a `server.toml` from each release line.
 

@@ -896,6 +896,9 @@ impl Font {
         std::mem::take(&mut self.cache.borrow_mut().region.pending)
     }
     pub fn advance(&self, c: char, style: &Style) -> f32 {
+        if c == '\u{fffc}' && style.inline_object.is_some() {
+            return 8.0;
+        }
         let g = self.glyph_styled(c, style);
         g.advance + if style.is_bold() { g.offset } else { 0.0 }
     }

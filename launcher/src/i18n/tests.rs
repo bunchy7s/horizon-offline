@@ -4,51 +4,51 @@ use std::path::Path;
 
 /// Every Rust file of the launcher's sources.
 fn sources(dir: &Path, out: &mut Vec<String>) {
-    for entry in std::fs::read_dir(dir).unwrap().flatten() {
-        let path = entry.path();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
         if path.is_dir() {
             sources(&path, out);
         } else if path.extension().is_some_and(|e| e == "rs") {
-            // Comments left out: they quote strings too.
-            let code = std::fs::read_to_string(path).unwrap();
-            let lines = code
-                .lines()
-                .map(|l| match l.trim_start().starts_with("//") {
-                    true => "",
-                    false => l,
-                });
-            out.push(lines.collect::<Vec<_>>().join("\n"));
+            out.push(std::fs::read_to_string(path).unwrap());
         }
     }
 }
 
-/// The string literal at the start of `code` (just after its opening quote), unescaped the way
-/// Rust does: `\"`, `\\`, `\n`, and a backslash at a line's end that drops the next line's
-/// indent.
-fn literal(code: &str) -> String {
-    let mut out = String::new();
-    let mut chars = code.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '"' => break,
-            '\\' => match chars.next() {
-                Some('n') => out.push('\n'),
-                Some('\n') => {
-                    while chars.peek().is_some_and(|c| c.is_whitespace()) {
-                        chars.next();
+/// Read Rust tokens rather than quote positions: whitespace, comments, escaped and raw strings
+/// must not hide a call or turn a quoted example into one. Recurse into macro bodies too.
+fn strings_in(
+    tokens: proc_macro2::TokenStream,
+    asked: &mut BTreeSet<String>,
+    all: &mut BTreeSet<String>,
+) {
+    use proc_macro2::{Delimiter, TokenTree};
+    let mut tokens = tokens.into_iter().peekable();
+    while let Some(token) = tokens.next() {
+        match token {
+            TokenTree::Ident(name) if name == "tr" || name == "trf" => {
+                if let Some(TokenTree::Group(args)) = tokens.peek() {
+                    if args.delimiter() == Delimiter::Parenthesis {
+                        if let Some(TokenTree::Literal(value)) = args.stream().into_iter().next() {
+                            if let Ok(value) = syn::parse_str::<syn::LitStr>(&value.to_string()) {
+                                asked.insert(value.value());
+                            }
+                        }
                     }
                 }
-                Some(c) => out.push(c),
-                None => break,
-            },
-            c => out.push(c),
+            }
+            TokenTree::Group(group) => strings_in(group.stream(), asked, all),
+            TokenTree::Literal(value) => {
+                if let Ok(value) = syn::parse_str::<syn::LitStr>(&value.to_string()) {
+                    all.insert(value.value());
+                }
+            }
+            _ => {}
         }
     }
-    out
 }
 
-/// The English strings the code asks a translation for: `tr("…")` and `trf("…")`, and every
-/// other string literal (some reach `tr` through a widget).
+/// The English strings requested directly, plus every literal (some reach `tr` via a widget or
+/// constant). The tables' shared key set below covers those indirect translations.
 fn strings() -> (BTreeSet<String>, BTreeSet<String>) {
     let mut files = Vec::new();
     sources(
@@ -57,27 +57,54 @@ fn strings() -> (BTreeSet<String>, BTreeSet<String>) {
     );
     let (mut asked, mut all) = (BTreeSet::new(), BTreeSet::new());
     for file in &files {
-        for (at, _) in file.match_indices('"') {
-            let before = &file[..at];
-            if before.ends_with('\\') || before.ends_with('\'') {
-                continue;
-            }
-            let s = literal(&file[at + 1..]);
-            // rustfmt puts a long string on the line after the call.
-            let before = before.trim_end();
-            let call = |name: &str| {
-                before.ends_with(&format!("{name}(")) && {
-                    let head = &before[..before.len() - name.len() - 1];
-                    !head.ends_with(|c: char| c.is_alphanumeric() || c == '_')
-                }
-            };
-            if call("tr") || call("trf") {
-                asked.insert(s.clone());
-            }
-            all.insert(s);
-        }
+        strings_in(
+            file.parse().expect("valid Rust tokens"),
+            &mut asked,
+            &mut all,
+        );
     }
     (asked, all)
+}
+
+#[test]
+fn the_scan_finds_multiline_calls_without_reading_comments_or_quoted_code() {
+    let code = r###"
+        tr
+        (
+            "multiline"
+        );
+        trf(/* before the string */ "hello {name}", &[("name", "player")]);
+        some_macro!(crate::i18n::tr(r#"raw "quotes""#));
+        tr("escaped \"quotes\" and \u{4e2d}\nnext");
+        tr("continued \
+            line");
+        // tr("line comment");
+        /* tr("block comment"); */
+        let example = r#"tr("quoted code")"#;
+        other_tr("not a translation");
+        trf_other("not a translation either");
+        let indirect = "widget label";
+        tr(indirect);
+    "###;
+    let (mut asked, mut all) = (BTreeSet::new(), BTreeSet::new());
+    strings_in(code.parse().unwrap(), &mut asked, &mut all);
+    assert_eq!(
+        asked,
+        [
+            "multiline",
+            "hello {name}",
+            "raw \"quotes\"",
+            "escaped \"quotes\" and 中\nnext",
+            "continued line",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    );
+    assert!(all.contains("widget label"));
+    assert!(asked.is_subset(&all));
+    assert!(!all.contains("line comment"));
+    assert!(!all.contains("block comment"));
 }
 
 fn holes(s: &str) -> BTreeSet<&str> {
@@ -89,14 +116,23 @@ fn holes(s: &str) -> BTreeSet<&str> {
 
 #[test]
 fn every_language_has_every_string_the_code_asks_for() {
-    let (asked, all) = strings();
+    let (mut asked, all) = strings();
     assert!(asked.contains("Language"), "the scan finds tr(\"…\")");
-    for language in Language::ALL
+    let tables: Vec<_> = Language::ALL
         .into_iter()
-        .filter(|l| *l != Language::English)
-    {
-        let table: HashMap<String, String> = serde_json::from_str(language.source())
-            .unwrap_or_else(|e| panic!("lang/{}.json: {e}", language.code()));
+        .filter(|language| *language != Language::English)
+        .map(|language| {
+            let table: HashMap<String, String> = serde_json::from_str(language.source())
+                .unwrap_or_else(|e| panic!("lang/{}.json: {e}", language.code()));
+            (language, table)
+        })
+        .collect();
+    // A label passed through a widget or a constant is not a literal argument to `tr`. Once
+    // translated in any language it must exist in all of them, not silently fall back to English.
+    for (_, table) in &tables {
+        asked.extend(table.keys().cloned());
+    }
+    for (language, table) in &tables {
         let missing: Vec<_> = asked.iter().filter(|s| !table.contains_key(*s)).collect();
         assert!(
             missing.is_empty(),
@@ -109,7 +145,7 @@ fn every_language_has_every_string_the_code_asks_for() {
             "lang/{}.json has strings the code no longer has: {unused:#?}",
             language.code()
         );
-        for (en, said) in &table {
+        for (en, said) in table {
             assert_eq!(holes(en), holes(said), "{}: {en:?}", language.code());
             assert!(
                 !said.trim().is_empty(),
@@ -122,29 +158,54 @@ fn every_language_has_every_string_the_code_asks_for() {
 
 #[test]
 fn the_system_language_is_the_first_one_the_launcher_has() {
+    assert_eq!(Language::pick(["pl-PL", "en-US"]), Language::Polish);
+    assert_eq!(Language::parse("pl_PL.UTF-8"), Some(Language::Polish));
+    assert_eq!(Language::pick(["pl-PL", "en-US"]), Language::Polish);
+    assert_eq!(Language::parse("pl_PL.UTF-8"), Some(Language::Polish));
     assert_eq!(Language::pick(["fr-CH", "en-US"]), Language::French);
+    assert_eq!(Language::pick(["it-IT", "ru_RU.UTF-8"]), Language::Russian);
+    assert_eq!(Language::pick(["it-IT", "zh-Hans-CN"]), Language::Chinese);
+    assert_eq!(Language::pick(["it-IT", "ja"]), Language::English);
     assert_eq!(Language::pick(["de-CH", "ru_RU.UTF-8"]), Language::German);
     assert_eq!(Language::pick(["de-DE", "ja"]), Language::German);
+    assert_eq!(Language::pick(["de-DE", "zh-Hans-CN"]), Language::German);
     assert_eq!(Language::pick(["es-ES", "en-US"]), Language::Spanish);
     assert_eq!(Language::pick(["ja", "ko"]), Language::English);
     assert_eq!(Language::pick(["uk-UA", "ru-RU"]), Language::Ukrainian);
     assert_eq!(Language::parse("uk_UA.UTF-8"), Some(Language::Ukrainian));
     assert_eq!(Language::pick([]), Language::English);
     assert_eq!(Language::parse("FR"), Some(Language::French));
+    assert_eq!(Language::parse("french"), None);
     assert_eq!(Language::parse("DE"), Some(Language::German));
     assert_eq!(Language::parse("ES"), Some(Language::Spanish));
     assert_eq!(Language::parse("german"), None);
+    assert_eq!(Language::parse("ZH"), Some(Language::Chinese));
     assert_eq!(serde_json::to_string(&Language::German).unwrap(), "\"de\"");
+    assert_eq!(serde_json::to_string(&Language::Chinese).unwrap(), "\"zh\"");
+    assert_eq!(serde_json::to_string(&Language::Russian).unwrap(), "\"ru\"");
     assert_eq!(serde_json::to_string(&Language::Spanish).unwrap(), "\"es\"");
 }
 
 #[test]
 fn a_missing_string_shows_in_english() {
+    assert_eq!(tr_in(Language::Polish, "Settings"), "Ustawienia");
     assert_eq!(tr_in(Language::French, "Settings"), "Paramètres");
     assert_eq!(tr_in(Language::Russian, "Settings"), "Настройки");
     assert_eq!(tr_in(Language::German, "Settings"), "Einstellungen");
+    assert_eq!(tr_in(Language::Chinese, "Settings"), "设置");
     assert_eq!(tr_in(Language::Spanish, "Settings"), "Ajustes");
     assert_eq!(tr_in(Language::Ukrainian, "Settings"), "Налаштування");
     assert_eq!(tr_in(Language::English, "Settings"), "Settings");
     assert_eq!(tr_in(Language::French, "No such string"), "No such string");
+}
+
+#[test]
+fn polish_entries_are_valid_and_keep_placeholders() {
+    let (_, all) = strings();
+    let table: HashMap<String, String> = serde_json::from_str(Language::Polish.source()).unwrap();
+    for (en, said) in &table {
+        assert!(all.contains(en), "unused Polish string: {en:?}");
+        assert!(!said.trim().is_empty(), "empty Polish string: {en:?}");
+        assert_eq!(holes(en), holes(said), "Polish: {en:?}");
+    }
 }

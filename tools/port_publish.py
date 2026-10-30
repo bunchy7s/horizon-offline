@@ -223,7 +223,8 @@ def apply(actions, report, open_issues):
 
 def issue(action, name, text, number, new):
     """Create or update one issue; its URL."""
-    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as stream:
+    # gh reads the body as UTF-8, whatever the system's code page.
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", delete=False) as stream:
         stream.write(text)
     try:
         if action == "create":

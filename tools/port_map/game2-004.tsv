@@ -129,7 +129,7 @@ WardenAi.initSniffingActivity	inline	crates/horizon-client/src/mobs/warden_brain
 WardenAi.isTarget	port	crates/horizon-client/src/mobs/warden.rs::brain_target	gap: minor: returns the attack target; the look-at filter is the caller's check
 WardenSpawnTracker.hasNearbyWarden	inline	crates/horizon-client/src/game/sculk.rs::Game::try_to_warn	a warden within 24 blocks on each axis stops the warning
 WardenSpawnTracker.getNearbyPlayers	inline	crates/horizon-client/src/game/sculk.rs::Game::try_to_warn	gap: minor: only the player who set off the shrieker is counted, not other players within 16 blocks
-WardenSpawnTracker.copyData	inline	crates/horizon-client/src/sculk.rs::WardenSpawnTracker::try_warn	every tracker takes the highest one's level, cooldown and tick count
+WardenSpawnTracker.copyData	inline	crates/horizon-client-render/src/sculk.rs::WardenSpawnTracker::try_warn	every tracker takes the highest one's level, cooldown and tick count
 Drowned.checkDrownedSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	water below, spawner or deep enough, dark enough, frequency roll
 Drowned.isDeepEnoughToSpawn	inline	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	below sea level minus 5
 Drowned.populateDefaultEquipmentSlots	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::populate	10 percent chance of a trident (10 in 16) or fishing rod

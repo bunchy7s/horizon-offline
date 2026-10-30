@@ -106,6 +106,50 @@ impl BiomeZoom {
         }
         selected
     }
+    /// The jitter `quart_at_block` adds to each of the eight corners of the
+    /// quart cell `base` (the block position minus 2, shifted right by 2), as
+    /// `[x, y, z]` per corner in its corner order (x, then y, then z offset).
+    /// With `select_corner` this gives `quart_at_block`'s choice for every
+    /// block of the cell from one mix.
+    pub fn corner_jitter(self, base: [i32; 3]) -> [[f64; 3]; 8] {
+        let coordinate = base.map(i64::from);
+        let seed = self.seed;
+        const A: i64 = 6364136223846793005;
+        const B: i64 = 1442695040888963407;
+        let g = |m: i64| m.wrapping_mul(m.wrapping_mul(A).wrapping_add(B));
+        let root = g(seed);
+        std::array::from_fn(|corner| {
+            let [x, y, z] = [(corner >> 2) & 1, (corner >> 1) & 1, corner & 1].map(|v| v as i64);
+            let m0 = root.wrapping_add(coordinate[0].wrapping_add(x));
+            let m1 = g(m0).wrapping_add(coordinate[1].wrapping_add(y));
+            let m2 = g(m1).wrapping_add(coordinate[2].wrapping_add(z));
+            let m3 = g(m2).wrapping_add(coordinate[0].wrapping_add(x));
+            let m4 = g(m3).wrapping_add(coordinate[1].wrapping_add(y));
+            let m5 = g(m4).wrapping_add(coordinate[2].wrapping_add(z));
+            let m6 = g(m5).wrapping_add(seed);
+            let m7 = g(m6).wrapping_add(seed);
+            [fiddle(m5), fiddle(m6), fiddle(m7)]
+        })
+    }
+    /// The corner (index into `corner_jitter`) `quart_at_block` picks for
+    /// `block` inside the cell whose jitter is `jitter`.
+    #[inline]
+    pub fn select_corner(block: BlockPos, jitter: &[[f64; 3]; 8]) -> usize {
+        let fractions = [block.x, block.y, block.z].map(|v| f64::from(v.wrapping_sub(2) & 3) / 4.);
+        let mut selected = 0;
+        let mut best = f64::INFINITY;
+        for (corner, jitter) in jitter.iter().enumerate() {
+            let dx = fractions[0] - ((corner >> 2) & 1) as f64 + jitter[0];
+            let dy = fractions[1] - ((corner >> 1) & 1) as f64 + jitter[1];
+            let dz = fractions[2] - (corner & 1) as f64 + jitter[2];
+            let distance = dz * dz + dy * dy + dx * dx;
+            if best > distance {
+                best = distance;
+                selected = corner;
+            }
+        }
+        selected
+    }
 }
 
 /// Direct noise-biome lookup bypasses the eight-corner zoom.
@@ -221,6 +265,36 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn corner_jitter_matches_quart_at_block() {
+        for seed in [0i64, -1, i64::MIN, 0x0123_4567_89ab_cdef] {
+            let zoom = BiomeZoom::new(seed);
+            let check = |block: BlockPos| {
+                let base = [block.x, block.y, block.z].map(|v| v.wrapping_sub(2) >> 2);
+                let corner = BiomeZoom::select_corner(block, &zoom.corner_jitter(base));
+                let offsets = [(corner >> 2) & 1, (corner >> 1) & 1, corner & 1];
+                let quart: [i32; 3] =
+                    std::array::from_fn(|i| base[i].wrapping_add(offsets[i] as i32));
+                assert_eq!(
+                    quart,
+                    zoom.quart_at_block(block),
+                    "seed {seed} at {block:?}"
+                );
+            };
+            for x in -20..20 {
+                for y in -20..20 {
+                    for z in -20..20 {
+                        check(BlockPos::new(x, y, z));
+                    }
+                }
+            }
+            for v in [i32::MIN, i32::MIN + 1, -1, 0, i32::MAX - 1, i32::MAX] {
+                check(BlockPos::new(v, v, v));
+                check(BlockPos::new(v, v.wrapping_neg(), 3));
             }
         }
     }

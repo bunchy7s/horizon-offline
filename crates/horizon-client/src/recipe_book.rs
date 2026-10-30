@@ -7,6 +7,7 @@ use crate::{
     crafting::{Ingredient, Placement, Recipe, Recipes},
     items::{ItemStack, Items},
 };
+use horizon_world::loot::PackOverlay;
 use horizon_world::nbt::Tag;
 use std::collections::{BTreeSet, HashMap};
 
@@ -658,23 +659,11 @@ fn crafting_station(kind: &str) -> &'static str {
     }
 }
 impl RecipeIndex {
-    /// Reads `data/minecraft/recipe/*.json` under `root`.
-    pub fn load(root: &std::path::Path) -> Self {
+    /// Reads `data/minecraft/recipe/*.json` under `root`, with the world's
+    /// packs' recipe files over it (`overlay`).
+    pub fn load(root: &std::path::Path, overlay: &PackOverlay) -> Self {
         let mut recipes = std::collections::BTreeMap::new();
-        let dir = root.join("data/minecraft/recipe");
-        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-            let path = entry.path();
-            if path.extension().is_none_or(|e| e != "json") {
-                continue;
-            }
-            let (Some(stem), Some(v)) = (
-                path.file_stem().and_then(|s| s.to_str()),
-                std::fs::read(&path)
-                    .ok()
-                    .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()),
-            ) else {
-                continue;
-            };
+        let mut insert = |id: String, v: &serde_json::Value| {
             let kind = v["type"].as_str().unwrap_or_default();
             let special = kind.starts_with("minecraft:crafting_special_")
                 || kind == "minecraft:crafting_decorated_pot";
@@ -694,7 +683,7 @@ impl RecipeIndex {
                 1
             };
             recipes.insert(
-                format!("minecraft:{stem}"),
+                id,
                 Known {
                     special,
                     displays,
@@ -704,6 +693,30 @@ impl RecipeIndex {
                     result: v["result"]["id"].as_str().map(str::to_owned),
                 },
             );
+        };
+        let dir = root.join("data/minecraft/recipe");
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "json") {
+                continue;
+            }
+            let (Some(stem), Some(v)) = (
+                path.file_stem().and_then(|s| s.to_str()),
+                std::fs::read(&path)
+                    .ok()
+                    .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()),
+            ) else {
+                continue;
+            };
+            insert(format!("minecraft:{stem}"), &v);
+        }
+        // The world's packs' recipes over the game's own: the top pack's
+        // file for each id replaces it (`SimpleJsonResourceReloadListener`).
+        for (id, files) in overlay.kind("recipe") {
+            match serde_json::from_slice::<serde_json::Value>(PackOverlay::top(files)) {
+                Ok(v) => insert(id.to_owned(), &v),
+                Err(e) => log::warn!("Horizon: pack recipe {id} not shown in the book: {e}"),
+            }
         }
         // RecipeManager keeps its recipes sorted by id and numbers the displays in that order.
         let mut next = 0;
@@ -907,7 +920,7 @@ mod tests {
         ] {
             std::fs::write(dir.join(format!("{name}.json")), json).unwrap();
         }
-        let index = RecipeIndex::load(&root);
+        let index = RecipeIndex::load(&root, &PackOverlay::NONE);
         std::fs::remove_dir_all(&root).unwrap();
         let toast = |id: &str| (index.toast_station(id), index.result(id));
         assert_eq!(

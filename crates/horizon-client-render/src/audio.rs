@@ -144,6 +144,7 @@ type Stream = cpal::Stream;
 type Stream = std::convert::Infallible;
 pub struct Audio {
     _stream: Option<Stream>,
+    device_name: String,
     pub engine: SoundEngine,
     backend: MixerBackend,
     /// Record `Heard` sounds (the subtitle overlay is listening).
@@ -543,15 +544,48 @@ fn build_stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
     )?;
     Ok(stream)
 }
+/// Available audio output device names.
+#[cfg(feature = "audio")]
+pub fn output_devices() -> Vec<String> {
+    if output_disabled(|name| std::env::var_os(name)).is_some() {
+        return Vec::new();
+    }
+    let host = cpal::default_host();
+    let mut names = Vec::new();
+    if let Ok(devices) = host.output_devices() {
+        for device in devices {
+            if let Ok(name) = device.name()
+                && !names.contains(&name)
+            {
+                names.push(name);
+            }
+        }
+    }
+    names
+}
+
+#[cfg(not(feature = "audio"))]
+pub fn output_devices() -> Vec<String> {
+    Vec::new()
+}
+
 impl Audio {
     pub fn new(root: &Path) -> Self {
-        Self::with_output(root, true)
+        Self::with_device(root, "")
+    }
+    pub fn with_device(root: &Path, device_name: &str) -> Self {
+        Self::with_output(root, true, device_name)
     }
     /// No output device: the dedicated server.
     pub fn silent(root: &Path) -> Self {
-        Self::with_output(root, false)
+        Self::with_output(root, false, "")
     }
-    fn with_output(root: &Path, output: bool) -> Self {
+    /// The output device asked for (`soundDevice`), empty for the system's default; the
+    /// default plays when that one can't be opened, as in vanilla.
+    pub fn device(&self) -> &str {
+        &self.device_name
+    }
+    fn with_output(root: &Path, output: bool, target_device: &str) -> Self {
         let registry = SoundRegistry::load(root);
         if output && registry.is_empty() {
             // The game then plays nothing on a working output (#1035, #1076).
@@ -564,7 +598,7 @@ impl Audio {
         }
         let mixer = Arc::new(Mutex::new(Mixer::default()));
         let opened = if output {
-            Self::open(mixer.clone())
+            Self::open_named(mixer.clone(), target_device)
         } else {
             Err("no output on a dedicated server".into())
         };
@@ -581,6 +615,7 @@ impl Audio {
         engine.loaded = live;
         Self {
             _stream: stream,
+            device_name: target_device.to_owned(),
             engine,
             backend: MixerBackend {
                 mixer,
@@ -602,8 +637,59 @@ impl Audio {
         }
     }
     #[cfg(not(feature = "audio"))]
-    fn open(_: Arc<Mutex<Mixer>>) -> Result<Stream> {
+    fn open_named(_: Arc<Mutex<Mixer>>, _: &str) -> Result<Stream> {
         Err("this build has no sound output (built without the `audio` feature)".into())
+    }
+    #[cfg(feature = "audio")]
+    fn open_named(mixer: Arc<Mutex<Mixer>>, target: &str) -> Result<Stream> {
+        if let Some(reason) = output_disabled(|name| std::env::var_os(name)) {
+            return Err(reason.into());
+        }
+        let host = cpal::default_host();
+        if !target.is_empty()
+            && let Ok(devices) = host.output_devices()
+        {
+            for device in devices {
+                let name = device.name().unwrap_or_else(|_| "unnamed device".into());
+                if name == target {
+                    match open_device(&device, mixer.clone()) {
+                        Ok((stream, config)) => {
+                            log::info!(
+                                "Horizon: audio output {name} ({} Hz, {} channels, {})",
+                                config.sample_rate().0,
+                                config.channels(),
+                                config.sample_format()
+                            );
+                            return Ok(stream);
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Horizon: could not open audio device '{target}': {e}; falling back to default"
+                            );
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        Self::open(mixer)
+    }
+    #[cfg(feature = "audio")]
+    pub fn set_device(&mut self, name: &str) -> Result<()> {
+        if !self.backend.live && self._stream.is_none() && !self.engine.loaded {
+            self.device_name = name.to_owned();
+            return Ok(());
+        }
+        self._stream = Some(Self::open_named(self.backend.mixer.clone(), name)?);
+        self.device_name = name.to_owned();
+        self.backend.live = true;
+        self.engine.loaded = true;
+        Ok(())
+    }
+    #[cfg(not(feature = "audio"))]
+    pub fn set_device(&mut self, name: &str) -> Result<()> {
+        self.device_name = name.to_owned();
+        Ok(())
     }
     #[cfg(feature = "audio")]
     fn open(mixer: Arc<Mutex<Mixer>>) -> Result<Stream> {

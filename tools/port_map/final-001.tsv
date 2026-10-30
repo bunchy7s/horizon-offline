@@ -1,6 +1,6 @@
 LocationPredicate.matches	port	crates/horizon-client/src/advancements.rs::location	position, biome, structure, dimension and block checks for advancement criteria
 MultiLineEditBox.setValue	missing		minor: unsure: book pages keep their own text in books.rs; no multi-line box setter found
-TransferableSelectionList.PackEntry.mouseClicked	inline	crates/horizon-client/src/pack_screen.rs::PackScreen::click	entry select, move arrows and double-click transfer
+TransferableSelectionList.PackEntry.mouseClicked	inline	crates/horizon-client-render/src/pack_screen.rs::PackScreen::click	entry select, move arrows and double-click transfer
 CompoundTag.getIntArray	skip:java		typed NBT accessor; Rust matches Tag::IntArray where it reads one
 Component.toFlatList	skip:java		Horizon Text already keeps flat styled spans
 Style.withColor	port	crates/horizon-client-core/src/text.rs::Text::with_color	colour on the text span

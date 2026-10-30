@@ -251,6 +251,21 @@ impl Game<'_> {
         ];
         self.block_explosion(center, in_water.then_some(pos))
     }
+    /// `StrawBedBlock.destroyBed`: the break sound, then the bed is air.
+    pub(super) fn destroy_straw_bed(&mut self, head: [i32; 3]) -> Result<()> {
+        let center = [
+            f64::from(head[0]) + 0.5,
+            f64::from(head[1]) + 0.5,
+            f64::from(head[2]) + 0.5,
+        ];
+        self.audio.play(
+            "minecraft:block.straw_bed.break_leave",
+            Some(center),
+            1.0,
+            1.0,
+        );
+        self.level_set(head, self.world.air)
+    }
     /// `BedRule.destroyOnUse` of the dimension's `bed_rule` and
     /// `straw_bed_rule`: true in the Nether and the End.
     pub(super) fn beds_destroy_on_use(&self) -> bool {
@@ -268,14 +283,7 @@ impl Game<'_> {
             f64::from(head[2]) + 0.5,
         ];
         if &*name == "minecraft:straw_bed" {
-            // StrawBedBlock.destroyBed.
-            self.audio.play(
-                "minecraft:block.straw_bed.break_leave",
-                Some(center),
-                1.0,
-                1.0,
-            );
-            return self.level_set(head, self.world.air);
+            return self.destroy_straw_bed(head);
         }
         // removeBlock(head), then the foot behind it if it is still this bed.
         let facing = self

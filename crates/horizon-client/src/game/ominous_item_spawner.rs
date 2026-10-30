@@ -21,6 +21,8 @@ const TICKS_SCALING: f32 = 50.0;
 const ROTATION_SPEED: f32 = 40.0;
 
 pub(super) struct OminousItemSpawner {
+    /// The entity id a server tracks it by (0 until it is tracked).
+    pub(super) id: u32,
     pub(super) item: ItemStack,
     pub(super) position: [f64; 3],
     pub(super) spawn_item_after: i64,
@@ -65,6 +67,7 @@ impl Game<'_> {
         delay: i32,
     ) {
         self.ominous_spawners.push(OminousItemSpawner {
+            id: 0,
             item,
             position,
             spawn_item_after: i64::from(delay),
@@ -82,6 +85,7 @@ impl Game<'_> {
             return;
         };
         self.ominous_spawners.push(OminousItemSpawner {
+            id: 0,
             item,
             position: [at.x, at.y, at.z],
             spawn_item_after,
@@ -120,6 +124,32 @@ impl Game<'_> {
         }
         kept.append(&mut self.ominous_spawners);
         self.ominous_spawners = kept;
+    }
+    /// `handleAddEntity` for a spawner a server sent: its item comes with the
+    /// entity data (`ItemStack.EMPTY` until then, which draws nothing).
+    pub(super) fn add_remote_ominous_item_spawner(&mut self, id: u32, position: [f64; 3]) {
+        self.ominous_spawners.push(OminousItemSpawner {
+            id,
+            item: ItemStack::new("minecraft:air", 1),
+            position,
+            spawn_item_after: 0,
+            tick_count: 0,
+            uuid: [0; 4],
+            raw: None,
+        });
+    }
+    /// `OminousItemSpawner.tick` on a client: `tickCount` and `tickClient`,
+    /// the particles every 5 game ticks; only the server spawns the item.
+    pub(super) fn tick_remote_ominous_item_spawners(&mut self) {
+        let at: Vec<[f64; 3]> = self.ominous_spawners.iter().map(|s| s.position).collect();
+        for s in &mut self.ominous_spawners {
+            s.tick_count += 1;
+        }
+        if self.world.game_time % 5 == 0 {
+            for position in at {
+                self.ominous_spawner_particles(position);
+            }
+        }
     }
     /// `spawnItem`: a projectile shot down, or an item entity; level event
     /// 3021 and the entity_place game event.

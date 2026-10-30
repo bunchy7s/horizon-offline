@@ -12,7 +12,7 @@ struct Params {
     peak: f32,
     // 1 when this frame drew a world.
     world: f32,
-    // 1 paints expanded pixels magenta (HORIZON_HDR_DEBUG=1).
+    // 1 greys what isn't expanded and tints what is (HORIZON_HDR_DEBUG=1).
     debug: f32,
     // 1 for an HDR10 swapchain, 0 for scRGB.
     pq: f32,
@@ -20,19 +20,23 @@ struct Params {
     black: f32,
     // The HUD and menus' brightness as a share of paper white.
     ui: f32,
+    // Per tier, low to very bright (hdr.rs `Tier`): the share of the headroom
+    // the brightest pixels get, and the brightness where the lift starts and
+    // where it is full.
+    share: vec4<f32>,
+    start: vec4<f32>,
+    full: vec4<f32>,
 };
 @group(0) @binding(2) var<uniform> params: Params;
 
 // Light sources are lifted evenly rather than by a highlight curve: vanilla's
 // textures were drawn for SDR, so a curve on their brightest pixels blows out
 // near-white spots (glowstone) and leaves the rest (lava, a jack o'lantern's
-// face) nearly as it was. Pixels brighter than LIFT_FULL get STRENGTH of the
-// headroom, dimmer ones less down to none at LIFT_START (lava's crust, a
-// lantern's metal), and no channel goes past the peak. Brightness is the mean
-// of luminance and the brightest channel, so saturated light counts as bright.
-const LIFT_START: f32 = 0.18;
-const LIFT_FULL: f32 = 0.42;
-const STRENGTH: f32 = 0.7;
+// face) nearly as it was. Each tier's pixels brighter than its `full` get its
+// `share` of the headroom, dimmer ones less down to none at its `start`
+// (lava's crust, a lantern's metal), and no channel goes past the peak.
+// Brightness is the mean of luminance and the brightest channel, so saturated
+// light counts as bright.
 
 // Whether `c` still shows the world pixel `w`: the same, or darkened evenly
 // across its channels, as the vignette and other screen-wide tints darken it.
@@ -99,24 +103,34 @@ fn lift_black(e: vec3<f32>) -> vec3<f32> {
     // Gamma 2.2, as SDR displays and the compositors' SDR paths decode it.
     var light = pow(max(c, vec3(0.0)), vec3(2.2));
     let w = textureLoad(world, at, 0);
-    // The world's alpha is 0 on light-emitting blocks, the sun and the moon
-    // (terrain.wgsl, the celestial pipeline): only those shine, and only where
-    // nothing was drawn over them since: grey text over the white sun still looks
-    // like the sun darkened, but it raised the frame's alpha.
+    // The world's alpha is below 0.75 on light sources, the sun and the moon
+    // (terrain.wgsl, the celestial pipeline): only those shine, by the tier it
+    // holds, the lower the brighter, and only where nothing was drawn over them
+    // since: grey text over the white sun still looks like the sun darkened, but
+    // it raised the frame's alpha.
+    var lifted = false;
     if params.world > 0.5 && params.peak > 1.0 && w.a < 0.75 && !covered
         && shows_world(c, w.rgb) {
         // Brightness of the world pixel, before the vignette darkens the frame
         // toward its edges: a light source shines the same anywhere on screen.
         let wl = pow(max(w.rgb, vec3(0.0)), vec3(2.2));
         let y = 0.5 * (dot(wl, vec3(0.2126, 0.7152, 0.0722)) + max(wl.r, max(wl.g, wl.b)));
-        let lift = smoothstep(LIFT_START, LIFT_FULL, y);
+        let tier = u32(clamp(round(4.0 - 4.0 * w.a / 0.7), 1.0, 4.0)) - 1u;
+        let lift = smoothstep(params.start[tier], params.full[tier], y);
         if lift > 0.0 {
             let top = max(light.r, max(light.g, light.b));
-            let gain = min(1.0 + (params.peak - 1.0) * STRENGTH * lift, params.peak / max(top, 1e-4));
+            let gain = min(1.0 + (params.peak - 1.0) * params.share[tier] * lift, params.peak / max(top, 1e-4));
             light *= max(gain, 1.0);
-            if params.debug > 0.5 {
-                light = mix(light, vec3(gain, 0.0, gain), 0.6);
-            }
+            lifted = true;
+        }
+    }
+    // HORIZON_HDR_DEBUG=1: what isn't lifted turns grey, what is keeps its
+    // colour with a magenta tint, so a lift shows on any colour.
+    if params.debug > 0.5 && params.world > 0.5 {
+        if lifted {
+            light *= vec3(1.0, 0.6, 1.0);
+        } else {
+            light = vec3(dot(light, vec3(0.2126, 0.7152, 0.0722)));
         }
     }
     // The HUD and menus at their own brightness, by how much they cover.

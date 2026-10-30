@@ -60,7 +60,11 @@ def rea_command(lock):
         version = subprocess.run([installed, "--version"], capture_output=True, text=True).stdout.strip()
         if version == pin["version"]:
             return [installed]
-    return ["npx", "-y", f"{pin['package']}@{pin['version']}"]
+    # By path: on Windows npx is npx.cmd, which CreateProcess doesn't find by name.
+    npx = shutil.which("npx")
+    if not npx:
+        raise SystemExit("npx is missing: install Node.js 22.19+ (or the pinned `rea` command)")
+    return [npx, "-y", f"{pin['package']}@{pin['version']}"]
 
 
 def main():

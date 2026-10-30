@@ -23,16 +23,16 @@ StructureBlockEntity.getRenderableBox	missing		player: no outline box is drawn a
 TestInstanceBlockEntity.Data.withSize	skip:java		record copy-with builder; no behaviour of its own
 TestInstanceBlockEntity.Data.withStatus	missing		minor: test instance status never changes; Horizon has no game test runner (/test only reports no instances)
 TestInstanceBlockEntity.Data.withError	missing		minor: no game test runner, so no error message is ever set on a test instance block
-TheEndGatewayBlockEntity.beamAnimationTick	port	crates/horizon-client/src/block_entity_anim.rs::EndGateway::tick	client ticker: age goes up and the teleport cooldown goes down
-TheEndGatewayBlockEntity.getSpawnPercent	inline	crates/horizon-client/src/block_entity_render.rs::gateway_beam	spawn percent is (age + partial) / 200, clamped, inside the beam function
-TheEndGatewayBlockEntity.getCooldownPercent	inline	crates/horizon-client/src/block_entity_render.rs::gateway_beam	cooldown percent is one minus the clamped cooldown over 40, inside the beam function
+TheEndGatewayBlockEntity.beamAnimationTick	port	crates/horizon-client-render/src/block_entity_anim.rs::EndGateway::tick	client ticker: age goes up and the teleport cooldown goes down
+TheEndGatewayBlockEntity.getSpawnPercent	inline	crates/horizon-client-render/src/block_entity_render.rs::gateway_beam	spawn percent is (age + partial) / 200, clamped, inside the beam function
+TheEndGatewayBlockEntity.getCooldownPercent	inline	crates/horizon-client-render/src/block_entity_render.rs::gateway_beam	cooldown percent is one minus the clamped cooldown over 40, inside the beam function
 TheEndGatewayBlockEntity.findExitPosition	inline	crates/horizon-client/src/game/end.rs::Game::resolve_gateway	the known-exit branch's find_exit closure: tallest block from two up and five out, then one above it
 TheEndGatewayBlockEntity.findOrCreateValidTeleportPos	port	crates/horizon-client/src/game/end.rs::Game::resolve_gateway	the find branch: tentative chunk, valid end stone, an island when none, then the tallest block
 TheEndGatewayBlockEntity.findExitPortalXZPosTentative	inline	crates/horizon-client/src/game/end.rs::Game::resolve_gateway	the find branch walks back over non-empty and forward over empty chunks; gap: minor: an unloaded chunk stops the walk instead of loading it
 TheEndGatewayBlockEntity.getChunk	port	crates/horizon-client/src/game/end.rs::Game::chunk_empty	gap: minor: returns whether the chunk is empty, not the chunk; an unloaded chunk reads as None
 TheEndGatewayBlockEntity.findValidSpawnInChunk	inline	crates/horizon-client/src/game/end.rs::Game::resolve_gateway	end stone with two open blocks above it, closest to the origin
-TheEndGatewayBlockEntity.getParticleAmount	port	crates/horizon-client/src/block_entity_render.rs::BlockEntityRenderer::gateway_faces	the count is the number of gateway faces that render; render_tick passes its length to animate_tick, which draws one particle per face
-TrialSpawnerBlockEntity.createDefaultSpawner	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::default	default cooldown 36000 and range 14; the no-creative player filter is in TrialSpawner::detect
+TheEndGatewayBlockEntity.getParticleAmount	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::gateway_faces	the count is the number of gateway faces that render; render_tick passes its length to animate_tick, which draws one particle per face
+TrialSpawnerBlockEntity.createDefaultSpawner	port	crates/horizon-client-render/src/chunk/block_entity.rs::TrialSpawner::default	default cooldown 36000 and range 14; the no-creative player filter is in TrialSpawner::detect
 TrialSpawnerBlockEntity.setEntityId	missing		player: a spawn egg used on a trial spawner does not change the mob it spawns; only spawners take eggs (use_spawn_egg_on_spawner)
 TrialSpawnerBlockEntity.setEntityData	missing		player: an op's spawn egg with entity data does nothing to a trial spawner
 TrialSpawnerBlockEntity.getState	port	crates/horizon-client/src/game/trial_spawner.rs::Game::trial_spawner_block	reads the state and ominous properties of the block
@@ -59,8 +59,8 @@ TrialSpawnerStateData.isReadyToEjectItems	inline	crates/horizon-client/src/mobs/
 TrialSpawnerStateData.getOrCreateDisplayEntity	port	crates/horizon-client/src/game/spawner.rs::Game::update_spawner_display	the shown mob is made again when its type changes; a trial spawner shows one only with a spinning mob
 TrialSpawnerStateData.getDispensingItems	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::spawn_ominous_item_spawner	rolls the loot once and keeps a non-empty roll
 TrialSpawnerStateData.lowResolutionPosition	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::spawn_ominous_item_spawner	the 30 by 20 by 30 cell of the position plus the level seed
-VaultBlockEntity.saveAdditional	port	crates/horizon-client/src/vault.rs::Vault::save	writes config, shared data and server data
-VaultBlockEntity.loadAdditional	port	crates/horizon-client/src/vault.rs::Vault::load	reads server data, config and shared data back
+VaultBlockEntity.saveAdditional	port	crates/horizon-client-render/src/vault.rs::Vault::save	writes config, shared data and server data
+VaultBlockEntity.loadAdditional	port	crates/horizon-client-render/src/vault.rs::Vault::load	reads server data, config and shared data back
 VaultBlockEntity.getServerData	skip:other		accessor that is null on the client; Horizon keeps one Vault struct holding both halves, so there is no server object to return
 VaultBlockEntity.Client.emitDeactivationParticles	inline	crates/horizon-client/src/game/trial_visuals.rs::Game::trial_level_event	the 3016 arm draws 20 flame particles in the cage and plays the deactivate sound
 VaultBlockEntity.Client.emitIdleParticles	inline	crates/horizon-client/src/game/trial_visuals.rs::Game::client_tick_vault	half the ticks: a smoke and a flame particle inside the cage
@@ -72,19 +72,19 @@ VaultBlockEntity.Client.randomPosCenterOfCage	inline	crates/horizon-client/src/g
 VaultBlockEntity.Client.randomPosInsideCage	port	crates/horizon-client/src/game/trial_visuals.rs::cage_point	
 VaultBlockEntity.Client.keyholePos	inline	crates/horizon-client/src/game/trial_visuals.rs::Game::vault_connection_particles	keyhole point: bottom centre, 1.75 up, half a block out of the facing side
 VaultBlockEntity.Server.setVaultState	port	crates/horizon-client/src/game/vault.rs::Game::set_vault_state	writes the vault_state block property; the exit and entry effects run in Vault::on_transition
-VaultBlockEntity.Server.cycleDisplayItemFromLootTable	port	crates/horizon-client/src/vault.rs::Vault::cycle_display_item	
-VaultBlockEntity.Server.getRandomDisplayItemFromLootTable	inline	crates/horizon-client/src/vault.rs::Vault::cycle_display_item	rolls the display table and picks one item at random
-VaultBlockEntity.Server.unlock	inline	crates/horizon-client/src/vault.rs::Vault::try_insert_key	the unlock step sets the ejection list and display item and starts the 14 tick delay
-VaultBlockEntity.Server.resolveItemsToEject	inline	crates/horizon-client/src/vault.rs::Vault::try_insert_key	rolls the vault loot table when a key is inserted
-VaultBlockEntity.Server.isValidToInsert	inline	crates/horizon-client/src/vault.rs::Vault::try_insert_key	the stack must match the key item's components and hold at least its count
-VaultBlockEntity.Server.shouldCycleDisplayItem	inline	crates/horizon-client/src/vault.rs::Vault::server_tick	cycles the display item every 20 ticks while Active
-VaultConfig.validate	port	crates/horizon-client/src/vault.rs::VaultConfig::decode	an activation range above the deactivation range fails the whole config
-VaultServerData.addToRewardedPlayers	inline	crates/horizon-client/src/vault.rs::Vault::try_insert_key	adds the player and keeps at most 128 rewarded players
-VaultServerData.setItemsToEject	inline	crates/horizon-client/src/vault.rs::Vault::try_insert_key	the unlock stores the rolled items as the ejection list
-VaultServerData.getNextItemToEject	inline	crates/horizon-client/src/vault.rs::Vault::try_insert_key	the display item becomes the last item to eject, also after each ejection in tick_and_get_next
-VaultServerData.popNextItemToEject	inline	crates/horizon-client/src/vault.rs::Vault::tick_and_get_next	the ejecting state pops the last item
-VaultSharedData.set	inline	crates/horizon-client/src/vault.rs::Vault::load	the display item, connected players and particles range are read straight into the vault on load
-VaultState.ejectResultItem	inline	crates/horizon-client/src/vault.rs::Vault::tick_and_get_next	the ejecting branch spawns the item upward, sends level event 3017 and plays the eject sound
+VaultBlockEntity.Server.cycleDisplayItemFromLootTable	port	crates/horizon-client-render/src/vault.rs::Vault::cycle_display_item	
+VaultBlockEntity.Server.getRandomDisplayItemFromLootTable	inline	crates/horizon-client-render/src/vault.rs::Vault::cycle_display_item	rolls the display table and picks one item at random
+VaultBlockEntity.Server.unlock	inline	crates/horizon-client-render/src/vault.rs::Vault::try_insert_key	the unlock step sets the ejection list and display item and starts the 14 tick delay
+VaultBlockEntity.Server.resolveItemsToEject	inline	crates/horizon-client-render/src/vault.rs::Vault::try_insert_key	rolls the vault loot table when a key is inserted
+VaultBlockEntity.Server.isValidToInsert	inline	crates/horizon-client-render/src/vault.rs::Vault::try_insert_key	the stack must match the key item's components and hold at least its count
+VaultBlockEntity.Server.shouldCycleDisplayItem	inline	crates/horizon-client-render/src/vault.rs::Vault::server_tick	cycles the display item every 20 ticks while Active
+VaultConfig.validate	port	crates/horizon-client-render/src/vault.rs::VaultConfig::decode	an activation range above the deactivation range fails the whole config
+VaultServerData.addToRewardedPlayers	inline	crates/horizon-client-render/src/vault.rs::Vault::try_insert_key	adds the player and keeps at most 128 rewarded players
+VaultServerData.setItemsToEject	inline	crates/horizon-client-render/src/vault.rs::Vault::try_insert_key	the unlock stores the rolled items as the ejection list
+VaultServerData.getNextItemToEject	inline	crates/horizon-client-render/src/vault.rs::Vault::try_insert_key	the display item becomes the last item to eject, also after each ejection in tick_and_get_next
+VaultServerData.popNextItemToEject	inline	crates/horizon-client-render/src/vault.rs::Vault::tick_and_get_next	the ejecting state pops the last item
+VaultSharedData.set	inline	crates/horizon-client-render/src/vault.rs::Vault::load	the display item, connected players and particles range are read straight into the vault on load
+VaultState.ejectResultItem	inline	crates/horizon-client-render/src/vault.rs::Vault::tick_and_get_next	the ejecting branch spawns the item upward, sends level event 3017 and plays the eject sound
 TreeGrower.getConfiguredFeature	inline	crates/horizon-world/src/level/growth.rs::Sim::grow_tree	the flower list is used when a flower is near and the list is not empty, then a weighted pick
 TreeGrower.getSurroundingBlockStates	inline	crates/horizon-world/src/level/growth.rs::Sim::two_by_two	reads the four blocks of the two by two square
 TreeGrower.removeSaplings	inline	crates/horizon-world/src/level/growth.rs::Sim::grow_tree	the mega branch clears the four sapling blocks before placing

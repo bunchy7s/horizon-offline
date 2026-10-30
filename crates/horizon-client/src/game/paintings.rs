@@ -1,6 +1,7 @@
 //! Paintings: `HangingEntityItem.useOn` placement with `Painting.create`'s
-//! variant choice, `HangingEntity.survives` checks every 100 ticks,
-//! breaking by attack (`dropItem`), saving, and `PaintingRenderer` quads.
+//! variant choice (or the stack's `painting/variant`), `HangingEntity.survives`
+//! checks every 100 ticks, breaking by attack (`dropItem`), saving, and
+//! `PaintingRenderer` quads.
 use super::{Game, Hit};
 use horizon_client::{entities::Painting, items::ItemStack, mesher::Vertex};
 use horizon_core::{
@@ -16,6 +17,9 @@ pub(super) struct Variant {
     pub asset: String,
     pub width: i32,
     pub height: i32,
+    /// `PaintingVariant.title` and `author`: text components.
+    pub title: Option<serde_json::Value>,
+    pub author: Option<serde_json::Value>,
 }
 /// Variants by id plus the `#minecraft:placeable` list.
 #[derive(Default)]
@@ -48,6 +52,8 @@ impl PaintingVariants {
                         .to_owned(),
                     width: v["width"].as_i64().unwrap_or(1) as i32,
                     height: v["height"].as_i64().unwrap_or(1) as i32,
+                    title: v.get("title").cloned(),
+                    author: v.get("author").cloned(),
                 });
             }
         }
@@ -63,6 +69,11 @@ impl PaintingVariants {
     }
     pub fn get(&self, id: &str) -> Option<&Variant> {
         self.all.iter().find(|v| &*v.id == id)
+    }
+    /// The variant a stack's `painting/variant` component names.
+    pub fn of_stack(&self, stack: &ItemStack) -> Option<&Variant> {
+        let id = horizon_client::save::text(stack.data()?.other("minecraft:painting/variant"))?;
+        self.get(&horizon_world::datafix::dynamic::namespaced(&id))
     }
 }
 fn overlaps(a: ([f64; 3], [f64; 3]), b: ([f64; 3], [f64; 3])) -> bool {
@@ -154,6 +165,15 @@ impl Game<'_> {
             .unwrap_or(0) as usize;
         let v = &fitting[pick];
         (candidate.variant, candidate.width, candidate.height) = (v.id.clone(), v.width, v.height);
+        // EntityType.createDefaultStackConfig -> Painting.applyImplicitComponents:
+        // the stack's `painting/variant` replaces the random pick, and that
+        // painting has to survive where it goes (else the use is CONSUME).
+        if let Some(v) = self.painting_variants.of_stack(stack).cloned() {
+            (candidate.variant, candidate.width, candidate.height) = (v.id, v.width, v.height);
+            if !self.painting_survives(&candidate) {
+                return false;
+            }
+        }
         let (lo, hi) = candidate.bounds();
         let at = [
             (lo[0] + hi[0]) / 2.0,

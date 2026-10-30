@@ -10,10 +10,10 @@ again restores vanilla's behaviour completely.
 | Part | Code |
 |---|---|
 | Settings, parsing and saving | `crates/horizon-client-render/src/extras.rs` |
-| FPS and click counters (for mods) | `extras.rs` (pure logic, unit tested) |
+| FPS and click counters (for native mods) | `extras.rs` (pure logic, unit tested) |
 | Dynamic lights: item glow, nearest sources | `crates/horizon-client-render/src/dynamic_light.rs` (unit tested), `game/dynamic_lights.rs`, `terrain.wgsl` and `entity.wgsl` (`dynamic_block_light`) |
-| HUD drawing (a mod's minimap, corner stacking) | `crates/horizon-client/src/extras_hud.rs` |
-| Minimap colours, tiles and image (for `render.set-minimap`) | `crates/horizon-client-render/src/minimap.rs` |
+| HUD drawing (a native mod's minimap, corner stacking) | `crates/horizon-client/src/extras_hud.rs` |
+| Minimap colours, tiles and image (for the Minimap native mod) | `crates/horizon-client-render/src/minimap.rs` |
 | Reconnect policy and backoff | `crates/horizon-client/src/reconnect.rs` |
 | Game glue (input hooks, per-frame update) | `crates/horizon-client/src/game/extras.rs` |
 | Mouse Tweaks-style controls, sort buttons | `crates/horizon-client/src/game/tweaks.rs` |
@@ -60,18 +60,16 @@ in Controls, and adding one would put a non-vanilla mapping into `options.txt`.
 - Off: nothing is gathered and the shaders' loop runs zero times (the count is 0), so it costs
   nothing measurable (numbers in the pull request, #814).
 
-### Moved to the mod browser
+### Moved to native mods
 
-The **FPS counter**, **Keystrokes**, **Zoom** and the **Minimap** are official mods now (`mods/official/`, [mods.md](mods.md#horizons-official-mods)),
-with the same look and options. On the first start after the update, a player who had one on gets the mod installed
-from Horizon's registry and turned on, with their corner and options carried over (Zoom's key too, into
-`horizon-mods.txt`, when it wasn't Z), and reads one line in the chat ("Zoom moved to the mod browser: installed for
-you"). The install is checked like the launcher's (size,
-SHA-256, signature, manifest); if it fails (offline), the next start tries again. `horizon-extras.txt` keeps the old
-keys and lists what was done in `movedToMods`. Code: `crates/horizon-client/src/moved_extras.rs`,
-`game/moved_extras.rs`.
+The **FPS counter**, **Keystrokes**, **Zoom** and the **Minimap** are official native mods now (in
+horizon-rust/horizon-mods under `native/<name>/`, [mods.md](mods.md#horizons-official-mods)), with the same look and
+options. Players install them from the launcher's Mods page, and the launcher builds them into the game
+([native-mods.md](native-mods.md)). They were WebAssembly mods for a while; those don't run any more. The game keeps
+the hook points they use (`crates/horizon-client/src/game/native_hooks.rs`), and `horizon-extras.txt` keeps the old
+keys and `movedToMods`.
 
-The game still draws the minimap, for the mod (`render.set-minimap`, [mods.md](mods.md)):
+The game still draws the minimap, for the native mod (`native_minimap` in `native_hooks.rs`, [mods.md](mods.md)):
 - a corner map (top right by default), square or round, small/medium/large, zoom 0.5 to 4 blocks per pixel, rotating
   with the player or north up, with the player arrow (vanilla's map decoration sprite);
 - vanilla's `MapColor` per block, as map items use, with the map item's height shading and water-depth dithering;

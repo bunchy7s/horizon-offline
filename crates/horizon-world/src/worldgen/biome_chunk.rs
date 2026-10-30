@@ -188,6 +188,9 @@ impl<T: Clone> BiomeRegion<T> {
     pub fn quart_at_block(&self, block: BlockPos) -> [i32; 3] {
         self.zoom.quart_at_block(block)
     }
+    pub fn zoom(&self) -> BiomeZoom {
+        self.zoom
+    }
     /// Distinct values currently stored anywhere in the chunk. The result is
     /// sorted by biome identity; callers must not use this order as registry order.
     pub fn present_in_chunk(&self, p: ChunkPos) -> Result<Vec<T>, BiomeRegionError>

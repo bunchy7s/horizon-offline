@@ -161,6 +161,31 @@ impl Column {
             self.spans.push(span);
         }
     }
+    /// Open water and its floor lit as open sky, as the seed's far columns
+    /// are: a chunk's own light fades a level per block of water, so the
+    /// chunks a player passed drew a darker band through the seed's sea.
+    /// The water is one span again.
+    fn light_open_water(&mut self, kinds: &[u8]) {
+        // Water; lava glows.
+        let water = |span: &Span| {
+            let kind = kinds.get(span.state.0 as usize).copied().unwrap_or(0);
+            kind & FLUID != 0 && kind >> 4 == 0
+        };
+        if !self.spans.last().is_some_and(water) {
+            return;
+        }
+        let floor = self
+            .spans
+            .iter()
+            .rposition(|span| !water(span))
+            .unwrap_or(0);
+        for (i, mut span) in std::mem::take(&mut self.spans).into_iter().enumerate() {
+            if i >= floor {
+                span.light |= 0xf0;
+            }
+            self.push(span);
+        }
+    }
     /// `kinds`: `state_kinds`, per block state.
     fn from_chunk(chunk: &Chunk, kinds: &[u8], x: i32, z: i32) -> Self {
         let kind = |state: BlockStateId| kinds.get(state.0 as usize).copied().unwrap_or(0);
@@ -212,6 +237,7 @@ impl Column {
                 });
             }
         }
+        column.light_open_water(kinds);
         let mut water = None;
         for span in column.spans.iter().rev() {
             if kind(span.state) & FLUID != 0 {
@@ -1770,6 +1796,48 @@ mod tests {
             7 << 12,
             "block light does not invent skylight"
         );
+    }
+    #[test]
+    fn open_water_and_its_floor_are_lit_as_the_seed_lights_them() {
+        let span = |min, max, state, light| Span {
+            min,
+            max,
+            state: BlockStateId(state),
+            biome: 0,
+            light,
+        };
+        // 0 air, 1 stone, 2 water, 3 lava.
+        let kinds = [AIR, KEPT, KEPT | FLUID, KEPT | FLUID | 15 << 4];
+        // A chunk's own light: a cave, the floor, water fading a level a block.
+        let mut sea = Column {
+            surface: None,
+            spans: vec![
+                span(30, 40, 1, 0),
+                span(40, 48, 1, 0x10 | 2 << 12),
+                span(48, 61, 2, 0x20),
+                span(61, 62, 2, 0xe0),
+                span(62, 63, 2, 0xf0),
+            ],
+        };
+        sea.light_open_water(&kinds);
+        assert_eq!(
+            sea.spans,
+            [
+                span(30, 40, 1, 0),
+                span(40, 48, 1, 0xf0 | 2 << 12),
+                span(48, 63, 2, 0xf0)
+            ]
+        );
+        // Land, and lava, keep their light.
+        for top in [1, 3] {
+            let mut column = Column {
+                surface: None,
+                spans: vec![span(40, 50, 2, 0x20), span(50, 63, top, 0x80)],
+            };
+            let before = column.spans.clone();
+            column.light_open_water(&kinds);
+            assert_eq!(column.spans, before);
+        }
     }
     #[test]
     fn coarse_voxels_reduce_the_area_instead_of_inflating_one_leaf() {

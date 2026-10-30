@@ -310,8 +310,12 @@ public final class VanillaCommandExecOracle {
                 }
             }
             // Entity sections become visible once their (asynchronous) load
-            // finished and the chunk entity-ticks.
-            for (int i = 0; i < 400; i++) {
+            // finished and the chunk entity-ticks. That load runs on other
+            // threads, so wait by the clock, not by a tick count: 400 ticks
+            // (~2 s) ran out on a loaded runner and failed main's parity
+            // (2026-10-29).
+            long deadline = System.nanoTime() + 120_000_000_000L;
+            for (int i = 0; System.nanoTime() < deadline; i++) {
                 tick();
                 boolean ready = true;
                 for (int dz = -2; dz <= 2 && ready; dz++) {

@@ -883,6 +883,24 @@ fn relight_layer(
         let Some(old) = level(world, sky, p) else {
             continue;
         };
+        // `BlockLightEngine.checkNode`: a block emitting at least the light
+        // already there keeps it and pulls its neighbours' light in. Clearing
+        // it would darken and relight everything it lit (flowing lava next to
+        // lava: thousands of cells per block).
+        if !sky && !force && old > 0 {
+            let emission = world
+                .state(p.0, p.1, p.2)
+                .map_or(0, |s| tables.cells[s as usize].emission);
+            if emission >= old {
+                if emission > old {
+                    set_level(world, sky, p, emission);
+                    changed.push(p);
+                }
+                decrease.push_back((p, 0));
+                increase.push_back(p);
+                continue;
+            }
+        }
         if old > 0 {
             set_level(world, sky, p, 0);
             changed.push(p);
@@ -1088,6 +1106,49 @@ mod tests {
         );
         assert!(same(&w, (1, 0)));
         assert_eq!(block(&w, 14, 0, 8), 13);
+    }
+    /// Emitters placed in light at most as bright as theirs (flowing lava
+    /// next to lava) only brighten: nothing they lit is darkened and lit
+    /// again, and the result is the full relight's.
+    #[test]
+    fn emitters_placed_in_their_own_light_only_brighten() {
+        let mut w = world(|c| {
+            c.set(8, 0, 8, TORCH);
+        });
+        let block = |w: &HashMap<(i32, i32), Arc<Chunk>>, p: Pos| {
+            w[&(p.0 >> 4, p.2 >> 4)].light(p.0 & 15, p.1, p.2 & 15) & 15
+        };
+        for (x, y, z) in [(9, 0, 8), (10, 0, 8), (10, 1, 8), (11, 1, 9), (8, 0, 9)] {
+            let around: Vec<Pos> = (-15..=15)
+                .flat_map(|dx| {
+                    (-3..=3).flat_map(move |dy| (-15..=15).map(move |dz| (x + dx, y + dy, z + dz)))
+                })
+                .collect();
+            let before: Vec<u8> = around.iter().map(|&p| block(&w, p)).collect();
+            Arc::make_mut(w.get_mut(&(0, 0)).unwrap()).set(x, y, z, TORCH);
+            let mut changed = LightChanges::default();
+            relight(&mut w, &tables(), true, &[(x, y, z)], false, &mut changed);
+            for (&p, &was) in around.iter().zip(&before) {
+                assert!(block(&w, p) >= was, "{p:?} darkened from {was}");
+            }
+        }
+        // An emitter checked again with its block light unchanged changes
+        // nothing, so no section is remeshed.
+        let mut changed = LightChanges::default();
+        relight(&mut w, &tables(), false, &[(8, 0, 8)], false, &mut changed);
+        assert!(changed.is_empty());
+        let region: [[Option<&Chunk>; 3]; 3] = std::array::from_fn(|dz| {
+            std::array::from_fn(|dx| w.get(&(dx as i32 - 1, dz as i32 - 1)).map(|c| &**c))
+        });
+        for (si, s) in light_chunk(&region, &tables(), true).iter().enumerate() {
+            for i in 0..4096 {
+                assert_eq!(
+                    s.get(i),
+                    w[&(0, 0)].sections[si].light(i),
+                    "section {si} index {i}"
+                );
+            }
+        }
     }
     #[test]
     fn random_border_relights_match_full_relight() {

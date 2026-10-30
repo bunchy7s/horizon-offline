@@ -39,10 +39,13 @@ fn state<'a>(pad: &Padded, info: &'a [Info], p: [i32; 3]) -> &'a Info {
 /// `LightCoordsUtil.getLightCoords`: light at `p` as seen through `state`
 /// (block level << 4 | sky level << 20).
 pub(super) fn coords(pad: &Padded, state: &Info, p: [i32; 3]) -> u32 {
+    packed_coords(state, pad.light[pi(p[0], p[1], p[2])])
+}
+/// `coords` of a stored light byte (sky level << 4 | block level).
+pub(super) fn packed_coords(state: &Info, packed: u8) -> u32 {
     if state.emissive {
         return FULL_BRIGHT;
     }
-    let packed = pad.light[pi(p[0], p[1], p[2])];
     let block = u32::from((packed & 15).max(state.emission));
     block << 4 | u32::from(packed >> 4) << 20
 }
@@ -274,8 +277,28 @@ pub(super) fn flat(
     positions: &[[f32; 3]; 4],
     face: D,
 ) -> u32 {
-    let cubic = shape(positions, face, own.full).cubic;
-    coords(pad, own, if cubic { step(pos, face) } else { pos })
+    coords(
+        pad,
+        own,
+        flat_position(pos, positions, face, None, own.full),
+    )
+}
+/// Where `tesselateFlat` reads the light of a quad of a block at `pos`: the
+/// neighbour on its cull face, else `prepareQuadFlat`'s choice (the neighbour
+/// when the quad is cubic, else the block itself). `full` is the block's
+/// `isCollisionShapeFullBlock`.
+pub(super) fn flat_position(
+    pos: [i32; 3],
+    positions: &[[f32; 3]; 4],
+    face: D,
+    cull: Option<D>,
+    full: bool,
+) -> [i32; 3] {
+    match cull {
+        Some(d) => step(pos, d),
+        None if shape(positions, face, full).cubic => step(pos, face),
+        None => pos,
+    }
 }
 /// `prepareQuadAmbientOcclusion`: per-vertex AO brightness (before `ARGB.gray`)
 /// and smooth light coords, by vertex index.
@@ -396,6 +419,39 @@ mod tests {
         assert_eq!(with_emission(0x0087_0013, 0), 0x0087_0013);
         assert_eq!(with_emission(0x0087_0013, 3), packed(3, 8));
         assert_eq!(max_coords(packed(3, 9), packed(7, 2)), packed(7, 9));
+    }
+    #[test]
+    fn flat_light_reads_the_neighbour_a_face_looks_at() {
+        let pos = [4, 64, -2];
+        let full_top = [
+            [0.0, 1.0, 0.0],
+            [0.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [1.0, 1.0, 0.0],
+        ];
+        // A cull face samples its neighbour, whatever the quad's shape.
+        let inset = full_top.map(|[x, _, z]| [x, 0.75, z]);
+        assert_eq!(
+            flat_position(pos, &inset, D::Up, Some(D::Up), false),
+            [4, 65, -2]
+        );
+        // A flush quad without a cull face samples its neighbour too: a block
+        // drawn at a cell that is now opaque (a moving block, #3002) still
+        // takes the light around it.
+        assert_eq!(
+            flat_position(pos, &full_top, D::Up, None, false),
+            [4, 65, -2]
+        );
+        let west = [
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 1.0],
+            [0.0, 1.0, 0.0],
+        ];
+        assert_eq!(flat_position(pos, &west, D::West, None, false), [3, 64, -2]);
+        // An inset quad (a piston head's arm) takes the block's own light.
+        assert_eq!(flat_position(pos, &inset, D::Up, None, false), pos);
+        assert_eq!(flat_position(pos, &inset, D::Up, None, true), [4, 65, -2]);
     }
     #[test]
     fn quad_shape_classifies_partial_and_cubic_faces() {

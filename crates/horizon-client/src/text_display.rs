@@ -1,7 +1,11 @@
 //! Display/TextDisplay synced data (26.3), checked against vanilla accessors
 //! and ClientboundSetEntityDataPacket's own stream codec.
-use crate::text::Text;
-use horizon_protocol::entity_data::Value;
+use crate::{
+    save::{float, number},
+    text::Text,
+};
+use horizon_protocol::entity_data::{Value, serializer};
+use horizon_world::nbt::Tag;
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -152,6 +156,197 @@ impl TextDisplayData {
             Align::Center
         }
     }
+}
+
+/// One synched data entry: kept when it differs from its default, or always
+/// with `all` (the defaults a client is sent when a value goes back to one).
+fn entry(
+    out: &mut Vec<(u8, i32, Value)>,
+    all: bool,
+    id: u8,
+    kind: i32,
+    value: Value,
+    default: Value,
+) {
+    if all || value != default {
+        out.push((id, kind, if all { default } else { value }));
+    }
+}
+
+/// `Display.readAdditionalSaveData`: the synched data entries (ids 8 to 22)
+/// of a saved display, or with `all` their defaults. A matrix `transformation`
+/// (`MATRIX4F`) is not decomposed: it stays the identity.
+pub fn display_data(tag: &Tag, all: bool) -> Vec<(u8, i32, Value)> {
+    let int = |key: &str| number(tag.get(key)).map(|v| v as i32);
+    let real = |key: &str| float(tag.get(key)).map(|v| v as f32);
+    let mut out = Vec::new();
+    let mut set = |id: u8, kind: i32, value: Value, default: Value| {
+        entry(&mut out, all, id, kind, value, default);
+    };
+    let defaults = TextDisplayData::default();
+    // The start delay, the transformation duration, the teleport duration (0 to 59).
+    let ints = [
+        (8, "start_interpolation", 0, i32::MIN, i32::MAX),
+        (9, "interpolation_duration", 0, i32::MIN, i32::MAX),
+        (10, "teleport_duration", 0, 0, 59),
+        (22, "glow_color_override", -1, i32::MIN, i32::MAX),
+    ];
+    for (id, key, default, low, high) in ints {
+        let value = int(key).unwrap_or(default).clamp(low, high);
+        set(id, serializer::INT, Value::Int(value), Value::Int(default));
+    }
+    // `Transformation.CODEC`: all four parts, else the identity.
+    let t = tag.get("transformation").and_then(transformation);
+    let (translation, left, scale, right) = t.unwrap_or((
+        defaults.translation,
+        defaults.left_rotation,
+        defaults.scale,
+        defaults.right_rotation,
+    ));
+    let parts = [
+        (
+            11,
+            serializer::VECTOR3,
+            translation.to_vec(),
+            defaults.translation.to_vec(),
+        ),
+        (
+            12,
+            serializer::VECTOR3,
+            scale.to_vec(),
+            defaults.scale.to_vec(),
+        ),
+        (
+            13,
+            serializer::QUATERNION,
+            left.to_vec(),
+            defaults.left_rotation.to_vec(),
+        ),
+        (
+            14,
+            serializer::QUATERNION,
+            right.to_vec(),
+            defaults.right_rotation.to_vec(),
+        ),
+    ];
+    for (id, kind, value, default) in parts {
+        set(id, kind, Value::Floats(value), Value::Floats(default));
+    }
+    let billboard = match tag.get("billboard") {
+        Some(Tag::String(s)) => match s.to_string_lossy().as_str() {
+            "vertical" => 1,
+            "horizontal" => 2,
+            "center" => 3,
+            _ => 0,
+        },
+        _ => 0,
+    };
+    set(15, serializer::BYTE, Value::Byte(billboard), Value::Byte(0));
+    // `Brightness.pack`: block light in bits 4 to 7, sky light in bits 20 to 23.
+    let brightness = tag.get("brightness").and_then(|b| {
+        let light = |key: &str| number(b.get(key)).filter(|v| (0..=15).contains(v));
+        Some((light("block")? as i32) << 4 | (light("sky")? as i32) << 20)
+    });
+    set(
+        16,
+        serializer::INT,
+        Value::Int(brightness.unwrap_or(-1)),
+        Value::Int(-1),
+    );
+    for (id, key, default) in [
+        (17, "view_range", 1.0),
+        (18, "shadow_radius", 0.0),
+        (19, "shadow_strength", 1.0),
+        (20, "width", 0.0),
+        (21, "height", 0.0),
+    ] {
+        let value = real(key).unwrap_or(default);
+        set(
+            id,
+            serializer::FLOAT,
+            Value::Float(value),
+            Value::Float(default),
+        );
+    }
+    out
+}
+
+/// `TextDisplay.readAdditionalSaveData`: the text, line width, background,
+/// opacity and style flags (ids 23 to 27), or with `all` their defaults.
+pub fn text_display_data(tag: &Tag, all: bool) -> Vec<(u8, i32, Value)> {
+    let int = |key: &str| number(tag.get(key)).map(|v| v as i32);
+    let mut out = Vec::new();
+    let mut set = |id: u8, kind: i32, value: Value, default: Value| {
+        entry(&mut out, all, id, kind, value, default);
+    };
+    let empty = Tag::String("".into());
+    set(
+        23,
+        serializer::COMPONENT,
+        Value::Text(tag.get("text").unwrap_or(&empty).clone()),
+        Value::Text(empty.clone()),
+    );
+    set(
+        24,
+        serializer::INT,
+        Value::Int(int("line_width").unwrap_or(200)),
+        Value::Int(200),
+    );
+    let background = Value::Int(int("background").unwrap_or(0x4000_0000));
+    set(25, serializer::INT, background, Value::Int(0x4000_0000));
+    let opacity = Value::Byte(int("text_opacity").unwrap_or(-1) as i8);
+    set(26, serializer::BYTE, opacity, Value::Byte(-1));
+    // Shadow 1, see-through 2, default background 4, then the alignment: left 8, right 16.
+    let flag = |key: &str, bit: i8| {
+        if int(key).is_some_and(|v| v != 0) {
+            bit
+        } else {
+            0
+        }
+    };
+    let align = match tag.get("alignment") {
+        Some(Tag::String(s)) => match s.to_string_lossy().as_str() {
+            "left" => 8,
+            "right" => 16,
+            _ => 0,
+        },
+        _ => 0,
+    };
+    let flags = flag("shadow", 1) | flag("see_through", 2) | flag("default_background", 4) | align;
+    set(27, serializer::BYTE, Value::Byte(flags), Value::Byte(0));
+    out
+}
+
+/// `Transformation.CODEC`'s translation, left rotation, scale and right
+/// rotation; None unless all four are there (the matrix form is not read).
+fn transformation(tag: &Tag) -> Option<([f32; 3], [f32; 4], [f32; 3], [f32; 4])> {
+    let list = |tag: Option<&Tag>| -> Option<Vec<f32>> {
+        match tag? {
+            Tag::List(l) => l.iter().map(|v| float(Some(v)).map(|v| v as f32)).collect(),
+            _ => None,
+        }
+    };
+    let vector = |key: &str| -> Option<[f32; 3]> { list(tag.get(key))?.try_into().ok() };
+    // `ExtraCodecs.QUATERNIONF`: four components (normalized) or an axis and an angle.
+    let rotation = |key: &str| -> Option<[f32; 4]> {
+        let value = tag.get(key)?;
+        if let Some(q) = list(Some(value)) {
+            let [x, y, z, w]: [f32; 4] = q.try_into().ok()?;
+            let length = (x * x + y * y + z * z + w * w).sqrt();
+            return Some([x / length, y / length, z / length, w / length]);
+        }
+        let angle = float(value.get("angle"))? as f32;
+        let [x, y, z]: [f32; 3] = list(value.get("axis"))?.try_into().ok()?;
+        let (sin, cos) = (angle * 0.5).sin_cos();
+        let inverse = 1.0 / (x * x + y * y + z * z).sqrt();
+        Some([x * inverse * sin, y * inverse * sin, z * inverse * sin, cos])
+    };
+    Some((
+        vector("translation")?,
+        rotation("left_rotation")?,
+        vector("scale")?,
+        rotation("right_rotation")?,
+    ))
 }
 
 /// `TextDisplay.CachedInfo`: each line and its width, and the widest.

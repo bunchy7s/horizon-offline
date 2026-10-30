@@ -19,6 +19,20 @@ public final class VanillaTooltipDisplayOracle {
         var context = Item.TooltipContext.of(ParityData.lookup);
         var output = new ArrayList<String>();
         for (String line : Files.readAllLines(Path.of(args[0]))) {
+            if (line.startsWith("name\t")) {
+                var stack = ParityData.stack("{id:\"minecraft:stick\",count:1,components:{\"minecraft:custom_name\":" + line.substring(5) + "}}");
+                var result = new StringBuilder("name\t");
+                stack.getStyledHoverName().visit((style, text) -> {
+                    text.codePoints().forEach(c -> result.append(c).append(',')
+                        .append(style.getColor() == null ? 0xffffff : style.getColor().getValue()).append(',')
+                        .append(style.isBold()).append(',').append(style.isItalic()).append(',')
+                        .append(style.isUnderlined()).append(',').append(style.isStrikethrough()).append(',')
+                        .append(style.isObfuscated()).append('|'));
+                    return java.util.Optional.empty();
+                }, net.minecraft.network.chat.Style.EMPTY);
+                output.add(result.toString());
+                continue;
+            }
             String[] fields = line.split("\t");
             boolean hideTooltip = Boolean.parseBoolean(fields[0]);
             boolean creative = Boolean.parseBoolean(fields[1]);

@@ -24,16 +24,16 @@ RegistrySetBuilder.BuildState.createBootstrap	skip:data		bootstrap and datagen r
 RegistrySynchronization.packRegistries	inline	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	gap: minor: packs every registry SyncData holds; the synchronized-registry list is not checked here
 RegistrySynchronization.packRegistry	port	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	gap: minor: known_pack leaves out contents for every entry; vanilla checks each entry's known pack
 RegistrySynchronization.networkSafeRegistries	inline	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	gap: minor: unsure which registries count as networkable; decided when SyncData is built
-SectionPos.offset	inline	crates/horizon-client/src/light.rs::Region::slot	gap: minor: the light engine reaches neighbour sections by block coordinate; the SectionTracker walk is not checked
+SectionPos.offset	inline	crates/horizon-client-render/src/light.rs::Region::slot	gap: minor: the light engine reaches neighbour sections by block coordinate; the SectionTracker walk is not checked
 SectionPos.sectionRelativePos	port	crates/horizon-core/src/position.rs::BlockPos::section_relative	
 SectionPos.relativeToBlockPos	port	crates/horizon-core/src/position.rs::SectionPos::relative_to_block	
 SectionPos.blockToSection	port	crates/horizon-core/src/position.rs::BlockPos::section	on the unpacked position; the long is SectionPos::pack of it
-SectionPos.origin	inline	crates/horizon-client/src/gfx/resident.rs::origin	gap: minor: camera-relative origin; the block corner is the same sum without the camera
+SectionPos.origin	inline	crates/horizon-client-render/src/gfx/resident.rs::origin	gap: minor: camera-relative origin; the block corner is the same sum without the camera
 SectionPos.asLong	port	crates/horizon-core/src/position.rs::SectionPos::pack	asLong(BlockPos): BlockPos::section then this pack; bit layout matches
 SectionPos.blocksInside	inline	crates/horizon-client/src/mobs/villager_brain.rs::chunk_pois	the POI scan visits every block of each section
 SectionPos.aroundChunk	missing		minor: unsure: ensureLoadedAndValid pre-loads POI chunks around a point; Horizon's chunk_pois reads loaded chunks only
 SectionPos.betweenClosedStream	skip:java		Java stream over a 3-D section box; the loops in pois_in_range and chunk_pois do the iteration
-SectionPos.aroundAndAtBlockPos	port	crates/horizon-client/src/light.rs::LightChanges::dirty_sections	the sections within one block of a changed cell
+SectionPos.aroundAndAtBlockPos	port	crates/horizon-client-render/src/light.rs::LightChanges::dirty_sections	the sections within one block of a changed cell
 TypedInstance.is	skip:java		holder type checks; Horizon compares registry names
 UUIDUtil.leastMostToIntArray	port	crates/horizon-client/src/lan/playerdata.rs::uuid_ints	
 UUIDUtil.uuidToByteArray	port	crates/horizon-protocol/src/buf.rs::Writer::uuid	writes into the buffer instead of returning bytes

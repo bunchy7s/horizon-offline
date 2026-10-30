@@ -19,7 +19,7 @@ use std::f32::consts::PI;
 pub fn register(m: &mut Mob) {
     m.no_gravity = true;
     m.ai.mov.kind = super::control::MoveKind::Custom;
-    m.extra.main_hand = Some("minecraft:iron_sword".into());
+    m.extra.set_main_hand(Some("minecraft:iron_sword".into()));
     if m.extra.egg_time == 0 {
         m.extra.egg_time = -1;
     }

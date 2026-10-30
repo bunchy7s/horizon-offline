@@ -149,6 +149,27 @@ impl BlockRegistry {
         self.defaults.get(name).copied()
     }
 
+    /// The values `property` takes on `block`, in `Property.getPossibleValues`
+    /// order. The state list is in `StateDefinition` order (properties sorted
+    /// by name, values in their own order), so a value's first appearance is
+    /// that order.
+    pub fn property_values(&self, block: &str, property: &str) -> Vec<&str> {
+        let mut values: Vec<&str> = Vec::new();
+        for state in self
+            .states
+            .iter()
+            .filter(|state| state.name.as_str() == block)
+        {
+            if let Some(value) = state.properties.get(property) {
+                let value = value.as_str();
+                if !values.contains(&value) {
+                    values.push(value);
+                }
+            }
+        }
+        values
+    }
+
     /// Resolve a saved descriptor, supplying omitted default properties. Unlike
     /// vanilla's lenient logging paths, invalid properties return a typed error.
     pub fn resolve(&self, descriptor: &BlockState) -> io::Result<BlockStateId> {

@@ -62,7 +62,7 @@ HangingEntityItem.mayPlace	port	crates/horizon-client/src/game/paintings.rs::Gam
 HangingEntityItem.appendHoverText	missing		player: hovering a painting item shows no title, author or size line in its tooltip
 Item.getDestroySpeed	port	crates/horizon-items/src/items.rs::Items::mining_speed	
 Item.finishUsingItem	port	crates/horizon-client/src/game.rs::Game::consume_held	the consumable effects are applied by apply_consume_effect
-Item.getBarColor	port	crates/horizon-client/src/hud_overlays.rs::damage_bar	width and hue from the damage fraction
+Item.getBarColor	port	crates/horizon-client-render/src/hud_overlays.rs::damage_bar	width and hue from the damage fraction
 Item.mineBlock	port	crates/horizon-client/src/game.rs::Game::mine_block_with_held	
 Item.isCorrectToolForDrops	port	crates/horizon-items/src/items.rs::Items::correct_for_drops	
 Item.getUseAnimation	port	crates/horizon-items/src/use_animation.rs::consumable_animation	consumable animation; the block and spear poses are handled by the item pose code

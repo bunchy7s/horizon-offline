@@ -235,9 +235,9 @@ impl Game<'_> {
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == *id) else {
                     return false;
                 };
-                let item = stack.map(|s| s.item);
+                let item = stack.as_ref().map(|s| s.item.clone());
                 match *key {
-                    "mainhand" => m.extra.main_hand = item,
+                    "mainhand" => m.extra.set_main_hand_stack(stack),
                     "offhand" => m.extra.off_hand = item,
                     "head" | "body" => m.extra.head = item,
                     "chest" => m.extra.chest = item,
@@ -430,9 +430,10 @@ impl Game<'_> {
                                 c.insert("minecraft:item_name".into(), name);
                             });
                         } else {
-                            let t = horizon_client::packs::component(&m["name"]);
-                            stack.extra.get_or_insert_with(Default::default).custom_name =
-                                Some(t.plain());
+                            // SetNameFunction.run preserves the component when no entity resolver is requested.
+                            stack
+                                .data_mut()
+                                .set_loot_name("minecraft:custom_name", &m["name"]);
                         }
                     }
                     "minecraft:set_enchantments" => {
@@ -599,7 +600,7 @@ impl Game<'_> {
         if let Some(Tag::Int(n)) = s.data().and_then(|d| d.other("minecraft:max_stack_size")) {
             return (*n).clamp(1, 99) as u32;
         }
-        self.res.items().get(&s.item).map_or(64, |i| i.max_stack)
+        self.items().get(&s.item).map_or(64, |i| i.max_stack)
     }
     /// `ResourceOrIdArgument.getItemModifier`: an inline modifier (SNBT) or
     /// a registered one.

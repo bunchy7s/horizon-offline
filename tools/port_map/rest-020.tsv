@@ -116,7 +116,7 @@ TagLoader.SortingEntry.visitRequiredDependencies	inline	crates/horizon-world/src
 TagLoader.SortingEntry.visitOptionalDependencies	inline	crates/horizon-world/src/worldgen/tags.rs::TagDefinitions::build	the edges of the sort in TagDefinitions::build
 TagNetworkSerialization.serializeToNetwork	port	crates/horizon-client/src/lan/data.rs::SyncData::load_tags	tag ids per registry, with # references expanded
 TagNetworkSerialization.deserializeTagsFromNetwork	missing		minor: the client never reads UpdateTags (only lan/conn.rs sends it), so tags from a server are not applied; Horizon loads its own tag files (items.rs load_tag_lists)
-ARGB.linearChannelMean	port	crates/horizon-client/src/mipmap.rs::mean_linear	the linear-light mean of four samples for one channel
+ARGB.linearChannelMean	port	crates/horizon-client-render/src/mipmap.rs::mean_linear	the linear-light mean of four samples for one channel
 ARGB.addRgb	skip:other		int overload has no caller in 26.3; ColorModifier uses the Vector3fc and Vector4fc overloads
 ARGB.subtractRgb	skip:other		int overload has no caller in 26.3; ColorModifier uses the Vector3fc and Vector4fc overloads
 ARGB.greyscale	skip:other		int overload has no caller in 26.3; ColorModifier uses the vector overloads
@@ -125,7 +125,7 @@ ARGB.alphaBlendChannel	skip:other		private helper of alphaBlend, which has no ca
 ARGB.linearLerp	skip:other		no caller in 26.3
 ARGB.vector4fFromARGB32	port	crates/horizon-client/src/game/lan_particles.rs::rgba	ARGB int to float colour, used for particle option colours; the colour codecs have no counterpart
 ARGB.setVector4fFromARGB32	skip:ui		clear colour of the start-up loading overlay; drawing only
-ARGB.toABGR	port	crates/horizon-client/src/hud_layout.rs::abgr	swaps red and blue into the HUD's packed colour
+ARGB.toABGR	port	crates/horizon-client-render/src/hud_layout.rs::abgr	swaps red and blue into the HUD's packed colour
 AbstractListBuilder.add	skip:java		DataResult list builder of the codec layer
 AbstractListBuilder.withErrorsFrom	skip:java		DataResult list builder of the codec layer
 AbstractListBuilder.build	skip:java		DataResult list builder of the codec layer

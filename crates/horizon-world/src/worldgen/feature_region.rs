@@ -28,7 +28,7 @@ use std::{
 
 struct RegionBlockQueries {
     fluids: super::fluid_predicate::FluidPredicateBindings,
-    tags: BTreeMap<String, Arc<BTreeSet<BlockStateId>>>,
+    tags: Arc<BTreeMap<String, Arc<BTreeSet<BlockStateId>>>>,
 }
 
 #[derive(Debug)]

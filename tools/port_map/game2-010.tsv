@@ -93,7 +93,7 @@ Level.loadedAndEntityCanStandOnFace	missing		unsure: no face-sturdy test for pla
 Level.getWorldBorderAdjustedRespawnData	missing		unsure: respawn clamp to the world border not found
 Level.hasEntities	missing		unsure: no entity-in-box test found for this use
 Level.getClockTimeTicks	port	crates/horizon-client/src/game.rs::GameLevel::day_time	day time; no separate clock time
-Level.getThunderLevel	port	crates/horizon-client/src/world.rs::World::levels	thunder scaled by rain
+Level.getThunderLevel	port	crates/horizon-client-render/src/world.rs::World::levels	thunder scaled by rain
 Level.setThunderLevel	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	weather game event sets the thunder level
 Level.setRainLevel	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	weather game event sets the rain level
 Level.fillReportDetails	skip:debug		crash-report details
@@ -102,7 +102,7 @@ BlockGetter.isBlockInLine	skip:other		no caller in 26.3 code
 BlockGetter.clipWithInteractionOverride	missing		unsure: no interaction-shape override found for the pick ray; clip_ray not checked in depth
 BlockGetter.traverseBlocks	port	crates/horizon-core/src/geometry/traversal.rs::traverse_blocks	
 BlockGetter.forEachBlockIntersectedBetween	port	crates/horizon-core/src/geometry/sweep.rs::sweep_intersected_blocks	
-BlockGetter.addCollisionsAlongTravel	inline	crates/horizon-client/src/collisions.rs::SceneCollisions::resolve_with_context	gap: minor: the shape list along the path is built inside the resolver
+BlockGetter.addCollisionsAlongTravel	inline	crates/horizon-client-render/src/collisions.rs::SceneCollisions::resolve_with_context	gap: minor: the shape list along the path is built inside the resolver
 BlockGetter.getFurthestCorner	port	crates/horizon-core/src/geometry/sweep.rs::furthest_corner	
 ChunkPos.maxFromRegion	missing		unsure: region scan bound in IOWorker; not checked against save.rs
 ChunkPos.isValid	inline	crates/horizon-world/src/level/update.rs::Sim::is_in_valid_bounds	horizontal chunk range folded into the block range
@@ -114,12 +114,12 @@ ChunkPos.contains	port	crates/horizon-core/src/position.rs::BlockPos::chunk	a bl
 ChunkPos.getChessboardDistance	inline	crates/horizon-client/src/ticket_levels.rs::compute	Chebyshev distance folded into the ticket level loop
 ChunkPos.distanceSquared	missing		unsure: caller not identified in 26.3 sources; no port located
 CollisionGetter.isUnobstructed	port	crates/horizon-client/src/game.rs::GameLevel::is_unobstructed	the state-based overload
-CollisionGetter.noBorderCollision	port	crates/horizon-client/src/collisions.rs::EntityCollisions::movement_border	border shape when inside close to the border
-CollisionGetter.getPreMoveCollisions	inline	crates/horizon-client/src/collisions.rs::SceneCollisions::resolve_with_context	gap: minor: entity and block shapes are not returned as a list; the resolver takes them together
-CollisionGetter.getBlockAndLiquidCollisions	port	crates/horizon-client/src/collisions.rs::no_collision_or_liquid	gap: minor: a yes or no test, not the shape list
-CollisionGetter.getBlockCollisionsFromContext	port	crates/horizon-client/src/collisions.rs::SceneCollisions::collision_block	gap: minor: per-block shape; the box walk is not here
+CollisionGetter.noBorderCollision	port	crates/horizon-client-render/src/collisions.rs::EntityCollisions::movement_border	border shape when inside close to the border
+CollisionGetter.getPreMoveCollisions	inline	crates/horizon-client-render/src/collisions.rs::SceneCollisions::resolve_with_context	gap: minor: entity and block shapes are not returned as a list; the resolver takes them together
+CollisionGetter.getBlockAndLiquidCollisions	port	crates/horizon-client-render/src/collisions.rs::no_collision_or_liquid	gap: minor: a yes or no test, not the shape list
+CollisionGetter.getBlockCollisionsFromContext	port	crates/horizon-client-render/src/collisions.rs::SceneCollisions::collision_block	gap: minor: per-block shape; the box walk is not here
 CollisionGetter.clipIncludingBorder	missing		unsure: no world-border clamp of a ray found in clip_ray
-CollisionGetter.collidesWithSuffocatingBlock	port	crates/horizon-client/src/collisions.rs::SceneCollisions::is_suffocating	
+CollisionGetter.collidesWithSuffocatingBlock	port	crates/horizon-client-render/src/collisions.rs::SceneCollisions::is_suffocating	
 EntityGetter.getEntitiesOfClass	skip:other		class filter repeated at each caller over the entity lists; no shared lookup
 EntityGetter.getPlayerByUUID	skip:other		uuid find repeated at each caller (e.g. allays.rs)
 Explosion.getIndirectSourceEntity	inline	crates/horizon-client/src/game/explosion.rs::Game::explosion_hurt_entities	the projectile owner rule is folded into the hurt loop
@@ -127,10 +127,10 @@ GameType.byName	port	crates/horizon-command/src/args.rs::GameMode::from_name	nam
 GameType.isValidId	missing		minor: no id check; set_mode_id falls back to survival for unknown ids
 LevelAccessor.createTick	port	crates/horizon-world/src/level/update.rs::Sim::schedule_tick	the scheduled tick; no tick object is returned
 LevelHeightAccessor.isOutsideBuildHeight	port	crates/horizon-world/src/level/query.rs::Sim::is_inside_build_height	negated
-LevelReader.getHeight	port	crates/horizon-client/src/world.rs::World::world_surface	gap: minor: WORLD_SURFACE only; other heightmap types not read here
-LevelReader.getBlockStatesIfLoaded	port	crates/horizon-client/src/world.rs::World::loaded	gap: minor: the loaded check only; the states are read with World::block
+LevelReader.getHeight	port	crates/horizon-client-render/src/world.rs::World::world_surface	gap: minor: WORLD_SURFACE only; other heightmap types not read here
+LevelReader.getBlockStatesIfLoaded	port	crates/horizon-client-render/src/world.rs::World::loaded	gap: minor: the loaded check only; the states are read with World::block
 LevelReader.getNoiseBiome	skip:other		no caller in 26.3 code
-LevelReader.getHeightmapPos	port	crates/horizon-client/src/world.rs::World::world_surface	gap: minor: the height only; the BlockPos is built by the caller
+LevelReader.getHeightmapPos	port	crates/horizon-client-render/src/world.rs::World::world_surface	gap: minor: the height only; the BlockPos is built by the caller
 LevelReader.getChunk	missing		unsure: same as Level.getChunk
 LevelReader.findBlocksInBoxByManhattanDistance	missing		unsure: no block search by Manhattan distance found in Horizon
 LevelWriter.destroyBlock	port	crates/horizon-world/src/level/update.rs::Sim::destroy_block	

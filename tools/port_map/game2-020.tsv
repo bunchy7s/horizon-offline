@@ -1,6 +1,6 @@
 SectionStorage.unpackPendingLoads	missing		minor: POI region files are written but never read back; POI come from blocks (poi_sections.rs), so saved POI claims are not restored
 SectionStorage.flushAll	inline	crates/horizon-client/src/game.rs::Game::save_level	saves modified chunks with their POI and flushes the writer
-SectionStorage.getOrLoad	port	crates/horizon-client/src/poi_sections.rs::PoiSections::get	gap: minor: the section's POI list is derived from its blocks, not loaded from the POI file
+SectionStorage.getOrLoad	port	crates/horizon-client-render/src/poi_sections.rs::PoiSections::get	gap: minor: the section's POI list is derived from its blocks, not loaded from the POI file
 SectionStorage.getOrCreate	skip:other		no POI record to create; PoiSections::get derives each section's list from its blocks
 SectionStorage.prefetch	skip:java		async prefetch of POI files; nothing is loaded from disk, so there is nothing to prefetch
 SectionStorage.unpackChunk	missing		minor: POI region files are never read back; POI come from blocks (poi_sections.rs), so saved POI claims are not restored
@@ -44,8 +44,8 @@ GameEvent.register	skip:data		registers a game event with its default radius; Ho
 GameEventDispatcher.post	port	crates/horizon-client/src/game/sculk.rs::Game::post_game_event	delivers the event to sensors, shriekers and wardens within the radius
 GameEventDispatcher.handleGameEventMessagesInQueue	inline	crates/horizon-client/src/game/sculk.rs::Game::post_game_event	gap: minor: no sort by distance before delivery; the selector keeps the nearest candidate, which only differs on ties
 VibrationSystem.Listener.forceScheduleVibration	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_stand_on	a step on a sensor schedules the step event after the sensor's own checks
-VibrationSystem.Listener.scheduleVibration	port	crates/horizon-client/src/sculk.rs::Data::schedule	adds the candidate to the selector; the distance is computed by sculk_listen
-VibrationSystem.Ticker.trySelectAndScheduleVibration	port	crates/horizon-client/src/sculk.rs::Data::tick	gap: minor: picks the chosen candidate and travel time; the particle is sent by tick_sculk_block
+VibrationSystem.Listener.scheduleVibration	port	crates/horizon-client-render/src/sculk.rs::Data::schedule	adds the candidate to the selector; the distance is computed by sculk_listen
+VibrationSystem.Ticker.trySelectAndScheduleVibration	port	crates/horizon-client-render/src/sculk.rs::Data::tick	gap: minor: picks the chosen candidate and travel time; the particle is sent by tick_sculk_block
 VibrationSystem.Ticker.tryReloadVibrationParticle	missing		minor: the travelling vibration particle is sent once when the trip starts; vanilla resends it until a player receives it, which matters only for players who arrive mid-trip
 VibrationSystem.Ticker.receiveVibration	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_receive	gap: minor: the adjacent-chunk hold-back is in Data::tick, not here
 VibrationSystem.Ticker.areAdjacentChunksTicking	inline	crates/horizon-client/src/game/sculk.rs::Game::tick_sculk_blocks	computes the adjacent flag per sensor from the 3x3 block-ticking chunks

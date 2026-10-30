@@ -3,8 +3,8 @@ DelegatingOps.DelegateListBuilder.add	skip:java		forwards to the original ListBu
 DelegatingOps.DelegateListBuilder.addAll	skip:java		encodes values into the original ListBuilder; codec plumbing
 DelegatingOps.DelegateRecordBuilder.add	skip:java		forwards to the original RecordBuilder; codec plumbing
 DelegatingOps.DelegateRecordBuilder.build	skip:java		forwards to the original RecordBuilder; codec plumbing
-FileToIdConverter.fileToId	port	crates/horizon-client/src/datapack.rs::resource_id	resource path to id with the folder prefix and extension stripped
-FileToIdConverter.matches	inline	crates/horizon-client/src/datapack.rs::resource_id	prefix and extension test is inside resource_id
+FileToIdConverter.fileToId	port	crates/horizon-client-render/src/datapack.rs::resource_id	resource path to id with the folder prefix and extension stripped
+FileToIdConverter.matches	inline	crates/horizon-client-render/src/datapack.rs::resource_id	prefix and extension test is inside resource_id
 Identifier.tryBuild	port	crates/horizon-world/src/identifier.rs::Identifier::from_parts	validated constructor; Err instead of null
 Identifier.tryBySeparator	port	crates/horizon-world/src/identifier.rs::Identifier::parse	splits on ':'; minecraft namespace when it is empty or missing
 Identifier.withPath	port	crates/horizon-world/src/identifier.rs::Identifier::from_parts	no helper; callers rebuild the id with from_parts(namespace, path)
@@ -135,7 +135,7 @@ ReloadableServerRegistries.validateLootRegistries	skip:data		loot table validati
 ReloadableServerResources.loadResources	skip:data		server resource loading
 ServerAdvancementManager.validate	skip:data		advancement validation logging at load
 ServerFunctionLibrary.reload	port	crates/horizon-client/src/game/functions.rs::Game::rebuild_store	rebuilds the function store from the data packs
-ServerFunctionLibrary.readLines	inline	crates/horizon-client/src/datapack.rs::parse_function	splits the function text into lines
+ServerFunctionLibrary.readLines	inline	crates/horizon-client-render/src/datapack.rs::parse_function	splits the function text into lines
 ServerFunctionManager.executeTagFunctions	port	crates/horizon-client/src/game/functions.rs::Game::tick_functions	runs the functions of a tag
 ServerFunctionManager.execute	port	crates/horizon-client/src/game/functions.rs::Game::run_function	runs one function as the sender
 ServerLinks.findKnownType	missing		minor: no lookup by known link type; only the bug-report link is sent (dedicated.rs)

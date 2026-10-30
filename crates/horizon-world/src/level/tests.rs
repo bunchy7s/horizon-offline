@@ -1475,6 +1475,44 @@ fn big_dripleaf_tilts_under_an_entity_standing_on_it() {
 }
 
 #[test]
+fn using_storage_and_interactable_blocks_succeeds() {
+    let mut w = world!();
+    let pos = BlockPos::new(0, 1, 0);
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("chest", &[("facing", "north"), ("type", "single")]),
+        ("trapped_chest", &[("facing", "north"), ("type", "single")]),
+        ("barrel", &[("facing", "up")]),
+        ("ender_chest", &[("facing", "north")]),
+        ("shulker_box", &[("facing", "up")]),
+        ("dispenser", &[("facing", "north")]),
+        ("dropper", &[("facing", "north")]),
+        ("hopper", &[("facing", "down")]),
+        ("crafter", &[("orientation", "north_up")]),
+        ("furnace", &[("facing", "north")]),
+        ("blast_furnace", &[("facing", "north")]),
+        ("smoker", &[("facing", "north")]),
+        ("brewing_stand", &[]),
+        ("beacon", &[]),
+        ("decorated_pot", &[]),
+        ("jukebox", &[("has_record", "true")]),
+    ];
+    for &(name, props) in cases {
+        w.put(pos, w.id(name, props));
+        assert_eq!(
+            w.use_block(pos),
+            InteractionResult::Success,
+            "{name} should succeed (client swing)"
+        );
+    }
+    w.put(pos, w.id("jukebox", &[("has_record", "false")]));
+    assert_eq!(
+        w.use_block(pos),
+        InteractionResult::Pass,
+        "an empty jukebox passes"
+    );
+}
+
+#[test]
 fn creative_breaking_piston_head_does_not_drop_piston() {
     for (piston_name, head_type) in [("piston", "normal"), ("sticky_piston", "sticky")] {
         let mut w = world!();
@@ -1543,6 +1581,44 @@ fn survival_breaking_piston_head_drops_piston() {
                 .iter()
                 .any(|e| matches!(e, LevelEvent::DropResources { pos, .. } if *pos == base_pos)),
             "survival mode breaking {head_type} piston head must drop base piston"
+        );
+    }
+}
+
+/// A lever on the back of a piston stays through extend and retract.
+#[test]
+fn lever_on_piston_back_survives_extend_and_retract() {
+    let mut w = world!();
+    w.floor(0, 10, "stone");
+    for kind in ["piston", "sticky_piston"] {
+        let piston = w.id(kind, &[("facing", "east")]);
+        let lever = w.id("lever", &[("face", "wall"), ("facing", "west")]);
+        w.set(BlockPos::new(0, 1, 0), piston);
+        w.set(BlockPos::new(-1, 1, 0), lever);
+        let on = w.b().table.set_bool(lever, w.b().props.powered, true);
+        w.set(BlockPos::new(-1, 1, 0), on);
+        for _ in 0..4 {
+            w.full_tick();
+        }
+        assert_eq!(w.prop(BlockPos::new(0, 1, 0), "extended"), "true", "{kind}");
+        assert_eq!(
+            w.name(BlockPos::new(-1, 1, 0)),
+            "lever[face=wall,facing=west,powered=true]",
+            "{kind}"
+        );
+        w.set(BlockPos::new(-1, 1, 0), lever);
+        for _ in 0..4 {
+            w.full_tick();
+        }
+        assert_eq!(
+            w.prop(BlockPos::new(0, 1, 0), "extended"),
+            "false",
+            "{kind}"
+        );
+        assert_eq!(
+            w.name(BlockPos::new(-1, 1, 0)),
+            "lever[face=wall,facing=west,powered=false]",
+            "{kind}"
         );
     }
 }

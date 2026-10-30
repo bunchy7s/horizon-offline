@@ -198,6 +198,41 @@ pub fn needs_file_fixes(world: &Path) -> bool {
     let version = number(data.get("DataVersion")).unwrap_or(-1);
     i32::try_from(version).is_ok_and(horizon_world::datafix::files::requires_file_fixing)
 }
+/// `LevelVersion.parse`: the saved game version's name, this build's when the `Version`
+/// compound has no `Name`, and empty without a `Version` (`getWorldVersionName` then
+/// shows `selectWorld.versionUnknown`).
+fn saved_version_name(version: Option<&Tag>) -> String {
+    match version {
+        Some(v) => text(v.get("Name")).unwrap_or_else(|| VERSION_NAME.to_string()),
+        None => String::new(),
+    }
+}
+/// `LevelSummary.isCompatible` (`DataVersion.isCompatible`: the saved series must be
+/// the current `main` one). None when the world opens; otherwise the saved game
+/// version's name, empty when it has none (`getWorldVersionName`).
+pub fn incompatible_version(world: &Path) -> Option<String> {
+    let root = read_dat(&world.join("level.dat"))?;
+    let version = root.get("Data")?.get("Version");
+    let series = text(version.and_then(|v| v.get("Series"))).unwrap_or_else(|| "main".into());
+    if series == "main" {
+        return None;
+    }
+    Some(saved_version_name(version))
+}
+/// `LevelSummary.backupStatus` DOWNGRADE: the saved game version's name (empty when it
+/// has none) when the world's `Version.Id` is newer than this build's `DataVersion`
+/// (`LevelVersion.parse`: no `Version` reads as 0, no `Id` as the current one).
+pub fn downgraded_from(world: &Path) -> Option<String> {
+    let root = read_dat(&world.join("level.dat"))?;
+    let version = root.get("Data")?.get("Version");
+    let id = version.map_or(0, |v| {
+        number(v.get("Id")).unwrap_or_else(|| i64::from(DATA_VERSION))
+    });
+    if id <= i64::from(DATA_VERSION) {
+        return None;
+    }
+    Some(saved_version_name(version))
+}
 /// Move a world saved by an older Horizon build (pre-26.3 layout with a
 /// DataVersion that keeps vanilla from upgrading it) into the 26.3 layout.
 pub fn migrate_legacy(world: &Path) -> Result<()> {
@@ -483,6 +518,13 @@ pub fn encode_block_entity(
             }
         }
         BlockEntity::Sculk(s) => entries.extend(s.to_nbt()),
+        BlockEntity::Shelf(shelf) => {
+            entries.push(("Items", encode_items(&shelf.items)));
+            entries.push((
+                "align_items_to_bottom",
+                Tag::Byte(i8::from(shelf.align_to_bottom)),
+            ));
+        }
         // ChiseledBookShelfBlockEntity.saveAdditional.
         BlockEntity::ChiseledBookshelf(b) => {
             entries.push(("Items", encode_items(&b.items)));
@@ -547,7 +589,21 @@ pub fn encode_block_entity(
         BlockEntity::Vault(v) => entries.extend(v.save()),
         BlockEntity::Beehive(h) => entries.extend(h.to_nbt()),
         BlockEntity::CommandBlock(c) => entries.extend(c.save()),
+        BlockEntity::Brushable(b) => {
+            if let Some(table) = &b.loot_table {
+                entries.push(("LootTable", table.clone()));
+                if let Some(seed) = &b.loot_seed {
+                    entries.push(("LootTableSeed", seed.clone()));
+                }
+            } else if let Some(item) = &b.item {
+                entries.push(("item", item_to_nbt(item)));
+            }
+        }
         BlockEntity::DaylightDetector => {}
+        // PotentSulfurBlockEntity.saveAdditional.
+        BlockEntity::PotentSulfur(sulfur) => {
+            entries.push(("countdown", Tag::Int(sulfur.waiting_countdown)))
+        }
     }
     Tag::compound(entries)
 }
@@ -724,8 +780,24 @@ pub fn decode_block_entity(tag: &Tag) -> Option<((i32, i32, i32), crate::contain
                 _ => 1.0,
             };
         }
+        BlockEntity::Brushable(b) => {
+            b.loot_table = tag.get("LootTable").cloned();
+            b.loot_seed = tag.get("LootTableSeed").cloned();
+            b.item = if b.loot_table.is_none() {
+                tag.get("item").and_then(item_from_nbt)
+            } else {
+                None
+            };
+            b.hit_direction = int("hit_direction").filter(|v| (0..=5).contains(v));
+        }
         BlockEntity::Sign(sign) => sign.decode(tag),
         BlockEntity::Sculk(s) => s.load(tag),
+        BlockEntity::Shelf(shelf) => {
+            for (slot, item) in decode_items(tag.get("Items"), 3).into_iter().enumerate() {
+                shelf.items[slot] = item;
+            }
+            shelf.align_to_bottom = int("align_items_to_bottom").unwrap_or(0) != 0;
+        }
         // ChiseledBookShelfBlockEntity.loadAdditional.
         BlockEntity::ChiseledBookshelf(b) => {
             for (slot, item) in decode_items(tag.get("Items"), 6).into_iter().enumerate() {
@@ -759,6 +831,12 @@ pub fn decode_block_entity(tag: &Tag) -> Option<((i32, i32, i32), crate::contain
             c.triggered = int("triggered").unwrap_or(0) != 0;
             c.state_triggered = None;
             c.crafting_ticks = int("crafting_ticks_remaining").unwrap_or(0);
+        }
+        // PotentSulfurBlockEntity.loadAdditional.
+        BlockEntity::PotentSulfur(sulfur) => {
+            if let Some(countdown) = int("countdown") {
+                sulfur.waiting_countdown = countdown;
+            }
         }
         BlockEntity::Jukebox(_)
         | BlockEntity::Beacon(_)
@@ -2562,14 +2640,83 @@ const INT_RULES: [&str; 11] = [
     "respawn_radius",
 ];
 
+/// The world presets of 26.3's `worldgen/world_preset` that the create
+/// screen offers, in the order of `WorldPresetTags.NORMAL`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorldPreset {
+    Normal,
+    Flat,
+    LargeBiomes,
+    Amplified,
+    SingleBiomeSurface,
+}
+impl WorldPreset {
+    /// The presets, in the order the world-type button cycles through them.
+    pub const ALL: [Self; 5] = [
+        Self::Normal,
+        Self::Flat,
+        Self::LargeBiomes,
+        Self::Amplified,
+        Self::SingleBiomeSurface,
+    ];
+    /// The preset's registry id (`minecraft:normal`).
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Normal => "minecraft:normal",
+            Self::Flat => "minecraft:flat",
+            Self::LargeBiomes => "minecraft:large_biomes",
+            Self::Amplified => "minecraft:amplified",
+            Self::SingleBiomeSurface => "minecraft:single_biome_surface",
+        }
+    }
+    /// The preset an id names, if it is one of them.
+    pub fn of_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|preset| preset.id() == id)
+    }
+    /// The language key the world-type button shows
+    /// (`Identifier.toLanguageKey("generator")`).
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "generator.minecraft.normal",
+            Self::Flat => "generator.minecraft.flat",
+            Self::LargeBiomes => "generator.minecraft.large_biomes",
+            Self::Amplified => "generator.minecraft.amplified",
+            Self::SingleBiomeSurface => "generator.minecraft.single_biome_surface",
+        }
+    }
+    /// The preset the world-type button cycles to next.
+    pub fn next(self) -> Self {
+        let index = Self::ALL
+            .iter()
+            .position(|preset| *preset == self)
+            .unwrap_or(0);
+        Self::ALL[(index + 1) % Self::ALL.len()]
+    }
+    /// The preset a saved overworld generator is: the noise settings name
+    /// the preset, and the single-biome preset shares the overworld's noise
+    /// settings, so its fixed biome source tells the two apart.
+    pub fn of_generator(generator: &Tag) -> Self {
+        if text(generator.get("type")).as_deref() == Some("minecraft:flat") {
+            return Self::Flat;
+        }
+        let source = generator.get("biome_source");
+        let fixed = text(source.and_then(|s| s.get("type"))).as_deref() == Some("minecraft:fixed");
+        match text(generator.get("settings")).as_deref() {
+            Some("minecraft:large_biomes") => Self::LargeBiomes,
+            Some("minecraft:amplified") => Self::Amplified,
+            Some("minecraft:overworld") if fixed => Self::SingleBiomeSurface,
+            _ => Self::Normal,
+        }
+    }
+}
 /// World and player state stored in `level.dat`, the saved-data files and
 /// the player file.
 /// The world options CreateWorldScreen sets (`WorldOptions` and the world
 /// preset) that `world_gen_settings` keeps.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WorldGen {
-    /// The `minecraft:flat` preset (Superflat) instead of `normal`.
-    pub flat: bool,
+    /// The world preset the world is created with.
+    pub preset: WorldPreset,
     pub structures: bool,
     pub bonus_chest: bool,
 }
@@ -2583,8 +2730,7 @@ impl WorldGen {
             .and_then(|d| d.get("minecraft:overworld"))
             .and_then(|o| o.get("generator"));
         Some(Self {
-            flat: text(generator.and_then(|g| g.get("type")))
-                .is_some_and(|t| t.trim_start_matches("minecraft:") == "flat"),
+            preset: generator.map_or(WorldPreset::Normal, WorldPreset::of_generator),
             structures: flag("generate_structures", true),
             bonus_chest: flag("bonus_chest", false),
         })
@@ -2617,7 +2763,7 @@ impl WorldGen {
 impl Default for WorldGen {
     fn default() -> Self {
         Self {
-            flat: false,
+            preset: WorldPreset::Normal,
             structures: true,
             bonus_chest: false,
         }
@@ -2692,6 +2838,34 @@ pub fn write_world_gen_settings_with(
             ("preset", string(p)),
         ])
     };
+    // The overworld generator of worldgen/world_preset/<preset>.json: the
+    // noise settings and the biome source each preset uses.
+    let overworld = match options.preset {
+        WorldPreset::Flat => flat,
+        WorldPreset::LargeBiomes => dimension(
+            "minecraft:overworld",
+            "minecraft:large_biomes",
+            preset("minecraft:overworld"),
+        ),
+        WorldPreset::Amplified => dimension(
+            "minecraft:overworld",
+            "minecraft:amplified",
+            preset("minecraft:overworld"),
+        ),
+        WorldPreset::SingleBiomeSurface => dimension(
+            "minecraft:overworld",
+            "minecraft:overworld",
+            Tag::compound([
+                ("type", string("minecraft:fixed")),
+                ("biome", string("minecraft:plains")),
+            ]),
+        ),
+        WorldPreset::Normal => dimension(
+            "minecraft:overworld",
+            "minecraft:overworld",
+            preset("minecraft:overworld"),
+        ),
+    };
     write_saved_data(
         dir,
         "world_gen_settings",
@@ -2705,18 +2879,7 @@ pub fn write_world_gen_settings_with(
             (
                 "dimensions",
                 Tag::compound([
-                    (
-                        "minecraft:overworld",
-                        if options.flat {
-                            flat
-                        } else {
-                            dimension(
-                                "minecraft:overworld",
-                                "minecraft:overworld",
-                                preset("minecraft:overworld"),
-                            )
-                        },
-                    ),
+                    ("minecraft:overworld", overworld),
                     (
                         "minecraft:the_nether",
                         dimension(

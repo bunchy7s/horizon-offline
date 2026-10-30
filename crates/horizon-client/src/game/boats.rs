@@ -601,9 +601,10 @@ impl Game<'_> {
             self.dismount(i);
             return Ok(());
         }
-        let mut b = self.boats[i].clone();
+        // The boat steers with the input `LocalPlayer.rideTick` latched on the
+        // previous tick; this tick's keys are latched after it ticked.
+        let mut b = self.tick_boat(self.boats[i].clone(), true);
         b.input = [keys.left, keys.right, keys.forward, keys.backward];
-        let b = self.tick_boat(b, true);
         // positionRider: the seat, turned with the boat; clampRotation to 105 degrees.
         self.yaw += b.delta_rotation;
         let delta = (self.yaw - b.yaw + 180.0).rem_euclid(360.0) - 180.0;
@@ -801,6 +802,7 @@ impl Game<'_> {
             self.screen = super::Screen::Inventory;
             self.capture(false);
             self.right = false;
+            self.swing_arm();
             return true;
         }
         if sneaking

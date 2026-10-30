@@ -62,7 +62,7 @@ pub fn register(m: &mut Mob) {
 
 /// `Illusioner.finalizeSpawn`: a bow in the main hand.
 pub fn finalize(m: &mut Mob) {
-    m.extra.main_hand = Some("minecraft:bow".into());
+    m.extra.set_main_hand(Some("minecraft:bow".into()));
 }
 
 /// `IllusionerMirrorSpellGoal` and `IllusionerBlindnessSpellGoal`.

@@ -1,12 +1,16 @@
 //! The sign editing screen (`SignEditScreen` / `HangingSignEditScreen`):
 //! opened when a sign is placed, four lines limited to the sign's line
 //! width, Up/Down/Enter move between lines, Escape or Done closes.
-use super::{Game, lan::LanHost};
+use super::{
+    Game,
+    commands::{Target, execute::Source},
+    lan::LanHost,
+};
 use horizon_client::{
     containers::BlockEntity,
     hud::{HudBatch, rgba},
     items::ItemStack,
-    signs::{DYE_TEXT, wood_type},
+    signs::{ClickAction, DYE_TEXT, click_action, wood_type},
     ui::EditBox,
 };
 use horizon_protocol::packets::play::{self, Clientbound as C, Serverbound as S};
@@ -90,11 +94,124 @@ impl Game<'_> {
         let diff = if diff >= 180.0 { 360.0 - diff } else { diff };
         diff <= 90.0
     }
-    /// `SignBlock.useWithoutItem` (the block's `OpenMenu` effect): a waxed
-    /// sign plays the failed-interaction sound; otherwise a player who may
-    /// build edits the side they face.
+    /// `SignBlockEntity.canExecuteClickCommands` for the side the acting
+    /// player faces: a waxed sign with a `run_command` click event on it.
+    pub(super) fn sign_can_execute_click_commands(&self, pos: (i32, i32, i32)) -> bool {
+        // Only a waxed sign can; skip the facing maths for everything else.
+        let Some(BlockEntity::Sign(sign)) = self.world.block_entities.get(&pos) else {
+            return false;
+        };
+        sign.waxed && sign.can_execute_click_commands(self.facing_sign_front(pos))
+    }
+    /// `SignBlockEntity.createCommandSourceStack`: the acting player runs the
+    /// command from the middle of the sign's block, rotation zero, at the
+    /// game master level, with `CommandSource.NULL` (no feedback, no failure
+    /// messages).
+    fn sign_command_source(&self, pos: [i32; 3]) -> Source {
+        Source {
+            entity: self.player.is_some().then_some(Target::Player),
+            pos: pos.map(|v| f64::from(v) + 0.5),
+            rot: [0.0, 0.0],
+            eyes: false,
+            silent: true,
+            store: None,
+            dimension: self.dim,
+            level: None,
+            block: None,
+        }
+    }
+    /// Run a sign's `run_command` line as the prefixed command vanilla runs
+    /// it as: a leading slash is allowed, errors are not reported (the NULL
+    /// source).
+    fn run_sign_command(&mut self, pos: [i32; 3], command: &str) {
+        let source = self.sign_command_source(pos);
+        let line = command.strip_prefix('/').unwrap_or(command);
+        self.exec = Default::default();
+        let permission = std::mem::replace(&mut self.ui.registries.permission, 2);
+        let _ = self.execute_line(line, source);
+        self.ui.registries.permission = permission;
+        // InventoryChangeTrigger fires as slots change, not on the next tick.
+        if self.player.is_some() {
+            self.check_inventory_trigger();
+        }
+    }
+    /// `SignBlockEntity.executeClickCommandsIfPresent`: every line of the
+    /// side whose style has a `run_command`, `show_dialog` or `custom` click
+    /// event runs it as the acting player when the sign allows op features;
+    /// otherwise the player is told click actions are disabled. Whether any
+    /// line had one.
+    fn execute_sign_click_commands(&mut self, pos: [i32; 3], front: bool) -> bool {
+        let key = (pos[0], pos[1], pos[2]);
+        let Some(BlockEntity::Sign(sign)) = self.world.block_entities.get(&key) else {
+            return false;
+        };
+        let allow_op_features = sign.allow_op_features;
+        let side = if front { &sign.front } else { &sign.back };
+        // The side as it was when the loop began: a command may change it.
+        let events: Vec<_> = side.click.iter().flatten().cloned().collect();
+        let mut any_click_command = false;
+        for event in &events {
+            match click_action(event) {
+                Some(ClickAction::RunCommand(command)) => {
+                    if allow_op_features {
+                        self.run_sign_command(pos, &command);
+                    }
+                    any_click_command = true;
+                }
+                Some(ClickAction::ShowDialog(dialog)) => {
+                    if allow_op_features {
+                        self.show_click_dialog(dialog);
+                    }
+                    any_click_command = true;
+                }
+                // MinecraftServer.handleCustomClickAction only logs it.
+                Some(ClickAction::Custom { id, payload }) => {
+                    if allow_op_features {
+                        log::debug!("Received custom click action {id} with payload {payload:?}");
+                    }
+                    any_click_command = true;
+                }
+                None => {}
+            }
+        }
+        if !allow_op_features && any_click_command {
+            self.sign_click_actions_disabled();
+        }
+        any_click_command
+    }
+    /// `Player.sendOverlayMessage(CLICK_ACTIONS_DISABLED)`: red text on the
+    /// action bar. A guest gets a packet, so its own client translates it.
+    fn sign_click_actions_disabled(&mut self) {
+        const KEY: &str = "sign.click_actions_disabled";
+        if self.lan_acting.is_some() {
+            let message = horizon_client::text::Text::translate(KEY, &[])
+                .with_color(horizon_client::text::RED);
+            self.guest_packets.push(C::SystemChat(play::SystemChat {
+                content: horizon_client::lan::data::component_nbt(&message.component()),
+                overlay: true,
+            }));
+        } else {
+            self.message = Some((
+                self.translate(KEY, "Click actions are disabled for this sign"),
+                std::time::Instant::now(),
+            ));
+        }
+    }
+    /// `SignBlock.useWithoutItem` (the block's `OpenMenu` effect): the side
+    /// the player faces runs its click commands first; then a waxed sign
+    /// plays the failed-interaction sound, a sign that ran one does nothing
+    /// more, and otherwise a player who may build edits the side they face.
     pub(super) fn use_sign_empty_hand(&mut self, pos: [i32; 3]) {
         let key = (pos[0], pos[1], pos[2]);
+        if !matches!(
+            self.world.block_entities.get(&key),
+            Some(BlockEntity::Sign(_))
+        ) {
+            return;
+        }
+        let front = self.facing_sign_front(key);
+        let executed = self.execute_sign_click_commands(pos, front);
+        // The commands may have changed the sign, or removed it.
         let Some(BlockEntity::Sign(sign)) = self.world.block_entities.get(&key) else {
             return;
         };
@@ -107,8 +224,7 @@ impl Game<'_> {
             };
             self.audio
                 .play(sound, Some(pos.map(|v| f64::from(v) + 0.5)), 1.0, 1.0);
-        } else if self.may_build() {
-            let front = self.facing_sign_front(key);
+        } else if !executed && self.may_build() {
             self.open_sign_editor(key, front);
         }
     }
@@ -183,6 +299,7 @@ impl Game<'_> {
         }
         self.audio.play(sound, Some(centre), 1.0, 1.0);
         self.mark_block_entity_updated(key);
+        self.execute_sign_click_commands(pos, front);
         let state = self.world.block(pos[0], pos[1], pos[2]);
         self.post_block_game_event(
             "minecraft:block_change",

@@ -39,45 +39,45 @@ IntegratedServer.reportChunkSaveFailure	missing		player: no low-disk-space toast
 LanServerDetection.LanServerDetector.run	port	crates/horizon-client/src/lan/discovery.rs::listen	receive loop for LAN announcements
 LanServerDetection.LanServerList.takeDirtyServers	skip:java		dirty flag; Scanner::games returns a copy on each call
 LanServerPinger.run	port	crates/horizon-client/src/lan/discovery.rs::Pinger::start	announce loop on a thread until dropped
-ChannelAccess.createHandle	port	crates/horizon-client/src/audio.rs::MixerBackend::create	gap: minor: the streaming flag is ignored
+ChannelAccess.createHandle	port	crates/horizon-client-render/src/audio.rs::MixerBackend::create	gap: minor: the streaming flag is ignored
 ChannelAccess.executeOnChannels	skip:other		sound executor thread; the mixer is shared under a lock
-ChannelAccess.ChannelHandle.execute	port	crates/horizon-client/src/audio.rs::MixerBackend::with	runs the action on the channel when it exists
+ChannelAccess.ChannelHandle.execute	port	crates/horizon-client-render/src/audio.rs::MixerBackend::with	runs the action on the channel when it exists
 ChunkedSampleByteBuf.accept	skip:java		16-bit PCM buffer; Horizon mixes f32 samples
 ChunkedSampleByteBuf.get	skip:java		16-bit PCM buffer; Horizon mixes f32 samples
-FloatSampleSource.read	inline	crates/horizon-client/src/audio.rs::decode	decoded buffer; decode reads the whole file
-FloatSampleSource.readAll	inline	crates/horizon-client/src/audio.rs::decode	decoded buffer; decode reads the whole file
-JOrbisAudioStream.<init>	port	crates/horizon-client/src/audio.rs::decode	Ogg decoded by symphonia, not JOrbis
-JOrbisAudioStream.readToBuffer	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
-JOrbisAudioStream.readPage	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
-JOrbisAudioStream.readIdentificationPacket	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
-JOrbisAudioStream.readPacket	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
-JOrbisAudioStream.getSamplesToWrite	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
-JOrbisAudioStream.readChunk	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
-JOrbisAudioStream.copyAnyChannels	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
-JOrbisAudioStream.copyMono	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
-JOrbisAudioStream.copyStereo	inline	crates/horizon-client/src/audio.rs::decode	Ogg reading folded into decode
-LoopingAudioStream.read	port	crates/horizon-client/src/audio.rs::attach	gap: minor: the looping flag is set on the channel; the buffer loops, no stream is reopened
+FloatSampleSource.read	inline	crates/horizon-client-render/src/audio.rs::decode	decoded buffer; decode reads the whole file
+FloatSampleSource.readAll	inline	crates/horizon-client-render/src/audio.rs::decode	decoded buffer; decode reads the whole file
+JOrbisAudioStream.<init>	port	crates/horizon-client-render/src/audio.rs::decode	Ogg decoded by symphonia, not JOrbis
+JOrbisAudioStream.readToBuffer	inline	crates/horizon-client-render/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.readPage	inline	crates/horizon-client-render/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.readIdentificationPacket	inline	crates/horizon-client-render/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.readPacket	inline	crates/horizon-client-render/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.getSamplesToWrite	inline	crates/horizon-client-render/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.readChunk	inline	crates/horizon-client-render/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.copyAnyChannels	inline	crates/horizon-client-render/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.copyMono	inline	crates/horizon-client-render/src/audio.rs::decode	Ogg reading folded into decode
+JOrbisAudioStream.copyStereo	inline	crates/horizon-client-render/src/audio.rs::decode	Ogg reading folded into decode
+LoopingAudioStream.read	port	crates/horizon-client-render/src/audio.rs::attach	gap: minor: the looping flag is set on the channel; the buffer loops, no stream is reopened
 MusicManager.canReplace	inline	crates/horizon-client/src/music.rs::MusicManager::tick	replace only when the new track differs from the playing one
 MusicManager.getCurrentMusicTranslationKey	port	crates/horizon-client/src/music.rs::MusicManager::current	gap: minor: returns the sound id; the short translation key is not built
-SoundBufferLibrary.getCompleteBuffer	port	crates/horizon-client/src/audio.rs::decode	cached in SoundCache
-SoundBufferLibrary.getStream	inline	crates/horizon-client/src/audio.rs::decode	gap: minor: the whole file is decoded; no stream
-SoundBufferLibrary.clear	inline	crates/horizon-client/src/audio.rs::Audio::reload	the cache is emptied on reload
+SoundBufferLibrary.getCompleteBuffer	port	crates/horizon-client-render/src/audio.rs::decode	cached in SoundCache
+SoundBufferLibrary.getStream	inline	crates/horizon-client-render/src/audio.rs::decode	gap: minor: the whole file is decoded; no stream
+SoundBufferLibrary.clear	inline	crates/horizon-client-render/src/audio.rs::Audio::reload	the cache is emptied on reload
 SoundBufferLibrary.preload	skip:java		sounds decode on demand
-SoundBufferLibrary.enumerate	port	crates/horizon-client/src/audio.rs::Audio::census	sound buffer census for debug output
-SoundBufferLibrary.DebugOutput.Counter.accountBuffer	inline	crates/horizon-client/src/audio.rs::Audio::census	counts buffers and sizes
-SoundEngine.reload	port	crates/horizon-client/src/audio.rs::Audio::reload	stops sounds and reads the new resource root
-SoundEngine.loadLibrary	port	crates/horizon-client/src/audio.rs::Audio::with_output	opens the output device
+SoundBufferLibrary.enumerate	port	crates/horizon-client-render/src/audio.rs::Audio::census	sound buffer census for debug output
+SoundBufferLibrary.DebugOutput.Counter.accountBuffer	inline	crates/horizon-client-render/src/audio.rs::Audio::census	counts buffers and sizes
+SoundEngine.reload	port	crates/horizon-client-render/src/audio.rs::Audio::reload	stops sounds and reads the new resource root
+SoundEngine.loadLibrary	port	crates/horizon-client-render/src/audio.rs::Audio::with_output	opens the output device
 SoundEngine.shouldChangeDevice	missing		player: when the output device is lost or the system default changes, vanilla reopens sound output; Horizon's Audio has no device watch
-SoundEngine.notifyListeners	port	crates/horizon-client/src/sound_engine.rs::SoundEngine::notify	subtitle and listener notification with range
-SoundEngine.updateSource	port	crates/horizon-client/src/audio.rs::Audio::set_listener	listener position and orientation
+SoundEngine.notifyListeners	port	crates/horizon-client-render/src/sound_engine.rs::SoundEngine::notify	subtitle and listener notification with range
+SoundEngine.updateSource	port	crates/horizon-client-render/src/audio.rs::Audio::set_listener	listener position and orientation
 SoundEngineExecutor.createThread	skip:other		sound thread creation; Horizon's audio runs on the cpal callback
 SoundEngineExecutor.run	skip:other		sound thread loop; Horizon's audio runs on the cpal callback
 SoundEngineExecutor.shutDown	skip:other		sound thread shutdown; Horizon's audio runs on the cpal callback
-SoundManager.prepare	port	crates/horizon-client/src/sound_events.rs::SoundRegistry::load	reads sounds.json per namespace
-SoundManager.apply	port	crates/horizon-client/src/audio.rs::Audio::reload	applies the registry and reloads the engine
-SoundManager.validateSoundResource	inline	crates/horizon-client/src/sound_events.rs::SoundRegistry::add_file	file existence check through the exists closure
-SoundManager.Preparations.handleRegistration	port	crates/horizon-client/src/sound_events.rs::SoundRegistry::add_file	replace flag and sound entries
-SoundManager.Preparations.apply	inline	crates/horizon-client/src/sound_events.rs::SoundRegistry::load	registry replaced with the prepared one
+SoundManager.prepare	port	crates/horizon-client-render/src/sound_events.rs::SoundRegistry::load	reads sounds.json per namespace
+SoundManager.apply	port	crates/horizon-client-render/src/audio.rs::Audio::reload	applies the registry and reloads the engine
+SoundManager.validateSoundResource	inline	crates/horizon-client-render/src/sound_events.rs::SoundRegistry::add_file	file existence check through the exists closure
+SoundManager.Preparations.handleRegistration	port	crates/horizon-client-render/src/sound_events.rs::SoundRegistry::add_file	replace flag and sound entries
+SoundManager.Preparations.apply	inline	crates/horizon-client-render/src/sound_events.rs::SoundRegistry::load	registry replaced with the prepared one
 SoundPreviewHandler.preview	missing		player: moving a category volume slider in Options plays no preview sound (Options.java calls SoundPreviewHandler.preview)
 SoundPreviewHandler.stopOtherCategoryPreview	missing		minor: part of the volume preview
 WeighedSoundEvents.preloadIfRequired	skip:java		preload is a cache; Horizon decodes on demand
@@ -100,7 +100,7 @@ Tutorial.start	missing		minor: tutorial driver; no tutorial exists
 Tutorial.tick	missing		player: the tutorial driver that shows the first toasts is absent
 Tutorial.setStep	missing		minor: tutorial driver; no tutorial exists
 Tutorial.isSurvival	missing		minor: only the tutorial asks whether the player is in survival
-TutorialSteps.getByName	port	crates/horizon-client/src/options_file.rs::OptionsFile::try_apply	tutorialStep name read from options
+TutorialSteps.getByName	port	crates/horizon-client-render/src/options_file.rs::OptionsFile::try_apply	tutorialStep name read from options
 ClientWaypointManager.updateWaypoint	port	crates/horizon-client/src/locator_bar.rs::ClientWaypoints::apply	updates a tracked waypoint by id
 ClientWaypointManager.forEachWaypoint	port	crates/horizon-client/src/locator_bar.rs::ClientWaypoints::draw	drawn farthest first
 ArgumentVisitor.visitArguments	port	crates/horizon-client/src/game/lan_chat.rs::Game::signable_arguments	collects the message arguments of a command

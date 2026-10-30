@@ -246,7 +246,7 @@ public final class VanillaFinalizeSpawnOracle {
             Map.entry("jump_strength", Attributes.JUMP_STRENGTH));
 
         static final List<Map.Entry<String, MemoryModuleType<?>>> MEMORIES = List.of(
-            Map.entry("long_jump_cooldown", MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS), Map.entry("ram_cooldown", MemoryModuleType.RAM_COOLDOWN_TICKS),
+            Map.entry("long_jump_cooling_down", MemoryModuleType.LONG_JUMP_COOLDOWN_TICKS), Map.entry("ram_cooldown_ticks", MemoryModuleType.RAM_COOLDOWN_TICKS),
             Map.entry("attack_target_cooldown", MemoryModuleType.ATTACK_TARGET_COOLDOWN), Map.entry("hunted_recently", MemoryModuleType.HUNTED_RECENTLY),
             Map.entry("dig_cooldown", MemoryModuleType.DIG_COOLDOWN), Map.entry("is_emerging", MemoryModuleType.IS_EMERGING),
             Map.entry("home", MemoryModuleType.HOME));

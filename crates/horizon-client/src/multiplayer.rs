@@ -660,7 +660,7 @@ impl Screen {
                     half(w) - 100.0,
                     quarter(h) + 96.0 + 18.0,
                     200.0,
-                    "Join",
+                    &crate::lang::get_or("horizon.multiplayer.join", "Join"),
                     horizon_friends::invite::parse(code).is_some(),
                     56,
                 ),
@@ -687,7 +687,10 @@ impl Screen {
                         half(w) - 100.0,
                         half(h) + 54.0,
                         200.0,
-                        "Cancel Reconnecting",
+                        &crate::lang::get_or(
+                            "horizon.multiplayer.cancel_reconnecting",
+                            "Cancel Reconnecting",
+                        ),
                         true,
                         55,
                     ));
@@ -1055,13 +1058,18 @@ impl Screen {
                 }
             }
             Self::Friend { code, relay, focus } => {
-                centered(batch, "Join a Friend", 20.0, u32::MAX);
+                centered(
+                    batch,
+                    &crate::lang::get_or("horizon.multiplayer.join_friend", "Join a Friend"),
+                    20.0,
+                    u32::MAX,
+                );
                 Self::field(
                     atlas,
                     batch,
                     caret,
                     focused_at,
-                    "Invite Code",
+                    &crate::lang::get_or("horizon.multiplayer.invite_code", "Invite Code"),
                     code,
                     FRIEND_CODE,
                     max,
@@ -1073,7 +1081,7 @@ impl Screen {
                     batch,
                     caret,
                     focused_at,
-                    "Relay (optional)",
+                    &crate::lang::get_or("horizon.multiplayer.relay", "Relay (optional)"),
                     relay,
                     FRIEND_RELAY,
                     max,
@@ -1096,6 +1104,16 @@ impl Screen {
                     centered(batch, &text, half(h) + 16.0, rgba(170, 170, 170, 255));
                 }
             }
+        }
+    }
+    /// `DirectJoinServerScreen.keyPressed`: Enter joins the typed address
+    /// while the Join Server button is active.
+    pub fn confirm(&self) -> Outcome {
+        match self {
+            Self::Direct { address } if servers::parse_address(address).is_some() => {
+                Outcome::Connect(direct_address(address))
+            }
+            _ => Outcome::None,
         }
     }
     pub fn click(

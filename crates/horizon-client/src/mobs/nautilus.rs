@@ -535,11 +535,6 @@ pub fn to_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
         map.remove(&"Owner".into());
     }
     map.insert("Sitting".into(), Tag::Byte(0));
-    // AgeableMob and Animal (a water creature is not saved with them above).
-    map.insert("Age".into(), Tag::Int(m.extra.age));
-    map.insert("AgeLocked".into(), Tag::Byte(i8::from(m.extra.age_locked)));
-    map.insert("InLove".into(), Tag::Int(m.extra.in_love.max(0)));
-    map.entry("ForcedAge".into()).or_insert(Tag::Int(0));
     if zombie(m) {
         let v = VARIANTS[usize::from(m.extra.variant).min(1)];
         map.insert(
@@ -573,14 +568,6 @@ pub fn to_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
 }
 pub fn from_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
     use horizon_world::nbt::Tag;
-    let int = |k: &str| match tag.get(k) {
-        Some(Tag::Int(v)) => Some(*v),
-        Some(Tag::Byte(v)) => Some(i32::from(*v)),
-        _ => None,
-    };
-    m.extra.age = int("Age").unwrap_or(0);
-    m.extra.age_locked = int("AgeLocked").unwrap_or(0) != 0;
-    m.extra.in_love = int("InLove").unwrap_or(0);
     m.extra.owner = crate::save::uuid_from_tag(tag.get("Owner"));
     m.extra.tame = m.extra.owner.is_some();
     if let Some(Tag::String(v)) = tag.get("variant") {

@@ -8,8 +8,8 @@ registry for Horizon's own mods, modpacks, resource packs and shader packs; see 
 
 Horizon doesn't run Java code ([mods.md](mods.md)). It ports what a Java mod
 carries as data (blocks, items, recipes, loot tables, tags, worldgen, textures, names) with `horizon-port-pack`, and
-says before install which of the mod's features that leaves out. Horizon `.hmod` mods aren't on Modrinth or CurseForge
-yet (Modrinth has no `horizon` loader).
+says before install which of the mod's features that leaves out. Horizon's own mods (content mods, `.hmod`, and native
+mods, `.hnmod`) aren't on Modrinth or CurseForge yet (Modrinth has no `horizon` loader).
 
 | Kind | Goes to | How well it runs |
 |---|---|---|
@@ -160,14 +160,15 @@ horizon-launcher mods remove faithful-32x
 
 ## Sources
 
-**Horizon's registry.** Mods (`.hmod`), modpacks (`.hpack`), resource packs and shader packs (`.hshader`) made for Horizon, reviewed as pull requests in
+**Horizon's registry.** Content mods (`.hmod`), native mods (`.hnmod`), modpacks (`.hpack`), resource packs and shader packs (`.hshader`) made for Horizon, reviewed as pull requests in
 [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods) ([api/mod-index.md](api/mod-index.md)). The
 launcher reads its `index.json` (`browser/horizon.rs`; `HORIZON_MOD_INDEX=<file or https address>` reads a test
 registry instead, whose files may then be on disk) at most every ten minutes, and keeps the last copy in
 `mod-browser/horizon-index.json`. Before a result is installed it shows whether its files are signed and, for a mod,
 what it may do, in the words of the game's Options > Mods. A download goes to `mod-browser/downloads/` and is moved
 into place only after `horizon_mods::index::check_file` passes (size, SHA-256, the author's signature when the project
-has a key, the file's own manifest against the index). A mod becomes `horizon-mods/<id>.hmod`, turned on;
+has a key, the file's own manifest against the index). A content mod becomes `horizon-mods/<id>.hmod`, turned on; a native mod becomes
+`horizon-native-mods/<id>.hnmod`, and the launcher builds it into the game ([native-mods.md](native-mods.md));
 `mods disable` and `mods enable` switch it in `horizon-mods.txt`. When the index takes a file down, the launcher turns
 it off the next time it reads the index or starts the game, says why, and refuses to install it or turn it back on.
 A Horizon modpack (`.hpack`) installs as its own profile (`browser/horizon/pack.rs`): `horizon-packs/<id>/` holds the
@@ -177,11 +178,14 @@ settings) are copied in on the first install only, so the player's changes survi
 down installs nothing. It is listed on the Modpacks tab with **Play** and **Remove**, and plays like an imported pack
 (`modpacks::apply_profile`). A shader pack goes to `shaderpacks/<file>` once `check_file` has run the game's own
 check on it (`horizon_shader_api::check`); a taken-down one is named, for the player to remove.
+A registry `.hmod` that has WebAssembly code (any capability besides `registries`) "needs a native port": Horizon doesn't
+run it any more. The browser neither lists nor installs it alone. A modpack that requires one still installs, and the
+launcher lists the mod as not running, with that reason, and leaves out its code.
 
 ```sh
-horizon-launcher mods search --source horizon --kind mod coords   # with whether it is signed and what it may do
-horizon-launcher mods install --source horizon coords_hud
-horizon-launcher mods disable coords_hud
+horizon-launcher mods search --source horizon --kind mod <words>   # with whether it is signed and what it may do
+horizon-launcher mods install --source horizon <id>
+horizon-launcher mods disable <id>
 horizon-launcher mods install --source horizon cozy               # a modpack: its own profile
 horizon-launcher modpack play cozy
 ```

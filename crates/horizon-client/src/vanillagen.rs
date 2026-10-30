@@ -13,6 +13,7 @@ use horizon_core::{
 };
 use horizon_world::{
     heightmap::HeightmapType,
+    loot::PackOverlay,
     nbt::Tag,
     registry::BlockRegistry,
     worldgen::{
@@ -20,6 +21,7 @@ use horizon_world::{
             GeneratorData, GeneratorWorker, OverworldGenerator, ProtoChunk, SurfaceSample,
         },
         overrides::WorldgenOverrides,
+        structure::legacy::PieceRandom,
         terrain::PreLightChunkStage,
     },
 };
@@ -202,7 +204,9 @@ impl VanillaTerrain {
                 );
             }
         }
-        let loot = dir.parent().and_then(crate::structure_blocks::loot_data);
+        let loot = dir
+            .parent()
+            .and_then(|root| crate::structure_blocks::loot_data(root, &PackOverlay::NONE));
         if let Some(root) = dir.parent() {
             crate::mobs::trial_spawner::load_registry(root);
         }
@@ -248,6 +252,24 @@ impl VanillaTerrain {
     /// mobs are finalized with.
     pub fn set_spawn_conditions(&self, difficulty: u8, day_time: i64) {
         self.structure_mobs.set_conditions(difficulty, day_time);
+    }
+    /// The random a chunk's generation steps draw from (`WorldGenRegion`).
+    pub fn region_random(&self, cx: i32, cz: i32) -> Box<dyn PieceRandom> {
+        self.generator.region_random(ChunkPos::new(cx, cz))
+    }
+    /// A mob chunk generation spawns, as the chunk saves it
+    /// (`StructureMobFinalizer::spawn_generated`).
+    pub fn spawn_generated(
+        &self,
+        kind: &str,
+        position: horizon_core::geometry::Vec3,
+        yaw: f32,
+        biome: &str,
+        random: &mut dyn PieceRandom,
+        group: &mut Option<crate::mobs::finalize::Group>,
+    ) -> Option<horizon_world::nbt::Compound> {
+        self.structure_mobs
+            .spawn_generated(kind, position, yaw, biome, random, group)
     }
     /// A proto chunk's blocks, biomes, scheduled ticks and post-processing
     /// marks as a column.
@@ -694,7 +716,7 @@ impl ChunkGenerator for VanillaTerrain {
             crate::structure_blocks::block_entities(&chunk, self.loot.as_deref());
         out.block_entities = block_entities;
         // The block entities Horizon does not model (decorated pots with their
-        // sherds and loot table, brushable blocks) stay as placed, like a
+        // sherds and loot table) stay as placed, like a
         // loaded chunk's.
         let mut unmodelled: Vec<Tag> = chunk
             .block_entities
@@ -751,7 +773,7 @@ mod default_block_entity_tests {
         out.set(4, -40, 9, 7);
         out.set(5, -40, 9, 6);
         let mut kinds = vec![None; 8];
-        kinds[6] = Some("minecraft:potent_sulfur");
+        kinds[6] = Some("minecraft:conduit");
         kinds[7] = Some("minecraft:sculk_sensor");
         let mut raw = vec![];
         add_default_block_entities(&kinds, &mut out, &mut raw);
@@ -762,7 +784,7 @@ mod default_block_entity_tests {
         assert_eq!(raw.len(), 1);
         assert_eq!(
             raw[0].get("id"),
-            Some(&Tag::String("minecraft:potent_sulfur".into()))
+            Some(&Tag::String("minecraft:conduit".into()))
         );
         add_default_block_entities(&kinds, &mut out, &mut raw);
         assert_eq!(

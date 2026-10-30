@@ -72,7 +72,7 @@ ItemFrameRenderer.submit	port	crates/horizon-client/src/game/frames.rs::Game::fr
 ItemFrameRenderer.getRenderOffset	inline	crates/horizon-client/src/game/frames.rs::Game::frame_geometry	offset in front of the wall
 ItemFrameRenderer.extractRenderState	inline	crates/horizon-client/src/game/frames.rs::Game::frame_geometry	direction, item, rotation, glow and map read there
 LeashKnotRenderer.submit	port	crates/horizon-client/src/game/leads.rs::Game::leash_geometry	knot drawn with the rope pass
-LightningBoltRenderer.quad	inline	crates/horizon-client/src/gfx/lightning.rs::geometry	quad built inline
+LightningBoltRenderer.quad	inline	crates/horizon-client-render/src/gfx/lightning.rs::geometry	quad built inline
 LivingEntityRenderer.getBoundingBoxForCulling	skip:other		culling box only (dragon-head inflate)
 LivingEntityRenderer.isEntityUpsideDown	port	crates/horizon-client/src/mobs/render.rs::base_transform_at	upside-down flip for Dinnerbone and Grumm
 LivingEntityRenderer.isUpsideDownName	inline	crates/horizon-client/src/mobs/render.rs::base_transform_at	name check folded into the flip

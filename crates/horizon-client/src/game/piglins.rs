@@ -60,7 +60,7 @@ impl Game<'_> {
             })
     }
     fn piglin_max_stack(&self, item: &str) -> u32 {
-        self.res.items().get(item).map_or(64, |i| i.max_stack)
+        self.items().get(item).map_or(64, |i| i.max_stack)
     }
     /// `PiglinAi.wantsToPickup` (an adult that is not hurt-shy), without
     /// the baby rule, which babies skip entirely here.
@@ -223,10 +223,26 @@ impl Game<'_> {
             // Nuggets come whole, anything else one at a time.
             let (taken_item, id) = (e.clone(), self.mobs[i].id);
             let item = e.stack.item.clone();
+            let carried = e.stack.clone();
+            let owner = e.thrower;
             self.add_pickup(
                 super::pickups::Taken::Item(Box::new(taken_item)),
                 super::pickups::Collector::Mob(id),
             );
+            // LivingEntity.onItemPickup, before PiglinAi.pickUpItem splits the stack.
+            // The owner is the host or a guest: whoever it is gets the trigger.
+            if let Some(owner) = owner {
+                let target = self.mob_entity(&self.mobs[i]);
+                self.for_each_player(|g| {
+                    if g.acting_uuid() == owner {
+                        g.trigger_item_entity(
+                            "minecraft:thrown_item_picked_up_by_entity",
+                            &carried,
+                            &target,
+                        );
+                    }
+                });
+            }
             let stack = if &*item == "minecraft:gold_nugget" {
                 self.dropped.remove(j).stack
             } else {
@@ -297,7 +313,7 @@ impl Game<'_> {
         let m = &self.mobs[i];
         let from = [m.position.x, m.position.y + 1.3, m.position.z];
         let items = if !m.is_baby() {
-            self.res.items().loot_table(
+            world_items!(self).loot_table(
                 "minecraft:gameplay/piglin_bartering",
                 false,
                 None,

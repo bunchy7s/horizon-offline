@@ -20,6 +20,9 @@ pub struct Tab {
     pub column: u32,
     pub search: bool,
     pub inventory: bool,
+    /// `CreativeModeTab.Type.HOTBAR`: the saved toolbars, filled when the
+    /// tab is selected (`set_saved_hotbars`).
+    pub hotbar: bool,
 }
 /// What the client's creative search trees (SessionSearchTrees) index for one
 /// stack of the search tab: its creative tooltip lines and its item tags.
@@ -229,7 +232,7 @@ impl Creative {
                 }
                 search_items = items.clone();
             }
-            if kind == "HOTBAR" || t["visible"] == false {
+            if t["visible"] == false {
                 continue;
             }
             let icon = t["icon"]
@@ -244,6 +247,7 @@ impl Creative {
                 column: t["column"].as_u64().unwrap_or(0) as u32,
                 search: kind == "SEARCH",
                 inventory: kind == "INVENTORY",
+                hotbar: kind == "HOTBAR",
             });
         }
         Ok(Self::new(tabs, search_items, search_index))
@@ -277,6 +281,7 @@ impl Creative {
                 column: t["column"].as_u64().unwrap_or(0) as u32,
                 search: kind == "SEARCH",
                 inventory: kind == "INVENTORY",
+                hotbar: false,
             });
         }
         let search_index = search_items
@@ -333,6 +338,7 @@ impl Creative {
                 column: t.column,
                 search: t.search,
                 inventory: t.inventory,
+                hotbar: t.hotbar,
             })
             .collect()
     }
@@ -463,6 +469,23 @@ impl Creative {
             items: items.clone(),
         });
         items
+    }
+    /// The stack in grid cell `index` (row-major from the tab's top), None
+    /// for an empty cell: a saved toolbar's empty slot, or past the end.
+    pub fn shown(&self, names: &Names, index: usize) -> Option<ItemStack> {
+        self.items(names)
+            .get(index)
+            .filter(|s| s.count > 0)
+            .cloned()
+    }
+    /// `CreativeModeInventoryScreen.selectTab` for the HOTBAR tab: the nine
+    /// saved rows of `HotbarManager` as the tab's items, an empty stack (count
+    /// 0) for an empty slot.
+    pub fn set_saved_hotbars(&mut self, items: Vec<ItemStack>) {
+        if let Some(tab) = self.tabs.iter_mut().find(|t| t.hotbar) {
+            tab.items = items;
+        }
+        self.forget_items();
     }
     /// Drop the shown items, so the next `items` works them out again: a
     /// reload can rename items without changing the Search label.
@@ -664,6 +687,13 @@ pub enum DisplayClick {
     Drop(ItemStack),
 }
 
+/// Whether a stack has `minecraft:creative_slot_lock`.
+pub fn slot_locked(stack: &ItemStack) -> bool {
+    stack
+        .data()
+        .is_some_and(|d| d.other("minecraft:creative_slot_lock").is_some())
+}
+
 /// `CreativeModeInventoryScreen.slotClicked` on a display slot
 /// (`slot.container == CONTAINER`): `shown` is the slot's item (None past
 /// the tab's end) and `max` gives an item's max stack size. The tab's items
@@ -676,6 +706,11 @@ pub fn click_display(
     input: crate::menu::Input,
 ) -> DisplayClick {
     use crate::menu::Input;
+    // CustomCreativeSlot.mayPickup: a `creative_slot_lock` stack (the saved
+    // toolbars' hint) can't be clicked at all.
+    if shown.is_some_and(slot_locked) {
+        return DisplayClick::Nothing;
+    }
     let copy = |s: &ItemStack, count: u32| ItemStack { count, ..s.clone() };
     let quick_key = input == Input::QuickMove;
     match input {
@@ -738,6 +773,7 @@ pub fn click_display(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_world::nbt::Tag;
 
     fn stack(item: &str, count: u32) -> ItemStack {
         ItemStack {
@@ -1048,6 +1084,53 @@ mod tests {
     }
 
     #[test]
+    fn saved_hotbars_tab_shows_its_rows_and_locks_the_hint() {
+        let mut c = Creative::from_json(&serde_json::json!({"schema": 2, "tabs": [
+            {"id": "minecraft:hotbar", "type": "HOTBAR", "row": "TOP", "column": 5, "title": "Saved Hotbars",
+             "icon": "{count:1,id:\"minecraft:bookshelf\"}", "visible": true, "items": []},
+            {"id": "minecraft:inventory", "type": "INVENTORY", "row": "BOTTOM", "column": 6, "title": "Survival Inventory",
+             "icon": "{count:1,id:\"minecraft:chest\"}", "visible": true, "items": []}
+        ]}))
+        .unwrap();
+        assert!(c.tab().hotbar);
+        assert!(!c.tab_headers()[1].hotbar);
+        let mut hint = stack("paper", 1);
+        hint.data_mut().set_other(
+            "minecraft:creative_slot_lock",
+            Some(Tag::compound(Vec::<(&str, Tag)>::new())),
+        );
+        // A saved sword in slot 0, an empty slot, then the hint.
+        c.set_saved_hotbars(vec![stack("diamond_sword", 1), stack("air", 0), hint]);
+        let names = Names {
+            map: HashMap::new(),
+        };
+        assert_eq!(c.shown(&names, 0), Some(stack("diamond_sword", 1)));
+        assert_eq!(c.shown(&names, 1), None);
+        assert_eq!(c.shown(&names, 3), None);
+        let hint = c.shown(&names, 2).unwrap();
+        assert!(slot_locked(&hint));
+        assert!(!slot_locked(&stack("diamond_sword", 1)));
+        // CustomCreativeSlot.mayPickup: the hint is never taken, and a carried
+        // stack stays as it is.
+        use crate::menu::Input::*;
+        for (carried, button, input) in [
+            (None, 0, Pickup),
+            (None, 0, QuickMove),
+            (None, 2, Clone),
+            (None, 3, Swap),
+            (None, 0, Throw),
+            (Some(stack("dirt", 2)), 0, Pickup),
+            (Some(stack("dirt", 2)), 1, Pickup),
+        ] {
+            let mut carried = carried;
+            let before = carried.clone();
+            let effect = click_display(&mut carried, Some(&hint), |_| 64, button, input);
+            assert_eq!(effect, DisplayClick::Nothing);
+            assert_eq!(carried, before);
+        }
+    }
+
+    #[test]
     fn search_matches_vanilla_trees() {
         let c = creative(0);
         let names = Names {
@@ -1191,6 +1274,7 @@ mod tests {
             column,
             search: false,
             inventory: false,
+            hotbar: false,
         };
         // Top row, second column: the button spans x 27..53, y -28..4.
         let t = tab(true, 1);

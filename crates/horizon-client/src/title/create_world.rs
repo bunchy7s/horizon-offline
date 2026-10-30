@@ -30,8 +30,8 @@ pub struct WorldOptions {
     pub difficulty: usize,
     /// Allow Cheats as toggled; unset follows the game mode.
     pub commands: Option<bool>,
-    /// The Superflat world preset instead of Default.
-    pub flat: bool,
+    /// The world preset the world is created with.
+    pub world_type: crate::save::WorldPreset,
     /// CreateFlatWorldScreen's layers and biome, kept with the world type.
     pub flat_settings: Option<super::flat::FlatSettings>,
     pub structures: bool,
@@ -51,7 +51,7 @@ impl Default for WorldOptions {
             hardcore: false,
             difficulty: 2,
             commands: None,
-            flat: false,
+            world_type: crate::save::WorldPreset::Normal,
             flat_settings: None,
             structures: true,
             bonus_chest: false,
@@ -76,9 +76,8 @@ impl WorldOptions {
                 .position(|d| *d == level.difficulty)
                 .unwrap_or(2),
             commands: Some(commands),
-            flat: generation.flat,
-            flat_settings: generation
-                .flat
+            world_type: generation.preset,
+            flat_settings: (generation.preset == crate::save::WorldPreset::Flat)
                 .then(|| super::flat::FlatSettings::from_world(dir))
                 .flatten(),
             structures: generation.structures,
@@ -101,7 +100,7 @@ impl WorldOptions {
     }
     pub fn world_gen(&self) -> crate::save::WorldGen {
         crate::save::WorldGen {
-            flat: self.flat,
+            preset: self.world_type,
             structures: self.structures,
             bonus_chest: self.bonus_chest(),
         }
@@ -126,8 +125,8 @@ impl WorldOptions {
             23 => self.difficulty = (self.difficulty + 1) % DIFFICULTIES.len(),
             24 => self.commands = Some(!self.commands(*creative)),
             25 => {
-                self.flat = !self.flat;
-                if self.flat {
+                self.world_type = self.world_type.next();
+                if self.world_type == crate::save::WorldPreset::Flat {
                     // setWorldType starts the generator from the flat preset.
                     self.flat_settings = Some(super::flat::FlatSettings::default());
                 }
@@ -262,14 +261,7 @@ pub(super) fn buttons(w: f32, h: f32, creative: bool, o: &WorldOptions) -> Vec<B
                 gx,
                 gy,
                 150.0,
-                labelled(
-                    "selectWorld.mapType",
-                    tr(if o.flat {
-                        "generator.minecraft.flat"
-                    } else {
-                        "generator.minecraft.normal"
-                    }),
-                ),
+                labelled("selectWorld.mapType", tr(o.world_type.label())),
                 true,
                 25,
             ),
@@ -279,7 +271,7 @@ pub(super) fn buttons(w: f32, h: f32, creative: bool, o: &WorldOptions) -> Vec<B
                 gy,
                 150.0,
                 tr("selectWorld.customizeType"),
-                o.flat,
+                o.world_type == crate::save::WorldPreset::Flat,
                 26,
             ),
             // SwitchGrid: 44-wide value-only buttons at the grid's right.

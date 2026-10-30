@@ -42,7 +42,7 @@ pub const SCHEMA: i64 = 7;
 /// the preparer and fails when the output is not the one output-versions.txt gives this number
 /// (`python3 tools/prepare_output.py check`). The launcher reads this line from the version
 /// folder's sources: keep it on one line, as it is.
-pub const OUTPUT_VERSION: u32 = 1;
+pub const OUTPUT_VERSION: u32 = 2;
 
 /// Digest of this crate's sources (build.rs): the launcher prepares a version in-process when
 /// that version ships these same sources, and runs the version's own binary otherwise.

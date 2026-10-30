@@ -391,15 +391,14 @@ impl Lists {
     }
 }
 
-/// The world presets of 26.3's `worldgen/world_preset`.
-const WORLD_PRESETS: [&str; 7] = [
-    "minecraft:normal",
-    "minecraft:flat",
-    "minecraft:large_biomes",
-    "minecraft:amplified",
-    "minecraft:single_biome_surface",
-    "minecraft:debug_all_block_states",
-    "minecraft:flat_all_dimensions",
+/// DedicatedServerProperties.LEGACY_PRESET_NAMES: the old `level-type`
+/// names, before the presets had their own ids.
+const LEGACY_PRESET_NAMES: [(&str, horizon_client::save::WorldPreset); 2] = [
+    ("default", horizon_client::save::WorldPreset::Normal),
+    (
+        "largebiomes",
+        horizon_client::save::WorldPreset::LargeBiomes,
+    ),
 ];
 
 /// Identifier.tryParse: `namespace:path`, or a path in `minecraft`.
@@ -416,11 +415,18 @@ impl Game<'_> {
     /// DedicatedServerProperties.createDimensions for a world that doesn't
     /// exist yet: `level-type`'s preset, a flat world's `generator-settings`
     /// and `generate-structures`, written before the world opens so that
-    /// streaming reads them. Horizon generates the normal and flat presets.
+    /// streaming reads them.
     fn write_world_gen(&self, dir: &std::path::Path, props: &ServerProperties) -> Result<()> {
         let level_type = &props.level_type;
         let preset = parse_identifier(level_type)
-            .filter(|id| WORLD_PRESETS.contains(&id.as_str()))
+            .as_deref()
+            .and_then(horizon_client::save::WorldPreset::of_id)
+            .or_else(|| {
+                LEGACY_PRESET_NAMES
+                    .iter()
+                    .find(|(name, _)| *name == level_type)
+                    .map(|(_, preset)| *preset)
+            })
             .unwrap_or_else(|| {
                 log_from(
                     "Worker-Main-1",
@@ -429,18 +435,9 @@ impl Game<'_> {
                         "Failed to parse level-type {level_type}, defaulting to minecraft:normal"
                     ),
                 );
-                "minecraft:normal".to_owned()
+                horizon_client::save::WorldPreset::Normal
             });
-        let flat = preset == "minecraft:flat";
-        if !flat && preset != "minecraft:normal" {
-            log_from(
-                "Worker-Main-1",
-                "WARN",
-                &format!(
-                    "Horizon doesn't generate the {preset} world preset yet: using minecraft:normal"
-                ),
-            );
-        }
+        let flat = preset == horizon_client::save::WorldPreset::Flat;
         let settings = if flat {
             let biomes = self.res.biomes();
             let (settings, errors) = horizon_client::flatgen::settings_from_json(
@@ -456,7 +453,7 @@ impl Game<'_> {
             None
         };
         let options = horizon_client::save::WorldGen {
-            flat,
+            preset,
             structures: props.generate_structures,
             bonus_chest: false,
         };
@@ -612,13 +609,9 @@ impl Game<'_> {
         // MinecraftServer.initializeKeyPair (only online mode uses it).
         log("INFO", "Generating keypair");
         let online = if props.online_mode {
-            let key = horizon_protocol::rsa::RsaPrivateKey::generate(1024)
-                .map_err(|e| format!("Failed to generate key pair: {e}"))?;
-            Some(Arc::new(OnlineMode {
-                public_der: key.public_der(),
-                key,
-                prevent_proxy: props.prevent_proxy_connections,
-            }))
+            Some(Arc::new(OnlineMode::generate(
+                props.prevent_proxy_connections,
+            )?))
         } else {
             None
         };
@@ -679,7 +672,8 @@ impl Game<'_> {
         }
         self.settings.render_distance = props.view_distance.clamp(2, 32);
         self.settings.simulation_distance = props.simulation_distance.clamp(2, 32);
-        self.streaming.radius = self.settings.render_distance;
+        // Nothing is kept around the spawn while nobody is on.
+        self.streaming.radius = -1;
         self.settle_spawn()?;
         let gate_lists = lists.clone();
         let gate: LoginGate = Arc::new(move |address, uuid, name| {
@@ -770,6 +764,8 @@ impl Game<'_> {
         self.sync_ops(&lists);
         if let Some(host) = self.lan.as_mut() {
             host.hub.spawn_protection = props.spawn_protection;
+            host.hub.chat_spam_threshold = props.chat_spam_threshold_seconds.wrapping_mul(20);
+            host.hub.command_spam_threshold = props.command_spam_threshold_seconds.wrapping_mul(20);
         }
         log(
             "INFO",
@@ -851,10 +847,39 @@ impl Game<'_> {
         self.stop_dedicated()
     }
 
+    /// A dedicated server of its own, not single player's server thread
+    /// (which runs with `options.dedicated` too).
+    pub(super) fn standalone_server(&self) -> bool {
+        self.options.dedicated.is_some() && self.serving.is_none()
+    }
     /// Load the spawn area and find the world spawn as single player does,
-    /// without keeping a player there.
+    /// without keeping a player there. A dedicated server only finds the world
+    /// spawn (MinecraftServer.setInitialSpawn): a player's spawn is found as
+    /// one joins.
     pub(super) fn settle_spawn(&mut self) -> Result<()> {
         let deadline = Instant::now() + Duration::from_secs(600);
+        if self.standalone_server() {
+            if self.level.spawn.is_none() {
+                let [x, y, z] = loop {
+                    self.update_world();
+                    if let Some(pos) = self.find_world_spawn()? {
+                        break pos;
+                    }
+                    if Instant::now() > deadline {
+                        return Err("the spawn area did not load".into());
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                };
+                self.level.spawn = Some([f64::from(x), f64::from(y), f64::from(z)]);
+                self.level.world_spawn.get_or_insert([x, y, z]);
+                self.streaming.extra.clear();
+            }
+            self.spawn = self
+                .level
+                .spawn
+                .map(|s| horizon_core::geometry::Vec3::new(s[0] + 0.5, s[1], s[2] + 0.5));
+            return Ok(());
+        }
         while self.player.is_none() {
             self.update_world();
             self.spawn_player()?;
@@ -867,24 +892,28 @@ impl Game<'_> {
         Ok(())
     }
 
-    /// The chunks to keep loaded: the players' (lan_update_streaming), or
-    /// the spawn chunk while nobody is online.
+    /// The chunks to keep loaded: the players' (lan_update_streaming). While
+    /// nobody is online a dedicated server keeps none (vanilla has no spawn
+    /// ticket), an integrated one the spawn chunk's.
     pub(super) fn update_dedicated_streaming(&mut self) {
-        let center = self
-            .lan
-            .as_ref()
-            .and_then(|h| {
-                h.hub
-                    .guests
-                    .iter()
-                    .find(|g| h.hub.here(g))
-                    .map(|g| g.chunk())
-            })
-            .or_else(|| {
-                self.spawn
-                    .map(|s| ((s.x.floor() as i32) >> 4, (s.z.floor() as i32) >> 4))
-            });
-        if let Some(c) = center {
+        let guest = self.lan.as_ref().and_then(|h| {
+            h.hub
+                .guests
+                .iter()
+                .find(|g| h.hub.here(g))
+                .map(|g| g.chunk())
+        });
+        if self.standalone_server() {
+            self.streaming.radius = if guest.is_some() {
+                self.settings.render_distance
+            } else {
+                -1
+            };
+        }
+        let spawn = self
+            .spawn
+            .map(|s| ((s.x.floor() as i32) >> 4, (s.z.floor() as i32) >> 4));
+        if let Some(c) = guest.or(spawn) {
             self.streaming.center = c;
         }
     }

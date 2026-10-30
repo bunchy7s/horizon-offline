@@ -40,7 +40,7 @@ LivingEntity.onRemoval	skip:other		waypoint tracking is per player (game/lan_way
 LivingEntity.updateDirtyEffects	skip:java		dirty flag; Horizon reads invisibility and swirls from the effect list when needed
 LivingEntity.updateInvisibilityStatus	inline	crates/horizon-client/src/mobs/trader.rs::is_invisible	the Invisibility effect hides the model (render_with) and sets flag 0x20 in lan.rs::mob_meta
 LivingEntity.areAllEffectsAmbient	inline	crates/horizon-client/src/game/client_ambient.rs::Game::effect_swirls	a server's flag is kept in Extra::effect_ambient; a mob's own effects are never ambient
-LivingEntity.removeAllEffects	port	crates/horizon-client/src/effects.rs::PlayerEffects::clear	player; a mob's list is cleared in commands/effects.rs::cmd_effect_clear
+LivingEntity.removeAllEffects	port	crates/horizon-client-render/src/effects.rs::PlayerEffects::clear	player; a mob's list is cleared in commands/effects.rs::cmd_effect_clear
 LivingEntity.removeEffect	inline	crates/horizon-client/src/game/commands/effects.rs::Game::cmd_effect_clear	retain by effect id for the player and for mobs
 LivingEntity.onEffectUpdated	port	crates/horizon-client/src/game/potions.rs::Game::apply_effect_status	gap: minor: player only; a mob's attributes follow just speed and slowness, strength, weakness, resistance and absorption do nothing on mobs
 LivingEntity.onEffectsRemoved	port	crates/horizon-client/src/game/potions.rs::Game::apply_effect_status	gap: minor: same as onEffectUpdated, mobs only react to speed and slowness

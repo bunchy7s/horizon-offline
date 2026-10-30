@@ -61,6 +61,7 @@ impl Game<'_> {
         }
         // Animal.setInLove: entity event 18.
         if loved {
+            self.love_cause.insert(self.mobs[index].id, self.lan_acting);
             self.mob_event_particles(self.mobs[index].id, 18);
         }
         self.llama_sound(index, "entity.llama.eat", 1.0);

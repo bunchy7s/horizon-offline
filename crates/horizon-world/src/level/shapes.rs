@@ -17,6 +17,11 @@ use horizon_core::{
     random::RandomSource,
 };
 
+/// `SoundEvents.GEYSER_ERUPTION_START`.
+const GEYSER_ERUPTION_START: &str = "minecraft:block.potent_sulfur.geyser_eruption";
+/// `SoundEvents.GEYSER_CONTINUOUS_START`.
+const GEYSER_CONTINUOUS_START: &str = "minecraft:block.potent_sulfur.geyser_continuous_eruption";
+
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// `BlockState.updateShape(level, ticks, pos, direction, neighbourPos, neighbourState, random)`.
     pub fn update_shape(
@@ -794,7 +799,20 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             Class::WallHangingSign => {
                 survive_or_air!(axis_of(dir) == axis_of(clockwise(b.facing(state))))
             }
-            Class::PotentSulfur => self.potent_sulfur_state(state, pos),
+            Class::PotentSulfur => {
+                let next = self.potent_sulfur_state(state, pos);
+                // validBlockState: a block that was no geyser starts its
+                // block entity's countdown over when it becomes dormant.
+                if table.text(next, p.potent_sulfur_state) == "dormant"
+                    && !matches!(
+                        table.text(state, p.potent_sulfur_state),
+                        "erupting" | "dormant"
+                    )
+                {
+                    self.level.reset_potent_sulfur_countdown(pos);
+                }
+                next
+            }
             Class::NetherPortal => {
                 let x_axis = table.text(state, p.axis) == "x";
                 let update_axis = axis_of(dir);
@@ -839,6 +857,25 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         } else {
             b.table.set_text(state, key, "wet")
         }
+    }
+
+    /// `PotentSulfurBlock.onPlace`: a geyser that starts erupting (or runs
+    /// continuously) queues its eruption block event, plays its start sound
+    /// and signals the activation.
+    pub(crate) fn potent_sulfur_on_place(&mut self, pos: BlockPos, state: BlockStateId) {
+        let b = self.b;
+        let current = b.table.text(state, b.props.potent_sulfur_state);
+        if current != "erupting" && current != "continuous" {
+            return;
+        }
+        let sound = if current == "continuous" {
+            GEYSER_CONTINUOUS_START
+        } else {
+            GEYSER_ERUPTION_START
+        };
+        self.block_event(pos, b.block(state), 0, 0);
+        self.sound(pos, &sound.into(), 1.0, 1.0);
+        self.game_event_state(pos, "minecraft:block_activate", state);
     }
 
     fn bed_neighbour_direction(&self, state: BlockStateId) -> Direction {

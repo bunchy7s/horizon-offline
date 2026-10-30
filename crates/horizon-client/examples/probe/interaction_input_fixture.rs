@@ -15,6 +15,9 @@ struct World {
     passing: bool,
 }
 impl InteractionWorld for World {
+    // The fixture's targets don't change within a tick.
+    fn pick_hit_result(&mut self) {}
+    fn release_hit_result(&mut self) {}
     fn using_item(&self) -> bool {
         self.using
     }

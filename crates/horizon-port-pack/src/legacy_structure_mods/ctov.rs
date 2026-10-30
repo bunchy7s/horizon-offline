@@ -1,8 +1,6 @@
 //! Choice Theorem's Overhauled Village: the entries it adds to other
-//! structure sets in Java code, and its `modular_compat` processor.
-use crate::processors::{ProcessorData, referenced};
-use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+//! structure sets in Java code (its `modular_compat` processor is
+//! `crate::lithostitched`'s now).
 
 /// ChoiceTheorem's Overhauled Village's villages and outposts, which it adds
 /// to vanilla's `villages` and `pillager_outposts` sets in Java code
@@ -78,61 +76,9 @@ pub(crate) fn code_set_entries(
     }
 }
 
-/// Choice Theorem's Overhauled Village's processor that runs the list
-/// `reference` when mod `modid` is loaded (ModularCompatProcessor).
-const MODULAR_COMPAT: &str = "ctov:modular_compat";
-
-/// Notes which mods its compat processors name are `loaded`.
-pub(crate) fn mark_loaded(data: &mut ProcessorData, loaded: &dyn Fn(&str) -> bool) {
-    fn walk(v: &Value, out: &mut BTreeSet<String>) {
-        match v {
-            Value::Object(o) => {
-                if o.get("processor_type").and_then(Value::as_str) == Some(MODULAR_COMPAT) {
-                    if let Some(id) = o.get("modid").and_then(Value::as_str) {
-                        out.insert(id.to_owned());
-                    }
-                }
-                o.values().for_each(|v| walk(v, out));
-            }
-            Value::Array(a) => a.iter().for_each(|v| walk(v, out)),
-            _ => {}
-        }
-    }
-    let mut named = BTreeSet::new();
-    data.lists.values().for_each(|l| walk(l, &mut named));
-    data.compat_loaded = named.into_iter().filter(|m| loaded(m)).collect();
-}
-
-/// A `ctov:modular_compat` processor in a list being carried, at `depth`
-/// (see [`super::lithostitched`]'s references): counted in `carried`, and
-/// the processors of the list it names when its mod is loaded, else none.
-/// `None` for any other processor, or past the depth limit.
-pub(super) fn modular_compat(
-    p: &Value,
-    data: &ProcessorData,
-    carried: &mut BTreeMap<String, usize>,
-    depth: usize,
-) -> Option<Vec<Value>> {
-    if p["processor_type"] != MODULAR_COMPAT || depth >= 8 {
-        return None;
-    }
-    *carried.entry(MODULAR_COMPAT.into()).or_default() += 1;
-    let loaded = p["modid"]
-        .as_str()
-        .is_some_and(|m| data.compat_loaded.contains(m));
-    Some(
-        loaded
-            .then(|| referenced(&p["reference"], data))
-            .flatten()
-            .unwrap_or_default(),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::processors::carry;
-    use serde_json::json;
 
     #[test]
     fn ctov_joins_vanillas_villages_and_outposts() {
@@ -154,27 +100,5 @@ mod tests {
             ("ctov:large/village_taiga_fortified".into(), 1)
         );
         assert!(code_set_entries("mvs").is_empty());
-    }
-
-    #[test]
-    #[ignore = "modular compat is crate::lithostitched's now (its tests)"]
-    fn modular_compat_runs_its_list_only_with_its_mod() {
-        let mut data = ProcessorData::default();
-        let swap = json!({"processor_type": "minecraft:rule", "rules": []});
-        data.lists
-            .insert("v:house_ns".into(), json!({"processors": [swap.clone()]}));
-        let compat = |m: &str| json!({"processor_type": "ctov:modular_compat", "modid": m, "reference": "v:house_ns"});
-        let gravity = json!({"processor_type": "minecraft:gravity"});
-        data.lists.insert(
-            "v:house".into(),
-            json!({"processors": [compat("ns"), compat("absent"), gravity.clone()]}),
-        );
-        data.mark_loaded(&|m| m == "ns");
-        assert_eq!(data.compat_loaded, BTreeSet::from(["ns".to_owned()]));
-        let mut v = json!({"processors": [compat("ns"), compat("absent"), gravity.clone()]});
-        let mut carried = BTreeMap::new();
-        assert!(carry("processor_list", &mut v, &data, &mut carried));
-        assert_eq!(v, json!({"processors": [swap, gravity]}));
-        assert_eq!(carried["ctov:modular_compat"], 2);
     }
 }

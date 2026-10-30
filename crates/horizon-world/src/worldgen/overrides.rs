@@ -15,9 +15,10 @@ pub const DIMENSIONS: &str = "dimensions";
 
 /// Pack folders (`data/<ns>/<kind>/`) the chunk generator reads, and the
 /// bundle each joins.
-const KINDS: [(&str, &str); 14] = [
+const KINDS: [(&str, &str); 15] = [
     ("dimension", DIMENSIONS),
     ("worldgen/biome", "biomes"),
+    ("worldgen/block_state_provider", "state_providers"),
     // 26.3's names: 26.2 called them configured_carver and configured_feature.
     ("worldgen/carver", "carvers"),
     ("worldgen/feature", "features"),
@@ -315,6 +316,13 @@ mod tests {
             PackFile::Read
         );
         assert_eq!(
+            add(
+                "data/p/worldgen/block_state_provider/stony_cliffs.json",
+                "8"
+            ),
+            PackFile::Read
+        );
+        assert_eq!(
             add("data/minecraft/worldgen/configured_carver/cave.json", "{}"),
             PackFile::NotRead("worldgen/configured_carver".into())
         );
@@ -335,6 +343,7 @@ mod tests {
         assert_eq!(get(DIMENSIONS), [("minecraft:overworld", "5")]);
         assert_eq!(get("carvers"), [("minecraft:cave", "6")]);
         assert_eq!(get("features"), [("minecraft:water_delta", "7")]);
+        assert_eq!(get("state_providers"), [("p:stony_cliffs", "8")]);
         assert_eq!(get("structures"), []);
         assert_eq!(o.tags("biome_tags").count(), 1);
     }

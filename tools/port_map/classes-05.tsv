@@ -44,9 +44,9 @@ EuclideanGameEventListenerRegistry.unregister	port	crates/horizon-client/src/gam
 EuclideanGameEventListenerRegistry.visitInRangeListeners	port	crates/horizon-client/src/game/sculk.rs::Game::post_game_event	walks the index for listeners in range, then the wardens
 VibrationInfo.getEntity	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_receive	the source is held as a Who and read there
 VibrationInfo.getProjectileOwner	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_receive	the projectile owner is captured when posted (info.owner) and read there
-VibrationSelector.addCandidate	port	crates/horizon-client/src/sculk.rs::Selector::add_candidate	
-VibrationSelector.chosenCandidate	port	crates/horizon-client/src/sculk.rs::Selector::chosen_candidate	
-VibrationSelector.shouldReplaceVibration	port	crates/horizon-client/src/sculk.rs::Selector::should_replace	
+VibrationSelector.addCandidate	port	crates/horizon-client-render/src/sculk.rs::Selector::add_candidate	
+VibrationSelector.chosenCandidate	port	crates/horizon-client-render/src/sculk.rs::Selector::chosen_candidate	
+VibrationSelector.shouldReplaceVibration	port	crates/horizon-client-render/src/sculk.rs::Selector::should_replace	
 GameRuleCategory.register	skip:data		static category table; Horizon's rule categories are static strings (gamerules.rs)
 GameRuleMap.equals	skip:java		value equality of the map
 GameRuleMap.of	port	crates/horizon-client-core/src/gamerules.rs::GameRules::get	no stored map: a rule that was never set reads its table default

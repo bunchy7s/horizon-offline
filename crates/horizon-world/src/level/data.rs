@@ -567,6 +567,7 @@ props! {
     creaking_heart_state = "creaking_heart_state",
     cracked = "cracked",
     has_book = "has_book",
+    has_record = "has_record",
     signal_fire = "signal_fire",
     orientation = "orientation",
     crafting = "crafting",

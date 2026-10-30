@@ -1,43 +1,43 @@
 MultilineTextField.setCharacterLimit	port	crates/horizon-client/src/game/books.rs::book_page_box	gap: minor: only the book page sets a character limit (PAGE_CHARS); other MultiLineEditBox users are not ported
 MultilineTextField.setLineLimit	inline	crates/horizon-client/src/game/books.rs::Game::page_keep	the 14-line limit (LINES) is checked in page_keep; there is no limit field
-MultilineTextField.setValue	port	crates/horizon-client/src/ui.rs::EditBox::set_value	gap: minor: no line-limit check when the text is set (allowOverflowLineLimit path)
-MultilineTextField.insertText	port	crates/horizon-client/src/ui.rs::EditBox::insert_text	the line limit is checked by Game::page_keep, not here
-MultilineTextField.deleteText	port	crates/horizon-client/src/ui.rs::EditBox::delete_chars	
-MultilineTextField.getSelected	port	crates/horizon-client/src/ui.rs::EditBox::selected	
+MultilineTextField.setValue	port	crates/horizon-client-render/src/ui.rs::EditBox::set_value	gap: minor: no line-limit check when the text is set (allowOverflowLineLimit path)
+MultilineTextField.insertText	port	crates/horizon-client-render/src/ui.rs::EditBox::insert_text	the line limit is checked by Game::page_keep, not here
+MultilineTextField.deleteText	port	crates/horizon-client-render/src/ui.rs::EditBox::delete_chars	
+MultilineTextField.getSelected	port	crates/horizon-client-render/src/ui.rs::EditBox::selected	
 MultilineTextField.getLineAtCursor	port	crates/horizon-client/src/game/books.rs::Game::caret_on	the visual row holding the caret, with its x
 MultilineTextField.getLineView	port	crates/horizon-client/src/game/books.rs::Game::page_rows	visual rows as character ranges
-MultilineTextField.seekCursor	port	crates/horizon-client/src/ui.rs::EditBox::set_cursor	
+MultilineTextField.seekCursor	port	crates/horizon-client-render/src/ui.rs::EditBox::set_cursor	
 MultilineTextField.seekCursorLine	port	crates/horizon-client/src/game/books.rs::Game::book_move_line	gap: minor: column kept without vanilla's 2 px bias (LINE_SEEK_PIXEL_BIAS)
 MultilineTextField.seekCursorToPoint	port	crates/horizon-client/src/game/books.rs::Game::page_index_at	
 MultilineTextField.selectWordAtCursor	missing		player: double-clicking a word on a book page does not select it; Game::book_page_click only sets the caret
 MultilineTextField.keyPressed	port	crates/horizon-client/src/game/books.rs::Game::book_input	gap: player: Home and End go to the start and end of the whole page, not of the visual line (EditBox::key); Enter, arrows and Ctrl keys are handled
-MultilineTextField.getSelectedText	port	crates/horizon-client/src/ui.rs::EditBox::selected_text	
+MultilineTextField.getSelectedText	port	crates/horizon-client-render/src/ui.rs::EditBox::selected_text	
 MultilineTextField.getCursorLineView	inline	crates/horizon-client/src/game/books.rs::Game::book_move_line	gap: player: Home and End do not use the caret's line range (see keyPressed)
-MultilineTextField.getNextWord	port	crates/horizon-client/src/ui.rs::multiline_word_position	start of the next word; Ctrl+Right and Ctrl+Delete reach it through EditBox::word_position
+MultilineTextField.getNextWord	port	crates/horizon-client-render/src/ui.rs::multiline_word_position	start of the next word; Ctrl+Right and Ctrl+Delete reach it through EditBox::word_position
 MultilineTextField.getWordEndPosition	missing		minor: the word end only feeds selectWordAtCursor, which is missing for book pages
 MultilineTextField.onValueChange	inline	crates/horizon-client/src/game/books.rs::Game::page_keep	the page text is stored there after the limit check; visual rows are computed on demand by page_rows
 MultilineTextField.reflowDisplayLines	port	crates/horizon-client/src/game/books.rs::Game::page_rows	same wrap breaks as font.split
-MultilineTextField.truncateFullText	port	crates/horizon-client/src/ui.rs::EditBox::set_value	truncates to max_length characters
-MultilineTextField.truncateInsertionText	inline	crates/horizon-client/src/ui.rs::EditBox::insert_text	room left under max_length
+MultilineTextField.truncateFullText	port	crates/horizon-client-render/src/ui.rs::EditBox::set_value	truncates to max_length characters
+MultilineTextField.truncateInsertionText	inline	crates/horizon-client-render/src/ui.rs::EditBox::insert_text	room left under max_length
 MultilineTextField.overflowsLineLimit	port	crates/horizon-client/src/game/books.rs::Game::page_keep	counts page_rows, which adds the row after a trailing newline as vanilla does
 ObjectSelectionList.nextFocusPath	missing		minor: no arrow-key focus or selection in the title, server or pack lists
 ObjectSelectionList.updateWidgetNarration	skip:other		screen-reader narration; Horizon has no narration output
-OptionsList.addBig	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	Row::Big: 310 wide at width/2 - 155
-OptionsList.addHeader	port	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	gap: minor: the header is centred text, not a focusable widget
+OptionsList.addBig	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	Row::Big: 310 wide at width/2 - 155
+OptionsList.addHeader	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	gap: minor: the header is centred text, not a focusable widget
 OptionsList.findOption	skip:ui		widget lookup only; rows are rebuilt from Settings in OptionsUi::layout each frame
-OptionsList.applyUnsavedChanges	inline	crates/horizon-client/src/options_ui.rs::set_slider	gap: minor: delayed sliders (render, simulation, biome blend distance, wheel sensitivity) apply on every step, not 600 ms after the last move or on close
-OptionsList.resetOption	inline	crates/horizon-client/src/options_ui.rs::OptionsUi::slider_shown	gap: minor: only sliders show the stored value at once; other options redraw from Settings each frame
-OptionsList.Entry.big	port	crates/horizon-client/src/options_ui.rs::option_widget	310 wide; the row's place is OptionsUi::layout (Row::Big)
-OptionsList.Entry.small	port	crates/horizon-client/src/options_ui.rs::option_widget	pair placement at width/2 - 155 and + 5 in OptionsUi::layout (Row::Pair)
-OptionsList.Entry.extractContent	inline	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	positions the row's widgets; OptionsUi::draw paints them
+OptionsList.applyUnsavedChanges	inline	crates/horizon-client-render/src/options_ui.rs::set_slider	gap: minor: delayed sliders (render, simulation, biome blend distance, wheel sensitivity) apply on every step, not 600 ms after the last move or on close
+OptionsList.resetOption	inline	crates/horizon-client-render/src/options_ui.rs::OptionsUi::slider_shown	gap: minor: only sliders show the stored value at once; other options redraw from Settings each frame
+OptionsList.Entry.big	port	crates/horizon-client-render/src/options_ui.rs::option_widget	310 wide; the row's place is OptionsUi::layout (Row::Big)
+OptionsList.Entry.small	port	crates/horizon-client-render/src/options_ui.rs::option_widget	pair placement at width/2 - 155 and + 5 in OptionsUi::layout (Row::Pair)
+OptionsList.Entry.extractContent	inline	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	positions the row's widgets; OptionsUi::draw paints them
 OptionsList.Entry.findOption	skip:ui		widget lookup only; rows are rebuilt from Settings each frame
-OptionsList.HeaderEntry.extractContent	inline	crates/horizon-client/src/options_ui.rs::OptionsUi::layout	header centred on the row (Row::Header)
+OptionsList.HeaderEntry.extractContent	inline	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	header centred on the row (Row::Header)
 PlainTextButton.extractContents	missing		player: the title's bottom copyright text that opens Credits is not a button; Horizon draws "Not affiliated with Mojang or Microsoft" there instead
-PlayerFaceExtractor.extractHat	port	crates/horizon-client/src/tab_list.rs::face	hat layer: UV 40, flipped for Dinnerbone and Grumm
+PlayerFaceExtractor.extractHat	port	crates/horizon-client-render/src/tab_list.rs::face	hat layer: UV 40, flipped for Dinnerbone and Grumm
 PlayerFaceWidget.extractWidgetRenderState	skip:service		head in the friends list (AbstractFriendsEntryContainerWidget)
 PlayerSkinWidget.extractWidgetRenderState	skip:service		skin preview on the chat report screen (SkinReportScreen)
 PlayerSkinWidget.onDrag	skip:service		drag-to-rotate of the chat report skin preview
-PlayerTabOverlay.extractTablistScore	inline	crates/horizon-client/src/tab_list.rs::TabList::layout	the score column is drawn in layout; hearts go through TabList::hearts
+PlayerTabOverlay.extractTablistScore	inline	crates/horizon-client-render/src/tab_list.rs::TabList::layout	the score column is drawn in layout; hearts go through TabList::hearts
 PopupScreen.init	port	crates/horizon-client/src/game/lan_screen.rs::Popup::new	gap: minor: only the lock question (title, message, Yes and No); images and extra buttons are not ported
 PopupScreen.buildButtonRow	inline	crates/horizon-client/src/game/lan_screen.rs::Popup::new	two buttons min((214 - 6) / 2, 150) wide, 6 apart
 PopupScreen.repositionElements	inline	crates/horizon-client/src/game/lan_screen.rs::Popup::new	centres the popup on the screen
@@ -58,11 +58,11 @@ ScrollableLayout.Container.setFocused	missing		minor: focusing a row does not sc
 ScrollableLayout.Container.setX	skip:ui		positions set by each screen's layout
 ScrollableLayout.Container.setY	skip:ui		positions set by each screen's layout
 ScrollableLayout.Container.setScrollAmount	inline	crates/horizon-client/src/game/server_links.rs::Game::server_links_scroll	gap: minor: clamps the server links list only; other scroll areas clamp in their own code
-SelectableEntry.mouseOverIcon	port	crates/horizon-client/src/pack_screen.rs::PackScreen::entry_click	32 px icon of a pack row; the world row's icon uses the same test in Title::click_action
-SelectableEntry.mouseOverLeftHalf	port	crates/horizon-client/src/pack_screen.rs::PackScreen::entry_click	left 16 px of the pack icon (unselect)
+SelectableEntry.mouseOverIcon	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::entry_click	32 px icon of a pack row; the world row's icon uses the same test in Title::click_action
+SelectableEntry.mouseOverLeftHalf	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::entry_click	left 16 px of the pack icon (unselect)
 SelectableEntry.mouseOverRightHalf	port	crates/horizon-client/src/multiplayer.rs::over_right_half	join half of a server row
-SelectableEntry.mouseOverTopRightQuarter	port	crates/horizon-client/src/pack_screen.rs::PackScreen::entry_click	move-up arrow of a pack row
-SelectableEntry.mouseOverBottomRightQuarter	port	crates/horizon-client/src/pack_screen.rs::PackScreen::entry_click	move-down arrow of a pack row
+SelectableEntry.mouseOverTopRightQuarter	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::entry_click	move-up arrow of a pack row
+SelectableEntry.mouseOverBottomRightQuarter	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::entry_click	move-down arrow of a pack row
 SelectableEntry.mouseOverTopLeftQuarter	port	crates/horizon-client/src/multiplayer.rs::over_top_left	move-up arrow of a server row
 SelectableEntry.mouseOverBottomLeftQuarter	port	crates/horizon-client/src/multiplayer.rs::over_bottom_left	move-down arrow of a server row
 SplashRenderer.extractRenderState	missing		player: the random splash line on the title screen is not drawn; Title::draw has no splash
@@ -73,15 +73,15 @@ SpriteIconButton.Builder.sprite	skip:java		builder setter; Horizon draws its ico
 SpriteIconButton.Builder.build	skip:java		builder; no object is needed
 SpriteIconButton.CenteredIcon.extractContents	skip:service		FriendsButton (social)
 SpriteIconButton.TextAndIcon.extractContents	skip:other		no caller in 26.3
-StringWidget.setMaxWidth	port	crates/horizon-client/src/screen_draw.rs::string_widget	clips at max_width (CLAMPED)
-StringWidget.getWidth	port	crates/horizon-client/src/screen_draw.rs::label_width	the smaller of max width and text width
-StringWidget.visitLines	port	crates/horizon-client/src/screen_draw.rs::string_widget	gap: minor: SCROLLING overflow (scrolling text) is not ported; CLAMPED draws "..."
+StringWidget.setMaxWidth	port	crates/horizon-client-render/src/screen_draw.rs::string_widget	clips at max_width (CLAMPED)
+StringWidget.getWidth	port	crates/horizon-client-render/src/screen_draw.rs::label_width	the smaller of max width and text width
+StringWidget.visitLines	port	crates/horizon-client-render/src/screen_draw.rs::string_widget	gap: minor: SCROLLING overflow (scrolling text) is not ported; CLAMPED draws "..."
 TabButton.updateWidgetNarration	skip:other		screen-reader text; Horizon has no narration output
-TextCursorUtils.extractInsertCursor	port	crates/horizon-client/src/ui.rs::EditBox::draw	insert caret is a 1 px bar; blinks every 300 ms
+TextCursorUtils.extractInsertCursor	port	crates/horizon-client-render/src/ui.rs::EditBox::draw	insert caret is a 1 px bar; blinks every 300 ms
 Tooltip.create	skip:java		factory; Horizon passes the lines to ui::tooltip
-Tooltip.toCharSequence	port	crates/horizon-client/src/screen_draw.rs::tooltip	wraps at 170 px as splitTooltip does; no per-language cache
-WidgetSprites.get	port	crates/horizon-client/src/ui.rs::button	disabled and hovered pick the sprite; gap: minor: keyboard focus does not pick the highlighted sprite
-WidgetTooltipHolder.refreshTooltipForNextRenderPass	port	crates/horizon-client/src/ui.rs::tooltip	gap: minor: tooltips show only under the pointer, not for keyboard focus
+Tooltip.toCharSequence	port	crates/horizon-client-render/src/screen_draw.rs::tooltip	wraps at 170 px as splitTooltip does; no per-language cache
+WidgetSprites.get	port	crates/horizon-client-render/src/ui.rs::button	disabled and hovered pick the sprite; gap: minor: keyboard focus does not pick the highlighted sprite
+WidgetTooltipHolder.refreshTooltipForNextRenderPass	port	crates/horizon-client-render/src/ui.rs::tooltip	gap: minor: tooltips show only under the pointer, not for keyboard focus
 WidgetTooltipHolder.createTooltipPositioner	missing		minor: a keyboard-focused widget gets no tooltip placed below or above it
 DebugEntryBiome.display	missing		minor: F3 biome line not drawn
 DebugEntryBiome.printBiome	missing		minor: biome id text for the F3 biome line

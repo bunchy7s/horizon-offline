@@ -71,8 +71,15 @@ impl MobData {
             }
             _ => Self::fallback(facts),
         };
-        data.biome_tags = crate::items::load_tags(root, "worldgen/biome").unwrap_or_default();
-        data.entity_tags = crate::items::load_tags(root, "entity_type").unwrap_or_default();
+        data.biome_tags = crate::items::load_tags(
+            root,
+            "worldgen/biome",
+            &horizon_world::loot::PackOverlay::NONE,
+        )
+        .unwrap_or_default();
+        data.entity_tags =
+            crate::items::load_tags(root, "entity_type", &horizon_world::loot::PackOverlay::NONE)
+                .unwrap_or_default();
         data.villager_hats = std::sync::RwLock::new(super::villager_hats::VillagerHats::load(root));
         data
     }

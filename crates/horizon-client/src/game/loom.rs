@@ -194,7 +194,7 @@ impl Game<'_> {
         base: &str,
         layers: &[BannerLayer],
     ) {
-        let banners = &self.res.stations().banners;
+        let banners = &self.stations().banners;
         let layers: Vec<(String, String)> = layers
             .iter()
             .map(|l| (banners.banner_texture(&l.pattern), l.color.to_string()))
@@ -322,7 +322,7 @@ impl Game<'_> {
         let l = &s.loom;
         let dye = s.inputs[1]
             .as_ref()
-            .and_then(|d| self.res.items().get(&d.item))
+            .and_then(|d| self.items().get(&d.item))
             .and_then(|i| i.dye.clone())
             .unwrap_or_else(|| "white".to_owned());
         let result = s
@@ -347,7 +347,7 @@ impl Game<'_> {
             dye: &dye,
             mouse: local,
         };
-        let draws = screen_layout::loom(&view, &self.res.stations().banners);
+        let draws = screen_layout::loom(&view, &self.stations().banners);
         self.paint_screen(batch, ox, oy, &draws, false)
     }
 }

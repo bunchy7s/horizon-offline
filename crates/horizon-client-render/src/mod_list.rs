@@ -36,11 +36,8 @@ pub struct Installed {
     pub description: String,
     /// Why it is not running, when it failed.
     pub problem: Option<String>,
-    /// Loaded with `--dev-mod`: always on, reloaded when rebuilt.
+    /// Loaded with `--dev-mod`: always on.
     pub dev: bool,
-    /// The running mod set a page of widgets (capability `ui`): its row
-    /// gains a Settings button.
-    pub has_settings: bool,
     /// A native mod (`game/native_hooks.rs`): built into the game, on until
     /// the player turns it off, and its settings page.
     pub native: Option<NativePage>,
@@ -178,7 +175,6 @@ mod tests {
             description: String::new(),
             problem: None,
             dev,
-            has_settings: false,
             native: None,
         };
         let mut list = ModList {

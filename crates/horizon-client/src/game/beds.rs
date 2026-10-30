@@ -67,6 +67,16 @@ impl Game<'_> {
         for head in left {
             self.player_beds.retain(|b| *b != (dim, head));
             self.set_bed_occupied(head, false);
+            // AbstractBedBlock.onStopSleeping: the Overworld's straw_bed_rule
+            // has destroy_on_leave, so a straw bed breaks when its sleeper gets up.
+            let bed = self.world.block(head[0], head[1], head[2]);
+            let straw = &*self.res.facts().get(bed).name == "minecraft:straw_bed";
+            if dim == Dim::Overworld
+                && straw
+                && let Err(e) = self.destroy_straw_bed(head)
+            {
+                log::warn!("could not break the straw bed at {head:?}: {e}");
+            }
         }
     }
 

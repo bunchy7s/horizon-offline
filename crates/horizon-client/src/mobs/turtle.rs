@@ -3,9 +3,8 @@
 //! (`TurtleLayEggGoal`). `extra.flag` is `hasEgg`, `extra.flag2` `isLayingEgg`,
 //! `extra.counter` `layEggCounter`, `extra.home` `homePos`, `extra.counter2`
 //! `goingHome` and `extra.point` `travelPos`. Its own `TurtleMoveControl`
-//! sets the speed it walks and swims at. Not ported yet: `Turtle.travelInWater`
-//! (swimming still uses the generic fluid travel), so movement in water still
-//! differs from vanilla.
+//! sets the speed it walks and swims at, and `travel` swims with its own
+//! `travelInWater`.
 use super::{
     Mob, MobEvent, MobWorld,
     control::{EPSILON, Operation, rotlerp},
@@ -17,7 +16,10 @@ use super::{
     path::PathType,
 };
 use crate::blocks::Fluid;
-use horizon_core::{geometry::trig, random::RandomSource};
+use horizon_core::{
+    geometry::{Vec3, trig},
+    random::RandomSource,
+};
 
 /// `Turtle.registerGoals`, and the path maluses and navigation `Turtle` and
 /// `TurtlePathNavigation` give it.
@@ -146,6 +148,21 @@ pub fn move_control(m: &mut Mob) {
     // Mth.lerp(0.125F, getSpeed(), wanted).
     m.set_speed(m.ai.speed + 0.125 * (wanted - m.ai.speed));
     m.velocity.y += f64::from(m.ai.speed) * (yd / dist) * 0.1;
+}
+/// `Turtle.travelInWater`: swims at 0.1 move speed with 0.9 drag, and sinks
+/// slowly unless it has a target or is going home and near its home. On
+/// land the usual travel.
+pub fn travel(m: &mut Mob, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>) -> bool {
+    if !m.fluids.in_water {
+        return false;
+    }
+    m.move_relative(0.1, input);
+    m.do_move(w, events);
+    m.velocity = m.velocity.scale(0.9);
+    if m.ai.target.is_none() && (!going_home(m) || !close_to_home(m, 20.0)) {
+        m.velocity.y -= 0.005;
+    }
+    true
 }
 /// `Turtle.aiStep`: while digging, sand crumbs fly every fifth tick.
 pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {

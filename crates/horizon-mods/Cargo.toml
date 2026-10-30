@@ -4,7 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version = "1.95"
-description = "Horizon's mod runtime: sandboxed WebAssembly components (docs/mods.md)"
+description = "Horizon's mod files: content mods, modpacks and the registry index (docs/mods.md)"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -12,12 +12,7 @@ serde_json = "1"
 toml = "1.1.6"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 log = "0.4"
-# The 48 LTS line: security fixes until August 2028, on the same wasm-tools (0.254) as wit-component and the SDK's wit-bindgen.
-wasmtime = { version = "48.0.7", default-features = false, features = ["runtime", "cranelift", "component-model", "std"], optional = true }
-# Turns a mod's core module into a component (cargo horizon-mod build, the tests).
-wit-component = { version = "0.254", optional = true }
-wit-parser = { version = "0.254", optional = true }
-# The functions a mod imports, for its API level (src/api_level.rs): the game and the registry index.
+# The functions a published WebAssembly mod imports, for its API level (src/api_level.rs): the registry index.
 wasmparser = { version = "0.254", optional = true }
 # The registry index's checks (feature `index`): SHA-256, and minisign signatures (no dependencies of its own).
 sha2 = { version = "0.10", optional = true }
@@ -25,29 +20,9 @@ minisign-verify = { version = "0.3", optional = true }
 # A shader pack's check (kind `shader`): the one the game runs before it loads a pack.
 horizon-shader-api = { path = "../horizon-shader-api", optional = true }
 
-[dev-dependencies]
-# A component made for a newer Horizon, from the WIT alone (tests/sandbox.rs).
-wit-component = { version = "0.254", features = ["dummy-module"] }
-wit-parser = "0.254"
-
 [features]
-# Loads and runs mods (the game's `mods` feature); without it only manifests,
-# content and packaging. Off by default so builds that don't run mods (the
-# game's tests and probes) skip wasmtime and cranelift.
-runtime = ["dep:wasmtime", "dep:wasmparser"]
-pack = ["dep:wit-component", "dep:wit-parser"]
 # The mod registry's index (docs/api/mod-index.md): the launcher, the registry server and its CI.
 index = ["dep:sha2", "dep:minisign-verify", "dep:horizon-shader-api", "dep:wasmparser"]
-
-# Runs real mods: `cargo test -p horizon-mods --features runtime,pack`.
-[[test]]
-name = "sandbox"
-required-features = ["runtime", "pack"]
-
-# docs/api/mods-reference.md from the WIT contract (HORIZON_WRITE_DOCS=1 rewrites it).
-[[test]]
-name = "api_reference"
-required-features = ["pack"]
 
 [lints]
 workspace = true

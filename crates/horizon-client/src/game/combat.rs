@@ -304,6 +304,16 @@ impl Game<'_> {
             None
         }
     }
+    /// The display component of a custom-named held stack.
+    fn mob_main_hand_name(&self, id: u32) -> Option<Text> {
+        let m = self.mobs.iter().find(|m| m.id == id)?;
+        let mut stack = m.extra.main_hand_stack()?.clone();
+        stack.custom_name()?;
+        if let Some(g) = horizon_client::mobs::gear::gear(m) {
+            stack.data_mut().enchantments = g.slots[horizon_client::mobs::gear::MAIN].clone();
+        }
+        Some(self.stack_display_name(&stack))
+    }
     /// `CombatTracker.getDeathMessage`.
     pub(super) fn combat_death_message(&mut self) -> Text {
         self.combat_death_message_for(Text::literal(PLAYER_NAME))
@@ -357,8 +367,16 @@ impl Game<'_> {
         }
         // `getLocalizedDeathMessage`: the causing entity's name, or the
         // direct entity's when nothing caused the damage.
-        if let Some((_, name)) = killer {
-            return Text::translate(&key, &[me, name]);
+        if let Some((id, name)) = killer {
+            // DamageSource.getLocalizedDeathMessage: the cause's item with a
+            // custom name gets the `<id>.item` message.
+            let (key, args) = horizon_client::scoreboard::death_message_args(
+                &key,
+                &me,
+                &name,
+                self.mob_main_hand_name(id).as_ref(),
+            );
+            return Text::translate(&key, &args);
         }
         if let Some(name) = direct {
             return Text::translate(&key, &[me, name]);

@@ -20,6 +20,7 @@ enum Stage {
     Entities(VecDeque<(i32, i32)>),
     Writes,
     Server,
+    Quit,
 }
 
 // Bound the work in both sparse and block-entity-heavy worlds. A single chunk
@@ -40,7 +41,7 @@ impl Game<'_> {
                 close: true,
                 reply: None,
                 started: Instant::now(),
-                stage: Stage::Writes,
+                stage: Stage::Quit,
             });
             return Ok(());
         }
@@ -57,12 +58,16 @@ impl Game<'_> {
             if !quit {
                 return self.leave_server(None);
             }
+            if let Some(mut remote) = self.remote.take() {
+                remote.session.disconnect();
+            }
+            self.saved_for_exit = true;
             self.pending_save = Some(ClosingSave {
                 quit,
                 close: true,
                 reply: None,
                 started: Instant::now(),
-                stage: Stage::Writes,
+                stage: Stage::Quit,
             });
         } else {
             self.close_container();
@@ -118,6 +123,7 @@ impl Game<'_> {
         };
         let result = (|| -> Result<bool> {
             match &mut save.stage {
+                Stage::Quit => Ok(true),
                 Stage::Server => {
                     let server = self
                         .integrated
@@ -229,6 +235,12 @@ impl Game<'_> {
     }
 
     pub(super) fn render_closing_save(&mut self) -> Result<()> {
+        if matches!(
+            self.pending_save.as_ref().map(|save| &save.stage),
+            Some(Stage::Quit)
+        ) {
+            return Ok(());
+        }
         let Some(renderer) = &mut self.renderer else {
             return Ok(());
         };

@@ -27,21 +27,15 @@ const MARGIN: f32 = 8.0;
 /// Items a panel may hold.
 const ITEMS: usize = 8192;
 
-/// Whose panel it is: a native mod's id, or a running WebAssembly mod's
-/// index.
+/// Whose panel it is: a native mod's id.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Owner {
     Native(String),
-    #[cfg(feature = "mods")]
-    Wasm(usize),
 }
 impl Owner {
-    fn native_id(&self) -> Option<&str> {
-        match self {
-            Owner::Native(id) => Some(id),
-            #[cfg(feature = "mods")]
-            Owner::Wasm(_) => None,
-        }
+    fn native_id(&self) -> &str {
+        let Owner::Native(id) = self;
+        id
     }
 }
 
@@ -61,9 +55,6 @@ pub(super) struct Shown {
 pub(super) struct Panel {
     /// A native mod's panel: the last one to show something.
     native: Option<Shown>,
-    /// A WebAssembly mod's, converted once per change.
-    #[cfg(feature = "mods")]
-    pub(super) wasm: Option<Shown>,
     /// The last native change.
     versions: u64,
     /// The items' owner and version they were made from.
@@ -79,16 +70,9 @@ pub(super) struct Panel {
 }
 
 impl Panel {
-    /// What the panel shows: a native mod's (one `on`), else a
-    /// WebAssembly mod's.
+    /// What the panel shows: a native mod's, one `on`.
     pub(super) fn shown(&self, on: impl Fn(&str) -> bool) -> Option<&Shown> {
-        let native = self
-            .native
-            .as_ref()
-            .filter(|s| s.owner.native_id().is_some_and(&on));
-        #[cfg(feature = "mods")]
-        let native = native.or(self.wasm.as_ref());
-        native
+        self.native.as_ref().filter(|s| on(s.owner.native_id()))
     }
     /// `native_panel_items`.
     pub(super) fn show_items(&mut self, mod_id: &str, mut items: Vec<BrowserStack>) {
@@ -111,7 +95,7 @@ impl Panel {
         let own = self
             .native
             .as_ref()
-            .is_some_and(|s| s.owner.native_id() == Some(mod_id));
+            .is_some_and(|s| s.owner.native_id() == mod_id);
         if !own {
             if !showing {
                 return None;
@@ -187,7 +171,6 @@ impl Game<'_> {
         if self.screen != Screen::Inventory || self.title.is_some() {
             return None;
         }
-        self.panel_wasm_sync();
         let disabled = &self.settings.mods.disabled;
         let Some(shown) = self.panel.shown(|id| !disabled.contains(id)) else {
             self.panel.of = None;
@@ -196,7 +179,7 @@ impl Game<'_> {
         };
         let of = (shown.owner.clone(), shown.version);
         if self.panel.of.as_ref() != Some(&of) {
-            let items = self.res.items();
+            let items = world_items!(self);
             let stacks = shown
                 .items
                 .iter()
@@ -220,14 +203,8 @@ impl Game<'_> {
     }
     /// The player did `event` on `owner`'s panel.
     pub(super) fn panel_event(&mut self, owner: &Owner, event: BrowserEvent) {
-        match owner {
-            Owner::Native(id) => self.native_panel_event(id, &event),
-            #[cfg(feature = "mods")]
-            Owner::Wasm(i) => self
-                .mods
-                .mods
-                .browser_event(*i, super::mod_panel::event(event)),
-        }
+        let Owner::Native(id) = owner;
+        self.native_panel_event(id, &event);
     }
     /// The panel's parts: right of the window, from the top of the screen to
     /// the search box at its foot. None when the screen has no room for it.
@@ -551,7 +528,7 @@ impl Game<'_> {
         if self.screen != Screen::Inventory || self.title.is_some() || self.mod_browser_typing() {
             return;
         }
-        let Some(owner) = self.browser_sync().filter(|o| o.native_id().is_some()) else {
+        let Some(owner) = self.browser_sync() else {
             return;
         };
         if let Some(stack) = self.mod_browser_pointed() {
@@ -581,12 +558,6 @@ pub(super) fn browser_stack(
         damage,
         extra,
     })
-}
-
-/// No WebAssembly mods: no panel of theirs (`mod_panel.rs` with them).
-#[cfg(not(feature = "mods"))]
-impl Game<'_> {
-    fn panel_wasm_sync(&mut self) {}
 }
 
 #[cfg(test)]
@@ -655,41 +626,5 @@ mod tests {
         assert_eq!((shown.items.len(), shown.recipes.is_none()), (2, true));
         panel.show_items("recipes", Vec::new());
         assert!(panel.shown(|_| true).is_none());
-    }
-
-    /// A native mod's panel wins over a WebAssembly mod's, and events go
-    /// back to a WebAssembly owner in the runtime's form.
-    #[cfg(feature = "mods")]
-    #[test]
-    fn native_owner_wins_over_webassembly() {
-        use super::{BrowserEvent, Shown};
-        use crate::game::mod_panel as wasm;
-        let mut panel = Panel {
-            wasm: Some(Shown {
-                owner: Owner::Wasm(0),
-                version: 7,
-                items: vec![stack("minecraft:stone")],
-                recipes: None,
-            }),
-            ..Panel::default()
-        };
-        let owner = |p: &Panel| p.shown(|_| true).map(|s| s.owner.clone());
-        assert_eq!(owner(&panel), Some(Owner::Wasm(0)));
-        panel.show_items("recipes", vec![stack("minecraft:dirt")]);
-        assert_eq!(owner(&panel), Some(Owner::Native("recipes".into())));
-        panel.show_items("recipes", Vec::new());
-        assert_eq!(owner(&panel), Some(Owner::Wasm(0)));
-
-        let event = BrowserEvent::SlotClicked {
-            recipe: 2,
-            slot: 9,
-            stack: stack("minecraft:oak_planks"),
-            right: true,
-        };
-        let horizon_mods::BrowserEvent::SlotClicked(c) = wasm::event(event) else {
-            panic!("a slot click");
-        };
-        assert_eq!((c.recipe, c.slot, c.right), (2, 9, true));
-        assert_eq!(c.stack.item, "minecraft:oak_planks");
     }
 }

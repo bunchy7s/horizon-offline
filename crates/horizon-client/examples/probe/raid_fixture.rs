@@ -19,6 +19,7 @@ use horizon_client::{
     raid::{self, Action, BarName, RaidLevel, RaidPlayer, RaiderInfo, Raids},
 };
 use horizon_core::random::{LegacyRandom, RandomSource};
+use horizon_world::loot::PackOverlay;
 use horizon_world::{chunk::BlockState, nbt::Tag, registry::BlockStateId};
 use std::{
     cell::RefCell,
@@ -470,7 +471,7 @@ pub fn main() -> horizon_client::Result<()> {
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry)?;
     let data = MobData::load(root, &facts);
-    let items = Items::tags_only(root)?;
+    let items = Items::tags_only(root, &PackOverlay::NONE)?;
     let attributes = GameplayAttributes::load(root);
     let shared = Shared {
         facts: &facts,

@@ -89,7 +89,7 @@ pub fn blocked(m: &mut Mob, events: &mut Vec<MobEvent>) -> bool {
         false
     }
 }
-/// `Ravager.aiStep`: speed toward 0.35 while hunting, leaf trampling, and
+/// `Ravager.aiStep`: speed toward 0.35 while hunting, leaf and crop trampling, and
 /// the bite, stun and roar clocks.
 pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if !m.alive() {
@@ -129,6 +129,33 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         }
         if !destroyed && m.on_ground {
             m.ai.jumping = true;
+        }
+    }
+    // Entity.checkInsideBlocks -> CropBlock.entityInside: a ravager walking
+    // through a crop destroys it, drops and all, with mobGriefing.
+    if w.mob_griefing {
+        let b = m
+            .bounds()
+            .deflate(horizon_core::geometry::Vec3::new(1.0e-5, 1.0e-5, 1.0e-5));
+        let (lo, hi) = (b.min_position(), b.max_position());
+        for x in lo.x.floor() as i32..=hi.x.floor() as i32 {
+            for y in lo.y.floor() as i32..=hi.y.floor() as i32 {
+                for z in lo.z.floor() as i32..=hi.z.floor() as i32 {
+                    if matches!(
+                        w.block_name(x, y, z),
+                        "minecraft:wheat"
+                            | "minecraft:carrots"
+                            | "minecraft:potatoes"
+                            | "minecraft:beetroots"
+                            | "minecraft:torchflower_crop"
+                    ) {
+                        events.push(MobEvent::BreakBlock {
+                            pos: [x, y, z],
+                            drop: true,
+                        });
+                    }
+                }
+            }
         }
     }
     if m.extra.anim_ticks > 0 {

@@ -14,7 +14,7 @@ impl Game<'_> {
         else {
             return Vec::new();
         };
-        layer_textures(&self.res.stations().banners, &b.layers)
+        layer_textures(&self.stations().banners, &b.layers)
     }
 }
 

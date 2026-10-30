@@ -60,6 +60,31 @@ pub fn resets_x_rot(m: &Mob) -> bool {
     !flag(m, POUNCING | CROUCHING | INTERESTED | FACEPLANTED)
 }
 
+/// `Fox.populateDefaultEquipmentSlots`: one fox in five holds an emerald, an
+/// egg, rabbit feet or hide, wheat, leather or a feather in its mouth.
+pub fn populate_default_equipment(m: &mut Mob) {
+    if m.random.next_float() < 0.2 {
+        let odds = m.random.next_float();
+        let held = if odds < 0.05 {
+            "minecraft:emerald"
+        } else if odds < 0.2 {
+            "minecraft:egg"
+        } else if odds < 0.4 {
+            if m.random.next_boolean() {
+                "minecraft:rabbit_foot"
+            } else {
+                "minecraft:rabbit_hide"
+            }
+        } else if odds < 0.6 {
+            "minecraft:wheat"
+        } else if odds < 0.8 {
+            "minecraft:leather"
+        } else {
+            "minecraft:feather"
+        };
+        m.extra.main_hand = Some(held.into());
+    }
+}
 /// `Fox.registerGoals` and `setTargetGoals` (the targets wait for the variant:
 /// red foxes prefer chickens and rabbits, snow foxes fish).
 pub fn register(m: &mut Mob) {
@@ -168,11 +193,12 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         let eaten = m.extra.ints[TICKS_SINCE_EATEN];
         if eaten > 600 {
             // ItemStack.finishUsingItem: the food is gone, a use remainder stays.
-            m.extra.main_hand = w
-                .items
-                .and_then(|i| i.items.get(&item))
-                .and_then(|i| i.use_remainder.as_deref())
-                .map(Into::into);
+            m.extra.set_main_hand(
+                w.items
+                    .and_then(|i| i.items.get(&item))
+                    .and_then(|i| i.use_remainder.as_deref())
+                    .map(Into::into),
+            );
             m.extra.ints[TICKS_SINCE_EATEN] = 0;
         } else if eaten > 560 && m.random.next_float() < 0.1 {
             let at = [m.position.x, m.position.y, m.position.z];
@@ -742,7 +768,8 @@ impl EatBerries {
                     .unwrap_or(0);
             let mut count = 1 + m.random.next_int_bound(2).unwrap_or(0) + i32::from(age == 3);
             if m.extra.main_hand.is_none() {
-                m.extra.main_hand = Some("minecraft:sweet_berries".into());
+                m.extra
+                    .set_main_hand(Some("minecraft:sweet_berries".into()));
                 count -= 1;
             }
             if count > 0 {

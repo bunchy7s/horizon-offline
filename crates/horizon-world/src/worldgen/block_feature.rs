@@ -14,6 +14,11 @@ use std::{
     sync::Arc,
 };
 
+/// Block states by block name and by tag name ([`FeatureBlockBindings::bind_tags`]).
+pub type BoundBlockTags = (
+    Arc<BTreeMap<String, Arc<BTreeSet<BlockStateId>>>>,
+    Arc<BTreeMap<String, Arc<BTreeSet<BlockStateId>>>>,
+);
 pub struct FeatureBlockBindings<'r> {
     registry: &'r BlockRegistry,
     pub(crate) simple_blocks: Option<(
@@ -27,8 +32,8 @@ pub struct FeatureBlockBindings<'r> {
     biomes: Option<Arc<super::biome_predicate::BiomePredicateBindings>>,
     pub(crate) fluids: super::fluid_predicate::FluidPredicateBindings,
     pub(crate) codec: BlockStateJsonCodec<'r>,
-    pub(crate) blocks: BTreeMap<String, Arc<BTreeSet<BlockStateId>>>,
-    pub(crate) tags: BTreeMap<String, Arc<BTreeSet<BlockStateId>>>,
+    pub(crate) blocks: Arc<BTreeMap<String, Arc<BTreeSet<BlockStateId>>>>,
+    pub(crate) tags: Arc<BTreeMap<String, Arc<BTreeSet<BlockStateId>>>>,
     pub(crate) air: [BlockStateId; 3],
     tree_blocks: std::sync::OnceLock<Arc<super::tree_blocks::TreeBlocks>>,
     pub(crate) structures: Option<Arc<super::structure::StructureResources>>,
@@ -126,8 +131,15 @@ impl<'r> FeatureBlockBindings<'r> {
         integers: BTreeSet<(String, String)>,
         tags: &BTreeMap<String, Vec<String>>,
     ) -> Result<Self, DecodeError> {
-        let codec = BlockStateJsonCodec::new(registry, integers)
-            .map_err(|e| DecodeError::Registry(e.to_string()))?;
+        let bound = Self::bind_tags(registry, tags)?;
+        Self::with_bound_tags(registry, integers, bound)
+    }
+    /// Every block's states and every tag's, by name: what `with_tags` binds,
+    /// to share between the bindings made over the same registry and tags.
+    pub fn bind_tags(
+        registry: &BlockRegistry,
+        tags: &BTreeMap<String, Vec<String>>,
+    ) -> Result<BoundBlockTags, DecodeError> {
         let mut blocks = BTreeMap::<String, BTreeSet<BlockStateId>>::new();
         for id in 0..registry.len() {
             let id = BlockStateId(id as u32);
@@ -153,6 +165,25 @@ impl<'r> FeatureBlockBindings<'r> {
                 return Err(DecodeError::Field("duplicate block tag"));
             }
         }
+        Ok((
+            Arc::new(
+                blocks
+                    .into_iter()
+                    .map(|(name, states)| (name, Arc::new(states)))
+                    .collect(),
+            ),
+            Arc::new(bound_tags),
+        ))
+    }
+    /// [`FeatureBlockBindings::with_tags`] over tags already bound by
+    /// [`FeatureBlockBindings::bind_tags`].
+    pub fn with_bound_tags(
+        registry: &'r BlockRegistry,
+        integers: BTreeSet<(String, String)>,
+        (blocks, tags): BoundBlockTags,
+    ) -> Result<Self, DecodeError> {
+        let codec = BlockStateJsonCodec::new(registry, integers)
+            .map_err(|e| DecodeError::Registry(e.to_string()))?;
         let get = |name| {
             registry
                 .default_state(name)
@@ -167,11 +198,8 @@ impl<'r> FeatureBlockBindings<'r> {
             occlusion_faces: None,
             can_occlude: None,
             fluids: super::fluid_predicate::FluidPredicateBindings::new(registry)?,
-            blocks: blocks
-                .into_iter()
-                .map(|(name, states)| (name, Arc::new(states)))
-                .collect(),
-            tags: bound_tags,
+            blocks,
+            tags,
             tree_blocks: std::sync::OnceLock::new(),
             structures: None,
             air: [

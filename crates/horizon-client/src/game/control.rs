@@ -34,7 +34,7 @@ const HELP: &[&str] = &[
     "chat TEXT                      send a chat line or /command as if typed",
     "type TEXT                      type into the open chat box (key enter tap sends)",
     "chat-log [N]                   the newest N chat messages (default 10)",
-    "options [PAGE]                 open the options (video sound controls keybinds mouse chat accessibility language font packs mods graphics graphics-advanced)",
+    "options [PAGE]                 open the options (video sound controls keybinds mouse chat accessibility language font packs mods graphics graphics-advanced graphics-hdr)",
     "stats [reset]                  frame-time summary since the last reset",
     "bench SECONDS                  reset stats, wait, then reply with the summary",
     "fly X1 Y1 Z1 X2 Y2 Z2 SECONDS [PITCH [raw]]  fly the camera along a line at constant speed, then reply with the frame summary (raw: every frame time too)",
@@ -339,13 +339,10 @@ impl Game<'_> {
                         self.debug_key(key, KeyAction::Release);
                     }
                 }
-                // Mods' keys (capability `input`) see the key as the keyboard
-                // hook does.
+                // Native mods see the key as the keyboard hook does.
                 let action = arg(2)?;
-                self.mod_key(physical, action != "up", action == "repeat");
                 self.native_key_event(physical, action != "up", action == "repeat");
                 if action == "tap" {
-                    self.mod_key(physical, false, false);
                     self.native_key_event(physical, false, false);
                 }
                 // Text screens consume raw presses; releases follow key binds.
@@ -425,19 +422,15 @@ impl Game<'_> {
                 match arg(2)? {
                     "down" => {
                         self.extras_mouse(button, true);
-                        self.mod_mouse_key(button, true);
                         self.play_mouse(button, true)?
                     }
                     "up" => {
                         self.extras_mouse(button, false);
-                        self.mod_mouse_key(button, false);
                         self.play_mouse(button, false)?
                     }
                     "click" => {
                         self.extras_mouse(button, true);
-                        self.mod_mouse_key(button, true);
                         self.extras_mouse(button, false);
-                        self.mod_mouse_key(button, false);
                         self.play_mouse(button, true)?;
                         self.play_mouse(button, false)?;
                     }
@@ -455,8 +448,10 @@ impl Game<'_> {
                 ok()
             }
             "turn" => {
-                self.yaw += arg(1)?.parse::<f32>()?;
-                self.pitch = (self.pitch + arg(2)?.parse::<f32>()?).clamp(-90.0, 90.0);
+                let yaw = arg(1)?.parse::<f32>()?;
+                let pitch = arg(2)?.parse::<f32>()?;
+                // Degrees, as `Entity.turn` degrees.
+                self.turn_player(f64::from(yaw / 0.15), f64::from(pitch / 0.15));
                 ok()
             }
             "tp" => {
@@ -685,6 +680,7 @@ impl Game<'_> {
                     "shader-packs" => Page::ShaderPacks,
                     "graphics" => Page::Graphics,
                     "graphics-advanced" => Page::GraphicsAdvanced,
+                    "graphics-hdr" => Page::GraphicsHdr,
                     "extras" => Page::Extras,
                     "credits" => Page::Credits,
                     "horizon" => Page::Horizon,
@@ -855,6 +851,10 @@ impl Game<'_> {
 
     fn control_key_down(&mut self, key: KeyCode) -> Result<()> {
         self.physical_keys.insert(key);
+        // The window's shortcuts come before any screen, here too.
+        if self.screenshot_shortcut(key, false) {
+            return Ok(());
+        }
         if self.screen == Screen::Chat {
             self.chat_key_code(key, None);
             return Ok(());
@@ -897,7 +897,6 @@ impl Game<'_> {
             Screen::DialogWarning => "dialog-warning",
             Screen::CommandBlock => "command-block",
             Screen::Win => "win",
-            Screen::Mod => "mod",
         }
     }
 

@@ -23,6 +23,8 @@ pub mod component {
     pub const LORE: i32 = 11;
     pub const RARITY: i32 = 12;
     pub const ENCHANTMENTS: i32 = 13;
+    /// `AdventureModePredicate`: the blocks an adventure player may break.
+    pub const CAN_BREAK: i32 = 15;
     pub const CUSTOM_MODEL_DATA: i32 = 17;
     pub const TOOLTIP_DISPLAY: i32 = 18;
     pub const REPAIR_COST: i32 = 19;
@@ -40,6 +42,7 @@ pub mod component {
     pub const CHARGED_PROJECTILES: i32 = 51;
     pub const BUNDLE_CONTENTS: i32 = 52;
     pub const POTION_CONTENTS: i32 = 53;
+    pub const SUSPICIOUS_STEW_EFFECTS: i32 = 55;
     pub const WRITABLE_BOOK_CONTENT: i32 = 56;
     pub const WRITTEN_BOOK_CONTENT: i32 = 57;
     pub const TRIM: i32 = 58;
@@ -50,6 +53,7 @@ pub mod component {
     pub const BLOCK_ENTITY_DATA: i32 = 62;
     pub const OMINOUS_BOTTLE_AMPLIFIER: i32 = 65;
     pub const CONTAINER: i32 = 77;
+    pub const PAINTING_VARIANT: i32 = 109;
 }
 
 /// A written book's content (`WrittenBookContent.STREAM_CODEC`): the
@@ -119,6 +123,9 @@ pub enum Component {
         material: i32,
         pattern: i32,
     },
+    /// `SuspiciousStewEffects`: each entry's `minecraft:mob_effect` id and
+    /// duration in ticks.
+    StewEffects(Vec<(i32, i32)>),
     /// `InstrumentComponent` naming its instrument by `minecraft:instrument`
     /// registry id; a direct instrument stays [`Component::Raw`].
     Instrument(i32),
@@ -126,6 +133,9 @@ pub enum Component {
     /// its dye id (`DyeColor.getId`). A layer with a direct pattern has no
     /// registry name: that value stays [`Component::Raw`].
     BannerPatterns(Vec<(i32, i32)>),
+    /// `painting/variant` naming its `painting_variant` by registry id; a
+    /// direct variant stays [`Component::Raw`].
+    PaintingVariant(i32),
     /// A component Horizon reads past without interpreting it: its encoded
     /// bytes, written back as they came.
     Raw(Vec<u8>),
@@ -233,6 +243,16 @@ impl Component {
             LORE => {
                 let n = r.count(256)?;
                 Self::Lore((0..n).map(|_| r.nbt()).collect::<Result<_>>()?)
+            }
+            // SuspiciousStewEffects.Entry.STREAM_CODEC: MobEffect.STREAM_CODEC
+            // (the registry id), then the duration, both varints.
+            SUSPICIOUS_STEW_EFFECTS => {
+                let n = r.count(r.remaining())?;
+                Self::StewEffects(
+                    (0..n)
+                        .map(|_| Ok((r.varint()?, r.varint()?)))
+                        .collect::<Result<_>>()?,
+                )
             }
             ENCHANTMENTS | STORED_ENCHANTMENTS => {
                 let n = r.count(r.remaining())?;
@@ -381,6 +401,18 @@ impl Component {
                     _ => Self::Raw(bytes.to_vec()),
                 }
             }
+            // Holder<PaintingVariant>: a reference's id plus one, or 0 and
+            // the variant itself (no registry name: read past).
+            PAINTING_VARIANT => {
+                let start = r.position();
+                skip::component(PAINTING_VARIANT, r)?;
+                let bytes = r.since(start);
+                let mut ids = Reader::new(bytes);
+                match ids.varint() {
+                    Ok(id @ 1..) if ids.remaining() == 0 => Self::PaintingVariant(id - 1),
+                    _ => Self::Raw(bytes.to_vec()),
+                }
+            }
             // DyeColor.STREAM_CODEC: its id.
             BASE_COLOR => Self::Int(r.varint()?),
             // BannerPatternLayers.STREAM_CODEC: a list of a pattern holder (a
@@ -432,6 +464,7 @@ impl Component {
                 w.varint(pattern + 1);
             }
             Self::Instrument(id) => w.varint(id + 1),
+            Self::PaintingVariant(id) => w.varint(id + 1),
             Self::Int(v) if kind == component::DYED_COLOR => w.i32(*v),
             Self::Int(v) => w.varint(*v),
             Self::Unit => {}
@@ -442,7 +475,7 @@ impl Component {
                 w.varint(lines.len() as i32);
                 lines.iter().for_each(|l| w.nbt(l));
             }
-            Self::Enchantments(list) => {
+            Self::Enchantments(list) | Self::StewEffects(list) => {
                 w.varint(list.len() as i32);
                 for (e, level) in list {
                     w.varint(*e);
@@ -560,6 +593,27 @@ impl Component {
 /// edited goes back byte for byte. It is no part of a stack's equality.
 #[derive(Clone, Debug, Default)]
 pub struct WirePatch(pub Option<Arc<[u8]>>);
+impl WirePatch {
+    /// Whether a patch in this form sets component `kind`.
+    pub fn adds(patch: &[u8], kind: i32) -> bool {
+        let mut r = Reader::new(patch);
+        let Ok(positive) = r.count(65536) else {
+            return false;
+        };
+        if r.count(65536).is_err() {
+            return false;
+        }
+        (0..positive).any(|_| {
+            let Ok(k) = r.varint() else {
+                return false;
+            };
+            let Ok(len) = r.count(r.remaining()) else {
+                return false;
+            };
+            r.bytes(len).is_ok() && k == kind
+        })
+    }
+}
 impl PartialEq for WirePatch {
     fn eq(&self, _: &Self) -> bool {
         true
@@ -803,6 +857,24 @@ mod tests {
         let mut r = Reader::new(&w.data);
         assert_eq!(C::read(&mut r).unwrap(), v);
         assert_eq!(r.remaining(), 0);
+    }
+
+    #[test]
+    fn a_wire_patch_tells_what_it_adds() {
+        // Two added components (damage 3, then can_break's bytes as read)
+        // and one removed.
+        let mut w = Writer::new();
+        w.varint(2);
+        w.varint(1);
+        w.varint(component::DAMAGE);
+        w.byte_array(&[3]);
+        w.varint(component::CAN_BREAK);
+        w.byte_array(&[1, 0, 0, 0, 0, 0]);
+        w.varint(component::ENCHANTMENTS);
+        assert!(WirePatch::adds(&w.data, component::DAMAGE));
+        assert!(WirePatch::adds(&w.data, component::CAN_BREAK));
+        assert!(!WirePatch::adds(&w.data, component::ENCHANTMENTS));
+        assert!(!WirePatch::adds(&[], component::CAN_BREAK));
     }
 
     #[test]
@@ -1077,6 +1149,8 @@ mod tests {
                         pattern: 1,
                     }
                 }
+                // night_vision for 100 ticks, poison for the default 160.
+                55 => *c == Component::StewEffects(vec![(15, 100), (18, 160)]),
                 63 => *c == Component::Instrument(1),
                 _ => matches!(c, Component::Raw(_)),
             };
@@ -1089,6 +1163,39 @@ mod tests {
             let mut w = Writer::new();
             Slot::write(&stack, &mut w);
             assert_eq!(w.data, bytes, "component {kind}");
+        }
+    }
+
+    #[test]
+    fn painting_variants_decode_by_reference() {
+        // Holder<PaintingVariant>: a reference (its id plus one) is typed; a
+        // direct variant (0, width, height, asset id, no title, no author)
+        // is read past. Both encode back to the same bytes.
+        let asset = b"minecraft:x";
+        let mut direct = vec![1u8, 7, 1, 0, 109, 0, 2, 1, asset.len() as u8];
+        direct.extend_from_slice(asset);
+        direct.extend_from_slice(&[0, 0]);
+        for (bytes, expected) in [
+            (
+                vec![1u8, 7, 1, 0, 109, 5],
+                Some(Component::PaintingVariant(4)),
+            ),
+            (direct, None),
+        ] {
+            let mut r = Reader::new(&bytes);
+            let stack = Slot::read(&mut r).unwrap();
+            assert_eq!(r.remaining(), 0);
+            let c = stack
+                .as_ref()
+                .and_then(|s| s.component(component::PAINTING_VARIANT))
+                .unwrap();
+            match &expected {
+                Some(e) => assert_eq!(c, e),
+                None => assert!(matches!(c, Component::Raw(_))),
+            }
+            let mut w = Writer::new();
+            Slot::write(&stack, &mut w);
+            assert_eq!(w.data, bytes);
         }
     }
 }

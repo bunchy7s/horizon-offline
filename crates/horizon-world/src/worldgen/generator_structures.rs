@@ -203,11 +203,7 @@ impl StructureState {
         for (i, def) in registry.structures.iter().enumerate() {
             by_step[def.step].push(i);
         }
-        let mut bindings = FeatureBlockBindings::with_tags(
-            data.registry(),
-            data.integers().clone(),
-            &data.block_tags,
-        )?;
+        let mut bindings = data.feature_block_bindings()?;
         // Processors that test what a block is made of read canOcclude.
         if let Some(blocks) = data
             .feature_resources

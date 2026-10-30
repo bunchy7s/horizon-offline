@@ -10,9 +10,9 @@ LevelChunkTicks.poll	port	crates/horizon-core/src/ticks/mod.rs::ChunkTicks::poll
 LevelChunkTicks.removeIf	port	crates/horizon-core/src/ticks/mod.rs::ChunkTicks::remove_if	
 LevelChunkTicks.scheduleUnchecked	inline	crates/horizon-core/src/ticks/mod.rs::ChunkTicks::schedule	gap: minor: push only, no duplicate check (the unpack path is in ChunkTicks::unpack); the onTickAdded deadline update is in LevelTicks::schedule
 LevelChunkTicks.unpack	port	crates/horizon-core/src/ticks/mod.rs::ChunkTicks::unpack	gap: minor: the deadline refresh is in LevelTicks::unpack_chunk
-AttributeTrack.bakeSampler	inline	crates/horizon-client/src/environment.rs::Environment::load_dimension	gap: minor: builds the day timeline's tracks only (keyframes, easing, multiply); the clock holder is implicit
+AttributeTrack.bakeSampler	inline	crates/horizon-client-render/src/environment.rs::Environment::load_dimension	gap: minor: builds the day timeline's tracks only (keyframes, easing, multiply); the clock holder is implicit
 AttributeTrack.createCodec	skip:java		codec; Horizon parses the timeline JSON in Environment::load_dimension and patrol.rs GameplayAttributes::load
 AttributeTrack.createCodecWithModifier	skip:java		codec; same parsing as createCodec
 AttributeTrack.validatePeriod	skip:data		load-time check of keyframes against period_ticks; Horizon reads the vanilla timeline files without it
-AttributeTrackSampler.applyTimeBased	port	crates/horizon-client/src/environment.rs::Environment::value	gap: minor: multiply and override only; star_brightness 'maximum' reads as override (same value at base 0); booleans are in patrol.rs BoolTrack or hardcoded per consumer; no per-tick cache
+AttributeTrackSampler.applyTimeBased	port	crates/horizon-client-render/src/environment.rs::Environment::value	gap: minor: multiply and override only; star_brightness 'maximum' reads as override (same value at base 0); booleans are in patrol.rs BoolTrack or hardcoded per consumer; no per-tick cache
 Timelines.bootstrap	skip:data		registers the timelines in code; Horizon reads data/minecraft/timeline/*.json, and the few day-cycle numbers it needs are in level/timeline.rs

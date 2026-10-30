@@ -1,13 +1,13 @@
 SortedArraySet	skip:java		sorted unique array list, a java.util collection; Horizon keeps its own ordered containers
 SortedArraySet.ArrayIterator	skip:java		iterator of the sorted array set above
 StaticCache2D	skip:java		chunk-neighbourhood cache; plain arrays in Horizon
-StringDecomposer.feedChar	inline	crates/horizon-client/src/screen_draw.rs::formatted	gap: minor: no surrogate replacement; Rust chars are always valid, so each char is passed on as is
-StringDecomposer.iterate	port	crates/horizon-client/src/screen_draw.rs::formatted	returns every drawn char with its index and style at once; no early stop, no surrogate handling needed
-StringDecomposer.iterateBackwards	port	crates/horizon-client/src/font.rs::Font::fit_reverse	counts characters from the end that fit the width (plain text, no style walk backwards)
+StringDecomposer.feedChar	inline	crates/horizon-client-render/src/screen_draw.rs::formatted	gap: minor: no surrogate replacement; Rust chars are always valid, so each char is passed on as is
+StringDecomposer.iterate	port	crates/horizon-client-render/src/screen_draw.rs::formatted	returns every drawn char with its index and style at once; no early stop, no surrogate handling needed
+StringDecomposer.iterateBackwards	port	crates/horizon-client-render/src/font.rs::Font::fit_reverse	counts characters from the end that fit the width (plain text, no style walk backwards)
 StringDecomposer.filterBrokenSurrogates	skip:java		strips lone UTF-16 surrogates; Rust strings are valid UTF-8 already (java_text.rs keeps the replacement)
 StringRepresentable	skip:java		codec and name-lookup builders; Horizon matches enum names in its own tables
 StringRepresentable.EnumCodec	skip:java		codec byName lookup
-StringUtil.truncateStringIfNecessary	port	crates/horizon-client/src/screen_draw.rs::TextField::set_value	gap: minor: no '...' suffix variant (only the brain-dump debug text uses it); cuts by characters
+StringUtil.truncateStringIfNecessary	port	crates/horizon-client-render/src/screen_draw.rs::TextField::set_value	gap: minor: no '...' suffix variant (only the brain-dump debug text uses it); cuts by characters
 StringUtil.lineCount	skip:other		no caller in 26.3 (dead helper)
 StringUtil.isBlank	port	crates/horizon-client/src/title.rs::Title::buttons	Save of the rename screen is active only for a non-blank name; trim() uses Unicode whitespace, a tiny difference from Java's isWhitespace
 ThreadingDetector	skip:debug		debug check that two threads enter the same structure; Rust's ownership rules rule it out
@@ -17,7 +17,7 @@ Util.makeExecutor	skip:java		background ForkJoin pool with thread names
 Util.getMaxThreads	skip:java		max.bg.threads pool size; Horizon sizes its own pools
 Util.makeIoExecutor	skip:java		cached IO thread pool
 Util.throwAsRuntime	skip:java		Java checked-exception rethrow
-Util.onThreadException	port	crates/horizon-client/src/crash.rs::install	gap: player: vanilla then relays a crash report to the main thread and the game ends; Horizon only logs an error from a worker thread
+Util.onThreadException	port	crates/horizon-client-render/src/crash.rs::install	gap: player: vanilla then relays a crash report to the main thread and the game ends; Horizon only logs an error from a worker thread
 Util.doFetchChoiceType	skip:data		DataFixer choice-type lookup; Horizon migrates saves in horizon-world datafix
 Util.runNamed	skip:debug		renames the thread and opens a Tracy zone
 Util.getRegisteredName	skip:debug		registry key text for logs and debug output (Ticket.toString)
@@ -41,7 +41,7 @@ Util.executeInSequence	missing		minor: the steps of a file move are not retried 
 Util.runWithRetries	missing		minor: no retry loop (10 attempts) around file moves for Windows file locks; Horizon's save and datafix moves do not retry
 Util.safeMoveFile	port	crates/horizon-world/src/datafix/files.rs::move_file	gap: minor: one attempt, no 10-try retry; still refuses to overwrite an existing target
 Util.safeReplaceOrMoveFile	port	crates/horizon-client/src/save.rs::write_dat	gap: minor: no retries and no rollback to the backup when the new file cannot be renamed in; the old file is moved to a *_old name
-Util.offsetByCodepoints	inline	crates/horizon-client/src/screen_draw.rs::TextField::key	gap: minor: arrow keys move one character only (no count argument, no surrogate pairs); ctrl-arrows use ui word_position
+Util.offsetByCodepoints	inline	crates/horizon-client-render/src/screen_draw.rs::TextField::key	gap: minor: arrow keys move one character only (no count argument, no surrogate pairs); ctrl-arrows use ui word_position
 Util.startTimerHackThread	skip:other		JVM Windows timer-resolution thread; Rust timers do not need it
 Util.copyBetweenDirs	missing		player: the create-world screen has no Data Packs step, so packs a player would pick are never copied into the new world (title/create_world.rs:289 says it has no data pack screen yet)
 Util.sanitizeName	skip:other		builds the texture cache path of a world icon; Horizon reads icon.png straight from the save folder (title.rs)

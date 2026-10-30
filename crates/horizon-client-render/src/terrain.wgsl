@@ -146,9 +146,10 @@ fn apply_fog(color: vec4<f32>, spherical: f32, cylindrical: f32) -> vec4<f32> {
     // Bit 15 of the layer marks opaque leaves (forceOpaque): no alpha cutout.
     let color = sprite(in.uv, in.layer & 0x7fffu) * in.color;
     if color.a < 0.5 && (in.layer & 0x8000u) == 0u { discard; }
-    // Alpha 0 tells HDR output (hdr.wgsl) a light-emitting block's bright pixels
-    // may shine. Nothing else reads the frame's alpha.
-    let emissive = select(1.0, 0.0, in.emission > 0u);
+    // Below 0.75, alpha tells HDR output (hdr.wgsl) a light source's bright
+    // pixels may shine, and at which tier (mesher::hdr_tier): 0.525 at the
+    // lowest, 0 at the brightest. Nothing else reads the frame's alpha.
+    let emissive = select(1.0, 0.7 * f32(4u - min(in.emission, 4u)) / 4.0, in.emission > 0u);
     return apply_fog(vec4(color.rgb, emissive), in.spherical, in.cylindrical);
 }
 @fragment fn fs_translucent(in: TerrainOut) -> @location(0) vec4<f32> {

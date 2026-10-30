@@ -2,7 +2,7 @@ AgeableWaterCreature.handleAirSupply	inline	crates/horizon-client/src/mobs/ai.rs
 AgeableWaterCreature.checkSurfaceAgeableWaterCreatureSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::surface_water	
 Animal.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	InLove is read; LoveCause is not kept
 Animal.canMate	port	crates/horizon-client/src/mobs/animal_brain.rs::can_mate_with	brain breeding; the Breed goal in goals.rs does the same for goal-driven animals
-Animal.handleEntityEvent	port	crates/horizon-client/src/particles.rs::entity_event_burst	event 18 love hearts
+Animal.handleEntityEvent	port	crates/horizon-client-render/src/particles.rs::entity_event_burst	event 18 love hearts
 Animal.getDismountLocationForPassenger	port	crates/horizon-client/src/game/mounts.rs::Game::dismount_mount	gap: tries both sides by the mob's yaw, then on top; not DismountHelper's offsets and pose boxes
 Allay.createAttributes	skip:data		attributes come from entity-types.json
 Allay.createNavigation	port	crates/horizon-client/src/mobs/allay.rs::register	flying navigation, required path length 48
@@ -21,8 +21,8 @@ Allay.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_f
 Allay.updateDuplicationCooldown	inline	crates/horizon-client/src/mobs/allay.rs::ai_step	egg_time counts down
 Allay.setDuplicationCooldown	inline	crates/horizon-client/src/game/allays.rs::Game::interact_allay	6000 set here; can_duplicate is derived from egg_time in mob_meta
 Allay.getLeashOffset	missing		lead hangs at the default offset (eye height), not 0.6 of it; leash::leash_offset only special-cases llamas
-Allay.handleEntityEvent	port	crates/horizon-client/src/particles.rs::entity_event_burst	event 18, three hearts
-Allay.spawnHeartParticle	port	crates/horizon-client/src/particles.rs::around_self	one heart's random placement
+Allay.handleEntityEvent	port	crates/horizon-client-render/src/particles.rs::entity_event_burst	event 18, three hearts
+Allay.spawnHeartParticle	port	crates/horizon-client-render/src/particles.rs::around_self	one heart's random placement
 Allay.VibrationUser.canReceiveVibration	missing		allays never listen for vibrations: a note block played near one is not remembered
 AllayAi.initCoreActivity	inline	crates/horizon-client/src/mobs/allay.rs::register	panic goal; the cooldown countdowns are plain ints
 AllayAi.initIdleActivity	inline	crates/horizon-client/src/mobs/allay.rs::register	fetch, deliver, stay close, stroll and look as goals instead of a brain
@@ -134,8 +134,8 @@ MushroomCow.checkMushroomSpawnRules	port	crates/horizon-client/src/mobs/spawn_ru
 MushroomCow.thunderHit	port	crates/horizon-client/src/game/lightning.rs::Game::thunder_hit	swaps colour once per bolt, convert sound
 MushroomCow.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	the type entry
 MushroomCow.mobInteract	port	crates/horizon-client/src/game/creatures.rs::Game::interact_mob	gap: bowl stew and shearing are done; feeding a flower to a brown mooshroom (suspicious stew) is missing
-MushroomCow.addAdditionalSaveData	missing		Type and stew_effects are not written from the live mob: a colour change (lightning) is not saved
-MushroomCow.readAdditionalSaveData	missing		Type is not read: a saved brown mooshroom loads red
+MushroomCow.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	Type; gap: stew_effects (not modelled) is not written
+MushroomCow.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	Type, red when missing; gap: stew_effects (not modelled) is not read
 MushroomCow.getEffectsFromItemStack	missing		no suspicious stew effects from flowers: a brown mooshroom never takes a flower
 MushroomCow.get	missing		mooshroom/variant component is not reported; species_variant_component has no mooshroom
 MushroomCow.applyImplicitComponent	missing		mooshroom/variant component on a spawn egg is ignored

@@ -1,47 +1,47 @@
-SectionCopy.getBlockState	inline	crates/horizon-client/src/mesher.rs::Padded::new	the copy is Padded's block array; no debug-world barrier or DebugLevelSource blocks
+SectionCopy.getBlockState	inline	crates/horizon-client-render/src/mesher.rs::Padded::new	the copy is Padded's block array; no debug-world barrier or DebugLevelSource blocks
 SectionRenderDispatcher.<init>	skip:other		builds the GPU arena and staging for chunk upload; Horizon creates its arena and uploads in gfx.rs with the renderer
-SectionRenderDispatcher.runTask	port	crates/horizon-client/src/streaming.rs::Streaming::new	the worker loop pops the nearest queued job and runs it
-SectionRenderDispatcher.getRenderSectionSlice	port	crates/horizon-client/src/gfx.rs::Renderer::draw_sections	the per-layer vertex and index slices of a section are read when drawing
-SectionRenderDispatcher.uploadTerrainBuffersToGpu	port	crates/horizon-client/src/gfx/upload.rs::Uploads::finish	closes the frame's staging belt after the terrain copies
-SectionRenderDispatcher.schedule	port	crates/horizon-client/src/streaming.rs::Streaming::submit	the mesh job goes into the priority queue by distance
-SectionRenderDispatcher.dispose	port	crates/horizon-client/src/gfx.rs::Renderer::clear_sections	frees every section's GPU buffers
+SectionRenderDispatcher.runTask	port	crates/horizon-client-render/src/streaming.rs::Streaming::new	the worker loop pops the nearest queued job and runs it
+SectionRenderDispatcher.getRenderSectionSlice	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_sections	the per-layer vertex and index slices of a section are read when drawing
+SectionRenderDispatcher.uploadTerrainBuffersToGpu	port	crates/horizon-client-render/src/gfx/upload.rs::Uploads::finish	closes the frame's staging belt after the terrain copies
+SectionRenderDispatcher.schedule	port	crates/horizon-client-render/src/streaming.rs::Streaming::submit	the mesh job goes into the priority queue by distance
+SectionRenderDispatcher.dispose	port	crates/horizon-client-render/src/gfx.rs::Renderer::clear_sections	frees every section's GPU buffers
 SectionRenderDispatcher.getStats	skip:debug		F3 text: compile queue size and free buffers
 SectionRenderDispatcher.RenderSection.getVisibility	missing		player: newly meshed terrain appears at full strength; vanilla fades each section in over the chunkSectionFadeInTime option, and block entities wait for 0.3
-SectionRenderDispatcher.RenderSection.setSectionNode	port	crates/horizon-client/src/gfx.rs::section_instance	the section's render origin; its 16-block bounds are derived from the origin
-SectionRenderDispatcher.RenderSection.reset	port	crates/horizon-client/src/gfx.rs::Renderer::release_section	drops the section's mesh and GPU slices
-SectionRenderDispatcher.RenderSection.resortTransparency	port	crates/horizon-client/src/gfx/translucency.rs::SortState::update	translucent quads re-sorted for the camera; gap: minor: the new order goes to the next draw, not a newly uploaded index buffer
+SectionRenderDispatcher.RenderSection.setSectionNode	port	crates/horizon-client-render/src/gfx.rs::section_instance	the section's render origin; its 16-block bounds are derived from the origin
+SectionRenderDispatcher.RenderSection.reset	port	crates/horizon-client-render/src/gfx.rs::Renderer::release_section	drops the section's mesh and GPU slices
+SectionRenderDispatcher.RenderSection.resortTransparency	port	crates/horizon-client-render/src/gfx/translucency.rs::SortState::update	translucent quads re-sorted for the camera; gap: minor: the new order goes to the next draw, not a newly uploaded index buffer
 SectionRenderDispatcher.RenderSection.transparencyResortingScheduled	skip:other		Horizon sorts during the frame, so there is no pending resort task to report
-SectionRenderDispatcher.RenderSection.cancelTasks	inline	crates/horizon-client/src/streaming.rs::Streaming::update	a finished job whose seq no longer matches is dropped on arrival; queued jobs are not removed
-SectionRenderDispatcher.RenderSection.createCompileTask	port	crates/horizon-client/src/streaming.rs::Streaming::submit	the mesh job is queued; the recompile flag is not kept
-SectionRenderDispatcher.RenderSection.compileSync	port	crates/horizon-client/src/mesher.rs::Mesher::mesh	meshes on the calling thread with no queue
-SectionRenderDispatcher.RenderSection.setSectionMesh	port	crates/horizon-client/src/gfx.rs::Renderer::upload	stores the new mesh for the section and hands back the old one
-SectionRenderDispatcher.RenderSection.releaseSectionMesh	port	crates/horizon-client/src/gfx.rs::Renderer::release_mesh	frees the old mesh's GPU slices
-SectionRenderDispatcher.RenderSection.createVertexSorting	port	crates/horizon-client/src/gfx/translucency.rs::Sorter::sort	sort by squared distance from the camera to each quad centre
-SectionRenderDispatcher.RenderSection.checkSectionMesh	inline	crates/horizon-client/src/gfx.rs::Renderer::upload	uploads are synchronous, so there is no wait for every layer to land before publishing
-SectionRenderDispatcher.RenderSection.addSectionBuffersToUberBuffer	port	crates/horizon-client/src/gfx.rs::Renderer::upload_mesh	copies a layer's vertex and index bytes into arena pages
-SectionRenderDispatcher.RenderSection.CompileTask.doTask	port	crates/horizon-client/src/mesher.rs::Mesher::mesh	meshes the section; the empty result and upload are handled in streaming and Renderer::upload
-SectionRenderDispatcher.RenderSection.ResortTransparencyTask.doTask	port	crates/horizon-client/src/gfx/translucency.rs::SortState::update	re-sorts translucent quads when the camera's point of view changes
-SectionTaskDynamicQueue.poll	port	crates/horizon-client/src/streaming.rs::Queued::cmp	nearest job first; gap: minor: no recompile quota, new and remesh jobs share one priority
+SectionRenderDispatcher.RenderSection.cancelTasks	inline	crates/horizon-client-render/src/streaming.rs::Streaming::update	a finished job whose seq no longer matches is dropped on arrival; queued jobs are not removed
+SectionRenderDispatcher.RenderSection.createCompileTask	port	crates/horizon-client-render/src/streaming.rs::Streaming::submit	the mesh job is queued; the recompile flag is not kept
+SectionRenderDispatcher.RenderSection.compileSync	port	crates/horizon-client-render/src/mesher.rs::Mesher::mesh	meshes on the calling thread with no queue
+SectionRenderDispatcher.RenderSection.setSectionMesh	port	crates/horizon-client-render/src/gfx.rs::Renderer::upload	stores the new mesh for the section and hands back the old one
+SectionRenderDispatcher.RenderSection.releaseSectionMesh	port	crates/horizon-client-render/src/gfx.rs::Renderer::release_mesh	frees the old mesh's GPU slices
+SectionRenderDispatcher.RenderSection.createVertexSorting	port	crates/horizon-client-render/src/gfx/translucency.rs::Sorter::sort	sort by squared distance from the camera to each quad centre
+SectionRenderDispatcher.RenderSection.checkSectionMesh	inline	crates/horizon-client-render/src/gfx.rs::Renderer::upload	uploads are synchronous, so there is no wait for every layer to land before publishing
+SectionRenderDispatcher.RenderSection.addSectionBuffersToUberBuffer	port	crates/horizon-client-render/src/gfx.rs::Renderer::upload_mesh	copies a layer's vertex and index bytes into arena pages
+SectionRenderDispatcher.RenderSection.CompileTask.doTask	port	crates/horizon-client-render/src/mesher.rs::Mesher::mesh	meshes the section; the empty result and upload are handled in streaming and Renderer::upload
+SectionRenderDispatcher.RenderSection.ResortTransparencyTask.doTask	port	crates/horizon-client-render/src/gfx/translucency.rs::SortState::update	re-sorts translucent quads when the camera's point of view changes
+SectionTaskDynamicQueue.poll	port	crates/horizon-client-render/src/streaming.rs::Queued::cmp	nearest job first; gap: minor: no recompile quota, new and remesh jobs share one priority
 SectionTaskDynamicQueue.clear	skip:other		Horizon has no queue clear; stale results are dropped by seq in Streaming::update
-TranslucencyPointOfView.set	inline	crates/horizon-client/src/gfx/translucency.rs::SortState::update	the point of view: camera block minus section, clamped to -1..1 per axis
-TranslucencyPointOfView.isAxisAligned	inline	crates/horizon-client/src/gfx/translucency.rs::SortState::update	the axis-aligned test: a zero component in the point of view
-TranslucencyPointOfView.equals	inline	crates/horizon-client/src/gfx/translucency.rs::SortState::update	compares the last point of view with the new one
+TranslucencyPointOfView.set	inline	crates/horizon-client-render/src/gfx/translucency.rs::SortState::update	the point of view: camera block minus section, clamped to -1..1 per axis
+TranslucencyPointOfView.isAxisAligned	inline	crates/horizon-client-render/src/gfx/translucency.rs::SortState::update	the axis-aligned test: a zero component in the point of view
+TranslucencyPointOfView.equals	inline	crates/horizon-client-render/src/gfx/translucency.rs::SortState::update	compares the last point of view with the new one
 TranslucencyPointOfView.hashCode	skip:java		hash for a map key
-VisGraph.setOpaque	inline	crates/horizon-client/src/mesher.rs::visibility	opaque cells are marked in the seen map before the flood fill
-VisGraph.getIndex	inline	crates/horizon-client/src/mesher.rs::visibility	cell index y<<8 | z<<4 | x in the seen map
-VisGraph.floodFill	inline	crates/horizon-client/src/mesher.rs::visibility	flood fill from each open cell; gap: minor: no shortcut for sections with fewer than 256 opaque cells, which vanilla marks fully visible
-VisGraph.addEdges	inline	crates/horizon-client/src/mesher.rs::visibility	the faces of the section a cell touches
-VisGraph.getNeighborIndexAtFace	inline	crates/horizon-client/src/mesher.rs::visibility	the neighbour index inside the section, -1 at its border
-VisibilitySet.add	inline	crates/horizon-client/src/mesher.rs::visibility	sets the bit for each pair of faces an open region touches (bit a*6+b)
-VisibilitySet.set	inline	crates/horizon-client/src/mesher.rs::visibility	sets both bits of a face pair
-VisibilitySet.visibilityBetween	port	crates/horizon-client/src/gfx/occlusion.rs::Graph::propagate	the faces a section connects are read from its visibility bits when the search moves on
+VisGraph.setOpaque	inline	crates/horizon-client-render/src/mesher.rs::visibility	opaque cells are marked in the seen map before the flood fill
+VisGraph.getIndex	inline	crates/horizon-client-render/src/mesher.rs::visibility	cell index y<<8 | z<<4 | x in the seen map
+VisGraph.floodFill	inline	crates/horizon-client-render/src/mesher.rs::visibility	flood fill from each open cell; gap: minor: no shortcut for sections with fewer than 256 opaque cells, which vanilla marks fully visible
+VisGraph.addEdges	inline	crates/horizon-client-render/src/mesher.rs::visibility	the faces of the section a cell touches
+VisGraph.getNeighborIndexAtFace	inline	crates/horizon-client-render/src/mesher.rs::visibility	the neighbour index inside the section, -1 at its border
+VisibilitySet.add	inline	crates/horizon-client-render/src/mesher.rs::visibility	sets the bit for each pair of faces an open region touches (bit a*6+b)
+VisibilitySet.set	inline	crates/horizon-client-render/src/mesher.rs::visibility	sets both bits of a face pair
+VisibilitySet.visibilityBetween	port	crates/horizon-client-render/src/gfx/occlusion.rs::Graph::propagate	the faces a section connects are read from its visibility bits when the search moves on
 VisibilitySet.toString	skip:debug		debug text
 Frustum.set	skip:java		copies the frustum; Horizon passes the Frustum value
 Frustum.offset	missing		minor: particles are not culled against a frustum pulled back 3 blocks (ParticleEngine.extract); Horizon has no particle frustum test
-Frustum.offsetToFullyIncludeCameraCube	port	crates/horizon-client/src/gfx/occlusion.rs::Graph::search	the occlusion search starts in the camera's own section, so its cube is always included; gap: minor: no frustum offset
-Frustum.calculateFrustum	port	crates/horizon-client/src/gfx.rs::frustum	the six planes from projection times view
-Frustum.isVisible	port	crates/horizon-client/src/gfx.rs::Frustum::intersects	box against the planes; gap: minor: infinite bounds are not special-cased
-Frustum.cubeInFrustum	port	crates/horizon-client/src/gfx.rs::Frustum::intersects	box test on camera-relative bounds
+Frustum.offsetToFullyIncludeCameraCube	port	crates/horizon-client-render/src/gfx/occlusion.rs::Graph::search	the occlusion search starts in the camera's own section, so its cube is always included; gap: minor: no frustum offset
+Frustum.calculateFrustum	port	crates/horizon-client-render/src/gfx.rs::frustum	the six planes from projection times view
+Frustum.isVisible	port	crates/horizon-client-render/src/gfx.rs::Frustum::intersects	box against the planes; gap: minor: infinite bounds are not special-cased
+Frustum.cubeInFrustum	port	crates/horizon-client-render/src/gfx.rs::Frustum::intersects	box test on camera-relative bounds
 Frustum.pointInFrustum	missing		minor: only particle culling uses it (QuadParticleGroup), and Horizon has no particle frustum test
 Frustum.getFrustumPoints	skip:debug		the eight frustum corners, for debug drawing only
 Frustum.getNearPlaneBounds	missing		player: the block texture overlay drawn when your eye is inside a block (view-blocking block) is never shown; ScreenEffectRenderer's block_overlay is never set outside tests
@@ -84,14 +84,14 @@ LevelExtractor.extractVisibleBlockEntities	inline	crates/horizon-client/src/game
 LevelExtractor.extractBlockDestroyAnimation	port	crates/horizon-client/src/game.rs::Game::destroy_block_progress	keeps the crumbling progress per breaker for 400 ticks; gap: minor: no 32-block distance cut here
 LevelExtractor.extractGizmos	port	crates/horizon-client/src/game/debug_keys.rs::Game::debug_gizmos	the frame's debug gizmos
 LevelExtractor.extractPlayerState	inline	crates/horizon-client/src/game.rs::Game::render	player and hands read from the game state at draw time; gap: minor: the view-blocking block is missing, see Frustum.getNearPlaneBounds
-LevelExtractor.applyFrustum	port	crates/horizon-client/src/gfx/resident.rs::Resident::visible	the frustum decides which sections are visible
+LevelExtractor.applyFrustum	port	crates/horizon-client-render/src/gfx/resident.rs::Resident::visible	the frustum decides which sections are visible
 LevelExtractor.setLevel	inline	crates/horizon-client/src/game.rs::Game::all_sections_changed	a new level rebuilds every loaded section (allChanged); the null-level branch is not separate
-LevelExtractor.blockChanged	port	crates/horizon-client/src/world.rs::World::set	a block edit marks its 3x3x3 neighbourhood; gap: minor: the player-changed flag (update bit 8) is not kept
-LevelExtractor.setBlockDirty	port	crates/horizon-client/src/world.rs::World::set	marks the 3x3x3 section neighbourhood of an edited block
-LevelExtractor.setBlocksDirty	inline	crates/horizon-client/src/world.rs::World::set	each block of the range goes through the same 3x3x3 marking
-LevelExtractor.setSectionDirtyWithNeighbors	port	crates/horizon-client/src/streaming.rs::Streaming::light_updated	the section and its neighbours remesh
-LevelExtractor.setSectionRangeDirty	inline	crates/horizon-client/src/streaming.rs::Streaming::light_updated	section range marked in world.dirty_sections
-LevelExtractor.setSectionDirty	port	crates/horizon-client/src/world.rs::DirtySections::insert	marks one section for remesh
+LevelExtractor.blockChanged	port	crates/horizon-client-render/src/world.rs::World::set	a block edit marks its 3x3x3 neighbourhood; gap: minor: the player-changed flag (update bit 8) is not kept
+LevelExtractor.setBlockDirty	port	crates/horizon-client-render/src/world.rs::World::set	marks the 3x3x3 section neighbourhood of an edited block
+LevelExtractor.setBlocksDirty	inline	crates/horizon-client-render/src/world.rs::World::set	each block of the range goes through the same 3x3x3 marking
+LevelExtractor.setSectionDirtyWithNeighbors	port	crates/horizon-client-render/src/streaming.rs::Streaming::light_updated	the section and its neighbours remesh
+LevelExtractor.setSectionRangeDirty	inline	crates/horizon-client-render/src/streaming.rs::Streaming::light_updated	section range marked in world.dirty_sections
+LevelExtractor.setSectionDirty	port	crates/horizon-client-render/src/world.rs::DirtySections::insert	marks one section for remesh
 LevelExtractor.countRenderedSections	skip:debug		F3 count of sections with renderable layers; Horizon reports Renderer::section_count
 LevelExtractor.sectionStatistics	skip:debug		F3 text
 LevelExtractor.entityStatistics	skip:debug		F3 text
@@ -100,5 +100,5 @@ CustomFeatureRenderer.buildGroup	skip:other		feature pass plumbing; Horizon has 
 FeatureRenderDispatcher.<init>	skip:other		feature dispatcher set-up; Horizon has no feature dispatcher
 FeatureRenderDispatcher.prepareFrame	skip:other		feature dispatcher; the frame's draw order is fixed in Renderer::draw_frame
 FeatureRenderDispatcher.prepareFrameWithContext	skip:other		feature dispatcher; the frame's draw order is fixed in Renderer::draw_frame
-FeatureRenderDispatcher.renderAllFeatures	port	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	draws the frame's passes; gap: minor: the order is fixed, not taken from a feature list
+FeatureRenderDispatcher.renderAllFeatures	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	draws the frame's passes; gap: minor: the order is fixed, not taken from a feature list
 FeatureRenderDispatcher.PhaseSubmitGrouper	skip:other		groups feature submissions per phase for vanilla's dispatcher; Horizon submits in fixed passes

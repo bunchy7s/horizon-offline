@@ -19,12 +19,13 @@ use horizon_world::{
     registry::BlockStateId,
 };
 
-/// `Entity.moveDist`, `flyDist` and `nextStep`.
+/// `Entity.moveDist`, `flyDist`, `nextStep` and `Parrot.nextFlap`.
 #[derive(Clone, Copy, Debug)]
 pub struct Steps {
     pub move_dist: f32,
     pub fly_dist: f32,
     pub next_step: f32,
+    pub next_flap: f32,
     /// `AbstractHorse.gallopSoundCounter`.
     pub gallop: i32,
 }
@@ -34,6 +35,7 @@ impl Default for Steps {
             move_dist: 0.0,
             fly_dist: 0.0,
             next_step: 1.0,
+            next_flap: 1.0,
             gallop: 0,
         }
     }
@@ -759,6 +761,22 @@ impl Mob {
                     ));
                 }
             }
+        } else if w.facts.is_air(state)
+            && self.species() == super::Species::Bee
+            && !self.on_ground
+            && self.age.is_multiple_of(2)
+        {
+            // Entity.processFlappingMovement: a flying bee beats its wings on
+            // every other tick (Bee.isFlapping, TICKS_PER_FLAP is 2).
+            events.push(MobEvent::GameEvent {
+                event: "minecraft:flap",
+                at: [self.position.x, self.position.y, self.position.z],
+                source: self.id,
+                state: horizon_world::registry::BlockStateId(0),
+            });
+        } else if w.facts.is_air(state) && self.species() == super::Species::Parrot {
+            // Entity.processFlappingMovement: a move ending in the air.
+            super::parrot::process_flapping(self, events);
         }
     }
     /// `Entity.nextStep`: the next whole metre walked; a warden's steps come
@@ -865,6 +883,19 @@ impl Mob {
         if self.species() == super::Species::Creeper {
             self.swell = (self.swell + (self.fall_distance * 1.5) as i32).min(30 - 5);
         }
+        // AbstractHorse.causeFallDamage (llamas override it): a landing of more
+        // than a block thuds, and the horse's fall makes no generic fall sound.
+        let thud =
+            super::equine::is_equine(self.species()) && !super::llama::is_llama(self.species());
+        if thud && self.fall_distance > 1.0 && !self.silent {
+            let at = [self.position.x, self.position.y, self.position.z];
+            let sound = if self.is_baby() {
+                "entity.baby_horse.land"
+            } else {
+                "entity.horse.land"
+            };
+            events.push(MobEvent::Sound(sound, at, 0.4, 1.0));
+        }
         if self.kind.flags.fall_immune {
             return;
         }
@@ -884,7 +915,9 @@ impl Mob {
                 (false, true) => "entity.generic.big_fall",
                 (false, false) => "entity.generic.small_fall",
             };
-            events.push(MobEvent::Sound(sound, at, 1.0, 1.0));
+            if !thud {
+                events.push(MobEvent::Sound(sound, at, 1.0, 1.0));
+            }
             self.damage(damage as f32, super::Damage::fall());
         }
     }

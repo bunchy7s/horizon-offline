@@ -43,7 +43,7 @@ impl Game<'_> {
     pub(super) fn submerged_mining_speed(&self) -> f32 {
         let mut total = 0.0;
         for stack in self.armor.iter().flatten() {
-            for (attr, _, amount, op) in self.res.stations().enchantments.attributes(stack) {
+            for (attr, _, amount, op) in self.stations().enchantments.attributes(stack) {
                 if attr == "minecraft:submerged_mining_speed" && op == "add_multiplied_total" {
                     total += amount;
                 }
@@ -53,13 +53,13 @@ impl Game<'_> {
     }
     /// `EnchantmentHelper.processDurabilityChange` (unbreaking) for `amount` points.
     pub(super) fn durability_loss(&mut self, stack: &ItemStack, amount: u32) -> u32 {
-        let e = &self.res.stations().enchantments;
+        let e = &world_stations!(self).enchantments;
         if !e.has_component(stack, "minecraft:item_damage") {
             return amount;
         }
         let ctx = EffectContext {
             tool: Some(&stack.item),
-            items: Some(self.res.items()),
+            items: Some(world_items!(self)),
             ..Default::default()
         };
         e.modify_value(
@@ -96,10 +96,10 @@ impl Game<'_> {
             direct_attacker: Some("minecraft:player"),
             is_direct: true,
             damage_type: Some("minecraft:player_attack"),
-            items: Some(self.res.items()),
+            items: Some(world_items!(self)),
             ..Default::default()
         };
-        self.res.stations().enchantments.modify_value(
+        world_stations!(self).enchantments.modify_value(
             Some(&held),
             "minecraft:damage",
             &ctx,
@@ -127,10 +127,10 @@ impl Game<'_> {
                     attacker: Some("minecraft:player"),
                     direct_attacker: Some("minecraft:player"),
                     is_direct: true,
-                    items: Some(self.res.items()),
+                    items: Some(world_items!(self)),
                     ..Default::default()
                 };
-                self.res.stations().enchantments.modify_value(
+                world_stations!(self).enchantments.modify_value(
                     Some(&held),
                     "minecraft:knockback",
                     &ctx,
@@ -172,7 +172,7 @@ impl Game<'_> {
             attacker: Some("minecraft:player"),
             direct_attacker: Some("minecraft:player"),
             is_direct: true,
-            items: Some(self.res.items()),
+            items: Some(world_items!(self)),
             ..Default::default()
         };
         // minecraft:post_attack effects of the attacker's weapon on the victim:
@@ -180,7 +180,7 @@ impl Game<'_> {
         let mut ignite = 0.0f32;
         let mut mob_effects = Vec::new();
         for (id, level) in held.enchantments() {
-            let Some(def) = self.res.stations().enchantments.get(id) else {
+            let Some(def) = world_stations!(self).enchantments.get(id) else {
                 continue;
             };
             for effect in def.effects["minecraft:post_attack"]
@@ -238,7 +238,7 @@ impl Game<'_> {
         };
         let mut effects = Vec::new();
         for (id, level) in held.enchantments() {
-            let Some(def) = self.res.stations().enchantments.get(id) else {
+            let Some(def) = self.stations().enchantments.get(id) else {
                 continue;
             };
             for entry in def.effects["minecraft:post_piercing_attack"]
@@ -362,7 +362,7 @@ impl Game<'_> {
     /// `minecraft:post_attack` explode effects on the attacker (wind burst):
     /// a burst at the player's feet that only knocks back and triggers
     /// blocks (`ExplodeEffect` with `block_interaction: trigger`).
-    fn post_attack_bursts(&mut self, held: &ItemStack, victim: &str) {
+    pub(super) fn post_attack_bursts(&mut self, held: &ItemStack, victim: &str) {
         let Some(p) = self.player.as_ref() else {
             return;
         };
@@ -374,13 +374,13 @@ impl Game<'_> {
             attacker: Some("minecraft:player"),
             direct_attacker: Some("minecraft:player"),
             is_direct: true,
-            items: Some(self.res.items()),
+            items: Some(world_items!(self)),
             direct_motion: Some(motion),
             ..Default::default()
         };
         let mut bursts = Vec::new();
         for (id, level) in held.enchantments() {
-            let Some(def) = self.res.stations().enchantments.get(id) else {
+            let Some(def) = world_stations!(self).enchantments.get(id) else {
                 continue;
             };
             for effect in def.effects["minecraft:post_attack"]
@@ -397,7 +397,7 @@ impl Game<'_> {
                     continue;
                 }
                 let ok = effect.get("requirements").is_none_or(|r| {
-                    self.res.stations().enchantments.condition(
+                    world_stations!(self).enchantments.condition(
                         r,
                         *level,
                         &ctx,
@@ -449,16 +449,16 @@ impl Game<'_> {
             if level == 0 {
                 continue;
             }
-            let Some(def) = self.res.stations().enchantments.get("minecraft:thorns") else {
+            let Some(def) = self.stations().enchantments.get("minecraft:thorns") else {
                 continue;
             };
             let effect = def.effects["minecraft:post_attack"][0].clone();
             let ctx = EffectContext {
-                items: Some(self.res.items()),
+                items: Some(world_items!(self)),
                 ..Default::default()
             };
             let mut random = self.world.random.clone();
-            let ok = self.res.stations().enchantments.condition(
+            let ok = self.stations().enchantments.condition(
                 &effect["requirements"],
                 level,
                 &ctx,
@@ -480,6 +480,15 @@ impl Game<'_> {
                     .is_some_and(|i| s.damage >= i.max_damage)
                 {
                     self.armor[slot] = None;
+                    if let Some(eye) = self.eye_position() {
+                        self.audio.play(
+                            "minecraft:entity.item.break",
+                            Some(eye),
+                            0.8,
+                            0.8 + self.world.random.next_float() * 0.4,
+                        );
+                    }
+                    self.apply_equipment();
                 }
             }
         }
@@ -513,10 +522,10 @@ impl Game<'_> {
                 return amount;
             };
             let ctx = EffectContext {
-                items: Some(self.res.items()),
+                items: Some(world_items!(self)),
                 ..Default::default()
             };
-            let to_repair_xp = self.res.stations().enchantments.modify_value(
+            let to_repair_xp = world_stations!(self).enchantments.modify_value(
                 Some(&stack),
                 "minecraft:repair_with_xp",
                 &ctx,
@@ -558,11 +567,11 @@ impl Game<'_> {
         let Some(bow) = self.held().cloned() else {
             return (0.0, false);
         };
-        let e = &self.res.stations().enchantments;
+        let e = &world_stations!(self).enchantments;
         let ctx = EffectContext {
             direct_attacker: Some("minecraft:arrow"),
             attacker: Some("minecraft:player"),
-            items: Some(self.res.items()),
+            items: Some(world_items!(self)),
             ..Default::default()
         };
         let power = e.modify_value(
@@ -574,7 +583,7 @@ impl Game<'_> {
         );
         let ammo_ctx = EffectContext {
             tool: Some(ammo),
-            items: Some(self.res.items()),
+            items: Some(world_items!(self)),
             ..Default::default()
         };
         let infinity = e.has_component(&bow, "minecraft:ammo_use")
@@ -593,12 +602,12 @@ impl Game<'_> {
         let bow = self.held().cloned()?;
         let ctx = EffectContext {
             this: Some("minecraft:arrow"),
-            items: Some(self.res.items()),
+            items: Some(world_items!(self)),
             ..Default::default()
         };
         let mut ignite: Option<f32> = None;
         for (id, level) in bow.enchantments() {
-            let Some(def) = self.res.stations().enchantments.get(id) else {
+            let Some(def) = world_stations!(self).enchantments.get(id) else {
                 continue;
             };
             for effect in def.effects["minecraft:projectile_spawned"]
@@ -610,7 +619,7 @@ impl Game<'_> {
                     continue;
                 }
                 let ok = effect.get("requirements").is_none_or(|r| {
-                    self.res.stations().enchantments.condition(
+                    world_stations!(self).enchantments.condition(
                         r,
                         *level,
                         &ctx,
@@ -679,14 +688,14 @@ impl Game<'_> {
         // The attribute effects were applied to the player before: swap them.
         if was_active > 0 && (!active || equipped) {
             for (attribute, id, _, op) in
-                soul_speed_modifiers(&self.res.stations().enchantments, was_active)
+                soul_speed_modifiers(&world_stations!(self).enchantments, was_active)
             {
                 let _ = player.set_modifier(&attribute, &id, 0.0, &op, false);
             }
         }
         if active && (was_active == 0 || equipped) {
             for (attribute, id, amount, op) in
-                soul_speed_modifiers(&self.res.stations().enchantments, level)
+                soul_speed_modifiers(&world_stations!(self).enchantments, level)
             {
                 let _ = player.set_modifier(&attribute, &id, amount, &op, true);
             }
@@ -773,7 +782,7 @@ impl Game<'_> {
         for (stack, slot) in self.armor.iter().zip(["head", "chest", "legs", "feet"]) {
             let Some(stack) = stack else { continue };
             for (id, level) in stack.enchantments() {
-                let Some(def) = self.res.stations().enchantments.get(id) else {
+                let Some(def) = self.stations().enchantments.get(id) else {
                     continue;
                 };
                 if !def
@@ -911,7 +920,7 @@ impl Game<'_> {
                     .iter()
                     .flat_map(ItemStack::enchantments)
                     .any(|(id, _)| {
-                        self.res.stations().enchantments.get(id).is_some_and(|def| {
+                        self.stations().enchantments.get(id).is_some_and(|def| {
                             def.effects.get("minecraft:damage_immunity").is_some()
                                 && def
                                     .slots
@@ -928,7 +937,7 @@ impl Game<'_> {
         let mut wanted: Vec<(String, String, f64, String)> = Vec::new();
         for (stack, slot) in self.armor.iter().zip(["head", "chest", "legs", "feet"]) {
             let Some(stack) = stack else { continue };
-            for (attr, id, amount, op) in self.res.stations().enchantments.attributes(stack) {
+            for (attr, id, amount, op) in self.stations().enchantments.attributes(stack) {
                 wanted.push((attr, format!("{id}/{slot}"), amount, op));
             }
         }

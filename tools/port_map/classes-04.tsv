@@ -145,7 +145,7 @@ CopperGolemStatueBlockEntity.createStatue	port	crates/horizon-client/src/game/co
 CopperGolemStatueBlockEntity.getItem	port	crates/horizon-client/src/game/block_items.rs::Game::picked_stack	statue pose on the picked item
 CopperGolemStatueBlockEntity.initCopperGolem	port	crates/horizon-client/src/game/copper_golems.rs::Game::use_golem_statue	axe on an unaffected statue brings the golem back
 DecoratedPotPatterns	skip:data		bootstrap and asset registration
-EnchantingTableBlockEntity.bookAnimationTick	port	crates/horizon-client/src/block_entity_anim.rs::EnchantingBook::tick	
+EnchantingTableBlockEntity.bookAnimationTick	port	crates/horizon-client-render/src/block_entity_anim.rs::EnchantingBook::tick	
 ListBackedContainer	skip:java		slot helpers over a plain list
 PotDecorations.addSideDetailsToTooltip	port	crates/horizon-client/src/item_tooltip.rs::TooltipDisplay::detail_lines	sherd lines of the decorated pot tooltip
 PotDecorations.allBrick	skip:data		constant brick decoration set
@@ -165,10 +165,10 @@ RandomizableContainerBlockEntity.applyImplicitComponents	missing		minor: a chest
 RandomizableContainerBlockEntity.canOpen	missing		unsure: minor: the spectator and loot-table open checks were not found
 RandomizableContainerBlockEntity.collectImplicitComponents	missing		minor: a container does not save its loot table onto the item it drops
 RandomizableContainerBlockEntity.createMenu	port	crates/horizon-client/src/game.rs::Game::open_menu	gap: minor: the spectator and loot-table checks are not ported here
-SculkSensorBlockEntity.loadAdditional	port	crates/horizon-client/src/sculk.rs::SculkEntity::load	
-SculkSensorBlockEntity.saveAdditional	port	crates/horizon-client/src/sculk.rs::SculkEntity::to_nbt	
-SculkSensorBlockEntity.VibrationUser.canReceiveVibration	port	crates/horizon-client/src/sculk.rs::valid_vibration	
-SculkSensorBlockEntity.VibrationUser.onReceiveVibration	port	crates/horizon-client/src/sculk.rs::Data::schedule	
+SculkSensorBlockEntity.loadAdditional	port	crates/horizon-client-render/src/sculk.rs::SculkEntity::load	
+SculkSensorBlockEntity.saveAdditional	port	crates/horizon-client-render/src/sculk.rs::SculkEntity::to_nbt	
+SculkSensorBlockEntity.VibrationUser.canReceiveVibration	port	crates/horizon-client-render/src/sculk.rs::valid_vibration	
+SculkSensorBlockEntity.VibrationUser.onReceiveVibration	port	crates/horizon-client-render/src/sculk.rs::Data::schedule	
 TestBlockEntity	missing		minor: game-test block entity; reset, trigger and logging are not ported, NBT only
 TestInstanceBlockEntity	missing		minor: game-test structure tooling; export and chunk forcing are not ported
 TrialSpawnerConfig.calculateTargetSimultaneousMobs	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialConfig::target_simultaneous_mobs	
@@ -204,7 +204,7 @@ LinearPalette	skip:java		palette storage; Horizon's chunk.rs keeps block ids in 
 PalettedContainerFactory	skip:java		factory for palette storage; Horizon's chunk.rs keeps block ids in plain arrays
 SingleValuePalette	skip:java		palette storage; Horizon's chunk.rs keeps block ids in plain arrays
 UpgradeData	missing		unsure: minor: block upgrades of old chunks on load are not ported
-ChunkDependencies.getRadiusOf	inline	crates/horizon-client/src/streaming.rs::Ranges::margins	fixed margins instead of a per-status radius
+ChunkDependencies.getRadiusOf	inline	crates/horizon-client-render/src/streaming.rs::Ranges::margins	fixed margins instead of a per-status radius
 ChunkPyramid.Builder	skip:java		builder for the status pyramid; Horizon uses fixed margins
 ChunkStatusTasks.buildTerrain	inline	crates/horizon-world/src/worldgen/generator.rs::Pipeline::generate_with_context	terrain pass
 ChunkStatusTasks.collectPossibleBiomes	inline	crates/horizon-world/src/worldgen/generator.rs::Pipeline::biome_chunk	biome set folded into the biome pass
@@ -214,11 +214,11 @@ ChunkStatusTasks.generateFeatures	port	crates/horizon-world/src/worldgen/generat
 ChunkStatusTasks.generateSpawn	port	crates/horizon-world/src/worldgen/spawn_finder.rs::find_spawn_position	
 ChunkStatusTasks.generateStructureReferences	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::references	
 ChunkStatusTasks.generateStructureStarts	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::starts_at	
-ChunkStatusTasks.initializeLight	port	crates/horizon-client/src/light.rs::light_chunk	
+ChunkStatusTasks.initializeLight	port	crates/horizon-client-render/src/light.rs::light_chunk	
 ChunkStatusTasks.isLighted	skip:other		status check; streaming tracks which chunks are lit
-ChunkStep.apply	inline	crates/horizon-client/src/streaming.rs::Streaming::update	stage advance
-ChunkStep.completeChunkGeneration	inline	crates/horizon-client/src/streaming.rs::Streaming::update	final stage hand-over
-ChunkStep.getAccumulatedRadiusOf	inline	crates/horizon-client/src/streaming.rs::Ranges::margins	fixed margins
+ChunkStep.apply	inline	crates/horizon-client-render/src/streaming.rs::Streaming::update	stage advance
+ChunkStep.completeChunkGeneration	inline	crates/horizon-client-render/src/streaming.rs::Streaming::update	final stage hand-over
+ChunkStep.getAccumulatedRadiusOf	inline	crates/horizon-client-render/src/streaming.rs::Ranges::margins	fixed margins
 ChunkStep.Builder	skip:java		builder for chunk steps
 ChunkIOErrorReporter.createMisplacedChunkReport	skip:other		report text for a chunk saved at another position; Horizon logs its own load error
 RecreatingSimpleRegionStorage	skip:java		close: Rust closes the file on drop

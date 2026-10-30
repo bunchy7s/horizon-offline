@@ -1,0 +1,36 @@
+name: pr labels
+# A pull request's kind label (the box ticked in the template) and area labels (the paths it changes):
+# tools/ci/pr_labels.py, CONTRIBUTING.md "Pull requests".
+#
+# Why no pull request's code runs here, though `pull_request_target` gives a token that can write to fork PRs:
+# - `pull_request_target` runs this file and the script from main, never the pull request's copy.
+# - It checks out main's script only (`ref: main`), never the pull request's head or merge commit.
+# - The script reads the event file (the description is data in JSON, never in a shell line) and the API's list of
+#   changed file names; it runs, builds and imports nothing of theirs. The token writes labels only.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  label:
+    # Title-only edits change nothing: skip them before a runner starts.
+    if: github.event.action != 'edited' || github.event.changes.body != null
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          sparse-checkout: |
+            tools/ci/pr_labels.py
+          sparse-checkout-cone-mode: false
+      - name: Label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: python3 tools/ci/pr_labels.py event

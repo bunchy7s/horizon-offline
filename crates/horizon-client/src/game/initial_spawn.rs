@@ -110,7 +110,17 @@ impl Game<'_> {
         while let Some((dx, dz)) = self.spawn_spiral.current() {
             if self.spawn_spiral.tested() {
                 let (cx, cz) = (ox + dx, oz + dz);
-                if !self.streaming.is_lit(cx, cz) {
+                if self.standalone_server() {
+                    // getChunk(FULL) of the tested chunk alone: its 3x3 is decorated.
+                    if !self.world.chunks.contains_key(&(cx, cz)) {
+                        let area = [((cx, cz), -1)];
+                        if self.streaming.extra != area {
+                            self.streaming.extra = area.to_vec();
+                            self.streaming.rank_full_task(cx, cz);
+                        }
+                        return Ok(None);
+                    }
+                } else if !self.streaming.is_lit(cx, cz) {
                     self.streaming.center = (cx, cz);
                     return Ok(None);
                 }

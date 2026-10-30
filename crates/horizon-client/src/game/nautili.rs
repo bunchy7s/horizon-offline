@@ -140,6 +140,8 @@ impl Game<'_> {
             m.extra.in_love = 600;
             m.extra.love_player = true;
             let sound = nautilus::eat_sound(m);
+            let id = m.id;
+            self.love_cause.insert(id, self.lan_acting);
             self.use_nautilus_food(item);
             self.nautilus_sound(index, sound);
             // Animal.setInLove: entity event 18.

@@ -19,7 +19,7 @@ Turtle.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	HA
 Turtle.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	home_pos and has_egg written here
 Turtle.checkTurtleSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Turtle arm: below sea+4, sand, bright
 Turtle.createAttributes	skip:data		attribute values come from data tables (attr lookups in mobs.rs)
-Turtle.getAmbientSound	port	crates/horizon-client/src/mobs/ai.rs::ambient_sound	gap: player: turtles in water or babies also play the land ambient (no Turtle arm; vanilla is silent there)
+Turtle.getAmbientSound	port	crates/horizon-client/src/mobs/ai.rs::turtle_ambient_silent	silent in water, in the air and as a baby
 Turtle.playStepSound	port	crates/horizon-client/src/mobs/ai.rs::step_sound	shamble and shamble_baby at 0.15 volume
 Turtle.travelInWater	missing		player: turtles swim with generic fluid travel (0.02 base speed, 0.8 vertical drag), not 0.1 move speed, 0.9 drag and the slow sink
 Turtle.TurtleLayEggGoal.isValidTarget	port	crates/horizon-client/src/mobs/turtle.rs::LayEgg::valid	air above and sand below

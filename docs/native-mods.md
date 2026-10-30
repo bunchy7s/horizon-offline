@@ -30,7 +30,7 @@ on any Horizon whose version is the one it needs or a later one. Its `horizon` i
 pin, else on the installed version's commit (the game the player plays), after checking that commit's
 `NATIVE_HOOKS_API` (read from GitHub) is at least the mod's; when it isn't and nothing pins, it builds on the commit the
 mod was tested on. In its own copy of the mod it sets `horizon_revision` to the commit it builds on. Horizon's
-official mods (Zoom, FPS counter, Keystrokes, Minimap, Recipes) are made this way, so any of them build together
+own native mods (Zoom, FPS counter, Keystrokes, Minimap; horizon-rust/horizon-mods, `native/<name>/`) are made this way, so any of them build together
 with no re-release for each Nightly. The `mods` feature (WebAssembly mods) is passed to the build only when the source has it.
 
 API 2 adds the item panel beside container screens and its recipe pages (`native_panel_items`,
@@ -121,8 +121,9 @@ Only the native builds an instance plays are kept (`native_mods::prune`); `nativ
   versions. The Mods page says who made each one, and "Not made or endorsed by the Horizon project" for any mod not
   Horizon's own.
 - **The registry** (horizon-rust/horizon-mods) lists them as their own kind, `native-mod`, only after a maintainer
-  has read the source: the `.hnmod` *is* the source (only `.rs` and `.toml`, checked without running anything),
-  pinned by SHA-256 like every registry file. An update is reviewed again; `revoked.toml` takes one down.
+  has read the source: the `.hnmod` contains `.rs` and `.toml` files and may contain data files under
+  `mixins/<id>/data/`. The launcher checks the bundle without running anything. Native code is trusted.
+  The file is pinned by SHA-256 like every registry file. An update is reviewed again; `revoked.toml` takes one down.
   A WebAssembly mod's entry may turn `native-mod` once (never back): its `.hmod` versions stay published and
   are checked as `.hmod`s, the index lists only its `.hnmod` versions, and the launcher's update keeps the
   player's `.hmod` (the game runs it until a native build has the mod, then skips it); removing the mod removes both.
@@ -141,3 +142,12 @@ Only the native builds an instance plays are kept (`native_mods::prune`); `nativ
 
 - Rebuild after the mods or the Nightly change (asking first, as it compiles for minutes).
 - A prebuilt horizon-mixins from its CI instead of building it on the player's computer.
+
+## Named hook catalog (draft)
+
+`native-hooks.json` maps stable hook names and contract versions to the current
+source targets. A contract includes the signature, call timing and behavior.
+Keep an existing contract or add a new version when it changes incompatibly.
+The catalog does not cover helper methods or arbitrary private game code.
+Named injection resolution needs a matching horizon-mixins change; existing raw
+targets and the `hooks` metadata continue to work as before.

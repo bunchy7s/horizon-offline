@@ -138,8 +138,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
       - name: Build the client, horizon-ctl, horizon-prepare and horizon-server
-        # `horizon-client/mods`: every released game runs code mods (the feature is off in dev builds).
-        run: cargo build --release --locked --features horizon-client/mods -p horizon-client --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+        run: cargo build --release --locked -p horizon-client --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
       - name: Every program the release folder takes was built
         run: |
           for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
@@ -267,9 +266,8 @@ jobs:
         run: |
           set -euo pipefail
           # After the client is packaged: target/release/horizon-client is rebuilt without the audio and
-          # controllers features, so it needs neither libasound nor libudev (minimal server images lack them),
-          # and with code mods like the client.
-          cargo build --release --locked -p horizon-client --no-default-features --features mods --bin horizon-client
+          # controllers features, so it needs neither libasound nor libudev (minimal server images lack them).
+          cargo build --release --locked -p horizon-client --no-default-features --bin horizon-client
           cargo run --locked -p xtask -- package-server target/release/horizon-client "dist/${{ matrix.server_dir }}"
           folder="dist/${{ matrix.server_dir }}"
           python3 tools/check_imports.py --server "$folder/horizon-engine" "$folder/horizon-server" "$folder/horizon-prepare"

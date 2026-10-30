@@ -57,7 +57,7 @@ impl Game<'_> {
         Ok(())
     }
     /// Entity.playEntityOnFireExtinguishedSound
-    fn extinguish_sound(&mut self, at: [f64; 3]) {
+    pub(super) fn extinguish_sound(&mut self, at: [f64; 3]) {
         let r = self.particles.random();
         let pitch = 1.6 + (r.next_float() - r.next_float()) * 0.4;
         self.audio.play(

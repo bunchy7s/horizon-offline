@@ -31,7 +31,7 @@ SulfurCubeArchetypes.register	skip:data		registry registration
 TamableAnimal.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	gap: minor: the flags byte (sitting 1, tame 4) is sent to LAN guests; the owner UUID data is never sent
 TamableAnimal.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	Owner and Sitting for wolf, cat and parrot
 TamableAnimal.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	an owner makes the mob tame (wolf health 40), Sitting restored; old owner-name conversion is not done
-TamableAnimal.handleEntityEvent	port	crates/horizon-client/src/particles.rs::entity_event_burst	event 7 hearts, event 6 smoke, seven particles
+TamableAnimal.handleEntityEvent	port	crates/horizon-client-render/src/particles.rs::entity_event_burst	event 7 hearts, event 6 smoke, seven particles
 TamableAnimal.isTame	skip:other		a field: Mob.extra.tame
 TamableAnimal.setInSittingPose	skip:other		a field: Mob.extra.sitting, set by the sit goals and interactions
 TamableAnimal.tame	inline	crates/horizon-client/src/game/creatures.rs::interact_mob	wolf (bone, 1 in 3), cat and parrot set tame, owner and sitting in their interaction arms, then the tame_animal trigger; mobs/tame.rs::set_tame gives the wolf 40 health

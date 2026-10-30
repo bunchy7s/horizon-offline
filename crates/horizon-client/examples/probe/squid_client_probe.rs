@@ -36,7 +36,7 @@ pub fn main() -> Result<()> {
             aquatic::squid_cycle_event(&mut mob);
         }
         let velocity = mob.velocity;
-        aquatic::squid_client_step(&mut mob);
+        aquatic::squid_client_step(&mut mob, &mut Vec::new());
         assert_eq!(
             velocity, mob.velocity,
             "a remote animation must preserve packet velocity"

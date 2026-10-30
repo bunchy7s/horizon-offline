@@ -16,8 +16,8 @@ is off: nothing leaves the machine.
     python3 tools/test_friends.py --client target/fast/horizon-client --relay target/fast/horizon-relay
 
 The host runs on its integrated server thread by default (the window is a
-client of it). `--in-frame` compares the fallback; `--server-thread` is accepted
-for compatibility.
+client of it). `--in-frame` is DEPRECATED (never use it, it will be removed soon);
+`--server-thread` is accepted for compatibility.
 
 `--role host|guest` runs one side only (two machines, e.g. over a tailnet):
 the host prints the code, the guest takes it with `--code` (`--relay-url`
@@ -31,6 +31,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
@@ -377,12 +378,14 @@ def main():
     mode.add_argument('--server-thread', dest='server_thread', action='store_true', default=True,
                       help='host on its server thread (default; retained for existing callers)')
     mode.add_argument('--in-frame', dest='server_thread', action='store_false',
-                      help='host the world in the window, for comparison')
+                      help='DEPRECATED, never use: unsupported, will be removed soon')
     parser.add_argument('--xvfb', action='store_true', help='run the games under xvfb-run (headless Linux)')
     args = parser.parse_args()
     Game.prefix = ['xvfb-run', '-a'] if args.xvfb else []
     Game.extra = ['--offscreen'] if args.offscreen else []
     Game.server_thread = args.server_thread
+    if not args.server_thread:
+        print('DEPRECATED: --in-frame is unsupported and will be removed soon. Do not use it.', file=sys.stderr)
     args.client, args.resources = args.client.resolve(), args.resources.resolve()
     try:
         require_server_reports(args.resources)

@@ -9,15 +9,15 @@ OitRenderPassProvider.createDepthBoundsPass	missing		minor: opt-in Improved Tran
 OitRenderPassProvider.createTransmittancePass	missing		minor: opt-in Improved Transparency (off by default), no OIT pipelines or passes in Horizon
 OitRenderPassProvider.createAccumulatePass	missing		minor: opt-in Improved Transparency (off by default), no OIT pipelines or passes in Horizon
 PreparedRenderType.drawFromBufferOit	missing		minor: opt-in Improved Transparency (off by default), no OIT pipelines or passes in Horizon
-PreparedRenderType.draw	inline	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	gap: minor: the indexed draw runs in the gfx/ pass modules that draw_frame calls; RenderSetup scissor not seen
+PreparedRenderType.draw	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	gap: minor: the indexed draw runs in the gfx/ pass modules that draw_frame calls; RenderSetup scissor not seen
 RenderSetup.toString	skip:debug		
-RenderSetup.prepareTextures	inline	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	overlay and lightmap samplers are bound per pass in gfx/
+RenderSetup.prepareTextures	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	overlay and lightmap samplers are bound per pass in gfx/
 RenderSetup.RenderSetupBuilder.withTexture	skip:java		builder
 RenderSetup.RenderSetupBuilder.setOutline	skip:java		builder setter; outline behaviour is in gfx/entity_outline.rs
 RenderSetup.RenderSetupBuilder.createRenderSetup	skip:java		builder
 RenderType.calculateHasBlending	skip:other		blend flag from the pipeline colour targets; Horizon picks blend per pipeline in gfx.rs
-RenderType.prepare	inline	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	gap: minor: texture and overlay/lightmap binding folded into the frame passes
-RenderType.writeDynamicTransforms	inline	crates/horizon-client/src/gfx.rs::Renderer::draw_frame	gap: minor: no per-render-type layering offset found (only perspective layering scale)
+RenderType.prepare	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	gap: minor: texture and overlay/lightmap binding folded into the frame passes
+RenderType.writeDynamicTransforms	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	gap: minor: no per-render-type layering offset found (only perspective layering scale)
 RenderTypes.createMovingBlockSetup	inline	crates/horizon-client/src/game/moving_pistons.rs::Game::moving_piston_geometry	block atlas and lightmap for moving blocks; gap: minor: crumbling and outline flags not checked here
 RenderTypes.breezeWind	inline	crates/horizon-client/src/mobs/render.rs::layers	gap: player: the breeze wind layer does not scroll; the UV offset is not applied (render.rs comment)
 BannerSpecialRenderer.submit	port	crates/horizon-client/src/item_render/special.rs::submit	Banner arm: flag, base and up to 16 pattern layers
@@ -41,7 +41,7 @@ DecoratedPotSpecialRenderer.submit	port	crates/horizon-client/src/item_render/sp
 EndCubeSpecialRenderer.Unbaked.bake	missing		minor: no bundled item uses the end cube model (special.rs notes it), so no end portal or gateway effect in hand
 PlayerHeadSpecialRenderer.submit	port	crates/horizon-client/src/item_render/special.rs::submit	PlayerHead arm
 PlayerHeadSpecialRenderer.getExtents	port	crates/horizon-client/src/item_render/special.rs::extents	PlayerHead arm
-PlayerHeadSpecialRenderer.extractArgument	port	crates/horizon-client/src/skins.rs::head_skin	profile to skin lookup
+PlayerHeadSpecialRenderer.extractArgument	port	crates/horizon-client-render/src/skins.rs::head_skin	profile to skin lookup
 PlayerHeadSpecialRenderer.Unbaked.bake	inline	crates/horizon-client/src/item_render/special.rs::load_parts	models are baked once from entity-models.json
 ShieldSpecialRenderer.getExtents	port	crates/horizon-client/src/item_render/special.rs::extents	Shield arm
 ShieldSpecialRenderer.Unbaked.bake	inline	crates/horizon-client/src/item_render/special.rs::load_parts	models are baked once from entity-models.json
@@ -89,50 +89,50 @@ TiledBlitRenderState.buildVertices	skip:ui		GUI tiled draw geometry
 TiledBlitRenderState.getBounds	skip:ui		GUI draw bounds
 PictureInPictureRenderState.getBounds	skip:ui		GUI draw bounds
 LevelRenderState.reset	skip:java		per-frame state clear
-ParticlesRenderState.submit	inline	crates/horizon-client/src/particles.rs::ParticleEngine::render	submits particle groups; draws in render
+ParticlesRenderState.submit	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::render	submits particle groups; draws in render
 PlayerRenderState.reset	skip:java		per-frame state clear
-QuadParticleRenderState.add	port	crates/horizon-client/src/particles.rs::ParticleEngine::add	quad particle queued per layer
-QuadParticleRenderState.buildLayer	port	crates/horizon-client/src/particles.rs::ParticleEngine::render	per-layer quad build and draw
-QuadParticleRenderState.renderVertex	inline	crates/horizon-client/src/particles.rs::ParticleEngine::render	vertex math inside the render rotated quad
-QuadParticleRenderState.Storage.add	port	crates/horizon-client/src/particles.rs::ParticleEngine::push	store one quad particle
-QuadParticleRenderState.Storage.forEachParticle	inline	crates/horizon-client/src/particles.rs::ParticleEngine::render	iterates stored particles in render
+QuadParticleRenderState.add	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::add	quad particle queued per layer
+QuadParticleRenderState.buildLayer	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::render	per-layer quad build and draw
+QuadParticleRenderState.renderVertex	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::render	vertex math inside the render rotated quad
+QuadParticleRenderState.Storage.add	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::push	store one quad particle
+QuadParticleRenderState.Storage.forEachParticle	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::render	iterates stored particles in render
 QuadParticleRenderState.Storage.grow	skip:java		array capacity growth
 WeatherRenderState.reset	skip:java		per-frame state clear
 AbstractTexture.releaseTextures	skip:java		GPU handle release; Rust drop
 AbstractTexture.getTexture	skip:java		accessor
 AbstractTexture.getTextureView	skip:java		accessor
-CubeMapTexture.loadContents	port	crates/horizon-client/src/gfx/panorama.rs::Faces::try_load	six faces read, flipped and stacked
-CubeMapTexture.doLoad	port	crates/horizon-client/src/gfx/panorama.rs::Panorama::new	cube texture creation and upload
+CubeMapTexture.loadContents	port	crates/horizon-client-render/src/gfx/panorama.rs::Faces::try_load	six faces read, flipped and stacked
+CubeMapTexture.doLoad	port	crates/horizon-client-render/src/gfx/panorama.rs::Panorama::new	cube texture creation and upload
 DynamicAtlasTree.insertInner	skip:other		dynamic atlas packing; Horizon uses texture-array layers, not a rectangle packer
 DynamicTexture.createTexture	skip:other		GPU texture creation for CPU pixels; Horizon has no DynamicTexture class
-DynamicTexture.upload	port	crates/horizon-client/src/gfx.rs::Renderer::update_lightmap	gap: minor: only the lightmap upload goes through here
+DynamicTexture.upload	port	crates/horizon-client-render/src/gfx.rs::Renderer::update_lightmap	gap: minor: only the lightmap upload goes through here
 DynamicTexture.dumpContents	skip:debug		dump debug action
-MipmappedTexture.setSampler	port	crates/horizon-client/src/screen_effects.rs::sampling	gap: minor: only blur and clamp bits; filters fixed in gfx
-MipmappedTexture.doLoad	port	crates/horizon-client/src/mipmap.rs::generate	mip chain generation
-MipmappedTexture.clampMipLevel	port	crates/horizon-client/src/sprites.rs::sprite_mipmap_limit	mip level cap from texture size
-MissingTextureAtlasSprite.create	port	crates/horizon-client/src/sprites.rs::Sprites::insert	generated magenta and black missing texture
+MipmappedTexture.setSampler	port	crates/horizon-client-render/src/screen_effects.rs::sampling	gap: minor: only blur and clamp bits; filters fixed in gfx
+MipmappedTexture.doLoad	port	crates/horizon-client-render/src/mipmap.rs::generate	mip chain generation
+MipmappedTexture.clampMipLevel	port	crates/horizon-client-render/src/sprites.rs::sprite_mipmap_limit	mip level cap from texture size
+MissingTextureAtlasSprite.create	port	crates/horizon-client-render/src/sprites.rs::Sprites::insert	generated magenta and black missing texture
 OverlayTexture.pack	skip:other		packs u and v into one int for vertex data; overlay.rs::living uses one code
-ReloadableTexture.apply	inline	crates/horizon-client/src/sprites.rs::Sprites::load	gap: minor: sampler flags read from the texture section; upload happens later in gfx
-ReloadableTexture.doLoad	inline	crates/horizon-client/src/sprites.rs::Sprites::finish	gap: minor: lays out layers; the GPU upload is in gfx
-SkinTextureDownloader.downloadAndRegisterSkin	port	crates/horizon-client/src/skins.rs::Downloader::state	starts the skin download and decode
-SkinTextureDownloader.downloadSkin	port	crates/horizon-client/src/skins.rs::Downloader::state	disk cache read or HTTP fetch with cache write, in the spawned thread
-SkinTextureDownloader.registerTextureInManager	inline	crates/horizon-client/src/skins.rs::Downloader::queue	ready skin queued for the atlas upload
-SkinTextureDownloader.doNotchTransparencyHack	inline	crates/horizon-client/src/skins.rs::process_legacy_skin	hat layer cleared when fully opaque
-SkinTextureDownloader.setNoAlpha	inline	crates/horizon-client/src/skins.rs::process_legacy_skin	legacy skin regions made opaque
-SpriteContents.increaseMipLevel	port	crates/horizon-client/src/mipmap.rs::generate	mip chain generation
-SpriteContents.createAnimatedTexture	port	crates/horizon-client/src/sprites.rs::Sprites::load	animation frames from mcmeta
-SpriteContents.createAnimationState	inline	crates/horizon-client/src/sprites.rs::Sprites::finish	animation frames laid out per layer
+ReloadableTexture.apply	inline	crates/horizon-client-render/src/sprites.rs::Sprites::load	gap: minor: sampler flags read from the texture section; upload happens later in gfx
+ReloadableTexture.doLoad	inline	crates/horizon-client-render/src/sprites.rs::Sprites::finish	gap: minor: lays out layers; the GPU upload is in gfx
+SkinTextureDownloader.downloadAndRegisterSkin	port	crates/horizon-client-render/src/skins.rs::Downloader::state	starts the skin download and decode
+SkinTextureDownloader.downloadSkin	port	crates/horizon-client-render/src/skins.rs::Downloader::state	disk cache read or HTTP fetch with cache write, in the spawned thread
+SkinTextureDownloader.registerTextureInManager	inline	crates/horizon-client-render/src/skins.rs::Downloader::queue	ready skin queued for the atlas upload
+SkinTextureDownloader.doNotchTransparencyHack	inline	crates/horizon-client-render/src/skins.rs::process_legacy_skin	hat layer cleared when fully opaque
+SkinTextureDownloader.setNoAlpha	inline	crates/horizon-client-render/src/skins.rs::process_legacy_skin	legacy skin regions made opaque
+SpriteContents.increaseMipLevel	port	crates/horizon-client-render/src/mipmap.rs::generate	mip chain generation
+SpriteContents.createAnimatedTexture	port	crates/horizon-client-render/src/sprites.rs::Sprites::load	animation frames from mcmeta
+SpriteContents.createAnimationState	inline	crates/horizon-client-render/src/sprites.rs::Sprites::finish	animation frames laid out per layer
 SpriteContents.getAdditionalMetadata	skip:java		generic metadata lookup
 SpriteContents.close	skip:java		image release; Rust drop
 SpriteContents.toString	skip:debug		
-SpriteContents.isTransparent	inline	crates/horizon-client/src/sprites.rs::Sprites::region_opaque	gap: minor: single-texel alpha query is not kept; region_opaque tests alpha 255 over a UV box
-SpriteContents.uploadFirstFrame	inline	crates/horizon-client/src/sprites.rs::Sprites::finish	first frame copied into the layer pixels
-SpriteContents.AnimatedTexture.createAnimationState	inline	crates/horizon-client/src/sprites.rs::Sprites::finish	animation frames laid out per layer
+SpriteContents.isTransparent	inline	crates/horizon-client-render/src/sprites.rs::Sprites::region_opaque	gap: minor: single-texel alpha query is not kept; region_opaque tests alpha 255 over a UV box
+SpriteContents.uploadFirstFrame	inline	crates/horizon-client-render/src/sprites.rs::Sprites::finish	first frame copied into the layer pixels
+SpriteContents.AnimatedTexture.createAnimationState	inline	crates/horizon-client-render/src/sprites.rs::Sprites::finish	animation frames laid out per layer
 SpriteContents.AnimationState.needsToDraw	skip:java		redraw skip optimisation
 SpriteContents.AnimationState.close	skip:java		frame texture release; Rust drop
-SpriteLoader.stitch	port	crates/horizon-client/src/sprites.rs::sprite_mipmap_limit	gap: minor: atlas stitching replaced by one texture-array layer per sprite
+SpriteLoader.stitch	port	crates/horizon-client-render/src/sprites.rs::sprite_mipmap_limit	gap: minor: atlas stitching replaced by one texture-array layer per sprite
 SpriteLoader.runSpriteSuppliers	skip:java		parallel sprite loading
-SpriteLoader.loadAndStitch	inline	crates/horizon-client/src/sprites.rs::Sprites::insert	gap: minor: sprites are read on first use, not as one batch
+SpriteLoader.loadAndStitch	inline	crates/horizon-client-render/src/sprites.rs::Sprites::insert	gap: minor: sprites are read on first use, not as one batch
 SpriteLoader.getStitchedSprites	skip:other		maps sprites to atlas rectangles; Horizon uses array layers
 Stitcher.registerSprite	skip:other		atlas rectangle packing; Horizon uses one texture-array layer per sprite
 Stitcher.stitch	skip:other		atlas rectangle packing; Horizon uses one texture-array layer per sprite

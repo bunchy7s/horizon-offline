@@ -16,8 +16,9 @@ pub struct StackData {
     pub stored_enchantments: Levels,
     /// `minecraft:repair_cost` (anvil prior-work penalty).
     pub repair_cost: u32,
-    /// `minecraft:custom_name` as plain text.
-    pub custom_name: Option<String>,
+    /// The original `minecraft:custom_name` component; plain text is derived
+    /// when gameplay needs it, so styled names have one source of truth.
+    pub custom_name: Option<Tag>,
     /// `minecraft:potion_contents.potion`.
     pub potion: Option<Arc<str>>,
     /// `minecraft:trim`: (material, pattern).
@@ -120,23 +121,25 @@ const MODELLED: &[&str] = &[
     "minecraft:written_book_content",
 ];
 impl StackData {
-    /// An unmodelled component's saved value.
+    pub fn custom_name_plain(&self) -> Option<String> {
+        self.custom_name.as_ref().and_then(read_text)
+    }
+
+    /// A preserved component's saved value.
     pub fn other(&self, id: &str) -> Option<&Tag> {
+        if id == "minecraft:custom_name" {
+            return self.custom_name.as_ref();
+        }
         self.other.iter().find(|(k, _)| k == id).map(|(_, v)| v)
     }
-    /// `SetNameFunction.run`: a loot text component stored as `custom_name`
-    /// (plain text, as modelled) or as the unmodelled `item_name`.
+    /// `SetNameFunction.run`: retain a loot name as its original component.
     pub fn set_loot_name(&mut self, id: &str, text: &serde_json::Value) {
         let tag = horizon_client_core::scoreboard::json_to_tag(text);
-        if id == "minecraft:custom_name" {
-            self.custom_name = read_text(&tag);
-        } else {
-            self.set_other(id, Some(tag));
-        }
+        self.set_other(id, Some(tag));
     }
     /// `SetComponentsFunction`: one component of a loot patch, in its JSON
-    /// form. Trim is modelled, a custom name is text, the rest are kept as
-    /// saved. A null value removes the component.
+    /// form. Trim is modelled; the rest keep their saved components.
+    /// A null value removes the component.
     pub fn set_loot_component(&mut self, id: &str, value: &serde_json::Value) {
         let tag = (!value.is_null()).then(|| horizon_client_core::scoreboard::json_to_tag(value));
         match id {
@@ -148,17 +151,45 @@ impl StackData {
                     _ => None,
                 };
             }
-            "minecraft:custom_name" => self.custom_name = tag.as_ref().and_then(read_text),
             _ => self.set_other(id, tag),
         }
     }
-    /// Set (or with None remove) an unmodelled component.
+    /// Set (or with None remove) a preserved component.
     pub fn set_other(&mut self, id: &str, value: Option<Tag>) {
         self.other.retain(|(k, _)| k != id);
+        if id == "minecraft:custom_name" {
+            self.custom_name = value
+                .filter(|tag| read_text(tag).is_some())
+                .map(collapsed_text);
+            return;
+        }
         if let Some(v) = value {
             self.other.push((id.to_owned(), v));
             self.other.sort_by(|a, b| a.0.cmp(&b.0));
         }
+    }
+    /// `DebugStickState.properties().get(block)`: the property selected for
+    /// `block` in `minecraft:debug_stick_state`.
+    pub fn debug_stick_property(&self, block: &str) -> Option<String> {
+        let Tag::Compound(map) = self.other("minecraft:debug_stick_state")? else {
+            return None;
+        };
+        match map.get(&JavaString::from(block))? {
+            Tag::String(property) => Some(property.to_string_lossy()),
+            _ => None,
+        }
+    }
+    /// `DebugStickState.withProperty(block, property)`.
+    pub fn set_debug_stick_property(&mut self, block: &str, property: &str) {
+        let mut map = match self.other("minecraft:debug_stick_state") {
+            Some(Tag::Compound(map)) => map.clone(),
+            _ => Default::default(),
+        };
+        map.insert(
+            JavaString::from(block),
+            Tag::String(JavaString::from(property)),
+        );
+        self.set_other("minecraft:debug_stick_state", Some(Tag::Compound(map)));
     }
 }
 /// `Raid.getBannerComponentPatch`: the ominous banner's pattern layers.
@@ -289,8 +320,8 @@ impl ItemStack {
     pub fn repair_cost(&self) -> u32 {
         self.data().map_or(0, |d| d.repair_cost)
     }
-    pub fn custom_name(&self) -> Option<&str> {
-        self.data().and_then(|d| d.custom_name.as_deref())
+    pub fn custom_name(&self) -> Option<String> {
+        self.data()?.custom_name_plain()
     }
     /// `minecraft:item_name` in the current language (`getItemName`'s
     /// component). It stays in the patch as loaded, so a translatable name
@@ -415,6 +446,25 @@ fn read_text(t: &Tag) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// `Component.tryCollapseToString`: `ComponentSerialization.CODEC` writes
+/// plain text with no style and no siblings as a bare string.
+fn collapsed_text(tag: Tag) -> Tag {
+    if let Tag::Compound(map) = &tag
+        && let Some(Tag::String(text)) = tag.get("text")
+        && map
+            .iter()
+            .all(|(key, value)| match key.to_string_lossy().as_str() {
+                "text" => true,
+                "type" => matches!(value, Tag::String(s) if s.to_string_lossy() == "text"),
+                "extra" => matches!(value, Tag::List(l) if l.is_empty()),
+                _ => false,
+            })
+    {
+        return Tag::String(text.clone());
+    }
+    tag
 }
 
 /// A `FireworkExplosion` as vanilla's codec writes it (defaults omitted).
@@ -591,7 +641,7 @@ pub fn components_tag(damage: u32, data: Option<&StackData>) -> Option<Tag> {
             entries.push(("minecraft:repair_cost", Tag::Int(d.repair_cost as i32)));
         }
         if let Some(name) = &d.custom_name {
-            entries.push(("minecraft:custom_name", Tag::String(name.as_str().into())));
+            entries.push(("minecraft:custom_name", name.clone()));
         }
         if let Some(potion) = &d.potion {
             entries.push((
@@ -797,7 +847,11 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             .and_then(int)
             .unwrap_or(0)
             .max(0) as u32,
-        custom_name: c.get("minecraft:custom_name").and_then(read_text),
+        custom_name: c
+            .get("minecraft:custom_name")
+            .filter(|tag| read_text(tag).is_some())
+            .cloned()
+            .map(collapsed_text),
         potion,
         map_id: c.get("minecraft:map_id").and_then(int).map(|v| v as i32),
         banner_patterns: crate::banner_layer::layers_from_nbt(c.get("minecraft:banner_patterns")),
@@ -975,7 +1029,7 @@ mod tests {
         stack.enchant("minecraft:sharpness", 3);
         stack.enchant("minecraft:unbreaking", 2);
         stack.data_mut().repair_cost = 3;
-        stack.data_mut().custom_name = Some("Blade".into());
+        stack.data_mut().custom_name = Some(Tag::String("Blade".into()));
         let tag = encode_components(&stack).expect("components");
         let (damage, extra) = decode_components(Some(&tag));
         assert_eq!(damage, 12);
@@ -987,7 +1041,7 @@ mod tests {
         assert_eq!(back.enchantment_level("minecraft:sharpness"), 3);
         assert_eq!(back.enchantment_level("minecraft:unbreaking"), 2);
         assert_eq!(back.repair_cost(), 3);
-        assert_eq!(back.custom_name(), Some("Blade"));
+        assert_eq!(back.custom_name().as_deref(), Some("Blade"));
     }
 
     #[test]
@@ -1021,9 +1075,115 @@ mod tests {
         let components = Tag::compound([("minecraft:custom_name", name)]);
         let (_, extra) = decode_components(Some(&components));
         assert_eq!(
-            extra.and_then(|d| d.custom_name.clone()).as_deref(),
+            extra.and_then(|d| d.custom_name_plain()).as_deref(),
             Some("Games Right click")
         );
+    }
+
+    #[test]
+    fn plain_custom_name_is_saved_as_a_string() {
+        // Component.tryCollapseToString: `{text:"Cool"}` is written "Cool";
+        // a style or a sibling keeps the compound.
+        let decode = |name: Tag| {
+            let components = Tag::compound([("minecraft:custom_name", name)]);
+            decode_components(Some(&components)).1.unwrap().custom_name
+        };
+        let plain = Tag::compound([("text", Tag::String("Cool".into()))]);
+        assert_eq!(decode(plain), Some(Tag::String("Cool".into())));
+        let styled = Tag::compound([
+            ("text", Tag::String("Cool".into())),
+            ("color", Tag::String("red".into())),
+        ]);
+        assert_eq!(decode(styled.clone()), Some(styled));
+        let mut data = StackData::default();
+        data.set_other(
+            "minecraft:custom_name",
+            Some(Tag::compound([("text", Tag::String("Loot".into()))])),
+        );
+        assert_eq!(data.custom_name, Some(Tag::String("Loot".into())));
+    }
+
+    #[test]
+    fn rich_custom_name_is_the_single_saved_value_after_rename() {
+        let name = Tag::compound([
+            ("text", Tag::String("".into())),
+            (
+                "extra",
+                Tag::List(vec![
+                    Tag::compound([
+                        ("text", Tag::String("A".into())),
+                        ("color", Tag::String("#ff0000".into())),
+                    ]),
+                    Tag::compound([
+                        ("text", Tag::String("B".into())),
+                        ("color", Tag::String("#0000ff".into())),
+                    ]),
+                ]),
+            ),
+        ]);
+        let components = Tag::compound([("minecraft:custom_name", name.clone())]);
+        let (_, extra) = decode_components(Some(&components));
+        let mut stack = ItemStack {
+            extra,
+            ..ItemStack::new("minecraft:stick", 1)
+        };
+        assert_eq!(stack.custom_name().as_deref(), Some("AB"));
+        assert_eq!(encode_components(&stack), Some(components));
+        stack
+            .data_mut()
+            .set_other("minecraft:custom_name", Some(Tag::String("Changed".into())));
+        assert_eq!(stack.custom_name().as_deref(), Some("Changed"));
+        assert_eq!(
+            encode_components(&stack)
+                .unwrap()
+                .get("minecraft:custom_name"),
+            Some(&Tag::String("Changed".into()))
+        );
+    }
+
+    #[test]
+    fn loot_name_preserves_plain_and_styled_components() {
+        let mut stack = ItemStack::new("minecraft:stone", 1);
+        stack
+            .data_mut()
+            .set_loot_name("minecraft:custom_name", &serde_json::json!("Rock"));
+        assert_eq!(
+            encode_components(&stack)
+                .unwrap()
+                .get("minecraft:custom_name"),
+            Some(&Tag::String("Rock".into()))
+        );
+        let styled = serde_json::json!({"text": "Rock", "color": "red"});
+        stack
+            .data_mut()
+            .set_loot_name("minecraft:custom_name", &styled);
+        assert_eq!(
+            encode_components(&stack)
+                .unwrap()
+                .get("minecraft:custom_name"),
+            Some(&horizon_client_core::scoreboard::json_to_tag(&styled))
+        );
+    }
+
+    #[test]
+    fn loot_component_keeps_a_styled_custom_name() {
+        let name = serde_json::json!({"text":"Prize","color":"#ff8800"});
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack
+            .data_mut()
+            .set_loot_component("minecraft:custom_name", &name);
+        assert_eq!(stack.custom_name().as_deref(), Some("Prize"));
+        let expected = horizon_client_core::scoreboard::json_to_tag(&name);
+        assert_eq!(
+            encode_components(&stack)
+                .unwrap()
+                .get("minecraft:custom_name"),
+            Some(&expected)
+        );
+        stack
+            .data_mut()
+            .set_loot_component("minecraft:custom_name", &serde_json::Value::Null);
+        assert!(stack.custom_name().is_none());
     }
 
     #[test]
@@ -1138,5 +1298,32 @@ mod tests {
         );
         assert_eq!(explosions[0].colors, vec![0xFF0000]);
         assert!(explosions[0].twinkle && !explosions[0].trail);
+    }
+
+    #[test]
+    fn debug_stick_state_round_trips() {
+        let mut stack = ItemStack::new("minecraft:debug_stick", 1);
+        stack
+            .data_mut()
+            .set_debug_stick_property("minecraft:oak_stairs", "facing");
+        stack
+            .data_mut()
+            .set_debug_stick_property("minecraft:oak_stairs", "half");
+        stack
+            .data_mut()
+            .set_debug_stick_property("minecraft:stone", "axis");
+
+        let tag = encode_components(&stack).expect("debug stick components");
+        let (_, extra) = decode_components(Some(&tag));
+        let data = extra.expect("debug stick state");
+        assert_eq!(
+            data.debug_stick_property("minecraft:oak_stairs").as_deref(),
+            Some("half")
+        );
+        assert_eq!(
+            data.debug_stick_property("minecraft:stone").as_deref(),
+            Some("axis")
+        );
+        assert_eq!(data.debug_stick_property("minecraft:dirt"), None);
     }
 }

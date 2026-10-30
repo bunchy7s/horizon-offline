@@ -16,6 +16,7 @@ use horizon_client::{
     items::Items,
 };
 use horizon_core::random::LegacyRandom;
+use horizon_world::loot::PackOverlay;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
 use serde_json::Value;
 use std::{
@@ -127,7 +128,7 @@ pub fn main() -> Result<()> {
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry)?;
     let renderer = BlockEntityRenderer::load(root, registry)?;
-    let tags = Items::tags_only(root)?;
+    let tags = Items::tags_only(root, &PackOverlay::NONE)?;
     let frames = tags
         .block_tags
         .get("minecraft:conduit_effect_block")

@@ -64,6 +64,10 @@ pub struct BlockEntities {
     /// Positions whose block entity `take` took and `put` has not brought
     /// back.
     out: FxHashSet<Pos>,
+    /// Positions a loaded chunk gave a new block entity over an old one: at
+    /// the next tick their slot stays only if their block state ticks
+    /// (`updateBlockEntityTicker`: rebind, or remove without a ticker).
+    replaced: FxHashSet<Pos>,
     /// `Ticking` by block state id; empty until the game builds it.
     states: Vec<Ticking>,
 }
@@ -239,15 +243,20 @@ impl BlockEntities {
         self.added.clear();
         self.pending.clear();
         self.out.clear();
+        self.replaced.clear();
         self.freed = false;
     }
     /// A loaded or generated chunk's block entities, in the order the chunk
     /// lists them; they tick in its block entity map's order
-    /// (`registerAllBlockEntitiesAfterLevelLoad`).
+    /// (`registerAllBlockEntitiesAfterLevelLoad`). One replacing an entity
+    /// already at its position (`LevelChunk.setBlockEntity`) drops that one;
+    /// its slot is decided by the block state at the next tick.
     pub fn load_chunk(&mut self, entities: Vec<(Pos, BlockEntity)>) {
         let order = chunk_map_order(entities.iter().map(|(p, _)| *p));
         for (p, e) in entities {
-            self.map.insert(p, e);
+            if self.map.insert(p, e).is_some() {
+                self.replaced.insert(p);
+            }
         }
         for p in order {
             self.add(p);
@@ -290,6 +299,11 @@ impl BlockEntities {
             let slot = self.next();
             self.live.insert(pos, slot);
             Arc::make_mut(&mut self.tickers).push((pos, slot));
+        }
+        for pos in std::mem::take(&mut self.replaced) {
+            if self.live.contains_key(&pos) && self.ticking(state(pos)) != Ticking::Yes {
+                self.cancel(&pos);
+            }
         }
         if !std::mem::take(&mut self.freed) && self.out.is_empty() {
             return Arc::clone(&self.tickers);
@@ -389,5 +403,34 @@ mod tests {
         let many: Vec<Pos> = (0..100).map(|i| (i % 16, i / 16, 3)).collect();
         let order = chunk_map_order(many.iter().copied().chain(many.iter().copied()));
         assert_eq!(order.len(), 100);
+    }
+
+    /// A chunk loaded over a block entity already there: the new one replaces
+    /// it, and keeps the old slot only while its block state ticks.
+    #[test]
+    fn loaded_chunk_replaces_block_entity_by_state() {
+        let mut b = level();
+        let mut s = HashMap::new();
+        let (p, q) = ((0, 0, 0), (1, 0, 0));
+        for pos in [p, q] {
+            s.insert(pos, 1);
+        }
+        // Two chunks, so the order is the order they load in.
+        b.load_chunk(vec![(p, hopper())]);
+        b.load_chunk(vec![(q, hopper())]);
+        assert_eq!(order(&mut b, &s), [p, q]);
+        // Replaced where the state ticks: the slot stays in its place.
+        b.load_chunk(vec![(p, hopper())]);
+        assert_eq!(order(&mut b, &s), [p, q]);
+        // Replaced where the state has no ticker: the slot is freed, and the
+        // new block entity is the one in the map.
+        s.insert(p, 2);
+        b.load_chunk(vec![(p, BlockEntity::Chest(vec![None; 27]))]);
+        assert_eq!(order(&mut b, &s), [q]);
+        assert!(matches!(b.get(&p), Some(BlockEntity::Chest(items)) if items.len() == 27));
+        // Ticking again later appends it, as any new ticker does.
+        s.insert(p, 1);
+        b.state_changed(p, 2, 1);
+        assert_eq!(order(&mut b, &s), [q, p]);
     }
 }

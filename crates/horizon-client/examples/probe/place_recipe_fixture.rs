@@ -10,6 +10,7 @@ use horizon_client::{
     items::Items,
     menu::{Env, Kind, Menu, place::PostPlace},
 };
+use horizon_world::loot::PackOverlay;
 use serde_json::Value;
 use std::{fs, path::Path};
 
@@ -34,9 +35,9 @@ pub fn main() -> horizon_client::Result<()> {
     let root = Path::new(args.get(1).ok_or(usage)?);
     let cases = fs::read_to_string(args.get(2).ok_or(usage)?)?;
     let orders = fs::read_to_string(args.get(3).ok_or(usage)?)?;
-    let items = Items::catalog(root)?;
-    let recipes = Recipes::load(root, &items)?;
-    let brewing = horizon_client::brewing::Brewing::load(root, &items);
+    let items = Items::catalog(root, &PackOverlay::NONE)?;
+    let recipes = Recipes::load(root, &items, &PackOverlay::NONE)?;
+    let brewing = horizon_client::brewing::Brewing::load(root, &items, &PackOverlay::NONE);
     let banners = horizon_client::banner::Banners::default();
     let station_recipes = horizon_client::stations::StationRecipes::default();
     let enchantments = horizon_client::enchant::Enchantments::default();

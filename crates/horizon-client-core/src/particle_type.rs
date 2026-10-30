@@ -55,6 +55,12 @@ particle_types! {
     Rain = "rain",
     Bubble = "bubble",
     SulfurBubbles = "sulfur_bubbles",
+    NoxiousGas = "noxious_gas",
+    NoxiousGasCloud = "noxious_gas_cloud",
+    Geyser = "geyser",
+    GeyserBase = "geyser_base",
+    GeyserPoof = "geyser_poof",
+    GeyserPlume = "geyser_plume",
     BubblePop = "bubble_pop",
     BubbleColumnUp = "bubble_column_up",
     CurrentDown = "current_down",
@@ -149,6 +155,10 @@ impl ParticleType {
         matches!(
             self,
             Self::BlockMarker
+                | Self::Geyser
+                | Self::GeyserBase
+                | Self::GeyserPoof
+                | Self::GeyserPlume
                 | Self::DamageIndicator
                 | Self::ExplosionEmitter
                 | Self::Explosion
@@ -191,6 +201,8 @@ impl ParticleType {
             // SpellParticle.
             | Self::Effect | Self::InstantEffect | Self::EntityEffect
             | Self::Witch | Self::Infested | Self::TrialOmen | Self::RaidOmen
+            // NoxiousGasParticle.
+            | Self::NoxiousGas
             // EmissiveRisingParticle.
             | Self::Soul | Self::SculkSoul
             // SculkChargeParticle, SculkChargePopParticle, ShriekParticle,

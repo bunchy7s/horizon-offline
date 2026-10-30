@@ -17,7 +17,7 @@
 //!   with the server's `ai_step` where the server computes the same.
 use super::{
     Mob, Species, allay, armadillo, axolotl, breeze, camel, copper_golem, creaking, equine, frog,
-    goat, golem, guardian, piglin, ravager, shulker, sniffer, undead, villager, warden,
+    goat, golem, guardian, piglin, ravager, shulker, sniffer, tame, undead, villager, warden,
 };
 
 // `Pose.id` of the poses mobs take.
@@ -93,6 +93,8 @@ pub fn client_tick(m: &mut Mob, game_time: i64) {
         Species::Goat => goat::tick(m),
         s if equine::grazes(s) => equine::client_tick(m),
         Species::Drowned => undead::drowned_client_tick(m),
+        // Wolf.tick (alive only): the begging head tilt follows the synched flag.
+        Species::Wolf if m.alive() => tame::interest_tick(m),
         _ => {}
     }
 }

@@ -422,7 +422,7 @@ fn content_root_loads_with_every_table() {
     assert_eq!(facts.get(iron).hardness, a.hardness);
     assert_eq!(&*facts.get(iron).name, "minecraft:iron_block");
 
-    let items = Items::load(&root, new, &facts).unwrap();
+    let items = Items::load(&root, new, &facts, &PackOverlay::NONE).unwrap();
     let ruby_block = &items.items["ruby:ruby_block"];
     assert_eq!(ruby_block.block, Some(ruby));
     let gem = &items.items["ruby:ruby"];
@@ -531,6 +531,7 @@ fn no_content_keeps_the_base_root() {
     );
 }
 
+use horizon_world::loot::PackOverlay;
 use horizon_world::registry::BlockStateId;
 
 #[test]

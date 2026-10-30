@@ -1,9 +1,0 @@
-id = "far_view"
-name = "Far View"
-version = "1.0.0"
-description = "See much farther: the world past your render distance drawn as simplified distant terrain, out to 1024 chunks, without loading or simulating more chunks."
-authors = ["Horizon"]
-api = "0.1"
-side = "client"
-capabilities = ["render", "ui", "storage"]
-experimental = ["render", "ui"]

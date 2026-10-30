@@ -1,9 +1,0 @@
-id = "minimap"
-name = "Minimap"
-version = "1.0.0"
-description = "A map of the terrain around you in a corner, in map colours, square or round, north up or turning with you. Horizon's own, formerly an extra."
-authors = ["Horizon"]
-api = "0.1"
-side = "client"
-capabilities = ["render", "ui", "storage"]
-experimental = ["render", "ui"]

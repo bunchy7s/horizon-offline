@@ -11,13 +11,13 @@ ClientAdvancements.setSelectedTab	port	crates/horizon-client/src/game/advancemen
 ClientAdvancements.setListener	skip:ui		listener plumbing for the advancements screen; Horizon's screen reads its state each frame
 ClientAdvancements.get	port	crates/horizon-client/src/advancements.rs::Tree::get	returns the advancement by id; holder wrapper is not needed
 ClientChunkCache.isValidChunk	skip:other		chunks are stored by position, so there is no ring slot to check
-ClientChunkCache.drop	port	crates/horizon-client/src/streaming.rs::Streaming::forget	gap: minor: no ChunkEvent unload hook; block entities and renderer columns are cleared in Game::handle_packet
+ClientChunkCache.drop	port	crates/horizon-client-render/src/streaming.rs::Streaming::forget	gap: minor: no ChunkEvent unload hook; block entities and renderer columns are cleared in Game::handle_packet
 ClientChunkCache.getChunk	skip:java		lookup of a loaded chunk; Horizon reads world.chunks directly
 ClientChunkCache.replaceBiomes	missing		minor: ChunksBiomes (id 13) has no arm in Game::handle_packet, so server biome changes (e.g. /fillbiome) do not reach the client until the chunk is resent
 ClientChunkCache.flipUpdateTrackingSets	skip:other		double-buffered change lists for LevelRenderer; Horizon hands changed columns to the renderer directly
 ClientChunkCache.Storage.getIndex	skip:java		ring-buffer index into the view range; Horizon keys chunks by position
 ClientChunkCache.Storage.replace	port	crates/horizon-client/src/game/remote_chunks.rs::Game::remote_chunk	gap: minor: old chunk unload is in Streaming::forget, not here
-ClientChunkCache.Storage.drop	port	crates/horizon-client/src/streaming.rs::Streaming::forget	forgets the chunk at the index
+ClientChunkCache.Storage.drop	port	crates/horizon-client-render/src/streaming.rs::Streaming::forget	forgets the chunk at the index
 ClientChunkCache.Storage.onSectionEmptinessChanged	skip:java		empty-section sets for the renderer's culling; Horizon's mesher works from block data
 ClientChunkCache.Storage.onChunkRemoved	skip:java		empty-section bookkeeping when a chunk leaves; see Storage.onSectionEmptinessChanged
 ClientChunkCache.Storage.onChunkAdded	skip:java		empty-section bookkeeping when a chunk arrives; see Storage.onSectionEmptinessChanged
@@ -71,8 +71,8 @@ ClientDebugSubscriber.ValueMap.forEach	skip:java		iteration helper
 ClientDebugSubscriber.ValueMaps.purgeExpired	missing		minor: expiry of server debug values; none are received
 ClientDebugSubscriber.ValueMaps.dropChunkAndBlocks	missing		minor: drops server debug values per chunk; none are received
 ClientDebugSubscriber.ValueWrapper.hasExpired	skip:java		timestamp check on a debug value wrapper
-ClientExplosionTracker.track	inline	crates/horizon-client/src/particles.rs::ParticleEngine::explosion	gap: minor: the debris is thrown at once instead of queued for later ticks
-ClientExplosionTracker.addParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::explosion_blocks	gap: minor: always the default poof and smoke list; the explode packet's own block particle list is not read
+ClientExplosionTracker.track	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::explosion	gap: minor: the debris is thrown at once instead of queued for later ticks
+ClientExplosionTracker.addParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::explosion_blocks	gap: minor: always the default poof and smoke list; the explode packet's own block particle list is not read
 ClientHandshakePacketListenerImpl.switchState	inline	crates/horizon-client/src/net.rs::run	login steps run in packet order in run(); no state machine
 ClientHandshakePacketListenerImpl.handleHello	port	crates/horizon-client/src/net.rs::run	gap: minor: the session join and server check are in auth.rs (join_server); the encryption setup is in run
 ClientHandshakePacketListenerImpl.setEncryption	port	crates/horizon-client/src/net.rs::run	enables the connection cipher
@@ -107,10 +107,10 @@ ClientLevel.playPlayerSound	skip:other		no caller in the 26.3 client sources
 ClientLevel.playSound	missing		player: distance-delayed sounds (over 10 blocks, sqrt(distance)/40 s) play at once, so far fireworks and similar sounds arrive early; audio.rs has no delay
 ClientLevel.getRelativeTickSpeed	skip:other		no caller in the 26.3 client sources
 ClientLevel.destroyBlockProgress	port	crates/horizon-client/src/game.rs::Game::destroy_block_progress	sets or clears another player's crack on a block
-ClientLevel.addAlwaysVisibleParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::add_with	always-show flag set
-ClientLevel.doAddParticle	port	crates/horizon-client/src/particles.rs::ParticleEngine::add_with	drops particles beyond 32 blocks and at minimal particle level
+ClientLevel.addAlwaysVisibleParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::add_with	always-show flag set
+ClientLevel.doAddParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::add_with	drops particles beyond 32 blocks and at minimal particle level
 ClientLevel.getSkyFlashTime	inline	crates/horizon-client/src/game.rs::Game::render	the flash check with the hideLightningFlashes option
-ClientLevel.calculateBlockTint	port	crates/horizon-client/src/mesher.rs::MeshTables::terrain_particle_tint	gap: minor: returns none for grass-block tints
+ClientLevel.calculateBlockTint	port	crates/horizon-client-render/src/mesher.rs::MeshTables::terrain_particle_tint	gap: minor: returns none for grass-block tints
 ClientLevel.playBreakingSound	port	crates/horizon-client/src/game/level_particles.rs::Game::breaking_block_effects	the block's hit sound while digging
 ClientLevel.getClientLeafTintColor	port	crates/horizon-client/src/animate_tick.rs::AnimateContext::foliage	leaf tint for tinted leaves particles; the caller is TintedParticleLeavesBlock
 ClientLevel.EntityCallbacks.onTrackingStart	inline	crates/horizon-client/src/game/remote.rs::Game::spawn_entity	minor: ender dragon parts are placed by the dragon module, with no tracked parts list

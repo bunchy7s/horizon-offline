@@ -2,7 +2,10 @@
 //! merchant menu as the host's (`horizon_client::menu`, `Kind::Merchant`),
 //! with vanilla's packets: OpenScreen (`minecraft:merchant`), MerchantOffers,
 //! the select trade packet, container clicks and the content sync after each.
-use super::{Game, lan::LanHost, stations::Kind as StationKind, trading::MerchantState};
+use super::{
+    Game, lan::LanHost, lan_actions::guest_within_entity_range, stations::Kind as StationKind,
+    trading::MerchantState,
+};
 use horizon_client::{
     items::ItemStack,
     menu::{Env, Input, Kind, Menu},
@@ -229,17 +232,17 @@ impl Game<'_> {
             next_id: std::cell::Cell::new(next_map),
         };
         let trade_env = merchant::TradeEnv {
-            trades: &self.res.stations().trades,
-            enchantments: &self.res.stations().enchantments,
+            trades: &self.stations().trades,
+            enchantments: &self.stations().enchantments,
             maps: Some(&maps),
         };
         let env = Env {
-            items: self.res.items(),
-            recipes: self.res.recipes(),
-            brewing: &self.res.stations().brewing,
-            banners: &self.res.stations().banners,
-            station_recipes: &self.res.stations().recipes,
-            enchantments: &self.res.stations().enchantments,
+            items: self.items(),
+            recipes: self.recipes(),
+            brewing: &self.stations().brewing,
+            banners: &self.stations().banners,
+            station_recipes: &self.stations().recipes,
+            enchantments: &self.stations().enchantments,
             names: &self.pack.names,
             trade: Some(&trade_env),
             maps: None,
@@ -350,6 +353,33 @@ impl Game<'_> {
     /// `Villager.customServerAiStep` for the guests' trading villagers: the
     /// TRADE reputation event, then the prices follow.
     pub(super) fn lan_merchant_tick(&mut self, host: &mut LanHost) {
+        // `AbstractVillager.stillValid`: the trade screen closes once the trader
+        // is gone or dead, or the guest is more than 4 blocks past its reach.
+        let far: Vec<(u32, i32)> =
+            host.play
+                .iter()
+                .filter_map(|(conn, p)| {
+                    let gm = p.merchant.as_ref()?;
+                    let id = gm.merchant.mob?;
+                    let g = host
+                        .hub
+                        .guests
+                        .iter()
+                        .find(|g| g.conn == *conn && host.hub.here(g))?;
+                    let valid = self.mobs.iter().find(|m| m.id == id).is_some_and(|m| {
+                        m.alive() && guest_within_entity_range(g, &m.bounds(), 4.0)
+                    });
+                    (!valid).then_some((*conn, gm.window))
+                })
+                .collect();
+        for (conn, window) in far {
+            if self.lan_merchant_closed(host, conn, Some(window)) {
+                host.hub.send_to(
+                    conn,
+                    &C::ContainerClose(play::ContainerClose { container: window }),
+                );
+            }
+        }
         let conns: Vec<u32> = host
             .play
             .iter()

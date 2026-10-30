@@ -1,0 +1,64 @@
+{
+  "hooks": [
+    {
+      "name": "frame",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_frame"
+    },
+    {
+      "name": "tick",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_tick"
+    },
+    {
+      "name": "hud",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_hud"
+    },
+    {
+      "name": "key",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_key"
+    },
+    {
+      "name": "wheel",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_wheel"
+    },
+    {
+      "name": "command",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_command"
+    },
+    {
+      "name": "zoom",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_zoom"
+    },
+    {
+      "name": "minimap",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_minimap"
+    },
+    {
+      "name": "mods",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_mods"
+    },
+    {
+      "name": "settings",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_settings"
+    },
+    {
+      "name": "settings_click",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_settings_click"
+    },
+    {
+      "name": "panel_event",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_panel_event"
+    }
+  ]
+}

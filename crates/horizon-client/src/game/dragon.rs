@@ -1963,16 +1963,8 @@ impl Game<'_> {
                     if zone.intersects(p.bounds) {
                         let (xd, zd) = (p.position.x - bc, p.position.z - bz);
                         let dd = (xd * xd + zd * zd).max(0.1);
-                        self.as_fight_player(p.who, |g| {
-                            if let Some(pl) = g.player.as_mut() {
-                                pl.velocity.x += xd / dd * 4.0;
-                                pl.velocity.y += 0.2;
-                                pl.velocity.z += zd / dd * 4.0;
-                            }
-                            if !sitting {
-                                g.dragon_hurts_player("minecraft:mob_attack", 5.0);
-                            }
-                        });
+                        let push = Vec3::new(xd / dd * 4.0, f64::from(0.2_f32), zd / dd * 4.0);
+                        self.as_fight_player(p.who, |g| g.dragon_wing_knock_back(push, sitting));
                     }
                 }
                 // hurt: the head and the neck.
@@ -1992,7 +1984,7 @@ impl Game<'_> {
             return;
         };
         let boxes = [d.part_box(0), d.part_box(1), d.part_box(2)];
-        let tags = &self.res.items().block_tags;
+        let tags = &self.items().block_tags;
         let transparent = tags
             .get("minecraft:dragon_transparent")
             .cloned()
@@ -2288,10 +2280,37 @@ impl Game<'_> {
             });
         }
     }
+    /// `EnderDragon.knockBack` on the player in a wing's zone: pushed away
+    /// from the body, and hurt for 5 unless the dragon is perched
+    /// (`isSitting`) or a mob hurt the player within the last 2 ticks
+    /// (`getLastHurtByMobTimestamp() < tickCount - 2`).
+    fn dragon_wing_knock_back(&mut self, push: Vec3, sitting: bool) {
+        let now = self.world.game_time;
+        let hurt_lately = self.player_hurt_by().is_some_and(|(_, at)| at >= now - 2);
+        let hurts = !sitting && !hurt_lately && !self.creative;
+        if hurts {
+            self.note_dragon_attacker("minecraft:mob_attack");
+        }
+        let (health, rules) = (&self.motion.health, self.world.health_rules);
+        let id = health.damage.id("minecraft:mob_attack");
+        if let Some(p) = self.player.as_mut() {
+            push_seen_with_hurt(p, push, |p| {
+                if let Some(id) = id.filter(|_| hurts) {
+                    let _ = p.hurt(health, rules, id, 5.0);
+                }
+            });
+        }
+    }
     /// Damage from the dragon, which is its causing entity
     /// (`DamageSources.mobAttack(dragon)`, `indirectMagic(cloud, dragon)`): the
     /// death message names it, or the cloud once the dragon is gone.
     fn dragon_hurts_player(&mut self, damage_type: &str, amount: f32) {
+        self.note_dragon_attacker(damage_type);
+        self.hurt_player_by(damage_type, amount);
+    }
+    /// The causing entity of the dragon's next `damage_type` damage, for the
+    /// death message.
+    fn note_dragon_attacker(&mut self, damage_type: &str) {
         if let Some(id) = self.dragon.as_ref().map(|d| d.id) {
             let name = Text::translate("entity.minecraft.ender_dragon", &[]);
             self.note_named_attacker(damage_type, id, name);
@@ -2299,7 +2318,6 @@ impl Game<'_> {
             let name = Text::translate("entity.minecraft.area_effect_cloud", &[]);
             self.note_direct_entity(damage_type, name);
         }
-        self.hurt_player_by(damage_type, amount);
     }
     /// `BossHealthOverlay.extractRenderState`: whatever `publish_boss_bars`
     /// (or a server's packets) put on this client's overlay.
@@ -3603,6 +3621,28 @@ fn dragon_rays(base: glam::Mat4, t: f32, white: horizon_client::hud::Rect, out: 
     }
 }
 
+/// `Entity.push` on the server's copy of a player, then `hurt`. A player's
+/// own client hears of its velocity only when a hurt marks it
+/// (`LivingEntity.hurtServer`'s `markHurt`, sent by
+/// `ServerEntity.sendChanges`); `push` alone only sets `needsSync`, which
+/// reaches the players tracking them, not them. So the push moves the player
+/// only together with a hurt that lands outside the hurt cooldown, and is
+/// dropped otherwise.
+fn push_seen_with_hurt(
+    p: &mut horizon_client::motion::PlayerMotion,
+    push: Vec3,
+    hurt: impl FnOnce(&mut horizon_client::motion::PlayerMotion),
+) {
+    let before = p.velocity;
+    let marked_before = std::mem::take(&mut p.health.sync_velocity);
+    p.velocity = before.add_vector(push);
+    hurt(p);
+    if !p.health.sync_velocity {
+        p.velocity = before;
+    }
+    p.health.sync_velocity |= marked_before;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3745,6 +3785,55 @@ mod tests {
             creative,
             spectator,
         }
+    }
+
+    /// #2893: a player under a wing is pushed only when the wing's hurt
+    /// lands, not on every tick they stay there, and never under a perched
+    /// dragon's wing.
+    #[test]
+    fn a_wing_pushes_the_player_only_with_a_landed_hurt() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = horizon_client::assets::Assets::load(&root).unwrap();
+        let resources = horizon_client::motion::MotionResources::load(&root, &assets).unwrap();
+        let (health, rules) = (&resources.health, Default::default());
+        let id = health.damage.id("minecraft:mob_attack").unwrap();
+        let push = Vec3::new(0.5, f64::from(0.2_f32), -0.25);
+        let wing = |p: &mut horizon_client::motion::PlayerMotion, sitting: bool| {
+            push_seen_with_hurt(p, push, |p| {
+                if !sitting {
+                    let _ = p.hurt(health, rules, id, 5.0);
+                }
+            });
+        };
+        // In flight: the first tick's hurt lands and carries the push.
+        let mut p = horizon_client::motion::PlayerMotion::new(&resources, Vec3::ZERO).unwrap();
+        wing(&mut p, false);
+        assert_eq!(p.velocity, push);
+        assert_eq!(p.health.health(), 15.0);
+        // The next 9 ticks are inside the hurt cooldown: no hurt, no push.
+        for _ in 0..9 {
+            p.health.advance_clock();
+            wing(&mut p, false);
+        }
+        assert_eq!(p.velocity, push, "pushed again with no hurt");
+        assert_eq!(p.health.health(), 15.0);
+        // Ten ticks on, the next hurt lands and pushes again.
+        p.health.advance_clock();
+        wing(&mut p, false);
+        assert_eq!(p.velocity, push.add_vector(push));
+        assert_eq!(p.health.health(), 10.0);
+        // Under a perched dragon's wing nothing reaches the player.
+        let mut p = horizon_client::motion::PlayerMotion::new(&resources, Vec3::ZERO).unwrap();
+        for _ in 0..20 {
+            wing(&mut p, true);
+        }
+        assert_eq!(p.velocity, Vec3::ZERO, "pushed by a perched dragon");
+        assert!(!p.health.sync_velocity);
     }
 
     #[test]

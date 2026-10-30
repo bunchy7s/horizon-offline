@@ -19,9 +19,12 @@ impl Game<'_> {
     /// `new SpectatorMenu`: the listed players, and the teams with a player
     /// to go to (`TeleportToTeamMenuCategory.createTeamEntries`).
     fn new_spectator_menu(&mut self) -> SpectatorMenu {
-        let tab: Vec<TabPlayer> = self
+        let mut tab: Vec<TabPlayer> = self
             .remote_tab_players()
             .map_or_else(Vec::new, |(players, _, _)| players);
+        for p in &mut tab {
+            p.skin = self.face_skin(p.uuid, &p.skin);
+        }
         let member = |p: &TabPlayer| Member {
             uuid: p.uuid,
             name: p.name.clone(),

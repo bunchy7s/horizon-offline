@@ -112,6 +112,7 @@ pub fn style_from_json(v: &Value) -> Style {
                 .and_then(|h| u32::from_str_radix(h, 16).ok())
         });
     }
+    s.shadow_color = o.get("shadow_color").and_then(component::shadow_color);
     let flag = |k: &str| o.get(k).and_then(Value::as_bool);
     s.bold = flag("bold");
     s.italic = flag("italic");
@@ -1561,5 +1562,51 @@ mod tests {
             NumberFormat::from_tag(&t),
             Some(NumberFormat::Styled(serde_json::json!({"color": "gold"})))
         );
+    }
+}
+
+/// `DamageSource.getLocalizedDeathMessage`: the cause's item with a custom
+/// name gets the `<id>.item` message, with the item's name as a third
+/// argument.
+pub fn death_message_args(
+    key: &str,
+    victim: &Text,
+    cause: &Text,
+    item: Option<&Text>,
+) -> (String, Vec<Text>) {
+    match item {
+        Some(item) => (
+            format!("{key}.item"),
+            vec![victim.clone(), cause.clone(), item.clone()],
+        ),
+        None => (key.to_owned(), vec![victim.clone(), cause.clone()]),
+    }
+}
+
+#[cfg(test)]
+mod death_message_tests {
+    use super::*;
+
+    #[test]
+    fn the_death_message_names_the_causes_item_when_it_has_a_custom_name() {
+        let victim = Text::literal("Steve");
+        let cause = Text::literal("Zombie");
+        // DamageSource.getLocalizedDeathMessage: the item variant, with the
+        // item's name as the third argument.
+        let (key, args) = death_message_args(
+            "death.attack.arrow",
+            &victim,
+            &cause,
+            Some(&Text::literal("My Sword")),
+        );
+        assert_eq!(key, "death.attack.arrow.item");
+        assert_eq!(args.len(), 3);
+        assert_eq!(args[0].plain(), "Steve");
+        assert_eq!(args[1].plain(), "Zombie");
+        assert_eq!(args[2].plain(), "My Sword");
+        // Without a custom name the message keeps its two arguments.
+        let (key, args) = death_message_args("death.attack.arrow", &victim, &cause, None);
+        assert_eq!(key, "death.attack.arrow");
+        assert_eq!(args.len(), 2);
     }
 }

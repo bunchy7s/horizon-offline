@@ -1,12 +1,13 @@
 //! The wither on the game side: building it (`WitherSkullBlock.checkSpawn`),
 //! its boss bar, and its skulls hitting and exploding.
 use super::Game;
+use horizon_client::block_pattern::{BlockPattern, PatternMatch, WITHER_FULL};
 use horizon_client::{
     items::ItemStack,
     mobs::{Damage, DamageKind, Species, Who},
     projectiles::{Projectile, ProjectileKind},
 };
-use horizon_core::position::BlockPos;
+use horizon_core::{geometry::Direction, position::BlockPos};
 
 impl Game<'_> {
     /// `LivingEntity.createWitherRose`: a mob a wither killed leaves a wither
@@ -60,64 +61,66 @@ impl Game<'_> {
             "minecraft:wither_skeleton_skull" | "minecraft:wither_skeleton_wall_skull"
         )
     }
-    fn is_soul_base(&self, p: [i32; 3]) -> bool {
+    /// `#minecraft:wither_summon_base_blocks` (soul sand and soul soil).
+    pub(super) fn is_soul_base(&self, p: [i32; 3]) -> bool {
         let name = &*self
             .res
             .facts()
             .get(self.world.block(p[0], p[1], p[2]))
             .name;
-        matches!(name, "minecraft:soul_sand" | "minecraft:soul_soil")
+        self.res
+            .items()
+            .block_tags
+            .get("minecraft:wither_summon_base_blocks")
+            .is_some_and(|t| t.contains(name))
     }
-    /// After a wither skeleton skull is placed: the T of soul sand (or soul
-    /// soil) under three skulls, upright along X or Z, becomes a wither.
+    /// `pattern.find(level, pos)` for the wither patterns: '^' a wither
+    /// skeleton skull, '#' a summon base block, '~' air.
+    pub(super) fn find_wither_pattern(
+        &self,
+        pattern: BlockPattern,
+        pos: [i32; 3],
+    ) -> Option<PatternMatch> {
+        pattern.find(pos, |key, p| match key {
+            '^' => self.is_wither_skull(p),
+            '#' => self.is_soul_base(p),
+            _ => self.res.facts().is_air(self.world.block(p[0], p[1], p[2])),
+        })
+    }
+    /// `WitherSkullBlock.checkSpawn`, after a wither skeleton skull is
+    /// placed: the T of three skulls on four soul sand or soul soil, built in
+    /// any orientation, becomes a wither.
     pub(super) fn check_wither_spawn(&mut self, placed: [i32; 3]) -> horizon_client::Result<()> {
         // Nothing is built in Peaceful (`level.getDifficulty() != PEACEFUL`).
         if self.ui.difficulty == 0 || !self.is_wither_skull(placed) {
             return Ok(());
         }
-        // Pattern rows top to bottom: "^^^", "###", "~#~" ('~' air).
-        for (ax, az) in [(1, 0), (0, 1)] {
-            for col in 0..3 {
-                let left = [placed[0] - ax * col, placed[1], placed[2] - az * col];
-                let at = |c: i32, row: i32| [left[0] + ax * c, left[1] - row, left[2] + az * c];
-                let ok = (0..3).all(|c| self.is_wither_skull(at(c, 0)))
-                    && (0..3).all(|c| self.is_soul_base(at(c, 1)))
-                    && self.is_soul_base(at(1, 2))
-                    && [0, 2].iter().all(|&c| {
-                        let p = at(c, 2);
-                        self.res.facts().is_air(self.world.block(p[0], p[1], p[2]))
-                    });
-                if !ok {
-                    continue;
-                }
-                // WitherSkullBlock.checkSpawn: clear the pattern, the wither
-                // appears on the middle of the bottom row, then neighbours update.
-                let cells: Vec<[i32; 3]> = (0..3)
-                    .flat_map(|c| (0..3).map(move |row| (c, row)))
-                    .map(|(c, row)| at(c, row))
-                    .collect();
-                self.clear_pattern_blocks(&cells)?;
-                let base = at(1, 2);
-                let at = [
-                    f64::from(base[0]) + 0.5,
-                    f64::from(base[1]) + 0.55,
-                    f64::from(base[2]) + 0.5,
-                ];
-                let yaw = if ax == 1 { 0.0 } else { 90.0 };
-                if let Some(id) = self.create_triggered("minecraft:wither", at, yaw)
-                    && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
-                {
-                    m.persistent = true;
-                    horizon_client::mobs::wither::make_invulnerable(m);
-                    let view =
-                        self.mob_entity(&self.mobs.iter().find(|m| m.id == id).cloned().unwrap());
-                    self.trigger_entity("minecraft:summoned_entity", "entity", &view);
-                }
-                self.update_pattern_blocks(&cells)?;
-                return Ok(());
-            }
+        let Some(found) = self.find_wither_pattern(WITHER_FULL, placed) else {
+            return Ok(());
+        };
+        // Clear the pattern, the wither appears on the middle of the bottom
+        // row facing along the pattern's forwards axis, then neighbours update.
+        let cells = found.front_cells();
+        self.clear_pattern_blocks(&cells)?;
+        let base = found.block(1, 2, 0);
+        let at = [
+            f64::from(base[0]) + 0.5,
+            f64::from(base[1]) + 0.55,
+            f64::from(base[2]) + 0.5,
+        ];
+        let yaw = if matches!(found.forwards, Direction::West | Direction::East) {
+            0.0
+        } else {
+            90.0
+        };
+        let id = self.create_triggered("minecraft:wither", at, yaw);
+        if let Some(m) = id.and_then(|id| self.mobs.iter_mut().find(|m| m.id == id)) {
+            m.persistent = true;
+            horizon_client::mobs::wither::make_invulnerable(m);
         }
-        Ok(())
+        // SUMMONED_ENTITY for each player within 50 blocks of the wither's box.
+        self.trigger_summoned(id, 50.0);
+        self.update_pattern_blocks(&cells)
     }
     /// `WitherSkull.onHitEntity` / `onHit`: 8 damage (healing the wither 5
     /// when it kills), withering on a hit (10 seconds on Normal, 40 on Hard,
@@ -159,7 +162,18 @@ impl Game<'_> {
                     attacker: p.owner,
                     from: Some([p.previous.x, p.previous.y, p.previous.z]),
                 };
+                let owner_species = owner
+                    .and_then(|o| self.mobs.iter().find(|m| m.id == o))
+                    .map(|m| m.species());
                 let killed = match self.mobs.iter_mut().find(|m| m.id == id) {
+                    // `WitherBoss.hurtServer`: nothing from a wither friend.
+                    Some(m)
+                        if owner_species.is_some_and(|o| {
+                            horizon_client::mobs::wither::shielded_from(m.species(), o)
+                        }) =>
+                    {
+                        false
+                    }
                     Some(m) => {
                         let hit = m.damage(amount, source);
                         if hit && m.alive() && m.species() != Species::Wither && wither_ticks > 0 {

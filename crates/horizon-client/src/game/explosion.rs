@@ -329,7 +329,13 @@ impl Game<'_> {
         }
     }
 
-    fn explosion_hurt_entities(&mut self, center: [f64; 3], radius: f32, damage_type: &str) {
+    fn explosion_hurt_entities(
+        &mut self,
+        center: [f64; 3],
+        radius: f32,
+        damage_type: &str,
+        interaction: BlockInteraction,
+    ) {
         if radius < 1.0e-5 {
             return;
         }
@@ -382,6 +388,13 @@ impl Game<'_> {
             }
             self.lan = Some(host);
         }
+        // Mobs. `WitherBoss.hurtServer`: a wither shrugs off an undead cause.
+        let cause = self
+            .combat
+            .explosion_owner
+            .or(exploding)
+            .and_then(|id| self.mobs.iter().find(|m| m.id == id))
+            .map(|m| m.species());
         // Mobs, but not the one exploding (`getEntities(source, box)`): a
         // wither's spawn blast neither hurts nor pushes it.
         let spared = exploding.filter(|_| self.combat.explosion_source_named);
@@ -417,7 +430,9 @@ impl Game<'_> {
                     .map(horizon_client::mobs::Who::Mob),
                 from: Some(center),
             };
-            if hurtable && !m.damage(damage(dist, exposure), source) {
+            let shielded =
+                cause.is_some_and(|c| horizon_client::mobs::wither::shielded_from(m.species(), c));
+            if hurtable && (shielded || !m.damage(damage(dist, exposure), source)) {
                 continue;
             }
             // `EXPLOSION_KNOCKBACK_RESISTANCE`, not `KNOCKBACK_RESISTANCE`: its
@@ -431,6 +446,7 @@ impl Game<'_> {
             );
         }
         self.mobs = mobs;
+        self.explosion_breaks_frames(center, diameter, interaction);
         // Dropped items: 5 health, destroyed by the explosion damage (nether stars resist).
         let mut items = std::mem::take(&mut self.dropped);
         items.retain_mut(|item| {
@@ -570,7 +586,7 @@ impl Game<'_> {
         let ctx = horizon_client::sculk::Context::default();
         self.post_game_event("minecraft:explode", center, ctx);
         let mut targets = self.exploded_positions(center, radius, resists);
-        self.explosion_hurt_entities(center, radius, damage_type);
+        self.explosion_hurt_entities(center, radius, damage_type, interaction);
         if interaction != BlockInteraction::Keep {
             // Util.shuffle(list, level.random)
             for i in (2..=targets.len()).rev() {
@@ -672,7 +688,7 @@ impl Game<'_> {
             // tables' survives_explosion and explosion_decay draw from their
             // random sequence.
             let decay = (interaction == BlockInteraction::DestroyWithDecay).then_some(radius);
-            let drops = self.res.items().block_drops_exploded(
+            let drops = world_items!(self).block_drops_exploded(
                 self.pack.assets.registry,
                 state,
                 None,
@@ -687,7 +703,10 @@ impl Game<'_> {
                     continue;
                 }
                 self.pending.attach(pos, &mut stack);
-                add_or_append_stack(stacks, stack, pos);
+                let items = self.res.items();
+                add_or_append_stack(stacks, stack, pos, &|s| {
+                    items.get(&s.item).map_or(64, |i| i.max_stack)
+                });
             }
         }
         self.pending.clear(pos);
@@ -708,15 +727,23 @@ impl Game<'_> {
     }
 }
 
-/// `ServerExplosion.addOrAppendStack` with `ItemEntity.merge(.., 16)`.
+/// `ServerExplosion.addOrAppendStack`: `ItemEntity.areMergable` (same item and
+/// components, combined count within the item's max stack size), then
+/// `ItemEntity.merge(.., 16)`.
 fn add_or_append_stack(
     stacks: &mut Vec<([i32; 3], ItemStack)>,
     mut stack: ItemStack,
     pos: [i32; 3],
+    max_stack: &dyn Fn(&ItemStack) -> u32,
 ) {
+    let max = i64::from(max_stack(&stack));
     for (_, existing) in stacks.iter_mut() {
-        if existing.item == stack.item && existing.damage == stack.damage && existing.count < 16 {
-            let moved = (16 - existing.count).min(stack.count);
+        if existing.same_item_same_components(&stack)
+            && i64::from(existing.count) + i64::from(stack.count) <= max
+        {
+            let moved = (max.min(16) - i64::from(existing.count))
+                .min(i64::from(stack.count))
+                .max(0) as u32;
             existing.count += moved;
             stack.count -= moved;
             if stack.count == 0 {
@@ -754,12 +781,50 @@ mod tests {
             damage: 0,
             extra: None,
         };
+        let max = |s: &ItemStack| {
+            if &*s.item == "minecraft:diamond_sword" {
+                1
+            } else {
+                64
+            }
+        };
         let mut stacks = Vec::new();
         for _ in 0..20 {
-            add_or_append_stack(&mut stacks, stack("minecraft:dirt"), [0, 0, 0]);
+            add_or_append_stack(&mut stacks, stack("minecraft:dirt"), [0, 0, 0], &max);
         }
-        add_or_append_stack(&mut stacks, stack("minecraft:stone"), [1, 0, 0]);
+        add_or_append_stack(&mut stacks, stack("minecraft:stone"), [1, 0, 0], &max);
         let counts: Vec<u32> = stacks.iter().map(|(_, s)| s.count).collect();
         assert_eq!(counts, vec![16, 4, 1]);
+    }
+
+    #[test]
+    fn unstackable_drops_stay_separate() {
+        let sword = ItemStack {
+            item: "minecraft:diamond_sword".into(),
+            count: 1,
+            damage: 0,
+            extra: None,
+        };
+        let max = |_: &ItemStack| 1;
+        let mut stacks = Vec::new();
+        add_or_append_stack(&mut stacks, sword.clone(), [0, 0, 0], &max);
+        add_or_append_stack(&mut stacks, sword, [0, 0, 0], &max);
+        let counts: Vec<u32> = stacks.iter().map(|(_, s)| s.count).collect();
+        assert_eq!(counts, vec![1, 1]);
+    }
+
+    #[test]
+    fn drops_with_different_damage_stay_separate() {
+        let pick = |damage| ItemStack {
+            item: "minecraft:iron_pickaxe".into(),
+            count: 1,
+            damage,
+            extra: None,
+        };
+        let max = |_: &ItemStack| 64;
+        let mut stacks = Vec::new();
+        add_or_append_stack(&mut stacks, pick(0), [0, 0, 0], &max);
+        add_or_append_stack(&mut stacks, pick(5), [0, 0, 0], &max);
+        assert_eq!(stacks.len(), 2);
     }
 }

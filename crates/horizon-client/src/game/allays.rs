@@ -181,6 +181,11 @@ impl Game<'_> {
         m.extra.ints[3] = 60;
         // ItemEntity.setDefaultPickUpDelay.
         self.spawn_item(ItemStack::new(&item, 1), from, v, 10);
+        // BehaviorUtils.throwItem: ItemEntity.setThrower(the allay).
+        let allay = self.mob_uuid(self.mobs[i].id);
+        if let Some(thrown) = self.dropped.last_mut() {
+            thrown.thrower = Some(allay);
+        }
         if self.world.game_time % 7 == 0 && self.world.random.next_double() < 0.9 {
             const PITCHES: [f32; 16] = [
                 0.5625, 0.625, 0.75, 0.9375, 1.0, 1.0, 1.125, 1.25, 1.5, 1.875, 2.0, 2.25, 2.5,
@@ -219,7 +224,7 @@ impl Game<'_> {
         let holds = m.extra.main_hand.is_some();
         if !holds && !item.is_empty() {
             let m = &mut self.mobs[index];
-            m.extra.main_hand = Some(item.into());
+            m.extra.set_main_hand(Some(item.into()));
             m.extra.tame = true;
             // `Allay.mobInteract` remembers LIKED_PLAYER by UUID.
             m.extra.owner = Some(acting);

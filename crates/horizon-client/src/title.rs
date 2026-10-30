@@ -114,9 +114,11 @@ pub enum Mode {
     Backup {
         world: WorldEntry,
     },
-    /// BackupConfirmScreen over a world whose file fixes are due.
+    /// BackupConfirmScreen over a world whose file fixes are due, or, with `downgrade`
+    /// (the saved version's name), over a world saved by a newer version.
     BackupBeforeUpgrade {
         world: WorldEntry,
+        downgrade: Option<String>,
     },
     Delete {
         world: WorldEntry,
@@ -124,6 +126,8 @@ pub enum Mode {
     Error {
         message: String,
         return_to: Box<Mode>,
+        /// AlertScreen with the red `selectWorld.incompatible.title`, not the access failure.
+        incompatible: bool,
     },
     Multiplayer(crate::multiplayer::Screen),
     /// SafetyScreen: the warning before the first Multiplayer click, with its
@@ -465,7 +469,7 @@ impl Title {
         } = mode
         {
             if apply {
-                options.flat = true;
+                options.world_type = crate::save::WorldPreset::Flat;
                 options.flat_settings = Some(flat.settings);
             }
             self.mode = Mode::Create {
@@ -587,6 +591,7 @@ impl Title {
         self.mode = Mode::Error {
             message: error.to_string(),
             return_to,
+            incompatible: false,
         };
     }
     /// Polling is done once per rendered frame so filesystem work never blocks drawing.
@@ -642,8 +647,9 @@ impl Title {
     }
     /// `WorldOpenFlows.openWorld`: a world that can't be locked, as one another
     /// instance has open, stays closed behind `onWorldAccessFailure`
-    /// (`createWorldAccess`); then `openWorldCheckVersionCompatibility`: a world
-    /// whose file fixes are due asks for a backup first; any other opens at once.
+    /// (`createWorldAccess`); then `openWorldCheckVersionCompatibility`: a world from
+    /// another series is an alert, one whose file fixes are due or that a newer version
+    /// saved asks for a backup first; any other opens at once.
     fn play(&mut self, world: WorldEntry) -> Action {
         if crate::save::SessionLock::acquire(&self.saves.join(&world.folder)).is_err() {
             self.toast = Some((
@@ -652,8 +658,42 @@ impl Title {
             ));
             return Action::None;
         }
+        // openWorldCheckVersionCompatibility: a world from another series is an AlertScreen.
+        if let Some(version) = crate::save::incompatible_version(&self.saves.join(&world.folder)) {
+            let version = if version.is_empty() {
+                lang::get_or("selectWorld.versionUnknown", "unknown")
+            } else {
+                version
+            };
+            self.mode = Mode::Error {
+                message: translate(
+                    "selectWorld.incompatible.description",
+                    "This world cannot be opened in this version.\nIt was last played in version %s.",
+                    &[&version],
+                ),
+                return_to: Box::new(self.mode.clone()),
+                incompatible: true,
+            };
+            return Action::None;
+        }
         if crate::save::needs_file_fixes(&self.saves.join(&world.folder)) {
-            self.mode = Mode::BackupBeforeUpgrade { world };
+            self.mode = Mode::BackupBeforeUpgrade {
+                world,
+                downgrade: None,
+            };
+            return Action::None;
+        }
+        // BackupStatus.DOWNGRADE: a world from a newer version asks for a backup too.
+        if let Some(version) = crate::save::downgraded_from(&self.saves.join(&world.folder)) {
+            let version = if version.is_empty() {
+                lang::get_or("selectWorld.versionUnknown", "unknown")
+            } else {
+                version
+            };
+            self.mode = Mode::BackupBeforeUpgrade {
+                world,
+                downgrade: Some(version),
+            };
             return Action::None;
         }
         Action::Play {
@@ -1009,16 +1049,25 @@ impl Title {
                     ),
                 ]
             }
-            Mode::Error { .. } => vec![b(
-                (w / 2.0).floor() - 75.0,
-                confirm_top(h, self.message_lines.get())
-                    + 41.0
-                    + self.message_lines.get() as f32 * 9.0,
-                150.0,
-                &lang::get_or("gui.back", "Back"),
-                true,
-                39,
-            )],
+            Mode::Error { incompatible, .. } => {
+                let lines = self.message_lines.get();
+                let y = if *incompatible {
+                    // AlertScreen.init: the button follows the text, kept inside the screen.
+                    (90.0 + lines as f32 * 9.0 + 12.0)
+                        .max(h / 6.0 + 96.0)
+                        .min(h - 24.0)
+                } else {
+                    confirm_top(h, lines) + 41.0 + lines as f32 * 9.0
+                };
+                vec![b(
+                    (w / 2.0).floor() - 75.0,
+                    y,
+                    150.0,
+                    &lang::get_or("gui.back", "Back"),
+                    true,
+                    39,
+                )]
+            }
             Mode::BackupBeforeUpgrade { .. } => {
                 // BackupConfirmScreen.init: the buttons sit under the text at fixed offsets.
                 let y = 109.0 + self.message_lines.get() as f32 * 9.0;
@@ -1344,20 +1393,38 @@ impl Title {
                     centered(atlas, batch, line, top + 17.0 + i as f32 * 9.0, u32::MAX);
                 }
             }
-            Mode::BackupBeforeUpgrade { .. } => {
+            Mode::BackupBeforeUpgrade { downgrade, .. } => {
                 crate::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
-                let question = lang::get_or(
-                    "selectWorld.backupQuestion.file_fixing_required",
-                    "Create a backup before upgrading this world?",
-                );
-                let warning = lang::get_or(
-                    "selectWorld.backupWarning.file_fixing_required",
-                    "This world needs to be upgraded before you can play it. We strongly suggest creating a backup before continuing in case you experience world corruption.",
-                );
+                // BackupStatus.DOWNGRADE is severe: its question is red (-2142128).
+                let (question, warning, color) = match downgrade {
+                    Some(version) => (
+                        lang::get_or(
+                            "selectWorld.backupQuestion.downgrade",
+                            "Downgrading a world is not supported",
+                        ),
+                        translate(
+                            "selectWorld.backupWarning.downgrade",
+                            "This world was last played in version %s; you are on version %s. Downgrading a world could cause corruption - we cannot guarantee that it will load or work. If you still want to continue, please make a backup.",
+                            &[version, &crate::save::VERSION_NAME],
+                        ),
+                        rgba(223, 80, 80, 255),
+                    ),
+                    None => (
+                        lang::get_or(
+                            "selectWorld.backupQuestion.file_fixing_required",
+                            "Create a backup before upgrading this world?",
+                        ),
+                        lang::get_or(
+                            "selectWorld.backupWarning.file_fixing_required",
+                            "This world needs to be upgraded before you can play it. We strongly suggest creating a backup before continuing in case you experience world corruption.",
+                        ),
+                        u32::MAX,
+                    ),
+                };
                 let lines = wrapped(atlas, &warning, w - 50.0);
                 self.message_lines.set(lines.len());
                 // BackupConfirmScreen.extractRenderState: the title at 50, the text from 70.
-                centered(atlas, batch, &question, 50.0, u32::MAX);
+                centered(atlas, batch, &question, 50.0, color);
                 for (i, line) in lines.iter().enumerate() {
                     centered(atlas, batch, line, 70.0 + i as f32 * 9.0, u32::MAX);
                 }
@@ -1389,20 +1456,39 @@ impl Title {
                     );
                 }
             }
-            Mode::Error { message, .. } => {
+            Mode::Error {
+                message,
+                incompatible,
+                ..
+            } => {
                 crate::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
-                let lines = wrapped(atlas, message, w - 50.0);
+                let lines: Vec<String> = message
+                    .split('\n')
+                    .flat_map(|line| wrapped(atlas, line, w - 50.0))
+                    .collect();
                 self.message_lines.set(lines.len());
-                let top = confirm_top(h, lines.len());
-                centered(
-                    atlas,
-                    batch,
-                    &lang::get_or("selectWorld.access_failure", "Failed to access world"),
-                    top,
-                    u32::MAX,
-                );
+                // AlertScreen (an incompatible world): the red title at 70, the text at 90.
+                let (top, text_top, key, fallback, color) = if *incompatible {
+                    (
+                        70.0,
+                        90.0,
+                        "selectWorld.incompatible.title",
+                        "Incompatible version",
+                        rgba(255, 0, 0, 255),
+                    )
+                } else {
+                    let top = confirm_top(h, lines.len());
+                    (
+                        top,
+                        top + 17.0,
+                        "selectWorld.access_failure",
+                        "Failed to access world",
+                        u32::MAX,
+                    )
+                };
+                centered(atlas, batch, &lang::get_or(key, fallback), top, color);
                 for (i, line) in lines.iter().enumerate() {
-                    centered(atlas, batch, line, top + 17.0 + i as f32 * 9.0, u32::MAX);
+                    centered(atlas, batch, line, text_top + i as f32 * 9.0, u32::MAX);
                 }
             }
             Mode::MultiplayerWarning { check } => {
@@ -1650,16 +1736,16 @@ impl Title {
                     None => Action::None,
                 }
             }
-            (Mode::BackupBeforeUpgrade { world }, Some(40)) => {
+            (Mode::BackupBeforeUpgrade { world, .. }, Some(40)) => {
                 let world = world.clone();
                 self.backup_then_open = true;
                 self.start_backup(world);
                 Action::None
             }
-            (Mode::BackupBeforeUpgrade { world }, Some(41)) => Action::Play {
+            (Mode::BackupBeforeUpgrade { world, .. }, Some(41)) => Action::Play {
                 folder: world.folder.clone(),
             },
-            (Mode::BackupBeforeUpgrade { world }, Some(42)) => {
+            (Mode::BackupBeforeUpgrade { world, .. }, Some(42)) => {
                 let folder = world.folder.clone();
                 self.return_to_list(Some(&folder));
                 Action::None
@@ -1985,6 +2071,45 @@ impl Title {
             Err(error) => self.failed(error),
         }
     }
+    /// `CreateWorldScreen.keyPressed`, `DirectJoinServerScreen.keyPressed` and
+    /// `WorldListEntry.keyPressed` on Enter (Space too on the list): Create New
+    /// World creates, a rename saves, Direct Connection joins, the selected
+    /// world joins.
+    pub fn confirm_key(&mut self) -> Action {
+        self.remember_direct_address();
+        if self.rules.get_mut().is_some() {
+            return Action::None;
+        }
+        if matches!(self.mode, Mode::Edit { .. }) {
+            self.confirm_edit();
+            return Action::None;
+        }
+        if self.list_focused() {
+            return self.join_selected();
+        }
+        match &self.mode {
+            Mode::Create { .. } => self.create_action(),
+            Mode::Multiplayer(screen) => match screen.confirm() {
+                crate::multiplayer::Outcome::Connect(address) => Action::Connect { address },
+                _ => Action::None,
+            },
+            _ => Action::None,
+        }
+    }
+    /// The world list has the keyboard: no search box focus.
+    pub fn list_focused(&self) -> bool {
+        matches!(self.mode, Mode::Select { .. }) && !self.search_focused
+    }
+    /// `WorldListEntry.keyPressed`: the selected world joins, as its click does.
+    fn join_selected(&mut self) -> Action {
+        let Mode::Select { worlds, selected } = &self.mode else {
+            return Action::None;
+        };
+        let Some(world) = selected.and_then(|i| worlds.get(i)).cloned() else {
+            return Action::None;
+        };
+        self.play(world)
+    }
     pub fn tab(&mut self) {
         if self.rules.get_mut().is_some() {
             return;
@@ -2079,7 +2204,7 @@ impl Title {
             Mode::Backup { .. } => {}
             Mode::Edit { world, .. }
             | Mode::Delete { world }
-            | Mode::BackupBeforeUpgrade { world } => {
+            | Mode::BackupBeforeUpgrade { world, .. } => {
                 let folder = world.folder.clone();
                 self.return_to_list(Some(&folder));
             }

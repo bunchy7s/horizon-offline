@@ -22,7 +22,7 @@ impl Game<'_> {
     }
     /// The item's `compostable` layers provider.
     fn compostable(&self, stack: &ItemStack) -> Option<serde_json::Value> {
-        self.res.items().get(&stack.item)?.compostable.clone()
+        self.items().get(&stack.item)?.compostable.clone()
     }
     /// `ComposterBlock.addLayer` and level event 1500: the provider is
     /// evaluated in the composter's block-interaction loot context (its
@@ -65,6 +65,17 @@ impl Game<'_> {
         // ServerPlayerGameMode.useItemOn: the action was consumed.
         self.trigger_block("minecraft:item_used_on_block", pos, stack);
         true
+    }
+    /// `ComposterBlock.useItemOn` on a client's level: whether `held` is
+    /// compostable and the composter at `pos` below level 8 (SUCCESS).
+    pub(super) fn composter_takes(&self, pos: [i32; 3], held: Option<&ItemStack>) -> bool {
+        self.composter_level(pos).is_some_and(|level| level < 8)
+            && held.is_some_and(|stack| {
+                self.res
+                    .items()
+                    .get(&stack.item)
+                    .is_some_and(|i| i.compostable.is_some())
+            })
     }
     /// `HopperBlockEntity.addItem` into the composter's `InputContainer`
     /// (levels 0 to 6; one item, compostable, from above): the remainder.

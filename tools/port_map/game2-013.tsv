@@ -84,7 +84,7 @@ DoublePlantBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim:
 DoublePlantBlock.copyWaterloggedFrom	inline	crates/horizon-world/src/level/place.rs::Sim::set_placed_by	upper half waterlogged from the water at its spot, inline in set_placed_by
 DoublePlantBlock.playerWillDestroy	port	crates/horizon-world/src/level/hooks.rs::Sim::player_destroy	gap: minor: only the creative bottom-half removal is read here, the drop branch is not
 DoublePlantBlock.preventDropFromBottomPart	inline	crates/horizon-world/src/level/hooks.rs::Sim::player_destroy	bottom half removed without drops on a creative break of the upper half
-DoublePlantBlock.getSeed	port	crates/horizon-client/src/mesher.rs::offset	gap: minor: the jitter seed uses y 0 for every block, vanilla uses the lower half's y, so tall grass and flower offsets differ
+DoublePlantBlock.getSeed	port	crates/horizon-client-render/src/mesher.rs::offset	gap: minor: the jitter seed uses y 0 for every block, vanilla uses the lower half's y, so tall grass and flower offsets differ
 DriedGhastBlock.createBlockStateDefinition	skip:data		facing, hydration_level and waterlogged properties come from the block state tables
 DriedGhastBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	DriedGhast arm: waterlogged tick, then the default shape update
 DriedGhastBlock.tickWaterlogged	inline	crates/horizon-world/src/level/timeline.rs::Sim::dried_ghast_tick	waterlogged branch: transition sound and hydration plus one, or the ghastling spawn event at full hydration

@@ -127,7 +127,7 @@ impl Game<'_> {
             "enchant" => {
                 let e = id(arg(1)?);
                 let level: u32 = arg(2)?.parse()?;
-                if self.res.stations().enchantments.get(&e).is_none() {
+                if self.stations().enchantments.get(&e).is_none() {
                     return Err(format!("unknown enchantment {e}").into());
                 }
                 let held = self.inventory[self.selected]

@@ -181,6 +181,7 @@ pub fn protection_points(g: &Gear, kind: DamageKind) -> f32 {
         kind,
         DamageKind::OnFire
             | DamageKind::InFire
+            | DamageKind::Campfire
             | DamageKind::Lava
             | DamageKind::Fireball
             | DamageKind::SulfurCubeHot

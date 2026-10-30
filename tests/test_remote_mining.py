@@ -24,6 +24,8 @@ class RemoteMiningTests(unittest.TestCase):
 #![allow(dead_code)]
 #[derive(Clone, Copy)]
 struct Hit { pos: [i32; 3], face: u8 }
+/// The held stack: `ItemStack.item`, which the debug-stick check reads.
+struct Stack { item: &'static str }
 struct Mining { pos: [i32; 3], progress: f32, ticks: u32 }
 #[derive(Default)]
 struct Remote { destroy_delay: u32, destroying: Option<([i32; 3], u8, f32)>, destroying_item: String }
@@ -35,7 +37,7 @@ struct Sounds { hit: String, volume: f32, pitch: f32 }
 struct Facts { hardness: f32, name: String, requires_tool: bool, sounds: Sounds }
 struct Resources { facts: Facts, speed: f32, tool_allows_creative: bool }
 impl Resources {
-    fn can_destroy_block(&self, _: Option<&()>, creative: bool) -> bool {
+    fn can_destroy_block(&self, _: Option<&Stack>, creative: bool) -> bool {
         !creative || self.tool_allows_creative
     }
     fn facts(&self) -> &Self { self }
@@ -69,7 +71,7 @@ fn face_direction(face: u8) -> u8 { face }
 struct Game {
     remote: Option<Remote>, mining: Option<Mining>, creative: bool,
     world: World, res: Resources, player: Option<Player>, audio: Audio,
-    hit: Hit, sequence: i32, packets: Vec<play::PlayerAction>,
+    hit: Hit, sequence: i32, packets: Vec<play::PlayerAction>, restricted: bool,
 }
 impl Game {
     fn main_hand_key(&self) -> String { String::new() }
@@ -83,10 +85,13 @@ impl Game {
             player: Some(Player { ground: Ground { on_ground: true } }),
             audio: Audio { played: Vec::new() },
             hit: Hit { pos: [0, 64, 0], face: 1 }, sequence: 0, packets: vec![],
+            restricted: false,
         }
     }
     fn pick(&self) -> Option<Hit> { Some(self.hit) }
-    fn held(&self) -> Option<&()> { None }
+    fn held(&self) -> Option<&Stack> { None }
+    // Player.blockActionRestricted: adventure without a can_break item.
+    fn remote_break_restricted(&self) -> bool { self.restricted }
     // Game::destroy_progress (hand.rs) for a harvestable block on the ground.
     fn destroy_progress(&self, _: [i32; 3]) -> f32 {
         self.res.speed / self.res.facts.hardness / 30.0
@@ -176,6 +181,21 @@ fn main() {
     assert!(game.remote.as_ref().unwrap().destroying.is_none());
     assert!(game.mining.is_none());
     assert!(game.world.broken.is_empty());
+    // An adventure player without can_break (#3027): startDestroyBlock
+    // refuses before predicting, so nothing breaks, cracks or is sent.
+    for (hardness, speed) in [(0.0, 1.0), (1.0, 15.0)] {
+        let mut game = Game::new(hardness, speed, false);
+        game.restricted = true;
+        game.remote_mining(true);
+        for _ in 0..40 {
+            game.remote_mining(false);
+        }
+        assert!(game.world.broken.is_empty());
+        assert!(game.packets.is_empty());
+        assert!(game.audio.played.is_empty());
+        assert!(game.mining.is_none());
+        assert!(game.remote.as_ref().unwrap().destroying.is_none());
+    }
 }
 '''.replace("METHOD", source[start:end].replace("pub(super) fn", "fn"))
         with tempfile.TemporaryDirectory(prefix="remote-mining-") as directory:

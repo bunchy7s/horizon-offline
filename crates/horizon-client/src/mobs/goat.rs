@@ -39,7 +39,7 @@ struct Candidate {
 }
 
 /// The lowered head and the ram behaviours' state. `RAM_COOLDOWN_TICKS` is a
-/// brain memory (`ram_cooldown`), saved with the others.
+/// brain memory (`ram_cooldown_ticks`), saved with the others.
 #[derive(Clone, Debug, Default)]
 pub struct State {
     lower_head_tick: i32,
@@ -96,7 +96,7 @@ fn set_ram_cooldown(m: &mut Mob, ticks: i32) {
         None => {}
     }
 }
-const RAM_COOLDOWN: &str = "ram_cooldown";
+const RAM_COOLDOWN: &str = "ram_cooldown_ticks";
 /// `Goat.getRammingXHeadRot`.
 pub fn ramming_x_head_rot(m: &Mob) -> f32 {
     let max = if m.is_baby() { 52.5_f32 } else { 30.0 };
