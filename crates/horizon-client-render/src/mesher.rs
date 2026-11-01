@@ -12,7 +12,7 @@ use crate::{
     assets::{Assets, RenderAssets},
     biome::{Biomes, GrassModifier},
     blocks::{BlockFacts, RenderShape},
-    chunk::{Chunk, Light, MIN_Y},
+    chunk::{Chunk, MIN_Y},
     graphics::LeafCullingMode,
     models::catalog::BakedFace,
 };
@@ -973,10 +973,7 @@ fn fill_run(
                 Some(own) => blocks.copy_from_slice(own),
                 None => section.blocks.get_run(at, blocks),
             }
-            match &section.light {
-                Light::Uniform(v) => light.fill(*v),
-                Light::Full(all) => light.copy_from_slice(&all[at..at + light.len()]),
-            }
+            section.light.copy_run(at, light);
         }
         Source::Outside(v) => {
             blocks.fill(0);

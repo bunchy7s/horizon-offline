@@ -1302,10 +1302,7 @@ fn nibbles(light: &Light, sky: bool) -> Vec<u8> {
     let mut out = vec![0u8; 2048];
     for (i, byte) in out.iter_mut().enumerate() {
         let value = |j: usize| {
-            let v = match light {
-                Light::Uniform(v) => *v,
-                Light::Full(a) => a[j],
-            };
+            let v = light.get(j);
             if sky { v >> 4 } else { v & 15 }
         };
         *byte = value(2 * i) | value(2 * i + 1) << 4;
@@ -1331,10 +1328,10 @@ pub fn encode_with(
     // Sky layers below the highest section with light other than 15 are
     // written (even all-zero ones): vanilla derives missing layers from the
     // layer above them.
-    let top_sky = chunk.sections.iter().rposition(|s| match &s.light {
-        Light::Uniform(v) => v >> 4 != 15,
-        Light::Full(a) => a.iter().any(|v| v >> 4 != 15),
-    });
+    let top_sky = chunk
+        .sections
+        .iter()
+        .rposition(|s| s.light.any_not(0xF0, 0xF0));
     for (si, section) in chunk.sections.iter().enumerate() {
         let y = (chunk.min_y() >> 4) + si as i32;
         if !shape.has_section(y) {
@@ -1396,10 +1393,7 @@ pub fn encode_with(
             ("biomes", Tag::compound(biome_tag)),
         ];
         if chunk.lit {
-            let block_lit = match &section.light {
-                Light::Uniform(v) => v & 15 != 0,
-                Light::Full(a) => a.iter().any(|v| v & 15 != 0),
-            };
+            let block_lit = section.light.any(15);
             if block_lit {
                 entries.push(("BlockLight", Tag::ByteArray(nibbles(&section.light, false))));
             }

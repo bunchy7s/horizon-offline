@@ -2627,14 +2627,7 @@ fn keep_unchanged_sections(
 }
 /// Whether two sections' packed light (4,096 cells) holds the same values.
 fn same_light(a: &crate::chunk::Light, b: &crate::chunk::Light) -> bool {
-    use crate::chunk::Light;
-    match (a, b) {
-        (Light::Uniform(x), Light::Uniform(y)) => x == y,
-        (Light::Full(x), Light::Full(y)) => x == y,
-        (Light::Uniform(v), Light::Full(f)) | (Light::Full(f), Light::Uniform(v)) => {
-            f.iter().all(|c| c == v)
-        }
-    }
+    a.same_as(b)
 }
 /// Whether two biome containers (64 cells) hold the same values.
 fn same_values(
