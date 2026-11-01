@@ -34,7 +34,9 @@ import net.minecraft.world.phys.Vec3;
  *
  * Script (system property horizon.bench.script): {"world", "seed", "settle",
  * "seconds", "timeout", "scenes": [{"name", "from": [x,y,z], "to": [x,y,z],
- * "pitch"}]}. Output: horizon.bench.out.
+ * "pitch", "settle"?, "setup"?: [command...], "cleanup"?: [command...]}]}: a scene's own settle replaces
+ * the script's, its setup commands (tools/stress_scenes.py) run once its chunks are loaded and its cleanup
+ * commands after its flight. Output: horizon.bench.out.
  */
 public final class VanillaBench implements ClientModInitializer {
     private static VanillaBench bench;
@@ -52,6 +54,9 @@ public final class VanillaBench implements ClientModInitializer {
     private int lastLoaded = -1;
     private long lastChange;
     private final List<Float> frames = new ArrayList<>();
+    /** Client tick durations (Minecraft.tick) while flying, in milliseconds. */
+    private final List<Float> ticks = new ArrayList<>();
+    private long tickStart;
 
     /** Fabric's entrypoint instance; the benchmark itself is the static one. */
     public VanillaBench() {
@@ -76,6 +81,17 @@ public final class VanillaBench implements ClientModInitializer {
             throw new UncheckedIOException(e);
         }
         bench.event("init");
+    }
+
+    /** Called around every client tick (Minecraft.tick). */
+    public static void tick(boolean start) {
+        if (bench == null) return;
+        long now = System.nanoTime();
+        if (start) {
+            bench.tickStart = now;
+        } else if (bench.phase == Phase.FLY && bench.tickStart != 0) {
+            bench.ticks.add((now - bench.tickStart) / 1e6f);
+        }
     }
 
     /** Called at the start of every frame (Minecraft.runTick). */
@@ -139,13 +155,19 @@ public final class VanillaBench implements ClientModInitializer {
                     e.addProperty("load_ms", (lastChange - phaseStart) / 1e6);
                     e.addProperty("chunks", lastLoaded);
                     event("loaded", e);
+                    if (s.has("setup")) {
+                        for (var line : s.getAsJsonArray("setup")) mc.player.connection.sendCommand(line.getAsString());
+                    }
                     enter(Phase.SETTLE, now);
                 }
             }
             case SETTLE -> {
-                place(mc, scenes.get(scene), 0);
-                if (elapsed >= script.get("settle").getAsDouble()) {
+                JsonObject s = scenes.get(scene);
+                place(mc, s, 0);
+                double settle = (s.has("settle") ? s : script).get("settle").getAsDouble();
+                if (elapsed >= settle) {
                     frames.clear();
+                    ticks.clear();
                     event("fly", named(scenes.get(scene)));
                     enter(Phase.FLY, now);
                 }
@@ -159,8 +181,19 @@ public final class VanillaBench implements ClientModInitializer {
                     JsonArray times = new JsonArray();
                     frames.forEach(times::add);
                     e.add("frame_ms", times);
+                    JsonArray tickTimes = new JsonArray();
+                    ticks.forEach(tickTimes::add);
+                    e.add("tick_ms", tickTimes);
+                    JsonObject entities = new JsonObject();
+                    entities.addProperty("all", mc.level.getEntityCount());
+                    e.add("entities", entities);
                     e.addProperty("chunks", mc.level.getChunkSource().getLoadedChunksCount());
                     event("flown", e);
+                    if (scenes.get(scene).has("cleanup")) {
+                        for (var line : scenes.get(scene).getAsJsonArray("cleanup")) {
+                            mc.player.connection.sendCommand(line.getAsString());
+                        }
+                    }
                     next(mc, now);
                 }
             }

@@ -30,6 +30,11 @@ Games:
                 (mods/horizon/src/neoforge-bench) + the jars of --mod-jars and
                 --deps, the user's own; 26.3 options it does not know are ignored
 
+Many-entity stress scenes (tools/stress_scenes.py: mobs, dropped items, item frames, armor stands,
+containers, signs, banners, particles), built by the same vanilla commands in every game and held still:
+
+    python3 tools/perf_bench.py --game horizon --scenes stress --distances 16 --label stress-horizon
+
 --port-work loads the mods a horizon-port-pack work folder carried over into
 Horizon as dev mods.
 
@@ -57,10 +62,11 @@ import zipfile
 from pathlib import Path
 
 try:
-    from . import lab, runtime
+    from . import lab, runtime, stress_scenes
 except ImportError:
     import lab
     import runtime
+    import stress_scenes
 
 ROOT = lab.ROOT
 WORK = ROOT / ".local/perf-bench"
@@ -317,8 +323,35 @@ def size_label(label, width, height):
 
 
 def scene_list(args):
+    """(name, from, to, pitch) of the scenes asked for: the flights, then the stress scenes ("stress" is all of them)."""
     picked = args.scenes.split(",") if args.scenes else [s[0] for s in SCENES]
-    return [s for s in SCENES if s[0] in picked]
+    if "stress" in picked:
+        picked += stress_scenes.NAMES
+    return ([s for s in SCENES if s[0] in picked]
+            + [stress_scenes.scene(n) for n in stress_scenes.NAMES if n in picked])
+
+
+# Seconds a stress scene settles after its setup: the server spawns, the client receives and draws it.
+STRESS_SETTLE = 6.0
+
+
+def first_stress(args):
+    """The first stress scene of the run, which sets the game rules for all of them."""
+    return next((s[0] for s in scene_list(args) if s[0] in stress_scenes.NAMES), None)
+
+
+def settle_seconds(args, name):
+    return max(args.settle, STRESS_SETTLE) if name in stress_scenes.NAMES else args.settle
+
+
+def scene_rss(sampler, windows):
+    """Median resident memory (MB) inside each named window: {name: MB}."""
+    out = {}
+    for name, (a, b) in windows.items():
+        during = [rss for t, rss in sampler.samples if a <= t <= b]
+        if during:
+            out[name] = statistics.median(during) / 2**20
+    return out
 
 
 def yaw(start, end):
@@ -490,7 +523,7 @@ def run_horizon(args, distance):
     sampler.start()
     control = Control(sock)
     result = {"options_txt": options, "scenes": {}}
-    windows = []
+    windows, scene_windows = [], {}
     try:
         title, at = poll(control, lambda s: s.get("screen") == "title" and s.get("renderer"), 300)
         result["renderer"] = title["renderer"]
@@ -510,13 +543,27 @@ def run_horizon(args, distance):
             # Section meshes built while loading and while flying (Horizon only).
             loaded_meshes = control("status")["meshed_sections"]
             scene["meshes_load"] = loaded_meshes - meshed
-            time.sleep(args.settle)
-            loaded_meshes = control("status")["meshed_sections"]
+            if name in stress_scenes.NAMES:
+                for line in stress_scenes.setup(name, first=name == first_stress(args)):
+                    control("command " + line)
+            time.sleep(settle_seconds(args, name))
+            before = control("status")
+            loaded_meshes = before["meshed_sections"]
             begin = time.time()
             summary = control("fly {} {} {} {} {} {} {} {} raw".format(*start, *end, args.seconds, pitch))
             windows.append((begin, time.time()))
+            scene_windows[name] = windows[-1]
             scene.update({k: summary.get(k) or [] for k in ("frame_ms", "cpu_ms", "gpu_ms")})
             status = control("status")
+            # The client's own ticks: the frames' tick phase over the ticks the flight ran.
+            ticks = status.get("ticks", 0) - before.get("ticks", 0)
+            tick_phase = (summary.get("phases_avg_ms") or {}).get("tick")
+            if ticks > 0 and tick_phase is not None:
+                scene["client_tick_ms"] = tick_phase * summary.get("frames", 0) / ticks
+            scene["entities"] = {"mobs": status.get("mobs"), "block_entities": status.get("block_entities")}
+            if name in stress_scenes.NAMES:
+                for line in stress_scenes.cleanup(name):
+                    control("command " + line)
             scene["meshes_flight"] = status["meshed_sections"] - loaded_meshes
             renderer = status.get("renderer") or {}
             scene["gpu_mb"] = nvidia_memory_mb(proc.pid) or (renderer.get("gpu_allocated_bytes") or 0) / 2**20 or None
@@ -531,6 +578,8 @@ def run_horizon(args, distance):
         sampler.stop.set()
         sock.unlink(missing_ok=True)
     result["memory"] = sampler.summary(windows)
+    for name, mb in scene_rss(sampler, scene_windows).items():
+        result["scenes"][name]["rss_mb"] = mb
     args.release = release_version(WORK / f"horizon-rd{distance}.log")
     return result
 
@@ -649,7 +698,7 @@ def run_vanilla(args, distance):
     script = WORK / "script.json"
     script.write_text(json.dumps({
         "world": WORLD, "seed": SEED, "settle": args.settle, "seconds": args.seconds, "timeout": args.timeout,
-        "scenes": [{"name": n, "from": a, "to": b, "pitch": p} for n, a, b, p in scene_list(args)],
+        "scenes": driver_scenes(args),
     }))
     events = WORK / f"{args.game}-rd{distance}.events.jsonl"
     events.unlink(missing_ok=True)
@@ -674,6 +723,18 @@ def run_vanilla(args, distance):
         env["LD_LIBRARY_PATH"] = ":".join(libs + [env.get("LD_LIBRARY_PATH", "")]).strip(":")
     log = (WORK / f"{args.game}-rd{distance}.log").open("w")
     return driven(args, distance, command, game_dir, env, log, events, options, loaded_mods)
+
+
+def driver_scenes(args):
+    """The scenes as the driver mods read them: stress scenes carry their setup commands and settle time."""
+    out = []
+    for n, a, b, p in scene_list(args):
+        scene = {"name": n, "from": a, "to": b, "pitch": p, "settle": settle_seconds(args, n)}
+        if n in stress_scenes.NAMES:
+            scene["setup"] = stress_scenes.setup(n, first=n == first_stress(args))
+            scene["cleanup"] = stress_scenes.cleanup(n)
+        out.append(scene)
+    return out
 
 
 def driven(args, distance, command, game_dir, env, log, events, options, loaded_mods):
@@ -705,17 +766,24 @@ def driven(args, distance, command, game_dir, env, log, events, options, loaded_
                     "world_s": world["ready_epoch_ms"] / 1000 - started},
         "scenes": {},
     }
-    windows = []
+    windows, scene_windows = [], {}
     loaded = {e["scene"]: e for e in by("loaded")}
     flights = {e["scene"]: e for e in by("fly")}
     for flown in by("flown"):
         name = flown["scene"]
         windows.append((flights[name]["epoch_ms"] / 1000, flown["epoch_ms"] / 1000))
+        scene_windows[name] = windows[-1]
         scene = {"load_s": loaded[name]["load_ms"] / 1000, "frame_ms": flown["frame_ms"],
                  "chunks": flown["chunks"], "gpu_mb": nvidia}
+        if flown.get("tick_ms"):
+            scene["client_tick_ms"] = statistics.mean(flown["tick_ms"])
+        if "entities" in flown:
+            scene["entities"] = flown["entities"]
         result["scenes"][name] = scene
         print_scene(args.game, distance, name, scene)
     result["memory"] = sampler.summary(windows)
+    for name, mb in scene_rss(sampler, scene_windows).items():
+        result["scenes"][name]["rss_mb"] = mb
     return result
 
 
@@ -742,7 +810,7 @@ def run_neoforge(args, distance):
     script = WORK / "script.json"
     script.write_text(json.dumps({
         "world": WORLD, "seed": SEED, "settle": args.settle, "seconds": args.seconds, "timeout": args.timeout,
-        "scenes": [{"name": n, "from": a, "to": b, "pitch": p} for n, a, b, p in scene_list(args)],
+        "scenes": driver_scenes(args),
     }))
     events = WORK / f"{args.game}-rd{distance}.events.jsonl"
     events.unlink(missing_ok=True)
@@ -877,6 +945,9 @@ def report(args, distance, runs, app):
         for key in ("avg_fps", "low_1pct_fps", "low_01pct_fps"):
             metric(f"fps.{name}.{key}", [f[key] for f in flights if f])
         metric(f"memory.{name}.gpu_mb", [s.get("gpu_mb") for s in scenes])
+        metric(f"memory.{name}.rss_mb", [s.get("rss_mb") for s in scenes])
+        metric(f"tick.{name}.client_ms", [s.get("client_tick_ms") for s in scenes])
+        metric(f"cpu.{name}.p50_ms", [f.get("cpu_p50_ms") for f in flights if f])
     metric("memory.rss_peak_mb", [r["memory"].get("rss_peak_mb") for r in runs])
     metric("memory.rss_steady_mb", [r["memory"].get("rss_steady_mb") for r in runs])
     metric("memory.footprint_peak_mb", [r["memory"].get("footprint_peak_mb") for r in runs])
@@ -923,6 +994,22 @@ def table(labels):
                 cells.append(" / ".join(cell(m.get(f"fps.{scene}.{k}")) for k in ("avg_fps", "low_1pct_fps", "low_01pct_fps")))
             print(f"| {d} | {scene} | " + " | ".join(cells) + " |")
     print()
+    # Per-scene costs where any run recorded them (stress scenes): frame CPU, client tick, resident memory.
+    per_scene = ("cpu.{}.p50_ms", "tick.{}.client_ms", "memory.{}.rss_mb")
+    rows = [(d, scene) for d in distances
+            for scene in sorted({k.split(".")[1] for by in runs.values() if d in by for k in by[d]["metrics"]
+                                 if k.split(".")[0] in ("cpu", "tick") or (k.startswith("memory.") and k.endswith(".rss_mb"))})]
+    if rows:
+        print("| RD | scene | " + " | ".join(f"{l}: frame CPU p50 ms / client tick ms / RSS MB" for l in labels) + " |")
+        print("| --- | --- |" + " --- |" * len(labels))
+        for d, scene in rows:
+            cells = []
+            for l in labels:
+                m = runs.get(l, {}).get(d, {}).get("metrics", {})
+                cells.append(" / ".join(cell(m.get(k.format(scene)), 0 if k.startswith("memory") else 2)
+                                        for k in per_scene))
+            print(f"| {d} | {scene} | " + " | ".join(cells) + " |")
+        print()
     print("| RD | " + " | ".join(f"{l}: title / world s, mean scene load s, RSS steady / peak MB, footprint steady / peak MB, load avg" for l in labels) + " |")
     print("| --- |" + " --- |" * len(labels))
     for d in distances:
