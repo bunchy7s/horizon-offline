@@ -1814,14 +1814,20 @@ impl Hub {
             })
             .collect();
         let uses = &mut columns.uses;
+        let chunks = &columns.chunks;
         for (i, taken, far, batch) in batches {
             let g = &mut self.guests[i];
             let size = batch.len();
+            // The single-player window shares the sections it is sent (handoff.rs).
+            let memory = g.address == super::conn::MEMORY_ADDRESS;
             if size > 0 {
                 g.batch_quota -= size as f32;
                 g.send(&C::ChunkBatchStart(horizon_protocol::packets::Empty));
                 g.sender.send_many(batch.into_iter().map(|body| match body {
                     Body::Level(j) => {
+                        if memory {
+                            super::handoff::offer(chunks[j]);
+                        }
                         uses[j] -= 1;
                         if uses[j] == 0 {
                             std::mem::take(&mut encoded[j])

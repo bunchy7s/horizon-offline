@@ -449,6 +449,12 @@ impl Section {
     pub fn is_uniform(&self, v: u32) -> bool {
         self.blocks.is_uniform(v)
     }
+    /// Whether every block, biome and light value is the same as `other`'s.
+    pub fn same_as(&self, other: &Self) -> bool {
+        self.blocks == other.blocks
+            && self.biomes == other.biomes
+            && self.light.same_as(&other.light)
+    }
     /// Heap bytes held by the block, biome and light storage (benchmark accounting).
     pub fn heap_bytes(&self) -> usize {
         self.blocks.heap_bytes() + self.biomes.heap_bytes() + self.light.heap_bytes()

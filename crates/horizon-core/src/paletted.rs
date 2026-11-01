@@ -723,10 +723,23 @@ impl PalettedContainer {
     }
 }
 impl PartialEq for PalettedContainer {
-    /// Equal when every entry is.
+    /// Equal when every entry is. The same width, palette and words are the
+    /// same entries, whatever they are: compared without reading each.
     fn eq(&self, other: &Self) -> bool {
         let entries = self.strategy.entries();
-        entries == other.strategy.entries() && (0..entries).all(|i| self.get(i) == other.get(i))
+        if entries != other.strategy.entries() {
+            return false;
+        }
+        let same_palette = match (&self.palette, &other.palette) {
+            (Palette::Single(a), Palette::Single(b)) => a == b,
+            (Palette::List(a), Palette::List(b)) => a == b,
+            (Palette::Global, Palette::Global) => true,
+            _ => false,
+        };
+        if same_palette && self.bits == other.bits && self.words == other.words {
+            return true;
+        }
+        (0..entries).all(|i| self.get(i) == other.get(i))
     }
 }
 

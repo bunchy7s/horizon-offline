@@ -112,6 +112,9 @@ impl ChunkFormat {
         // the server sent; nothing is relit.
         let (layers, above) = self.light(&p.light);
         horizon_client::light::light_from_layers(&mut chunk, &layers, above, self.has_skylight);
+        // From the single-player server thread: its own sections where they
+        // are the same.
+        horizon_client::lan::handoff::take(&mut chunk);
         Ok(chunk)
     }
 
