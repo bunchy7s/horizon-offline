@@ -62,7 +62,7 @@ impl Launcher {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some(tr("Choose").into()),
+            prompt: Some("Choose".into()),
         });
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(mut paths))) = paths.await else {

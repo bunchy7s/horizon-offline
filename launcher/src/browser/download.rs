@@ -7,8 +7,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 /// Hosts a file may come from: Modrinth's and CurseForge's file servers, and the release assets
-/// of Horizon's registry (and, see [`github_release_asset`], of the repository a registry entry
-/// names).
+/// of Horizon's registry.
 const HOSTS: [&str; 5] = [
     "https://cdn.modrinth.com/",
     "https://edge.forgecdn.net/",
@@ -17,26 +16,6 @@ const HOSTS: [&str; 5] = [
     // The registry's files at their address before the move to horizon-rust (GitHub redirects it).
     "https://github.com/ludovic111/horizon-mods/releases/download/",
 ];
-/// `https://github.com/<owner>/<repo>/releases/download/<tag>/<name>`: a release asset of a mod's
-/// own repository, which the registry's index lists once its release passed the registry's checks
-/// (docs/api/mod-index.md). Only the address is vouched for here; the index's SHA-256 is what
-/// pins the bytes, and [`save`] refuses any other.
-pub fn github_release_asset(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("https://github.com/") else {
-        return false;
-    };
-    let parts: Vec<&str> = rest.split('/').collect();
-    let plain = |p: &str| {
-        !p.is_empty()
-            && p != "."
-            && p != ".."
-            && p.bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'+' | b'%'))
-    };
-    matches!(parts[..], [owner, repo, "releases", "download", tag, name]
-        if [owner, repo, tag, name].iter().all(|p| plain(p)))
-}
-
 /// Bigger than any pack these sources serve (Modrinth caps uploads at 500 MiB).
 const MAX: u64 = 1 << 30;
 
@@ -64,9 +43,9 @@ pub(super) fn agent(url: &str) -> ureq::Agent {
 
 /// Why a file can't be downloaded at all, before any byte is read.
 pub fn refuse(file: &FileRef) -> Option<String> {
-    if !HOSTS.iter().any(|h| file.url.starts_with(h)) && !github_release_asset(&file.url) {
+    if !HOSTS.iter().any(|h| file.url.starts_with(h)) {
         return Some(format!(
-            "{} isn't on Modrinth's, CurseForge's or Horizon's file servers, or a GitHub release.",
+            "{} isn't on Modrinth's, CurseForge's or Horizon's file servers.",
             file.url
         ));
     }

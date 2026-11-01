@@ -45,13 +45,13 @@ impl Launcher {
                 )
                 .child(index_row(
                     0,
-                    tr("Offline names without an account"),
+                    "Offline names without an account",
                     Some(
                         div()
-                            .child(tr(
+                            .child(
                                 "Offline names play without a Microsoft account that owns the game. \
                                  Minecraft still comes from your own install.",
-                            ))
+                            )
                             .into_any_element(),
                     ),
                     Some(toggle.into_any_element()),

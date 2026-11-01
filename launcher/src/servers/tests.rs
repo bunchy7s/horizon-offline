@@ -25,7 +25,6 @@ fn create_asks_init_and_config_set() {
         },
         players: vec!["Alex".into(), "Steve".into()],
         eula: true,
-        check_accounts: false,
         ..NewServer::default()
     };
     assert_eq!(
@@ -35,6 +34,7 @@ fn create_asks_init_and_config_set() {
     );
     let open = NewServer {
         friends_only: false,
+        check_accounts: true,
         world: World::Copy("/saves/Old".into()),
         ..NewServer::default()
     };

@@ -92,10 +92,7 @@ fn home(name: &str) -> PathBuf {
 
 fn names(zip: &Path) -> Vec<String> {
     let zip = zip::ZipArchive::new(fs::File::open(zip).unwrap()).unwrap();
-    let mut names: Vec<String> = zip
-        .file_names()
-        .map(|name| name.unwrap().into_owned())
-        .collect();
+    let mut names: Vec<String> = zip.file_names().map(str::to_string).collect();
     names.sort();
     names
 }

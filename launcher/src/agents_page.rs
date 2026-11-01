@@ -29,14 +29,14 @@ impl Launcher {
             }));
         index_row(
             n,
-            tr("No AI"),
+            "No AI",
             Some(
                 div()
-                    .child(tr(if on {
+                    .child(if on {
                         "On: every AI feature is hidden and off. The game opens no control socket, and horizon-ctl and the MCP servers refuse."
                     } else {
                         "Hides and turns off every AI feature: agent control of the launcher and the game, horizon-ctl and the MCP servers."
-                    }))
+                    })
                     .into_any_element(),
             ),
             Some(toggle.into_any_element()),
@@ -50,7 +50,7 @@ impl Launcher {
             return None;
         }
         let t = self.theme;
-        let exe = &backend::update_target();
+        let exe = backend::exe_path();
         let clients = agents::clients(exe);
         let pick = self.agents.client.min(clients.len() - 1);
         let client = &clients[pick];
@@ -101,26 +101,18 @@ impl Launcher {
             .p(px(24.))
             .text_size(px(theme::UI.px))
             .line_height(px(21.))
-            .child(
-                text(theme::HEADING)
-                    .text_color(t.ink)
-                    .child(tr("Connect an AI agent")),
-            )
-            .child(div().max_w(px(640.)).text_color(t.muted).child(tr(
+            .child(text(theme::HEADING).text_color(t.ink).child("Connect an AI agent"))
+            .child(div().max_w(px(640.)).text_color(t.muted).child(
                 "Your own agent (Claude Code, Codex, Cursor or any MCP client) can drive the launcher and the game it starts, with the same commands as the terminal. It runs on your computer and talks to Horizon there; it asks before deleting anything.",
-            )))
+            ))
             .child(picker);
         if let Some((program, args)) = client.add.clone() {
             let line = client.add_line().unwrap_or_default();
-            let label = trf("Add to {client}", &[("client", client.name)]);
+            let label = format!("Add to {}", client.name);
             let busy = self.agents.busy;
             let add = button(
                 "agent-add",
-                if busy {
-                    tr("Running…").to_owned()
-                } else {
-                    label
-                },
+                if busy { "Running…".to_owned() } else { label },
                 Kind::Primary,
                 &t,
             )
@@ -146,9 +138,9 @@ impl Launcher {
                 cx.notify();
             }));
             section = section
-                .child(div().text_color(t.muted).child(trf(
-                    "{client} adds it with this command (it runs only when you click):",
-                    &[("client", client.name)],
+                .child(div().text_color(t.muted).child(format!(
+                    "{} adds it with this command (it runs only when you click):",
+                    client.name
                 )))
                 .child(code(&line))
                 .child(div().flex().gap(px(8.)).child(add).child(copy(
@@ -158,13 +150,10 @@ impl Launcher {
                 )));
         }
         section = section
-            .child(div().text_color(t.muted).child(trf(
-                if client.add.is_some() {
-                    "Or put this in {file}:"
-                } else {
-                    "Put this in {file}:"
-                },
-                &[("file", tr(client.file))],
+            .child(div().text_color(t.muted).child(format!(
+                "{} {}:",
+                if client.add.is_some() { "Or put this in" } else { "Put this in" },
+                client.file
             )))
             .child(code(&client.config))
             .child(div().flex().gap(px(8.)).child(copy("agent-copy-config", client.config.clone(), cx)).child(
@@ -175,11 +164,11 @@ impl Launcher {
                         }
                         this.agents.busy = true;
                         this.agents.status = None;
-                        let exe = backend::update_target();
+                        let exe = backend::exe_path().to_path_buf();
                         let task = cx.background_executor().spawn(async move {
                             match agents::self_test(&exe) {
-                                Ok(n) => (true, trf("The MCP server answered with {count} tools. Now ask your agent: \"Say hello from Horizon\".", &[("count", &n.to_string())])),
-                                Err(e) => (false, trf("The MCP server did not answer: {error}", &[("error", &e)])),
+                                Ok(n) => (true, format!("The MCP server answered with {n} tools. Now ask your agent: \"Say hello from Horizon\".")),
+                                Err(e) => (false, format!("The MCP server did not answer: {e}")),
                             }
                         });
                         cx.spawn(async move |this, cx| {
@@ -209,7 +198,7 @@ impl Launcher {
                     .text_color(t.accent)
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.8))
-                    .child(tr("What an agent can do, and the commands"))
+                    .child("What an agent can do, and the commands")
                     .on_click(|_, _, cx| cx.open_url(backend::AGENT_DOCS_URL)),
             ),
         )
@@ -224,42 +213,28 @@ fn run_add(program: &str, args: &[String]) -> (bool, String) {
     {
         Ok(out) if out.status.success() => (
             true,
-            trf(
-                "Added. Restart {program} if it is open, then ask it: \"Say hello from Horizon\".",
-                &[("program", program)],
+            format!(
+                "Added. Restart {program} if it is open, then ask it: \"Say hello from Horizon\"."
             ),
         ),
         Ok(out) => (
             false,
-            trf(
-                "{program} said: {output}",
-                &[
-                    ("program", program),
-                    (
-                        "output",
-                        String::from_utf8_lossy(if out.stderr.is_empty() {
-                            &out.stdout
-                        } else {
-                            &out.stderr
-                        })
-                        .trim(),
-                    ),
-                ],
+            format!(
+                "{program} said: {}",
+                String::from_utf8_lossy(if out.stderr.is_empty() {
+                    &out.stdout
+                } else {
+                    &out.stderr
+                })
+                .trim()
             ),
         ),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (
             false,
-            trf(
-                "{program} is not installed here (or not on the PATH): copy the config instead.",
-                &[("program", program)],
+            format!(
+                "{program} is not installed here (or not on the PATH): copy the config instead."
             ),
         ),
-        Err(e) => (
-            false,
-            trf(
-                "Could not run {program}: {error}",
-                &[("program", program), ("error", &e.to_string())],
-            ),
-        ),
+        Err(e) => (false, format!("Could not run {program}: {e}")),
     }
 }

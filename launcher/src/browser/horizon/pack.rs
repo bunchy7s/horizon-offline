@@ -57,8 +57,7 @@ fn read(work: &Path) -> Option<Installed> {
 
 /// Whether `work` is a registry pack's folder.
 pub fn is_pack(work: &Path) -> bool {
-    // Imported Java packs also have pack.json, with a different record format.
-    read(work).is_some()
+    work.join(RECORD).is_file()
 }
 
 /// The profile's game folder.
