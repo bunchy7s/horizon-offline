@@ -106,6 +106,14 @@ impl MaterialRuleLibrary {
             .ok_or(DecodeError::Field("unknown material density"))?;
         Ok(self.compiler.get_sampler(id)?)
     }
+    /// The sampler of a function decoded into the density registry passed to
+    /// `from_json`, sharing this compiler's cache namespace.
+    pub fn function_sampler(
+        &mut self,
+        id: FunctionId,
+    ) -> Result<Arc<dyn DensitySampler>, DecodeError> {
+        Ok(self.compiler.get_sampler(id)?)
+    }
     /// Compile a router decoded into the density registry passed to `from_json`.
     /// Its roots share cache IDs with all material and aquifer samplers.
     pub fn compile_router(&mut self, router: NoiseRouter) -> Result<RouterSamplers, DecodeError> {

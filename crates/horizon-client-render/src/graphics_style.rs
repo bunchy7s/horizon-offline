@@ -3,6 +3,7 @@
 //! lay out rows and handle input; a menu theme replaces this module.
 use crate::{
     hud::{HudAtlas, HudBatch},
+    lang,
     text::Text,
     ui,
 };
@@ -131,8 +132,48 @@ impl Style {
         value: f32,
         hover: bool,
         active: bool,
+        dragging: bool,
     ) {
-        ui::slider(batch, atlas, x, y, w, label, value, hover && active, active);
+        ui::slider(
+            batch,
+            atlas,
+            x,
+            y,
+            w,
+            label,
+            value,
+            hover && active,
+            active,
+            dragging && active,
+        );
+    }
+    pub fn slider_ext(
+        &self,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        (x, y, w): (f32, f32, f32),
+        label: &Text,
+        value: f32,
+        hover: bool,
+        focused: bool,
+        can_change_value: bool,
+        active: bool,
+        dragging: bool,
+    ) {
+        ui::slider_ext(
+            batch,
+            atlas,
+            x,
+            y,
+            w,
+            label,
+            value,
+            hover && active,
+            focused,
+            can_change_value,
+            active,
+            dragging && active,
+        );
     }
     /// The cost tag and the description beside a control, wrapped to two lines.
     pub fn description(
@@ -144,10 +185,11 @@ impl Style {
         cost: Cost,
         text: &str,
     ) {
-        let tag = Text::literal(cost.label());
+        let tag = Text::literal(lang::get(cost.label()));
         batch.text_styled(atlas, &tag, x, y, self.cost_colors[cost as usize], true);
         let indent = atlas.font.width_text(&tag) + 4.0;
-        let lines = wrap(atlas, text, self.text_width(batch.width), indent);
+        let text = lang::get(text);
+        let lines = wrap(atlas, &text, self.text_width(batch.width), indent);
         for (i, line) in lines.iter().take(2).enumerate() {
             let lx = if i == 0 { x + indent } else { x };
             batch.text_styled(

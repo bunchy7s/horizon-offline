@@ -123,6 +123,8 @@ pub fn accepts_damage(m: &mut Mob, source: &Damage) -> bool {
             | DamageKind::Arrow
             | DamageKind::Thrown
             | DamageKind::Fireball
+            | DamageKind::WitherSkull
+            | DamageKind::WindCharge
             | DamageKind::Thorns
     );
     if !direct && !by_player {

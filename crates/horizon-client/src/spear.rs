@@ -4,7 +4,10 @@
 //! it charges).
 use crate::first_person::SwingAnimation;
 use glam::{Mat4, Vec3};
-use horizon_core::{geometry::trig::Mth, jmath::pow};
+use horizon_core::{
+    geometry::{Aabb, Vec3 as Vec3d, trig::Mth},
+    jmath::pow,
+};
 use std::f32::consts::PI;
 
 /// `KineticWeapon.Condition`.
@@ -120,6 +123,12 @@ impl Kinetic {
                 "minecraft:item.spear.attack"
             },
         })
+    }
+
+    /// `KineticWeapon.computeDamageUseDuration`: the delay and the time the
+    /// damage condition lasts.
+    pub fn damage_use_duration(&self) -> i32 {
+        self.delay_ticks + self.damage.max_duration_ticks
     }
 
     /// The spear's `attack_animation`: a STAB (`SwingAnimationType` 2) as long
@@ -408,6 +417,63 @@ pub fn third_person_attack_item(swing: f32, forward: f32) -> Mat4 {
         Mat4::from_rotation_x((-70.0 * (attack - retract)).to_radians()),
         Vec3::new(0.0, -0.125, 0.125),
     ) * Mat4::from_translation(Vec3::new(0.0, forward * (attack - retract), 0.0))
+}
+
+/// `ProjectileUtil.getManyEntityHitResult` over `boxes`: those the segment
+/// `from`..`to` meets, or comes within the margin of with no block between
+/// (`clip`: where a segment first meets a block), each with where it is hit.
+fn hits_along(
+    boxes: &[(usize, Aabb)],
+    from: Vec3d,
+    to: Vec3d,
+    margin: f64,
+    clip: &impl Fn(Vec3d, Vec3d) -> Option<Vec3d>,
+) -> Vec<(usize, Vec3d)> {
+    let grow = Vec3d::new(margin, margin, margin);
+    let mut hits = Vec::new();
+    for &(i, bounds) in boxes {
+        let hit = if bounds.contains(from) {
+            Some(from)
+        } else if let Some(at) = bounds.clip(from, to) {
+            Some(at)
+        } else if margin > 0.0 {
+            bounds.inflate(grow).clip(from, to).and_then(|outside| {
+                let centre = bounds.center();
+                let toward = clip(outside, centre).unwrap_or(centre);
+                bounds.clip(outside, toward)
+            })
+        } else {
+            None
+        };
+        if let Some(at) = hit {
+            hits.push((i, at));
+        }
+    }
+    hits
+}
+
+/// `ProjectileUtil.getHitEntitiesAlong` with an `AttackRange` of `reach` (its
+/// effective min and max range and hitbox margin): the boxes along `look`
+/// from the minimum reach to the maximum plus the attacker's own movement,
+/// none when a block (`clip`) is closer than the minimum.
+pub fn hits_in_reach(
+    boxes: &[(usize, Aabb)],
+    eye: Vec3d,
+    look: Vec3d,
+    movement: Vec3d,
+    (min, max, margin): (f32, f32, f32),
+    clip: impl Fn(Vec3d, Vec3d) -> Option<Vec3d>,
+) -> Vec<(usize, Vec3d)> {
+    let from = eye.add_vector(look.scale(f64::from(min)));
+    let mut to = eye.add_vector(look.scale(f64::from(max) + movement.dot(look).max(0.0)));
+    // A block closer than the minimum reach takes the whole stab.
+    if let Some(block) = clip(eye, to) {
+        to = block;
+        if eye.distance_squared(to) < eye.distance_squared(from) {
+            return Vec::new();
+        }
+    }
+    hits_along(boxes, from, to, f64::from(margin), &clip)
 }
 
 #[cfg(test)]

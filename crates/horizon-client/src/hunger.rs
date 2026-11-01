@@ -60,9 +60,11 @@ impl PlayerMotion {
         }
         let h = &mut self.health;
         let mut world = TickWorld {
+            entity: self.entity_id,
             resources,
             rules,
             invulnerable: self.invulnerable || self.spectator,
+            client_loaded: self.client_loaded,
             attributes: &mut self.attributes,
             data: &mut h.data,
             ids: h.ids,
@@ -77,9 +79,11 @@ impl PlayerMotion {
     }
 }
 struct TickWorld<'a> {
+    entity: i32,
     resources: &'a HealthResources,
     rules: HealthRules,
     invulnerable: bool,
+    client_loaded: bool,
     attributes: &'a mut Attributes,
     data: &'a mut SyncedFloats,
     ids: PlayerFloatIds,
@@ -144,7 +148,10 @@ impl FoodWorld for TickWorld<'_> {
         self.events
             .push(MotionEvent::Health(HealthEvent::StarvationDamage(amount)));
         let mut environment = Environment {
+            entity: self.entity,
+            causing: 0,
             invulnerable: false,
+            client_loaded: self.client_loaded,
             rules: self.rules,
             source: self
                 .resources
@@ -159,10 +166,12 @@ impl FoodWorld for TickWorld<'_> {
             status: Default::default(),
             blocking: None,
             blocked: 0.0,
+            fully_blocked: false,
             block_sound: false,
             knocked: false,
             totem: false,
             totem_fired: false,
+            canceled: false,
         };
         if ServerPlayerCombat::new(self.attributes, self.data, food, self.ids, &mut environment)?
             .hurt(self.hurt, amount)?

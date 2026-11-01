@@ -2,7 +2,9 @@
 //! the vanilla error messages and completion suggestions.
 use super::{CmdResult, CommandError, Context, Reader, SuggestionsBuilder};
 
-pub use horizon_client_core::registries::{Registries, RegistryIds};
+pub use horizon_client_core::registries::{
+    CustomCompletionAction, Registries, RegistryIds, modify_custom_completions,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Resource {

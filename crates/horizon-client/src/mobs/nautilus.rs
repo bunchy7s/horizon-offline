@@ -228,10 +228,42 @@ fn dash(m: &mut Mob, amount: f32) {
     // The sound plays on its next tick.
     m.extra.scratch[1] = 1;
 }
+/// `AbstractNautilus.getNautilusRestrictionRadius`: 32 blocks, or 16 for a
+/// baby or a saddled one.
+fn restriction_radius(m: &Mob) -> i32 {
+    if !m.is_baby() && !m.extra.saddled {
+        32
+    } else {
+        16
+    }
+}
+/// `AbstractNautilus.checkRestriction`: a tame nautilus that is neither
+/// leashed nor ridden keeps its home where it is, within its radius.
+fn check_restriction(m: &mut Mob) {
+    if m.extra.leash.is_some() || m.rider.is_some() || !m.extra.tame {
+        return;
+    }
+    let radius = restriction_radius(m);
+    let at = [
+        m.position.x.floor() as i32,
+        m.position.y.floor() as i32,
+        m.position.z.floor() as i32,
+    ];
+    let kept = m.ai.home.is_some_and(|(c, r)| {
+        let d = [c[0] - at[0], c[1] - at[1], c[2] - at[2]];
+        let sq = f64::from(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        sq < f64::from(radius + 8).powi(2) && r == radius
+    });
+    if !kept {
+        m.ai.home = Some((at, radius));
+    }
+}
 /// `AbstractNautilus.tick` and the brains' memories: the rider's breath, the
 /// dash clock, bubbles, and choosing whom to charge at
 /// (`NautilusAi.findNearestValidAttackTarget`).
 pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+    // customServerAiStep: the home is kept before the rest of the step.
+    check_restriction(m);
     if m.extra.scratch[1] != 0 {
         m.extra.scratch[1] = 0;
         sound(m, dash_sound(m), events);

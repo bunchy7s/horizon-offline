@@ -211,6 +211,15 @@ impl Game<'_> {
                 "tick" => {
                     self.chat_capture = Some(Vec::new());
                     for _ in 0..op["n"].as_u64().unwrap_or(1) {
+                        // The oracle's profile resolver answers at once; the
+                        // game's asks the services (none here: they refuse at
+                        // once) on a thread, which a tick can outrun.
+                        let asked = Instant::now();
+                        while self.profile_fetches_pending()
+                            && asked.elapsed() < Duration::from_secs(10)
+                        {
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
                         self.tick_server(false)?;
                     }
                     let messages = self.chat_capture.take().unwrap_or_default();

@@ -80,9 +80,78 @@ pub enum BlockEntity {
     Shelf(Box<Shelf>),
     /// `ChiseledBookShelfBlockEntity`: a `Container` of six one-book slots.
     ChiseledBookshelf(Box<ChiseledBookshelf>),
+    /// A block entity of a mod (`native_block_entity`), kept as its saved
+    /// compound for the mod to read and change.
+    Mod(Box<ModBlockEntity>),
     /// `PotentSulfurBlockEntity` (`game/potent_sulfur.rs`).
     PotentSulfur(PotentSulfur),
+    /// `StructureBlockEntity` (`structure_block.rs`).
+    StructureBlock(Box<crate::structure_block::StructureBlock>),
+    /// `JigsawBlockEntity` (`jigsaw_block.rs`).
+    JigsawBlock(Box<crate::jigsaw_block::JigsawBlock>),
+    /// `TestBlockEntity` (`test_block.rs`).
+    TestBlock(Box<crate::test_block::TestBlock>),
+    /// `TestInstanceBlockEntity` (`test_instance_block.rs`).
+    TestInstanceBlock(Box<crate::test_instance_block::TestInstanceBlock>),
 }
+/// A mod's block entity: its type id (`mymod:machine`), its saved
+/// compound without `id`, `x`, `y`, `z` and `Items`, its item slots
+/// (`Items`) when its block has a container (`ModContainer`), and the data
+/// slots its menu shows (`ContainerData`: a furnace menu's flame and arrow),
+/// which the mod sets and nothing saves.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ModBlockEntity {
+    pub id: String,
+    pub nbt: Compound,
+    pub items: Vec<Option<ItemStack>>,
+    pub data: Vec<i32>,
+}
+/// The container of a mod block's block entity, as a `WorldlyContainer`
+/// says it: its slot count, the slots each face reaches
+/// (`getSlotsForFace`, by `Direction`: down, up, north, south, west, east),
+/// and the slots hoppers may put into (`canPlaceItemThroughFace`) and take
+/// from (`canTakeItemThroughFace`); and the vanilla menu that shows its
+/// slots when the block is used, if any (`MOD_MENUS`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ModContainer {
+    pub slots: usize,
+    pub faces: [Vec<usize>; 6],
+    pub inputs: Vec<usize>,
+    pub outputs: Vec<usize>,
+    pub menu: Option<String>,
+}
+/// The fluid tanks of a mod block's block entity, in the container's shape:
+/// each tank's capacity in millibuckets, the tanks each face reaches, and
+/// the tanks a fill may reach and a drain may take. The tanks' contents are
+/// not here: they live in the entity's saved compound, under `fluids`, so
+/// they survive restarts and the block's own tick reads them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ModFluidTanks {
+    /// Each tank's capacity in millibuckets, in tank order.
+    pub tanks: Vec<i32>,
+    pub faces: [Vec<usize>; 6],
+    /// The tanks a fill may reach (`canPlaceItemThroughFace`).
+    pub inputs: Vec<usize>,
+    /// The tanks a drain may take from (`canTakeItemThroughFace`).
+    pub outputs: Vec<usize>,
+}
+/// The vanilla menus a mod container can open, with the slot count each
+/// shows: slot grids, and the furnaces' (input, fuel, result), whose four
+/// data slots draw the flame (`data[0]` of `data[1]`) and the arrow
+/// (`data[2]` of `data[3]`), as `AbstractFurnaceBlockEntity.dataAccess`.
+pub const MOD_MENUS: [(&str, usize); 11] = [
+    ("minecraft:furnace", 3),
+    ("minecraft:blast_furnace", 3),
+    ("minecraft:smoker", 3),
+    ("minecraft:hopper", 5),
+    ("minecraft:generic_3x3", 9),
+    ("minecraft:generic_9x1", 9),
+    ("minecraft:generic_9x2", 18),
+    ("minecraft:generic_9x3", 27),
+    ("minecraft:generic_9x4", 36),
+    ("minecraft:generic_9x5", 45),
+    ("minecraft:generic_9x6", 54),
+];
 /// `PotentSulfurBlockEntity`: the seconds left to the geyser's next change of
 /// state (`waitingCountdown`, saved as `countdown`) and the game time of its
 /// last eruption block event, which the client's plume counts from.
@@ -164,6 +233,9 @@ pub struct SkullSkin {
     /// `ResolvableProfile.nameOrId` when the profile is `Dynamic` (a name or
     /// an id only): the key `skins::Resolver` resolves it by.
     pub dynamic: Option<NameOrId>,
+    /// `PlayerSkin.Patch.body`: the profile's `texture`, a resource pack
+    /// texture drawn instead of any skin.
+    pub texture: Option<String>,
     pub fallback: &'static str,
 }
 /// `Either<String, UUID>`: the key a `Dynamic` `ResolvableProfile` resolves
@@ -222,10 +294,18 @@ pub struct Beacon {
 }
 #[derive(Clone, Debug, Default)]
 pub struct Jukebox {
-    pub record: Option<ItemStack>,
+    /// `JukeboxBlockEntity`'s one slot (`ContainerSingleItem`), so a hopper or
+    /// a dropper reaches it as it reaches any container.
+    pub items: [Option<ItemStack>; 1],
     /// `ticks_since_song_started`, while a song plays.
     pub ticks: i64,
     pub playing: bool,
+}
+impl Jukebox {
+    /// `JukeboxBlockEntity.getTheItem`: the disc it holds.
+    pub fn record(&self) -> Option<&ItemStack> {
+        self.items[0].as_ref()
+    }
 }
 /// `BrewingStandBlockEntity` state. Slots: 0-2 bottles, 3 ingredient, 4 fuel.
 #[derive(Clone, Debug, Default)]

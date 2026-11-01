@@ -7,9 +7,9 @@
 use super::{
     Mob, MobEvent, MobWorld, Seen, Species,
     goals::{
-        Avoid, AvoidEntity, Breed, Cx, Float, FollowParent, Goal, JUMP, LOOK, LeapAtTarget,
-        LookAtPlayer, MOVE, MeleeAttack, MoveToBlock, NearestTarget, Panic, Prey, Stroll,
-        goal_clone, hide_pos, reduced,
+        Avoid, AvoidEntity, Breed, ClimbOnTopOfPowderSnow, Cx, Float, FollowParent, Goal, JUMP,
+        LOOK, LeapAtTarget, LookAtPlayer, MOVE, MeleeAttack, MoveToBlock, NearestTarget, Panic,
+        Prey, Stroll, goal_clone, hide_pos, reduced,
     },
     living::wrap,
 };
@@ -40,6 +40,26 @@ const MAX_CROUCH_AMOUNT: f32 = 5.0;
 pub fn flag(m: &Mob, f: i32) -> bool {
     m.extra.ints[0] & f != 0
 }
+/// `Fox.getAmbientSound` for a fox awake: when it isn't bright outside, one
+/// time in ten, the screech if no non-spectator player's box is within 16
+/// blocks of the fox's; otherwise the ambient sound.
+pub fn awake_ambient(m: &mut Mob, w: &MobWorld) -> &'static str {
+    // Level.isBrightOutside: the End has a fixed time, so never there.
+    let bright = w.daylight && !w.end;
+    if !bright && m.random.next_float() < 0.1 {
+        let around = m.bounds().inflate(Vec3::new(16.0, 16.0, 16.0));
+        let player_near = w
+            .player
+            .as_ref()
+            .is_some_and(|p| !p.spectator && p.bounds.intersects(around));
+        if !player_near {
+            return SCREECH;
+        }
+    }
+    "entity.fox.ambient"
+}
+/// `SoundEvents.FOX_SCREECH`.
+pub const SCREECH: &str = "entity.fox.screech";
 fn set_flag(m: &mut Mob, f: i32, on: bool) {
     if on {
         m.extra.ints[0] |= f;
@@ -50,6 +70,42 @@ fn set_flag(m: &mut Mob, f: i32, on: bool) {
 /// `Fox.clearStates`.
 fn clear_states(m: &mut Mob) {
     m.extra.ints[0] = 0;
+}
+/// `Fox.getTrustedEntities`: the UUIDs a fox trusts, `DATA_TRUSTED_ID_0`
+/// first.
+pub fn trusted_entities(m: &Mob) -> impl Iterator<Item = [i32; 4]> + '_ {
+    m.extra.trusted.iter().flatten().copied()
+}
+/// `Fox.addTrustedEntity`: the first free slot, and once both are taken a new
+/// one replaces the second.
+pub fn add_trusted_entity(m: &mut Mob, uuid: [i32; 4]) {
+    let slot = usize::from(m.extra.trusted[0].is_some());
+    m.extra.trusted[slot] = Some(uuid);
+}
+/// `Fox.clearTrusted`: forget everyone.
+pub fn clear_trusted(m: &mut Mob) {
+    m.extra.trusted = [None; 2];
+}
+/// `Fox.trusts`: the UUID is one of the trusted.
+pub fn trusts(m: &Mob, uuid: [i32; 4]) -> bool {
+    trusted_entities(m).any(|trusted| trusted == uuid)
+}
+/// The trust of a fox's breeding (`Fox.FoxBreedGoal.breed`): the baby trusts
+/// the player who fed this fox into love and, when it is another player, the
+/// one who fed its partner.
+pub fn trust_breeders(
+    baby: &mut Mob,
+    love_cause: Option<[i32; 4]>,
+    partner_love_cause: Option<[i32; 4]>,
+) {
+    if let Some(cause) = love_cause {
+        add_trusted_entity(baby, cause);
+    }
+    if let Some(cause) = partner_love_cause
+        && partner_love_cause != love_cause
+    {
+        add_trusted_entity(baby, cause);
+    }
 }
 /// `Fox.canMove`, which `FoxMoveControl` waits for.
 pub fn can_move(m: &Mob) -> bool {
@@ -91,6 +147,7 @@ pub fn register(m: &mut Mob) {
     let countdown = m.random.next_int_bound(reduced(140)).unwrap_or(0);
     let g = &mut m.ai.goals;
     g.add(0, Wrap::new(Float).on_start(clear_states));
+    g.add(0, ClimbOnTopOfPowderSnow);
     g.add(1, Faceplant { countdown: 0 });
     g.add(2, Panic::new(2.2));
     g.add(3, Wrap::new(Breed::new(1.0)).on_start(clear_states));
@@ -98,7 +155,7 @@ pub fn register(m: &mut Mob) {
     g.add(
         4,
         AvoidEntity::new(Avoid::Player, 16.0, 1.6, 1.4)
-            .player_when(|p| !p.sneaking && !p.spectator),
+            .player_when(|m, p| !p.sneaking && !p.spectator && !trusts(m, p.uuid)),
     );
     g.add(
         4,
@@ -113,7 +170,7 @@ pub fn register(m: &mut Mob) {
     g.add(6, SeekShelter::new(1.25));
     g.add(
         7,
-        Wrap::new(MeleeAttack::new(1.2, true))
+        Wrap::new(MeleeAttack::new(1.2, true).bite("entity.fox.bite"))
             .when(
                 |m| !flag(m, SITTING | SLEEPING | CROUCHING | FACEPLANTED),
                 false,
@@ -203,6 +260,12 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         } else if eaten > 560 && m.random.next_float() < 0.1 {
             let at = [m.position.x, m.position.y, m.position.z];
             events.push(MobEvent::Sound("entity.fox.eat", at, 1.0, 1.0));
+            // Fox.handleEntityEvent 45: the clients throw the crumbs of the food.
+            events.push(MobEvent::EntityEvent {
+                mob: m.id,
+                event: 45,
+                at,
+            });
         }
     }
     if !m.target_info(w).is_some_and(|t| t.alive) {
@@ -868,5 +931,74 @@ pub fn pose(m: &Mob, partial: f32) -> super::body_anim::Fox {
         head_roll_angle: m.anim.lerp(INTERESTED_ANGLE, partial) * 0.11 * std::f32::consts::PI,
         crouch_amount: m.anim.lerp(CROUCH_AMOUNT, partial),
         leg_motion_pos: (m.age as f32 + partial) * 0.67 * 3.0,
+    }
+}
+
+#[cfg(test)]
+mod trust_tests {
+    use super::*;
+    use crate::mobs::sensor_scan_tests::kind;
+
+    fn fox() -> Mob {
+        let mut kind = kind();
+        let k = std::sync::Arc::make_mut(&mut kind);
+        k.id = "minecraft:fox".into();
+        k.species = Species::Fox;
+        Mob::new(1, kind, Vec3::ZERO, 0.0)
+    }
+
+    /// `Fox.addTrustedEntity`: the first free slot, then the second, and a
+    /// third player replaces the second (`DATA_TRUSTED_ID_0/1`).
+    #[test]
+    fn a_fox_trusts_two_players_and_the_third_replaces_the_second() {
+        const A: [i32; 4] = [1, 2, 3, 4];
+        const B: [i32; 4] = [5, 6, 7, 8];
+        const C: [i32; 4] = [9, 10, 11, 12];
+        let mut f = fox();
+        assert!(!trusts(&f, A), "a fresh fox trusts nobody");
+        add_trusted_entity(&mut f, A);
+        add_trusted_entity(&mut f, B);
+        assert!(trusts(&f, A) && trusts(&f, B));
+        add_trusted_entity(&mut f, C);
+        assert!(trusts(&f, A), "the first slot stays");
+        assert!(!trusts(&f, B) && trusts(&f, C), "the second is replaced");
+        assert_eq!(trusted_entities(&f).collect::<Vec<_>>(), vec![A, C]);
+        clear_trusted(&mut f);
+        assert_eq!(trusted_entities(&f).count(), 0);
+        assert!(!trusts(&f, A));
+    }
+}
+
+#[cfg(test)]
+mod trust_breed_tests {
+    use super::*;
+    use crate::mobs::sensor_scan_tests::kind;
+
+    fn fox() -> Mob {
+        let mut kind = kind();
+        let k = std::sync::Arc::make_mut(&mut kind);
+        k.id = "minecraft:fox".into();
+        k.species = Species::Fox;
+        Mob::new(1, kind, Vec3::ZERO, 0.0)
+    }
+
+    /// `Fox.FoxBreedGoal.breed`: the baby trusts both players who fed the
+    /// parents into love, and one of them only once when it is the same.
+    #[test]
+    fn a_baby_fox_trusts_both_players_who_fed_its_parents() {
+        const A: [i32; 4] = [1, 2, 3, 4];
+        const B: [i32; 4] = [5, 6, 7, 8];
+        let mut baby = fox();
+        trust_breeders(&mut baby, Some(A), Some(B));
+        assert_eq!(trusted_entities(&baby).collect::<Vec<_>>(), vec![A, B]);
+        let mut same = fox();
+        trust_breeders(&mut same, Some(A), Some(A));
+        assert_eq!(trusted_entities(&same).collect::<Vec<_>>(), vec![A]);
+        let mut one = fox();
+        trust_breeders(&mut one, Some(A), None);
+        assert_eq!(trusted_entities(&one).collect::<Vec<_>>(), vec![A]);
+        let mut none = fox();
+        trust_breeders(&mut none, None, None);
+        assert_eq!(trusted_entities(&none).count(), 0);
     }
 }

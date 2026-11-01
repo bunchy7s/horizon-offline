@@ -429,9 +429,16 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // A fresh command block has no command and is neither powered
                 // nor always active: `CommandBlock.tick` changes nothing. A
                 // fresh suspicious block was never brushed, so
-                // `BrushableBlockEntity.checkReset` has nothing to reset.
+                // `BrushableBlockEntity.checkReset` has nothing to reset. A
+                // fresh structure block has no structure name, so its trigger
+                // neither saves nor loads. A test block's trigger and reset
+                // live on its block entity: `game/test_blocks.rs` runs them.
+                // `Block.pushEntitiesUp` lifts only the entities in the new
+                // block's box, and these cases have none: nothing moves.
                 LevelEvent::BlockEvent {
-                    kind: "shrieker_respond" | "portal_spawn" | "command_block" | "brushable",
+                    kind:
+                        "shrieker_respond" | "portal_spawn" | "command_block" | "brushable"
+                        | "structure_block" | "test_block" | "test_block_tick" | "push_entities_up",
                     ..
                 } => {}
                 LevelEvent::BlockEvent { kind, .. } => {

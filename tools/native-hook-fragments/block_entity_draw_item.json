@@ -1,0 +1,8 @@
+{
+  "hooks": [],
+  "rust_summary": "items and block state properties for drawing mod block entities\n(`native_draw_item`, `native_block_state_property`).",
+  "doc_summary": "items and block state properties for drawing mod block entities: in `native_block_entity_submit`, `native_draw_item(draw,\nstack, display, owner_yaw, seed)` draws an item stack under `draw`'s pose as a campfire's or a shelf's\n(`ItemModelResolver.updateForTopItem` and `ItemStackRenderState.submit`, in the model's `display` transform; with `owner_yaw`, the block\nentity is the item's owner, as a shelf is, so a compass on it points from there). The client's copy of a block entity has\nno item slots: send the stacks you draw in `native_block_entity_update_tag` and read them from `entity.nbt`.\n`native_block_state_property(state, key)` reads the block's\n`facing` from the hook's `state` without a world lookup. Bundles that use them need `\"hooks\": @API:block_entity_draw_item@`.",
+  "comments": [
+    "crates/horizon-client/src/game/native_block_entity_draw.rs"
+  ]
+}

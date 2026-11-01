@@ -439,6 +439,25 @@ impl PalettedContainer {
             }
         }
     }
+    /// The palette id of every entry in index order, and the list palette
+    /// they index (`get(i)` is `list[ids[i]]`), without looking the values
+    /// up; `None` (and `ids` untouched) for a single-value or global palette.
+    pub fn unpack_ids(&self, ids: &mut [u16]) -> Option<&[u32]> {
+        let Palette::List(list) = &self.palette else {
+            return None;
+        };
+        assert_eq!(ids.len(), self.strategy.entries());
+        let bits = usize::from(self.bits);
+        let per = 64 / bits;
+        let m = mask(self.bits);
+        for (chunk, &word) in ids.chunks_mut(per).zip(&self.words) {
+            for (slot, cell) in chunk.iter_mut().enumerate() {
+                // List palettes stay at a few bits (eight at most for blocks).
+                *cell = ((word >> (slot * bits)) & m) as u16;
+            }
+        }
+        Some(list)
+    }
     /// A container holding `values` in the smallest configuration for their
     /// distinct count, with palette ids in first-occurrence order, like a
     /// container unpacked from disk.

@@ -1,15 +1,16 @@
 //! The control API (docs/server.md, section 8): HTTP and JSON on 127.0.0.1, with a random token in
 //! `.horizon/api.json` that only the server's own user can read. The CLI manages a running server through
-//! it; the web panel and the MCP server will too.
+//! it, and so does the web panel. The admin endpoints (players, moderation, text metrics) are in admin.rs.
 //!
 //! Its routes are [`ROUTES`], listed in docs/api/server-reference.md.
 
 use crate::{
+    admin::{self, Action},
     backup,
     config::Config,
     engine,
     http::{self, Request, Response},
-    panel,
+    panel, settings,
     update::{self, Install},
 };
 use serde_json::{Value, json};
@@ -47,7 +48,7 @@ pub struct Route {
 }
 
 /// Every endpoint `start` and [`route`] answer; a test checks the two agree.
-pub const ROUTES: [Route; 11] = [
+pub const ROUTES: [Route; 28] = [
     Route {
         method: "GET",
         path: "/api/v1/status",
@@ -68,6 +69,13 @@ pub const ROUTES: [Route; 11] = [
         takes: "`?since=N`",
         answers: "`{\"next\": N, \"lines\": [...]}`",
         what: "The log lines after the Nth (the last 2000 are kept)",
+    },
+    Route {
+        method: "GET",
+        path: "/api/v1/events",
+        takes: "`?since=N` (or `Last-Event-ID`), `?types=join,leave,kick,chat,chat_filtered,death,log,phase` (all by default)",
+        answers: "with `Accept: text/event-stream`, server-sent events as they happen (`id`, `event`: the type, `data`: JSON); otherwise `{\"next\": N, \"events\": [...]}`",
+        what: "Log lines, the supervisor's phase, and the game's joins, leaves, kicks, chat, messages the chat filter refused (`chat_filtered`, without their text) and deaths (the last 2000 kept)",
     },
     Route {
         method: "POST",
@@ -105,6 +113,20 @@ pub const ROUTES: [Route; 11] = [
         what: "Back up now (a running game saves first and stays up)",
     },
     Route {
+        method: "DELETE",
+        path: "/api/v1/backups",
+        takes: "`?name=<file>` (the full name `backups` lists)",
+        answers: "`{\"name\": \"<file>\"}`",
+        what: "Delete a backup",
+    },
+    Route {
+        method: "GET",
+        path: "/api/v1/backups/download",
+        takes: "`?name=<file>`",
+        answers: "the zip",
+        what: "Download a backup",
+    },
+    Route {
         method: "POST",
         path: "/api/v1/restore",
         takes: "`{\"name\": \"<backup>\"}`",
@@ -117,6 +139,104 @@ pub const ROUTES: [Route; 11] = [
         takes: "`{\"tag\": \"...\", \"timeout\": seconds}` (both optional)",
         answers: "`{\"ok\": true}`; `status` says how it went (`update`)",
         what: "Restart on that installed release, or download the newest first; goes back if the game isn't up within the timeout",
+    },
+    Route {
+        method: "GET",
+        path: "/api/v1/metrics/prometheus",
+        takes: "",
+        answers: "the latest sample as Prometheus text: `horizon_up`, `horizon_tps`, `horizon_mspt{stat}`, `horizon_players_online`, `horizon_memory_rss_bytes`...",
+        what: "Metrics for a monitoring tool to scrape",
+    },
+    Route {
+        method: "GET",
+        path: "/api/v1/players",
+        takes: "",
+        answers: "`online` (name, uuid, address, ping_ms, op_level), `max_players`, `ops`, `whitelist` (`enabled`, `players`), `bans`, `ip_bans` (with reason, source, created, expires)",
+        what: "Who is online, and vanilla's lists",
+    },
+    Route {
+        method: "POST",
+        path: "/api/v1/players/kick",
+        takes: "`{\"name\", \"reason\"}` (reason optional)",
+        answers: "`{\"changed\": bool, \"output\": [...]}`: whether the list (or who is online) changed, and the console's lines",
+        what: "Kick an online player",
+    },
+    Route {
+        method: "POST",
+        path: "/api/v1/players/ban",
+        takes: "`{\"name\", \"reason\"}` (reason optional)",
+        answers: "`{\"changed\": bool, \"output\": [...]}`: whether the list (or who is online) changed, and the console's lines",
+        what: "Ban a player (kicked if online)",
+    },
+    Route {
+        method: "POST",
+        path: "/api/v1/players/pardon",
+        takes: "`{\"name\"}`",
+        answers: "`{\"changed\": bool, \"output\": [...]}`: whether the list (or who is online) changed, and the console's lines",
+        what: "Lift a player's ban",
+    },
+    Route {
+        method: "POST",
+        path: "/api/v1/players/ban-ip",
+        takes: "`{\"ip\", \"reason\"}`, or `{\"name\"}` of an online player",
+        answers: "`{\"changed\": bool, \"output\": [...]}`: whether the list (or who is online) changed, and the console's lines",
+        what: "Ban an address (its players are kicked)",
+    },
+    Route {
+        method: "POST",
+        path: "/api/v1/players/pardon-ip",
+        takes: "`{\"ip\"}`",
+        answers: "`{\"changed\": bool, \"output\": [...]}`: whether the list (or who is online) changed, and the console's lines",
+        what: "Lift an address's ban",
+    },
+    Route {
+        method: "POST",
+        path: "/api/v1/players/op",
+        takes: "`{\"name\"}`",
+        answers: "`{\"changed\": bool, \"output\": [...]}`: whether the list (or who is online) changed, and the console's lines",
+        what: "Make a player an operator (op-permission-level)",
+    },
+    Route {
+        method: "POST",
+        path: "/api/v1/players/deop",
+        takes: "`{\"name\"}`",
+        answers: "`{\"changed\": bool, \"output\": [...]}`: whether the list (or who is online) changed, and the console's lines",
+        what: "Make a player no longer an operator",
+    },
+    Route {
+        method: "POST",
+        path: "/api/v1/whitelist",
+        takes: "`{\"enabled\": bool}`",
+        answers: "`{\"changed\": bool, \"output\": [...]}`: whether the list (or who is online) changed, and the console's lines",
+        what: "Turn the whitelist on or off",
+    },
+    Route {
+        method: "POST",
+        path: "/api/v1/whitelist/add",
+        takes: "`{\"name\"}`",
+        answers: "`{\"changed\": bool, \"output\": [...]}`: whether the list (or who is online) changed, and the console's lines",
+        what: "Whitelist a player",
+    },
+    Route {
+        method: "POST",
+        path: "/api/v1/whitelist/remove",
+        takes: "`{\"name\"}`",
+        answers: "`{\"changed\": bool, \"output\": [...]}`: whether the list (or who is online) changed, and the console's lines",
+        what: "Take a player off the whitelist (kicked if enforce-whitelist)",
+    },
+    Route {
+        method: "GET",
+        path: "/api/v1/config",
+        takes: "",
+        answers: "`{\"config\": {...}}`: server.toml's settings by section (`api.token` hidden)",
+        what: "The settings",
+    },
+    Route {
+        method: "PATCH",
+        path: "/api/v1/config",
+        takes: "`{\"changes\": {\"world.difficulty\": \"hard\", ...}}`",
+        answers: "`saved`, `applied` (taken by the running game at once), `restart` (from the next start), `running`",
+        what: "Change settings as `config set` does; not `engine.*`, `panel.*`, `api.*`, nor RCON, query or management keys",
     },
     Route {
         method: "POST",
@@ -138,7 +258,7 @@ pub enum Phase {
 }
 
 impl Phase {
-    fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Self::Starting => "starting",
             Self::Running => "running",
@@ -219,6 +339,9 @@ pub struct Shared {
     /// The installer's folder this program runs from (none for a build of your own: no updates).
     pub install: Option<Install>,
     pub update: Mutex<Updates>,
+    /// The event stream's events (events.rs), and the streams' wake-up.
+    pub events: Mutex<crate::events::Events>,
+    pub event_added: std::sync::Condvar,
 }
 
 impl Shared {
@@ -247,6 +370,8 @@ impl Shared {
             panel: Mutex::new(panel::Auth::default()),
             install,
             update: Mutex::new(Updates::default()),
+            events: Mutex::default(),
+            event_added: std::sync::Condvar::new(),
         })
     }
 
@@ -334,6 +459,7 @@ impl Shared {
     }
     pub fn set_phase(&self, phase: Phase) {
         self.state.lock().unwrap().phase = phase;
+        self.emit("phase", json!({ "phase": phase.name() }));
     }
     fn phase(&self) -> Phase {
         self.state.lock().unwrap().phase
@@ -423,12 +549,12 @@ pub fn same_token(a: &str, b: &str) -> bool {
 }
 
 /// Writes a file only its owner can read.
-pub fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+pub fn write_private(path: &Path, text: impl AsRef<[u8]>) -> std::io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    options.open(path)?.write_all(text.as_bytes())
+    options.open(path)?.write_all(text.as_ref())
 }
 
 /// Removes the endpoint file when the supervisor ends.
@@ -439,19 +565,35 @@ impl Drop for Endpoint {
     }
 }
 
-/// Starts the API on a free port of 127.0.0.1 and writes where it is and its token.
+/// Starts the API where `[api]` says (a free port of 127.0.0.1 by default) and writes where it is and its
+/// token (`[api] token`, or a random one).
 pub fn start(shared: Arc<Shared>) -> Result<Endpoint, String> {
-    let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| format!("control API: {e}"))?;
+    let settings = Config::load(&shared.dir)?.api;
+    let listener =
+        TcpListener::bind(settings.address()?).map_err(|e| format!("control API: {e}"))?;
     let address = listener.local_addr().map_err(|e| e.to_string())?;
-    let token = random_token();
+    let token = match settings.token.trim() {
+        "" => random_token(),
+        token => token.to_owned(),
+    };
+    let public = !crate::config::private(address.ip());
+    if public {
+        crate::supervisor::note(
+            &shared,
+            "WARN",
+            &format!(
+                "The control API listens on {address}, beyond this computer and the tailnet (api.allow_public): \
+                 only its token guards the server"
+            ),
+        );
+    }
     let path = shared.dir.join(ENDPOINT);
     write_private(
         &path,
-        &json!({ "address": address.to_string(), "token": token, "pid": std::process::id() })
+        json!({ "address": address.to_string(), "token": token, "pid": std::process::id() })
             .to_string(),
     )
     .map_err(|e| format!("{}: {e}", path.display()))?;
-    let hosts = [address.to_string(), format!("localhost:{}", address.port())];
     http::serve(listener, move |request| {
         // A page in a browser can't send the token, and a rebound DNS name can't pass as this address.
         let authorised = request
@@ -461,9 +603,10 @@ pub fn start(shared: Arc<Shared>) -> Result<Endpoint, String> {
         if !authorised {
             return Response::error(401, "missing or wrong token (see .horizon/api.json)");
         }
-        if !request
-            .header("host")
-            .is_some_and(|h| hosts.iter().any(|a| a == h))
+        if !public
+            && !request
+                .header("host")
+                .is_some_and(|h| panel::host_allowed(h, address))
         {
             return Response::error(403, "wrong Host");
         }
@@ -509,6 +652,7 @@ pub fn route(shared: &Arc<Shared>, request: &Request) -> Response {
             let (next, lines) = shared.log.lock().unwrap().since(since);
             Response::json(200, &json!({ "next": next, "lines": lines }))
         }
+        ("GET", "/api/v1/events") => crate::events::route(shared, request),
         ("POST", "/api/v1/command") => {
             let line = serde_json::from_slice::<Value>(&request.body)
                 .ok()
@@ -574,8 +718,107 @@ pub fn route(shared: &Arc<Shared>, request: &Request) -> Response {
                 Err(e) => Response::error(409, &e),
             }
         }
+        ("GET", "/api/v1/metrics/prometheus") => admin::prometheus(shared),
+        ("GET", "/api/v1/players") => admin::players(shared),
+        ("POST", "/api/v1/players/kick") => admin::act(shared, Action::Kick, &request.body),
+        ("POST", "/api/v1/players/ban") => admin::act(shared, Action::Ban, &request.body),
+        ("POST", "/api/v1/players/pardon") => admin::act(shared, Action::Pardon, &request.body),
+        ("POST", "/api/v1/players/ban-ip") => admin::act(shared, Action::BanIp, &request.body),
+        ("POST", "/api/v1/players/pardon-ip") => {
+            admin::act(shared, Action::PardonIp, &request.body)
+        }
+        ("POST", "/api/v1/players/op") => admin::act(shared, Action::Op, &request.body),
+        ("POST", "/api/v1/players/deop") => admin::act(shared, Action::Deop, &request.body),
+        ("POST", "/api/v1/whitelist") => admin::act(shared, Action::Whitelist, &request.body),
+        ("POST", "/api/v1/whitelist/add") => {
+            admin::act(shared, Action::WhitelistAdd, &request.body)
+        }
+        ("POST", "/api/v1/whitelist/remove") => {
+            admin::act(shared, Action::WhitelistRemove, &request.body)
+        }
+        ("DELETE", "/api/v1/backups") => {
+            let name = request.param("name").unwrap_or_default();
+            if !backup::list(&shared.dir).iter().any(|b| b.name == name) {
+                return Response::error(404, "no such backup (`GET /api/v1/backups` lists them)");
+            }
+            match std::fs::remove_file(shared.dir.join(backup::DIR).join(name)) {
+                Ok(()) => {
+                    crate::supervisor::note(
+                        shared,
+                        "INFO",
+                        &format!("Control API: deleted the backup {name}"),
+                    );
+                    Response::json(200, &json!({ "name": name }))
+                }
+                Err(e) => Response::error(409, &e.to_string()),
+            }
+        }
+        ("GET", "/api/v1/backups/download") => {
+            let name = request.param("name").unwrap_or_default();
+            if !backup::list(&shared.dir).iter().any(|b| b.name == name) {
+                return Response::error(404, "no such backup (`GET /api/v1/backups` lists them)");
+            }
+            Response::file(shared.dir.join(backup::DIR).join(name), name)
+        }
+        ("GET", "/api/v1/config") => match settings::shown(&shared.dir) {
+            Ok(config) => Response::json(200, &json!({ "config": config })),
+            Err(e) => Response::error(409, &e),
+        },
+        ("PATCH", "/api/v1/config") => patch_config(shared, &request.body),
         (_, path) if ROUTES.iter().any(|r| r.path == path) => Response::error(405, "wrong method"),
         _ => Response::error(404, "no such endpoint"),
+    }
+}
+
+/// `PATCH /api/v1/config`: `config set` for a program, without the settings that change who can reach the
+/// server or what program it runs.
+fn patch_config(shared: &Shared, body: &[u8]) -> Response {
+    let body: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    let Some(changes) = body["changes"].as_object().filter(|c| !c.is_empty()) else {
+        return Response::error(
+            400,
+            "the body must be {\"changes\": {\"section.name\": value, ...}}",
+        );
+    };
+    let mut lines = Vec::new();
+    for (key, value) in changes {
+        if !settings::changeable_remotely(key) {
+            return Response::error(403, &format!("{key} can only be changed in server.toml"));
+        }
+        let text = match value {
+            Value::String(s) if !s.contains(['\n', '\r']) => s.clone(),
+            Value::Bool(_) | Value::Number(_) => value.to_string(),
+            _ => {
+                return Response::error(
+                    400,
+                    &format!("{key}: a value is one line of text, a number or true/false"),
+                );
+            }
+        };
+        lines.push(format!("{key}={text}"));
+    }
+    let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let live = |line: &str| {
+        shared.phase() == Phase::Running
+            && engine::Control::connect(&shared.dir)
+                .and_then(|mut c| c.ask(&format!("console {line}")))
+                .is_ok()
+    };
+    let running = matches!(shared.phase(), Phase::Running | Phase::Restarting);
+    match settings::apply(
+        &shared.dir,
+        &lines,
+        running.then_some(&live as &dyn Fn(&str) -> bool),
+    ) {
+        Ok(outcome) => {
+            crate::supervisor::note(
+                shared,
+                "INFO",
+                &format!("Control API: config set {}", lines.join(" ")),
+            );
+            Response::json(200, &outcome.to_json())
+        }
+        Err(e) => Response::error(400, &e),
     }
 }
 
@@ -615,6 +858,40 @@ impl Client {
 
     pub fn call(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, String> {
         self.call_within(method, path, body, Duration::from_secs(60))
+    }
+
+    /// Reads a server-sent event stream (`GET /api/v1/events`), one event at a time, until the server ends
+    /// it (`Ok`) or stops answering.
+    pub fn follow(&self, path: &str, mut each: impl FnMut(&Value)) -> Result<(), String> {
+        use std::io::BufRead;
+        let mut stream =
+            std::net::TcpStream::connect_timeout(&self.address, Duration::from_secs(5))
+                .map_err(|e| e.to_string())?;
+        // The stream sends a comment every 15 s: a minute of silence is a server gone.
+        stream
+            .set_read_timeout(Some(Duration::from_secs(60)))
+            .map_err(|e| e.to_string())?;
+        write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nAccept: text/event-stream\r\nConnection: close\r\n\r\n",
+            self.address, self.token
+        )
+        .map_err(|e| e.to_string())?;
+        let mut lines = std::io::BufReader::new(stream).lines();
+        let status = lines.next().and_then(Result::ok).unwrap_or_default();
+        if status.split_whitespace().nth(1) != Some("200") {
+            return Err(format!("the server answered {status:?}"));
+        }
+        for line in lines {
+            let line = line.map_err(|e| e.to_string())?;
+            if let Some(event) = line
+                .strip_prefix("data: ")
+                .and_then(|d| serde_json::from_str(d).ok())
+            {
+                each(&event);
+            }
+        }
+        Ok(())
     }
 
     /// A call that may take long (a backup of a big world).
@@ -664,6 +941,7 @@ mod tests {
     fn the_api_wants_its_token() {
         let dir = std::env::temp_dir().join(format!("horizon-server-api-{}", std::process::id()));
         std::fs::create_dir_all(dir.join(".horizon")).unwrap();
+        std::fs::write(dir.join(crate::config::FILE), crate::config::TEMPLATE).unwrap();
         let shared = Shared::new(&dir);
         let _endpoint = start(shared.clone()).unwrap();
         let v: Value =
@@ -708,6 +986,157 @@ mod tests {
         }
         drop(_endpoint);
         assert!(!dir.join(ENDPOINT).exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_token_and_a_port_from_server_toml() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-server-api-fixed-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join(".horizon")).unwrap();
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let token = "a-token-for-the-discord-bot";
+        let toml = crate::config::TEMPLATE
+            .replace(
+                "[api]\nbind = \"\"",
+                &format!("[api]\nbind = \"127.0.0.1:{port}\""),
+            )
+            .replace("token = \"\"", &format!("token = \"{token}\""));
+        std::fs::write(dir.join(crate::config::FILE), toml).unwrap();
+        let _endpoint = start(Shared::new(&dir)).unwrap();
+        let address: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+        let get = |token: &str| {
+            http::request(
+                address,
+                token,
+                "GET",
+                "/api/v1/status",
+                None,
+                Duration::from_secs(5),
+            )
+            .unwrap()
+            .0
+        };
+        assert_eq!((get(token), get("a-token-for-the-discord-bo")), (200, 401));
+        drop(_endpoint);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn config_and_backups_over_the_api() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-server-api-admin-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("backups")).unwrap();
+        let toml = crate::config::TEMPLATE
+            .replace("token = \"\"", "token = \"a-token-for-the-discord-bot\"");
+        std::fs::write(dir.join(crate::config::FILE), toml).unwrap();
+        std::fs::write(
+            dir.join("backups/2026-10-31T12-00-00Z-manual.zip"),
+            b"PK\x05\x06zip",
+        )
+        .unwrap();
+        let shared = Shared::with_install(&dir, None);
+        shared.set_phase(Phase::Restarting);
+        let call = |method: &str, path: &str, query: &str, body: Value| {
+            let response = route(
+                &shared,
+                &Request {
+                    method: method.into(),
+                    path: path.into(),
+                    query: query.into(),
+                    headers: Vec::new(),
+                    body: body.to_string().into_bytes(),
+                },
+            );
+            (
+                response.status,
+                serde_json::from_str::<Value>(&response.body).unwrap_or(Value::Null),
+            )
+        };
+        let (status, config) = call("GET", "/api/v1/config", "", Value::Null);
+        assert_eq!(
+            (status, &config["config"]["api"]["token"]),
+            (200, &json!("(set)"))
+        );
+        assert_eq!(config["config"]["world"]["difficulty"], "easy");
+        let (status, outcome) = call(
+            "PATCH",
+            "/api/v1/config",
+            "",
+            json!({ "changes": { "world.difficulty": "hard", "server.max_players": 50 } }),
+        );
+        assert_eq!(status, 200, "{outcome}");
+        // The game is down between a crash and its restart: both wait for its start.
+        assert_eq!(
+            outcome["restart"],
+            json!(["server.max_players", "world.difficulty"])
+        );
+        let saved = crate::config::Config::load(&dir).unwrap();
+        assert_eq!(
+            (saved.world.difficulty.as_str(), saved.server.max_players),
+            ("hard", 50)
+        );
+        for key in [
+            "engine.path",
+            "api.allow_public",
+            "panel.bind",
+            "properties.enable-rcon",
+        ] {
+            let (status, _) = call(
+                "PATCH",
+                "/api/v1/config",
+                "",
+                json!({ "changes": { key: "x" } }),
+            );
+            assert_eq!(status, 403, "{key}");
+        }
+        let (status, _) = call(
+            "PATCH",
+            "/api/v1/config",
+            "",
+            json!({ "changes": { "world.difficulty": "brutal" } }),
+        );
+        assert_eq!(status, 400);
+        assert_eq!(
+            crate::config::Config::load(&dir).unwrap().world.difficulty,
+            "hard"
+        );
+
+        let name = "2026-10-31T12-00-00Z-manual.zip";
+        let response = route(
+            &shared,
+            &Request {
+                method: "GET".into(),
+                path: "/api/v1/backups/download".into(),
+                query: format!("name={name}"),
+                headers: Vec::new(),
+                body: Vec::new(),
+            },
+        );
+        assert!(response.stream.is_some());
+        assert!(response.headers.contains(&("Content-Length", "7".into())));
+        let (status, _) = call(
+            "DELETE",
+            "/api/v1/backups",
+            "name=../server.toml",
+            Value::Null,
+        );
+        assert_eq!(status, 404);
+        assert_eq!(
+            call(
+                "DELETE",
+                "/api/v1/backups",
+                &format!("name={name}"),
+                Value::Null
+            )
+            .0,
+            200
+        );
+        assert!(backup::list(&dir).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

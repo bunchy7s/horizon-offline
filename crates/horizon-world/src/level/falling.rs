@@ -89,7 +89,7 @@ impl Behaviours {
         }
         let concrete = self.instance_of(state, Class::ConcretePowder);
         // DirectionalPlaceContext(level, pos, DOWN, ItemStack.EMPTY, UP).
-        let ctx = super::place::Ctx {
+        let ctx = super::place::PlacementContext {
             pos,
             hit_pos: pos,
             face: Direction::Up,

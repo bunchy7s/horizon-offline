@@ -45,6 +45,7 @@ pub struct ModelInstance {
     pub layer: u32,
     pub shade: f32,
 }
+#[derive(Default)]
 pub struct PreparedModels {
     pub catalog: StateModels,
     pub placements: Vec<(BlockPos, BlockStateId)>,

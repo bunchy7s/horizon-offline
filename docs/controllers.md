@@ -21,8 +21,11 @@ design for any new screen.
 libudev for hot-plugging), IOKit on macOS, Windows.Gaming.Input on Windows.
 Its SDL mapping database normalizes every pad to one positional layout
 (South/East/West/North face buttons, bumpers, triggers, sticks, D-pad,
-Select/Start). No second windowing or event stack: gilrs is polled once per
-loop iteration next to winit's events.
+Select/Start). Horizon also injects a few SDL rows gilrs' bundled DB still
+misses (notably the 8BitDo Ultimate 2 on Linux/Bluetooth, whose right stick
+is on ABS_Z/ABS_RX without that row), and corrects that pad by vendor/product
+when no SDL row matched. No second windowing or event stack: gilrs is polled
+once per loop iteration next to winit's events.
 
 - The pure logic (mapping table, deadzones and curves, button edges, the
   settings file, glyph choice) lives in `crates/horizon-client-input/src/gamepad.rs`
@@ -36,7 +39,10 @@ loop iteration next to winit's events.
   move vector directly (a half-tilted stick walks slowly, like Bedrock),
   instead of being rounded to WASD. The forward/back/left/right flags other
   code reads (sprint start, boats, minecarts, the server's input packet) are
-  set when the stick passes a threshold.
+  set when the stick passes a threshold. On a server (not this game's own
+  server thread) the stick moves as those keys do, in 8 directions at full
+  speed, as the server only hears the keys: an anticheat predicting from them
+  pulls back a player moving at the stick's own angle and speed.
 - The pad last touched is the active one. Several pads are not merged.
 - `horizon-ctl pad ...` injects a virtual pad (buttons, sticks, triggers) into
   a running game, for tests without hardware.
@@ -65,8 +71,9 @@ loop iteration next to winit's events.
 
 The Guide / PS / Steam button is left to the system. Sneak on a stick click
 toggles by default (holding a stick in while steering the camera is
-awkward, which is why Bedrock does the same); the controls options can make it
-hold-to-sneak.
+awkward, which is why Bedrock does the same) and acts like vanilla's toggle
+crouch: a screen stands you up while it is open and closing it crouches you
+again. The controls options can make it hold-to-sneak.
 
 ## Menus and inventories
 
@@ -141,6 +148,72 @@ show their highlighted sprite (`isHoveredOrFocused`, drawn because the hidden
 pointer is over them), and list rows and text fields get vanilla's white
 one-pixel outline (`AbstractSelectionList`'s focused selection, `EditBox`'s
 highlighted border).
+
+### Keyboard
+
+Vanilla's own keyboard focus navigation (`Screen.keyPressed`, 26.3) uses the
+same focus, so it works with no controller and with controllers turned off
+(`game/key_focus.rs` decides, `game/pad_menu.rs` applies it, and
+`game/startup_menu.rs` on the title shown while resources load). It matters
+most for the narrator: the focused widget is the narration's focused one.
+
+| Key | Does |
+|---|---|
+| Tab / Shift+Tab | next / previous widget in tab order, wrapping (`TabNavigation`) |
+| Arrows | the widget that way (`ArrowNavigation`, the step above; past a list's last visible row the list scrolls) |
+| Enter, Space, keypad Enter | press the focused button, cycle button, checkbox or tab (`AbstractButton.keyPressed`: a click on it, with its sound) |
+
+- **Sliders** (`AbstractSliderButton`): focused with Tab or a click, left
+  and right change the value (one pixel per press, `1 / (width - 8)`);
+  focused with an arrow they move the focus until Enter lets them change
+  it. Enter toggles that. Up and down always move the focus.
+- **Text fields** keep left and right for their caret (`EditBox.keyPressed`),
+  and Enter and Space for themselves; Tab, up and down leave them. Focus
+  landing on a field focuses it with the caret at the end; leaving it
+  unfocuses it (title screens).
+- **Lists**: a list's rows are one Tab stop (Tab enters on its first row,
+  Shift+Tab on its last, the next Tab leaves); up and down move between rows.
+  On the world list focus selects the row and Enter joins it, as vanilla;
+  on other lists Enter clicks the row (selects it, or joins the selected
+  server).
+- With nothing focused, Enter and Space go to the screen (the world list's
+  Enter joins the selected world) and an arrow starts from the screen's
+  edge behind it. A click focuses what it lands on (`mouseClicked`), so the
+  next Tab or arrow goes on from there.
+- A new screen opened by a key starts on its first widget in tab order
+  (`Screen.setInitialFocus`); one opened from the game has no focus.
+- The keyboard doesn't reach inventory slots or the creative and recipe-book
+  tabs (vanilla's screens don't focus them): in container screens only
+  their buttons (the recipe book button, trades, beacon effects).
+- Screens that keep the keys: chat (Tab completes commands), signs, books
+  being written, the creative, recipe-book and mod searches, the anvil's
+  name, command blocks, dialogs, a key or button being bound on Controls,
+  the credits, the on-screen keyboard.
+
+It looks as vanilla's keyboard focus does: the focused widget draws its
+highlighted sprite, and rows and fields the white outline (as above). As
+for the pad, the screens draw their highlight from the pointer, so the focus
+puts Horizon's pointer (not the OS one, which stays where the mouse left it
+and stays visible) on the focused widget, and Enter is a click there. Moving
+the mouse hands the pointer back; a click or a scroll first puts it back
+where the mouse is.
+
+Approximations:
+
+- **Tab order** is reading order (top to bottom, then left to right), not
+  vanilla's add order (`children()` by `getTabOrderGroup`). Horizon has no
+  widget tree, and a screen's buttons and other targets are registered
+  separately, so their draw order isn't one sequence; vanilla's layouts add
+  widgets row by row, which reading order follows.
+- Tab visits the visible widgets only (a scrolled-away options row is
+  reached with the arrows, which scroll); a list is entered on its first or
+  last visible row, not its selected one.
+- A focused slider whose arrows don't change it yet shows the hovered look,
+  not vanilla's highlighted track.
+- The widget under the real mouse isn't highlighted while the keyboard has
+  the pointer (vanilla highlights both).
+- The narration reads a slider's `canChangeValue` from the input type, so
+  Enter sets the input type to match.
 
 ### Pointer
 

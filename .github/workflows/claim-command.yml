@@ -22,12 +22,15 @@ jobs:
     if: >-
       github.event_name == 'issue_comment' && github.event.comment.user.type != 'Bot' && (
       startsWith(github.event.comment.body, '/claim') ||
-      startsWith(github.event.comment.body, '/unclaim'))
+      startsWith(github.event.comment.body, '/unclaim') ||
+      startsWith(github.event.comment.body, '🤖 Agent: /claim') ||
+      startsWith(github.event.comment.body, '🤖 Agent: /unclaim'))
     # One command per issue at a time, so two `/claim`s can't both find it free. On the job, not the workflow:
     # the skipped runs of ordinary comments must not cancel a waiting one.
     concurrency:
       group: claim-${{ github.event.issue.number }}
-    runs-on: ubuntu-latest
+    # One of playhorizon's small runners, out of GitHub's shared pool: main's script only (docs/ci-runners.md).
+    runs-on: ${{ vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted", "linux", "playhorizon-light"]') || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -53,7 +56,8 @@ jobs:
         run: python3 tools/ci/claim_command.py command
   release:
     if: github.event_name != 'issue_comment' && github.repository == 'horizon-rust/horizon'
-    runs-on: ubuntu-latest
+    # One of playhorizon's small runners, out of GitHub's shared pool: main's script only (docs/ci-runners.md).
+    runs-on: ${{ vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted", "linux", "playhorizon-light"]') || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: read

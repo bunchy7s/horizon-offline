@@ -85,7 +85,9 @@ impl Game<'_> {
         mut stack: ItemStack,
         from_above: bool,
     ) -> Option<ItemStack> {
-        let level = self.composter_level(pos)?;
+        let Some(level) = self.composter_level(pos) else {
+            return Some(stack);
+        };
         if !from_above || level >= 7 {
             return Some(stack);
         }

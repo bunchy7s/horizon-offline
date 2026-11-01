@@ -1,0 +1,6 @@
+{
+  "hooks": [],
+  "rust_summary": "giving a whole stack to any player from a server hook (`native_give_stack`).",
+  "doc_summary": "`native_give_stack(uuid, stack)`: gives a whole stack (damage, name, enchantments kept) to any player from a server hook, as `Inventory.add` places it, and returns what did not fit. Bundles need \"hooks\": @API:give_stack@.",
+  "comments": ["crates/horizon-client/src/game/native_server.rs"]
+}

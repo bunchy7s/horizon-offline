@@ -2,7 +2,7 @@
 
 Thanks for helping. Horizon is Minecraft: Java Edition 26.3 rewritten in Rust, and the one rule that shapes
 everything is that **it plays exactly like vanilla**. This page is the short version of how we work; questions are
-welcome on [Discord](https://discord.gg/HcTeMZxe5E).
+welcome on [Discord](https://discord.gg/playhorizon).
 
 This repository holds the game and the launcher, plus the tools, tests and docs that build, check and release them.
 The website (playhorizon.dev) is built in a separate repository from this one's README, `docs/api/` and roadmap. Anything else (videos, Discord and other community material) lives elsewhere.
@@ -47,14 +47,31 @@ them (`git config core.hooksPath .githooks` runs it before every commit).
 The pre-push hook checks the full history reachable from the branches and tags being pushed. Run
 `python3 tools/check_public_tree.py --history` to audit the history of all local refs.
 
-## Only original code
+## Only original code, or code whose license allows it
 
-Horizon's code is written from Minecraft 26.3 itself and from public documentation, never from another mod, loader
-or renderer. Don't read, copy, translate or paraphrase the source of Iris, OptiFine, Sodium or any other project,
-and don't send code an AI tool wrote from it. Their user documentation and file formats are fine to read, and their
-packs and mods are fine to run and observe. Shader packs were removed on 24 October 2026 (#1561) because their code
-had been written from another project's source; they come back only as a clean-room rewrite from a written
-description of the pack format.
+Horizon is MIT. Its code is written from Minecraft 26.3 itself and from public documentation. Since 30 October 2026
+another project's source may also be read and used, **only when that project's license allows it**:
+
+- **Allowed:** MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, 0BSD, ISC, zlib, Apache-2.0, Unlicense, and the CC0-1.0
+  public-domain dedication. That code may be read, copied or adapted.
+- **Everything else is off limits, even to read:** GPL, LGPL (Iris), AGPL, MPL, EPL, Polyform (Sodium), the Creative
+  Commons licenses (CC BY, CC BY-SA, CC BY-NC and the others; CC0 is a public-domain dedication, not one of them),
+  custom or "source available" licenses, all rights reserved (OptiFine), and any project with no license or an
+  unclear one. Don't read, copy, translate or paraphrase their source, and don't send code an AI tool
+  wrote from it. Being able to download a mod or a pack does not give you the right to read its files.
+- **Check the license yourself.** Read the LICENSE file at the commit you use and the header of each file you take:
+  some repositories mix licenses, and a file under another license is off limits. A license that changed: the one
+  at your commit counts. In doubt, don't: ask in #contributors first.
+- **Say it in the pull request:** the project, a link to the commit, its license, and what you read or copied. A
+  pull request that used another project's source without saying so is closed.
+- **Copied or adapted code** keeps its copyright line and license notice at the top of the file, and gets an entry
+  in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Apache-2.0 code also keeps its NOTICE text and says what
+  was changed.
+
+User documentation and file formats are fine to read, and packs and mods are fine to run and observe, whatever
+their license. Shader packs were removed on 24 October 2026 (#1561) because their code had been written from
+another project's source; they come back only as a clean-room rewrite from a written description of the pack
+format.
 
 ## Before asking for review
 
@@ -82,7 +99,8 @@ claimed on Discord with Kira's `/claim`): pick another, or ask its holder in the
 enough), then claim it. `/unclaim` gives it back.
 
 A claim with no open pull request linking the issue (`Fixes #123` in the description, or a draft) is released after
-5 days, with a comment: open a draft early. You can hold 5 open issues at a time. Agents claim the same way.
+5 days, with a comment: open a draft early. You can hold 8 open issues at a time, not counting the ones your
+pull requests already fix. Agents claim the same way.
 
 When your pull request changes the same functions as another open one, or closes the same issue, a bot comment names
 it (edited on every push, never repeated): talk to its author in the thread before you both finish the same work.
@@ -95,6 +113,10 @@ it (edited on every push, never repeated): talk to its author in the thread befo
   can see.
 - **Tick "Allow edits by maintainers".** When something small is left (a lint, a rebase, a nit) we push the fixup
   ourselves instead of sending it back to you; only design questions come back.
+- **Once we've pushed to your branch, merge main into it; don't rebase or force-push.** A rebase or force-push
+  replaces our commits with yours and erases the fixes we added (it happened on #5188 and #5203). Tell your agent
+  too: `git merge origin/main`, never `git rebase` or `git push --force` on a branch a maintainer has touched. If
+  our fixes get erased anyway, we finish the work in our own pull request that keeps your commits and credits you.
 - **Tick its kind** in the template: `parity` (Horizon now does what vanilla does), `bug` (a crash or breakage),
   `perf`, `feature` (new for players), `extra` (Horizon-only, off by default), `tooling` or `docs`. A workflow sets
   that label, and area labels (`launcher`, `mobs`, `worldgen`, `rendering`...) from the paths you change.
@@ -118,5 +140,5 @@ new pushes, we add it again.
 
 ## Talk to us
 
-[Discord](https://discord.gg/HcTeMZxe5E) for questions and ideas, [issues](https://github.com/horizon-rust/horizon/issues)
+[Discord](https://discord.gg/playhorizon) for questions and ideas, [issues](https://github.com/horizon-rust/horizon/issues)
 for bugs. To take something on, `/claim` its issue ([above](#claim-before-you-start)).

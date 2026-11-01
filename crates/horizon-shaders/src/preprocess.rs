@@ -16,6 +16,8 @@ use crate::condition::{Conditionals, split_directive};
 use crate::pack::normalize;
 
 const MAX_DEPTH: usize = 10;
+/// How many lines one macro call may span.
+const MAX_CALL_LINES: usize = 64;
 
 /// Where a line came from: an index into [`Preprocessed::files`] and a line number from 1.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -44,6 +46,8 @@ pub struct Preprocessed {
     /// The text of every block comment in live code (`DRAWBUFFERS:`, buffer formats).
     pub comments: Vec<(Origin, String)>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Conditions that could not be evaluated and read as false: noted, the program still runs.
+    pub warnings: Vec<Diagnostic>,
 }
 
 impl Preprocessed {
@@ -112,6 +116,18 @@ impl Run<'_> {
                 line.push_str(lines[n]);
             }
             n += 1;
+            // A macro call's arguments may span lines: they join the line the call starts on.
+            if !line.trim_start().starts_with('#') && self.conditionals.active() {
+                while n < lines.len()
+                    && n - first < MAX_CALL_LINES
+                    && !lines[n].trim_start().starts_with('#')
+                    && self.macros.unfinished_call(&line)
+                {
+                    line.push(' ');
+                    line.push_str(lines[n]);
+                    n += 1;
+                }
+            }
             let origin = Origin {
                 file,
                 line: first as u32 + 1,
@@ -149,6 +165,10 @@ impl Run<'_> {
             return self.diagnose(origin, &format!("unknown directive `#{}`", after.trim()));
         };
         match self.conditionals.apply(word, rest, &self.macros) {
+            // As Iris loads such a pack: the branch is skipped, the program kept.
+            Err(e) if e.ends_with("read as false") => {
+                return self.out.warnings.push(Diagnostic { origin, message: e });
+            }
             Err(e) => return self.diagnose(origin, &e),
             Ok(true) => return,
             Ok(false) if !self.conditionals.active() => return,
@@ -358,6 +378,25 @@ mod tests {
     }
 
     #[test]
+    fn macro_arguments_span_lines() {
+        let p = run(&[(
+            "program/final.fsh",
+            "#define CLAMP01(x) clamp(x, 0.0, 1.0)\nfloat v = CLAMP01(\n    a * (b\n    + c)\n);\nfloat w;\n",
+        )]);
+        assert_eq!(
+            code_lines(&p),
+            [
+                (
+                    "float v = clamp(a * (b     + c), 0.0, 1.0);",
+                    "program/final.fsh:2".into()
+                ),
+                ("float w;", "program/final.fsh:6".into())
+            ]
+        );
+        assert_eq!(p.lines.len(), p.code.split('\n').count());
+    }
+
+    #[test]
     fn comments_extensions_and_errors() {
         let p = run(&[(
             "program/final.fsh",
@@ -370,5 +409,18 @@ mod tests {
         assert_eq!(code_lines(&p), [("float x;", "program/final.fsh:9".into())]);
         let messages: Vec<&str> = p.diagnostics.iter().map(|d| d.message.as_str()).collect();
         assert_eq!(messages, ["#error live", "unknown directive `#bogus`"]);
+    }
+
+    /// A condition that can't be evaluated is a warning and reads as false; the code goes on.
+    #[test]
+    fn bad_conditions_warn_and_read_false() {
+        let p = run(&[(
+            "program/final.fsh",
+            "#if (in(biome, BIOME_SOUL_SAND_VALLEY)\nfloat a;\n#else\nfloat b;\n#endif\nfloat c;\n",
+        )]);
+        assert!(p.diagnostics.is_empty(), "{:?}", p.diagnostics);
+        assert_eq!(p.warnings.len(), 1);
+        let code: Vec<&str> = code_lines(&p).iter().map(|(c, _)| *c).collect();
+        assert_eq!(code, ["float b;", "float c;"]);
     }
 }

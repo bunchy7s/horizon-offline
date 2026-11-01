@@ -3,7 +3,10 @@
 //! (`coverage.json`, `coverage.md`). It reads what the other steps wrote:
 //! the inventory, each mod's `carry-report.json` and its harness result
 //! (`tools/mod_port_harness.py`).
-use crate::inventory::Record;
+use crate::{
+    inventory::Record,
+    resourcepacks::{Outcome, Report, State},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::BTreeMap, fmt::Write, path::Path};
@@ -194,10 +197,42 @@ fn carried(work: &Path, key: &str) -> Option<(Status, String)> {
     }
 }
 
+fn resource_row(path: &str, outcome: Option<&Outcome>, record: Option<&Record>) -> Row {
+    let state = outcome.map_or(State::Missing, |o| o.state);
+    let shader = path.starts_with("shaderpacks/");
+    Row {
+        key: path.into(),
+        name: path.into(),
+        class: if shader { "shaderpack" } else { "resourcepack" }.into(),
+        tier: "data".into(),
+        license: record.map_or("unknown", |r| r.license.as_str()).into(),
+        license_kind: license_kind(record.map_or("unknown", |r| r.license.as_str())).into(),
+        status: if !shader && state == State::Available {
+            Status::Partial
+        } else {
+            Status::NotYet
+        },
+        reason: outcome.map_or_else(
+            || {
+                if shader {
+                    "shader-pack conversion is pending".into()
+                } else {
+                    "resource pack not obtained yet; run port".into()
+                }
+            },
+            |o| format!("{:?}: {}", o.state, o.detail),
+        ),
+    }
+}
+
 pub fn build(records: &[Record], work: &Path) -> Vec<Row> {
+    let resourcepacks = Report::load(work);
     let mut rows: Vec<Row> = records
         .iter()
         .map(|r| {
+            if r.path.starts_with("resourcepacks/") || r.path.starts_with("shaderpacks/") {
+                return resource_row(&r.path, resourcepacks.files.get(&r.path), Some(r));
+            }
             let (status, reason) = if r.class == "unknown" {
                 let why =
                     "unclassified: its jar (mods.toml, file census) or a reviewed row decides";
@@ -242,6 +277,11 @@ pub fn build(records: &[Record], work: &Path) -> Vec<Row> {
             .collect();
         if !waiting.is_empty() {
             let _ = write!(row.reason, "; waits on {}", waiting.join(", "));
+        }
+    }
+    for (path, outcome) in &resourcepacks.files {
+        if !records.iter().any(|r| &r.path == path) {
+            rows.push(resource_row(path, Some(outcome), None));
         }
     }
     rows

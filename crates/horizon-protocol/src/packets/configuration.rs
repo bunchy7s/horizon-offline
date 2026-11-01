@@ -325,6 +325,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn client_information_carries_the_main_hand() {
+        // Skin Customization's Main Hand: HumanoidArm LEFT is 0, RIGHT is 1.
+        for main_hand in [0, 1] {
+            round_trip(
+                Serverbound::ClientInformation(ClientInformation {
+                    main_hand,
+                    ..ClientInformation::new(12)
+                }),
+                Serverbound::encode,
+                Serverbound::decode,
+            );
+        }
+    }
+
     /// The bytes vanilla writes: the length, then the tag (a lone `End` byte
     /// for none).
     #[test]

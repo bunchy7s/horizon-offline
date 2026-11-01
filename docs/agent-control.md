@@ -66,7 +66,7 @@ passes on without checking it).
 | Install, remove a version | Play | yes | yes | yes | yes | `remove` needs `confirm` in MCP |
 | Pick the version that plays | Play | no | no | yes | yes | `settings selected-version TAG` |
 | Prepare resources | Play | yes | yes | yes | yes | |
-| Start the game | Play | yes | yes | yes | yes | `play --world --creative --join --arg`; MCP `play` adds `offscreen` |
+| Start the game | Play | yes | yes | yes | yes | `play --world --creative --join --arg --account`; MCP `play` adds `offscreen` |
 | Join a friend by invite code | Play | yes | no | yes | yes | `play --join CODE` |
 | Dedicated server here: start, console, log, stop | Servers | yes | yes | yes | yes | `server`; MCP `server`, `server_command`, `server_log`, `server_stop` |
 | Hosted servers: list, create, set up, run a command, forget | Servers | yes | no | yes | yes | `servers ...`; `servers_forget` needs `confirm` |
@@ -173,6 +173,11 @@ turn the switch off.
   under control. A game the player starts from the window is not, until they turn Agent Control
   on. An open socket lets any program of that user drive the game, so it opens only when an agent
   asked for the game, or when the player chose it.
+- **Headless:** `horizon-ctl launch --headless` (`horizon-client --headless --control`) starts a
+  game with no display, no window and no GPU: it runs where no display server is (an SSH session,
+  a server) and runs its own loop instead of winit's (`game/headless.rs`), one frame a tick. It
+  plays through these commands only; commands that need the screen's pixels (`screenshot`, clicks
+  at GUI points) answer with an error ([#4951](https://github.com/horizon-rust/horizon/issues/4951)).
 
 ## Design rules for a new command
 

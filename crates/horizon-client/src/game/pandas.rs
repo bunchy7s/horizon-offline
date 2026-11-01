@@ -43,7 +43,7 @@ impl Game<'_> {
                     .iter()
                     .position(|e| wants(self, e) && reach.intersects(e.bounds()));
                 if let Some(j) = taken {
-                    let e = self.dropped.remove(j);
+                    let e = self.remove_dropped(j);
                     self.add_pickup(Taken::Item(Box::new(e.clone())), Collector::Mob(id));
                     panda::hold(&mut self.mobs[i], &e.stack.item, e.stack.count, true);
                 }
@@ -73,6 +73,9 @@ impl Game<'_> {
         if panda::get_up(m) {
             return true;
         }
+        // A baby holding a golden_dandelion goes on to `AgeableMob.mobInteract`,
+        // which `interact_mob` answered before this; anything else that is not
+        // bamboo passes.
         if !m.kind.food.iter().any(|f| f == item) {
             return false;
         }
@@ -84,6 +87,10 @@ impl Game<'_> {
         let mut dropped = None;
         let mut loved = false;
         if m.is_baby() {
+            // Panda.mobInteract: a baby an age lock holds back passes.
+            if !horizon_client::mobs::ai::can_age_up(m) {
+                return false;
+            }
             // ageUp((int) (-getAge() / 20 * 0.1F), true).
             let seconds = ((-m.extra.age / 20) as f32 * 0.1) as i32;
             horizon_client::mobs::ai::age_up(m, seconds, true);

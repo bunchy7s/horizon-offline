@@ -53,6 +53,47 @@ impl Game<'_> {
         self.container_changed((pos[0], pos[1], pos[2]));
         self.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
     }
+    /// `JukeboxBlockEntity.setTheItem` from a container (a hopper or a dropper
+    /// feeding the slot): a disc that lands in a jukebox that is not playing
+    /// starts its song, as the player's own use does, with the block state,
+    /// the song's level event and the neighbour and comparator updates.
+    pub(super) fn jukebox_inserted(&mut self, pos: [i32; 3]) {
+        let Some(song) = self
+            .jukebox(pos)
+            .filter(|j| !j.playing)
+            .and_then(|j| j.record())
+            .and_then(|record| self.res.items().get(&record.item))
+            .and_then(|info| info.jukebox_song.clone())
+        else {
+            return;
+        };
+        if let Some(BlockEntity::Jukebox(j)) =
+            self.world.block_entities.get_mut(&(pos[0], pos[1], pos[2]))
+        {
+            j.playing = true;
+            j.ticks = 0;
+        }
+        self.set_has_record(pos, true);
+        self.start_song(pos, &song);
+        self.jukebox_changed(pos);
+    }
+    /// `JukeboxBlockEntity.setTheItem(EMPTY)` from a container (a hopper
+    /// below taking the disc): the song stops, the block loses its record,
+    /// and the neighbours and comparators hear it.
+    pub(super) fn jukebox_taken(&mut self, pos: [i32; 3]) {
+        if let Some(BlockEntity::Jukebox(j)) =
+            self.world.block_entities.get_mut(&(pos[0], pos[1], pos[2]))
+        {
+            if j.record().is_some() {
+                return;
+            }
+            j.playing = false;
+            j.ticks = 0;
+        }
+        self.stop_song(pos);
+        self.set_has_record(pos, false);
+        self.jukebox_changed(pos);
+    }
     /// `JukeboxBlock.useItemOn` / `useWithoutItem` on the jukebox at `pos`.
     pub(super) fn use_jukebox(&mut self, pos: [i32; 3], held: Option<&ItemStack>) -> bool {
         if &*self
@@ -64,12 +105,14 @@ impl Game<'_> {
         {
             return false;
         }
-        if self.jukebox(pos).is_some_and(|j| j.record.is_some()) {
+        if self.jukebox(pos).is_some_and(|j| j.record().is_some()) {
             // TRY_WITH_EMPTY_HAND: only the main hand goes on to useWithoutItem.
             if self.hand != Hand::Main {
                 return false;
             }
             self.eject_record(pos);
+            // ServerPlayerGameMode.useItemOn: useWithoutItem consumed the click.
+            self.trigger_default_block_use(pos);
             return true;
         }
         let Some(stack) = held else { return false };
@@ -93,7 +136,7 @@ impl Game<'_> {
         self.world.block_entities.insert(
             (pos[0], pos[1], pos[2]),
             BlockEntity::Jukebox(Jukebox {
-                record: Some(record),
+                items: [Some(record)],
                 ticks: 0,
                 playing: true,
             }),
@@ -140,8 +183,10 @@ impl Game<'_> {
         self.jukebox_sounds.insert((pos[0], pos[1], pos[2]), id);
         let description =
             horizon_client::component::to_text(&s.description, &mut |k| Text::literal(k));
-        self.titles
-            .set_overlay(Text::translate("record.nowPlaying", &[description]), true);
+        // Hud.setNowPlaying: the overlay, said at once.
+        let message = Text::translate("record.nowPlaying", &[description]);
+        self.say_system_now(&message);
+        self.titles.set_overlay(message, true);
         self.update_song_volumes();
         self.notify_record_playing(pos, true);
         if self.audio.capture.is_some() {
@@ -196,7 +241,7 @@ impl Game<'_> {
             Some(BlockEntity::Jukebox(j)) => {
                 j.playing = false;
                 j.ticks = 0;
-                j.record.take()
+                j.items[0].take()
             }
             _ => None,
         };
@@ -220,7 +265,7 @@ impl Game<'_> {
     /// `JukeboxSongPlayer.tick` of the jukebox at `key`, while it plays.
     pub(super) fn tick_jukebox(&mut self, key: (i32, i32, i32)) {
         let playing = match self.world.block_entities.get(&key) {
-            Some(BlockEntity::Jukebox(j)) if j.playing => j.record.as_ref().and_then(|r| {
+            Some(BlockEntity::Jukebox(j)) if j.playing => j.record().and_then(|r| {
                 let song = self.items().get(&r.item)?.jukebox_song.clone()?;
                 Some((song, j.ticks))
             }),
@@ -310,8 +355,7 @@ pub(super) fn jukebox_signals(
     match world.block_entities.get(&(pos.x, pos.y, pos.z)) {
         Some(BlockEntity::Jukebox(j)) => {
             let comparator = j
-                .record
-                .as_ref()
+                .record()
                 .and_then(|r| items.get(&r.item)?.jukebox_song.as_ref())
                 .and_then(|s| items.songs.get(s))
                 .map_or(0, |s| s.comparator);

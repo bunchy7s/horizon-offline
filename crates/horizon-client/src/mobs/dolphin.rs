@@ -263,3 +263,139 @@ impl Goal for Jump {
         }
     }
 }
+
+/// `FollowPlayerRiddenEntityGoal(mob, AbstractBoat / AbstractNautilus)`: a
+/// dolphin swims to the back of a boat or nautilus a player steers within 5
+/// blocks of it, then ahead of it in the direction it moves, and goes back
+/// when it is more than 12 blocks off.
+///
+/// Only the player the mob sees (the nearest) is considered.
+#[derive(Clone, Debug)]
+pub struct FollowPlayerRidden {
+    nautilus: bool,
+    following: bool,
+    recalc: i32,
+    leading: bool,
+}
+impl FollowPlayerRidden {
+    pub fn new(nautilus: bool) -> Self {
+        Self {
+            nautilus,
+            following: false,
+            recalc: 0,
+            leading: false,
+        }
+    }
+    /// `Entity.hasMovedHorizontallyRecently` of the rider, and the player's
+    /// own position (its yaw gives the directions).
+    fn rider<'a>(&self, cx: &'a Cx) -> Option<&'a super::PlayerView> {
+        cx.w.player.as_ref().filter(|p| {
+            p.vehicle
+                .as_ref()
+                .is_some_and(|v| v.nautilus == self.nautilus)
+        })
+    }
+    fn moved(p: &super::PlayerView) -> bool {
+        p.vehicle.as_ref().is_some_and(|v| {
+            (v.velocity.x * v.velocity.x + v.velocity.z * v.velocity.z).sqrt() > 1.0e-5
+        })
+    }
+}
+impl Goal for FollowPlayerRidden {
+    goal_clone!();
+    fn name(&self) -> &'static str {
+        "FollowPlayerRiddenEntityGoal"
+    }
+    fn flags(&self) -> u8 {
+        0
+    }
+    /// `FollowPlayerRiddenEntityGoal.canUse`.
+    fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
+        let Some(p) = self.rider(cx) else {
+            return false;
+        };
+        if self.following && Self::moved(p) {
+            return true;
+        }
+        let area = m
+            .bounds()
+            .inflate(horizon_core::geometry::Vec3::new(5.0, 5.0, 5.0));
+        p.vehicle
+            .as_ref()
+            .is_some_and(|v| v.bounds.intersects(area))
+            && Self::moved(p)
+    }
+    /// `FollowPlayerRiddenEntityGoal.canContinueToUse`.
+    fn can_continue(&mut self, _: &mut Mob, cx: &mut Cx) -> bool {
+        self.following
+            && self
+                .rider(cx)
+                .is_some_and(|p| p.passenger && Self::moved(p))
+    }
+    /// `FollowPlayerRiddenEntityGoal.start`.
+    fn start(&mut self, _: &mut Mob, cx: &mut Cx) {
+        self.following = self.rider(cx).is_some();
+        self.recalc = 0;
+        self.leading = false;
+    }
+    /// `FollowPlayerRiddenEntityGoal.stop`.
+    fn stop(&mut self, _: &mut Mob, _: &mut Cx) {
+        self.following = false;
+    }
+    /// `FollowPlayerRiddenEntityGoal.tick`.
+    fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
+        let Some(p) = self.rider(cx) else { return };
+        let (position, yaw) = (p.position, p.yaw);
+        let speed = if self.leading { 0.01 } else { 0.015 };
+        let input = horizon_core::geometry::Vec3::new(
+            f64::from(m.ai.xxa),
+            f64::from(m.ai.yya),
+            f64::from(m.ai.zza),
+        );
+        m.move_relative(speed, input);
+        m.do_move(cx.w, cx.events);
+        self.recalc -= 1;
+        if self.recalc > 0 {
+            return;
+        }
+        self.recalc = reduced(10);
+        let [dx, dz] = motion_step(yaw);
+        let block = [
+            position.x.floor() as i32,
+            position.y.floor() as i32,
+            position.z.floor() as i32,
+        ];
+        if !self.leading {
+            // The block behind the player, one lower.
+            let behind = [block[0] - dx, block[1] - 1, block[2] - dz];
+            m.nav_move_to(
+                cx.w,
+                [
+                    f64::from(behind[0]),
+                    f64::from(behind[1]),
+                    f64::from(behind[2]),
+                ],
+                1.0,
+            );
+            if m.distance_sqr(position) < 16.0 {
+                self.recalc = 0;
+                self.leading = true;
+            }
+        } else {
+            let ahead = [block[0] + dx * 10, block[1] - 1, block[2] + dz * 10];
+            m.nav_move_to(
+                cx.w,
+                [
+                    f64::from(ahead[0]),
+                    f64::from(ahead[1]),
+                    f64::from(ahead[2]),
+                ],
+                1.0,
+            );
+            if m.distance_sqr(position) > 144.0 {
+                self.recalc = 0;
+                self.leading = false;
+            }
+        }
+    }
+}

@@ -1092,6 +1092,7 @@ pub struct Swapchain {
     format_desc: super::TextureFormatDesc,
     #[allow(unused)]
     sample_type: wgt::TextureSampleType,
+    vsync: bool,
 }
 
 #[derive(Debug)]
@@ -1132,6 +1133,13 @@ impl Surface {
                 log::error!("make_current(surface) failed: {e}");
                 crate::SurfaceError::Lost
             })?;
+
+        // Setting swap interval per-frame ensures the configured present mode (VSync
+        // on/off) is maintained even if configure-time make_current was contested.
+        let _ = self
+            .egl
+            .instance
+            .swap_interval(self.egl.display, if sc.vsync { 1 } else { 0 });
 
         unsafe { gl.disable(glow::SCISSOR_TEST) };
         unsafe { gl.color_mask(true, true, true, true) };
@@ -1376,35 +1384,68 @@ impl crate::Surface for Surface {
         };
 
         let format_desc = device.shared.describe_texture_format(config.format);
-        let gl = &device.shared.context.lock();
-        let renderbuffer = unsafe { gl.create_renderbuffer() }.map_err(|error| {
-            log::error!("Internal swapchain renderbuffer creation failed: {error}");
-            crate::DeviceError::OutOfMemory
-        })?;
-        unsafe { gl.bind_renderbuffer(glow::RENDERBUFFER, Some(renderbuffer)) };
-        unsafe {
-            gl.renderbuffer_storage(
-                glow::RENDERBUFFER,
-                format_desc.internal,
-                config.extent.width as _,
-                config.extent.height as _,
-            )
+        let (renderbuffer, framebuffer) = {
+            let gl = &device.shared.context.lock();
+            let renderbuffer = unsafe { gl.create_renderbuffer() }.map_err(|error| {
+                log::error!("Internal swapchain renderbuffer creation failed: {error}");
+                crate::DeviceError::OutOfMemory
+            })?;
+            unsafe { gl.bind_renderbuffer(glow::RENDERBUFFER, Some(renderbuffer)) };
+            unsafe {
+                gl.renderbuffer_storage(
+                    glow::RENDERBUFFER,
+                    format_desc.internal,
+                    config.extent.width as _,
+                    config.extent.height as _,
+                )
+            };
+            let framebuffer = unsafe { gl.create_framebuffer() }.map_err(|error| {
+                log::error!("Internal swapchain framebuffer creation failed: {error}");
+                crate::DeviceError::OutOfMemory
+            })?;
+            unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(framebuffer)) };
+            unsafe {
+                gl.framebuffer_renderbuffer(
+                    glow::READ_FRAMEBUFFER,
+                    glow::COLOR_ATTACHMENT0,
+                    glow::RENDERBUFFER,
+                    Some(renderbuffer),
+                )
+            };
+            unsafe { gl.bind_renderbuffer(glow::RENDERBUFFER, None) };
+            unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, None) };
+            (renderbuffer, framebuffer)
         };
-        let framebuffer = unsafe { gl.create_framebuffer() }.map_err(|error| {
-            log::error!("Internal swapchain framebuffer creation failed: {error}");
-            crate::DeviceError::OutOfMemory
-        })?;
-        unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(framebuffer)) };
-        unsafe {
-            gl.framebuffer_renderbuffer(
-                glow::READ_FRAMEBUFFER,
-                glow::COLOR_ATTACHMENT0,
-                glow::RENDERBUFFER,
-                Some(renderbuffer),
-            )
+
+        let vsync = match config.present_mode {
+            wgt::PresentMode::Immediate => false,
+            wgt::PresentMode::Fifo => true,
+            _ => {
+                log::warn!(
+                    "unsupported present mode: {:?}, defaulting to Fifo",
+                    config.present_mode
+                );
+                true
+            }
         };
-        unsafe { gl.bind_renderbuffer(glow::RENDERBUFFER, None) };
-        unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, None) };
+
+        // Set swap interval on the newly created surface. If make_current fails here
+        // due to context contention, the per-frame call in present() will self-heal.
+        if let Ok(()) = self.egl.instance.make_current(
+            self.egl.display,
+            Some(surface),
+            Some(surface),
+            Some(self.egl.raw),
+        ) {
+            let interval = if vsync { 1 } else { 0 };
+            if let Err(e) = self.egl.instance.swap_interval(self.egl.display, interval) {
+                log::warn!("eglSwapInterval({interval}) failed: {e:?}");
+            }
+            let _ = self
+                .egl
+                .instance
+                .make_current(self.egl.display, None, None, None);
+        }
 
         let mut swapchain = self.swapchain.write();
         *swapchain = Some(Swapchain {
@@ -1416,6 +1457,7 @@ impl crate::Surface for Surface {
             format: config.format,
             format_desc,
             sample_type: wgt::TextureSampleType::Float { filterable: false },
+            vsync,
         });
 
         Ok(())

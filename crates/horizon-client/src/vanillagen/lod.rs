@@ -8,7 +8,10 @@ use crate::{
 use horizon_world::{
     heightmap::HeightmapState,
     registry::BlockStateId,
-    worldgen::{decoration_order::vanilla_order, generator::GeneratorError},
+    worldgen::{
+        decoration_order::vanilla_order,
+        generator::{GenBlockStates, GeneratorError},
+    },
 };
 use std::{
     collections::VecDeque,
@@ -25,8 +28,12 @@ mod vegetation;
 use islands::EndIslands;
 use vegetation::Vegetation;
 const CACHE: usize = 1024;
-const REQUESTS: usize = 64;
-const BATCH: i32 = 4;
+/// Chunks waiting for decoration: enough batches to keep every thread busy.
+const REQUESTS: usize = 1024;
+/// Chunks a side a decoration batch emits. Each needs a two-chunk border of
+/// proto chunks, which the batch shares: 4 built four protos per chunk, 8
+/// builds 2.25, and the protos (noise, surface) are most of far decoration.
+const BATCH: i32 = 8;
 fn batch_origin((x, z): (i32, i32)) -> (i32, i32) {
     (x.div_euclid(BATCH) * BATCH, z.div_euclid(BATCH) * BATCH)
 }
@@ -34,7 +41,8 @@ fn batch_origin((x, z): (i32, i32)) -> (i32, i32) {
 struct Requests {
     chunks: FxHashSet<(i32, i32)>,
     center: [i32; 2],
-    current: Option<(i32, i32)>,
+    /// The batches the decoration threads are working on.
+    current: FxHashSet<(i32, i32)>,
     finished: FxHashSet<(i32, i32)>,
 }
 struct Shared {
@@ -50,7 +58,7 @@ fn distance((x, z): (i32, i32), center: [i32; 2]) -> i64 {
 struct Builder {
     shared: Arc<Shared>,
     results: mpsc::Receiver<LodDetail>,
-    thread: Option<thread::JoinHandle<()>>,
+    threads: Vec<thread::JoinHandle<()>>,
 }
 impl Builder {
     fn new(terrain: Arc<VanillaTerrain>) -> Self {
@@ -59,11 +67,36 @@ impl Builder {
             wake: Condvar::new(),
             stop: AtomicBool::new(false),
         });
-        let worker = shared.clone();
         let (tx, results) = mpsc::channel();
-        let thread = thread::Builder::new()
+        // Idle priority: decoration only takes time the near chunks, the
+        // ticks and the frame leave, so more cores can share it.
+        let count = thread::available_parallelism()
+            .map_or(1, |n| n.get() / 3)
+            .clamp(1, 12);
+        let threads = (0..count)
+            .map(|_| Self::spawn(terrain.clone(), shared.clone(), tx.clone()))
+            .collect();
+        Self {
+            shared,
+            results,
+            threads,
+        }
+    }
+    fn spawn(
+        terrain: Arc<VanillaTerrain>,
+        worker: Arc<Shared>,
+        tx: mpsc::Sender<LodDetail>,
+    ) -> thread::JoinHandle<()> {
+        thread::Builder::new()
             .name("Far decoration".into())
             .spawn(move || {
+                horizon_threads::idle_current();
+                // A superflat world's far ring is its flat ground (`FlatTerrain::lod_surface`);
+                // a normal overworld rebuilt here would draw hills, oceans and trees.
+                if terrain.is_flat() {
+                    worker.stop.store(true, Ordering::Relaxed);
+                    return;
+                }
                 // Structure pieces have mutable one-shot placement flags. Sharing
                 // gameplay's seeded pipeline would consume its chests/spawners.
                 let generator = match OverworldGenerator::for_dimension(
@@ -96,7 +129,7 @@ impl Builder {
                             .unwrap();
                         let origin = batch_origin(key);
                         requests.chunks.retain(|&key| batch_origin(key) != origin);
-                        requests.current = Some(origin);
+                        requests.current.insert(origin);
                         origin
                     };
                     let result = decorated_batch(&mut state, key, BATCH, &worker.stop, |chunk| {
@@ -108,7 +141,7 @@ impl Builder {
                             worker.stop.store(true, Ordering::Relaxed);
                         }
                     });
-                    worker.requests.lock().unwrap().current = None;
+                    worker.requests.lock().unwrap().current.remove(&key);
                     match result {
                         Ok(_) => {}
                         Err(error) => {
@@ -123,12 +156,7 @@ impl Builder {
                     }
                 }
             })
-            .expect("far decoration worker");
-        Self {
-            shared,
-            results,
-            thread: Some(thread),
-        }
+            .expect("far decoration worker")
     }
     fn request(&self, chunks: &[(i32, i32)], center: [i32; 2]) {
         if self.shared.stop.load(Ordering::Relaxed) {
@@ -137,7 +165,7 @@ impl Builder {
         let mut requests = self.shared.requests.lock().unwrap();
         requests.center = center;
         for &key in chunks {
-            if requests.current != Some(batch_origin(key)) && !requests.finished.contains(&key) {
+            if !requests.current.contains(&batch_origin(key)) && !requests.finished.contains(&key) {
                 requests.chunks.insert(key);
             }
         }
@@ -146,14 +174,18 @@ impl Builder {
             sorted.sort_unstable_by_key(|&key| (distance(key, center), key));
             requests.chunks = sorted.into_iter().take(REQUESTS).collect();
         }
-        self.shared.wake.notify_one();
+        self.shared.wake.notify_all();
     }
 }
 impl Drop for Builder {
     fn drop(&mut self) {
+        // Under the lock the threads check it with: one between its check and
+        // its wait missed the wake, and closing the world waited forever.
+        let requests = self.shared.requests.lock();
         self.shared.stop.store(true, Ordering::Relaxed);
-        self.shared.wake.notify_one();
-        if let Some(thread) = self.thread.take() {
+        drop(requests);
+        self.shared.wake.notify_all();
+        for thread in self.threads.drain(..) {
             let _ = thread.join();
         }
     }
@@ -235,16 +267,20 @@ fn decorated_region(
 fn columns(chunk: &ProtoChunk, biome_map: &[u16], dimension: &str) -> Arc<[Column; 256]> {
     let states = chunk.data().block_states();
     let registry = chunk.data().registry();
-    let min = chunk.terrain.min_y().max(MIN_Y);
-    let max = (chunk.terrain.min_y() + chunk.terrain.height()).min(MIN_Y + HEIGHT);
+    // The level's range, all of it inside its column; the column's bottom
+    // stands for "no surface".
+    let (min, height) = (chunk.terrain.min_y(), chunk.terrain.height());
+    let max = min + height;
+    let bottom = crate::chunk::ColumnLayout::of_level(min, height).min_y();
+    let water = registry.default_state("minecraft:water");
     Arc::new(std::array::from_fn(|index| {
         let x = (index & 15) as i32;
         let z = (index >> 4) as i32;
         let mut column = Column::default();
         for y in min..max {
-            let state = chunk.block(x, y, z);
+            let mut state = chunk.block(x, y, z);
             let properties = states.get(state);
-            let name = registry.state(state).map_or("", |s| s.name.as_str());
+            let mut name = registry.state(state).map_or("", |s| s.name.as_str());
             if properties.is_air()
                 || (!properties.blocks_motion_in_heightmap()
                     && !properties.has_fluid()
@@ -252,13 +288,26 @@ fn columns(chunk: &ProtoChunk, biome_map: &[u16], dimension: &str) -> Arc<[Colum
             {
                 continue;
             }
+            // Kelp and seagrass hold water: far off they are the water around
+            // them, as saved chunks' far columns have them. As spans of their
+            // own they hid the seabed with no top face of theirs, a hole
+            // where the sky showed through (white dots across the sea).
+            if !properties.blocks_motion_in_heightmap()
+                && properties.has_fluid()
+                && !matches!(name, "minecraft:water" | "minecraft:lava")
+                && let Some(water) = water
+            {
+                state = water;
+                name = "minecraft:water";
+            }
             let fluid = matches!(name, "minecraft:water" | "minecraft:lava");
             let biome = biome_map
                 .get(chunk.biome_id_at(x, y, z).0 as usize)
                 .copied()
                 .unwrap_or(0);
-            // shortcut: no propagated far lighting, use the normal lighting
+            // shortcut: no propagated far block light, use the normal lighting
             // engine if accurate distant block-light propagation is required.
+            // Skylight is `shade_sky`'s, once the column is complete.
             let light = if dimension == "minecraft:the_nether" {
                 0
             } else {
@@ -277,7 +326,7 @@ fn columns(chunk: &ProtoChunk, biome_map: &[u16], dimension: &str) -> Arc<[Colum
             });
             if fluid {
                 let surface = column.surface.get_or_insert(Surface {
-                    height: MIN_Y,
+                    height: bottom,
                     state: BlockStateId(0),
                     water: None,
                     biome,
@@ -292,8 +341,77 @@ fn columns(chunk: &ProtoChunk, biome_map: &[u16], dimension: &str) -> Arc<[Colum
                 });
             }
         }
+        if dimension != "minecraft:the_nether" {
+            shade_sky(&mut column, states);
+        }
         column
     }))
+}
+/// Skylight as it reaches the top of each span straight down from the sky:
+/// fluids and leaves take a level per block, as vanilla's dampening does.
+/// Full skylight everywhere lit seabeds and the ground under canopies as if
+/// they stood in the open.
+// ponytail: straight down only. Solid blocks take none, though vanilla's
+// stop it: the faces under them that far terrain shows are cliffs and
+// overhangs, which vanilla lights sideways from the open air, and they went
+// black. The lighting engine for exact light.
+fn shade_sky(column: &mut Column, states: &GenBlockStates) {
+    // Dimming blocks get a span a level, as a real chunk's light has them,
+    // down to the dark: one lit span for a whole sea lit its bed, where
+    // `Column::reduced` merges water and sand, as brightly as its surface.
+    let mut sky = 15u32;
+    let mut shaded = Vec::with_capacity(column.spans.len());
+    for span in column.spans.iter().rev() {
+        let lit = |min, max, sky: u32| Span {
+            min,
+            max,
+            light: (span.light & !0xf0) | (sky << 4) as u16,
+            ..*span
+        };
+        let state = states.get(span.state);
+        if state.motion && state.no_leaves {
+            shaded.push(lit(span.min, span.max, sky));
+            continue;
+        }
+        let mut top = span.max;
+        while top > span.min {
+            let bottom = if sky == 0 { span.min } else { top - 1 };
+            shaded.push(lit(bottom, top, sky));
+            sky = sky.saturating_sub((top - bottom) as u32);
+            top = bottom;
+        }
+    }
+    shaded.reverse();
+    column.spans = shaded.into();
+}
+
+/// A whole tile inside visited chunks needs no density work at all. This
+/// used to evaluate the lattice first and throw all of it away in the per-cell
+/// cache check below.
+fn cached_grid(
+    cache: &FxHashMap<(i32, i32), Arc<[Column; 256]>>,
+    x: i32,
+    z: i32,
+    width: i32,
+    side: usize,
+) -> Option<Vec<Column>> {
+    if width > 16 || cache.is_empty() {
+        return None;
+    }
+    let mut columns = Vec::with_capacity(side * side);
+    for dz in 0..side {
+        for dx in 0..side {
+            let (wx, wz) = (x + dx as i32 * width, z + dz as i32 * width);
+            let cached = cache.get(&(wx >> 4, wz >> 4))?;
+            columns.push(Column::reduced(
+                cached,
+                (wx & 15) as usize,
+                (wz & 15) as usize,
+                width as usize,
+            ));
+        }
+    }
+    Some(columns)
 }
 
 pub(super) struct VanillaLodSampler {
@@ -406,6 +524,9 @@ impl LodSampler for VanillaLodSampler {
         self.grid(x, z, width, 1).pop().unwrap_or_default()
     }
     fn grid(&mut self, x: i32, z: i32, width: i32, side: usize) -> Vec<Column> {
+        if let Some(columns) = cached_grid(&self.cache, x, z, width, side) {
+            return columns;
+        }
         let samples =
             match self
                 .worker
@@ -454,7 +575,7 @@ impl VanillaLodSampler {
         let registry = self.generator.generator.data().registry();
         let mut column = Column {
             surface,
-            spans: Vec::new(),
+            spans: crate::lod::Spans::new(),
         };
         for (min, max, state) in spans.into_iter().rev() {
             column.push(Span {
@@ -476,19 +597,52 @@ impl VanillaLodSampler {
                 },
             });
         }
-        let light = if self.generator.dimension == "minecraft:the_nether" {
-            0
-        } else {
-            240
-        };
+        let nether = self.generator.dimension == "minecraft:the_nether";
+        let light = if nether { 0 } else { 240 };
         self.vegetation.apply(&mut column, x, z, width, light);
         self.islands.apply(&mut column, x, z, width, light);
+        if !nether {
+            shade_sky(&mut column, self.generator.generator.data().block_states());
+        }
         column
     }
 }
 
 #[cfg(test)]
 mod tests {
+    /// The all-cached path must return exactly the per-cell reductions the
+    /// old override produced, including negative chunk coordinates.
+    #[test]
+    fn cached_grid_equals_each_cells_reduction() {
+        let mut cache: FxHashMap<(i32, i32), Arc<[Column; 256]>> = FxHashMap::default();
+        let columns: Arc<[Column; 256]> = Arc::new(std::array::from_fn(|i| {
+            Column::from_surface(Some(Surface {
+                height: 60 + i as i32 % 8,
+                state: BlockStateId(i as u32 % 3 + 1),
+                water: None,
+                biome: 0,
+            }))
+        }));
+        cache.insert((0, 0), columns.clone());
+        cache.insert((-1, -1), columns.clone());
+        for (x, z) in [(0, 0), (4, 4), (8, 8), (-8, -8), (-16, -16)] {
+            let fast = cached_grid(&cache, x, z, 4, 2)
+                .unwrap_or_else(|| panic!("inside cached chunks at {x},{z}"));
+            for dz in 0..2 {
+                for dx in 0..2 {
+                    let (wx, wz) = (x + dx * 4, z + dz * 4);
+                    assert_eq!(
+                        fast[dz as usize * 2 + dx as usize],
+                        Column::reduced(&columns, (wx & 15) as usize, (wz & 15) as usize, 4)
+                    );
+                }
+            }
+        }
+        // One missing chunk falls back to the generator path.
+        assert!(cached_grid(&cache, 12, 0, 4, 2).is_none());
+        assert!(cached_grid(&cache, 0, 0, 32, 2).is_none());
+    }
+
     use super::*;
     #[test]
     #[ignore = "requires prepared worldgen data in HORIZON_TEST_RESOURCES"]
@@ -659,6 +813,21 @@ mod tests {
         };
         assert!(count("_leaves") > 0, "unexplored forest has a real canopy");
         assert!(count("_log") > 0, "canopy retains its trunks");
+        let sky = |span: &Span| (span.light >> 4) & 15;
+        assert!(
+            generated
+                .iter()
+                .filter_map(|column| column.spans.last())
+                .all(|top| sky(top) == 15),
+            "the top of every column is in the open"
+        );
+        assert!(
+            generated
+                .iter()
+                .flat_map(|column| &column.spans)
+                .any(|span| (1..15).contains(&sky(span))),
+            "ground under the canopy is shaded, not black"
+        );
         assert!(generated.iter().all(|column| {
             column
                 .spans
@@ -715,7 +884,7 @@ mod tests {
                 "emitted before all neighbouring features completed"
             );
         }
-        assert_eq!(batch_origin((-1, -5)), (-4, -8));
+        assert_eq!(batch_origin((-1, -BATCH - 1)), (-BATCH, -2 * BATCH));
         let stop = AtomicBool::new(true);
         assert!(decorated_region(&mut terrain.generator.worker(), key, &stop)?.is_none());
         for (dimension, center) in [

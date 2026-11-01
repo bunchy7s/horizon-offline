@@ -287,6 +287,16 @@ def full(args, work):
         assert "Couldn't reach your friend's game" in reason, reason
         print(f'after stopping: "{reason}"')
         guest.stop()
+        if Game.server_thread:
+            # Leaving the world ends its code; coming back shares a new one.
+            host('friends host')
+            host.wait('friends status', lambda v: v['code'], 30, 'invite code')
+            host('disconnect')
+            host.wait('screen', lambda v: v['screen'] == 'title', 60, 'the title screen')
+            assert host('friends status')['code'] is None, 'the code outlived its world'
+            assert host_world(host) != code
+            host('friends stop')
+            print('leaving the world ends its code')
         # (b) A self-hosted relay, run locally: the short code, relayed.
         relay, relay_log, relay_url = start_relay(args, work)
         set_relay(host, relay_url)

@@ -116,8 +116,19 @@ pub fn has_active_raid(m: &Mob) -> bool {
     state(m).is_some_and(|s| s.active_raid)
 }
 /// `Raider.isCaptain`: the banner on the head of a patrol leader.
+///
+/// The worn stack (`extra.armor[0]`) carries the ominous components so a
+/// client that only got `SetEquipment` (no `PatrolLeader` NBT) still draws
+/// the patterned banner (#4567).
 pub fn is_captain(m: &Mob) -> bool {
-    m.extra.head.as_deref() == Some(BANNER) && state(m).is_some_and(|s| s.patrol_leader)
+    if m.extra.head.as_deref() != Some(BANNER) {
+        return false;
+    }
+    state(m).is_some_and(|s| s.patrol_leader)
+        || m.extra.armor[0]
+            .as_ref()
+            .and_then(|s| s.data())
+            .is_some_and(|d| d.ominous_banner)
 }
 
 /// `PatrollingMonster.registerGoals` then `Raider.registerGoals`: the goals
@@ -171,8 +182,12 @@ pub fn find_patrol_target_from(m: &mut Mob, [x, y, z]: [i32; 3]) {
     s.patrolling = true;
 }
 /// The leader's ominous banner and its drop chance of 2.0 (always dropped).
+///
+/// Also keeps the full ominous stack in `armor[0]` so `SetEquipment` sends
+/// the patterned banner to clients (`Raid.getOminousBannerInstance`).
 pub fn wear_banner(m: &mut Mob) {
     m.extra.head = Some(BANNER.into());
+    m.extra.armor[0] = Some(ominous_banner());
 }
 /// Why a mob was spawned (`EntitySpawnReason`), as far as raiders care.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -218,15 +233,15 @@ pub fn keeps_alive(m: &Mob, distance_squared: f64) -> bool {
 
 /// `Heightmap.Types.MOTION_BLOCKING_NO_LEAVES` position above (x, z).
 pub fn heightmap_pos(w: &MobWorld, x: i32, z: i32) -> [i32; 3] {
-    let top = crate::chunk::MIN_Y + crate::chunk::HEIGHT;
-    let y = (crate::chunk::MIN_Y..top)
+    let top = w.world.top_y();
+    let y = (w.world.bottom_y()..top)
         .rev()
         .find(|&y| {
             let f = w.facts.get(w.world.block(x, y, z));
             (f.full_collision || f.fluid != crate::blocks::Fluid::None)
                 && !f.name.ends_with("leaves")
         })
-        .map_or(crate::chunk::MIN_Y, |y| y + 1);
+        .map_or(w.world.bottom_y(), |y| y + 1);
     [x, y, z]
 }
 
@@ -380,8 +395,8 @@ impl Goal for ObtainBanner {
     fn can_continue(&mut self, m: &mut Mob, _cx: &mut Cx) -> bool {
         !m.ai.nav.is_done() && state(m).is_some_and(|s| s.banner_at.is_some())
     }
-    fn start(&mut self, m: &mut Mob, _cx: &mut Cx) {
-        m.nav_move_to_path(self.path_to_banner.take(), 1.15);
+    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.nav_move_to_path(cx.w, self.path_to_banner.take(), 1.15);
     }
 }
 
@@ -713,6 +728,31 @@ mod tests {
         assert!(!is_raider(Species::Zombie));
         assert!(can_be_leader(Species::Pillager) && can_be_leader(Species::Evoker));
         assert!(!can_be_leader(Species::Witch) && !can_be_leader(Species::Ravager));
+    }
+    #[test]
+    fn wear_banner_keeps_the_ominous_stack_for_clients() {
+        use crate::mobs::sensor_scan_tests::kind;
+        use std::sync::Arc;
+        let mut k = (*kind()).clone();
+        k.id = "minecraft:pillager".into();
+        k.species = Species::Pillager;
+        let mut m = Mob::new(1, Arc::new(k), Vec3::ZERO, 0.0);
+        m.extra.raider = Some(Box::default());
+        state_mut(&mut m).patrol_leader = true;
+        wear_banner(&mut m);
+        assert_eq!(m.extra.head.as_deref(), Some(BANNER));
+        assert!(
+            m.extra.armor[0]
+                .as_ref()
+                .and_then(|s| s.data())
+                .is_some_and(|d| d.ominous_banner)
+        );
+        assert!(is_captain(&m));
+        // Client that only saw SetEquipment: no PatrolLeader, still a captain.
+        state_mut(&mut m).patrol_leader = false;
+        assert!(is_captain(&m));
+        m.extra.armor[0] = None;
+        assert!(!is_captain(&m));
     }
     #[test]
     fn long_distance_patrol_turns_by_ninety_radians() {

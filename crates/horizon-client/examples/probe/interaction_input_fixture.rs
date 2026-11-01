@@ -1,5 +1,6 @@
 use horizon_client::interaction_input::{
-    Button, InteractionInput, InteractionWorld, TargetUseWorld, use_on_target,
+    Button, InteractionInput, InteractionWorld, TargetUseWorld, release_on_screen_open,
+    use_on_target,
 };
 use serde_json::Value;
 use std::io::{BufRead, Write};
@@ -103,14 +104,23 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             passing: row["passing"].as_bool().unwrap_or(false),
         };
         let mut input = InteractionInput::default();
-        for button in row["clicks"].as_array().unwrap() {
-            input.press(match button.as_u64().unwrap() {
-                0 => Button::Attack,
-                1 => Button::Use,
-                _ => Button::Pick,
-            });
+        let screen = row["screen"].as_bool().unwrap_or(false);
+        if screen {
+            // A keybind opened a screen: Gui.setScreen already ran
+            // KeyMapping.releaseAll, so the same handleKeybinds call releases an
+            // active use; with the screen open nothing else acts this tick.
+            release_on_screen_open(&mut world);
+            input.tick(&mut world, false, false);
+        } else {
+            for button in row["clicks"].as_array().unwrap() {
+                input.press(match button.as_u64().unwrap() {
+                    0 => Button::Attack,
+                    1 => Button::Use,
+                    _ => Button::Pick,
+                });
+            }
+            input.tick(&mut world, flag("attack_down"), flag("use_down"));
         }
-        input.tick(&mut world, flag("attack_down"), flag("use_down"));
         writeln!(out, "== {i}")?;
         for event in world.events {
             writeln!(out, "{event}")?;

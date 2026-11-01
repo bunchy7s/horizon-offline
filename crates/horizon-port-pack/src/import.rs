@@ -92,10 +92,10 @@ pub fn import(path: &Path) -> Result<Pack, String> {
     let file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("{}: {e}", path.display()))?;
     if let Some(index) = read_json(&mut zip, "modrinth.index.json")? {
-        return Ok(mrpack(&index, &names(&zip)));
+        return Ok(mrpack(&index, &names(&zip)?));
     }
     if let Some(manifest) = read_json(&mut zip, "manifest.json")? {
-        let mut pack = curseforge(&manifest, &names(&zip));
+        let mut pack = curseforge(&manifest, &names(&zip)?);
         // The manifest names files only by CurseForge ids, which need a key
         // to resolve; the pack's own mod list names them and gives their
         // SHA-1s, so Modrinth can answer for most.
@@ -112,8 +112,11 @@ pub fn import(path: &Path) -> Result<Pack, String> {
     ))
 }
 
-fn names(zip: &zip::ZipArchive<fs::File>) -> Vec<String> {
-    zip.file_names().map(str::to_owned).collect()
+fn names(zip: &zip::ZipArchive<fs::File>) -> Result<Vec<String>, String> {
+    zip.file_names()
+        .map(|name| name.map(|name| name.into_owned()))
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())
 }
 
 fn read_json(zip: &mut zip::ZipArchive<fs::File>, name: &str) -> Result<Option<Value>, String> {
@@ -304,12 +307,7 @@ fn instance(dir: &Path) -> Result<Pack, String> {
             }
         }
     }
-    let game = [".minecraft", "minecraft", "."]
-        .iter()
-        .map(|g| dir.join(g))
-        .find(|g| g.join("mods").is_dir())
-        .or_else(|| dir.read_dir().is_ok().then(|| dir.to_path_buf()))
-        .ok_or_else(|| format!("{}: no mods folder", dir.display()))?;
+    let game = game_dir(dir)?;
     let mods = if game.join("mods").is_dir() {
         game.join("mods")
     } else {
@@ -341,6 +339,16 @@ fn instance(dir: &Path) -> Result<Pack, String> {
         }
     }
     Ok(pack)
+}
+
+/// Resolve the game root for both mod and resource-pack instance imports.
+pub(crate) fn game_dir(dir: &Path) -> Result<PathBuf, String> {
+    [".minecraft", "minecraft", "."]
+        .iter()
+        .map(|g| dir.join(g))
+        .find(|g| g.join("mods").is_dir() || g.join("resourcepacks").is_dir())
+        .or_else(|| dir.read_dir().is_ok().then(|| dir.to_path_buf()))
+        .ok_or_else(|| format!("{}: no game folder", dir.display()))
 }
 
 fn count_files(dir: &Path) -> usize {

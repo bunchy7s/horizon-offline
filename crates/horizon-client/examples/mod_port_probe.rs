@@ -12,6 +12,7 @@ use horizon_client::{
     assets::Assets,
     blocks::BlockFacts,
     crafting::{Recipe, Recipes},
+    enchant::Enchantments,
     items::{ItemStack, Items},
     mod_content::{self, ContentMod},
     stations::StationRecipes,
@@ -43,6 +44,26 @@ fn tool(name: &str) -> Option<ItemStack> {
         }
         other => Some(ItemStack::new(&format!("minecraft:{other}"), 1)),
     }
+}
+
+/// An equipment asset's first humanoid layers as files under the root, as worn armour reads them.
+fn equipment_textures(root: &Path, asset: &str) -> Value {
+    let (ns, path) = asset.split_once(':').unwrap_or(("minecraft", asset));
+    let Ok(doc) = fs::read(root.join(format!("assets/{ns}/equipment/{path}.json"))) else {
+        return Value::Null;
+    };
+    let doc: Value = serde_json::from_slice(&doc).unwrap_or_default();
+    let mut out = Map::new();
+    for kind in ["humanoid", "humanoid_leggings"] {
+        if let Some(texture) = doc["layers"][kind][0]["texture"].as_str() {
+            let (tns, tpath) = texture.split_once(':').unwrap_or(("minecraft", texture));
+            let file = root.join(format!(
+                "assets/{tns}/textures/entity/equipment/{kind}/{tpath}.png"
+            ));
+            out.insert(kind.into(), json!(file.exists().then_some(file)));
+        }
+    }
+    Value::Object(out)
 }
 
 fn main() -> Result<()> {
@@ -81,6 +102,7 @@ fn main() -> Result<()> {
     let items = Items::load(&root, registry, &facts, &PackOverlay::NONE).map_err(step("items"))?;
     let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).map_err(step("recipes"))?;
     let stations = StationRecipes::load(&root, &items, &PackOverlay::NONE);
+    let enchantments = Enchantments::load(&root);
     let collisions =
         horizon_client::collisions::load(&root, registry).map_err(step("collisions"))?;
     let loaded = began.elapsed().as_secs_f64() - built;
@@ -198,7 +220,36 @@ fn main() -> Result<()> {
         item_rows.insert(
             name.clone(),
             match items.items.get(name.as_str()) {
-                Some(i) => json!({"max_stack_size": i.max_stack, "block": i.block.map(|b| b.0)}),
+                Some(i) => {
+                    let props = enchantments.props(name);
+                    let repairable: Vec<String> = props
+                        .into_iter()
+                        .flat_map(|p| &p.repairable)
+                        .flat_map(|r| match r.strip_prefix('#') {
+                            Some(tag) => items.item_tag_order.get(tag).cloned().unwrap_or_default(),
+                            None => vec![r.clone()],
+                        })
+                        .collect();
+                    json!({
+                        "max_stack_size": i.max_stack,
+                        "block": i.block.map(|b| b.0),
+                        "max_damage": i.max_damage,
+                        "modifiers": i.modifiers.iter().map(|(attribute, id, amount, operation, slot)| {
+                            json!({"type": attribute, "id": id, "amount": amount, "operation": operation, "slot": slot})
+                        }).collect::<Vec<_>>(),
+                        "tool": i.tool_damage_per_block.map(|per_block| json!({
+                            "rules": i.tool.iter().map(|r| json!({"blocks": r.blocks, "speed": r.speed, "correct_for_drops": r.correct})).collect::<Vec<_>>(),
+                            "default_mining_speed": i.tool_default_speed,
+                            "damage_per_block": per_block,
+                        })),
+                        "enchantable": props.map_or(0, |p| p.enchantable),
+                        "repairable": repairable,
+                        "equip_slot": i.equip_slot,
+                        "equip_asset": i.equip_asset,
+                        "equipment": i.equip_asset.as_deref().map(|a| equipment_textures(&root, a)),
+                        "food": i.food.map(|(nutrition, saturation)| json!({"nutrition": nutrition, "saturation": saturation})),
+                    })
+                }
                 None => Value::Null,
             },
         );

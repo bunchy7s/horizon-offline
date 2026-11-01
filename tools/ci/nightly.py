@@ -95,7 +95,8 @@ def notes(today: str, chosen: Ref, main: Ref, picked: list[dict], left_out: list
     new = [pr for pr in shown if "feature" in pr["labels"]]
     fixed = [pr for pr in shown if "feature" not in pr["labels"]]
     built = f"main ({main.sha[:7]})" + (f" with {len(picked)} pull requests merged in" if picked else "")
-    parts = [f"Nightly {today} · {chosen.sha[:7]}: {built}, built from `{chosen.name}` ({chosen.sha}).",
+    # The banner first: people who land on the Nightly ran its game zip for the launcher (a player, 2026-10-30).
+    parts = [train.PLAYERS, f"Nightly {today} · {chosen.sha[:7]}: {built}, built from `{chosen.name}` ({chosen.sha}).",
              source_line(today, chosen.sha), PLAYERS]
     if not shown and not picked:
         parts.append("Nothing new for players on main since the previous Nightly.")
@@ -125,9 +126,9 @@ def merged_since(previous: str | None, main: str) -> list[dict]:
     return train.merged_between("game", previous, main)
 
 
-def refresh(entries: list[dict], get, patterns: list[str], team: set[str]) -> tuple[list[dict], list[str]]:
-    """The scheduled nightly's set: each pull request at its newest approved head (the Team's or Ludovic's agents'
-    approval, ns.approvers); a newer head nobody approved yet waits, merged, closed and refused ones are out."""
+def refresh(entries: list[dict], get, patterns: list[str]) -> tuple[list[dict], list[str]]:
+    """The scheduled nightly's set: each pull request still at the head it was picked at (a push after the pick
+    waits for someone to pick it again); merged, closed and refused ones are out."""
     kept, left_out = [], []
     for e in entries:
         pr = get(e["number"])
@@ -135,15 +136,8 @@ def refresh(entries: list[dict], get, patterns: list[str], team: set[str]) -> tu
             left_out.append(f"#{e['number']} {e['title']}: merged, so it's in main")
         elif why := ns.check(pr, e["number"], patterns):
             left_out.append(f"{why}: left out")
-        elif ns.approvers(pr, pr.head, team):
-            kept.append({**e, "head": pr.head, "title": pr.title})
-        elif ns.approvers(pr, e["head"], team):
-            kept.append(e)
-            left_out.append(f"#{e['number']} {e['title']}: its new head {pr.head[:7]} isn't approved yet, so the "
-                            f"approved {e['head'][:7]} stays")
         else:
-            left_out.append(f"#{e['number']} {e['title']}: no approving review from the Team or Ludovic's agents at "
-                            "its head: left out")
+            kept.append(e)
     return kept, left_out
 
 
@@ -239,12 +233,11 @@ def pick(force: bool) -> None:
         get = ns.lookup(repo)
 
         def fresh(st: dict, builds: str):
-            team = ns.read_reviewers(Path(ns.REVIEWERS).read_text() if Path(ns.REVIEWERS).exists() else "").logins
-            kept, out = refresh(st.get("prs", []), get, patterns, team)
+            kept, out = refresh(st.get("prs", []), get, patterns)
             left_out[:] = out
             if kept == st.get("prs", []):
                 return None
-            return {**st, "prs": kept}, builds, "the scheduled nightly takes the newest heads"
+            return {**st, "prs": kept}, builds, "the scheduled nightly drops the merged, closed and refused"
         prs = ns.update_state(fresh, token).get("prs", [])
     build_set(main, prs, left_out, today, force)
 

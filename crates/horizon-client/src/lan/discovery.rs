@@ -123,6 +123,8 @@ pub struct Scanner {
 struct ScanInner {
     games: Games,
     stop: Arc<AtomicBool>,
+    /// How many games `take_found` has handed out.
+    taken: Mutex<usize>,
 }
 impl Drop for ScanInner {
     fn drop(&mut self) {
@@ -141,13 +143,36 @@ impl Scanner {
                 .spawn(move || listen(socket, games, stop));
         }
         Self {
-            inner: Arc::new(ScanInner { games, stop }),
+            inner: Arc::new(ScanInner {
+                games,
+                stop,
+                taken: Mutex::new(0),
+            }),
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn for_tests(games: Vec<LanGame>) -> Self {
+        Self {
+            inner: Arc::new(ScanInner {
+                games: Arc::new(Mutex::new(games)),
+                stop: Arc::new(AtomicBool::new(false)),
+                taken: Mutex::new(0),
+            }),
         }
     }
     /// The worlds announced since the scan started, in order (vanilla's
     /// list keeps them while the multiplayer screen is open).
     pub fn games(&self) -> Vec<LanGame> {
         self.inner.games.lock().unwrap().clone()
+    }
+    /// `LanServerList.takeDirty` with `updateNetworkServers`' new count: the
+    /// games found since the last call, with their place in [`games`](Self::games).
+    pub fn take_found(&self) -> Vec<(usize, LanGame)> {
+        let games = self.inner.games.lock().unwrap();
+        let mut taken = self.inner.taken.lock().unwrap();
+        let found = games.iter().cloned().enumerate().skip(*taken).collect();
+        *taken = games.len();
+        found
     }
 }
 fn bind_listener() -> io::Result<UdpSocket> {
@@ -170,6 +195,38 @@ fn listen(socket: UdpSocket, games: Games, stop: Arc<AtomicBool>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `takeDirty`: each world found is handed out once, in order.
+    #[test]
+    fn found_worlds_are_taken_once() {
+        let scanner = Scanner {
+            inner: Arc::new(ScanInner {
+                games: Arc::default(),
+                stop: Arc::default(),
+                taken: Mutex::new(0),
+            }),
+        };
+        let found = |s: &Scanner| -> Vec<usize> { s.take_found().iter().map(|f| f.0).collect() };
+        assert!(found(&scanner).is_empty());
+        add_server(
+            &mut scanner.inner.games.lock().unwrap(),
+            &ping_string("A", 1),
+            "10.0.0.2",
+        );
+        add_server(
+            &mut scanner.inner.games.lock().unwrap(),
+            &ping_string("B", 2),
+            "10.0.0.3",
+        );
+        assert_eq!(found(&scanner), [0, 1]);
+        assert!(found(&scanner).is_empty());
+        add_server(
+            &mut scanner.inner.games.lock().unwrap(),
+            &ping_string("C", 3),
+            "10.0.0.4",
+        );
+        assert_eq!(scanner.take_found()[0].1.motd, "C");
+    }
 
     #[test]
     fn ping_string_round_trips() {

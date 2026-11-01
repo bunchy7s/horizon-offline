@@ -47,7 +47,7 @@ fn kind_id(prefix: &str, kind: DataKind) -> &'static str {
 
 /// Where a switch would be: the ping has none.
 fn always_on(t: &Theme) -> Div {
-    caps("Always on").flex_none().text_color(t.muted)
+    caps(tr("Always on")).flex_none().text_color(t.muted)
 }
 
 /// The "I'm playing" ping on the first-run question, laid out as the switches' rows.
@@ -69,12 +69,12 @@ fn ping_row(t: &Theme) -> Div {
                 .child(
                     text(theme::UI)
                         .text_color(t.ink)
-                        .child(telemetry::PING_NAME),
+                        .child(tr(telemetry::PING_NAME)),
                 )
                 .child(
                     text(theme::CAPTION)
                         .text_color(t.muted)
-                        .child(telemetry::PING),
+                        .child(tr(telemetry::PING)),
                 ),
         )
         .child(always_on(t))
@@ -120,7 +120,10 @@ impl Launcher {
     fn answer_consent(&mut self, choices: Choices) {
         match telemetry::answer(choices) {
             Ok(consent) => self.collection.consent = consent,
-            Err(e) => self.collection.note = Some(format!("Could not save your choice: {e}")),
+            Err(e) => {
+                self.collection.note =
+                    Some(trf("Could not save your choice: {error}", &[("error", &e)]))
+            }
         }
         // The question and Settings say what the "I'm playing" ping holds, beside the switches.
         if !self.settings.ping_notice_seen {
@@ -158,8 +161,8 @@ impl Launcher {
                         .flex_1()
                         .min_w_0()
                         .gap(px(2.))
-                        .child(text(theme::UI).text_color(t.ink).child(name))
-                        .child(text(theme::CAPTION).text_color(t.muted).child(what)),
+                        .child(text(theme::UI).text_color(t.ink).child(tr(name)))
+                        .child(text(theme::CAPTION).text_color(t.muted).child(tr(what))),
                 )
                 .child(switch(kind_id("ask", kind), on, &t).on_click(cx.listener(
                     move |this, _: &ClickEvent, _, cx| {
@@ -181,15 +184,15 @@ impl Launcher {
             .pt(px(28.))
             .pb(px(20.))
             .overflow_y_scroll()
-            .child(caps("Data collection").text_color(t.muted))
+            .child(caps(tr("Data collection")).text_color(t.muted))
             .child(
                 text(theme::HEADING)
                     .text_color(t.ink)
-                    .child("Help make Horizon faster and steadier?"),
+                    .child(tr("Help make Horizon faster and steadier?")),
             )
-            .child(text(theme::UI).text_color(t.muted).child(
+            .child(text(theme::UI).text_color(t.muted).child(tr(
                 "Horizon can send a few things to its developers. Each switch is off until you turn it on, and Settings can change it any time.",
-            ))
+            )))
             .child(
                 div()
                     .flex()
@@ -199,7 +202,7 @@ impl Launcher {
                     .children(rows)
                     .child(ping_row(&t)),
             )
-            .child(text(theme::CAPTION).text_color(t.muted).child(telemetry::NEVER))
+            .child(text(theme::CAPTION).text_color(t.muted).child(tr(telemetry::NEVER)))
             .child(
                 div()
                     .id("ask-view")
@@ -207,7 +210,7 @@ impl Launcher {
                     .text_color(t.accent)
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.8))
-                    .child(if viewing { "Hide what would be sent" } else { "View what would be sent" })
+                    .child(tr(if viewing { "Hide what would be sent" } else { "View what would be sent" }))
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                         this.toggle_view();
                         cx.notify();
@@ -260,7 +263,7 @@ impl Launcher {
             .px(px(32.))
             .py(px(24.))
             .bg(t.page.opacity(0.92))
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .occlude()
             .child(card)
     }
@@ -286,28 +289,34 @@ impl Launcher {
             ));
             list = list.child(index_row(
                 i + 1,
-                name,
-                Some(div().child(what).into_any_element()),
+                tr(name),
+                Some(div().child(tr(what)).into_any_element()),
                 Some(toggle.into_any_element()),
                 &t,
             ));
         }
         list = list.child(index_row(
             telemetry::SWITCHES.len() + 1,
-            telemetry::PING_NAME,
-            Some(div().child(telemetry::PING).into_any_element()),
+            tr(telemetry::PING_NAME),
+            Some(div().child(tr(telemetry::PING)).into_any_element()),
             Some(always_on(&t).into_any_element()),
             &t,
         ));
         let waiting = horizon_telemetry::outbox::pending(&telemetry::home()).len();
         let id = match consent.install_id.as_str() {
-            "" => "No install ID: nothing has been collected".to_string(),
-            id => format!("Install ID {}…{}", &id[..4], &id[id.len() - 4..]),
+            "" => tr("No install ID: nothing has been collected").to_string(),
+            id => trf(
+                "Install ID {prefix}…{suffix}",
+                &[("prefix", &id[..4]), ("suffix", &id[id.len() - 4..])],
+            ),
         };
         let server = if horizon_telemetry::endpoint().is_some() {
-            format!("{waiting} waiting to be sent")
+            trf(
+                "{count} waiting to be sent",
+                &[("count", &waiting.to_string())],
+            )
         } else {
-            "Sending is turned off here (HORIZON_TELEMETRY_URL=off)".into()
+            tr("Sending is turned off here (HORIZON_TELEMETRY_URL=off)").into()
         };
         let confirm = self.collection.confirm_delete;
         let actions = div()
@@ -355,7 +364,7 @@ impl Launcher {
             );
         list = list.child(index_row(
             telemetry::SWITCHES.len() + 2,
-            "Your data",
+            tr("Your data"),
             Some(
                 div()
                     .font_family(theme::MONO)
@@ -369,13 +378,37 @@ impl Launcher {
             .flex()
             .flex_col()
             .gap(px(16.))
-            .child(text(theme::HEADING).text_color(t.ink).child("Data collection"))
-            .child(text(theme::UI).max_w(px(600.)).text_color(t.muted).child(
-                "Each switch is off unless you turn it on. What it sends is below it; the privacy page on playhorizon.dev says how long it is kept.",
-            ))
+            .child(
+                text(theme::HEADING)
+                    .text_color(t.ink)
+                    .child(tr("Data collection")),
+            )
+            .child(
+                text(theme::UI)
+                    .max_w(px(600.))
+                    .text_color(t.muted)
+                    .child(tr(
+                        "Each switch is off unless you turn it on. What it sends is below it; the privacy page on playhorizon.dev says how long it is kept.",
+                    )),
+            )
             .child(list)
-            .child(text(theme::CAPTION).text_color(t.muted).child(telemetry::NEVER))
-            .children(self.collection.note.clone().map(|n| text(theme::UI).text_color(t.ink).child(n)))
-            .children(self.collection.view.as_ref().map(|v| json_view(v, &t, &self.collection.json_scroll)))
+            .child(
+                text(theme::CAPTION)
+                    .max_w(px(600.))
+                    .text_color(t.muted)
+                    .child(tr(telemetry::NEVER)),
+            )
+            .children(
+                self.collection
+                    .note
+                    .clone()
+                    .map(|n| text(theme::UI).text_color(t.ink).child(n)),
+            )
+            .children(
+                self.collection
+                    .view
+                    .as_ref()
+                    .map(|v| json_view(v, &t, &self.collection.json_scroll)),
+            )
     }
 }

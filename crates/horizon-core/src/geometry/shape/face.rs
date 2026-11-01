@@ -16,6 +16,24 @@ impl VoxelShape {
             .get_or_init(|| self.calculate_face(direction))
             .clone()
     }
+    /// [`Self::face_shape`] that keeps no face it had to calculate on this
+    /// shape: for a one-off pass over a whole table at load, whose faces
+    /// nothing asks for again (kept, they held tens of MB).
+    pub fn face_shape_transient(&self, direction: Direction) -> Result<Self, ShapeError> {
+        let (axis, _) = face_axis(direction);
+        if self.is_empty() || self.cube_like_along(axis) {
+            return Ok(self.clone());
+        }
+        match self
+            .identity
+            .faces
+            .get()
+            .and_then(|faces| faces[direction as usize].get())
+        {
+            Some(face) => face.clone(),
+            None => self.calculate_face(direction),
+        }
+    }
     fn cube_like_along(&self, axis: Axis) -> bool {
         let coords = self.coordinates(axis);
         coords.len() == 2
@@ -119,5 +137,32 @@ mod tests {
         drop(shape);
         assert!(weak.upgrade().is_none());
         assert!(!face.is_empty());
+    }
+
+    /// A transient face is the cached one's geometry, keeps nothing, and
+    /// returns the cached face once there is one.
+    #[test]
+    fn transient_faces_are_not_kept() {
+        let shape = VoxelShape::from_cube(
+            [2, 2, 2],
+            &[true, false, false, false, false, false, false, false],
+        )
+        .unwrap();
+        for direction in Direction::ALL {
+            let kept = |shape: &VoxelShape| {
+                shape
+                    .identity
+                    .faces
+                    .get()
+                    .is_some_and(|faces| faces[direction as usize].get().is_some())
+            };
+            let transient = shape.face_shape_transient(direction).unwrap();
+            assert!(!kept(&shape), "{direction:?}");
+            let cached = shape.face_shape(direction).unwrap();
+            assert!(kept(&shape));
+            assert_eq!(transient.boxes(), cached.boxes(), "{direction:?}");
+            let again = shape.face_shape_transient(direction).unwrap();
+            assert!(again.same_identity(&cached));
+        }
     }
 }

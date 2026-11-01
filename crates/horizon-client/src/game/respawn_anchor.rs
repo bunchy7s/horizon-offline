@@ -349,6 +349,12 @@ impl Game<'_> {
         if self.block_in_tag("minecraft:climbable", name) || open_trapdoor {
             return VoxelShape::empty();
         }
+        self.block_collision_shape(p)
+    }
+    /// `BlockState.getCollisionShape(level, pos)`: the shape under the empty
+    /// collision context.
+    pub(super) fn block_collision_shape(&self, p: [i32; 3]) -> VoxelShape {
+        let state = self.world.block(p[0], p[1], p[2]);
         let binding = self.collision;
         let mut scene = SceneCollisions {
             world: &self.world,
@@ -363,6 +369,22 @@ impl Game<'_> {
                 &CollisionContext::empty(false),
             )
             .unwrap_or_else(|_| VoxelShape::empty())
+    }
+    /// `DismountHelper.canDismountTo(level, entity, box)`: no block collides
+    /// with the box and it is inside the world border.
+    pub(super) fn can_dismount_to(&self, bounds: Aabb) -> bool {
+        let mut scene = SceneCollisions {
+            world: &self.world,
+            binding: self.collision,
+            subject: None,
+        };
+        if !no_collision_empty(&mut scene, bounds) {
+            return false;
+        }
+        // WorldBorder.isWithinBounds(box).
+        let (lo, hi) = (bounds.min(Axis::X), bounds.max(Axis::X) - 1.0e-5);
+        let (lz, hz) = (bounds.min(Axis::Z), bounds.max(Axis::Z) - 1.0e-5);
+        self.border.contains(lo, lz) && self.border.contains(hi, hz)
     }
     pub(super) fn block_in_tag(&self, tag: &str, block: &str) -> bool {
         self.res
@@ -427,12 +449,7 @@ impl Game<'_> {
                 position.z + half,
             ),
         );
-        let mut scene = SceneCollisions {
-            world: &self.world,
-            binding: self.collision,
-            subject: None,
-        };
-        if !no_collision_empty(&mut scene, bounds) {
+        if !self.can_dismount_to(bounds) {
             return None;
         }
         let name = |q: [i32; 3]| {
@@ -450,10 +467,7 @@ impl Game<'_> {
         {
             return None;
         }
-        // WorldBorder.isWithinBounds(box).
-        let (lo, hi) = (bounds.min(Axis::X), bounds.max(Axis::X) - 1.0e-5);
-        let (lz, hz) = (bounds.min(Axis::Z), bounds.max(Axis::Z) - 1.0e-5);
-        (self.border.contains(lo, lz) && self.border.contains(hi, hz)).then_some(position)
+        Some(position)
     }
     /// `Block.isPossibleToRespawnInThis`: neither solid nor liquid; banners,
     /// signs and pressure plates override it to always.
@@ -533,6 +547,25 @@ impl Game<'_> {
     }
     pub(super) fn is_bed(&self, state: BlockStateId) -> bool {
         self.res.facts().get(state).name.ends_with("_bed")
+    }
+    /// `LivingEntity.stopSleeping`: when the block at `head` is still a bed,
+    /// stand at `AbstractBedBlock.findStandUpPosition` (else 0.1 above the
+    /// block over the head), turned toward the bed's bottom centre with a
+    /// level pitch.
+    pub(super) fn bed_wake_pose(&self, head: [i32; 3], yaw: f32) -> Option<(Vec3, f32)> {
+        let state = self.world.block(head[0], head[1], head[2]);
+        if !self.is_bed(state) {
+            return None;
+        }
+        let facing = self.bed_forward(state);
+        let stand = self.bed_stand_up(head, facing, yaw).unwrap_or_else(|| {
+            Vec3::new(
+                f64::from(head[0]) + 0.5,
+                f64::from(head[1] + 1) + 0.1,
+                f64::from(head[2]) + 0.5,
+            )
+        });
+        Some((stand, look_at_yaw(stand, head)))
     }
     /// The bed's `facing`, as a step.
     fn bed_forward(&self, state: BlockStateId) -> [i32; 3] {
@@ -708,4 +741,20 @@ fn wrap_degrees(degrees: f64) -> f64 {
         d += 360.0;
     }
     d
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn waking_up_next_to_a_bed_looks_toward_the_bed_head() {
+        let head = [10, 64, 5];
+        // Standing one block south of the bed head (z + 1) looks north (180 deg).
+        let south = Vec3::new(10.5, 64.0, 6.5);
+        assert!((look_at_yaw(south, head).abs() - 180.0).abs() < 1.0e-4);
+        // Standing one block east of the bed head (x + 1) looks west (90 deg).
+        let east = Vec3::new(11.5, 64.0, 5.5);
+        assert!((look_at_yaw(east, head) - 90.0).abs() < 1.0e-4);
+    }
 }

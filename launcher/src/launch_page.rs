@@ -68,8 +68,8 @@ impl Launcher {
         });
         let saved = saved.map(|i| {
             let said = match i.launch.summary() {
-                Some(what) => format!("Saved: the next Play {what}."),
-                None => "Saved: nothing runs around the game.".to_string(),
+                Some(what) => trf("Saved: the next Play {what}.", &[("what", &what)]),
+                None => tr("Saved: nothing runs around the game.").to_string(),
             };
             self.reload_instances();
             said
@@ -93,8 +93,8 @@ impl Launcher {
             *on = !*on;
         });
         panel.saved = Some(saved.map(|i| match i.launch.summary() {
-            Some(what) => format!("Saved: the next Play {what}."),
-            None => "Saved: nothing runs around the game.".to_string(),
+            Some(what) => trf("Saved: the next Play {what}.", &[("what", &what)]),
+            None => tr("Saved: nothing runs around the game.").to_string(),
         }));
         self.reload_instances();
     }
@@ -148,8 +148,8 @@ impl Launcher {
                         on,
                         &t,
                     ))
-                    .child(text(theme::LABEL).text_color(t.ink_soft).child(label))
-                    .child(text(theme::CAPTION).text_color(t.muted).child(about))
+                    .child(text(theme::LABEL).text_color(t.ink_soft).child(tr(label)))
+                    .child(text(theme::CAPTION).text_color(t.muted).child(tr(about)))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.flip(toggle);
                         cx.notify();
@@ -161,7 +161,7 @@ impl Launcher {
                 .flex()
                 .flex_col()
                 .gap(px(8.))
-                .child(caps("On this computer").text_color(t.muted))
+                .child(caps(tr("On this computer")).text_color(t.muted))
                 .child(list)
         })
     }
@@ -184,9 +184,9 @@ impl Launcher {
                 .flex()
                 .flex_col()
                 .gap(px(6.))
-                .child(caps(label).text_color(t.muted))
-                .child(this.field(field, placeholder, 520., cx))
-                .child(text(theme::CAPTION).text_color(t.muted).child(about))
+                .child(caps(tr(label)).text_color(t.muted))
+                .child(this.field(field, tr(placeholder), 520., cx))
+                .child(text(theme::CAPTION).text_color(t.muted).child(tr(about)))
         };
         let pre = row(
             self,
@@ -238,7 +238,7 @@ impl Launcher {
                 .px(px(14.))
                 .py(px(12.))
                 .ml(px(40.))
-                .child(caps("When it starts").text_color(t.muted))
+                .child(caps(tr("When it starts")).text_color(t.muted))
                 .child(pre)
                 .child(wrapper)
                 .child(env)

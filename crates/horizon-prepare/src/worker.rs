@@ -11,12 +11,10 @@ pub(crate) struct Worker {
 }
 
 impl Worker {
-    pub(crate) fn new(run: &Run, classes: &Path, cp: &str) -> Result<Self, String> {
-        let log = run.log_file(&run.local.join(format!(
-            "{}-worker.log",
-            classes.file_name().unwrap().to_string_lossy()
-        )))?;
+    pub(crate) fn new(run: &Run, name: &str, classes: &Path, cp: &str) -> Result<Self, String> {
+        let log = run.log_file(&run.local.join(format!("{name}-worker.log")))?;
         let mut child = java::command(&run.jdk.java)
+            .args(java::BATCH_OPTIONS)
             .args([
                 "-Xmx2G",
                 "-cp",
@@ -28,6 +26,8 @@ impl Worker {
                 ),
                 "dev.horizonlab.parity.PrepareWorker",
             ])
+            // Vanilla's code logs relative to it (logs/): in the scratch, as `Run::run`.
+            .current_dir(&run.local)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(log)

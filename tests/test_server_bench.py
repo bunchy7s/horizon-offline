@@ -2,7 +2,9 @@ import unittest
 
 import re
 
-from tools.server_bench import DONE, TICK_AVERAGE, TICK_PERCENTILES, work
+from types import SimpleNamespace
+
+from tools.server_bench import DONE, PUMPKIN_READY, TICK_AVERAGE, TICK_PERCENTILES, pumpkin_config, work
 
 
 def run(server, bots, sent, new, waited=0.0, behaviour="mixed"):
@@ -29,9 +31,10 @@ class ServerBenchWorkTests(unittest.TestCase):
         failed = dict(run("vanilla", 50, 0, 0), error="watchdog")
         self.assertEqual(work([run("horizon", 50, 450, 10), failed, run("horizon", 1, 9, 0.3)]), [])
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_each_round_is_compared_on_its_own(self):
+        rows = work([dict(run("horizon", 20, 236, 111), round=0), dict(run("pumpkin", 20, 190, 69), round=0),
+                     dict(run("horizon", 20, 237, 112), round=1), dict(run("pumpkin", 20, 237, 112), round=1)])
+        self.assertEqual([(r["round"], r["equal"]) for r in rows], [(0, False), (1, True)])
 
 
 class ServerBenchLogTests(unittest.TestCase):
@@ -47,3 +50,64 @@ class ServerBenchLogTests(unittest.TestCase):
         self.assertEqual(TICK_PERCENTILES.search(
             "[02:54:10 INFO]: System chat: Percentiles: P50: 1.0ms P95: 34.6ms P99: 764.4ms. Sample: 100").groups(),
             ("1.0", "34.6", "764.4"))
+    def test_pumpkin_is_up_once_it_listens(self):
+        line = "16:39:19  INFO Server is now running. Connect using port: Java Edition: 127.0.0.1:39811"
+        self.assertTrue(re.search(PUMPKIN_READY, line))
+
+
+# A configuration in the shape Pumpkin writes (made up here: the keys this tool sets).
+PUMPKIN_DEFAULTS = '''seed = "17"
+default_gamemode = "Survival"
+spawn_protection = 16
+
+[logging]
+color = true
+
+[networking.query]
+enabled = true
+address = "0.0.0.0:25565"
+
+[networking.java]
+enabled = true
+address = "0.0.0.0:25565"
+encryption = true
+online_mode = true
+view_distance = 16
+simulation_distance = 10
+
+[networking.bedrock]
+enabled = true
+address = "0.0.0.0:19132"
+online_mode = true
+view_distance = 16
+
+[plugins]
+enabled = true
+
+[telemetry]
+enabled = true
+endpoint = "https://example.org/heartbeat"
+'''
+
+
+class PumpkinConfigTests(unittest.TestCase):
+    def test_the_benchmark_settings_on_loopback_with_the_extras_off(self):
+        text = pumpkin_config(PUMPKIN_DEFAULTS, 27001, SimpleNamespace(seed=12345))
+        self.assertIn('seed = "12345"', text)
+        self.assertIn('default_gamemode = "Creative"', text)
+        self.assertIn('spawn_protection = 0', text)
+        java = text.split('[networking.java]')[1].split('[')[0]
+        for line in ('address = "127.0.0.1:27001"', 'encryption = false', 'online_mode = false',
+                     'view_distance = 10', 'simulation_distance = 10'):
+            self.assertIn(line, java)
+        self.assertIn('[networking.query]\nenabled = false\naddress = "127.0.0.1:27002"', text)
+        self.assertIn('[networking.bedrock]\nenabled = false', text)
+        self.assertIn('[plugins]\nenabled = false', text)
+        self.assertIn('[telemetry]\nenabled = false\nendpoint = ""', text)
+        self.assertNotIn('0.0.0.0:25565', text)
+        # Only its own section's keys change: Bedrock keeps its (it is off).
+        self.assertIn('address = "0.0.0.0:19132"\nonline_mode = true', text)
+
+
+if __name__ == "__main__":
+    unittest.main()

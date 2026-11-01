@@ -35,6 +35,13 @@ Two more Java servers, both dev-only downloads into .local/server-bench/jars (ne
 - `fabric`: the pinned vanilla server on the pinned Fabric loader (tools/benchmark-deps/fabric.lock.json) with Lithium from
   tools/benchmark-deps/mods.lock.json (and Fabric API only if Lithium asks for it), checked against the lock's SHA-512.
 Both run with the same heap as vanilla (`--heap`).
+
+`pumpkin` runs Pumpkin (github.com/Pumpkin-MC/Pumpkin, GPL-3.0), a binary you built yourself and name with
+`--pumpkin`: a black box, nothing of it is read or shipped. A first start in a scratch folder (on 127.0.0.1
+only, without telemetry) writes its default configuration; every run gets that file with the same settings
+as the others (seed, view and simulation distance 10, creative, offline, no encryption, 127.0.0.1) and
+Pumpkin's Bedrock and LAN listeners, query, plugins and telemetry off. docs/performance/server-vs-pumpkin.md
+has the comparison and its commands.
 """
 
 import argparse
@@ -167,6 +174,8 @@ class Server:
 # The line every server logs once it is up: vanilla, Fabric and Horizon `[time] [Server thread/INFO]: Done (`,
 # Paper `[time INFO]: Done (`.
 DONE = r'INFO\]: Done \('
+# Pumpkin's, once it listens.
+PUMPKIN_READY = r'Server is now running|Done \('
 TICK_AVERAGE = re.compile(r'Average time per tick: ([0-9.]+) ?ms')
 TICK_PERCENTILES = re.compile(r'P50: ([0-9.]+) ?ms P95: ([0-9.]+) ?ms P99: ([0-9.]+) ?ms')
 
@@ -201,6 +210,95 @@ def fabric_mods():
     if any(d == 'fabric-api' or d.startswith('fabric-') and d != 'fabricloader' for d in depends):
         jars.append(fetch('fabric-api'))
     return jars, {'fabric_loader': lock['fabric_loader'], 'lithium': lock['projects']['lithium']['version']}
+
+
+# What Pumpkin's first start gets: its own defaults listen on every address (and for Bedrock and LAN
+# players) and send telemetry. It fills in the rest of the file.
+PUMPKIN_SEED = '''[networking.java]
+address = "127.0.0.1:{port}"
+online_mode = false
+encryption = false
+
+[networking.query]
+enabled = false
+address = "127.0.0.1:{query}"
+
+[networking.bedrock]
+enabled = false
+
+[networking.bedrock.nethernet]
+enabled = false
+address = "127.0.0.1:0"
+
+[networking.lan_broadcast]
+enabled = false
+
+[networking.management]
+enabled = false
+
+[plugins]
+enabled = false
+
+[telemetry]
+enabled = false
+endpoint = ""
+'''
+
+
+def pumpkin_defaults(exe, out):
+    """Pumpkin's default configuration files (name → text), written by a first start in a scratch folder
+    from PUMPKIN_SEED."""
+    directory = out / 'pumpkin-defaults'
+    shutil.rmtree(directory, ignore_errors=True)
+    directory.mkdir(parents=True)
+    (directory / 'pumpkin.toml').write_text(PUMPKIN_SEED.format(port=lab.free_port(), query=lab.free_port()))
+    server = Server([exe], directory, out / 'pumpkin-defaults.log')
+    try:
+        server.wait_for(PUMPKIN_READY, 600)
+    finally:
+        server.stop()
+    files = {p.relative_to(directory): p.read_text() for p in directory.rglob('*.toml')}
+    if not any('[networking.java]' in t for t in files.values()):
+        raise RuntimeError(f'Pumpkin wrote no [networking.java] configuration in {directory}')
+    shutil.rmtree(directory)
+    return files
+
+
+def pumpkin_config(text, port, args):
+    """Pumpkin's default configuration with the benchmark's settings (PROPERTIES), listening on 127.0.0.1 only,
+    with no Bedrock or LAN listener, query, plugins or telemetry."""
+    top = {'seed': f'"{args.seed}"', 'default_difficulty': '"Easy"', 'default_gamemode': '"Creative"',
+           'force_gamemode': 'true', 'spawn_protection': '0', 'white_list': 'false', 'use_tty': 'false'}
+    sections = {
+        'logging': {'color': 'false'},
+        'networking.java': {'address': f'"127.0.0.1:{port}"', 'online_mode': 'false', 'encryption': 'false',
+                            'max_players': '200', 'view_distance': PROPERTIES['view-distance'],
+                            'simulation_distance': PROPERTIES['simulation-distance']},
+        'networking.java.authentication': {'enabled': 'false'},
+        'networking.java.authentication.textures': {'enabled': 'false'},
+        'networking.query': {'enabled': 'false', 'address': f'"127.0.0.1:{port + 1}"'},
+        'networking.management': {'enabled': 'false'},
+        'networking.bedrock': {'enabled': 'false'},
+        'networking.bedrock.nethernet': {'enabled': 'false', 'address': '"127.0.0.1:0"'},
+        'networking.lan_broadcast': {'enabled': 'false'},
+        'plugins': {'enabled': 'false'},
+        'telemetry': {'enabled': 'false', 'endpoint': '""'},
+    }
+    def setting(body, key, value):
+        return re.sub(r'(?m)^' + re.escape(key) + r' = .*$', f'{key} = {value}', body)
+    head, _, _ = text.partition('\n[')
+    rest = text[len(head):]
+    for key, value in top.items():
+        head = setting(head, key, value)
+    for name, settings in sections.items():
+        m = re.search(r'(?ms)^\[' + re.escape(name) + r'\]\n(.*?)(?=^\[|\Z)', rest)
+        if not m:
+            continue
+        body = m.group(1)
+        for key, value in settings.items():
+            body = setting(body, key, value)
+        rest = rest[:m.start(1)] + body + rest[m.end(1):]
+    return head + rest
 
 
 def tick_query(server):
@@ -254,13 +352,37 @@ def server_command(kind, directory, args):
         classpath = os.pathsep.join(map(str, [jars['server'], *libraries, *runtime.fabric_libraries()]))
         return [*java, '-Dfabric.log.disableAnsi=true', '-cp', classpath,
                 'net.fabricmc.loader.impl.launch.knot.KnotServer', 'nogui']
+    if kind == 'pumpkin':
+        if not args.pumpkin:
+            raise RuntimeError('--pumpkin names the Pumpkin binary to run')
+        if args.pumpkin_files is None:
+            args.pumpkin_files = pumpkin_defaults(args.pumpkin, directory.parent)
+        for name, text in args.pumpkin_files.items():
+            (directory / name).parent.mkdir(parents=True, exist_ok=True)
+            (directory / name).write_text(pumpkin_config(text, args.port, args) if '[networking.java]' in text else text)
+        return [args.pumpkin]
     server = BIN / f'horizon-server{EXE}'
     subprocess.run([server, '--dir', directory, 'import', directory / 'server.properties'], check=True,
                    capture_output=True)
     toml = directory / 'server.toml'
     # The same settings, without the web panel.
     toml.write_text(re.sub(r'(?m)^bind = "127\.0\.0\.1:8130"', 'bind = ""', toml.read_text()))
+    if args.anticheat:
+        # Every check on with its defaults (docs/anticheat.md), to measure what it costs. The bots move
+        # by their own rules, not vanilla's: the prediction plays every move again but, with this
+        # tolerance, flags none (an honest player's moves agree).
+        toml.write_text(toml.read_text()
+                        + '\n[anticheat]\nenabled = true\n[anticheat.prediction]\ntolerance = 1000.0\n')
+    else:
+        # The anticheat is on by default: off, to measure the server without it.
+        toml.write_text(toml.read_text() + '\n[anticheat]\nenabled = false\n')
     return [server, '--dir', directory, 'run']
+
+
+def flag_count(directory):
+    """The lines of Horizon's anticheat log: one a flag (none when it is off)."""
+    log = directory / 'logs/anticheat.log'
+    return len(log.read_text().splitlines()) if log.exists() else 0
 
 
 def bots_command(args):
@@ -275,8 +397,10 @@ def run_once(kind, bots, behaviour, args, out):
     directory = out / name
     shutil.rmtree(directory, ignore_errors=True)
     directory.mkdir(parents=True)
-    port = lab.free_port()
+    port = args.port = lab.free_port()
     props = dict(PROPERTIES, **{'server-port': str(port), 'level-seed': str(args.seed)})
+    if args.ground:
+        props.update({'level-type': 'minecraft\\:flat', 'generate-structures': 'false', 'gamemode': 'survival'})
     (directory / 'server.properties').write_text(''.join(f'{k}={v}\n' for k, v in props.items()))
     (directory / 'eula.txt').write_text('eula=true\n')
     command = server_command(kind, directory, args)
@@ -286,7 +410,7 @@ def run_once(kind, bots, behaviour, args, out):
     server = Server(command, directory, out / f'{name}.log')
     result = {'server': kind, 'bots': bots, 'behaviour': behaviour}
     try:
-        server.wait_for(DONE, 600)
+        server.wait_for(PUMPKIN_READY if kind == 'pumpkin' else DONE, 600)
         result['start_seconds'] = round(time.time() - started, 2)
         # Every bot appears on the world spawn itself, not spread around it, so both servers see the same paths.
         server.console('gamerule respawn_radius 0')
@@ -296,11 +420,13 @@ def run_once(kind, bots, behaviour, args, out):
         report = out / f'{name}-bots.json'
         total = bots * args.join_every + args.warmup + args.seconds
         # The summary comes back on stdout after the per-second lines, so it works over ssh too.
-        bot_process = subprocess.Popen(
-            [*bots_command(args), '--server', f'{args.connect}:{port}', '--bots', str(bots),
+        # No bots: the idle server, measured the same way.
+        bot_process = subprocess.Popen(['true'] if bots == 0 else [
+             *bots_command(args), '--server', f'{args.connect}:{port}', '--bots', str(bots),
              '--behaviour', behaviour, '--join-every', str(args.join_every), '--seconds', str(int(total)),
              '--seed', str(args.seed), '--report', '-',
-             *(['--explore-speed', str(args.explore_speed)] if args.explore_speed else [])],
+             *(['--explore-speed', str(args.explore_speed)] if args.explore_speed else []),
+             *(['--height', '0', '--ground'] if args.ground else [])],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         bot_lines = []
         threading.Thread(target=lambda: bot_lines.extend(bot_process.stdout), daemon=True).start()
@@ -363,8 +489,11 @@ def run_once(kind, bots, behaviour, args, out):
             'resent': summary.get('resent'),
             'pulled_back': summary.get('pulled_back'),
             'moved_too_quickly': sum('moved too quickly!' in l for l in server.since(0)),
+            'anticheat_flags': flag_count(directory),
             'moved_wrongly': sum('moved wrongly!' in l for l in server.since(0)),
             'bots_joined': summary.get('joined'),
+            # From the bot's first packet to its spawn position, in ms.
+            'join_ms': summary.get('join_time'),
             'bots_failed': [b for b in summary.get('per_bot', []) if b.get('error')],
             'tick_queries': len(ticks),
         })
@@ -387,12 +516,12 @@ def work(runs):
     groups = {}
     for r in runs:
         if 'error' not in r:
-            groups.setdefault((r['behaviour'], r['bots']), []).append(r)
+            groups.setdefault((r['behaviour'], r['bots'], r.get('round', 0)), []).append(r)
     rows = []
-    for (behaviour, bots), group in groups.items():
+    for (behaviour, bots, round_), group in groups.items():
         if len(group) < 2:
             continue
-        row = {'behaviour': behaviour, 'bots': bots, 'servers': {}, 'equal': True}
+        row = {'behaviour': behaviour, 'bots': bots, 'round': round_, 'servers': {}, 'equal': True}
         for key in ('chunks_per_second', 'unique_per_second'):
             top = max(r.get(key) or 0 for r in group)
             for r in group:
@@ -419,7 +548,7 @@ def versions(kinds):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    parser.add_argument('--servers', default='horizon,vanilla', help='horizon, vanilla, paper, fabric (Lithium)')
+    parser.add_argument('--servers', default='horizon,vanilla', help='horizon, vanilla, paper, fabric (Lithium), pumpkin')
     parser.add_argument('--bots', default='1,10,25,50')
     parser.add_argument('--behaviour', default='walk,explore', help='one pass per behaviour (comma-separated)')
     parser.add_argument('--join-every', type=float, default=1.0)
@@ -435,20 +564,31 @@ def main():
     parser.add_argument('--heap', default='4g', help='the Java heap, -Xms and -Xmx (vanilla, Paper, Fabric)')
     parser.add_argument('--out', type=Path, default=None, help='the report (JSON)')
     parser.add_argument('--nice', type=int, default=0, help='run the servers under nice -n N')
+    parser.add_argument('--anticheat', action='store_true',
+                        help="turn Horizon's anticheat on (server.toml [anticheat]); its flags are counted")
+    parser.add_argument('--ground', action='store_true',
+                        help='a flat survival world, the bots walking on its ground and saying so in every move '
+                             "(what the anticheat's ground check judges)")
     parser.add_argument('--bots-via', default='', help="a command prefix to run the bots elsewhere ('ssh host')")
     parser.add_argument('--bots-bin', default='', help='horizon-bots (on the --bots-via machine)')
     parser.add_argument('--connect', default='127.0.0.1', help='the address the bots reach the server at')
+    parser.add_argument('--pumpkin', type=Path, default=None, help='the Pumpkin binary (--servers pumpkin)')
+    parser.add_argument('--repeat', type=int, default=1,
+                        help='rounds: every server and bot count once per round, the servers alternated')
     args = parser.parse_args()
+    args.pumpkin_files = None
     out = lab.LOCAL / 'server-bench'
     out.mkdir(parents=True, exist_ok=True)
     runs = []
-    for behaviour in args.behaviour.split(','):
-        for bots in [int(b) for b in args.bots.split(',')]:
-            for kind in args.servers.split(','):
-                print(f'{kind}, {bots} {behaviour} bots...', flush=True)
-                result = run_once(kind, bots, behaviour, args, out)
-                runs.append(result)
-                print(json.dumps(result), flush=True)
+    for round_ in range(args.repeat):
+        for behaviour in args.behaviour.split(','):
+            for bots in [int(b) for b in args.bots.split(',')]:
+                for kind in args.servers.split(','):
+                    print(f'{kind}, {bots} {behaviour} bots...', flush=True)
+                    result = run_once(kind, bots, behaviour, args, out)
+                    result['round'] = round_
+                    runs.append(result)
+                    print(json.dumps(result), flush=True)
     report = {
         'kind': 'horizon-server-benchmark',
         'date': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
@@ -456,7 +596,8 @@ def main():
         'commit': subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True).stdout.strip(),
         'java': subprocess.run(['java', '--version'], capture_output=True, text=True).stdout.splitlines()[:1],
         'versions': versions(args.servers.split(',')),
-        'settings': {**vars(args), 'out': str(args.out), 'properties': PROPERTIES},
+        'settings': {**{k: v for k, v in vars(args).items() if k != 'pumpkin_files'}, 'out': str(args.out),
+                     'pumpkin': str(args.pumpkin) if args.pumpkin else None, 'properties': PROPERTIES},
         'runs': runs,
         'work': work(runs),
     }
@@ -464,17 +605,17 @@ def main():
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=2) + '\n')
     print(f'\n{"server":8} {"pass":8} {"bots":>4} {"start s":>8} {"MSPT":>6} {"P95":>6} {"P99":>6} {"RSS MB":>7} '
-          f'{"CPU %":>6} {"chunks/s":>8} {"/bot":>6} {"resent":>6} {"pulled":>6} {"joined":>6}')
+          f'{"CPU %":>6} {"chunks/s":>8} {"/bot":>6} {"resent":>6} {"pulled":>6} {"joined":>6} {"join ms":>7}')
     for r in runs:
         if 'error' in r:
             print(f'{r["server"]:8} {r["behaviour"]:8} {r["bots"]:>4}  failed: {r["error"].splitlines()[0]}')
             continue
         # A mixed pass: every bot's.
-        per_bot = r['chunks_per_bot'].get(r['behaviour']) or round((r['chunks_total'] or 0) / r['bots'])
+        per_bot = r['chunks_per_bot'].get(r['behaviour']) or round((r['chunks_total'] or 0) / max(r['bots'], 1))
         print(f'{r["server"]:8} {r["behaviour"]:8} {r["bots"]:>4} {r["start_seconds"]:>8} {r["mspt"]["average"]!s:>6} '
               f'{r["mspt"]["p95"]!s:>6} {r["mspt"]["p99"]!s:>6} {r["rss_mb"]["mean"]!s:>7} {r["cpu_percent"]!s:>6} '
               f'{r["chunks_per_second"]!s:>8} {per_bot!s:>6} {r["resent"]!s:>6} {r["pulled_back"]!s:>6} '
-              f'{r["bots_joined"]!s:>6}')
+              f'{r["bots_joined"]!s:>6} {(r.get("join_ms") or {}).get("p50_ms")!s:>7}')
     if report['work']:
         print(f'\nWork, against the busiest server (chunks a second sent, new; ticks a second bots waited):')
         for row in report['work']:

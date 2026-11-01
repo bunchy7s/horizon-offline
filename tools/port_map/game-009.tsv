@@ -71,26 +71,26 @@ DolphinJumpGoal.surfaceIsClear	inline	crates/horizon-client/src/mobs/dolphin.rs:
 DolphinJumpGoal.canContinueToUse	port	crates/horizon-client/src/mobs/dolphin.rs::Jump::can_continue	
 DoorInteractGoal.start	inline	crates/horizon-client/src/mobs/doors.rs::RaiderOpenDoor::start	passed and the door direction only feed canContinueToUse, which both subclasses override, so they are not kept
 DoorInteractGoal.tick	inline	crates/horizon-client/src/mobs/doors.rs::BreakDoor::tick	the passed-the-door dot test is not kept: BreakDoor and RaiderOpenDoor both override can_continue
-FollowFlockLeaderGoal	missing		player: cod, salmon and tropical fish spawn in groups but do not follow a leader, so schools do not swim together (leader id is stored, no goal uses it)
-FollowMobGoal	missing		player: parrots do not fly after and hover near other mobs (priority 3 goal missing from register_parrot)
-FollowPlayerRiddenEntityGoal	missing		player: dolphins do not swim after a boat or nautilus a player is riding
+FollowFlockLeaderGoal	port	crates/horizon-client/src/mobs/aquatic.rs::FollowFlockLeader	tick for tick with vanilla in mob_ai cod/salmon/tropical_fish_school; recruits in vanilla getEntitiesOfClass order (Mob.section)
+FollowMobGoal	port	crates/horizon-client/src/mobs/goals.rs::FollowMob	the mutual-look branch is left out: only parrots have the goal
+FollowPlayerRiddenEntityGoal	port	crates/horizon-client/src/mobs/dolphin.rs::FollowPlayerRidden	only the player the mob sees (the nearest) is considered; tick for tick with vanilla in mob_ai dolphin_boat_*
 GoalSelector.removeAllGoals	port	crates/horizon-client/src/mobs/goals.rs::GoalSelector::clear	gap: minor: clear() takes no predicate and does not stop running goals
 GoalSelector.removeGoal	missing		minor: no per-goal removal; callers (cat and ocelot trust, zombie break door, skeleton weapon swap, skeleton horse trap) fold the condition into can_use
 GoalSelector.goalContainsAnyFlags	inline	crates/horizon-client/src/mobs/goals.rs::GoalSelector::tick	flags & disabled
 GoalSelector.goalCanBeReplacedForAllFlags	inline	crates/horizon-client/src/mobs/goals.rs::GoalSelector::tick	the replaceable check over the locked slots
 GoalSelector.tickRunningGoals	port	crates/horizon-client/src/mobs/goals.rs::GoalSelector::tick_running	
-GolemRandomStrollInVillageGoal	missing		player: iron golems stroll with a plain water-avoiding stroll, so they do not stay in the village or go towards villagers who want a golem
+GolemRandomStrollInVillageGoal	inline	crates/horizon-client/src/mobs/golem.rs::register_iron	a named Stroll with a gate and a position; tick for tick with vanilla in mob_ai iron_golem_village_*
 MeleeAttackGoal.checkAndPerformAttack	inline	crates/horizon-client/src/mobs/goals.rs::MeleeAttack::tick	reset cooldown, swing, do_hurt_target
 MeleeAttackGoal.canPerformAttack	inline	crates/horizon-client/src/mobs/goals.rs::MeleeAttack::tick	cooldown over, within melee range, line of sight
-MoveBackToVillageGoal	missing		player: iron golems outside a village never walk back towards it (goal missing from register_iron)
-MoveThroughVillageGoal	missing		player: zombies never walk purposefully through a village towards its POIs and doors at night; they only wander (priority 6 goal missing; the raider variant is separate)
+MoveBackToVillageGoal	inline	crates/horizon-client/src/mobs/golem.rs::register_iron	a named Stroll with a gate and a position; tick for tick with vanilla in mob_ai iron_golem_village_*
+MoveThroughVillageGoal	inline	crates/horizon-client/src/mobs/undead.rs::MoveThroughVillage	zombies register it at priority 6 (the raider variant is raider.rs::MoveThroughVillage); no tick parity check yet
 MoveToBlockGoal.moveMobToBlock	inline	crates/horizon-client/src/mobs/goals.rs::MoveToBlock::start	nav_move_to the block centre one up
 MoveTowardsTargetGoal.start	inline	crates/horizon-client/src/mobs/golem.rs::MoveTowardsTarget::can_use	gap: minor: paths straight to the target entity in can_use, not to a random position towards it chosen in canUse
 OpenDoorGoal.canContinueToUse	port	crates/horizon-client/src/mobs/doors.rs::RaiderOpenDoor::can_continue	the raider goal does not close the door after, so it never continues
 PanicGoal.findRandomPosition	inline	crates/horizon-client/src/mobs/goals.rs::Panic::can_use	default_random_pos(5, 4)
 PanicGoal.lookForWater	inline	crates/horizon-client/src/mobs/goals.rs::Panic::can_use	burning (or turtle) mob not inside a solid cell looks for water by Manhattan distance
 PathfindToRaidGoal.canContinueToUse	port	crates/horizon-client/src/mobs/raider.rs::PathfindToRaid::can_continue	
-RandomStandGoal.playStandSound	port	crates/horizon-client/src/mobs/equine.rs::RandomStand::start	gap: player: plays the angry neigh and only for horses; vanilla plays the ambient sound (baby variants too), so skeleton and zombie horses rear silently, and donkeys and mules never get the goal (can_rear) although only llamas are barred from rearing
+RandomStandGoal.playStandSound	port	crates/horizon-client/src/mobs/equine.rs::RandomStand::start	ambient sound, baby variants too, donkeys and mules have the goal; tick for tick with vanilla in mob_ai *_herd_rears
 RangedCrossbowAttackGoal.canContinueToUse	port	crates/horizon-client/src/mobs/illager.rs::CrossbowAttack::can_continue	gap: minor: holding test looks at the main hand only
 RangedCrossbowAttackGoal.isValidTarget	inline	crates/horizon-client/src/mobs/illager.rs::CrossbowAttack::can_use	alive target; also rejects creative players
 RemoveBlockGoal.getPosWithBlock	inline	crates/horizon-client/src/mobs/undead.rs::AttackTurtleEgg::tick	own cell, below, west, east, north, south, two below

@@ -289,3 +289,101 @@ fn only_open_kinds_are_taken() {
     assert!(plain_version("1.0.0-beta.2") && !plain_version("../1") && !plain_version("1 0"));
     assert!(plain_date("2026-10-24") && !plain_date("24/10/2026"));
 }
+
+const COZY_REPO: &str = r#"id = "cozy"
+kind = "modpack"
+repo = "acme/cozy-pack"
+owners = ["acme"]
+"#;
+
+#[test]
+fn a_project_listed_by_its_repository_takes_its_versions_from_releases() {
+    let s = Scratch::new("repo");
+    s.write("mods/coords_hud.toml", &hud_entry());
+    s.write("mods/cozy.toml", COZY_REPO);
+    let hpack = fixtures().join("cozy-1.0.0.hpack");
+    let entry: Entry = toml::from_str(COZY_REPO).unwrap();
+    // Listed, nothing released yet: not in the index, and not an error.
+    let built = s.build().unwrap();
+    assert!(built.project("cozy").is_none());
+    // The page file fills what the entry leaves out; the entry's own words win.
+    let page = page(
+        &entry,
+        "name = \"Cozy\"\nsummary = \"Calm.\"\nlicense = \"MIT\"\nauthors = [\"Acme\"]\n",
+    )
+    .unwrap();
+    assert!(
+        self::page(&entry, "name = \"Cozy\"")
+            .unwrap_err()
+            .contains("summary")
+    );
+    assert!(self::page(&entry, "owners = [\"me\"]").is_err());
+    let release = |tag, asset, notes| Release {
+        tag,
+        published: "2026-10-30",
+        notes,
+        asset,
+        game: "26.3",
+        signature: None,
+    };
+    let v = release_version(
+        &entry,
+        &release("v1.0.0", "cozy-1.0.0.hpack", "Notes."),
+        &hpack,
+    )
+    .unwrap();
+    assert_eq!(v.version, "1.0.0");
+    assert_eq!(v.file.sha256, HPACK);
+    assert_eq!(
+        v.file.url,
+        "https://github.com/acme/cozy-pack/releases/download/v1.0.0/cozy-1.0.0.hpack"
+    );
+    assert_eq!(v.changelog, "Notes.");
+    // A name the launcher can't download, a wrong extension, a project with a key but no signature.
+    assert!(release_version(&entry, &release("v1/x", "cozy-1.0.0.hpack", ""), &hpack).is_err());
+    assert!(release_version(&entry, &release("v1", "cozy.zip", ""), &hpack).is_err());
+    let mut keyed = entry.clone();
+    keyed.key = Some("RWTVtuGb/GRXcBf3Re5hzM07EzoStr2sLTJjghJia0xX15ULoZRFFZDb".into());
+    assert!(
+        release_version(&keyed, &release("v1", "cozy-1.0.0.hpack", ""), &hpack)
+            .unwrap_err()
+            .contains("sign")
+    );
+    let cache = Cache {
+        page,
+        versions: vec![v.clone()],
+    };
+    std::fs::create_dir_all(s.0.join("repo").join(CACHE)).unwrap();
+    s.write(
+        "versions/cozy.json",
+        &serde_json::to_string(&cache).unwrap(),
+    );
+    let built = s.build().unwrap();
+    let p = built.project("cozy").unwrap();
+    assert_eq!(
+        (p.name.as_str(), p.authors.clone()),
+        ("Cozy", vec!["Acme".to_string()])
+    );
+    assert_eq!(p.source, "https://github.com/acme/cozy-pack");
+    assert_eq!(p.versions, vec![v]);
+    // The registry's own words win over the repository's.
+    s.write(
+        "mods/cozy.toml",
+        &format!("{COZY_REPO}name = \"Cozy Pack\"\n"),
+    );
+    assert_eq!(
+        s.build().unwrap().project("cozy").unwrap().name,
+        "Cozy Pack"
+    );
+    // A repository that is not owner/name is refused.
+    s.write(
+        "mods/cozy.toml",
+        &COZY_REPO.replace("acme/cozy-pack", "acme"),
+    );
+    assert!(
+        s.build()
+            .unwrap_err()
+            .iter()
+            .any(|e| e.contains("owner/name"))
+    );
+}

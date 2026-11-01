@@ -8,7 +8,12 @@ use crate::{
 use horizon_world::nbt::Tag;
 use std::sync::Arc;
 
+#[doc(hidden)]
+pub mod custom;
+mod hash;
 mod skip;
+
+pub use hash::{Names, NoNames};
 
 /// minecraft:data_component_type registry ids (26.3).
 pub mod component {
@@ -52,19 +57,27 @@ pub mod component {
     pub const FIREWORKS: i32 = 71;
     pub const BLOCK_ENTITY_DATA: i32 = 62;
     pub const OMINOUS_BOTTLE_AMPLIFIER: i32 = 65;
+    pub const USE_REMAINDER: i32 = 25;
+    pub const POT_DECORATIONS: i32 = 76;
     pub const CONTAINER: i32 = 77;
+    pub const SULFUR_CUBE_CONTENT: i32 = 80;
     pub const PAINTING_VARIANT: i32 = 109;
 }
 
-/// A written book's content (`WrittenBookContent.STREAM_CODEC`): the
-/// filtered variants of the title and pages are read and dropped.
-#[derive(Clone, Debug, PartialEq)]
+/// A written book's content (`WrittenBookContent.STREAM_CODEC`). The raw title
+/// and pages are what a book shows; the filtered variants (`Filterable.filtered`,
+/// which a server sends when chat filtering is on) are kept only so that the
+/// component hashes as the server holds it.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct WrittenBook {
     pub title: String,
+    pub title_filtered: Option<String>,
     pub author: String,
     pub generation: i32,
     /// Each page's text component.
     pub pages: Vec<Tag>,
+    /// Each page's filtered variant: empty (none filtered) or one per page.
+    pub pages_filtered: Vec<Option<Tag>>,
     pub resolved: bool,
 }
 
@@ -99,8 +112,12 @@ pub enum Component {
         hide: bool,
         hidden: Vec<i32>,
     },
-    /// `WritableBookContent`: the pages (raw text).
-    WritableBook(Vec<String>),
+    /// `WritableBookContent`: the pages (raw text) and their filtered variants
+    /// (empty, or one per page).
+    WritableBook {
+        pages: Vec<String>,
+        filtered: Vec<Option<String>>,
+    },
     WrittenBook(WrittenBook),
     /// `ChargedProjectiles`: a loaded crossbow's ammunition, as templates.
     Stacks(Vec<Stack>),
@@ -176,14 +193,20 @@ impl FireworkExplosion {
     }
 }
 
-/// `Filterable.streamCodec`: the raw value, then an optional filtered one
-/// (dropped).
-fn filterable<T>(r: &mut Reader, value: impl Fn(&mut Reader) -> Result<T>) -> Result<T> {
+/// `Filterable.streamCodec`: the raw value, then an optional filtered one.
+fn filterable<T>(
+    r: &mut Reader,
+    value: impl Fn(&mut Reader) -> Result<T>,
+) -> Result<(T, Option<T>)> {
     let raw = value(r)?;
-    if r.bool()? {
-        value(r)?;
-    }
-    Ok(raw)
+    let filtered = if r.bool()? { Some(value(r)?) } else { None };
+    Ok((raw, filtered))
+}
+/// The filtered variants of a list of pages, or none when no page has one.
+fn filtered_variants<T>(pages: &mut Vec<(T, Option<T>)>) -> (Vec<T>, Vec<Option<T>>) {
+    let any = pages.iter().any(|(_, f)| f.is_some());
+    let (raw, filtered): (Vec<_>, Vec<_>) = pages.drain(..).unzip();
+    (raw, if any { filtered } else { Vec::new() })
 }
 
 /// `ResolvableProfile`: an optional name and UUID and the profile's property
@@ -193,6 +216,47 @@ pub struct Profile {
     pub name: Option<String>,
     pub id: Option<u128>,
     pub properties: Vec<(String, String, Option<String>)>,
+    pub skin: SkinPatch,
+}
+/// `PlayerSkin.Patch`: the optional body, cape and elytra texture ids and the
+/// model type (`true` for slim).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SkinPatch {
+    pub body: Option<String>,
+    pub cape: Option<String>,
+    pub elytra: Option<String>,
+    pub slim: Option<bool>,
+}
+impl SkinPatch {
+    fn read(r: &mut Reader) -> Result<Self> {
+        let texture = |r: &mut Reader| -> Result<Option<String>> {
+            if r.bool()? {
+                Ok(Some(r.string(32767)?))
+            } else {
+                Ok(None)
+            }
+        };
+        let (body, cape, elytra) = (texture(r)?, texture(r)?, texture(r)?);
+        let slim = if r.bool()? { Some(r.bool()?) } else { None };
+        Ok(Self {
+            body,
+            cape,
+            elytra,
+            slim,
+        })
+    }
+    fn write(&self, w: &mut Writer) {
+        for texture in [&self.body, &self.cape, &self.elytra] {
+            w.bool(texture.is_some());
+            if let Some(texture) = texture {
+                w.string(texture);
+            }
+        }
+        w.bool(self.slim.is_some());
+        if let Some(slim) = self.slim {
+            w.bool(slim);
+        }
+    }
 }
 impl Component {
     pub(crate) fn read(kind: i32, r: &mut Reader) -> Result<Self> {
@@ -208,25 +272,28 @@ impl Component {
             | OMINOUS_BOTTLE_AMPLIFIER => Self::Int(r.varint()?),
             WRITABLE_BOOK_CONTENT => {
                 let n = r.count(100)?;
-                Self::WritableBook(
-                    (0..n)
-                        .map(|_| filterable(r, |r| r.string(1024)))
-                        .collect::<Result<_>>()?,
-                )
+                let mut pages = (0..n)
+                    .map(|_| filterable(r, |r| r.string(1024)))
+                    .collect::<Result<Vec<_>>>()?;
+                let (pages, filtered) = filtered_variants(&mut pages);
+                Self::WritableBook { pages, filtered }
             }
             WRITTEN_BOOK_CONTENT => {
-                let title = filterable(r, |r| r.string(32))?;
+                let (title, title_filtered) = filterable(r, |r| r.string(32))?;
                 let author = r.string(32767)?;
                 let generation = r.varint()?;
                 let n = r.count(r.remaining())?;
-                let pages = (0..n)
+                let mut pages = (0..n)
                     .map(|_| filterable(r, |r| r.nbt()))
-                    .collect::<Result<_>>()?;
+                    .collect::<Result<Vec<_>>>()?;
+                let (pages, pages_filtered) = filtered_variants(&mut pages);
                 Self::WrittenBook(WrittenBook {
                     title,
+                    title_filtered,
                     author,
                     generation,
                     pages,
+                    pages_filtered,
                     resolved: r.bool()?,
                 })
             }
@@ -313,19 +380,12 @@ impl Component {
                     let name = Some(r.string(64)?);
                     (name, id, properties(r)?)
                 };
-                // PlayerSkin.Patch: body, cape, elytra and model, each absent
-                // in the profiles servers send for heads.
-                for _ in 0..4 {
-                    if r.bool()? {
-                        // ClientAsset.ResourceTexture: its id and its texture path.
-                        r.string(32767)?;
-                        r.string(32767)?;
-                    }
-                }
+                // PlayerSkin.Patch: three texture ids and the model type.
                 Self::Profile(Profile {
                     name,
                     id,
                     properties,
+                    skin: SkinPatch::read(r)?,
                 })
             }
             CUSTOM_MODEL_DATA => {
@@ -426,6 +486,7 @@ impl Component {
                     None => Self::Raw(bytes.to_vec()),
                 }
             }
+            other if custom::contains(other) => Self::Nbt(r.nbt()?),
             other => {
                 let start = r.position();
                 skip::component(other, r)?;
@@ -523,9 +584,7 @@ impl Component {
                         w.string(signature);
                     }
                 }
-                for _ in 0..4 {
-                    w.bool(false);
-                }
+                p.skin.write(w);
             }
             Self::CustomModelData {
                 floats,
@@ -565,22 +624,40 @@ impl Component {
                 }
                 w.bool(*tracked);
             }
-            Self::WritableBook(pages) => {
+            Self::WritableBook { pages, filtered } => {
                 w.varint(pages.len() as i32);
-                for page in pages {
+                for (i, page) in pages.iter().enumerate() {
                     w.string(page);
-                    w.bool(false);
+                    match filtered.get(i).and_then(Option::as_ref) {
+                        Some(f) => {
+                            w.bool(true);
+                            w.string(f);
+                        }
+                        None => w.bool(false),
+                    }
                 }
             }
             Self::WrittenBook(b) => {
                 w.string(&b.title);
-                w.bool(false);
+                match &b.title_filtered {
+                    Some(f) => {
+                        w.bool(true);
+                        w.string(f);
+                    }
+                    None => w.bool(false),
+                }
                 w.string(&b.author);
                 w.varint(b.generation);
                 w.varint(b.pages.len() as i32);
-                for page in &b.pages {
+                for (i, page) in b.pages.iter().enumerate() {
                     w.nbt(page);
-                    w.bool(false);
+                    match b.pages_filtered.get(i).and_then(Option::as_ref) {
+                        Some(f) => {
+                            w.bool(true);
+                            w.nbt(f);
+                        }
+                        None => w.bool(false),
+                    }
                 }
                 w.bool(b.resolved);
             }
@@ -612,6 +689,26 @@ impl WirePatch {
             };
             r.bytes(len).is_ok() && k == kind
         })
+    }
+}
+impl WirePatch {
+    /// The components and removals a patch in this form holds, read as
+    /// [`DelimitedSlot`] does.
+    pub fn decode(patch: &[u8]) -> Result<(Vec<(i32, Component)>, Vec<i32>)> {
+        let mut r = Reader::new(patch);
+        let positive = r.count(65536)?;
+        let negative = r.count(65536)?;
+        let mut added = Vec::with_capacity(positive.min(64));
+        for _ in 0..positive {
+            let kind = r.varint()?;
+            let len = r.count(r.remaining())?;
+            added.push((
+                kind,
+                Component::read(kind, &mut Reader::new(r.bytes(len)?))?,
+            ));
+        }
+        let removed = (0..negative).map(|_| r.varint()).collect::<Result<_>>()?;
+        Ok((added, removed))
     }
 }
 impl PartialEq for WirePatch {
@@ -696,7 +793,12 @@ fn read_stack(r: &mut Reader, delimited: bool) -> Result<Option<Stack>> {
         let (component, value) = if delimited {
             let len = r.count(r.remaining())?;
             let value = r.bytes(len)?;
-            (Component::read(kind, &mut Reader::new(value))?, value)
+            let mut component_reader = Reader::new(value);
+            let component = Component::read(kind, &mut component_reader)?;
+            if custom::contains(kind) && component_reader.remaining() != 0 {
+                return Err(crate::Error::new("trailing custom component data"));
+            }
+            (component, value)
         } else {
             let start = r.position();
             (Component::read(kind, r)?, r.since(start))
@@ -787,9 +889,7 @@ impl Codec<Stack> for Template {
 }
 
 /// HashedStack: what the client believes a slot holds. Component values are
-/// sent as hashes; Horizon sends patches without hashes, so a server whose
-/// stack carries components resynchronises that slot (as it does for any
-/// mismatched prediction).
+/// sent as hashes ([`Hashed::create`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Hashed {
     pub item: i32,
@@ -798,13 +898,10 @@ pub struct Hashed {
     pub removed: Vec<i32>,
 }
 impl Hashed {
+    /// The stack hashed without registry names: only components that hold no
+    /// registry id get a hash (see [`Hashed::create`]).
     pub fn of(stack: &Stack) -> Self {
-        Self {
-            item: stack.item,
-            count: stack.count,
-            added: Vec::new(),
-            removed: stack.removed.clone(),
-        }
+        Self::create(stack, &NoNames)
     }
 }
 pub struct HashedSlot;
@@ -952,6 +1049,8 @@ mod tests {
                 author: "Guest".into(),
                 generation: 1,
                 pages: vec![literal("one"), literal("two")],
+                pages_filtered: vec![None, Some(literal("2"))],
+                title_filtered: Some("N".into()),
                 resolved: true,
             }),
         ));
@@ -970,7 +1069,10 @@ mod tests {
         let mut quill = Stack::new(1099, 1);
         quill.added.push((
             component::WRITABLE_BOOK_CONTENT,
-            Component::WritableBook(vec!["a".into(), String::new()]),
+            Component::WritableBook {
+                pages: vec!["a".into(), String::new()],
+                filtered: vec![None, Some("b".into())],
+            },
         ));
         round::<Option<Stack>, Slot>(Some(quill));
         assert_eq!(sword.damage(), 17);
@@ -1048,13 +1150,16 @@ mod tests {
     }
 
     #[test]
-    fn filtered_book_pages_are_read_and_dropped() {
+    fn filtered_book_pages_are_read_and_kept() {
         // A writable book with one page "hi" and its filtered "**".
         let bytes = [1, 7, 1, 0, 56, 1, 2, b'h', b'i', 1, 2, b'*', b'*'];
         let stack = Slot::read(&mut Reader::new(&bytes)).unwrap().unwrap();
         assert_eq!(
             stack.component(component::WRITABLE_BOOK_CONTENT),
-            Some(&Component::WritableBook(vec!["hi".into()]))
+            Some(&Component::WritableBook {
+                pages: vec!["hi".into()],
+                filtered: vec![Some("**".into())],
+            })
         );
     }
 
@@ -1088,6 +1193,12 @@ mod tests {
                 name: Some("Player53470".into()),
                 id: Some(0x7a5d_6a1a_30d7_4187_88c5_efe9_1201_8922),
                 properties: vec![("textures".into(), "dGV4dHVyZXM=".into(), None)],
+                skin: SkinPatch {
+                    body: Some("minecraft:entity/player/wide/steve".into()),
+                    cape: None,
+                    elytra: None,
+                    slim: Some(true),
+                },
             }),
         ));
         round::<Option<Stack>, Slot>(Some(sword));

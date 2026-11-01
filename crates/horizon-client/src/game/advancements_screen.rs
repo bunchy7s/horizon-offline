@@ -317,6 +317,12 @@ impl Game<'_> {
         (title, desc, longest + 3.0 + 5.0)
     }
     pub(super) fn draw_advancements(&mut self, batch: &mut HudBatch) {
+        horizon_client::widgets::begin_screen(|| {
+            horizon_client::widgets::ScreenInfo::new(
+                "advancements",
+                super::screen_info::tr("gui.advancements", &[]),
+            )
+        });
         let (w, h) = (batch.width, batch.height);
         let view = self.adv_view();
         let (left, top) = window(w, h);

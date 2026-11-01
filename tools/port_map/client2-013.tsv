@@ -94,10 +94,10 @@ OversizedItemRenderer.textureIsReadyToBlit	skip:other		cache check for the pictu
 PictureInPictureRenderer.blitTexture	skip:other		picture-in-picture texture blit; Horizon draws each preview into the batch directly (draw_player_preview, draw_banner_result)
 PictureInPictureRenderer.prepareTexturesAndProjection	skip:other		GPU texture allocation for a picture-in-picture
 PictureInPictureRenderer.close	skip:other		GPU texture release
-AccessibilityOnboardingScreen.init	missing		player: first launch shows the accessibility onboarding (onboardAccessibility defaults to true in options_file.rs) with narrator, Sounds, Accessibility, Language and Continue; Horizon has no such screen (options_fixes.rs only turns it off for old files)
+AccessibilityOnboardingScreen.init	port	crates/horizon-client/src/title/onboarding.rs::Title::onboarding_buttons	gap: minor: the Narrator button stays inactive and reads Not Available (no narrator output)
 AccessibilityOnboardingScreen.setInitialFocus	missing		minor: keyboard focus starts on the narrator button; part of the missing onboarding screen
-AccessibilityOnboardingScreen.closeAndSetScreen	missing		player: the Sounds, Accessibility and Language buttons on the onboarding screen; part of the missing screen
-AccessibilityOnboardingScreen.extractRenderState	missing		player: the onboarding screen fades in over 2 s, fades out on Continue, and draws the logo
+AccessibilityOnboardingScreen.closeAndSetScreen	port	crates/horizon-client/src/title.rs::Title::click_action	
+AccessibilityOnboardingScreen.extractRenderState	port	crates/horizon-client/src/title/onboarding.rs::Title::draw_onboarding	
 AccessibilityOnboardingScreen.handleInitialNarrationDelay	skip:other		screen-reader narration; Horizon has no narration output
 AlertScreen	missing		unsure: no alert screen (title, message, OK) found in Horizon; vanilla callers are world-open, recovery and pack errors (WorldOpenFlows.java, RecoverWorldDataScreen.java, PackSelectionScreen.java)
 BackupConfirmScreen	missing		unsure: no backup question before opening a world that needs one (WorldOpenFlows.java:375, EditWorldScreen.java:111); Horizon's backup is only Make Backup (title.rs)
@@ -107,3 +107,5 @@ ChatScreen.shouldDiscardDraft	missing		player: decides whether closing chat keep
 ChatScreen.insertText	port	crates/horizon-client-render/src/chat.rs::ChatScreen::type_text	insert at the cursor; replace=true (setValue) is ChatScreen::suggest_command in Horizon
 ChatScreen.formatChat	missing		minor: a restored draft is drawn grey italic; Horizon has no draft state (see ChatScreen.removed)
 ChatScreen.updateNarrationState	skip:other		screen-reader narration; Horizon has no narration output
+ChatScreen.handleChatInput	port	crates/horizon-client/src/game/chat.rs::Game::handle_chat_input	the message is normalized first (ChatScreen.normalizeChatMessage), then into history, then a command or a chat line
+ChatScreen.normalizeChatMessage	port	crates/horizon-client-render/src/chat.rs::normalize_chat_message	String.trim, then normalizeSpace (one space per whitespace run), then the first 256 UTF-16 units (StringUtil.trimChatMessage)

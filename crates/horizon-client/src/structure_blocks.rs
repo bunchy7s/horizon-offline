@@ -120,29 +120,73 @@ pub fn has_pending_map(item: &ItemStack) -> bool {
     })
 }
 
-/// None until `loot_data` runs; `Some(None)` when the tables failed to load.
-static LOOT: Mutex<Option<Option<Arc<LootData>>>> = Mutex::new(None);
+/// The loot data and the [`loot_key`] it was loaded for; None until
+/// `loot_data` runs. `Some((_, None))` when the tables failed to load.
+type LoadedLoot = (u64, Option<Arc<LootData>>);
+static LOOT: Mutex<Option<LoadedLoot>> = Mutex::new(None);
 
-/// Loot data of the resource root with the world's packs over it, loaded
-/// once per process (a world open or `/reload` forgets it).
-pub fn loot_data(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> Option<Arc<LootData>> {
-    let mut loot = LOOT.lock().unwrap_or_else(|e| e.into_inner());
-    loot.get_or_insert_with(|| match LootData::load(root, overlay) {
+/// The resource root and the packs' files the loot data was loaded from.
+fn loot_key(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> u64 {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    root.hash(&mut hasher);
+    overlay.files.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn load_loot(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> LoadedLoot {
+    let data = match LootData::load(root, overlay) {
         Ok(data) => Some(Arc::new(data)),
         Err(e) => {
             log::warn!("Horizon: loot tables unavailable, structure containers stay empty: {e}");
             None
         }
-    })
-    .clone()
+    };
+    (loot_key(root, overlay), data)
+}
+
+/// Loot data of the resource root with the world's packs over it, loaded
+/// once per process (a world open with other packs, or `/reload`, loads it
+/// again).
+pub fn loot_data(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> Option<Arc<LootData>> {
+    let mut loot = LOOT.lock().unwrap_or_else(|e| e.into_inner());
+    loot.get_or_insert_with(|| load_loot(root, overlay))
+        .1
+        .clone()
+}
+
+/// [`loot_data`] for a world being opened: the copy already loaded when it
+/// came from the same root and packs (world generation loads it first, with
+/// no packs; a second copy held 8 MB for the whole run), else a fresh one.
+pub fn world_loot_data(
+    root: &Path,
+    overlay: &horizon_world::loot::PackOverlay,
+) -> Option<Arc<LootData>> {
+    reuse_or_load(
+        &mut LOOT.lock().unwrap_or_else(|e| e.into_inner()),
+        root,
+        overlay,
+    )
+}
+
+fn reuse_or_load(
+    loot: &mut Option<LoadedLoot>,
+    root: &Path,
+    overlay: &horizon_world::loot::PackOverlay,
+) -> Option<Arc<LootData>> {
+    let key = loot_key(root, overlay);
+    if loot.as_ref().is_none_or(|(loaded, _)| *loaded != key) {
+        *loot = Some(load_loot(root, overlay));
+    }
+    loot.as_ref().and_then(|(_, data)| data.clone())
 }
 
 /// The loot data `loot_data` loaded, if it ran.
 pub fn loaded_loot_data() -> Option<Arc<LootData>> {
     LOOT.lock()
         .unwrap_or_else(|e| e.into_inner())
-        .clone()
-        .flatten()
+        .as_ref()
+        .and_then(|(_, data)| data.clone())
 }
 
 /// Let go of the loot data: for a preload no world used
@@ -321,6 +365,28 @@ mod tests {
             Some("minecraft:slowness"),
         ));
         assert_eq!(arrow.potion(), Some("minecraft:slowness"));
+    }
+
+    /// Opening a world keeps the loot data world generation loaded when the
+    /// packs are the same, and loads it again when they differ.
+    #[test]
+    fn a_world_open_reuses_loot_data_of_the_same_packs() {
+        use horizon_world::loot::PackOverlay;
+        let root = std::env::temp_dir().join(format!("horizon-loot-reuse-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        let mut slot = None;
+        let first = reuse_or_load(&mut slot, &root, &PackOverlay::NONE).expect("loot data");
+        let again = reuse_or_load(&mut slot, &root, &PackOverlay::NONE).unwrap();
+        assert!(Arc::ptr_eq(&first, &again));
+        let files = [(
+            "loot_table/chests/x".to_owned(),
+            vec![br#"{"pools": []}"#.to_vec()],
+        )];
+        let packs = PackOverlay { files: &files };
+        let other = reuse_or_load(&mut slot, &root, &packs).unwrap();
+        assert!(!Arc::ptr_eq(&first, &other));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

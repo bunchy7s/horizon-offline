@@ -324,3 +324,90 @@ fn benchmark_saving_into_a_full_region() {
     let in_place = start.elapsed() / rounds as u32;
     println!("one chunk into a full region: rewrite {rewrite:?}, in place {in_place:?}");
 }
+
+/// `RegionFileStorage.read` reads the root straight off the decompressing
+/// stream (#5064): bytes after it and a damaged stream past it are never read,
+/// so the chunk loads. A root cut short still fails.
+#[test]
+fn a_chunk_loads_whatever_follows_its_root() {
+    let root = NamedTag {
+        name: JavaString::default(),
+        tag: Tag::compound([("x", Tag::Int(7))]),
+    };
+    let bytes = horizon_world::nbt::write_named(&root, Limits::saved()).unwrap();
+    let record = |compression: Compression, compressed: Vec<u8>| ChunkRecord {
+        compression,
+        compressed,
+        timestamp: 0,
+    };
+    let with = |tail: &[u8]| [bytes.as_slice(), tail].concat();
+    let filler: Vec<u8> = (0..70_000).map(|i| (i * 31) as u8).collect();
+    let mut zlib_tail = Compression::Zlib.encode(&with(&filler)).unwrap();
+    let end = zlib_tail.len();
+    zlib_tail[end - 4..].copy_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+    let mut lz4_tail = Compression::Lz4.encode(&with(&filler)).unwrap();
+    // The second block's checksum: the first block holds the root.
+    let second = 21 + u32::from_le_bytes(lz4_tail[9..13].try_into().unwrap()) as usize;
+    lz4_tail[second + 17] ^= 0xff;
+    for (name, chunk) in [
+        (
+            "uncompressed, a byte after",
+            record(Compression::None, with(&[0xff])),
+        ),
+        (
+            "zlib, junk after",
+            record(
+                Compression::Zlib,
+                Compression::Zlib.encode(&with(b"junk")).unwrap(),
+            ),
+        ),
+        (
+            "gzip, junk after",
+            record(
+                Compression::Gzip,
+                Compression::Gzip.encode(&with(b"junk")).unwrap(),
+            ),
+        ),
+        (
+            "zlib, damaged checksum",
+            record(Compression::Zlib, zlib_tail),
+        ),
+        (
+            "lz4, damaged second block",
+            record(Compression::Lz4, lz4_tail),
+        ),
+    ] {
+        assert_eq!(chunk.nbt(Limits::saved()).unwrap(), root, "{name}");
+    }
+    let cut = Compression::Zlib.encode(&bytes[..bytes.len() - 2]).unwrap();
+    assert!(record(Compression::Zlib, cut).nbt(Limits::saved()).is_err());
+}
+
+/// `RegionFile.write` rewrites both header sectors from memory
+/// (`writeHeader`), so entries the constructor dropped as invalid (#5064:
+/// overlapping the header, empty, past the end) are zero on disk afterwards;
+/// their timestamps stay. Vanilla 26.3 leaves this file with these bytes.
+#[test]
+fn a_chunk_write_rewrites_the_whole_region_header() {
+    let dir = Directory::new();
+    let mut header = vec![0u8; 8192];
+    header[20..24].copy_from_slice(&[0, 0, 1, 1]); // slot 5: sector 1
+    header[200..204].copy_from_slice(&[0, 0, 5, 0]); // slot 50: no sectors
+    header[400..404].copy_from_slice(&[0, 0, 0x64, 1]); // slot 100: past the end
+    header[4096 + 20..4096 + 24].copy_from_slice(&12345u32.to_be_bytes());
+    fs::write(dir.region(), &header).unwrap();
+    let root = NamedTag {
+        name: JavaString::default(),
+        tag: Tag::compound([("x", Tag::Int(7))]),
+    };
+    let record = ChunkRecord::from_nbt(&root, Compression::Zlib, 1, Limits::saved()).unwrap();
+    let mut region = RegionFile::open_writable(dir.region(), false).unwrap();
+    region.write(ChunkPos::new(-32, 0), &record).unwrap();
+    drop(region);
+    let bytes = fs::read(dir.region()).unwrap();
+    assert_eq!(bytes[0..4], [0, 0, 2, 1]);
+    for slot in [5, 50, 100] {
+        assert_eq!(bytes[slot * 4..slot * 4 + 4], [0; 4], "slot {slot}");
+    }
+    assert_eq!(bytes[4096 + 20..4096 + 24], 12345u32.to_be_bytes());
+}

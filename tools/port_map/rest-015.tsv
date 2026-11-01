@@ -71,7 +71,7 @@ PerfCommand.stopProfilingDedicatedServer	skip:server		profiler for the dedicated
 PerfCommand.saveResults	skip:server		profiler for the dedicated server; not a game behaviour
 PerfCommand.whenStopped	skip:server		profiler for the dedicated server; not a game behaviour
 PlaceCommand.placeJigsaw	port	crates/horizon-client/src/game/commands/place.rs::Game::cmd_place_generated	place.jigsaw branch: pool check, generation, success message
-PlaceCommand.placeStructure	missing		player: /place structure checks the id then always fails (Structure.generate is not wired to the live level)
+PlaceCommand.placeStructure	port	crates/horizon-client/src/game/commands/place.rs::Game::cmd_place_generated	place.structure branch: id check, Structure.generate with the biome -> true predicate, checkLoaded over the start's box, per-chunk placeInChunk, success/failed messages
 PlaceCommand.placeTemplate	port	crates/horizon-client/src/game/commands/place.rs::Game::cmd_place	template placement with rotation, mirror, integrity and strict
 PlaySoundCommand.register	port	crates/horizon-command/src/tree_world.rs::sounds	playsound literal with a sound-source literal per source
 PlaySoundCommand.source	port	crates/horizon-command/src/tree_world.rs::sounds	per-source literal with targets, pos, volume, pitch, minVolume

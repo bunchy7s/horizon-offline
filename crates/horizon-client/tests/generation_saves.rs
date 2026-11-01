@@ -52,6 +52,7 @@ impl Recorder {
     fn save_chunk(&self, chunk: &Chunk) {
         let mut saved = chunk.clone();
         saved.fresh = false;
+        saved.generated = false;
         self.chunks
             .lock()
             .unwrap()
@@ -177,22 +178,50 @@ impl Session {
     }
 }
 
+fn worker_context(root: &Path) -> Arc<WorkerContext> {
+    let assets = Arc::new(Assets::load(root).unwrap());
+    let render = Arc::new(assets.reload(root).unwrap());
+    let facts = BlockFacts::load(root, assets.registry).unwrap();
+    let visibility = models::load_visibility(root, assets.registry).unwrap();
+    Arc::new(WorkerContext {
+        tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility).unwrap()),
+        light: Arc::new(LightTables::load(root, assets.registry, &facts).unwrap()),
+        biomes: Arc::new(Biomes::load(root).unwrap()),
+        assets,
+        render: render.clone(),
+    })
+}
+
+/// What native mods hear (`native_chunk_load`): a column just generated is
+/// new, one read back from the save isn't, and each arrival is told once.
+#[test]
+fn a_new_column_is_told_apart_from_a_saved_one() {
+    let Some(root) = resources() else {
+        return;
+    };
+    let context = worker_context(&root);
+    let generator = Arc::new(Recorder::default());
+    let mut session = Session::new(generator.clone(), context.clone());
+    session.settle_at((0, 0));
+    let first = std::mem::take(&mut session.world.loaded_chunks);
+    assert!(first.contains(&(0, 0, true)), "{first:?}");
+    assert!(first.iter().all(|c| c.2), "{first:?}");
+    let residents = session.world.chunks.len();
+    assert_eq!(first.len(), residents, "one arrival for each column");
+    session.save();
+    drop(session);
+    let mut session = Session::new(generator, context);
+    session.settle_at((0, 0));
+    let again = std::mem::take(&mut session.world.loaded_chunks);
+    assert!(again.contains(&(0, 0, false)), "{again:?}");
+}
+
 #[test]
 fn chunks_left_behind_keep_their_decoration() {
     let Some(root) = resources() else {
         return;
     };
-    let assets = Arc::new(Assets::load(&root).unwrap());
-    let render = Arc::new(assets.reload(&root).unwrap());
-    let facts = BlockFacts::load(&root, assets.registry).unwrap();
-    let visibility = models::load_visibility(&root, assets.registry).unwrap();
-    let context = Arc::new(WorkerContext {
-        tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility).unwrap()),
-        light: Arc::new(LightTables::load(&root, assets.registry, &facts).unwrap()),
-        biomes: Arc::new(Biomes::load(&root).unwrap()),
-        assets,
-        render: render.clone(),
-    });
+    let context = worker_context(&root);
     let generator = Arc::new(Recorder::default());
     let mut session = Session::new(generator.clone(), context.clone());
     // Generate an area, walk away from it in steps (its edge unloads a ring
@@ -308,7 +337,10 @@ fn saved_proto_chunks_restore_exactly() {
     .unwrap();
     let dir = std::env::temp_dir().join(format!("horizon-proto-saves-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let save = Arc::new(SaveDir::new(dir.clone()));
+    let save = Arc::new(SaveDir::new(
+        dir.clone(),
+        horizon_client::save::LevelShape::OVERWORLD,
+    ));
     let generator = Persistent {
         inner: Arc::new(terrain),
         save: save.clone(),
@@ -388,7 +420,10 @@ fn saved_proto_block_entities_keep_their_id() {
     .unwrap();
     let dir = std::env::temp_dir().join(format!("horizon-proto-ids-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let save = Arc::new(SaveDir::new(dir.clone()));
+    let save = Arc::new(SaveDir::new(
+        dir.clone(),
+        horizon_client::save::LevelShape::OVERWORLD,
+    ));
     let generator = Persistent {
         inner: Arc::new(terrain),
         save: save.clone(),
@@ -427,5 +462,57 @@ fn saved_proto_block_entities_keep_their_id() {
     assert!(suspicious > 0, "the ruin placed no suspicious blocks");
     drop(generator);
     drop(save);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// What the game's generator, `Persistent`, passes on of beside-final decoration: the block
+/// entities a decoration made in a chunk saved by an older version reach `World` only if
+/// `Persistent` forwards `final_block_entities` (the trait default is none).
+#[test]
+fn persistent_forwards_the_block_entities_decoration_made_in_a_final_chunk() {
+    use horizon_client::{
+        chunk::block_entity::BlockEntity,
+        save::{Persistent, SaveDir},
+    };
+    struct Marked;
+    impl ChunkGenerator for Marked {
+        type Worker = ();
+        fn worker(&self) {}
+        fn proto(&self, _: &mut (), _: i32, _: i32) -> Proto {
+            Box::new(())
+        }
+        fn finish(&self, _: Proto) -> Chunk {
+            Chunk::empty(0, 0)
+        }
+        fn final_block_entities(
+            &self,
+            _: &Proto,
+            writes: &[([i32; 3], u32)],
+        ) -> Vec<((i32, i32, i32), BlockEntity)> {
+            writes
+                .iter()
+                .map(|([x, y, z], _)| ((*x, *y, *z), BlockEntity::Chest(Vec::new())))
+                .collect()
+        }
+    }
+    let Some(root) = resources() else {
+        return;
+    };
+    let assets = Arc::new(Assets::load(&root).unwrap());
+    let biomes = Arc::new(Biomes::load(&root).unwrap());
+    let dir = std::env::temp_dir().join(format!("horizon-final-be-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let generator = Persistent {
+        inner: Arc::new(Marked),
+        save: Arc::new(SaveDir::new(
+            dir.clone(),
+            horizon_client::save::LevelShape::OVERWORLD,
+        )),
+        registry: assets,
+        biomes,
+    };
+    let made = generator.final_block_entities(&(Box::new(()) as Proto), &[([1, 64, 2], 5)]);
+    assert_eq!(made.len(), 1, "Persistent drops the block entities");
+    assert_eq!(made[0].0, (1, 64, 2));
     let _ = std::fs::remove_dir_all(&dir);
 }

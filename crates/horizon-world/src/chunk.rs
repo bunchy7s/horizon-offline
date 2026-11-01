@@ -432,6 +432,19 @@ impl<'r> BlockSection<'r> {
         }
         Ok(self.state(index))
     }
+    /// Every state in index order, as [`state`](Self::state) reads them one by
+    /// one, unpacked word by word.
+    pub(crate) fn fill_states(&self, out: &mut [u32; 4096]) {
+        match &self.storage {
+            None => out.fill(self.palette[0].0),
+            Some(storage) => {
+                storage.unpack_into(out);
+                for v in out.iter_mut() {
+                    *v = self.palette[*v as usize].0;
+                }
+            }
+        }
+    }
     /// The state at `index`, which must be below 4096 (a `local_index`).
     #[inline]
     pub(crate) fn state(&self, index: usize) -> BlockStateId {
@@ -759,6 +772,32 @@ mod tests {
             ("defaults", Tag::Compound(defaults)),
         ]);
         BlockRegistry::from_nbt(&tag).unwrap()
+    }
+
+    /// `fill_states` reads what `state` reads at every index, from a uniform
+    /// section (no storage) through every palette width.
+    #[test]
+    fn fill_states_matches_state() {
+        let registry = benchmark_registry(64);
+        for &(distinct, seed) in &[(1u64, 1u64), (2, 2), (16, 3), (17, 4), (64, 6)] {
+            let mut section = BlockSection::uniform(BlockStateId(0), &registry).unwrap();
+            let mut rng = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+            let mut out = [0u32; 4096];
+            for round in 0..4 {
+                section.fill_states(&mut out);
+                for (index, &value) in out.iter().enumerate() {
+                    assert_eq!(value, section.state(index).0, "round {round} index {index}");
+                }
+                for _ in 0..2_000 {
+                    rng ^= rng << 13;
+                    rng ^= rng >> 7;
+                    rng ^= rng << 17;
+                    let index = (rng % 4096) as usize;
+                    let value = ((rng >> 20) % distinct) as u32;
+                    section.set(index, BlockStateId(value)).unwrap();
+                }
+            }
+        }
     }
 
     /// The optimized `set`/`get` must agree with the pre-optimization ones on

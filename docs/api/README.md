@@ -1,6 +1,6 @@
 # Horizon APIs
 
-Horizon has six surfaces that other programs and people build on. Each one has an **API** (the contract: what you
+Horizon has seven surfaces that other programs and people build on. Each one has an **API** (the contract: what you
 may call, read or write, and what Horizon promises about it) and an **SDK** (the tools that help you use it). This
 section has one page per surface, plus the rules every surface follows:
 [stability and versioning](stability.md).
@@ -12,6 +12,7 @@ section has one page per surface, plus the rules every surface follows:
 | [Agent control](agent-control.md) | agents, scripts, tests | `horizon-ctl`, its MCP server, the game's control socket | preview | [horizon-ctl-commands.md](../horizon-ctl-commands.md) (generated) |
 | [Servers](server.md) | hosts, panels, bots | `horizon-server` commands, `server.toml`, control API `/api/v1` | stable | [server-reference.md](server-reference.md) (generated) |
 | [Launcher](launcher.md) | players' agents, pack makers | `horizon-launcher` commands and its MCP server | preview | [launcher-commands.md](../launcher-commands.md) (generated) |
+| [Launch](launch.md) | other launchers | `horizon-client`'s launch options, the session JSON, exit codes; `horizon-prepare`'s output, `--check` and `--progress json` | experimental | [launch-reference.md](launch-reference.md) (generated) |
 | [Data formats](data-formats.md) | tools that read Horizon's files | benchmark reports, telemetry, settings files, signed checksums | stable or preview, per format | on that page |
 
 ## How these APIs are designed
@@ -41,6 +42,7 @@ A reference page is written by code from the source it describes, and a test fai
 | [server-reference.md](server-reference.md) | `horizon-server`'s help, `config::TEMPLATE`, `api::ROUTES` | `HORIZON_WRITE_DOCS=1 cargo test -p horizon-server reference` |
 | [horizon-ctl-commands.md](../horizon-ctl-commands.md) | the command table in `crates/horizon-client/src/bin/horizon-ctl/commands.rs` | `horizon-ctl help --markdown > docs/horizon-ctl-commands.md` |
 | [launcher-commands.md](../launcher-commands.md) | `launcher/src/cli.rs` | `HORIZON_WRITE_DOCS=1 cargo test --manifest-path launcher/Cargo.toml the_launcher_reference` |
+| [launch-reference.md](launch-reference.md) | `crates/horizon-client/src/game/launch_api.rs` | `HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --bin horizon-client launch_api` |
 
 So a pull request that changes an API also changes its reference, and the reviewer sees the API's diff in the
 reference's diff. The guides (overview, how-to, examples) are written by hand.

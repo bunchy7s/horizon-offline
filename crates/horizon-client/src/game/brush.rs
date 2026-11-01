@@ -71,7 +71,7 @@ impl Game<'_> {
         }
         let at = hit.pos.map(|v| f64::from(v) + 0.5);
         self.audio.play(sound, Some(at), 1.0, 1.0);
-        if brushable && self.brush_block(hit.pos, hit.face) {
+        if brushable && self.brush_block(hit.pos, hit.face, slot) {
             self.damage_held(1);
         }
     }
@@ -113,7 +113,7 @@ impl Game<'_> {
     }
 
     /// `BrushableBlockEntity.brush`: whether the block changed (the brush wears).
-    fn brush_block(&mut self, pos: [i32; 3], face: [i32; 3]) -> bool {
+    fn brush_block(&mut self, pos: [i32; 3], face: [i32; 3], slot: usize) -> bool {
         let time = self.world.game_time;
         let mut brush = self.brushing.remove(&pos).unwrap_or_default();
         brush.hit_face.get_or_insert(face);
@@ -141,7 +141,7 @@ impl Game<'_> {
         let before = completion_state(brush.count);
         brush.count += 1;
         if brush.count >= 10 {
-            self.brushing_completed(pos, brush.hit_face);
+            self.brushing_completed(pos, brush.hit_face, slot);
             return true;
         }
         self.schedule_brushable_tick(pos);
@@ -191,7 +191,7 @@ impl Game<'_> {
 
     /// `BrushableBlockEntity.brushingCompleted`: the item drops out of the
     /// brushed face and the block turns into its sand or gravel.
-    fn brushing_completed(&mut self, pos: [i32; 3], face: Option<[i32; 3]>) {
+    fn brushing_completed(&mut self, pos: [i32; 3], face: Option<[i32; 3]>, slot: usize) {
         let state = self.world.block(pos[0], pos[1], pos[2]);
         let turns_into = match &*self.res.facts().get(state).name {
             "minecraft:suspicious_sand" => "minecraft:sand",
@@ -212,7 +212,20 @@ impl Game<'_> {
                 f64::from(pos[1] + face[1]) + 0.625,
                 f64::from(pos[2] + face[2]) + 0.5,
             ];
-            self.spawn_item(item, at, [0.0; 3], 0);
+            let mut drops = vec![item];
+            let tool = self.stack_in(slot).cloned();
+            let origin = pos.map(|c| f64::from(c) + 0.5);
+            self.native_use_drops(
+                "",
+                origin,
+                Some((pos, state)),
+                None,
+                tool.as_ref(),
+                &mut drops,
+            );
+            for item in drops {
+                self.spawn_item(item, at, [0.0; 3], 0);
+            }
         }
         // Level event 3008 for every player, then the block change.
         self.level_event_at(3008, pos, state.0 as i32);

@@ -33,17 +33,13 @@ pub fn command(dir: &Path, args: &[String]) -> Result<(), String> {
 }
 
 fn show(dir: &Path, as_json: bool) -> Result<(), String> {
-    let cfg = config::Config::load(dir)?;
-    let table = toml::Table::try_from(&cfg).map_err(|e| e.to_string())?;
+    let table = shown(dir)?;
     if as_json {
-        println!(
-            "{}",
-            serde_json::to_value(&table).map_err(|e| e.to_string())?
-        );
+        println!("{table}");
         return Ok(());
     }
-    for (section, values) in &table {
-        for (key, value) in values.as_table().into_iter().flatten() {
+    for (section, values) in table.as_object().into_iter().flatten() {
+        for (key, value) in values.as_object().into_iter().flatten() {
             println!("{section}.{key} = {value}");
         }
     }
@@ -63,7 +59,7 @@ pub struct Outcome {
 }
 
 impl Outcome {
-    fn to_json(&self) -> Value {
+    pub fn to_json(&self) -> Value {
         json!({
             "saved": self.saved,
             "applied": self.applied,
@@ -144,6 +140,7 @@ pub fn parse_change(
 fn range(section: &str, field: &str) -> Option<std::ops::RangeInclusive<i64>> {
     match (section, field) {
         ("server", "view_distance" | "simulation_distance") => Some(2..=32),
+        ("server", "max_view_distance") => Some(0..=32),
         ("server", "max_players") => Some(1..=1000),
         ("backups", "keep") => Some(1..=1000),
         _ => None,
@@ -174,6 +171,27 @@ pub fn live_command(section: &str, field: &str, value: &toml::Value) -> Option<S
 }
 
 pub fn set(dir: &Path, changes: &[&str]) -> Result<Outcome, String> {
+    let client = Client::open(dir)?;
+    let up = client.as_ref().is_some_and(|c| {
+        c.call("GET", "/api/v1/status", None)
+            .is_ok_and(|s| s["phase"] == "running")
+    });
+    let run = |line: &str| {
+        up && client.as_ref().is_some_and(|c| {
+            c.call("POST", "/api/v1/command", Some(&json!({ "line": line })))
+                .is_ok()
+        })
+    };
+    apply(dir, changes, client.is_some().then_some(&run))
+}
+
+/// Writes the changes to server.toml, then sends a running server (`live` runs a console command and says
+/// whether it did) what it can take at once.
+pub fn apply(
+    dir: &Path,
+    changes: &[&str],
+    live: Option<&dyn Fn(&str) -> bool>,
+) -> Result<Outcome, String> {
     let current = toml::Table::try_from(config::Config::load(dir)?).map_err(|e| e.to_string())?;
     let parsed = changes
         .iter()
@@ -184,31 +202,47 @@ pub fn set(dir: &Path, changes: &[&str]) -> Result<Outcome, String> {
         saved: parsed.iter().map(|(s, f, _)| format!("{s}.{f}")).collect(),
         ..Outcome::default()
     };
-    let Some(client) = Client::open(dir)? else {
+    let Some(live) = live else {
         return Ok(outcome);
     };
     outcome.running = true;
-    let up = client
-        .call("GET", "/api/v1/status", None)
-        .is_ok_and(|s| s["phase"] == "running");
     for (section, field, value) in &parsed {
         let key = format!("{section}.{field}");
         let unchanged = current.get(section).and_then(|s| s.get(field)) == Some(value);
         match live_command(section, field, value) {
             _ if unchanged => {}
             Some(line) if line.is_empty() => outcome.applied.push(key),
-            Some(line)
-                if up
-                    && client
-                        .call("POST", "/api/v1/command", Some(&json!({ "line": line })))
-                        .is_ok() =>
-            {
-                outcome.applied.push(key)
-            }
+            Some(line) if live(&line) => outcome.applied.push(key),
             _ => outcome.restart.push(key),
         }
     }
     Ok(outcome)
+}
+
+/// The settings the control API may change: none of `[engine]` (which program runs), `[panel]` and `[api]`
+/// (who can reach the server), `[discord]` (its webhook is a secret), nor the vanilla keys that open another remote console.
+pub fn changeable_remotely(key: &str) -> bool {
+    let (section, field) = key.split_once('.').unwrap_or((key, ""));
+    !matches!(section, "engine" | "panel" | "api" | "discord")
+        && !(section == "properties"
+            && (field.starts_with("rcon.")
+                || field.starts_with("management-server-")
+                || matches!(field, "enable-rcon" | "enable-query" | "query.port")))
+}
+
+/// The settings as JSON, the API's token and the Discord webhook hidden.
+pub fn shown(dir: &Path) -> Result<Value, String> {
+    let mut table = toml::Table::try_from(config::Config::load(dir)?).map_err(|e| e.to_string())?;
+    for (section, field) in [("api", "token"), ("discord", "webhook")] {
+        if let Some(secret) = table
+            .get_mut(section)
+            .and_then(|a| a.get_mut(field))
+            .filter(|t| t.as_str() != Some(""))
+        {
+            *secret = toml::Value::String("(set)".into());
+        }
+    }
+    serde_json::to_value(&table).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

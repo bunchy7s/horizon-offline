@@ -42,6 +42,9 @@ pub struct BakedModel {
     pub cube: Option<[super::cube::CubeStyle; 6]>,
 }
 type VariantKey = (String, [u8; 3], bool);
+/// Empty by default: no state has a model (a dedicated server, which draws
+/// nothing).
+#[derive(Default)]
 pub struct StateModels {
     /// Each definition's choices, a variant standing as its index in `baked`.
     choices: Vec<CompiledChoices<u32>>,

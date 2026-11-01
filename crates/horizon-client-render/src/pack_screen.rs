@@ -829,6 +829,15 @@ impl PackScreen {
     /// is the time since the search box took the focus.
     pub fn draw(&self, m: &Measure, mouse: (i32, i32), blink_ms: u64) -> Vec<Draw> {
         let mut out = Vec::new();
+        // PackSelectionScreen, or the ConfirmScreen over it (its title and
+        // its message).
+        crate::widgets::begin_screen(|| match &self.confirm {
+            Some(c) => crate::widgets::ScreenInfo::new(
+                "packs/confirm",
+                crate::widgets::join_for_narration(&[&c.title.plain(), &c.message.plain()]),
+            ),
+            None => crate::widgets::ScreenInfo::new("packs", self.title.plain()),
+        });
         if let Some(c) = &self.confirm {
             let ((tx, ty), (lines, mx, my), buttons) = self.confirm_layout(m, c);
             d::string_widget(&mut out, m, &c.title, tx, ty, 0);
@@ -874,6 +883,11 @@ impl PackScreen {
                 true,
                 hover || self.focus == Focus::Button(i),
             );
+            if i == 0 {
+                crate::widgets::last_narratable(|n| {
+                    n.hint = Some(tr("pack.folderInfo").plain());
+                });
+            }
             if i == 0 && hover {
                 d::tooltip(&mut out, m, &tr("pack.folderInfo"), mouse);
             }
@@ -887,6 +901,38 @@ impl PackScreen {
         } else {
             None
         };
+        let header = if l.selected_side {
+            "pack.selected.title"
+        } else {
+            "pack.available.title"
+        };
+        // TransferableSelectionList: the row under the mouse, else the
+        // selected one; the header narrates its title, a pack "Selected:
+        // <title>".
+        crate::widgets::narratable(|| {
+            use crate::widgets::{ListKind, Narratable, Row as Narrated};
+            let narrated = |i: usize| {
+                let text = match &l.entries[i].row {
+                    Row::Header => tr(header).plain(),
+                    Row::Pack(id) => {
+                        let title = self
+                            .info(id)
+                            .map_or_else(|| Text::literal(id.clone()), |p| p.title.clone());
+                        Text::translate("narrator.select", &[title]).plain()
+                    }
+                };
+                Narrated::new(i, text)
+            };
+            Narratable::list(
+                ListKind::Object,
+                l.entries.len(),
+                hovered.map(narrated),
+                l.selected.filter(|i| *i < l.entries.len()).map(narrated),
+                [l.x as f32, l.y as f32, l.width as f32, l.height as f32],
+            )
+            .key(crate::widgets::key_of(&("packs", side)))
+            .focused(l.focused)
+        });
         let prefix = if self.in_world { "inworld_" } else { "" };
         let right = l.x + l.width;
         d::blit(
@@ -926,12 +972,7 @@ impl PackScreen {
             let (cx, cy) = (left + 2, e.y + 2);
             match &e.row {
                 Row::Header => {
-                    let key = if l.selected_side {
-                        "pack.selected.title"
-                    } else {
-                        "pack.available.title"
-                    };
-                    let t = tr(key).with_style(&Style {
+                    let t = tr(header).with_style(&Style {
                         underlined: Some(true),
                         bold: Some(true),
                         ..Style::default()

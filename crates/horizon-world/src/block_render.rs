@@ -46,6 +46,19 @@ pub struct FaceVisibility {
     cache: HashMap<(u32, u32), bool>,
 }
 impl FaceVisibility {
+    /// No state's faces, for a server, which draws nothing: every lookup
+    /// answers "unknown render state".
+    pub fn empty() -> Self {
+        Self {
+            states: Vec::new(),
+            faces: vec![VoxelShape::empty(), VoxelShape::block()],
+            cache: HashMap::new(),
+        }
+    }
+    /// [`Self::empty`]: no state is known.
+    pub fn is_empty(&self) -> bool {
+        self.states.is_empty()
+    }
     pub fn new(
         occlusion: &CachedCollisionRegistry<'_>,
         definitions: &BTreeMap<String, RenderDefinition>,
@@ -212,5 +225,30 @@ impl FaceVisibility {
         }
         self.cache.insert(key, visible);
         Ok(visible)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A server's empty visibility knows no state: lookups fail instead of
+    /// panicking.
+    #[test]
+    fn empty_visibility_knows_no_state() {
+        let mut visibility = FaceVisibility::empty();
+        assert!(visibility.is_empty());
+        let stone = BlockStateId(1);
+        assert!(visibility.occlusion_face(stone, Direction::Up).is_none());
+        assert!(
+            visibility
+                .skip_rendering(stone, stone, Direction::Up, true)
+                .is_err()
+        );
+        assert!(
+            visibility
+                .should_render_face(stone, stone, Direction::Up, true)
+                .is_err()
+        );
     }
 }

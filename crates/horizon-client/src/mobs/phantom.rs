@@ -34,10 +34,26 @@ pub fn register(m: &mut Mob) {
         },
     );
 }
+/// `Phantom.setPhantomSize` with `updatePhantomSizeInfo`: the size, clamped to
+/// 0 to 64, and an attack damage base of 6 plus the size. The box and the
+/// drawn model grow by `1 + 0.15 * size` (the mob's dimensions, `PhantomRenderer.scale`).
+pub fn set_size(m: &mut Mob, size: i32) {
+    use super::finalize::{Attr, set_base};
+    let size = size.clamp(0, 64);
+    if size != m.extra.size {
+        m.extra.size = size;
+        set_base(m, Attr::AttackDamage, f64::from(6 + size));
+    }
+}
 fn can_attack(w: &MobWorld) -> bool {
     w.player
         .as_ref()
         .is_some_and(|p| p.alive && !p.creative && !p.spectator)
+}
+/// `Phantom.canAttack(level, player, TargetingConditions.DEFAULT)`: as above,
+/// and in sight (`Sensing.hasLineOfSight`), so a roof or a wall hides the player.
+fn can_attack_seen(m: &mut Mob, w: &MobWorld) -> bool {
+    can_attack(w) && m.sees(w, Who::Player)
 }
 fn sea_level() -> i32 {
     63
@@ -66,14 +82,14 @@ impl Goal for AttackPlayerTarget {
         let near = (d.x - m.position.x).abs() <= 16.0 + f64::from(m.width())
             && (d.y - m.position.y).abs() <= 64.0
             && (d.z - m.position.z).abs() <= 16.0 + f64::from(m.width());
-        if near && can_attack(cx.w) {
+        if near && can_attack_seen(m, cx.w) {
             m.ai.target = Some(Who::Player);
             return true;
         }
         false
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        m.ai.target.is_some() && can_attack(cx.w)
+        m.ai.target.is_some() && can_attack_seen(m, cx.w)
     }
 }
 /// `PhantomAttackStrategyGoal`: circle, then swoop.
@@ -97,7 +113,7 @@ impl Goal for AttackStrategy {
         0
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        m.ai.target.is_some() && can_attack(cx.w)
+        m.ai.target.is_some() && can_attack_seen(m, cx.w)
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         self.next_sweep = reduced(10);
@@ -358,5 +374,68 @@ pub fn flap_sound(m: &Mob, events: &mut Vec<MobEvent>) {
             0.95 + 0.05,
             0.95,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mobs::world::{test_player, with_built_test_world};
+
+    /// `TargetingConditions.DEFAULT` checks line of sight (#4929): a phantom
+    /// above takes a player in the open, not one boxed in stone or glass.
+    #[test]
+    fn a_phantom_cannot_target_a_player_it_cannot_see() {
+        for roof in [None, Some("minecraft:stone"), Some("minecraft:glass")] {
+            with_built_test_world(
+                &[],
+                |world, registry| {
+                    for x in -1..=1 {
+                        for z in -1..=1 {
+                            world.chunks.insert(
+                                (x, z),
+                                std::sync::Arc::new(crate::chunk::Chunk::empty(x, z)),
+                            );
+                        }
+                    }
+                    let Some(block) = roof.and_then(|b| registry.default_state(b)) else {
+                        return;
+                    };
+                    // A hollow 5x5x5 box around the player at (0.5, 64, 0.5).
+                    for x in -2i32..=2 {
+                        for y in 63..=67 {
+                            for z in -2i32..=2 {
+                                let shell = x.abs() == 2 || z.abs() == 2 || y == 63 || y == 67;
+                                if shell {
+                                    world.set(x, y, z, block).unwrap();
+                                }
+                            }
+                        }
+                    }
+                },
+                |w, types| {
+                    let mut w = w.clone();
+                    w.player = Some(test_player(Vec3::new(0.5, 64.0, 0.5)));
+                    let kind = std::sync::Arc::new(types.types["minecraft:phantom"].clone());
+                    let mut m = Mob::new(1, kind, Vec3::new(0.5, 80.0, 0.5), 0.0);
+                    let mut target = AttackPlayerTarget { next_scan: 0 };
+                    let mut events = Vec::new();
+                    let mut lr = horizon_core::random::LegacyRandom::new(0);
+                    let mut cx = Cx {
+                        w: &w,
+                        lr: &mut lr,
+                        events: &mut events,
+                    };
+                    assert_eq!(target.can_use(&mut m, &mut cx), roof.is_none(), "{roof:?}");
+                    m.ai.target = Some(Who::Player);
+                    m.ai.seen_cache.clear();
+                    assert_eq!(
+                        target.can_continue(&mut m, &mut cx),
+                        roof.is_none(),
+                        "{roof:?}"
+                    );
+                },
+            );
+        }
     }
 }

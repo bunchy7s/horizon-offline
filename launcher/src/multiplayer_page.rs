@@ -1,7 +1,7 @@
 //! The selected instance's server list on Home (`horizon_launcher::server_list`, the game's own
 //! `servers.dat`): each server with the picture the game last saw, Join (the game starts straight
 //! into it), Remove after a confirmation, and a line to add one. The official server is put on top
-//! once, as the game does (`server_list::add_official`).
+//! once, as the game does, at the address links.json gives (`server_list::add_official`).
 use super::*;
 use gpui::{Image, ImageFormat};
 use horizon_launcher::server_list::{self, Server};
@@ -39,7 +39,11 @@ impl Launcher {
             return;
         }
         // A list that can't be read is the game's to report: the page shows it empty.
-        let _ = server_list::add_official(&home);
+        let _ = server_list::add_official(
+            &home,
+            &self.links.official_server,
+            &self.links.official_server_previous,
+        );
         // A few servers and their 64×64 pictures: small enough to read while drawing.
         self.multiplayer.list = server_list::List::load(&home)
             .servers()
@@ -77,30 +81,34 @@ impl Launcher {
         }
     }
 
-    /// Home's Multiplayer section, for the selected instance.
-    pub(super) fn multiplayer_section(&mut self, cx: &mut Context<Self>) -> Option<Div> {
+    /// How many servers the selected instance's list has.
+    pub(super) fn servers_count(&mut self) -> usize {
+        let Some(home) = self.selected_instance().map(|i| i.home.clone()) else {
+            return 0;
+        };
+        self.load_servers(home);
+        self.multiplayer.list.len()
+    }
+
+    /// Home's Multiplayer tab, for the selected instance: its button (beside the tabs) and its
+    /// list.
+    pub(super) fn multiplayer_section(&mut self, cx: &mut Context<Self>) -> Option<(Div, Div)> {
         let t = self.theme;
         let home = self.selected_instance()?.home.clone();
         self.load_servers(home);
-        let header = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .mb(px(4.))
-            .child(section_title("Multiplayer", "server", &t))
-            .child(
-                button("server-add", "Add server", Kind::Ghost, &t).on_click(cx.listener(
-                    |this, _: &ClickEvent, _, cx| {
-                        this.multiplayer.adding = !this.multiplayer.adding;
-                        this.multiplayer.error = None;
-                        if this.multiplayer.adding {
-                            this.servers.focus_soon = Some(Field::ServerAddress);
-                        }
-                        cx.notify();
-                    },
-                )),
-            );
-        let mut section = div().flex().flex_col().gap(px(8.)).child(header);
+        let actions = div().child(
+            button("server-add", "Add server", Kind::Ghost, &t).on_click(cx.listener(
+                |this, _: &ClickEvent, _, cx| {
+                    this.multiplayer.adding = !this.multiplayer.adding;
+                    this.multiplayer.error = None;
+                    if this.multiplayer.adding {
+                        this.servers.focus_soon = Some(Field::ServerAddress);
+                    }
+                    cx.notify();
+                },
+            )),
+        );
+        let mut section = div().flex().flex_col().gap(px(8.));
         if let Some(e) = self.multiplayer.error.clone() {
             section = section.child(notice(e, &t));
         }
@@ -112,7 +120,7 @@ impl Launcher {
                     .gap(px(8.))
                     .px(px(14.))
                     .py(px(10.))
-                    .child(self.field(Field::ServerName, "Minecraft Server", 220., cx))
+                    .child(self.field(Field::ServerName, tr("Minecraft Server"), 220., cx))
                     .child(self.field(Field::ServerAddress, "play.example.com", 300., cx))
                     .child(button("server-save", "Add", Kind::Secondary, &t).on_click(
                         cx.listener(|this, _: &ClickEvent, _, cx| {
@@ -124,16 +132,14 @@ impl Launcher {
         }
         let list = self.multiplayer.list.clone();
         if list.is_empty() && !self.multiplayer.adding {
-            section = section.child(
-                text(theme::CAPTION)
-                    .text_color(t.muted)
-                    .child("No servers yet: add one here or in the game's Multiplayer screen."),
-            );
+            section = section.child(text(theme::CAPTION).text_color(t.muted).child(tr(
+                "No servers yet: add one here or in the game's Multiplayer screen.",
+            )));
         }
         for (i, (server, icon)) in list.into_iter().enumerate() {
             section = section.child(self.server_row(i, server, icon, cx));
         }
-        Some(section)
+        Some((actions, section))
     }
 
     fn server_row(
@@ -163,7 +169,7 @@ impl Launcher {
                 .child(
                     text(theme::CAPTION)
                         .text_color(t.danger)
-                        .child("Remove it from the list?"),
+                        .child(tr("Remove it from the list?")),
                 )
                 .child(
                     button(

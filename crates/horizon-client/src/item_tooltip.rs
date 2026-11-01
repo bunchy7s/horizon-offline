@@ -1,5 +1,6 @@
 //! Item tooltip formatting: equipment modifiers with a player's base values,
 //! and lines without player context for the recipe book's search tree.
+use crate::text::{GRAY, Text};
 use crate::{
     hud::rgba,
     items::{ItemInfo, ItemStack},
@@ -210,6 +211,34 @@ fn is_potion_item(item: &str) -> bool {
     item.ends_with("potion") || item == "minecraft:tipped_arrow"
 }
 
+/// `PlayerHeadItem.getName`: a player head whose profile has a name is titled
+/// after it.
+pub struct PlayerHeadName(String);
+
+impl PlayerHeadName {
+    /// The title as `getName`'s `%s's Head` translation.
+    pub fn title(&self, translate: &dyn Fn(&str) -> Option<String>) -> String {
+        translate("block.minecraft.player_head.named")
+            .unwrap_or_else(|| "%s's Head".to_owned())
+            .replacen("%s", &self.0, 1)
+    }
+    /// The title as a component, for command feedback.
+    pub fn text(&self) -> crate::text::Text {
+        crate::text::Text::translate(
+            "block.minecraft.player_head.named",
+            &[crate::text::Text::literal(self.0.clone())],
+        )
+    }
+}
+
+/// The name in a player head's `minecraft:profile`, if it has one.
+pub fn player_head_name(stack: &ItemStack) -> Option<PlayerHeadName> {
+    if &*stack.item != "minecraft:player_head" {
+        return None;
+    }
+    Some(PlayerHeadName(stack.profile_name()?))
+}
+
 /// The name line of `stack`, as the item's translation or, for potions and
 /// smithing templates, its name component gives it.
 pub fn name_line(stack: &ItemStack, translate: &dyn Fn(&str) -> Option<String>) -> String {
@@ -226,6 +255,9 @@ pub fn name_line(stack: &ItemStack, translate: &dyn Fn(&str) -> Option<String>) 
     if stack.data().is_some_and(|d| d.ominous_banner) {
         return translate("block.minecraft.ominous_banner")
             .unwrap_or_else(|| "Ominous Banner".to_owned());
+    }
+    if let Some(head) = player_head_name(stack) {
+        return head.title(translate);
     }
     let key = if is_potion_item(&stack.item) {
         Some(crate::brewing::potion_name_key(&stack.item, stack.potion()))
@@ -300,6 +332,130 @@ pub fn instrument_line(
     Some(translate(&key).unwrap_or(key))
 }
 
+/// `TropicalFish.COMMON_VARIANTS`: pattern, base colour and pattern colour of
+/// the 22 named fish (`entity.minecraft.tropical_fish.predefined.<index>`).
+const COMMON_TROPICAL_FISH: [(&str, &str, &str); 22] = [
+    ("stripey", "orange", "gray"),
+    ("flopper", "gray", "gray"),
+    ("flopper", "gray", "blue"),
+    ("clayfish", "white", "gray"),
+    ("sunstreak", "blue", "gray"),
+    ("kob", "orange", "white"),
+    ("spotty", "pink", "light_blue"),
+    ("blockfish", "purple", "yellow"),
+    ("clayfish", "white", "red"),
+    ("spotty", "white", "yellow"),
+    ("glitter", "white", "gray"),
+    ("clayfish", "white", "orange"),
+    ("dasher", "cyan", "pink"),
+    ("brinely", "lime", "light_blue"),
+    ("betty", "red", "white"),
+    ("snooper", "gray", "red"),
+    ("blockfish", "red", "white"),
+    ("flopper", "white", "yellow"),
+    ("kob", "red", "white"),
+    ("sunstreak", "gray", "white"),
+    ("dasher", "cyan", "yellow"),
+    ("flopper", "yellow", "yellow"),
+];
+
+/// `TropicalFish.Pattern.addToTooltip`: a bucket of tropical fish names a
+/// common variant, or else shows the pattern and then the base colour (with
+/// the pattern colour when it differs), all in italic gray. Only a stack that
+/// has the pattern component shows it.
+pub fn tropical_fish_lines(stack: &ItemStack, display: &TooltipDisplay) -> Vec<Text> {
+    if !display.shows("minecraft:tropical_fish/pattern") {
+        return Vec::new();
+    }
+    let Some(data) = stack.data() else {
+        return Vec::new();
+    };
+    let name = |key: &str, default: &'static str| match data.other(key) {
+        Some(Tag::String(s)) => s
+            .to_string_lossy()
+            .trim_start_matches("minecraft:")
+            .to_owned(),
+        _ => default.to_owned(),
+    };
+    let Some(Tag::String(pattern)) = data.other("minecraft:tropical_fish/pattern") else {
+        return Vec::new();
+    };
+    let pattern = pattern
+        .to_string_lossy()
+        .trim_start_matches("minecraft:")
+        .to_owned();
+    let base = name("minecraft:tropical_fish/base_color", "white");
+    let color = name("minecraft:tropical_fish/pattern_color", "white");
+    let styled = |t: Text| t.italic().with_color(GRAY);
+    let common = COMMON_TROPICAL_FISH
+        .iter()
+        .position(|(p, b, c)| *p == pattern && *b == base && *c == color);
+    if let Some(index) = common {
+        let key = format!("entity.minecraft.tropical_fish.predefined.{index}");
+        return vec![styled(Text::translate(&key, &[]))];
+    }
+    let mut colors = Text::translate(&format!("color.minecraft.{base}"), &[]);
+    if base != color {
+        colors = colors
+            .append(", ")
+            .append(Text::translate(&format!("color.minecraft.{color}"), &[]));
+    }
+    vec![
+        styled(Text::translate(
+            &format!("entity.minecraft.tropical_fish.type.{pattern}"),
+            &[],
+        )),
+        styled(colors),
+    ]
+}
+
+/// `MapId.addToTooltip`: a map whose data is not known (`map` is `None`, else
+/// its `locked` flag and `scale`) reads "Unknown Map"; a known one gives its
+/// id (unless it has a custom name or is to be locked or scaled), "Locked"
+/// when it is or is being locked, and with advanced tooltips its scale (a
+/// copy being scaled one up, at most 4) and level.
+pub fn map_id_lines(
+    stack: &ItemStack,
+    display: &TooltipDisplay,
+    advanced: bool,
+    map: Option<(bool, u8)>,
+    translate: &dyn Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let Some(id) = stack.data().and_then(|d| d.map_id) else {
+        return Vec::new();
+    };
+    if !display.shows("minecraft:map_id") {
+        return Vec::new();
+    }
+    let text = |key: &str, fallback: &str| translate(key).unwrap_or_else(|| fallback.to_owned());
+    let Some((locked, scale)) = map else {
+        return vec![text("filled_map.unknown", "Unknown Map")];
+    };
+    // MapPostProcessing: 0 lock, 1 scale.
+    let post = stack.data().and_then(|d| d.map_post_processing);
+    let mut lines = Vec::new();
+    if stack.custom_name().is_none() && post.is_none() {
+        lines.push(text("filled_map.id", "ID #%s").replacen("%s", &id.to_string(), 1));
+    }
+    if locked || post == Some(0) {
+        lines.push(text("filled_map.locked", "Locked"));
+    }
+    if advanced {
+        let scale = (scale + u8::from(post == Some(1))).min(4);
+        lines.push(text("filled_map.scale", "Scaling at 1:%s").replacen(
+            "%s",
+            &(1u32 << scale).to_string(),
+            1,
+        ));
+        lines.push(
+            text("filled_map.level", "(Level %s/%s)")
+                .replacen("%s", &scale.to_string(), 1)
+                .replacen("%s", "4", 1),
+        );
+    }
+    lines
+}
+
 /// `Bees.addToTooltip`: how many bees a hive item holds (a hive item without
 /// the component has the item's default, none).
 pub fn bees_line(
@@ -322,6 +478,51 @@ pub fn bees_line(
         text.replacen("%s", &bees.to_string(), 1)
             .replacen("%s", "3", 1),
     )
+}
+
+/// `TypedEntityData.addToTooltip` for a spawn egg: in Peaceful, the red
+/// "Disabled in Peaceful" under an egg whose entity type is not allowed there
+/// (`EntityType.isAllowedInPeaceful`). The type is the one in the egg's
+/// `entity_data` component, else the egg's own (`zombie_spawn_egg`).
+/// `allowed_in_peaceful` answers for an entity type id; one it does not know
+/// is allowed.
+pub fn spawn_egg_peaceful_line(
+    stack: &ItemStack,
+    peaceful: bool,
+    display: &TooltipDisplay,
+    allowed_in_peaceful: &dyn Fn(&str) -> bool,
+    translate: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
+    if !peaceful || !display.shows("minecraft:entity_data") {
+        return None;
+    }
+    // `TypedEntityData.addToTooltip` hangs on the `entity_data` component, whatever the item;
+    // a spawn egg without the component has its own mob as the default.
+    let id = match stack
+        .data()
+        .and_then(|d| d.other("minecraft:entity_data"))
+        .and_then(|data| data.get("id"))
+    {
+        Some(Tag::String(id)) => {
+            let id = id.to_string_lossy();
+            if id.contains(':') {
+                id
+            } else {
+                format!("minecraft:{id}")
+            }
+        }
+        _ if stack.item.ends_with("_spawn_egg") => format!(
+            "minecraft:{}",
+            stack
+                .item
+                .trim_start_matches("minecraft:")
+                .trim_end_matches("_spawn_egg")
+        ),
+        _ => return None,
+    };
+    (!allowed_in_peaceful(&id)).then(|| {
+        translate("item.spawn_egg.peaceful").unwrap_or_else(|| "item.spawn_egg.peaceful".into())
+    })
 }
 
 /// `BlockItemStateProperties.addToTooltip`: a hive item's honey level (a hive
@@ -1146,6 +1347,37 @@ mod tests {
     }
 
     #[test]
+    fn player_head_names_use_the_profile() {
+        let translate = |key: &str| match key {
+            "block.minecraft.player_head.named" => Some("%s's Head".to_owned()),
+            "block.minecraft.player_head" => Some("Player Head".to_owned()),
+            _ => None,
+        };
+        let mut named = ItemStack::new("minecraft:player_head", 1);
+        named
+            .data_mut()
+            .set_other("minecraft:profile", Some(Tag::String("Notch".into())));
+        assert_eq!(name_line(&named, &translate), "Notch's Head");
+
+        let mut compound = ItemStack::new("minecraft:player_head", 1);
+        compound.data_mut().set_other(
+            "minecraft:profile",
+            Some(Tag::compound([("name", Tag::String("Notch".into()))])),
+        );
+        assert_eq!(name_line(&compound, &translate), "Notch's Head");
+
+        let mut id_only = ItemStack::new("minecraft:player_head", 1);
+        id_only.data_mut().set_other(
+            "minecraft:profile",
+            Some(Tag::compound([("id", Tag::IntArray(vec![1, 2, 3, 4]))])),
+        );
+        assert_eq!(name_line(&id_only, &translate), "Player Head");
+
+        named.data_mut().custom_name = Some(Tag::String("Trophy".into()));
+        assert_eq!(name_line(&named, &translate), "Trophy");
+    }
+
+    #[test]
     fn container_lines_list_five_stacks_then_how_many_more() {
         let mut chest = ItemStack::new("minecraft:chest", 1);
         for slot in [9u8, 1, 2, 3, 4, 5, 6] {
@@ -1401,5 +1633,41 @@ mod tests {
             modifier_line(&lang, "attack_damage", 0.2, 2, false).as_deref(),
             Some("+20% Damage")
         );
+    }
+
+    #[test]
+    fn a_spawn_egg_of_a_monster_says_so_in_peaceful() {
+        let lang =
+            |k: &str| (k == "item.spawn_egg.peaceful").then(|| "Disabled in Peaceful".to_owned());
+        let monsters = |id: &str| !matches!(id, "minecraft:zombie" | "minecraft:creeper");
+        let line = |s: &ItemStack, peaceful| {
+            spawn_egg_peaceful_line(s, peaceful, &TooltipDisplay::for_stack(s), &monsters, &lang)
+        };
+        let zombie = ItemStack::new("minecraft:zombie_spawn_egg", 1);
+        assert_eq!(line(&zombie, true).as_deref(), Some("Disabled in Peaceful"));
+        // Not in Peaceful, or an egg of a mob that is allowed there, or no egg.
+        assert_eq!(line(&zombie, false), None);
+        assert_eq!(
+            line(&ItemStack::new("minecraft:pig_spawn_egg", 1), true),
+            None
+        );
+        assert_eq!(line(&ItemStack::new("minecraft:stone", 1), true), None);
+        // The entity data's type wins over the egg's own.
+        let mut pig = ItemStack::new("minecraft:pig_spawn_egg", 1);
+        pig.data_mut().set_other(
+            "minecraft:entity_data",
+            Some(Tag::compound([(
+                "id",
+                Tag::String("minecraft:creeper".into()),
+            )])),
+        );
+        assert_eq!(line(&pig, true).as_deref(), Some("Disabled in Peaceful"));
+        // Any item with the component, and an id without its namespace.
+        let mut stand = ItemStack::new("minecraft:armor_stand", 1);
+        stand.data_mut().set_other(
+            "minecraft:entity_data",
+            Some(Tag::compound([("id", Tag::String("zombie".into()))])),
+        );
+        assert_eq!(line(&stand, true).as_deref(), Some("Disabled in Peaceful"));
     }
 }

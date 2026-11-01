@@ -686,7 +686,7 @@ impl B {
                     t.begin(cx.lr, cx.now);
                     // start
                     mem(m).path.set_opt(path.clone());
-                    m.nav_move_to_path(path.clone(), f64::from(*speed));
+                    m.nav_move_to_path(cx.w, path.clone(), f64::from(*speed));
                     return true;
                 }
                 let mm = mem(m);
@@ -1027,7 +1027,7 @@ impl B {
                 {
                     *last_target = Some(now_target);
                     mem(m).path.set_opt(path.clone());
-                    m.nav_move_to_path(path.clone(), f64::from(*speed));
+                    m.nav_move_to_path(cx.w, path.clone(), f64::from(*speed));
                 }
             }
             // canStillUse is true: they run their duration.

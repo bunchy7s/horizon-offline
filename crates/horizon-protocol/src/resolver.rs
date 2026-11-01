@@ -1,13 +1,20 @@
 //! Minecraft server DNS redirects (`ServerRedirectHandler` / `ServerNameResolver`).
 //! Port 25565 asks for `_minecraft._tcp.<host>`'s SRV record; no record or a
-//! failed query leaves the original address in use. The protocol handshake
-//! still uses that original address.
+//! failed query leaves the original address in use. Login uses the resolved
+//! host and port; status requests keep the original address.
 use crate::{Error, Result};
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 
 mod dns;
 
-pub(crate) fn resolve(host: &str, port: u16) -> Result<Vec<SocketAddr>> {
+#[derive(Debug)]
+pub(crate) struct Resolved {
+    pub host: String,
+    pub port: u16,
+    pub addresses: Vec<SocketAddr>,
+}
+
+pub(crate) fn resolve(host: &str, port: u16) -> Result<Resolved> {
     resolve_with(host, port, srv_redirect, |host, port| {
         (host, port)
             .to_socket_addrs()
@@ -16,12 +23,14 @@ pub(crate) fn resolve(host: &str, port: u16) -> Result<Vec<SocketAddr>> {
     })
 }
 
+/// `ServerNameResolver.resolveAddress`: keep the selected host and port with
+/// its socket addresses, including a single SRV redirect.
 fn resolve_with(
     host: &str,
     port: u16,
     srv: impl FnOnce(&str) -> Option<(String, u16)>,
     addresses: impl FnOnce(&str, u16) -> Result<Vec<SocketAddr>>,
-) -> Result<Vec<SocketAddr>> {
+) -> Result<Resolved> {
     // Vanilla also asks for `_minecraft._tcp.127.0.0.1`, which never has a
     // record: IP literals and localhost skip the query.
     if port == 25565
@@ -32,9 +41,24 @@ fn resolve_with(
     {
         // No second SRV lookup at the target, and no fallback to the original
         // host when the target is unknown.
-        return addresses(&target, target_port);
+        return Ok(Resolved {
+            addresses: addresses(&target, target_port)?,
+            host: target,
+            port: target_port,
+        });
     }
-    addresses(host, port)
+    Ok(Resolved {
+        addresses: addresses(host, port)?,
+        host: host.to_owned(),
+        port,
+    })
+}
+
+/// Where a server address leads (`ServerRedirectHandler`): its `_minecraft._tcp` SRV target when
+/// the port is 25565 and the host a name, else the host and port as given. No address lookup.
+pub fn server_redirect(host: &str, port: u16) -> (String, u16) {
+    resolve_with(host, port, srv_redirect, |_, _| Ok(Vec::new()))
+        .map_or_else(|_| (host.to_owned(), port), |r| (r.host, r.port))
 }
 
 fn srv_redirect(name: &str) -> Option<(String, u16)> {
@@ -44,6 +68,32 @@ fn srv_redirect(name: &str) -> Option<(String, u16)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Compared with ServerNameResolver by tools/test_server_address_parity.py.
+    #[test]
+    fn login_handshake_address_matches_vanilla() {
+        for (scenario, port, redirected) in [
+            ("direct", 25565, false),
+            ("redirect", 25565, true),
+            ("explicit", 25566, false),
+        ] {
+            let result = resolve_with(
+                "play.example.org",
+                port,
+                |_| redirected.then(|| ("backend.example.org.".into(), 25570)),
+                |_, port| Ok(vec![SocketAddr::from(([127, 0, 0, 1], port))]),
+            )
+            .unwrap();
+            let expected = if redirected {
+                ("backend.example.org.", 25570)
+            } else {
+                ("play.example.org", port)
+            };
+            assert_eq!((result.host.as_str(), result.port), expected);
+            assert_eq!(result.addresses[0].port(), expected.1);
+            println!("server_address={scenario}:{}:{}", result.host, result.port);
+        }
+    }
 
     #[test]
     fn redirects_default_port_even_when_the_original_host_has_no_addresses() {
@@ -61,7 +111,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            result,
+            result.addresses,
             vec!["127.0.0.1:25570".parse::<SocketAddr>().unwrap()]
         );
     }

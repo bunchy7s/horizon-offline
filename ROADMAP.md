@@ -76,9 +76,9 @@ Owner: [levzzz5154](https://github.com/levzzz5154) · Tracking: [#3911](https://
 
 <details><summary>Technical</summary>
 
-One item for all modding work ([#3911](https://github.com/horizon-rust/horizon/issues/3911)), led by levzzz5154 with vladislav_hagen; the order between the parts is theirs. Native mods on stable hook points (game/native_hooks.rs, [#3345](https://github.com/horizon-rust/horizon/issues/3345), [#3346](https://github.com/horizon-rust/horizon/issues/3346), [#3434](https://github.com/horizon-rust/horizon/issues/3434), [#3435](https://github.com/horizon-rust/horizon/issues/3435)) built by the launcher ([#3388](https://github.com/horizon-rust/horizon/issues/3388), [#3855](https://github.com/horizon-rust/horizon/issues/3855)); server-side hooks ([#3878](https://github.com/horizon-rust/horizon/issues/3878), [#3706](https://github.com/horizon-rust/horizon/issues/3706)); mod-owned screens, input and drawing; tools for mod makers (templates, `native.py check`); the registry ([#1634](https://github.com/horizon-rust/horizon/issues/1634), [#1642](https://github.com/horizon-rust/horizon/issues/1642), [#1659](https://github.com/horizon-rust/horizon/issues/1659)); machines with inventories and menus ([#1189](https://github.com/horizon-rust/horizon/issues/1189)); mods that read and change the world through the server. The WebAssembly runtime is removed ([#3350](https://github.com/horizon-rust/horizon/issues/3350), [#3351](https://github.com/horizon-rust/horizon/issues/3351), [#3353](https://github.com/horizon-rust/horizon/issues/3353)). [docs/native-mods.md](docs/native-mods.md).
+One item for all modding work ([#3911](https://github.com/horizon-rust/horizon/issues/3911)), led by levzzz5154 with vladislav_hagen; the order between the parts is theirs. Native mods on stable hook points (game/native_hooks.rs, [#3345](https://github.com/horizon-rust/horizon/issues/3345), [#3346](https://github.com/horizon-rust/horizon/issues/3346), [#3434](https://github.com/horizon-rust/horizon/issues/3434), [#3435](https://github.com/horizon-rust/horizon/issues/3435)) built by the launcher ([#3388](https://github.com/horizon-rust/horizon/issues/3388), [#3855](https://github.com/horizon-rust/horizon/issues/3855)); server-side hooks ([#3878](https://github.com/horizon-rust/horizon/issues/3878), [#3706](https://github.com/horizon-rust/horizon/issues/3706)); mod-owned screens, input and drawing; tools for mod makers (templates, `native.py check`); the registry ([#1634](https://github.com/horizon-rust/horizon/issues/1634), [#1642](https://github.com/horizon-rust/horizon/issues/1642), [#1659](https://github.com/horizon-rust/horizon/issues/1659)); machines with inventories and menus ([#1189](https://github.com/horizon-rust/horizon/issues/1189)); mods that read and change the world through the server. [docs/native-mods.md](docs/native-mods.md).
 
-More: [#3360](https://github.com/horizon-rust/horizon/issues/3360) · [#1596](https://github.com/horizon-rust/horizon/issues/1596) · [#1635](https://github.com/horizon-rust/horizon/issues/1635)
+More: [#3351](https://github.com/horizon-rust/horizon/issues/3351) · [#3353](https://github.com/horizon-rust/horizon/issues/3353) · [#3360](https://github.com/horizon-rust/horizon/issues/3360) · [#1596](https://github.com/horizon-rust/horizon/issues/1596) · [#1635](https://github.com/horizon-rust/horizon/issues/1635)
 
 </details>
 
@@ -326,11 +326,11 @@ A mapping table from intermediary and SRG names so pre-26.1 jars can be classifi
 
 #### A modpack's own resource and shader packs
 
-Importing a modpack also brings the resource packs and shader packs it ships with, where Horizon can use them.
+Imported modpacks carry their resource packs into a profile of their own. Shader-pack conversion is still pending.
 
 <details><summary>Technical</summary>
 
-Porting a pack carries data, assets and worldgen today; the resource packs and shader packs bundled with it are left out. Resource packs can be carried as they are; shader packs go through the converter ([docs/modpacks.md](docs/modpacks.md)).
+Resource-pack carry-over is implemented locally: Modrinth common/client overrides, CurseForge's override folder, installed instances (ZIP and directory packs), and hash-checked indexed ZIP downloads. The launcher keeps profile edits and lets resource-only profiles play; packs are enabled in Resource Packs. Synthetic import and profile tests cover the file pipeline; in-game rendering has not been verified. Shader-pack conversion is still pending, so this combined item remains partial ([docs/modpacks.md](docs/modpacks.md)).
 
 </details>
 
@@ -490,7 +490,7 @@ Small mods written as scripts, in the style of KubeJS, with no compiler.
 
 <details><summary>Technical</summary>
 
-Waits for native mods to settle: the earlier plan ran Lua inside the WebAssembly sandbox, which is removed. A script layer over the native hook points is to be designed.
+Waits for native mods to settle: a script layer over the native hook points is to be designed.
 
 More: [docs/native-mods.md](docs/native-mods.md)
 
@@ -718,7 +718,7 @@ Versions of Horizon for Android, iOS and web browsers. Nothing official yet; con
 
 <details><summary>Technical</summary>
 
-No official build. Android was first closed as not planned, with touch controls, a mobile interface, packaging and loading the player's own assets all missing; the roadmap now includes it, iOS and a WebAssembly build for the browser as long-term goals. First pieces from contributors: `horizon-dualsense` compiling on iOS ([#1813](https://github.com/horizon-rust/horizon/issues/1813)) and helper-thread limits on Android ([#1751](https://github.com/horizon-rust/horizon/issues/1751)). Preparing without Java ([#1750](https://github.com/horizon-rust/horizon/issues/1750)) matters here too. Horizon ships none of Mojang's files on any platform.
+No official build. Android was first closed as not planned, with touch controls, a mobile interface, packaging and loading the player's own assets all missing; the roadmap now includes it, iOS and a build for the browser as long-term goals. First pieces from contributors: `horizon-dualsense` compiling on iOS ([#1813](https://github.com/horizon-rust/horizon/issues/1813)) and helper-thread limits on Android ([#1751](https://github.com/horizon-rust/horizon/issues/1751)). Preparing without Java ([#1750](https://github.com/horizon-rust/horizon/issues/1750)) matters here too. Horizon ships none of Mojang's files on any platform.
 
 </details>
 
@@ -742,13 +742,13 @@ Open: the GUI Scale is clamped to 2 after a restart under Hyprland, while XWayla
 
 </details>
 
-#### AppImage and a Nix flake
+#### A Nix flake
 
-Install Horizon on any Linux distribution as an AppImage, and on NixOS through a Nix flake.
+Install Horizon on NixOS through a Nix flake.
 
 <details><summary>Technical</summary>
 
-A player's idea (#horizon-ideas). An AppImage of the launcher and game from the release workflow, and a flake.nix packaging the release binaries with their runtime libraries (Vulkan loader, X11/Wayland, ALSA), the way horizon-parity's NixOS setup runs them today.
+A player's idea (#horizon-ideas). The launcher's AppImage ships with each launcher release ([packaging/linux/appimage.sh](packaging/linux/appimage.sh)): one file with the libraries GPUI needs, which replaces itself when it updates. A flake.nix packaging the release binaries with their runtime libraries (Vulkan loader, X11/Wayland, ALSA) is still missing, the way horizon-parity's NixOS setup runs them today.
 
 </details>
 

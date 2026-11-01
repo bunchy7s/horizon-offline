@@ -5,6 +5,10 @@ use horizon_client::discord_presence::{self as presence, Dimension, Play, Status
 impl Game<'_> {
     /// Each frame: only a change reaches the presence thread.
     pub(super) fn update_discord_presence(&self) {
+        // One Discord status per computer: P1's, not a splitscreen player's.
+        if self.options.split_guest {
+            return;
+        }
         presence::set(self.discord_status());
     }
     fn discord_status(&self) -> Status {

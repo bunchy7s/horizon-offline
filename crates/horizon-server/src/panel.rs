@@ -107,9 +107,9 @@ fn page_error(status: u16, message: &str) -> Response {
     Response::text(status, "text/html; charset=utf-8", body)
 }
 
-/// The `Host` header names the panel itself: its address, `localhost` on loopback, or a tailnet name
+/// The `Host` header names the panel (or the control API) itself: its address, `localhost` on loopback, or a tailnet name
 /// (a MagicDNS short name or `*.ts.net`, with or without the port when `tailscale serve` passes it on).
-fn host_allowed(host: &str, address: SocketAddr) -> bool {
+pub fn host_allowed(host: &str, address: SocketAddr) -> bool {
     if host == address.to_string() {
         return true;
     }
@@ -174,7 +174,7 @@ fn handle(shared: &Arc<Shared>, address: SocketAddr, request: &Request) -> Respo
         }
         _ => {}
     }
-    if method == "POST" && request.header("x-horizon") != Some("1") {
+    if method != "GET" && request.header("x-horizon") != Some("1") {
         return Response::error(403, "missing the X-Horizon header");
     }
     if (method, path) == ("POST", "/logout") {

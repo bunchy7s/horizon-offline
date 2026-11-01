@@ -247,3 +247,68 @@ fn curseforge_and_modrinth_app_instances_are_their_game_folders() {
     );
     let _ = fs::remove_dir_all(&root);
 }
+
+#[test]
+fn atlauncher_instances_are_read_from_their_instance_json() {
+    // Synthetic folders holding only the fields four real instance.json files agree on.
+    let root = scratch("atl");
+    let forge = json!({"id": "1.20.1", "launcher": {"name": "My Pack", "pack": "Minecraft",
+        "loaderVersion": {"version": "47.3.12", "rawVersion": "1.20.1-47.3.12",
+            "recommended": false, "type": "Forge"}}});
+    let neo = json!({"id": "1.21.1", "launcher": {"name": "Neo",
+        "loaderVersion": {"version": "21.1.219", "type": "NeoForge"}}});
+    let plain = json!({"id": "1.21.1", "launcher": {"name": ""}});
+    let unknown = json!({"id": "1.20.1", "launcher": {"name": "Odd",
+        "loaderVersion": {"version": "1", "type": "SomethingElse"}}});
+    for (dir, doc) in [
+        ("Pack1", &forge),
+        ("Neo", &neo),
+        ("Plain", &plain),
+        ("Odd", &unknown),
+    ] {
+        write(
+            &root.join("instances").join(dir).join("instance.json"),
+            &doc.to_string(),
+        );
+    }
+    write(&root.join("instances/Pack1/mods/a.jar"), "x");
+    write(&root.join("instances/NotOne/readme.txt"), "x");
+    write(
+        &root.join("instances/NoLauncher/instance.json"),
+        r#"{"id": "1.20.1"}"#,
+    );
+    write(
+        &root.join("instances/NoId/instance.json"),
+        r#"{"launcher": {"name": "x"}}"#,
+    );
+    let found = atlauncher_instances(&root);
+    let names: Vec<_> = found.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["My Pack", "Neo", "Odd", "Plain"]);
+    let pack = &found[0];
+    assert_eq!(pack.launcher, "ATLauncher");
+    assert_eq!(pack.minecraft.as_deref(), Some("1.20.1"));
+    assert_eq!(pack.loader.as_ref().unwrap().name, "forge");
+    assert_eq!(pack.loader.as_ref().unwrap().version, "47.3.12");
+    assert_eq!(pack.game, root.join("instances/Pack1"));
+    assert_eq!(found[1].loader.as_ref().unwrap().name, "neoforge");
+    assert!(found[2].loader.is_none());
+    assert!(found[3].loader.is_none());
+    assert_eq!(in_folder(&root, None).len(), 4);
+    assert_eq!(in_folder(&root.join("instances"), None).len(), 4);
+    assert_eq!(in_folder(&root.join("instances/Pack1"), None).len(), 1);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn atlauncher_loader_types_match_whatever_the_case() {
+    for (kind, want) in [
+        ("fabric", "fabric"),
+        ("Quilt", "quilt"),
+        ("NEOFORGE", "neoforge"),
+    ] {
+        let launcher = json!({"loaderVersion": {"type": kind, "version": "1.0"}});
+        assert_eq!(atlauncher_loader(&launcher).unwrap().name, want);
+    }
+    assert!(atlauncher_loader(&json!({"loaderVersion": {"type": "Forge"}})).is_none());
+    assert!(atlauncher_loader(&json!({})).is_none());
+}

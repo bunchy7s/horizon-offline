@@ -214,11 +214,16 @@ pub fn needs_repair_in(data: &Path, path: Option<&OsStr>) -> bool {
 }
 
 /// What the entry starts: a distributor's wrapper (`HORIZON_LAUNCHER_DESKTOP_EXEC`) when one is
-/// configured, else the binary at `exe`.
+/// configured, else the AppImage the launcher runs from (the copy `current_exe` names is inside its
+/// mount, gone once the launcher exits), else the binary at `exe`.
 pub(crate) fn target(exe: &Path) -> PathBuf {
+    target_from(exe, crate::backend::appimage_path().as_deref())
+}
+
+fn target_from(exe: &Path, appimage: Option<&Path>) -> PathBuf {
     std::env::var_os("HORIZON_LAUNCHER_DESKTOP_EXEC")
         .filter(|path| !path.is_empty())
-        .map_or_else(|| exe.to_path_buf(), PathBuf::from)
+        .map_or_else(|| appimage.unwrap_or(exe).to_path_buf(), PathBuf::from)
 }
 
 /// Registers the launcher whatever entry is there: for the player turning it on (the Settings
@@ -334,5 +339,18 @@ mod tests {
         fs::write(&entry, "[Desktop Entry]\nName=Horizon\n").unwrap();
         assert!(needs_repair_in(&data, path));
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Inside an AppImage the entry starts the AppImage, not the copy in its mount, which is gone
+    /// when the launcher exits.
+    #[test]
+    fn an_appimage_entry_starts_the_appimage() {
+        let exe = Path::new("/tmp/.mount_Horizon123/usr/bin/horizon-launcher");
+        let appimage = Path::new("/home/a b/Horizon.AppImage");
+        assert_eq!(target_from(exe, Some(appimage)), appimage);
+        assert_eq!(target_from(exe, None), exe);
+        // Quoted, so the space in the player's folder survives.
+        assert!(launcher_entry(&target_from(exe, Some(appimage)))
+            .contains("Exec=\"/home/a b/Horizon.AppImage\"\n"));
     }
 }

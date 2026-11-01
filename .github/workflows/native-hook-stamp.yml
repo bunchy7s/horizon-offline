@@ -1,0 +1,55 @@
+name: native hook stamp
+# Opens a PR that numbers pending fragments after they merge. Only pushes to
+# main run main's own tool; fragments are read as data, not PR code.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/native-hook-fragments/*.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-hook-stamp
+  cancel-in-progress: false
+
+jobs:
+  stamp:
+    if: github.repository == 'horizon-rust/horizon'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Open a stamp pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          branch=automation/native-hook-stamp
+          if [ -n "$(gh pr list --state open --head "$branch" --json number --jq '.[0].number // empty')" ]; then
+            echo "A stamp pull request is already open."
+            exit 0
+          fi
+          python3 tools/stamp_native_hooks.py
+          if git diff --quiet; then
+            echo "No fragments to stamp."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -b "$branch"
+          git add -u
+          git commit -m 'Stamp native hook API fragments'
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch"
+          fi
+          git push --force-with-lease origin "$branch"
+          gh pr create --base main --head "$branch" --title 'Stamp native hook API fragments' --body 'Assign API numbers to the pending native hook fragments. Close and reopen this PR to run CI.'

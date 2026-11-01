@@ -11,5 +11,12 @@
   "horizon.options.look_deadzone": "Мертва зона огляду",
   "horizon.options.button_glyphs": "Значки кнопок",
   "horizon.options.menu_navigation": "Навігація в меню",
-  "horizon.options.on_screen_keyboard": "Екранна клавіатура"
+  "horizon.options.on_screen_keyboard": "Екранна клавіатура",
+  "horizon.multiplayer.finding_friend": "Шукаємо світ друга…",
+  "horizon.loading.opening_world": "Відкриття світу",
+  "horizon.loading.cancelling_world": "Скасування",
+  "horizon.multiplayer.not_signed_in": "Цей сервер працює в онлайн-режимі. Увійдіть за допомогою акаунта Microsoft у лаунчері Horizon, щоб приєднатися.",
+  "horizon.multiplayer.invalid_address": "Недійсна адреса сервера: %s",
+  "horizon.multiplayer.connected_friend_direct": "Пряме з'єднання з другом встановлено…",
+  "horizon.multiplayer.connected_friend_relay": "З'єднання з другом через ретранслятор…"
 }

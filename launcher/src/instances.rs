@@ -79,6 +79,57 @@ impl Icon {
     }
 }
 
+/// An instance's own picture, in its game folder: one the player chose, or its modpack's icon.
+/// Drawn instead of [`Meta::icon`] while it is there.
+pub const PICTURE: &str = "icon.png";
+/// How many pixels a side a picture is kept at: twice the largest it is drawn.
+pub const PICTURE_SIDE: u32 = 128;
+
+/// Any image file's `bytes` as a picture: PNG, scaled down to fit [`PICTURE_SIDE`].
+pub fn picture(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+    crate::browser::images::fit_png(bytes, PICTURE_SIDE, 8192, 256 << 20).ok_or_else(|| {
+        "That file isn't a picture the launcher can read (PNG, JPEG, GIF, WebP).".into()
+    })
+}
+
+/// Keeps `png` (made by [`picture`]) as the picture of the instance playing in `home`, or, with
+/// None, gives its picture to `to_trash`.
+pub fn set_picture(
+    home: &Path,
+    png: Option<&[u8]>,
+    to_trash: &dyn Fn(&Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let target = home.join(PICTURE);
+    let Some(png) = png else {
+        return if target.is_file() {
+            to_trash(&target)
+        } else {
+            Ok(())
+        };
+    };
+    fs::create_dir_all(home).map_err(|e| format!("{}: {e}", home.display()))?;
+    let part = home.join("icon.png.part");
+    fs::write(&part, png).map_err(|e| format!("{}: {e}", part.display()))?;
+    fs::rename(&part, &target).map_err(|e| format!("{}: {e}", target.display()))
+}
+
+/// Makes the icon at `url` (a modpack's, from the source it was installed from) the picture of the
+/// instance playing in `home`, unless it has one already. Best effort: a pack without its icon
+/// still plays.
+pub fn adopt_icon(home: &Path, url: &str) {
+    if home.join(PICTURE).exists() {
+        return;
+    }
+    let image = crate::browser::images::fetch(&backend::data_dir(), url, PICTURE_SIDE);
+    let png = image
+        .ok()
+        .and_then(|f| fs::read(f).ok())
+        .and_then(|b| picture(b).ok());
+    if let Some(png) = png {
+        let _ = set_picture(home, Some(&png), &|_| Ok(()));
+    }
+}
+
 /// The player's choices about one instance.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Meta {

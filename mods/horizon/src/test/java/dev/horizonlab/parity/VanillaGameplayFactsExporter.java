@@ -26,8 +26,8 @@ public final class VanillaGameplayFactsExporter {
         return result;
     }
 
-    private static JsonArray states() {
-        var states = new JsonArray();
+    /** Writes each state as it is read: the whole file (56 MB) never sits in memory. */
+    private static void states(Gson gson, com.google.gson.stream.JsonWriter out) throws java.io.IOException {
         var level = EmptyBlockGetter.INSTANCE;
         for (var state : Block.BLOCK_STATE_REGISTRY) {
             var o = new JsonObject();
@@ -89,16 +89,24 @@ public final class VanillaGameplayFactsExporter {
             sounds.add("hit", sound(sound.getHitSound()));
             sounds.add("fall", sound(sound.getFallSound()));
             o.add("sound", sounds);
-            states.add(o);
+            gson.toJson(o, out);
         }
-        return states;
     }
 
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
-        var result = new JsonObject();
-        result.add("states", states());
-        Files.writeString(Path.of(args[0]), new Gson().toJson(result), StandardCharsets.UTF_8);
+        // The same bytes Gson.toJson(JsonElement) gives for {"states": [...]}.
+        var gson = new Gson();
+        // Streamed beside the target and moved over it when whole: a run stopped halfway leaves
+        // no short file for the next preparation to keep.
+        var target = Path.of(args[0]);
+        var partial = target.resolveSibling(target.getFileName() + ".partial");
+        try (var out = gson.newJsonWriter(Files.newBufferedWriter(partial, StandardCharsets.UTF_8))) {
+            out.beginObject().name("states").beginArray();
+            states(gson, out);
+            out.endArray().endObject();
+        }
+        Files.move(partial, target, StandardCopyOption.REPLACE_EXISTING);
     }
 }

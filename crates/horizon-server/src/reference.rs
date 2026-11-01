@@ -170,7 +170,7 @@ fn the_reference_lists_every_setting() {
 fn the_routes_table_matches_the_code() {
     let source = include_str!("api.rs");
     let mut answered: Vec<(String, String)> = Vec::new();
-    for method in ["GET", "POST"] {
+    for method in ["GET", "POST", "PATCH", "DELETE"] {
         let open = format!("(\"{method}\", \"/api/v1/");
         for (at, _) in source.match_indices(&open) {
             let rest = &source[at + open.len()..];

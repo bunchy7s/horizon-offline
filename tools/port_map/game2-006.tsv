@@ -1,7 +1,7 @@
 FireworkRocketEntity.<init>	port	crates/horizon-client/src/game/fireworks.rs::Game::new_rocket	launch velocity triangle and lifetime 10*(1+flight)+randoms; the owner and attached target are set by the callers
 FireworkRocketEntity.defineSynchedData	skip:java		SynchedEntityData definitions; Horizon keeps the rocket fields on the Rocket struct
 FireworkRocketEntity.shouldRender	port	crates/horizon-client/src/game/fireworks.rs::Game::rocket_geometry	attached rockets are not drawn; camera range is the caller's check
-FireworkRocketEntity.onHitEntity	missing		player: a firework shot from a crossbow or dispenser flies through mobs and bursts only on a block or at its timer end; Horizon has no entity hit test for rockets
+FireworkRocketEntity.onHitEntity	port	crates/horizon-client/src/game/fireworks.rs::Game::tick_rockets	a rocket fired from a crossbow or dispenser tests entity hits in flight and bursts on what it strikes
 FireworkRocketEntity.onHitBlock	inline	crates/horizon-client/src/game/fireworks.rs::Game::tick_rockets	a block hit ends the angled rocket early and explodes it; vanilla explodes only when it has explosions and skips the block entityInside effect
 FireworkRocketEntity.dealExplosionDamage	port	crates/horizon-client/src/game/fireworks.rs::Game::explode_rocket	damage 5+2 per explosion; attached target takes the full blast, others within 5 blocks with line of sight
 FireworkRocketEntity.addAdditionalSaveData	missing		minor: rocket life, lifetime and item are not written to a save; Horizon does not save flying rockets
@@ -36,7 +36,7 @@ Projectile.applyOnProjectileSpawned	port	crates/horizon-client/src/game/enchant_
 Projectile.hitTargetOrDeflectSelf	port	crates/horizon-client/src/game/creatures.rs::Game::tick_projectiles	gap: minor: deflection is checked for breezes only; the onHit dispatch is creatures.rs projectile_hit
 Projectile.onRedirectProjectile	port	crates/horizon-client/src/game/deflect.rs::Game::deflect	gap: minor: the player's attack turns the projectile; a projectile hitting another redirectable one is not modelled
 Projectile.recreateFromPacket	port	crates/horizon-client/src/game/remote_projectiles.rs::Game::spawn_remote_projectile	the owner id from the add-entity data is set on the remote projectile
-Projectile.mayBreak	missing		player: a projectile hitting a decorated pot, chorus flower or pointed dripstone does not break it; no projectile break path found
+Projectile.mayBreak	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_breaks_block	impact projectiles break chorus flowers, decorated pots (cracked first) and speleothems, gated on mayInteract, mayBreak and the projectiles_can_break_blocks rule
 Projectile.calculateHorizontalHurtKnockbackDirection	inline	crates/horizon-client/src/game/creatures.rs::Game::projectile_hit	gap: minor: knockback goes from the shot's previous point, while vanilla uses the projectile's horizontal motion
 ProjectileUtil.getHitResultOnMoveVector	port	crates/horizon-client/src/projectiles.rs::Projectile::tick	sweep along the movement: block clip, then entity boxes; gap: minor: entity margin is a fixed 0.3, vanilla ramps it up over the first ticks
 ProjectileUtil.getHitResultOnViewVector	port	crates/horizon-client/src/game/pick_entity.rs::pick_entity_hit	gap: minor: the brush reach is the caller's; there is no separate view-vector trace
@@ -48,7 +48,7 @@ ShulkerBullet.readAdditionalSaveData	missing		minor: the final target and move d
 ShulkerBullet.canHitEntity	missing		minor: no-physics entities are not skipped by the bullet's target search; Projectile::tick checks owner and boxes only
 ShulkerBullet.onHitBlock	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_hit	shulker bullet block hit: hit sound and two explosion particles at the bullet
 ShulkerBullet.destroy	inline	crates/horizon-client/src/game/creatures.rs::Game::tick_projectiles	the bullet is dropped from the flight list on any hit; the game event is not sent
-ShulkerBullet.hurtServer	missing		player: a hit on a shulker bullet does not pop it (no hurt path for projectiles), so it keeps flying until it hits something else
+ShulkerBullet.hurtServer	port	crates/horizon-client/src/game/deflect.rs::Game::hit_shulker_bullet	
 ThrowableProjectile.applyInertia	port	crates/horizon-client/src/projectiles.rs::Projectile::tick	default arm: gravity, then drag 0.8 in water and 0.99 in air; gap: minor: no bubble particles in water
 ThrowableProjectile.handleFirstTickBubbleColumn	missing		minor: a thrown item that spawns inside a bubble column is not pushed on its first tick
 AbstractArrow.<init>	port	crates/horizon-client/src/arrows.rs::ArrowState::new	arrow defaults: pickup, pickup item, shake, pierce; the owner and drawn ammo come from set_owner and set_item
@@ -70,9 +70,9 @@ AbstractArrow.setPickupItemStack	port	crates/horizon-client/src/arrows.rs::Arrow
 AbstractArrow.isNoPhysics	inline	crates/horizon-client/src/arrows.rs::Ticker::tick	no_physics is a field read by the tick
 AbstractArrow.getSlot	missing		minor: the arrow's pickup stack is not reachable as an entity slot, so item commands on it do nothing
 AbstractArrow.Pickup.byOrdinal	port	crates/horizon-client/src/arrows.rs::Pickup::from_byte	out of range is DISALLOWED
-Arrow.updateColor	missing		player: a tipped arrow keeps no potion colour, so its flight and hit particles are not tinted
-Arrow.makeParticle	missing		player: a tipped arrow in flight leaves no coloured entity-effect trail
-Arrow.handleEntityEvent	missing		player: a tipped arrow that hits does not burst into its potion colour (event 0 has no port)
+Arrow.updateColor	port	crates/horizon-client/src/projectiles.rs::Projectile::arrow_effect_color	the tipped arrow's opaque potion colour for its flight and hit particles (-1 for none)
+Arrow.makeParticle	port	crates/horizon-client/src/game/remote_projectiles.rs::Game::arrow_makeparticle	ticked in #3514; `Arrow.makeParticle` is cited at crates/horizon-client/src/game/remote_projectiles.rs:218
+Arrow.handleEntityEvent	port	crates/horizon-client/src/game/remote_projectiles.rs::Game::remote_arrow_puff	ticked in #3514; `Arrow.handleEntityEvent` is cited at crates/horizon-client/src/game/remote_projectiles.rs:242
 ThrownTrident.defineSynchedData	skip:java		loyalty and foil synced fields; Horizon keeps loyalty on the trident struct
 ThrownTrident.isAcceptibleReturnOwner	port	crates/horizon-client/src/game/trident.rs::Game::tick_tridents	the loyalty return needs the owner's eye position; gap: minor: no separate alive or spectator check
 ThrownTrident.findHitEntities	port	crates/horizon-client/src/arrows.rs::Ticker::step_move_and_hit	one entity hit per trident, none once it has dealt damage
@@ -101,7 +101,7 @@ ThrownEnderpearl.isAllowedToTeleportOwner	missing		minor: a pearl whose owner is
 ThrownEnderpearl.playSound	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_hit	teleport sound at the landing point
 ThrownEnderpearl.teleport	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_hit	moves the player to the pearl's previous position and clears velocity and fall distance
 ThrownEnderpearl.canTeleport	missing		minor: a pearl from the End to the Overworld needs the owner's seen-credits flag before it may teleport
-ThrownEnderpearl.onInsideBlock	missing		player: a pearl that flies into an end gateway does not send its owner through it
+ThrownEnderpearl.onInsideBlock	port	crates/horizon-client/src/game/end.rs::Game::pearl_owner_in_gateway	a pearl that flies into an End gateway sends its owner through and fires enter_block
 Raid.<init>	port	crates/horizon-client/src/raid.rs::Raid::new	centre, difficulty-based group count, cooldown and active flag
 Raid.getAllRaiders	port	crates/horizon-client/src/game/raids.rs::Game::raid_members	the raiders of this raid, from the mobs carrying its id
 Raid.getValidSpawnPos	port	crates/horizon-client/src/raid.rs::Raid::find_spawn_pos	eight tries around the centre, as findRandomSpawnPos(level, 8)

@@ -57,9 +57,8 @@ impl Game<'_> {
             state.session.update_special_prices();
         }
         let title = self.merchant_display_name(&state);
-        // The container or workstation the trading screen replaces is closed.
-        self.guest_container_closed(host, conn);
-        self.lan_station_closed(host, conn, None);
+        // ServerPlayer.openMenu closes the menu that was open.
+        self.guest_close_all(host, conn);
         let Some(window) = host.hub.open_merchant_window(conn, title) else {
             self.merchant_closed(&mut state);
             return;
@@ -350,28 +349,37 @@ impl Game<'_> {
         self.merchant_closed(&mut gm.merchant);
         true
     }
+    /// `Merchant.stillValid` for a trader: it is alive and the guest is within
+    /// the entity interaction range plus 4 of its box.
+    pub(super) fn lan_merchant_valid(
+        &self,
+        g: &horizon_client::lan::guest::Guest,
+        id: u32,
+    ) -> bool {
+        self.mobs
+            .iter()
+            .find(|m| m.id == id)
+            .is_some_and(|m| m.alive() && guest_within_entity_range(g, &m.bounds(), 4.0))
+    }
     /// `Villager.customServerAiStep` for the guests' trading villagers: the
     /// TRADE reputation event, then the prices follow.
     pub(super) fn lan_merchant_tick(&mut self, host: &mut LanHost) {
         // `AbstractVillager.stillValid`: the trade screen closes once the trader
         // is gone or dead, or the guest is more than 4 blocks past its reach.
-        let far: Vec<(u32, i32)> =
-            host.play
-                .iter()
-                .filter_map(|(conn, p)| {
-                    let gm = p.merchant.as_ref()?;
-                    let id = gm.merchant.mob?;
-                    let g = host
-                        .hub
-                        .guests
-                        .iter()
-                        .find(|g| g.conn == *conn && host.hub.here(g))?;
-                    let valid = self.mobs.iter().find(|m| m.id == id).is_some_and(|m| {
-                        m.alive() && guest_within_entity_range(g, &m.bounds(), 4.0)
-                    });
-                    (!valid).then_some((*conn, gm.window))
-                })
-                .collect();
+        let far: Vec<(u32, i32)> = host
+            .play
+            .iter()
+            .filter_map(|(conn, p)| {
+                let gm = p.merchant.as_ref()?;
+                let id = gm.merchant.mob?;
+                let g = host
+                    .hub
+                    .guests
+                    .iter()
+                    .find(|g| g.conn == *conn && host.hub.here(g))?;
+                (!self.lan_merchant_valid(g, id)).then_some((*conn, gm.window))
+            })
+            .collect();
         for (conn, window) in far {
             if self.lan_merchant_closed(host, conn, Some(window)) {
                 host.hub.send_to(

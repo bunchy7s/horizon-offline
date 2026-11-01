@@ -342,6 +342,28 @@ pub fn mouse_position_after_grab_change(
     }
 }
 
+/// `MacosUtil.setCtrlClickEmulatesRightClick`: with the option on (and only on
+/// macOS), a left click made with Control held is a right click, and so is
+/// its release, whatever Control does in between.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RightClickEmulation {
+    emulating: bool,
+}
+impl RightClickEmulation {
+    /// Whether the left button's `pressed` or released event is a right click.
+    /// `enabled` is the option on macOS.
+    pub fn is_right_click(&mut self, pressed: bool, control: bool, enabled: bool) -> bool {
+        if pressed {
+            self.emulating = enabled && control;
+        }
+        let right = self.emulating;
+        if !pressed {
+            self.emulating = false;
+        }
+        right
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,5 +547,22 @@ mod tests {
             mouse_position_after_grab_change(true, true, [1920, 1080], 1.0),
             None
         );
+    }
+
+    #[test]
+    fn control_click_is_a_right_click_until_released() {
+        let mut e = RightClickEmulation::default();
+        // The option off, or no Control: a left click stays one.
+        assert!(!e.is_right_click(true, true, false));
+        assert!(!e.is_right_click(false, true, false));
+        assert!(!e.is_right_click(true, false, true));
+        assert!(!e.is_right_click(false, true, true));
+        // Control held at the press: the press and the release are right clicks,
+        // even when Control was let go before the release.
+        assert!(e.is_right_click(true, true, true));
+        assert!(e.is_right_click(false, false, true));
+        // The next left click is its own.
+        assert!(!e.is_right_click(true, false, true));
+        assert!(!e.is_right_click(false, false, true));
     }
 }

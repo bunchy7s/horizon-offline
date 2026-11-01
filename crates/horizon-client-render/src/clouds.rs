@@ -169,11 +169,13 @@ impl Mesh {
             let x0 = dx as f32 * 12.0;
             let z0 = dz as f32 * 12.0;
             let (x1, z1, y0, y1) = (x0 + 12.0, z0 + 12.0, 0.0, 4.0);
-            let mut quad = |p: [[f32; 3]; 4], shade: u32| {
+            // The face's normal is for shader packs (`gl_Normal`); the game's clouds shade by
+            // `shade`.
+            let mut quad = |p: [[f32; 3]; 4], shade: u32, normal: [i8; 4]| {
                 for v in p {
                     // Overlay 4: clouds (unlit, faded by the cloud fog end).
                     self.vertices.push(crate::mesher::Vertex {
-                        normal: [0; 4],
+                        normal,
                         pos: v,
                         uv,
                         layer: 4,
@@ -186,17 +188,41 @@ impl Mesh {
             };
             if input.fast {
                 for p in flat_cell(x0, z0, 0.0) {
-                    quad(p, 0);
+                    quad(p, 0, [0; 4]);
                 }
                 continue;
             }
             let quads = [
-                ([[x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y0, z0]], 1),
-                ([[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]], 0),
-                ([[x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0]], 2),
-                ([[x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [x0, y0, z1]], 2),
-                ([[x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [x0, y0, z0]], 3),
-                ([[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]], 3),
+                (
+                    [[x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y0, z0]],
+                    1,
+                    [0, -127, 0, 0],
+                ),
+                (
+                    [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]],
+                    0,
+                    [0, 127, 0, 0],
+                ),
+                (
+                    [[x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0]],
+                    2,
+                    [0, 0, -127, 0],
+                ),
+                (
+                    [[x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [x0, y0, z1]],
+                    2,
+                    [0, 0, 127, 0],
+                ),
+                (
+                    [[x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [x0, y0, z0]],
+                    3,
+                    [-127, 0, 0, 0],
+                ),
+                (
+                    [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]],
+                    3,
+                    [127, 0, 0, 0],
+                ),
             ];
             let mask = face_mask(
                 dx as i32,
@@ -210,8 +236,12 @@ impl Mesh {
                 ],
             );
             for (direction, inside) in faces(mask) {
-                let (p, shade) = quads[usize::from(direction)];
-                quad(if inside { [p[3], p[2], p[1], p[0]] } else { p }, shade);
+                let (p, shade, n) = quads[usize::from(direction)];
+                if inside {
+                    quad([p[3], p[2], p[1], p[0]], shade, n.map(|c| -c));
+                } else {
+                    quad(p, shade, n);
+                }
             }
         }
         self.key = Some(key);

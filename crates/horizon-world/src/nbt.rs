@@ -21,9 +21,10 @@ impl JavaString {
 
 pub type Compound = BTreeMap<JavaString, Tag>;
 
-/// Float and double variants hold their IEEE bit patterns. Java canonicalizes
-/// NaNs on binary output. Loading, like vanilla's valueOf factories, normalizes
-/// negative zero to positive zero.
+/// Float and double variants hold their IEEE bit patterns. Java's disk output
+/// canonicalizes NaNs (`DataOutputStream.writeFloat`); its network output
+/// keeps their bits (Netty's `ByteBuf.writeFloat`). Loading, like vanilla's
+/// valueOf factories, normalizes negative zero to positive zero.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Tag {
     End,
@@ -209,34 +210,13 @@ impl<'a> Reader<'a, '_> {
     fn string(&mut self) -> Result<JavaString, Error> {
         let len = u16::from_be_bytes(self.number()?) as usize;
         let bytes = self.take(len)?;
-        let mut units = Vec::with_capacity(len);
-        let mut i = 0;
-        while i < bytes.len() {
-            let b = bytes[i];
-            let (unit, size) = match b {
-                0..=127 => (u16::from(b), 1),
-                192..=223 if i + 1 < len && bytes[i + 1] & 0xc0 == 0x80 => {
-                    ((u16::from(b & 31) << 6) | u16::from(bytes[i + 1] & 63), 2)
-                }
-                224..=239
-                    if i + 2 < len
-                        && bytes[i + 1] & 0xc0 == 0x80
-                        && bytes[i + 2] & 0xc0 == 0x80 =>
-                {
-                    (
-                        (u16::from(b & 15) << 12)
-                            | (u16::from(bytes[i + 1] & 63) << 6)
-                            | u16::from(bytes[i + 2] & 63),
-                        3,
-                    )
-                }
-                _ => return Err(self.error("invalid Java modified UTF-8")),
-            };
-            // Match DataInput.readUTF, including accepted overlong sequences.
-            units.push(unit);
-            i += size;
-        }
-        Ok(JavaString(units))
+        modified_utf8(bytes).ok_or_else(|| self.error("invalid Java modified UTF-8"))
+    }
+    /// `StringTag.skipString`: vanilla skips a file root's name unread, so a
+    /// name that isn't modified UTF-8 is read as empty rather than refused.
+    fn root_name(&mut self) -> Result<JavaString, Error> {
+        let len = u16::from_be_bytes(self.number()?) as usize;
+        Ok(modified_utf8(self.take(len)?).unwrap_or_default())
     }
     fn payload(&mut self, id: u8, depth: usize) -> Result<Tag, Error> {
         if self.nodes >= self.limits.max_nodes {
@@ -404,6 +384,38 @@ impl ListElements<'_, '_, '_> {
     }
 }
 
+/// `DataInput.readUTF`'s decoding, accepting its overlong sequences; `None`
+/// for bytes that aren't modified UTF-8.
+fn modified_utf8(bytes: &[u8]) -> Option<JavaString> {
+    let len = bytes.len();
+    let mut units = Vec::with_capacity(len);
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        let (unit, size) = match b {
+            0..=127 => (u16::from(b), 1),
+            192..=223 if i + 1 < len && bytes[i + 1] & 0xc0 == 0x80 => {
+                ((u16::from(b & 31) << 6) | u16::from(bytes[i + 1] & 63), 2)
+            }
+            224..=239
+                if i + 2 < len && bytes[i + 1] & 0xc0 == 0x80 && bytes[i + 2] & 0xc0 == 0x80 =>
+            {
+                (
+                    (u16::from(b & 15) << 12)
+                        | (u16::from(bytes[i + 1] & 63) << 6)
+                        | u16::from(bytes[i + 2] & 63),
+                    3,
+                )
+            }
+            _ => return None,
+        };
+        // Match DataInput.readUTF, including accepted overlong sequences.
+        units.push(unit);
+        i += size;
+    }
+    Some(JavaString(units))
+}
+
 /// Read a file root (type, modified-UTF name, payload), returning bytes consumed.
 pub fn read_named(bytes: &[u8], limits: Limits) -> Result<(NamedTag, usize), Error> {
     let mut reader = Reader {
@@ -417,7 +429,7 @@ pub fn read_named(bytes: &[u8], limits: Limits) -> Result<(NamedTag, usize), Err
     let name = if id == 0 {
         JavaString::default()
     } else {
-        reader.string()?
+        reader.root_name()?
     };
     let tag = reader.payload(id, 0)?;
     Ok((NamedTag { name, tag }, reader.offset))
@@ -445,7 +457,7 @@ pub fn read_named_streaming(
     let name = if id == 0 {
         JavaString::default()
     } else {
-        reader.string()?
+        reader.root_name()?
     };
     let tag = reader.payload(id, 0)?;
     Ok((NamedTag { name, tag }, reader.offset))
@@ -469,6 +481,13 @@ struct Writer {
     bytes: Vec<u8>,
     limits: Limits,
     nodes: usize,
+    /// `NbtIo.StringFallbackDataOutput`, the disk writer's: a string too long
+    /// for modified UTF-8 is written empty and the rest of the tree goes on.
+    /// shortcut: vanilla also logs "Failed to write NBT String"; this crate has no logger.
+    empty_long_strings: bool,
+    /// `DataOutputStream.writeFloat`/`writeDouble` (`floatToIntBits`): a NaN
+    /// is written as the canonical one. The network writer keeps its bits.
+    canonical_nan: bool,
 }
 impl Writer {
     fn error(&self, reason: &'static str) -> Error {
@@ -498,8 +517,12 @@ impl Writer {
                 _ => 3,
             })
             .sum();
-        let len =
-            u16::try_from(len).map_err(|_| self.error("modified UTF-8 exceeds 65535 bytes"))?;
+        let Ok(len) = u16::try_from(len) else {
+            if self.empty_long_strings {
+                return self.put(&0u16.to_be_bytes());
+            }
+            return Err(self.error("modified UTF-8 exceeds 65535 bytes"));
+        };
         self.put(&len.to_be_bytes())?;
         for &c in &string.0 {
             match c {
@@ -529,7 +552,7 @@ impl Writer {
             Tag::Int(v) => self.put(&v.to_be_bytes())?,
             Tag::Long(v) => self.put(&v.to_be_bytes())?,
             Tag::Float(v) => self.put(
-                &if f32::from_bits(*v).is_nan() {
+                &if self.canonical_nan && f32::from_bits(*v).is_nan() {
                     0x7fc0_0000_u32
                 } else {
                     *v
@@ -537,7 +560,7 @@ impl Writer {
                 .to_be_bytes(),
             )?,
             Tag::Double(v) => self.put(
-                &if f64::from_bits(*v).is_nan() {
+                &if self.canonical_nan && f64::from_bits(*v).is_nan() {
                     0x7ff8_0000_0000_0000_u64
                 } else {
                     *v
@@ -609,11 +632,15 @@ impl Writer {
     }
 }
 
+/// `NbtIo.write`: a file root. A string too long for modified UTF-8 is
+/// written empty, as vanilla's disk writer does; [`write_network`] refuses it.
 pub fn write_named(root: &NamedTag, limits: Limits) -> Result<Vec<u8>, Error> {
     let mut writer = Writer {
         bytes: Vec::new(),
         limits,
         nodes: 0,
+        empty_long_strings: true,
+        canonical_nan: true,
     };
     writer.put(&[root.tag.id()])?;
     if root.tag.id() != 0 {
@@ -628,6 +655,8 @@ pub fn write_network(tag: &Tag, limits: Limits) -> Result<Vec<u8>, Error> {
         bytes: Vec::new(),
         limits,
         nodes: 0,
+        empty_long_strings: false,
+        canonical_nan: false,
     };
     writer.put(&[tag.id()])?;
     writer.payload(tag, 0)?;
@@ -831,6 +860,62 @@ impl Snbt<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// `NbtIo.write` (`StringFallbackDataOutput`) writes a string too long for
+    /// modified UTF-8 empty and goes on (#5064); the network writer refuses
+    /// it. Vanilla 26.3's bytes for `{s: 32768 x U+0000}` (65536 encoded).
+    #[test]
+    fn the_disk_writer_empties_a_string_too_long_for_modified_utf8() {
+        let long = Tag::String(JavaString(vec![0; 32768]));
+        let root = NamedTag {
+            name: "".into(),
+            tag: Tag::compound([("s", long.clone())]),
+        };
+        assert_eq!(
+            write_named(&root, Limits::saved()).unwrap(),
+            [0x0a, 0, 0, 0x08, 0, 1, b's', 0, 0, 0]
+        );
+        assert!(write_network(&root.tag, Limits::saved()).is_err());
+        // The rest of the tree is kept.
+        let root = NamedTag {
+            name: "".into(),
+            tag: Tag::compound([
+                ("before", Tag::String("kept".into())),
+                ("long", long),
+                ("after", Tag::Int(7)),
+            ]),
+        };
+        let bytes = write_named(&root, Limits::saved()).unwrap();
+        let back = read_named(&bytes, Limits::saved()).unwrap().0.tag;
+        assert_eq!(back.get("before"), Some(&Tag::String("kept".into())));
+        assert_eq!(back.get("long"), Some(&Tag::String("".into())));
+        assert_eq!(back.get("after"), Some(&Tag::Int(7)));
+    }
+    /// `NbtIo.readUnnamedTag` skips the root's name unread
+    /// (`StringTag.skipString`), so a name that isn't modified UTF-8 still
+    /// loads (#5064). Vanilla 26.3 reads these bytes the same way.
+    #[test]
+    fn a_root_name_that_is_not_modified_utf8_is_skipped() {
+        let hex = |s: &str| -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        };
+        let (root, used) = read_named(&hex("0a0002ffff00"), Limits::saved()).unwrap();
+        assert_eq!((root.tag, used), (Tag::Compound(Compound::new()), 6));
+        let (root, _) = read_named(&hex("0a0002ffff030001780000000700"), Limits::saved()).unwrap();
+        assert_eq!(root.tag, Tag::compound([("x", Tag::Int(7))]));
+        assert_eq!(
+            read_named(&hex("0a00047465737400"), Limits::saved())
+                .unwrap()
+                .0
+                .name,
+            "test".into()
+        );
+        // A name cut short, or a key inside that isn't modified UTF-8, still fails.
+        assert!(read_named(&hex("0a0009ff"), Limits::saved()).is_err());
+        assert!(read_named(&hex("0a000003000278ff0000000700"), Limits::saved()).is_err());
+    }
     #[test]
     fn streamed_lists_reach_the_visitor_and_stay_empty_in_the_tree() {
         let list = |n: i32| Tag::List((0..n).map(Tag::Int).collect());
@@ -994,15 +1079,29 @@ mod tests {
         );
     }
     #[test]
-    fn duplicate_keys_last_wins_and_nan_output_is_canonical() {
+    fn duplicate_keys_last_wins_and_nan_output_is_canonical_on_disk() {
         let bytes = [10, 1, 0, 1, b'x', 1, 1, 0, 1, b'x', 2, 0];
         assert_eq!(
             read_network(&bytes, Limits::default()).unwrap().0.get("x"),
             Some(&Tag::Byte(2))
         );
+        // Vanilla 26.3 (#5064): `FriendlyByteBuf.writeNbt` keeps a NaN's bits,
+        // `NbtIo.write` writes the canonical NaN.
+        let nan = |bits: u32| NamedTag {
+            name: "".into(),
+            tag: Tag::compound([("v", Tag::Float(bits))]),
+        };
         assert_eq!(
             write_network(&Tag::Float(0xff80_0001), Limits::default()).unwrap(),
-            [5, 0x7f, 0xc0, 0, 0]
+            [5, 0xff, 0x80, 0, 1]
+        );
+        assert_eq!(
+            write_network(&Tag::Double(0x7ff0_0000_0000_0001), Limits::default()).unwrap(),
+            [6, 0x7f, 0xf0, 0, 0, 0, 0, 0, 1]
+        );
+        assert_eq!(
+            write_named(&nan(0x7f80_0001), Limits::default()).unwrap(),
+            [10, 0, 0, 5, 0, 1, b'v', 0x7f, 0xc0, 0, 0, 0]
         );
         assert_eq!(
             write_network(&Tag::Double((-0.0_f64).to_bits()), Limits::default()).unwrap()[1],

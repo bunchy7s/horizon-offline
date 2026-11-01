@@ -3,10 +3,13 @@
 use super::{Button, Title};
 use crate::{
     hud::{HudAtlas, HudBatch, rgba},
+    item_render::{self, ItemRenderState, ItemRenderer, NoHost},
+    items::ItemStack,
     lang,
     text::{Text, format_translation},
     ui,
 };
+use horizon_assets::item_model::{DisplayContext, NoEnv};
 use horizon_world::nbt::Tag;
 use serde_json::Value;
 use std::{collections::BTreeSet, path::Path};
@@ -460,6 +463,7 @@ pub(super) fn buttons(w: f32, h: f32, state: &State) -> Vec<Button> {
         enabled,
         id,
         icon: None,
+        trailing: None,
     };
     match state.page {
         Page::Layers => {
@@ -587,6 +591,7 @@ pub(super) fn release(state: &mut State) {
 pub(super) fn draw(
     title: &Title,
     atlas: &HudAtlas,
+    items: Option<&ItemRenderer>,
     batch: &mut HudBatch,
     cursor: (f32, f32),
     state: &State,
@@ -594,14 +599,15 @@ pub(super) fn draw(
     let (w, h) = (batch.width.ceil(), batch.height.ceil());
     ui::menu_background(batch, atlas, 0.0, 0.0, w, h, false);
     match state.page {
-        Page::Layers => draw_layers(title, atlas, batch, cursor, state, (w, h)),
-        Page::Presets => draw_presets(title, atlas, batch, cursor, state, (w, h)),
+        Page::Layers => draw_layers(title, atlas, items, batch, cursor, state, (w, h)),
+        Page::Presets => draw_presets(title, atlas, items, batch, cursor, state, (w, h)),
     }
 }
 
 fn draw_layers(
     _title: &Title,
     atlas: &HudAtlas,
+    items: Option<&ItemRenderer>,
     batch: &mut HudBatch,
     cursor: (f32, f32),
     state: &State,
@@ -621,6 +627,7 @@ fn draw_layers(
     ui::list_background(batch, atlas, top, bottom, false);
     crate::ui::separators(batch, atlas, top, bottom, false);
     let first = batch.vertices.len();
+    let mut pending = Vec::new();
     let right = left + ROW_WIDTH;
     batch.text_styled(
         atlas,
@@ -642,6 +649,44 @@ fn draw_layers(
     );
     let offset = state.scroll.amount.trunc();
     let selected = state.selected;
+    // DetailsList: its header row ("Layer Material. Height"), then the layers
+    // top first, each "Selected: <item>. Height. <height>".
+    crate::widgets::narratable(|| {
+        use crate::widgets::{ListKind, Narratable, Row, join_for_narration as join};
+        let tr = |key: &str| Text::translate(key, &[]).plain();
+        let height = tr("createWorld.customize.flat.height");
+        let row = |i: usize| {
+            let narration = match i.checked_sub(1) {
+                None => join(&[&tr("createWorld.customize.flat.tile"), &height]),
+                Some(layer) => {
+                    let layer = &state.settings.layers[state.settings.layers.len() - 1 - layer];
+                    let item = Text::translate(
+                        "narrator.select",
+                        &[Text::literal(item_name(&layer.block))],
+                    )
+                    .plain();
+                    join(&[&item, &height, &layer.height.to_string()])
+                }
+            };
+            Row::new(i, narration)
+        };
+        let over_header = cursor.1 >= top
+            && cursor.1 < bottom
+            && cursor.1 - top - 2.0 + state.scroll.amount < HEADER;
+        let hovered = if over_header {
+            Some(0)
+        } else {
+            layer_row(state, cursor, (w, h)).map(|r| r + 1)
+        };
+        Narratable::list(
+            ListKind::Object,
+            state.settings.layers.len() + 1,
+            hovered.map(row),
+            selected.map(|r| row(r + 1)),
+            [0.0, top, w, bottom - top],
+        )
+        .key(crate::widgets::key_of(&"create_world/flat/layers"))
+    });
     for (row, layer) in state.settings.layers.iter().rev().enumerate() {
         let y = top + 2.0 + HEADER + row as f32 * LAYER_ROW - offset;
         let target = [left - 2.0, y - 1.0, ROW_WIDTH + 4.0, LAYER_ROW];
@@ -667,8 +712,10 @@ fn draw_layers(
         }
         slot(
             atlas,
+            items,
+            &mut pending,
             batch,
-            layer_icon(atlas, &layer.block),
+            &layer.block,
             left + 2.0,
             y + 1.0,
         );
@@ -703,6 +750,7 @@ fn draw_layers(
         );
     }
     batch.clip_since(first, 0.0, top, w, bottom);
+    draw_items(atlas, items, batch, pending, [0.0, top, w, bottom]);
     ui::scrollbar(
         batch,
         atlas,
@@ -717,6 +765,7 @@ fn draw_layers(
 fn draw_presets(
     title: &Title,
     atlas: &HudAtlas,
+    items: Option<&ItemRenderer>,
     batch: &mut HudBatch,
     cursor: (f32, f32),
     state: &State,
@@ -750,6 +799,9 @@ fn draw_presets(
         state.share_focused,
         title.started,
     );
+    crate::widgets::name_last_edit_box(|| {
+        Text::translate("createWorld.customize.presets.share", &[]).plain()
+    });
     batch.text(
         atlas,
         &lang::get_or(
@@ -765,7 +817,24 @@ fn draw_presets(
     ui::list_background(batch, atlas, top, bottom, false);
     crate::ui::separators(batch, atlas, top, bottom, false);
     let first = batch.vertices.len();
+    let mut pending = Vec::new();
     let offset = state.preset_scroll.amount.trunc();
+    // PresetsList: "Selected: <preset>".
+    crate::widgets::narratable(|| {
+        use crate::widgets::{ListKind, Narratable, Row};
+        let row = |i: usize| {
+            let name = Text::literal(preset_name(&state.presets[i].id));
+            Row::new(i, Text::translate("narrator.select", &[name]).plain())
+        };
+        Narratable::list(
+            ListKind::Object,
+            state.presets.len(),
+            preset_row(state, cursor, (w, h)).map(row),
+            state.preset_selected.map(row),
+            [0.0, top, w, bottom - top],
+        )
+        .key(crate::widgets::key_of(&"create_world/flat/presets"))
+    });
     for (row, preset) in state.presets.iter().enumerate() {
         let y = top + 2.0 + row as f32 * PRESET_ROW - offset;
         let target = [left - 2.0, y - 1.0, ROW_WIDTH + 4.0, PRESET_ROW];
@@ -791,8 +860,10 @@ fn draw_presets(
         }
         slot(
             atlas,
+            items,
+            &mut pending,
             batch,
-            layer_icon(atlas, &preset.display),
+            &preset.display,
             left + 2.0,
             y + 2.0,
         );
@@ -806,6 +877,7 @@ fn draw_presets(
         );
     }
     batch.clip_since(first, 0.0, top, w, bottom);
+    draw_items(atlas, items, batch, pending, [0.0, top, w, bottom]);
     ui::scrollbar(
         batch,
         atlas,
@@ -817,16 +889,74 @@ fn draw_presets(
     );
 }
 
-/// The 18x18 slot behind a layer's item icon (`container/slot`).
-fn slot(atlas: &HudAtlas, batch: &mut HudBatch, icon: Option<String>, x: f32, y: f32) {
+/// The 18x18 slot behind a layer's item icon (`container/slot`), then the item
+/// (`GuiGraphics.renderItem`): its GUI model, so a block shows as the isometric
+/// block. Without item models, or for an id with none, the flat sprite stands in.
+fn slot(
+    atlas: &HudAtlas,
+    items: Option<&ItemRenderer>,
+    pending: &mut Vec<(ItemRenderState, f32, f32)>,
+    batch: &mut HudBatch,
+    id: &str,
+    x: f32,
+    y: f32,
+) {
     if let Some(rect) = atlas.sprites.get("gui/sprites/container/slot").copied() {
         batch.rect_uv(x, y, 18.0, 18.0, rect, u32::MAX);
     } else {
         batch.fill(atlas, x, y, 18.0, 18.0, rgba(139, 139, 139, 255));
         batch.fill(atlas, x + 1.0, y + 1.0, 16.0, 16.0, rgba(55, 55, 55, 255));
     }
-    if let Some(icon) = icon {
+    if let Some(renderer) = items {
+        let stack = ItemStack::new(&layer_item(id), 1);
+        let state = renderer.resolve(
+            &item_render::stack_view(&stack),
+            DisplayContext::Gui,
+            None,
+            None,
+            0,
+            &NoEnv,
+        );
+        if !state.is_empty() {
+            pending.push((state, x + 1.0, y + 1.0));
+            return;
+        }
+    }
+    if let Some(icon) = layer_icon(atlas, id) {
         batch.sprite_scaled(atlas, &icon, x + 1.0, y + 1.0, 16.0, 16.0, u32::MAX);
+    }
+}
+/// The item models of a list's rows, drawn after the list's own quads are cut
+/// to its area (`clip_since` keeps or drops a slanted quad whole): each is
+/// clipped exactly to the list, as vanilla's scissor does.
+fn draw_items(
+    atlas: &HudAtlas,
+    renderer: Option<&ItemRenderer>,
+    batch: &mut HudBatch,
+    pending: Vec<(ItemRenderState, f32, f32)>,
+    scissor: [f32; 4],
+) {
+    let Some(renderer) = renderer else { return };
+    for (state, x, y) in &pending {
+        item_render::gui::draw_scissored(
+            state,
+            renderer,
+            &atlas.sprites,
+            &NoHost,
+            batch,
+            *x,
+            *y,
+            scissor,
+        );
+    }
+}
+/// The item a layer shows: `FlatLayerInfo` draws `block.asItem()`, and the
+/// fluids' items are their buckets.
+fn layer_item(id: &str) -> String {
+    match id.strip_prefix("minecraft:").unwrap_or(id) {
+        "water" => "minecraft:water_bucket".into(),
+        "lava" => "minecraft:lava_bucket".into(),
+        name => format!("minecraft:{name}"),
     }
 }
 fn layer_icon(atlas: &HudAtlas, id: &str) -> Option<String> {
@@ -881,4 +1011,17 @@ fn pretty(name: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::layer_item;
+
+    #[test]
+    fn a_layer_shows_the_item_of_its_block() {
+        assert_eq!(layer_item("minecraft:grass_block"), "minecraft:grass_block");
+        assert_eq!(layer_item("dirt"), "minecraft:dirt");
+        assert_eq!(layer_item("minecraft:water"), "minecraft:water_bucket");
+        assert_eq!(layer_item("minecraft:lava"), "minecraft:lava_bucket");
+    }
 }

@@ -215,6 +215,7 @@ def export(args):
     exporter = build(home)
     home, run = instance('export', jars, [*deps, exporter])
     out = Path(args.out).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.unlink(missing_ok=True)
     seconds, log = start(home, run, {'horizon.oracle.out': out, 'horizon.oracle.namespaces': namespaces})
     if not out.exists():

@@ -96,6 +96,8 @@ pub struct Style {
     pub hover: Option<Box<Text>>,
     /// `HoverEvent.ShowItem`: the event's `{id, count?, components?}` object.
     pub hover_item: Option<Box<Value>>,
+    /// `HoverEvent.ShowEntity`: the event's `{id, uuid, name?}` object.
+    pub hover_entity: Option<Box<Value>>,
     /// `Style.insertion`: the text a Shift-click puts in the chat box.
     pub insertion: Option<String>,
     /// The font (`FontDescription.Resource`), a full id like
@@ -127,11 +129,12 @@ impl Style {
         if self.click.is_none() {
             self.click.clone_from(&base.click);
         }
-        if self.hover.is_none() {
+        // One HoverEvent: its three kinds are inherited together, so a style
+        // with its own event never picks up another kind from `base`.
+        if self.hover.is_none() && self.hover_item.is_none() && self.hover_entity.is_none() {
             self.hover.clone_from(&base.hover);
-        }
-        if self.hover_item.is_none() {
             self.hover_item.clone_from(&base.hover_item);
+            self.hover_entity.clone_from(&base.hover_entity);
         }
         if self.insertion.is_none() {
             self.insertion.clone_from(&base.insertion);
@@ -590,6 +593,10 @@ fn style_json(style: &Style) -> Vec<(String, Value)> {
     } else if let Some(Value::Object(item)) = style.hover_item.as_deref() {
         let mut event = item.clone();
         event.insert("action".into(), "show_item".into());
+        out.push(("hover_event".to_owned(), Value::Object(event)));
+    } else if let Some(Value::Object(entity)) = style.hover_entity.as_deref() {
+        let mut event = entity.clone();
+        event.insert("action".into(), "show_entity".into());
         out.push(("hover_event".to_owned(), Value::Object(event)));
     }
     if let Some(insertion) = &style.insertion {

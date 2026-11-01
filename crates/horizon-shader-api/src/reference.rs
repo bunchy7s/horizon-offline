@@ -45,6 +45,7 @@ pub fn markdown() -> String {
             StageKind::Post => "[[post]]",
             StageKind::Sky => "[sky]",
             StageKind::Material => "[material]",
+            StageKind::Weather => "[weather]",
         };
         out += &format!("| {} | `{key}` | `{}` |\n", kind.name(), kind.signature());
     }
@@ -62,11 +63,35 @@ pub fn markdown() -> String {
             out += &format!("| {} | `{}` | {} |\n", r.binding, r.ty, r.doc);
         }
         out += "\n";
+        if kind != StageKind::Sky {
+            out += "Helpers:\n\n";
+        }
         if kind == StageKind::Post {
-            out += "Helpers:\n\n\
-                    - `fn depth_at(uv: vec2<f32>) -> f32`: the world's depth at `uv`.\n\
+            out += "- `fn depth_at(uv: vec2<f32>) -> f32`: the world's depth at `uv`.\n\
                     - `fn view_position(uv: vec2<f32>, depth: f32) -> vec3<f32>`: the camera-relative position, in blocks, of\n  \
-                    the point at `uv` and `depth`.\n\n";
+                    the point at `uv` and `depth`.\n";
+        }
+        if kind == StageKind::Material {
+            out += "- `fn block_pbr_maps() -> bool`: whether the resource packs ship LabPBR maps (`_n`, `_s`).\n\
+                    - `fn block_normal_map(uv: vec2<f32>) -> vec4<f32>`: the surface's LabPBR normal map at `uv` (rg the \
+                    normal along `input.tangent` and down the texture, b ambient occlusion, a height); (0.5, 0.5, 1, 1) \
+                    without one.\n\
+                    - `fn block_specular_map(uv: vec2<f32>) -> vec4<f32>`: its LabPBR specular map (r smoothness, g F0 or a \
+                    metal, b porosity or subsurface, a emission, 1 none); (0, 0, 0, 0) without one.\n\
+                    - `fn block_normal_map_level(uv: vec2<f32>, lod: f32) -> vec4<f32>`, \
+                    `fn block_specular_map_level(uv: vec2<f32>, lod: f32) -> vec4<f32>`: the same at mip level `lod`.\n\
+                    - `fn block_pbr_size() -> vec2<f32>`: the LabPBR maps' size in texels.\n";
+        }
+        if kind != StageKind::Sky {
+            out += "- `fn shadow_position(position: vec3<f32>) -> vec3<f32>`: where the camera-relative point `position` is\n  \
+                    stored in the shadow map, for `textureSampleCompareLevel`.\n\
+                    - `fn shadow_distort(xy: vec2<f32>) -> vec2<f32>`: the map's distortion of a point at shadow clip `xy`.\n\n";
+        }
+        if kind == StageKind::Post {
+            out += "A `[[post]]` entry with `output = \"<name>\"` writes a target of the pack's own, at its `scale` of the\n\
+                    world's size (1, 0.5 or 0.25), instead of the next pass's `previous`; the prelude of every pass declares\n\
+                    `var <name>: texture_2d<f32>` (group 3 from binding 32), which holds last frame's until written again (a\n\
+                    pass reads a blank one in place of the target it writes).\n\n";
         }
     }
     out += "## The frame\n\n";

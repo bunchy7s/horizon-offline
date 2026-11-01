@@ -813,8 +813,23 @@ impl NoiseColumn {
 
 /// Biome and height queries for one structure generation attempt.
 pub trait StartContext: JigsawContext {
+    /// A chunk an older version generated: its structure starts are the ones
+    /// it saved, which are in its blocks, not the ones this generator would
+    /// make there.
+    fn is_old_chunk(&self, _chunk: ChunkPos) -> bool {
+        false
+    }
+    /// The starts that old chunk saved: see `OldWorld::saved_starts`.
+    fn saved_starts(&self, _chunk: ChunkPos) -> Vec<crate::worldgen::blending::SavedStart> {
+        Vec::new()
+    }
     fn seed(&self) -> i64;
     fn sea_level(&self) -> i32;
+    /// `ChunkGenerator.getMinY`: the noise settings' minimum Y, or a superflat generator's 0
+    /// (`MineshaftStructure` and `StrongholdStructure` read it, not the level's).
+    fn generator_min_y(&self) -> i32 {
+        self.min_y()
+    }
     /// ChunkGenerator.getBaseColumn as heightmap opacity, indexed from min_y.
     fn base_column(&mut self, x: i32, z: i32, kind: HeightmapType) -> Vec<bool>;
     /// base_column for several heightmap kinds from one noise-column pass.
@@ -831,7 +846,9 @@ pub trait StartContext: JigsawContext {
     /// BiomeSource.findBiomeHorizontal samples: each climate lookup starts
     /// from the previous result, which a tie keeps.
     fn noise_biomes(&mut self, quarts: &[[i32; 3]]) -> Vec<BiomeId>;
-    fn set_valid_biomes(&mut self, biomes: &BTreeSet<BiomeId>);
+    /// `GenerationContext.validBiome`'s set: `None` is the `biome -> true`
+    /// predicate `/place structure` passes, so every biome counts as valid.
+    fn set_valid_biomes(&mut self, biomes: Option<&BTreeSet<BiomeId>>);
 }
 
 /// ChunkGenerator.createStructures for one chunk: the starts it owns.
@@ -869,6 +886,7 @@ pub fn create_starts(
                 context,
                 set.structures[0].0,
                 chunk,
+                false,
             ) {
                 starts.push(start);
             }
@@ -889,9 +907,9 @@ pub fn create_starts(
                 index += 1;
             }
             let selected = options[index];
-            if let Some(start) =
-                try_generate(registry, resources, bindings, context, selected.0, chunk)
-            {
+            if let Some(start) = try_generate(
+                registry, resources, bindings, context, selected.0, chunk, false,
+            ) {
                 starts.push(start);
                 break;
             }
@@ -901,16 +919,21 @@ pub fn create_starts(
     }
     starts
 }
-fn try_generate(
+/// `Structure.generate` of one structure for one chunk: what the chunk's
+/// structure set would build there, or, for `/place structure`, the start this
+/// structure builds in any chunk (the set's placement is not consulted, and
+/// `any_biome` is vanilla's `biome -> true` predicate there).
+pub(crate) fn try_generate(
     registry: &StructureRegistry,
     resources: &StructureResources,
     bindings: &FeatureBlockBindings<'_>,
     context: &mut impl StartContext,
     structure: usize,
     chunk: ChunkPos,
+    any_biome: bool,
 ) -> Option<StructureStart> {
     let def = &registry.structures[structure];
-    context.set_valid_biomes(&def.biomes);
+    context.set_valid_biomes((!any_biome).then_some(&def.biomes));
     let seed = context.seed();
     let mut random = WorldgenRandom::new(LegacyRandom::new(0));
     random.set_large_feature_seed(seed, chunk.x, chunk.z);
@@ -920,6 +943,8 @@ fn try_generate(
                 .start_height
                 .sample(&mut random, context.generation())
                 .ok()?;
+            // A carried mod's own start rules keep the structure's biome set:
+            // they read it directly, not through the context's predicate.
             if !jigsaw
                 .checks
                 .pass(context, &def.biomes, chunk, height, jigsaw.project_to)
@@ -1125,7 +1150,7 @@ fn try_generate(
             (stub, legacy(pieces))
         }
         StructureKind::Mineshaft { mesa, blocking } => {
-            let (sea, min) = (context.sea_level(), context.min_y());
+            let (sea, min) = (context.sea_level(), context.generator_min_y());
             let (position, pieces) = super::mineshaft::generate(
                 &mut random,
                 [chunk.x, chunk.z],
@@ -1138,7 +1163,7 @@ fn try_generate(
             (position, legacy(pieces))
         }
         StructureKind::Stronghold => {
-            let (sea, min) = (context.sea_level(), context.min_y());
+            let (sea, min) = (context.sea_level(), context.generator_min_y());
             let pieces =
                 super::stronghold::generate(&mut random, seed, [chunk.x, chunk.z], sea, min);
             ([chunk.x * 16, 0, chunk.z * 16], legacy(pieces))
@@ -1163,9 +1188,10 @@ fn try_generate(
                 return None;
             }
             let start = [x, y, z];
-            if !def
-                .biomes
-                .contains(&context.noise_biome(start.map(|v| v >> 2)))
+            if !any_biome
+                && !def
+                    .biomes
+                    .contains(&context.noise_biome(start.map(|v| v >> 2)))
             {
                 return None;
             }
@@ -1195,7 +1221,7 @@ fn try_generate(
             )?;
             let position = [x, y, z];
             let quart = position.map(|v| v >> 2);
-            if !def.biomes.contains(&context.noise_biome(quart)) {
+            if !any_biome && !def.biomes.contains(&context.noise_biome(quart)) {
                 return None;
             }
             let piece = super::nether_fossil::piece(resources, &mut random, position)?;
@@ -1216,7 +1242,7 @@ fn try_generate(
         StructureKind::Unsupported(_) => return None,
     };
     let quart = position.map(|v| v >> 2);
-    if !def.biomes.contains(&context.noise_biome(quart)) || pieces.is_empty() {
+    if (!any_biome && !def.biomes.contains(&context.noise_biome(quart))) || pieces.is_empty() {
         return None;
     }
     Some(StructureStart::new(structure, def, chunk, pieces))
@@ -1410,6 +1436,7 @@ pub fn place_in_chunk<W: FeatureWorld + PlacementContext, R: RandomSource + 'sta
                         random,
                         chunk_box,
                         reference,
+                        false,
                         place_feature,
                     )?;
                 }

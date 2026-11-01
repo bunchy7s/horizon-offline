@@ -2,7 +2,9 @@
 
 The reported preparation timings put sounds at 20–29 seconds with little CPU use, versus
 0.9–1.4 seconds for fresh client asset extraction. Prefer fewer file opens, reads and writes
-over parallelizing decompression.
+first. The exporter JVMs dominate a fresh preparation now; they and the asset copy run side by
+side, and extraction and hashing are spread over threads that share one parsed jar
+([launcher-preparation.md](launcher-preparation.md)).
 
 Preparation now shares one parsed asset index between panorama, font, pack and language imports.
 Its destination verification results live only for that preparation. A subsequent invocation

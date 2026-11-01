@@ -132,6 +132,14 @@ impl UserCache {
         self.infos[index].user.clone()
     }
 
+    /// `get(UUID)`: the player with this id, if cached (expired or not, as vanilla's).
+    pub fn get_by_id(&mut self, id: u128) -> Option<NameAndId> {
+        let index = *self.by_uuid.get(&id)?;
+        self.operations += 1;
+        self.infos[index].last_access = self.operations;
+        Some(self.infos[index].user.clone())
+    }
+
     /// `get(String)`: the player with this name (any case). An expired entry is
     /// dropped; a name not cached is asked of `lookup` (the profile service,
     /// given the lower-case name) and, failing that, made an offline player
@@ -277,6 +285,15 @@ mod tests {
         // A hit in any case, and it becomes the most recent.
         let notch = c.get_by_name_at("NOTCH", now, never).unwrap();
         assert_eq!(notch.name, "Notch");
+        // By id: what the cache holds, expired or not (vanilla's `get(UUID)` doesn't check).
+        assert_eq!(c.get_by_id(notch.id), Some(notch.clone()));
+        assert_eq!(
+            c.get_by_id(0x61699b2e_d327_4a01_9f1e_0ea8c3f06bc6)
+                .unwrap()
+                .name,
+            "Old"
+        );
+        assert_eq!(c.get_by_id(1), None);
         // Expired: dropped and looked up again, by its lower-case name.
         let mut asked = Vec::new();
         let old = c

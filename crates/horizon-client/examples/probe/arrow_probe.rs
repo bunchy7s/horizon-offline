@@ -153,6 +153,9 @@ pub fn main() -> Result<()> {
                                 bits(position),
                                 bits(velocity)
                             )),
+                            ArrowEvent::PotionPuff { id, color } => {
+                                events.push(format!("potion-puff {id} {color:08x}"))
+                            }
                             ArrowEvent::Sound {
                                 sound,
                                 volume,

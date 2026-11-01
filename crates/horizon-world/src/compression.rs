@@ -32,27 +32,38 @@ impl TryFrom<u8> for Compression {
 
 impl Compression {
     pub fn decode(self, bytes: &[u8], max_output: usize) -> io::Result<Vec<u8>> {
+        let mut output = Vec::new();
+        self.decode_into(bytes, max_output, &mut output)?;
+        Ok(output)
+    }
+    /// [`decode`](Self::decode) into `output`, which keeps what was decoded
+    /// before an error: what a stream reader would already have handed out.
+    pub fn decode_into(
+        self,
+        bytes: &[u8],
+        max_output: usize,
+        output: &mut Vec<u8>,
+    ) -> io::Result<()> {
         match self {
             Self::None => {
                 if bytes.len() > max_output {
                     return Err(invalid("decompression limit exceeded"));
                 }
-                Ok(bytes.to_vec())
+                output.extend_from_slice(bytes);
+                Ok(())
             }
             Self::Gzip => {
                 let decoder = flate2::read::MultiGzDecoder::new(bytes);
-                let mut output = Vec::new();
                 decoder
                     .take((max_output as u64).saturating_add(1))
-                    .read_to_end(&mut output)?;
+                    .read_to_end(output)?;
                 if output.len() > max_output {
                     return Err(invalid("decompression limit exceeded"));
                 }
-                Ok(output)
+                Ok(())
             }
             Self::Zlib => {
                 let mut decoder = Decompress::new(true);
-                let mut output = Vec::new();
                 let mut block = [0; 8192];
                 loop {
                     let before_in = decoder.total_in();
@@ -70,14 +81,14 @@ impl Compression {
                     }
                     output.extend_from_slice(&block[..produced]);
                     if status == Status::StreamEnd {
-                        return Ok(output);
+                        return Ok(());
                     }
                     if decoder.total_in() == before_in && produced == 0 {
                         return Err(invalid("truncated zlib stream"));
                     }
                 }
             }
-            Self::Lz4 => decode_lz4(bytes, max_output),
+            Self::Lz4 => decode_lz4(bytes, max_output, output),
         }
     }
 
@@ -105,8 +116,11 @@ fn checksum(bytes: &[u8]) -> u32 {
     xxhash_rust::xxh32::xxh32(bytes, 0x9747_b28c) & 0x0fff_ffff
 }
 
-fn decode_lz4(mut bytes: &[u8], max_output: usize) -> io::Result<Vec<u8>> {
-    let mut output = Vec::new();
+fn decode_lz4(mut bytes: &[u8], max_output: usize, output: &mut Vec<u8>) -> io::Result<()> {
+    // `LZ4BlockInputStream.compressedBuffer`: each header is read into it,
+    // and a block's bytes over its start; it grows by half when too small.
+    // The decompressor may read up to its end, past the block.
+    let mut buffer = vec![0; 21];
     loop {
         let header = bytes
             .get(..21)
@@ -127,12 +141,13 @@ fn decode_lz4(mut bytes: &[u8], max_output: usize) -> io::Result<Vec<u8>> {
         {
             return Err(invalid("invalid LZ4 block lengths"));
         }
+        buffer[..21].copy_from_slice(header);
         bytes = &bytes[21..];
         if raw == 0 {
             if expected != 0 {
                 return Err(invalid("invalid LZ4 terminator checksum"));
             }
-            return Ok(output);
+            return Ok(());
         }
         if raw > max_output.saturating_sub(output.len()) {
             return Err(invalid("decompression limit exceeded"));
@@ -141,20 +156,106 @@ fn decode_lz4(mut bytes: &[u8], max_output: usize) -> io::Result<Vec<u8>> {
             .get(..compressed)
             .ok_or_else(|| invalid("truncated LZ4 payload"))?;
         let start = output.len();
-        if method == 0x10 {
+        let decoded = if method == 0x10 {
             output.extend_from_slice(block);
+            Ok(())
         } else {
+            if buffer.len() < compressed {
+                buffer = vec![0; compressed.max(buffer.len() * 3 / 2)];
+            }
+            buffer[..compressed].copy_from_slice(block);
             output.resize(start + raw, 0);
-            let actual = lz4_flex::block::decompress_into(block, &mut output[start..])
-                .map_err(|e| invalid(e.to_string()))?;
-            if actual != raw {
-                return Err(invalid("LZ4 decoded length mismatch"));
+            // `refill`: the block must be read to its last byte, no further.
+            if decompress_lz4_java(&buffer, &mut output[start..]) == Some(compressed) {
+                Ok(())
+            } else {
+                Err(invalid("LZ4 stream is corrupted"))
             }
         }
-        if checksum(&output[start..]) != expected {
-            return Err(invalid("LZ4 checksum mismatch"));
+        .and_then(|()| {
+            if checksum(&output[start..]) == expected {
+                Ok(())
+            } else {
+                Err(invalid("LZ4 checksum mismatch"))
+            }
+        });
+        // lz4-java hands out a block only once it has decoded and checked it.
+        if let Err(e) = decoded {
+            output.truncate(start);
+            return Err(e);
         }
         bytes = &bytes[compressed..];
+    }
+}
+
+/// lz4-java's `LZ4JavaSafeFastDecompressor.decompress`, which
+/// `LZ4BlockInputStream` uses: `dest` filled from `src`, returning how many
+/// bytes of `src` it read, or `None` where it throws `LZ4Exception`. Its end
+/// conditions are its own (a sequence whose literals leave less than 8 bytes of
+/// output, or of input past them, must be the last and end the output), and
+/// an offset of 0 fills the match with zeros.
+fn decompress_lz4_java(src: &[u8], dest: &mut [u8]) -> Option<usize> {
+    let (src_end, dest_end) = (src.len(), dest.len());
+    if dest_end == 0 {
+        return (src.first() == Some(&0)).then_some(1);
+    }
+    // The run-length bytes after a 15 in the token; a run cut off by the end of
+    // the input adds a last 255, as the Java loop does.
+    let length = |s: &mut usize, mut len: usize| {
+        let mut last = 0xff;
+        while *s < src_end {
+            last = src[*s];
+            *s += 1;
+            if last != 0xff {
+                break;
+            }
+            len += 255;
+        }
+        len + usize::from(last)
+    };
+    let (mut s, mut d) = (0, 0);
+    loop {
+        if s >= src_end {
+            return None;
+        }
+        let token = src[s];
+        s += 1;
+        let mut literals = usize::from(token >> 4);
+        if literals == 15 {
+            literals = length(&mut s, literals);
+        }
+        let literal_end = d + literals;
+        if dest_end < literal_end + 8 || src_end - s < 8 + literals {
+            if literal_end != dest_end || src_end - s < literals {
+                return None;
+            }
+            dest[d..literal_end].copy_from_slice(&src[s..s + literals]);
+            return Some(s + literals);
+        }
+        dest[d..literal_end].copy_from_slice(&src[s..s + literals]);
+        s += literals;
+        d = literal_end;
+        let offset = usize::from(u16::from_le_bytes([src[s], src[s + 1]]));
+        s += 2;
+        if offset > d {
+            return None;
+        }
+        let mut matched = usize::from(token & 15);
+        if matched == 15 {
+            matched = length(&mut s, matched);
+        }
+        let match_end = d + matched + 4;
+        if match_end > dest_end {
+            return None;
+        }
+        if offset == 0 {
+            dest[d..match_end].fill(0);
+        } else {
+            for i in d..match_end {
+                dest[i] = dest[i - offset];
+            }
+        }
+        d = match_end;
     }
 }
 
@@ -183,6 +284,40 @@ fn encode_lz4(bytes: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// lz4-java's `LZ4BlockInputStream` decides which blocks are corrupted
+    /// (#5064). Each stream below has a correct checksum; the results are
+    /// lz4-java 1.10.1's.
+    #[test]
+    fn lz4_blocks_are_read_as_lz4_java_reads_them() {
+        let hex = |s: &str| -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        };
+        let lz4 = |s: &str| Compression::Lz4.decode(&hex(s), usize::MAX);
+        const END: &str = "4c5a34426c6f636b16000000000000000000000000";
+        // The issue's stream: its last match ends 2 bytes before the output's end.
+        assert!(lz4(&format!(
+            "4c5a34426c6f636b2620000000270000002817d90bb112cd89673ffd3d11ad97420600708664345bbd2cb70b00248fc80b0020a52b{END}"
+        ))
+        .is_err());
+        // A literal with less than 8 bytes of input after it must end the output.
+        assert!(
+            lz4(&format!(
+                "4c5a34426c6f636b260500000005000000f5a1570e100301000c{END}"
+            ))
+            .is_err()
+        );
+        // An offset of 0 fills the match with zeros.
+        assert_eq!(
+            lz4(&format!(
+                "4c5a34426c6f636b260400000010000000eace86020c000007{END}"
+            ))
+            .unwrap(),
+            [0; 16]
+        );
+    }
     #[test]
     fn all_codecs_roundtrip_and_enforce_limits() {
         for codec in [

@@ -1,7 +1,80 @@
 import json
+import sys
 import unittest
 
 from tools.perf_bench import HISTOGRAM_EDGES_MS, OPTIONS, frames, rnd, summary
+
+
+class ComparisonConditionsTests(unittest.TestCase):
+    def test_rejects_incompatible_or_unknown_conditions_before_printing(self):
+        import contextlib
+        import io
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        import tools.perf_bench as pb
+
+        conditions = {"scenario": "flight", "seed": "1234", "render_distance": 8, "simulation_distance": 12,
+                      "window": [1920, 1080], "vsync": False, "offscreen": False}
+        differences = {"scenario": "other", "seed": "5678", "simulation_distance": 8, "window": [1280, 720],
+                       "vsync": True, "offscreen": True, "fps_cap": 60}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports = root / "benchmarks/perf"
+            reports.mkdir(parents=True)
+            def write(label, values):
+                (reports / f"{label}-rd8.json").write_text(
+                    json.dumps({"conditions": values, "metrics": {}}), encoding="utf-8")
+            write("first", conditions)
+            with mock.patch.object(pb, "ROOT", root):
+                for key, value in differences.items():
+                    with self.subTest(key=key):
+                        write("second", dict(conditions, **{key: value}))
+                        out = io.StringIO()
+                        with contextlib.redirect_stdout(out), self.assertRaisesRegex(ValueError, key):
+                            pb.table(["first", "second"])
+                        self.assertEqual(out.getvalue(), "")
+                incomplete = dict(conditions)
+                del incomplete["window"]
+                write("second", incomplete)
+                with contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(ValueError, "window"):
+                    pb.table(["first", "second"])
+                stderr, stdout = io.StringIO(), io.StringIO()
+                with mock.patch("sys.argv", ["perf_bench.py", "--table", "first", "second"]), \
+                        contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr), \
+                        self.assertRaises(SystemExit) as exit_error:
+                    pb.main()
+                self.assertEqual(exit_error.exception.code, 2)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertIn("window missing in second", stderr.getvalue())
+                self.assertNotIn("Traceback", stderr.getvalue())
+                write("second", dict(conditions, fps_cap=None))
+                with contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(ValueError, "fps_cap"):
+                    pb.table(["first", "second"])
+
+    def test_matching_reports_and_single_incomplete_report_remain_readable(self):
+        import contextlib
+        import io
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        import tools.perf_bench as pb
+
+        conditions = {"scenario": "flight", "seed": "1234", "render_distance": 8, "simulation_distance": 12,
+                      "window": [1920, 1080], "vsync": False, "offscreen": False}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports = root / "benchmarks/perf"
+            reports.mkdir(parents=True)
+            for label, values in (("first", conditions), ("second", conditions),
+                                  ("single", {"render_distance": 8})):
+                (reports / f"{label}-rd8.json").write_text(
+                    json.dumps({"conditions": values, "metrics": {}}), encoding="utf-8")
+            with mock.patch.object(pb, "ROOT", root), contextlib.redirect_stdout(io.StringIO()) as out:
+                pb.table(["first", "second"])
+                pb.table(["single"])
+            self.assertIn("| 8 |", out.getvalue())
+
 
 
 class PerfBenchStatsTests(unittest.TestCase):
@@ -49,6 +122,37 @@ class PerfBenchStatsTests(unittest.TestCase):
     def test_one_options_file_sets_the_render_distance(self):
         self.assertEqual(OPTIONS["renderDistance"].format(distance=16), "16")
         self.assertEqual(OPTIONS["graphicsPreset"], '"custom"')
+
+    def test_table_distinguishes_missing_scene_load_from_zero(self):
+        import contextlib
+        import io
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        import tools.perf_bench as pb
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports = root / "benchmarks" / "perf"
+            reports.mkdir(parents=True)
+            # Comparable runs: table() refuses reports whose conditions differ or are missing.
+            conditions = {"scenario": "flight", "seed": "1234", "render_distance": 8, "simulation_distance": 12,
+                          "window": [1920, 1080], "vsync": False, "offscreen": False}
+            for label, metrics in (
+                ("missing", {}),
+                ("zero", {"chunks.village.load_ms": {"mean": 0}}),
+                ("measured", {"chunks.village.load_ms": {"mean": 1000},
+                              "chunks.forest.load_ms": {"mean": 3000}}),
+            ):
+                (reports / f"{label}-rd8.json").write_text(
+                    json.dumps({"conditions": conditions, "metrics": metrics}), encoding="utf-8")
+            output = io.StringIO()
+            with mock.patch.object(pb, "ROOT", root), contextlib.redirect_stdout(output):
+                pb.table(["missing", "zero", "measured"])
+        row = next(line for line in output.getvalue().splitlines() if line.startswith("| 8 |"))
+        self.assertEqual([cell.strip().split(", ")[1] for cell in row.split("|")[2:-1]], ["–", "0.0", "2.0"])
+
+
 
 
 if __name__ == "__main__":
@@ -143,6 +247,21 @@ class PortabilityTests(unittest.TestCase):
             self.assertIsNone(pb.nvidia_memory_mb(1234))
             self.assertEqual(pb.nvidia_memory_mb(4321), 812.0)
             self.assertIsNone(pb.nvidia_memory_mb(99))
+
+    @unittest.skipUnless(sys.platform == "win32", "the console's OEM code page is Windows'")
+    def test_windows_version_reads_the_console_code_page(self):
+        # pr_ready runs the tests with PYTHONUTF8=1, and `cmd /C ver` answers in the OEM code page:
+        # decoding it as UTF-8 left `stdout` None (issue #5201).
+        import os
+        import subprocess
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        out = subprocess.run(
+            [sys.executable, "-c",
+             "from tools.perf_bench import windows_version; print(windows_version())"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
+            env={**os.environ, "PYTHONUTF8": "1"}, cwd=root)
+        self.assertIn("Windows", out.stdout)
 
     def test_control_over_the_tcp_endpoint(self):
         # The game's TCP transport (Windows, or an endpoint path ending in .json): the file names a port and

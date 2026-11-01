@@ -20,6 +20,9 @@ use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource
 pub(crate) struct LevelFeatureWorld<'s, 'a, L: LevelAccess + ?Sized> {
     pub sim: &'s mut Sim<'a, L>,
     pub features: &'s LiveFeatures,
+    /// The entities a structure template placed (`add_entity`), for the caller
+    /// to spawn.
+    pub entities: Vec<crate::nbt::Compound>,
 }
 
 fn pos([x, y, z]: [i32; 3]) -> BlockPos {
@@ -59,6 +62,19 @@ impl<L: LevelAccess + ?Sized> FeatureWorld for LevelFeatureWorld<'_, '_, L> {
 }
 
 impl<L: LevelAccess + ?Sized> PlacementContext for LevelFeatureWorld<'_, '_, L> {
+    /// `BlockEntity.loadWithComponents` on the block a template just placed.
+    fn set_block_entity(
+        &mut self,
+        position: [i32; 3],
+        nbt: crate::nbt::Compound,
+    ) -> Result<(), PlacementQueryError> {
+        self.sim.level.load_block_entity(pos(position), nbt);
+        Ok(())
+    }
+    fn add_entity(&mut self, nbt: crate::nbt::Compound) -> Result<(), PlacementQueryError> {
+        self.entities.push(nbt);
+        Ok(())
+    }
     /// `StructureTemplate.updateShapeAtEdge` for one face.
     fn update_shape_at_face(
         &mut self,
@@ -86,6 +102,24 @@ impl<L: LevelAccess + ?Sized> PlacementContext for LevelFeatureWorld<'_, '_, L> 
         if new_neighbour != neighbour {
             self.sim.set_block(neighbour_pos, new_neighbour, flags & !1);
         }
+        Ok(())
+    }
+    /// `StructureTemplate.placeInWorld`'s pass over a placed block:
+    /// `Block.updateFromNeighbourShapes`, written with `flags` when it
+    /// changes, then `ServerLevel.updateNeighborsAt` for the new block.
+    fn update_from_neighbour_shapes(
+        &mut self,
+        position: [i32; 3],
+        flags: i32,
+    ) -> Result<(), PlacementQueryError> {
+        let place = pos(position);
+        let state = self.sim.state(place);
+        let new_state = self.sim.update_from_neighbour_shapes(state, place);
+        if new_state != state {
+            self.sim.set_block(place, new_state, flags);
+        }
+        let block = self.sim.b.block(new_state);
+        self.sim.update_neighbors_at(place, block);
         Ok(())
     }
     fn set_section_block(

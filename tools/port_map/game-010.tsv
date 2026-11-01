@@ -22,13 +22,13 @@ PathNavigation.getGroundY	inline	crates/horizon-client/src/mobs/nav.rs::Mob::nav
 PathNavigation.shouldTargetNextNodeInDirection	port	crates/horizon-client/src/mobs/nav.rs::Mob::should_target_next_node	
 PathNavigation.trimPath	missing		minor: path nodes on a cauldron are not raised one block, so a route ending on a cauldron (leatherworker job site) aims into the block
 PathNavigation.isClearForMovementBetween	port	crates/horizon-client/src/mobs/world.rs::MobWorld::clear_between	collider clip from start to the target raised by half the height, optionally stopped by fluids
-PathNavigation.shouldRecomputePath	missing		player: nothing asks a mob to re-path when a block changes near its route (recompute_path is only reached after its own delay flag), so a mob keeps walking an old path into a wall you just placed or past one you removed
+PathNavigation.shouldRecomputePath	inline	crates/horizon-client/src/mobs/nav.rs::Mob::should_recompute_path, crates/horizon-client/src/mobs.rs::blocks_changed	called for every block write that changes a collision shape, when the mobs tick (`World::path_writes`); the recompute happens at the start of the mob's next navigation tick, not inside sendBlockUpdated
 WallClimberNavigation.createPath	port	crates/horizon-client/src/mobs/nav.rs::Mob::create_path_to	WallClimber kind remembers climb_to before the ground path
 WallClimberNavigation.tick	inline	crates/horizon-client/src/mobs/nav.rs::Mob::nav_tick	WallClimber branch: with no path it keeps steering at climb_to until within the body width
 WaterBoundPathNavigation.createPathFinder	inline	crates/horizon-client/src/mobs/nav.rs::Navigation::evaluator	Evaluator::Swim with breach for the dolphin; can_pass_doors stays true (minor)
 WaterBoundPathNavigation.canUpdatePath	port	crates/horizon-client/src/mobs/nav.rs::Mob::can_update_path	breach (dolphin) or in liquid
 WaterBoundPathNavigation.getTempMobPos	port	crates/horizon-client/src/mobs/nav.rs::Mob::temp_mob_pos	x, half the height up, z
-AdultSensor.doTick	inline	crates/horizon-client/src/mobs/animal_brain.rs::tick_sensors	gap: player: Sensor::AdultSameType arm (axolotl only); goats, camels, hoglins and farm animals follow parents through FollowParent goals, but baby armadillos have no follow-the-adult behaviour
+AdultSensor.doTick	inline	crates/horizon-client/src/mobs/animal_brain.rs::tick_sensors (axolotl), crates/horizon-client/src/mobs/armadillo.rs::BabyFollowAdult (armadillo)	goal stand-in for the armadillo brain (no tick parity: the probe has no armadillo brain): the baby follows the nearest visible adult 5 to 17 blocks away
 AdultSensor.setNearestVisibleAdult	inline	crates/horizon-client/src/mobs/animal_brain.rs::tick_sensors	closest visible adult of the same species into nearest_visible_adult
 AdultSensorAnyType.setNearestVisibleAdult	port	crates/horizon-client/src/mobs/animal_brain.rs::sense_adult	closest visible adult of a #followable_friendly_mobs species (happy ghast)
 AxolotlAttackablesSensor.isMatchingEntity	port	crates/horizon-client/src/mobs/animal_brain.rs::sense_axolotl_attackables	within 8 blocks, in water, always-hostile or hunt target tag, alive and not playing dead

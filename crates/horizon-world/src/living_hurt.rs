@@ -33,6 +33,15 @@ pub trait HurtWorld {
     fn dead_or_dying(&mut self, s: &mut HurtState<Self::Source>) -> Result<bool, Self::Error>;
     fn tag(&mut self, s: &mut HurtState<Self::Source>, tag: HurtTag) -> Result<bool, Self::Error>;
     fn fire_resistance(&mut self, s: &mut HurtState<Self::Source>) -> Result<bool, Self::Error>;
+    /// The hit once the guards above passed: it may change `damage`, and
+    /// true refuses the hit. The default does nothing.
+    fn hurt_start(
+        &mut self,
+        _s: &mut HurtState<Self::Source>,
+        _damage: &mut f32,
+    ) -> Result<bool, Self::Error> {
+        Ok(false)
+    }
     fn sleeping(&mut self, s: &mut HurtState<Self::Source>) -> Result<bool, Self::Error>;
     fn stop_sleeping(&mut self, s: &mut HurtState<Self::Source>) -> Result<(), Self::Error>;
     fn use_item(&mut self, s: &mut HurtState<Self::Source>) -> Result<Self::UseItem, Self::Error>;
@@ -115,6 +124,9 @@ pub fn hurt_server<W: HurtWorld>(
         return Ok(false);
     }
     if w.tag(s, HurtTag::Fire)? && w.fire_resistance(s)? {
+        return Ok(false);
+    }
+    if w.hurt_start(s, &mut damage)? {
         return Ok(false);
     }
     if w.sleeping(s)? {

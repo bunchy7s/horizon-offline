@@ -35,6 +35,37 @@ Preparation is `horizon-prepare` (`crates/horizon-prepare`, Rust): it needs no P
 the JDK, for the small exporters that call Mojang's own code. Release folders ship it beside
 `horizon-client`, and the launcher prepares with it and copies the sounds as part of preparing.
 
+`--output DIR` puts the resources elsewhere (the exporters' scratch files stay in the version
+folder's `.local/`), for preparing and for the asset commands alike. `horizon-prepare --check`
+exits 0 when the resources are complete and current for this preparer, and otherwise prints
+each gap with the command that fills it on stdout and exits 1. It also exits 1 when it can't
+check, with `error:` on stderr (no `research-lock.json`, say). It runs no Java and reads no game
+files: it tests which files are there and the versions they were made for, not their contents, so
+a launcher that suspects damage prepares again. A preparation stamps its resources with the
+preparer's `OUTPUT_VERSION` (`horizon-prepare.json`) when it finishes, and removes the stamp
+before it writes anything, so `--check` reports a folder being prepared, or whose preparation
+stopped, as not current. Resources prepared before the stamp existed report an unknown version
+until they are prepared again. One preparation at a time writes to a folder: each holds
+`.horizon-prepare.lock` in the resources and in the version folder's `.local/`, and a second one
+waits for the first. `--complete` prepares, copies the sounds, and fails unless `--check` would
+then pass: one command for resources with nothing missing. `--progress json` prints one JSON
+object a line instead of plain text (its format is part of the Launch API:
+[docs/api/launch.md](api/launch.md#--progress-json)). Exit codes: 0 done, 1 failed or gaps found,
+2 a refused command line.
+
+A launcher whose files are laid out its own way names them one by one instead of
+`--minecraft-dir`: `--version-json` (the pinned version's JSON), `--client-jar`,
+`--libraries-dir` (the client's libraries, Maven layout) and `--assets-dir` (the asset store,
+with `indexes/` and `objects/`); each replaces only what it names, and every file is still
+checked against `research-lock.json`'s pins. When an earlier import beside `--root` is still
+verified, it is reused and the named files aren't read. Two things no such launcher keeps:
+- **The server jar.** The first `--prepare` needs `--server-jar`. Horizon never downloads it; a
+  launcher downloads it (the version JSON's `downloads.server`) only for a signed-in account that
+  owns Minecraft: Java Edition, as `horizon-launcher` does.
+- **Java 25.** `--java-home PATH` names a runtime the launcher manages. The preparer takes the first
+  Java of the pinned version from `JAVA_HOME`, the `PATH`, `--java-home`, then the official
+  launcher's runtimes.
+
 ```sh
 cargo run --release -p horizon-prepare -- --prepare --server-jar ~/Downloads/server.jar
 cargo run --release -p horizon-prepare -- sounds
@@ -42,6 +73,9 @@ cargo run --release -p horizon-client -- --render-distance 12
 ```
 
 Development builds that link quickly: `cargo build --profile fast -p horizon-client`.
+
+Optional Windows allocator build features are documented in
+[Windows allocator experiments](windows-allocators.md).
 
 | Option | Meaning |
 | --- | --- |

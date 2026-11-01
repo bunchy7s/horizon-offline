@@ -33,6 +33,28 @@ pub const MAJOR_LINES: u32 = 0xFF3F_3FFF;
 pub const OUTER_COLUMNS: u32 = 0x7FFF_0000;
 /// `ARGB.colorFromFloat(1.0F, 0.25F, 1.0F, 0.0F)`: dragon parts.
 pub const DRAGON_PART: u32 = 0xFF3F_FF00;
+/// `BlockEntityWithBoundingBoxRenderer.InvisibleBlockType`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InvisibleBlock {
+    Air,
+    StructureVoid,
+    Barrier,
+    Light,
+}
+impl InvisibleBlock {
+    /// The marker's stroke: `colorFromFloat(1, 0.5, 0.5, 1)`, `(1, 1, 0.75,
+    /// 0.75)`, `-65536` and `-256`.
+    pub fn color(self) -> u32 {
+        match self {
+            Self::Air => 0xFF7F_7FFF,
+            Self::StructureVoid => 0xFFFF_BFBF,
+            Self::Barrier => 0xFFFF_0000,
+            Self::Light => 0xFFFF_FF00,
+        }
+    }
+}
+/// `ARGB.colorFromFloat(1.0F, 0.9F, 0.9F, 0.9F)`: a block entity's box.
+pub const BOUNDING_BOX: u32 = 0xFFE5_E5E5;
 /// `GizmoStyle.stroke(argb)` and `Gizmos.arrow(start, end, argb)`.
 pub const STROKE_WIDTH: f32 = 2.5;
 
@@ -85,6 +107,73 @@ impl Gizmos {
             color,
             width,
         }));
+    }
+    /// `CuboidGizmo.emit` with a stroke style drawn on top of everything
+    /// (`Gizmos.cuboid(aabb, style, true)`).
+    pub fn cuboid_on_top(&mut self, min: [f64; 3], max: [f64; 3], color: u32, width: f32) {
+        let edges = cuboid_edges(min, max);
+        self.on_top.extend(edges.iter().map(|&(start, end)| Line {
+            start,
+            end,
+            color,
+            width,
+        }));
+    }
+    /// `BlockEntityWithBoundingBoxRenderer.submit`: the box at `block` +
+    /// `local` of `size` blocks (nothing when a side is empty), then the
+    /// markers of the invisible blocks in it, indexed `z * sx * sy + y * sx + x`.
+    pub fn bounding_box(
+        &mut self,
+        block: [i32; 3],
+        local: [i32; 3],
+        size: [i32; 3],
+        invisible: Option<&[Option<InvisibleBlock>]>,
+    ) {
+        if size.iter().any(|s| *s < 1) {
+            return;
+        }
+        let at = |i: usize| f64::from(block[i] + local[i]);
+        let far = |i: usize| f64::from(block[i] + local[i] + size[i]);
+        // `ARGB.colorFromFloat(1.0F, 0.9F, 0.9F, 0.9F)`.
+        self.cuboid_on_top(
+            [at(0), at(1), at(2)],
+            [far(0), far(1), far(2)],
+            BOUNDING_BOX,
+            STROKE_WIDTH,
+        );
+        let Some(invisible) = invisible else {
+            return;
+        };
+        let (sx, sy) = (size[0] as usize, size[1] as usize);
+        for x in 0..size[0] {
+            for y in 0..size[1] {
+                for z in 0..size[2] {
+                    let index = z as usize * sx * sy + y as usize * sx + x as usize;
+                    let Some(Some(kind)) = invisible.get(index) else {
+                        continue;
+                    };
+                    // Air gets bigger markers: 0.45 - 0.05 to 0.55 + 0.05.
+                    let scale = if *kind == InvisibleBlock::Air {
+                        0.05f32
+                    } else {
+                        0.0
+                    };
+                    let corner = |i: usize, d: i32, sign: f32| {
+                        f64::from(
+                            (block[i] + local[i] + d) as f32
+                                + if sign < 0.0 {
+                                    0.45 - scale
+                                } else {
+                                    0.55 + scale
+                                },
+                        )
+                    };
+                    let min = [corner(0, x, -1.0), corner(1, y, -1.0), corner(2, z, -1.0)];
+                    let max = [corner(0, x, 1.0), corner(1, y, 1.0), corner(2, z, 1.0)];
+                    self.cuboid(min, max, kind.color(), STROKE_WIDTH);
+                }
+            }
+        }
     }
     /// `ArrowGizmo.emit`: the shaft, then four tips around the end.
     pub fn arrow(&mut self, start: [f64; 3], end: [f64; 3], color: u32, width: f32) {
@@ -243,6 +332,48 @@ impl Gizmos {
     }
 }
 
+/// `CuboidGizmo.emit`'s fill: the six quads (+X, -X, -Z, +Z, +Y, -Y), each
+/// counter-clockwise seen from outside.
+pub fn cuboid_fill_quads(min: [f64; 3], max: [f64; 3]) -> [[[f64; 3]; 4]; 6] {
+    let [x0, y0, z0] = min;
+    let [x1, y1, z1] = max;
+    [
+        [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]],
+        [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]],
+        [[x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0]],
+        [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]],
+        [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]],
+        [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]],
+    ]
+}
+
+/// `ARGB.colorFromFloat(0.375F, 1.0F, 0.0F, 0.0F)`: the fill of an error marker.
+pub const ERROR_MARKER_FILL: u32 = 0x5FFF_0000;
+/// `TestInstanceRenderer.submitErrorMarker`'s billboard text scale.
+pub const ERROR_MARKER_TEXT_SCALE: f32 = 0.16;
+
+/// `TestInstanceRenderer.submitErrorMarker`: the marker's box, `new
+/// AABB(pos).inflate(0.02F)`, and the centre of its text,
+/// `Vec3.atLowerCornerWithOffset(pos, 0.5, 1.2, 0.5)`.
+pub fn error_marker_shape(pos: [i32; 3]) -> ([f64; 3], [f64; 3], [f64; 3]) {
+    let pad = f64::from(0.02f32);
+    (
+        pos.map(|v| f64::from(v) - pad),
+        pos.map(|v| f64::from(v) + 1.0 + pad),
+        [
+            f64::from(pos[0]) + 0.5,
+            f64::from(pos[1]) + 1.2,
+            f64::from(pos[2]) + 0.5,
+        ],
+    )
+}
+
+/// `GizmoFeatureRenderer.buildTexts`: the world size of one font pixel,
+/// `scale / 16`.
+pub fn billboard_text_unit(scale: f32) -> f32 {
+    scale / 16.0
+}
+
 /// The edges of `CuboidGizmo.emit`'s stroke, in order.
 fn cuboid_edges(min: [f64; 3], max: [f64; 3]) -> [([f64; 3], [f64; 3]); 12] {
     let [x0, y0, z0] = min;
@@ -318,6 +449,32 @@ pub fn camera_relative(lines: &[Line], camera: [f64; 3], view: glam::Mat4) -> Ve
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_error_marker_is_a_filled_box_with_text_above_it() {
+        let (min, max, text) = error_marker_shape([10, 64, -3]);
+        let pad = f64::from(0.02f32);
+        assert_eq!(min, [10.0 - pad, 64.0 - pad, -3.0 - pad]);
+        assert_eq!(max, [11.0 + pad, 65.0 + pad, -2.0 + pad]);
+        assert_eq!(text, [10.5, 65.2, -2.5]);
+        // 0.375 of 255 floors to 95; the colour is red.
+        assert_eq!(ERROR_MARKER_FILL, 0x5FFF_0000);
+        assert_eq!(billboard_text_unit(ERROR_MARKER_TEXT_SCALE), 0.01);
+        let quads = cuboid_fill_quads(min, max);
+        assert_eq!(quads.len(), 6);
+        // Every quad is flat on a face of the box and counter-clockwise from outside.
+        for q in quads {
+            let n = (glam::DVec3::from(q[1]) - glam::DVec3::from(q[0]))
+                .cross(glam::DVec3::from(q[2]) - glam::DVec3::from(q[1]));
+            let centre = q
+                .iter()
+                .fold(glam::DVec3::ZERO, |a, p| a + glam::DVec3::from(*p))
+                / 4.0;
+            let middle = (glam::DVec3::from(min) + glam::DVec3::from(max)) / 2.0;
+            assert!(n.dot(centre - middle) > 0.0);
+        }
+        assert_eq!(quads[0][0], [max[0], min[1], min[2]]);
+    }
+
     use super::*;
 
     #[test]
@@ -415,5 +572,41 @@ mod tests {
         let out = camera_relative(&lines, [0.0; 3], view);
         assert_eq!(out.len(), 1);
         assert!((out[0][5] + 0.05).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bounding_box_draws_the_box_on_top_and_markers_for_invisible_blocks() {
+        let mut g = Gizmos::default();
+        let mut invisible = vec![None; 2];
+        invisible[1] = Some(InvisibleBlock::Barrier);
+        g.bounding_box([10, 64, 10], [1, 0, 0], [2, 1, 1], Some(&invisible));
+        // The box: twelve edges, from the corner to the far corner.
+        assert_eq!(g.on_top.len(), 12);
+        assert_eq!(g.on_top[0].start, [11.0, 64.0, 10.0]);
+        assert_eq!(g.on_top[0].end, [13.0, 64.0, 10.0]);
+        assert!(g.on_top.iter().all(|l| l.color == BOUNDING_BOX));
+        // The barrier at index 1 (x = 1): 0.45 to 0.55 inside its block, red.
+        assert_eq!(g.lines.len(), 12);
+        let l = &g.lines[0];
+        assert_eq!(l.color, 0xFFFF_0000);
+        assert!((l.start[0] - 12.45).abs() < 1e-6 && (l.end[0] - 12.55).abs() < 1e-6);
+        // An empty side draws nothing.
+        let mut none = Gizmos::default();
+        none.bounding_box([0; 3], [0; 3], [0, 3, 3], None);
+        assert!(none.on_top.is_empty() && none.lines.is_empty());
+    }
+
+    #[test]
+    fn air_markers_are_larger_than_the_others() {
+        let mut g = Gizmos::default();
+        g.bounding_box(
+            [0; 3],
+            [0; 3],
+            [1, 1, 1],
+            Some(&[Some(InvisibleBlock::Air)]),
+        );
+        let (min, max) = (g.lines[0].start[0], g.lines[0].end[0]);
+        assert!((min - 0.4).abs() < 1e-6 && (max - 0.6).abs() < 1e-6);
+        assert_eq!(g.lines[0].color, 0xFF7F_7FFF);
     }
 }

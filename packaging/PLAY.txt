@@ -12,9 +12,8 @@ Playing through the Horizon launcher
   launcher to update, play or run a server.
 
 Downloaded this archive directly?
-  Get the launcher instead; it installs, prepares and updates Horizon for you:
-  https://github.com/horizon-rust/horizon/releases?q=launcher-v&expanded=true
-  More about Horizon: https://playhorizon.dev
+  Get the launcher instead (Download at https://playhorizon.dev); it signs
+  you in, prepares Horizon from your own Minecraft: Java Edition and updates it.
 
   To prepare this folder by hand you need Minecraft Java Edition 26.3, played
   once from the official launcher, and a Java 25 runtime. Then, in this folder:

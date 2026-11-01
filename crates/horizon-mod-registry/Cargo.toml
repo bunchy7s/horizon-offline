@@ -25,10 +25,13 @@ base64 = "0.22"
 getrandom = "0.3"
 # Ratings: one SQLite file on a small volume, as the telemetry server keeps its data.
 rusqlite = { version = "0.37", features = ["bundled"] }
+# Draining a refused upload (already one of axum's).
+http-body-util = "0.1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
-http-body-util = "0.1"
+# A native mod's `.hnmod` for the tests (already one of horizon-mods').
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [profile.release]
 strip = true

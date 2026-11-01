@@ -1,17 +1,17 @@
 Fox.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	gap: minor: the type and the flags byte are synced; the two trusted-entity slots are not
 Fox.canEat	inline	crates/horizon-client/src/mobs/fox.rs::ai_step	held food (eats), no target, on the ground and awake, tested in the eating block of ai_step
 Fox.populateDefaultEquipmentSlots	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::populate	gap: player: only Ctx::finalize (structure mobs, probe) calls it; natural spawns and eggs use spawning.rs::finalize, so a fresh fox never holds an emerald, egg, rabbit foot or the like in its mouth
-Fox.handleEntityEvent	missing		player: no item crumbs at the mouth of a fox that is eating (event 45 is never broadcast or handled; only the sound plays)
+Fox.handleEntityEvent	port	crates/horizon-client/src/mobs/fox.rs::ai_step	ticked in #3512; `Fox.handleEntityEvent` is cited at crates/horizon-client/src/mobs/fox.rs:227 (in a comment, so `where` names the enclosing fn)
 Fox.createAttributes	skip:data		attributes come from entity-types.json
 Fox.checkFoxSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	foxes_spawnable_on below and bright enough
 Fox.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	gap: player: live spawns (natural, spawner, summon) run spawning.rs::finalize, which has no fox arm beyond pick-up-loot: every spawned fox is red (no snow foxes in snowy biomes), no baby packs, no item in the mouth; Ctx::finalize is only reached by structure mobs and the probe
 Fox.setTargetGoals	port	crates/horizon-client/src/mobs/fox.rs::register	red and snow target orders as goals gated on the variant read when the goal runs
 Fox.get	missing		minor: the fox/variant component is not reported (species_variant_component has no fox)
 Fox.applyImplicitComponent	missing		minor: a fox/variant component on a spawn egg or item is ignored
-Fox.getTrustedEntities	missing		player: foxes trust nobody, so a fox you bred still runs from you (the avoid-player goal has no trust test) and never defends you
-Fox.addTrustedEntity	missing		player: foxes bred or hatched by a player never trust them (breeding does not pass the breeder on)
-Fox.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	gap: player: only Type is read; Trusted, Sleeping, Sitting and Crouching are dropped, so a reload wakes a sleeping fox and forgets trust
-Fox.clearTrusted	missing		minor: trust is not modelled, so there is nothing to clear
+Fox.getTrustedEntities	port	crates/horizon-client/src/mobs/fox.rs::trusted_entities	the trusted list decides whom the avoid-player goal leaves alone (`Fox.trusts`); defending a trusted player (`DefendTrustedTargetGoal`) is still missing
+Fox.addTrustedEntity	port	crates/horizon-client/src/mobs/fox.rs::add_trusted_entity	the two DATA_TRUSTED_ID slots, first free then replacing the second; a baby fox made by using a fox spawn egg on a fox trusts that player (`Fox.onOffspringSpawnedFromEgg`)
+Fox.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	Type, Trusted (clearTrusted then addTrustedEntity per UUID), Sleeping, Sitting and Crouching
+Fox.clearTrusted	port	crates/horizon-client/src/mobs/fox.rs::clear_trusted	both trusted slots emptied, before a load reads Trusted
 Fox.getFlag	port	crates/horizon-client/src/mobs/fox.rs::flag	flags byte in extra.ints[0]
 Fox.canHoldItem	missing		player: part of the missing item pickup (a fox never reaches the point of choosing what to hold)
 Fox.spitOutItem	missing		minor: the old item is never spat out with entity.fox.spit because pickup is missing
@@ -19,8 +19,8 @@ Fox.dropItemStack	missing		minor: the rest of a stack is never dropped by a fox 
 Fox.pickUpItem	missing		player: foxes never pick up dropped items (food, emeralds, anything): the loot pickup of Mob.aiStep exists only for pandas (game/pandas.rs) and the fox search-for-items goal is absent
 Fox.getHeadRollAngle	port	crates/horizon-client/src/mobs/fox.rs::pose	head_roll_angle from the interested angle at the partial tick
 Fox.setTarget	missing		minor: only clears the defending flag, which is never set
-Fox.playAmbientSound	missing		player: no night screech at double volume (entity.fox.screech) when no player is near
-Fox.getAmbientSound	missing		player: a sleeping fox makes no sleep sound and foxes never screech at night; the ambient is always entity.fox.ambient
+Fox.playAmbientSound	port	crates/horizon-client/src/mobs/ai.rs::play_ambient	ticked in #3512; `Fox.playAmbientSound` is cited at crates/horizon-client/src/mobs/ai.rs:1095 (in a comment, so `where` names the enclosing fn)
+Fox.getAmbientSound	port	crates/horizon-client/src/mobs/ai.rs::play_ambient	ticked in #3512; `Fox.getAmbientSound` is cited at crates/horizon-client/src/mobs/ai.rs:1093 (in a comment, so `where` names the enclosing fn)
 Fox.getLeashOffset	missing		minor: a lead hangs at the default offset (eye height), not at 0.55 of it
 Fox.FoxAlertableEntitiesSelector.test	inline	crates/horizon-client/src/mobs/fox.rs::alertable	gap: minor: any other mob counts even when asleep or sneaking, and a trusted mob is not skipped (no trust)
 Fox.FoxEatBerriesGoal.onReachedTarget	inline	crates/horizon-client/src/mobs/fox.rs::EatBerries::tick	after 40 ticks at the bush, picks when mob griefing is on
@@ -37,15 +37,15 @@ Frog.getTongueTarget	inline	crates/horizon-client/src/mobs/frog.rs::ShootTongue:
 Frog.get	port	crates/horizon-client/src/mobs/finalize.rs::species_variant_component	frog/variant component
 Frog.applyImplicitComponent	missing		minor: a frog/variant component on a spawn egg or item is ignored
 Frog.customServerAiStep	port	crates/horizon-client/src/mobs/frog.rs::server_ai_step	the attackables sensor and memory timers; the activities run as goals
-Frog.getBreedOffspring	missing		player: frogs never breed: they take slimeballs and show hearts, but no breed goal exists, so no frogspawn is ever laid by frogs
+Frog.getBreedOffspring	port	crates/horizon-client/src/mobs/goals.rs::Breed::tick	the mother becomes pregnant with frogspawn instead of a baby
 Frog.spawnChildFromBreeding	missing		player: frogs never become pregnant (IS_PREGNANT) and so never lay frogspawn; no breed goal means this is never reached, and the generic baby spawn would be wrong for frogs anyway
 Frog.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	variant by biome (live spawns set it in spawning.rs::finalize from biome.frog); the long jump cooldown it sets has no user
 Frog.createAttributes	skip:data		attributes come from entity-types.json
 Frog.checkFrogSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	frogs_spawnable_on below and bright enough
 Frog.FrogNodeEvaluator.getStart	missing		minor: frogs use the plain ground navigation, so a frog in water does not start its path at the box corner
 Frog.FrogNodeEvaluator.getPathType	missing		minor: blocks above #frog_prefer_jump_to (lily pad, dripleaf) are not treated as open path nodes
-Frog.FrogPathNavigation.canCutCorner	missing		minor: no frog navigation, so water-border nodes allow cutting corners
-Frog.FrogPathNavigation.createPathFinder	missing		player: frogs path as plain walkers (NavKind::Ground, no water malus 4 or trapdoor block); vanilla frogs use amphibious pathing with a shallow-water preference
+Frog.FrogPathNavigation.canCutCorner	port	crates/horizon-client/src/mobs/nav.rs::Navigation::can_cut_corner	with the frog on the amphibious finder the corners it refuses are the generic set (fire, damage, walkable doors), which is the frog's own three
+Frog.FrogPathNavigation.createPathFinder	port	crates/horizon-client/src/mobs/frog.rs::register	amphibious navigation with the frog's prefersShallowSwimming (water below sea level - 10 costs more)
 FrogAi.initCoreActivity	inline	crates/horizon-client/src/mobs/frog.rs::register	gap: minor: Panic runs at 1.25 where AnimalPanic uses 2.0; look and move sinks are the controls
 FrogAi.initIdleActivity	inline	crates/horizon-client/src/mobs/frog.rs::register	gap: player: Croak, stroll and look at player (6 blocks) are there; no slimeball tempt, no mate search and no TryFindLand
 FrogAi.initSwimActivity	inline	crates/horizon-client/src/mobs/frog.rs::register	gap: minor: no separate swim activity: Float and the land stroll stand in, no random swim at 0.75 or find-land
@@ -63,16 +63,15 @@ ShootTongue.addUnreachableTargetToMemory	inline	crates/horizon-client/src/mobs/f
 Tadpole.customServerAiStep	inline	crates/horizon-client/src/mobs/aquatic.rs::register	gap: player: panic and swim-around goals stand in for the brain; tadpoles do not follow a player holding a slimeball and do not look at players
 Tadpole.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	Age and AgeLocked
 Tadpole.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	Age and AgeLocked
-Tadpole.setAgeLockedData	missing		player: a golden dandelion on a tadpole does nothing (no age lock use anywhere in the game)
 Tadpole.saveToBucketTag	port	crates/horizon-client/src/entity_nbt.rs::bucket_data	Age and AgeLocked for axolotls and tadpoles
 Tadpole.loadFromBucketTag	port	crates/horizon-client/src/entity_nbt.rs::load_bucket_data	Age and AgeLocked
 Tadpole.ageUp	inline	crates/horizon-client/src/mobs/aquatic.rs::ai_step	gap: player: at 24000 the frog is spawned fresh with yaw and persistence only (SpawnSetup), so a named, silenced or glowing tadpole turns into a plain frog; the grow-up sound is 1.0 loud, not 0.15
 TadpoleAi.initCoreActivity	inline	crates/horizon-client/src/mobs/aquatic.rs::register	panic at 2.0 as a goal
 TadpoleAi.initIdleActivity	inline	crates/horizon-client/src/mobs/aquatic.rs::register	gap: player: swims around with speed 1.0 every 40 ticks (vanilla 0.5); no look at player, no slimeball tempt
-Goat.createHorn	missing		player: a horn dropped by a ramming goat is always the default ponder horn (no random instrument from the goat's uuid, regular or screaming set) and drops with a flat upward push
+Goat.createHorn	port	crates/horizon-client/src/mobs/goat.rs::Goal::create_horn	ticked in #3512; `Goat.createHorn` is cited at crates/horizon-client/src/mobs/goat.rs:512
 Goat.createAttributes	skip:data		attributes come from entity-types.json
 Goat.ageBoundaryReached	port	crates/horizon-client/src/mobs/finalize.rs::age_boundary_reached	attack damage 1 for a baby, 2 for an adult
-Goat.getBreedOffspring	missing		player: a baby goat is never screaming (not inherited from a parent, no 2 percent roll on the breeding path) and starts with no ram or long jump cooldown
+Goat.getBreedOffspring	port	crates/horizon-client/src/game/creatures.rs::breed	ticked in #3512; `Goat.getBreedOffspring` is cited at crates/horizon-client/src/game/creatures.rs:2605 (in a comment, so `where` names the enclosing fn)
 Goat.customServerAiStep	inline	crates/horizon-client/src/mobs/ai.rs::generic	goals stand in for the brain: Float, Panic 2.0, Breed, Tempt, FollowParent, stroll and look (ai.rs generic) and the ram goal (goat.rs); the ram cooldown counts down in goat.rs::tick
 Goat.setYHeadRot	missing		minor: the head is not clamped to 15 degrees of the body on every set; only walking and body turning limit it (control.rs)
 Goat.playEatingSound	port	crates/horizon-client/src/mobs/ai.rs::eating_sound	screaming or normal eat sound at 0.8 to 1.2 pitch
@@ -85,27 +84,27 @@ Goat.checkGoatSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::che
 GoatAi.initMemories	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	gap: player: the long jump (600 to 1200) and ram (600 to 6000) cooldowns are only set by Ctx::finalize (structure mobs, probe); live spawns and babies start at zero, so goats ram right after spawning
 GoatAi.initCoreActivity	inline	crates/horizon-client/src/mobs/ai.rs::generic	Float (swim), Panic 2.0 and the cooldown count in goat.rs::tick
 GoatAi.initIdleActivity	inline	crates/horizon-client/src/mobs/ai.rs::generic	Breed, Tempt 1.25 with goat_food, FollowParent 1.25, stroll, look at player 6; no walk-to-look-target or do-nothing options
-GoatAi.initLongJumpActivity	missing		player: goats never long jump between ledges (no crouch and leap)
+GoatAi.initLongJumpActivity	port	crates/horizon-client/src/mobs/goat.rs::register	ticked in #3512; `GoatAi.initLongJumpActivity` is cited at crates/horizon-client/src/mobs/goat.rs:61 (in a comment, so `where` names the enclosing fn)
 GoatAi.initRamActivity	port	crates/horizon-client/src/mobs/goat.rs::register	the Ram goal: prepare four to seven blocks away, wait 20 ticks head down, charge, knock back or break a horn
 CopperGolem.createAttributes	skip:data		attributes come from entity-types.json
 CopperGolem.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	weather state and golem state
 CopperGolem.canTurnToStatue	inline	crates/horizon-client/src/mobs/copper_golem.rs::update_weathering	oxidized, standing in air, 0.0058 chance per tick on the level random
 CopperGolem.playHeadSpinSound	port	crates/horizon-client/src/mobs/copper_golem.rs::ai_step	gap: minor: local spin sound by oxidation level, but a silent golem still plays it
 CopperGolem.getLeashOffset	missing		minor: a lead hangs at the default offset, not 0.75 of the eye height with no forward shift
-CopperGolemAi.initCoreActivity	port	crates/horizon-client/src/mobs/animal_brain.rs::copper_golem_package	gap: player: panic 1.5, look sink, move sink and the two countdowns are there; InteractWithDoor is not, so a golem's path through a closed wooden door ends at the door
+CopperGolemAi.initCoreActivity	port	crates/horizon-client/src/mobs/animal_brain.rs::copper_golem_package	InteractWithDoor sits in the golem's core activity, so its path through a closed wooden door no longer stops at the door
 CopperGolemAi.initIdleActivity	port	crates/horizon-client/src/mobs/animal_brain.rs::copper_golem_package	transport between chests, look at player, then stroll (2 blocks) or do nothing while the transport cooldown runs
 CopperGolemAi.getTargetReachedInteractions	inline	crates/horizon-client/src/mobs/transport_items.rs::reached_interaction	pickup, pickup nothing, place, place nothing from what the chest holds and what the golem carries
 CopperGolemAi.onReachedTargetInteraction	inline	crates/horizon-client/src/mobs/transport_items.rs::Transport::on_reached	tick 1 opens the chest and sets the state, tick 9 plays the sound, tick 60 closes it
 IronGolem.registerGoals	port	crates/horizon-client/src/mobs/golem.rs::register_iron	gap: player: no MoveBackToVillageGoal and no village-bound stroll (plain stroll 0.6), so golems wander off from their village; no ResetUniversalAngerTargetGoal
 IronGolem.createAttributes	skip:data		attributes come from entity-types.json
 IronGolem.doPush	missing		minor: a hostile mob that bumps the golem is not picked as its target one time in 20 (the golem still finds enemies by its nearest-target goal)
-IronGolem.canSpawnSprintParticle	missing		player: a walking iron golem kicks up no dust of the block under its feet (sprint dust is drawn for players only, client_ambient.rs)
-IronGolem.canAttack	missing		player: a golem the player built can still attack the player after being hit (player-created is not tracked)
-IronGolem.addAdditionalSaveData	missing		minor: PlayerCreated and the persistent anger are not written from the live mob
-IronGolem.readAdditionalSaveData	missing		minor: PlayerCreated and the persistent anger are not read
-IronGolem.hurtServer	missing		player: no entity.iron_golem.damage crack sound when damage moves the golem to a new crackiness level (the crack texture does change, mobs/golem.rs::crackiness)
-IronGolem.isPlayerCreated	missing		player: the player-created flag does not exist, so every golem acts like a village golem toward the player
-IronGolem.setPlayerCreated	missing		player: building a golem from iron blocks does not mark it player-created (game/golems.rs create_triggered)
+IronGolem.canSpawnSprintParticle	port	crates/horizon-client/src/mobs/ai.rs::Mob::base_tick	ticked in #3512; `IronGolem.canSpawnSprintParticle` is cited at crates/horizon-client/src/mobs/ai.rs:862 (in a comment, so `where` names the enclosing fn)
+IronGolem.canAttack	port	crates/horizon-client/src/mobs/goals.rs::Mob::spares_players	the creator rule: player_created makes every player-target path skip players; gap: minor: the creeper refusal is only golem_prey's nearest-target filter, so HurtByTarget can still target a creeper that hits the golem
+IronGolem.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	PlayerCreated in the iron golem arm; persistent anger writes anger_end_time and angry_at
+IronGolem.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	PlayerCreated (absent is false); persistent anger reads anger_end_time and angry_at
+IronGolem.hurtServer	port	crates/horizon-client/src/mobs.rs::Mob::damage_with	golem::crackiness is read before the hit and compared after; a changed level plays entity.iron_golem.damage at 1.0/1.0
+IronGolem.isPlayerCreated	inline	crates/horizon-client/src/mobs/goals.rs::Mob::spares_players	the flag is extra.player_created; spares_players reads it, and entity_nbt.rs writes and reads it
+IronGolem.setPlayerCreated	inline	crates/horizon-client/src/game/golems.rs::Game::check_golem_spawn	sets extra.player_created on the golem built from blocks; mob_from_nbt sets it on load
 IronGolem.getLeashOffset	missing		minor: a lead hangs at the default offset, not 0.875 of the eye height
 SnowGolem.registerGoals	port	crates/horizon-client/src/mobs/golem.rs::register_snow	gap: minor: stroll uses the 0.001 water-avoiding probability, vanilla 1.0000001E-5
 SnowGolem.shear	port	crates/horizon-client/src/game/creatures.rs::Game::interact_shear_mob	shear sound, pumpkin off, shearing loot table at eye height

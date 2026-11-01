@@ -104,7 +104,7 @@ class AllowTests(unittest.TestCase):
     def test_the_repos_list_is_the_nightlys(self):
         self.assertEqual(ns.REVIEWERS, ".github/trusted-reviewers.txt")
         listed = ns.read_reviewers((ROOT / ns.REVIEWERS).read_text())
-        self.assertEqual(listed.logins, {"kacpherek", "rdbtcvs", "online5277", "levzzz5154"})
+        self.assertEqual(listed.logins, {"kacpherek", "rdbtcvs", "online5277", "levzzz5154", "qwerner88880"})
         self.assertFalse(listed.paused)
 
 

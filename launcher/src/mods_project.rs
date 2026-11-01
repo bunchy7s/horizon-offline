@@ -109,7 +109,10 @@ impl Launcher {
                 }
             }
             Loaded::Image(key, path) => {
-                b.images.insert(key, path);
+                // A refresh that failed (offline) keeps the cached image.
+                if path.is_some() || !matches!(b.images.get(&key), Some(Some(_))) {
+                    b.images.insert(key, path);
+                }
             }
             Loaded::Tags(key, Ok(tags)) => {
                 b.tags.insert(key, tags);
@@ -156,47 +159,61 @@ impl Launcher {
         });
     }
 
-    /// The image of `url` at `size` when it is on disk; else asks for it once.
-    fn mods_image(&mut self, url: &str, size: u32) -> Option<PathBuf> {
+    /// The image of `url` at `size` when it is on disk; else asks for it once. One cached longer
+    /// than `images::FRESH` is shown and asked for again, with its validators.
+    pub(super) fn mods_image(&mut self, url: &str, size: u32) -> Option<PathBuf> {
         let key = (url.to_owned(), size);
         if let Some(state) = self.mods.browse.images.get(&key) {
             return state.clone();
         }
-        let home = backend::game_home();
+        // The launcher's data folder, shared by every instance.
+        let home = backend::data_dir();
         if let Some(p) = images::cached(&home, url, size) {
-            self.mods.browse.images.insert(key, Some(p.clone()));
+            self.mods.browse.images.insert(key.clone(), Some(p.clone()));
+            if images::stale(&home, url, size) {
+                let _ = self.mods_image_queue().send(key);
+            }
             return Some(p);
         }
         self.mods.browse.images.insert(key.clone(), None);
         if images::refuse(url).is_some() {
             return None;
         }
-        let b = &mut self.mods.browse;
-        let queue = b.image_queue.get_or_insert_with(|| {
-            let (send, receive) = std::sync::mpsc::channel::<(String, u32)>();
-            let receive = std::sync::Arc::new(std::sync::Mutex::new(receive));
-            for _ in 0..IMAGE_WORKERS {
-                let (receive, tx, home) = (receive.clone(), self.mods.tx.clone(), home.clone());
-                std::thread::spawn(move || loop {
-                    let Ok(next) = receive.lock().map(|r| r.recv()) else {
-                        break;
-                    };
-                    let Ok((url, size)) = next else {
-                        break;
-                    };
-                    let path = images::fetch(&home, &url, size).ok();
-                    if tx
-                        .send(Event::Loaded(Loaded::Image((url, size), path)))
-                        .is_err()
-                    {
-                        break;
-                    }
-                });
-            }
-            send
-        });
-        let _ = queue.send(key);
+        let _ = self.mods_image_queue().send(key);
         None
+    }
+
+    /// The image workers' queue, started the first time an image is asked for.
+    fn mods_image_queue(&mut self) -> std::sync::mpsc::Sender<(String, u32)> {
+        let tx = self.mods.tx.clone();
+        self.mods
+            .browse
+            .image_queue
+            .get_or_insert_with(|| {
+                let (send, receive) = std::sync::mpsc::channel::<(String, u32)>();
+                let receive = std::sync::Arc::new(std::sync::Mutex::new(receive));
+                let home = backend::data_dir();
+                for _ in 0..IMAGE_WORKERS {
+                    let (receive, tx, home) = (receive.clone(), tx.clone(), home.clone());
+                    std::thread::spawn(move || loop {
+                        let Ok(next) = receive.lock().map(|r| r.recv()) else {
+                            break;
+                        };
+                        let Ok((url, size)) = next else {
+                            break;
+                        };
+                        let path = images::fetch(&home, &url, size).ok();
+                        if tx
+                            .send(Event::Loaded(Loaded::Image((url, size), path)))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    });
+                }
+                send
+            })
+            .clone()
     }
 
     /// A project's icon, `side` pixels: its image, or its first letter on a plate until then.
@@ -255,9 +272,9 @@ impl Launcher {
         let toggle = button(
             "mods-filters",
             if active > 0 {
-                format!("Filters ({active})")
+                trf("Filters ({count})", &[("count", &active.to_string())])
             } else {
-                "Filters".to_string()
+                tr("Filters").to_string()
             },
             if shown { Kind::Secondary } else { Kind::Ghost },
             &t,
@@ -279,7 +296,7 @@ impl Launcher {
             return bar;
         }
         let Some(tags) = self.mods_tags().cloned() else {
-            return bar.child(caps("Loading filters").text_color(t.muted));
+            return bar.child(caps(tr("Loading filters")).text_color(t.muted));
         };
         // A chip: on or off, one value of a filter.
         let chip = |id: String, label: String, on: bool| {
@@ -296,7 +313,7 @@ impl Launcher {
                 .flex_wrap()
                 .items_center()
                 .gap(px(4.))
-                .child(caps(title).text_color(t.muted).w(px(120.)))
+                .child(caps(tr(title)).text_color(t.muted).w(px(120.)))
         };
         let mut loaders = row("Loader");
         for l in &tags.loaders {
@@ -401,17 +418,23 @@ impl Launcher {
         let details = o.details.clone();
         let versions = o.versions.clone();
         let version_list = o.version_list.clone();
-        let mut meta = vec![format!("{} downloads", thousands(p.downloads))];
+        let mut meta = vec![trf(
+            "{count} downloads",
+            &[("count", &thousands(p.downloads))],
+        )];
         if let Some(Ok(d)) = &details {
-            meta.push(format!("{} followers", thousands(d.followers)));
+            meta.push(trf(
+                "{count} followers",
+                &[("count", &thousands(d.followers))],
+            ));
             if let Some(day) = d.updated.get(..10) {
-                meta.push(format!("updated {day}"));
+                meta.push(trf("updated {date}", &[("date", day)]));
             }
         }
         if !p.license.is_empty() {
             meta.push(p.license.clone());
         }
-        meta.push(format!("from {}", p.source.label()));
+        meta.push(trf("from {source}", &[("source", p.source.label())]));
         let authors = match &details {
             Some(Ok(d)) if !d.authors.is_empty() => d.authors.join(", "),
             _ => p.author.clone(),
@@ -422,17 +445,17 @@ impl Launcher {
         let checking = self.mods.checking(&p);
         let mut action = div().flex().items_center().gap(px(8.)).child(
             caps(if checking {
-                "Checking"
+                tr("Checking")
             } else {
-                support.label()
+                tr(support.label())
             })
             .flex_none()
             .text_color(color),
         );
         if busy.as_deref() == Some(p.id.as_str()) {
-            action = action.child(caps("Installing").text_color(t.accent));
+            action = action.child(caps(tr("Installing")).text_color(t.accent));
         } else if installed {
-            action = action.child(caps("Installed").text_color(t.muted));
+            action = action.child(caps(tr("Installed")).text_color(t.muted));
         } else if support.installable() && !checking {
             let label = if p.kind == PackKind::Modpack {
                 "Import"
@@ -470,7 +493,11 @@ impl Launcher {
                             .child(if authors.is_empty() {
                                 p.summary.clone()
                             } else {
-                                format!("by {authors} · {}", p.summary)
+                                format!(
+                                    "{} · {}",
+                                    trf("by {author}", &[("author", &authors)]),
+                                    p.summary
+                                )
                             }),
                     )
                     .child(
@@ -514,7 +541,7 @@ impl Launcher {
                     .flex()
                     .flex_col()
                     .gap(px(2.))
-                    .child(caps(title).text_color(t.muted))
+                    .child(caps(tr(title)).text_color(t.muted))
                     .children(
                         list.iter()
                             .map(|l| text(theme::CAPTION).text_color(t.ink_soft).child(l.clone())),
@@ -536,7 +563,7 @@ impl Launcher {
                 links = links.child(
                     button(
                         "mods-link-page",
-                        format!("{} page", p.source.label()),
+                        trf("{source} page", &[("source", p.source.label())]),
                         Kind::Ghost,
                         &t,
                     )
@@ -565,14 +592,14 @@ impl Launcher {
         })));
         let body = match tab {
             Tab::Description => match &details {
-                None => centered("Loading…", &t),
+                None => centered(tr("Loading…"), &t),
                 Some(Err(e)) => notice(e.clone(), &t),
                 Some(Ok(d)) => div().max_w(px(760.)).child(markdown::render(&d.body, &t)),
             },
             Tab::Gallery => match &details {
-                None => centered("Loading…", &t),
+                None => centered(tr("Loading…"), &t),
                 Some(Err(e)) => notice(e.clone(), &t),
-                Some(Ok(d)) if d.gallery.is_empty() => centered("No gallery images.", &t),
+                Some(Ok(d)) if d.gallery.is_empty() => centered(tr("No gallery images."), &t),
                 Some(Ok(d)) => {
                     let mut grid = div().flex().flex_wrap().gap(px(16.));
                     for g in &d.gallery {
@@ -600,7 +627,7 @@ impl Launcher {
                 }
             },
             Tab::Versions => match &versions {
-                None => centered("Loading…", &t),
+                None => centered(tr("Loading…"), &t),
                 Some(Err(e)) => notice(e.clone(), &t),
                 Some(Ok(list)) => version_list.column(
                     &self.content_scroll.handle,
@@ -630,7 +657,9 @@ impl Launcher {
                             v.number.clone(),
                             Some(detail.join(" · ").into_any_element()),
                             list[i].verdict.as_ref().map(|verdict| {
-                                caps(verdict.label()).text_color(t.muted).into_any_element()
+                                caps(tr(verdict.label()))
+                                    .text_color(t.muted)
+                                    .into_any_element()
                             }),
                             &t,
                         )

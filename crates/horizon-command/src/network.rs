@@ -348,6 +348,51 @@ mod tests {
         assert_eq!(back, p);
     }
 
+    /// What a client signs (SignableCommand.of over the server's tree): the
+    /// message arguments of vanilla's /msg and of a command the client does
+    /// not know, and nothing for a command without one.
+    #[test]
+    fn signable_arguments_of_a_server_tree() {
+        let mut shout = argument("text", "minecraft:message", vec![], true);
+        shout.suggestions = None;
+        let mut targets = argument("targets", "minecraft:entity", vec![0], false);
+        targets.children = vec![2];
+        let packet = Commands {
+            nodes: vec![
+                literal("msg", vec![1], false),
+                targets,
+                argument("message", "minecraft:message", vec![], true),
+                literal("shout", vec![4], false),
+                shout,
+                literal("spawn", vec![], true),
+                CommandNode {
+                    kind: 0,
+                    executable: false,
+                    restricted: false,
+                    children: vec![0, 3, 5],
+                    redirect: None,
+                    name: String::new(),
+                    parser: None,
+                    suggestions: None,
+                },
+            ],
+            root: 6,
+        };
+        let d = from_packet(&packet, super::super::vanilla::dispatcher());
+        let reg = crate::Registries::default();
+        let signable = |command: &str| d.parse(command, &reg).signable_arguments(&d);
+        assert_eq!(
+            signable("msg Steve hi there @a"),
+            vec![("message".to_owned(), "hi there @a".to_owned())]
+        );
+        assert_eq!(
+            signable("shout hello"),
+            vec![("text".to_owned(), "hello".to_owned())]
+        );
+        assert!(signable("spawn").is_empty());
+        assert!(signable("unknown words").is_empty());
+    }
+
     #[test]
     fn server_tree_becomes_a_dispatcher() {
         let local = super::super::vanilla::dispatcher();

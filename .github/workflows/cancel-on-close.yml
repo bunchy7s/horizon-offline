@@ -9,7 +9,9 @@ permissions:
   actions: write
 jobs:
   cancel:
-    runs-on: ubuntu-latest
+    # One of playhorizon's small runners, out of GitHub's shared pool: no checkout, no code of the pull request
+    # (docs/ci-runners.md). SELF_HOSTED_CI=off: GitHub's runners.
+    runs-on: ${{ vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted", "linux", "playhorizon-light"]') || 'ubuntu-latest' }}
     steps:
       - name: Cancel the pull request's unfinished runs
         env:

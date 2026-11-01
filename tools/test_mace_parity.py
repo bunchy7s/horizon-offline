@@ -1,8 +1,11 @@
 """Compare a player's melee hit with a mace (and other weapons) with vanilla's.
 
 Every case has a stone floor, a target mob standing on it or hanging in the
-air (health raised so no hit kills it, sometimes in armor), other mobs and
-armor stands around it, and a player near the target holding a mace with
+air (health raised so no hit kills it, sometimes in armor) or an armor stand
+(a living target whose own `hurtServer` wobbles on a first punch and breaks on
+a second within five ticks; its hit still runs `itemAttackInteraction`, so a
+smash knocks the creatures around it away and a Wind Burst launches the
+attacker), other mobs and armor stands around it, and a player near the target holding a mace with
 Density, Breach, Wind Burst and Unbreaking in any mix, or a sword, an axe, a
 stick or nothing. The player has fallen some distance (sometimes gliding or
 flying), moves, and may still have the impact point of an earlier impulse.
@@ -29,6 +32,7 @@ import json
 import math
 import os
 import random
+import re
 try:
     from . import block_update_harness as h, lab, test_dispenser_parity as d, test_rust_parity as base
 except ImportError:
@@ -88,8 +92,15 @@ def cases(facts, count, seed):
         grounded = rng.random() < 0.75
         tx, tz = rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5)
         ty = 0.0 if grounded else rng.choice([0.5, 1.25, 2.0])
-        target = {'type': 'minecraft:' + rng.choice(TARGETS), 'pos': [tx, ty, tz], 'yaw': rng.uniform(-180, 180),
-                  'health': 1000.0}
+        stand = rng.random() < 0.3
+        target = {'type': 'minecraft:armor_stand' if stand else 'minecraft:' + rng.choice(TARGETS),
+                  'pos': [tx, ty, tz], 'yaw': rng.uniform(-180, 180)}
+        if stand:
+            # ArmorStand.hurtServer wobbles on a first punch and breaks on a
+            # second one within five ticks of the last (lastHit).
+            target['last_hit'] = case['time'] - rng.choice([1, 3, 5, 6, 10, 1000])
+        else:
+            target['health'] = 1000.0
         if grounded:
             target['ground'] = True
         if target['type'] in ('minecraft:zombie', 'minecraft:husk', 'minecraft:skeleton') and rng.random() < 0.6:
@@ -97,7 +108,7 @@ def cases(facts, count, seed):
             target['equip'] = {'chest': d.plain(f'{material}_chestplate')}
             if rng.random() < 0.5:
                 target['equip']['head'] = d.plain(f'{material}_helmet')
-        if rng.random() < 0.15:
+        if not stand and rng.random() < 0.15:
             target['knockback_resistance'] = rng.choice([0.25, 0.5, 1.0])
         entities = [target]
         for _ in range(rng.choice([0, 1, 2, 3, 5])):
@@ -144,7 +155,35 @@ def kind(case):
         name += ' smash' if smash else ' hit'
         if 'wind_burst' in item:
             name += ' with wind burst'
+    if case['entities'][0]['type'] == 'minecraft:armor_stand':
+        name += ' on an armor stand'
     return name
+
+
+def weapon_part(lines):
+    """A hit armor stand's lines without what its own `hurtServer` adds.
+
+    The weapon's part is what this harness compares: the smash, Wind Burst
+    and the wear. The stand's wobble and break have their own effects, which
+    Horizon does not copy yet: the `entity_damage` / `entity_die` game events,
+    the hit sound (vanilla's client plays it for entity event 32), the stand
+    item the break pops (place, motion and random draws) and so the random
+    stream after a break, which Unbreaking's roll for the weapon's wear
+    reads: the held stack's damage is left out then.
+    """
+    broke = any(line.startswith('T 0 ') and line.endswith(' removed') for line in lines)
+
+    def own(line):
+        return ((line.startswith('G ') and line.endswith(('minecraft:entity_damage', 'minecraft:entity_die')))
+                or (line.startswith('N minecraft:item ') and '"minecraft:armor_stand"' in line)
+                or (line.startswith('S ') and line.endswith('minecraft:entity.armor_stand.hit'))
+                or (broke and line.startswith('rng ')))
+
+    def held(line):
+        if broke and line.startswith('held '):
+            line = re.sub(r'minecraft:damage:\d+,?', '', line).replace('components:{},', '')
+        return line
+    return [held(line) for line in lines if not own(line)]
 
 
 def main():
@@ -183,6 +222,8 @@ def main():
             continue
         smashed += any('source=minecraft:mace_smash hurt=true' in line for line in a)
         burst += any(line.endswith('minecraft:entity.wind_charge.wind_burst') for line in a)
+        if case['entities'][0]['type'] == 'minecraft:armor_stand':
+            a, b = weapon_part(a), weapon_part(b)
         if not d.same(a, b):
             groups.setdefault(kind(case), []).append((case, a, b))
     for name, entries in sorted(errors.items(), key=lambda e: -len(e[1])):

@@ -619,6 +619,11 @@ public final class VanillaBlockUpdateOracle {
         @Override
         public void sendToTrackingPlayers(final net.minecraft.world.entity.Entity entity, final net.minecraft.network.protocol.Packet<? super net.minecraft.network.protocol.game.ClientGamePacketListener> packet) {
         }
+
+        /** Entity events (an armor stand's wobble) go to the trackers and the entity itself; nobody is there. */
+        @Override
+        public void sendToTrackingPlayersAndSelf(final net.minecraft.world.entity.Entity entity, final net.minecraft.network.protocol.Packet<? super net.minecraft.network.protocol.game.ClientGamePacketListener> packet) {
+        }
     }
 
     static World build(JsonObject f) throws Exception {

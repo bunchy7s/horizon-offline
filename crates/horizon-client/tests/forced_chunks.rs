@@ -13,6 +13,7 @@ use horizon_client::{
     light::LightTables,
     mesher::MeshTables,
     models,
+    section_mask::SectionMask,
     streaming::{ChunkGenerator, Proto, Streaming, WorkerContext},
     world::World,
 };
@@ -71,6 +72,10 @@ impl ChunkGenerator for Plain {
         let column = proto.downcast_ref::<Column>()?;
         Some(Chunk::empty(column.x, column.z))
     }
+    fn non_air_sections(&self, proto: &Proto) -> Option<SectionMask> {
+        proto.downcast_ref::<Column>()?;
+        Some(SectionMask::single(4))
+    }
 }
 
 #[test]
@@ -121,10 +126,17 @@ fn forced_chunks_reach_vanillas_rings() {
         let (x, z) = (40 + dx, -40 + dz);
         let ring = dx.abs().max(dz.abs());
         let status = streaming.latest_status(&world, x, z);
+        // A level chunk's light layers count a neighbour at FEATURES as
+        // vanilla's do one at INITIALIZE_LIGHT (#4294); not one at TERRAIN.
+        let proto = streaming.proto_sections(x, z);
         if ring == 3 {
             assert_eq!(status, Some(Status::Features), "({x}, {z})");
+            assert_eq!(proto, Some(SectionMask::single(4)), "({x}, {z})");
         } else if ring == 4 {
             assert_eq!(status, Some(Status::Terrain), "({x}, {z})");
+            assert_eq!(proto, None, "({x}, {z})");
+        } else {
+            assert_eq!(proto, None, "({x}, {z})");
         }
     }
 }

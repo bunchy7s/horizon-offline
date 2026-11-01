@@ -1,8 +1,9 @@
 //! Shapes whose corners are cut in pixel steps, like the sky's art (docs/design-system.md, "Night").
 //! The fill and the stroke are rectangles that don't overlap, so a translucent plate keeps one
-//! opacity, and the stroke follows the steps.
+//! opacity, and the stroke follows the steps. One canvas paints them all: a plate costs two
+//! elements, however many steps it has.
 use crate::theme::night::{self, Night};
-use gpui::{div, prelude::*, px, rgba, Div, Rgba};
+use gpui::{canvas, div, point, prelude::*, px, rgba, Bounds, Div, Pixels, Rgba};
 
 /// `c` at opacity `a`.
 pub fn alpha(c: u32, a: f32) -> Rgba {
@@ -25,13 +26,27 @@ pub fn plate(n: &Night) -> Div {
 pub fn cut(step: f32, steps: usize, fill: Option<Rgba>, stroke: Option<(Rgba, f32)>) -> Div {
     let fill = fill
         .into_iter()
-        .flat_map(|c| fill_rects(step, steps).into_iter().map(move |r| r.div(c)));
+        .flat_map(|c| fill_rects(step, steps).into_iter().map(move |r| (r, c)));
     let stroke = stroke.into_iter().flat_map(|(c, w)| {
         stroke_rects(step, steps, w)
             .into_iter()
-            .map(move |r| r.div(c))
+            .map(move |r| (r, c))
     });
-    div().relative().children(fill.chain(stroke))
+    let quads: Vec<_> = fill.chain(stroke).collect();
+    div().relative().child(
+        canvas(
+            |_, _, _| {},
+            move |bounds, (), window, _| {
+                for (r, c) in quads {
+                    window.paint_quad(gpui::fill(r.within(bounds), c));
+                }
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full(),
+    )
 }
 
 /// A distance from the box's start (left, top) or end (right, bottom) edge.
@@ -78,20 +93,18 @@ impl Rect {
         r
     }
 
-    fn div(self, c: Rgba) -> Div {
-        let d = div().absolute().bg(c);
-        let d = match self.x {
-            (Edge::Start(a), Edge::Start(b)) => d.left(px(a)).w(px(b - a)),
-            (Edge::Start(a), Edge::End(b)) => d.left(px(a)).right(px(b)),
-            (Edge::End(a), Edge::End(b)) => d.right(px(b)).w(px(a - b)),
-            (Edge::End(_), Edge::Start(_)) => unreachable!("rectangles run start to end"),
+    /// Where it falls in a box with these bounds.
+    fn within(self, b: Bounds<Pixels>) -> Bounds<Pixels> {
+        let span = |(from, to): (Edge, Edge), start: Pixels, len: Pixels| {
+            let at = |e| match e {
+                Edge::Start(a) => start + px(a),
+                Edge::End(a) => start + len - px(a),
+            };
+            (at(from), at(to))
         };
-        match self.y {
-            (Edge::Start(a), Edge::Start(b)) => d.top(px(a)).h(px(b - a)),
-            (Edge::Start(a), Edge::End(b)) => d.top(px(a)).bottom(px(b)),
-            (Edge::End(a), Edge::End(b)) => d.bottom(px(b)).h(px(a - b)),
-            (Edge::End(_), Edge::Start(_)) => unreachable!("rectangles run start to end"),
-        }
+        let (left, right) = span(self.x, b.origin.x, b.size.width);
+        let (top, bottom) = span(self.y, b.origin.y, b.size.height);
+        Bounds::from_corners(point(left, top), point(right, bottom))
     }
 }
 
@@ -172,6 +185,16 @@ mod tests {
                 "stroke {step}×{steps} w{w}"
             );
         }
+    }
+
+    #[test]
+    fn rectangles_land_in_the_box_they_are_painted_in() {
+        let b = Bounds::new(point(px(10.), px(20.)), gpui::size(px(100.), px(50.)));
+        let r = Rect::across(8., true, 4., 4.).within(b);
+        assert_eq!(
+            (r.left(), r.right(), r.top(), r.bottom()),
+            (px(18.), px(102.), px(62.), px(66.))
+        );
     }
 
     #[test]

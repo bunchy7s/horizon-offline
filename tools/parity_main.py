@@ -7,8 +7,8 @@
 `base` prints the newest commit on main whose parity-main run passed and that HEAD contains, else HEAD's first parent,
 so a run tests every merge since the last green one (`tools/parity.py --changed <base>`), however many landed while
 the previous run went on. `bisect` reads the harnesses that failed (.local/parity-runner/last-run.json), checks out
-the first-parent merges between BASE and HEAD by halves and runs only those harnesses, then names the first merge they
-fail on, once they fail again at HEAD and pass at BASE (written to $GITHUB_STEP_SUMMARY and, with --comment, on its pull request). HEAD is checked out again at the end.
+the first-parent merges between BASE and HEAD by halves and runs only those harnesses, then names, for each of them that
+fails again at HEAD and passes at BASE, the first merge it fails on (written to $GITHUB_STEP_SUMMARY and, with --comment, on its pull request). HEAD is checked out again at the end.
 """
 
 import argparse
@@ -65,11 +65,18 @@ def harness_exists(name):
 
 
 def run_harnesses(names, timeout):
-    """Whether any of the harnesses fails at the checked-out commit (those it doesn't have yet can't)."""
+    """The harnesses that fail at the checked-out commit (those it doesn't have yet can't), as parity.py records them."""
     present = [name for name in names if harness_exists(name)]
     if not present:
-        return False
-    return subprocess.run([sys.executable, "tools/parity.py", *present, "--timeout", str(timeout)], cwd=ROOT).returncode != 0
+        return []
+    if subprocess.run([sys.executable, "tools/parity.py", *present, "--timeout", str(timeout)], cwd=ROOT).returncode == 0:
+        return []
+    try:
+        failed = json.loads(LAST_RUN.read_text(encoding="utf-8")).get("failed") or []
+    except (OSError, ValueError):
+        failed = []
+    # A run that failed before recording its harnesses (a probe that doesn't build) fails them all.
+    return [name for name in present if name in failed] or present
 
 
 def bisect(since, timeout, comment):
@@ -85,44 +92,64 @@ def bisect(since, timeout, comment):
         print("No merge since the base.")
         return 1
 
-    def fails(commit):
+    def fails(commit, names):
         print(f"--- {commit[:9]} {git('log', '-1', '--format=%s', commit).stdout.strip()}", flush=True)
         git("checkout", "-q", "--detach", commit)
-        return run_harnesses(failed, timeout)
+        return run_harnesses(names, timeout)
 
-    def blame_nobody(why, code):
-        line = f"parity-main: {', '.join(failed)} {why}: no merge is named."
+    def report(line):
         print(line)
         if os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
                 summary.write(f"### {line}\n")
-        return code
 
-    # A merge is named only when the harnesses fail again at HEAD and pass at the base: otherwise the search would
-    # end on the newest merge (a flake, or a runner missing files, passes everywhere now) or the oldest one (the
-    # runner fails at every commit) and blame it for nothing. The exit code is the run's verdict: 0 only when every
-    # failed harness passes when run again at HEAD (the commit is good, so releases may follow it), 1 otherwise.
+    # Each harness is judged on its own. One that passes when run again at HEAD is a flake (counted as a pass); one
+    # that fails at the base too is the runner's or a flake (no merge to blame: the search would end on the oldest
+    # merge); the others fail at HEAD and pass at the base, so a merge broke them and the halving search names it.
+    # Harnesses that break at different merges are searched again after the first one. The exit code is the run's
+    # verdict: 0 only when every failed harness passes when run again at HEAD (the commit is good, so releases may
+    # follow it), 1 otherwise.
+    blames = []
     try:
-        if not fails(head):
-            return blame_nobody(f"pass when run again at {head[:9]}: a flake, counted as a pass", 0)
-        if fails(since):
-            return blame_nobody(f"fail at the base {since[:9]} too: the runner or a flake", 1)
-        culprit = first_bad(commits, fails) if len(commits) > 1 else commits[0]
+        at_head = fails(head, failed)
+        flakes = [name for name in failed if name not in at_head]
+        if flakes:
+            report(f"parity-main: {', '.join(flakes)} pass when run again at {head[:9]}: a flake, counted as a pass.")
+        if not at_head:
+            return 0
+        at_base = fails(since, at_head)
+        if at_base:
+            report(f"parity-main: {', '.join(at_base)} fail at the base {since[:9]} too: the runner or a flake: "
+                   "no merge is named.")
+        remaining = [name for name in at_head if name not in at_base]
+        # What failed where; a run of more harnesses also answers for fewer of them.
+        tried = {head: set(at_head)}
+
+        def failing(commit):
+            if commit not in tried:
+                tried[commit] = set(fails(commit, remaining))
+            return tried[commit] & set(remaining)
+
+        low = 0
+        while remaining:
+            span = commits[low:]
+            culprit = first_bad(span, failing) if len(span) > 1 else span[0]
+            hit = [name for name in remaining if name in failing(culprit)]
+            blames.append((culprit, hit))
+            remaining = [name for name in remaining if name not in hit]
+            low = commits.index(culprit) + 1
     finally:
         git("checkout", "-q", "--detach", head)
-    subject = git("log", "-1", "--format=%s", culprit).stdout.strip()
-    number = re.search(r"Merge pull request #(\d+)", subject)
-    line = (f"parity-main: {', '.join(failed)} first fail at {culprit[:9]} ({subject}), "
-            f"of {len(commits)} merges since {since[:9]}.")
-    print(line)
-    if os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-            summary.write(f"### {line}\n")
-    if comment and number:
-        url = f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/{REPO}/actions/runs/{os.environ.get('GITHUB_RUN_ID', '')}"
-        body = (f"🤖 Agent: parity-main found that this merge breaks {', '.join(f'`{name}`' for name in failed)} on main "
-                f"(bisected over {len(commits)} merges: {url}). Releases wait until parity-main passes again.")
-        subprocess.run(["gh", "pr", "comment", number.group(1), "--repo", REPO, "--body", body])
+    for culprit, hit in blames:
+        subject = git("log", "-1", "--format=%s", culprit).stdout.strip()
+        number = re.search(r"Merge pull request #(\d+)", subject)
+        report(f"parity-main: {', '.join(hit)} first fail at {culprit[:9]} ({subject}), "
+               f"of {len(commits)} merges since {since[:9]}.")
+        if comment and number:
+            url = f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/{REPO}/actions/runs/{os.environ.get('GITHUB_RUN_ID', '')}"
+            body = (f"🤖 Agent: parity-main found that this merge breaks {', '.join(f'`{name}`' for name in hit)} on main "
+                    f"(bisected over {len(commits)} merges: {url}). Releases wait until parity-main passes again.")
+            subprocess.run(["gh", "pr", "comment", number.group(1), "--repo", REPO, "--body", body])
     return 1
 
 

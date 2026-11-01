@@ -1,10 +1,10 @@
 //! The commands that manage a server in the background (docs/server.md, section 5): `start`, `stop`,
-//! `restart`, `status`, `cmd` and `logs`. They talk to the running supervisor through the control API.
+//! `restart`, `status`, `cmd`, `report` and `logs`. They talk to the running supervisor through the control API.
 
 use crate::{api::Client, backup, signals, supervisor};
 use serde_json::{Value, json};
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
@@ -156,6 +156,182 @@ pub fn command(dir: &Path, words: &[String]) -> Result<(), String> {
         println!("{}", line.as_str().unwrap_or_default());
     }
     Ok(())
+}
+
+/// `players [--json]`: who is online, the operators, the whitelist and the bans; a stopped server's lists
+/// are read from its files.
+pub fn players(dir: &Path, as_json: bool) -> Result<(), String> {
+    let v = match Client::open(dir)? {
+        Some(client) => client.call("GET", "/api/v1/players", None)?,
+        None => serde_json::from_str(
+            &crate::admin::players(&crate::api::Shared::with_install(dir, None)).body,
+        )
+        .map_err(|e| e.to_string())?,
+    };
+    if as_json {
+        println!("{v}");
+        return Ok(());
+    }
+    let list = |key: &str, describe: &dyn Fn(&Value) -> String| -> String {
+        let items: Vec<String> = v[key]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(describe)
+            .collect();
+        if items.is_empty() {
+            "none".into()
+        } else {
+            items.join(", ")
+        }
+    };
+    let name = |p: &Value| p["name"].as_str().unwrap_or_default().to_owned();
+    let because = |b: &Value| match b["reason"].as_str() {
+        Some(reason) => format!(" ({reason})"),
+        None => String::new(),
+    };
+    let online = list("online", &|p| match p["op_level"].as_i64() {
+        Some(level) if level > 0 => format!("{} (op {level}, {} ms)", name(p), p["ping_ms"]),
+        _ => format!("{} ({} ms)", name(p), p["ping_ms"]),
+    });
+    match v["max_players"].as_u64() {
+        Some(max) => println!(
+            "Online ({}/{max}): {online}",
+            v["online"].as_array().map_or(0, Vec::len)
+        ),
+        None => println!("Online: the game isn't running"),
+    }
+    println!(
+        "Operators: {}",
+        list("ops", &|o| format!("{} ({})", name(o), o["level"]))
+    );
+    let white: Vec<String> = v["whitelist"]["players"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(name)
+        .collect();
+    println!(
+        "Whitelist ({}): {}",
+        if v["whitelist"]["enabled"] == true {
+            "on"
+        } else {
+            "off"
+        },
+        if white.is_empty() {
+            "none".into()
+        } else {
+            white.join(", ")
+        }
+    );
+    println!(
+        "Banned: {}",
+        list("bans", &|b| format!("{}{}", name(b), because(b)))
+    );
+    println!(
+        "Banned addresses: {}",
+        list("ip_bans", &|b| format!(
+            "{}{}",
+            b["ip"].as_str().unwrap_or_default(),
+            because(b)
+        ))
+    );
+    Ok(())
+}
+
+/// `kick NAME [REASON]`, `ban NAME [REASON]`, `pardon NAME`, `ban-ip ADDRESS|NAME [REASON]`, `pardon-ip
+/// ADDRESS`: the vanilla command on the running server, through the control API.
+pub fn moderate(dir: &Path, command: &str, words: &[String]) -> Result<(), String> {
+    let Some(target) = words.first() else {
+        return Err(format!(
+            "{command} needs a player's name{}",
+            if command.ends_with("-ip") {
+                " or an address"
+            } else {
+                ""
+            }
+        ));
+    };
+    let mut body = json!({});
+    let key = if target.parse::<std::net::IpAddr>().is_ok() {
+        "ip"
+    } else {
+        "name"
+    };
+    body[key] = json!(target);
+    if words.len() > 1 {
+        body["reason"] = json!(words[1..].join(" "));
+    }
+    let client = running(dir)?;
+    wait_running(&client, None)?;
+    let reply = client.call("POST", &format!("/api/v1/players/{command}"), Some(&body))?;
+    for line in reply["output"].as_array().into_iter().flatten() {
+        println!("{}", line.as_str().unwrap_or_default());
+    }
+    Ok(())
+}
+
+/// `report [SECONDS]`: the running game records a performance report for that long (60 s by default,
+/// at most 600), writes it to `reports/` (a JSON file and a short text summary, nothing about who
+/// plays) and this prints the summary.
+pub fn report(dir: &Path, words: &[String]) -> Result<(), String> {
+    let seconds = match words.first() {
+        None => 60,
+        Some(word) => word
+            .parse::<u64>()
+            .ok()
+            .filter(|s| (1..=600).contains(s))
+            .ok_or("report takes the seconds to record, 1 to 600 (60 by default)")?,
+    };
+    let client = running(dir)?;
+    wait_running(&client, None)?;
+    let reports = dir.join("reports");
+    let before = report_files(&reports);
+    let reply = client.call(
+        "POST",
+        "/api/v1/command",
+        Some(&json!({ "line": format!("horizon-report {seconds}") })),
+    )?;
+    for line in reply["output"].as_array().into_iter().flatten() {
+        println!("{}", line.as_str().unwrap_or_default());
+    }
+    println!("Recording for {seconds} s...");
+    // The report is written a moment after the last recorded tick; a slow server gets a minute more.
+    let deadline = Instant::now() + Duration::from_secs(seconds + 60);
+    while Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(500));
+        if let Some(text) = report_files(&reports)
+            .into_iter()
+            .find(|p| !before.contains(p))
+        {
+            let summary =
+                std::fs::read_to_string(&text).map_err(|e| format!("{}: {e}", text.display()))?;
+            print!("{summary}");
+            println!("Saved: {} (and the .json beside it)", text.display());
+            return Ok(());
+        }
+    }
+    Err(format!(
+        "no report in {} after {} s: is the game on a release with `horizon-report`?",
+        reports.display(),
+        seconds + 60
+    ))
+}
+
+/// The text summaries in `reports/`.
+fn report_files(dir: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension().is_some_and(|e| e == "txt")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("perf-"))
+        })
+        .collect()
 }
 
 /// `panel`: a one-time login link for the web panel.

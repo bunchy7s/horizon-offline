@@ -13,7 +13,9 @@ const SITE: &str = "https://horizon-rust.github.io/horizon-mods/";
 const USAGE: &str = "usage: cargo horizon-mod registry build <checkout> --files <dir> --out <index.json> [--release <url>] [--site <url>] [--generated <time>]
        cargo horizon-mod registry review <base checkout> <head checkout> --author <login> [--json]
        cargo horizon-mod registry check <base checkout> <head checkout> --files <dir>
-       cargo horizon-mod registry list <checkout>";
+       cargo horizon-mod registry list <checkout>
+       cargo horizon-mod registry release <checkout> <id> <file> --tag <tag> --published <YYYY-MM-DD> [--notes <file>] [--signature <file>] [--game <version>]
+       cargo horizon-mod registry page <checkout> <id> <horizon-registry.toml>";
 
 fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
     super::flag(args, name)
@@ -154,6 +156,74 @@ pub fn main(args: &[String]) -> Result<(), String> {
             }
             Ok(())
         }
+        // A release of a project's repository, downloaded: the checks of a submission, then the
+        // version as the index lists it (JSON on stdout), for the registry's release sync.
+        Some("release") => {
+            let [checkout, id, file] = pos[..] else {
+                return Err(USAGE.into());
+            };
+            let (tag, published) = (
+                flag(rest, "--tag").ok_or(USAGE)?,
+                flag(rest, "--published").ok_or(USAGE)?,
+            );
+            let read = |name: &str| {
+                flag(rest, name)
+                    .map(|p| std::fs::read_to_string(p).map_err(|e| format!("{p}: {e}")))
+                    .transpose()
+            };
+            let (notes, signature) = (read("--notes")?, read("--signature")?);
+            let entry = entry_of(checkout, id)?;
+            let path = Path::new(file);
+            let cache = registry::Cache::read(Path::new(checkout), id)?;
+            let entry = entry.resolved(&cache.page);
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            crate::check::check(
+                path,
+                entry.kind.clone(),
+                entry.key.as_deref(),
+                signature.as_deref(),
+            )?;
+            let version = registry::release_version(
+                &entry,
+                &registry::Release {
+                    tag,
+                    published,
+                    notes: notes.as_deref().unwrap_or(""),
+                    asset: flag(rest, "--name").unwrap_or(name),
+                    game: flag(rest, "--game").unwrap_or("26.3"),
+                    signature: signature.as_deref(),
+                },
+                path,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string(&version).map_err(|e| e.to_string())?
+            );
+            Ok(())
+        }
+        // The page file of a project's repository, checked against its entry: the page as JSON.
+        Some("page") => {
+            let [checkout, id, file] = pos[..] else {
+                return Err(USAGE.into());
+            };
+            let entry = entry_of(checkout, id)?;
+            let text = std::fs::read_to_string(file).map_err(|e| format!("{file}: {e}"))?;
+            let page = registry::page(&entry, &text)?;
+            println!(
+                "{}",
+                serde_json::to_string(&page).map_err(|e| e.to_string())?
+            );
+            Ok(())
+        }
         _ => Err(USAGE.into()),
     }
+}
+
+/// `mods/<id>.toml` of the checkout, which must name a repository.
+fn entry_of(checkout: &str, id: &str) -> Result<registry::Entry, String> {
+    let (entries, _) = registry::load(Path::new(checkout)).map_err(lines)?;
+    entries
+        .into_iter()
+        .find(|e| e.id == id && e.repo.is_some())
+        .ok_or_else(|| format!("{id}: no entry with a repo"))
 }

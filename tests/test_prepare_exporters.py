@@ -12,7 +12,8 @@ from tools.check_prepare_exporters import verify
 class PrepareExportersTests(unittest.TestCase):
     def test_known_noise_does_not_mask_changed_resources(self):
         with tempfile.TemporaryDirectory() as temporary:
-            folders = [Path(temporary) / str(i) for i in range(3)]
+            # Two isolated runs, then two batched ones (with and without the second server JVM).
+            folders = [Path(temporary) / str(i) for i in range(4)]
             for i, folder in enumerate(folders):
                 folder.mkdir()
                 (folder / 'stable.nbt').write_bytes(b'unchanged')
@@ -29,9 +30,10 @@ class PrepareExportersTests(unittest.TestCase):
                     ('creative-inventory.json', b'{"tabs":[{},{"tags":[["a","b"]],"items":["dirt"]}]}'),
                     ('horizon-resources.json', b'{"schema":8}'),
                 ]:
-                    path = folders[2] / name
-                    original = path.read_bytes()
-                    path.write_bytes(changed)
-                    with self.subTest(resource=name), self.assertRaises(SystemExit):
-                        verify(folders)
-                    path.write_bytes(original)
+                    for folder in folders[2:]:
+                        path = folder / name
+                        original = path.read_bytes()
+                        path.write_bytes(changed)
+                        with self.subTest(resource=name, run=folder.name), self.assertRaises(SystemExit):
+                            verify(folders)
+                        path.write_bytes(original)

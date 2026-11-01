@@ -144,7 +144,7 @@ impl Paletted {
             return Self::from_values_slow(values, strategy, global_bits);
         }
         let mut palette: Vec<i32> = Vec::new();
-        let mut ids = Vec::with_capacity(values.len());
+        let mut ids: Vec<u32> = Vec::with_capacity(values.len());
         INDEX.with_borrow_mut(|index| {
             if index.len() <= max as usize {
                 index.resize(max as usize + 1, u32::MAX);
@@ -165,6 +165,17 @@ impl Paletted {
                 index[v as usize] = u32::MAX;
             }
         });
+        Self::from_palette(palette, &ids, strategy, global_bits)
+    }
+
+    /// `from_values` from what it finds first: the distinct values in
+    /// first-seen order, and each entry's index among them.
+    pub fn from_palette(
+        palette: Vec<i32>,
+        ids: &[u32],
+        strategy: Strategy,
+        global_bits: u8,
+    ) -> Self {
         let needed = if palette.len() <= 1 {
             0
         } else {
@@ -179,9 +190,9 @@ impl Paletted {
             };
         }
         let data = if has_palette {
-            pack(&ids, bits, |&id| u64::from(id))
+            pack(ids, bits, |&id| u64::from(id))
         } else {
-            pack(values, bits, |&v| v as u64)
+            pack(ids, bits, |&id| palette[id as usize] as u64)
         };
         Self {
             bits,

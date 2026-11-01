@@ -50,7 +50,7 @@ CompassItem.isFoil	port	crates/horizon-assets/src/item_model.rs::Resolve::has_fo
 CrossbowItem.tryLoadProjectiles	port	crates/horizon-client/src/game/crossbow.rs::Game::tick_crossbow	the drawn ammo is stored on the crossbow once charged
 CrossbowItem.shootProjectile	port	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	
 CrossbowItem.getProjectileShotVector	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	the multishot spread is rotated inline from the view and up vectors
-CrossbowItem.createProjectile	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	gap: player: crossbow arrows keep the normal arrow hit sound; the crossbow hit sound (item.crossbow.hit) is never set
+CrossbowItem.createProjectile	port	crates/horizon-client/src/arrows.rs::Ticker::hit_sound	a crossbow arrow hits with item.crossbow.hit (the arrow keeps fired_from_weapon, set in shoot_crossbow)
 CrossbowItem.getShotPitch	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	the shot pitch per index is inline
 CrossbowItem.getRandomShotPitch	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	the random pitch formula is inline
 CrossbowItem.getPowerForTime	inline	crates/horizon-client/src/game/crossbow.rs::Game::tick_crossbow	the charge fraction capped at one is the tick check against the charge time
@@ -58,7 +58,7 @@ DyeColor.getMixedColor	missing		player: a baby sheep, wolf or cat from parents o
 DyeColor.findColorMixInRecipes	missing		player: part of the same breeding dye mix; the crafting recipe lookup for two dyes is not done for offspring
 FireworkRocketItem.createDispenseConfig	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_projectile	rocket config: offset 0.5000099, uncertainty 1, power 0.5, event 1004
 FireworkRocketItem.getEntityJustOutsideOfBlockPos	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_position	the position just outside the dispenser on the facing side
-HangingEntityItem.mayPlace	port	crates/horizon-client/src/game/paintings.rs::Game::place_painting	gap: player: the horizontal-face rule is checked for paintings only; place_item_frame has no vertical-face test
+HangingEntityItem.mayPlace	port	crates/horizon-client/src/game/paintings.rs::Game::place_painting	paintings take no vertical face; an item frame (ItemFrameItem.mayPlace) may go on one and only needs the build height, which place_item_frame checks
 HangingEntityItem.appendHoverText	missing		player: hovering a painting item shows no title, author or size line in its tooltip
 Item.getDestroySpeed	port	crates/horizon-items/src/items.rs::Items::mining_speed	
 Item.finishUsingItem	port	crates/horizon-client/src/game.rs::Game::consume_held	the consumable effects are applied by apply_consume_effect

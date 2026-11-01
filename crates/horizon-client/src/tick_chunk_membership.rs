@@ -1,18 +1,20 @@
 //! Tick scheduler membership, invalidated by resident key changes or resets.
-use crate::chunk_map::ChunkMap;
-use std::collections::HashSet;
+use crate::{
+    chunk_map::{ChunkMap, ChunkMembershipDelta},
+    fast_hash::FxHashSet,
+};
 
 type Key = (i32, i32);
 
 #[derive(Default)]
 pub struct TickChunkMembership {
-    keys: HashSet<Key>,
+    keys: FxHashSet<Key>,
     revision: Option<u64>,
     added: Vec<Key>,
     removed: Vec<Key>,
     /// Loaded chunks with saved ticks that have not started ticking yet
     /// (`LevelChunkTicks.pendingTicks`, unpacked by `startTickingChunk`).
-    waiting: HashSet<Key>,
+    waiting: FxHashSet<Key>,
 }
 
 impl TickChunkMembership {
@@ -35,6 +37,43 @@ impl TickChunkMembership {
         }
         self.added.clear();
         self.removed.clear();
+
+        if let Some(deltas) = self.revision.and_then(|rev| chunks.deltas_since(rev)) {
+            let mut removed_waiting = FxHashSet::default();
+            for (_, delta) in deltas {
+                match delta {
+                    ChunkMembershipDelta::Added(key) => {
+                        if let Some(pos) = self.removed.iter().position(|&k| k == key) {
+                            // The chunk is back where it was: the removal it
+                            // cancels is no news, and it keeps its saved ticks.
+                            self.removed.swap_remove(pos);
+                            self.keys.insert(key);
+                            if removed_waiting.remove(&key) {
+                                self.waiting.insert(key);
+                            }
+                        } else if self.keys.insert(key) {
+                            self.added.push(key);
+                        }
+                    }
+                    ChunkMembershipDelta::Removed(key) => {
+                        if let Some(pos) = self.added.iter().position(|&k| k == key) {
+                            self.added.swap_remove(pos);
+                            self.keys.remove(&key);
+                            self.waiting.remove(&key);
+                        } else if self.keys.remove(&key) {
+                            self.removed.push(key);
+                            if self.waiting.remove(&key) {
+                                removed_waiting.insert(key);
+                            }
+                        }
+                    }
+                    ChunkMembershipDelta::Reset => unreachable!(),
+                }
+            }
+            self.revision = Some(revision);
+            return true;
+        }
+
         self.keys.retain(|key| {
             if chunks.contains_key(key) {
                 true
@@ -95,7 +134,7 @@ impl TickChunkMembership {
 mod tests {
     use super::*;
     use crate::chunk::Chunk;
-    use std::sync::Arc;
+    use std::{collections::HashSet, sync::Arc};
 
     fn compare(cache: &mut TickChunkMembership, old: &mut HashSet<Key>, map: &ChunkMap) {
         let loaded: HashSet<_> = map.keys().copied().collect();
@@ -115,7 +154,7 @@ mod tests {
         } else {
             assert!(expected_added.is_empty() && expected_removed.is_empty());
         }
-        assert_eq!(cache.keys, loaded);
+        assert_eq!(cache.keys.iter().copied().collect::<HashSet<_>>(), loaded);
         *old = loaded;
     }
 
@@ -267,5 +306,37 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A removal the next addition cancels puts the chunk back where it was,
+    /// saved ticks included: the delta replay answers as the full scan does.
+    #[test]
+    fn cancel_removal_between_synchronizations_restores_membership_and_waiting() {
+        let mut map = ChunkMap::default();
+        let chunk = Arc::new(Chunk::empty(0, 0));
+        let mut cache = TickChunkMembership::default();
+        let key = (3, 7);
+
+        map.insert(key, chunk.clone());
+        assert!(cache.synchronize(&map));
+        assert_eq!(cache.take_added(), vec![key]);
+        cache.wait(key);
+        assert!(cache.waiting.contains(&key));
+
+        map.remove(&key);
+        map.insert(key, chunk);
+
+        assert!(cache.synchronize(&map));
+        assert!(cache.take_added().is_empty());
+        assert!(cache.removed().is_empty());
+        assert!(cache.keys.contains(&key));
+        assert!(cache.waiting.contains(&key));
+        assert_eq!(cache.start_ticking(|k| k == key), vec![key]);
+
+        // The unload after that one is still news.
+        map.remove(&key);
+        assert!(cache.synchronize(&map));
+        assert_eq!(cache.removed(), &[key]);
+        assert!(!cache.keys.contains(&key));
     }
 }

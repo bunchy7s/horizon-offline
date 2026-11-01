@@ -212,6 +212,15 @@ impl Hub {
                 message.content
             )));
         }
+        // The chat filter (docs/chat-filter.md): after the chain took the message, before anyone sees it.
+        if !self.chat_allowed(
+            i,
+            &[&message.content],
+            super::chat_filter::Place::Chat,
+            events,
+        ) {
+            return;
+        }
         let bound = play::ChatTypeBound {
             chat_type: self.chat_type,
             name: self.player_display_name(uuid, &name),

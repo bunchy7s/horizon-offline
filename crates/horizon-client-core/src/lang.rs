@@ -57,6 +57,9 @@ impl ResourceSource for Bundled {
             "assets/horizon/lang/en_us.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/en_us.json")
             }
+            "assets/horizon/lang/zh_cn.json" => {
+                include_str!("../../horizon-client/assets/horizon/lang/zh_cn.json")
+            }
             "assets/horizon/lang/ru_ru.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/ru_ru.json")
             }
@@ -65,6 +68,18 @@ impl ResourceSource for Bundled {
             }
             "assets/horizon/lang/uk_ua.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/uk_ua.json")
+            }
+            "assets/horizon/lang/tr_tr.json" => {
+                include_str!("../../horizon-client/assets/horizon/lang/tr_tr.json")
+            }
+            "assets/horizon/lang/es_es.json"
+            | "assets/horizon/lang/es_ar.json"
+            | "assets/horizon/lang/es_cl.json"
+            | "assets/horizon/lang/es_ec.json"
+            | "assets/horizon/lang/es_mx.json"
+            | "assets/horizon/lang/es_uy.json"
+            | "assets/horizon/lang/es_ve.json" => {
+                include_str!("../../horizon-client/assets/horizon/lang/es_es.json")
             }
             _ => return None,
         };
@@ -279,6 +294,16 @@ mod tests {
         }
         assert_eq!(en.get("horizon.pages.mods"), Some("Mods"));
         assert_eq!(ru.get("horizon.pages.mods"), Some("Моды"));
+        let zh = Language::load(&[&empty], "zh_cn");
+        assert_eq!(zh.get("horizon.options.controller"), Some("手柄"));
+        assert_eq!(zh.get("horizon.pages.mods"), Some("模组"));
+        assert_eq!(zh.get("Preset"), Some("预设"));
+        assert_eq!(zh.get("%s chunks"), Some("%s 个区块"));
+        // Not every bundle is complete: the en_us layer is in every map, so a
+        // missing key falls back to English (`horizon.mods.not_built` is not
+        // in ru_ru either).
+        assert_eq!(zh.get("LOD Distance"), Some("LOD 距离"));
+        assert_eq!(ru.get("horizon.mods.not_built"), Some(" (Not built)"));
         let pl = Language::load(&[&empty], "pl_pl");
         assert_eq!(pl.get("horizon.options.controller"), Some("Kontroler"));
         assert_eq!(pl.get("horizon.options.vibration"), Some("Wibracje"));
@@ -286,6 +311,15 @@ mod tests {
         assert_eq!(
             uk.get("horizon.options.on_screen_keyboard"),
             Some("Екранна клавіатура")
+        );
+        let tr = Language::load(&[&empty], "tr_tr");
+        assert_eq!(tr.get("horizon.options.controller"), Some("Kontrolcü"));
+        let es = Language::load(&[&empty], "es_es");
+        assert_eq!(es.get("horizon.options.controller"), Some("Mando"));
+        let es_ve = Language::load(&[&empty], "es_ve");
+        assert_eq!(
+            es_ve.get("horizon.options.on_screen_keyboard"),
+            Some("Teclado en pantalla")
         );
     }
 

@@ -257,6 +257,7 @@ public final class VanillaEntityDeathLootOracle {
         if (c.containsKey("size")) victim.getClass().getMethod("setSize", int.class, boolean.class).invoke(victim, Integer.parseInt(c.get("size")), true);
         if (c.containsKey("color") && victim instanceof net.minecraft.world.entity.animal.sheep.Sheep sheep) sheep.setColor(DyeColor.byName(c.get("color"), DyeColor.WHITE));
         if (c.getOrDefault("sheared", "0").equals("1") && victim instanceof net.minecraft.world.entity.animal.sheep.Sheep sheep) sheep.setSheared(true);
+        if (c.containsKey("carried")) ((net.minecraft.world.entity.monster.Enderman) victim).setCarriedBlock(BuiltInRegistries.BLOCK.getValue(Identifier.parse(c.get("carried"))).defaultBlockState());
         if (c.getOrDefault("leader", "0").equals("1")) ((net.minecraft.world.entity.monster.PatrollingMonster) victim).setPatrolLeader(true);
         if (c.getOrDefault("captain", "0").equals("1"))
             victim.setItemSlot(EquipmentSlot.HEAD, net.minecraft.world.entity.raid.Raid.getOminousBannerInstance(access.lookupOrThrow(Registries.BANNER_PATTERN)));

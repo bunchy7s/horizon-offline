@@ -1,0 +1,13 @@
+{
+  "hooks": [
+    {
+      "name": "render_hand",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_render_hand",
+      "neoforge": "RenderHandEvent",
+      "side": "client",
+      "cancellable": true
+    }
+  ],
+  "rust_summary": "a cancellable first-person hand render hook (`native_render_hand`).",
+  "doc_summary": "`native_render_hand(hand, stack, partial, swing, equip, canceled)` runs before each visible first-person hand: `Hand::Main` or `Hand::Off`, the displayed stack (None for an empty arm), partial tick, swing progress and inverse equip height including swap animation scale. Set `canceled` to skip the default geometry for that hand (arms and maps included). It runs after the existing spectator, hidden-HUD, sleep and camera gates. It only hides: the hook has no way to draw a replacement. Bundles need \"hooks\": @API:render_hand@."
+}

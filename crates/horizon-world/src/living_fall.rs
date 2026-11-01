@@ -27,6 +27,13 @@ impl ImpulseContext {
             self.reset();
         }
     }
+    /// `LivingEntity.hasLandedInLiquid`: a move into a liquid with no upward
+    /// movement ends the impulse context, still deferred by the grace time.
+    pub fn landed_in_liquid(&mut self, delta_y: f64, in_liquid: bool) {
+        if in_liquid && delta_y < 9.9999997e-6 {
+            self.try_reset();
+        }
+    }
     pub fn is_in_grace_time(&self) -> bool {
         self.reset_grace_time > 0
     }
@@ -49,6 +56,10 @@ pub trait LivingFallWorld {
     ) -> Result<(), Self::Error>;
     fn safe_fall_distance(&mut self) -> Result<f64, Self::Error>;
     fn fall_damage_multiplier(&mut self) -> Result<f64, Self::Error>;
+    /// A host may adjust a mod block's landing damage before sounds and hurt.
+    fn modify_fall_damage(&mut self, _distance: f64, damage: f32) -> Result<f32, Self::Error> {
+        Ok(damage)
+    }
     /// Select the entity type's small/big fall sound. Big applies above four.
     fn fall_sound(&mut self, big: bool) -> Result<Self::Sound, Self::Error>;
     fn play_fall_sound(&mut self, sound: Self::Sound) -> Result<(), Self::Error>;
@@ -102,14 +113,128 @@ pub fn cause_living_fall_damage<W: LivingFallWorld>(
         world.propagate_fall_to_passengers(distance, multiplier)?;
     }
     let damage = calculate_fall_damage(world, distance, multiplier)?;
-    if damage > 0 {
+    let damage = world.modify_fall_damage(distance, damage as f32)?;
+    if damage > 0.0 {
         world.reset_impulse()?;
-        let sound = world.fall_sound(damage > 4)?;
+        let sound = world.fall_sound(damage > 4.0)?;
         world.play_fall_sound(sound)?;
         world.play_block_fall_sound()?;
-        world.hurt(damage as f32)?;
+        world.hurt(damage)?;
         Ok(true)
     } else {
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use horizon_core::geometry::Vec3;
+
+    struct Landing {
+        replacement: Option<f32>,
+        damage: f32,
+        sounds: usize,
+    }
+    impl LivingFallWorld for Landing {
+        type Error = ();
+        type Sound = bool;
+        fn impact_position(&self) -> Option<Vec3> {
+            None
+        }
+        fn y(&self) -> f64 {
+            0.0
+        }
+        fn reset_impulse(&mut self) -> Result<(), ()> {
+            Ok(())
+        }
+        fn try_reset_impulse(&mut self) -> Result<(), ()> {
+            Ok(())
+        }
+        fn immune_to_fall_damage(&mut self) -> Result<bool, ()> {
+            Ok(false)
+        }
+        fn propagate_fall_to_passengers(&mut self, _: f64, _: f32) -> Result<(), ()> {
+            Ok(())
+        }
+        fn safe_fall_distance(&mut self) -> Result<f64, ()> {
+            Ok(3.0)
+        }
+        fn fall_damage_multiplier(&mut self) -> Result<f64, ()> {
+            Ok(1.0)
+        }
+        fn modify_fall_damage(&mut self, distance: f64, damage: f32) -> Result<f32, ()> {
+            assert_eq!((distance, damage), (13.0, 10.0));
+            assert_eq!((self.sounds, self.damage), (0, 0.0));
+            Ok(self.replacement.unwrap_or(damage))
+        }
+        fn fall_sound(&mut self, big: bool) -> Result<bool, ()> {
+            Ok(big)
+        }
+        fn play_fall_sound(&mut self, _: bool) -> Result<(), ()> {
+            self.sounds += 1;
+            Ok(())
+        }
+        fn play_block_fall_sound(&mut self) -> Result<(), ()> {
+            self.sounds += 1;
+            Ok(())
+        }
+        fn hurt(&mut self, damage: f32) -> Result<(), ()> {
+            self.damage = damage;
+            Ok(())
+        }
+    }
+    #[test]
+    fn landing_damage_is_changed_before_sounds_and_hurt() {
+        for (replacement, expected) in [(None, 10.0), (Some(2.0), 2.0), (Some(0.0), 0.0)] {
+            let mut w = Landing {
+                replacement,
+                damage: 0.0,
+                sounds: 0,
+            };
+            assert_eq!(
+                cause_living_fall_damage(&mut w, 13.0, 1.0),
+                Ok(expected > 0.0)
+            );
+            assert_eq!(w.damage, expected);
+            assert_eq!(w.sounds, if expected > 0.0 { 2 } else { 0 });
+        }
+    }
+
+    /// A wind charge's or mace's impact position with no grace time left.
+    fn impact() -> ImpulseContext {
+        ImpulseContext {
+            reset_grace_time: 0,
+            impact_position: Some(Vec3::new(0.5, 64.0, 0.5)),
+        }
+    }
+
+    #[test]
+    fn a_move_that_lands_in_a_liquid_ends_the_impulse_context() {
+        let mut impulse = impact();
+        impulse.landed_in_liquid(-0.08, true);
+        assert!(impulse.impact_position.is_none());
+    }
+
+    #[test]
+    fn a_move_that_lands_on_dry_ground_keeps_it() {
+        let mut impulse = impact();
+        impulse.landed_in_liquid(-0.08, false);
+        assert_eq!(impulse.impact_position, Some(Vec3::new(0.5, 64.0, 0.5)));
+    }
+
+    #[test]
+    fn a_rise_through_a_liquid_keeps_it() {
+        let mut impulse = impact();
+        impulse.landed_in_liquid(0.2, true);
+        assert!(impulse.ignores_fall_damage());
+    }
+
+    #[test]
+    fn the_grace_time_defers_the_liquid_reset() {
+        let mut impulse = ImpulseContext::default();
+        impulse.set_ignore_fall_damage(true, Some(Vec3::new(0.5, 64.0, 0.5)));
+        impulse.landed_in_liquid(-0.08, true);
+        assert!(impulse.ignores_fall_damage());
     }
 }

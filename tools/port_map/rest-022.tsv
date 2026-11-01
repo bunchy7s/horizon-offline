@@ -136,7 +136,7 @@ SequencedPriorityIterator.add	inline	crates/horizon-world/src/worldgen/structure
 SequencedPriorityIterator.computeNext	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::Placer::next	gap: minor: the queue is a BTreeMap, not a cache that switches queues
 SequencedPriorityIterator.switchCacheToNextHighestPrioQueue	inline	crates/horizon-world/src/worldgen/structure/jigsaw.rs::Placer::next	BTreeMap last_entry finds the highest priority queue
 SignatureValidator.verifySignature	port	crates/horizon-protocol/src/rsa.rs::RsaPublicKey::verify	
-Signer.from	missing		unsure: no private-key chat signing exists in crates (grep finds none); unknown whether a secure-chat hub refuses a guest's unsigned messages
+Signer.from	port	crates/horizon-protocol/src/rsa.rs::RsaPrivateKey::sign	SHA256withRSA, checked with the public key before it is sent
 SimpleBitStorage.<init>	port	crates/horizon-core/src/paletted.rs::pack_words	packs palette ids into longs, values never spanning a long
 SimpleBitStorage.cellIndex	port	crates/horizon-core/src/paletted.rs::locate	the word index of an entry
 SimpleBitStorage.getAndSet	port	crates/horizon-core/src/paletted.rs::PalettedContainer::set	gap: minor: also grows the palette; the raw word write is write

@@ -60,6 +60,7 @@ impl Game<'_> {
         if self.remote.is_some() || self.spectator() {
             return;
         }
+        self.native_on_equip(slot, new);
         let Some(at) = self.player.as_ref().map(|p| p.position) else {
             return;
         };

@@ -8,7 +8,7 @@ Every living entity type with a loot table is killed by a player with and
 without looting, by nothing, on fire, with a smelting weapon, as a baby, with
 luck and with worn equipment, plus each table's special conditions (sheep
 colours, cube sizes, frog kills, skeleton and charged creeper kills, fireballs,
-lightning, raid captains and vehicles). Loot draws come from the world's random
+lightning, raid captains, vehicles and an enderman's carried block). Loot draws come from the world's random
 sequences; several victims are killed in turn per case.
 """
 import argparse
@@ -36,6 +36,10 @@ WEAPONS = ['minecraft:iron_sword', 'minecraft:diamond_sword;looting:1', 'minecra
            'minecraft:netherite_sword;looting:3', 'minecraft:golden_sword;fire_aspect:2', 'minecraft:diamond_axe;looting:3;fire_aspect:1']
 ARMOUR = {'head': 'minecraft:iron_helmet', 'chest': 'minecraft:chainmail_chestplate', 'legs': 'minecraft:golden_leggings',
           'feet': 'minecraft:diamond_boots', 'mainhand': 'minecraft:iron_sword', 'offhand': 'minecraft:shield'}
+# enderman_holdable blocks (and a few whose plain drop differs from the block).
+CARRIED = ['grass_block', 'dirt', 'podzol', 'mycelium', 'mud', 'moss_block', 'pale_moss_block', 'sand', 'red_sand', 'gravel',
+           'dandelion', 'poppy', 'brown_mushroom', 'red_mushroom', 'tnt', 'cactus', 'clay', 'pumpkin', 'carved_pumpkin', 'melon',
+           'crimson_fungus', 'crimson_nylium', 'crimson_roots', 'warped_fungus', 'warped_nylium', 'warped_roots', 'cactus_flower']
 DYES = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple',
         'blue', 'brown', 'green', 'red', 'black']
 
@@ -104,6 +108,11 @@ def corpus(types):
     add('zombie-baby-chicken', type='minecraft:zombie', baby=1, vehicle='minecraft:chicken', killer='player', kills=3)
     add('zombie-baby-chicken-none', type='minecraft:zombie', baby=1, vehicle='minecraft:chicken', source='generic', kills=2)
     add('husk-camel', type='minecraft:husk', vehicle='minecraft:camel_husk', killer='player', kills=3)
+    # Enderman.dropCustomDeathLoot: the carried block's drops with a silk touch diamond axe.
+    for block in CARRIED:
+        add(f'enderman-carried-{block}', type='minecraft:enderman', carried='minecraft:' + block, killer='player',
+            weapon='minecraft:iron_sword;looting:3', kills=3)
+        add(f'enderman-carried-{block}-none', type='minecraft:enderman', carried='minecraft:' + block, source='generic', kills=2)
     for weapon in WEAPONS:
         add('wither-' + weapon.split(';')[-1].replace(':', ''), type='minecraft:wither', killer='player', weapon=weapon, kills=2)
     return cases
@@ -123,7 +132,8 @@ def main():
     types = sorted('minecraft:' + p.stem for p in tables.glob('*.json') if p.stem not in SKIPPED)
     oracle = lab.ROOT / 'mods/horizon/src/test/java/dev/horizonlab/parity/VanillaEntityDeathLootOracle.java'
     sources = [oracle, Path(__file__), lab.ROOT / 'crates/horizon-client/examples/probe/entity_death_loot_fixture.rs',
-               lab.ROOT / 'crates/horizon-client/src/mobs/drops.rs', lab.ROOT / 'crates/horizon-world/src/loot.rs']
+               lab.ROOT / 'crates/horizon-client/src/mobs/drops.rs', lab.ROOT / 'crates/horizon-client/src/mobs/enderman.rs',
+               lab.ROOT / 'crates/horizon-world/src/loot.rs']
     tested = base.source_hashes(sources)
     inputs = build / 'inputs.txt'
     cases = corpus(types)

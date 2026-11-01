@@ -127,6 +127,42 @@ fn imitate_nearby_mobs(
     }
 }
 
+/// The sound a parrot on a player's shoulder makes (`ServerPlayer.
+/// playShoulderEntityAmbientSound` after its one-in-200 draw): the voice of a
+/// random imitable mob in `nearby` (`Parrot.imitateNearbyMobs`, half the time,
+/// those with a `silent` flag excluded after being picked), else its own
+/// ambient sound or a rare imitation (`Parrot.getAmbient`). `random` is drawn
+/// from in vanilla's order. Returns the sound, its volume and its pitch; the
+/// happy ghast's imitation is silent (`""`).
+pub fn shoulder_sound(
+    random: &mut LegacyRandom,
+    player_alive: bool,
+    player_silent: bool,
+    peaceful: bool,
+    nearby: &[(Species, bool)],
+) -> Option<(&'static str, f32, f32)> {
+    if player_alive && !player_silent && random.next_int_bound(2).unwrap_or(1) == 0 {
+        let candidates: Vec<_> = nearby
+            .iter()
+            .filter(|(s, _)| imitation(*s).is_some())
+            .collect();
+        if !candidates.is_empty() {
+            let (species, silent) =
+                *candidates[random.next_int_bound(candidates.len() as i32).unwrap_or(0) as usize];
+            if !silent {
+                let sound = imitation(species).filter(|s| !s.is_empty())?;
+                return Some((sound, 0.7, pitch(random)));
+            }
+        }
+    }
+    let sound = if !peaceful && random.next_int_bound(1000).unwrap_or(1) == 0 {
+        IMITATIONS[random.next_int_bound(IMITATIONS.len() as i32).unwrap_or(0) as usize].1
+    } else {
+        "entity.parrot.ambient"
+    };
+    Some((sound, 1.0, pitch(random))).filter(|s| !s.0.is_empty())
+}
+
 /// `Parrot.getAmbient`: now and then (outside peaceful) the voice of a random
 /// imitable mob instead of the parrot's own.
 pub fn ambient(m: &mut Mob, w: &MobWorld) -> &'static str {
@@ -322,5 +358,42 @@ mod tests {
             [MobEvent::Sound("entity.parrot.fly", _, v, _)] if *v == 0.15
         ));
         assert!((m.ai.steps.next_flap - 1.7).abs() < 1.0e-6);
+    }
+
+    /// `ServerPlayer.playShoulderEntityAmbientSound`: with a mob to imitate
+    /// and a coin flip won, the mob's voice at 0.7; otherwise the parrot's own.
+    #[test]
+    fn a_shoulder_parrot_imitates_or_chirps() {
+        let nearby = [(Species::Zombie, false)];
+        let mut imitated = 0;
+        let mut chirped = 0;
+        for n in 0..64_i64 {
+            let seed = n.wrapping_mul(0x9E37_79B9_7F4A_7C15_u64 as i64);
+            let mut probe = LegacyRandom::new(seed);
+            let flip = probe.next_int_bound(2).unwrap();
+            let mut random = LegacyRandom::new(seed);
+            let (sound, volume, _) =
+                shoulder_sound(&mut random, true, false, true, &nearby).unwrap();
+            if flip == 0 {
+                assert_eq!((sound, volume), ("entity.parrot.imitate.zombie", 0.7));
+                imitated += 1;
+            } else {
+                assert_eq!((sound, volume), ("entity.parrot.ambient", 1.0));
+                chirped += 1;
+            }
+        }
+        assert!(imitated > 0 && chirped > 0);
+        // A silent player (or a dead one) imitates nothing and only chirps.
+        let mut random = LegacyRandom::new(1);
+        let (sound, volume, _) = shoulder_sound(&mut random, true, true, true, &nearby).unwrap();
+        assert_eq!((sound, volume), ("entity.parrot.ambient", 1.0));
+        // The happy ghast's imitation is silent.
+        let ghast = [(Species::HappyGhast, false)];
+        let silent = (0..64_i64).filter(|&n| {
+            let seed = n.wrapping_mul(0x9E37_79B9_7F4A_7C15_u64 as i64);
+            let mut r = LegacyRandom::new(seed);
+            shoulder_sound(&mut r, true, false, true, &ghast).is_none()
+        });
+        assert!(silent.count() > 0);
     }
 }

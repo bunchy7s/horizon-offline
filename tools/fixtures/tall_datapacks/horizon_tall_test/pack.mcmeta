@@ -1,0 +1,7 @@
+{
+  "pack": {
+    "description": "Horizon's tall-world fixture: a 2096-high Overworld with peaks past y 1000",
+    "min_format": 121,
+    "max_format": 121
+  }
+}

@@ -335,19 +335,26 @@ impl RsaPublicKey {
         if signature.len() != k || signature >= self.modulus.as_slice() {
             return false;
         }
-        let (prefix, digest) = (hash.prefix(), hash.digest(message));
-        let t = prefix.len() + digest.len();
-        if k < t + 11 {
-            return false;
-        }
-        let mut expected = vec![0xff; k];
-        expected[0] = 0;
-        expected[1] = 1;
-        expected[k - t - 1] = 0;
-        expected[k - t..k - digest.len()].copy_from_slice(prefix);
-        expected[k - digest.len()..].copy_from_slice(&digest);
-        self.apply(signature, &self.exponent) == expected
+        emsa_pkcs1(hash, message, k)
+            .is_some_and(|expected| self.apply(signature, &self.exponent) == expected)
     }
+}
+
+/// EMSA-PKCS1-v1_5 (RFC 8017 9.2): `00 01 FF.. 00 DigestInfo` for a
+/// `k`-byte modulus; None when the modulus is too short for the digest.
+fn emsa_pkcs1(hash: SignatureHash, message: &[u8], k: usize) -> Option<Vec<u8>> {
+    let (prefix, digest) = (hash.prefix(), hash.digest(message));
+    let t = prefix.len() + digest.len();
+    if k < t + 11 {
+        return None;
+    }
+    let mut block = vec![0xff; k];
+    block[0] = 0;
+    block[1] = 1;
+    block[k - t - 1] = 0;
+    block[k - t..k - digest.len()].copy_from_slice(prefix);
+    block[k - digest.len()..].copy_from_slice(&digest);
+    Some(block)
 }
 
 /// Small odd primes for sieving prime candidates.
@@ -425,7 +432,7 @@ fn prime(limbs: usize) -> Result<Big> {
 }
 
 /// DER: a tag and its length, then the contents.
-fn der_element(tag: u8, contents: &[u8]) -> Vec<u8> {
+pub(crate) fn der_element(tag: u8, contents: &[u8]) -> Vec<u8> {
     let mut out = vec![tag];
     let len = contents.len();
     if len < 0x80 {
@@ -444,7 +451,7 @@ fn der_element(tag: u8, contents: &[u8]) -> Vec<u8> {
 }
 
 /// A DER INTEGER from big-endian magnitude bytes (a leading zero keeps it positive).
-fn der_integer(magnitude: &[u8]) -> Vec<u8> {
+pub(crate) fn der_integer(magnitude: &[u8]) -> Vec<u8> {
     let mut v = strip(magnitude);
     if v.first().is_none_or(|b| b & 0x80 != 0) {
         v.insert(0, 0);
@@ -452,7 +459,8 @@ fn der_integer(magnitude: &[u8]) -> Vec<u8> {
     der_element(0x02, &v)
 }
 
-/// The server's key pair (Crypt.generateKeyPair).
+/// The server's key pair (Crypt.generateKeyPair), or a player's chat key
+/// pair from the services (Crypt.stringToPemRsaPrivateKey).
 pub struct RsaPrivateKey {
     pub public: RsaPublicKey,
     /// The private exponent, big-endian.
@@ -539,6 +547,76 @@ impl RsaPrivateKey {
             return Err(bad());
         }
         Ok(block[zero + 1..].to_vec())
+    }
+
+    /// PKCS8EncodedKeySpec: PrivateKeyInfo { version, AlgorithmIdentifier,
+    /// OCTET STRING RSAPrivateKey }. A bare PKCS#1 RSAPrivateKey is read too:
+    /// the services label their PKCS#8 key "RSA PRIVATE KEY".
+    pub fn from_der(der_bytes: &[u8]) -> Result<Self> {
+        let bad = || Error::new("Malformed private key");
+        let (tag, body, _) = der(der_bytes)?;
+        if tag != 0x30 {
+            return Err(bad());
+        }
+        let (tag, _version, rest) = der(body)?;
+        if tag != 0x02 {
+            return Err(bad());
+        }
+        let key = match der(rest)? {
+            (0x30, algorithm, rest) => {
+                let (oid_tag, oid, _) = der(algorithm)?;
+                if oid_tag != 0x06 || oid != RSA_ENCRYPTION {
+                    return Err(Error::new("Not an RSA private key"));
+                }
+                let (tag, octets, _) = der(rest)?;
+                if tag != 0x04 {
+                    return Err(bad());
+                }
+                let (tag, key, _) = der(octets)?;
+                if tag != 0x30 {
+                    return Err(bad());
+                }
+                let (_, _version, key) = der(key)?;
+                key
+            }
+            // PKCS#1: the version is followed by the modulus.
+            (0x02, ..) => rest,
+            _ => return Err(bad()),
+        };
+        let (n_tag, n, rest) = der(key)?;
+        let (e_tag, e, rest) = der(rest)?;
+        let (d_tag, d, _) = der(rest)?;
+        if n_tag != 0x02 || e_tag != 0x02 || d_tag != 0x02 {
+            return Err(bad());
+        }
+        let public = RsaPublicKey {
+            modulus: strip(n),
+            exponent: strip(e),
+        };
+        if public.modulus.len() < 64 || public.modulus.last().is_none_or(|b| b & 1 == 0) {
+            return Err(bad());
+        }
+        let size = public.size();
+        let d = strip(d);
+        if d.is_empty() || d.len() > size {
+            return Err(bad());
+        }
+        let mut exponent = vec![0u8; size - d.len()];
+        exponent.extend_from_slice(&d);
+        Ok(Self { public, exponent })
+    }
+
+    /// `Signature.sign` for RSASSA-PKCS1-v1_5 (RFC 8017 8.2.1), checked with
+    /// the public exponent before it leaves, so a faulty result is never sent.
+    pub fn sign(&self, hash: SignatureHash, message: &[u8]) -> Result<Vec<u8>> {
+        let k = self.public.size();
+        let block = emsa_pkcs1(hash, message, k)
+            .ok_or_else(|| Error::new("RSA key too short for the digest"))?;
+        let signature = self.public.apply(&block, &self.exponent);
+        if !self.public.verify(hash, message, &signature) {
+            return Err(Error::new("RSA signature failed its own check"));
+        }
+        Ok(signature)
     }
 }
 
@@ -691,6 +769,66 @@ pub(crate) mod tests {
             let signature = key.apply(&block, &hex(TEST_D));
             assert!(key.verify(hash, b"payload", &signature));
             assert!(!key.verify(hash, b"payloaD", &signature));
+        }
+    }
+
+    /// A 2048-bit key (`openssl genrsa 2048`, then `openssl pkcs8 -topk8 -nocrypt
+    /// -outform DER`), the size of a player's chat key: its signatures are
+    /// MessageSignature's 256 bytes.
+    pub const CHAT_KEY_PKCS8: &str = "308204bc020100300d06092a864886f70d0101010500048204a6308204a20201000282010100bebf25d067e367ba25767067c0464701a109a37699f90a49e413cfba58694c4e51c317e43ad90b171f08dae88aabe0f51958871becf2e62e65282fbb256b70247aa0a7f186b044db793c379d1a332ccc5b50832b8564cf31282d3229abc982439fa3d8085824a8705b1d0d2a4323e300f1ce266f82f09282bbb77ebcd02da8d11c5f118141671497c3e08201e26764f681f50c84ab1475d57bfdc3f648431dcf9c2fa9e215002093ca4c33fc6986bc7e5e430ee4fb269e6b4d04bfd6bbd9d50c9ded5d04325d298815c22334a31e156eeb18aecffa2f64899c6d344723f93691531d816b440fd12a6ede94cdcfa2b86dd32077ae1be0e39c456b5d2d06aee9350203010001028201001bd2874a3b010b3df65d6c7f61a70e8fe104a62474488454eb50ed758d944c56472c49059804d50e8a0f11592672f424e40dcae54a9e526f557f7358dd982a7b13acefda35ae6bd8c47a0155a7beebaba22d1ff8dee3e9a9cea5ab01b38638bb32e3a3ecf1a8652e40480045d815b9b48750adc009ae1bfcb8334767f488986d2978982f12a06f9763bf9eebfdeb60f617521b0bce0756ec379cab2a22d00176b058fabca90175860f66a0634a0dd4219eba51c8c43ab3abbd2d2de4466bef6a815d84585f3cd76420bceaacd15be37fd9e957869ca25d0644c50e5ad399c05359b455b885ed135d3a63b1f80705def62a29cab8904f5ae5fd0f8cfcc9f2048902818100e0611a0d0009e190af7a99e9070ddcf127b41b578515888e18c555488567c2b3ebf970695e44fc7755580245b191fda81a8f670475a4048304652fb7ea9003b2b9985fafbac9f59695132bc6d6e35a3503f407ac2e6efa8dd736d617fad4946c80aabdcf06ab67da7a5cc4a0d69d9320964dc618feb2fc2cfb39c2e11bd1295902818100d9a0afc08108ba70c0a46bb82f1d8beb12cfd50a106d5483fbdf17a7919e0e1373a4c05c4287256faf7be8c42f1788ec3dd33abead70c4a67ec30ef930800f1bb34f5a762946e6fa3c7e296356d1a1059a7068d2bdac29ef4bd5cd25203ffc1a5d10a9bb1d15f6c72e5c830ff9fe5d2f445ce3da61693e6353a8d8fca7f7a73d02818040ef18f0e62ff5dd3f4b45bb50554cb9657a13e79216173cb8227379d7519de11fcb4222dc2b2ebd022fc4089348e295818a3a8fe9d39b92a6f4f9884a137f5e7ba3831d81faec5db5aaa4a29891970b7ca7648909af0847801ed87a7c168515996ed01b579cc7234d0207cd5c0ea2036e3bf7b6480f58375444f506dc5bfd91028180276aa12a7eb47400440403b6a261f99ba4169c816c2441307e8813a2b80f2681836a8da4a8300e29c260f0f1c78dbdb0fc29abf42939c984566541eb044bcd70b8f36071125cd32cf393ee2f1de46e03b3cb345127256d9af7e34b7ab3f2a2d8ab8e7f0f72df2d8939ee6b969332ecf1c8b2025ae555c884f8fc1600fcf330090281802985deefe6ccc4ceb42bbb1ce9a2ecacea4974f5ba8090ba33049e36d0c43a7c9be2da95fc0bf2c7fb0ec2ee73ee628bfda786afa68c75fa08d996b6c1674a759f7f1ec67d95206d69c4b28234b55933748b7930feb9818fa6944bdbf0258894164706d498d2cf29e241fe1b99ec94021cd29ed8a528ee5cf4fe6e6ddcbd1d97";
+
+    /// A 1024-bit key from `openssl genrsa` as `openssl pkcs8 -topk8 -nocrypt
+    /// -outform DER` writes it, its public half, and `openssl dgst -sha256
+    /// -sign` of "chat".
+    const PKCS8: &str = "30820275020100300d06092a864886f70d01010105000482025f3082025b02010002818100a483a9a2ce1762edb78b7359b96415e35885db2cebb0615d36ce314623a5c3ddb5fe1dccdb6066c4dfe16125baf73ca48b4658285da6adf1ccf0bd18be0f67e3a1d68e9547fc129b6d3fe74413ed5f987123f556b54a8c3a434a0fd4a02d4599d73fbdbf403bc229ed3c6e45877fbb2a20fd3850f1a19c5adbefb703eac785eb02030100010281803e646cb68100df9516523dea1e6475e4a61305ffb0575165bfbe4d73b35b4fc04b2057fef48848118c72f69c0f9f6a9160fcc9bc6d6024821ade8668d6d412eae70f2c19d1890877c4fe46aebbbf2324ad3f304dfc7bd6ec484befe4730cc72c749a557c0d0bb6a73093ef571e4fc543ff5a5ec146e9799ca98f9a71b6c08831024100d5e071afe69c04174eea3023c16a3226a577a3ae01c0166ce68dac20791c75aec47ee115ab52a86ae0a7860ba87bfb6f37a8754d72feec7073eff4d6485dd2b3024100c4ea63df21d6711e15a431400a84c127acb6a77c22f475fc807be941a6a80fc0edd4bab09f09a157e517580777c2caf832e5fa07375fc8f3f1286e9f9e9ebbe90240609199e37975a2673fcb7ff6f502d5281bf83c207a4bd8144db95429c9656f417d1968da16e4188541708296caf9481afc7f848f76c7e1cc189d14e897fe3cff024043ba4e817774f7511ea66b9e184012e35f7f2f59fdf7d100f8fc257d4421f7d126bc0d3e24653e8e29a87ec98ac27fe72032836da9f912f7fc5128c353de4ac902401a16b013e8717963d6f938b0126db15eecc678ccd0b3b8497aa6528d522f89087112694fd5082b9838ba162de4831589195284a6aa24711fc7d54ec073dfddf1";
+    const PKCS8_SPKI: &str = "30819f300d06092a864886f70d010101050003818d0030818902818100a483a9a2ce1762edb78b7359b96415e35885db2cebb0615d36ce314623a5c3ddb5fe1dccdb6066c4dfe16125baf73ca48b4658285da6adf1ccf0bd18be0f67e3a1d68e9547fc129b6d3fe74413ed5f987123f556b54a8c3a434a0fd4a02d4599d73fbdbf403bc229ed3c6e45877fbb2a20fd3850f1a19c5adbefb703eac785eb0203010001";
+    const PKCS8_SIG_CHAT: &str = "3a6ed84b109a293d92a53b2120925f3fa33d3b81b686e9a9f0f1f935bd80a263b0912cf0bcd5ac5ca14ffcd3301a23cb2c3d828a092bb49cc8831a3c1f9be674a44a7c906dd8d48e00edcf7c899a75b19e2eea6d94f868507005448692f8c500192268a286988a025c09ad8fa99ffb50de52c2e892310111c22cdb8b3ac4eb8a";
+
+    /// PKCS#1 v1.5 signatures are deterministic, so signing here must give
+    /// OpenSSL's bytes exactly.
+    #[test]
+    fn signs_like_openssl_with_a_pkcs8_key() {
+        let key = RsaPrivateKey::from_der(&hex(PKCS8)).unwrap();
+        assert_eq!(
+            key.public,
+            RsaPublicKey::from_der(&hex(PKCS8_SPKI)).unwrap()
+        );
+        assert_eq!(key.public_der(), hex(PKCS8_SPKI));
+        let signature = key.sign(SignatureHash::Sha256, b"chat").unwrap();
+        assert_eq!(signature, hex(PKCS8_SIG_CHAT));
+        assert!(
+            key.public
+                .verify(SignatureHash::Sha256, b"chat", &signature)
+        );
+        assert!(RsaPrivateKey::from_der(&hex(PKCS8)[..200]).is_err());
+        assert!(RsaPrivateKey::from_der(&hex(PKCS8_SPKI)).is_err());
+        assert!(RsaPrivateKey::from_der(b"not a key").is_err());
+    }
+
+    /// The bare PKCS#1 form: version, n, e, d (the CRT fields aren't used).
+    #[test]
+    fn reads_pkcs1_private_keys() {
+        let body = [
+            der_integer(&[0]),
+            der_integer(&hex(TEST_N)),
+            der_integer(&[1, 0, 1]),
+            der_integer(&hex(TEST_D)),
+        ]
+        .concat();
+        let key = RsaPrivateKey::from_der(&der_element(0x30, &body)).unwrap();
+        assert_eq!(key.public, RsaPublicKey::from_der(&hex(TEST_SPKI)).unwrap());
+        let signature = key.sign(SignatureHash::Sha256, b"hello").unwrap();
+        assert_eq!(signature, hex(TEST_SIG_HELLO));
+    }
+
+    #[test]
+    fn generated_keys_sign() {
+        let key = RsaPrivateKey::generate(1024).unwrap();
+        for hash in [SignatureHash::Sha1, SignatureHash::Sha256] {
+            let signature = key.sign(hash, b"message").unwrap();
+            assert_eq!(signature.len(), 128);
+            assert!(key.public.verify(hash, b"message", &signature));
+            assert!(!key.public.verify(hash, b"messagE", &signature));
         }
     }
 }

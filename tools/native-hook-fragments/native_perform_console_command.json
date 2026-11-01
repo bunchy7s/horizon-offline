@@ -1,0 +1,7 @@
+{
+  "hooks": [
+    {"name": "perform_console_command", "target": "horizon_client::game::native_hooks::Game<'_>::native_perform_console_command"}
+  ],
+  "rust_summary": "a mod's command typed on the dedicated server's console (`native_perform_console_command`).",
+  "doc_summary": "a mod's command typed on the dedicated server's console: `native_perform_console_command(command, ran)` hears a command a mod registered with `native_register_commands`, without its slash, from the console (permission level 4, no player: `native_acting_player` is None), and a mod sets `ran`. `native_feedback` answers on the console. A name no mod registered goes to vanilla's dispatcher as before; the single player owner's console is not covered. Bundles that use it need `\"hooks\": @API:native_perform_console_command@`."
+}

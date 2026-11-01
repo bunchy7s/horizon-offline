@@ -89,6 +89,25 @@ fn ram_bytes() -> Option<u64> {
     }
 }
 
+/// The machine's hardware threads. On Linux the processors /proc/cpuinfo lists, as `cores` counts
+/// them: `available_parallelism` is this process's share (its CPU affinity, a cgroup's quota), so a
+/// game pinned to some CPUs would report fewer threads than cores.
+fn threads() -> u16 {
+    let processors = if cfg!(target_os = "linux") {
+        read("/proc/cpuinfo").map_or(0, |t| {
+            t.lines()
+                .filter(|l| {
+                    l.split_once(':')
+                        .is_some_and(|(k, _)| k.trim() == "processor")
+                })
+                .count() as u16
+        })
+    } else {
+        0
+    };
+    processors.max(std::thread::available_parallelism().map_or(0, |n| n.get() as u16))
+}
+
 /// Physical cores.
 fn cores() -> Option<u16> {
     if cfg!(target_os = "linux") {
@@ -459,7 +478,7 @@ impl System {
             os_version: os_version().unwrap_or_default(),
             arch: std::env::consts::ARCH.to_owned(),
             cpu: cpu().unwrap_or_default(),
-            threads: std::thread::available_parallelism().map_or(0, |n| n.get() as u16),
+            threads: threads(),
             cores: fixed.cores,
             cpu_base_mhz: fixed.base,
             cpu_boost_mhz: fixed.boost,

@@ -1,8 +1,10 @@
 //! Commands of the hosted game rather than the world: `/dialog`, `/kick`,
 //! `/posteffect`, `/fetchprofile`, `/spectate`, `/publish`, `/unpublish`,
-//! `/waypoint`, `/debug`, `/jfr` and `/test`.
+//! `/waypoint`, `/debug`, `/jfr` and `/test`; on a dedicated server only,
+//! `/op`, `/deop`, `/ban`, `/ban-ip`, `/banlist`, `/pardon`, `/pardon-ip` and
+//! `/whitelist`.
 use super::{
-    Dispatcher,
+    Dispatcher, Suggests,
     args::ArgType,
     vanilla::{ENTITY, GAMEMASTERS, PLAYER, PLAYERS},
 };
@@ -205,4 +207,73 @@ pub fn register(d: &mut Dispatcher, root: usize) {
     let h = d.argument(w, "height", int.clone());
     let depth = d.argument(h, "depth", int);
     d.executes(depth, "test.create");
+}
+
+/// The commands only a dedicated server registers
+/// (`Commands.CommandSelection.includeDedicated`): an integrated server, and
+/// so single player and a LAN world, has none of them.
+pub fn register_dedicated(d: &mut Dispatcher, root: usize) {
+    // BanIpCommands, BanListCommands
+    let ban_ip = d.literal(root, "ban-ip");
+    d.requires(ban_ip, ADMINS);
+    let t = d.argument(ban_ip, "target", ArgType::Word);
+    d.executes(t, "ban-ip");
+    let reason = d.argument(t, "reason", ArgType::Message);
+    d.executes(reason, "ban-ip");
+    let banlist = d.literal(root, "banlist");
+    d.requires(banlist, ADMINS);
+    d.executes(banlist, "banlist");
+    for (word, id) in [("ips", "banlist.ips"), ("players", "banlist.players")] {
+        let w = d.literal(banlist, word);
+        d.executes(w, id);
+    }
+
+    // OpCommand, DeOpCommands, BanPlayerCommands, PardonCommand
+    for (name, id, suggests) in [
+        ("op", "op", Suggests::NonOperators),
+        ("deop", "deop", Suggests::Operators),
+        ("pardon", "pardon", Suggests::BannedPlayers),
+    ] {
+        let n = d.literal(root, name);
+        d.requires(n, ADMINS);
+        let t = d.argument(n, "targets", ArgType::GameProfile);
+        d.suggests(t, suggests);
+        d.executes(t, id);
+    }
+    // PardonIpCommand
+    let pardon_ip = d.literal(root, "pardon-ip");
+    d.requires(pardon_ip, ADMINS);
+    let t = d.argument(pardon_ip, "target", ArgType::Word);
+    d.suggests(t, Suggests::BannedIps);
+    d.executes(t, "pardon-ip");
+
+    let ban = d.literal(root, "ban");
+    d.requires(ban, ADMINS);
+    let t = d.argument(ban, "targets", ArgType::GameProfile);
+    d.executes(t, "ban");
+    let reason = d.argument(t, "reason", ArgType::Message);
+    d.executes(reason, "ban");
+
+    // WhitelistCommand
+    let whitelist = d.literal(root, "whitelist");
+    d.requires(whitelist, ADMINS);
+    for (word, id) in [
+        ("on", "whitelist.on"),
+        ("off", "whitelist.off"),
+        ("list", "whitelist.list"),
+    ] {
+        let w = d.literal(whitelist, word);
+        d.executes(w, id);
+    }
+    for (word, id, suggests) in [
+        ("add", "whitelist.add", Suggests::NonWhitelisted),
+        ("remove", "whitelist.remove", Suggests::Whitelisted),
+    ] {
+        let w = d.literal(whitelist, word);
+        let t = d.argument(w, "targets", ArgType::GameProfile);
+        d.suggests(t, suggests);
+        d.executes(t, id);
+    }
+    let reload = d.literal(whitelist, "reload");
+    d.executes(reload, "whitelist.reload");
 }

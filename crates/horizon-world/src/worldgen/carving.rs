@@ -73,6 +73,9 @@ pub fn apply_carving_mask<R: RandomSource, S: MaterialSurfaceQueries, B: Terrain
 where
     R::Positional: Clone,
 {
+    if mask.is_empty() {
+        return Ok(());
+    }
     // Restoring the dirt under a carved cell used to build a fresh material
     // worker, compile the whole surface rule and allocate its bindings for every
     // cell. One worker now serves the pass; only the 1x1x1 bindings move.

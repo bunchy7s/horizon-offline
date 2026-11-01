@@ -64,6 +64,7 @@ pub trait QueryWorld<H, I> {
 /// Instance handles retain identity independently of map membership. In
 /// particular, a failed creation callback can leave a queued instance that was
 /// never inserted into `instances`.
+#[derive(Clone)]
 pub struct AttributeMap<H, I> {
     pub instances: ObjectOpenMap<H, I>,
     pub updates: ObjectOpenSet<I>,

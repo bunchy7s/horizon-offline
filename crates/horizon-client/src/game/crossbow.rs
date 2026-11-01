@@ -89,10 +89,8 @@ impl Game<'_> {
         }
         if stack.data().is_some_and(|d| !d.charged.is_empty()) {
             self.shoot_crossbow();
-        } else if (self.projectile_slot(CROSSBOW).is_some() || self.creative)
-            && self.using.is_none()
-        {
-            self.using = Some((self.held_slot(), 0));
+        } else if self.projectile_slot(CROSSBOW).is_some() || self.creative {
+            self.start_using_item();
         }
         true
     }

@@ -44,6 +44,7 @@ import net.minecraft.network.protocol.configuration.ConfigurationProtocols;
 import net.minecraft.network.protocol.configuration.ServerboundFinishConfigurationPacket;
 import net.minecraft.network.protocol.configuration.ServerboundSelectKnownPacks;
 import net.minecraft.network.protocol.game.ClientboundChunkBatchFinishedPacket;
+import net.minecraft.network.protocol.game.ClientboundExplodePacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.network.protocol.game.GameProtocols;
@@ -83,9 +84,9 @@ import net.minecraft.world.phys.Vec3;
  * it is back), {@code attack NAME TARGET} (ServerboundAttackPacket then the swing; TARGET is a
  * player's name or an entity type's path, the last one added), {@code use
  * NAME} (ServerboundUseItemPacket, main hand) and {@code end}. Each player
- * records the ClientboundSetEntityMotionPacket it receives, its own sprint
- * flag as the server sets it, teleports, and the system chat (command
- * feedback).
+ * records the ClientboundSetEntityMotionPacket it receives, the push each
+ * ClientboundExplodePacket carries for it, its own sprint flag as the server
+ * sets it, teleports, and the system chat (command feedback).
  */
 public final class KnockbackClient {
     private static volatile String step = "start";
@@ -355,6 +356,9 @@ public final class KnockbackClient {
                                 replyLock.notifyAll();
                             }
                         }
+                    } else if (p instanceof ClientboundExplodePacket e) {
+                        record(e.playerKnockback().map(v -> String.format(java.util.Locale.ROOT, "explode push %.5f %.5f %.5f",
+                            v.x, v.y, v.z)).orElse("explode push none"));
                     } else if (p instanceof net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket d && d.id() == id) {
                         for (var value : d.packedItems()) {
                             if (value.id() == 0) record("sprinting " + ((((Byte) value.value()) & 8) != 0));

@@ -73,6 +73,8 @@ impl DrawUniforms {
         let mut contents = vec![0u8; stride as usize * RENDER_STAGES.len()];
         for (i, slot) in contents.chunks_mut(stride as usize).enumerate() {
             slot[..4].copy_from_slice(&(i as i32).to_le_bytes());
+            // `blockEntityId` outside block entities, as Iris has it.
+            slot[8..12].copy_from_slice(&(-1i32).to_le_bytes());
         }
         let buffer = wgpu::util::DeviceExt::create_buffer_init(
             device,

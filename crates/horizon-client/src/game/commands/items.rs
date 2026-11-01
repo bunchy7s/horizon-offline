@@ -14,6 +14,9 @@ use horizon_world::nbt::Tag;
 pub(in crate::game) enum Slot {
     /// `inventory[0..36]`: hotbar then the main rows.
     Inv(usize),
+    /// The selected hotbar slot as `weapon.mainhand` names it: the equipment's
+    /// `setItemSlot`, where `hotbar.N` is the inventory's `setItem`.
+    MainHand,
     /// `armor[0..4]` (head, chest, legs, feet).
     Armor(usize),
     Offhand,
@@ -23,7 +26,11 @@ pub(in crate::game) enum Slot {
     /// An armor stand's equipment (`ArmorStand::SLOTS` index).
     Stand(u32, usize),
     Frame(u32),
+    /// A chest or hopper minecart's slot (`ContainerEntity.getChestVehicleSlot`).
+    Cart(u32, usize),
     Block([i32; 3], usize),
+    /// A slot of another player (`for_player`): reached with their state in place.
+    Guest(u32, Box<Slot>),
 }
 /// Whose slots a command addresses.
 #[derive(Clone, Debug, PartialEq)]
@@ -73,6 +80,16 @@ impl Game<'_> {
     }
     /// The slots a name (or wildcard group) addresses on an owner.
     pub(in crate::game) fn slots_named(&mut self, owner: &Owner, name: &str) -> Vec<Slot> {
+        if let Owner::Entity(Target::Guest(conn)) = *owner {
+            let slots = self.for_player(Target::Guest(conn), |g| {
+                g.slots_named(&Owner::Entity(Target::Player), name)
+            });
+            return slots
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| Slot::Guest(conn, Box::new(s)))
+                .collect();
+        }
         let mut out = Vec::new();
         let mut add = |s: Slot| out.push(s);
         match owner {
@@ -102,7 +119,7 @@ impl Game<'_> {
                     }
                 }
                 if matches_name(name, "weapon") || matches_name(name, "weapon.mainhand") {
-                    add(Slot::Inv(self.selected));
+                    add(Slot::MainHand);
                 }
                 if matches_name(name, "weapon.offhand") {
                     add(Slot::Offhand);
@@ -153,13 +170,30 @@ impl Game<'_> {
                     add(Slot::Frame(*id));
                 }
             }
+            // `getChestVehicleSlot` takes any index below `getContainerSize`.
+            Owner::Entity(Target::Cart(id)) => {
+                let size = self
+                    .carts
+                    .iter()
+                    .find(|c| c.id == *id)
+                    .map_or(0, |c| c.kind.slots());
+                for i in 0..size {
+                    if matches_name(name, &format!("container.{i}")) {
+                        add(Slot::Cart(*id, i));
+                    }
+                }
+            }
             Owner::Entity(_) => {}
         }
         out
     }
-    pub(in crate::game) fn slot_get(&self, s: &Slot) -> Option<ItemStack> {
+    pub(in crate::game) fn slot_get(&mut self, s: &Slot) -> Option<ItemStack> {
         match s {
+            Slot::Guest(conn, slot) => self
+                .for_player(Target::Guest(*conn), |g| g.slot_get(slot))
+                .flatten(),
             Slot::Inv(i) => self.inventory.get(*i).cloned().flatten(),
+            Slot::MainHand => self.inventory.get(self.selected).cloned().flatten(),
             Slot::Armor(i) => self.armor.get(*i).cloned().flatten(),
             Slot::Offhand => self.offhand.clone(),
             Slot::Ender(i) => self.ender_items.get(*i).cloned().flatten(),
@@ -190,6 +224,7 @@ impl Game<'_> {
                 .cloned()
                 .flatten(),
             Slot::Frame(id) => self.item_frames.iter().find(|f| f.id == *id)?.item.clone(),
+            Slot::Cart(id, i) => self.cart_slots(*id)?.get(*i).cloned().flatten(),
             Slot::Block(p, i) => match self.world.block_entities.get(&(p[0], p[1], p[2])) {
                 Some(horizon_client::containers::BlockEntity::Chest(items)) => {
                     items.get(*i).cloned().flatten()
@@ -201,6 +236,9 @@ impl Game<'_> {
     /// Put a stack (or nothing) in a slot; false when the slot cannot take it.
     pub(in crate::game) fn slot_set(&mut self, s: &Slot, stack: Option<ItemStack>) -> bool {
         match s {
+            Slot::Guest(conn, slot) => self
+                .for_player(Target::Guest(*conn), |g| g.slot_set(slot, stack))
+                .unwrap_or(false),
             Slot::Inv(i) => match self.inventory.get_mut(*i) {
                 Some(slot) => {
                     *slot = stack;
@@ -209,6 +247,14 @@ impl Game<'_> {
                 None => false,
             },
             // LivingEntity's equipment SlotAccess: setItemSlot, so onEquipItem.
+            Slot::MainHand => match self.inventory.get_mut(self.selected) {
+                Some(slot) => {
+                    let old = std::mem::replace(slot, stack.clone());
+                    self.player_on_equip("mainhand", old.as_ref(), stack.as_ref());
+                    true
+                }
+                None => false,
+            },
             Slot::Armor(i) => match self.armor.get_mut(*i) {
                 Some(slot) => {
                     let old = std::mem::replace(slot, stack.clone());
@@ -266,6 +312,13 @@ impl Game<'_> {
                 }
                 None => false,
             },
+            Slot::Cart(id, i) => match self.cart_slots(*id).and_then(|c| c.get_mut(*i)) {
+                Some(slot) => {
+                    *slot = stack;
+                    true
+                }
+                None => false,
+            },
             Slot::Block(p, i) => match self.world.block_entities.get_mut(&(p[0], p[1], p[2])) {
                 Some(horizon_client::containers::BlockEntity::Chest(items)) => {
                     match items.get_mut(*i) {
@@ -310,12 +363,19 @@ impl Game<'_> {
             None => (0, None),
         };
         let count = Self::int(ctx, "count").unwrap_or(1).max(1) as u32;
-        Ok(Some(ItemStack {
+        let stack = ItemStack {
             item: id.as_str().into(),
             count,
             damage,
             extra,
-        }))
+        };
+        // ItemInput.createItemStack: a count above the stack's max (its
+        // max_stack_size component, else the item's) is refused.
+        let max_stack = self.stack_max_size(&stack);
+        if count > max_stack {
+            return Err(err("arguments.item.overstacked", &[&id, &max_stack]));
+        }
+        Ok(Some(stack))
     }
     /// One item modifier (a typed object, a list or a datapack reference)
     /// applied to a stack; `None` when the stack ends up empty.
@@ -596,7 +656,7 @@ impl Game<'_> {
     }
     /// `ItemStack.getMaxStackSize`: the max_stack_size component, else the
     /// item's.
-    pub(super) fn stack_max_size(&self, s: &ItemStack) -> u32 {
+    pub(in crate::game) fn stack_max_size(&self, s: &ItemStack) -> u32 {
         if let Some(Tag::Int(n)) = s.data().and_then(|d| d.other("minecraft:max_stack_size")) {
             return (*n).clamp(1, 99) as u32;
         }

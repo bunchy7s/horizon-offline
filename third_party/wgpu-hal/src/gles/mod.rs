@@ -922,6 +922,7 @@ enum Command {
         topology: u32,
         indirect_buf: glow::Buffer,
         indirect_offset: wgt::BufferAddress,
+        draw_count: u32,
         first_instance_location: Option<glow::UniformLocation>,
     },
     DrawIndexedIndirect {
@@ -929,6 +930,7 @@ enum Command {
         index_type: u32,
         indirect_buf: glow::Buffer,
         indirect_offset: wgt::BufferAddress,
+        draw_count: u32,
         first_instance_location: Option<glow::UniformLocation>,
     },
     Dispatch([u32; 3]),

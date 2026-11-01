@@ -26,6 +26,16 @@ def corpus():
             yield dict(using=False, destroying=False, attack_down=False, use_down=False,
                        entity=entity, clicks=clicks, delay=0, dig_on_attack=False,
                        begin_using=False, passing=True)
+    # A keybind (the inventory or the chat) opened a screen while the player was
+    # using an item: Gui.setScreen runs KeyMapping.releaseAll, so key.use reads
+    # up and the same handleKeybinds call releases the use, even though the mouse
+    # button is still held. The screen is open, so no click acts this tick.
+    for using in [False, True]:
+        for attack_down, use_down in [(True, True), (False, False)]:
+            for delay in [0, 3]:
+                yield dict(using=using, destroying=False, attack_down=attack_down,
+                           use_down=use_down, entity=False, clicks=[], delay=delay,
+                           dig_on_attack=False, begin_using=False, screen=True)
 
 
 def main():
@@ -39,7 +49,9 @@ def main():
         "interaction-input-parity", "VanillaInteractionInputOracle", "interaction_input_fixture", inputs,
         "Invokes Minecraft.handleKeybinds itself with real KeyMapping click counters. "
         "Compares attack/use/pick ordering, release gating, drained clicks during use, "
-        "held-button repetition and use cooldowns for block/entity targets. "
+        "held-button repetition and use cooldowns for block/entity targets, and the "
+        "release a screen opened from a keybind (inventory, chat) causes in the same "
+        "handleKeybinds call through Gui.setScreen's KeyMapping.releaseAll. "
         "Includes passing entity interactions over solid blocks: only the held "
         "item may be tried afterward. "
         "Game-mode side effects and world simulation are controlled fixtures.",

@@ -30,7 +30,7 @@ exactly:
   brand (Horizon's server says "horizon", vanilla's "vanilla"), features,
   known packs, every registry, tags);
 - the play packets up to the first chunk batch, in order, with entity ids,
-  keep-alive ids and times left out (the recipe property sets and
+  keep-alive ids and times and the anticheat's pings left out (the recipe property sets and
   advancements, which vanilla keeps in hash maps, sorted); the command tree
   node by node; the chunks sent and their bytes; the replies to the chat
   message, /list and the failing commands, as text components;
@@ -239,6 +239,7 @@ def legacy_ping(port):
 
 
 CONSOLE_LINE = re.compile(r'^\[\d\d:\d\d:\d\d\] \[([^\]]+)\]: (.*)$')
+PLAY_PING = re.compile(r'play-\S* minecraft:ping\b')
 KEPT = re.compile(r'Tester|\[Server\]|\[Not Secure\]|There are|Stopping|Saving|ThreadedAnvilChunkStorage|All dimensions|Unknown or incomplete')
 
 
@@ -354,6 +355,9 @@ def run_side(label, command, directory, client):
     finally:
         server.stop()
     transcript = (directory.parent / f'{label}-client.txt').read_text(encoding='utf-8').splitlines()
+    # Horizon's anticheat, on by default, ends each server tick with a play ping for its movement
+    # prediction (docs/anticheat.md); vanilla's server sends none, and a client only answers them.
+    transcript = [l for l in transcript if not PLAY_PING.match(l)]
     return (['legacy-ping ' + legacy] + transcript + ['console ' + l for l in console_lines(server.lines)]
             + ['file ' + l for l in server_files(directory)])
 

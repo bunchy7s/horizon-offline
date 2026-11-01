@@ -7,6 +7,7 @@ use horizon_client::{
     chunk::{Chunk, MIN_Y, SECTIONS, Section},
     fast_hash::FxHashMap,
     portal_sections::PortalSections,
+    section_mask::SectionMask,
 };
 use horizon_core::{
     geometry::{Aabb, Vec3},
@@ -83,17 +84,14 @@ fn may_hold_portal_cached(
     if count > 64 {
         return true;
     }
-    let mut y_mask = 0u32;
-    for sy in y0..=y1 {
-        y_mask |= 1 << sy;
-    }
+    let y_mask = SectionMask::below(y1 as usize + 1).from(y0 as usize);
     (x0..=x1).any(|cx| {
         (z0..=z1).any(|cz| {
             world.get(&(cx, cz)).is_some_and(|chunk| {
-                cache.get((cx, cz), chunk, |v| {
+                let portals = cache.get((cx, cz), chunk, |v| {
                     behaviours.portal_axis(BlockStateId(v)).is_some()
-                }) & y_mask
-                    != 0
+                });
+                !(portals & y_mask).is_empty()
             })
         })
     })

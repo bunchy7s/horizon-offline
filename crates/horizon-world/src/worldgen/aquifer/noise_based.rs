@@ -123,6 +123,11 @@ pub struct NoiseBasedAquifer<P, F, B> {
     neighborhood: Option<([i32; 3], [(usize, BlockPos); 12])>,
     skip_above_y: i32,
     schedule: bool,
+    cached_col: [i32; 2],
+    cached_y_anchor: i32,
+    cached_h: [i32; 12],
+    cached_py: [i32; 12],
+    cached_indices: [usize; 12],
 }
 impl<P: FluidPicker, F: PositionalRandom, B: AquiferBlockStates> NoiseBasedAquifer<P, F, B> {
     /// The positional factory is the caller's aquifer factory, not the world's
@@ -184,6 +189,11 @@ impl<P: FluidPicker, F: PositionalRandom, B: AquiferBlockStates> NoiseBasedAquif
             neighborhood: None,
             skip_above_y: 0,
             schedule: false,
+            cached_col: [i32::MIN, i32::MIN],
+            cached_y_anchor: i32::MIN,
+            cached_h: [0; 12],
+            cached_py: [0; 12],
+            cached_indices: [0; 12],
         };
         let max_surface = result
             .max_surface_level(
@@ -532,21 +542,29 @@ impl<P: FluidPicker, F: PositionalRandom, B: AquiferBlockStates> NoiseBasedAquif
             }
             self.neighborhood = Some((grid, entries));
         }
+        if x != self.cached_col[0] || z != self.cached_col[1] || grid[1] != self.cached_y_anchor {
+            self.cached_col = [x, z];
+            self.cached_y_anchor = grid[1];
+            let entries = &self
+                .neighborhood
+                .as_ref()
+                .expect("populated neighborhood")
+                .1;
+            for i in 0..12 {
+                let (index, point) = entries[i];
+                let ax = point.x.wrapping_sub(x);
+                let az = point.z.wrapping_sub(z);
+                self.cached_indices[i] = index;
+                self.cached_h[i] = ax.wrapping_mul(ax).wrapping_add(az.wrapping_mul(az));
+                self.cached_py[i] = point.y;
+            }
+        }
         let mut distances = [i32::MAX; 4];
         let mut indices = [0usize; 4];
-        for &(index, point) in &self
-            .neighborhood
-            .as_ref()
-            .expect("populated neighborhood")
-            .1
-        {
-            let ax = point.x.wrapping_sub(x);
-            let ay = point.y.wrapping_sub(y);
-            let az = point.z.wrapping_sub(z);
-            let distance = ax
-                .wrapping_mul(ax)
-                .wrapping_add(ay.wrapping_mul(ay))
-                .wrapping_add(az.wrapping_mul(az));
+        for i in 0..12 {
+            let ay = self.cached_py[i].wrapping_sub(y);
+            let distance = self.cached_h[i].wrapping_add(ay.wrapping_mul(ay));
+            let index = self.cached_indices[i];
             // Equal distances insert before existing entries, as in vanilla.
             if distance <= distances[0] {
                 distances = [distance, distances[0], distances[1], distances[2]];

@@ -1,5 +1,6 @@
-//! Sapling growth and bone meal through live feature placement. Needs the
-//! prepared client resources and worldgen bundle (skipped when absent).
+//! Sapling growth, bone meal and templates through live feature placement.
+//! Needs the prepared client resources and worldgen bundle (skipped when
+//! absent).
 use super::*;
 use crate::{chunk::BlockState, worldgen::generator::GeneratorData, worldgen::live::LiveFeatures};
 use std::{
@@ -271,6 +272,148 @@ fn bone_meal_on_a_client_succeeds_only_where_its_level_can_tell() {
     // The server's growCrop takes the sapling.
     assert!(w.bone_meal(BlockPos::new(0, 64, 0)));
 }
+/// A mod block answers vanilla's three `BonemealableBlock` questions itself,
+/// ahead of the `BonemealableBlock` its template would give it, and the meal
+/// is used up with the growth particles and sound as vanilla's are.
+#[test]
+fn bone_meal_answers_a_mod_blocks_three_questions() {
+    /// A level whose bone meal answers are the test's.
+    struct ModLevel<'a> {
+        inner: &'a mut Level,
+        valid: Option<bool>,
+        success: bool,
+        /// `isBonemealSuccess` was asked, and what it saw.
+        rolls: Vec<(BlockPos, BlockStateId)>,
+        /// `performBonemeal` ran, and what it saw.
+        performed: Vec<(BlockPos, BlockStateId)>,
+    }
+    impl LevelAccess for ModLevel<'_> {
+        fn day_time(&self) -> i64 {
+            self.inner.day_time()
+        }
+        fn block_state(&self, pos: BlockPos) -> BlockStateId {
+            self.inner.block_state(pos)
+        }
+        fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
+            self.inner.set_raw(pos, state)
+        }
+        fn is_loaded(&self, pos: BlockPos) -> bool {
+            self.inner.is_loaded(pos)
+        }
+        fn random(&mut self) -> &mut LegacyRandom {
+            self.inner.random()
+        }
+        fn game_time(&self) -> i64 {
+            self.inner.game_time()
+        }
+        fn emit(&mut self, event: LevelEvent) {
+            self.inner.emit(event);
+        }
+        fn is_valid_bonemeal_target(&self, _pos: BlockPos, _state: BlockStateId) -> Option<bool> {
+            self.valid
+        }
+        fn is_bonemeal_success(&mut self, pos: BlockPos, state: BlockStateId) -> bool {
+            self.rolls.push((pos, state));
+            self.success
+        }
+        fn perform_bonemeal(&mut self, _ticks: &mut Ticks, pos: BlockPos, state: BlockStateId) {
+            self.performed.push((pos, state));
+        }
+    }
+    let Some(f) = fixture() else { return };
+    let b = &f.behaviours;
+    let mut w = World::new(f, 1);
+    w.floor("stone", 4);
+    let pos = BlockPos::new(0, 64, 0);
+    let stone = w.id("stone", &[]);
+    let crop = w.id("wheat", &[("age", "0")]);
+    // A block nothing in Horizon bonemeals: the level's answers take the meal,
+    // the roll grows it, and the caller fires the growth particles and sound.
+    w.put(pos, stone);
+    let mut level = ModLevel {
+        inner: &mut w.level,
+        valid: Some(true),
+        success: true,
+        rolls: Vec::new(),
+        performed: Vec::new(),
+    };
+    assert!(b.use_bone_meal(&mut level, &mut w.ticks, pos, Direction::Up));
+    assert_eq!(level.rolls, vec![(pos, stone)]);
+    assert_eq!(level.performed, vec![(pos, stone)]);
+    assert!(level.inner.events.iter().any(|e| matches!(
+        e,
+        LevelEvent::LevelEvent { id: 1505, pos: at, data: 15 } if *at == pos
+    )));
+    // A roll that fails still uses the meal up, without growing it.
+    let mut level = ModLevel {
+        inner: &mut w.level,
+        valid: Some(true),
+        success: false,
+        rolls: Vec::new(),
+        performed: Vec::new(),
+    };
+    assert!(b.use_bone_meal(&mut level, &mut w.ticks, pos, Direction::Up));
+    assert!(level.performed.is_empty());
+    // Refused: not a target, no roll, no growth, no meal used.
+    let mut level = ModLevel {
+        inner: &mut w.level,
+        valid: Some(false),
+        success: true,
+        rolls: Vec::new(),
+        performed: Vec::new(),
+    };
+    assert!(!b.use_bone_meal(&mut level, &mut w.ticks, pos, Direction::Up));
+    assert!(level.rolls.is_empty() && level.performed.is_empty());
+    // A block whose template bonemeals (a crop) is the mod's instead: the
+    // block's own growth doesn't run.
+    w.put(pos, crop);
+    let mut level = ModLevel {
+        inner: &mut w.level,
+        valid: Some(true),
+        success: true,
+        rolls: Vec::new(),
+        performed: Vec::new(),
+    };
+    assert!(b.grow_crop(&mut level, &mut w.ticks, pos));
+    assert_eq!(level.performed, vec![(pos, crop)]);
+    assert_eq!(level.inner.block_state(pos), crop);
+    // Refused by the mod: vanilla's growCrop stops, the crop keeps its meal
+    // and doesn't grow.
+    let mut level = ModLevel {
+        inner: &mut w.level,
+        valid: Some(false),
+        success: true,
+        rolls: Vec::new(),
+        performed: Vec::new(),
+    };
+    assert!(!b.grow_crop(&mut level, &mut w.ticks, pos));
+    assert_eq!(level.inner.block_state(pos), crop);
+    // Answered nothing, the crop keeps its own bone meal and grows.
+    let mut level = ModLevel {
+        inner: &mut w.level,
+        valid: None,
+        success: true,
+        rolls: Vec::new(),
+        performed: Vec::new(),
+    };
+    assert!(b.grow_crop(&mut level, &mut w.ticks, pos));
+    assert!(level.rolls.is_empty() && level.performed.is_empty());
+    assert_ne!(level.inner.block_state(pos), crop, "the crop grew");
+    // A client predicts the use with the same answer, where the block itself
+    // takes no bone meal on a client.
+    w.put(pos, stone);
+    let mut level = ModLevel {
+        inner: &mut w.level,
+        valid: Some(true),
+        success: true,
+        rolls: Vec::new(),
+        performed: Vec::new(),
+    };
+    assert!(b.bone_meal_succeeds_on_client(&mut level, pos, Direction::Up));
+    level.valid = Some(false);
+    assert!(!b.bone_meal_succeeds_on_client(&mut level, pos, Direction::Up));
+}
+
 #[test]
 fn azalea_and_mangrove_grow() {
     let Some(f) = fixture() else { return };
@@ -432,6 +575,77 @@ fn snowy_biomes_freeze_and_snow() {
 }
 
 #[test]
+fn a_template_with_entities_and_no_blocks_places_them() {
+    use crate::{
+        nbt::{Compound, JavaString, Tag},
+        worldgen::structure::{EntityInfo, Mirror, Rotation, StructureTemplate, save_nbt},
+    };
+    let Some(f) = fixture() else { return };
+    let resources = f
+        .behaviours
+        .live_features()
+        .and_then(|features| features.structure_resources())
+        .expect("structure resources");
+    let mut pig = Compound::new();
+    pig.insert("id".into(), Tag::String("minecraft:pig".into()));
+    let pig = EntityInfo {
+        pos: [0.5, 0.0, 0.5],
+        block_pos: [0, 0, 0],
+        nbt: pig,
+    };
+    // StructureTemplate.placeInWorld places when there are blocks, or entities
+    // it does not ignore.
+    for (entities, ignore_entities, expected) in [
+        (vec![pig.clone()], false, true),
+        (vec![pig], true, false),
+        (vec![], false, false),
+    ] {
+        let mut w = World::new(f, 0);
+        let tag = save_nbt(
+            f.registry,
+            &resources.transforms,
+            [1, 1, 1],
+            Vec::new(),
+            &entities,
+            horizon_core::version::DATA_VERSION,
+        );
+        let template = StructureTemplate::from_nbt(&tag, f.registry, &resources.transforms);
+        let settings = TemplateSettings {
+            mirror: Mirror::None,
+            rotation: Rotation::None,
+            ignore_entities,
+            known_shape: false,
+            integrity: 1.0,
+            seed: 0,
+            flags: flags::UPDATE_CLIENTS,
+        };
+        let (placed, spawned) = f
+            .behaviours
+            .place_template(
+                &mut w.level,
+                &mut w.ticks,
+                &template,
+                BlockPos::new(3, 64, -2),
+                settings,
+            )
+            .expect("structure resources");
+        let what = format!("{} entities, ignored {ignore_entities}", entities.len());
+        assert_eq!(placed, expected, "{what}");
+        assert_eq!(spawned.len(), usize::from(expected), "{what}");
+        if let Some(nbt) = spawned.first() {
+            assert_eq!(
+                nbt.get(&JavaString::from("id")),
+                Some(&Tag::String("minecraft:pig".into()))
+            );
+            let pos = [3.5, 64.0, -1.5].map(|v: f64| Tag::Double(v.to_bits()));
+            assert_eq!(
+                nbt.get(&JavaString::from("Pos")),
+                Some(&Tag::List(pos.to_vec()))
+            );
+        }
+    }
+}
+#[test]
 fn eyeblossoms_open_at_night_and_wake_neighbours() {
     let Some(f) = fixture() else { return };
     let mut w = World::new(f, 2);
@@ -507,4 +721,76 @@ fn sniffer_eggs_crack_twice_then_hatch_a_snifflet() {
             ..
         }
     )));
+}
+#[test]
+fn a_non_strict_template_updates_its_shapes_and_neighbours() {
+    use crate::worldgen::structure::{BlockInfo, Mirror, Rotation, StructureTemplate, save_nbt};
+    let Some(f) = fixture() else { return };
+    let resources = f
+        .behaviours
+        .live_features()
+        .and_then(|features| features.structure_resources())
+        .expect("structure resources");
+    for strict in [false, true] {
+        let mut w = World::new(f, 0);
+        let fence = w.id("oak_fence", &[]);
+        let power = w.id("redstone_block", &[]);
+        let block = |pos: [i32; 3], state: BlockStateId| BlockInfo {
+            pos,
+            state,
+            nbt: None,
+        };
+        let blocks = vec![
+            block([0, 0, 0], fence),
+            block([1, 0, 0], fence),
+            block([2, 0, 0], power),
+        ];
+        let tag = save_nbt(
+            f.registry,
+            &resources.transforms,
+            [3, 1, 1],
+            blocks,
+            &[],
+            horizon_core::version::DATA_VERSION,
+        );
+        let template = StructureTemplate::from_nbt(&tag, f.registry, &resources.transforms);
+        let lamp = w.id("redstone_lamp", &[("lit", "false")]);
+        w.put(BlockPos::new(3, 64, 0), lamp);
+        let settings = TemplateSettings {
+            mirror: Mirror::None,
+            rotation: Rotation::None,
+            ignore_entities: true,
+            known_shape: strict,
+            integrity: 1.0,
+            seed: 0,
+            // StructureBlockEntity.placeStructure's `2 | (strict ? 816 : 0)`.
+            flags: flags::UPDATE_CLIENTS | if strict { 816 } else { 0 },
+        };
+        let (placed, _) = f
+            .behaviours
+            .place_template(
+                &mut w.level,
+                &mut w.ticks,
+                &template,
+                BlockPos::new(0, 64, 0),
+                settings,
+            )
+            .expect("structure resources");
+        assert!(placed);
+        // The middle fence: placing the redstone block connects its east side,
+        // only the shape pass connects its west side to the fence placed before
+        // it.
+        let connected = w.id("oak_fence", &[("east", "true"), ("west", "true")]);
+        let lit = w.id("redstone_lamp", &[("lit", "true")]);
+        assert_eq!(
+            w.level.block_state(BlockPos::new(1, 64, 0)) == connected,
+            !strict,
+            "strict {strict}: the middle fence connects to the fence placed before it"
+        );
+        assert_eq!(
+            w.level.block_state(BlockPos::new(3, 64, 0)) == lit,
+            !strict,
+            "strict {strict}: the lamp next to the template lights"
+        );
+    }
 }

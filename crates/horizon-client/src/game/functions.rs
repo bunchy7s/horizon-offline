@@ -15,7 +15,6 @@ use horizon_client::{
     text::{self, Text},
 };
 use horizon_world::nbt::Tag;
-use std::collections::BTreeSet;
 
 /// A `TimerQueue` event.
 #[derive(Clone, Debug, PartialEq)]
@@ -47,44 +46,32 @@ pub(super) enum Outcome {
     Fail,
 }
 
-/// The world's pack stack: the built-in pack (unless disabled) and the
-/// packs of `<world>/datapacks`, with the enabled ids from `datapacks.json`.
+/// The world's pack stack: the built-in pack (unless disabled), the packs
+/// of `<world>/datapacks` and the resources root's feature packs, with the
+/// enabled ids from `datapacks.json` (`PackRepository.reload`).
 pub(super) struct PackStack {
     pub builtin: Option<DataPack>,
     pub packs: Vec<DataPack>,
     pub enabled: Vec<String>,
 }
+impl PackStack {
+    /// The enabled packs in `enabled` (the selected) order, later overriding
+    /// earlier: `PackRepository.openAllSelected` keeps the selected order.
+    fn enabled_packs(&self) -> impl Iterator<Item = &DataPack> {
+        self.enabled
+            .iter()
+            .filter_map(|id| self.packs.iter().find(|p| &p.id == id))
+    }
+}
 pub(super) fn pack_stack(
     world_root: &std::path::Path,
     resources: &std::path::Path,
     vanilla_disabled: bool,
+    enabled_features: &[String],
 ) -> PackStack {
     let builtin = (!vanilla_disabled).then(|| DataPack::builtin(resources));
-    let packs = datapack::discover(world_root);
-    let saved: Option<serde_json::Value> = std::fs::read(world_root.join("datapacks.json"))
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok());
-    let list = |key: &str| -> Vec<String> {
-        saved
-            .as_ref()
-            .and_then(|v| v[key].as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|s| s.as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-    let disabled: BTreeSet<String> = list("disabled").into_iter().collect();
-    let mut enabled: Vec<String> = list("enabled")
-        .into_iter()
-        .filter(|id| packs.iter().any(|p| &p.id == id))
-        .collect();
-    for p in &packs {
-        if !enabled.contains(&p.id) && !disabled.contains(&p.id) {
-            enabled.push(p.id.clone());
-        }
-    }
+    let packs = datapack::discover_with_features(world_root, resources);
+    let enabled = datapack::enabled_ids(world_root, &packs, enabled_features);
     PackStack {
         builtin,
         packs,
@@ -99,13 +86,10 @@ pub(super) fn content_overlay(
     world_root: &std::path::Path,
     resources: &std::path::Path,
     vanilla_disabled: bool,
+    enabled_features: &[String],
 ) -> Vec<(String, Vec<Vec<u8>>)> {
-    let stack = pack_stack(world_root, resources, vanilla_disabled);
-    let packs: Vec<&DataPack> = stack
-        .packs
-        .iter()
-        .filter(|p| stack.enabled.contains(&p.id))
-        .collect();
+    let stack = pack_stack(world_root, resources, vanilla_disabled, enabled_features);
+    let packs: Vec<&DataPack> = stack.enabled_packs().collect();
     if packs.is_empty() {
         return Vec::new();
     }
@@ -140,6 +124,7 @@ impl Game<'_> {
             &self.world_root,
             &self.options.resources,
             self.cmds.vanilla_disabled,
+            &self.level.enabled_features,
         );
         self.fns.packs = stack.packs;
         self.fns.enabled = stack.enabled;
@@ -163,17 +148,9 @@ impl Game<'_> {
             &self.world_root,
             &self.options.resources,
             self.cmds.vanilla_disabled,
+            &self.level.enabled_features,
         );
-        let packs: Vec<&DataPack> = stack
-            .builtin
-            .iter()
-            .chain(
-                stack
-                    .enabled
-                    .iter()
-                    .filter_map(|id| stack.packs.iter().find(|p| &p.id == id)),
-            )
-            .collect();
+        let packs: Vec<&DataPack> = stack.builtin.iter().chain(stack.enabled_packs()).collect();
         let store = DataStore::load(&packs);
         for (id, e) in &store.errors {
             log::warn!("Horizon: failed to load function {id}: {e}");
@@ -209,6 +186,59 @@ impl Game<'_> {
             .map(|p| p.id.clone())
             .filter(|id| !self.fns.enabled.contains(id))
             .collect();
+        // A pack's worldgen ids join the completion registries
+        // (`command-registries.json` lists only the game's own), and so do
+        // its worldgen tag ids for the `#tag` completions. The packs are the
+        // ones the world's worldgen is built from.
+        let packs = horizon_client::datapack::discover_with_features(
+            &self.world_root,
+            &self.options.resources,
+        );
+        let enabled = horizon_client::datapack::enabled_ids(
+            &self.world_root,
+            &packs,
+            &self.level.enabled_features,
+        );
+        let enabled: Vec<_> = enabled
+            .iter()
+            .filter_map(|id| packs.iter().find(|p| &p.id == id))
+            .collect();
+        let (overrides, _) = horizon_client::datapack::worldgen_overrides(&enabled, |_| true);
+        for (bundle, registry) in [
+            ("biomes", "minecraft:worldgen/biome"),
+            ("structures", "minecraft:worldgen/structure"),
+            ("structure_sets", "minecraft:worldgen/structure_set"),
+            ("template_pools", "minecraft:worldgen/template_pool"),
+            ("processor_lists", "minecraft:worldgen/processor_list"),
+        ] {
+            let entry = reg.by_registry.entry(registry.to_owned()).or_default();
+            for (id, _) in overrides.entries(bundle) {
+                if !entry.ids.contains(&id.to_owned()) {
+                    entry.ids.push(id.to_owned());
+                }
+            }
+            entry.ids.sort();
+        }
+        let entry = reg
+            .by_registry
+            .entry("minecraft:worldgen/biome".to_owned())
+            .or_default();
+        for (id, _, _) in overrides.tags("biome_tags") {
+            if !entry.tags.contains(&id.to_owned()) {
+                entry.tags.push(id.to_owned());
+            }
+        }
+        entry.tags.sort();
+        let entry = reg
+            .by_registry
+            .entry("minecraft:worldgen/structure".to_owned())
+            .or_default();
+        for (id, _, _) in overrides.tags("structure_tags") {
+            if !entry.tags.contains(&id.to_owned()) {
+                entry.tags.push(id.to_owned());
+            }
+        }
+        entry.tags.sort();
     }
 
     // ---- scheduled events ------------------------------------------------------
@@ -320,7 +350,14 @@ impl Game<'_> {
     fn run_function_by_id(&mut self, id: &str, args: Option<&Tag>, source: Source) {
         self.exec.commands = 0;
         if let Some(f) = self.fns.store.functions.get(id).cloned() {
-            let _ = self.run_function(&f, args, source);
+            // `ServerFunctionManager.execute` logs a function that failed to
+            // instantiate or run; its lines' own failures stay silent.
+            if let Err(e) = self.run_function(&f, args, source) {
+                log::warn!(
+                    "Horizon: failed to run function {id}: {}",
+                    e.message.plain()
+                );
+            }
         }
     }
 
@@ -718,10 +755,17 @@ impl Game<'_> {
             _ => None,
         };
         let selected = self.selected_packs();
-        // Feature packs need features this world lacks: never available.
+        // `DataPackCommand.listAvailablePacks`: a feature pack the world's
+        // features do not cover is not available.
         let available: Vec<String> = std::iter::once("vanilla".to_owned())
             .chain(self.fns.packs.iter().map(|p| p.id.clone()))
             .filter(|p| !selected.contains(p))
+            .filter(|p| {
+                FEATURE_PACKS
+                    .iter()
+                    .find(|(f, _)| *f == p.as_str())
+                    .is_none_or(|(_, flag)| self.level.enabled_features.iter().any(|f| f == flag))
+            })
             .collect();
         let known = |g: &Self, n: &str| {
             n == "vanilla"
@@ -779,7 +823,11 @@ impl Game<'_> {
                 if selected.contains(&name) {
                     return Err(err("commands.datapack.enable.failed", &[&name]));
                 }
-                if let Some((_, flag)) = FEATURE_PACKS.iter().find(|(p, _)| *p == name) {
+                if let Some((_, flag)) = FEATURE_PACKS.iter().find(|(p, _)| *p == name)
+                    && !self.level.enabled_features.iter().any(|f| f == flag)
+                {
+                    // `DataPackCommand`: the pack's requested features must
+                    // be a subset of the world's enabled ones.
                     return Err(err(
                         "commands.datapack.enable.failed.no_flags",
                         &[&name, flag],
@@ -818,6 +866,11 @@ impl Game<'_> {
                 }
                 if !selected.contains(&name) {
                     return Err(err("commands.datapack.disable.failed", &[&name]));
+                }
+                if FEATURE_PACKS.iter().any(|(p, _)| *p == name) {
+                    // `DataPackCommand`'s ERROR_CANNOT_DISABLE_FEATURE: the
+                    // flag stays on for the world's life.
+                    return Err(err("commands.datapack.disable.failed.feature", &[&name]));
                 }
                 if name == "vanilla" {
                     self.cmds.vanilla_disabled = true;
@@ -861,3 +914,38 @@ const FEATURE_PACKS: &[(&str, &str)] = &[
     ("redstone_experiments", "minecraft:redstone_experiments"),
     ("trade_rebalance", "minecraft:trade_rebalance"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two packs override the same recipe: the later one in the selected
+    /// (`datapacks.json`) order wins, not the later one alphabetically.
+    #[test]
+    fn content_overlay_follows_enabled_order() {
+        for order in [["file/a", "file/b"], ["file/b", "file/a"]] {
+            let dir = std::env::temp_dir().join(format!(
+                "horizon-overlay-{}-{}",
+                std::process::id(),
+                order[0].replace('/', "_")
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            for name in ["a", "b"] {
+                let pack = dir.join("datapacks").join(name);
+                std::fs::create_dir_all(pack.join("data/x/recipe")).unwrap();
+                std::fs::write(pack.join("pack.mcmeta"), "{}").unwrap();
+                std::fs::write(pack.join("data/x/recipe/r.json"), name).unwrap();
+            }
+            let json = serde_json::json!({"enabled": order, "disabled": []});
+            std::fs::write(dir.join("datapacks.json"), json.to_string()).unwrap();
+            let files = content_overlay(&dir, std::path::Path::new(""), true, &[]);
+            let (_, versions) = files.iter().find(|(id, _)| id == "recipe/x:r").unwrap();
+            let last = versions.last().unwrap();
+            assert_eq!(
+                last.as_slice(),
+                order[1].trim_start_matches("file/").as_bytes()
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+}

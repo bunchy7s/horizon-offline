@@ -24,6 +24,8 @@ const ASSETS: &[&str] = if cfg!(all(target_os = "linux", target_arch = "x86_64")
     ]
 } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
     &["horizon-macos-arm64.zip"]
+} else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+    &["horizon-macos-x64.zip"]
 } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
     &["horizon-windows-x64.zip"]
 } else {

@@ -81,6 +81,19 @@ impl InteractionInput {
     }
 }
 
+/// The sentence of `Minecraft.handleKeybinds` that follows a key which opened
+/// a screen: `Gui.setScreen` has already run `KeyMapping.releaseAll()`, so
+/// `key.use` reads up and the same call releases an active use
+/// (`player.isUsingItem() && !keyUse.isDown()` → `MultiPlayerGameMode.releaseUsingItem`).
+/// Only the screens opened from the keybinds do this (the inventory, chat and
+/// advancements); the pause menu, server containers, mount inventories and
+/// dialogs release on the first tick after closing instead, as vanilla does.
+pub fn release_on_screen_open(world: &mut impl InteractionWorld) {
+    if world.using_item() {
+        world.release_using();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

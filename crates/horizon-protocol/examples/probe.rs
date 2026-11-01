@@ -113,7 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while start.elapsed() < Duration::from_secs(seconds) {
         let (id, payload) = match c.recv() {
             Ok(p) => p,
-            Err(e) if e.0.contains("timed out") || e.0.contains("temporarily unavailable") => {
+            Err(e) if e.is_timed_out() => {
                 continue;
             }
             Err(e) => return Err(e.into()),

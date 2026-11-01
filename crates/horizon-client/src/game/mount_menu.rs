@@ -319,6 +319,16 @@ impl Game<'_> {
         v.extend((0..open.columns * 3).map(|i| CHEST + i));
         Some(v)
     }
+    /// How many slots `mount_slots` lists, counted without building it
+    /// (`Game::slot_count` asks every frame).
+    pub(super) fn mount_slot_count(&self) -> Option<usize> {
+        let open = self
+            .mount_menu
+            .open
+            .as_ref()
+            .filter(|_| self.mount_active())?;
+        Some(36 + usize::from(open.show_saddle) + usize::from(open.show_armor) + open.columns * 3)
+    }
     pub(super) fn mount_slot_position(&self, i: usize) -> Option<(f32, f32)> {
         let open = self
             .mount_menu
@@ -483,6 +493,7 @@ impl Game<'_> {
             }),
             None => String::new(),
         };
+        super::screen_info::name_container(|| title.clone());
         batch.text(atlas, &title, ox + 8.0, oy + 6.0, grey, false);
         let inventory = self.translate("container.inventory", "Inventory");
         batch.text(atlas, &inventory, ox + 8.0, oy + 72.0, grey, false);

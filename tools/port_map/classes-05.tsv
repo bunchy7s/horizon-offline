@@ -52,7 +52,7 @@ GameRuleMap.equals	skip:java		value equality of the map
 GameRuleMap.of	port	crates/horizon-client-core/src/gamerules.rs::GameRules::get	no stored map: a rule that was never set reads its table default
 GameRuleMap.setFromIf	skip:other		no caller in the pinned sources (only withOther uses it)
 GameRuleMap.withOther	skip:other		no caller in the pinned sources
-BlendingData	missing		player: in worlds upgraded from before 1.18 the old/new chunk border is not blended (datafix/fixes_c.rs drops blending_data), so a seam can show
+BlendingData	port	crates/horizon-world/src/worldgen/blending.rs::BlendingData	unpack/pack, calculateData for the border columns, heights, densities and biomes; the client reads the saved chunks (old_world.rs)
 BlendingData.Packed.validateArraySize	skip:java		codec size check
 AllOfPredicate.test	port	crates/horizon-world/src/worldgen/block_predicate.rs::BlockPredicate::test_inner	the All arm
 AnyOfPredicate.test	port	crates/horizon-world/src/worldgen/block_predicate.rs::BlockPredicate::test_inner	the Any arm

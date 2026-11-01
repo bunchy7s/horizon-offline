@@ -1,6 +1,5 @@
-//! `DebugScreenOverlay`: the F3 text. The entries of the default profile
-//! (`DebugScreenEntries.PROFILES`) report priority lines, regular lines and
-//! groups; the overlay splits them into a left and a right column and draws
+//! `DebugScreenOverlay`: the F3 text. The enabled entries
+//! (`debug-profile.json`) report priority lines, regular lines and groups; the overlay splits them into a left and a right column and draws
 //! them last, over any screen, at the debug GUI scale.
 use crate::{
     font::Font,
@@ -242,7 +241,12 @@ pub fn draw(font: &Font, columns: [&[String]; 2], scale: f32, width: i32) -> Vec
         }
         for (line, left, top, _) in placed {
             out.push(GuiDraw::Text {
-                text: Text::literal(line.clone()),
+                // Entries colour their text with legacy codes.
+                text: if line.contains('§') {
+                    Text::legacy(line)
+                } else {
+                    Text::literal(line.clone())
+                },
                 x: left,
                 y: top,
                 color: TEXT,
@@ -254,12 +258,337 @@ pub fn draw(font: &Font, columns: [&[String]; 2], scale: f32, width: i32) -> Vec
     out
 }
 
+/// `ChatFormatting.UNDERLINE`, `GREEN` and `RED` as legacy codes.
+pub const UNDERLINE: &str = "§n";
+pub const GREEN: &str = "§a";
+pub const RED: &str = "§c";
+
+/// `DebugEntryLookingAtState.extractInfo`: the underlined heading with the
+/// position, the state's registered name, then one line per property
+/// (`true` green, `false` red).
+pub fn state_lines<'a>(
+    prefix: &str,
+    pos: [i32; 3],
+    name: &str,
+    properties: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Vec<String> {
+    let mut out = vec![
+        format!("{UNDERLINE}{prefix}: {}, {}, {}", pos[0], pos[1], pos[2]),
+        name.to_owned(),
+    ];
+    out.extend(properties.into_iter().map(|(key, value)| {
+        let color = match value {
+            "true" => GREEN,
+            "false" => RED,
+            _ => "",
+        };
+        format!("{key}: {color}{value}")
+    }));
+    out
+}
+
+/// `DebugEntryLookingAt.addTagEntries`: `#` and each tag holding `id`.
+/// Vanilla walks a hash set; these are sorted, so the order holds still.
+pub fn tag_lines<'a>(
+    tags: impl IntoIterator<Item = (&'a String, &'a std::collections::HashSet<String>)>,
+    id: &str,
+) -> Vec<String> {
+    let mut out: Vec<String> = tags
+        .into_iter()
+        .filter(|(_, members)| members.contains(id))
+        .map(|(tag, _)| format!("#{tag}"))
+        .collect();
+    out.sort();
+    out
+}
+
+/// `DebugEntryHeightmap.HEIGHTMAP_NAMES`.
+fn heightmap_name(kind: horizon_world::heightmap::HeightmapType) -> &'static str {
+    use horizon_world::heightmap::HeightmapType::*;
+    match kind {
+        WorldSurfaceWg => "SW",
+        WorldSurface => "S",
+        OceanFloorWg => "OW",
+        OceanFloor => "O",
+        MotionBlocking => "M",
+        MotionBlockingNoLeaves => "ML",
+    }
+}
+
+/// `DebugEntryHeightmap`: the client chunk's heightmaps (`sendToClient`),
+/// then the server chunk's (`keepAfterWorldgen`, `??` without one), each
+/// type's height from `height`.
+pub fn heightmap_lines(
+    client: impl Fn(horizon_world::heightmap::HeightmapType) -> i32,
+    server: Option<&dyn Fn(horizon_world::heightmap::HeightmapType) -> i32>,
+) -> [String; 2] {
+    use horizon_world::heightmap::HeightmapType;
+    let mut ch = String::from("CH");
+    for kind in HeightmapType::ALL
+        .into_iter()
+        .filter(|k| k.send_to_client())
+    {
+        ch.push_str(&format!(" {}: {}", heightmap_name(kind), client(kind)));
+    }
+    let mut sh = String::from("SH");
+    for kind in HeightmapType::ALL
+        .into_iter()
+        .filter(|k| k.keep_after_worldgen())
+    {
+        let height = server.map_or_else(|| "??".to_owned(), |h| h(kind).to_string());
+        sh.push_str(&format!(" {}: {height}", heightmap_name(kind)));
+    }
+    [ch, sh]
+}
+
+/// `MobCategory.getDebugAbbreviation`, in `MobCategory.values()` order.
+const CATEGORY_ABBREVIATIONS: [&str; 8] = ["MO", "C", "AM", "AX", "UWC", "WC", "WA", "MI"];
+
+/// `DebugEntrySpawnCounts`: the spawnable chunks of the last spawn state,
+/// then each category's count.
+pub fn spawn_counts_line(chunks: i32, counts: &[i32; 8]) -> String {
+    let categories: Vec<String> = CATEGORY_ABBREVIATIONS
+        .iter()
+        .zip(counts)
+        .map(|(abbreviation, n)| format!("{abbreviation}: {n}"))
+        .collect();
+    format!("SC: {chunks}, {}", categories.join(", "))
+}
+
+/// `DebugEntryLocalDifficulty` with `DifficultyInstance.getSpecialMultiplier`.
+pub fn local_difficulty_line(effective: f32) -> String {
+    let special = if effective < 2.0 {
+        0.0
+    } else if effective > 4.0 {
+        1.0
+    } else {
+        (effective - 2.0) / 2.0
+    };
+    format!("Local Difficulty: {effective:.2} // {special:.2}")
+}
+
+/// `DebugEntryGpuUtilization`: past 100% in red.
+pub fn gpu_line(utilization: f64) -> String {
+    if utilization > 100.0 {
+        format!("GPU: {RED}100%")
+    } else {
+        format!("GPU: {}%", utilization.round() as i64)
+    }
+}
+
+/// `DebugEntrySoundMood`: `Library.getChannelDebugString` and the mood.
+pub fn sound_mood_line(used: [usize; 2], max: [usize; 2], mood: f32) -> String {
+    format!(
+        "Sounds: {}/{} + {}/{} (Mood {}%)",
+        used[0],
+        max[0],
+        used[1],
+        max[1],
+        (mood * 100.0).round() as i32
+    )
+}
+
+/// `DebugEntrySoundCache`: the decoded buffers and their size, in MiB
+/// rounded up.
+pub fn sound_cache_line(buffers: usize, bytes: usize) -> String {
+    let mib = (bytes as f64 / 1024.0 / 1024.0).ceil() as i64;
+    format!("Sound cache: {buffers} buffers, {mib} MiB")
+}
+
+/// `DebugEntryLight` without the server's values
+/// (`DEBUG_SHOW_SERVER_DEBUG_VALUES` is off): the raw brightness is the
+/// brighter of the two at the feet.
+pub fn light_line(sky: u8, block: u8) -> String {
+    format!(
+        "Client Light: {} ({sky} sky, {block} block)",
+        sky.max(block)
+    )
+}
+
+/// What the process holds, for `DebugEntryMemory` (Horizon has no JVM heap):
+/// anonymous resident memory for the heap's used part, all resident memory
+/// for its committed part, the machine's memory for its maximum.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ProcessMemory {
+    pub used: u64,
+    pub allocated: u64,
+    pub max: u64,
+}
+
+impl ProcessMemory {
+    /// From `/proc/self/status` and `/proc/meminfo`; `None` elsewhere.
+    pub fn read() -> Option<Self> {
+        if !cfg!(target_os = "linux") {
+            return None;
+        }
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+        Self::parse(&status, &meminfo)
+    }
+    fn parse(status: &str, meminfo: &str) -> Option<Self> {
+        let kib = |text: &str, key: &str| -> Option<u64> {
+            let line = text.lines().find(|l| l.starts_with(key))?;
+            Some(line.split_whitespace().nth(1)?.parse::<u64>().ok()? * 1024)
+        };
+        Some(Self {
+            used: kib(status, "RssAnon:")?,
+            allocated: kib(status, "VmRSS:")?,
+            max: kib(meminfo, "MemTotal:")?.max(1),
+        })
+    }
+}
+
+/// `DebugEntryMemory` and its `AllocationRateCalculator`: read twice a
+/// second; a drop in use (a GC in vanilla) keeps the last rate.
+#[derive(Debug, Default)]
+pub struct MemoryMeter {
+    last: Option<(std::time::Instant, ProcessMemory)>,
+    rate: i64,
+}
+
+impl MemoryMeter {
+    pub fn lines(&mut self) -> Option<[String; 3]> {
+        let now = std::time::Instant::now();
+        let memory = match self.last {
+            Some((at, memory)) if now.duration_since(at).as_millis() < 500 => memory,
+            last => {
+                let memory = ProcessMemory::read()?;
+                if let Some((at, before)) = last
+                    && memory.used >= before.used
+                {
+                    let seconds = now.duration_since(at).as_secs_f64();
+                    self.rate = ((memory.used - before.used) as f64 / seconds).round() as i64;
+                }
+                self.last = Some((now, memory));
+                memory
+            }
+        };
+        Some(memory_lines(memory, self.rate))
+    }
+}
+
+/// `DebugEntryMemory`'s three lines.
+pub fn memory_lines(m: ProcessMemory, rate: i64) -> [String; 3] {
+    let mib = |bytes: u64| bytes / 1024 / 1024;
+    [
+        format!(
+            "Mem: {:2}% {:03}/{:03}MiB",
+            m.used * 100 / m.max,
+            mib(m.used),
+            mib(m.max)
+        ),
+        format!("Allocation rate: {:03}MiB/s", rate / 1024 / 1024),
+        format!(
+            "Allocated: {:2}% {:03}MiB",
+            m.allocated * 100 / m.max,
+            mib(m.allocated)
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn lines(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn looking_at_lines_match_vanilla() {
+        let props = [
+            ("facing", "north"),
+            ("lit", "true"),
+            ("waterlogged", "false"),
+        ];
+        assert_eq!(
+            state_lines("Targeted Block", [1, -2, 3], "minecraft:furnace", props),
+            lines(&[
+                "§nTargeted Block: 1, -2, 3",
+                "minecraft:furnace",
+                "facing: north",
+                "lit: §atrue",
+                "waterlogged: §cfalse",
+            ])
+        );
+        let tags: std::collections::HashMap<String, std::collections::HashSet<String>> = [
+            ("minecraft:logs", vec!["minecraft:oak_log"]),
+            ("minecraft:dirt", vec!["minecraft:dirt"]),
+            ("minecraft:burnable", vec!["minecraft:oak_log"]),
+        ]
+        .into_iter()
+        .map(|(t, m)| (t.to_owned(), m.into_iter().map(str::to_owned).collect()))
+        .collect();
+        assert_eq!(
+            tag_lines(&tags, "minecraft:oak_log"),
+            lines(&["#minecraft:burnable", "#minecraft:logs"])
+        );
+    }
+
+    #[test]
+    fn world_lines_match_vanilla() {
+        use horizon_world::heightmap::HeightmapType::*;
+        let heights = |k| match k {
+            WorldSurface => 70,
+            OceanFloor => 64,
+            MotionBlocking => 69,
+            _ => 68,
+        };
+        assert_eq!(
+            heightmap_lines(heights, Some(&heights)),
+            [
+                "CH S: 70 M: 69 ML: 68".to_owned(),
+                "SH S: 70 O: 64 M: 69 ML: 68".to_owned()
+            ]
+        );
+        assert_eq!(
+            heightmap_lines(heights, None)[1],
+            "SH S: ?? O: ?? M: ?? ML: ??"
+        );
+        assert_eq!(
+            spawn_counts_line(289, &[3, 10, 1, 0, 0, 2, 4, 0]),
+            "SC: 289, MO: 3, C: 10, AM: 1, AX: 0, UWC: 0, WC: 2, WA: 4, MI: 0"
+        );
+        assert_eq!(local_difficulty_line(1.5), "Local Difficulty: 1.50 // 0.00");
+        assert_eq!(local_difficulty_line(3.0), "Local Difficulty: 3.00 // 0.50");
+        assert_eq!(light_line(12, 14), "Client Light: 14 (12 sky, 14 block)");
+    }
+
+    #[test]
+    fn performance_lines_match_vanilla() {
+        assert_eq!(gpu_line(42.4), "GPU: 42%");
+        assert_eq!(gpu_line(130.0), "GPU: §c100%");
+        assert_eq!(
+            sound_mood_line([3, 1], [247, 8], 0.256),
+            "Sounds: 3/247 + 1/8 (Mood 26%)"
+        );
+        assert_eq!(
+            sound_cache_line(12, 3 * 1024 * 1024 + 1),
+            "Sound cache: 12 buffers, 4 MiB"
+        );
+        let mib = 1024 * 1024;
+        let memory = ProcessMemory {
+            used: 512 * mib,
+            allocated: 900 * mib,
+            max: 16384 * mib,
+        };
+        assert_eq!(
+            memory_lines(memory, 40 * mib as i64),
+            [
+                "Mem:  3% 512/16384MiB".to_owned(),
+                "Allocation rate: 040MiB/s".to_owned(),
+                "Allocated:  5% 900MiB".to_owned(),
+            ]
+        );
+        let status = "Name:\thorizon\nVmRSS:\t  2048 kB\nRssAnon:\t  1024 kB\n";
+        assert_eq!(
+            ProcessMemory::parse(status, "MemTotal:       8192 kB\n"),
+            Some(ProcessMemory {
+                used: 1024 * 1024,
+                allocated: 2048 * 1024,
+                max: 8192 * 1024,
+            })
+        );
     }
 
     #[test]

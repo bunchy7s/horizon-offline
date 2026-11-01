@@ -2,10 +2,16 @@
 //! stray, bogged, wither skeleton): goals, bow attacks, water conversion.
 use super::{
     Damage, Mob, MobEvent, Species, Who,
-    doors::BreakDoor,
+    doors::{BreakDoor, can_navigate_ground, wooden_door},
     goals::{
         Avoid, AvoidEntity, Cx, FleeSun, Goal, HurtByTarget, LOOK, LookAtPlayer, MOVE, MeleeAttack,
         NearestTarget, RandomLookAround, RestrictSun, Stroll, goal_clone,
+    },
+    path::Path,
+    spear_use::SpearUse,
+    villager_brain::{
+        closer_to_center, occupied_pois_in_range, others_tickets, sections_to_village,
+        village_sections,
     },
 };
 use crate::projectiles::{Projectile, ProjectileKind};
@@ -30,7 +36,13 @@ pub fn register(m: &mut Mob) {
             g.add(4, AttackTurtleEgg::default());
             g.add(8, LookAtPlayer::new(8.0));
             g.add(8, RandomLookAround::default());
+            // Zombie.addBehaviourGoals: a spear in hand is used first.
+            g.add(2, SpearUse::new(1.0, 1.0, 10.0, 2.0));
             g.add(3, MeleeAttack::new(1.0, false).zombie());
+            g.add(
+                6,
+                MoveThroughVillage::new(1.0, true, 4, |m| m.extra.can_break_doors),
+            );
             g.add(7, Stroll::avoiding_water(1.0));
             let t = &mut m.ai.targets;
             let mut hurt = HurtByTarget::new().alert();
@@ -59,6 +71,7 @@ pub fn register(m: &mut Mob) {
             g.add(4, AttackTurtleEgg::default());
             g.add(8, LookAtPlayer::new(8.0));
             g.add(8, RandomLookAround::default());
+            g.add(1, SpearUse::new(1.0, 1.0, 10.0, 2.0));
             g.add(2, MeleeAttack::new(1.0, false).zombie());
             g.add(7, Stroll::avoiding_water(1.0));
             let t = &mut m.ai.targets;
@@ -116,7 +129,9 @@ pub fn register(m: &mut Mob) {
             );
             // DrownedMoveControl, AmphibiousPathNavigation, no water malus.
             m.ai.mov.kind = super::control::MoveKind::Custom;
-            m.ai.nav.kind = super::nav::NavKind::Amphibious;
+            m.ai.nav.kind = super::nav::NavKind::Amphibious {
+                prefers_shallow: false,
+            };
             m.ai.nav.can_float = false;
             m.set_malus(super::path::PathType::Water, 0.0);
         }
@@ -541,24 +556,20 @@ fn skeleton_freezing(m: &mut Mob, cx: &mut Cx) {
     } else if m.extra.counter2 > 0 {
         m.extra.counter2 -= 1;
         if m.extra.counter2 == 0 {
-            // levelEvent 1048: the conversion sound at the stray.
-            let pitch = (m.random.next_float() - m.random.next_float()) * 0.2 + 1.0;
-            cx.events.push(MobEvent::Sound(
-                "entity.skeleton.converted_to_stray",
-                m.center(),
-                2.0,
-                pitch,
-            ));
-            cx.events.push(MobEvent::SpawnKind {
-                kind: "minecraft:stray".into(),
-                at: [m.position.x, m.position.y, m.position.z],
-                setup: super::SpawnSetup {
-                    yaw: m.yaw,
-                    persistent: m.persistent,
-                    ..Default::default()
-                },
-            });
-            m.removed = true;
+            // ConversionTracker.doConversion: convertTo(STRAY,
+            // ConversionParams.single(this, true, true)).
+            convert(m, "minecraft:stray", cx);
+            // levelEvent 1048: the conversion sound at the stray, unless it
+            // is silent.
+            if !m.silent {
+                let pitch = (m.random.next_float() - m.random.next_float()) * 0.2 + 1.0;
+                cx.events.push(MobEvent::Sound(
+                    "entity.skeleton.converted_to_stray",
+                    m.center(),
+                    2.0,
+                    pitch,
+                ));
+            }
         }
     } else {
         m.extra.counter += 1;
@@ -566,6 +577,17 @@ fn skeleton_freezing(m: &mut Mob, cx: &mut Cx) {
             m.extra.counter2 = 301;
         }
     }
+}
+/// `Mob.convertTo(kind, ConversionParams.single(this, true, true))`: the
+/// mob is discarded and a new one of `kind` takes its place with its
+/// equipment, name, effects and flags (`MobEvent::Convert`).
+fn convert(m: &mut Mob, kind: &'static str, cx: &mut Cx) {
+    cx.events.push(MobEvent::Convert {
+        from: Box::new(m.clone()),
+        kind,
+        params: super::conversion::Params::KEEP_ALL,
+    });
+    m.removed = true;
 }
 pub fn custom_server_ai_step(m: &mut Mob, cx: &mut Cx) {
     if m.species() == Species::Skeleton && m.alive() && !m.no_ai {
@@ -588,18 +610,13 @@ pub fn custom_server_ai_step(m: &mut Mob, cx: &mut Cx) {
                 } else {
                     ("minecraft:drowned", "entity.zombie.converted_to_drowned")
                 };
-                cx.events.push(MobEvent::Sound(sound, m.center(), 1.0, 1.0));
-                cx.events.push(MobEvent::SpawnKind {
-                    kind: kind.into(),
-                    at: [m.position.x, m.position.y, m.position.z],
-                    setup: super::SpawnSetup {
-                        baby: m.is_baby(),
-                        yaw: m.yaw,
-                        persistent: m.persistent,
-                        ..Default::default()
-                    },
-                });
-                m.removed = true;
+                // ConversionTracker.doConversion: convertTo(type,
+                // ConversionParams.single(this, true, true)); levelEvent
+                // 1040 or 1041 unless the new mob is silent.
+                convert(m, kind, cx);
+                if !m.silent {
+                    cx.events.push(MobEvent::Sound(sound, m.center(), 1.0, 1.0));
+                }
             }
         } else if m.fluids.eye_in_water {
             m.extra.counter += 1;
@@ -934,6 +951,144 @@ impl Goal for DrownedGoToWater {
     }
 }
 
+/// `MoveThroughVillageGoal`: at night, walk to a village point of interest
+/// (a taken one) not visited lately, and on to the next.
+#[derive(Clone, Debug)]
+pub struct MoveThroughVillage {
+    speed: f64,
+    only_at_night: bool,
+    distance: i32,
+    can_deal_with_doors: fn(&Mob) -> bool,
+    path: Option<Path>,
+    poi: [i32; 3],
+    visited: Vec<[i32; 3]>,
+}
+impl MoveThroughVillage {
+    /// `MoveThroughVillageGoal.<init>`.
+    pub fn new(
+        speed: f64,
+        only_at_night: bool,
+        distance: i32,
+        can_deal_with_doors: fn(&Mob) -> bool,
+    ) -> Self {
+        Self {
+            speed,
+            only_at_night,
+            distance,
+            can_deal_with_doors,
+            path: None,
+            poi: [0; 3],
+            visited: Vec::new(),
+        }
+    }
+}
+impl Goal for MoveThroughVillage {
+    goal_clone!();
+    fn flags(&self) -> u8 {
+        MOVE
+    }
+    /// `MoveThroughVillageGoal.canUse`.
+    fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
+        if !can_navigate_ground(m) {
+            return false;
+        }
+        // updateVisited: the list keeps its last 16.
+        if self.visited.len() > 15 {
+            self.visited.remove(0);
+        }
+        if self.only_at_night && cx.w.daylight {
+            return false;
+        }
+        let w = cx.w;
+        let block = |p: Vec3| [p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32];
+        let section = |p: [i32; 3]| [p[0] >> 4, p[1] >> 4, p[2] >> 4];
+        let pos = block(m.position);
+        let villages = village_sections(m, w);
+        // ServerLevel.isCloseToVillage(pos, 6).
+        if sections_to_village(&villages, section(pos)) > 6 {
+            return false;
+        }
+        let taken = others_tickets(m, w);
+        let visited = &self.visited;
+        let land = m.land_random_pos_scored(w, 15, 7, |p| {
+            if sections_to_village(&villages, section(p)) > 1 {
+                return f64::NEG_INFINITY;
+            }
+            // The first unvisited taken point within 10, by its distance.
+            occupied_pois_in_range(w, &taken, p, 10)
+                .into_iter()
+                .find(|q| !visited.contains(q))
+                .map_or(f64::NEG_INFINITY, |q| {
+                    let d = |i: usize| f64::from(q[i] - pos[i]);
+                    -(d(0) * d(0) + d(1) * d(1) + d(2) * d(2))
+                })
+        });
+        let Some(land) = land else { return false };
+        let Some(target) =
+            occupied_pois_in_range(w, &taken, block(Vec3::new(land[0], land[1], land[2])), 10)
+                .into_iter()
+                .find(|q| !self.visited.contains(q))
+        else {
+            return false;
+        };
+        self.poi = target;
+        let doors = (self.can_deal_with_doors)(m);
+        m.ai.nav.can_open_doors = doors;
+        let mut path = m.create_path_to(w, self.poi, 0);
+        m.ai.nav.can_open_doors = true;
+        if path.is_none() {
+            // No way there: a step of up to 10 blocks toward it instead.
+            let to = [
+                f64::from(self.poi[0]) + 0.5,
+                f64::from(self.poi[1]),
+                f64::from(self.poi[2]) + 0.5,
+            ];
+            let Some(step) =
+                m.default_random_pos_towards(w, 10, 7, to, f64::from(std::f32::consts::FRAC_PI_2))
+            else {
+                return false;
+            };
+            m.ai.nav.can_open_doors = doors;
+            path = m.create_path_to(w, block(Vec3::new(step[0], step[1], step[2])), 0);
+            m.ai.nav.can_open_doors = true;
+            if path.is_none() {
+                return false;
+            }
+        }
+        // A wooden door on the way: only as far as the door.
+        let door = path.as_ref().and_then(|p| {
+            p.nodes
+                .iter()
+                .find(|n| wooden_door(w, [n.x, n.y + 1, n.z]))
+                .map(|n| [n.x, n.y, n.z])
+        });
+        if let Some(at) = door {
+            path = m.create_path_to(w, at, 0);
+        }
+        self.path = path;
+        self.path.is_some()
+    }
+    /// `MoveThroughVillageGoal.canContinueToUse`.
+    fn can_continue(&mut self, m: &mut Mob, _: &mut Cx) -> bool {
+        !m.ai.nav.is_done()
+            && !closer_to_center(
+                self.poi,
+                m.position,
+                f64::from(m.width()) + f64::from(self.distance),
+            )
+    }
+    /// `MoveThroughVillageGoal.start`.
+    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.nav_move_to_path(cx.w, self.path.clone(), self.speed);
+    }
+    /// `MoveThroughVillageGoal.stop`: a point reached (or the walk ended) is
+    /// visited.
+    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
+        if m.ai.nav.is_done() || closer_to_center(self.poi, m.position, f64::from(self.distance)) {
+            self.visited.push(self.poi);
+        }
+    }
+}
 /// `Zombie.ZombieAttackTurtleEggGoal` (a `RemoveBlockGoal` on turtle eggs):
 /// walk to a turtle egg within 24 blocks and trample it.
 #[derive(Clone, Debug)]
@@ -1081,5 +1236,120 @@ impl Goal for AttackTurtleEgg {
             ));
         }
         self.since_reached += 1;
+    }
+}
+
+#[cfg(test)]
+mod conversion_tests {
+    use super::*;
+    use crate::{items::ItemStack, mobs::world::with_test_world};
+    use std::sync::Arc;
+
+    /// The mob the game makes of a conversion event (`Game::convert_to` or,
+    /// for a plain spawn, `spawn_mob` plus `apply_setup` without the spawn
+    /// finalization's random gear).
+    fn resolve(event: &MobEvent, types: &crate::mobs::MobTypes) -> Option<Mob> {
+        let new = |kind: &str, at: Vec3, yaw: f32| {
+            Mob::new(2, Arc::new(types.types[kind].clone()), at, yaw)
+        };
+        match event {
+            MobEvent::Convert { from, kind, params } => {
+                let mut m = new(kind, from.position, from.yaw);
+                crate::mobs::conversion::single(from, &mut m, *params);
+                Some(m)
+            }
+            MobEvent::SpawnKind { kind, at, setup } => {
+                let mut m = new(kind, Vec3::new(at[0], at[1], at[2]), setup.yaw);
+                m.persistent = setup.persistent;
+                if setup.baby {
+                    m.extra.age = -24000;
+                }
+                Some(m)
+            }
+            _ => None,
+        }
+    }
+
+    /// `Zombie.drowningTracker` / `Husk`: the last tick of the conversion
+    /// under water turns the mob into `into`; what comes out (None only
+    /// without the extracted vanilla data).
+    fn drown(kind: &str, dress: impl FnOnce(&mut Mob)) -> Option<Mob> {
+        let mut out = None;
+        with_test_world(&[], |w, types| {
+            let mut m = Mob::new(
+                1,
+                Arc::new(types.types[kind].clone()),
+                Vec3::new(0.5, 64.0, 0.5),
+                30.0,
+            );
+            dress(&mut m);
+            m.fluids.eye_in_water = true;
+            m.extra.counter2 = 1;
+            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            let mut events = Vec::new();
+            let mut cx = Cx {
+                w,
+                lr: &mut lr,
+                events: &mut events,
+            };
+            custom_server_ai_step(&mut m, &mut cx);
+            assert!(m.removed, "the {kind} is discarded");
+            let new = events.iter().find_map(|e| resolve(e, types));
+            out = Some(new.expect("the conversion makes a new mob"));
+        });
+        out
+    }
+
+    #[test]
+    fn a_drowning_zombie_keeps_its_gear_and_name_tag() {
+        let Some(d) = drown("minecraft:zombie", |m| {
+            m.custom_name = Some("Bob".into());
+            m.name_visible = true;
+            m.persistent = true;
+            m.extra.head = Some("minecraft:iron_helmet".into());
+            m.extra.armor[0] = Some(ItemStack::new("minecraft:iron_helmet", 1));
+            m.extra
+                .set_main_hand_stack(Some(ItemStack::new("minecraft:iron_sword", 1)));
+            m.extra.drop_chances = Some(Box::new([2.0; 8]));
+            m.extra.pick_up_loot = true;
+            m.add_effect("minecraft:speed", 600, 1);
+        }) else {
+            return;
+        };
+        assert_eq!(d.species(), Species::Drowned);
+        assert_eq!(d.custom_name.as_deref(), Some("Bob"));
+        assert!(d.name_visible && d.persistent);
+        assert_eq!(d.extra.head.as_deref(), Some("minecraft:iron_helmet"));
+        assert_eq!(
+            d.extra.armor[0].as_ref().map(|s| &*s.item),
+            Some("minecraft:iron_helmet")
+        );
+        assert_eq!(
+            d.extra.main_hand_stack().map(|s| &*s.item),
+            Some("minecraft:iron_sword")
+        );
+        assert_eq!(d.extra.drop_chances.as_deref(), Some(&[2.0; 8]));
+        assert!(d.extra.pick_up_loot);
+        assert!(d.has_effect("minecraft:speed"));
+        assert_eq!(d.position, Vec3::new(0.5, 64.0, 0.5));
+    }
+
+    #[test]
+    fn a_husk_turns_into_a_zombie_with_its_flags() {
+        let Some(z) = drown("minecraft:husk", |m| {
+            m.custom_name = Some("Dusty".into());
+            m.no_ai = false;
+            m.silent = true;
+            m.extra.age = i32::MIN / 2;
+            m.extra.feet = Some("minecraft:golden_boots".into());
+            m.extra.armor[3] = Some(ItemStack::new("minecraft:golden_boots", 1));
+            m.extra.left_handed = true;
+        }) else {
+            return;
+        };
+        assert_eq!(z.species(), Species::Zombie);
+        assert_eq!(z.custom_name.as_deref(), Some("Dusty"));
+        assert!(z.silent && z.is_baby() && z.extra.left_handed);
+        assert_eq!(z.extra.feet.as_deref(), Some("minecraft:golden_boots"));
     }
 }

@@ -6,10 +6,77 @@ use horizon_client::lan::hub::Hub;
 use horizon_client::particles::{ParticleOptions, ParticleType};
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use horizon_protocol::{
-    entity_data::{Particle, ParticleData},
+    entity_data::{MOD_PARTICLE_ID, Particle, ParticleData},
     packets::play::{self, Clientbound as C},
 };
 use horizon_world::registry::BlockStateId;
+
+/// A particle request awaiting delivery to players in its level.
+pub(super) struct QueuedParticle {
+    pub dimension: &'static str,
+    pub options: ParticleOptions,
+    pub state: Option<BlockStateId>,
+    pub at: [f64; 3],
+    pub spread: [f64; 3],
+    pub speed: f64,
+    pub count: i32,
+    /// The packet's `RandomizationType` (0 DEFAULT, 1 ALTERNATIVE).
+    pub randomization: i32,
+}
+
+fn send_native_nearby(
+    host: &LanHost,
+    dimension: &str,
+    packet: Vec<u8>,
+    horizon_only: bool,
+    within_range: impl Fn([f64; 3]) -> bool,
+) {
+    for guest in host
+        .hub
+        .guests
+        .iter()
+        .filter(|g| g.placed && g.dimension == dimension && within_range(g.position))
+    {
+        // A vanilla client cannot decode a native mod's particle id; see
+        // `mod_particle_only_for_horizon`.
+        if horizon_only && guest.brand != "horizon" {
+            continue;
+        }
+        guest.sender.send(packet.clone());
+    }
+}
+
+/// A native mod's particle travels as `MOD_PARTICLE_ID` (-1) plus its name.
+/// Vanilla reads the id with `IdMap.byIdOrThrow`, which throws on -1 and
+/// drops the connection, so such a particle may only go to Horizon clients.
+fn mod_particle_only_for_horizon(particle: &Particle) -> bool {
+    matches!(particle.data, Some(ParticleData::Mod(_)))
+}
+
+/// One of a packet's `count` particles (`handleParticleEvent`): its position
+/// and speed. DEFAULT (0) draws both from a Gaussian; ALTERNATIVE (1) and
+/// ALTERNATIVE_WITH_SPEED (2) spread over `[0, dist)`, the first keeping
+/// the speeds as they are, the second scaling each by `nextDouble`.
+fn spread(
+    r: &mut impl RandomSource,
+    randomization: i32,
+    pos: [f64; 3],
+    dist: [f64; 3],
+    speed: [f64; 3],
+) -> ([f64; 3], [f64; 3]) {
+    if matches!(randomization, 1 | 2) {
+        let at = [0, 1, 2].map(|k| pos[k] + r.next_double() * dist[k]);
+        let v = if randomization == 2 {
+            [0, 1, 2].map(|k| speed[k] * r.next_double())
+        } else {
+            speed
+        };
+        (at, v)
+    } else {
+        let at = [0, 1, 2].map(|k| pos[k] + r.next_gaussian() * dist[k]);
+        (at, [0, 1, 2].map(|k| r.next_gaussian() * speed[k]))
+    }
+}
 
 /// An ARGB colour as the options' RGBA.
 fn rgba(argb: i32) -> [f32; 4] {
@@ -83,7 +150,8 @@ impl Game<'_> {
     }
 
     /// `ServerLevel.sendParticles` of a mob's particles: a packet to each
-    /// player within 32 blocks. The window draws its own copy.
+    /// player within 32 blocks. The window draws its own copy. `state` is the
+    /// block of a block particle.
     pub(super) fn lan_level_particles(
         &self,
         options: &ParticleOptions,
@@ -91,10 +159,13 @@ impl Game<'_> {
         spread: [f64; 3],
         speed: f64,
         count: u32,
+        state: Option<BlockStateId>,
     ) {
-        let (Some(host), Some(particle)) = (&self.lan, self.network_particle(options, None)) else {
+        let (Some(host), Some(particle)) = (&self.lan, self.network_particle(options, state))
+        else {
             return;
         };
+        let horizon_only = mod_particle_only_for_horizon(&particle);
         let packet = C::LevelParticles(play::LevelParticles {
             particle,
             override_limiter: false,
@@ -106,6 +177,9 @@ impl Game<'_> {
             randomization: 0,
         });
         for g in host.hub.guests.iter().filter(|g| host.hub.here(g)) {
+            if horizon_only && g.brand != "horizon" {
+                continue;
+            }
             // ServerLevel compares the player's block centre, strictly within 32.
             let distance: f64 = (0..3)
                 .map(|k| (g.position[k].floor() + 0.5 - at[k]).powi(2))
@@ -195,6 +269,13 @@ impl Game<'_> {
         options: &ParticleOptions,
         state: Option<BlockStateId>,
     ) -> Option<Particle> {
+        // A native mod's own type: no registry id, so the sentinel and the name.
+        if let Some(name) = &options.mod_particle {
+            return Some(Particle {
+                id: MOD_PARTICLE_ID,
+                data: Some(ParticleData::Mod(name.clone())),
+            });
+        }
         let name = format!("minecraft:{}", options.ty.name());
         let id = hub.registry_id("minecraft:particle_type", &name)?;
         use ParticleType as T;
@@ -235,6 +316,11 @@ impl Game<'_> {
         p: &Particle,
         at: [f64; 3],
     ) -> Option<ParticleOptions> {
+        if p.id == MOD_PARTICLE_ID
+            && let Some(ParticleData::Mod(name)) = &p.data
+        {
+            return Some(ParticleOptions::named(name.clone()));
+        }
         let name = self
             .remote
             .as_ref()?
@@ -304,17 +390,7 @@ impl Game<'_> {
             return;
         }
         for _ in 0..p.count {
-            let r = self.particles.random();
-            let at = [
-                p.pos[0] + r.next_gaussian() * d[0],
-                p.pos[1] + r.next_gaussian() * d[1],
-                p.pos[2] + r.next_gaussian() * d[2],
-            ];
-            let v = [
-                r.next_gaussian() * s[0],
-                r.next_gaussian() * s[1],
-                r.next_gaussian() * s[2],
-            ];
+            let (at, v) = spread(self.particles.random(), p.randomization, p.pos, d, s);
             add(&mut self.particles, at, v);
         }
     }
@@ -364,29 +440,30 @@ impl Game<'_> {
     /// the players (a guest's turn through `as_guest`, a host's hit on a
     /// guest) the packet waits for the turn to end so that it reaches every
     /// player, the guest too.
-    pub(super) fn lan_send_particles(
-        &mut self,
-        options: &ParticleOptions,
-        at: [f64; 3],
-        spread: [f64; 3],
-        speed: f64,
-        count: u32,
-    ) {
+    pub(super) fn lan_send_particles(&mut self, request: QueuedParticle) {
         if self.lan.is_none() {
-            // The server is running (its sounds are captured for the guests).
-            if self.audio.capture.is_some() {
-                self.creatures
-                    .lan_particles
-                    .push((options.clone(), at, spread, speed, count));
+            if self.serving.is_some() || self.options.dedicated.is_some() {
+                self.creatures.lan_particles.push(request);
             }
             return;
         }
-        let Some(particle) = self.network_particle(options, None) else {
+        let QueuedParticle {
+            dimension,
+            options,
+            state,
+            at,
+            spread,
+            speed,
+            count,
+            randomization,
+        } = request;
+        let Some(particle) = self.network_particle(&options, state) else {
             return;
         };
         let Some(host) = self.lan.as_ref() else {
             return;
         };
+        let horizon_only = mod_particle_only_for_horizon(&particle);
         let body = C::LevelParticles(play::LevelParticles {
             particle,
             override_limiter: false,
@@ -394,39 +471,98 @@ impl Game<'_> {
             pos: at,
             dist: spread.map(|d| d as f32),
             max_speed: [speed as f32; 3],
-            count: count as i32,
-            randomization: 0,
+            count,
+            randomization,
         })
         .encode();
-        for g in host.hub.guests.iter().filter(|g| host.hub.here(g)) {
-            // BlockPos.closerToCenterThan(at, 32): from the centre of the
-            // player's block.
+        // BlockPos.closerToCenterThan(at, 32): from the centre of the
+        // player's block.
+        send_native_nearby(host, dimension, body, horizon_only, |position| {
             let d: f64 = (0..3)
-                .map(|k| (g.position[k].floor() + 0.5 - at[k]).powi(2))
+                .map(|k| (position[k].floor() + 0.5 - at[k]).powi(2))
                 .sum();
-            if d < 32.0 * 32.0 {
-                g.sender.send(body.clone());
+            d < 32.0 * 32.0
+        });
+    }
+
+    /// Native sounds wait until the server host is available. An unknown
+    /// `minecraft:` event is dropped; a mod's goes by name (`sound_packet`).
+    pub(super) fn flush_native_sounds(&mut self) {
+        let Some(host) = &self.lan else { return };
+        for sound in std::mem::take(&mut self.creatures.lan_sounds) {
+            if sound.sound.starts_with("minecraft:")
+                && host
+                    .hub
+                    .registry_id("minecraft:sound_event", &sound.sound)
+                    .is_none()
+            {
+                continue;
             }
+            let packet = host
+                .hub
+                .sound_packet(
+                    &sound.sound,
+                    sound.at,
+                    sound.volume,
+                    sound.pitch,
+                    sound.source,
+                    host.hub.next_sound_seed(),
+                )
+                .encode();
+            let range = f64::from(sound.volume.max(1.0)) * 16.0;
+            send_native_nearby(host, sound.dimension, packet, false, |position| {
+                let distance: f64 = (0..3).map(|k| (position[k] - sound.at[k]).powi(2)).sum();
+                distance <= range * range
+            });
         }
+    }
+
+    /// `BucketItem.emptyContents` where water evaporates: `sendParticles(
+    /// LARGE_SMOKE, x, y, z, 8, 1, 1, 1, 0, ALTERNATIVE)` from the block's
+    /// corner, so each puff lands inside the block. The window draws its own.
+    pub(super) fn evaporation_smoke(&mut self, pos: [i32; 3]) {
+        let options = ParticleOptions::simple(ParticleType::LargeSmoke);
+        let at = pos.map(f64::from);
+        for _ in 0..8 {
+            let r = self.particles.random();
+            let p = [
+                at[0] + r.next_double(),
+                at[1] + r.next_double(),
+                at[2] + r.next_double(),
+            ];
+            self.particles.add(&options, p, [0.0; 3]);
+        }
+        self.lan_send_particles(QueuedParticle {
+            dimension: self.dim.id(),
+            options,
+            state: None,
+            at,
+            spread: [1.0; 3],
+            speed: 0.0,
+            count: 8,
+            randomization: 1,
+        });
     }
 
     /// The particles guests' turns put off.
     pub(super) fn flush_lan_particles(&mut self) {
-        for (options, at, spread, speed, count) in std::mem::take(&mut self.creatures.lan_particles)
-        {
-            self.lan_send_particles(&options, at, spread, speed, count);
+        for request in std::mem::take(&mut self.creatures.lan_particles) {
+            self.lan_send_particles(request);
         }
     }
 
-    /// `ServerLevel.explode`'s packet to each player within 64 blocks. The
-    /// sound and the push reach them on their own (the level's sounds, the
-    /// motion a hurt player is sent), so the packet carries neither.
+    /// `ServerLevel.explode`'s packet to each player within 64 blocks, with
+    /// the push `pushed` holds for them (`ServerExplosion.hitPlayers`: a
+    /// creative player, whom nothing hurt). The sound reaches them on its own
+    /// (the level's sounds), and so does a hurt player's push (the motion
+    /// they are sent).
     pub(super) fn lan_explode(
         &mut self,
         center: [f64; 3],
         small: bool,
         radius: f32,
         block_count: usize,
+        pushed: Vec<(u32, [f64; 3])>,
     ) {
         // In a guest's turn (their hit on an end crystal or a minecart) the
         // host holds the players (`as_guest`): the packet waits for the turn
@@ -434,7 +570,7 @@ impl Game<'_> {
         if self.lan_acting.is_some() && self.lan.is_none() {
             self.creatures
                 .lan_explosions
-                .push((center, small, radius, block_count));
+                .push((center, small, radius, block_count, pushed));
             return;
         }
         let emitter = if small {
@@ -446,16 +582,16 @@ impl Game<'_> {
         if let Some(packet) =
             self.explosion_packet(center, radius, block_count, emitter, sound, true)
         {
-            self.send_explosion(packet, &[]);
+            self.send_explosion(packet, &pushed);
         }
     }
 
     /// The explosions guests' turns put off.
     pub(super) fn flush_lan_explosions(&mut self) {
-        for (center, small, radius, block_count) in
+        for (center, small, radius, block_count, pushed) in
             std::mem::take(&mut self.creatures.lan_explosions)
         {
-            self.lan_explode(center, small, radius, block_count);
+            self.lan_explode(center, small, radius, block_count, pushed);
         }
     }
 
@@ -553,5 +689,32 @@ impl Game<'_> {
                 None => g.sender.send(plain.clone()),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::spread;
+    use horizon_core::random::LegacyRandom;
+
+    /// The Nether's evaporation smoke (ALTERNATIVE, dist 1, speed 0) lands
+    /// inside the block from its corner and stands still; DEFAULT spreads
+    /// both ways.
+    #[test]
+    fn alternative_particles_spread_from_the_corner_over_dist() {
+        let mut r = LegacyRandom::new(1);
+        let mut below = false;
+        for _ in 0..200 {
+            let (at, v) = spread(&mut r, 1, [3.0, 64.0, -7.0], [1.0; 3], [0.0; 3]);
+            assert!((3.0..4.0).contains(&at[0]), "{at:?}");
+            assert!((64.0..65.0).contains(&at[1]), "{at:?}");
+            assert!((-7.0..-6.0).contains(&at[2]), "{at:?}");
+            assert_eq!(v, [0.0; 3]);
+            let (_, v) = spread(&mut r, 2, [0.0; 3], [0.0; 3], [0.5, 0.0, 2.0]);
+            assert!((0.0..0.5).contains(&v[0]) && v[1] == 0.0 && (0.0..2.0).contains(&v[2]));
+            let (at, _) = spread(&mut r, 0, [0.0; 3], [1.0; 3], [0.0; 3]);
+            below |= at.iter().any(|&c| c < 0.0);
+        }
+        assert!(below, "DEFAULT is a Gaussian around the position");
     }
 }

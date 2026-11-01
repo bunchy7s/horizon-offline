@@ -105,7 +105,7 @@ fn projectile_kind(kind: &str) -> Option<ProjectileKind> {
             seed: 0,
         },
         "minecraft:wither_skull" => ProjectileKind::WitherSkull { dangerous: false },
-        _ => return None,
+        _ => ProjectileKind::Thrown(horizon_client::projectiles::thrown_type(kind)?),
     })
 }
 
@@ -114,14 +114,16 @@ fn projectile_kind(kind: &str) -> Option<ProjectileKind> {
 fn remote_arrow_tick(p: &mut Projectile, w: &impl ProjectileWorld) {
     p.previous = p.position;
     p.age += 1;
-    // AbstractArrow.tick: `inGroundTime` counts the ticks in a block.
+    // AbstractArrow.tick: the shake timer runs down, and `inGroundTime` counts
+    // the ticks in a block.
     if let Some(a) = p.arrow.as_mut() {
+        a.shake = (a.shake - 1).max(0);
         a.in_ground_time = if p.stuck { a.in_ground_time + 1 } else { 0 };
     }
     if p.stuck {
         return;
     }
-    let water = w.in_water(p.position);
+    let water = w.in_water(p.bounds());
     if water {
         p.velocity = p.velocity.scale(0.6);
     }
@@ -130,6 +132,12 @@ fn remote_arrow_tick(p: &mut Projectile, w: &impl ProjectileWorld) {
         p.position = at;
         p.velocity = Vec3::ZERO;
         p.stuck = true;
+        // AbstractArrow.onSyncedDataUpdated: IN_GROUND turning true starts the shake.
+        if let Some(a) = p.arrow.as_mut()
+            && a.shake <= 0
+        {
+            a.shake = 7;
+        }
         return;
     }
     p.position = to;
@@ -144,6 +152,24 @@ fn remote_arrow_tick(p: &mut Projectile, w: &impl ProjectileWorld) {
 pub(super) fn remote_projectile_tick(p: &mut Projectile, w: &impl ProjectileWorld) {
     if !matches!(p.tick(w).1, Hit::None) {
         p.velocity = Vec3::ZERO;
+    }
+}
+
+/// `ClientPacketListener.handleProjectilePowerPacket`: the power a hurting
+/// projectile (`AbstractHurtingProjectile`) accelerates by, found by id;
+/// anything else is ignored.
+pub(super) fn remote_projectile_power(projectiles: &mut [Projectile], id: i32, power: f64) {
+    if let Some(p) = projectiles.iter_mut().find(|p| p.id == id as u32)
+        && matches!(
+            p.kind,
+            ProjectileKind::SmallFireball
+                | ProjectileKind::LargeFireball { .. }
+                | ProjectileKind::WitherSkull { .. }
+                | ProjectileKind::WindCharge
+                | ProjectileKind::BreezeWindCharge
+        )
+    {
+        p.acceleration = power;
     }
 }
 
@@ -164,8 +190,7 @@ impl Game<'_> {
     /// fifth tick in a block; a spectral arrow an effect sparkle at its
     /// position while flying.
     fn arrow_effect_particles(&mut self) {
-        // The arrow's box: `EntityType.ARROW` is 0.5 x 0.5.
-        const SIZE: f64 = 0.5;
+        let mut puffs: Vec<(Vec3, i32, u32)> = Vec::new();
         for p in &self.creatures.projectiles {
             let Some(a) = p.arrow.as_ref().filter(|_| p.is_arrow()) else {
                 continue;
@@ -178,30 +203,54 @@ impl Game<'_> {
                 }
                 continue;
             }
-            let color = a.effect_color;
             let count = match (p.stuck, a.in_ground_time % 5) {
                 (true, 0) => 1,
                 (true, _) => 0,
                 (false, _) => 2,
             };
-            if color == -1 {
-                continue;
-            }
-            // ColorParticleOption.create(ENTITY_EFFECT, colour): ARGB as floats.
-            let channel = |shift: u32| (color as u32 >> shift & 255) as f32 / 255.0;
-            let options = ParticleOptions::colored(
-                ParticleType::EntityEffect,
-                [channel(16), channel(8), channel(0), channel(24)],
-            );
-            for _ in 0..count {
-                // getRandomX(0.5), getRandomY, getRandomZ(0.5).
-                let r = self.particles.random();
-                let x = at.x + SIZE * (2.0 * r.next_double() - 1.0) * 0.5;
-                let y = at.y + SIZE * r.next_double();
-                let z = at.z + SIZE * (2.0 * r.next_double() - 1.0) * 0.5;
-                self.particles.add(&options, [x, y, z], [0.0; 3]);
-            }
+            puffs.push((at, a.effect_color, count));
         }
+        for (at, color, count) in puffs {
+            self.arrow_makeparticle(at, color, count);
+        }
+    }
+
+    /// `Arrow.makeParticle`: `count` entity-effect swirls in `color` (an ARGB
+    /// int, -1 for none) inside the arrow's 0.5 x 0.5 box.
+    fn arrow_makeparticle(&mut self, at: Vec3, color: i32, count: u32) {
+        // `EntityType.ARROW` is 0.5 x 0.5.
+        const SIZE: f64 = 0.5;
+        if color == -1 {
+            return;
+        }
+        // ColorParticleOption.create(ENTITY_EFFECT, colour): ARGB as floats.
+        let channel = |shift: u32| (color as u32 >> shift & 255) as f32 / 255.0;
+        let options = ParticleOptions::colored(
+            ParticleType::EntityEffect,
+            [channel(16), channel(8), channel(0), channel(24)],
+        );
+        for _ in 0..count {
+            // getRandomX(0.5), getRandomY, getRandomZ(0.5).
+            let r = self.particles.random();
+            let x = at.x + SIZE * (2.0 * r.next_double() - 1.0) * 0.5;
+            let y = at.y + SIZE * r.next_double();
+            let z = at.z + SIZE * (2.0 * r.next_double() - 1.0) * 0.5;
+            self.particles.add(&options, [x, y, z], [0.0; 3]);
+        }
+    }
+
+    /// `Arrow.handleEntityEvent(0)`: a tipped arrow stuck for 600 ticks bursts
+    /// into twenty particles in its colour. The server turns it into a plain
+    /// arrow and does not send the colour again, so it stops here.
+    pub(super) fn remote_arrow_puff(&mut self, id: u32) {
+        let Some(p) = self.creatures.projectiles.iter_mut().find(|p| p.id == id) else {
+            return;
+        };
+        let Some(a) = p.arrow.as_mut() else {
+            return;
+        };
+        let (at, color) = (p.position, std::mem::replace(&mut a.effect_color, -1));
+        self.arrow_makeparticle(at, color, 20);
     }
 
     /// `AbstractHurtingProjectile.createParticleTrail`: one smoke puff half a
@@ -286,14 +335,19 @@ impl Game<'_> {
             }
             // FishingHook.recreateFromPacket: the owner's id is the data.
             "minecraft:fishing_bobber" => self.spawn_remote_hook(id, at, velocity, data),
-            "minecraft:end_crystal" => self.crystals.push(super::dragon::Crystal {
-                id,
-                position: at,
-                show_bottom: true,
-                time: 0,
-                beam: None,
-                invulnerable: false,
-            }),
+            "minecraft:end_crystal" => {
+                // EndCrystal's constructor starts `time` random, so each
+                // placed crystal spins from its own phase.
+                let time = self.world.random.next_int_bound(100_000).unwrap_or(0);
+                self.crystals.push(super::dragon::Crystal {
+                    id,
+                    position: at,
+                    show_bottom: true,
+                    time,
+                    beam: None,
+                    invulnerable: false,
+                });
+            }
             _ => {
                 let Some(k) = projectile_kind(kind) else {
                     return false;
@@ -424,6 +478,16 @@ impl Game<'_> {
                         *critical = flags & 1 != 0;
                     }
                     (ProjectileKind::Arrow { .. }, 10, Value::Bool(in_ground)) => {
+                        // AbstractArrow.onSyncedDataUpdated: IN_GROUND turning true after
+                        // the first tick starts the shake.
+                        if *in_ground
+                            && !p.stuck
+                            && p.age > 0
+                            && let Some(a) = p.arrow.as_mut()
+                            && a.shake <= 0
+                        {
+                            a.shake = 7;
+                        }
                         p.stuck = *in_ground;
                     }
                     // Arrow.ID_EFFECT_COLOR.
@@ -714,7 +778,7 @@ mod tests {
         fn clip(&self, _: Vec3, _: Vec3) -> Option<(Vec3, [i32; 3], [i32; 3])> {
             None
         }
-        fn in_water(&self, _: Vec3) -> bool {
+        fn in_water(&self, _: Aabb) -> bool {
             false
         }
         fn targets(&self) -> &[(Who, Aabb)] {
@@ -728,6 +792,11 @@ mod tests {
         let mut p = Projectile::new(kind, Vec3::new(0.0, 100.0, 0.0), None);
         p.velocity = Vec3::new(1.5, 0.0, 0.0);
         p
+    }
+
+    /// The same, under the id a server tracks it by.
+    fn tracked(kind: ProjectileKind, id: u32) -> Projectile {
+        Projectile { id, ..thrown(kind) }
     }
 
     #[test]
@@ -763,5 +832,43 @@ mod tests {
         remote_projectile_tick(&mut p, &Empty);
         assert!((p.velocity.x - 1.5).abs() < 1e-9, "{p:?}");
         assert!((p.velocity.y - 0.0).abs() < 1e-9, "{p:?}");
+    }
+
+    #[test]
+    fn a_power_packet_gives_a_fireball_the_power_its_next_tick_uses() {
+        // ClientPacketListener.handleProjectilePowerPacket: the fireball with
+        // id 12 gets the power the server sends bundled with its motion.
+        let mut list = vec![tracked(ProjectileKind::LargeFireball { power: 1 }, 12)];
+        remote_projectile_power(&mut list, 12, 0.5);
+        assert_eq!(list[0].acceleration, 0.5);
+        // AbstractHurtingProjectile.applyInertia: (v + v/|v| * 0.5) * 0.95,
+        // where the default 0.1 would have made 1.52.
+        remote_projectile_tick(&mut list[0], &Empty);
+        assert!((list[0].velocity.x - 1.9).abs() < 1e-9, "{:?}", list[0]);
+    }
+
+    #[test]
+    fn a_power_packet_ignores_an_arrow_an_unknown_id_and_a_thrown_item() {
+        // Vanilla's instanceof AbstractHurtingProjectile: an arrow and a
+        // thrown egg are none, and no entity is id 99.
+        let mut list = vec![
+            tracked(
+                ProjectileKind::Arrow {
+                    base_damage: 2.0,
+                    critical: false,
+                    effect: None,
+                },
+                3,
+            ),
+            tracked(ProjectileKind::Egg, 4),
+            tracked(ProjectileKind::LargeFireball { power: 1 }, 12),
+        ];
+        remote_projectile_power(&mut list, 3, 0.5);
+        remote_projectile_power(&mut list, 4, 0.5);
+        remote_projectile_power(&mut list, 99, 0.5);
+        assert_eq!(
+            list.iter().map(|p| p.acceleration).collect::<Vec<_>>(),
+            [0.1; 3]
+        );
     }
 }

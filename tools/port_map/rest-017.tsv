@@ -9,7 +9,7 @@ DedicatedServer.setViewDistance	skip:server		JSON-RPC management API only; view-
 DedicatedServer.setSimulationDistance	skip:server		JSON-RPC management API only; simulation-distance is read at start
 DedicatedServer.fillServerSystemReport	skip:debug		adds rows to the system report of a server crash report; Horizon writes no server crash report
 DedicatedServer.dumpServerProperties	skip:debug		writes server.properties.txt into the debug report only
-DedicatedServer.onServerExit	inline	crates/horizon-client/src/game/dedicated.rs::Game::stop_dedicated	gap: minor: closes no RCON, query, GUI or JSON-RPC; the LAN pinger and listener are closed by lan_close
+DedicatedServer.onServerExit	inline	crates/horizon-client/src/game/dedicated.rs::Game::stop_dedicated	gap: minor: closes no query, GUI or JSON-RPC (RCON is the supervisor's, which outlives the game); the LAN pinger and listener are closed by lan_close
 DedicatedServer.setMaxPlayers	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.setSpawnProtectionRadius	skip:server		JSON-RPC management API only; spawn-protection is read at start and used by Game::under_spawn_protection
 DedicatedServer.setRepliesToStatus	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
@@ -20,7 +20,7 @@ DedicatedServer.setStatusHeartbeatInterval	skip:server		JSON-RPC management API 
 DedicatedServer.setMotd	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.enforceSecureProfile	inline	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	gap: minor: services.canValidateProfileKeys() is not part of the check
 DedicatedServer.convertOldUsers	skip:other		one-time import of pre-1.7 .txt user lists; Horizon reads only the json lists in user_lists.rs
-DedicatedServer.runCommand	skip:server		RCON only; Horizon has no RCON (the stdin console is Game::console_command)
+DedicatedServer.runCommand	port	crates/horizon-server/src/rcon.rs::run_on_game	gap: minor: runs as the console (`console <line>` on the control endpoint), not as an Rcon source
 DedicatedServer.setEntityBroadcastRangePercentage	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.createTextFilterForPlayer	skip:service		external chat filter service; Horizon has no text filter
 DedicatedServer.setForceGameMode	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API

@@ -1,6 +1,5 @@
 //! Entity occlusion affects mesh submission, never entity ticking or interaction.
 use super::{Game, Vertex};
-use horizon_client::chunk::MIN_Y;
 use horizon_client::{
     blocks::{RenderShape, StateFacts},
     entity_culling::Culler,
@@ -18,6 +17,9 @@ impl Game<'_> {
         // Spans tell the pack's passes which entities are hidden; without them, nothing changes.
         self.pack_shadow_casters = match (&self.renderer, &self.pack_ids) {
             (Some(r), Some(_)) => r.pack_shadow_casters(),
+            // A native pack's shadow pass has no spans to hide entities with: it only needs
+            // the first-person model.
+            (Some(r), None) => (false, r.native_shadow()),
             _ => (false, false),
         };
         let at = camera.to_array().map(|v| v.floor() as i32);
@@ -41,7 +43,7 @@ impl Game<'_> {
             if !opaque(self.res.facts().get(state)) {
                 return false;
             }
-            let Some(y) = pos[1].checked_sub(MIN_Y) else {
+            let Some(y) = pos[1].checked_sub(self.world.bottom_y()) else {
                 return false;
             };
             let section = (pos[0] >> 4, y.div_euclid(16), pos[2] >> 4);

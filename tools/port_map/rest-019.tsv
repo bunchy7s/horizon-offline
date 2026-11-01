@@ -34,7 +34,7 @@ PackRepository.discoverAvailable	port	crates/horizon-client-render/src/packs.rs:
 PackRepository.isAbleToClearAnyPack	missing		player: when a pack fails at runtime vanilla clears the selected packs with a toast; Horizon keeps them and shows the error in Options (game/packs.rs::reload_packs)
 PackRepository.addPack	inline	crates/horizon-client-render/src/packs.rs::SelectionModel::activate	gap: minor: vanilla appends by id with no position rules
 PackRepository.removePack	inline	crates/horizon-client-render/src/packs.rs::SelectionModel::activate	gap: minor: vanilla removes by id even when the pack is required; the screen never offers that
-PackRepository.getAvailablePacks	inline	crates/horizon-client-render/src/packs.rs::SelectionModel::rebuild	gap: minor: rebuild also adds the required packs
+PackRepository.getAvailablePacks	inline	crates/horizon-client-render/src/packs.rs::SelectionModel::rebuild	rebuild also adds required packs (vanilla and active downloaded server packs from Game::pack_infos)
 PackRepository.getRequestedFeatureFlags	missing		minor: no pack feature flags are read, so a pack's requested features are never checked
 PackSource.decorateWithSource	port	crates/horizon-client-render/src/pack_screen.rs::PackInfo::extended_description	source label after the pack name (built-in, world, server)
 ServerPacksSource.createVanillaPackSource	port	crates/horizon-client-render/src/datapack.rs::DataPack::builtin	the built-in vanilla data source (id vanilla), used by functions.rs

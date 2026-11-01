@@ -49,16 +49,16 @@ HoverEvent.EntityTooltipInfo.getTooltipLines	missing		player: hovering a player 
 HoverEvent.EntityTooltipInfo.equals	skip:java		value equality
 HoverEvent.EntityTooltipInfo.hashCode	skip:java		hashing
 LastSeenMessages.updateSignature	inline	crates/horizon-protocol/src/secure_chat.rs::signed_payload	the last-seen list written into the signed payload
-LastSeenMessages.Packed.unpack	missing		minor: the client does not unpack the packed last-seen list of other players' messages
+LastSeenMessages.Packed.unpack	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	PlayerChat arm
 LastSeenMessages.Update.verifyChecksum	inline	crates/horizon-protocol/src/secure_chat.rs::LastSeenValidator::apply_update	the checksum check; 0 means not checked
-LastSeenMessagesTracker.addPending	missing		minor: the client-side last-seen tracker is absent; Horizon's client sends an empty last-seen update
-LastSeenMessagesTracker.addEntry	missing		minor: part of the client-side last-seen tracker, which is absent
-LastSeenMessagesTracker.ignorePending	missing		minor: part of the client-side last-seen tracker, which is absent
-LastSeenMessagesTracker.generateAndApplyUpdate	missing		minor: the client never builds an acknowledgement update for the server
+LastSeenMessagesTracker.addPending	port	crates/horizon-protocol/src/secure_chat.rs::LastSeenTracker::add_pending	
+LastSeenMessagesTracker.addEntry	port	crates/horizon-protocol/src/secure_chat.rs::LastSeenTracker::add_pending	inlined
+LastSeenMessagesTracker.ignorePending	port	crates/horizon-protocol/src/secure_chat.rs::LastSeenTracker::ignore_pending	handle_delete_chat calls it
+LastSeenMessagesTracker.generateAndApplyUpdate	port	crates/horizon-protocol/src/secure_chat.rs::LastSeenTracker::update	
 LastSeenTrackedEntry.acknowledge	missing		minor: part of the client-side last-seen tracker, which is absent
-LocalChatSession.createMessageEncoder	missing		player: Horizon's client never signs chat (no chat key); on a server that enforces secure chat, its messages are refused
+LocalChatSession.createMessageEncoder	port	crates/horizon-protocol/src/secure_chat.rs::Encoder::new	
 MessageSignature.equals	skip:java		value equality
-MessageSignature.Packed.unpack	missing		minor: the client does not unpack packed signatures from other players' messages
+MessageSignature.Packed.unpack	port	crates/horizon-protocol/src/secure_chat.rs::SignatureCache::unpack	
 MessageSignatureCache.push	port	crates/horizon-protocol/src/secure_chat.rs::SignatureCache::push	
 MutableComponent.withColor	port	crates/horizon-client-core/src/text.rs::Text::with_color	
 MutableComponent.getVisualOrderText	skip:ui		bidi reordering for drawing; Horizon lays text out in logical order
@@ -71,22 +71,22 @@ PlayerChatMessage.withUnsignedContent	missing		minor: the hub never sets unsigne
 PlayerChatMessage.removeUnsignedContent	missing		minor: unsigned content is never set, so there is nothing to remove
 PlayerChatMessage.filter	missing		minor: the hub sends pass-through filter masks; there is no text filter
 PlayerChatMessage.removeSignature	port	crates/horizon-client/src/lan/hub/chat.rs::ChatMessage::new	the unsigned branch keeps the content and drops the signature and the last seen
-PlayerChatMessage.verify	port	crates/horizon-protocol/src/secure_chat.rs::Chain::unpack	the signature check inside the chain check
+PlayerChatMessage.verify	port	crates/horizon-protocol/src/secure_chat.rs::MessageValidator::update_and_validate	the signature over the link and body; also the chain check of Chain::unpack on the server
 PlayerChatMessage.hasSignatureFrom	missing		minor: only decides whether a text filter runs for the message; Horizon runs no text filter
 PlayerChatMessage.describeSigned	skip:debug		log text for a rejected message
-RemoteChatSession.createMessageValidator	port	crates/horizon-protocol/src/secure_chat.rs::Chain::unpack	gap: minor: the profile key's expiry takes no grace period (has_expired(now) only)
+RemoteChatSession.createMessageValidator	port	crates/horizon-protocol/src/secure_chat.rs::MessageValidator::keyed	the expiry takes the 8 hour grace period (EXPIRY_GRACE_PERIOD)
 ResolutionContext.Builder.build	skip:java		builder
 SignableCommand.getArgument	port	crates/horizon-client/src/lan/hub/chat.rs::Hub::signed_arguments	the command's message arguments, looked up by name
 SignedMessageBody.updateSignature	inline	crates/horizon-protocol/src/secure_chat.rs::signed_payload	salt, time, content and last seen in the signed payload
-SignedMessageBody.Packed.unpack	missing		minor: the client does not unpack packed bodies of other players' messages
-SignedMessageChain.encoder	missing		player: client-side signing; Horizon's client never signs, so chat is refused on servers that enforce secure chat
+SignedMessageBody.Packed.unpack	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	PlayerChat arm: the last seen only, the body is not kept
+SignedMessageChain.encoder	port	crates/horizon-protocol/src/secure_chat.rs::Encoder::sign	
 SignedMessageChain.Decoder.unsigned	port	crates/horizon-protocol/src/secure_chat.rs::Chain::unpack	no session: unsigned, or refused when the server enforces secure chat
 SignedMessageLink.updateSignature	inline	crates/horizon-protocol/src/secure_chat.rs::signed_payload	sender, session and index in the signed payload
-SignedMessageLink.isDescendantOf	inline	crates/horizon-protocol/src/secure_chat.rs::Chain::unpack	Horizon requires the exact next index, which is stricter than a descendant check
+SignedMessageLink.isDescendantOf	port	crates/horizon-protocol/src/secure_chat.rs::MessageValidator::update_and_validate	a greater index, from the same sender in the same session (the server's Chain::unpack still requires the exact next index, as SignedMessageChain.Decoder does)
 SignedMessageLink.advance	inline	crates/horizon-protocol/src/secure_chat.rs::Chain::unpack	the next index is index + 1, kept in the chain
-SignedMessageValidator.KeyBased.validateChain	inline	crates/horizon-protocol/src/secure_chat.rs::Chain::unpack	the order check (timestamp and index) inside the chain check
-SignedMessageValidator.KeyBased.validate	port	crates/horizon-protocol/src/secure_chat.rs::Chain::unpack	expiry, signature and order, in that order
-SignedMessageValidator.KeyBased.updateAndValidate	port	crates/horizon-protocol/src/secure_chat.rs::Chain::unpack	a failed link breaks the chain (next index cleared)
+SignedMessageValidator.KeyBased.validateChain	port	crates/horizon-protocol/src/secure_chat.rs::MessageValidator::update_and_validate	the same message again, or a descendant of the last one
+SignedMessageValidator.KeyBased.validate	port	crates/horizon-protocol/src/secure_chat.rs::MessageValidator::update_and_validate	expiry (with the grace period), signature, then the chain, in that order
+SignedMessageValidator.KeyBased.updateAndValidate	port	crates/horizon-protocol/src/secure_chat.rs::MessageValidator::update_and_validate	a failed message breaks the chain: nothing more is accepted
 Style.create	skip:java		builder from optionals; Style is a plain struct
 Style.checkEmptyAfterChange	skip:java		canonical empty style instance
 Style.withShadowColor	missing		minor: Style has no shadow colour, so a component's shadow_color is dropped

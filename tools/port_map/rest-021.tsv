@@ -27,7 +27,7 @@ CrudeIncrementalIntIdentityHashBiMap.clear	skip:java		identity bimap over regist
 CrudeIncrementalIntIdentityHashBiMap.copy	skip:java		identity bimap over registry ids; Horizon uses its own id tables
 Crypt.generateKeyPair	port	crates/horizon-protocol/src/rsa.rs::RsaPrivateKey::generate	RSA key pair with the bit size passed in; vanilla passes 1024
 Crypt.digestData	port	crates/horizon-protocol/src/crypto.rs::server_hash	returns the signed hex string; vanilla returns bytes and the caller converts them
-Crypt.rsaStringToKey	missing		minor: PEM reader for the account chat key pair (AccountProfileKeyPairManager); Horizon has no PEM reader
+Crypt.rsaStringToKey	port	crates/horizon-client-render/src/auth.rs::pem_der	the PEM armour around the services' keys
 Crypt.rsaPublicKeyToString	missing		minor: PEM writer for the account chat public key; Horizon has no PEM writer
 Crypt.pemRsaPrivateKeyToString	missing		minor: PEM writer for the account chat private key; Horizon has no PEM writer
 Crypt.byteToPrivateKey	missing		minor: PKCS#8 private key reader for the account chat key pair; Horizon has none

@@ -40,8 +40,9 @@ pub trait PlacementContext {
         Ok(())
     }
     /// Block.updateFromNeighbourShapes for the state at `position`, written
-    /// with `flags` when it changes. Worlds without block shape-update
-    /// behavior accept this as a no-op.
+    /// with `flags` when it changes, then LevelAccessor.updateNeighborsAt for
+    /// the new block (a no-op outside a live level). Worlds without block
+    /// shape-update behavior accept this as a no-op.
     fn update_from_neighbour_shapes(
         &mut self,
         _position: [i32; 3],

@@ -8,7 +8,10 @@ description = "Downloads, prepares and starts Horizon builds"
 [workspace]
 
 [dependencies]
-gpui = "0.2.2"
+# GPUI Fast (longbridge/gpui-fast): Zed's GPUI with retained views and cached scroll layers, under
+# its own name. wgpu renders on Linux, not blade (#3812).
+gpui = { package = "gpui-fast", version = "0.1.12" }
+gpui_platform = { package = "gpui-fast-platform", version = "0.1.12", features = ["wayland", "x11", "font-kit"] }
 ureq = { version = "2", features = ["json", "tls"], default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -20,12 +23,12 @@ pulldown-cmark = { version = "0.12", default-features = false }
 flate2 = "1"
 tar = { version = "0.4", default-features = false }
 toml = "1.1"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 dirs = "5"
 # The system's preferred languages, for the window's language (i18n.rs).
 sys-locale = "0.3"
-self-replace = "1"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 horizon-theme = { path = "../crates/horizon-theme" }
 horizon-core = { path = "../crates/horizon-core" }
 horizon-prepare = { path = "../crates/horizon-prepare" }
@@ -40,6 +43,8 @@ horizon-mods = { path = "../crates/horizon-mods", features = ["index"] }
 horizon-release-sign = { path = "../crates/horizon-release-sign" }
 # Opt-in data collection: the consent, the outbox and its upload (docs/telemetry.md).
 horizon-telemetry = { path = "../crates/horizon-telemetry" }
+# The official server's count follows its SRV record, as the game does (server_redirect).
+horizon-protocol = { path = "../crates/horizon-protocol" }
 # level.dat and servers.dat (the worlds and server lists of instances)
 horizon-world = { path = "../crates/horizon-world" }
 # Deleting a world moves it to the system's trash
@@ -53,13 +58,18 @@ getrandom = "0.3"
 # in the lockfile through gpui).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 
+# Native builds at low priority (rust_toolchain::low_priority); already in the lockfile.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 # Microsoft account secrets in the OS keychain: the Secret Service on Linux through oo7 (the same
 # build gpui uses), Keychain and Credential Manager through keyring.
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
-oo7 = { version = "0.5", default-features = false, features = ["async-std", "native_crypto"] }
+oo7 = { version = "0.6", default-features = false, features = ["async-std", "native_crypto"] }
 futures-lite = "2"
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
+# Decode Keychain OSStatus errors without matching localized error strings (account.rs).
+security-framework = "3"
 # Painting the window's title bar dark or light (titlebar::apply_appearance), and the system's
 # reduced motion (sky::moves): crates already in the lockfile through gpui and wgpu.
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSAccessibility", "NSAppearance", "NSView", "NSWindow", "NSWorkspace"] }

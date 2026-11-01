@@ -491,6 +491,13 @@ fn liquid_in(w: &MobWorld, b: Aabb) -> bool {
     false
 }
 
+/// Whether this tick of the heart reaches its update (`updateCreakingState`
+/// and the protector checks), the only part of [`server_tick`] that reads the
+/// level's other mobs: about once a second, so a host may build them only then.
+pub fn tick_updates(heart: &CreakingHeart) -> bool {
+    heart.ticker < 0
+}
+
 /// `CreakingHeartBlockEntity.serverTick` (hearts that are not uprooted).
 pub fn server_tick(
     heart: &mut CreakingHeart,

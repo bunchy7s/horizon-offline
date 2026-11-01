@@ -64,6 +64,84 @@ pub fn default_face(resources: &Path, uuid: &str) -> Option<Vec<[u8; 4]>> {
     face(&std::fs::read(path).ok()?)
 }
 
+fn profile_pixels(png: &[u8]) -> Option<Vec<[u8; 4]>> {
+    // Check dimensions before decoding a downloaded image; skin heads need no large allocation.
+    let dimensions =
+        image::ImageReader::with_format(std::io::Cursor::new(png), image::ImageFormat::Png)
+            .into_dimensions()
+            .ok()?;
+    matches!(dimensions, (64, 32 | 64))
+        .then(|| face(png))
+        .flatten()
+}
+
+/// A signed-in profile's public skin, cached independently of its authentication tokens.
+/// This may do disk/network I/O and must run on a worker. Missing skins use the UUID default;
+/// the `bool` says the download failed, so the real skin is worth asking for again later.
+pub fn profile_face(
+    account: &crate::account::Account,
+    cache: &Path,
+    resources: &Path,
+) -> (Option<Vec<[u8; 4]>>, bool) {
+    let failed = std::cell::Cell::new(false);
+    let face = profile_face_with(account, cache, resources, &|url| {
+        use std::io::Read;
+        failed.set(true);
+        let response = crate::proxy::agent(
+            ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(10)),
+            url,
+        )
+        .build()
+        .get(url)
+        .call()
+        .ok()?;
+        let mut bytes = Vec::new();
+        response
+            .into_reader()
+            .take(1024 * 1024)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        failed.set(false);
+        Some(bytes)
+    });
+    (face, failed.get())
+}
+
+fn profile_face_with(
+    account: &crate::account::Account,
+    cache: &Path,
+    resources: &Path,
+    fetch: &dyn Fn(&str) -> Option<Vec<u8>>,
+) -> Option<Vec<[u8; 4]>> {
+    use sha1::{Digest, Sha1};
+    if let Some((url, _)) = &account.skin {
+        // Public Minecraft texture URLs only; never send credentials to a skin host.
+        let texture = url
+            .strip_prefix("https://textures.minecraft.net/texture/")
+            .or_else(|| url.strip_prefix("http://textures.minecraft.net/texture/"));
+        if texture
+            .is_some_and(|hash| !hash.is_empty() && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            let file = cache.join(format!("{:x}.png", Sha1::digest(url.as_bytes())));
+            if let Some(face) = std::fs::read(&file)
+                .ok()
+                .and_then(|png| profile_pixels(&png))
+            {
+                return Some(face);
+            }
+            if let Some(png) = fetch(url) {
+                if let Some(face) = profile_pixels(&png) {
+                    if std::fs::create_dir_all(cache).is_ok() {
+                        let _ = std::fs::write(file, png);
+                    }
+                    return Some(face);
+                }
+            }
+        }
+    }
+    default_face(resources, &account.uuid)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,5 +172,87 @@ mod tests {
         assert_eq!(face.len(), 64);
         assert_eq!(face[0], [1, 2, 3, 255]);
         assert_eq!(face[1], [7, 8, 9, 255]);
+    }
+
+    #[test]
+    fn profile_heads_are_cached_by_skin_and_work_offline() {
+        let dir = std::env::temp_dir().join(format!(
+            "hz-profile-head-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut skin = image::RgbaImage::new(64, 64);
+        skin.put_pixel(8, 8, image::Rgba([12, 34, 56, 255]));
+        let mut png = Vec::new();
+        skin.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let mut account = crate::account::Account {
+            name: "TestPlayer".into(),
+            uuid: "00000000000000000000000000000000".into(),
+            skin: Some((
+                "https://textures.minecraft.net/texture/abc".into(),
+                "classic".into(),
+            )),
+            cape: None,
+        };
+        let calls = std::cell::Cell::new(0);
+        let fetch = |_: &str| {
+            calls.set(calls.get() + 1);
+            Some(png.clone())
+        };
+        let head = profile_face_with(&account, &dir, &dir, &fetch).unwrap();
+        assert_eq!(head[0], [12, 34, 56, 255]);
+        assert_eq!(
+            profile_face_with(&account, &dir, &dir, &|_| panic!(
+                "cached head must not need the network"
+            )),
+            Some(head)
+        );
+        account.skin.as_mut().unwrap().0 = "https://textures.minecraft.net/texture/def".into();
+        assert!(profile_face_with(&account, &dir, &dir, &fetch).is_some());
+        assert_eq!(calls.get(), 2, "skin changes must not reuse an old image");
+        assert!(profile_pixels(&png).is_some());
+        let mut oversized = Vec::new();
+        image::RgbaImage::new(128, 64)
+            .write_to(
+                &mut std::io::Cursor::new(&mut oversized),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        assert!(profile_pixels(&oversized).is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unavailable_profile_skin_uses_the_uuid_default() {
+        let dir = std::env::temp_dir().join(format!("hz-profile-default-{}", std::process::id()));
+        let path = dir.join("assets/minecraft/textures/entity/player/slim/alex.png");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut skin = image::RgbaImage::new(64, 64);
+        skin.put_pixel(8, 8, image::Rgba([3, 5, 7, 255]));
+        skin.save(&path).unwrap();
+        let account = crate::account::Account {
+            name: "TestPlayer".into(),
+            uuid: "00000000000000000000000000000000".into(),
+            skin: Some((
+                "https://textures.minecraft.net/texture/abc".into(),
+                "classic".into(),
+            )),
+            cape: None,
+        };
+        let head = profile_face_with(&account, &dir.join("cache"), &dir, &|_| None).unwrap();
+        assert_eq!(head[0], [3, 5, 7, 255]);
+        let mut blocked = account;
+        blocked.skin.as_mut().unwrap().0 = "https://example.com/not-a-minecraft-skin".into();
+        assert!(
+            profile_face_with(&blocked, &dir.join("cache"), &dir, &|_| panic!(
+                "must not fetch an arbitrary profile URL"
+            ))
+            .is_some()
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

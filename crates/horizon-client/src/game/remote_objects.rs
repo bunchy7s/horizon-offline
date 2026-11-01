@@ -37,6 +37,11 @@ impl Game<'_> {
                     m.extra.leash = Some(Holder::Knot(block));
                 }
             }
+            for b in &mut self.boats {
+                if b.leash == Some(Holder::Mob(id)) {
+                    b.leash = Some(Holder::Knot(block));
+                }
+            }
         } else if let Some(shows) = match kind {
             "minecraft:text_display" => Some(super::text_displays::Shows::Text),
             "minecraft:block_display" => Some(super::text_displays::Shows::Block),
@@ -49,6 +54,12 @@ impl Game<'_> {
             );
         } else if kind == "minecraft:ominous_item_spawner" {
             self.add_remote_ominous_item_spawner(id, position);
+        } else if kind == "minecraft:interaction" {
+            // The width, height and response follow in SetEntityData.
+            self.interactions.insert(
+                id as i32,
+                super::interactions::RemoteInteraction::new(position),
+            );
         } else if let Some(cart) = super::minecarts::CartKind::from_id(kind) {
             let mut c = super::minecarts::Minecart::new(id, cart, at);
             c.yaw = yaw;
@@ -142,6 +153,9 @@ impl Game<'_> {
             }
             return;
         }
+        if self.remote_interaction_data(id, values) {
+            return;
+        }
         let id = id as u32;
         for (index, _, value) in values {
             if let (8, Value::Item(stack)) = (index, value)
@@ -213,13 +227,16 @@ impl Game<'_> {
                     c.color = (*color).clamp(0, 15) as u8;
                 }
             } else if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
-                // VehicleEntity's hurt, direction and damage; the paddles.
+                // VehicleEntity's hurt, direction and damage; the paddles and
+                // the bubble time.
                 match (index, value) {
                     (8, Value::Int(v)) => b.hurt_time = *v,
                     (9, Value::Int(v)) => b.hurt_dir = *v,
                     (10, Value::Float(v)) => b.damage = *v,
                     (11, Value::Bool(v)) => b.paddling[0] = *v,
                     (12, Value::Bool(v)) => b.paddling[1] = *v,
+                    // AbstractBoat.DATA_ID_BUBBLE_TIME.
+                    (13, Value::Int(v)) => b.bubble_time = *v,
                     _ => {}
                 }
             } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
@@ -229,6 +246,20 @@ impl Game<'_> {
                     (10, Value::Float(v)) => c.damage = *v,
                     (13, Value::Bool(lit)) if c.kind == super::minecarts::CartKind::Furnace => {
                         c.fuel = i32::from(*lit);
+                    }
+                    // MinecartCommandBlock.onSyncedDataUpdated: setCommand
+                    // (which resets the success count) and setLastOutput.
+                    (13, Value::String(command))
+                        if c.kind == super::minecarts::CartKind::CommandBlock =>
+                    {
+                        c.command.set_command(command);
+                    }
+                    (14, Value::Text(output))
+                        if c.kind == super::minecarts::CartKind::CommandBlock =>
+                    {
+                        c.command.last_output = Some(horizon_client::scoreboard::comp_text(
+                            &horizon_client::scoreboard::tag_to_json(output),
+                        ));
                     }
                     _ => {}
                 }
@@ -272,25 +303,28 @@ impl Game<'_> {
                 b.yaw = yaw;
             }
             b.on_ground = on_ground;
-        } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
-            if let Some(yaw) = yaw {
-                c.yaw = yaw;
-            }
-        } else if let Some(a) = self.armor_stands.iter_mut().find(|a| a.id == id) {
-            if let Some(yaw) = yaw {
-                a.yaw = yaw;
-            }
-            a.on_ground = on_ground;
+        } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id)
+            && let Some(yaw) = yaw
+        {
+            c.yaw = yaw;
         }
     }
 
     /// One tick of interpolation: `step` moves a position a step toward
-    /// the entity's last sent one, if it has a move in progress.
-    pub(super) fn tick_remote_objects(&mut self, mut step: impl FnMut(u32, Vec3) -> Vec3) {
+    /// the entity's last sent one, if it has a move in progress. A minecart
+    /// on `NewMinecartBehavior` is moved by `lerp_cart` (true when it did)
+    /// instead.
+    pub(super) fn tick_remote_objects(
+        &mut self,
+        mut step: impl FnMut(u32, Vec3) -> Vec3,
+        mut lerp_cart: impl FnMut(&mut super::minecarts::Minecart) -> bool,
+    ) {
         for c in &mut self.carts {
             c.previous = c.position;
             c.previous_yaw = c.yaw;
-            c.position = step(c.id, c.position);
+            if !lerp_cart(c) {
+                c.position = step(c.id, c.position);
+            }
             if c.kind == super::minecarts::CartKind::Furnace
                 && c.fuel > 0
                 && self.world.random.next_int_bound(4).unwrap_or(1) == 0
@@ -315,6 +349,7 @@ impl Game<'_> {
         for a in &mut self.armor_stands {
             a.position = step(a.id, a.position);
         }
+        self.tick_remote_boat_bubbles();
     }
 
     /// The boats, minecarts, armor stands, item frames and paintings in the
@@ -346,6 +381,11 @@ impl Game<'_> {
                 "yaw": c.yaw, "color": c.color_name()}),
             );
         }
+        for (&id, i) in &self.interactions {
+            out.push(json!({"id": id, "kind": "minecraft:interaction",
+                "position": at(i.position), "width": i.width, "height": i.height,
+                "response": i.response}));
+        }
         for f in &self.item_frames {
             out.push(
                 json!({"id": f.id, "kind": f.kind(), "position": f.pos, "facing": f.facing,
@@ -362,6 +402,7 @@ impl Game<'_> {
     /// Every object a server sent (a new connection, level or dimension).
     pub(super) fn clear_remote_objects(&mut self) {
         self.text_displays.clear();
+        self.interactions.clear();
         self.ominous_spawners.clear();
         self.remote_knots.clear();
         self.carts.clear();
@@ -374,11 +415,23 @@ impl Game<'_> {
 
     pub(super) fn remove_remote_object(&mut self, id: u32) {
         self.text_displays.remove(&(id as i32));
+        self.interactions.remove(&(id as i32));
         self.ominous_spawners.retain(|s| s.id != id);
         self.remote_knots.remove(&id);
         self.carts.retain(|c| c.id != id);
         self.boats.retain(|b| b.id != id);
         self.armor_stands.retain(|a| a.id != id);
+        // `Entity.setRemoved`: the cushion's rider gets off where it sat
+        // (`LivingEntity.dismountVehicle`), not inside the block below.
+        if self.riding == Some(id)
+            && let Some(y) = self
+                .cushions
+                .iter()
+                .find(|c| c.id == id)
+                .map(|c| c.position.y)
+        {
+            self.dismount_removed_vehicle(y);
+        }
         self.cushions.retain(|c| c.id != id);
         self.item_frames.retain(|f| f.id != id);
         self.paintings.retain(|p| p.id != id);

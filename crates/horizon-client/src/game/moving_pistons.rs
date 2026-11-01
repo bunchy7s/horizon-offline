@@ -55,16 +55,24 @@ impl Game<'_> {
             }
         }
     }
+    /// The section holding the block at `p` (`SectionPos.blockToSection`).
+    pub(super) fn section_of(&self, p: [i32; 3]) -> Option<(i32, i32, i32)> {
+        let y = p[1].checked_sub(self.world.layout().min_y())?;
+        Some((p[0] >> 4, y.div_euclid(16), p[2] >> 4))
+    }
     /// Whether the chunk mesh doesn't show the blocks at `p` yet (edited,
     /// meshing, or waiting for its upload).
     pub(super) fn section_mesh_pending(&self, p: [i32; 3]) -> bool {
-        let Some(y) = p[1].checked_sub(horizon_client::chunk::MIN_Y) else {
+        let Some(section) = self.section_of(p) else {
             return false;
         };
-        let section = (p[0] >> 4, y.div_euclid(16), p[2] >> 4);
         self.world.dirty_sections.contains(&section)
             || self.streaming.is_meshing(section)
-            || self.pending_uploads.iter().any(|(key, _)| *key == section)
+            || self.section_upload_pending(section)
+    }
+    /// Whether a mesh of the section waits for its upload.
+    pub(super) fn section_upload_pending(&self, section: (i32, i32, i32)) -> bool {
+        self.pending_uploads.iter().any(|(key, _)| *key == section)
     }
     /// The moved block and, for a retracting piston, its extended base.
     fn moving_piston_blocks(
@@ -114,7 +122,7 @@ impl Game<'_> {
     /// lone block at `seed`: each face from the cell it looks at. Not from
     /// the moving piston's own cell, which is dark once the block it placed
     /// stands there (#3002).
-    fn moving_block_vertices(
+    pub(super) fn moving_block_vertices(
         &self,
         state: BlockStateId,
         seed: horizon_core::position::BlockPos,
@@ -134,7 +142,7 @@ impl Game<'_> {
             state,
             [seed.x, seed.y, seed.z],
             &region,
-            self.res.biomes(),
+            world_biomes!(self),
             self.streaming.biome_zoom,
             self.streaming.biome_blend,
         );

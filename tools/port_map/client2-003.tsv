@@ -44,7 +44,7 @@ Frustum.isVisible	port	crates/horizon-client-render/src/gfx.rs::Frustum::interse
 Frustum.cubeInFrustum	port	crates/horizon-client-render/src/gfx.rs::Frustum::intersects	box test on camera-relative bounds
 Frustum.pointInFrustum	missing		minor: only particle culling uses it (QuadParticleGroup), and Horizon has no particle frustum test
 Frustum.getFrustumPoints	skip:debug		the eight frustum corners, for debug drawing only
-Frustum.getNearPlaneBounds	missing		player: the block texture overlay drawn when your eye is inside a block (view-blocking block) is never shown; ScreenEffectRenderer's block_overlay is never set outside tests
+Frustum.getNearPlaneBounds	port	crates/horizon-client-render/src/camera.rs::near_plane_bounds	the culling projection's NDC z=-1 plane, moved to the eye by screen_quads
 BeeDebugRenderer	missing		minor: F3 bee and hive debug view (hive blacklist, flowers, ghost hives); not drawn
 BrainDebugRenderer	missing		minor: F3 brain debug view (activities, memories, POIs); not drawn
 BreezeDebugRenderer	missing		minor: F3 breeze jump target view; breeze_jump_target is kept in monster_brain.rs but never drawn
@@ -83,7 +83,7 @@ LevelExtractor.drainTransientBlockQueue	missing		player: temporary blocks the se
 LevelExtractor.extractVisibleBlockEntities	inline	crates/horizon-client/src/game.rs::Game::render	block entities of the visible sections; gap: minor: no 0.3 visibility gate, see RenderSection.getVisibility
 LevelExtractor.extractBlockDestroyAnimation	port	crates/horizon-client/src/game.rs::Game::destroy_block_progress	keeps the crumbling progress per breaker for 400 ticks; gap: minor: no 32-block distance cut here
 LevelExtractor.extractGizmos	port	crates/horizon-client/src/game/debug_keys.rs::Game::debug_gizmos	the frame's debug gizmos
-LevelExtractor.extractPlayerState	inline	crates/horizon-client/src/game.rs::Game::render	player and hands read from the game state at draw time; gap: minor: the view-blocking block is missing, see Frustum.getNearPlaneBounds
+LevelExtractor.extractPlayerState	inline	crates/horizon-client/src/game.rs::Game::render	player and hands read from the game state at draw time
 LevelExtractor.applyFrustum	port	crates/horizon-client-render/src/gfx/resident.rs::Resident::visible	the frustum decides which sections are visible
 LevelExtractor.setLevel	inline	crates/horizon-client/src/game.rs::Game::all_sections_changed	a new level rebuilds every loaded section (allChanged); the null-level branch is not separate
 LevelExtractor.blockChanged	port	crates/horizon-client-render/src/world.rs::World::set	a block edit marks its 3x3x3 neighbourhood; gap: minor: the player-changed flag (update bit 8) is not kept

@@ -3,6 +3,9 @@ package dev.horizonlab.parity;
 import com.google.gson.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.HolderLookup;
@@ -24,20 +27,30 @@ import net.minecraft.world.item.TooltipFlag;
  * of the search tab the inputs of the client's creative search trees
  * (SessionSearchTrees): its creative tooltip lines and its item tags.
  *
+ * The tabs are built with permissions (CreativeModeInventoryScreen.hasPermissions:
+ * canUseGameMasterBlocks and the operatorItemsTab option), so the operator tab and
+ * its stacks in the search tab are listed; "permissions_only" gives the indices of
+ * the stacks a build without permissions leaves out, and "visible" is
+ * shouldDisplay without them.
+ *
  *   VanillaCreativeTabsExporter OUT.json
  */
 public final class VanillaCreativeTabsExporter {
-    /** The operator tab and its items need permissions and the operatorItemsTab option (off by default). */
-    public static final boolean HAS_PERMISSIONS = false;
-
     public static void main(String[] args) throws Exception {
         ParityData.init();
-        Files.writeString(Path.of(args[0]), export(FeatureFlags.DEFAULT_FLAGS, HAS_PERMISSIONS, ParityData.lookup).toString(),
+        Files.writeString(Path.of(args[0]), export(FeatureFlags.DEFAULT_FLAGS, ParityData.lookup).toString(),
             StandardCharsets.UTF_8);
     }
 
-    public static JsonObject export(FeatureFlagSet features, boolean hasPermissions, HolderLookup.Provider lookup) {
-        CreativeModeTabs.tryRebuildTabContents(features, hasPermissions, lookup);
+    public static JsonObject export(FeatureFlagSet features, HolderLookup.Provider lookup) {
+        CreativeModeTabs.tryRebuildTabContents(features, false, lookup);
+        var without = new HashMap<CreativeModeTab, List<String>>();
+        var visible = new HashMap<CreativeModeTab, Boolean>();
+        for (CreativeModeTab tab : BuiltInRegistries.CREATIVE_MODE_TAB) {
+            without.put(tab, tab.getDisplayItems().stream().map(VanillaCreativeTabsExporter::snbt).toList());
+            visible.put(tab, tab.shouldDisplay());
+        }
+        CreativeModeTabs.tryRebuildTabContents(features, true, lookup);
         var tabs = new JsonArray();
         for (CreativeModeTab tab : BuiltInRegistries.CREATIVE_MODE_TAB) {
             var o = new JsonObject();
@@ -48,10 +61,21 @@ public final class VanillaCreativeTabsExporter {
             o.addProperty("column", tab.column());
             o.addProperty("title", tab.getDisplayName().getString());
             o.addProperty("icon", snbt(tab.getIconItem()));
-            o.addProperty("visible", tab.shouldDisplay());
+            o.addProperty("visible", visible.get(tab));
             var items = new JsonArray();
-            for (ItemStack stack : tab.getDisplayItems()) items.add(snbt(stack));
+            var kept = new ArrayList<String>();
+            var permissionsOnly = new JsonArray();
+            var base = new HashSet<>(without.get(tab));
+            for (ItemStack stack : tab.getDisplayItems()) {
+                String s = snbt(stack);
+                if (base.contains(s)) kept.add(s);
+                else permissionsOnly.add(items.size());
+                items.add(s);
+            }
+            // The client leaves these indices out without permissions: what remains must be that build, in order.
+            if (!kept.equals(without.get(tab))) throw new IllegalStateException("permissions reorder " + key);
             o.add("items", items);
+            if (!permissionsOnly.isEmpty()) o.add("permissions_only", permissionsOnly);
             if (tab.getType() == CreativeModeTab.Type.SEARCH) {
                 var context = Item.TooltipContext.of(lookup);
                 var flag = TooltipFlag.Default.NORMAL.asCreative();
@@ -67,8 +91,7 @@ public final class VanillaCreativeTabsExporter {
             tabs.add(o);
         }
         var out = new JsonObject();
-        out.addProperty("schema", 2);
-        out.addProperty("permissions", hasPermissions);
+        out.addProperty("schema", 3);
         out.add("tabs", tabs);
         return out;
     }

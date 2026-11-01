@@ -8,6 +8,7 @@ use super::{
         Stroll, goal_clone, reduced,
     },
 };
+use crate::items::ItemStack;
 use crate::projectiles::{Projectile, ProjectileKind};
 use horizon_core::geometry::trig::Mth;
 use horizon_core::{geometry::Vec3, random::RandomSource};
@@ -411,6 +412,33 @@ pub fn charge_ticks(m: &Mob) -> i32 {
 fn holding_crossbow(m: &Mob) -> bool {
     m.extra.main_hand.as_deref() == Some("minecraft:crossbow")
 }
+
+/// `CrossbowItem.setCharged`: the loaded arrow lives in the stack's
+/// `charged_projectiles` component, which is what draws it in the crossbow and
+/// what `CrossbowItem.isCharged` reads. A mob's held stack carries the
+/// components it was spawned or equipped with, so a pillager that loads its
+/// own crossbow has to set them itself.
+fn set_crossbow_charged(m: &mut Mob, charged: bool) {
+    let mut stack = m
+        .extra
+        .main_hand_stack()
+        .cloned()
+        .unwrap_or_else(|| ItemStack::new("minecraft:crossbow", 1));
+    if &*stack.item != "minecraft:crossbow" {
+        return;
+    }
+    if charged {
+        if stack.data().is_some_and(|d| !d.charged.is_empty()) {
+            return;
+        }
+        stack.data_mut().charged = vec![ItemStack::new("minecraft:arrow", 1)];
+    } else if stack.data().is_none_or(|d| d.charged.is_empty()) {
+        return;
+    } else {
+        stack.data_mut().charged.clear();
+    }
+    m.extra.set_main_hand_stack(Some(stack));
+}
 impl Goal for CrossbowAttack {
     goal_clone!();
     fn flags(&self) -> u8 {
@@ -437,6 +465,7 @@ impl Goal for CrossbowAttack {
         m.extra.flag = false;
         m.extra.using_item = 0;
         self.state = Crossbow::Uncharged;
+        set_crossbow_charged(m, false);
     }
     fn start(&mut self, m: &mut Mob, _: &mut Cx) {
         m.ai.aggressive = true;
@@ -495,6 +524,7 @@ impl Goal for CrossbowAttack {
                     m.extra.using_item = 0;
                     m.extra.flag = false;
                     self.state = Crossbow::Charged;
+                    set_crossbow_charged(m, true);
                     self.attack_delay = 20 + m.random.next_int_bound(20).unwrap_or(0);
                     cx.events.push(MobEvent::Sound(
                         "item.crossbow.loading_end",
@@ -514,6 +544,7 @@ impl Goal for CrossbowAttack {
                 if sees {
                     shoot_crossbow(m, who, cx);
                     self.state = Crossbow::Uncharged;
+                    set_crossbow_charged(m, false);
                 }
             }
         }
@@ -761,5 +792,61 @@ pub fn anim_pose(m: &Mob, s: &State, p: &mut Poses, pose: ArmPose) {
         hide(p, "right_arm");
     } else {
         hide(p, "arms");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mobs::Species;
+    use crate::mobs::sensor_scan_tests::kind;
+    use std::sync::Arc;
+
+    fn pillager() -> Mob {
+        let mut kind = kind();
+        let k = Arc::make_mut(&mut kind);
+        k.id = "minecraft:pillager".into();
+        k.species = Species::Pillager;
+        Mob::new(1, kind, Vec3::ZERO, 0.0)
+    }
+
+    /// `CrossbowItem.setCharged`: the arrow lives in the stack's components,
+    /// and the model draws whatever the stack carries.
+    #[test]
+    fn a_charged_crossbow_carries_its_arrow() {
+        let mut m = pillager();
+        m.extra
+            .set_main_hand_stack(Some(ItemStack::new("minecraft:crossbow", 1)));
+        set_crossbow_charged(&mut m, true);
+        let stack = m.extra.main_hand_stack().unwrap();
+        let charged = &stack.data().unwrap().charged;
+        assert_eq!(charged.len(), 1);
+        assert_eq!(&*charged[0].item, "minecraft:arrow");
+        set_crossbow_charged(&mut m, false);
+        assert!(
+            m.extra
+                .main_hand_stack()
+                .unwrap()
+                .data()
+                .unwrap()
+                .charged
+                .is_empty()
+        );
+    }
+
+    /// A shot crossbow keeps its stack; only the loaded arrow goes.
+    #[test]
+    fn charging_leaves_anything_but_a_crossbow_alone() {
+        let mut m = pillager();
+        m.extra
+            .set_main_hand_stack(Some(ItemStack::new("minecraft:iron_sword", 1)));
+        set_crossbow_charged(&mut m, true);
+        assert!(
+            m.extra
+                .main_hand_stack()
+                .unwrap()
+                .data()
+                .is_none_or(|d| d.charged.is_empty())
+        );
     }
 }

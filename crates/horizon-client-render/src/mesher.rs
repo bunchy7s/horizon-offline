@@ -125,6 +125,8 @@ mod vertex_tests {
         assert_eq!(super::emitting(rgb, 0), rgb);
         assert_eq!(super::emitting(rgb, super::INCANDESCENT), 0xFD56_3412);
         assert_eq!(super::emitting(rgb, super::VERY_BRIGHT), 0xFB56_3412);
+        assert_eq!(super::emitting(rgb, super::LOW | super::WHOLE), 0xFA56_3412);
+        assert_eq!(super::emitting(rgb, super::WHOLE), rgb);
         assert_eq!(
             super::emitting(rgb, super::VERY_BRIGHT) | super::EMISSION_BITS,
             rgb
@@ -132,16 +134,87 @@ mod vertex_tests {
     }
     #[test]
     fn light_sources_shine_by_kind_not_light_level() {
-        use super::{BRIGHT, INCANDESCENT, LOW, hdr_tier};
+        use super::{BRIGHT, INCANDESCENT, LOW, WHOLE, hdr_tier};
         assert_eq!(hdr_tier("glowstone", 15), BRIGHT);
         // A candle's flame is a particle: the block keeps only its wick.
         assert_eq!(hdr_tier("torch", 14), INCANDESCENT);
         assert_eq!(hdr_tier("red_candle", 3), LOW);
         assert_eq!(hdr_tier("glow_lichen", 7), 0);
         assert_eq!(hdr_tier("stone", 0), 0);
+        assert_eq!(hdr_tier("ochre_froglight", 15), LOW | WHOLE);
+        assert_eq!(hdr_tier("lava", 15), INCANDESCENT | WHOLE);
+        assert_eq!(hdr_tier("red_candle_cake", 3), 0);
+        assert_eq!(hdr_tier("respawn_anchor", 3), INCANDESCENT);
+        assert_eq!(hdr_tier("waxed_copper_bulb", 15), LOW);
+        assert_eq!(hdr_tier("sea_pickle", 15), 0);
         // Unlisted ones by their light level.
-        assert_eq!(hdr_tier("ochre_froglight", 15), INCANDESCENT);
+        assert_eq!(hdr_tier("vault", 12), INCANDESCENT);
         assert_eq!(hdr_tier("sculk_sensor", 1), LOW);
+    }
+    #[test]
+    fn fluid_faces_keep_the_colour_and_the_emission() {
+        let lit = super::emitting(super::pack_rgb([0x12, 0x34, 0x56]), super::INCANDESCENT);
+        assert_eq!(super::fluid_face(lit, 0), 0x8D56_3412);
+        assert_eq!(super::fluid_face(lit, 5), 0xDD56_3412);
+        // Another face replaces the first.
+        assert_eq!(super::fluid_face(super::fluid_face(lit, 5), 1), 0x9D56_3412);
+    }
+    /// What `gfx/native_material.rs` reads back from the colour's alpha byte: the face of a
+    /// fluid quad, and the HDR tier.
+    fn decoded(color: u32) -> (Option<u32>, u32) {
+        let flags = color >> 24;
+        let high = flags >> 4;
+        let fluid = high >= 8 && (high & 7) < 6;
+        (fluid.then_some(high & 7), 15 - (flags & 15))
+    }
+    #[test]
+    fn the_material_stage_reads_back_what_the_mesher_encodes() {
+        let rgb = super::pack_rgb([0x12, 0x34, 0x56]);
+        for tier in 0..=super::VERY_BRIGHT {
+            let lit = super::emitting(rgb, tier);
+            assert_eq!(decoded(lit), (None, u32::from(tier)));
+            for face in 0..6 {
+                assert_eq!(
+                    decoded(super::fluid_face(lit, face)),
+                    (Some(face as u32), u32::from(tier))
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod section_mesh_tests {
+    use super::*;
+
+    #[test]
+    fn compute_bounds_empty_solid_and_translucent() {
+        let mut mesh = SectionMesh::default();
+        assert_eq!(mesh.compute_bounds(), None);
+
+        let v1 = TerrainVertex::new([1.0, 2.0, 3.0], [0.0, 0.0], 0, 0, 0);
+        let v2 = TerrainVertex::new([4.0, 5.0, 6.0], [0.0, 0.0], 0, 0, 0);
+        mesh.solid.push(v1);
+        mesh.solid.push(v2);
+
+        let pad = glam::Vec3::splat(SectionMesh::BOUNDS_PAD);
+        assert_eq!(
+            mesh.compute_bounds(),
+            Some([
+                glam::Vec3::new(1.0, 2.0, 3.0) - pad,
+                glam::Vec3::new(4.0, 5.0, 6.0) + pad,
+            ])
+        );
+
+        let v3 = TerrainVertex::new([0.5, 7.0, 8.0], [0.0, 0.0], 0, 0, 0);
+        mesh.translucent.push(v3);
+        assert_eq!(
+            mesh.compute_bounds(),
+            Some([
+                glam::Vec3::new(0.5, 2.0, 3.0) - pad,
+                glam::Vec3::new(4.0, 7.0, 8.0) + pad,
+            ])
+        );
     }
 }
 pub struct SectionMesh {
@@ -158,6 +231,17 @@ pub struct SectionMesh {
     /// each frame by `block_entity_render` like vanilla's per-section
     /// `SectionCompiler.Results.blockEntities`.
     pub block_entities: Vec<([i32; 3], u32)>,
+    /// Blocks that give off light (world position, state id), for the colour of block light
+    /// Horizon's shader packs read (`gfx::block_light`).
+    pub lights: Vec<([i32; 3], u32)>,
+    /// Sprite layers emitted while building this mesh. Kept distinct before
+    /// upload so the renderer does not rescan every terrain vertex.
+    pub sprite_layers: Vec<u16>,
+    /// Axis-aligned bounding box [min, max] of actual terrain mesh vertices in section-local space [0, 16].
+    pub bounds: Option<[glam::Vec3; 2]>,
+    /// A far mesh was clipped around finer tiles or resident chunks. Keep
+    /// the previous GPU mesh while its replacements fade in.
+    pub keep: bool,
 }
 impl Default for SectionMesh {
     fn default() -> Self {
@@ -167,19 +251,86 @@ impl Default for SectionMesh {
             translucent: Vec::new(),
             visibility: ALL_VISIBLE,
             block_entities: Vec::new(),
+            lights: Vec::new(),
+            sprite_layers: Vec::new(),
+            bounds: None,
+            keep: false,
         }
     }
 }
 impl SectionMesh {
+    /// Record a sprite layer used by a quad. Opaque is a vertex-only flag and
+    /// is removed here so the renderer can compare the actual atlas layer.
+    pub fn note_sprite_layer(&mut self, layer: u16) {
+        let layer = layer & !crate::mesher::OPAQUE_LAYER;
+        if !self.sprite_layers.contains(&layer) {
+            self.sprite_layers.push(layer);
+        }
+    }
+    /// Finish the compact layer list after meshing has emitted all faces.
+    pub fn finish_sprite_layers(&mut self) {
+        self.sprite_layers.sort_unstable();
+        self.sprite_layers.dedup();
+    }
+
+    /// Padding applied to mesh vertex bounds to prevent clipping at the frustum
+    /// boundary when shader packs with vertex displacement (e.g. waving foliage, water) are active.
+    pub const BOUNDS_PAD: f32 = 0.5;
+
+    /// Retain geometry capacity after an upload, but none of its old contents.
+    pub(crate) fn clear(&mut self) {
+        self.solid.clear();
+        self.translucent.clear();
+        self.block_entities.clear();
+        self.sprite_layers.clear();
+        self.sides = Sides::default();
+        self.visibility = ALL_VISIBLE;
+        self.bounds = None;
+        self.keep = false;
+    }
+    pub(crate) fn capacity_bytes(&self) -> usize {
+        self.solid.capacity() * std::mem::size_of::<TerrainVertex>()
+            + self.translucent.capacity() * std::mem::size_of::<TerrainVertex>()
+            + self.block_entities.capacity() * std::mem::size_of::<([i32; 3], u32)>()
+            + self.sprite_layers.capacity() * std::mem::size_of::<u16>()
+    }
     /// Sorts the solid quads by the side they face, for the renderer to
     /// leave out those facing away from the eye (`sides`).
     pub fn sort_solid(&mut self) {
         self.sides = sides::sort(&mut self.solid);
+        self.bounds = self.compute_bounds();
+    }
+
+    /// Computes the tight axis-aligned bounding box [min, max] of actual terrain geometry vertices.
+    pub fn compute_bounds(&self) -> Option<[glam::Vec3; 2]> {
+        if self.solid.is_empty() && self.translucent.is_empty() {
+            return None;
+        }
+        let mut min = glam::Vec3::splat(f32::INFINITY);
+        let mut max = glam::Vec3::splat(f32::NEG_INFINITY);
+        for v in &self.solid {
+            let p = glam::Vec3::from(v.pos);
+            min = min.min(p);
+            max = max.max(p);
+        }
+        for v in &self.translucent {
+            let p = glam::Vec3::from(v.pos);
+            min = min.min(p);
+            max = max.max(p);
+        }
+        let pad = glam::Vec3::splat(Self::BOUNDS_PAD);
+        Some([min - pad, max + pad])
     }
 }
 pub const ALL_VISIBLE: u64 = (1 << 36) - 1;
 /// VisGraph.resolve: flood fill non-opaque cells and connect the faces each region touches.
+#[cfg(test)]
 fn visibility(pad: &Padded, info: &[Info]) -> u64 {
+    visibility_reusing(pad, info, &mut Vec::new())
+}
+fn visibility_reusing(pad: &Padded, info: &[Info], stack: &mut Vec<usize>) -> u64 {
+    // The all-visible shortcut can leave a partially filled stack behind.
+    stack.clear();
     // Opaque cells are already visited: resolve each state's opacity once,
     // then reuse this map for the flood fill and the uniform-section shortcuts.
     let mut seen = [false; 4096];
@@ -201,7 +352,6 @@ fn visibility(pad: &Padded, info: &[Info]) -> u64 {
         return 0;
     }
     let mut result = 0u64;
-    let mut stack = Vec::new();
     for start in 0..4096usize {
         if seen[start] {
             continue;
@@ -348,6 +498,7 @@ pub struct MeshTables {
     water_overlay: u16,
     lava_still: u16,
     lava_flow: u16,
+    animated_layers: Vec<bool>,
 }
 fn stem_color(age: u8) -> u32 {
     let a = u32::from(age);
@@ -382,6 +533,11 @@ impl MeshTables {
                 .map(|&l| l as u16)
                 .ok_or_else(|| format!("missing fluid sprite {name}").into())
         };
+        let max_animated = render.animations.iter().map(|a| a.layer).max().unwrap_or(0);
+        let mut animated_layers = vec![false; max_animated as usize + 1];
+        for animation in &render.animations {
+            animated_layers[animation.layer as usize] = true;
+        }
         let mut covers = std::collections::HashMap::new();
         let mut info = Vec::with_capacity(facts.states.len());
         for (id, s) in facts.states.iter().enumerate() {
@@ -458,7 +614,12 @@ impl MeshTables {
             });
             let mut face = [0u8; 6];
             let mut cover = [0f32; 6];
-            for d in Direction::ALL {
+            // A server's visibility knows no state (`FaceVisibility::empty`):
+            // it meshes no fluid, so these stay unset.
+            for d in Direction::ALL
+                .into_iter()
+                .filter(|_| !visibility.is_empty())
+            {
                 let (face_id, shape) = visibility
                     .occlusion_face(BlockStateId(id as u32), d)
                     .ok_or("missing occlusion face")?;
@@ -499,7 +660,15 @@ impl MeshTables {
             water_overlay: layer("minecraft:block/water_overlay")?,
             lava_still: layer("minecraft:block/lava_still")?,
             lava_flow: layer("minecraft:block/lava_flow")?,
+            animated_layers,
         })
+    }
+    /// Whether a terrain sprite layer has an animated clip.
+    pub fn is_animated(&self, layer: u16) -> bool {
+        self.animated_layers
+            .get(layer as usize)
+            .copied()
+            .unwrap_or(false)
     }
     pub fn facts(&self, state: BlockStateId) -> Option<MeshFacts> {
         let i = self.info.get(state.0 as usize)?;
@@ -631,21 +800,30 @@ fn pi(x: i32, y: i32, z: i32) -> usize {
     ((y + B) as usize * P + (z + B) as usize) * P + (x + B) as usize
 }
 /// Blocks and light of one section plus a `B`-block border.
+#[derive(Default)]
 struct Padded {
     blocks: Vec<u32>,
     light: Vec<u8>,
 }
 impl Padded {
+    #[cfg(test)]
     fn new(region: &[[Option<&Chunk>; 3]; 3], sy: i32) -> Self {
-        let mut blocks = vec![0u32; P * P * P];
-        let mut light = vec![0u8; P * P * P];
-        let base_y = MIN_Y + sy * 16;
+        let mut pad = Self::default();
+        pad.fill(region, sy, &mut Box::new([0; 4096]));
+        pad
+    }
+    fn fill(&mut self, region: &[[Option<&Chunk>; 3]; 3], sy: i32, own: &mut [u32; 4096]) {
+        self.blocks.resize(P * P * P, 0);
+        self.blocks.fill(0);
+        self.light.resize(P * P * P, 0);
+        let (blocks, light) = (&mut self.blocks, &mut self.light);
+        let base_y = region[1][1].map_or(MIN_Y, Chunk::min_y) + sy * 16;
         // The section itself is unpacked in one pass; the border cells of the
         // neighbouring sections are read one by one.
-        let mut own = Box::new([0u32; 4096]);
+        own.fill(0);
         let center = region[1][1].map(|c| &c.sections[sy as usize]);
         if let Some(section) = center {
-            section.unpack(&mut own);
+            section.unpack(own);
         }
         for y in -B..16 + B {
             let wy = base_y + y;
@@ -662,20 +840,40 @@ impl Padded {
                                 c.get(x & 15, wy, z & 15)
                             };
                         light[i] = c.light(x & 15, wy, z & 15);
+                    } else if let Some(c) = region[1][1] {
+                        // A neighbour not loaded continues this chunk's edge
+                        // column. As lit air, the outermost chunks' water drew
+                        // a wall toward it (fluids show both sides), a light
+                        // sheet in the water where far terrain carries on.
+                        // Vanilla draws no chunk without its neighbours.
+                        let (ex, ez) = (x.clamp(0, 15), z.clamp(0, 15));
+                        blocks[i] = c.get(ex, wy, ez);
+                        light[i] = c.light(ex, wy, ez);
                     } else {
                         light[i] = 0xF0;
                     }
                 }
             }
         }
-        Self { blocks, light }
     }
 }
+/// Per-worker temporary arrays. They never hold resource-pack references or
+/// geometry still owned by the renderer, and total about 88 KiB per worker.
+#[derive(Default)]
+pub(crate) struct MeshScratch {
+    padded: Padded,
+    own: Option<Box<[u32; 4096]>>,
+    visibility: Vec<usize>,
+}
+#[cfg(test)]
+mod reuse_tests;
 /// Set on a terrain vertex's sprite layer when its texture alpha must be ignored.
 pub const OPAQUE_LAYER: u16 = 1 << 15;
 /// The bits of `TerrainVertex::color`'s alpha byte that hold how brightly its face shines
-/// in HDR output (`gfx/hdr.rs`): 15 minus the tier, so the usual 0xFF means none. The
-/// byte's other four bits stay set.
+/// in HDR output (`gfx/hdr.rs`): 15 minus the tier, plus 4 for one that shines all over
+/// (`WHOLE`), so the usual 0xFF means none. The byte's high nibble carries the fluid face
+/// flags (`fluid_face`); the shaders ignore the vertex alpha, so both travel to the
+/// material stage untouched.
 pub const EMISSION_BITS: u32 = 0x0F00_0000;
 /// HDR tiers, by the kind of light rather than its level: a candle's flame is as bright as
 /// a torch's, it only lights less around it. 0 stays as in SDR.
@@ -684,23 +882,64 @@ pub const INCANDESCENT: u8 = 2;
 pub const BRIGHT: u8 = 3;
 /// The sun and lightning.
 pub const VERY_BRIGHT: u8 = 4;
-/// `color` marked as shining at `tier` (0 to `VERY_BRIGHT`).
+/// Added to a tier: the light source shines all over (a froglight), not only where its
+/// sprite is brightest (a torch's flame, not its handle). See `gfx/hdr.rs` `Masks`.
+pub const WHOLE: u8 = 8;
+/// `color` marked as shining at `tier` (0 to `VERY_BRIGHT`, plus `WHOLE`).
 pub fn emitting(color: u32, tier: u8) -> u32 {
-    color & !EMISSION_BITS | u32::from(15 - tier.min(VERY_BRIGHT)) << 24
+    let level = (tier & !WHOLE).min(VERY_BRIGHT);
+    let code = if level > 0 && tier & WHOLE != 0 {
+        level + 4
+    } else {
+        level
+    };
+    color & !EMISSION_BITS | u32::from(15 - code) << 24
+}
+/// The high nibble of `TerrainVertex::color`'s alpha byte: 8 plus the face (`Direction`
+/// as usize) on a fluid quad, 0xF on every other. `terrain.wgsl` reads only the low nibble
+/// (the emission), so only the material stage of Horizon's own packs reads it
+/// (`gfx/native_material.rs`); whether the fluid is water or lava follows from the pass
+/// that draws it.
+pub const FLUID_FACE_BITS: u32 = 0xF000_0000;
+/// `color` marked as a fluid quad of face `face` (`Direction` as usize, 0 to 5).
+pub fn fluid_face(color: u32, face: usize) -> u32 {
+    debug_assert!(face < 6);
+    color & !FLUID_FACE_BITS | 0x8000_0000 | (face as u32) << 28
 }
 /// The HDR tier of block `name` (no namespace), which emits light `level`.
 pub fn hdr_tier(name: &str, level: u8) -> u8 {
     match name {
         _ if level == 0 => 0,
-        "glowstone" | "jack_o_lantern" | "campfire" | "soul_campfire" | "soul_lantern"
-        | "soul_torch" | "soul_wall_torch" | "soul_fire" => BRIGHT,
-        "torch" | "wall_torch" | "lantern" | "lava" | "crying_obsidian" | "fire"
-        | "sea_lantern" => INCANDESCENT,
-        "redstone_torch" | "redstone_wall_torch" | "magma_block" => LOW,
-        // Its flame is a particle.
-        _ if name.ends_with("candle") || name.ends_with("candle_cake") => LOW,
+        "glowstone"
+        | "soul_lantern"
+        | "soul_torch"
+        | "soul_wall_torch"
+        | "beacon"
+        | "end_rod"
+        | "furnace"
+        | "redstone_lamp"
+        | "brewing_stand"
+        | "enchanting_table"
+        | "medium_amethyst_bud"
+        | "small_amethyst_bud" => BRIGHT,
+        "campfire" | "soul_campfire" | "soul_fire" | "lava_cauldron" | "crying_obsidian"
+        | "amethyst_cluster" | "large_amethyst_bud" => BRIGHT | WHOLE,
+        "torch" | "wall_torch" | "lantern" | "sea_lantern" => INCANDESCENT,
+        "fire" | "lava" => INCANDESCENT | WHOLE,
+        // Glowing at every charge, not only the brighter ones.
+        "respawn_anchor" => INCANDESCENT,
+        "ochre_froglight" | "verdant_froglight" | "pearlescent_froglight" | "jack_o_lantern" => {
+            LOW | WHOLE
+        }
+        "redstone_torch" | "redstone_wall_torch" | "magma_block" | "shroomlight" => LOW,
+        // Its flame is a particle; the cake's frosting must not shine in daylight.
+        _ if name.ends_with("candle_cake") => 0,
+        _ if name.ends_with("candle") => LOW,
+        // One tier at every oxidation stage, waxed or not.
+        _ if name.ends_with("copper_bulb") => LOW,
         // A faint glow in the dark, as in SDR.
-        "glow_lichen" => 0,
+        "glow_lichen" | "sea_pickle" | "brown_mushroom" | "dragon_egg" | "end_portal_frame"
+        | "ender_chest" => 0,
         _ if level >= 10 => INCANDESCENT,
         _ => LOW,
     }
@@ -823,6 +1062,8 @@ fn pack_coords(coords: u32) -> u16 {
 pub struct Mesher<'a> {
     /// CardinalLighting.NETHER: brighter up/down faces.
     pub nether_shading: bool,
+    /// A shader pack lights the faces (its `oldLighting` off): no face shading in the colours.
+    pub shader_pack_lighting: bool,
     pub assets: &'a Assets,
     pub render: &'a RenderAssets,
     pub tables: &'a MeshTables,
@@ -840,15 +1081,31 @@ pub struct Mesher<'a> {
 impl Mesher<'_> {
     /// `region[dz][dx]` are the chunks around the meshed column (centre 1,1).
     pub fn mesh(&mut self, region: &[[Option<&Chunk>; 3]; 3], sy: i32) -> SectionMesh {
-        let mut out = SectionMesh::default();
+        self.mesh_reusing(
+            region,
+            sy,
+            SectionMesh::default(),
+            &mut MeshScratch::default(),
+        )
+    }
+    pub(crate) fn mesh_reusing(
+        &mut self,
+        region: &[[Option<&Chunk>; 3]; 3],
+        sy: i32,
+        mut out: SectionMesh,
+        scratch: &mut MeshScratch,
+    ) -> SectionMesh {
+        out.clear();
         let center = region[1][1].expect("centre chunk");
         let section = &center.sections[sy as usize];
         if section.is_uniform(0) {
             return out;
         }
-        let pad = Padded::new(region, sy);
-        out.visibility = visibility(&pad, &self.tables.info);
-        let base_y = MIN_Y + sy * 16;
+        let own = scratch.own.get_or_insert_with(|| Box::new([0; 4096]));
+        scratch.padded.fill(region, sy, own);
+        let pad = &scratch.padded;
+        out.visibility = visibility_reusing(pad, &self.tables.info, &mut scratch.visibility);
+        let base_y = center.min_y() + sy * 16;
         let mut tints = Tints::new(
             region,
             self.biomes,
@@ -871,6 +1128,10 @@ impl Mesher<'_> {
                         out.block_entities
                             .push(([center.x * 16 + x, base_y + y, center.z * 16 + z], id));
                     }
+                    if state.emission > 0 {
+                        out.lights
+                            .push(([center.x * 16 + x, base_y + y, center.z * 16 + z], id));
+                    }
                     if state.solid
                         && Direction::ALL.iter().all(|d| {
                             let [dx, dy, dz] = d.normal();
@@ -881,8 +1142,8 @@ impl Mesher<'_> {
                     }
                     if state.fluid.kind() != FluidKind::Empty {
                         let water = tints.get(Resolver::Water, x, y, z);
-                        let nether = self.nether_shading;
-                        fluid::tesselate(self.tables, nether, &pad, water, &mut out, [x, y, z]);
+                        let shade = (self.nether_shading, self.shader_pack_lighting);
+                        fluid::tesselate(self.tables, shade, pad, water, &mut out, [x, y, z]);
                     }
                     if !state.model {
                         continue;
@@ -932,7 +1193,7 @@ impl Mesher<'_> {
                                 continue;
                             }
                             self.face(
-                                &pad,
+                                pad,
                                 &mut tints,
                                 &mut out,
                                 [x, y, z],
@@ -946,6 +1207,7 @@ impl Mesher<'_> {
                 }
             }
         }
+        out.finish_sprite_layers();
         out
     }
     /// `BlockColors` tint source `index`, or `None` for an untinted (-1) layer.
@@ -979,9 +1241,15 @@ impl Mesher<'_> {
         state: &Info,
     ) {
         let q = &face.quad;
-        let tier = state.tier.max(hdr_tier("", q.light_emission));
+        // A quad's own light (a model's glowing part) may raise the tier; whether it
+        // shines all over stays the block's.
+        let tier = (state.tier & !WHOLE).max(hdr_tier("", q.light_emission)) | state.tier & WHOLE;
         let shade_face = q.shade_direction_override.unwrap_or(q.facing);
-        let directional = lighting::cardinal(self.nether_shading, shade_face);
+        let directional = if self.shader_pack_lighting {
+            1.0
+        } else {
+            lighting::cardinal(self.nether_shading, shade_face)
+        };
         // Grey level per vertex before tinting, and vanilla light coords.
         let (gray, coords) = if ao {
             let info = &self.tables.info;
@@ -997,6 +1265,9 @@ impl Mesher<'_> {
             ([lighting::gray(directional); 4], [coords; 4])
         };
         let tint = Self::tint(state, q.tint_index, tints, pos);
+        if self.tables.is_animated(face.layer as u16) {
+            out.note_sprite_layer(face.layer as u16);
+        }
         let target = if face.translucent {
             &mut out.translucent
         } else {

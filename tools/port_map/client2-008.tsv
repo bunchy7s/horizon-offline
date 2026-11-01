@@ -122,6 +122,7 @@ PalettedTextureManager.AtlasTexture.dumpContents	skip:debug		debug dump
 PalettedTextureManager.Slot.getU	skip:java		UV accessor of a dynamic atlas slot; Horizon uses sprite rects
 PalettedTextureManager.Slot.getV	skip:java		UV accessor of a dynamic atlas slot; Horizon uses sprite rects
 DownloadedPackSource.configureSource	inline	crates/horizon-client/src/game/server_packs.rs::Game::start_pack_reload	pack list staged for the reload; empty when none
+DownloadedPackSource.loadRequestedPacks	port	crates/horizon-client-render/src/packs.rs::server_pack	server/{id}/{file} with resourcePack.server.name; the pack screen lists active ones via Game::pack_infos
 DownloadedPackSource.onRecovery	port	crates/horizon-client/src/server_packs.rs::ServerPacks::reloaded	reloads the packs that were active after a failure
 DownloadedPackSource.onRecoveryFailure	port	crates/horizon-client/src/server_packs.rs::ServerPacks::reloaded	second failure leaves the server's packs inactive
 DownloadedPackSource.waitForPackFeedback	skip:java		future over the feedback callback; replies go through ServerPacks::take_replies

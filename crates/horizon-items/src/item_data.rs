@@ -21,6 +21,9 @@ pub struct StackData {
     pub custom_name: Option<Tag>,
     /// `minecraft:potion_contents.potion`.
     pub potion: Option<Arc<str>>,
+    /// The rest of `minecraft:potion_contents` (`custom_color`, `custom_effects`,
+    /// `custom_name`), kept as saved.
+    pub potion_extra: Vec<(String, Tag)>,
     /// `minecraft:trim`: (material, pattern).
     pub trim: Option<(Arc<str>, Arc<str>)>,
     /// `minecraft:container` (shulker boxes): the non-empty slots.
@@ -323,6 +326,11 @@ impl ItemStack {
     pub fn custom_name(&self) -> Option<String> {
         self.data()?.custom_name_plain()
     }
+    /// `ResolvableProfile.name`: a bare profile string or its `name` field.
+    pub fn profile_name(&self) -> Option<String> {
+        let profile = self.data()?.other("minecraft:profile")?;
+        string(profile).or_else(|| profile.get("name").and_then(string))
+    }
     /// `minecraft:item_name` in the current language (`getItemName`'s
     /// component). It stays in the patch as loaded, so a translatable name
     /// saves and reaches clients unchanged; the ominous banner's is modelled
@@ -333,6 +341,42 @@ impl ItemStack {
     }
     pub fn potion(&self) -> Option<&str> {
         self.data().and_then(|d| d.potion.as_deref())
+    }
+    /// `PotionContents.customEffects` as saved: (id, duration, amplifier). Both
+    /// default to 0 like `MobEffectInstance.CODEC`.
+    pub fn custom_potion_effects(&self) -> Vec<(String, i32, i32)> {
+        let Some((_, Tag::List(list))) = self
+            .data()
+            .and_then(|d| d.potion_extra.iter().find(|(k, _)| k == "custom_effects"))
+        else {
+            return Vec::new();
+        };
+        list.iter()
+            .filter_map(|e| {
+                Some((
+                    string(e.get("id")?)?,
+                    e.get("duration").and_then(int).unwrap_or(0) as i32,
+                    e.get("amplifier").and_then(int).unwrap_or(0).clamp(0, 255) as i32,
+                ))
+            })
+            .collect()
+    }
+    /// `DataComponents.POTION_DURATION_SCALE` with the item's default: 0.125
+    /// for a tipped arrow, 0.25 for a lingering potion, else 1.
+    pub fn potion_duration_scale(&self) -> f32 {
+        match self
+            .data()
+            .and_then(|d| d.other("minecraft:potion_duration_scale"))
+        {
+            Some(Tag::Float(bits)) => f32::from_bits(*bits),
+            Some(Tag::Double(bits)) => f64::from_bits(*bits) as f32,
+            Some(t) if int(t).is_some() => int(t).unwrap_or(1) as f32,
+            _ => match &*self.item {
+                "minecraft:tipped_arrow" => 0.125,
+                "minecraft:lingering_potion" => 0.25,
+                _ => 1.0,
+            },
+        }
     }
     pub fn with_potion(mut self, potion: &str) -> Self {
         self.data_mut().potion = Some(Arc::from(potion));
@@ -643,10 +687,15 @@ pub fn components_tag(damage: u32, data: Option<&StackData>) -> Option<Tag> {
         if let Some(name) = &d.custom_name {
             entries.push(("minecraft:custom_name", name.clone()));
         }
-        if let Some(potion) = &d.potion {
+        if d.potion.is_some() || !d.potion_extra.is_empty() {
+            let potion = d
+                .potion
+                .as_ref()
+                .map(|p| ("potion", Tag::String((&**p).into())));
+            let extra = d.potion_extra.iter().map(|(k, v)| (k.as_str(), v.clone()));
             entries.push((
                 "minecraft:potion_contents",
-                Tag::compound([("potion", Tag::String((&**potion).into()))]),
+                Tag::compound(potion.into_iter().chain(extra)),
             ));
         }
         if let Some((material, pattern)) = &d.trim {
@@ -839,6 +888,14 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             .map(|s| Arc::from(s.as_str())),
         None => None,
     };
+    let potion_extra = match c.get("minecraft:potion_contents") {
+        Some(Tag::Compound(map)) => map
+            .iter()
+            .filter(|(k, _)| k.to_string_lossy() != "potion")
+            .map(|(k, v)| (k.to_string_lossy(), v.clone()))
+            .collect(),
+        _ => Vec::new(),
+    };
     let data = StackData {
         enchantments: read_levels(c.get("minecraft:enchantments")),
         stored_enchantments: read_levels(c.get("minecraft:stored_enchantments")),
@@ -853,6 +910,7 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             .cloned()
             .map(collapsed_text),
         potion,
+        potion_extra,
         map_id: c.get("minecraft:map_id").and_then(int).map(|v| v as i32),
         banner_patterns: crate::banner_layer::layers_from_nbt(c.get("minecraft:banner_patterns")),
         base_color: c

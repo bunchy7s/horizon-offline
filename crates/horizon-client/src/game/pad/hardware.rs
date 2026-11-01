@@ -3,7 +3,7 @@
 //! server build) has the stub in pad.rs instead, and only `horizon-ctl pad`'s virtual pad.
 use super::{
     super::{Game, Screen},
-    Pads,
+    PadEvent, Pads,
 };
 use horizon_client::gamepad::{self, Button, GlyphStyle, PadState, Rumble, TriggerFeel};
 use serde_json::{Value, json};
@@ -57,6 +57,16 @@ fn is_dualsense(pad: &gilrs::Gamepad) -> bool {
         (Some(vendor), Some(product)) if horizon_dualsense::is_dualsense(vendor, product))
 }
 
+/// SDL rows gilrs' bundled DB is missing (or only ships for Windows). Newer
+/// than the crate's copy; `GilrsBuilder::add_mappings` prefers these. The
+/// Ultimate 2's Linux/BT rows put the right stick on a2/a3 — without them
+/// look never moves (#4343).
+const EXTRA_SDL_MAPPINGS: &str = concat!(
+    "03000000c82d00001260000011010000,8BitDo Ultimate 2,a:b0,b:b1,back:b10,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b6,leftstick:b13,lefttrigger:a5,leftx:a0,lefty:a1,paddle1:b17,paddle2:b16,paddle3:b2,paddle4:b5,rightshoulder:b7,rightstick:b14,righttrigger:a4,rightx:a2,righty:a3,start:b11,x:b3,y:b4,platform:Linux,\n",
+    "05000000c82d00001260000001000000,8BitDo Ultimate 2,a:b0,b:b1,back:b10,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b6,leftstick:b13,lefttrigger:a5,leftx:a0,lefty:a1,paddle1:b17,paddle2:b16,paddle3:b2,paddle4:b5,rightshoulder:b7,rightstick:b14,righttrigger:a4,rightx:a2,righty:a3,start:b11,x:b3,y:b4,platform:Linux,\n",
+    "03000000c82d00000b31000014010000,8BitDo Ultimate 2,a:b0,b:b1,back:b6,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b8,leftshoulder:b4,leftstick:b9,lefttrigger:a2,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b10,righttrigger:a5,rightx:a3,righty:a4,start:b7,x:b2,y:b3,platform:Linux,\n",
+);
+
 impl Pads {
     /// Open gilrs on first use. A platform without it (or a Linux without
     /// udev) leaves controllers off; the game runs as before.
@@ -65,7 +75,10 @@ impl Pads {
             return;
         }
         self.devices.started = true;
-        self.devices.gilrs = match gilrs::Gilrs::new() {
+        self.devices.gilrs = match gilrs::GilrsBuilder::new()
+            .add_mappings(EXTRA_SDL_MAPPINGS)
+            .build()
+        {
             Ok(g) => {
                 for (_, pad) in g.gamepads() {
                     log::info!("Controller connected: {}", pad.name());
@@ -78,6 +91,21 @@ impl Pads {
                 None
             }
         };
+    }
+
+    /// Splitscreen reads the pads for every player (`PadRouter`): this game's own gilrs closes, or
+    /// its events would queue up unread. It opens again if this game reads the pads itself.
+    /// While several play, nobody gets rumble, adaptive triggers or the lightbar: the router
+    /// has no output path yet.
+    pub(in crate::game) fn release_hardware(&mut self) {
+        if self.devices.started {
+            self.devices.gilrs = None;
+            self.devices.started = false;
+            self.devices.active = None;
+            self.devices.rumbles.clear();
+            self.devices.dualsense = false;
+            self.devices.output = None;
+        }
     }
 
     /// Drain gilrs' events and read the active pad (opening gilrs the first time).
@@ -124,31 +152,153 @@ impl Pads {
         };
         self.style = GlyphStyle::of_vendor(pad.vendor_id());
         self.devices.dualsense = is_dualsense(&pad);
-        let mut state = PadState::default();
-        for button in Button::ALL {
-            if !matches!(button, Button::LeftTrigger | Button::RightTrigger) {
-                state.set(button, pad.is_pressed(gilrs_button(button)));
+        state_of(&pad)
+    }
+}
+
+/// A pad's buttons, sticks and triggers now.
+fn state_of(pad: &gilrs::Gamepad) -> PadState {
+    let mut state = PadState::default();
+    for button in Button::ALL {
+        if !matches!(button, Button::LeftTrigger | Button::RightTrigger) {
+            state.set(button, pad.is_pressed(gilrs_button(button)));
+        }
+    }
+    let axis = |a| pad.value(a);
+    use gilrs::Axis as A;
+    let sdl_mapped = pad.mapping_source() == gilrs::MappingSource::SdlMappings;
+    let (left, right) = gamepad::stick_axes(
+        [axis(A::LeftStickX), axis(A::LeftStickY)],
+        [axis(A::RightStickX), axis(A::RightStickY)],
+        axis(A::LeftZ),
+        pad.vendor_id(),
+        pad.product_id(),
+        sdl_mapped,
+    );
+    state.left = left;
+    state.right = right;
+    // Triggers arrive as analog buttons on most mappings, as plain
+    // buttons on some.
+    let trigger = |b: gilrs::Button| {
+        let value = pad.button_data(b).map_or(0.0, |d| d.value());
+        if pad.is_pressed(b) {
+            value.max(1.0)
+        } else {
+            value
+        }
+    };
+    state.triggers = [
+        trigger(gilrs::Button::LeftTrigger2),
+        trigger(gilrs::Button::RightTrigger2),
+    ];
+    state
+}
+
+/// A controller, as splitscreen tells them apart.
+pub(in crate::game) type PadId = gilrs::GamepadId;
+
+/// Splitscreen: one gilrs for every player's game in this process. The split decides which
+/// player each pad drives; this reads them.
+#[derive(Default)]
+pub(in crate::game) struct PadRouter {
+    gilrs: Option<gilrs::Gilrs>,
+    started: bool,
+}
+
+impl PadRouter {
+    /// Solo play uses this reader's device IDs for feedback too: another pad cannot steal
+    /// the active output while its input is being offered to join. Reclaimed after P1's turn.
+    pub(in crate::game) fn lend_output(&mut self, pads: &mut Pads, id: PadId) {
+        if pads.devices.gilrs.is_some() {
+            pads.release_hardware();
+        }
+        if pads.devices.active != Some(id) {
+            pads.devices.rumbles.clear();
+            pads.devices.output = None;
+            pads.devices.shown = None;
+        }
+        pads.devices.dualsense = self
+            .gilrs
+            .as_ref()
+            .and_then(|g| g.connected_gamepad(id))
+            .is_some_and(|p| is_dualsense(&p));
+        pads.devices.active = Some(id);
+        pads.devices.started = true;
+        pads.devices.gilrs = self.gilrs.take();
+    }
+
+    pub(in crate::game) fn reclaim_output(&mut self, pads: &mut Pads) {
+        self.gilrs = pads.devices.gilrs.take();
+    }
+
+    /// The buttons pressed and the controllers gone or back since the last call, in order.
+    pub(in crate::game) fn events(&mut self) -> Vec<PadEvent> {
+        if !self.started {
+            self.started = true;
+            self.gilrs = gilrs::Gilrs::new().ok();
+        }
+        let Some(gilrs) = self.gilrs.as_mut() else {
+            return Vec::new();
+        };
+        let mut events = Vec::new();
+        while let Some(gilrs::Event { id, event, .. }) = gilrs.next_event() {
+            match event {
+                gilrs::EventType::ButtonPressed(pressed, _) => {
+                    if let Some(button) = Button::ALL
+                        .into_iter()
+                        .find(|&b| gilrs_button(b) == pressed)
+                    {
+                        events.push(PadEvent::Press(id, button));
+                    }
+                }
+                gilrs::EventType::Disconnected => {
+                    log::info!("Controller disconnected: {}", gilrs.gamepad(id).name());
+                    events.push(PadEvent::Gone(id));
+                }
+                gilrs::EventType::Connected => events.push(PadEvent::Back(id)),
+                _ => {}
             }
         }
-        let axis = |a| pad.value(a);
-        use gilrs::Axis as A;
-        state.left = [axis(A::LeftStickX), axis(A::LeftStickY)];
-        state.right = [axis(A::RightStickX), axis(A::RightStickY)];
-        // Triggers arrive as analog buttons on most mappings, as plain
-        // buttons on some.
-        let trigger = |b: gilrs::Button| {
-            let value = pad.button_data(b).map_or(0.0, |d| d.value());
-            if pad.is_pressed(b) {
-                value.max(1.0)
-            } else {
-                value
-            }
-        };
-        state.triggers = [
-            trigger(gilrs::Button::LeftTrigger2),
-            trigger(gilrs::Button::RightTrigger2),
-        ];
-        state
+        events
+    }
+
+    pub(in crate::game) fn connected(&self, id: PadId) -> bool {
+        self.gilrs
+            .as_ref()
+            .is_some_and(|g| g.connected_gamepad(id).is_some())
+    }
+
+    /// The kind of controller (its maker, model and bus; two of one model share it), to know it
+    /// back when it reconnects under a new id; zero when the system doesn't say.
+    pub(in crate::game) fn uuid(&self, id: PadId) -> [u8; 16] {
+        self.gilrs
+            .as_ref()
+            .map_or([0; 16], |g| g.gamepad(id).uuid())
+    }
+
+    /// The pad's state now (released when it is gone).
+    pub(in crate::game) fn state(&self, id: PadId) -> PadState {
+        self.gilrs
+            .as_ref()
+            .and_then(|g| g.connected_gamepad(id))
+            .map_or_else(PadState::default, |pad| state_of(&pad))
+    }
+
+    /// Its glyphs (Xbox, PlayStation, Nintendo), as `read` finds them for the active pad.
+    pub(in crate::game) fn style(&self, id: PadId) -> GlyphStyle {
+        self.gilrs
+            .as_ref()
+            .and_then(|g| g.connected_gamepad(id))
+            .map_or(GlyphStyle::Auto, |pad| {
+                GlyphStyle::of_vendor(pad.vendor_id())
+            })
+    }
+
+    pub(in crate::game) fn name(&self, id: PadId) -> String {
+        self.gilrs
+            .as_ref()
+            .and_then(|g| g.connected_gamepad(id))
+            .map_or_else(|| "A controller".into(), |pad| pad.name().to_owned())
     }
 }
 

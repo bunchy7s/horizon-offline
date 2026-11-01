@@ -67,6 +67,12 @@ pub struct EntityState {
     pub needs_sync: bool,
     /// `Leashable.getLeashHolder`: the entity holding its lead.
     pub leash: Option<i32>,
+    /// `ServerPlayer.isSpectator`: a player in spectator mode, whom only the
+    /// clients of other spectators track (`ServerPlayer.broadcastToPlayer`).
+    pub spectator: bool,
+    /// `ServerPlayer.getCamera() != this`: a spectator watching through
+    /// another entity is shown to nobody (`ServerPlayer.broadcastToPlayer`).
+    pub watching: bool,
 }
 
 impl EntityState {
@@ -90,6 +96,8 @@ impl EntityState {
         self.precise = false;
         self.needs_sync = false;
         self.leash = None;
+        self.spectator = false;
+        self.watching = false;
     }
 }
 
@@ -235,6 +243,11 @@ struct ServerEntity {
     /// TrackedEntity.lastSectionPos: its pairs are checked again when it
     /// moves to another section.
     section: [i32; 3],
+    /// Whether it was a spectator last tick: its pairs are checked again when
+    /// that changes, as `ServerPlayer.broadcastToPlayer` answers otherwise.
+    spectator: bool,
+    /// Likewise for a spectator who watches through a camera.
+    watching: bool,
 }
 
 /// SectionPos.of(entity).
@@ -275,6 +288,8 @@ impl ServerEntity {
             index: 0,
             added: true,
             section: section_of(e.position),
+            spectator: e.spectator,
+            watching: e.watching,
         }
     }
 
@@ -602,6 +617,8 @@ impl Tracker {
 /// view distance and chunks.
 pub struct Viewer<'a> {
     pub entity_id: i32,
+    /// Its player is in spectator mode: it tracks the other spectators too.
+    pub spectator: bool,
     /// It accepted a move since the last tick (ChunkMap.move): every pair
     /// of it is checked again.
     pub moved: bool,
@@ -611,6 +628,8 @@ pub struct Viewer<'a> {
     pub tracker: &'a mut Tracker,
     /// What the tick sends it, in order.
     pub out: &'a mut Vec<Vec<u8>>,
+    /// Where the entities it stops tracking were last sent, when asked (the prediction's replay).
+    pub gone: Option<&'a mut Vec<[f64; 3]>>,
 }
 
 /// One entity as this tick's range checks read it: where it is
@@ -624,16 +643,32 @@ struct Probe {
     id: i32,
     range: i32,
     chunk: u32,
+    spectator: bool,
+    watching: bool,
+}
+
+/// `ServerPlayer.broadcastToPlayer` (`Entity`'s is `true`): to a spectator,
+/// a player is shown only while its camera is itself; to anyone else, a
+/// spectator is hidden.
+fn broadcast_to_player(viewer_spectator: bool, p: &Probe) -> bool {
+    if viewer_spectator {
+        !p.watching
+    } else {
+        !p.spectator
+    }
 }
 
 /// TrackedEntity.updatePlayer: within the type's range (capped by the view
-/// distance) horizontally, in a chunk the client has. `held` remembers for
+/// distance) horizontally, shown to the client (`Entity.broadcastToPlayer`:
+/// `ServerPlayer`'s hides a spectator from players who are not spectators;
+/// a guest's camera is always its own player, so a spectating client sees
+/// every player) and in a chunk the client has. `held` remembers for
 /// each of the tick's chunks whether the client has it (0: not looked up
 /// yet, 1: no, 2: yes), so each chunk is looked up once per client.
 fn sees(v: &Viewer, p: &Probe, chunks: &[(i32, i32)], held: &mut [u8]) -> bool {
     let range = f64::from(p.range.min(v.view_distance * 16));
     let (dx, dz) = (v.position[0] - p.x, v.position[2] - p.z);
-    dx * dx + dz * dz <= range * range && {
+    dx * dx + dz * dz <= range * range && broadcast_to_player(v.spectator, p) && {
         let held = &mut held[p.chunk as usize];
         if *held == 0 {
             *held = 1 + u8::from(v.chunks.contains(&chunks[p.chunk as usize]));
@@ -718,11 +753,19 @@ impl Entities {
             });
             s.seen = now;
             s.index = index;
-            // ChunkMap.addEntity, and ChunkMap.tick's section change:
+            // ChunkMap.addEntity, ChunkMap.tick's section change, and a
+            // player going in or out of spectator mode (which ChunkMap.move
+            // catches at the player's next move, a second later at most):
             // updatePlayers.
             let section = section_of(e.position);
-            if added || section != s.section {
+            if added
+                || section != s.section
+                || e.spectator != s.spectator
+                || e.watching != s.watching
+            {
                 s.section = section;
+                s.spectator = e.spectator;
+                s.watching = e.watching;
                 self.moved.push(index);
                 self.is_moved[index] = true;
             }
@@ -743,6 +786,8 @@ impl Entities {
                     .range_percent
                     .map_or(s.range * 16, |p| p * (s.range * 16) / 100),
                 chunk,
+                spectator: e.spectator,
+                watching: e.watching,
             });
         }
         // TrackedEntity.getEffectiveRange: a vehicle is tracked as far as its
@@ -842,7 +887,10 @@ impl Entities {
                 let states = &self.states;
                 v.tracker.seen.retain(|id| match states.get(id) {
                     Some(s) if s.seen == now && flags[s.index] & TRACKS != 0 => true,
-                    _ => {
+                    other => {
+                        if let (Some(gone), Some(s)) = (v.gone.as_deref_mut(), other) {
+                            gone.push(s.base);
+                        }
                         removed.push(*id);
                         false
                     }
@@ -921,6 +969,8 @@ mod tests {
             precise: false,
             needs_sync: false,
             leash: None,
+            spectator: false,
+            watching: false,
         }
     }
 
@@ -1192,6 +1242,34 @@ mod tests {
     }
 
     #[test]
+    fn a_cleared_crystal_beam_is_sent() {
+        let mut e = state(0.0);
+        e.kind = "minecraft:end_crystal".into();
+        e.defaults = vec![(8, serializer::OPTIONAL_BLOCK_POS, Value::OptPos(None))];
+        e.meta = vec![(
+            8,
+            serializer::OPTIONAL_BLOCK_POS,
+            Value::OptPos(Some([0, 128, 0])),
+        )];
+        let mut s = added(&e);
+        e.meta.clear();
+        let mut packets = Vec::new();
+        s.send_dirty(&e, true, &mut packets);
+        let sent: Vec<_> = packets
+            .iter()
+            .filter_map(|p| match p {
+                play::Clientbound::SetEntityData(d) => Some(d.values.clone()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(
+            sent,
+            vec![(8, serializer::OPTIONAL_BLOCK_POS, Value::OptPos(None))]
+        );
+    }
+
+    #[test]
     fn a_value_back_at_a_listed_default_is_sent() {
         let mut e = state(0.0);
         e.defaults = vec![(16, serializer::BOOLEAN, Value::Bool(false))];
@@ -1264,6 +1342,9 @@ mod tests {
         out: [Vec<Vec<u8>>; 2],
         positions: [[f64; 3]; 2],
         moved: [bool; 2],
+        spectators: [bool; 2],
+        /// The first client's entities gone, where they were last sent.
+        gone: Vec<[f64; 3]>,
     }
 
     impl Clients {
@@ -1274,6 +1355,8 @@ mod tests {
                 out: Default::default(),
                 positions: [[0.0, 64.0, 0.0]; 2],
                 moved: [false; 2],
+                spectators: [false; 2],
+                gone: Vec::new(),
             }
         }
         fn tick(&mut self, level: &mut Entities, entities: &[&EntityState]) {
@@ -1285,21 +1368,25 @@ mod tests {
             let mut viewers = [
                 Viewer {
                     entity_id: 1,
+                    spectator: self.spectators[0],
                     moved: self.moved[0],
                     position: self.positions[0],
                     view_distance: 10,
                     chunks: &self.chunks,
                     tracker: t0,
                     out: o0,
+                    gone: Some(&mut self.gone),
                 },
                 Viewer {
                     entity_id: 2,
+                    spectator: self.spectators[1],
                     moved: self.moved[1],
                     position: self.positions[1],
                     view_distance: 10,
                     chunks: &self.chunks,
                     tracker: t1,
                     out: o1,
+                    gone: None,
                 },
             ];
             level.tick(entities, &Riding::default(), &mut viewers, |_| Some(100));
@@ -1382,10 +1469,12 @@ mod tests {
         c.tick(&mut level, &[&me, &e]);
         assert!(!c.trackers[0].is_tracking(1) && c.trackers[1].is_tracking(1));
         assert!(c.trackers[0].is_tracking(7));
-        // Out of the zombie's 8 chunks.
+        // Out of the zombie's 8 chunks: the client last had it where it started.
+        let start = e.position;
         e.position[0] = 200.0;
         c.tick(&mut level, &[&me, &e]);
         assert!(!c.trackers[0].is_tracking(7));
+        assert_eq!(c.gone, [start]);
         let removed = body(play::Clientbound::RemoveEntities(play::RemoveEntities {
             ids: vec![7],
         }));
@@ -1429,6 +1518,80 @@ mod tests {
         for t in &c.trackers {
             assert!(!t.is_tracking(7) && t.is_tracking(8) && t.is_tracking(9));
         }
+    }
+
+    /// ServerPlayer.broadcastToPlayer: a spectator is shown only to other
+    /// spectators, who see everyone. Going in or out of spectator mode checks
+    /// its pairs again, though nobody moved.
+    #[test]
+    fn spectators_are_tracked_only_by_spectators() {
+        let mut level = Entities::default();
+        let mut c = Clients::new();
+        let player = |id: i32| {
+            let mut p = state(0.0);
+            (p.id, p.uuid, p.kind) = (id, id as u128, "minecraft:player".into());
+            p
+        };
+        let (mut one, mut two) = (player(1), player(2));
+        // A third player, already spectating, that neither client plays.
+        let mut three = player(3);
+        three.spectator = true;
+        c.tick(&mut level, &[&one, &two, &three]);
+        c.tick(&mut level, &[&one, &two, &three]);
+        assert!(c.trackers[0].is_tracking(2) && c.trackers[1].is_tracking(1));
+        assert!(!c.trackers[0].is_tracking(3) && !c.trackers[1].is_tracking(3));
+        // The second player starts spectating: the first client loses it,
+        // and it sees the first player and the other spectator.
+        (two.spectator, c.spectators[1]) = (true, true);
+        c.tick(&mut level, &[&one, &two, &three]);
+        assert!(!c.trackers[0].is_tracking(2));
+        let removed = body(play::Clientbound::RemoveEntities(play::RemoveEntities {
+            ids: vec![2],
+        }));
+        assert_eq!(c.out[0].first(), Some(&removed));
+        assert!(c.trackers[1].is_tracking(1) && c.trackers[1].is_tracking(3));
+        // Its armour changes go to nobody who doesn't track it.
+        two.equipment.push((5, Some(Stack::new(5, 1))));
+        c.tick(&mut level, &[&one, &two, &three]);
+        assert!(c.out[0].is_empty());
+        // The first player starts spectating too: both spectators show up.
+        (one.spectator, c.spectators[0]) = (true, true);
+        c.tick(&mut level, &[&one, &two, &three]);
+        assert!(c.trackers[0].is_tracking(2) && c.trackers[0].is_tracking(3));
+        // Both back in survival: they still see each other, and lose the
+        // third player.
+        (one.spectator, c.spectators[0]) = (false, false);
+        (two.spectator, c.spectators[1]) = (false, false);
+        c.tick(&mut level, &[&one, &two, &three]);
+        assert!(c.trackers[0].is_tracking(2) && c.trackers[1].is_tracking(1));
+        assert!(!c.trackers[0].is_tracking(3) && !c.trackers[1].is_tracking(3));
+    }
+
+    /// ServerPlayer.broadcastToPlayer for a spectator: a spectator watching
+    /// through a camera is hidden from the other spectators too.
+    #[test]
+    fn a_spectator_with_a_camera_is_hidden_from_spectators() {
+        let mut level = Entities::default();
+        let mut c = Clients::new();
+        let player = |id: i32| {
+            let mut p = state(0.0);
+            (p.id, p.uuid, p.kind) = (id, id as u128, "minecraft:player".into());
+            p
+        };
+        let (mut one, mut two) = (player(1), player(2));
+        (one.spectator, two.spectator) = (true, true);
+        c.spectators = [true, true];
+        c.tick(&mut level, &[&one, &two]);
+        c.tick(&mut level, &[&one, &two]);
+        assert!(c.trackers[0].is_tracking(2) && c.trackers[1].is_tracking(1));
+        // The second spectator takes a camera: the first loses sight of it.
+        two.watching = true;
+        c.tick(&mut level, &[&one, &two]);
+        assert!(!c.trackers[0].is_tracking(2) && c.trackers[1].is_tracking(1));
+        // Back to its own view: it shows up again.
+        two.watching = false;
+        c.tick(&mut level, &[&one, &two]);
+        assert!(c.trackers[0].is_tracking(2));
     }
 
     #[test]

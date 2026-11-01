@@ -281,10 +281,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             if update_flags & flags::UPDATE_NEIGHBORS != 0 {
                 let old_block = self.block_of(old);
                 self.update_neighbors_at(pos, old_block);
-                if self
-                    .b
-                    .has_flag(state, super::data::state_flags::ANALOG_OUTPUT)
-                {
+                if self.has_analog_output(state) {
                     let block = self.block_of(state);
                     self.update_neighbour_for_output_signal(pos, block);
                 }
@@ -314,6 +311,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if old == state {
             return None;
         }
+        self.level.observe_block_changed(pos, old, state);
         let new_block = self.block_of(state);
         let block_changed = self.block_of(old) != new_block;
         if block_changed && self.block_of(old) == self.b.named.moving_piston {
@@ -391,6 +389,16 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         destroyed
     }
     pub fn drop_resources(&mut self, state: BlockStateId, pos: BlockPos) {
+        // `MovingPistonBlock.getDrops`: a moving piston's loot is the loot of
+        // the block it carries.
+        // shortcut: the carried block's `spawnAfterBreak` experience comes with
+        // it (vanilla spawns it for the moving piston, which gives none);
+        // upgrade when a drop harness covers a moving piston.
+        let Some(state) =
+            super::pistons::dropped_state(self.b, &self.ticks.moving_pistons, state, pos)
+        else {
+            return;
+        };
         if self.level.game_rules().block_drops {
             self.emit(LevelEvent::DropResources { pos, state });
         }

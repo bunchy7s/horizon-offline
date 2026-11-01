@@ -1,0 +1,6 @@
+{
+  "hooks": [],
+  "rust_summary": "reading redstone from a server mod's block (`native_neighbor_signal`).",
+  "doc_summary": "`native_neighbor_signal(dimension, pos)`, the strongest redstone signal reaching a block from its neighbours (`SignalGetter.getBestNeighborSignal`, 0 to 15), as a dispenser or a piston reads it: what a mod's explosive, launcher or machine needs to go off or switch on from its block entity's tick. 0 on a client and for another dimension. Bundles that use it need \"hooks\": @API:native_neighbor_signal@.",
+  "comments": []
+}

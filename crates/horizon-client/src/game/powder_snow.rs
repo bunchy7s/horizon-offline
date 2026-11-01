@@ -105,7 +105,8 @@ impl Game<'_> {
     /// and the filled_bucket trigger.
     pub(super) fn pick_up_powder_snow(&mut self, pos: [i32; 3]) -> Result<()> {
         let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        let picked = self.with_level(|b, level, ticks| b.bucket_pickup(level, ticks, at));
+        let creative = self.creative;
+        let picked = self.with_level(|b, level, ticks| b.bucket_pickup(level, ticks, at, creative));
         self.process_level_events()?;
         let Some(filled) = picked else {
             return Ok(());
@@ -132,7 +133,7 @@ impl Game<'_> {
         Ok(())
     }
     /// `ItemUtils.createFilledResult(held, player, filled)` for the held stack.
-    fn filled_result(&mut self, filled: ItemStack) {
+    pub(super) fn filled_result(&mut self, filled: ItemStack) {
         if self.creative {
             // Kept, and the filled one added unless the inventory has it.
             let has = self

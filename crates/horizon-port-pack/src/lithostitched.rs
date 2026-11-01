@@ -10,10 +10,12 @@
 //!   the processors nested in them carried in turn. CTOV's
 //!   `ctov:modular_compat` (a reference that runs only when its mod is loaded)
 //!   becomes a `reference` when the mod is ported along, else nothing.
-//! - `add_template_pool_elements` modifiers become `horizon:add_to` pool files
-//!   (`docs/mods.md`), when their load conditions pass. Lithostitched's own
-//!   pool elements (`limited`, `guaranteed`, `delegating`) place their
-//!   `delegate`; what they add to it is counted as lost.
+//! - `add_template_pool_elements` and `add_processor_list_processors`
+//!   modifiers become `horizon:add_to` pool and processor list files
+//!   (`docs/mods.md`), with their `priority`, when their load conditions pass.
+//! - Its `limited` and `guaranteed` pool elements are the game's own
+//!   (`horizon_world`'s `structure::jigsaw`); `delegating` places its
+//!   `delegate`, and what it adds is counted as lost.
 use crate::{processors::ProcessorData, worldgen::Upgrade};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -88,17 +90,21 @@ pub(crate) fn upgrade_pool_element(
     let Some(kind) = element["element_type"].as_str() else {
         return false;
     };
-    match kind {
-        "lithostitched:limited" | "lithostitched:guaranteed" | "lithostitched:delegating" => {
-            count(lost, kind);
-            let delegate = element["delegate"].take();
-            *element = delegate;
-            // A delegate wrapping another (only `delegating` allows it).
-            upgrade_pool_element(element, lost);
-            true
-        }
-        _ => false,
+    let unwrap = match kind {
+        "lithostitched:guaranteed" => false,
+        // A `limit` is what it adds (spec-lithostitched §3).
+        "lithostitched:limited" => element["limit"].as_i64().is_none(),
+        "lithostitched:delegating" => true,
+        _ => return false,
+    };
+    if unwrap {
+        count(lost, kind);
+        let delegate = element["delegate"].take();
+        *element = delegate;
+        // A delegate wrapping another (only `delegating` allows it).
+        upgrade_pool_element(element, lost);
     }
+    true
 }
 
 /// The ids a modifier targets: an id or a list of ids (`None` for tags and
@@ -140,8 +146,9 @@ fn conditions_pass(v: &Value, loaded: &dyn Fn(&str) -> bool) -> bool {
 }
 
 /// A worldgen modifier as a file the game merges: `("template_pool", file)`
-/// for `add_template_pool_elements`; the others are counted in
-/// `report.modifiers_left`.
+/// for `add_template_pool_elements`, `("processor_list", file)` for
+/// `add_processor_list_processors` (spec-lithostitched §2.1, §2.2); the
+/// others are counted in `report.modifiers_left`.
 pub(crate) fn modifier(
     v: &Value,
     loaded: &dyn Fn(&str) -> bool,
@@ -152,22 +159,31 @@ pub(crate) fn modifier(
         count(&mut report.modifiers_left, "conditions");
         return None;
     }
-    if kind != "lithostitched:add_template_pool_elements" {
-        count(&mut report.modifiers_left, kind);
-        return None;
-    }
-    let (Some(targets), Some(elements)) = (ids(&v["template_pools"]), v["elements"].as_array())
-    else {
+    // 1.8.1 reads `processor_lists`, not the wiki's `processor_list`.
+    let (to, targets, list) = match kind {
+        "lithostitched:add_template_pool_elements" => {
+            ("template_pool", "template_pools", "elements")
+        }
+        "lithostitched:add_processor_list_processors" => {
+            ("processor_list", "processor_lists", "processors")
+        }
+        _ => {
+            count(&mut report.modifiers_left, kind);
+            return None;
+        }
+    };
+    let (Some(targets), Some(entries)) = (ids(&v[targets]), v[list].as_array()) else {
         count(&mut report.modifiers_left, "target");
         return None;
     };
     for target in &targets {
-        *report.added_to.entry(target.clone()).or_default() += elements.len();
+        *report.added_to.entry(target.clone()).or_default() += entries.len();
     }
-    Some((
-        "template_pool",
-        json!({"horizon:add_to": targets, "elements": elements}),
-    ))
+    let mut file = json!({"horizon:add_to": targets, list: entries});
+    if let Some(priority) = v["priority"].as_i64() {
+        file["horizon:priority"] = priority.into();
+    }
+    Some((to, file))
 }
 
 /// Whether the game reads a Lithostitched processor as it is: one of its
@@ -322,16 +338,28 @@ mod tests {
     }
 
     #[test]
-    fn wrapped_elements_place_their_delegate() {
+    fn limited_and_guaranteed_elements_stay_theirs() {
         let mut lost = BTreeMap::new();
         let delegate = json!({"element_type": "minecraft:single_pool_element", "location": "a:b",
             "projection": "rigid", "processors": "minecraft:empty"});
-        let mut e =
-            json!({"element_type": "lithostitched:limited", "limit": 1, "delegate": delegate});
-        assert!(upgrade_pool_element(&mut e, &mut lost));
-        assert_eq!(e, delegate);
-        assert_eq!(lost["lithostitched:limited"], 1);
-        assert!(!upgrade_pool_element(&mut e, &mut lost));
+        for kept in [
+            json!({"element_type": "lithostitched:limited", "limit": 1, "delegate": delegate}),
+            json!({"element_type": "lithostitched:guaranteed", "count": 1, "min_depth": 3,
+                "delegate": delegate}),
+        ] {
+            let mut e = kept.clone();
+            assert!(upgrade_pool_element(&mut e, &mut lost));
+            assert_eq!(e, kept);
+        }
+        assert!(lost.is_empty());
+        // Without a limit, and `delegating`: the delegate, the rest counted.
+        for kind in ["lithostitched:limited", "lithostitched:delegating"] {
+            let mut e = json!({"element_type": kind, "delegate": delegate});
+            assert!(upgrade_pool_element(&mut e, &mut lost));
+            assert_eq!(e, delegate);
+            assert_eq!(lost[kind], 1);
+        }
+        assert!(!upgrade_pool_element(&mut delegate.clone(), &mut lost));
     }
 
     #[test]
@@ -357,12 +385,27 @@ mod tests {
         assert!(modifier(&add("waystones", json!("#a:pools")), &loaded, &mut report).is_none());
         let aliases = json!({"type": "lithostitched:set_pool_aliases"});
         assert!(modifier(&aliases, &loaded, &mut report).is_none());
+        // Processors appended to lists, with the modifier's priority; 1.8.1
+        // reads `processor_lists` (spec-lithostitched §2.2).
+        let nop = json!([{"processor_type": "minecraft:nop"}]);
+        let processors = json!({"type": "lithostitched:add_processor_list_processors",
+            "priority": 10, "processor_lists": ["minecraft:mossify_10_percent"], "processors": nop});
+        let (kind, file) = modifier(&processors, &loaded, &mut report).unwrap();
+        assert_eq!(kind, "processor_list");
+        assert_eq!(
+            file,
+            json!({"horizon:add_to": ["minecraft:mossify_10_percent"], "processors": nop,
+                "horizon:priority": 10})
+        );
+        let wiki = json!({"type": "lithostitched:add_processor_list_processors",
+            "processor_list": "minecraft:mossify_10_percent", "processors": nop});
+        assert!(modifier(&wiki, &loaded, &mut report).is_none());
         assert_eq!(
             report.modifiers_left,
             BTreeMap::from([
                 ("conditions".into(), 1),
                 ("lithostitched:set_pool_aliases".into(), 1),
-                ("target".into(), 1),
+                ("target".into(), 2),
             ])
         );
     }

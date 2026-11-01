@@ -759,11 +759,19 @@ pub struct SpawnState {
     counts: [i32; 8],
     charges: Vec<([i32; 3], f64)>,
     players: Vec<SpawnPlayer>,
-    players_near: FxHashMap<(i32, i32), Vec<usize>>,
-    player_counts: FxHashMap<usize, [i32; 8]>,
+    /// Each chunk asked about: its players' run in `near_list`.
+    players_near: FxHashMap<(i32, i32), (u32, u32)>,
+    near_list: Vec<usize>,
+    /// The mobs counted near each player (`playerMobCounts`), by category.
+    player_counts: Vec<[i32; 8]>,
     last_checked: Option<([i32; 3], String, f64)>,
 }
 impl SpawnState {
+    /// `getSpawnableChunkCount` and `getMobCategoryCounts` (by
+    /// [`Category::ALL`]), for the debug overlay's spawn counts.
+    pub fn counts(&self) -> (i32, [i32; 8]) {
+        (self.spawnable_chunks, self.counts)
+    }
     /// `NaturalSpawner.createState`: every non-persistent entity of a
     /// spawning category in a loaded chunk adds its biome's spawn charge, its
     /// category count and (for mobs) the local caps of the players near it.
@@ -778,9 +786,10 @@ impl SpawnState {
             spawnable_chunks,
             counts: [0; 8],
             charges: Vec::new(),
+            player_counts: vec![[0; 8]; players.len()],
             players,
             players_near: FxHashMap::default(),
-            player_counts: FxHashMap::default(),
+            near_list: Vec::new(),
             last_checked: None,
         };
         for e in entities {
@@ -809,13 +818,10 @@ impl SpawnState {
     /// `ChunkMap.getPlayersCloseForSpawning`: none past the natural spawn
     /// chunk tracker's range of 8 chunks from every player, else the
     /// non-spectators within 128 blocks of the chunk's centre.
-    fn players_near<'a>(
-        near: &'a mut FxHashMap<(i32, i32), Vec<usize>>,
-        players: &[SpawnPlayer],
-        cx: i32,
-        cz: i32,
-    ) -> &'a [usize] {
-        near.entry((cx, cz)).or_insert_with(|| {
+    fn players_near(&mut self, cx: i32, cz: i32) -> std::ops::Range<usize> {
+        let (list, players) = (&mut self.near_list, &self.players);
+        let (start, len) = *self.players_near.entry((cx, cz)).or_insert_with(|| {
+            let start = list.len() as u32;
             let tracked = players.iter().any(|p| {
                 let (px, pz) = (
                     (p.position[0].floor() as i32) >> 4,
@@ -823,24 +829,26 @@ impl SpawnState {
                 );
                 (px - cx).abs().max((pz - cz).abs()) <= 8
             });
-            if !tracked {
-                return Vec::new();
+            if tracked {
+                let (x, z) = (f64::from(cx * 16 + 8), f64::from(cz * 16 + 8));
+                list.extend(
+                    players
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, p)| {
+                            let (dx, dz) = (x - p.position[0], z - p.position[2]);
+                            !p.spectator && dx * dx + dz * dz < 16384.0
+                        })
+                        .map(|(i, _)| i),
+                );
             }
-            let (x, z) = (f64::from(cx * 16 + 8), f64::from(cz * 16 + 8));
-            players
-                .iter()
-                .enumerate()
-                .filter(|(_, p)| {
-                    let (dx, dz) = (x - p.position[0], z - p.position[2]);
-                    !p.spectator && dx * dx + dz * dz < 16384.0
-                })
-                .map(|(i, _)| i)
-                .collect()
-        })
+            (start, list.len() as u32 - start)
+        });
+        start as usize..(start + len) as usize
     }
     fn add_local(&mut self, cx: i32, cz: i32, category: Category) {
-        for &p in Self::players_near(&mut self.players_near, &self.players, cx, cz) {
-            self.player_counts.entry(p).or_insert([0; 8])[category.index()] += 1;
+        for i in self.players_near(cx, cz) {
+            self.player_counts[self.near_list[i]][category.index()] += 1;
         }
     }
     /// `canSpawnForCategoryGlobal`.
@@ -850,12 +858,12 @@ impl SpawnState {
     }
     /// `canSpawnForCategoryLocal` (`LocalMobCapCalculator.canSpawn`).
     pub fn can_spawn_local(&mut self, category: Category, cx: i32, cz: i32) -> bool {
-        let near = Self::players_near(&mut self.players_near, &self.players, cx, cz);
-        near.iter().any(|p| {
-            self.player_counts
-                .get(p)
-                .is_none_or(|c| c[category.index()] < category.max())
-        })
+        // A player with nothing counted yet can spawn: zero is under every
+        // spawning category's cap.
+        let near = self.players_near(cx, cz);
+        self.near_list[near]
+            .iter()
+            .any(|&p| self.player_counts[p][category.index()] < category.max())
     }
     /// `getFilteredSpawningCategories`.
     pub fn filtered_categories(
@@ -1209,14 +1217,18 @@ fn valid_position_for_type<L: NaturalLevel, R: RandomSource>(
         return false;
     }
     let [x, y, z] = pos;
+    // `canSpawnMobAt` comes first in vanilla, but it and `isSpawnPositionOk`
+    // only read the level, so their order cannot change the answer: the few
+    // block reads of the placement turn most positions away before the spawn
+    // list (structures, biome) is looked up again.
+    if !spawn_rules::is_spawn_position_ok(species, l, x, y, z) {
+        return false;
+    }
     if !listed
         && !mobs_at(l, category, x, y, z)
             .iter()
             .any(|e| same_spawner(e, entry))
     {
-        return false;
-    }
-    if !spawn_rules::is_spawn_position_ok(species, l, x, y, z) {
         return false;
     }
     if !spawn_rules::check_spawn_rules(species, l, Reason::Natural, random, x, y, z) {

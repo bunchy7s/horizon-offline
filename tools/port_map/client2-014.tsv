@@ -92,8 +92,8 @@ OutOfMemoryScreen.init	missing		minor: unsure: no out-of-memory screen; Horizon 
 PauseScreen.added	skip:service		friend list listener on the pause screen (social)
 PauseScreen.init	port	crates/horizon-client/src/game/screens.rs::pause_buttons	button layout; the title is drawn in draw_pause_menu
 PauseScreen.createPauseMenu	port	crates/horizon-client/src/game/screens.rs::pause_buttons	gap: player: Report Bugs, Feedback and Player Reporting icons are inactive, and no Mods button
-PauseScreen.getCustomAdditions	port	crates/horizon-client/src/game/screens.rs::pause_buttons	the server links row (links flag); gap: minor: only the server links dialog, the pause_screen_additions tag is not read
-PauseScreen.addCustomDialogButtons	port	crates/horizon-client/src/game/screens.rs::Game::pause_click	Server Links button (id 11) opens the links screen
+PauseScreen.getCustomAdditions	port	crates/horizon-client/src/game/screens.rs::Game::pause_screen_additions	the pause_screen_additions tag: one dialog, else minecraft:custom_options, else the server links row
+PauseScreen.addCustomDialogButtons	port	crates/horizon-client/src/game/screens.rs::Game::pause_click	one full-width button in row 3 (id 14), labelled by computeExternalTitle; the server links fallback opens the links screen (id 11)
 PauseScreen.extractRenderState	port	crates/horizon-client/src/game/screens.rs::Game::draw_pause_menu	gap: minor: no now-playing toast and no draft-report badge
 PauseScreen.rendersNowPlayingToast	missing		minor: unsure: no check of the music-toast option on the pause screen
 PauseScreen.openScreenButton	inline	crates/horizon-client/src/game/screens.rs::Game::pause_click	the Advancements, Stats, Options and World Options actions

@@ -182,6 +182,20 @@ pub fn version_files(version: &str) -> Result<Vec<FileRef>, String> {
         .ok_or_else(|| format!("Modrinth: no version {version}."))
 }
 
+/// Projects' icons in one request (`GET /projects?ids=[…]`, at most 100 ids): id → icon URL, for
+/// those that have one.
+pub fn icons(ids: &[String]) -> Result<Vec<(String, String)>, String> {
+    let ids = &ids[..ids.len().min(100)];
+    let list = serde_json::to_string(ids).map_err(|e| e.to_string())?;
+    let v = get(&format!("{API}/projects?ids={}", encode(&list)))?;
+    Ok(v.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| Some((text(&p["id"]), p["icon_url"].as_str()?.to_owned())))
+        .filter(|(id, url)| !id.is_empty() && !url.is_empty())
+        .collect())
+}
+
 impl Source for Modrinth {
     fn id(&self) -> SourceId {
         SourceId::Modrinth

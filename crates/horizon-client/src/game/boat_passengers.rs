@@ -356,12 +356,8 @@ impl Game<'_> {
                 .map(|(n, &j)| {
                     let m = &self.mobs[j];
                     let animal = is_animal(m.species());
-                    // Another player, on a server's client.
-                    let offset = if &*m.kind.id == "minecraft:player" {
-                        PLAYER_RIDING_OFFSET
-                    } else {
-                        riders::vehicle_attachment(m)
-                    };
+                    // Another player's too, on a server's client.
+                    let offset = riders::vehicle_attachment(m);
                     let index = players + n;
                     // calculatePassengerBodyYRot.
                     let turn = match (animal && full, m.id.is_multiple_of(2)) {

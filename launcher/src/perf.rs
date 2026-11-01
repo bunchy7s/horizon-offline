@@ -229,6 +229,11 @@ pub struct Bench {
 }
 
 impl Bench {
+    /// Whether this launcher measures itself (`HORIZON_LAUNCHER_BENCH` set).
+    pub fn wanted() -> bool {
+        std::env::var_os(BENCH_ENV).is_some()
+    }
+
     pub fn from_env() -> Option<Bench> {
         let out = std::env::var_os(BENCH_ENV)?;
         Some(Bench {

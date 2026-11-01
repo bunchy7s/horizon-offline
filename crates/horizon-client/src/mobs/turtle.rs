@@ -32,7 +32,9 @@ pub fn register(m: &mut Mob) {
     ] {
         m.set_malus(t, -1.0);
     }
-    m.ai.nav.kind = NavKind::Amphibious;
+    m.ai.nav.kind = NavKind::Amphibious {
+        prefers_shallow: false,
+    };
     let food = m.kind.food.clone();
     let g = &mut m.ai.goals;
     g.add(0, Panic::new(1.2).looking_for_water(7));

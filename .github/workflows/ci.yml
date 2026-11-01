@@ -24,14 +24,23 @@ env:
   HORIZON_TELEMETRY_URL: "off"
 
 jobs:
+  # One job, not one per check: each job takes a runner from the organisation's shared pool, and with every pull request
+  # and every merge to main starting this workflow, three jobs a run left the pool's queue tens of minutes deep.
+  #
+  # Where: GitHub's runners. With the repository variable SELF_HOSTED_CI=all (for when that pool is full: their 4 CPUs
+  # are about one GitHub runner, docs/ci-runners.md), main's pushes and this repository's own pull requests run on
+  # playhorizon's checks runners (label playhorizon-ci); a fork's pull request never does (and the runners refuse it
+  # themselves). There the build folder persists (CARGO_TARGET_DIR, outside the checkout), so the apt packages,
+  # Python and the Rust cache steps are GitHub's only.
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ${{ vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v5
+        if: runner.environment == 'github-hosted'
         with:
           python-version: '3.12'
       - name: Does this pull request need Rust checks?
@@ -41,20 +50,33 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 tools/ci/rust_changes.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+      # A pull request adds only its own commits to main, so it reads those; main's pushes read every ref's history.
       - name: Keep game artifacts out of Git
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           python tools/check_public_tree.py
-          python tools/check_public_tree.py --history
+          if [ "$EVENT" = pull_request ]; then
+            python tools/check_public_tree.py --range "$BASE_SHA..$HEAD_SHA"
+          else
+            python tools/check_public_tree.py --history
+          fi
       - name: Test offline research tooling
         run: python -m unittest discover -s tests -v
       - name: Install Rust toolchain and the ALSA and udev headers the client links against
         if: steps.rust.outputs.required != 'false'
+        env:
+          HOSTED: ${{ runner.environment == 'github-hosted' }}
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          if [ "$HOSTED" = true ]; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+          fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       # Dependencies and the workspace's own build, saved from main's runs (pull requests read main's cache).
       - uses: Swatinem/rust-cache@v2
-        if: steps.rust.outputs.required != 'false'
+        if: steps.rust.outputs.required != 'false' && runner.environment == 'github-hosted'
         with:
           shared-key: verify
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -67,6 +89,8 @@ jobs:
           cargo +stable clippy -p horizon-client --all-targets --no-default-features -- -D warnings
       # Libraries, binaries and integration tests, then doc tests: not the ~275 examples, which clippy above already
       # type-checks and the parity job builds and runs (they were most of this step's build and link time).
+      # cargo test, not nextest: nextest's process per test reloads each binary's shared tables for every test, and on
+      # these 4-core runners it was no faster (#4978).
       - name: Test Rust core and voxel kernel correctness
         if: steps.rust.outputs.required != 'false'
         run: |
@@ -79,8 +103,8 @@ jobs:
   # changes it or a crate it builds is checked here, and so is every push to main: two pull requests can each pass
   # alone and break it together (#2059 and the registry ratings did, 2026-10-26).
   launcher:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ${{ vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -94,12 +118,16 @@ jobs:
         run: python3 tools/ci/rust_changes.py --launcher "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
       - name: Install Rust and the headers GPUI links against
         if: steps.launcher.outputs.required != 'false'
+        env:
+          HOSTED: ${{ runner.environment == 'github-hosted' }}
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends libxkbcommon-x11-dev libwayland-dev \
-            libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev
+          if [ "$HOSTED" = true ]; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends libxkbcommon-x11-dev libwayland-dev \
+              libx11-xcb-dev libfontconfig-dev libvulkan-dev libasound2-dev libudev-dev
+          fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@v2
-        if: steps.launcher.outputs.required != 'false'
+        if: steps.launcher.outputs.required != 'false' && runner.environment == 'github-hosted'
         with:
           workspaces: launcher
           shared-key: launcher
@@ -116,7 +144,8 @@ jobs:
   # a harness, an oracle, a probe or the runner, or carries the run-parity label (run-parity.yml, when it is added).
   parity-scope:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    # A git diff of this repository's own branch: one of playhorizon's small runners (docs/ci-runners.md).
+    runs-on: ${{ vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted", "linux", "playhorizon-light"]') || 'ubuntu-latest' }}
     outputs:
       run: ${{ steps.scope.outputs.run }}
     steps:

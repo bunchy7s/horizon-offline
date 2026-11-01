@@ -8,7 +8,7 @@ use horizon_client::{
     effects,
     lan::attributes::{add_modifier, generic_syncable, instance, operation_named},
     mobs::{
-        Mob,
+        Mob, Species,
         finalize::{self, Attr, Op},
     },
 };
@@ -116,20 +116,22 @@ impl Game<'_> {
     /// `/attribute` changed.
     pub(super) fn mob_attributes(&self, m: &Mob, out: &mut Vec<AttributeSnapshot>) {
         let kind = m.kind.id.as_str();
-        if let Some(a) = self.synced_attribute(kind, "minecraft:movement_speed") {
-            instance(out, a, finalize::base_value(m, Attr::MovementSpeed));
+        // Movement speed is synced for nearly every mob, and read up to three
+        // times below: looked up once per mob and tick.
+        let speed = self
+            .synced_attribute(kind, Attr::MovementSpeed.id())
+            .map(|a| (a, finalize::base_value(m, Attr::MovementSpeed)));
+        if let Some((a, base)) = speed {
+            instance(out, a, base);
         }
         if let Some(s) = m.extra.attributes.as_deref() {
             for (attr, v) in &s.bases {
-                if let Some(a) = self.synced_attribute(kind, &format!("minecraft:{}", attr.name()))
-                {
+                if let Some(a) = self.synced_attribute(kind, attr.id()) {
                     instance(out, a, *v).base = *v;
                 }
             }
             for x in &s.modifiers {
-                if let Some(a) =
-                    self.synced_attribute(kind, &format!("minecraft:{}", x.attr.name()))
-                {
+                if let Some(a) = self.synced_attribute(kind, x.attr.id()) {
                     add_modifier(
                         out,
                         a,
@@ -147,14 +149,32 @@ impl Game<'_> {
                 }
             }
         }
-        if let (Some(a), Some((amount, Op::AddMultipliedBase))) = (
-            self.synced_attribute(kind, "minecraft:movement_speed"),
-            finalize::transient(m, Attr::MovementSpeed),
-        ) {
+        // AbstractHorse.randomizeAttributes rolls a horse's jump strength as
+        // its base (kept in `vector[0]`), so the instance is synced: its
+        // rider's client jumps it (`getCustomJump`).
+        let rolled = matches!(
+            m.species(),
+            Species::Horse | Species::SkeletonHorse | Species::ZombieHorse
+        );
+        let jump_base = m
+            .extra
+            .attributes
+            .as_deref()
+            .is_some_and(|s| s.bases.iter().any(|(a, _)| *a == Attr::JumpStrength));
+        if rolled
+            && !jump_base
+            && m.extra.vector[0] > 0.0
+            && let Some(a) = self.synced_attribute(kind, Attr::JumpStrength.id())
+        {
+            instance(out, a, m.extra.vector[0]).base = m.extra.vector[0];
+        }
+        if let (Some((a, base)), Some((amount, Op::AddMultipliedBase))) =
+            (speed, finalize::transient(m, Attr::MovementSpeed))
+        {
             add_modifier(
                 out,
                 a,
-                finalize::base_value(m, Attr::MovementSpeed),
+                base,
                 AttributeModifier {
                     id: "minecraft:baby".into(),
                     amount,
@@ -163,14 +183,11 @@ impl Game<'_> {
             );
         }
         // LivingEntity.setSprinting: SPEED_MODIFIER_SPRINTING (a dashing cat or ocelot).
-        if let (true, Some(a)) = (
-            m.extra.sprinting,
-            self.synced_attribute(kind, "minecraft:movement_speed"),
-        ) {
+        if let (true, Some((a, base))) = (m.extra.sprinting, speed) {
             add_modifier(
                 out,
                 a,
-                finalize::base_value(m, Attr::MovementSpeed),
+                base,
                 AttributeModifier {
                     id: "minecraft:sprinting".into(),
                     amount: f64::from(0.3f32),

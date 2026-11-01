@@ -101,6 +101,8 @@ enum Animate {
     DeadBush,
     /// `ShortDryGrassBlock` and `TallDryGrassBlock`.
     DryGrass,
+    /// A creaking heart that is not uprooted (`CreakingHeartBlock.animateTick`).
+    CreakingHeart,
 }
 fn step(facing: &str) -> [i32; 3] {
     match facing {
@@ -236,6 +238,9 @@ fn classify(name: &str, prop: &dyn Fn(&str) -> Option<String>) -> Animate {
         "firefly_bush" => Animate::FireflyBush,
         "open_eyeblossom" => Animate::OpenEyeblossom,
         "pale_hanging_moss" => Animate::PaleHangingMoss,
+        "creaking_heart" if prop("creaking_heart_state").as_deref() != Some("uprooted") => {
+            Animate::CreakingHeart
+        }
         "dead_bush" => Animate::DeadBush,
         "short_dry_grass" | "tall_dry_grass" => Animate::DryGrass,
         "sculk_sensor" | "calibrated_sculk_sensor"
@@ -296,7 +301,9 @@ fn candle_offsets(count: u8) -> &'static [[f64; 3]] {
     }
 }
 
-/// Per-state animate behaviour and the block tags it needs.
+/// Per-state animate behaviour and the block tags it needs. Empty by default
+/// (a dedicated server): every lookup finds nothing to animate.
+#[derive(Default)]
 pub struct AnimateTables {
     kinds: Vec<Animate>,
     impermeable: Vec<bool>,
@@ -442,6 +449,8 @@ pub struct AnimateContext<'a> {
     pub height_no_leaves: &'a dyn Fn([i32; 3]) -> i32,
     /// `EnvironmentAttributes.FIREFLY_BUSH_SOUNDS` (overworld day timeline).
     pub firefly_bush_sounds: bool,
+    /// `EnvironmentAttributes.CREAKING_ACTIVE` (overworld day timeline).
+    pub creaking_active: bool,
     /// `Level.getSkyDarken`, for `getMaxLocalRawBrightness`.
     pub sky_darken: i32,
     /// Creative main-hand marker block and a resolver for each placed state's sprite.
@@ -529,7 +538,7 @@ fn add_visible(engine: &mut ParticleEngine, ty: T, p: [f64; 3], v: [f64; 3]) {
     engine.add_with(&ParticleOptions::simple(ty), p, v, false, true);
 }
 fn sound(engine: &mut ParticleEngine, name: &'static str, p: [f64; 3], volume: f32, pitch: f32) {
-    engine.sounds.push((name, p, volume, pitch));
+    engine.sounds.push((name, p, volume, pitch, false));
 }
 fn redstone(engine: &mut ParticleEngine, p: [f64; 3]) {
     engine.add(&ParticleOptions::dust([1.0, 0.0, 0.0], 1.0), p, [0.0; 3]);
@@ -1257,6 +1266,39 @@ fn block_animate_tick(
                     let name = "minecraft:block.pale_hanging_moss.idle";
                     sound(engine, name, [fx, fy, fz], 1.0, 1.0);
                 }
+            }
+        }
+        Animate::CreakingHeart => {
+            // CreakingHeartBlock.animateTick: the idle creak is drawn only while
+            // the attribute is on, then needs pale oak logs on all six sides
+            // (`CreakingHeartBlock.isSurroundedByLogs`).
+            if ctx.creaking_active
+                && next_int(engine.random(), 16) == 0
+                && [
+                    [-1, 0, 0],
+                    [1, 0, 0],
+                    [0, -1, 0],
+                    [0, 1, 0],
+                    [0, 0, -1],
+                    [0, 0, 1],
+                ]
+                .iter()
+                .all(|d| {
+                    let p = [pos[0] + d[0], pos[1] + d[1], pos[2] + d[2]];
+                    tables
+                        .pale_oak_logs
+                        .get(ctx.state(p).0 as usize)
+                        .copied()
+                        .unwrap_or(false)
+                })
+            {
+                sound(
+                    engine,
+                    "minecraft:block.creaking_heart.idle",
+                    [fx, fy, fz],
+                    1.0,
+                    1.0,
+                );
             }
         }
         Animate::DeadBush => {

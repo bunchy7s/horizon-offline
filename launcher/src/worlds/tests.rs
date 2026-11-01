@@ -111,7 +111,10 @@ fn a_backup_is_named_and_laid_out_as_vanillas() {
         home.join("backups/2026-10-27_01-02-03_World (1).zip")
     );
     let mut zip = zip::ZipArchive::new(fs::File::open(&first).unwrap()).unwrap();
-    let mut entries: Vec<String> = zip.file_names().map(str::to_string).collect();
+    let mut entries: Vec<String> = zip
+        .file_names()
+        .map(|name| name.unwrap().into_owned())
+        .collect();
     entries.sort();
     assert_eq!(entries, ["World/level.dat", "World/region/r.0.0.mca"]);
     let mut region = Vec::new();

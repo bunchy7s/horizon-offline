@@ -8,7 +8,7 @@
 //! changed.
 use crate::{
     blocks::{BlockFacts, Fluid, MAP_COLORS},
-    chunk::{Chunk, MIN_Y, SECTIONS},
+    chunk::Chunk,
     fast_hash::FxHashMap,
     world::World,
 };
@@ -113,7 +113,8 @@ fn scan_column(
             return (color | WALL, head as i16, 0);
         }
     }
-    while y > MIN_Y {
+    let bottom = chunk.min_y();
+    while y > bottom {
         let (mut color, flags) = palette.get(chunk.get(x, y, z));
         if color == 0 {
             y -= 1;
@@ -123,7 +124,7 @@ fn scan_column(
         let fluid = flags & FLUID;
         if fluid != 0 {
             let mut below = y - 1;
-            while below > MIN_Y && palette.get(chunk.get(x, below, z)).1 & FLUID != 0 {
+            while below > bottom && palette.get(chunk.get(x, below, z)).1 & FLUID != 0 {
                 depth = depth.saturating_add(1);
                 below -= 1;
             }
@@ -134,11 +135,11 @@ fn scan_column(
         }
         return (color, y as i16, depth);
     }
-    (0, MIN_Y as i16, 0)
+    (0, bottom as i16, 0)
 }
 /// The highest block of a chunk worth scanning from.
 fn top_of(chunk: &Chunk, air: u32, layer: Layer) -> i32 {
-    let surface = (0..SECTIONS)
+    let surface = (0..chunk.sections.len())
         .rev()
         .find(|&s| {
             chunk
@@ -146,7 +147,7 @@ fn top_of(chunk: &Chunk, air: u32, layer: Layer) -> i32 {
                 .get(s)
                 .is_some_and(|sec| !sec.is_uniform(air))
         })
-        .map_or(MIN_Y, |s| MIN_Y + s as i32 * 16 + 15);
+        .map_or(chunk.min_y(), |s| chunk.min_y() + s as i32 * 16 + 15);
     match layer {
         Layer::Surface => surface,
         Layer::Below(head) => surface.min(head),
@@ -156,7 +157,7 @@ fn scan_tile(chunk: &Chunk, palette: &Palette, air: u32, layer: Layer, revision:
     let top = top_of(chunk, air, layer);
     let mut tile = Tile {
         color: [0; 256],
-        height: [MIN_Y as i16; 256],
+        height: [chunk.min_y() as i16; 256],
         depth: [0; 256],
         revision,
         layer,

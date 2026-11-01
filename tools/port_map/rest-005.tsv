@@ -78,8 +78,8 @@ SoundManager.apply	port	crates/horizon-client-render/src/audio.rs::Audio::reload
 SoundManager.validateSoundResource	inline	crates/horizon-client-render/src/sound_events.rs::SoundRegistry::add_file	file existence check through the exists closure
 SoundManager.Preparations.handleRegistration	port	crates/horizon-client-render/src/sound_events.rs::SoundRegistry::add_file	replace flag and sound entries
 SoundManager.Preparations.apply	inline	crates/horizon-client-render/src/sound_events.rs::SoundRegistry::load	registry replaced with the prepared one
-SoundPreviewHandler.preview	missing		player: moving a category volume slider in Options plays no preview sound (Options.java calls SoundPreviewHandler.preview)
-SoundPreviewHandler.stopOtherCategoryPreview	missing		minor: part of the volume preview
+SoundPreviewHandler.preview	port	crates/horizon-client-render/src/sound_preview.rs::SoundPreview::preview	
+SoundPreviewHandler.stopOtherCategoryPreview	port	crates/horizon-client-render/src/sound_preview.rs::SoundPreview::stop_other_category_preview	
 WeighedSoundEvents.preloadIfRequired	skip:java		preload is a cache; Horizon decodes on demand
 CraftPlanksTutorialStep.tick	missing		player: a new survival world shows no craft-planks tutorial toast; Horizon has no tutorial steps (tutorialStep is only stored in options)
 CraftPlanksTutorialStep.hasCraftedPlanksPreviously	missing		minor: part of the craft-planks tutorial
@@ -133,7 +133,7 @@ SharedSuggestionProvider.suggestRegistryElements	port	crates/horizon-command/src
 SharedSuggestionProvider.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	suggestions per argument type
 SharedSuggestionProvider.suggest2DCoordinates	port	crates/horizon-command/src/args.rs::suggest_coordinates	x z suggestions
 AngleArgument.SingleAngle.getAngle	port	crates/horizon-command/src/args.rs::Coord::get	gap: minor: the wrap to -180..180 is not confirmed
-ArgumentSignatures.signCommand	skip:service		chat message signing
+ArgumentSignatures.signCommand	port	crates/horizon-client/src/game/remote_chat.rs::Game::send_command	each message argument at the next chain link
 DimensionArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	dimension suggestions
 DimensionArgument.getDimension	inline	crates/horizon-client/src/game/commands/execute.rs::Game::modify	dimension resolved where execute in reads it
 EntityAnchorArgument.parse	port	crates/horizon-command/src/args.rs::ArgType::parse	eyes or feet

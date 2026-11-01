@@ -33,7 +33,7 @@ Deadmau5EarsLayer.submit	missing		minor: only a player named deadmau5 gets ears;
 DolphinCarryingItemLayer.submit	missing		player: a dolphin carrying an item shows nothing (the dolphin model has no arm bones for the hand lookup)
 DrownedOuterLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	drowned outer layer, adult and baby
 EnergySwirlLayer.submit	port	crates/horizon-client/src/mobs/render.rs::energy_swirl	charged creeper and powered wither swirl, drawn in render_visible
-EquipmentLayerRenderer.renderLayers	port	crates/horizon-client/src/game/armor_stands.rs::Game::armor_layers	gap: player: the leather overlay (layer 1 of the equipment asset) is never drawn, only layer 0
+EquipmentLayerRenderer.renderLayers	port	crates/horizon-client/src/game/armor_stands.rs::Game::armor_layers	draws all humanoid layers of the equipment asset, including leather overlay
 EquipmentLayerRenderer.getColorForLayer	port	crates/horizon-client/src/game/armor_stands.rs::Game::armor_layers	gap: player: a dyed leather piece is drawn in the undyed brown; the stack's dyed colour is not read
 EquipmentLayerRenderer.TrimTextureKey.createTextureWithNoPalette	port	crates/horizon-client-render/src/trims.rs::TrimTexture::generate	a trim with no palette is used as its own texture
 EyesLayer.submit	port	crates/horizon-client/src/mobs/render.rs::layers	spider, enderman and phantom eyes

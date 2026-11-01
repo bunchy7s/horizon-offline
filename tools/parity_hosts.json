@@ -45,6 +45,7 @@
  "solo": {
   "remote_fireball": "two game windows (lan_e2e); on 4 CPUs beside other harnesses, screenshots and control requests take ticks the check needs",
   "remote_fireworks": "two game windows (lan_e2e); a screenshot took ~1.5 s beside 3 other harnesses on playhorizon's runner, past the sparks' life (2026-10-27)",
+  "return_to_sender": "a game window: an attack on a fireball and its flight to the ghast take ticks the check needs",
   "server_player_sculk": "two game windows (lan_e2e); failed on playhorizon's runner beside other harnesses, passes alone (2026-10-27)",
   "world_reopen": "a game window reopening a world: failed on playhorizon's runner beside other harnesses (2026-10-27)"
  },
@@ -52,6 +53,7 @@
   "lan_integration": "the whole lan_e2e suite: ~40 min a run on a loaded runner, and single checks flake under load; run it by name, or tools/lan_e2e.py"
  },
  "known_flaky": {
-  "world_reopen": "counted 4 minecarts instead of 3 once on a loaded Mac mini runner, then passed at the same head (10-26)"
+  "world_reopen": "counted 4 minecarts instead of 3 once on a loaded Mac mini runner, then passed at the same head (10-26)",
+  "lunge_motion": "a loaded Mac mini runner: the server catches up with two ticks for one of the jump's moves (Alice falls a tick of gravity more, -0.3015 vs -0.2277; the harness now names it), and vanilla's own run once sent an extra motion while sprinting; the same trees pass alone (#5656, 11-01)"
  }
 }

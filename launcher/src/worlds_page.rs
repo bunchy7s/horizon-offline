@@ -90,13 +90,20 @@ impl Launcher {
         self.worlds.done = None;
         let task = cx.background_executor().spawn(async move {
             match action {
-                Action::Backup => worlds::backup(&home, &world)
-                    .map(|zip| (format!("{} backed up.", world.name), Some(zip))),
-                Action::Copy => {
-                    worlds::copy(&world).map(|c| (format!("Copied to {}.", c.name), None))
-                }
-                Action::Delete => worlds::delete(&world)
-                    .map(|()| (format!("{} moved to the trash.", world.name), None)),
+                Action::Backup => worlds::backup(&home, &world).map(|zip| {
+                    (
+                        trf("{name} backed up.", &[("name", &world.name)]),
+                        Some(zip),
+                    )
+                }),
+                Action::Copy => worlds::copy(&world)
+                    .map(|c| (trf("Copied to {name}.", &[("name", &c.name)]), None)),
+                Action::Delete => worlds::delete(&world).map(|()| {
+                    (
+                        trf("{name} moved to the trash.", &[("name", &world.name)]),
+                        None,
+                    )
+                }),
             }
         });
         cx.spawn(async move |this, cx| {
@@ -111,17 +118,20 @@ impl Launcher {
         .detach();
     }
 
-    /// Home's Worlds section, for the selected instance.
+    /// How many worlds the selected instance has; None while they are read.
+    pub(super) fn worlds_count(&mut self, cx: &mut Context<Self>) -> Option<usize> {
+        let home = self.selected_instance()?.home.clone();
+        self.load_worlds(home, cx);
+        self.worlds.fresh.then_some(self.worlds.list.len())
+    }
+
+    /// Home's Worlds tab, for the selected instance.
     pub(super) fn worlds_section(&mut self, cx: &mut Context<Self>) -> Option<Div> {
         let t = self.theme;
         let home = self.selected_instance()?.home.clone();
         self.load_worlds(home.clone(), cx);
         let list = self.worlds.list.clone();
-        let mut section = div()
-            .flex()
-            .flex_col()
-            .gap(px(8.))
-            .child(section_title("Worlds", "globe", &t).mb(px(4.)));
+        let mut section = div().flex().flex_col().gap(px(8.));
         match &self.worlds.done {
             Some(Ok((message, zip))) => {
                 let mut line = div().flex().items_center().gap(px(12.)).child(
@@ -152,7 +162,7 @@ impl Launcher {
                         .child(
                             text(theme::CAPTION)
                                 .text_color(t.muted)
-                                .child("No worlds yet: they appear here once you play one."),
+                                .child(tr("No worlds yet: they appear here once you play one.")),
                         )
                         .child(
                             button("worlds-folder", "Open folder", Kind::Ghost, &t).on_click(
@@ -218,7 +228,7 @@ impl Launcher {
                 .child(
                     text(theme::CAPTION)
                         .text_color(t.danger)
-                        .child("Move it to the trash?"),
+                        .child(tr("Move it to the trash?")),
                 )
                 .child(act("world-keep", "Keep", Kind::Ghost).on_click(cx.listener(
                     |this, _: &ClickEvent, _, cx| {
@@ -235,7 +245,11 @@ impl Launcher {
                     )),
                 );
         } else if this_busy {
-            actions = actions.child(text(theme::CAPTION).text_color(t.muted).child("Working…"));
+            actions = actions.child(
+                text(theme::CAPTION)
+                    .text_color(t.muted)
+                    .child(tr("Working…")),
+            );
         } else {
             let (backup, copy, folder) = (w.clone(), w.clone(), w.path.clone());
             let (delete, play) = (w.folder.clone(), w.folder.clone());

@@ -113,6 +113,18 @@ def scenarios():
                 steps = [step()] * 25 + [step(set=dict(hand='main', stack=b), busy=busy)] + [step(busy=busy)] * 25
                 steps += [step(set=dict(hand='off', stack=a))] + [step()] * 12 + [step(ac=1)] + [step()] * 30
                 yield case(steps, False, a)
+    # #4124: mining a block above while jumping into reach: holding the
+    # attack button, the aim is lost on the way down and found again on the
+    # next jump, several times, and the block never finishes breaking.
+    for block, main in [('minecraft:stone', ['minecraft:diamond_pickaxe', 1]),
+                        ('minecraft:dirt', None),
+                        ('minecraft:stone', None)]:
+        steps = []
+        for _ in range(3):
+            steps += [step(block_hit(TARGETS[0]), ad=True)] * 6
+            steps += [step(ad=True)] * 3
+        steps += [step(block_hit(TARGETS[0]), ad=True)] * 40 + [step()] * 8
+        yield case(steps, False, main, blocks={TARGETS[0]: block})
     # Haste and mining fatigue change the swing's length.
     for haste in (None, 0, 1, 2, 4):
         for fatigue in (None, 0, 1, 2):

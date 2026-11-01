@@ -32,6 +32,7 @@ import net.minecraft.world.level.chunk.status.ChunkPyramid;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.*;
 import net.minecraft.world.level.levelgen.blending.Blender;
+import net.minecraft.world.level.levelgen.blending.BlendingData;
 import net.minecraft.world.level.levelgen.structure.*;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
 import net.minecraft.world.level.storage.LevelStorageSource;
@@ -200,6 +201,13 @@ public final class VanillaChunkGenerationOracle {
     public static void main(String[] args) throws Exception {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+        // A crash report of a chunk request vanilla refused names the chunk and its distance.
+        Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            for (Throwable c = e; c != null; c = c.getCause()) {
+                if (c instanceof net.minecraft.ReportedException r) System.err.println(r.getReport().getFriendlyReport(net.minecraft.ReportType.CRASH));
+            }
+            e.printStackTrace();
+        });
         String mode = args[0];
         Path out = Path.of(args[1]);
         long seed = Long.parseLong(args[2]);
@@ -262,7 +270,8 @@ public final class VanillaChunkGenerationOracle {
             case "the_end" -> net.minecraft.world.level.dimension.BuiltinDimensionTypes.END;
             default -> net.minecraft.world.level.dimension.BuiltinDimensionTypes.OVERWORLD;
         }).value();
-        LevelHeightAccessor height = dimension.equals("overworld") ? LevelHeightAccessor.create(-64, 384) : LevelHeightAccessor.create(0, 256);
+        // The level's build range is its dimension type's: a data pack's when one changes it.
+        LevelHeightAccessor height = LevelHeightAccessor.create(dimensionType.minY(), dimensionType.height());
         var factory = PalettedContainerFactory.create(access);
         var unsafeField = Class.forName("sun.misc.Unsafe").getDeclaredField("theUnsafe");
         unsafeField.setAccessible(true);
@@ -308,12 +317,30 @@ public final class VanillaChunkGenerationOracle {
         var level = (ServerLevel) allocate.invoke(unsafe, OracleLevel.class);
         OracleLevel.structures = new StructureManager(level, new WorldOptions(seed, true, false), check);
         var pyramid = ChunkPyramid.GENERATION_PYRAMID;
+        // HORIZON_OLD_CHUNKS=SEED:x0,z0,x1,z1: chunks another seed generated, which count as saved by an older
+        // version (blending data, no worldgen heightmap) and which the target chunks blend with.
+        List<Long> oldChunks = new ArrayList<>();
+        String oldSpec = System.getenv("HORIZON_OLD_CHUNKS");
+        long oldSeed = 0;
+        if (oldSpec != null) {
+            oldSeed = Long.parseLong(oldSpec.substring(0, oldSpec.indexOf(':')));
+            String[] c = oldSpec.substring(oldSpec.indexOf(':') + 1).split(",");
+            for (int x = Integer.parseInt(c[0]); x <= Integer.parseInt(c[2]); x++) for (int z = Integer.parseInt(c[1]); z <= Integer.parseInt(c[3]); z++) oldChunks.add(ChunkPos.pack(x, z));
+        }
         java.util.function.BiFunction<Integer, Integer, ProtoChunk> chunkAt = (x, z) -> chunks.computeIfAbsent(ChunkPos.pack(x, z), k -> new ProtoChunk(new ChunkPos(x, z), UpgradeData.EMPTY, height, factory, null));
         java.util.function.BiFunction<ChunkStatus, ProtoChunk, WorldGenRegion> regionFor = (status, chunk) -> {
             var step = pyramid.getStepTo(status);
             int radius = step.directDependencies().size() - 1;
             var cache = StaticCache2D.<GenerationChunkHolder>create(chunk.getPos().x(), chunk.getPos().z(), radius, (x, z) -> new ChunkHolder(chunkAt.apply(x, z)));
-            return new WorldGenRegion(level, cache, step, chunk);
+            return new WorldGenRegion(level, cache, step, chunk) {
+                @Override
+                public boolean isOldChunkAround(final ChunkPos pos, final int range) {
+                    for (long key : oldChunks) {
+                        if (Math.abs(ChunkPos.getX(key) - pos.x()) <= range && Math.abs(ChunkPos.getZ(key) - pos.z()) <= range) return true;
+                    }
+                    return false;
+                }
+            };
         };
         Runnable noop = () -> {};
         try (var w = new PrintWriter(Files.newBufferedWriter(out, StandardCharsets.UTF_8))) {
@@ -353,6 +380,39 @@ public final class VanillaChunkGenerationOracle {
             }
             for (int rect = 4; rect < args.length; rect++) {
             chunks.clear();
+            if (!oldChunks.isEmpty()) {
+                var oldState = RandomState.create(world.lookupOrThrow(Registries.NOISE), oldSeed, settings.value());
+                int ox0 = Integer.MAX_VALUE, oz0 = Integer.MAX_VALUE, ox1 = Integer.MIN_VALUE, oz1 = Integer.MIN_VALUE;
+                for (long key : oldChunks) { ox0 = Math.min(ox0, ChunkPos.getX(key)); ox1 = Math.max(ox1, ChunkPos.getX(key)); oz0 = Math.min(oz0, ChunkPos.getZ(key)); oz1 = Math.max(oz1, ChunkPos.getZ(key)); }
+                // The pyramid asks structure starts of every chunk within 8 (there are none here).
+                for (int z = oz0 - 9; z <= oz1 + 9; z++) for (int x = ox0 - 9; x <= ox1 + 9; x++) chunkAt.apply(x, z).setPersistedStatus(ChunkStatus.STRUCTURE_STARTS);
+                for (int z = oz0 - 1; z <= oz1 + 1; z++) for (int x = ox0 - 1; x <= ox1 + 1; x++) {
+                    var chunk = chunkAt.apply(x, z);
+                    var region = regionFor.apply(ChunkStatus.BIOMES, chunk);
+                    generator.createBiomes(oldState, Blender.empty(), OracleLevel.structures.forWorldGenRegion(region), chunk).join();
+                    chunk.setPersistedStatus(ChunkStatus.BIOMES);
+                }
+                for (int z = oz0; z <= oz1; z++) for (int x = ox0; x <= ox1; x++) {
+                    var chunk = chunkAt.apply(x, z);
+                    var region = regionFor.apply(ChunkStatus.TERRAIN, chunk);
+                    Set<Holder<Biome>> possible = new HashSet<>();
+                    for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) region.getChunk(x + dx, z + dz).collectBiomesInPalette(possible);
+                    generator.buildTerrain(chunk, Blender.empty(), oldState, OracleLevel.structures.forWorldGenRegion(region), region.getBiomeManager(), region, possible).join();
+                    Heightmap.primeHeightmaps(chunk, EnumSet.of(Heightmap.Types.MOTION_BLOCKING, Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, Heightmap.Types.OCEAN_FLOOR, Heightmap.Types.WORLD_SURFACE));
+                    chunk.setPersistedStatus(ChunkStatus.TERRAIN);
+                }
+                // The ring around the old chunks was only there for their biomes; it is generated afresh below.
+                for (int z = oz0 - 9; z <= oz1 + 9; z++) for (int x = ox0 - 9; x <= ox1 + 9; x++) if (!oldChunks.contains(ChunkPos.pack(x, z))) chunks.remove(ChunkPos.pack(x, z));
+                var blendingField = ChunkAccess.class.getDeclaredField("blendingData");
+                blendingField.setAccessible(true);
+                var heightmapsField = ChunkAccess.class.getDeclaredField("heightmaps");
+                heightmapsField.setAccessible(true);
+                for (long key : oldChunks) {
+                    var chunk = chunks.get(key);
+                    blendingField.set(chunk, BlendingData.unpack(new BlendingData.Packed(height.getMinSectionY(), height.getMaxSectionY() + 1, Optional.empty())));
+                    ((Map<?, ?>) heightmapsField.get(chunk)).remove(Heightmap.Types.WORLD_SURFACE_WG);
+                }
+            }
             String[] corners = args[rect].split(",");
             int x0 = Integer.parseInt(corners[0]), z0 = Integer.parseInt(corners[1]), x1 = Integer.parseInt(corners[2]), z1 = Integer.parseInt(corners[3]);
             // Margins: FEATURES need TERRAIN at 1, which needs BIOMES at 1 more; STRUCTURE_STARTS reach 8 further.
@@ -360,31 +420,37 @@ public final class VanillaChunkGenerationOracle {
             int fx0 = x0 - m, fz0 = z0 - m, fx1 = x1 + m, fz1 = z1 + m;
             int tx0 = fx0 - 1, tz0 = fz0 - 1, tx1 = fx1 + 1, tz1 = fz1 + 1;
             int bx0 = tx0 - 1, bz0 = tz0 - 1, bx1 = tx1 + 1, bz1 = tz1 + 1;
-            int sx0 = tx0 - 8, sz0 = tz0 - 8, sx1 = tx1 + 8, sz1 = tz1 + 8;
+            int sm = oldChunks.isEmpty() ? 8 : 9; // blending reads the neighbours of old chunks 7 away
+            int sx0 = tx0 - sm, sz0 = tz0 - sm, sx1 = tx1 + sm, sz1 = tz1 + sm;
             for (int z = sz0; z <= sz1; z++) for (int x = sx0; x <= sx1; x++) {
+                if (oldChunks.contains(ChunkPos.pack(x, z))) continue;
                 var chunk = chunkAt.apply(x, z);
                 generator.createStructures(access, state, OracleLevel.structures, chunk, templates, levelKey);
                 chunk.setPersistedStatus(ChunkStatus.STRUCTURE_STARTS);
             }
-            for (int z = tz0; z <= tz1; z++) for (int x = tx0; x <= tx1; x++) {
+            int rm = oldChunks.isEmpty() ? 0 : 1; // Blender.of asks for the centre chunk itself at STRUCTURE_REFERENCES
+            for (int z = tz0 - rm; z <= tz1 + rm; z++) for (int x = tx0 - rm; x <= tx1 + rm; x++) {
+                if (oldChunks.contains(ChunkPos.pack(x, z))) continue;
                 var chunk = chunkAt.apply(x, z);
                 var region = regionFor.apply(ChunkStatus.STRUCTURE_REFERENCES, chunk);
                 generator.createReferences(region, OracleLevel.structures.forWorldGenRegion(region), chunk);
                 chunk.setPersistedStatus(ChunkStatus.STRUCTURE_REFERENCES);
             }
             for (int z = bz0; z <= bz1; z++) for (int x = bx0; x <= bx1; x++) {
+                if (oldChunks.contains(ChunkPos.pack(x, z))) continue;
                 var chunk = chunkAt.apply(x, z);
                 if (chunk.getPersistedStatus() != ChunkStatus.STRUCTURE_STARTS && chunk.getPersistedStatus() != ChunkStatus.EMPTY && chunk.getPersistedStatus() != ChunkStatus.STRUCTURE_REFERENCES) continue;
                 var region = regionFor.apply(ChunkStatus.BIOMES, chunk);
-                generator.createBiomes(randomState, Blender.empty(), OracleLevel.structures.forWorldGenRegion(region), chunk).join();
+                generator.createBiomes(randomState, Blender.of(region), OracleLevel.structures.forWorldGenRegion(region), chunk).join();
                 chunk.setPersistedStatus(ChunkStatus.BIOMES);
             }
             for (int z = tz0; z <= tz1; z++) for (int x = tx0; x <= tx1; x++) {
+                if (oldChunks.contains(ChunkPos.pack(x, z))) continue;
                 var chunk = chunkAt.apply(x, z);
                 var region = regionFor.apply(ChunkStatus.TERRAIN, chunk);
                 Set<Holder<Biome>> possible = new HashSet<>();
                 for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) region.getChunk(x + dx, z + dz).collectBiomesInPalette(possible);
-                generator.buildTerrain(chunk, Blender.empty(), randomState, OracleLevel.structures.forWorldGenRegion(region), region.getBiomeManager(), region, possible).join();
+                generator.buildTerrain(chunk, Blender.of(region), randomState, OracleLevel.structures.forWorldGenRegion(region), region.getBiomeManager(), region, possible).join();
                 Heightmap.primeHeightmaps(chunk, EnumSet.of(Heightmap.Types.MOTION_BLOCKING, Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, Heightmap.Types.OCEAN_FLOOR, Heightmap.Types.WORLD_SURFACE));
                 chunk.setPersistedStatus(ChunkStatus.TERRAIN);
             }
@@ -401,6 +467,7 @@ public final class VanillaChunkGenerationOracle {
             for (int[] at : order) {
                 if (phase.equals("terrain")) break;
                 int x = at[0], z = at[1];
+                if (oldChunks.contains(ChunkPos.pack(x, z))) continue; // an old chunk is not decorated, only written into
                 var chunk = chunkAt.apply(x, z);
                 var region = regionFor.apply(ChunkStatus.FEATURES, chunk);
                 generator.applyBiomeDecoration(region, chunk, OracleLevel.structures.forWorldGenRegion(region));

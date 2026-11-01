@@ -33,7 +33,7 @@ pub struct StateData {
     /// Collision shape top (0 when the shape is empty).
     pub top: f32,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Placement {
     OnGround,
     InWater,
@@ -55,6 +55,9 @@ pub struct MobData {
     /// The villager POI type of every block state (`PoiTypes.forState`),
     /// worked out the first time a villager looks for one.
     pub pois: std::sync::OnceLock<Vec<Option<super::villager_brain::Poi>>>,
+    /// [`MobData::placement`] of each species' entity type (by `Species as
+    /// usize`), worked out the first time a spawn asks.
+    pub species_placements: std::sync::OnceLock<Vec<Placement>>,
 }
 impl MobData {
     pub fn load(root: &Path, facts: &BlockFacts) -> Self {
@@ -145,6 +148,7 @@ impl MobData {
             biome_tags: HashMap::new(),
             entity_tags: HashMap::new(),
             pois: Default::default(),
+            species_placements: Default::default(),
         }
     }
     /// Without the export, approximate path types from the gameplay facts.
@@ -201,6 +205,7 @@ impl MobData {
             biome_tags: HashMap::new(),
             entity_tags: HashMap::new(),
             pois: Default::default(),
+            species_placements: Default::default(),
         }
     }
     pub fn state(&self, id: horizon_world::registry::BlockStateId) -> StateData {
@@ -222,7 +227,28 @@ impl MobData {
     pub fn placement(&self, entity: &str) -> Placement {
         self.placements
             .get(entity)
-            .cloned()
+            .copied()
             .unwrap_or(Placement::OnGround)
+    }
+    /// [`MobData::placement`] of the species' entity type, without building
+    /// its id: natural spawning asks it for every position it tries.
+    pub fn species_placement(&self, s: super::Species) -> Placement {
+        let table = self.species_placements.get_or_init(|| {
+            let defs = super::species::ALL;
+            let len = defs
+                .iter()
+                .map(|d| d.species as usize + 1)
+                .max()
+                .unwrap_or(0);
+            let mut table = vec![Placement::OnGround; len];
+            // `species::def` takes a species' first definition: so does this.
+            for d in defs.iter().rev() {
+                table[d.species as usize] = self.placement(&format!("minecraft:{}", d.name));
+            }
+            table
+        });
+        table.get(s as usize).copied().unwrap_or_else(|| {
+            self.placement(&format!("minecraft:{}", super::species::def(s).name))
+        })
     }
 }

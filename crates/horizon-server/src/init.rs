@@ -209,7 +209,12 @@ pub fn run(dir: &Path, answers: Answers) -> Result<(), String> {
                 println!("Warning: {e}");
             }
             match engine::resources(&cfg, dir, Some(&program)) {
-                Ok(resources) => println!("Game files: {}", resources.display()),
+                Ok(resources) => {
+                    println!("Game files: {}", resources.display());
+                    if let Err(e) = engine::check_prepared(&resources) {
+                        println!("Warning: {e}");
+                    }
+                }
                 Err(e) => println!("{e}"),
             }
         }

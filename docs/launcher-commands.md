@@ -4,6 +4,16 @@
 
 Every command of `horizon-launcher`, and the tool `horizon-launcher mcp` offers for it. A tool's arguments are the command's, in snake_case. A tool runs the command with `--json` and returns what it printed. The tools that change the player's things for good need `confirm: true`. The tools that send something or reach other people say "only when the player asks". The game's own tools, `game_*`, are in [horizon-ctl-commands.md](horizon-ctl-commands.md). With No AI on, `mcp` and `agent-config` are hidden and refuse; every other command stays. See [agent-control.md](agent-control.md#no-ai).
 
+## `horizon-launcher completions`
+
+Write a shell completion script to stdout.
+
+    horizon-launcher completions <SHELL>
+
+- `SHELL` (bash, elvish, fish, powershell, zsh)
+
+MCP: none: the player's switch.
+
 ## `horizon-launcher versions`
 
 List Horizon releases, or the installed versions.
@@ -57,6 +67,7 @@ Start the client (needs a signed-in Microsoft account that owns Minecraft: Java 
 - `--join`: Join a friend's world with its invite code
 - `--server`: Join this server at once: an address, or a server of the list by name or position
 - `--arg`: An extra argument for the game, passed through as-is (repeatable), for example --server-thread
+- `--account`: Play this launch as this signed-in account (its name or UUID), without changing the one `account select` picked: several games can play as several accounts at once
 
 MCP: `play`, then the `game_*` tools.
 
@@ -73,13 +84,16 @@ MCP: `server`, `server_command`, `server_log`, `server_stop`.
 
 ## `horizon-launcher native-build`
 
-Native mods (experimental, docs/native-mods.md): compile mixin bundles on the Horizon revision they pin, with the launcher's own Rust, as the version the "Native mods" instance plays. Not sandboxed: the mods' code runs with your rights.
+Native mods (docs/native-mods.md): compile mixin bundles on the Horizon revision they pin, else the one the instance plays, with the launcher's own Rust, as the version the instance then plays. Not sandboxed: the mods' code runs with your rights.
 
     horizon-launcher native-build [FOLDER]
 
 - `FOLDER`: A mod folder (horizon-mixin.toml, or an unpacked .hnmod), or a folder of them (default: the native mods installed and turned on in the instance)
-- `--instance`: The instance whose installed native mods to build, and which then plays the build (default: the selected one; the game's own home builds into the Native mods instance)
+- `--instance`: The instance whose installed native mods to build, and which then plays the build (default: the selected one)
+- `--update`: Move to the newest installed release or Nightly instead of the Horizon the instance plays (a full rebuild)
 - `--trust-native-code`: You read the mods' source and trust it with full access to this computer
+- `--allow-version-mismatch`: Build mods made for different Horizon versions together anyway, on the newest of them
+- `--profile` (fast, release): The Cargo profile: fast (the default: incremental, quick to rebuild) or release (thin LTO: slower to build, slightly faster game). Default: the native-profile setting
 
 MCP: none: the player's switch.
 
@@ -115,7 +129,29 @@ Sign in with a Microsoft account in your browser (device code). Play needs one t
 
     horizon-launcher account sign-in
 
+- `--for`: Sign this account (name or UUID) in again: another Microsoft account is refused and who plays stays the same
+
 MCP: `account_sign_in`.
+
+## `horizon-launcher account refresh`
+
+Renew an account's session now, even when its access token is still fresh.
+
+    horizon-launcher account refresh <WHO>
+
+- `WHO`
+
+MCP: `account_refresh`.
+
+## `horizon-launcher account session`
+
+Renew an account's session for a game already running: prints the read-once session file it hands over (`--json`: {"session_file"} or {"authentication"} when it can't).
+
+    horizon-launcher account session <WHO>
+
+- `WHO`
+
+MCP: none: the game's own session handoff.
 
 ## `horizon-launcher account sign-out`
 
@@ -174,11 +210,11 @@ MCP: `account_skin`.
 
 ## `horizon-launcher settings`
 
-Show the launcher's settings, or set one (the Settings page): selected-version TAG, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink, background PATH (a picture behind Home; "default" shows Horizon's landscape).
+Show the launcher's settings, or set one (the Settings page): selected-version TAG, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink, background PATH (a picture behind Home; "default" shows Horizon's landscape), native-profile fast|release (the Cargo profile native mods build with: fast is incremental, release is slower to build and slightly faster to play).
 
     horizon-launcher settings [KEY] [VALUE]
 
-- `KEY` (selected-version, minecraft-dir, server-dir, install-new-versions, prune-old-versions, keep-versions, opening-animation, proxy, while-playing, language, accent, background)
+- `KEY` (selected-version, minecraft-dir, server-dir, install-new-versions, prune-old-versions, keep-versions, opening-animation, proxy, while-playing, language, accent, background, native-profile)
 - `VALUE`: The new value (with KEY)
 
 MCP: `settings`.
@@ -836,6 +872,33 @@ Update what the browser installed (or one pack).
 
 MCP: `mods_update`.
 
+## `horizon-launcher mods add-github`
+
+Install a native mod from a GitHub link (docs/native-mods.md, "Install from GitHub"): https://github.com/OWNER/REPO (its latest release, else its default branch), .../releases/tag/TAG, .../tree/REF or .../commit/SHA. Resolved to an exact release file or commit, checked like a registry mod. NOT reviewed by the Horizon registry.
+
+    horizon-launcher mods add-github <URL>
+
+- `URL`
+- `--mod`: The mod to install when the link holds several
+- `--all`: Install every mod the link holds
+- `--instance`: The instance (default: the selected one)
+- `--trust-native-code`: You read the mod's source (the link printed) and trust it with full access to this computer
+
+MCP: none: the player's switch.
+
+## `horizon-launcher mods update-github`
+
+Look for newer versions of the native mods installed from GitHub (the latest release, or the default branch's head for a mod installed from a commit), and install them.
+
+    horizon-launcher mods update-github [ID]
+
+- `ID`: One mod (default: all of them)
+- `--check`: Only say what is newer
+- `--instance`: The instance (default: the selected one)
+- `--trust-native-code`: You read the new source and trust it with full access to this computer
+
+MCP: none: the player's switch.
+
 ## `horizon-launcher mods remove`
 
 Remove a pack the browser installed.
@@ -914,7 +977,7 @@ Create a server; with no options it is a new world, survival, normal, 10 players
 - `--difficulty` (peaceful, easy, normal, hard)
 - `--max-players`
 - `--open`: Let anyone in (no whitelist)
-- `--check-accounts`: Check players' Minecraft accounts (they must sign in with Microsoft)
+- `--offline`: Do not check players' Minecraft accounts (offline mode: anyone can use any name)
 - `--player`: Who may join (repeatable); the first becomes an operator
 - `--accept-eula`: Agree to the Minecraft EULA (https://aka.ms/MinecraftEULA)
 

@@ -1,0 +1,5 @@
+{
+  "type": "minecraft:max",
+  "left": "minecraft:overworld/final_density",
+  "right": "horizon_tall:peaks"
+}

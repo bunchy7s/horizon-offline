@@ -18,6 +18,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         changed: BlockId,
         moved: bool,
     ) {
+        self.level
+            .observe_neighbor_changed(pos, state, changed, moved);
         let b = self.b;
         let block = b.block(state);
         let chain = &b.data(state).chain;
@@ -44,6 +46,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         self.schedule_tick(pos, block, 1);
                     }
                 }
+                // StructureBlock.neighborChanged: the caller owns the block entity.
+                Class::Structure => self.emit(LevelEvent::BlockEvent {
+                    pos,
+                    state,
+                    kind: "structure_block",
+                }),
+                // TestBlock.neighborChanged: the caller owns the block entity.
+                Class::TestBlock => self.emit(LevelEvent::BlockEvent {
+                    pos,
+                    state,
+                    kind: "test_block",
+                }),
                 Class::CopperBulb => self.copper_bulb_check(pos, state),
                 Class::Crafter => self.crafter_neighbor_changed(pos, state),
                 Class::Diode => self.diode_neighbor_changed(pos, state),
@@ -62,7 +76,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 Class::Note => self.note_neighbor_changed(pos, state),
                 Class::PistonBase => self.piston_check_if_extend(pos, state),
                 Class::PistonHead => {
-                    if self.piston_head_can_survive(state, pos) {
+                    if self.can_survive(state, pos) {
                         let base = rel(pos, b.facing(state).opposite());
                         self.neighbor_changed_at(base, changed);
                     }
@@ -456,6 +470,32 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.game_event(pos, "minecraft:block_destroy");
         self.remove_block(pos, false)
     }
+    /// `TurtleEggBlock.playerDestroy` (after the drops): `decreaseEggs` plays the
+    /// break and puts back all but one egg of the mined stack. `destroyed` is the
+    /// state that was broken.
+    pub(crate) fn turtle_egg_destroyed_by_player(
+        &mut self,
+        pos: BlockPos,
+        destroyed: BlockStateId,
+    ) {
+        let b = self.b;
+        if !b.data(destroyed).is(Class::TurtleEgg) {
+            return;
+        }
+        let pitch = 0.9 + self.random().next_float() * 0.2;
+        self.sound(
+            pos,
+            &std::sync::Arc::from("minecraft:block.turtle_egg.break"),
+            0.7,
+            pitch,
+        );
+        let eggs = b.table.int(destroyed, b.props.eggs);
+        if eggs > 1 {
+            self.set_block(pos, b.table.set_int(destroyed, b.props.eggs, eggs - 1), 2);
+            self.game_event(pos, "minecraft:block_destroy");
+            self.level_event(2001, pos, destroyed.0 as i32);
+        }
+    }
     /// `IceBlock.playerDestroy` (after the drops): mined ice turns into water
     /// when it sits over a solid block or a liquid, unless the tool prevents
     /// ice melting (silk touch). In the nether, where water evaporates, the
@@ -505,6 +545,16 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             && !self.ticks.has_block_tick(pos, b.block(state))
         {
             self.tripwire_check_pressed(pos);
+        }
+    }
+
+    /// `LilyPadBlock.entityInside` for a boat: the lily pad at `pos` is
+    /// destroyed with its drops (`Level.destroyBlock(pos, true, entity)`).
+    pub(crate) fn boat_inside(&mut self, pos: BlockPos) {
+        let b = self.b;
+        let state = self.state(pos);
+        if b.data(state).is(Class::LilyPad) {
+            self.destroy_block(pos, true, super::flags::UPDATE_LIMIT);
         }
     }
 
@@ -558,7 +608,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 let state = self.state(pos);
                 if !b.is_water_fluid(self.fluid_at(pos).kind()) {
                     false
-                } else if self.pickup_block(pos, state) {
+                } else if self.pickup_block(pos, state, false) {
                     true
                 } else {
                     if b.instance_of(state, Class::Liquid) {

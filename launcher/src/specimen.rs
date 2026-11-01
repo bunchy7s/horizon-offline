@@ -76,7 +76,7 @@ pub fn render(t: &Theme) -> Div {
         .children(n.sky.iter().zip(BANDS).map(|(&c, share)| {
             div()
                 .w_full()
-                .flex_grow()
+                .flex_grow(1.)
                 .flex_basis(gpui::relative(share))
                 .bg(rgb(c))
         }));

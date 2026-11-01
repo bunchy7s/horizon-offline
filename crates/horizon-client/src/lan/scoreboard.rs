@@ -131,6 +131,22 @@ impl View {
         for name in self.teams.keys().filter(|n| !next.teams.contains_key(*n)) {
             out.push(team(name, 1, None, Vec::new()));
         }
+        // Every leave before any join: `addPlayerToTeam` sends the old
+        // team's leave first, and a client's `removePlayerFromTeam` throws
+        // when the player already sits in another team.
+        for (name, (_, had)) in &self.teams {
+            let Some((_, players)) = next.teams.get(name) else {
+                continue;
+            };
+            let left: Vec<_> = had
+                .iter()
+                .filter(|p| !players.contains(p))
+                .cloned()
+                .collect();
+            if !left.is_empty() {
+                out.push(team(name, 4, None, left));
+            }
+        }
         for (name, (params, players)) in &next.teams {
             let Some((was, had)) = self.teams.get(name) else {
                 out.push(team(name, 0, Some(params.clone()), players.clone()));
@@ -146,14 +162,6 @@ impl View {
                 .collect();
             if !joined.is_empty() {
                 out.push(team(name, 3, None, joined));
-            }
-            let left: Vec<_> = had
-                .iter()
-                .filter(|p| !players.contains(p))
-                .cloned()
-                .collect();
-            if !left.is_empty() {
-                out.push(team(name, 4, None, left));
             }
         }
         for (name, display) in &next.objectives {
@@ -297,12 +305,33 @@ mod tests {
         let second = View::of(&board);
         assert_eq!(
             methods(&first.changes(&second)),
-            ["team red 3 [\"Beta\"]", "team red 4 [\"Alpha\"]"]
+            ["team red 4 [\"Alpha\"]", "team red 3 [\"Beta\"]"]
         );
         board.remove_team("red");
         assert_eq!(
             methods(&second.changes(&View::of(&board))),
             ["team red 1 []"]
+        );
+    }
+
+    #[test]
+    fn a_player_moving_teams_leaves_the_old_one_first() {
+        let mut board = Scoreboard::default();
+        board.add_team("red");
+        board.add_team("blue");
+        board.add_to_team("Alpha", "red");
+        let first = View::of(&board);
+        // `blue` sorts before `red`; the leave still goes first.
+        board.add_to_team("Alpha", "blue");
+        board.add_team("amber");
+        board.add_to_team("Beta", "amber");
+        assert_eq!(
+            methods(&first.changes(&View::of(&board))),
+            [
+                "team red 4 [\"Alpha\"]",
+                "team amber 0 [\"Beta\"]",
+                "team blue 3 [\"Alpha\"]"
+            ]
         );
     }
 }

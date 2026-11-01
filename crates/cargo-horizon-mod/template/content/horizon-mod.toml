@@ -3,8 +3,8 @@ name = "{name}"
 version = "0.1.0"
 description = ""
 authors = []
-# A content mod: blocks and items from data/ and assets/, no code (API 0.2).
+# A content mod: blocks, items and mob effects from data/ and assets/, no code (API 0.2).
 api = "0.2"
 side = "both"
-# registries: "May add blocks and items to your worlds".
+# registries: "May add blocks, items and mob effects to your worlds".
 capabilities = ["registries"]

@@ -2,7 +2,11 @@
 //! throwing their load to the player or note block, dancing to jukeboxes,
 //! and the hand-over interaction (`Allay.mobInteract`).
 use super::Game;
-use horizon_client::{containers::BlockEntity, items::ItemStack, mobs::Species};
+use horizon_client::{
+    containers::BlockEntity,
+    items::ItemStack,
+    mobs::{Species, allay},
+};
 use horizon_core::random::RandomSource;
 
 impl Game<'_> {
@@ -25,15 +29,18 @@ impl Game<'_> {
                     .map(|(k, _)| *k)
                     .collect()
             });
-            let dancing = jukeboxes.iter().any(|k| {
-                (f64::from(k.0) + 0.5 - pos.x).powi(2)
-                    + (f64::from(k.1) + 0.5 - pos.y).powi(2)
-                    + (f64::from(k.2) + 0.5 - pos.z).powi(2)
-                    <= 100.0
-            });
-            self.mobs[i].extra.flag =
-                dancing && !horizon_client::mobs::goals::should_panic(&self.mobs[i]);
-            let Some(held) = self.mobs[i].extra.main_hand.clone() else {
+            let nearest = jukeboxes
+                .iter()
+                .map(|k| {
+                    (f64::from(k.0) + 0.5 - pos.x).powi(2)
+                        + (f64::from(k.1) + 0.5 - pos.y).powi(2)
+                        + (f64::from(k.2) + 0.5 - pos.z).powi(2)
+                })
+                .fold(f64::INFINITY, f64::min);
+            // `Allay.setDancing` wants effective AI: a `NoAI` allay never dances.
+            let panicking = horizon_client::mobs::goals::should_panic(&self.mobs[i]);
+            self.mobs[i].extra.flag = allay::dances(self.mobs[i].no_ai, panicking, nearest);
+            let Some(held) = self.mobs[i].extra.main_hand_stack().cloned() else {
                 self.mobs[i].extra.point = None;
                 continue;
             };
@@ -41,33 +48,72 @@ impl Game<'_> {
             let max = self
                 .res
                 .items()
-                .get(&held)
+                .get(&held.item)
                 .map_or(64, |i| i.max_stack as i32);
-            // GoToWantedItem / wantsToPickUp: the same item within 32.
-            let wanted = if griefing && carried < max && self.mobs[i].extra.ints[3] <= 0 {
+            // `Mob.aiStep`'s looting loop asks for no AI: `canPickUpLoot`, the
+            // inventory room in `wantsToPickUp` and mob_griefing are its gates.
+            let wants = self.mobs[i].can_pick_up_loot() && griefing && carried < max;
+            let reach = allay::pickup_reach(self.mobs[i].bounds());
+            // GoToWantedItem: a stack it considers equal within 32 that the
+            // allay sees (NearestItemSensor's hasLineOfSight, eye to eye). The
+            // sensor is the brain's, so without AI only `Mob.aiStep`'s looting
+            // loop runs: it takes an equal drop already in `getPickupReach`.
+            let wanted = if !wants {
+                None
+            } else if self.mobs[i].no_ai {
+                self.dropped.iter().position(|e| {
+                    e.pickup_delay == 0
+                        && allay::considers_item_equal(&held, &e.stack)
+                        && reach.contains(e.position)
+                })
+            } else {
+                let w = self.mob_world_base(&[]);
+                let eye = horizon_core::geometry::Vec3::new(pos.x, self.mobs[i].eye_y(), pos.z);
+                // The sensor looks in the allay's box grown by (32, 16, 32).
+                let b = self.mobs[i].bounds();
+                let (low, high) = (b.min_position().y - 16.0, b.max_position().y + 16.0);
                 self.dropped
                     .iter()
                     .enumerate()
-                    .filter(|(_, e)| e.stack.item == held && e.pickup_delay == 0)
+                    .filter(|(_, e)| {
+                        e.pickup_delay == 0 && allay::considers_item_equal(&held, &e.stack)
+                    })
                     .map(|(j, e)| (j, e.position.distance_squared(pos)))
-                    .filter(|(_, d)| *d <= 32.0 * 32.0)
+                    .filter(|(_, d)| *d < 32.0 * 32.0)
+                    .filter(|(j, _)| {
+                        let y = self.dropped[*j].position.y;
+                        y <= high && y + 0.25 >= low
+                    })
+                    .filter(|(j, _)| {
+                        // ItemEntity's eye height is 0.2125.
+                        let e = &self.dropped[*j];
+                        let at = horizon_core::geometry::Vec3::new(
+                            e.position.x,
+                            e.position.y + 0.2125,
+                            e.position.z,
+                        );
+                        w.line_of_sight(eye, at)
+                    })
                     .min_by(|a, b| a.1.total_cmp(&b.1))
-            } else {
-                None
+                    .map(|(j, _)| j)
             };
-            let Some((j, _)) = wanted else {
+            let Some(j) = wanted else {
                 self.mobs[i].extra.point = None;
-                self.allay_deliver(i);
+                // `GiveInventoryToLookTargetPlayer` is the brain's too.
+                if !self.mobs[i].no_ai {
+                    self.allay_deliver(i);
+                }
                 continue;
             };
             let e = &self.dropped[j];
-            // getPickupReach (1, 1, 1) around the box.
-            let b = self.mobs[i]
-                .bounds()
-                .inflate(horizon_core::geometry::Vec3::new(1.0, 1.0, 1.0));
-            if b.contains(e.position) {
+            if reach.contains(e.position) {
                 let take = (max - carried).min(e.stack.count as i32);
                 let (item, id) = (e.clone(), self.mobs[i].id);
+                // It carries the fetched stack, potion and all, not just its id.
+                self.mobs[i].extra.set_main_hand_stack(Some(ItemStack {
+                    count: 1,
+                    ..e.stack.clone()
+                }));
                 self.add_pickup(
                     super::pickups::Taken::Item(Box::new(item)),
                     super::pickups::Collector::Mob(id),
@@ -76,7 +122,7 @@ impl Game<'_> {
                 let e = &mut self.dropped[j];
                 e.stack.count -= take as u32;
                 if e.stack.count == 0 {
-                    self.dropped.remove(j);
+                    self.remove_dropped(j);
                 }
                 let at = [pos.x, pos.y, pos.z];
                 let pitch =
@@ -131,14 +177,20 @@ impl Game<'_> {
         if m.extra.ints[1] <= 0 {
             return;
         }
+        // AllayAi.getItemDepositPosition: the liked note block, else the player.
+        let dimension = self.dim.id();
+        let noteblock = allay::noteblock_deposit(&mut self.mobs[i], dimension, |p| {
+            &*self
+                .res
+                .facts()
+                .get(self.world.block(p[0], p[1], p[2]))
+                .name
+                == "minecraft:note_block"
+        });
         let player = self.allay_liked_player(i);
         let m = &self.mobs[i];
-        let target = match m.extra.home.filter(|_| m.extra.ints[2] > 0) {
-            Some(h) => horizon_core::geometry::Vec3::new(
-                f64::from(h[0]) + 0.5,
-                f64::from(h[1]) + 1.0,
-                f64::from(h[2]) + 0.5,
-            ),
+        let target = match noteblock {
+            Some(p) => horizon_core::geometry::Vec3::new(p[0], p[1], p[2]),
             None => match player.filter(|_| m.extra.tame) {
                 Some(p) => p,
                 None => return,
@@ -148,7 +200,7 @@ impl Game<'_> {
         if target.distance_squared(eye) >= 9.0 {
             return;
         }
-        let Some(item) = m.extra.main_hand.clone() else {
+        let Some(item) = m.extra.main_hand_stack().cloned() else {
             return;
         };
         let from = [
@@ -170,7 +222,8 @@ impl Game<'_> {
             target.z.floor() as i32,
         ];
         let uuid = self.allay_liked_uuid(i);
-        let stack = ItemStack::new(&item, 1);
+        // AllayAi.throwItem: one item of the held stack, its components and all.
+        let stack = ItemStack { count: 1, ..item };
         self.for_each_player(|g| {
             if g.acting_uuid() == uuid && !g.spectator() {
                 g.trigger_block("minecraft:allay_drop_item_on_block", below, &stack);
@@ -180,10 +233,10 @@ impl Game<'_> {
         m.extra.ints[1] -= 1;
         m.extra.ints[3] = 60;
         // ItemEntity.setDefaultPickUpDelay.
-        self.spawn_item(ItemStack::new(&item, 1), from, v, 10);
+        self.spawn_item(stack, from, v, 10);
         // BehaviorUtils.throwItem: ItemEntity.setThrower(the allay).
         let allay = self.mob_uuid(self.mobs[i].id);
-        if let Some(thrown) = self.dropped.last_mut() {
+        if let Some(thrown) = self.just_spawned_item() {
             thrown.thrower = Some(allay);
         }
         if self.world.game_time % 7 == 0 && self.world.random.next_double() < 0.9 {
@@ -198,13 +251,14 @@ impl Game<'_> {
     }
     /// `Allay.mobInteract`: duplicate when dancing with an amethyst shard,
     /// take the held item, or hand back what it holds.
-    pub(super) fn interact_allay(&mut self, index: usize, item: &str) -> bool {
+    pub(super) fn interact_allay(&mut self, index: usize, item: Option<&ItemStack>) -> bool {
         let m = &self.mobs[index];
         if m.species() != Species::Allay || !m.alive() {
             return false;
         }
         let at = [m.position.x, m.position.y, m.position.z];
-        if m.extra.flag && item == "minecraft:amethyst_shard" && m.extra.egg_time == 0 {
+        let shard = item.is_some_and(|s| &*s.item == "minecraft:amethyst_shard");
+        if m.extra.flag && shard && m.extra.egg_time == 0 {
             let pos = at;
             self.mobs[index].extra.egg_time = 6000;
             if let Some(id) = self.spawn_mob("minecraft:allay", pos, true)
@@ -222,9 +276,11 @@ impl Game<'_> {
         }
         let acting = self.acting_uuid();
         let holds = m.extra.main_hand.is_some();
-        if !holds && !item.is_empty() {
+        if !holds && let Some(mut given) = item.cloned() {
             let m = &mut self.mobs[index];
-            m.extra.set_main_hand(Some(item.into()));
+            // `Allay.mobInteract` hands over one item, its components and all.
+            given.count = 1;
+            m.extra.set_main_hand_stack(Some(given));
             m.extra.tame = true;
             // `Allay.mobInteract` remembers LIKED_PLAYER by UUID.
             m.extra.owner = Some(acting);
@@ -233,13 +289,15 @@ impl Game<'_> {
             self.consume_held();
             return true;
         }
-        if holds && item.is_empty() {
+        if holds && item.is_none() {
             let m = &mut self.mobs[index];
+            // The hand's stack keeps the components (a potion) the items came with.
             let held = m
                 .extra
-                .main_hand
-                .take()
-                .unwrap_or_else(|| "minecraft:air".into());
+                .main_hand_stack()
+                .cloned()
+                .unwrap_or_else(|| ItemStack::new("minecraft:air", 1));
+            m.extra.set_main_hand(None);
             let carried = std::mem::take(&mut m.extra.ints[1]);
             m.extra.tame = false;
             m.extra.owner = None;
@@ -247,13 +305,16 @@ impl Game<'_> {
                 .play("minecraft:entity.allay.item_taken", Some(at), 2.0, 1.0);
             if carried > 0 {
                 self.spawn_item(
-                    ItemStack::new(&held, carried as u32),
+                    ItemStack {
+                        count: carried as u32,
+                        ..held.clone()
+                    },
                     at,
                     [0.0, 0.2, 0.0],
                     40,
                 );
             }
-            if let Some(rest) = self.give(ItemStack::new(&held, 1))
+            if let Some(rest) = self.give(ItemStack { count: 1, ..held })
                 && let Some(eye) = self.eye_position()
             {
                 self.spawn_item(rest, eye, [0.0; 3], 0);

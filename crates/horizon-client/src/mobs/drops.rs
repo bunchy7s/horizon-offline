@@ -2,11 +2,15 @@
 //! killer's `killedEntity` hook (a charged creeper's head drop), then
 //! `dropAllDeathLoot`: the entity loot table (drawn from the world's random
 //! sequence), `Mob.dropCustomDeathLoot` (equipment by drop chance, with the
-//! entity random), the species' extra drops and the experience orbs.
+//! entity random), the species' extra drops (an enderman's carried block) and
+//! the experience orbs.
 use super::{Mob, Species, equine, gear, raider, render::DYE_NAMES, species};
 use crate::random_sequences::RandomSequences;
 use horizon_core::random::RandomSource;
-use horizon_world::loot::{EntityLootParams, LootDamage, LootData, LootEntity, LootStack};
+use horizon_world::{
+    loot::{EntityLootParams, LootDamage, LootData, LootEntity, LootStack},
+    registry::BlockStateId,
+};
 
 /// `DropChances.DEFAULT_EQUIPMENT_DROP_CHANCE`.
 pub const DEFAULT_DROP_CHANCE: f32 = 0.085;
@@ -14,9 +18,15 @@ pub const DEFAULT_DROP_CHANCE: f32 = 0.085;
 pub use horizon_world::loot::EQUIPMENT_SLOTS as SLOTS;
 
 /// One thing a death leaves in the world, in spawn order.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Drop {
     Item(LootStack),
+    /// The whole stack a mob kept in an equipment slot (damage, name,
+    /// components), dropped as it is.
+    Stack(crate::items::ItemStack),
+    /// `Enderman.dropCustomDeathLoot`: the carried block's own drops, rolled
+    /// with `enderman::carried_block_tool` (`enderman::carried_block_drops`).
+    CarriedBlock(BlockStateId),
     /// An experience orb of this value.
     Orb(i32),
 }
@@ -254,6 +264,12 @@ pub fn slot_item(m: &Mob, slot: &str) -> Option<LootStack> {
     if slot == "body" && m.species() == Species::Wolf {
         stack.damage = m.extra.body_damage;
     }
+    if let Some(full) = stored_slot_stack(m, slot) {
+        stack.damage = full.damage as i32;
+        if m.species() != Species::Panda {
+            stack.count = full.count as i32;
+        }
+    }
     if let (Some(index), Some(g)) = (index, gear::gear(m)) {
         for (e, l) in &g.slots[index] {
             stack.enchantments.push((e.to_string(), *l as i32));
@@ -264,6 +280,34 @@ pub fn slot_item(m: &Mob, slot: &str) -> Option<LootStack> {
         }
     }
     Some(stack)
+}
+/// The `finalize` slot of a drop slot's name, for the slots a stack is kept in.
+fn slot_index(m: &Mob, slot: &str) -> Option<usize> {
+    use super::finalize as f;
+    Some(match slot {
+        "mainhand" => f::MAINHAND,
+        "offhand" => f::OFFHAND,
+        "head" if !head_is_body(m.species()) => f::HEAD,
+        "chest" => f::CHEST,
+        "legs" => f::LEGS,
+        "feet" => f::FEET,
+        _ => return None,
+    })
+}
+/// The whole stack the mob kept in `slot` (by name), when it kept one.
+fn stored_slot_stack(m: &Mob, slot: &str) -> Option<crate::items::ItemStack> {
+    super::finalize::stored_stack(m, slot_index(m, slot)?)
+}
+/// The drop of what the mob has in `slot`, given its `stack` after the drop
+/// rolls: the whole stack the mob kept (with the rolled damage), else the loot stack.
+fn slot_drop(m: &Mob, slot: &str, stack: LootStack) -> Drop {
+    match stored_slot_stack(m, slot).filter(|_| m.species() != Species::Panda) {
+        Some(mut full) => {
+            full.damage = stack.damage.max(0) as u32;
+            Drop::Stack(full)
+        }
+        None => Drop::Item(stack),
+    }
 }
 /// `setItemSlot(slot, EMPTY)`.
 pub fn clear_slot(m: &mut Mob, slot: &str) {
@@ -417,7 +461,7 @@ pub fn die(m: &mut Mob, d: &Death, sequences: &mut RandomSequences) -> (Vec<Drop
     if s == Species::Fox
         && let Some(stack) = slot_item(m, "mainhand")
     {
-        out.push(Drop::Item(stack));
+        out.push(slot_drop(m, "mainhand", stack));
         clear_slot(m, "mainhand");
     }
     // Allay: what it carries (`ints[1]` of the held item) is its inventory.
@@ -429,12 +473,7 @@ pub fn die(m: &mut Mob, d: &Death, sequences: &mut RandomSequences) -> (Vec<Drop
                 .map(|item| (item, m.extra.ints[1]))
         })
         .flatten();
-    let drops_loot = d.mob_drops && (is_monster(s) || !m.is_baby());
-    if drops_loot {
-        let table = format!(
-            "minecraft:entities/{}",
-            m.kind.id.trim_start_matches("minecraft:")
-        );
+    if let Some(table) = death_loot_table(m, d.mob_drops) {
         let params = EntityLootParams {
             this: this.clone(),
             damage: d.damage.clone(),
@@ -477,8 +516,14 @@ pub fn die(m: &mut Mob, d: &Death, sequences: &mut RandomSequences) -> (Vec<Drop
                 let inner = m.random.next_int_bound((max - 3).max(1)).unwrap_or(0);
                 stack.damage = max - m.random.next_int_bound(1 + inner).unwrap_or(0);
             }
-            out.push(Drop::Item(stack));
+            out.push(slot_drop(m, slot, stack));
             clear_slot(m, slot);
+        }
+        // Enderman.dropCustomDeathLoot: after Monster's, the carried block.
+        if s == Species::Enderman
+            && let Some(state) = m.extra.carried
+        {
+            out.push(Drop::CarriedBlock(state));
         }
         // WitherBoss.dropCustomDeathLoot.
         if s == Species::Wither {
@@ -494,7 +539,7 @@ pub fn die(m: &mut Mob, d: &Death, sequences: &mut RandomSequences) -> (Vec<Drop
         if let Some(stack) = slot_item(m, "mainhand")
             && !d.loot.prevents_equipment_drop(&stack)
         {
-            out.push(Drop::Item(stack));
+            out.push(slot_drop(m, "mainhand", stack));
             clear_slot(m, "mainhand");
         }
     }
@@ -530,6 +575,16 @@ pub fn die(m: &mut Mob, d: &Death, sequences: &mut RandomSequences) -> (Vec<Drop
         }
     }
     (out, skulls)
+}
+/// The loot table `die` rolls for `m` (`LivingEntity.getLootTable`), when it
+/// rolls one: none with `doMobLoot` off, nor for a baby that isn't a monster.
+pub fn death_loot_table(m: &Mob, mob_drops: bool) -> Option<String> {
+    (mob_drops && (is_monster(m.species()) || !m.is_baby())).then(|| {
+        format!(
+            "minecraft:entities/{}",
+            m.kind.id.trim_start_matches("minecraft:")
+        )
+    })
 }
 fn roll(
     d: &Death,

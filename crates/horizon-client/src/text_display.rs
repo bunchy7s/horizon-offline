@@ -107,6 +107,10 @@ impl TextDisplayData {
         out.right_rotation = glam::Quat::from_array(from.right_rotation)
             .slerp(glam::Quat::from_array(self.right_rotation), t)
             .to_array();
+        // Display$LinearFloatInterpolator: Mth.lerp(t, previous, current).
+        out.shadow_radius = from.shadow_radius + t * (self.shadow_radius - from.shadow_radius);
+        out.shadow_strength =
+            from.shadow_strength + t * (self.shadow_strength - from.shadow_strength);
         let int = |a: i32, b: i32| a + (t * (b as f32 - a as f32)).floor() as i32;
         out.opacity = int(i32::from(from.opacity), i32::from(self.opacity)) as i8;
         out.background = (0..4).fold(0, |color, channel| {
@@ -118,6 +122,27 @@ impl TextDisplayData {
         });
         out
     }
+}
+
+/// `Display.updateCulling`: either edge at 0 sets `noCulling`, so the renderer
+/// skips the frustum box (`DisplayRenderer.affectedByCulling`).
+pub fn no_culling(width: f32, height: f32) -> bool {
+    width == 0.0 || height == 0.0
+}
+
+/// `Display.updateCulling` / `getInterpolatedBoundingBox` at an interpolated
+/// origin: the AABB from `(x − width/2, y, z − width/2)` to
+/// `(x + width/2, y + height, z + width/2)`.
+pub fn culling_box(origin: glam::DVec3, width: f32, height: f32) -> (glam::DVec3, glam::DVec3) {
+    let half = f64::from(width) * 0.5;
+    let tall = f64::from(height);
+    (
+        glam::DVec3::new(origin.x - half, origin.y, origin.z - half),
+        glam::DVec3::new(origin.x + half, origin.y + tall, origin.z + half),
+    )
+}
+
+impl TextDisplayData {
     /// Omitted fields retain their previous values.
     pub fn apply(&mut self, values: &[(u8, i32, Value)]) {
         for (id, _, value) in values {
@@ -174,8 +199,7 @@ fn entry(
 }
 
 /// `Display.readAdditionalSaveData`: the synched data entries (ids 8 to 22)
-/// of a saved display, or with `all` their defaults. A matrix `transformation`
-/// (`MATRIX4F`) is not decomposed: it stays the identity.
+/// of a saved display, or with `all` their defaults.
 pub fn display_data(tag: &Tag, all: bool) -> Vec<(u8, i32, Value)> {
     let int = |key: &str| number(tag.get(key)).map(|v| v as i32);
     let real = |key: &str| float(tag.get(key)).map(|v| v as f32);
@@ -195,7 +219,7 @@ pub fn display_data(tag: &Tag, all: bool) -> Vec<(u8, i32, Value)> {
         let value = int(key).unwrap_or(default).clamp(low, high);
         set(id, serializer::INT, Value::Int(value), Value::Int(default));
     }
-    // `Transformation.CODEC`: all four parts, else the identity.
+    // `Transformation.EXTENDED_CODEC` (four parts or MATRIX4F), else `Transformation.IDENTITY`.
     let t = tag.get("transformation").and_then(transformation);
     let (translation, left, scale, right) = t.unwrap_or((
         defaults.translation,
@@ -317,29 +341,34 @@ pub fn text_display_data(tag: &Tag, all: bool) -> Vec<(u8, i32, Value)> {
     out
 }
 
-/// `Transformation.CODEC`'s translation, left rotation, scale and right
-/// rotation; None unless all four are there (the matrix form is not read).
+/// `Transformation.EXTENDED_CODEC`'s translation, left rotation, scale and
+/// right rotation: all four parts, or a `MATRIX4F` (sixteen floats, row-major)
+/// that `new Transformation(matrix)` decomposes (`MatrixUtil.svdDecompose`).
 fn transformation(tag: &Tag) -> Option<([f32; 3], [f32; 4], [f32; 3], [f32; 4])> {
+    use horizon_assets::math::{
+        Mat4, normalize_quaternion, quaternion_from_axis_angle, svd_decompose,
+    };
     let list = |tag: Option<&Tag>| -> Option<Vec<f32>> {
         match tag? {
             Tag::List(l) => l.iter().map(|v| float(Some(v)).map(|v| v as f32)).collect(),
             _ => None,
         }
     };
+    if let Some(values) = list(Some(tag)) {
+        let values: [f32; 16] = values.try_into().ok()?;
+        return Some(svd_decompose(&Mat4::from_row_major(values)));
+    }
     let vector = |key: &str| -> Option<[f32; 3]> { list(tag.get(key))?.try_into().ok() };
-    // `ExtraCodecs.QUATERNIONF`: four components (normalized) or an axis and an angle.
+    // `ExtraCodecs.QUATERNIONF`: four components (normalized) or an axis and an
+    // angle (`new Quaternionf(AxisAngle4f)`: the angle wrapped, the axis as given).
     let rotation = |key: &str| -> Option<[f32; 4]> {
         let value = tag.get(key)?;
         if let Some(q) = list(Some(value)) {
-            let [x, y, z, w]: [f32; 4] = q.try_into().ok()?;
-            let length = (x * x + y * y + z * z + w * w).sqrt();
-            return Some([x / length, y / length, z / length, w / length]);
+            return Some(normalize_quaternion(q.try_into().ok()?));
         }
         let angle = float(value.get("angle"))? as f32;
-        let [x, y, z]: [f32; 3] = list(value.get("axis"))?.try_into().ok()?;
-        let (sin, cos) = (angle * 0.5).sin_cos();
-        let inverse = 1.0 / (x * x + y * y + z * z).sqrt();
-        Some([x * inverse * sin, y * inverse * sin, z * inverse * sin, cos])
+        let axis: [f32; 3] = list(value.get("axis"))?.try_into().ok()?;
+        Some(quaternion_from_axis_angle(angle, axis))
     };
     Some((
         vector("translation")?,
@@ -386,6 +415,13 @@ impl Lines {
             ))
     }
 }
+
+/// The corners of each six-vertex `HudBatch` quad that `draw` fills, in the
+/// order the world draws them: `Font`'s glyphs go top left, bottom left,
+/// bottom right, top right, so under `Lines::pose` they wind
+/// counter-clockwise on the side the text reads from, the face the culled
+/// `TEXT_POLYGON_OFFSET` and `TEXT_SEE_THROUGH` keep.
+pub const CORNERS: [usize; 4] = [5, 2, 1, 0];
 
 /// `TextDisplayRenderer.submitInner` after its `translate(1 - width / 2,
 /// -height, 0)`: the background and each line, in text units, each quad's
@@ -446,6 +482,89 @@ pub fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use horizon_world::nbt::Compound;
+
+    /// Whether a text quad seen from `camera` (yaw, pitch, at `eye` from the
+    /// display) faces it (counter-clockwise on screen, the face back-face
+    /// culling keeps) and whether its text reads left to right.
+    fn seen(d: &TextDisplayData, entity: [f32; 2], camera: [f32; 2], eye: glam::Vec3) -> [bool; 2] {
+        let lines = Lines {
+            lines: vec![],
+            width: 10.0,
+        };
+        let mut batch = crate::hud::HudBatch::new([1, 1]);
+        batch.quad(
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            [[0.0; 2]; 4],
+            u32::MAX,
+        );
+        let view_proj = glam::Mat4::perspective_rh(1.2, 1.0, 1000.0, 0.05)
+            * crate::camera::view_matrix(camera[0], camera[1])
+            * glam::Mat4::from_translation(-eye);
+        let matrix = view_proj * d.matrix(entity, camera) * lines.pose();
+        let [a, b, c, _] = CORNERS.map(|i| {
+            let v = batch.vertices[i];
+            matrix.project_point3(glam::Vec3::new(v.pos[0], v.pos[1], v.depth))
+        });
+        let ccw = (b - a).truncate().perp_dot((c - a).truncate()) > 0.0;
+        // The text's x axis, from the left edge to the right, on screen.
+        let right =
+            matrix.project_point3(glam::Vec3::X).x > matrix.project_point3(glam::Vec3::ZERO).x;
+        [ccw, right]
+    }
+
+    #[test]
+    fn text_quads_face_the_side_they_read_from() {
+        let mut d = TextDisplayData::default();
+        // A fixed display at yaw 0 reads from the south: in front it faces
+        // the camera, from the north it shows its back, which the text
+        // pipelines cull.
+        assert_eq!(
+            seen(&d, [0.0, 0.0], [180.0, 0.0], glam::Vec3::Z * 3.0),
+            [true, true]
+        );
+        assert_eq!(
+            seen(&d, [0.0, 0.0], [0.0, 0.0], glam::Vec3::Z * -3.0),
+            [false, false]
+        );
+        assert_eq!(
+            seen(&d, [90.0, 0.0], [-90.0, 0.0], glam::Vec3::X * -3.0),
+            [true, true]
+        );
+        // A mirrored scale turns the readable side round with the front.
+        d.scale = [-1.0, 1.0, 1.0];
+        assert_eq!(
+            seen(&d, [0.0, 0.0], [0.0, 0.0], glam::Vec3::Z * -3.0),
+            [true, true]
+        );
+        assert_eq!(
+            seen(&d, [0.0, 0.0], [180.0, 0.0], glam::Vec3::Z * 3.0),
+            [false, false]
+        );
+        // Billboards face the camera from anywhere it looks at them.
+        d.scale = [1.0; 3];
+        for billboard in 1..=3 {
+            d.billboard = billboard;
+            for yaw in [0.0, 37.0, 90.0, 180.0, -135.0] {
+                let pitch = if billboard == 1 { 0.0 } else { 30.0 };
+                let forward = glam::Vec3::new(
+                    -f32::to_radians(yaw).sin() * f32::to_radians(pitch).cos(),
+                    -f32::to_radians(pitch).sin(),
+                    f32::to_radians(yaw).cos() * f32::to_radians(pitch).cos(),
+                );
+                let entity = if billboard == 2 {
+                    [180.0 + yaw, 0.0]
+                } else {
+                    [0.0, 0.0]
+                };
+                assert_eq!(
+                    seen(&d, entity, [yaw, pitch], forward * -3.0),
+                    [true, true],
+                    "billboard {billboard} at yaw {yaw}"
+                );
+            }
+        }
+    }
     #[test]
     fn partial_updates_retain_values_and_bad_vectors_do_not_panic() {
         let mut d = TextDisplayData::default();
@@ -454,5 +573,81 @@ mod tests {
         assert_eq!(d.line_width, 80);
         assert_eq!(d.align(), Align::Left);
         assert_eq!(d.translation, [0.0; 3]);
+    }
+    #[test]
+    fn a_matrix_transformation_is_decomposed() {
+        let matrix = [
+            2.0, 0.0, 0.0, 1.0, 0.0, 3.0, 0.0, -2.0, 0.0, 0.0, 0.5, 0.25, 0.0, 0.0, 0.0, 1.0,
+        ];
+        let tag = Tag::Compound(
+            [("transformation".into(), crate::save::floats(&matrix))]
+                .into_iter()
+                .collect(),
+        );
+        let data = display_data(&tag, false);
+        let part = |id: u8| data.iter().find(|e| e.0 == id).map(|e| e.2.clone());
+        assert_eq!(part(11), Some(Value::Floats(vec![1.0, -2.0, 0.25])));
+        assert_eq!(part(12), Some(Value::Floats(vec![2.0, 3.0, 0.5])));
+        assert_eq!(part(13), None);
+    }
+    #[test]
+    fn axis_angle_rotations_keep_the_axis_and_wrap_the_angle() {
+        let mut rotation = Compound::new();
+        rotation.insert(
+            "angle".into(),
+            Tag::Float((-std::f32::consts::PI).to_bits()),
+        );
+        rotation.insert("axis".into(), crate::save::floats(&[0.0, 0.0, 2.0]));
+        let mut t = Compound::new();
+        t.insert("translation".into(), crate::save::floats(&[0.0; 3]));
+        t.insert("scale".into(), crate::save::floats(&[1.0; 3]));
+        t.insert("left_rotation".into(), Tag::Compound(rotation));
+        t.insert(
+            "right_rotation".into(),
+            crate::save::floats(&[0.0, 0.0, 0.0, 2.0]),
+        );
+        let (_, left, _, right) = transformation(&Tag::Compound(t)).unwrap();
+        assert_eq!(
+            left,
+            horizon_assets::math::quaternion_from_axis_angle(
+                -std::f32::consts::PI,
+                [0.0, 0.0, 2.0]
+            )
+        );
+        assert!(left[2] > 1.9);
+        assert_eq!(right, [0.0, 0.0, 0.0, 1.0]);
+    }
+
+    /// `Display.updateCulling`: width or height 0 disables the frustum box.
+    #[test]
+    fn zero_width_or_height_disables_display_culling() {
+        assert!(no_culling(0.0, 1.0));
+        assert!(no_culling(2.0, 0.0));
+        assert!(no_culling(0.0, 0.0));
+        assert!(!no_culling(2.0, 1.0));
+    }
+
+    /// `Display.updateCulling`: the box is width-centred on XZ and rises by height.
+    #[test]
+    fn display_culling_box_is_centred_on_xz_and_stands_on_y() {
+        let (lo, hi) = culling_box(glam::DVec3::new(10.0, 64.0, -3.0), 2.0, 1.0);
+        assert_eq!(lo, glam::DVec3::new(9.0, 64.0, -4.0));
+        assert_eq!(hi, glam::DVec3::new(11.0, 65.0, -2.0));
+    }
+
+    /// `Display$LinearFloatInterpolator`: the shadow radius and strength blend
+    /// across the interpolation duration with the transformation's progress.
+    #[test]
+    fn the_blend_interpolates_shadow_radius_and_strength() {
+        let from = TextDisplayData::default();
+        let shown = TextDisplayData {
+            shadow_radius: 2.0,
+            shadow_strength: 0.25,
+            ..TextDisplayData::default()
+        };
+        let half = shown.blend(&from, 0.5);
+        assert_eq!((half.shadow_radius, half.shadow_strength), (1.0, 0.625));
+        assert_eq!(shown.blend(&from, 0.0).shadow_radius, 0.0);
+        assert_eq!(shown.blend(&from, 1.0).shadow_strength, 0.25);
     }
 }

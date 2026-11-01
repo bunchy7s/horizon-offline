@@ -117,12 +117,19 @@ impl VoxelShape {
         Ok(shape)
     }
     pub fn empty() -> Self {
+        Self::empty_ref().clone()
+    }
+    /// The shared empty shape, without cloning it.
+    pub fn empty_ref() -> &'static Self {
         static EMPTY: OnceLock<VoxelShape> = OnceLock::new();
-        EMPTY
-            .get_or_init(|| {
-                Self::from_grid([vec![0.0], vec![0.0], vec![0.0]], &[]).expect("valid empty grid")
-            })
-            .clone()
+        EMPTY.get_or_init(|| {
+            Self::from_grid([vec![0.0], vec![0.0], vec![0.0]], &[]).expect("valid empty grid")
+        })
+    }
+    /// `shape == Shapes.empty()`: the same as `same_identity(&empty())`
+    /// without cloning the shared empty shape.
+    pub fn is_empty_identity(&self) -> bool {
+        self.same_identity(Self::empty_ref())
     }
     pub fn block() -> Self {
         Self::block_ref().clone()

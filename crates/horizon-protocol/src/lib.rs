@@ -8,12 +8,15 @@ pub mod connection;
 pub mod crypto;
 pub mod entity_data;
 pub mod frame;
+pub mod hash_ops;
 pub mod ids;
 pub mod item;
+pub mod mod_net;
 pub mod packets;
 pub mod quiet;
 pub mod registry;
 mod resolver;
+pub use resolver::server_redirect;
 pub mod rsa;
 pub mod secure_chat;
 pub mod servers;
@@ -44,8 +47,26 @@ pub enum Direction {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error(pub String);
 impl Error {
+    const TIMED_OUT: &str = "Timed out";
+    const END_OF_STREAM: &str = "Connection closed by the server";
     pub fn new(message: impl Into<String>) -> Self {
         Self(message.into())
+    }
+    /// The read timeout passed with nothing received (netty's
+    /// `ReadTimeoutException`, which `Connection.exceptionCaught` reports as
+    /// `disconnect.timeout`).
+    pub fn timed_out() -> Self {
+        Self::new(Self::TIMED_OUT)
+    }
+    pub fn is_timed_out(&self) -> bool {
+        self.0 == Self::TIMED_OUT
+    }
+    /// The peer closed the stream (`Connection.channelInactive`).
+    pub fn end_of_stream() -> Self {
+        Self::new(Self::END_OF_STREAM)
+    }
+    pub fn is_end_of_stream(&self) -> bool {
+        self.0 == Self::END_OF_STREAM
     }
 }
 impl std::fmt::Display for Error {

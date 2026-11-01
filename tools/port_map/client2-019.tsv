@@ -87,15 +87,15 @@ ExperimentsScreen.getHumanReadableTitle	missing		minor: translated title of an e
 ExperimentsScreen.repositionElements	skip:ui		layout only
 ExperimentsScreen.getNarrationMessage	skip:ui		narration text only
 ExperimentsScreen.onDone	missing		minor: applies the chosen experiments to the pack repository; none in Horizon
-FileFixerProgressScreen.init	missing		player: Cancel while a world's files are fixed; Horizon fixes them with no progress screen
-FileFixerProgressScreen.extractRenderState	missing		player: part of the file-fix progress screen, which Horizon never shows
-FileFixerProgressScreen.extractProgress	missing		player: part of the file-fix progress screen, which Horizon never shows
-FileFixerProgressScreen.extractProgressBar	missing		player: part of the file-fix progress screen, which Horizon never shows
-FileFixerProgressScreen.extractTypeText	missing		player: part of the file-fix progress screen, which Horizon never shows
-FileFixerProgressScreen.extractTypeProgress	missing		player: part of the file-fix progress screen, which Horizon never shows
-FileFixerProgressScreen.extractFileStats	missing		player: part of the file-fix progress screen, which Horizon never shows
-FileFixerProgressScreen.extractScanning	missing		player: part of the file-fix progress screen, which Horizon never shows
-FileFixerProgressScreen.extractFileFixerCount	missing		player: part of the file-fix progress screen, which Horizon never shows
+FileFixerProgressScreen.init	port	crates/horizon-client/src/game.rs::Game::window_event	Cancel at ((width - 200) / 2, height / 2 + 100) (file_fixer_cancel) sets the upgrade's cancel and goes inactive; Escape does nothing. gap: a cancel is honoured before the file fixes move anything and between files of the data stage, not in the middle of the file fixes (they are not undoable)
+FileFixerProgressScreen.extractRenderState	port	crates/horizon-client-render/src/level_loading.rs::draw_file_fixer	title, then progress or the scanning line
+FileFixerProgressScreen.extractProgress	port	crates/horizon-client-render/src/level_loading.rs::draw_file_fixer	bar, totals, stage, type label, type bar, percentage
+FileFixerProgressScreen.extractProgressBar	port	crates/horizon-client-render/src/level_loading.rs::draw_file_fixer	black 200x2 bar with the green part round(progress * 200)
+FileFixerProgressScreen.extractTypeText	port	crates/horizon-client-render/src/level_loading.rs::draw_file_fixer	the type label (upgradeWorld.progress.type.<name>)
+FileFixerProgressScreen.extractTypeProgress	port	crates/horizon-client-render/src/level_loading.rs::draw_file_fixer	upgradeWorld.progress.percentage with floor(progress * 100)
+FileFixerProgressScreen.extractFileStats	port	crates/horizon-client-render/src/level_loading.rs::draw_file_fixer	upgradeWorld.info.converted and upgradeWorld.info.total
+FileFixerProgressScreen.extractScanning	port	crates/horizon-client-render/src/level_loading.rs::draw_file_fixer	upgradeWorld.info.scanning while no operation is counted
+FileFixerProgressScreen.extractFileFixerCount	port	crates/horizon-client-render/src/level_loading.rs::draw_file_fixer	upgradeWorld.info.file_fix_stage
 OptimizeWorldScreen.create	missing		player: opens from Optimize World, which Horizon draws inactive on purpose; no optimizer exists
 OptimizeWorldScreen.init	missing		player: Cancel of the optimize run; no optimize run exists
 OptimizeWorldScreen.extractRenderState	missing		player: optimize progress (converted, skipped, per-dimension bars); not shown

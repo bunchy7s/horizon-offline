@@ -127,8 +127,13 @@ pub struct Shadow {
     pub distance: f32,
     /// `shadowDistanceRenderMul`: when > 0, geometry beyond `distance × mul` is not drawn.
     pub render_mul: f32,
+    /// `voxelDistance`: with `shadow.culling=reversed`, nothing within it is culled.
+    pub voxel_distance: f32,
     /// `shadowIntervalSize`: the shadow camera moves in steps of this many blocks (0: none).
     pub interval: f32,
+    /// Native packs: the snap's remainder is euclidean, so the centre is within half an interval
+    /// of the player at negative coordinates too. `shaders/` packs keep Iris's.
+    pub euclidean_snap: bool,
     /// `sunPathRotation`, degrees.
     pub sun_path_rotation: f32,
     /// `shadowMapFov`: a perspective projection of this many degrees instead of orthographic.
@@ -152,7 +157,9 @@ impl Default for Shadow {
             resolution: 1024,
             distance: 160.0,
             render_mul: -1.0,
+            voxel_distance: 160.0,
             interval: 2.0,
+            euclidean_snap: false,
             sun_path_rotation: 0.0,
             fov: None,
             near: 0.05,
@@ -310,6 +317,7 @@ impl Config {
             }
             "shadowDistance" => float(&mut s.distance),
             "shadowDistanceRenderMul" => float(&mut s.render_mul),
+            "voxelDistance" => float(&mut s.voxel_distance),
             "shadowIntervalSize" => float(&mut s.interval),
             "sunPathRotation" => float(&mut s.sun_path_rotation),
             "shadowNearPlane" => float(&mut s.near),

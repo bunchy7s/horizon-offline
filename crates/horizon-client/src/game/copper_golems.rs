@@ -36,6 +36,8 @@ impl Game<'_> {
             self.world.chest_openers.remove(&key);
         }
         self.block_entity_event(chest, 1, count.max(0));
+        // The guests get the same `ClientboundBlockEventPacket` (the lid).
+        self.lan_block_event(chest, 1, count.max(0));
     }
     /// A copper golem took from or filled a chest slot.
     pub(super) fn golem_chest_slot(
@@ -100,6 +102,7 @@ impl Game<'_> {
                 o.0 = count;
             }
             self.block_entity_event(p, 1, count);
+            self.lan_block_event(p, 1, count);
         }
     }
     /// `ChestBlockEntity.playSound` for a chest the recheck closed.

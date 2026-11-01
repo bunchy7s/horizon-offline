@@ -279,19 +279,22 @@ impl Game<'_> {
         };
         let me = self.level.player_uuid.unwrap_or_default();
         let range = vault.connected_particles_range;
-        let (Some(p), true) = (self.player.as_ref(), vault.connected_players.contains(&me)) else {
-            return;
-        };
-        let block = [p.position.x, p.position.y, p.position.z].map(|v| v.floor() as i32);
-        let d = [0, 1, 2].map(|i| f64::from(block[i] - pos[i]));
-        if d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > range * range {
+        // VaultSharedData.getConnectedPlayers, each through getPlayerByUUID: the
+        // host and the guests, with their position and height.
+        let mut players = Vec::new();
+        for uuid in &vault.connected_players {
+            if *uuid == me {
+                if let Some(p) = self.player.as_ref() {
+                    let at = [p.position.x, p.position.y, p.position.z];
+                    players.push((at, p.dimensions.height));
+                }
+            } else if let Some(g) = self.lan_present().into_iter().find(|g| g.uuid == *uuid) {
+                players.push((g.position, g.height));
+            }
+        }
+        if players.is_empty() {
             return;
         }
-        let target = [
-            p.position.x,
-            p.position.y + f64::from(p.dimensions.height / 2.0),
-            p.position.z,
-        ];
         let facing = self
             .pack
             .assets
@@ -310,12 +313,21 @@ impl Game<'_> {
             f64::from(pos[1]) + 1.75,
             f64::from(pos[2]) + 0.5 + step[1] * 0.5,
         ];
-        let direction: [f64; 3] = std::array::from_fn(|i| target[i] - keyhole[i]);
-        let random = self.particles.level_random();
-        let count = random.next_int_bound(4).unwrap_or(0) + 2;
-        for _ in 0..count {
-            let v = offset_random(direction, self.particles.level_random(), 1.0);
-            self.particle(T::VaultConnection, keyhole, v);
+        for (at, height) in players {
+            // isWithinConnectionRange: player.blockPosition().distSqr(vault) in range.
+            let block = at.map(|v| v.floor() as i32);
+            let d = [0, 1, 2].map(|i| f64::from(block[i] - pos[i]));
+            if d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > range * range {
+                continue;
+            }
+            let target = [at[0], at[1] + f64::from(height / 2.0), at[2]];
+            let direction: [f64; 3] = std::array::from_fn(|i| target[i] - keyhole[i]);
+            let random = self.particles.level_random();
+            let count = random.next_int_bound(4).unwrap_or(0) + 2;
+            for _ in 0..count {
+                let v = offset_random(direction, self.particles.level_random(), 1.0);
+                self.particle(T::VaultConnection, keyhole, v);
+            }
         }
     }
 }

@@ -45,7 +45,7 @@ Blocks.register	skip:data		Registry bootstrap; Horizon reads block definitions f
 BrushableBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Class::Brushable arm schedules the 2-tick update.
 BubbleColumnBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	Bubble and current particles plus whirlpool and upwards ambient sounds.
 BubbleColumnBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Class::BubbleColumn arm schedules the water tick and the 5-tick recheck.
-BubbleColumnBlock.pickupBlock	missing		player: an empty bucket on a bubble column should scoop a water bucket and remove the column; Horizon's bucket_pickup takes only liquids and waterlogged blocks, so nothing happens.
+BubbleColumnBlock.pickupBlock	port	crates/horizon-world/src/level/fluids.rs::Sim::pickup_block	ticked in #3516; `BubbleColumnBlock.pickupBlock` is cited at crates/horizon-world/src/level/fluids.rs:318 (in a comment, so `where` names the enclosing fn)
 ButtonBlock.makeShapes	skip:data		Shape precomputed from the extracted block shapes (level/data.rs).
 ButtonBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	Class::Button arm presses it, or consumes when already pressed.
 ButtonBlock.onExplosionHit	port	crates/horizon-client/src/game/wind.rs::Game::wind_trigger_block	Wind charge bursts use the button like a player use; TNT does not reach it.
@@ -61,27 +61,27 @@ CampfireBlock.entityInside	port	crates/horizon-client/src/motion.rs::MotionWorld
 CampfireBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Waterlogged, lit, signal fire from hay below, facing from the player.
 CampfireBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Waterlogged tick and signal fire from the block below.
 CampfireBlock.placeLiquid	port	crates/horizon-world/src/level/fluids.rs::Sim::place_liquid	Water puts it out with the extinguish sound and sets waterlogged.
-CampfireBlock.onProjectileHit	missing		player: a burning arrow (Flame bow) that hits an unlit campfire should light it; Horizon's projectile_hit only dispatches bells and targets.
+CampfireBlock.onProjectileHit	port	crates/horizon-client/src/arrows.rs::Ticker::block_reaction	a burning arrow lights an unlit, dry campfire
 CampfireBlock.getFluidState	port	crates/horizon-world/src/level/mod.rs::Behaviours::fluid	Waterlogged fluid is read from per-state facts.
 CampfireBlock.rotate	skip:data		Rotation is a precomputed table from extracted data.
 CampfireBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
 CampfireBlock.getTicker	port	crates/horizon-client/src/game/campfire.rs::Game::tick_campfire	Cooking tick when lit, cooldown tick when unlit.
-CandleBlock.useItemOn	missing		player: an empty hand on a lit candle should snuff it out with the extinguish sound; Horizon has no snuff path (candles only light from arrows).
+CandleBlock.useItemOn	port	crates/horizon-world/src/level/interact.rs::Sim::use_item_on	empty hand with mayBuild on a lit candle: unlit, wick smoke (the clicking client draws it), block.candle.extinguish and block_change; AbstractCandleBlock.extinguish is Sim::extinguish_candle
 CandleBlock.canBeReplaced	port	crates/horizon-world/src/level/place.rs::Sim::can_be_replaced	Adding a candle to a candle with fewer than four is allowed.
 CandleBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Class::Candle arm cycles the candle count when placed on a candle.
 CandleBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Waterlogged water tick.
 CandleBlock.getFluidState	port	crates/horizon-world/src/level/mod.rs::Behaviours::fluid	Waterlogged fluid is read from per-state facts.
 CandleBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
 CandleBlock.placeLiquid	port	crates/horizon-world/src/level/fluids.rs::Sim::place_liquid	Water waterlogs the candle and puts out a lit one.
-CandleCakeBlock.useItemOn	missing		player: an empty hand on a lit candle cake should snuff the candle; Horizon has no snuff path.
+CandleCakeBlock.useItemOn	port	crates/horizon-world/src/level/interact.rs::Sim::use_item_on	empty hand above half a block (candleHit) on a lit candle cake: unlit, wick smoke (the clicking client draws it at the cake's own offset, a block up), block.candle.extinguish and block_change
 CandleCakeBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	CandleCake arm eats the cake and drops the candle.
-CandleCakeBlock.candleHit	missing		player: the hit-on-candle check for the missing candle-cake snuff.
+CandleCakeBlock.candleHit	inline	crates/horizon-world/src/level/interact.rs::Sim::use_item_on	the hit.y - pos.y > 0.5 test inside the CandleCakeBlock.useItemOn arm, which now snuffs the candle
 CandleCakeBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Candle cake drops to air when unsupported below.
 CarvedPumpkinBlock.getWeatherStateFromPattern	inline	crates/horizon-client/src/game/golems.rs::Game::try_spawn_copper_golem	Weathering comes from the copper block below; waxed blocks count as unwaxed.
-CarvedPumpkinBlock.getOrCreateSnowGolemBase	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	Snow column under the head; the lazy pattern cache is not needed.
-CarvedPumpkinBlock.getOrCreateSnowGolemFull	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	Snow golem with a pumpkin head on the snow column.
-CarvedPumpkinBlock.getOrCreateIronGolemBase	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	Iron arms and body under the head.
-CarvedPumpkinBlock.getOrCreateIronGolemFull	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	Iron golem pattern with air cells.
+CarvedPumpkinBlock.getOrCreateSnowGolemBase	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	the pattern is block_pattern::SNOW_GOLEM_BASE (a space where the head goes), matched by BlockPattern::find; the lazy pattern cache is not needed.
+CarvedPumpkinBlock.getOrCreateSnowGolemFull	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	the pattern is block_pattern::SNOW_GOLEM_FULL, a pumpkin head on the snow column.
+CarvedPumpkinBlock.getOrCreateIronGolemBase	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	the pattern is block_pattern::IRON_GOLEM_BASE, air beside the arms and body under the head.
+CarvedPumpkinBlock.getOrCreateIronGolemFull	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	the pattern is block_pattern::IRON_GOLEM_FULL, with its air cells.
 CarvedPumpkinBlock.getOrCreateCopperGolemBase	port	crates/horizon-client/src/game/golems.rs::Game::copper_golem_base	Copper block under the head.
 CarvedPumpkinBlock.getOrCreateCopperGolemFull	inline	crates/horizon-client/src/game/golems.rs::Game::try_spawn_copper_golem	Copper golem spawn with the pumpkin head; the head check is in is_golem_head.
 CarvedPumpkinBlock.replaceCopperBlockWithChest	inline	crates/horizon-client/src/game/golems.rs::Game::try_spawn_copper_golem	Copper block becomes its chest with flag 2 through copper_chest_from_block.
@@ -109,7 +109,7 @@ ChorusFlowerBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim
 ChorusFlowerBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Needs a chorus plant or support tag below, or a single plant neighbour in the air.
 ChorusFlowerBlock.generatePlant	port	crates/horizon-world/src/worldgen/chorus_plant.rs::ChorusPlantFeature::place	Connects the base plant and grows the tree.
 ChorusFlowerBlock.growTreeRecursive	port	crates/horizon-world/src/worldgen/chorus_plant.rs::ChorusPlantFeature::grow	Random height, stems and flowers at the tips.
-ChorusFlowerBlock.onProjectileHit	missing		player: an arrow or other breakable projectile hitting a chorus flower should break it and drop it; Horizon's projectile_hit only dispatches bells and targets.
+ChorusFlowerBlock.onProjectileHit	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_breaks_block	an impact projectile breaks and drops the flower under the mayBreak rules
 ChorusPlantBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Class::ChorusPlant arm updates the side connection and schedules the survival check.
 ChorusPlantBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	Destroys the plant when it cannot survive.
 ChorusPlantBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Plant or support tag below, or a plant neighbour with support under it.

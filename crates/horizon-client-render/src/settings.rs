@@ -50,6 +50,9 @@ pub fn sound_source(event: &str) -> usize {
         index("ambient")
     } else if e.starts_with("music_disc.") {
         index("record")
+    } else if e.starts_with("item.goat_horn.") {
+        // InstrumentItem.play: SoundSource.RECORDS.
+        index("record")
     } else if e.starts_with("music.") {
         index("music")
     } else if e.starts_with("weather.") || e.starts_with("entity.lightning_bolt") {
@@ -186,6 +189,10 @@ pub struct Settings {
     pub ctrl_click_emulates_right_click: bool,
     /// Horizon's own graphics settings (`horizon-graphics.txt`, not options.txt).
     pub horizon: crate::graphics::Graphics,
+    /// The graphics API the game started with: `Options.preferredGraphicsBackendFromStartup`.
+    pub startup_api: crate::graphics::GraphicsApi,
+    /// `Monitor.videoModes` of the window's monitor, for the Video page (set by the game).
+    pub video_modes: Vec<crate::window::VideoMode>,
     /// Controller settings (`horizon-controller.txt`, Horizon's own).
     pub controller: crate::gamepad::PadSettings,
     /// Horizon's optional extras (`horizon-extras.txt`), all off by default.
@@ -195,6 +202,8 @@ pub struct Settings {
     /// The packs in `shaderpacks/`, listed when the Shader Packs page opens; the pick is
     /// `horizon.shader_pack`.
     pub shader_packs: Vec<crate::shader_pack_list::Entry>,
+    /// The picked pack's options while its Shader Options page is open.
+    pub shader_options: Option<crate::shader_options::ShaderOptions>,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -272,10 +281,13 @@ impl Default for Settings {
             quit_shortcuts: true,
             ctrl_click_emulates_right_click: false,
             horizon: Default::default(),
+            startup_api: Default::default(),
+            video_modes: Vec::new(),
             controller: Default::default(),
             extras: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
+            shader_options: None,
         }
     }
 }
@@ -305,11 +317,22 @@ fn put_s(f: &mut OptionsFile, key: &str, v: &str) {
     }
 }
 impl Settings {
+    /// The index in `video_modes` of the preferred fullscreen mode, -1 (the desktop's own mode)
+    /// when none is set or the monitor lacks it: `Monitor.indexOfMode`.
+    pub fn video_mode_index(&self) -> i32 {
+        self.file
+            .fullscreen_resolution
+            .as_deref()
+            .and_then(crate::window::VideoMode::read)
+            .and_then(|mode| self.video_modes.iter().position(|m| *m == mode))
+            .map_or(-1, |i| i as i32)
+    }
     pub fn load(path: &Path) -> Self {
         let horizon = path
             .parent()
             .map(crate::graphics::Graphics::load)
             .unwrap_or_default();
+        crate::mipmap::set_dither_cutouts(horizon.dither_cutout_mips);
         let controller = path
             .parent()
             .map(crate::gamepad::PadSettings::load)
@@ -339,7 +362,11 @@ impl Settings {
             },
         };
         settings.describe_for_crashes();
-        settings
+        // Options.load: the backend asked for at startup, what a restart is measured from.
+        Self {
+            startup_api: settings.horizon.api,
+            ..settings
+        }
     }
     /// The render settings and resource packs a crash report lists.
     fn describe_for_crashes(&self) {
@@ -438,10 +465,13 @@ impl Settings {
             quit_shortcuts: f.bool("quitShortcuts"),
             ctrl_click_emulates_right_click: f.bool("ctrlClickEmulatesRightClick"),
             horizon: Default::default(),
+            startup_api: Default::default(),
+            video_modes: Vec::new(),
             controller: Default::default(),
             extras: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
+            shader_options: None,
             auto_jump: f.bool("autoJump"),
             language: f.string("lang"),
             force_unicode: f.bool("forceUnicodeFont"),
@@ -472,10 +502,13 @@ impl Settings {
     /// `Options.createInformation`: what the server learns about this player.
     pub fn client_information(&self, view_distance: i8) -> ClientInformation {
         ClientInformation {
+            language: self.language.clone(),
             chat_visibility: self.chat_visibility as i32,
+            chat_colors: self.chat_colors,
             model_customisation: self.file.model_customisation(),
             main_hand: i32::from(!self.main_hand_left),
             allows_listing: self.file.bool("allowServerListing"),
+            particle_status: i32::from(self.particles),
             ..ClientInformation::new(view_distance)
         }
     }
@@ -593,7 +626,7 @@ impl Settings {
     /// These settings with one `options.txt` value changed (`horizon-ctl
     /// options-set`, as `OptionsFile::set_text` reads it). Horizon's own
     /// files (graphics, controller, extras, the mod list) aren't in
-    /// `options.txt`, so they stay as they are.
+    /// `options.txt`, so they stay as they are, as do the monitor's video modes.
     pub fn with_option(&self, key: &str, value: &str) -> Result<Self, String> {
         let mut file = self.to_file();
         file.set_text(key, value)?;
@@ -602,6 +635,7 @@ impl Settings {
             controller: self.controller.clone(),
             extras: self.extras.clone(),
             mods: self.mods.clone(),
+            video_modes: self.video_modes.clone(),
             ..Self::from_file(file)
         })
     }
@@ -631,6 +665,22 @@ impl Settings {
                     self.volumes[i]
                 }
             })
+    }
+    /// `Options.getFinalSoundSourceVolume`: a source's volume times master's.
+    pub fn final_volume(&self, source: &str) -> f32 {
+        if source == "master" {
+            self.master_volume
+        } else {
+            self.volume(source) * self.master_volume
+        }
+    }
+    /// `Options.narrator`: the `narrator` id in options.txt.
+    pub fn narrator(&self) -> horizon_narrator::Status {
+        horizon_narrator::Status::by_id(self.file.int("narrator"))
+    }
+    pub fn set_narrator(&mut self, status: horizon_narrator::Status) {
+        self.file
+            .set("narrator", crate::options_file::V::Int(status.id()));
     }
     /// `Options.getBackgroundColor(float)`: the text backdrop colour, `default`
     /// opacity unless `backgroundForChatOnly` is off.
@@ -764,11 +814,34 @@ pub enum Opt {
     SharePresence,
     DirectionalAudio,
     MusicToast,
+    /// `Options.exclusiveFullscreen`.
+    ExclusiveFullscreen,
+    /// VideoSettingsScreen's "Exclusive Fullscreen Mode": the monitor's mode to take.
+    ExclusiveMode,
+    /// `Options.preferredGraphicsBackend`.
+    GraphicsBackend,
+    /// `Options.textureFiltering`.
+    TextureFiltering,
+    /// `Options.maxAnisotropyBit`.
+    MaxAnisotropy,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_narrator_reads_its_status_and_the_voice_under_master() {
+        let s = Settings::parse("narrator:2\nsoundCategory_master:0.5\nsoundCategory_voice:0.5\n");
+        assert_eq!(s.narrator(), horizon_narrator::Status::Chat);
+        assert_eq!(s.final_volume("voice"), 0.25);
+        assert_eq!(s.final_volume("master"), 0.5);
+        let mut s = s;
+        s.set_narrator(horizon_narrator::Status::Off);
+        assert_eq!(
+            Settings::parse(&s.serialize()).narrator(),
+            horizon_narrator::Status::Off
+        );
+    }
     #[test]
     fn an_option_set_keeps_horizon_files() {
         let mut s = Settings::parse("fov:70\n");
@@ -830,6 +903,17 @@ mod tests {
         let again = Settings::parse(&out);
         assert_eq!(again.fov, 90.0);
         assert_eq!(again.keys.get("key.jump"), "key.keyboard.j");
+    }
+    #[test]
+    fn client_information_maps_the_stored_main_hand() {
+        // The Skin Customization option is stored by name; ClientInformation
+        // sends HumanoidArm (LEFT = 0, RIGHT = 1).
+        for (stored, arm) in [("left", 0), ("right", 1)] {
+            let s = Settings::parse(&format!("mainHand:{stored}\n"));
+            assert_eq!(s.client_information(10).main_hand, arm);
+            assert!(s.serialize().contains(&format!("mainHand:\"{stored}\"")));
+        }
+        assert_eq!(Settings::default().client_information(10).main_hand, 1);
     }
     #[test]
     fn no_options_txt_paces_frames_like_an_empty_one() {

@@ -14,11 +14,11 @@ RedstoneWireEvaluator.getWireSignal	port	crates/horizon-world/src/level/redstone
 SavedDataType	skip:java		equals over the saved-data type record; Horizon keys saved data by name
 WanderingTraderData.setSpawnChance	inline	crates/horizon-client/src/game/wandering_trader.rs::Game::tick_wandering_trader	field write of spawn_chance inside the tick; no setter
 WanderingTraderData.setSpawnDelay	inline	crates/horizon-client/src/game/wandering_trader.rs::Game::tick_wandering_trader	field write of spawn_delay inside the tick; no setter
-MapBanner.fromWorld	missing		player: using a map on a placed banner adds no banner marker to the map (MapItem.useOn toggle is not ported)
-MapBanner.getDecoration	missing		player: banner markers would show the dye colour icon; maps.rs has no banner decoration types
+MapBanner.fromWorld	port	crates/horizon-client/src/game/banners.rs::Game::map_banner_at	ticked in #3517; `MapBanner.fromWorld` is cited at crates/horizon-client/src/game/banners.rs:19
+MapBanner.getDecoration	port	crates/horizon-client/src/game/maps.rs::MapBanner::sprite	ticked in #3517; `MapBanner.getDecoration` is cited at crates/horizon-client/src/game/maps.rs:50
 MapBanner.getId	missing		minor: key string of a banner marker, only used by the marker feature
 MapDecorationTypes	skip:data		registry of map decoration types; maps.rs keeps its own DECORATION_TYPES table
-MapId.addToTooltip	missing		player: map tooltips show no 'Map #id', 'Locked' or advanced scale lines
+MapId.addToTooltip	port	crates/horizon-client/src/item_tooltip.rs::PlayerHeadName::map_id_lines	ticked in #3517; `MapId.addToTooltip` is cited at crates/horizon-client/src/item_tooltip.rs:412
 MapIndex.getNextMapId	port	crates/horizon-client/src/game/maps.rs::Game::next_map_id	
 DerivedLevelData	skip:debug		crash report category
 LevelData	skip:debug		crash report category
@@ -34,7 +34,7 @@ LevelStorageSource.makeLevelSummary	inline	crates/horizon-client/src/title.rs::l
 LevelStorageSource.parseFeatureFlagsFromSummary	missing		unsure: list_worlds does not read enabled_features, so experimental worlds are not flagged
 LevelStorageSource.parseValidator	skip:other		symlink allow-list (allowed_symlinks.txt); Horizon does not read that file
 LevelStorageSource.readDataConfig	missing		minor: the world's own enabled datapacks and features are not read back from level.dat
-LevelSummary.backupStatus	missing		player: opening a world from an older version gives no 'back up first' prompt; the upgrade runs straight away (world_loading.rs)
+LevelSummary.backupStatus	inline	crates/horizon-client/src/title.rs::list_worlds	FILE_FIXING_REQUIRED from save.rs::needs_file_fixes and DOWNGRADE from save.rs::downgraded_from; UPGRADE_TO_SNAPSHOT never applies to a stable build
 LevelSummary.compareTo	inline	crates/horizon-client/src/title.rs::list_worlds	newest first by last played
 LevelSummary.createInfo	missing		unsure: row status text (locked, needs conversion) is not carried in WorldEntry
 LevelSummary.getLevelName	inline	crates/horizon-client/src/title.rs::list_worlds	WorldEntry.name
@@ -125,7 +125,7 @@ SetAttributesFunction.ModifierBuilder.build	skip:java		builder
 SetBannerPatternFunction.run	missing		minor: banner pattern layers from loot are not set; no vanilla loot table uses set_banner_pattern
 SetBannerPatternFunction.Builder	skip:java		builder
 SetBookCoverFunction.apply	missing		minor: no vanilla loot table uses set_book_cover
-SetComponentsFunction.run	port	crates/horizon-client/src/game/commands/items.rs::Game::apply_item_modifier	gap: player: only /item modify runs it; loot tables (trial chamber copper trim) do not apply the components
+SetComponentsFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	loot tables apply set_components when the stack becomes an item (trial chamber trims included), not only /item modify
 SetComponentsFunction.setComponent	skip:java		builder factory
 SetContainerContents.run	missing		minor: no vanilla loot table uses set_contents
 SetContainerContents.Builder	skip:java		builder
@@ -139,7 +139,7 @@ SetEnchantmentsFunction.validate	skip:data		validation at datapack load
 SetEnchantmentsFunction.Builder	skip:java		builder
 SetFireworkExplosionFunction.apply	missing		minor: no vanilla loot table uses set_firework_explosion
 SetFireworksFunction.apply	missing		minor: no vanilla loot table uses set_fireworks
-SetInstrumentFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	gap: player: only draws the random option; the goat horn's instrument component is never set (pillager outpost horns)
+SetInstrumentFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	the random option becomes the item's minecraft:instrument component
 SetItemCountFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	set_count arm
 SetItemCountFunction.setCount	skip:java		builder factory
 SetItemDamageFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	set_damage arm

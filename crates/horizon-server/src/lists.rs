@@ -168,10 +168,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(config::FILE), config::TEMPLATE).unwrap();
+        // This test edits local lists; it must not look names up through Mojang's services.
+        config::update(&dir, "server", "online_mode", toml::Value::Boolean(false)).unwrap();
         let s = |v: &[&str]| v.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>();
-        run(&dir, "op", &s(&["Alex"])).unwrap();
-        run(&dir, "whitelist", &s(&["add", "Steve"])).unwrap();
-        run(&dir, "whitelist", &s(&["off"])).unwrap();
+        // Each edit takes the folder's lock: retried past a fork-held descriptor (see supervisor::retried).
+        let edit = |v: &[&str]| supervisor::retried(|| run(&dir, v[0], &s(&v[1..])));
+        edit(&["op", "Alex"]).unwrap();
+        edit(&["whitelist", "add", "Steve"]).unwrap();
+        edit(&["whitelist", "off"]).unwrap();
         assert!(
             std::fs::read_to_string(dir.join("ops.json"))
                 .unwrap()
@@ -183,16 +187,15 @@ mod tests {
                 .contains("Steve")
         );
         assert!(!config::Config::load(&dir).unwrap().server.whitelist);
-        run(&dir, "deop", &s(&["Alex"])).unwrap();
+        edit(&["deop", "Alex"]).unwrap();
         assert!(
             !std::fs::read_to_string(dir.join("ops.json"))
                 .unwrap()
                 .contains("Alex")
         );
         // A running server owns the lists: without its API, nothing changes.
-        let lock = supervisor::lock(&dir).unwrap();
+        let lock = supervisor::retried(|| supervisor::lock(&dir)).unwrap();
         assert!(run(&dir, "op", &s(&["Alex"])).is_err());
-        config::update(&dir, "server", "online_mode", toml::Value::Boolean(false)).unwrap();
         assert!(run(&dir, "whitelist", &s(&["add", "Kai"])).is_err());
         drop(lock);
         assert!(

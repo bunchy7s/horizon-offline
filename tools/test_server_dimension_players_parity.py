@@ -37,6 +37,16 @@ SCRIPT = [
     ('bob-end', [f'cmd Bob execute in {END} run tp @s 2.5 100 0.5']),
     ('alice-back', [f'cmd Alice execute in {OVERWORLD} run tp @s 0.5 100 0.5']),
     ('bob-back-again', [f'cmd Bob execute in {OVERWORLD} run tp @s 2.5 100 0.5']),
+    # The dedicated server console has no player as its command source.
+    ('console-bob-nether', [f'console execute in {NETHER} run tp Bob 2.5 100 0.5']),
+    ('console-bob-end', [f'console execute in {END} run tp Bob 2.5 100 0.5']),
+    ('console-bob-back', [f'console execute in {OVERWORLD} run tp Bob 2.5 100 0.5']),
+    # A destination entity supplies its own dimension; a selector can move
+    # more than one player in the same command.
+    ('console-alice-end', [f'console execute in {END} run tp Alice 0.5 100 0.5']),
+    ('console-bob-to-alice', ['console tp Bob Alice']),
+    ('console-alice-back', [f'console execute in {OVERWORLD} run tp Alice 0.5 100 0.5']),
+    ('console-bob-back2', [f'console execute in {OVERWORLD} run tp Bob 2.5 100 0.5']),
     # Through an End portal (Entity.handlePortal), and back by command.
     ('bob-portal', ['cmd Bob setblock 2 101 3 minecraft:end_portal', 'cmd Bob tp @s 2.5 101 3.5']),
     ('bob-portal-back', [f'cmd Bob execute in {OVERWORLD} run tp @s 2.5 100 0.5']),
@@ -72,7 +82,10 @@ def run_side(label, server_command, client_command, build, world):
                 for step, actions in SCRIPT:
                     client.tell(f'step {step}')
                     for action in actions:
-                        client.tell(action)
+                        if action.startswith('console '):
+                            server.console(action.removeprefix('console '))
+                        else:
+                            client.tell(action)
                     # Standing still, a client still sends its position every 20 ticks
                     # (LocalPlayer.sendPosition): the server then tracks to it what it has sent the
                     # chunks of since (ChunkMap.move).

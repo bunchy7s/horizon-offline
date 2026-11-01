@@ -491,10 +491,6 @@ impl Cull {
         }
     }
 
-    pub fn depth_test(&self) -> DepthTest {
-        self.depth_test
-    }
-
     /// In the world pass after phase 1 (`Early`): draw the tested boxes
     /// against its depth. Leaves the pass's pipeline and group 0 changed.
     pub fn test(&self, pass: &mut wgpu::RenderPass<'_>) {

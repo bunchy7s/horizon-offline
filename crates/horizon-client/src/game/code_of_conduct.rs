@@ -169,6 +169,15 @@ impl Game<'_> {
         let Some(prompt) = &self.code_of_conduct else {
             return;
         };
+        // CodeOfConductScreen: WarningScreen's narration, the title and the
+        // text on the next line.
+        horizon_client::widgets::begin_screen(|| {
+            let title = super::screen_info::tr("multiplayer.codeOfConduct.title", &[]);
+            horizon_client::widgets::ScreenInfo::new(
+                "code_of_conduct",
+                format!("{title}\n{}", prompt.text),
+            )
+        });
         let atlas = &self.gui.atlas;
         let (w, h) = (batch.width, batch.height);
         if self.player.is_none() {
@@ -209,6 +218,17 @@ impl Game<'_> {
 
         let [x, y, cw, ch] = layout.check;
         let hover = ui::hovered(cursor, x, y, cw, ch);
+        horizon_client::widgets::narratable(|| {
+            horizon_client::widgets::Narratable::new(
+                horizon_client::widgets::What::Checkbox {
+                    message: layout.label.plain(),
+                    selected: prompt.stop_showing,
+                    active: true,
+                },
+                [x, y, cw, ch],
+            )
+            .hovered(hover)
+        });
         let sprite = match (prompt.stop_showing, hover) {
             (true, true) => "gui/sprites/widget/checkbox_selected_highlighted",
             (true, false) => "gui/sprites/widget/checkbox_selected",

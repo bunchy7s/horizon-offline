@@ -24,26 +24,29 @@ impl Behaviours {
     /// `JigsawPlacement.generateJigsaw`: `assemble` builds the pieces (from
     /// the generation context's own random), then each piece is placed into
     /// the level with the level random, an unbounded box and `reference` as
-    /// the origin. Returns whether pieces were assembled.
+    /// the origin; `keep_jigsaws` skips the jigsaw replacement. Returns whether pieces were assembled
+    /// and the entities the pieces carried (their NBT, for the caller to spawn).
     pub fn place_jigsaw<L: LevelAccess + ?Sized>(
         &self,
         level: &mut L,
         ticks: &mut super::Ticks,
         reference: [i32; 3],
+        keep_jigsaws: bool,
         assemble: impl FnOnce() -> Option<crate::worldgen::generator::JigsawPieces>,
-    ) -> bool {
+    ) -> (bool, Vec<crate::nbt::Compound>) {
         let Some(features) = self.live_features() else {
-            return false;
+            return (false, Vec::new());
         };
         let Some(jigsaw) = assemble() else {
-            return false;
+            return (false, Vec::new());
         };
         let mut sim = self.sim(level, ticks);
         let mut random = sim.random().clone();
-        {
+        let entities = {
             let mut world = LevelFeatureWorld {
                 sim: &mut sim,
                 features,
+                entities: Vec::new(),
             };
             let unbounded =
                 crate::worldgen::structure::BoundingBox::new([i32::MIN; 3], [i32::MAX; 3]);
@@ -59,14 +62,83 @@ impl Behaviours {
                     &mut random,
                     unbounded,
                     reference,
+                    keep_jigsaws,
                     &mut place_feature,
                 ) {
                     eprintln!("Horizon: placing a jigsaw piece failed: {e}");
                 }
             }
-        }
+            world.entities
+        };
         *sim.random() = random;
-        true
+        (true, entities)
+    }
+    /// `/place structure`: `PlaceCommand.placeStructure` after the start is
+    /// generated, `StructureStart.placeInChunk` for every chunk of the start's
+    /// bounding box (`ChunkPos.rangeClosed` of its corners), each clipped to
+    /// the chunk's whole height, drawing from the level random. False when the
+    /// level has no structure resources, or a piece failed to place. The
+    /// entities the pieces carried (villagers, guardians, template entities)
+    /// come back as NBT for the caller to spawn.
+    pub fn place_structure<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut super::Ticks,
+        start: &crate::worldgen::structure::start::StructureStart,
+    ) -> (bool, Vec<crate::nbt::Compound>) {
+        let Some(features) = self.live_features() else {
+            return (false, Vec::new());
+        };
+        let (Some(resources), Some(blocks)) = (features.structures(), features.tree_blocks())
+        else {
+            return (false, Vec::new());
+        };
+        let (min, max) = (start.bounding_box.min, start.bounding_box.max);
+        let (cx0, cx1) = (min[0] >> 4, max[0] >> 4);
+        let (cz0, cz1) = (min[2] >> 4, max[2] >> 4);
+        let mut sim = self.sim(level, ticks);
+        // PlaceCommand's per-chunk clip box: BoundingBox(minX, getMinY(), minZ,
+        // maxX, getMaxY() + 1, maxZ), the level's whole height of the chunk
+        // (`max_y` is exclusive here, so the top layer is `max_y - 1`).
+        let (low_y, high_y) = (sim.level.min_y(), sim.level.max_y() - 1);
+        let mut random = sim.random().clone();
+        let mut placed = true;
+        let entities = {
+            let mut world = LevelFeatureWorld {
+                sim: &mut sim,
+                features,
+                entities: Vec::new(),
+            };
+            let mut place_feature =
+                |w: &mut LevelFeatureWorld<'_, '_, L>,
+                 r: &mut horizon_core::random::LegacyRandom,
+                 name: &str,
+                 p: [i32; 3]| { Ok(features.place_placed(name, w, r, p)) };
+            for cx in cx0..=cx1 {
+                for cz in cz0..=cz1 {
+                    let chunk_box = crate::worldgen::structure::BoundingBox::new(
+                        [cx * 16, low_y, cz * 16],
+                        [cx * 16 + 15, high_y, cz * 16 + 15],
+                    );
+                    if crate::worldgen::structure::start::place_in_chunk(
+                        start,
+                        &mut world,
+                        resources,
+                        &blocks,
+                        &mut random,
+                        chunk_box,
+                        &mut place_feature,
+                    )
+                    .is_err()
+                    {
+                        placed = false;
+                    }
+                }
+            }
+            world.entities
+        };
+        *sim.random() = random;
+        (placed, entities)
     }
 }
 
@@ -205,6 +277,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let mut world = LevelFeatureWorld {
                 sim: self,
                 features,
+                entities: Vec::new(),
             };
             features.place_configured(name, &mut world, &mut random, [pos.x, pos.y, pos.z])
         };
@@ -222,6 +295,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             let mut world = LevelFeatureWorld {
                 sim: self,
                 features,
+                entities: Vec::new(),
             };
             features.place_placed(name, &mut world, &mut random, [pos.x, pos.y, pos.z])
         };

@@ -15,7 +15,8 @@ import sys
 from pathlib import Path
 
 # DLLs that are part of Windows 10 and 11. api-ms-win-* and ext-ms-win-* API
-# sets resolve inside Windows too.
+# sets resolve inside Windows too. uiautomationcore.dll (UI Automation, in System32
+# since Windows 7) is what the launcher's accessibility (accesskit_windows) imports.
 WINDOWS_SYSTEM = {
     "advapi32.dll", "bcrypt.dll", "bcryptprimitives.dll", "cfgmgr32.dll", "combase.dll",
     "comctl32.dll", "comdlg32.dll", "crypt32.dll", "d2d1.dll", "d3d11.dll", "d3d12.dll",
@@ -24,7 +25,8 @@ WINDOWS_SYSTEM = {
     "kernelbase.dll", "mfplat.dll", "mmdevapi.dll", "msvcrt.dll", "ncrypt.dll", "ntdll.dll",
     "ole32.dll", "oleaut32.dll", "opengl32.dll", "propsys.dll", "secur32.dll", "setupapi.dll",
     "shcore.dll", "shell32.dll", "shlwapi.dll", "ucrtbase.dll", "user32.dll", "userenv.dll",
-    "uxtheme.dll", "version.dll", "winmm.dll", "ws2_32.dll", "xinput1_4.dll",
+    "uiautomationcore.dll", "uxtheme.dll", "version.dll", "winmm.dll", "ws2_32.dll",
+    "xinput1_4.dll",
 }
 LINUX_LOADER = "/lib64/ld-linux-x86-64.so.2"
 LINUX_SYSTEM = {

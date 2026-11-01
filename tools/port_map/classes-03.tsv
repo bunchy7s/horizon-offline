@@ -108,7 +108,7 @@ BuddingAmethystBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim
 BushBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	
 CactusFlowerBlock.mayPlaceOn	port	crates/horizon-world/src/level/survive.rs::Sim::may_place_on	
 CakeBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
-CakeBlock.useItemOn	port	crates/horizon-world/src/level/interact.rs::Behaviours::use_item_on	
+CakeBlock.useItemOn	port	crates/horizon-world/src/level/interact.rs::Behaviours::cake_candle_state	a candle on an uneaten cake makes a candle cake; the client consumes the candle in game.rs::use_hand
 CakeBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	
 CalibratedSculkSensorBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
 CalibratedSculkSensorBlock.getSignal	port	crates/horizon-world/src/level/sculk.rs::Behaviours::calibrated_back_signal	
@@ -179,7 +179,7 @@ FenceGateBlock.getShape	skip:data		block shape is a per-state table from the van
 FenceGateBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
 FenceGateBlock.isPathfindable	skip:data		path types come from the per-state path data (mobs/path.rs)
 FenceGateBlock.neighborChanged	port	crates/horizon-world/src/level/redstone.rs::Sim::gate_neighbor_changed	
-FenceGateBlock.onExplosionHit	missing		player: an explosion (TNT, creeper) does not open a closed, unpowered fence gate; vanilla toggles it open
+FenceGateBlock.onExplosionHit	port	crates/horizon-client/src/game/wind.rs::Game::wind_trigger_block	ticked in #3516; `FenceGateBlock.onExplosionHit` is cited at crates/horizon-client/src/game/wind.rs:555 (in a comment, so `where` names the enclosing fn)
 FenceGateBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
 FenceGateBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	
 FireflyBushBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	
@@ -187,7 +187,7 @@ FlowerBedBlock.canBeReplaced	port	crates/horizon-world/src/level/place.rs::Sim::
 FlowerBedBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
 FlowerBedBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	
 FlowerBedBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
-FlowerBlock.makeEffectList	skip:data		suspicious stew effects are item data (stew_effects component)
+FlowerBlock.makeEffectList	skip:data		the constructor sites' effects are the table in horizon-items/src/flowers.rs (floor(seconds * 20))
 FrogspawnBlock.mayPlaceOn	port	crates/horizon-world/src/level/survive.rs::Sim::frogspawn_may_place_on	
 FrogspawnBlock.spawnTadpoles	port	crates/horizon-client/src/game.rs::Game::process_level_events	handles the hatch block event: 2 to 5 tadpoles
 FrogspawnBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	
@@ -243,9 +243,9 @@ LeafLitterBlock.canBeReplaced	port	crates/horizon-world/src/level/place.rs::Sim:
 LeafLitterBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
 LeafLitterBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
 LeafLitterBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
-LilyPadBlock.entityInside	missing		player: a boat that drives over a lily pad does not break it; vanilla destroys it
+LilyPadBlock.entityInside	port	crates/horizon-client/src/game.rs::GameLevel::boat_trigger_boxes	ticked in #3516; `LilyPadBlock.entityInside` is cited at crates/horizon-client/src/game.rs:878
 LilyPadBlock.mayPlaceOn	port	crates/horizon-world/src/level/survive.rs::Sim::may_place_on	
-MagmaBlock.stepOn	missing		player: standing on magma does not hurt (vanilla deals 1 hot-floor damage unless sneaking)
+MagmaBlock.stepOn	port	crates/horizon-client/src/mobs/ai.rs::effects_from_blocks	a mob on the ground on magma takes the hot-floor point; the player's is in motion.rs
 MangrovePropaguleBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
 MangrovePropaguleBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
 MangrovePropaguleBlock.createNewHangingPropagule	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	hanging state set when a propagule grows down

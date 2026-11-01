@@ -422,6 +422,15 @@ pub fn button(
     active: bool,
     highlighted: bool,
 ) {
+    // Its narration: hovered is the mouse over it (`isHovered`), which the
+    // narrator tests.
+    crate::widgets::narratable(|| {
+        crate::widgets::Narratable::button(
+            label.plain(),
+            [x as f32, y as f32, w as f32, h as f32],
+            active,
+        )
+    });
     let sprite_id = if !active {
         "widget/button_disabled"
     } else if highlighted {
@@ -469,6 +478,8 @@ pub struct TextField {
     pub text_shadow: bool,
     pub hint: Option<Text>,
     pub suggestion: Option<String>,
+    /// `getMessage`: what the narrator calls the box.
+    pub message: String,
 }
 fn chars(s: &str) -> usize {
     s.chars().count()
@@ -511,6 +522,7 @@ impl TextField {
             text_shadow: true,
             hint: None,
             suggestion: None,
+            message: String::new(),
         }
     }
     pub fn inner_width(&self) -> i32 {
@@ -717,15 +729,17 @@ impl TextField {
         blink_ms: u64,
         format: Option<&dyn Fn(&str, usize) -> Text>,
     ) {
-        crate::widgets::target_as(
-            [
-                self.x as f32,
-                self.y as f32,
-                self.width as f32,
-                self.height as f32,
-            ],
-            crate::widgets::Kind::Field,
-        );
+        let rect = [
+            self.x as f32,
+            self.y as f32,
+            self.width as f32,
+            self.height as f32,
+        ];
+        crate::widgets::target_as(rect, crate::widgets::Kind::Field);
+        crate::widgets::narratable(|| {
+            crate::widgets::Narratable::edit_box(self.message.clone(), self.value.clone(), rect)
+                .focused(self.focused)
+        });
         if self.bordered {
             let s = if self.focused {
                 "widget/text_field_highlighted"

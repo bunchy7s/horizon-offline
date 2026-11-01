@@ -36,9 +36,37 @@ pub fn build() -> Dispatcher {
 /// The tree Commands registers; `dev` adds the commands vanilla only
 /// registers in development builds (raid, warden_spawn_tracker).
 pub fn build_with(dev: bool) -> Dispatcher {
+    build_for(dev, false)
+}
+/// [`build_with`] for a server of the given kind (Commands.CommandSelection):
+/// an integrated server's tree, or with `dedicated` a dedicated server's.
+pub fn build_for(dev: bool, dedicated: bool) -> Dispatcher {
     let mut d = registered(dev);
+    if dedicated {
+        dedicated_selection(&mut d);
+    }
     apply_vanilla_order(&mut d);
     d
+}
+/// Commands(CommandSelection.DEDICATED) where it differs from INTEGRATED:
+/// `seed` and `version` check permissions (SeedCommand.register and
+/// VersionCommand.register get `selection != INTEGRATED`), `publish` and
+/// `unpublish` are not registered (`includeIntegrated`), and the dedicated
+/// commands are (`includeDedicated`: `/op`, `/ban`, `/whitelist`...).
+fn dedicated_selection(d: &mut Dispatcher) {
+    for name in ["seed", "version"] {
+        if let Some(n) = d.find(name) {
+            d.requires(n, GAMEMASTERS);
+        }
+    }
+    let kept: Vec<usize> = d.nodes[0]
+        .children
+        .iter()
+        .copied()
+        .filter(|&c| !matches!(d.nodes[c].name(), "publish" | "unpublish"))
+        .collect();
+    d.nodes[0].children = kept;
+    super::tree_extra::register_dedicated(d, 0);
 }
 /// The tree in the order Horizon's code registers it, before
 /// [`vanilla_order`](super::vanilla_order) puts children in vanilla's order
@@ -289,7 +317,8 @@ pub fn registered(dev: bool) -> Dispatcher {
         d.executes(l, "difficulty");
     }
 
-    // seed and version: everyone in the integrated server.
+    // seed and version: everyone in the integrated server, game masters on a
+    // dedicated one (`dedicated_selection`).
     let seed = d.literal(root, "seed");
     d.executes(seed, "seed");
     let version = d.literal(root, "version");
@@ -544,7 +573,18 @@ pub fn game_dispatcher() -> &'static Dispatcher {
     game_tree(
         std::env::var_os("HORIZON_DEV_COMMANDS").is_some(),
         HORIZON_COMMANDS.load(std::sync::atomic::Ordering::Relaxed),
+        DEDICATED_COMMANDS.load(std::sync::atomic::Ordering::Relaxed),
     )
+}
+/// Whether this process is a dedicated server, whose tree has the dedicated
+/// commands (`/op`, `/ban`, `/whitelist`...). Single player's server thread
+/// and a LAN world are integrated servers: vanilla registers none of them.
+static DEDICATED_COMMANDS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// A dedicated server turns its commands on, for the trees `game_dispatcher`
+/// returns from now on.
+pub fn set_dedicated_commands(on: bool) {
+    DEDICATED_COMMANDS.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 /// Whether this process's server has Horizon's own commands (`/pregen`). Off
 /// by default, so `/help` and the command tree are vanilla's; a dedicated
@@ -559,17 +599,19 @@ pub fn set_horizon_commands(on: bool) {
 /// The server.properties key that turns `/pregen` on (Horizon's own; vanilla
 /// ignores keys it doesn't know).
 pub const PREGEN_PROPERTY: &str = "horizon-pregen";
-pub(crate) fn game_tree(dev: bool, horizon: bool) -> &'static Dispatcher {
-    static HORIZON: [std::sync::OnceLock<Dispatcher>; 2] =
-        [const { std::sync::OnceLock::new() }; 2];
-    match (dev, horizon) {
-        (true, false) => dispatcher(),
-        (false, false) => release_dispatcher(),
-        (dev, true) => HORIZON[usize::from(dev)].get_or_init(|| {
-            let mut d = build_with(dev);
-            horizon_commands(&mut d, 0);
-            d
-        }),
+pub(crate) fn game_tree(dev: bool, horizon: bool, dedicated: bool) -> &'static Dispatcher {
+    static TREES: [std::sync::OnceLock<Dispatcher>; 8] = [const { std::sync::OnceLock::new() }; 8];
+    match (dev, horizon, dedicated) {
+        (true, false, false) => dispatcher(),
+        (false, false, false) => release_dispatcher(),
+        _ => TREES[usize::from(dev) | usize::from(horizon) << 1 | usize::from(dedicated) << 2]
+            .get_or_init(|| {
+                let mut d = build_for(dev, dedicated);
+                if horizon {
+                    horizon_commands(&mut d, 0);
+                }
+                d
+            }),
     }
 }
 /// Commands vanilla doesn't have, after its own: `/pregen`

@@ -37,7 +37,7 @@ pub fn note(shared: &Shared, level: &str, message: &str) {
         chrono::Local::now().format("%H:%M:%S")
     );
     println!("{line}");
-    shared.log.lock().unwrap().push(line);
+    shared.log_line(line);
 }
 
 /// The folder's lock: one supervisor per server folder. Released when the process ends, even by a crash.
@@ -57,6 +57,22 @@ pub fn lock(dir: &Path) -> Result<File, String> {
         }
         Err(std::fs::TryLockError::Error(e)) => Err(e.to_string()),
     }
+}
+
+/// `attempt` (one that takes the folder's lock) retried for up to a second. A process another test
+/// spawns holds a copy of the lock's descriptor between its fork and exec: the lock comes back once that
+/// child has exec'd.
+#[cfg(test)]
+pub(crate) fn retried<T>(mut attempt: impl FnMut() -> Result<T, String>) -> Result<T, String> {
+    let mut result = attempt();
+    for _ in 0..50 {
+        if result.is_ok() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+        result = attempt();
+    }
+    result
 }
 
 enum Exit {
@@ -89,11 +105,21 @@ pub fn run(dir: &Path) -> Result<(), String> {
     let config = Config::load(dir)?;
     let program = engine::program(&config, dir)?;
     let resources = engine::resources(&config, dir, Some(&program))?;
+    // Half-copied game files would only crash the engine again at every restart: name what is missing.
+    engine::check_prepared(&resources)?;
     // A game the system can't load would only crash again at every restart: say why at once.
     engine::check_starts(&program)?;
     let _lock = lock(dir)?;
     let shared = Shared::new(dir);
     let _endpoint = api::start(shared.clone())?;
+    if let Some(address) = crate::management::start(shared.clone())? {
+        note(
+            &shared,
+            "INFO",
+            &format!("Json-RPC Management connection listening on {address}"),
+        );
+    }
+    crate::rcon::start(shared.clone())?;
     match config.panel.address() {
         Ok(Some(address)) => match crate::panel::start(shared.clone(), address) {
             Ok(()) => note(
@@ -113,6 +139,8 @@ pub fn run(dir: &Path) -> Result<(), String> {
         Err(e) => note(&shared, "WARN", &e),
     }
     sample(shared.clone());
+    crate::events::poll_game(shared.clone());
+    crate::discord::start(shared.clone(), config.discord.clone());
     schedule_backups(shared.clone());
     check_updates(shared.clone());
     let console = console_lines();
@@ -141,7 +169,7 @@ pub fn run(dir: &Path) -> Result<(), String> {
             ),
         );
         shared.set_phase(Phase::Starting);
-        let mut child = engine::spawn(&program, &resources, dir)
+        let mut child = engine::spawn(&program, &resources, dir, config.engine.low_memory)
             .map_err(|e| format!("{}: {e}", program.display()))?;
         {
             let mut state = shared.state.lock().unwrap();
@@ -459,13 +487,20 @@ fn pump(shared: &Arc<Shared>, from: impl Read + Send + 'static, to_stderr: bool)
                 } else {
                     println!("{line}");
                     if line.contains("/INFO]: Done (") {
-                        let mut state = shared.state.lock().unwrap();
-                        if state.phase == Phase::Starting {
-                            state.phase = Phase::Running;
+                        let up = {
+                            let mut state = shared.state.lock().unwrap();
+                            let starting = state.phase == Phase::Starting;
+                            if starting {
+                                state.phase = Phase::Running;
+                            }
+                            starting
+                        };
+                        if up {
+                            shared.emit("phase", serde_json::json!({ "phase": "running" }));
                         }
                     }
                 }
-                shared.log.lock().unwrap().push(line);
+                shared.log_line(line);
             }
         });
 }
@@ -850,17 +885,7 @@ mod tests {
         let first = lock(&dir).unwrap();
         assert!(lock(&dir).unwrap_err().contains("already running"));
         drop(first);
-        // A process another test spawns holds a copy of the lock's descriptor between its fork and exec:
-        // the lock comes back once that child has exec'd.
-        let mut again = lock(&dir);
-        for _ in 0..50 {
-            if again.is_ok() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-            again = lock(&dir);
-        }
-        again.unwrap();
+        retried(|| lock(&dir)).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

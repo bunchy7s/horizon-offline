@@ -1,6 +1,6 @@
 //! `BlockPattern`: a grid of block predicates found in the world in any of
 //! its 24 orientations (upright, upside down, lying flat, turned sideways).
-//! The wither is built from these.
+//! The wither and the golems are built from these.
 use horizon_core::geometry::Direction;
 
 /// A grid of predicate keys: `aisles[z][y]` is a row whose chars are the `x`
@@ -18,6 +18,25 @@ pub const WITHER_FULL: BlockPattern = BlockPattern {
 /// `WitherSkullBlock.getOrCreateWitherBase`.
 pub const WITHER_BASE: BlockPattern = BlockPattern {
     aisles: &[&["   ", "###", "~#~"]],
+};
+/// `CarvedPumpkinBlock.getOrCreateSnowGolemFull`: '^' a carved pumpkin or
+/// jack o'lantern, '#' a snow block.
+pub const SNOW_GOLEM_FULL: BlockPattern = BlockPattern {
+    aisles: &[&["^", "#", "#"]],
+};
+/// `CarvedPumpkinBlock.getOrCreateSnowGolemBase`: the same column with any
+/// block where the head will go.
+pub const SNOW_GOLEM_BASE: BlockPattern = BlockPattern {
+    aisles: &[&[" ", "#", "#"]],
+};
+/// `CarvedPumpkinBlock.getOrCreateIronGolemFull`: '^' the head, '#' an iron
+/// block, '~' air beside the arms and legs.
+pub const IRON_GOLEM_FULL: BlockPattern = BlockPattern {
+    aisles: &[&["~^~", "###", "~#~"]],
+};
+/// `CarvedPumpkinBlock.getOrCreateIronGolemBase`.
+pub const IRON_GOLEM_BASE: BlockPattern = BlockPattern {
+    aisles: &[&["~ ~", "###", "~#~"]],
 };
 /// `BlockPattern.BlockPatternMatch`: where a pattern was found and how it is turned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

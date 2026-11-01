@@ -7,10 +7,10 @@ PointedDripstoneBlock.getCauldronFillFluidType	inline	crates/horizon-world/src/l
 PointedDripstoneBlock.canGrow	inline	crates/horizon-world/src/level/speleothem.rs::Sim::speleothem_grow	gap: minor: checks the fluid two blocks above is water, not that it is a source block
 PointedDripstoneBlock.getDripParticle	port	crates/horizon-client/src/game/level_particles.rs::Game::dripstone_drip_particle	
 PotentSulfurBlock.isSourceIfFluid	inline	crates/horizon-world/src/level/shapes.rs::Sim::potent_sulfur_state	source_if_fluid check inside the state rule
-PotentSulfurBlock.onPlace	missing		player: placing a continuous sulfur geyser block gives no geyser start sound and no block-activate game event; no erupting state ever starts in Horizon
+PotentSulfurBlock.onPlace	port	crates/horizon-world/src/level/shapes.rs::Sim::potent_sulfur_on_place	ticked in #3516; `PotentSulfurBlock.onPlace` is cited at crates/horizon-world/src/level/shapes.rs:878
 PotentSulfurBlock.spawnBubbleParticlesAt	inline	crates/horizon-client/src/animate_tick.rs::block_animate_tick	two sulfur bubbles in the potent sulfur arm; add_visible is the always-visible add
 PotentSulfurBlock.triggerEvent	missing		minor: only stores the eruption tick that the geyser plume timing reads; geysers never erupt in Horizon (see getTicker)
-PotentSulfurBlock.getTicker	missing		player: wet or dormant sulfur never makes nearby players nauseous from noxious gas; periodic geysers never erupt and continuous ones do not launch entities or play the plume
+PotentSulfurBlock.getTicker	port	crates/horizon-client/src/game/potent_sulfur.rs::Game::tick_potent_sulfur	ticked in #3516; `PotentSulfurBlock.getTicker` is cited at crates/horizon-client/src/game/potent_sulfur.rs:133
 PowderSnowBlock.skipRendering	port	crates/horizon-world/src/block_render.rs::FaceVisibility::skips	same_block skip kind from the block data
 PowderSnowBlock.fallOn	port	crates/horizon-world/src/block_landing.rs::BlockLandingRegistry::fall_on	powder snow landing sound from 4 blocks, small or big by 7
 PowderSnowBlock.getEntityInsideCollisionShape	inline	crates/horizon-client/src/motion.rs::MotionWorld::check_inside_blocks	gap: minor: each powder snow cell is swept as a full box; vanilla uses the entity-context shape, which for falling entities over 2.5 blocks is a 0.9 tall box
@@ -33,7 +33,7 @@ ScaffoldingBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::
 RedStoneOreBlock.interact	port	crates/horizon-world/src/level/interact.rs::Behaviours::attack_block	gap: player: no red dust burst when the ore lights; the lit set is in attack_block and game/sculk.rs step_on_redstone_ore
 RedStoneOreBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	
 RedStoneOreBlock.spawnAfterBreak	inline	crates/horizon-world/src/level/removal.rs::break_experience	ore experience (1 to 5) for the break is in break_experience
-RedStoneOreBlock.spawnParticles	missing		player: no red dust particles burst around a redstone ore when it lights from mining, stepping on it, or a right-click with an item
+RedStoneOreBlock.spawnParticles	port	crates/horizon-client/src/game/sculk.rs::Game::redstone_ore_particles	the dust burst of an ore that lights, from mining, stepping on it or a right click
 RedstoneWireBlock.makeShapes	skip:data		wire shapes are per-state data from the block tables
 RedstoneWireBlock.getMissingConnections	inline	crates/horizon-world/src/level/redstone.rs::Sim::wire_connection_state	the missing-side loop of the connection state
 RedstoneWireBlock.updateShape	port	crates/horizon-world/src/level/redstone.rs::Sim::redstone_wire_update_shape	
@@ -105,9 +105,9 @@ ShelfBlock.isPathfindable	skip:data		path types come from the per-state path dat
 ShelfBlock.createBlockStateDefinition	skip:data		block state definition is data (blocks table in horizon-items)
 ShelfBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	shelf arm of the placement rules
 ShelfBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	facing rotation from the generated state table
-ShelfBlock.useItemOn	missing		player: right-clicking a shelf with an item does nothing: the item is not put on a slot, a filled slot is not taken out, and a powered shelf does not swap with the hotbar; interact.rs has no shelf item use
-ShelfBlock.swapSingleItem	missing		player: the held item is not exchanged with the item in the clicked shelf slot
-ShelfBlock.swapHotbar	missing		player: a powered shelf chain does not swap its items with the hotbar
+ShelfBlock.useItemOn	port	crates/horizon-client/src/game/shelf.rs::Game::use_shelf	a single slot swap, the multi-block hotbar swap while powered (`block.shelf.multi_swap`) and the creative keep, with the block entity and comparator told
+ShelfBlock.swapSingleItem	inline	crates/horizon-client/src/game/shelf.rs::Game::use_shelf	the unpowered single-slot swap is the other arm of `use_shelf`
+ShelfBlock.swapHotbar	inline	crates/horizon-client/src/game/shelf.rs::Game::use_shelf	the powered chain's hotbar swap is the `powered` arm of `use_shelf`
 ShelfBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::RegistryFluidWorld::fluid_state	waterlogged state from block data
 ShelfBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
 ShulkerBoxBlock.useWithoutItem	port	crates/horizon-client/src/game.rs::Game::open_menu	opens the box and awards the open stat; canOpen via shulker_can_open

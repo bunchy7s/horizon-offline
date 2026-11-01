@@ -72,6 +72,8 @@ pub(super) struct SpriteAnimator {
     size: u32,
     /// The layers the last `animate` rewrote, counted over all arrays.
     changed: Vec<u32>,
+    /// Whether each sprite layer has an animation.
+    is_animated: Vec<bool>,
 }
 
 impl SpriteAnimator {
@@ -147,7 +149,12 @@ impl SpriteAnimator {
                 group,
             });
         }
-        let Some(pipeline) = pipeline else {
+        let max_layer = animations.iter().map(|a| a.layer).max().unwrap_or(0);
+        let mut is_animated = vec![false; (max_layer + 1) as usize];
+        for a in animations {
+            is_animated[a.layer as usize] = true;
+        }
+        let Some((pipeline, layout)) = pipeline else {
             let groups = keys
                 .iter()
                 .zip(&counts)
@@ -168,6 +175,7 @@ impl SpriteAnimator {
                 },
                 size,
                 changed: Vec::new(),
+                is_animated,
             };
         };
         let frames: Vec<_> = frames
@@ -193,7 +201,6 @@ impl SpriteAnimator {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let layout = pipeline.get_bind_group_layout(0);
         let groups = keys
             .iter()
             .zip(&counts)
@@ -248,7 +255,21 @@ impl SpriteAnimator {
             writer: Writer::Gpu { jobs, pipeline },
             size,
             changed: Vec::new(),
+            is_animated,
         }
+    }
+
+    /// Whether the sprite layer has an animation.
+    pub fn is_animated(&self, layer: u16) -> bool {
+        self.is_animated
+            .get(layer as usize)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Number of words needed to mark the animated layers visible this frame.
+    pub fn active_layer_words(&self) -> usize {
+        self.is_animated.len().div_ceil(u64::BITS as usize)
     }
 
     /// Whether the jobs can run on the GPU: compute shaders writing a
@@ -270,14 +291,16 @@ impl SpriteAnimator {
     }
 
     /// Show every sprite's frame at `tick`, rewriting only the sprites whose
-    /// frame or mix changed (`SpriteContents.AnimationState.tick`).
+    /// frame or mix changed (`SpriteContents.AnimationState.tick`), skipping
+    /// sprites not present in `active` when provided.
     pub fn animate(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         uploads: &mut Uploads,
         tick: u64,
+        active: Option<&[u64]>,
     ) {
-        if self.collect(tick) == 0 {
+        if self.collect(tick, active) == 0 {
             return;
         }
         let (jobs, pipeline) = match &self.writer {
@@ -337,10 +360,18 @@ impl SpriteAnimator {
 
     /// Queue a job for every sprite whose blend at `tick` differs from what
     /// its layer shows; the number of jobs.
-    fn collect(&mut self, tick: u64) -> usize {
+    fn collect(&mut self, tick: u64, active: Option<&[u64]>) -> usize {
         let mut count = 0;
         self.changed.clear();
         for sprite in &mut self.sprites {
+            if let Some(active) = active {
+                let layer = sprite.animation.layer as usize;
+                let word = layer / u64::BITS as usize;
+                let bit = 1_u64 << (layer % u64::BITS as usize);
+                if active.get(word).is_none_or(|active| active & bit == 0) {
+                    continue;
+                }
+            }
             let blend = sprite.animation.blend(tick);
             if sprite.shown == Some(blend) {
                 continue;
@@ -364,11 +395,15 @@ impl SpriteAnimator {
     }
 }
 
-/// `animate.wgsl`'s pipeline, unless the device fails to make it: an OpenGL
-/// driver can list compute shaders among its extensions while wgpu writes
-/// the GLSL version of its core version, which has none (Mesa's
-/// `MESA_GL_VERSION_OVERRIDE`, older drivers).
-fn pipeline(device: &wgpu::Device) -> Option<wgpu::ComputePipeline> {
+/// `animate.wgsl`'s pipeline and the bind group layout of its group 0,
+/// unless the device fails to make the pipeline: an OpenGL driver can list
+/// compute shaders among its extensions while wgpu writes the GLSL version
+/// of its core version, which has none (Mesa's `MESA_GL_VERSION_OVERRIDE`,
+/// older drivers). A device lost between the scopes' pushes answers pipeline
+/// creation with a silent placeholder and reports its invalidity only when
+/// the layout is asked for — inside the scopes that error is caught, outside
+/// them it is uncaptured and panics (#3866).
+fn pipeline(device: &wgpu::Device) -> Option<(wgpu::ComputePipeline, wgpu::BindGroupLayout)> {
     let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -383,9 +418,10 @@ fn pipeline(device: &wgpu::Device) -> Option<wgpu::ComputePipeline> {
         compilation_options: Default::default(),
         cache: None,
     });
+    let layout = pipeline.get_bind_group_layout(0);
     let internal = pollster::block_on(internal.pop());
     match internal.or(pollster::block_on(validation.pop())) {
-        None => Some(pipeline),
+        None => Some((pipeline, layout)),
         Some(e) => {
             log::warn!("Horizon renderer: animated sprites drawn on the CPU ({e})");
             None
@@ -823,7 +859,7 @@ mod tests {
         for tick in [0, 0, 1, 2, 3, 4, 7, 7, 12, 30] {
             let mut encoder = device.create_command_encoder(&Default::default());
             let shown: Vec<_> = animator.sprites.iter().map(|s| s.shown).collect();
-            animator.animate(&mut encoder, &mut uploads, tick);
+            animator.animate(&mut encoder, &mut uploads, tick, None);
             writes.push(
                 animator
                     .sprites
@@ -859,5 +895,57 @@ mod tests {
         // but layer 1 at tick 30 (two 9-tick loops after 12), layer 3 when
         // its frame turns over (every 2 ticks, but 12 shows 7's frame).
         assert_eq!(writes, [3, 0, 2, 3, 2, 3, 3, 0, 2, 1]);
+    }
+
+    #[test]
+    fn inactive_sprites_are_skipped_by_collect() {
+        let Some((device, _)) = device() else {
+            return;
+        };
+        let size = 16;
+        let clips = [
+            (1, 16, r#"{"frametime":1}"#),
+            (3, 16, r#"{"frametime":1}"#),
+            (5, 16, r#"{"frametime":1}"#),
+        ];
+        let mut mips = vec![Settings::default(); 6];
+        let animations: Vec<_> = clips
+            .iter()
+            .map(|&(layer, native, metadata)| {
+                mips[layer as usize] = settings(native, Strategy::Cutout);
+                let frames = (0..3)
+                    .map(|f| crate::sprites::resample(&frame(native, layer * 7 + f), native, size))
+                    .collect();
+                crate::sprites::test_frames(layer, frames, metadata)
+            })
+            .collect();
+        // Construct with CPU writer (empty textures is fine for collect testing)
+        let mut animator = SpriteAnimator::new(&device, &animations, size, &mips, &[], 2, false);
+        assert!(animator.is_animated(1));
+        assert!(!animator.is_animated(2));
+        assert!(animator.is_animated(3));
+        assert!(animator.is_animated(5));
+
+        // When active layer is [1], only sprite 1 is collected
+        let active = [1_u64 << 1];
+        let count = animator.collect(1, Some(&active));
+        assert_eq!(count, 1);
+        assert_eq!(animator.changed, vec![1]);
+
+        // When active is empty, 0 are collected
+        let count = animator.collect(2, Some(&[0]));
+        assert_eq!(count, 0);
+        assert!(animator.changed.is_empty());
+
+        // When active is [3, 5], both 3 and 5 are collected
+        let active = [1_u64 << 3 | 1_u64 << 5];
+        let count = animator.collect(3, Some(&active));
+        assert_eq!(count, 2);
+        assert_eq!(animator.changed, vec![3, 5]);
+
+        // When active is None, all out-of-date sprites update
+        let count = animator.collect(5, None);
+        assert_eq!(count, 3);
+        assert_eq!(animator.changed, vec![1, 3, 5]);
     }
 }

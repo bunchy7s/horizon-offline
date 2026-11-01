@@ -9,11 +9,16 @@ use super::{
         RandomLookAround, Stroll, TARGET, goal_clone, reduced,
     },
 };
-use crate::blocks::Fluid;
+use crate::{
+    blocks::Fluid,
+    items::{ItemStack, Items},
+    random_sequences::RandomSequences,
+};
 use horizon_core::{
     geometry::{Aabb, Vec3},
     random::RandomSource,
 };
+use horizon_world::registry::{BlockRegistry, BlockStateId};
 
 pub fn register(m: &mut Mob) {
     let g = &mut m.ai.goals;
@@ -80,7 +85,7 @@ pub fn teleport_to(
         return false;
     }
     let mut by = y.floor() as i32;
-    while by > crate::chunk::MIN_Y && !w.facts.get(w.world.block(bx, by, bz)).full_collision {
+    while by > w.world.bottom_y() && !w.facts.get(w.world.block(bx, by, bz)).full_collision {
         by -= 1;
     }
     let ground = w.facts.get(w.world.block(bx, by, bz));
@@ -226,6 +231,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     }
 }
 /// EndermanModel.setupAnim: half-speed clamped limbs, held-block arms, creepy head.
+/// Humanoid riding pose runs first (`isPassenger`); only xRot is halved/clamped after.
 pub fn anim(m: &Mob, s: &State, p: &mut Poses) {
     super::anim::humanoid_pub(p, s, m);
     for part in ["right_arm", "left_arm", "right_leg", "left_leg"] {
@@ -446,6 +452,44 @@ impl Goal for LeaveBlock {
     }
 }
 
+/// The tool `Enderman.dropCustomDeathLoot` rolls the carried block's drops
+/// with: a diamond axe enchanted by `VanillaEnchantmentProviders.ENDERMAN_LOOT_DROP`
+/// (`enchantment_provider/enderman_loot_drop.json`, a single Silk Touch I),
+/// so the block itself comes back.
+pub fn carried_block_tool() -> ItemStack {
+    let mut axe = ItemStack::new("minecraft:diamond_axe", 1);
+    axe.enchant("minecraft:silk_touch", 1);
+    axe
+}
+
+/// `Enderman.dropCustomDeathLoot`: `BlockState.getDrops` of the carried
+/// state with [`carried_block_tool`] and the enderman as `this` entity,
+/// drawing from the block table's random sequence (`sequences`: the world's
+/// sequences and seed), else `random` (the level random).
+pub fn carried_block_drops(
+    items: &Items,
+    registry: &BlockRegistry,
+    state: BlockStateId,
+    random: &mut impl RandomSource,
+    sequences: Option<(&mut RandomSequences, i64)>,
+) -> Vec<ItemStack> {
+    let tool = carried_block_tool();
+    items
+        .block_drops_exploded(
+            registry,
+            state,
+            Some(&tool),
+            &[],
+            random,
+            sequences,
+            None,
+            true,
+        )
+        .into_iter()
+        .filter(|s| s.count > 0 && &*s.item != "minecraft:air")
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,5 +519,69 @@ mod tests {
             assert_eq!(seated.extra.counter2, 0, "no teleport while seated");
             assert!(!dodges(&seated, &Damage::of(kind)), "{kind:?}");
         }
+    }
+
+    /// Enderman.dropCustomDeathLoot (#3513): a killed enderman drops the
+    /// block it carries, mined with a silk touch diamond axe, so a grass
+    /// block comes back as a grass block (not dirt) and a nylium as itself.
+    #[test]
+    fn a_killed_enderman_drops_its_carried_block() {
+        use crate::mobs::drops;
+        use horizon_world::loot::{LootData, PackOverlay};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() || !root.join("data").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let registry = assets.registry;
+        let facts = crate::blocks::BlockFacts::load(&root, registry).unwrap();
+        let items = Items::load(&root, registry, &facts, &PackOverlay::NONE).unwrap();
+        let loot = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let death = |mob_drops| drops::Death {
+            loot: &loot,
+            damage: None,
+            player: None,
+            luck: 0.0,
+            vehicle: None,
+            mob_drops,
+            world_seed: 0,
+        };
+        let mut sequences = RandomSequences::default();
+        let mut random = horizon_core::random::LegacyRandom::new(0);
+        for block in [
+            "minecraft:grass_block",
+            "minecraft:crimson_nylium",
+            "minecraft:tnt",
+        ] {
+            let mut m = enderman();
+            m.extra.carried = registry.default_state(block);
+            let (out, _) = drops::die(&mut m, &death(true), &mut sequences);
+            let dropped: Vec<String> = out
+                .into_iter()
+                .flat_map(|d| match d {
+                    drops::Drop::CarriedBlock(state) => carried_block_drops(
+                        &items,
+                        registry,
+                        state,
+                        &mut random,
+                        Some((&mut sequences, 0)),
+                    ),
+                    _ => Vec::new(),
+                })
+                .map(|s| format!("{} {}", s.item, s.count))
+                .collect();
+            assert_eq!(dropped, [format!("{block} 1")], "{block}");
+        }
+        // doMobLoot off: no dropCustomDeathLoot, so no block either.
+        let mut m = enderman();
+        m.extra.carried = registry.default_state("minecraft:grass_block");
+        let (out, _) = drops::die(&mut m, &death(false), &mut sequences);
+        assert!(
+            !out.iter()
+                .any(|d| matches!(d, drops::Drop::CarriedBlock(_))),
+            "{out:?}"
+        );
     }
 }

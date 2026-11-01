@@ -66,7 +66,7 @@ pub fn server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         return;
     }
     if let Some(&t) = m.extra.positions.first()
-        && (!w.facts.is_air(w.world.block(t[0], t[1], t[2])) || t[1] <= crate::chunk::MIN_Y)
+        && (!w.facts.is_air(w.world.block(t[0], t[1], t[2])) || t[1] <= w.world.bottom_y())
     {
         m.extra.positions.clear();
     }

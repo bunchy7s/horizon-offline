@@ -21,11 +21,37 @@ use horizon_world::{
     server_player_damage::ServerDamageEnvironment,
     synced_floats::{FloatValue, Observer, SyncedFloats},
 };
-use std::{fs, io, path::Path};
-pub(crate) type Attributes = LiveAttributes<Box<dyn FnMut() -> i32>>;
+use std::{fs, io, path::Path, sync::OnceLock};
+pub(crate) type Attributes = LiveAttributes<Box<dyn horizon_world::attributes::live::Identities>>;
 pub(crate) type State = HurtState<DamageTypeId>;
 
 pub use crate::world::HealthRules;
+/// A hit's `DamageSource` for [`HURT_SERVER`]: its type (`minecraft:fall`),
+/// and the entity ids of `getEntity` (`causing`) and `getDirectEntity`
+/// (`direct`), 0 for none or not known.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HurtSource<'a> {
+    pub damage_type: &'a str,
+    pub causing: i32,
+    pub direct: i32,
+}
+/// What `LivingEntity.hurtServer` is about to hurt, for [`HURT_SERVER`].
+pub enum Hurting<'a> {
+    /// A player, by its entity id.
+    Player(i32, HurtSource<'a>),
+    /// A mob, and what hurts it.
+    Mob(&'a crate::mobs::Mob, &'a crate::mobs::Damage),
+    /// The ender dragon, by its entity id.
+    Dragon(i32, HurtSource<'a>),
+}
+/// The game's native damage hook (`native_living_incoming_damage`), set once by the
+/// game: `LivingEntity.hurtServer` once its guards passed. It may change the
+/// amount; true cancels the hit.
+pub static HURT_SERVER: OnceLock<fn(Hurting<'_>, &mut f32) -> bool> = OnceLock::new();
+/// Whether [`HURT_SERVER`] canceled the hit (never while it is unset).
+pub fn hurt_server_canceled(hurting: Hurting<'_>, amount: &mut f32) -> bool {
+    HURT_SERVER.get().is_some_and(|hook| hook(hurting, amount))
+}
 pub struct HealthResources {
     pub damage: Catalog,
     pub ids: PlayerFloatIds,
@@ -78,6 +104,8 @@ pub fn hurt_sound(effects: &str) -> &'static str {
 }
 #[derive(Clone, Copy, Debug)]
 pub enum HealthEvent {
+    /// `FoodData.tick` calling `hurtServer` with starvation. Only a hit that
+    /// lands is recorded (`RecordedDamage`).
     StarvationDamage(f32),
     /// `LivingEntity.aiStep` hurting a fully frozen entity.
     FreezeDamage(f32),
@@ -151,6 +179,7 @@ impl Observer for Updates<'_> {
         Ok(())
     }
 }
+#[derive(Clone)]
 pub struct PlayerHealth {
     pub data: SyncedFloats,
     pub ids: PlayerFloatIds,
@@ -311,11 +340,12 @@ impl PlayerMotion {
         amount: f32,
         blocking: Option<Blocking>,
     ) -> Result<BlockOutcome> {
-        self.hurt_caused_by(resources, rules, source, amount, blocking, false)
+        self.hurt_caused_by(resources, rules, source, amount, blocking, false, 0)
     }
     /// `hurt_blocking` from a source whose causing entity is a living
     /// non-player (`living_cause`), which the `when_caused_by_living_non_player`
-    /// damage types scale with the difficulty.
+    /// damage types scale with the difficulty. `causing` is that entity's id
+    /// when it is known (0 otherwise), for the native damage hook.
     pub fn hurt_caused_by(
         &mut self,
         resources: &HealthResources,
@@ -324,6 +354,7 @@ impl PlayerMotion {
         amount: f32,
         blocking: Option<Blocking>,
         living_cause: bool,
+        causing: i32,
     ) -> Result<BlockOutcome> {
         if self.client_side {
             return Ok(BlockOutcome::default());
@@ -341,7 +372,10 @@ impl PlayerMotion {
         let invulnerable = self.invulnerable;
         let h = &mut self.health;
         let mut environment = Environment {
+            entity: self.entity_id,
+            causing,
             invulnerable,
+            client_loaded: self.client_loaded,
             rules,
             source,
             living_cause,
@@ -352,10 +386,12 @@ impl PlayerMotion {
             status: self.status.clone(),
             blocking,
             blocked: 0.0,
+            fully_blocked: false,
             block_sound: false,
             knocked: false,
             totem: totem_ready,
             totem_fired: false,
+            canceled: false,
         };
         let hurt = ServerPlayerCombat::new(
             &mut self.attributes,
@@ -368,8 +404,10 @@ impl PlayerMotion {
         let outcome = BlockOutcome {
             hurt,
             blocked: environment.blocked,
+            fully_blocked: environment.fully_blocked,
             sound: environment.block_sound,
             knockback: environment.knocked,
+            canceled: environment.canceled,
         };
         if environment.totem_fired {
             h.totem_used = true;
@@ -423,8 +461,14 @@ impl PlayerMotion {
     }
 }
 pub(crate) struct Environment<'a> {
+    /// The player's entity id, and the causing entity's (0: none or not known).
+    pub(crate) entity: i32,
+    pub(crate) causing: i32,
     /// Abilities.invulnerable.
     pub(crate) invulnerable: bool,
+    /// The player's client has loaded the world since its last respawn or
+    /// level change (`ServerGamePacketListenerImpl.hasClientLoaded`).
+    pub(crate) client_loaded: bool,
     pub(crate) rules: HealthRules,
     pub(crate) source: DamageSource<'a, ()>,
     /// The causing entity is a living non-player (a mob, or its projectile's owner).
@@ -438,12 +482,16 @@ pub(crate) struct Environment<'a> {
     /// The raised blocking item, if any, and what it blocked.
     pub(crate) blocking: Option<Blocking>,
     pub(crate) blocked: f32,
+    /// What it blocked covers the whole hit, as difficulty scaled it.
+    pub(crate) fully_blocked: bool,
     pub(crate) block_sound: bool,
     /// `dealDefaultKnockback` ran: a fresh hit, not fully blocked.
     pub(crate) knocked: bool,
     /// LivingEntity.checkTotemDeathProtection: a totem is held / was used.
     pub(crate) totem: bool,
     pub(crate) totem_fired: bool,
+    /// A native mod canceled the hit (`living_incoming_damage`).
+    pub(crate) canceled: bool,
 }
 /// `LivingEntity.applyItemBlocking` inputs for a raised `BlocksAttacks` item:
 /// reductions whose damage-type sets are already matched against the source.
@@ -501,11 +549,16 @@ pub struct AttackRecord {
 pub struct BlockOutcome {
     pub hurt: bool,
     pub blocked: f32,
+    /// `applyItemBlocking`'s `damageBlocked >= damage`, against the damage
+    /// `Player.hurtServer` scaled with the difficulty.
+    pub fully_blocked: bool,
     /// `BlocksAttacks.onBlocked` ran (the block sound plays).
     pub sound: bool,
     /// The hit knocks the player back (`dealDefaultKnockback`): not one in
     /// the hurt cooldown, nor one the shield took whole.
     pub knockback: bool,
+    /// A native mod canceled the hit: its attacker must not be credited.
+    pub canceled: bool,
 }
 struct MatchedSets;
 impl horizon_world::blocking_rules::TypeMatchWorld for MatchedSets {
@@ -663,7 +716,7 @@ impl ImmunityWorld for Environment<'_> {
         Ok(self.source.is_type("minecraft:ender_pearl"))
     }
     fn client_loaded(&mut self) -> io::Result<bool> {
-        Ok(true)
+        Ok(self.client_loaded)
     }
 }
 impl HurtWorld for Environment<'_> {
@@ -690,6 +743,16 @@ impl HurtWorld for Environment<'_> {
     fn fire_resistance(&mut self, _: &mut State) -> io::Result<bool> {
         Ok(self.status.fire_resistance)
     }
+    fn hurt_start(&mut self, _: &mut State, damage: &mut f32) -> io::Result<bool> {
+        let source = HurtSource {
+            damage_type: &self.source.definition().name,
+            causing: self.causing,
+            direct: 0,
+        };
+        let canceled = hurt_server_canceled(Hurting::Player(self.entity, source), damage);
+        self.canceled |= canceled;
+        Ok(canceled)
+    }
     fn sleeping(&mut self, _: &mut State) -> io::Result<bool> {
         Ok(false)
     }
@@ -707,6 +770,7 @@ impl HurtWorld for Environment<'_> {
             return Ok(0.0);
         }
         self.blocked = b.rules.resolve(&mut MatchedSets, damage, b.angle)?;
+        self.fully_blocked = self.blocked >= damage;
         Ok(self.blocked)
     }
     fn freeze_hurts_extra(&mut self, _: &mut State) -> io::Result<bool> {
@@ -738,10 +802,6 @@ impl HurtWorld for Environment<'_> {
         self.event(HealthEvent::DamageBroadcast {
             source: self.source.type_id(),
         });
-        // The player hears its own hurt sound from handleDamageEvent; a
-        // blocked hit sends the block sound (onBlocked) instead.
-        let sound = hurt_sound(&self.source.definition().effects);
-        self.events.push(MotionEvent::HurtSound(sound));
         Ok(())
     }
     fn mark_hurt(&mut self, _: &mut State) -> io::Result<()> {
@@ -782,6 +842,10 @@ impl HurtWorld for Environment<'_> {
     }
     /// `Player.playSound` leaves the player itself out: others hear this one.
     fn hurt_sound(&mut self, _: &mut State) -> io::Result<()> {
+        if !self.block_sound {
+            let sound = hurt_sound(&self.source.definition().effects);
+            self.events.push(MotionEvent::HurtSound(sound));
+        }
         self.phase("hurt-sound")
     }
     fn game_time(&mut self, _: &mut State) -> io::Result<i64> {
@@ -880,6 +944,56 @@ mod tests {
         assert!(!third.hurt && !third.knockback);
     }
 
+    /// #2800: on Easy a mob's 4 is scaled to 3 before `applyItemBlocking`,
+    /// so a shield that stops all 3 blocks fully (`damageBlocked >= damage`)
+    /// and `blockedByItem` must not pull the player toward the mob.
+    #[test]
+    fn a_shield_fully_blocks_a_hit_scaled_down_by_easy() {
+        use horizon_world::blocking_rules::{BlockingRules, DamageReduction, ItemDamageFunction};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let resources = crate::motion::MotionResources::load(&root, &assets).unwrap();
+        let mut player =
+            crate::motion::PlayerMotion::new(&resources, horizon_core::geometry::Vec3::ZERO)
+                .unwrap();
+        let health = &resources.health;
+        let rules = super::HealthRules {
+            difficulty: horizon_world::food::Difficulty::Easy,
+            ..Default::default()
+        };
+        let shield = super::Blocking {
+            rules: BlockingRules {
+                delay_seconds: 0.25,
+                disable_scale: 1.0,
+                reductions: vec![DamageReduction {
+                    horizontal_angle: 90.0,
+                    types: None,
+                    base: 0.0,
+                    factor: 1.0,
+                }],
+                item_damage: ItemDamageFunction {
+                    threshold: 3.0,
+                    base: 1.0,
+                    factor: 1.0,
+                },
+            },
+            bypassed: false,
+            pierce: false,
+            angle: 0.0,
+        };
+        let id = health.damage.id("minecraft:mob_attack").unwrap();
+        let o = player
+            .hurt_caused_by(health, rules, id, 4.0, Some(shield), true, 0)
+            .unwrap();
+        assert_eq!(o.blocked, 3.0, "Easy scales 4 to 3 before the shield");
+        assert!(o.fully_blocked && !o.knockback);
+    }
+
     /// #2141: an arrow that takes the last of the player's health must kill
     /// them: `LivingEntity.hurt` leaves the health at zero and `Player.die`
     /// follows.
@@ -903,6 +1017,146 @@ mod tests {
         assert!(hurt, "the arrow must hurt");
         assert_eq!(player.health.health(), 0.0, "the health must be spent");
         assert!(player.health.dead_or_dying(), "the player must be dead");
+    }
+
+    /// What the hook of these tests saw: entity, damage type (a mob's kind)
+    /// and causing entity, amount.
+    static SEEN: std::sync::Mutex<Vec<(i32, String, f32)>> = std::sync::Mutex::new(Vec::new());
+    /// Sets the native damage hook of these tests (global: it stays set for
+    /// the process): for entities 9001 to 9004 and 9011 to 9013 it records the
+    /// hit, cancels x1's, doubles x2's, makes 9003's -5 and 9004's NaN.
+    fn set_hook() -> fn(i32) -> Vec<(String, f32)> {
+        use super::Hurting;
+        fn hook(hurting: Hurting<'_>, amount: &mut f32) -> bool {
+            let (entity, seen) = match hurting {
+                Hurting::Player(e, s) | Hurting::Dragon(e, s) => {
+                    (e, format!("{} {}", s.damage_type, s.causing))
+                }
+                Hurting::Mob(mob, source) => (mob.id as i32, format!("{:?}", source.kind)),
+            };
+            if !matches!(entity, 9001..=9004 | 9011..=9013) {
+                return false;
+            }
+            SEEN.lock().unwrap().push((entity, seen, *amount));
+            match entity {
+                9002 | 9012 => *amount *= 2.0,
+                9003 => *amount = -5.0,
+                9004 => *amount = f32::NAN,
+                _ => {}
+            }
+            entity % 10 == 1
+        }
+        let installed = *super::HURT_SERVER.get_or_init(|| hook);
+        assert!(std::ptr::fn_addr_eq(
+            installed,
+            hook as fn(Hurting<'_>, &mut f32) -> bool
+        ));
+        |entity| {
+            let seen = SEEN.lock().unwrap();
+            let hits = seen.iter().filter(|s| s.0 == entity);
+            hits.map(|s| (s.1.clone(), s.2)).collect()
+        }
+    }
+
+    #[test]
+    fn the_native_damage_hook_changes_or_cancels_a_mobs_hit() {
+        use crate::mobs::{Damage, DamageKind, Mob};
+        let seen = set_hook();
+        let mob = |id| {
+            Mob::new(
+                id,
+                crate::mobs::sensor_scan_tests::kind(),
+                Default::default(),
+                0.0,
+            )
+        };
+        let hit = Damage {
+            kind: DamageKind::PlayerAttack,
+            attacker: None,
+            from: Some([3.0, 0.0, 0.0]),
+        };
+        // Canceled: no damage, cooldown, sound or knockback.
+        let mut kept = mob(9001);
+        assert!(!kept.damage(2.0, hit));
+        assert_eq!(
+            (kept.health, kept.invulnerable, kept.hurt_time),
+            (10.0, 0, 0)
+        );
+        assert!(kept.outbox.is_empty() && kept.velocity == Default::default());
+        assert_eq!(seen(9001), [("PlayerAttack".to_owned(), 2.0)]);
+        let mut doubled = mob(9002);
+        assert!(doubled.damage(2.0, hit));
+        assert_eq!(doubled.health, 6.0);
+        // LivingEntity.hurtServer: a negative amount hurts by 0, a NaN by
+        // Float.MAX_VALUE.
+        let (mut negative, mut nan) = (mob(9003), mob(9004));
+        assert!(negative.damage(2.0, hit) && nan.damage(2.0, hit));
+        assert!(negative.health == 10.0 && nan.health <= 0.0);
+    }
+
+    /// Needs the prepared data in `.local/horizon-client/26.3`; skipped
+    /// without it.
+    #[test]
+    fn the_native_damage_hook_changes_or_cancels_a_players_hit() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let seen = set_hook();
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let resources = crate::motion::MotionResources::load(&root, &assets).unwrap();
+        let (health, rules) = (&resources.health, super::HealthRules::default());
+        let id = health.damage.id("minecraft:arrow").unwrap();
+        let player = |entity| {
+            let mut p = crate::motion::PlayerMotion::new(&resources, Default::default()).unwrap();
+            p.entity_id = entity;
+            p
+        };
+        let mut kept = player(9011);
+        assert!(!kept.hurt(health, rules, id, 5.0).unwrap());
+        assert_eq!((kept.health.health(), kept.health.hurt.cooldown), (20.0, 0));
+        let mut doubled = player(9012);
+        assert!(doubled.hurt(health, rules, id, 5.0).unwrap());
+        assert_eq!(doubled.health.health(), 10.0);
+        // The causing mob when it is known, else 0.
+        let hurt = player(9013).hurt_caused_by(health, rules, id, 5.0, None, false, 44);
+        assert!(hurt.unwrap().hurt);
+        assert_eq!(seen(9011), [("minecraft:arrow 0".to_owned(), 5.0)]);
+        assert_eq!(seen(9013), [("minecraft:arrow 44".to_owned(), 5.0)]);
+    }
+
+    /// #4301: `ServerPlayer.isInvulnerableTo`'s `!connection.hasClientLoaded`
+    /// term spares a respawned player the void until the client has loaded the
+    /// world; once it has, the void hurts again.
+    #[test]
+    fn the_void_spares_a_player_whose_client_has_not_loaded() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let resources = crate::motion::MotionResources::load(&root, &assets).unwrap();
+        let mut player =
+            crate::motion::PlayerMotion::new(&resources, horizon_core::geometry::Vec3::ZERO)
+                .unwrap();
+        let (health, rules) = (&resources.health, super::HealthRules::default());
+        let id = health.damage.id("minecraft:out_of_world").unwrap();
+        player.client_loaded = false;
+        assert!(
+            !player.hurt(health, rules, id, 4.0).unwrap(),
+            "an unloaded client must not take void damage"
+        );
+        assert_eq!(player.health.health(), 20.0);
+        player.client_loaded = true;
+        assert!(
+            player.hurt(health, rules, id, 4.0).unwrap(),
+            "a loaded client takes the void's 4.0"
+        );
+        assert_eq!(player.health.health(), 16.0);
     }
 
     #[test]

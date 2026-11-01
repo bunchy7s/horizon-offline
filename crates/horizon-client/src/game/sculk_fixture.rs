@@ -308,7 +308,7 @@ impl Game<'_> {
 
     fn sculk_fixture_reset(&mut self, s: &Scenario) -> Result<()> {
         self.world = World::new(self.res.facts().air, 0);
-        let plains = u32::from(self.res.biomes().id("minecraft:plains"));
+        let plains = u32::from(world_biomes!(self).id("minecraft:plains"));
         let layers = [
             self.fixture_state("minecraft:bedrock")?,
             self.fixture_state("minecraft:dirt")?,

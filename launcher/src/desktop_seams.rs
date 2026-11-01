@@ -38,16 +38,33 @@ pub fn to_folder(path: &Path, dir: &Path) -> Result<(), String> {
 }
 
 fn system_trash(path: &Path) -> Result<(), String> {
-    #[allow(unused_mut)]
-    let mut trash = trash::TrashContext::default();
-    // The crate's default on macOS asks Finder through AppleScript, which needs the player to
-    // allow the launcher to control Finder first; the file manager call needs nothing.
-    #[cfg(target_os = "macos")]
-    trash::macos::TrashContextExtMacos::set_delete_method(
-        &mut trash,
-        trash::macos::DeleteMethod::NsFileManager,
-    );
-    trash.delete(path).map_err(|e| e.to_string())
+    // On Windows the crate starts COM on the calling thread and panics when that thread already
+    // runs it in the other mode (RPC_E_CHANGED_MODE). A worker of GPUI's thread pool can, and a
+    // panic there aborts the launcher (#3784); a thread of its own starts without COM.
+    on_own_thread(|| {
+        #[allow(unused_mut)]
+        let mut trash = trash::TrashContext::default();
+        // The crate's default on macOS asks Finder through AppleScript, which needs the player
+        // to allow the launcher to control Finder first; the file manager call needs nothing.
+        #[cfg(target_os = "macos")]
+        trash::macos::TrashContextExtMacos::set_delete_method(
+            &mut trash,
+            trash::macos::DeleteMethod::NsFileManager,
+        );
+        trash.delete(path).map_err(|e| e.to_string())
+    })
+}
+
+/// Runs `f` on a new thread and waits for it; a panic there comes back as an error.
+fn on_own_thread<T: Send>(f: impl FnOnce() -> Result<T, String> + Send) -> Result<T, String> {
+    std::thread::scope(|s| s.spawn(f).join()).unwrap_or_else(|panic| {
+        let why = panic
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| panic.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "it panicked".into());
+        Err(why)
+    })
 }
 
 /// The file copies go to instead of the clipboard, when `HORIZON_LAUNCHER_CLIPBOARD` is set.
@@ -78,5 +95,16 @@ mod tests {
         assert_eq!(std::fs::read(bin.join("shot.png 2")).unwrap(), b"2");
         assert!(std::fs::read_dir(&home).unwrap().next().is_none());
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_trash_runs_on_a_thread_of_its_own_and_its_panic_is_an_error() {
+        let caller = std::thread::current().id();
+        assert_eq!(
+            on_own_thread(|| Ok(std::thread::current().id() != caller)),
+            Ok(true)
+        );
+        let failed: Result<(), String> = on_own_thread(|| panic!("Call to CoInitializeEx failed"));
+        assert_eq!(failed, Err("Call to CoInitializeEx failed".into()));
     }
 }

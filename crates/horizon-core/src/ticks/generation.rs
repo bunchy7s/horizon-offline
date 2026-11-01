@@ -1,14 +1,14 @@
 //! Generation-stage tick storage and routing, before level tick execution.
 use super::{ChunkTicks, SavedTick, ScheduledTick, TickTypeId};
+use crate::fast_hash::FxHashSet;
 use crate::position::BlockPos;
-use std::collections::HashSet;
 
 /// Proto chunks retain the first request for a type/position in insertion order.
 /// Newly scheduled delays are zero; loaded delays and priorities are preserved.
 #[derive(Clone, Debug, Default)]
 pub struct ProtoChunkTicks {
     ticks: Vec<SavedTick>,
-    positions: HashSet<(TickTypeId, BlockPos)>,
+    positions: FxHashSet<(TickTypeId, BlockPos)>,
 }
 impl ProtoChunkTicks {
     pub fn from_saved(ticks: impl IntoIterator<Item = SavedTick>) -> Self {

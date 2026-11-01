@@ -15,8 +15,8 @@ use horizon_protocol::packets::play::{self, Clientbound as C};
 
 /// A guest's open mount menu.
 pub(super) struct GuestMount {
-    window: i32,
-    mob: u32,
+    pub(super) window: i32,
+    pub(super) mob: u32,
     columns: usize,
     state: i32,
     /// The menu's slots and the carried stack the client was last sent.
@@ -31,10 +31,8 @@ impl Game<'_> {
             return;
         };
         let columns = super::mount_menu::mount_columns(&self.mobs[index]);
-        self.lan_mount_closed(host, conn, None);
-        self.lan_station_closed(host, conn, None);
-        self.lan_crafting_closed(host, conn, None);
-        self.guest_container_closed(host, conn);
+        // ServerPlayer.openMenu closes the menu that was open.
+        self.guest_close_all(host, conn);
         let Some(window) = host.hub.open_mount_window(conn, columns as i32, mob as i32) else {
             return;
         };
@@ -182,10 +180,28 @@ impl Game<'_> {
         closed
     }
 
+    /// `AbstractMountInventoryMenu.stillValid`: the mount is alive and within
+    /// the entity interaction range (3) plus 4 of the guest's eyes.
+    pub(super) fn lan_mount_valid(&self, g: &horizon_client::lan::guest::Guest, mob: u32) -> bool {
+        let eye = [g.position[0], g.position[1] + g.eye_height(), g.position[2]];
+        self.mobs.iter().find(|m| m.id == mob).is_some_and(|m| {
+            let (w, h) = (f64::from(m.width()) / 2.0, f64::from(m.height()));
+            let p = [m.position.x, m.position.y, m.position.z];
+            let lo = [p[0] - w, p[1], p[2] - w];
+            let hi = [p[0] + w, p[1] + h, p[2] + w];
+            let d: f64 = (0..3)
+                .map(|k| (eye[k] - eye[k].clamp(lo[k], hi[k])).powi(2))
+                .sum();
+            m.alive() && d < 7.0 * 7.0
+        })
+    }
+
     /// Each tick: a mount menu whose mount died or is out of reach closes
     /// (`AbstractMountInventoryMenu.stillValid`: alive, within the entity
     /// interaction range plus 4 of the eyes), and the others follow the
-    /// mount's and the inventory's slots.
+    /// mount's and the inventory's slots. Only the level the player is in
+    /// checks its menu (`ServerPlayer.tick`): another level ticking has
+    /// none of its mobs (#5331).
     pub(super) fn tick_lan_mount_menus(&mut self, host: &mut LanHost) {
         let open: Vec<(u32, u32, i32)> = host
             .play
@@ -196,19 +212,10 @@ impl Game<'_> {
             let Some(g) = host.hub.guests.iter().find(|g| g.conn == conn) else {
                 continue;
             };
-            let eye = [g.position[0], g.position[1] + g.eye_height(), g.position[2]];
-            let valid = self.mobs.iter().find(|m| m.id == mob).is_some_and(|m| {
-                let (w, h) = (f64::from(m.width()) / 2.0, f64::from(m.height()));
-                let p = [m.position.x, m.position.y, m.position.z];
-                let lo = [p[0] - w, p[1], p[2] - w];
-                let hi = [p[0] + w, p[1] + h, p[2] + w];
-                let d: f64 = (0..3)
-                    .map(|k| (eye[k] - eye[k].clamp(lo[k], hi[k])).powi(2))
-                    .sum();
-                // Player.ENTITY_INTERACTION_RANGE 3, plus 4.
-                m.alive() && d < 7.0 * 7.0
-            });
-            if valid {
+            if !host.hub.here(g) {
+                continue;
+            }
+            if self.lan_mount_valid(g, mob) {
                 self.lan_send_mount(host, conn);
             } else {
                 self.lan_mount_closed(host, conn, Some(window));

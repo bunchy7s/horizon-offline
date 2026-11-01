@@ -168,6 +168,7 @@ pub fn draw(
         time,
         glint_speed,
         glint_alpha,
+        None,
     );
     if let Some(key) = key
         && let Ok(mut drawn) = renderer.gui_drawn.lock()
@@ -178,6 +179,38 @@ pub fn draw(
         }
         drawn.insert(key, batch.vertices[start..].into());
     }
+}
+
+/// [`draw`] clipped to `scissor` (`[x0, y0, x1, y1]`) as well as the item's slot:
+/// a list's scissor cuts the item of a half-visible row exactly. Not cached, the
+/// scissor is not part of the cache key.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_scissored(
+    state: &ItemRenderState,
+    renderer: &ItemRenderer,
+    sprites: &HashMap<String, Rect>,
+    host: &dyn SpecialHost,
+    batch: &mut HudBatch,
+    x: f32,
+    y: f32,
+    scissor: [f32; 4],
+) {
+    if state.is_empty() {
+        return;
+    }
+    draw_now(
+        state,
+        renderer,
+        sprites,
+        host,
+        batch,
+        x,
+        y,
+        0.0,
+        0.0,
+        0.0,
+        Some(scissor),
+    );
 }
 
 /// Entries of `ItemRenderer::gui_drawn` before it starts over.
@@ -244,6 +277,7 @@ fn draw_now(
     time: f32,
     glint_speed: f32,
     glint_alpha: f32,
+    scissor: Option<[f32; 4]>,
 ) {
     let pose = Mat4::from_translation(Vec3::new(x + 8.0, y + 8.0, 0.0))
         * Mat4::from_scale(Vec3::new(16.0, -16.0, 16.0));
@@ -263,6 +297,15 @@ fn draw_now(
         ]
     } else {
         [x, y, x + 16.0, y + 16.0]
+    };
+    let rect = match scissor {
+        Some([x0, y0, x1, y1]) => [
+            rect[0].max(x0),
+            rect[1].max(y0),
+            rect[2].min(x1),
+            rect[3].min(y1),
+        ],
+        None => rect,
     };
     let glint = sprites
         .contains_key("misc/enchanted_glint_item")
@@ -364,9 +407,104 @@ pub fn draw_banner_result(
     );
 }
 
+/// `Lighting.Entry.ENTITY_IN_UI` (`setupForEntityInInventory`), which the
+/// enchanting screen's book is lit with.
+fn entity_in_ui_lights() -> (Vec3, Vec3) {
+    (
+        Vec3::new(0.2, -1.0, -1.0).normalize(),
+        Vec3::new(-0.2, -1.0, 0.0).normalize(),
+    )
+}
+
+/// `PictureInPictureRenderer.prepare` for the enchanting screen's 38x31 book
+/// box at `(x0, y0)` (`translate(w / 2, 17)`, `scale(40, 40, -40)`), then
+/// `GuiBookModelRenderer.renderToTexture`'s turns for `open`.
+pub fn enchanting_book_pose(x0: f32, y0: f32, open: f32) -> Mat4 {
+    let closed = 1.0 - open;
+    Mat4::from_translation(Vec3::new(x0 + 19.0, y0 + 17.0, 0.0))
+        * Mat4::from_scale(Vec3::new(40.0, 40.0, -40.0))
+        * Mat4::from_rotation_y(PI)
+        * Mat4::from_rotation_x(25f32.to_radians())
+        * Mat4::from_translation(Vec3::new(closed * 0.2, closed * 0.1, closed * 0.25))
+        * Mat4::from_rotation_y((-closed * 90.0 - 90.0).to_radians())
+        * Mat4::from_rotation_x(PI)
+}
+
+/// `GuiBookModelRenderer.renderToTexture`'s page flips for `flip`: each
+/// `clamp(frac(flip + offset) * 1.6 - 0.3, 0, 1)`.
+pub fn enchanting_book_pages(flip: f32) -> (f32, f32) {
+    let page = |offset: f32| {
+        let x = flip + offset;
+        ((x - x.floor()) * 1.6 - 0.3).clamp(0.0, 1.0)
+    };
+    (page(0.25), page(0.75))
+}
+
+/// `GuiGraphicsExtractor.book` from `EnchantmentScreen.extractBook`: the
+/// enchanting table's book, `open` (0 to 1) and turning its pages with
+/// `flip`, in the 38x31 box at `(x0, y0)`.
+pub fn draw_enchanting_book(
+    renderer: &ItemRenderer,
+    sprites: &HashMap<String, Rect>,
+    batch: &mut HudBatch,
+    x0: f32,
+    y0: f32,
+    open: f32,
+    flip: f32,
+) {
+    let (page1, page2) = enchanting_book_pages(flip);
+    let mut quads = Vec::new();
+    super::special::submit_book(
+        renderer,
+        enchanting_book_pose(x0, y0, open),
+        open,
+        page1,
+        page2,
+        sprites,
+        &mut quads,
+    );
+    draw_quads(
+        &quads,
+        entity_in_ui_lights(),
+        batch,
+        [x0, y0, x0 + 38.0, y0 + 31.0],
+        None,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enchanting_book_pages_turn_with_the_flip() {
+        let close = |flip: f32, want: (f32, f32)| {
+            let (a, b) = enchanting_book_pages(flip);
+            assert!(
+                (a - want.0).abs() < 1e-5 && (b - want.1).abs() < 1e-5,
+                "{flip}: {a} {b}, want {want:?}"
+            );
+        };
+        close(0.0, (0.1, 0.9));
+        // A whole page further, the same pages.
+        close(1.0, (0.1, 0.9));
+        close(0.5, (0.9, 0.1));
+        // The pages rest flat at either end of a turn.
+        close(-0.25, (0.0, 0.5));
+        close(0.6875, (1.0, 0.4));
+    }
+    #[test]
+    fn a_closed_book_turns_away_and_an_open_one_faces_the_screen() {
+        // The box centre maps the model origin; the book's origin moves with
+        // `open` (`translate((1 - open) * (0.2, 0.1, 0.25))` before the turn).
+        let open = enchanting_book_pose(0.0, 0.0, 1.0).transform_point3(Vec3::ZERO);
+        assert!(
+            (open - Vec3::new(19.0, 17.0, 0.0)).length() < 1e-4,
+            "{open}"
+        );
+        let closed = enchanting_book_pose(0.0, 0.0, 0.0).transform_point3(Vec3::ZERO);
+        assert!((closed - open).length() > 1.0, "{closed}");
+    }
 
     fn face(y0: f32, y1: f32, z: impl Fn(f32) -> f32, color: u32) -> ItemQuad {
         ItemQuad {
@@ -379,6 +517,7 @@ mod tests {
             light_emission: 0,
             cull_back: false,
             translucent: false,
+            oit: false,
         }
     }
 

@@ -35,9 +35,19 @@ pub fn op_warning(stack: &crate::items::ItemStack) -> bool {
     data(stack).is_some_and(|(id, _)| OP_ONLY.contains(&id.as_str()))
 }
 
+/// `EntityTypes.OP_ONLY_CUSTOM_DATA`: the entity types whose data only a player
+/// who can use game master blocks sets (`EntityType.onlyOpCanSetNbt`).
+fn egg_op_only(id: &str) -> bool {
+    matches!(
+        id,
+        "minecraft:falling_block"
+            | "minecraft:command_block_minecart"
+            | "minecraft:spawner_minecart"
+    )
+}
+
 /// `SpawnEggItem.shouldPrintOpWarning` for a player with game master
-/// permission: a spawn egg carries data of an op-only entity type
-/// (`EntityTypes.OP_ONLY_CUSTOM_DATA`).
+/// permission: a spawn egg carries data of an op-only entity type.
 pub fn spawn_egg_op_warning(stack: &crate::items::ItemStack) -> bool {
     stack.item.ends_with("_spawn_egg")
         && matches!(
@@ -45,12 +55,7 @@ pub fn spawn_egg_op_warning(stack: &crate::items::ItemStack) -> bool {
                 .data()
                 .and_then(|d| d.other("minecraft:entity_data"))
                 .and_then(|data| data.get("id")),
-            Some(Tag::String(id)) if matches!(
-                id.to_string_lossy().as_str(),
-                "minecraft:falling_block"
-                    | "minecraft:command_block_minecart"
-                    | "minecraft:spawner_minecart"
-            )
+            Some(Tag::String(id)) if egg_op_only(&id.to_string_lossy())
         )
 }
 
@@ -74,6 +79,24 @@ pub fn spawn_egg_on_spawner(
         }
     };
     (id, data.filter(|_| op).cloned())
+}
+
+/// `EntityType.updateCustomEntityTag`: the `minecraft:entity_data` a spawn egg
+/// puts on the mob it spawned — only when the data names the spawned type (data
+/// without an `id` is the egg's own), and an op-only type's data only for an op.
+pub fn spawn_egg_entity_data<'a>(
+    stack: &'a crate::items::ItemStack,
+    spawned: &str,
+    op: bool,
+) -> Option<&'a Tag> {
+    let data = stack.data()?.other("minecraft:entity_data")?;
+    if matches!(data.get("id"), Some(Tag::String(id)) if id.to_string_lossy() != spawned) {
+        return None;
+    }
+    if egg_op_only(spawned) && !op {
+        return None;
+    }
+    Some(data)
 }
 
 /// `Spawner.getSpawnEntityDisplayName` (`SpawnData.entity.id` of the item's
@@ -515,6 +538,38 @@ mod tests {
             data.get(&JavaString::from("CustomName")),
             Some(&Tag::String("Guard".into()))
         );
+    }
+
+    #[test]
+    fn a_spawn_egg_data_needs_its_own_type_and_an_op_for_an_op_only_one() {
+        let egg = |entity_data: &str| {
+            let components = snbt(&format!("{{\"minecraft:entity_data\":{entity_data}}}"));
+            let (damage, extra) = crate::item_data::decode_components(Some(&components));
+            crate::items::ItemStack {
+                damage,
+                extra,
+                ..crate::items::ItemStack::new("minecraft:zombie_spawn_egg", 1)
+            }
+        };
+        // `entity_data` without an id names the egg's own type: applied for anyone.
+        let own = egg("{NoAI:1b}");
+        assert_eq!(
+            spawn_egg_entity_data(&own, "minecraft:zombie", false)
+                .and_then(|data| data.get("NoAI")),
+            Some(&Tag::Byte(1))
+        );
+        // `entity_data.id` names another type: the spawned type keeps no data.
+        let other = egg("{id:\"minecraft:pig\",NoAI:1b}");
+        assert_eq!(
+            spawn_egg_entity_data(&other, "minecraft:zombie", false),
+            None
+        );
+        // An op-only type's data needs an op.
+        assert_eq!(
+            spawn_egg_entity_data(&own, "minecraft:falling_block", false),
+            None
+        );
+        assert!(spawn_egg_entity_data(&own, "minecraft:falling_block", true).is_some());
     }
 
     #[test]

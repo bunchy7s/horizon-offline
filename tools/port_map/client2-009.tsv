@@ -31,8 +31,8 @@ Gui.addSocialInteractionsToast	skip:service		social interactions are not offered
 Gui.handleKeybinds	port	crates/horizon-client/src/game.rs::Game::key_pressed	gap: minor: the social interactions key has no port (see addSocialInteractionsToast)
 Gui.openChatScreen	port	crates/horizon-client/src/game/chat.rs::Game::open_chat	
 Gui.openChatAndAddText	port	crates/horizon-client/src/game/chat.rs::Game::open_chat	the text is passed as the initial input
-Gui.buildInitialScreens	missing		player: first launch skips vanilla's accessibility onboarding screen, and ban notices are not shown before the title screen
-Gui.addInitialScreens	missing		player: same as buildInitialScreens: no onboarding screen or ban notice is queued
+Gui.buildInitialScreens	missing		player: ban notices are not shown before the title screen (the services attributes and profile actions are not read); the onboarding screen is ported (title/onboarding.rs)
+Gui.addInitialScreens	missing		player: same as buildInitialScreens: the onboarding screen is queued first (Title::start_onboarding), no ban notice is
 Gui.canInterruptScreen	missing		minor: unsure: no check that stops a server-opened screen from replacing an open one was found
 Gui.renderActiveTextDebug	skip:debug		debug overlay of text bounds
 GuiGraphicsExtractor.enableScissor	port	crates/horizon-client-render/src/screen_draw.rs::paint	gap: minor: callers push a rectangle; there is no stack, so enclosing rectangles are not intersected
@@ -48,7 +48,7 @@ GuiGraphicsExtractor.item	port	crates/horizon-client/src/game.rs::Game::draw_ite
 GuiGraphicsExtractor.fakeItem	inline	crates/horizon-client/src/game.rs::Game::draw_item	same as item with no owner
 GuiGraphicsExtractor.itemBar	inline	crates/horizon-client-render/src/hud_overlays.rs::item_decorations	damage bar drawn in item_decorations
 GuiGraphicsExtractor.itemCount	inline	crates/horizon-client-render/src/hud_overlays.rs::item_decorations	stack count drawn in item_decorations
-GuiGraphicsExtractor.map	port	crates/horizon-client/src/game/cartography.rs::Game::draw_cartography	gap: player: the map image is drawn only in the cartography preview; map markers (decorations) are not drawn there
+GuiGraphicsExtractor.map	port	crates/horizon-client/src/game/cartography.rs::Game::draw_cartography	
 GuiGraphicsExtractor.entity	port	crates/horizon-client/src/game/perspective.rs::Game::draw_player_preview	gap: player: only the local player is previewed; the smithing armour-stand preview has no port
 GuiGraphicsExtractor.skin	missing		minor: no skin customisation preview was found; the inventory preview is draw_player_preview
 GuiGraphicsExtractor.book	missing		player: the enchanting table screen does not draw its open book; Horizon's book drawing is for written books only
@@ -118,7 +118,7 @@ AbstractSelectionList.narrationPriority	skip:other		screen-reader priority; Hori
 AbstractSelectionList.removeEntry	skip:other		rows are rebuilt from the model when they change (update_list, server list), so there is no single-row removal
 AbstractSelectionList.narrateListElementPosition	skip:other		narration only
 AbstractSelectionList.TrackedList.set	skip:java		delegate list wrapper
-AbstractSliderButton.getSprite	inline	crates/horizon-client-render/src/ui.rs::slider	gap: minor: track highlight follows hover only; keyboard focus does not highlight
+AbstractSliderButton.getSprite	inline	crates/horizon-client-render/src/ui.rs::slider	gap: minor: the track outline is drawn while dragged only; keyboard focus does not highlight it; hover highlights only the handle
 AbstractSliderButton.getHandleSprite	inline	crates/horizon-client-render/src/ui.rs::slider	gap: minor: handle highlight follows hover only
 AbstractSliderButton.updateWidgetNarration	skip:other		narration only
 AbstractSliderButton.extractWidgetRenderState	port	crates/horizon-client-render/src/ui.rs::slider	gap: minor: the label is clipped rather than scrolled

@@ -40,7 +40,7 @@ pathfinder/Node.distanceManhattan	port	crates/horizon-client/src/mobs/path.rs::N
 pathfinder/Node.asVec3	skip:debug	-	only the pathfinding debug renderer calls it
 pathfinder/Node.equals	port	crates/horizon-client/src/mobs/path.rs::Path::same_as	compares the node lists; Horizon nodes are PathNode values that also compare kind, vanilla compares position only
 Path.getEndNode	port	crates/horizon-client/src/mobs/path.rs::Path::end	-
-Path.truncateNodes	missing	-	player: RestrictSun sets avoid_sun (goals.rs) and undead use it (undead.rs), but nothing cuts the path at the first sunlit node, so undead wander into sunlight while it is bright
+Path.truncateNodes	port	crates/horizon-client/src/mobs/nav.rs::trim_path	GroundPathNavigation.trimPath with avoidSun: the path stops before the first node the sky sees
 Path.getPreviousNode	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	path.nodes[path.next - 1] is read directly for the door check (InteractWithDoor)
 Path.equals	skip:java	-	Java equals; Path derives PartialEq and navigation compares paths with same_as
 Path.copy	skip:java	-	Path derives Clone
@@ -55,7 +55,7 @@ MapItemSavedData.<init>	port	crates/horizon-client/src/game/maps.rs::MapData::fr
 MapItemSavedData.createForClient	port	crates/horizon-client/src/game/maps.rs::Game::remote_map_item_data	the client map is created from the packet (fresh map, locked flag from the packet)
 MapItemSavedData.mapMatcher	inline	crates/horizon-client/src/game/maps.rs::Game::tick_maps	the carried maps are the map ids in the inventory and offhand, which is what the matcher finds
 MapItemSavedData.tickCarriedBy	port	crates/horizon-client/src/game/maps.rs::Game::tick_maps	gap: player: no framed-map marker when the map hangs in an item frame, and no removal of a player who wears map-invisibility gear
-MapItemSavedData.hasMapInvisibilityItemEquipped	missing	-	player: a player wearing map-invisibility gear (ItemTags.MAP_INVISIBILITY_EQUIPMENT) is still drawn on other players maps
+MapItemSavedData.hasMapInvisibilityItemEquipped	port	crates/horizon-client/src/game/maps.rs::Holder::new	ticked in #3517; `MapItemSavedData.hasMapInvisibilityItemEquipped` is cited at crates/horizon-client/src/game/maps.rs:161
 MapItemSavedData.removeDecoration	inline	crates/horizon-client/src/game/maps.rs::Game::tick_maps	decorations are rebuilt each tick (holder markers kept, the rest replaced) instead of removed by key
 MapItemSavedData.addDecoration	inline	crates/horizon-client/src/game/maps.rs::Game::tick_maps	gap: player: only the item target decorations go through here; banner and frame markers never reach it
 MapItemSavedData.calculateDecorationLocationAndType	inline	crates/horizon-client/src/game/maps.rs::Game::tick_maps	player branch and item branch both done inline, with clamping
@@ -64,9 +64,9 @@ MapItemSavedData.isInsideMap	inline	crates/horizon-client/src/game/maps.rs::Game
 MapItemSavedData.decorationTypeForPlayerOutsideMap	inline	crates/horizon-client/src/game/maps.rs::Game::tick_maps	off-map and off-limits sprite choice inline
 MapItemSavedData.setColorsDirty	inline	crates/horizon-client/src/game/maps.rs::MapData::update_color	the holders dirty rectangle is updated in update_color
 MapItemSavedData.getHoldingPlayer	port	crates/horizon-client/src/game/maps.rs::MapData::holder	-
-MapItemSavedData.toggleBanner	missing	-	player: placing a banner inside a map area does not add a marker to the map (banners saved as an empty list)
-MapItemSavedData.checkBanners	missing	-	player: banner markers are not tracked, so a marker would not disappear when its banner is broken
-MapItemSavedData.removedFromFrame	missing	-	player: framed-map markers are never added, so breaking an item frame leaves no marker to clear (frames saved as an empty list)
+MapItemSavedData.toggleBanner	port	crates/horizon-client/src/game/maps.rs::MapData::toggle_banner	ticked in #3517; `MapItemSavedData.toggleBanner` is cited at crates/horizon-client/src/game/maps.rs:403
+MapItemSavedData.checkBanners	port	crates/horizon-client/src/game/maps.rs::MapData::check_banners	ticked in #3517; `MapItemSavedData.checkBanners` is cited at crates/horizon-client/src/game/maps.rs:443
+MapItemSavedData.removedFromFrame	port	crates/horizon-client/src/game/maps.rs::MapData::removed_from_frame	ticked in #3517; `MapItemSavedData.removedFromFrame` is cited at crates/horizon-client/src/game/maps.rs:387
 MapItemSavedData.setColor	port	crates/horizon-client/src/game/maps.rs::MapData::update_color	-
 MapItemSavedData.addClientSideDecorations	port	crates/horizon-client/src/game/maps.rs::Game::remote_map_item_data	decorations are replaced from the packet list
 MapItemSavedData.HoldingPlayer.createPatch	port	crates/horizon-client/src/game/maps.rs::MapData::update_packet	the dirty rectangle is copied into the patch
@@ -112,9 +112,9 @@ CommandStorage.Container.getKeys	port	crates/horizon-client/src/command_storage.
 LevelStorageSource.LevelStorageAccess.releaseTemporarilyAndRun	skip:other	-	used only by the external datafixer tool (FileFixerUpper); Horizon does not run it
 LevelStorageSource.LevelStorageAccess.safeClose	skip:other	-	closes the session lock and logs a failure; Horizon releases its lock when the session drops
 LevelStorageSource.LevelStorageAccess.getLevelPath	skip:other	-	path helper for level resources; Horizon builds these paths where they are used (save.rs::saved_data_path)
-LevelStorageSource.LevelStorageAccess.collectIssues	missing	-	player: a world with a damaged level.dat gets no recovery screen listing its data-fix issues (RecoverWorldDataScreen)
+LevelStorageSource.LevelStorageAccess.collectIssues	port	crates/horizon-client/src/save.rs::level_dat_issue	the issue line of each file on RecoverWorldDataScreen (title.rs)
 LevelStorageSource.LevelStorageAccess.fixAndGetSummaryFromTag	port	crates/horizon-client/src/title.rs::list_worlds	gap: minor: the world list reads name and last played directly, without a data fix first
-LevelStorageSource.LevelStorageAccess.getUnfixedDataTagWithFallback	missing	-	player: when level.dat is unreadable, the level.dat_old copy is not used as a fallback; the world does not load
+LevelStorageSource.LevelStorageAccess.getUnfixedDataTagWithFallback	port	crates/horizon-client/src/save.rs::fall_back_to_level_dat_old	the dedicated server (Main) takes level.dat_old and restores it; the client asks on RecoverWorldDataScreen instead (WorldOpenFlows)
 LevelStorageSource.LevelStorageAccess.getUnfixedDataTag	inline	crates/horizon-client/src/save.rs::Level::read	the Data compound of level.dat is read inside Level::read
 LevelStorageSource.LevelStorageAccess.saveDataTag	inline	crates/horizon-client/src/save.rs::Level::write	level.dat is written inside Level::write
 LevelStorageSource.LevelStorageAccess.saveLevelData	port	crates/horizon-client/src/save.rs::write_dat	the temp file, the level.dat_old swap and the write are in write_dat
@@ -124,7 +124,7 @@ LevelStorageSource.LevelStorageAccess.renameAndDropPlayer	skip:other	-	no caller
 LevelStorageSource.LevelStorageAccess.modifyLevelDataWithoutDatafix	inline	crates/horizon-client/src/title/world_management.rs::rename	read, change the Data compound and write back; rename is the only edit Horizon makes
 LevelStorageSource.LevelStorageAccess.makeWorldBackup	port	crates/horizon-client/src/title/world_management.rs::backup	-
 LevelStorageSource.LevelStorageAccess.hasWorldData	inline	crates/horizon-client/src/title.rs::list_worlds	gap: minor: a folder counts as a world only when its level.dat reads; level.dat_old is not checked
-LevelStorageSource.LevelStorageAccess.restoreLevelDataFromOld	missing	-	player: the recovery that moves a damaged level.dat aside and puts level.dat_old back is not offered (RecoverWorldDataScreen)
+LevelStorageSource.LevelStorageAccess.restoreLevelDataFromOld	port	crates/horizon-client/src/save.rs::restore_level_data_from_old	keeps the broken file as level.dat_corrupted_<time>; gap: minor: a failed move puts level.dat back and reports the failure (vanilla reports success with noRollback)
 PlayerDataStorage.backup	missing	-	minor: a player file that fails to load is not copied to a _corrupted_ backup first; Horizon leaves it in place
 SavedDataStorage.getDataFile	port	crates/horizon-client/src/save.rs::saved_data_path	gap: minor: no check that the path stays inside the data folder; the names come from fixed callers
 SavedDataStorage.computeIfAbsent	inline	crates/horizon-client/src/save.rs::compound_or_empty	the default is an empty compound when the file is absent
@@ -146,5 +146,5 @@ PortalShape.getDistanceUntilTop	inline	crates/horizon-world/src/level/portal.rs:
 TeleportTransition.playPortalSound	inline	crates/horizon-client/src/game/nether_portal.rs::Game::arrive_through_nether_portal	level event 1032 is sent on arrival
 TeleportTransition.withRotation	inline	crates/horizon-client/src/game/nether_portal.rs::Game::arrive_through_nether_portal	the turned yaw and motion are applied on arrival
 TeleportTransition.withPosition	inline	crates/horizon-client/src/game/nether_portal.rs::Game::arrive_through_nether_portal	the exit position is applied on arrival
-TeleportTransition.transitionAsPassenger	missing	-	player: a player riding a vehicle cannot use a nether portal here (riding blocks it), while vanilla carries the rider through with the vehicle
+TeleportTransition.transitionAsPassenger	port	crates/horizon-client/src/game/server_travel.rs::Game::carry_riders_through_portals	riders travel with the vehicle and ride it again on arrival
 DefaultRedstoneWireEvaluator.calculateTargetStrength	inline	crates/horizon-world/src/level/redstone.rs::Sim::wire_update_power	the 15 shortcut and the max with the incoming signal are inline

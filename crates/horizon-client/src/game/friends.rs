@@ -182,6 +182,9 @@ impl Game<'_> {
     pub(super) fn draw_friends_screen(&mut self, batch: &mut HudBatch) {
         self.tick_friends();
         let view = self.friends_view();
+        horizon_client::widgets::begin_screen(|| {
+            horizon_client::widgets::ScreenInfo::new("friends", friends_screen::TITLE)
+        });
         friends_screen::draw(batch, &self.gui.atlas, self.cursor, &view, true);
     }
     pub(super) fn friends_screen_click(&mut self) {

@@ -5,21 +5,21 @@ SkullBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_
 SkullBlockEntity.removeComponentsFromTag	inline	crates/horizon-client/src/block_entity_item.rs::pick	the three keys are removed from the saved NBT inside pick's part loop
 SpawnerBlockEntity.triggerEvent	port	crates/horizon-client/src/mobs/spawner.rs::Spawner::client_event	event 1 resets the client spawn delay to the minimum; other events return false
 SpawnerBlockEntity.setEntityData	missing		minor: an op's spawn egg with an ENTITY_DATA component only sets the mob type on a spawner here (use_spawn_egg_on_spawner); the rest of the egg's entity data is dropped
-StructureBlockEntity.updateBlockState	missing		player: the structure block's mode is never written to its block state, so the block does not switch between SAVE, LOAD, CORNER and DATA
-StructureBlockEntity.usedBy	missing		player: right-clicking a structure block opens no edit screen; Horizon has no structure block screen
-StructureBlockEntity.setStructureName	missing		player: the structure name box does nothing; the structure block edit packet (SET_STRUCTURE_BLOCK, id 60) has no handler
-StructureBlockEntity.setMode	missing		player: changing the mode in the structure block screen does nothing
-StructureBlockEntity.detectSize	missing		player: the Detect Size button does nothing, so a corner-marked area is never sized
-StructureBlockEntity.getEnclosingBoundingBox	missing		player: no area is found between corner blocks, so Detect Size and saving have nothing to use
-StructureBlockEntity.saveStructure	missing		player: the Save button and redstone save do nothing, so a built structure cannot be saved from the game
-StructureBlockEntity.placeStructureIfSameSize	missing		player: the Load button does nothing when the template size matches
-StructureBlockEntity.loadStructureInfo	missing		player: a structure block never reads a template's size and author
-StructureBlockEntity.placeStructure	port	crates/horizon-world/src/worldgen/structure/processor.rs::place_in_world	gap: player: the block's own settings (mirror, rotation, integrity, seed, strict, ignore entities) and its redstone trigger are not read; only the placement runs
+StructureBlockEntity.updateBlockState	port	crates/horizon-client/src/game/structure_blocks.rs::Game::set_structure_mode	the mode is written to the block's mode property too
+StructureBlockEntity.usedBy	port	crates/horizon-client/src/game/block_editor.rs::Game::open_block_editor_if_editable	a game master's right click opens the structure block screen
+StructureBlockEntity.setStructureName	port	crates/horizon-client-render/src/structure_block.rs::StructureBlock::set_structure_name	the SET_STRUCTURE_BLOCK packet's name reaches the entity
+StructureBlockEntity.setMode	port	crates/horizon-client/src/game/structure_blocks.rs::Game::set_structure_mode	the screen's mode buttons write both the entity and the block state's mode
+StructureBlockEntity.detectSize	port	crates/horizon-client/src/game/structure_blocks.rs::Game::detect_structure_size	Detect Size finds the box between the corner blocks
+StructureBlockEntity.getEnclosingBoundingBox	port	crates/horizon-client-render/src/structure_block.rs::StructureBlock::enclosing_box	the box between the corner blocks
+StructureBlockEntity.saveStructure	port	crates/horizon-client/src/game/structure_blocks.rs::Game::save_structure	the Save button and a redstone rising edge write the template from the detected box
+StructureBlockEntity.placeStructureIfSameSize	port	crates/horizon-client/src/game/structure_blocks.rs::Game::place_structure_if_same_size	the Load button only places a template that matches the box
+StructureBlockEntity.loadStructureInfo	port	crates/horizon-client/src/game/structure_blocks.rs::Game::load_structure_info	the template's size and author are read back
+StructureBlockEntity.placeStructure	port	crates/horizon-client/src/game/structure_blocks.rs::Game::place_structure	mirror, rotation, integrity, seed, strict and ignore entities come from the block entity; the redstone path is Game::trigger_structure_block
 StructureBlockEntity.getStructureTemplate	port	crates/horizon-world/src/worldgen/structure.rs::StructureResources::template	name lookup only; nothing calls it for a structure block
 StructureBlockEntity.unloadStructure	missing		minor: no structure block to unload a template from; templates in StructureResources are never dropped
-StructureBlockEntity.isStructureLoadable	missing		player: the Load button never reports whether the template exists
-StructureBlockEntity.renderMode	missing		player: a structure block in creative shows no outline box for its SAVE or LOAD mode
-StructureBlockEntity.getRenderableBox	missing		player: no outline box is drawn around the structure's area
+StructureBlockEntity.isStructureLoadable	port	crates/horizon-client/src/game/structure_blocks.rs::Game::structure_loadable	the Load button reports whether the template exists
+StructureBlockEntity.renderMode	port	crates/horizon-client-render/src/structure_block.rs::StructureBlock::render_mode	a creative structure block shows its mode's outline
+StructureBlockEntity.getRenderableBox	port	crates/horizon-client-render/src/structure_block.rs::StructureBlock::renderable_box	the outline box of SAVE and LOAD modes
 TestInstanceBlockEntity.Data.withSize	skip:java		record copy-with builder; no behaviour of its own
 TestInstanceBlockEntity.Data.withStatus	missing		minor: test instance status never changes; Horizon has no game test runner (/test only reports no instances)
 TestInstanceBlockEntity.Data.withError	missing		minor: no game test runner, so no error message is ever set on a test instance block
@@ -34,16 +34,16 @@ TheEndGatewayBlockEntity.findValidSpawnInChunk	inline	crates/horizon-client/src/
 TheEndGatewayBlockEntity.getParticleAmount	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::gateway_faces	the count is the number of gateway faces that render; render_tick passes its length to animate_tick, which draws one particle per face
 TrialSpawnerBlockEntity.createDefaultSpawner	port	crates/horizon-client-render/src/chunk/block_entity.rs::TrialSpawner::default	default cooldown 36000 and range 14; the no-creative player filter is in TrialSpawner::detect
 TrialSpawnerBlockEntity.setEntityId	missing		player: a spawn egg used on a trial spawner does not change the mob it spawns; only spawners take eggs (use_spawn_egg_on_spawner)
-TrialSpawnerBlockEntity.setEntityData	missing		player: an op's spawn egg with entity data does nothing to a trial spawner
+TrialSpawnerBlockEntity.setEntityData	inline	crates/horizon-client/src/game/spawner.rs::Game::use_spawn_egg_on_spawner	the egg's data goes through `override_entity_data` on the spawner it is used on
 TrialSpawnerBlockEntity.getState	port	crates/horizon-client/src/game/trial_spawner.rs::Game::trial_spawner_block	reads the state and ominous properties of the block
 TrialSpawnerBlockEntity.setState	port	crates/horizon-client/src/game/trial_spawner.rs::Game::set_trial_spawner_state	writes the state property and the ominous flag together
 TrialSpawnerBlockEntity.markUpdated	port	crates/horizon-client/src/game/trial_spawner.rs::Game::mark_block_entity_updated	
 TrialSpawner.removeOminous	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::tick_and_get_next	the cooldown branch clears the ominous flag and emits OminousSet(false); the block write goes through set_trial_spawner_state
 TrialSpawner.shouldMobBeUntracked	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::server_tick	gap: minor: drops mobs that are gone or beyond 47 blocks; no separate alive or dimension check
 TrialSpawner.addBecomeOminousParticles	inline	crates/horizon-client/src/game/trial_visuals.rs::Game::trial_level_event	the 3020 arm draws the 20 trial omen and soul fire flame particles
-TrialSpawner.overrideEntityToSpawn	missing		player: a spawn egg on a trial spawner cannot change its mob; the egg only reaches spawners
-TrialSpawner.FullConfig.overrideEntity	missing		player: same as overrideEntityToSpawn; the trial spawner's mob type cannot be set from an egg
-TrialSpawner.FullConfig.overrideEntityData	missing		player: same as overrideEntityToSpawn; egg entity data never reaches a trial spawner
+TrialSpawner.overrideEntityToSpawn	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawnerExt::override_entity	a spawn egg on a trial spawner rewrites its spawn potentials and returns it to INACTIVE
+TrialSpawner.FullConfig.overrideEntity	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawnerExt::override_entity	both configs' spawn potentials are rewritten
+TrialSpawner.FullConfig.overrideEntityData	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::override_entity_data	the egg's entity data rewrites both configs' spawn potentials
 TrialSpawnerState.calculatePositionToSpawnSpawner	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::item_spawner_position	
 TrialSpawnerState.calculatePositionAbove	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::item_spawner_position	the clip two to five blocks above the chosen entity and the drop point under it
 TrialSpawnerState.selectEntityToSpawnItemAbove	inline	crates/horizon-client/src/mobs/trial_spawner.rs::TrialSpawner::item_spawner_position	picks a mob or a player at random, as vanilla does
@@ -109,7 +109,7 @@ PistonHeadBlock.affectNeighborsAfterRemoval	port	crates/horizon-world/src/level/
 PistonHeadBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	the head becomes air when it cannot survive from its facing side
 PistonHeadBlock.canSurvive	port	crates/horizon-world/src/level/pistons.rs::Sim::piston_head_can_survive	
 PistonHeadBlock.neighborChanged	port	crates/horizon-world/src/level/hooks.rs::Sim::neighbor_changed	the head passes the neighbour change to its base while it can survive
-PistonHeadBlock.getCloneItemStack	missing		player: unsure: middle-click on a piston head probably gives no item; the head has no item form and block_items.rs has no piston case
+PistonHeadBlock.getCloneItemStack	port	crates/horizon-client/src/game/block_items.rs::Game::picked_stack	ticked in #3516; `PistonHeadBlock.getCloneItemStack` is cited at crates/horizon-client/src/game/block_items.rs:57 (in a comment, so `where` names the enclosing fn)
 PistonHeadBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	rotation goes through the table built from block data
 PistonHeadBlock.createBlockStateDefinition	skip:data		state properties come from the block data tables
 PistonMovingBlockEntity.getProgress	port	crates/horizon-world/src/piston_shape.rs::MovingPistonState::interpolated_progress	

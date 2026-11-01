@@ -4,6 +4,7 @@
 //! (the entity goes through on the next tick), and
 //! `TheEndGatewayBlockEntity.getPortalPosition` (where it lands).
 use crate::nether_portal::{ENTITY_DELAY, PortalState};
+use crate::projectiles::{Projectile, ProjectileKind};
 use horizon_core::{geometry::Vec3, position::BlockPos};
 
 /// The End gateway travel of one entity.
@@ -63,6 +64,35 @@ pub fn swept_gateway(
             true
         });
     found
+}
+
+/// The End gateway a thrown ender pearl passed through on its last move, from
+/// where it started the tick to where it is (`Entity.checkInsideBlocks` from
+/// `ThrowableProjectile.tick`'s `applyEffectsFromBlocks`). Other projectiles
+/// are not looked at.
+pub fn pearl_gateway(
+    pearl: &Projectile,
+    is_gateway: impl FnMut(BlockPos) -> bool,
+) -> Option<BlockPos> {
+    if !matches!(pearl.kind, ProjectileKind::EnderPearl) {
+        return None;
+    }
+    let size = pearl.kind.size() as f32;
+    swept_gateway(pearl.previous, pearl.position, size, size, is_gateway)
+}
+
+/// A thrown ender pearl at its gateway's exit `at`
+/// (`EndGatewayBlock.getPortalDestination` for a `ThrownEnderpearl`: a
+/// `TeleportTransition` with no motion, rotation 0 and nothing relative).
+/// It falls from there and takes its owner where it lands.
+pub fn place_pearl(pearl: &mut Projectile, at: Vec3) {
+    pearl.position = at;
+    pearl.previous = at;
+    pearl.velocity = Vec3::ZERO;
+    pearl.yaw = 0.0;
+    pearl.pitch = 0.0;
+    // A server tells its clients of the jump at once.
+    pearl.needs_sync = true;
 }
 
 /// The bottom centre of a block (`Vec3.atBottomCenterOf`): where a traveller
@@ -148,6 +178,75 @@ mod tests {
         traveller.enter(gateway);
         // A mob that cannot use a portal does not go through.
         assert_eq!(traveller.travel(false), None);
+    }
+
+    /// A world with no blocks in the way and nothing to hit: the gateway
+    /// block has no collision shape, so a projectile flies into it.
+    struct Open;
+    impl crate::projectiles::ProjectileWorld for Open {
+        fn clip(&self, _: Vec3, _: Vec3) -> Option<(Vec3, [i32; 3], [i32; 3])> {
+            None
+        }
+        fn in_water(&self, _: horizon_core::geometry::Aabb) -> bool {
+            false
+        }
+        fn targets(&self) -> &[(crate::mobs::Who, horizon_core::geometry::Aabb)] {
+            &[]
+        }
+    }
+
+    /// The ticks a projectile flies, thrown east at the gateway, until its
+    /// move goes through one (`None` if it never does in 5 ticks).
+    fn thrown_at_gateway(kind: ProjectileKind) -> (Projectile, Option<BlockPos>) {
+        let mut shot = Projectile::new(kind, at(699.5, 100.3, 0.5), None);
+        shot.velocity = at(1.5, 0.0, 0.0);
+        for _ in 0..5 {
+            shot.tick(&Open);
+            if let Some(g) = pearl_gateway(&shot, is_gateway) {
+                return (shot, Some(g));
+            }
+        }
+        (shot, None)
+    }
+
+    #[test]
+    fn a_thrown_pearl_goes_through_the_gateway_and_falls_from_its_exit() {
+        let (mut pearl, found) = thrown_at_gateway(ProjectileKind::EnderPearl);
+        let gateway = BlockPos::new(702, 100, 0);
+        // ThrownEnderpearl in the gateway block: EndGatewayBlock.entityInside
+        // takes it in, and it goes through on the next tick.
+        assert_eq!(found, Some(gateway));
+        let mut traveller = Traveller::default();
+        traveller.enter(gateway);
+        assert_eq!(traveller.travel(true), Some(gateway));
+        // getPortalDestination: at the exit, no motion and rotation 0.
+        let exit = bottom_center([8, 100, 0]);
+        place_pearl(&mut pearl, exit);
+        assert_eq!(pearl.position, exit);
+        assert_eq!(pearl.previous, exit);
+        assert_eq!(pearl.velocity, Vec3::ZERO);
+        assert_eq!((pearl.yaw, pearl.pitch), (0.0, 0.0));
+        // It falls straight down from the exit (ThrowableProjectile gravity,
+        // then inertia), where it lands and takes its owner along.
+        pearl.tick(&Open);
+        assert_eq!((pearl.position.x, pearl.position.z), (8.5, 0.5));
+        assert!((pearl.position.y - (100.0 - 0.03 * 0.99)).abs() < 1e-9);
+        // The pearl is out of the gateway: it does not go back at once.
+        assert_eq!(traveller.travel(true), None);
+        assert_eq!(traveller.cooldown(), ENTITY_DELAY - 1);
+    }
+
+    #[test]
+    fn a_pearl_flying_past_the_gateway_stays_out_of_it() {
+        // Thrown one block higher, over the gateway block.
+        let mut pearl = Projectile::new(ProjectileKind::EnderPearl, at(699.5, 101.3, 0.5), None);
+        pearl.velocity = at(1.5, 0.0, 0.0);
+        for _ in 0..5 {
+            pearl.tick(&Open);
+            assert_eq!(pearl_gateway(&pearl, is_gateway), None);
+        }
+        // Only the pearl travels: a snowball on the same path is not taken in.
+        assert_eq!(thrown_at_gateway(ProjectileKind::Snowball).1, None);
     }
 
     #[test]

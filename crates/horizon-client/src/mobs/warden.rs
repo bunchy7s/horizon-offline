@@ -404,7 +404,7 @@ pub fn hurt(m: &mut Mob, source: &Damage) {
     }
     let direct = !matches!(
         source.kind,
-        DamageKind::Arrow | DamageKind::Thrown | DamageKind::Fireball
+        DamageKind::Arrow | DamageKind::Thrown | DamageKind::Fireball | DamageKind::WitherSkull
     );
     if let Some(st) = m.extra.warden.as_mut() {
         st.hurt_by.push((source.attacker, direct));

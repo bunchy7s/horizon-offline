@@ -23,12 +23,14 @@ use horizon_world::{
     nbt::Tag,
     registry::BlockRegistry,
     worldgen::{
+        biome::BiomeId,
+        blending::{BlendingData, Direction8, OldChunk, OldWorld, Sides},
         generator::{GeneratorData, OverworldGenerator, ProtoChunk},
         overrides::{PackFile, WorldgenOverrides},
     },
 };
 use serde_json::Value;
-use std::{collections::HashMap, fmt::Write as _, fs, io::Write as _, path::Path};
+use std::{collections::HashMap, fmt::Write as _, fs, io::Write as _, path::Path, sync::Arc};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -148,6 +150,89 @@ fn datapacks(dir: &Path) -> Result<WorldgenOverrides, Error> {
     Ok(overrides)
 }
 
+/// HORIZON_OLD_CHUNKS=SEED:x0,z0,x1,z1: chunks another seed generated that
+/// count as saved by an older version (see the oracle).
+struct OldChunks {
+    keys: std::collections::HashSet<(i32, i32)>,
+    chunks: HashMap<(i32, i32), ProtoChunk>,
+    data: std::sync::Mutex<HashMap<(i32, i32), std::sync::Arc<BlendingData>>>,
+}
+struct OldView<'a>(&'a ProtoChunk, ChunkPos);
+impl OldChunk for OldView<'_> {
+    fn has_surface_heightmap(&self) -> bool {
+        false
+    }
+    fn surface_height(&self, _: i32, _: i32) -> i32 {
+        unreachable!("no worldgen heightmap")
+    }
+    fn is_surface_block(&self, x: i32, y: i32, z: i32) -> bool {
+        matches!(
+            self.0.block_name(self.1.x * 16 + x, y, self.1.z * 16 + z),
+            "minecraft:podzol"
+                | "minecraft:gravel"
+                | "minecraft:grass_block"
+                | "minecraft:stone"
+                | "minecraft:coarse_dirt"
+                | "minecraft:sand"
+                | "minecraft:red_sand"
+                | "minecraft:mycelium"
+                | "minecraft:snow_block"
+                | "minecraft:terracotta"
+                | "minecraft:dirt"
+        )
+    }
+    fn is_ground(&self, x: i32, y: i32, z: i32) -> bool {
+        // A terrain chunk holds air, the two fluids and full solid blocks.
+        !matches!(
+            self.0.block_name(self.1.x * 16 + x, y, self.1.z * 16 + z),
+            "minecraft:air"
+                | "minecraft:cave_air"
+                | "minecraft:void_air"
+                | "minecraft:water"
+                | "minecraft:lava"
+        )
+    }
+    fn noise_biome(&self, qx: i32, qy: i32, qz: i32) -> BiomeId {
+        self.0
+            .biome_id_at(self.1.x * 16 + qx * 4, qy * 4, self.1.z * 16 + qz * 4)
+    }
+}
+impl OldWorld for OldChunks {
+    fn is_old_chunk_around(&self, center: ChunkPos, range: i32) -> bool {
+        self.keys
+            .iter()
+            .any(|&(x, z)| (x - center.x).abs() <= range && (z - center.z).abs() <= range)
+    }
+    fn old_biomes(
+        &self,
+        x: i32,
+        z: i32,
+    ) -> Option<Arc<horizon_world::worldgen::biome_chunk::BiomeChunk<BiomeId>>> {
+        self.chunks
+            .get(&(x, z))
+            .map(|c| Arc::new(c.biomes().clone()))
+    }
+    fn blending(&self, x: i32, z: i32) -> Option<std::sync::Arc<BlendingData>> {
+        let chunk = self.chunks.get(&(x, z))?;
+        let mut data = self.data.lock().unwrap();
+        if let Some(found) = data.get(&(x, z)) {
+            return Some(found.clone());
+        }
+        let mut sides = Sides::default();
+        for side in Direction8::ALL {
+            let (dx, dz) = side.step();
+            if !self.keys.contains(&(x + dx, z + dz)) {
+                sides.insert(side);
+            }
+        }
+        let made = BlendingData::unpack(-4, 20, None)?
+            .calculated(&OldView(chunk, ChunkPos::new(x, z)), sides);
+        let made = std::sync::Arc::new(made);
+        data.insert((x, z), made.clone());
+        Some(made)
+    }
+}
+
 pub fn main() -> Result<(), Error> {
     let mut args = crate::args().skip(1);
     let resources = std::path::PathBuf::from(args.next().ok_or("client resource directory")?);
@@ -183,8 +268,20 @@ pub fn main() -> Result<(), Error> {
     for warning in data.warnings() {
         eprintln!("data pack worldgen: {warning}");
     }
-    let generator = OverworldGenerator::for_dimension(data, seed, "minecraft:normal", &dimension)?;
+    let generator =
+        OverworldGenerator::for_dimension(data.clone(), seed, "minecraft:normal", &dimension)?;
     let mut worker = generator.worker();
+    let old_spec = std::env::var("HORIZON_OLD_CHUNKS").ok();
+    let old_rect = match &old_spec {
+        Some(spec) => {
+            let (_, rect) = spec
+                .split_once(':')
+                .ok_or("HORIZON_OLD_CHUNKS=SEED:x0,z0,x1,z1")?;
+            let v: Vec<i32> = rect.split(',').map(str::parse).collect::<Result<_, _>>()?;
+            Some(<[i32; 4]>::try_from(v).map_err(|_| "old rectangle")?)
+        }
+        None => None,
+    };
     // HORIZON_PHASE: terrain (no decoration), structures (pieces only) or full.
     let phase = std::env::var("HORIZON_PHASE").unwrap_or_else(|_| "full".into());
     worker.set_structures_only(phase == "structures");
@@ -243,8 +340,35 @@ pub fn main() -> Result<(), Error> {
             worker.use_saved_start(chunk, id, pieces)?;
         }
         let mut chunks: HashMap<(i32, i32), ProtoChunk> = HashMap::new();
+        if let (Some(spec), Some([ox0, oz0, ox1, oz1])) = (&old_spec, old_rect) {
+            // The old chunks: another seed's terrain, without structures.
+            let old_seed: i64 = spec.split(':').next().ok_or("old seed")?.parse()?;
+            let old_generator = OverworldGenerator::without_structures(data.clone(), old_seed)?;
+            let mut old_worker = old_generator.worker();
+            let mut made = HashMap::new();
+            for z in oz0..=oz1 {
+                for x in ox0..=ox1 {
+                    made.insert((x, z), old_worker.generate_proto(ChunkPos::new(x, z))?);
+                }
+            }
+            let keys = made.keys().copied().collect();
+            let old = std::sync::Arc::new(OldChunks {
+                keys,
+                chunks: made,
+                data: Default::default(),
+            });
+            generator.set_old_world(old.clone());
+            for &key in old.chunks.keys() {
+                // Each rectangle starts from scratch: the probe's own copy.
+                let again = old_worker.generate_proto(ChunkPos::new(key.0, key.1))?;
+                chunks.insert(key, again);
+            }
+        }
         for z in z0 - 2..=z1 + 2 {
             for x in x0 - 2..=x1 + 2 {
+                if chunks.contains_key(&(x, z)) {
+                    continue;
+                }
                 chunks.insert((x, z), worker.generate_proto(ChunkPos::new(x, z))?);
             }
         }
@@ -265,6 +389,12 @@ pub fn main() -> Result<(), Error> {
                 .collect(),
         };
         for (x, z) in order {
+            // An old chunk is not decorated, only written into.
+            if old_rect.is_some_and(|[ox0, oz0, ox1, oz1]| {
+                (ox0..=ox1).contains(&x) && (oz0..=oz1).contains(&z)
+            }) {
+                continue;
+            }
             let mut region = Vec::with_capacity(9);
             for dz in -1..=1 {
                 for dx in -1..=1 {

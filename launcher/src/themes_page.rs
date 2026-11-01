@@ -1,10 +1,16 @@
 //! Settings' accent colour and Home background rows (`horizon_launcher::themes`).
 use super::*;
+use gpui::{
+    canvas, fill, point, size, Bounds, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    Pixels, Point,
+};
 use horizon_launcher::themes::{self, Accent};
 use std::path::PathBuf;
 
 /// Each accent's swatch, in points.
 const SWATCH: f32 = 26.;
+/// The hue strip beside the swatches, in points: 0 to 360 degrees across it.
+const STRIP: f32 = 120.;
 
 impl Launcher {
     /// The theme Settings ask for, under the window's own light or dark.
@@ -70,9 +76,117 @@ impl Launcher {
                     ))
                     .into_any_element(),
             ),
-            Some(swatches.into_any_element()),
+            Some(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.))
+                    .child(swatches)
+                    .child(self.hue_strip(&t, cx))
+                    .into_any_element(),
+            ),
             &t,
         )
+    }
+
+    /// A strip of every hue: a click or a drag picks any of them, the swatches being shortcuts.
+    fn hue_strip(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
+        let current = self.settings.accent.hue();
+        let area = self.hue_area.clone();
+        let ink = t.ink;
+        let outline = t.outline;
+        // Hues per painted quad: 60 of them, fine enough at this width.
+        const STEPS: usize = 60;
+        div()
+            .relative()
+            .flex_none()
+            .w(px(STRIP))
+            .h(px(SWATCH))
+            .border_2()
+            .border_color(outline)
+            .cursor_pointer()
+            .child(
+                canvas(
+                    move |bounds, _, _| {
+                        area.set(Some(bounds));
+                        bounds
+                    },
+                    move |bounds, _, window, _| {
+                        let width: f32 = bounds.size.width.into();
+                        let step = width / STEPS as f32;
+                        for i in 0..STEPS {
+                            let left = px(step * i as f32);
+                            let colour: Hsla =
+                                gpui::rgb(themes::hue_colour(i as f32 * 360. / STEPS as f32))
+                                    .into();
+                            window.paint_quad(fill(
+                                Bounds::new(
+                                    point(bounds.left() + left, bounds.top()),
+                                    size(px(step), bounds.size.height),
+                                ),
+                                colour,
+                            ));
+                        }
+                        if let Some(hue) = current {
+                            let at = px(width * hue / 360.);
+                            window.paint_quad(fill(
+                                Bounds::new(
+                                    point(bounds.left() + at - px(1.5), bounds.top()),
+                                    size(px(3.), bounds.size.height),
+                                ),
+                                ink,
+                            ));
+                        }
+                    },
+                )
+                .size_full(),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                    this.pick_hue(ev.position, window, cx);
+                }),
+            )
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| {
+                if ev.pressed_button == Some(MouseButton::Left) {
+                    this.pick_hue(ev.position, window, cx);
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseUpEvent, _, _| this.finish_hue()),
+            )
+            // `on_mouse_up` fires only while the strip is hovered, so a drag released off it would
+            // keep its accent in memory and never write it.
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseUpEvent, _, _| this.finish_hue()),
+            )
+    }
+
+    /// A release ends the drag and writes `settings.json` once.
+    fn finish_hue(&mut self) {
+        if self.hue_dragging {
+            self.hue_dragging = false;
+            self.settings.save();
+        }
+    }
+
+    /// The hue under the pointer, as the accent. Saving waits until the mouse comes up, so a drag
+    /// writes `settings.json` once.
+    fn pick_hue(&mut self, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(area) = self.hue_area.get() else {
+            return;
+        };
+        let width: f32 = area.size.width.into();
+        if width <= 0. {
+            return;
+        }
+        let across: f32 = (at.x - area.origin.x).into();
+        self.settings.accent = Accent::custom((across / width).clamp(0., 1.) * 360.);
+        self.hue_dragging = true;
+        self.theme = self.settings_theme(window);
+        cx.notify();
     }
 
     fn choose_background(&mut self, cx: &mut Context<Self>) {

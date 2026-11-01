@@ -168,11 +168,13 @@ pub const TRACKING: &[(&str, u8, u32, bool)] = &[
     ("minecraft:zombified_piglin", 8, 3, true),
 ];
 
-/// The settings of one entity type; unknown types get the builder defaults.
+/// the settings of one entity type: a content mod's type takes its
+/// template's, other unknown types the builder defaults.
 pub fn settings(kind: &str) -> (u8, u32, bool) {
-    TRACKING
-        .binary_search_by(|row| row.0.cmp(kind))
-        .map_or((5, 3, true), |i| {
-            (TRACKING[i].1, TRACKING[i].2, TRACKING[i].3)
-        })
+    let row = |kind: &str| TRACKING.binary_search_by(|row| row.0.cmp(kind)).ok();
+    let row = row(kind)
+        .or_else(|| crate::projectiles::thrown_type(kind).and_then(|_| row("minecraft:snowball")));
+    row.map_or((5, 3, true), |i| {
+        (TRACKING[i].1, TRACKING[i].2, TRACKING[i].3)
+    })
 }

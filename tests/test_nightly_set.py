@@ -8,15 +8,11 @@ from tools.ci import nightly_set as ns
 
 ROOT = Path(__file__).resolve().parents[1]
 NOW = "2026-10-28T12:00:00+00:00"
-TEAM = {"kacpherek", "rdbtcvs", "online5277", "levzzz5154"}
 PATTERNS = ns.guarded_patterns((ROOT / ".github/CODEOWNERS").read_text())
 
 
-def pr(n, head="h", state="open", files=("crates/horizon-world/src/lib.rs",), base="main", approved_by=("rdbtcvs",),
-       approved_at=None):
-    sha = f"{head}{n}"
-    return ns.PullRequest(n, state, sha, f"Fix {n}", f"dev{n}", base, list(files),
-                          {who: approved_at or sha for who in approved_by})
+def pr(n, head="h", state="open", files=("crates/horizon-world/src/lib.rs",), base="main"):
+    return ns.PullRequest(n, state, f"{head}{n}", f"Fix {n}", f"dev{n}", base, list(files))
 
 
 def lookup(*prs):
@@ -25,30 +21,32 @@ def lookup(*prs):
 
 
 def run(state, text, login="kacpherek", *prs):
-    return ns.apply(state, ns.parse(text), login, NOW, lookup(*prs), PATTERNS, TEAM)
+    return ns.apply(state, ns.parse(text), login, NOW, lookup(*prs), PATTERNS)
 
 
-class ApprovalTests(unittest.TestCase):
-    """A Nightly reaches every player: only pull requests the Team or Ludovic's agents approved at that head."""
+class NoReviewNeededTests(unittest.TestCase):
+    """Ludovic, 2026-10-30, at the Team's request: a Nightly takes any open pull request to main, reviewed or not."""
 
-    def test_an_unreviewed_pull_request_is_refused(self):
-        with self.assertRaisesRegex(ns.Refused, "no approving review"):
-            run({}, "/nightly add 1", "kacpherek", pr(1, approved_by=()))
+    def test_an_unreviewed_pull_request_is_accepted(self):
+        for text in ("/nightly add 1", "/nightly 1", "/nightly dry-run 1"):
+            result = run({}, text, "kacpherek", pr(1))
+            self.assertTrue(result.build, text)
+        self.assertEqual(run({}, "/nightly add 1", "kacpherek", pr(1)).state["prs"][0]["head"], "h1")
 
-    def test_the_authors_own_approval_and_outsiders_dont_count(self):
-        with self.assertRaisesRegex(ns.Refused, "no approving review"):
-            run({}, "/nightly add 1", "kacpherek", pr(1, approved_by=("dev1", "someone")))
+    def test_a_guarded_file_is_still_refused(self):
+        for text in ("/nightly add 1", "/nightly dry-run 1"):
+            with self.assertRaisesRegex(ns.Refused, "only Ludovic merges"):
+                run({}, text, "kacpherek", pr(1, files=["crates/horizon-world/src/lib.rs", ".github/CODEOWNERS"]))
 
-    def test_ludovics_agents_and_the_team_count(self):
-        for who in ("ludovic111", "levzzz5154"):
-            self.assertEqual(run({}, "/nightly add 1", "kacpherek", pr(1, approved_by=(who,))).state["prs"][0]["number"], 1)
-
-    def test_an_approval_on_an_older_head_doesnt_count(self):
-        with self.assertRaisesRegex(ns.Refused, "no approving review"):
-            run({}, "/nightly add 1", "kacpherek", pr(1, approved_at="old1"))
-
-    def test_a_dry_run_needs_no_approval(self):
-        self.assertTrue(run({}, "/nightly dry-run 1", "kacpherek", pr(1, approved_by=())).dry_run)
+    def test_the_other_guards_stay(self):
+        with self.assertRaisesRegex(ns.Refused, "not main"):
+            run({}, "/nightly add 1", "kacpherek", pr(1, base="release"))
+        with self.assertRaisesRegex(ns.Refused, "is closed"):
+            run({}, "/nightly add 1", "kacpherek", pr(1, state="closed"))
+        with self.assertRaises(ns.Refused):  # who may ask is checked before the set changes (command())
+            ns.authorize("someone", ns.read_reviewers("kacpherek\n"))
+        with self.assertRaises(ns.Refused):
+            ns.authorize("kacpherek", ns.read_reviewers("kacpherek\npaused\n"))
 
 
 class ParseTests(unittest.TestCase):
@@ -98,9 +96,11 @@ class AllowTests(unittest.TestCase):
             ns.authorize("kacpherek", reviewers)
         ns.authorize("ludovic111", reviewers)
 
-    def test_the_repos_list_names_the_three_reviewers(self):
+    def test_the_repos_list_names_its_reviewers(self):
         reviewers = ns.read_reviewers((ROOT / ns.REVIEWERS).read_text())
-        self.assertEqual(reviewers.logins, {"kacpherek", "rdbtcvs", "online5277", "levzzz5154"})
+        self.assertEqual(
+            reviewers.logins, {"kacpherek", "rdbtcvs", "online5277", "levzzz5154", "qwerner88880"}
+        )
         self.assertFalse(reviewers.paused)
 
 class RefusalTests(unittest.TestCase):

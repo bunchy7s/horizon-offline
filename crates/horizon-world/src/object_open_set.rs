@@ -22,6 +22,7 @@ impl<K> Cursor<K> {
         self.remaining != 0
     }
 }
+#[derive(Clone)]
 pub struct ObjectOpenSet<K> {
     slots: Vec<Option<K>>,
     size: i32,

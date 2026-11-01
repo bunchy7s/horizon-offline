@@ -1,0 +1,8 @@
+{
+  "hooks": [],
+  "rust_summary": "keeping a mod block entity's geometry while it doesn't change\n(`BlockEntityDraw::keep`).",
+  "doc_summary": "keeping a mod block entity's geometry: `draw.keep()` in `native_block_entity_submit` keeps what that call drew, and the\nblock is drawn the same again without calling `native_block_entity_submit` or `native_block_entity_render_bounding_box`\nuntil its state, its block entity (what the server sent), its light or the resource packs change, so idle machines cost\nno call into the mod each frame. Keep only geometry that reads none of `partial`, `game_time`, the blocks around it or other state of yours:\nkept geometry stands still (an enchanted item's glint, a clock or compass drawn with `native_draw_item`).\nBundles that use it need `\"hooks\": @API:block_entity_keep@`.",
+  "comments": [
+    "crates/horizon-client/src/game/native_block_entity_draw.rs"
+  ]
+}

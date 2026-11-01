@@ -7,7 +7,7 @@ MultilineTextField.getSelected	port	crates/horizon-client-render/src/ui.rs::Edit
 MultilineTextField.getLineAtCursor	port	crates/horizon-client/src/game/books.rs::Game::caret_on	the visual row holding the caret, with its x
 MultilineTextField.getLineView	port	crates/horizon-client/src/game/books.rs::Game::page_rows	visual rows as character ranges
 MultilineTextField.seekCursor	port	crates/horizon-client-render/src/ui.rs::EditBox::set_cursor	
-MultilineTextField.seekCursorLine	port	crates/horizon-client/src/game/books.rs::Game::book_move_line	gap: minor: column kept without vanilla's 2 px bias (LINE_SEEK_PIXEL_BIAS)
+MultilineTextField.seekCursorLine	port	crates/horizon-client/src/game/books.rs::Game::book_move_line	
 MultilineTextField.seekCursorToPoint	port	crates/horizon-client/src/game/books.rs::Game::page_index_at	
 MultilineTextField.selectWordAtCursor	missing		player: double-clicking a word on a book page does not select it; Game::book_page_click only sets the caret
 MultilineTextField.keyPressed	port	crates/horizon-client/src/game/books.rs::Game::book_input	gap: player: Home and End go to the start and end of the whole page, not of the visual line (EditBox::key); Enter, arrows and Ctrl keys are handled

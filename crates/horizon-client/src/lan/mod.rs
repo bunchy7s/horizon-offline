@@ -5,9 +5,11 @@
 //! ever exchanges decoded packets with these threads through channels, so a
 //! world that is not open to the network pays nothing.
 mod advancements;
+pub mod anticheat;
 pub mod attributes;
 pub mod border;
 pub mod chunks;
+pub mod code_of_conduct;
 mod command_order;
 pub mod command_suggestions;
 pub mod commands;
@@ -16,10 +18,13 @@ pub mod containers;
 pub mod data;
 pub mod discovery;
 pub mod entity;
+pub mod far;
+pub mod forwarding;
 pub mod guest;
 pub mod hub;
 pub mod menu;
 pub mod playerdata;
+pub mod prediction;
 mod recipes;
 pub mod scoreboard;
 pub mod tracking;
@@ -51,7 +56,8 @@ pub const MAX_PLAYERS: usize = 8;
 pub enum NetEvent {
     /// A client finished configuration and enters the play state.
     Joined(Box<Joined>),
-    Packet(u32, Box<play::Serverbound>),
+    /// A packet and the bytes of its body on the wire.
+    Packet(u32, Box<play::Serverbound>, usize),
     /// The connection ended (reason for the log).
     Left(u32, String),
     /// PlayerList.disconnectAllPlayersWithProfile: a new login of this
@@ -131,6 +137,12 @@ pub struct NetLog {
     pub log_ips: bool,
 }
 
+/// The server.properties key that lets only the Horizon client join (off unless "true").
+pub const HORIZON_CLIENTS_ONLY: &str = "horizon-clients-only";
+/// What another client is told.
+pub const HORIZON_CLIENTS_ONLY_REASON: &str =
+    "This server is for the Horizon client: playhorizon.dev";
+
 /// How the server side of the network behaves: an integrated server's LAN
 /// uses the defaults, a dedicated server takes them from server.properties.
 #[derive(Clone)]
@@ -164,14 +176,31 @@ pub struct NetConfig {
     pub gate: Option<LoginGate>,
     /// Online mode: players are authenticated (a LAN world's when its host is signed in).
     pub online: Option<Arc<OnlineMode>>,
+    /// Behind a Velocity proxy: the secret its forwarded player information is signed with. Only an offline
+    /// server (the proxy authenticates) uses it; without it a login is the plain offline one.
+    pub forwarding_secret: Option<Vec<u8>>,
     pub log: Option<NetLog>,
     /// server.properties `resource-pack`: offered to every player during
     /// configuration (a dedicated server's; MinecraftServer.getServerResourcePack).
     pub resource_pack: Option<crate::server::properties::ResourcePackInfo>,
+    /// `enable-code-of-conduct`: the `codeofconduct/<language>.txt` texts
+    /// (`MinecraftServer.getCodeOfConducts`), offered before the resource
+    /// pack. Empty: no code of conduct.
+    pub code_of_conducts: Vec<(String, String)>,
     /// MinecraftServer.serverLinks (a dedicated server's `bug-report-link`):
     /// sent in configuration when non-empty
     /// (ServerConfigurationPacketListenerImpl.startConfiguration).
     pub server_links: Vec<horizon_protocol::packets::configuration::ServerLink>,
+    /// An integrated server's owner profile: the properties the window's own
+    /// (memory) connection logs in with.
+    pub owner_profile: Option<Arc<OwnerProfile>>,
+    /// `horizon-clients-only` (Horizon's own server.properties key, off): a
+    /// client whose `minecraft:brand` isn't Horizon's is turned away during
+    /// configuration. A brand can be spoofed: a gate, not security.
+    pub horizon_clients_only: bool,
+    /// The shapes of the world's levels: their dimension types go to
+    /// clients when the world's data packs changed them.
+    pub levels: crate::chunk::LevelShapes,
 }
 impl NetConfig {
     /// MinecraftServer.enforceSecureProfile.
@@ -197,9 +226,58 @@ impl NetConfig {
             bypasses_limit: None,
             gate: None,
             online: None,
+            forwarding_secret: None,
             log: None,
             resource_pack: None,
+            code_of_conducts: Vec::new(),
             server_links: Vec::new(),
+            horizon_clients_only: false,
+            levels: crate::chunk::LevelShapes::VANILLA,
+            owner_profile: None,
+        }
+    }
+}
+
+/// `IntegratedServer.getSingleplayerProfile` (`Minecraft.getGameProfile`):
+/// the signed-in account's profile properties, its signed `textures` among
+/// them, which the player list gives the owner so that LAN guests see the
+/// owner's skin. Fetched in the background from the world's start; nothing
+/// waits for it: until it answers (or when it fails) the owner is listed
+/// without properties, as before.
+pub struct OwnerProfile {
+    properties: std::sync::OnceLock<Vec<horizon_protocol::packets::login::Property>>,
+    fetch: Mutex<Receiver<Vec<horizon_protocol::packets::login::Property>>>,
+}
+
+impl OwnerProfile {
+    pub fn new(
+        fetch: impl FnOnce() -> Vec<horizon_protocol::packets::login::Property> + Send + 'static,
+    ) -> Self {
+        let (send, receive) = channel();
+        let _ = std::thread::Builder::new()
+            .name("Profile fetcher".into())
+            .spawn(move || {
+                let _ = send.send(fetch());
+            });
+        Self {
+            properties: std::sync::OnceLock::new(),
+            fetch: Mutex::new(receive),
+        }
+    }
+    /// The owner's properties once fetched; empty while the fetch is out
+    /// or when it failed. Never blocks.
+    pub fn properties(&self) -> &[horizon_protocol::packets::login::Property] {
+        if let Some(properties) = self.properties.get() {
+            return properties;
+        }
+        let received = self.fetch.lock().ok().and_then(|r| match r.try_recv() {
+            Ok(properties) => Some(properties),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Vec::new()),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+        });
+        match received {
+            Some(properties) => self.properties.get_or_init(|| properties),
+            None => &[],
         }
     }
 }
@@ -246,7 +324,8 @@ impl SecureChat {
 
 /// State shared with the connection threads.
 pub struct Shared {
-    pub sync: Arc<data::SyncData>,
+    /// What the next login is sent; `PlayerList.reloadResources` swaps it.
+    sync: Mutex<Arc<data::SyncData>>,
     pub events: Sender<NetEvent>,
     pub config: NetConfig,
     motd: Mutex<String>,
@@ -258,8 +337,18 @@ pub struct Shared {
     next: AtomicU32,
     stop: AtomicBool,
     random: Mutex<u64>,
+    /// Connections accepted from the network whose thread still runs.
+    connections: AtomicUsize,
 }
 impl Shared {
+    /// The registries and tags a new connection is sent.
+    pub fn sync(&self) -> Arc<data::SyncData> {
+        self.sync.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+    /// `/reload`: the data new connections are sent from now on.
+    pub fn set_sync(&self, sync: Arc<data::SyncData>) {
+        *self.sync.lock().unwrap_or_else(|e| e.into_inner()) = sync;
+    }
     pub fn next_id(&self) -> u32 {
         self.next.fetch_add(1, Ordering::Relaxed)
     }
@@ -441,7 +530,7 @@ impl Lan {
         let (tx, events) = channel();
         let (listen, port, announce) = (config.listen, config.port, config.announce);
         let shared = Arc::new(Shared {
-            sync,
+            sync: Mutex::new(sync),
             events: tx,
             motd: Mutex::new(config.motd.clone()),
             max_players: AtomicUsize::new(config.max_players),
@@ -449,6 +538,7 @@ impl Lan {
             reserved: Mutex::new(HashSet::new()),
             next: AtomicU32::new(1),
             stop: AtomicBool::new(false),
+            connections: AtomicUsize::new(0),
             random: Mutex::new(crate::server::java_properties::now_millis() as u64 | 1),
             config,
         });
@@ -559,14 +649,35 @@ impl Drop for Lan {
     }
 }
 
+/// Connections from the network accepted beyond the server's player limit.
+const SPARE_CONNECTIONS: usize = 64;
+
+/// An accepted connection, uncounted once its thread ends (or couldn't start).
+struct Counted(Arc<Shared>);
+impl Drop for Counted {
+    fn drop(&mut self) {
+        self.0.connections.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 fn accept_loop(listener: TcpListener, shared: Arc<Shared>, stop: &AtomicBool) {
     while !shared.stop.load(Ordering::Relaxed) && !stop.load(Ordering::Relaxed) {
         match listener.accept() {
             Ok((stream, addr)) => {
-                let shared = shared.clone();
+                // A thread a connection, where vanilla's Netty has a few for all: past the players
+                // the server takes and [`SPARE_CONNECTIONS`] more (logins, server-list pings), a
+                // new one is closed at once, so that a flood of sockets can't use up the threads a
+                // container allows and crash the server.
+                let most = shared.max_players().saturating_add(SPARE_CONNECTIONS);
+                if shared.connections.fetch_add(1, Ordering::AcqRel) >= most {
+                    shared.connections.fetch_sub(1, Ordering::AcqRel);
+                    drop(stream);
+                    continue;
+                }
+                let counted = Counted(shared.clone());
                 let _ = std::thread::Builder::new()
                     .name("horizon-lan-conn".into())
-                    .spawn(move || handle(stream, addr, shared));
+                    .spawn(move || handle(stream, addr, counted.0.clone()));
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(25));
@@ -589,4 +700,57 @@ pub fn available_port() -> u16 {
     TcpListener::bind(("0.0.0.0", 0))
         .and_then(|l| l.local_addr())
         .map_or(25565, |a| a.port())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{io::Read, time::Instant};
+
+    /// Sockets that never say a word each hold a connection thread until their read times out: past
+    /// the player limit and [`SPARE_CONNECTIONS`], a new one is closed at once instead of taking one
+    /// more thread, and the room comes back as they go.
+    #[test]
+    fn a_flood_of_silent_sockets_is_turned_away() {
+        let config = NetConfig {
+            announce: false,
+            ..NetConfig::lan(0, "Flood".into(), 1)
+        };
+        let lan = Lan::start_with(Arc::new(data::SyncData::empty()), config).unwrap();
+        let address = (std::net::Ipv4Addr::LOCALHOST, lan.port);
+        let most = 1 + SPARE_CONNECTIONS;
+        let held: Vec<TcpStream> = (0..most)
+            .map(|_| TcpStream::connect(address).unwrap())
+            .collect();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while lan.shared.connections.load(Ordering::Acquire) < most {
+            assert!(
+                Instant::now() < deadline,
+                "the held sockets were not all accepted"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let mut late = TcpStream::connect(address).unwrap();
+        late.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut byte = [0u8; 1];
+        assert!(
+            match late.read(&mut byte) {
+                Ok(n) => n == 0,
+                Err(e) => !matches!(
+                    e.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ),
+            },
+            "the socket past the limit should be closed"
+        );
+        assert_eq!(lan.shared.connections.load(Ordering::Acquire), most);
+        drop(held);
+        while lan.shared.connections.load(Ordering::Acquire) > 0 {
+            assert!(
+                Instant::now() < deadline,
+                "the closed sockets' threads did not end"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 }

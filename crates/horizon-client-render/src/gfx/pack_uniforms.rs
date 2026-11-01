@@ -30,9 +30,13 @@ pub struct PackInputs {
     pub biome_precipitation: i32,
     pub temperature: f32,
     pub rainfall: f32,
+    /// Whether the biome at the camera is known (its chunk is loaded).
+    pub biome_known: bool,
     /// `heldItemId`, `heldItemId2` (item.properties, 5.3) and `heldBlockLightValue(2)`.
     pub held_items: [i32; 2],
     pub held_light: [i32; 2],
+    /// The values native mods hand their packs (`frame.mods`, `native_shader_params`).
+    pub mod_params: [[f32; 4]; 8],
 }
 
 /// One uniform's value: up to 16 floats or 3 integers.
@@ -160,6 +164,15 @@ pub const NAMES: &[&str] = &[
     "shadowModelViewInverse",
     "shadowProjection",
     "shadowProjectionInverse",
+    "cameraPositionInt",
+    "cameraPositionFract",
+    "previousCameraPositionInt",
+    "previousCameraPositionFract",
+    "eyePosition",
+    "relativeEyePosition",
+    "playerLookVector",
+    "playerBodyVector",
+    "firstPersonCamera",
 ];
 
 /// Values carried from frame to frame.
@@ -170,7 +183,7 @@ pub struct FrameUniforms {
     start: std::time::Instant,
     last: Option<std::time::Instant>,
     frame: u32,
-    previous: Option<(Vec3, Mat4, Mat4)>,
+    previous: Option<(glam::DVec3, Mat4, Mat4)>,
     wetness: f32,
     eye_smooth: [f32; 2],
     /// The pack's shadow settings (7.1).
@@ -203,9 +216,9 @@ fn body(angle: f32, tilt: f32) -> Vec3 {
 }
 
 /// `sunPathRotation`'s turn of the sky's bodies: `tilt` degrees about the world's X axis, so a
-/// positive angle moves the noon sun toward +Z (south).
+/// positive angle moves the noon sun toward -Z (north), as Iris does.
 pub fn tilt_matrix(tilt: f32) -> Mat4 {
-    Mat4::from_rotation_x(tilt.to_radians())
+    Mat4::from_rotation_x(-tilt.to_radians())
 }
 
 /// The world direction of the shadow light (7.1): the sun by day, the moon by night.
@@ -232,38 +245,44 @@ pub fn shadow_culling(frame: &Frame, shadow: &Shadow) -> Mat4 {
     depth * gl * view
 }
 
-/// Distance from the snapped point to the shadow camera, toward the light: the middle of the
-/// default near and far planes (OQ-6).
-const SHADOW_EYE: f64 = 128.0;
+/// How far toward the light the shadow projection starts, in blocks: part of the projection,
+/// not of `shadowModelView` (Iris's matrices, measured).
+pub const SHADOW_EYE: f32 = 100.0;
 
-/// The shadow camera (7.1; OQ-6, impl-plan.md): its view (player space to shadow view space)
-/// and GL projection. The camera looks from the light, world +Z up (+Y when the light is near
-/// Z); the point it centres moves in steps of `shadowIntervalSize` along the shadow view's
-/// own axes, and it sits `SHADOW_EYE` blocks toward the light from it. Orthographic over
-/// `shadowDistance` each side, or perspective with `shadowMapFov`.
+/// The shadow camera as Iris places it (7.1; measured from the outside): its view (player
+/// space to shadow view space) and GL projection. The view undoes `sunPathRotation`, turns the
+/// light's path about Z by the light's angle from the zenith, then X by 90 degrees, so the
+/// light lies on the view's +Z. Its origin is `shadowIntervalSize / 2 - camera % interval`
+/// (the remainder takes the camera's sign) from the player on each world axis, so the map moves
+/// in whole steps. The orthographic projection covers `shadowDistance` each side and depths
+/// from `-near` to `far`, counted from `SHADOW_EYE` blocks toward the light; or perspective
+/// with `shadowMapFov`.
 pub fn shadow_camera(light: Vec3, camera: DVec3, shadow: &Shadow) -> (Mat4, Mat4) {
-    let light = light.as_dvec3();
-    let up = if light.z.abs() > 0.99 {
-        DVec3::Y
-    } else {
-        DVec3::Z
-    };
-    let rotation = DMat4::look_to_rh(DVec3::ZERO, -light, up);
-    let at = rotation.transform_vector3(camera);
+    let tilt = f64::from(shadow.sun_path_rotation).to_radians();
+    let untilted = DMat4::from_rotation_x(tilt).transform_vector3(light.as_dvec3());
+    let zenith = untilted.x.atan2(untilted.y);
+    let rotation = DMat4::from_rotation_x(std::f64::consts::FRAC_PI_2)
+        * DMat4::from_rotation_z(zenith)
+        * DMat4::from_rotation_x(tilt);
     let step = f64::from(shadow.interval);
-    let snapped = if step > 0.0 {
-        (at / step).floor() * step
+    let origin = if step > 0.0 {
+        let remainder = if shadow.euclidean_snap {
+            camera.rem_euclid(DVec3::splat(step))
+        } else {
+            camera % step
+        };
+        DVec3::splat(step / 2.0) - remainder
     } else {
-        at
+        DVec3::ZERO
     };
-    let offset = at - snapped - DVec3::new(0.0, 0.0, SHADOW_EYE);
-    let view = (DMat4::from_translation(offset) * rotation).as_mat4();
+    let view = (rotation * DMat4::from_translation(-origin)).as_mat4();
     let (near, far) = (shadow.near, shadow.far);
+    let eye = Mat4::from_translation(Vec3::new(0.0, 0.0, -SHADOW_EYE));
     let projection = match shadow.fov {
-        Some(fov) => Mat4::perspective_rh_gl(fov.to_radians(), 1.0, near, far),
+        Some(fov) => Mat4::perspective_rh_gl(fov.to_radians(), 1.0, near, far) * eye,
         None => {
             let d = shadow.distance;
-            Mat4::orthographic_rh_gl(-d, d, -d, d, near, far)
+            Mat4::orthographic_rh_gl(-d, d, -d, d, -near, far) * eye
         }
     };
     (view, projection)
@@ -281,19 +300,33 @@ impl FrameUniforms {
         let dt = self.last.map_or(0.0, |l| (now - l).as_secs_f32());
         self.last = Some(now);
         let aspect = size[0] as f32 / size[1].max(1) as f32;
-        let view = crate::camera::view_matrix(frame.yaw, frame.pitch);
+        // Packs take gbufferProjection for a plain perspective (they invert only its perspective
+        // terms): the view bob and the nausea spin belong to the model-view, as GL drew them.
+        let view = frame.bob * frame.spin * crate::camera::view_matrix(frame.yaw, frame.pitch);
         let projection = Mat4::perspective_rh_gl(
             frame.fov_degrees.to_radians(),
             aspect,
             0.05,
             frame.depth_far,
-        ) * frame.bob
-            * frame.spin;
+        );
         let camera = frame.camera.as_vec3();
-        let (previous_camera, previous_view, previous_projection) =
+        let (previous_exact, previous_view, previous_projection) =
             self.previous
-                .unwrap_or((Vec3::ZERO, Mat4::ZERO, Mat4::ZERO));
-        self.previous = Some((camera, view, projection));
+                .unwrap_or((glam::DVec3::ZERO, Mat4::ZERO, Mat4::ZERO));
+        let previous_camera = previous_exact.as_vec3();
+        self.previous = Some((frame.camera, view, projection));
+        // The camera's whole blocks and the rest, exact however far from the origin.
+        let whole = |p: glam::DVec3| p.floor();
+        let int = |p: glam::DVec3| Value::i(&whole(p).as_ivec3().to_array());
+        let fract = |p: glam::DVec3| Value::f(&(p - whole(p)).as_vec3().to_array());
+        // The player's, not the camera's: in a third-person view the camera is behind (or in
+        // front of, turned around) the eye the pack lights from.
+        let [yaw, pitch] = frame.eye_rotation.map(f32::to_radians);
+        let look = Vec3::new(
+            -yaw.sin() * pitch.cos(),
+            -pitch.sin(),
+            yaw.cos() * pitch.cos(),
+        );
 
         let to_view = |v: Vec3| view.transform_vector3(v);
         let sun_angle = (frame.sky.sun_angle / 360.0 + 0.25).rem_euclid(1.0);
@@ -338,6 +371,15 @@ impl FrameUniforms {
             match name {
                 "cameraPosition" => v3(camera),
                 "previousCameraPosition" => v3(previous_camera),
+                "cameraPositionInt" => int(frame.camera),
+                "cameraPositionFract" => fract(frame.camera),
+                "previousCameraPositionInt" => int(previous_exact),
+                "previousCameraPositionFract" => fract(previous_exact),
+                // The camera is the eye in first person.
+                "eyePosition" => v3(frame.eye.as_vec3()),
+                "relativeEyePosition" => v3((frame.camera - frame.eye).as_vec3()),
+                "playerLookVector" | "playerBodyVector" => v3(look),
+                "firstPersonCamera" => Value::i(&[i32::from(frame.first_person)]),
                 "eyeAltitude" => Value::f(&[frame.camera.y as f32]),
                 "upPosition" => v3(to_view(Vec3::new(0.0, 100.0, 0.0))),
                 "sunPosition" => v3(sun),
@@ -360,7 +402,8 @@ impl FrameUniforms {
                 "viewHeight" => Value::f(&[size[1] as f32]),
                 "aspectRatio" => Value::f(&[aspect]),
                 "near" => Value::f(&[0.05]),
-                "far" => Value::f(&[frame.distance]),
+                // The chunk render distance, not the distant terrain's reach.
+                "far" => Value::f(&[frame.detail_distance]),
                 "rainStrength" => Value::f(&[inputs.rain]),
                 "wetness" => Value::f(&[self.wetness]),
                 "thunderStrength" => Value::f(&[inputs.thunder]),
@@ -448,6 +491,14 @@ fn components(name: &str) -> usize {
     match name {
         "cameraPosition"
         | "previousCameraPosition"
+        | "cameraPositionInt"
+        | "cameraPositionFract"
+        | "previousCameraPositionInt"
+        | "previousCameraPositionFract"
+        | "eyePosition"
+        | "relativeEyePosition"
+        | "playerLookVector"
+        | "playerBodyVector"
         | "upPosition"
         | "sunPosition"
         | "moonPosition"
@@ -486,8 +537,8 @@ mod tests {
     fn noon_is_straight_up_and_the_sun_sets_in_the_west() {
         assert!(body(0.0, 0.0).abs_diff_eq(Vec3::new(0.0, 100.0, 0.0), 1e-3));
         assert!(body(90.0, 0.0).abs_diff_eq(Vec3::new(-100.0, 0.0, 0.0), 1e-3));
-        // sunPathRotation tilts noon toward +Z and leaves sunset on the horizon.
-        assert!(body(0.0, 30.0).abs_diff_eq(Vec3::new(0.0, 86.60254, 50.0), 1e-3));
+        // sunPathRotation tilts noon toward -Z and leaves sunset on the horizon.
+        assert!(body(0.0, 30.0).abs_diff_eq(Vec3::new(0.0, 86.60254, -50.0), 1e-3));
         assert!(body(90.0, 30.0).abs_diff_eq(Vec3::new(-100.0, 0.0, 0.0), 1e-3));
     }
 
@@ -500,10 +551,13 @@ mod tests {
         let at = |p: Vec3| view.transform_point3(p);
         // Straight down: a block below the player is farther from the light.
         assert!(at(Vec3::new(0.0, -1.0, 0.0)).z < at(Vec3::ZERO).z);
-        // The player is less than a step from the centre, 128 blocks from the light.
-        let centre = at(Vec3::ZERO);
-        assert!(centre.x.abs() <= 2.0 && centre.y.abs() <= 2.0, "{centre}");
-        assert!((centre.z + 128.0).abs() < 1e-3, "{centre}");
+        // The view's origin is interval / 2 - camera % interval from the player on each axis,
+        // the remainder with the camera's sign: up to a step and a half on negative axes.
+        let origin = view.inverse().w_axis.truncate();
+        assert!(
+            origin.abs_diff_eq(Vec3::new(0.7, 1.0, 1.7), 1e-3),
+            "{origin}"
+        );
         // Moving within a step keeps the world where it was in the map.
         camera.x = 1000.6;
         let (moved, _) = shadow_camera(Vec3::Y, camera, &shadow);
@@ -515,7 +569,38 @@ mod tests {
                 .abs_diff_eq(at(world), 1e-3)
         );
         // shadowDistance blocks reach the map's edge.
-        let edge = projection.project_point3(Vec3::new(160.0, 0.0, -128.0));
+        let edge = projection.project_point3(Vec3::new(160.0, 0.0, 0.0));
         assert!((edge.x.abs() - 1.0).abs() < 1e-4, "{edge}");
+    }
+
+    /// Iris's matrices at 3000 ticks with `sunPathRotation = 30` and the camera at
+    /// (0.5, -58.38, 0.5), read from its uniforms by a probe pack.
+    #[test]
+    fn the_shadow_camera_matches_iris() {
+        let shadow = Shadow {
+            sun_path_rotation: 30.0,
+            ..Shadow::default()
+        };
+        let light = Vec3::new(0.56782, 0.71287, -0.41158).normalize();
+        let (view, projection) = shadow_camera(light, DVec3::new(0.5, -58.38, 0.5), &shadow);
+        let iris_view = Mat4::from_cols_array_2d(&[
+            [0.82315, 0.0, 0.56782, 0.0],
+            [-0.49175, -0.5, 0.71287, 0.0],
+            [0.28391, -0.86603, -0.41158, 0.0],
+            [0.12508, 1.12301, -1.06188, 1.0],
+        ]);
+        assert!(view.abs_diff_eq(iris_view, 2e-4), "{view}");
+        assert!(
+            (projection.z_axis.z + 0.0078110).abs() < 1e-6,
+            "{projection}"
+        );
+        assert!((projection.w_axis.z + 0.21851).abs() < 1e-4, "{projection}");
+        // Elsewhere the origin keeps to the steps: Iris put it at (-0.5, 1.38, 2.5) here.
+        let (view, _) = shadow_camera(light, DVec3::new(3.5, -58.38, -1.5), &shadow);
+        let origin = view.inverse().w_axis.truncate();
+        assert!(
+            origin.abs_diff_eq(Vec3::new(-0.5, 1.38, 2.5), 1e-3),
+            "{origin}"
+        );
     }
 }

@@ -114,6 +114,14 @@ impl<A: HealthAttributes, E: CombatEnvironment<A>> HurtWorld for ServerPlayerCom
     ) -> Result<bool, Self::Error> {
         HurtWorld::fire_resistance(self.environment, state).map_err(ServerDamageError::Environment)
     }
+    fn hurt_start(
+        &mut self,
+        state: &mut HurtState<Self::Source>,
+        damage: &mut f32,
+    ) -> Result<bool, Self::Error> {
+        HurtWorld::hurt_start(self.environment, state, damage)
+            .map_err(ServerDamageError::Environment)
+    }
     fn sleeping(&mut self, state: &mut HurtState<Self::Source>) -> Result<bool, Self::Error> {
         HurtWorld::sleeping(self.environment, state).map_err(ServerDamageError::Environment)
     }

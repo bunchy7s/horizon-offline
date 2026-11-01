@@ -10,6 +10,10 @@ pub struct KeyState {
     released_by_screen_when_down: bool,
     toggle: Option<bool>,
     keyboard: bool,
+    /// Held down by a controller's toggle (Horizon's pad toggle-sneak, which
+    /// vanilla has no option for): until it lets go, the mapping toggles as
+    /// if its vanilla option were on, so a screen releases and restores it.
+    pad_toggled: bool,
 }
 
 impl KeyState {
@@ -20,6 +24,7 @@ impl KeyState {
             released_by_screen_when_down: false,
             toggle: None,
             keyboard: true,
+            pad_toggled: false,
         }
     }
     /// A `ToggleKeyMapping`; `keyboard` is whether the bound key is a keyboard key.
@@ -43,15 +48,27 @@ impl KeyState {
             true
         }
     }
+    /// The mapping toggles: its option is on, or a pad toggled it down.
+    fn needs_toggle(&self, option: bool) -> bool {
+        option || self.pad_toggled
+    }
     /// `setDown`; `needs_toggle` is the mapping's option value.
     pub fn set_down(&mut self, down: bool, needs_toggle: bool) {
-        if self.toggle.is_some() && needs_toggle {
+        if self.toggle.is_some() && self.needs_toggle(needs_toggle) {
             if down {
                 self.is_down = !self.is_down;
+                // Toggled back up: the pad's toggle is over.
+                self.pad_toggled &= self.is_down;
             }
         } else {
             self.is_down = down;
         }
+    }
+    /// A controller's toggle button: flips the mapping like `setDown(true)`
+    /// with its option on, whatever the option says.
+    pub fn pad_toggle(&mut self) {
+        self.is_down = !self.is_down;
+        self.pad_toggled = self.is_down;
     }
     /// `shouldSetOnIngameFocus` for a keyboard-bound, bound key.
     pub fn should_set_on_ingame_focus(&self, needs_toggle: bool) -> bool {
@@ -61,7 +78,8 @@ impl KeyState {
     pub fn release(&mut self, needs_toggle: bool) {
         if self.toggle.is_some() {
             // ToggleKeyMapping.release does not clear pending clicks.
-            if needs_toggle && self.is_down || self.released_by_screen_when_down {
+            if self.needs_toggle(needs_toggle) && self.is_down || self.released_by_screen_when_down
+            {
                 self.released_by_screen_when_down = true;
             }
             self.reset();
@@ -70,7 +88,8 @@ impl KeyState {
             self.set_down(false, needs_toggle);
         }
     }
-    /// `ToggleKeyMapping.reset`.
+    /// `ToggleKeyMapping.reset`. A pad toggle stays on record, so the screen
+    /// that released it restores it.
     pub fn reset(&mut self) {
         self.is_down = false;
     }
@@ -83,7 +102,10 @@ impl KeyState {
         let Some(restore) = self.toggle else {
             return false;
         };
-        let result = restore && needs_toggle && self.keyboard && self.released_by_screen_when_down;
+        let result = restore
+            && self.needs_toggle(needs_toggle)
+            && self.keyboard
+            && self.released_by_screen_when_down;
         self.released_by_screen_when_down = false;
         result
     }
@@ -138,6 +160,15 @@ impl ToggleKeys {
             _ => {}
         }
     }
+    /// A controller's toggle button bound to `slot` (the pad's toggle-sneak):
+    /// a press with no screen open flips the mapping and clicks it, as a
+    /// key press does with the mapping's toggle option on.
+    pub fn pad_toggle(&mut self, slot: usize, screen_open: bool) {
+        if !screen_open {
+            self.0[slot].pad_toggle();
+            self.0[slot].click();
+        }
+    }
     /// `MouseHandler.onButton` for a button bound to `slot`: only without a
     /// screen or overlay.
     pub fn button(&mut self, slot: usize, pressed: bool, screen_open: bool, needs_toggle: bool) {
@@ -167,6 +198,9 @@ impl ToggleKeys {
     pub fn respawn(&mut self) {
         for key in &mut self.0 {
             key.reset();
+            // As with the vanilla option, the death screen closing after
+            // this still restores a toggle it released.
+            key.pad_toggled &= key.released_by_screen_when_down;
         }
     }
 }
@@ -196,6 +230,57 @@ mod tests {
         keys.key(SPRINT, KeyAction::Press, false, true);
         keys.respawn();
         assert!(!keys.is_down(SPRINT));
+    }
+    /// #3061: the pad's toggle-sneak (vanilla's toggle crouch off) comes
+    /// back after a screen, as the vanilla option's toggle does; a
+    /// keyboard shift-click in the inventory does not drop it.
+    #[test]
+    fn pad_toggle_is_restored_after_a_screen() {
+        let off = [false; 4];
+        let mut keys = ToggleKeys::default();
+        keys.pad_toggle(SNEAK, false);
+        assert!(keys.is_down(SNEAK));
+        keys.screen_opened(off);
+        assert!(!keys.is_down(SNEAK));
+        keys.key(SNEAK, KeyAction::Press, true, false);
+        keys.key(SNEAK, KeyAction::Release, true, false);
+        keys.screen_closed(off);
+        assert!(keys.is_down(SNEAK), "the pad's toggle is restored");
+        // Toggled back up, it stays up through the next screen.
+        keys.pad_toggle(SNEAK, false);
+        assert!(!keys.is_down(SNEAK));
+        keys.screen_opened(off);
+        keys.screen_closed(off);
+        assert!(!keys.is_down(SNEAK));
+        // A held key is not restored, as before.
+        keys.key(SNEAK, KeyAction::Press, false, false);
+        keys.screen_opened(off);
+        keys.key(SNEAK, KeyAction::Release, true, false);
+        keys.screen_closed(off);
+        assert!(!keys.is_down(SNEAK));
+    }
+    /// After the pad's toggle is over (toggled up, or reset by a respawn
+    /// with no screen to restore it), the shift key holds again.
+    #[test]
+    fn pad_toggle_ends_with_its_release() {
+        let off = [false; 4];
+        let mut keys = ToggleKeys::default();
+        keys.pad_toggle(SNEAK, false);
+        keys.respawn();
+        assert!(!keys.is_down(SNEAK));
+        keys.key(SNEAK, KeyAction::Press, false, false);
+        keys.key(SNEAK, KeyAction::Release, false, false);
+        assert!(!keys.is_down(SNEAK), "held, not toggled");
+        // The death screen releases it and closes after the respawn: the
+        // toggle comes back, as with the vanilla option.
+        keys.pad_toggle(SNEAK, false);
+        keys.screen_opened(off);
+        keys.respawn();
+        keys.screen_closed(off);
+        assert!(keys.is_down(SNEAK));
+        // A press with a screen open does nothing.
+        keys.pad_toggle(SNEAK, true);
+        assert!(keys.is_down(SNEAK));
     }
     #[test]
     fn screen_release_restores_toggled_state() {

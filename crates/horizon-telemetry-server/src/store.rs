@@ -10,6 +10,8 @@
 //!   that `/v1/aggregate` reads. Rebuilt from `perf` when a day changes (new sessions, a
 //!   deletion), and kept after the raw rows expire.
 //!
+//! - `live_minute`, `live_hour`, `live_day`: the live count over time (`history`).
+//!
 //! Dates are the day the server received an item (days since 1970, UTC). The sender's IP
 //! address is never stored.
 use std::collections::{HashMap, HashSet};
@@ -132,6 +134,7 @@ impl Store {
         db.execute_batch(SCHEMA)?;
         db.execute_batch(crate::hub::SCHEMA)?;
         db.execute_batch(crate::intake::SCHEMA)?;
+        db.execute_batch(crate::history::SCHEMA)?;
         migrate(&mut db)?;
         Ok(Self { db })
     }

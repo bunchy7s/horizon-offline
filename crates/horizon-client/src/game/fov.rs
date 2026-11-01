@@ -79,6 +79,14 @@ impl Game<'_> {
             .fov_player()
             .map_or(1.0, |p| field_of_view_modifier(&p, first_person, effect));
         let target = self.zoomed_fov_target(target);
+        // A server's spectator camera on a mob: its eye height. Its modifier
+        // stays 1 (another player's own modifier is not modelled here); the
+        // zoom extra still narrows it.
+        if let Some(m) = self.camera_mob() {
+            let eye = m.eye_height() as f32;
+            self.view.tick(Some(eye), self.zoomed_fov_target(1.0));
+            return;
+        }
         let eye = self.player.as_ref().map(|p| {
             if self.sleeping.is_some() {
                 0.2
@@ -148,6 +156,7 @@ impl Game<'_> {
         };
         let tilt = self.settings.file.double("damageTiltStrength");
         glam::Mat4::from_cols_array(&bob_matrix(&state, tilt, self.settings.view_bobbing).m)
+            * self.native_shake_matrix(partial)
     }
     /// `AbstractClientPlayer.tick` and `aiStep` (`ClientAvatarState.tick`,
     /// `updateBob`), `rideTick`'s `resetBob` and `LocalPlayer.move`'s walked
@@ -175,8 +184,7 @@ impl Game<'_> {
     }
     /// `SpyglassItem.use`: start scoping.
     pub(super) fn use_spyglass(&mut self) {
-        if self.using.is_none() {
-            self.using = Some((self.held_slot(), 0));
+        if self.start_using_item() {
             let at = self.eye_position();
             self.audio.play("minecraft:item.spyglass.use", at, 1.0, 1.0);
         }

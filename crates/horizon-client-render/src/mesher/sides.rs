@@ -13,9 +13,10 @@
 //!
 //! The buckets lie one after another in the mesh, in an order chosen so that
 //! the buckets an eye can see are usually one or two runs of quads: one draw
-//! each. Inside a bucket quads keep their model order, so coplanar quads
-//! facing one way (an overlay on its base) still draw in that order.
-use super::TerrainVertex;
+//! each. Coplanar quads facing one way keep their model order, so an overlay
+//! on its base still draws in that order. Solid cutout quads are otherwise
+//! ordered from the outside toward the section interior to reduce overdraw.
+use super::{OPAQUE_LAYER, TerrainVertex};
 
 /// The buckets in mesh order: +X, +Z, other, +Y, -Z, -X, -Y. Seen from
 /// above (+Y, the commonest case), each pair of horizontal sides with a
@@ -74,7 +75,13 @@ impl Sides {
     /// Calls `draw(first, count)` for each run of quads an eye at `eye`
     /// (relative to the mesh's origin) can see the front of, nearest the
     /// start first. Empty buckets do not break a run.
-    pub fn visible(&self, eye: [f32; 3], mut draw: impl FnMut(u32, u32)) {
+    pub fn visible(&self, eye: [f32; 3], draw: impl FnMut(u32, u32)) {
+        self.visible_from(eye, eye[1], draw);
+    }
+
+    /// `visible` for every eye from `eye` straight down to the height `low`: the camera and
+    /// its water mirror's eye below the plane, which differ only in y.
+    pub fn visible_from(&self, eye: [f32; 3], low: f32, mut draw: impl FnMut(u32, u32)) {
         let mut start = 0;
         let mut run: Option<u32> = None;
         for (i, bucket) in BUCKETS.iter().enumerate() {
@@ -84,6 +91,7 @@ impl Sides {
             }
             let seen = match *bucket {
                 Bucket::Side(axis, true) => eye[axis] > self.planes[i] - MARGIN,
+                Bucket::Side(1, false) => low < self.planes[i] + MARGIN,
                 Bucket::Side(axis, false) => eye[axis] < self.planes[i] + MARGIN,
                 Bucket::Other => true,
             };
@@ -131,11 +139,14 @@ fn bucket(quad: &[TerrainVertex; 4]) -> usize {
     OTHER
 }
 
-/// Reorders `solid`'s quads by bucket, keeping their order inside each.
+/// Reorders `solid`'s quads by bucket. Solid cutout quads are also ordered
+/// front to back within each axis-facing bucket; stable sorting preserves the
+/// mesher's order for coplanar overlays.
 pub fn sort(solid: &mut Vec<TerrainVertex>) -> Sides {
     let (quads, rest) = solid.as_chunks::<4>();
     debug_assert!(rest.is_empty(), "solid vertices come in quads");
     let buckets: Vec<u8> = quads.iter().map(|q| bucket(q) as u8).collect();
+    let has_cutout = quads.iter().any(|q| q[0].layer & OPAQUE_LAYER == 0);
     let mut counts = [0u32; 7];
     let mut planes = [0f32; 7];
     for (quad, &b) in quads.iter().zip(&buckets) {
@@ -156,13 +167,32 @@ pub fn sort(solid: &mut Vec<TerrainVertex>) -> Sides {
         total += count;
         *end = total;
     }
-    if counts.iter().filter(|&&c| c > 0).count() > 1 {
+    if has_cutout || counts.iter().filter(|&&c| c > 0).count() > 1 {
         let mut next: [u32; 7] = std::array::from_fn(|b| ends[b] - counts[b]);
         let mut sorted = vec![quads[0]; quads.len()];
         for (quad, &b) in quads.iter().zip(&buckets) {
             let slot = &mut next[usize::from(b)];
             sorted[*slot as usize] = *quad;
             *slot += 1;
+        }
+        if has_cutout {
+            let mut start = 0;
+            for (i, bucket) in BUCKETS.iter().enumerate() {
+                let end = ends[i] as usize;
+                let slice = &mut sorted[start..end];
+                if let Bucket::Side(axis, positive) = *bucket {
+                    slice.sort_by(|a, b| {
+                        let a = a[0].pos[axis];
+                        let b = b[0].pos[axis];
+                        if positive {
+                            b.total_cmp(&a)
+                        } else {
+                            a.total_cmp(&b)
+                        }
+                    });
+                }
+                start = end;
+            }
         }
         *solid = sorted.into_flattened();
     }
@@ -313,6 +343,24 @@ mod tests {
     }
 
     #[test]
+    fn an_eye_and_its_mirror_below_see_the_faces_of_both() {
+        let mut solid = cube([0.0; 3], 0);
+        let sides = sort(&mut solid);
+        let both = |eye: [f32; 3], low: f32| {
+            let mut out = Vec::new();
+            sides.visible_from(eye, low, |first, count| out.push((first, count)));
+            out
+        };
+        // Above the block: +X, +Z and +Y; with the mirror's eye below it, -Y too.
+        assert_eq!(runs(&sides, [8.0, 8.0, 8.0]), [(0, 3)]);
+        assert_eq!(both([8.0, 8.0, 8.0], -8.0), [(0, 3), (5, 1)]);
+        // A mirror above the block's bottom adds nothing.
+        assert_eq!(both([8.0, 8.0, 8.0], 0.5), [(0, 3)]);
+        // The sides depend on x and z alone.
+        assert_eq!(both([-8.0, 8.0, -8.0], -8.0), [(2, 4)]);
+    }
+
+    #[test]
     fn unsorted_meshes_draw_everything() {
         let sides = Sides::unsorted(9);
         assert_eq!(sides.quads(), 9);
@@ -342,5 +390,47 @@ mod tests {
             solid.iter().map(|v| v.layer).collect::<Vec<_>>(),
             before.iter().map(|v| v.layer).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn front_to_back_sort_orders_positive_faces_and_keeps_ties_stable() {
+        let mut solid: Vec<_> = [(1.0, 10), (3.0, 30), (3.0, 31)]
+            .into_iter()
+            .flat_map(|(x, layer)| {
+                quad(
+                    [[x, 0.0, 0.0], [x, 1.0, 0.0], [x, 1.0, 1.0], [x, 0.0, 1.0]],
+                    layer,
+                )
+            })
+            .collect();
+        sort(&mut solid);
+        let layers: Vec<u16> = solid
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|q| q[0].layer)
+            .collect();
+        assert_eq!(layers, [30, 31, 10]);
+    }
+
+    #[test]
+    fn front_to_back_sort_orders_negative_faces_toward_the_eye() {
+        let mut solid: Vec<_> = [(3.0, 30), (1.0, 10), (2.0, 20)]
+            .into_iter()
+            .flat_map(|(x, layer)| {
+                quad(
+                    [[x, 0.0, 0.0], [x, 0.0, 1.0], [x, 1.0, 1.0], [x, 1.0, 0.0]],
+                    layer,
+                )
+            })
+            .collect();
+        sort(&mut solid);
+        let layers: Vec<u16> = solid
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|q| q[0].layer)
+            .collect();
+        assert_eq!(layers, [10, 20, 30]);
     }
 }

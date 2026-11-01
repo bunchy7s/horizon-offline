@@ -80,6 +80,7 @@ impl Game<'_> {
         let Some(win) = self.win.as_mut() else {
             return;
         };
+        horizon_client::widgets::begin_screen(|| win.screen.screen_info());
         let now = Instant::now();
         // DeltaTracker.getGameTimeDeltaTicks: the frame's length in ticks.
         let delta_ticks =

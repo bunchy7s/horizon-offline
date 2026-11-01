@@ -128,7 +128,7 @@ impl Modpack {
         let (mut overrides, mut total) = (Vec::new(), 0u64);
         for i in 0..zip.len() {
             let entry = zip.by_index_raw(i).map_err(|e| e.to_string())?;
-            let name = entry.name();
+            let name = entry.name().map_err(|e| e.to_string())?.into_owned();
             if name == MANIFEST || entry.is_dir() {
                 continue;
             }

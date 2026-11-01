@@ -25,8 +25,10 @@ mod fixes_old;
 mod flat_tables;
 mod items;
 pub mod json;
+pub mod progress;
 pub mod schema;
 mod text;
+pub mod world_upgrader;
 
 use crate::nbt::Tag;
 use dynamic::{as_str, string};

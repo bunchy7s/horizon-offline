@@ -95,7 +95,9 @@ pub(super) fn acts_on_player(e: &MobEvent) -> bool {
     matches!(
         e,
         MobEvent::AttackPlayer(..)
+            | MobEvent::CubeHurtPlayer { .. }
             | MobEvent::AttackPlayerWithEffect { .. }
+            | MobEvent::StingPlayer { .. }
             | MobEvent::DamagePlayer { .. }
             | MobEvent::SonicBoom {
                 target: Who::Player,
@@ -108,6 +110,9 @@ pub(super) fn acts_on_player(e: &MobEvent) -> bool {
             | MobEvent::Knockback {
                 target: Who::Player,
                 ..
+            }
+            | MobEvent::StabDismount {
+                target: Who::Player,
             }
             | MobEvent::Ignite {
                 target: Who::Player,
@@ -437,6 +442,7 @@ mod tests {
             sleeping: false,
             sleep_timer: 0,
             passenger: false,
+            vehicle: None,
         }
     }
 

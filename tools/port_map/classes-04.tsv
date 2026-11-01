@@ -71,7 +71,7 @@ StonecutterBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs:
 SugarCaneBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	growth arm of the random tick
 SugarCaneBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	
 SugarCaneBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
-SuspiciousEffectHolder.tryGet	skip:data		the effect comes from the item's stew effects data (item_data.rs)
+SuspiciousEffectHolder.tryGet	port	crates/horizon-items/src/flowers.rs::stew_effect	the item's block is looked up in the flower table
 TallSeagrassBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
 TallSeagrassBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
 TallSeagrassBlock.mayPlaceOn	port	crates/horizon-world/src/level/survive.rs::Sim::may_place_on	
@@ -86,7 +86,7 @@ TrapDoorBlock.getShape	port	crates/horizon-world/src/interaction_shapes.rs::Inte
 TrapDoorBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
 TrapDoorBlock.isPathfindable	skip:data		per-state path type is exported state data (StateData.path)
 TrapDoorBlock.neighborChanged	port	crates/horizon-world/src/level/hooks.rs::Sim::neighbor_changed	redstone update arm for trapdoors
-TrapDoorBlock.onExplosionHit	missing		player: a wind burst or explosion that could open a trapdoor leaves it shut; the explosion code has no trapdoor case
+TrapDoorBlock.onExplosionHit	port	crates/horizon-client/src/game/wind.rs::Game::wind_trigger_block	the same path toggles a non-iron trapdoor
 TrapDoorBlock.playSound	port	crates/horizon-world/src/level/redstone.rs::Sim::trapdoor_sound	
 TrapDoorBlock.toggle	inline	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	the trapdoor arm cycles the open state
 TrapDoorBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
@@ -149,18 +149,18 @@ EnchantingTableBlockEntity.bookAnimationTick	port	crates/horizon-client-render/s
 ListBackedContainer	skip:java		slot helpers over a plain list
 PotDecorations.addSideDetailsToTooltip	port	crates/horizon-client/src/item_tooltip.rs::TooltipDisplay::detail_lines	sherd lines of the decorated pot tooltip
 PotDecorations.allBrick	skip:data		constant brick decoration set
-PotentSulfurBlockEntity.applyNauseaEffect	missing		player: standing in potent sulfur gas gives no nausea, since the geyser never erupts
-PotentSulfurBlockEntity.canBeReachedByNoxiousGas	missing		player: gas from a potent sulfur geyser never reaches players
+PotentSulfurBlockEntity.applyNauseaEffect	port	crates/horizon-client/src/game/potent_sulfur.rs::apply_nausea_effect_to_mob	ticked in #3516; `PotentSulfurBlockEntity.applyNauseaEffect` is cited at crates/horizon-client/src/game/potent_sulfur.rs:86
+PotentSulfurBlockEntity.canBeReachedByNoxiousGas	port	crates/horizon-client-render/src/potent_sulfur.rs::can_be_reached_by_noxious_gas	ticked in #3516; `PotentSulfurBlockEntity.canBeReachedByNoxiousGas` is cited at crates/horizon-client-render/src/potent_sulfur.rs:73
 PotentSulfurBlockEntity.findNoxiousGasSourceBlock	missing		minor: helper of the geyser gas, not ported
 PotentSulfurBlockEntity.getNearbyLivingEntities	missing		minor: helper of the geyser gas, not ported
 PotentSulfurBlockEntity.getUnobstructedBlockCount	missing		minor: helper of the geyser gas, not ported
-PotentSulfurBlockEntity.geyserPositional	missing		player: no potent sulfur geyser eruption, so no geyser plume or sound
+PotentSulfurBlockEntity.geyserPositional	port	crates/horizon-client/src/game/potent_sulfur.rs::geyser_positional	ticked in #3516; `PotentSulfurBlockEntity.geyserPositional` is cited at crates/horizon-client/src/game/potent_sulfur.rs:55
 PotentSulfurBlockEntity.haveLineOfSight	missing		minor: helper of the geyser gas, not ported
 PotentSulfurBlockEntity.isGeyserPassableBlock	missing		minor: helper of the geyser, not ported
 PotentSulfurBlockEntity.loadAdditional	missing		minor: the eruption timer is not loaded; Horizon keeps only the countdown in NBT
 PotentSulfurBlockEntity.setLevel	missing		minor: the eruption timer is not started on load
-PotentSulfurBlockEntity.spawnGeyserParticle	missing		player: no geyser particles over a potent sulfur block
-PotentSulfurBlockEntity.spawnNoxiousGasCloudParticle	missing		player: no noxious gas cloud particles over a potent sulfur block
+PotentSulfurBlockEntity.spawnGeyserParticle	port	crates/horizon-client/src/game/potent_sulfur.rs::Game::spawn_geyser_particle	ticked in #3516; `PotentSulfurBlockEntity.spawnGeyserParticle` is cited at crates/horizon-client/src/game/potent_sulfur.rs:380
+PotentSulfurBlockEntity.spawnNoxiousGasCloudParticle	port	crates/horizon-client/src/game/potent_sulfur.rs::Game::spawn_noxious_gas_cloud_particle	ticked in #3516; `PotentSulfurBlockEntity.spawnNoxiousGasCloudParticle` is cited at crates/horizon-client/src/game/potent_sulfur.rs:395
 RandomizableContainerBlockEntity.applyImplicitComponents	missing		minor: a chest item does not hand its loot table back to the block
 RandomizableContainerBlockEntity.canOpen	missing		unsure: minor: the spectator and loot-table open checks were not found
 RandomizableContainerBlockEntity.collectImplicitComponents	missing		minor: a container does not save its loot table onto the item it drops
@@ -181,8 +181,9 @@ StateDefinition	skip:java		codecs and state builders; states come from the gener
 StateDefinition.Builder	skip:java		state builder
 StateDefinition.StateCollection	skip:data		neighbour tables of the state graph are generated data
 BlockInWorld	skip:java		accessor over the level's state and block entity
-BlockPattern.matches	port	crates/horizon-client/src/game/golems.rs::Game::find_golem	golem head and body patterns only, not a generic pattern matcher
-BlockPattern.translateAndRotate	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	pattern placement folded into golem search
+BlockPattern.matches	port	crates/horizon-client/src/block_pattern.rs::BlockPattern::matches	the wither's, the golems' and the dispenser's patterns all go through it
+BlockPattern.find	port	crates/horizon-client/src/block_pattern.rs::BlockPattern::find	every corner of the search cube (x fastest, then y, then z), then every forwards/up pair in Direction order
+BlockPattern.translateAndRotate	port	crates/horizon-client/src/block_pattern.rs::translate_and_rotate	x along forwards x up, y against up, z along forwards
 BlockPattern.BlockPatternMatch	skip:java		match result accessor
 BlockPatternBuilder	skip:java		builder for block patterns
 BlockStatePredicate	skip:java		predicate builder

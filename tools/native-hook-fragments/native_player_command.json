@@ -1,0 +1,13 @@
+{
+  "hooks": [
+    {
+      "name": "player_command",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_command",
+      "neoforge": "CommandEvent",
+      "side": "server",
+      "cancellable": true
+    }
+  ],
+  "rust_summary": "any command a player types, cancellable (`native_player_command`).",
+  "doc_summary": "any command a player types: `native_player_command(player, name, command, cancel, replies)` is heard before the command is looked at (NeoForge's `CommandEvent`), without its slash, for vanilla's commands, the mods' own and commands the player may not run, once for each command a player sends, on a server. Also each line of a quiet command batch. A mod sets `canceled` to stop it: nothing runs and nothing is answered but the lines it pushes to `replies`, which reach the player as system chat. Bundles that use it need `\"hooks\": @API:native_player_command@`."
+}

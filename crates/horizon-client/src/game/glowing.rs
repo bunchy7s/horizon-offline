@@ -33,7 +33,7 @@ impl Game<'_> {
             let name = names.into_iter().find(|(id, _)| *id == m.id);
             name.and_then(|(_, name)| self.score.board.players_team(&name))
         } else {
-            self.mob_team(m.id)
+            self.mob_team_of(m)
         };
         Some(team_color(team))
     }

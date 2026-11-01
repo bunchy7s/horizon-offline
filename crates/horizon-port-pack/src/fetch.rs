@@ -17,7 +17,7 @@ use serde_json::Value;
 use std::{
     collections::HashMap,
     fs,
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -134,7 +134,7 @@ pub fn fetch(
             }
         } else if let Some(url) = url_of(file, &cache) {
             log(format!("{}/{} {name}", i + 1, wanted.len()));
-            match download(&url, sha1, &dest) {
+            match download(&url, sha1, &dest, true) {
                 Ok(()) => outcome(How::Downloaded, url),
                 Err(e) => outcome(How::Failed, e),
             }
@@ -168,7 +168,7 @@ pub fn fetch(
         match made
             .unwrap_or(Ok(()))
             .map_err(|e| e.to_string())
-            .and_then(|()| download(&url, sha1.as_deref(), &dest))
+            .and_then(|()| download(&url, sha1.as_deref(), &dest, true))
         {
             Ok(()) => log(format!("loader: {}", dest.display())),
             Err(e) => log(format!(
@@ -215,25 +215,84 @@ pub fn url_of(file: &PackFile, cache: &Cache) -> Option<String> {
 }
 
 /// Downloads `url` to `dest`, kept only if its SHA-1 is `sha1`.
-fn download(url: &str, sha1: Option<&str>, dest: &Path) -> Result<(), String> {
+pub(crate) fn download(
+    url: &str,
+    sha1: Option<&str>,
+    dest: &Path,
+    overwrite: bool,
+) -> Result<(), String> {
     let response = crate::net::agent(url)
         .get(url)
         .set("User-Agent", modrinth::AGENT)
         .call()
         .map_err(|e| format!("{url}: {e}"))?;
+    store_download(response.into_reader(), sha1, dest, overwrite).map_err(|e| format!("{url}: {e}"))
+}
+
+/// Read and verify the whole bounded response before publishing it; a failed read leaves no file.
+pub(crate) fn store_download(
+    reader: impl Read,
+    sha1: Option<&str>,
+    dest: &Path,
+    overwrite: bool,
+) -> Result<(), String> {
     let mut bytes = Vec::new();
-    response
-        .into_reader()
-        .take(MAX_JAR)
+    reader
+        .take(MAX_JAR + 1)
         .read_to_end(&mut bytes)
-        .map_err(|e| format!("{url}: {e}"))?;
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_JAR {
+        return Err("download exceeds 512 MiB".into());
+    }
     let got = sha1_hex(&bytes);
     if let Some(want) = sha1.filter(|w| !w.eq_ignore_ascii_case(&got)) {
-        return Err(format!("{url}: SHA-1 {got}, the pack says {want}"));
+        return Err(format!("SHA-1 {got}, the pack says {want}"));
     }
-    let part = dest.with_extension("part");
-    fs::write(&part, &bytes).map_err(|e| format!("{}: {e}", part.display()))?;
-    fs::rename(&part, dest).map_err(|e| format!("{}: {e}", dest.display()))
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let suffix = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let part = dest.with_file_name(format!(
+        ".horizon-download-{}-{suffix}.part",
+        std::process::id()
+    ));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&part)
+        .map_err(|e| e.to_string())?;
+    let result = file
+        .write_all(&bytes)
+        .map_err(|e| e.to_string())
+        .and_then(|()| {
+            drop(file);
+            if overwrite {
+                fs::rename(&part, dest).map_err(|e| e.to_string())
+            } else {
+                // Publish without replacing a file that appeared while the request was in flight.
+                match fs::hard_link(&part, dest) {
+                    Ok(()) => fs::remove_file(&part).map_err(|e| e.to_string()),
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(e.to_string()),
+                    Err(_) => {
+                        // No hard links here (FAT, some network mounts): copy into a new file.
+                        let mut out = fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(dest)
+                            .map_err(|e| e.to_string())?;
+                        let written = out.write_all(&bytes).map_err(|e| e.to_string());
+                        drop(out);
+                        if written.is_err() {
+                            let _ = fs::remove_file(dest);
+                        }
+                        let _ = fs::remove_file(&part);
+                        written
+                    }
+                }
+            }
+        });
+    if result.is_err() {
+        let _ = fs::remove_file(&part);
+    }
+    result
 }
 
 /// The jars in a folder of the player's, by SHA-1 and by name, and what a

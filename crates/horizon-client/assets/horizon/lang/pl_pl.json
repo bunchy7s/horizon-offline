@@ -11,5 +11,12 @@
   "horizon.options.look_deadzone": "Martwa strefa rozglądania",
   "horizon.options.button_glyphs": "Symbole przycisków",
   "horizon.options.menu_navigation": "Nawigacja po menu",
-  "horizon.options.on_screen_keyboard": "Klawiatura ekranowa"
+  "horizon.options.on_screen_keyboard": "Klawiatura ekranowa",
+  "horizon.multiplayer.finding_friend": "Szukanie świata znajomego…",
+  "horizon.loading.opening_world": "Otwieranie świata",
+  "horizon.loading.cancelling_world": "Anulowanie",
+  "horizon.multiplayer.not_signed_in": "Ten serwer działa w trybie online. Zaloguj się kontem Microsoft w launcherze Horizon, aby dołączyć.",
+  "horizon.multiplayer.invalid_address": "Nieprawidłowy adres serwera: %s",
+  "horizon.multiplayer.connected_friend_direct": "Połączono bezpośrednio ze znajomym…",
+  "horizon.multiplayer.connected_friend_relay": "Połączono ze znajomym przez przekaźnik…"
 }

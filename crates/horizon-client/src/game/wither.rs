@@ -122,20 +122,31 @@ impl Game<'_> {
         self.trigger_summoned(id, 50.0);
         self.update_pattern_blocks(&cells)
     }
-    /// `WitherSkull.onHitEntity` / `onHit`: 8 damage (healing the wither 5
-    /// when it kills), withering on a hit (10 seconds on Normal, 40 on Hard,
-    /// none on Easy), then a power 1 blast.
+    /// `WitherSkull.onHitEntity` / `onHit`: 8 `wither_skull` damage from a
+    /// skull with an owner (healing a wither owner 5 when it kills), else 5
+    /// `magic`, withering on a living target that took it (10 seconds on
+    /// Normal, 40 on Hard, none on Easy), then a power 1 blast.
     pub(super) fn wither_skull_hit(
         &mut self,
         p: &Projectile,
         who: Option<Who>,
         at: [f64; 3],
     ) -> horizon_client::Result<()> {
-        let owner = match p.owner {
+        // Projectile.getOwner: none once the owner is gone.
+        let live_owner = match p.owner {
+            Some(Who::Mob(id)) if self.mobs.iter().any(|m| m.id == id && !m.removed) => {
+                Some(Who::Mob(id))
+            }
+            Some(Who::Mob(_)) => None,
+            other => other,
+        };
+        let owner = match live_owner {
             Some(Who::Mob(id)) => Some(id),
             _ => None,
         };
-        let amount = if owner.is_some() { 8.0 } else { 5.0 };
+        let from = [p.previous.x, p.previous.y, p.previous.z];
+        let skull = skull_source(live_owner, from);
+        let (amount, kind) = (skull.amount, skull.kind);
         let wither_ticks = match self.difficulty_id() {
             2 => 200,
             3 => 800,
@@ -144,23 +155,47 @@ impl Game<'_> {
         match who {
             Some(Who::Player) => {
                 if !self.creative {
-                    // WitherSkull.onHitEntity's source: the wither launched it.
+                    // WitherSkull.onHitEntity's source: the wither launched
+                    // it, and `magic` names no entity and no position.
                     self.combat.projectile_owner = owner;
-                    let hit = self.mob_hits_player(
+                    // EnchantmentHelper.doPostAttackEffects runs only on a
+                    // target that lived.
+                    self.combat.post_attack_if_alive = true;
+                    if skull.from.is_none() {
+                        self.combat.projectile_direct = None;
+                    }
+                    let hit = self.hurt_player_from(
                         amount,
-                        [p.previous.x, p.previous.y, p.previous.z],
-                        "minecraft:wither_skull",
+                        skull.from,
+                        super::creatures::damage_type(kind, false),
+                        Some(owner),
                     );
                     if hit && wither_ticks > 0 {
                         self.give_player_effect("minecraft:wither", wither_ticks, 1);
                     }
+                    // A totem that fired saves the player inside hurtServer:
+                    // still alive, so no heal.
+                    let killed = self.player.as_ref().is_some_and(|pl| {
+                        killed(hit, pl.health.dead_or_dying(), pl.health.totem_used)
+                    });
+                    if killed {
+                        self.heal_skull_owner(p, live_owner);
+                    }
                 }
+            }
+            // EnderDragonPart.hurtServer: EnderDragon.hurt routes it by the
+            // part, a skull is no arrow a perched dragon shrugs off, and only
+            // a player's skull takes health. A part is no LivingEntity
+            // (no withering) and stays alive (no heal).
+            Some(Who::Mob(id)) if id >= super::dragon::SPECIAL => {
+                let by_player = live_owner == Some(Who::Player);
+                self.hit_special(id, amount, by_player, kind, Some(&p.kind));
             }
             Some(Who::Mob(id)) => {
                 let source = Damage {
-                    kind: DamageKind::Magic,
-                    attacker: p.owner,
-                    from: Some([p.previous.x, p.previous.y, p.previous.z]),
+                    kind,
+                    attacker: live_owner,
+                    from: skull.from,
                 };
                 let owner_species = owner
                     .and_then(|o| self.mobs.iter().find(|m| m.id == o))
@@ -183,22 +218,67 @@ impl Game<'_> {
                     }
                     None => false,
                 };
-                if killed
-                    && let Some(o) = owner
-                    && let Some(w) = self.mobs.iter_mut().find(|m| m.id == o)
-                {
-                    w.health = (w.health + 5.0).min(w.attrs.max_health);
+                if killed {
+                    self.heal_skull_owner(p, live_owner);
                 }
             }
             None => {}
         }
-        if let Some(id) = owner {
-            self.note_attacker("minecraft:explosion", id);
-        }
         self.combat.explosion_owner = owner;
+        self.combat.explosion_in_water = p.touching_water;
+        // The blast's source names a player owner, for the dragon's kill credit.
+        self.set_blast_by_player(live_owner == Some(Who::Player));
         let result = self.with_hive_emptying_blast(|g| g.explode(at, 1.0));
+        self.set_blast_by_player(false);
         self.combat.explosion_owner = None;
+        self.combat.explosion_in_water = false;
         result
+    }
+    /// `livingOwner.heal(5.0F)` after the skull killed: `LivingEntity.heal`
+    /// does nothing to an owner at no health.
+    fn heal_skull_owner(&mut self, p: &Projectile, owner: Option<Who>) {
+        match owner {
+            Some(Who::Mob(id)) => {
+                if let Some(w) = self.mobs.iter_mut().find(|m| m.id == id && m.alive()) {
+                    w.health = (w.health + 5.0).min(w.attrs.max_health);
+                }
+            }
+            // The player (or the guest acting now) who owns the skull.
+            Some(Who::Player) if p.guest.is_none() || p.guest == self.lan_acting => {
+                self.apply_effect_action(horizon_client::effects::EffectAction::Heal(5.0));
+            }
+            _ => {}
+        }
+    }
+}
+/// `!target.isAlive()` after a hit that landed: a totem that fired keeps the
+/// player alive.
+pub(super) fn killed(hurt: bool, dead_or_dying: bool, totem_used: bool) -> bool {
+    hurt && dead_or_dying && !totem_used
+}
+/// `WitherSkull.onHitEntity`'s damage source.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct SkullSource {
+    pub(super) amount: f32,
+    pub(super) kind: DamageKind,
+    /// The source's position: the skull's for `witherSkull(skull, owner)`,
+    /// none for `magic()`, which has no entity.
+    pub(super) from: Option<[f64; 3]>,
+}
+/// 8 `wither_skull` from a skull with a living owner, else 5 `magic`.
+/// `skull` is where the skull is.
+pub(super) fn skull_source(owner: Option<Who>, skull: [f64; 3]) -> SkullSource {
+    match owner {
+        Some(_) => SkullSource {
+            amount: 8.0,
+            kind: DamageKind::WitherSkull,
+            from: Some(skull),
+        },
+        None => SkullSource {
+            amount: 5.0,
+            kind: DamageKind::Magic,
+            from: None,
+        },
     }
 }
 /// Wither skulls drawn as the skull model, blue when dangerous.
@@ -206,5 +286,33 @@ pub(super) fn skull_kind(p: &Projectile) -> Option<bool> {
     match p.kind {
         ProjectileKind::WitherSkull { dangerous } => Some(dangerous),
         _ => None,
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unowned_skull_hurts_as_magic_from_nowhere() {
+        // DamageSources.magic(): no entity and no position, so nothing to
+        // blame or push away from.
+        let at = [1.0, 64.0, 2.0];
+        let unowned = skull_source(None, at);
+        assert_eq!((unowned.amount, unowned.kind), (5.0, DamageKind::Magic));
+        assert_eq!(unowned.from, None);
+        // witherSkull(skull, owner): from where the skull is.
+        let owned = skull_source(Some(Who::Mob(3)), at);
+        assert_eq!((owned.amount, owned.kind), (8.0, DamageKind::WitherSkull));
+        assert_eq!(owned.from, Some(at));
+        assert_eq!(skull_source(Some(Who::Player), at), owned);
+    }
+
+    #[test]
+    fn a_totem_that_fires_is_no_kill() {
+        assert!(killed(true, true, false));
+        // The totem restores health next tick: alive inside hurtServer.
+        assert!(!killed(true, true, true));
+        assert!(!killed(true, false, false));
+        assert!(!killed(false, true, false));
     }
 }

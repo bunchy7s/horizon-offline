@@ -204,6 +204,9 @@ pub fn launch(socket: &Path, args: &[String]) -> Result<Value, Value> {
     let stderr = file
         .try_clone()
         .map_err(|e| json!({ "error": e.to_string(), "kind": "launch" }))?;
+    // Windows: the game would otherwise hold our caller's pipes open (horizon-threads).
+    #[cfg(windows)]
+    horizon_threads::keep_stdio_from_children();
     let mut child = cmd
         .args(&o.game_args)
         .arg("--control-socket")

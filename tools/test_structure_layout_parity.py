@@ -21,7 +21,14 @@ Mod profiles compare the mod world's `pieces` instead, through the path players'
 (`.local/structure-oracle/jars/`, or HORIZON_STRUCTURE_JARS) are carried by `horizon-port-pack carry` into
 a fresh work folder, and an overlay of the 26.3 resources adds the carried structures, sets, pools,
 processor lists, biome tags and templates. The jars are the player's; nothing of them enters the
-repository.
+repository. A profile whose oracle run added a data pack of the spec team's own (`lithostitched-probe`)
+carries that pack as one more mod, built at run time from the oracle's profile file
+(`.local/structure-oracle/profiles/<profile>.json`).
+
+Lithostitched lays jigsaws out its own way (spec-lithostitched OPEN-L5) and Horizon keeps vanilla's
+layouts, so the `lithostitched-probe` profile checks its pool elements' limits instead of the layout: in
+every start Horizon builds, no `limited` or `guaranteed` element's template appears more often than its
+limit, and how many starts hold one is printed beside the oracle's count.
 
 The `yung-probe` profiles check YUNG's API's draws with a data pack of the spec team's own (spec-yungsapi
 §3, probe experiments e1-e9: fallback, max_count, empty elements, min_required_depth, ignore_bounds,
@@ -29,7 +36,7 @@ max_y, is_priority). The pack is carried as one more mod, built at run time from
 (`.local/structure-oracle/profiles/<profile>.json`), and its starts are read from the oracle's census of
 every start (`all_starts`).
 
-usage: test_structure_layout_parity.py [--profile lithostitched|betterdungeons|yung-probe|yung-probe2]
+usage: test_structure_layout_parity.py [--profile lithostitched|betterdungeons|lithostitched-probe|yung-probe|yung-probe2]
                                        [--filter REGEX] [--verbose]
 """
 import base64
@@ -64,6 +71,12 @@ PROFILES = {
     'betterdungeons': {'side': 'pieces', 'mods': {'yungsapi': 'YungsApi-1.21.1-NeoForge-5.1.9.jar',
                                                   'betterdungeons': 'YungsBetterDungeons-1.21.1-NeoForge-5.1.4.jar'},
                        'carry': ['betterdungeons'], 'structures': r'^betterdungeons:(small|skeleton|zombie)_dungeon$'},
+    # The probe pack's limited (limit 1) and guaranteed (count 1) elements on vanilla's plains houses.
+    'lithostitched-probe': {'side': 'pieces', 'mods': {'lithostitched': 'lithostitched-1.8.1-neoforge-21.1.jar'},
+                            'packs': {'probe': 'lithostitched-probe'}, 'carry': ['lithostitched', 'probe'],
+                            'structures': r'^minecraft:village_plains$',
+                            'limits': {'minecraft:village/taiga/houses/taiga_small_house_1': 1,
+                                       'minecraft:village/snowy/houses/snowy_library_1': 1}},
     **{name: {'side': 'all_starts', 'mods': {'yungsapi': 'YungsApi-1.21.1-NeoForge-5.1.9.jar'},
               'packs': {'probe': name}, 'carry': ['probe'], 'structures': r'^probe:'}
        for name in ['yung-probe', 'yung-probe2']},
@@ -176,7 +189,8 @@ def overlay(profile, data_dirs):
             elif path.suffix == '.json' and kind == 'worldgen' and parts[2] in BUNDLES:
                 text = path.read_text()
                 if 'horizon:add_to' in text:
-                    additions.append((BUNDLES[parts[2]], json.loads(text)))
+                    value = json.loads(text)
+                    additions.append((value.get('horizon:priority', 1000), BUNDLES[parts[2]], value))
                 else:
                     merged[BUNDLES[parts[2]]][f'{namespace}:' + '/'.join(parts[3:])[:-5]] = text
             elif path.suffix == '.json' and parts[1:4] == ('tags', 'worldgen', 'biome'):
@@ -185,11 +199,12 @@ def overlay(profile, data_dirs):
                 if tag in merged['biome_tags'] and not value.get('replace'):
                     value['values'] = json.loads(merged['biome_tags'][tag])['values'] + value['values']
                 merged['biome_tags'][tag] = json.dumps(value)
-    # A carried file with `horizon:add_to` adds its entries to other sets or pools, as the game's
-    # mod_content.rs merges them.
-    for bundle, addition in additions:
+    # A carried file with `horizon:add_to` adds its entries to other sets, pools or processor lists, by
+    # priority, as the game's mod_content.rs merges them.
+    lists = {'structure_sets': 'structures', 'template_pools': 'elements', 'processor_lists': 'processors'}
+    for _, bundle, addition in sorted(additions, key=lambda a: a[0]):
         targets = addition['horizon:add_to']
-        key = 'structures' if bundle == 'structure_sets' else 'elements'
+        key = lists[bundle]
         for target in [targets] if isinstance(targets, str) else targets:
             if target in merged[bundle]:
                 value = json.loads(merged[bundle][target])
@@ -236,6 +251,40 @@ def compare(expected, actual):
     return None
 
 
+def check_limits(binary, resources, results, profile, pattern):
+    """Each limited template at most its limit in every start Horizon builds; starts holding it, Horizon
+    beside the oracle."""
+    limits, failed = profile['limits'], []
+    holding = {template: [0, 0] for template in limits}
+    starts = 0
+    for path in results:
+        oracle = json.load(gzip.open(path))
+        seed = oracle['seed']
+        wanted = [s for s in oracle['structures'] if s.get('pieces') and re.search(pattern, s['id'])
+                  and re.search(profile['structures'], s['id'])]
+        chunks = sorted({tuple(s['start_chunk']) for s in wanted})
+        actual = horizon_starts(binary, resources, seed, 'overworld', chunks)
+        for start in wanted:
+            got = actual.get((start['id'], *start['start_chunk']))
+            if got is None:
+                print(f'skip  seed {seed} {start["id"]} chunk {start["start_chunk"]}: no start in Horizon')
+                continue
+            starts += 1
+            for template, limit in limits.items():
+                have = sum(p.get('element') == template for p in got)
+                want = sum(element(p['pool_element'].get('delegate', p['pool_element'])) == template
+                           for p in start['pieces'] if p['id'] == 'minecraft:jigsaw')
+                holding[template][0] += have > 0
+                holding[template][1] += want > 0
+                if have > limit:
+                    failed.append(f'seed {seed} {start["id"]} chunk {start["start_chunk"]}: {have} {template}')
+    for line in failed:
+        print(f'FAIL  {line} (over its limit)')
+    for template, (ours, theirs) in holding.items():
+        print(f'{template} (limit {limits[template]}): in {ours} of {starts} Horizon starts; the oracle: {theirs}')
+    return 1 if failed or not starts else 0
+
+
 def census_starts(oracle):
     """The oracle's census of every start (`all_starts`), as `structures` entries with their `all_starts`."""
     for chunk in oracle['all_starts']:
@@ -267,6 +316,8 @@ def main():
         data = carry(args.profile, profile['mods'], profile['carry'], profile.get('packs'))
         resources = overlay(args.profile, data)
     binary = probe_binary()
+    if 'limits' in profile:
+        return check_limits(binary, resources, results, profile, args.filter)
     matched, known, failed = 0, 0, []
     for path in results:
         oracle = json.load(gzip.open(path))

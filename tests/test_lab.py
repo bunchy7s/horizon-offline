@@ -1,15 +1,18 @@
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
+import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
 import zipfile
 
-from tools import check_public_tree, lab
+from tools import agent_control_e2e, check_public_tree, lab
 
 
 def minimal_class(source="Example.java"):
@@ -199,6 +202,15 @@ class PublicationTests(unittest.TestCase):
                 self.assertIn(".local/artifact.txt", check_public_tree.paths_in_repository())
                 git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "fixture")
                 self.assertIn(".local/artifact.txt", check_public_tree.paths_in_repository(history=True))
+                # A range reads only its own commits: the artifact's commit lies before it.
+                (directory / ".local" / "artifact.txt").unlink()
+                git("rm", "-q", "--cached", ".local/artifact.txt")
+                git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "removal")
+                self.assertIn(".local/artifact.txt", check_public_tree.paths_in_repository(True, ["HEAD~1..HEAD"]))
+                (directory / "README.md").write_text("public\n")
+                git("add", "README.md")
+                git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "public")
+                self.assertEqual(check_public_tree.paths_in_repository(True, ["HEAD~1..HEAD"]), ["README.md", ""])
 
 
 def library(name, os_name=None):
@@ -283,6 +295,55 @@ class PlatformLibraryTests(unittest.TestCase):
             (launcher / "libraries" / required["path"]).unlink()
             with self.assertRaisesRegex(FileNotFoundError, "official launcher"):
                 lab.import_library(required, Path(temp) / "other", launcher)
+
+
+class LinkDirTests(unittest.TestCase):
+    class Refused(OSError):
+        winerror = 1314  # ERROR_PRIVILEGE_NOT_HELD: no Developer Mode, not an administrator
+
+    def test_a_symbolic_link_where_the_system_allows_one(self):
+        with mock.patch("os.symlink") as symlink, mock.patch("subprocess.run") as run:
+            lab.link_dir(Path("/res"), Path("/work/26.3"))
+        symlink.assert_called_once_with(Path("/res"), Path("/work/26.3"), target_is_directory=True)
+        run.assert_not_called()
+
+    def test_a_junction_on_windows_without_symlink_privilege(self):
+        with mock.patch.object(sys, "platform", "win32"),                 mock.patch("os.symlink", side_effect=self.Refused("privilege")),                 mock.patch("subprocess.run") as run:
+            lab.link_dir(Path("res"), Path("work/26.3"))
+        run.assert_called_once_with(["cmd", "/c", "mklink", "/J", str(Path("work/26.3")), str(Path("res").resolve())],
+                                    check=True, capture_output=True)
+
+    def test_other_failures_and_other_systems_still_raise(self):
+        for platform, error in (("linux", self.Refused("privilege")), ("win32", FileExistsError("exists"))):
+            with self.subTest(platform=platform), mock.patch.object(sys, "platform", platform),                     mock.patch("os.symlink", side_effect=error), mock.patch("subprocess.run") as run:
+                with self.assertRaises(OSError):
+                    lab.link_dir(Path("res"), Path("work/26.3"))
+                run.assert_not_called()
+
+    def test_removing_the_scratch_folder_keeps_the_linked_folder(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target, work = Path(temp) / "resources", Path(temp) / "work"
+            target.mkdir()
+            work.mkdir()
+            (target / "kept.json").write_text("{}")
+            try:
+                lab.link_dir(target, work / "26.3")
+            except OSError as error:
+                self.skipTest(f"this host can make neither a symlink nor a junction: {error}")
+            self.assertEqual((work / "26.3" / "kept.json").read_text(), "{}")
+            shutil.rmtree(work)
+            self.assertTrue((target / "kept.json").exists())
+
+
+class GameEnvScreenTests(unittest.TestCase):
+    def test_macos_and_windows_start_no_virtual_screen(self):
+        for platform in ("darwin", "win32"):
+            with self.subTest(platform=platform), mock.patch.object(sys, "platform", platform),                     mock.patch.dict(os.environ, {}, clear=False),                     mock.patch.object(agent_control_e2e.subprocess, "run") as run,                     tempfile.TemporaryDirectory() as home:
+                os.environ.pop("DISPLAY", None)
+                env = agent_control_e2e.game_env("e2e", home=home)
+                run.assert_not_called()
+                self.assertEqual(env["HORIZON_HOME"], home)
+                self.assertNotIn("VSCREEN", env)
 
 
 if __name__ == "__main__":

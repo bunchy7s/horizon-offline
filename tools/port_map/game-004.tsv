@@ -41,15 +41,10 @@ WitherMobEffect.shouldApplyEffectTickThisTick	port	crates/horizon-client-render/
 AbstractInterpolationHandler.adjustInterpolationPosition	skip:other		Horizon moves a remote entity only through SteppedInterpolation, so there is no client-side move to add to the target
 AbstractInterpolationHandler.adjustInterpolationTargetFromDeltas	skip:other		same: the entity never drifts from where the interpolation put it (see SteppedInterpolation::interpolate)
 AbstractInterpolationHandler.setLastPositionAndRotation	skip:other		only feeds the delta adjustments above; Horizon's own last is the start of the step
-AgeableMob.mobInteract	missing		player: using a golden dandelion on a baby animal does nothing; vanilla uses one up, locks its growth and plays a sound (no golden_dandelion handling exists)
-AgeableMob.canUseGoldenDandelion	missing		player: part of the golden dandelion age lock, which is not implemented
-AgeableMob.setAgeLockedData	missing		player: nothing toggles AgeLocked in play (only NBT, buckets and spawn data set it); golden dandelion age lock is missing
-AgeableMob.setAgeLocked	missing		player: golden dandelion consumption, persistence and the use or unuse sound are missing
-AgeableMob.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	gap: minor: the baby flag is sent (baby_index); the age-locked entry is not
+AgeableMob.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	the baby flag (baby_index) and AGE_LOCKED after it; a kind outside baby_index (sulfur cube, nautilus, happy ghast) sends neither
 AgeableMob.getAge	inline	crates/horizon-client/src/game/remote_mob_data.rs::apply	m.extra.age on the host; a remote client only learns baby or not (-1 or 0)
 AgeableMob.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	Age, ForcedAge and AgeLocked for creatures
 AgeableMob.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	Age, ForcedAge and AgeLocked
-AgeableMob.makeAgeLockedParticle	missing		player: no age lock particle timer, so no pause or reset growth particles; the particle types exist
 AnimationState.getTimeInMillis	port	crates/horizon-client/src/mobs/keyframes.rs::AnimationState::millis	
 AreaEffectCloud.defineSynchedData	port	crates/horizon-client/src/game/lan_entities.rs::Game::lan_projectile_states	radius, waiting and particle for dragon breath and lingering clouds; read back in remote_projectiles.rs::remote_projectile_data
 AreaEffectCloud.setRadius	inline	crates/horizon-client/src/game/potions.rs::Game::tick_potion_cloud	radius shrinks per tick and per victim; the 0..32 clamp is not needed
@@ -60,7 +55,7 @@ AreaEffectCloud.get	skip:other		entity data component accessor for predicates an
 AreaEffectCloud.applyImplicitComponents	inline	crates/horizon-client/src/game/potions.rs::Game::splash	the lingering branch takes the thrown stack's potion effects and colour; potion_duration_scale is fixed at 0.25
 AreaEffectCloud.applyImplicitComponent	inline	crates/horizon-client/src/game/potions.rs::Game::splash	same: potion contents only
 Avatar.defineSynchedData	port	crates/horizon-client/src/lan/hub.rs::Hub::player_state	gap: minor: skin parts (entry 16) are sent, the main hand entry is not
-Avatar.isModelPartShown	missing		player: Options > Skin Customization is an inactive button and the client always sends all parts shown, so hat, jacket, sleeve and pants layers and the cape cannot be switched off
+Avatar.isModelPartShown	port	crates/horizon-client/src/game/remote.rs::Game::update_remote_skins	the Skin Customization cape option reaches the drawn player
 Bucketable.loadDefaultDataFromBucketTag	port	crates/horizon-client/src/entity_nbt.rs::load_bucket_data	NoAI, Silent, NoGravity, Glowing, Invulnerable, PersistenceRequired and Health
 ContainerUser.getLivingEntity	skip:java		interface cast; every container user here is the player
 ConversionTracker.addAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	gap: minor: DrownedConversionTime and InWaterTime are kept from the loaded NBT or written as -1; live progress is not saved, and skeletons write no FreezingTime or StrayConversionTime
@@ -70,28 +65,28 @@ ConversionType.convertCommon	port	crates/horizon-client/src/game/zombie_villager
 ConversionType.copyComponent	inline	crates/horizon-client/src/game/zombie_villagers.rs::carry_over	gap: minor: the custom name is kept by carry_over and convert_mob, custom data is not
 Crackiness.byFraction	port	crates/horizon-client/src/mobs/golem.rs::crackiness	iron golem thresholds 0.75, 0.5, 0.25; wolf armor 0.95, 0.69, 0.32 are in mobs/render.rs::layers and mobs.rs::Mob::hurt_wolf_armor
 Crackiness.byDamage	inline	crates/horizon-client/src/mobs/render.rs::layers	wolf armor: durability left over max picks the crack texture; a golem uses its health instead
-Display.onSyncedDataUpdated	port	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::metadata	gap: minor: text displays a remote server sends only; start delay, duration and render state flags are tracked, width and height do not update a culling box
+Display.onSyncedDataUpdated	port	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::metadata	gap: minor: text displays a remote server sends only; start delay, duration and render state flags are tracked
 Display.createTransformation	port	crates/horizon-client/src/text_display.rs::TextDisplayData::matrix	translation, left rotation, scale, right rotation plus the billboard turn
 Display.tick	port	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::tick	start tick, interpolation duration and render state refresh; text displays only
 Display.defineSynchedData	port	crates/horizon-client/src/text_display.rs::TextDisplayData::default	the defaults of entries 8 to 22
-Display.readAdditionalSaveData	missing		player: display entities saved in a world (made by commands, datapacks or maps) are not loaded; the local game has no display entity, only a remote server's text displays are drawn
+Display.readAdditionalSaveData	port	crates/horizon-client/src/text_display.rs::display_data	the synched data entries (ids 8 to 22) of a saved display, matrix transformation included
 Display.setTransformation	missing		minor: server side setter; there is no local display entity
 Display.addAdditionalSaveData	missing		minor: no local display entity to save
-Display.getInterpolatedBoundingBox	missing		minor: no culling box, a text display is drawn whenever it is within its view range, even off screen
+Display.getInterpolatedBoundingBox	port	crates/horizon-client/src/text_display.rs::culling_box	width-centred XZ box from y to y+height at the interpolated origin; used by Game::display_in_view
 Display.setBrightnessOverride	missing		minor: server side setter; there is no local display entity
 Display.getBrightnessOverride	inline	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	the packed sky and block light of the brightness entry (-1 uses the world light)
 Display.calculateInterpolationProgress	port	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::progress	
-Display.updateCulling	missing		minor: width and height are stored but no culling box is built
-Display.shouldRenderAtSqrDistance	inline	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	view_range * 64 * view scale squared
+Display.updateCulling	port	crates/horizon-client/src/text_display.rs::culling_box	noCulling when width or height is 0 (`no_culling`); else the width/height AABB
+Display.shouldRenderAtSqrDistance	inline	crates/horizon-client/src/game/text_displays.rs::Game::display_in_view	view_range * 64 * view scale squared; frustum when width and height are set
 Display.getTeamColor	missing		minor: glow_color_override is read but a glowing display gets no coloured outline
 Display.createFreshRenderState	inline	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::tick	the copy of the synced data when no interpolation runs
 Display.createInterpolatedRenderState	inline	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::tick	the new start state is the old one blended to the last drawn progress (TextDisplayData::blend)
-Display.BlockDisplay	missing		player: block displays a server or map places are not drawn at all (only text displays are); command and datapack made decorations are invisible
-Display.ItemDisplay	missing		player: item displays (floating items, custom models on servers) are not drawn at all; only text displays are
+Display.BlockDisplay	port	crates/horizon-client/src/game/text_displays.rs::Game::block_item_display_geometry	a block display submits its block model under the display's transformation, lit and tracked like an entity
+Display.ItemDisplay	port	crates/horizon-client/src/game/text_displays.rs::Game::block_item_display_geometry	an item display submits its item model with the display context
 Display.TextDisplay.defineSynchedData	port	crates/horizon-client/src/text_display.rs::TextDisplayData::default	text, line width 200, background 0x40000000, opacity -1, flags 0
 Display.TextDisplay.onSyncedDataUpdated	port	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::metadata	the text render state ids mark the render state dirty
 Display.TextDisplay.loadFlag	missing		minor: reads the NBT booleans into the style flags; no local display entity
-Display.TextDisplay.readAdditionalSaveData	missing		player: text displays saved in a world are not loaded (see Display.readAdditionalSaveData)
+Display.TextDisplay.readAdditionalSaveData	port	crates/horizon-client/src/text_display.rs::text_display_data	a saved text display's synched data (ids 23 to 27) is read back from its compound and re-sent
 Display.TextDisplay.storeFlag	missing		minor: writes the style flags to NBT; no local display entity
 Display.TextDisplay.addAdditionalSaveData	missing		minor: no local display entity to save
 Display.TextDisplay.updateRenderSubState	port	crates/horizon-client/src/text_display.rs::TextDisplayData::blend	text, line width, opacity and background blend over the interpolation

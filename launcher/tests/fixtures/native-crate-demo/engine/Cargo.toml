@@ -1,0 +1,9 @@
+[package]
+name = "crate-demo-engine"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Only crates in Horizon's Cargo.lock, by version requirement.
+[dependencies]
+crc32fast = "1"

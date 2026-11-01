@@ -3,7 +3,7 @@
 //! `.local/horizon-client/<version>/assets` where the game reads them (tools/fetch_sounds.py and
 //! the tools/lab.py functions it called). Nothing is downloaded.
 
-use crate::artifacts::{self, Lock};
+use crate::artifacts::{self, Inputs, Lock};
 use crate::pyjson::Value;
 use crate::{digest, Log};
 use std::collections::{HashMap, HashSet};
@@ -22,7 +22,7 @@ fn launcher_assets(
     cached_index: &Path,
     log: Log,
 ) -> Result<(PathBuf, PathBuf, Vec<u8>), String> {
-    let assets = files.folder.join("assets");
+    let assets = files.assets.clone();
     let info = manifest
         .get("assetIndex")
         .ok_or("The version JSON has no assetIndex")?;
@@ -77,27 +77,20 @@ fn is_sound(name: &str) -> bool {
 /// `.local/horizon-client/<version>`; returns that folder. Files already there with the right
 /// SHA-1 are kept.
 pub fn sounds(root: &Path, minecraft: Option<&Path>, log: Log) -> Result<PathBuf, String> {
-    copy_assets(
-        root,
-        minecraft,
-        log,
-        is_sound,
-        "Sound",
-        &["minecraft/sounds.json"],
-    )
+    add_assets("sounds", root, None, minecraft, &Inputs::default(), log)
 }
 
 /// Replaces the client JAR's 1x1 title placeholders with the full panorama from the
 /// launcher's asset store. Also usable on already-prepared resources without Java.
 pub fn panorama(root: &Path, minecraft: Option<&Path>, log: Log) -> Result<PathBuf, String> {
-    copy_assets(root, minecraft, log, is_panorama, "Panorama", &PANORAMA)
+    add_assets("panorama", root, None, minecraft, &Inputs::default(), log)
 }
 
 /// Replaces the client JAR's empty `font/include/unifont.json` with the asset index's, and
 /// adds the GNU Unifont glyphs it names (`font/unifont*.zip`): the default font's fallback for
 /// every character the bitmap fonts lack (#1076). Also usable on prepared resources without Java.
 pub fn fonts(root: &Path, minecraft: Option<&Path>, log: Log) -> Result<PathBuf, String> {
-    copy_assets(root, minecraft, log, is_font, "Font", &UNIFONT)
+    add_assets("fonts", root, None, minecraft, &Inputs::default(), log)
 }
 
 /// Every bundled language and the language list, both of which only the asset index holds
@@ -105,7 +98,7 @@ pub fn fonts(root: &Path, minecraft: Option<&Path>, log: Log) -> Result<PathBuf,
 /// language screen offers, `minecraft/lang/<code>.json` the strings each one draws (#1272).
 /// Also usable on already-prepared resources without Java.
 pub fn languages(root: &Path, minecraft: Option<&Path>, log: Log) -> Result<PathBuf, String> {
-    copy_assets(root, minecraft, log, is_language, "Language", &LANGUAGES)
+    add_assets("languages", root, None, minecraft, &Inputs::default(), log)
 }
 
 const LANGUAGES: [&str; 1] = ["pack.mcmeta"];
@@ -118,7 +111,7 @@ fn is_language(name: &str) -> bool {
 #[cfg(test)]
 fn optional_assets(root: &Path, minecraft: Option<&Path>, log: Log) {
     optional_imports(
-        Assets::load(root, minecraft, log)
+        Assets::load(root, None, minecraft, &Inputs::default(), log)
             .as_mut()
             .map_err(|e| e.as_str()),
         log,
@@ -192,14 +185,7 @@ const UNIFONT: [&str; 2] = [
 /// Packs made to sit on Programmer Art, like Golden Days, show the default textures without it.
 /// Also usable on prepared resources without Java.
 pub fn packs(root: &Path, minecraft: Option<&Path>, log: Log) -> Result<PathBuf, String> {
-    copy_assets(
-        root,
-        minecraft,
-        log,
-        is_built_in_pack,
-        "Built-in pack",
-        &BUILT_IN_PACKS,
-    )
+    add_assets("packs", root, None, minecraft, &Inputs::default(), log)
 }
 
 /// The built-in packs `packs` copies, under the prepared resources' `assets`.
@@ -217,15 +203,40 @@ fn is_font(name: &str) -> bool {
     name.starts_with("minecraft/font/")
 }
 
-fn copy_assets(
+/// What each `horizon-prepare <kind>` copies: the assets it wants, its log label, the files it needs.
+type Kind = (
+    &'static str,
+    fn(&str) -> bool,
+    &'static str,
+    &'static [&'static str],
+);
+
+const KINDS: [Kind; 5] = [
+    ("sounds", is_sound, "Sound", &["minecraft/sounds.json"]),
+    ("panorama", is_panorama, "Panorama", &PANORAMA),
+    ("fonts", is_font, "Font", &UNIFONT),
+    ("packs", is_built_in_pack, "Built-in pack", &BUILT_IN_PACKS),
+    ("languages", is_language, "Language", &LANGUAGES),
+];
+
+/// `horizon-prepare <kind>`: copies what `kind` names (`sounds`, `panorama`, `fonts`, `packs` or
+/// `languages`) into the resources at `output` (default: `root`'s `.local/horizon-client/<version>`),
+/// from the asset store of `minecraft` or the one `inputs` names.
+pub fn add_assets(
+    kind: &str,
     root: &Path,
+    output: Option<&Path>,
     minecraft: Option<&Path>,
+    inputs: &Inputs,
     log: Log,
-    wanted_asset: fn(&str) -> bool,
-    label: &str,
-    required: &[&str],
 ) -> Result<PathBuf, String> {
-    Assets::load(root, minecraft, log)?.copy(wanted_asset, label, required, log)
+    let (_, wanted, label, required) = KINDS
+        .iter()
+        .find(|(name, ..)| *name == kind)
+        .ok_or_else(|| format!("no assets called {kind}"))?;
+    let mut assets = Assets::load(root, output, minecraft, inputs, log)?;
+    let _lock = crate::hold_lock(&assets.target, log)?;
+    assets.copy(*wanted, label, required, log)
 }
 
 /// A preparation's index and verified destinations. Never persisted: a later invocation
@@ -238,11 +249,17 @@ pub(crate) struct Assets {
 }
 
 impl Assets {
-    pub(crate) fn load(root: &Path, minecraft: Option<&Path>, log: Log) -> Result<Self, String> {
+    pub(crate) fn load(
+        root: &Path,
+        output: Option<&Path>,
+        minecraft: Option<&Path>,
+        inputs: &Inputs,
+        log: Log,
+    ) -> Result<Self, String> {
         let lock = Lock::read(root)?;
-        let files = artifacts::game_files(minecraft, &lock.version);
+        let files = artifacts::game_files(minecraft, &lock.version).with(inputs);
         let manifest = artifacts::import_manifest(&lock, &files)?;
-        let target = root.join(".local/horizon-client").join(&lock.version);
+        let target = crate::resources_dir(root, &lock.version, output);
         let (store, index, bytes) = launcher_assets(
             &lock,
             &manifest,
@@ -559,6 +576,48 @@ mod tests {
         assert_eq!(*lines.borrow(), ["Language assets ready: 2 files, 0.0 MB"]);
     }
 
+    /// `--assets-dir` (and `--version-json`) alone name the store: nothing comes from the
+    /// Minecraft folder, which is empty.
+    #[test]
+    fn named_asset_store_serves_the_asset_commands() {
+        let f = Fixture::with_extras(
+            "assets-dir",
+            &[],
+            &[("pack.mcmeta", b"{\"language\": {\"fr_fr\": {}}}")],
+        );
+        let store = f.dir.join("asset store");
+        fs::rename(f.minecraft.join("assets"), &store).unwrap();
+        let version_json = f.dir.join("meta/9.9.json");
+        fs::create_dir_all(version_json.parent().unwrap()).unwrap();
+        fs::rename(f.minecraft.join("versions/9.9/9.9.json"), &version_json).unwrap();
+        let empty = f.dir.join("no minecraft");
+        fs::create_dir_all(&empty).unwrap();
+        // Without --assets-dir the empty folder has no store.
+        let only_json = crate::artifacts::Inputs {
+            version_json: Some(version_json.clone()),
+            ..Default::default()
+        };
+        assert!(add_assets(
+            "languages",
+            &f.root,
+            None,
+            Some(&empty),
+            &only_json,
+            &|_| {}
+        )
+        .is_err());
+        let inputs = crate::artifacts::Inputs {
+            version_json: Some(version_json),
+            assets_dir: Some(store),
+            ..Default::default()
+        };
+        let target =
+            add_assets("languages", &f.root, None, Some(&empty), &inputs, &|_| {}).unwrap();
+        assert!(fs::read(target.join("assets/pack.mcmeta"))
+            .unwrap()
+            .starts_with(b"{\"language\""));
+    }
+
     /// #1076: the launcher holds an index Mojang republished under the same id, so its SHA-1
     /// is not the one in the version JSON. A known one is used quietly, an unknown one with a
     /// line in the log; the sounds come through either way.
@@ -828,7 +887,14 @@ mod tests {
     #[test]
     fn one_index_snapshot_serves_every_import_and_reruns_repair_corruption() {
         let f = Fixture::with_extras("snapshot", &PANORAMA, &[("pack.mcmeta", b"{}")]);
-        let mut assets = Assets::load(&f.root, Some(&f.minecraft), &|_| {}).unwrap();
+        let mut assets = Assets::load(
+            &f.root,
+            None,
+            Some(&f.minecraft),
+            &Inputs::default(),
+            &|_| {},
+        )
+        .unwrap();
         fs::remove_file(f.minecraft.join("assets/indexes/7.json")).unwrap();
         let lines = std::cell::RefCell::new(Vec::new());
         optional_imports(Ok(&mut assets), &|line| {
@@ -892,7 +958,14 @@ mod tests {
         // Preparing from cached JARs must also preserve full imports without the launcher.
         fs::remove_dir_all(f.minecraft.join("assets")).unwrap();
         for _ in 0..2 {
-            let mut assets = Assets::load(&f.root, Some(&f.minecraft), &|_| {}).unwrap();
+            let mut assets = Assets::load(
+                &f.root,
+                None,
+                Some(&f.minecraft),
+                &Inputs::default(),
+                &|_| {},
+            )
+            .unwrap();
             let (_, count) =
                 crate::extract_client_resources(&jar, &target, Some(&mut assets)).unwrap();
             assert_eq!(count, 5);

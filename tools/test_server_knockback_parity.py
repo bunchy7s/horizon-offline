@@ -155,6 +155,20 @@ def mob_hits_case(kind):
             'cmd Alice kill @e[type=!player]', 'cmd Alice gamemode survival']
 
 
+def blast_case(blast, row):
+    """A blast two blocks east of Bob in creative, which hurts him not: an end crystal he hits himself, or primed TNT
+    about to go off. The push his client is sent (the explosion packet's playerKnockback, ServerExplosion.hitPlayers)
+    and his motion packet. Each case has a floor of its own (`row` blocks south), as a blast digs a crater."""
+    at, z = (V[0], V[1], V[2] + row), V[2] + row
+    summon = {'crystal': f'cmd Alice summon minecraft:end_crystal {at[0] + 2} {at[1]} {z} {{ShowBottom:0b}}',
+              'tnt': f'cmd Alice summon minecraft:tnt {at[0] + 2} {at[1]} {z} {{fuse:20s}}'}[blast]
+    lines = ['cmd Alice kill @e[type=!player]', 'cmd Bob gamemode creative',
+             f'cmd Alice tp Bob {at[0]} {at[1]} {at[2]} -90 0', *stand('Bob', at, -90), 'ticks 20', summon, 'ticks 5']
+    lines += ['attack Bob end_crystal', 'ticks 10'] if blast == 'crystal' else ['ticks 30']
+    return lines + [*stand('Bob', at, -90), 'cmd Bob gamemode survival', 'cmd Alice kill @e[type=!player]',
+                    f'cmd Alice tp Bob {V[0]} {V[1]} {V[2]} 90 0', *stand('Bob', V, 90)]
+
+
 CASES = {
     'cow-plain': mob_case('cow'),
     'cow-sprint': mob_case('cow', sprint=True),
@@ -177,6 +191,8 @@ CASES = {
     'pvp-mace': pvp_case(weapon='minecraft:mace', mace=True),
     'pvp-cooldown': pvp_case(cooldown=True),
     'zombie-hits-bob': mob_hits_case('zombie'),
+    'crystal-creative': blast_case('crystal', 16),
+    'tnt-creative': blast_case('tnt', 32),
 }
 SETUP = ['cmd Alice gamerule spawn_mobs false', 'cmd Alice gamerule spawn_monsters false',
          'cmd Alice kill @e[type=!player]', 'cmd Alice gamerule advance_time false', 'cmd Alice time set midnight',
@@ -301,8 +317,8 @@ DATA = re.compile(r'^chat \S+ has the following entity data: \[(.*)\]$')
 
 
 def compared(lines):
-    """Per case, what is compared: the mob's Pos and Motion (to 1e-9), and each player's motion packets and
-    sprint flag."""
+    """Per case, what is compared: the mob's Pos and Motion (to 1e-9), and each player's motion packets, the push
+    each explosion packet carries for them and their sprint flag."""
     cases = {}
     for line in lines:
         who, step, text = line.split(' ', 2)
@@ -313,7 +329,7 @@ def compared(lines):
         data = DATA.match(text)
         if who == 'Alice' and data:
             kept.append('data ' + ' '.join(f'{float(v.rstrip("d")):.9f}' for v in data.group(1).split(', ')))
-        elif text.startswith('motion self') or text.startswith('sprinting'):
+        elif text.startswith(('motion self', 'sprinting', 'explode push')):
             kept.append(f'{who} {text}')
         elif text.startswith('error') or text.startswith('disconnected'):
             kept.append(f'{who} {text}')

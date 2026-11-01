@@ -44,6 +44,14 @@ impl Identifier {
             hash: hash(namespace).wrapping_mul(31).wrapping_add(hash(path)),
         })))
     }
+    /// A fully qualified identifier with nonempty namespace and path.
+    pub fn parse_namespaced(text: &str) -> Option<Self> {
+        let (namespace, path) = text.split_once(':')?;
+        if namespace.is_empty() || path.is_empty() {
+            return None;
+        }
+        Self::from_parts(namespace, path).ok()
+    }
     pub fn parse(text: &str) -> Result<Self, IdentifierError> {
         let (namespace, path) = text.split_once(':').unwrap_or(("minecraft", text));
         Self::from_parts(

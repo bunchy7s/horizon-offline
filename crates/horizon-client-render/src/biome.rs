@@ -3,7 +3,12 @@
 use crate::Result;
 use horizon_core::{noise::SimplexNoise, position::BlockPos, random::LegacyRandom};
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs,
+    path::Path,
+    sync::Arc,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GrassModifier {
@@ -102,6 +107,9 @@ pub struct BiomeInfo {
     /// The biome's own fog colour attribute; otherwise the dimension's applies.
     pub fog: Option<u32>,
     pub water_fog: u32,
+    /// `BiomeGenerationSettings.features`: the placed feature ids of each
+    /// `GenerationStep.Decoration` step, in order.
+    pub features: Vec<Vec<String>>,
 }
 impl BiomeInfo {
     /// `Biome.getHeightAdjustedTemperature`: the frozen modifier, then cooler
@@ -130,10 +138,27 @@ impl BiomeInfo {
             .then(|| self.temperature_at(BlockPos::new(x, y, z), 63) < 0.15)
     }
 }
+/// The game's biomes, by id. The built-in (vanilla) biomes come first, in
+/// file order, and keep their ids whatever a world's data packs do; a pack's
+/// new biomes follow them (`with_packs`). Those are the client's own ids:
+/// the network registry's are `registry_order`'s.
+#[derive(Clone)]
 pub struct Biomes {
     pub list: Vec<BiomeInfo>,
     pub index: HashMap<String, u16>,
     info_noise: SimplexNoise,
+    colormaps: Arc<Colormaps>,
+    /// The built-in biomes, the first of `list` unless packs replaced them.
+    builtin: Arc<Vec<BiomeInfo>>,
+    /// The data packs' biome files (new biomes and replaced built-in ones),
+    /// for the tables that read more of a biome than `BiomeInfo` keeps.
+    packs: BTreeMap<String, Arc<Value>>,
+}
+/// The grass, foliage and dry foliage colormaps.
+struct Colormaps {
+    grass: Vec<u32>,
+    foliage: Vec<u32>,
+    dry: Vec<u32>,
 }
 fn color(v: &Value) -> Option<u32> {
     match v {
@@ -166,11 +191,90 @@ fn sample(map: &[u32], temperature: f32, downfall: f32, fallback: u32) -> u32 {
     let index = (y << 8 | x) as usize;
     map.get(index).copied().unwrap_or(fallback)
 }
+impl BiomeInfo {
+    /// A biome file's (`worldgen/biome/<name>.json`) values, the colours it
+    /// leaves out sampled from the colormaps.
+    fn from_json(name: String, v: &Value, maps: &Colormaps) -> Self {
+        let effects = &v["effects"];
+        let attributes = &v["attributes"];
+        let temperature = v["temperature"].as_f64().unwrap_or(0.5) as f32;
+        let downfall = v["downfall"].as_f64().unwrap_or(0.5) as f32;
+        let modifier = match effects["grass_color_modifier"].as_str() {
+            Some("dark_forest") => GrassModifier::DarkForest,
+            Some("swamp") => GrassModifier::Swamp,
+            _ => GrassModifier::None,
+        };
+        let mut spawns: HashMap<String, Vec<SpawnEntry>> = HashMap::new();
+        let natural = &attributes["minecraft:gameplay/natural_mob_spawns"];
+        // A modifier object ({argument, modifier: overlay}) or the plain value;
+        // the overlay over the dimension's empty default is the biome's value.
+        let natural = if natural["argument"].is_object() {
+            &natural["argument"]
+        } else {
+            natural
+        };
+        let categories = &natural["spawns_by_category"];
+        for (category, entries) in categories.as_object().into_iter().flatten() {
+            let list = parse_entries(entries);
+            spawns.insert(category.clone(), list);
+        }
+        BiomeInfo {
+            spawns,
+            spawn_costs: parse_costs(&natural["spawn_costs"]),
+            creature_probability:
+                attributes["minecraft:gameplay/creature_world_gen_spawn_probability"]
+                    .as_f64()
+                    .unwrap_or(0.1) as f32,
+            increased_fire_burnout: attributes["minecraft:gameplay/increased_fire_burnout"]
+                .as_bool()
+                .unwrap_or(false),
+            temperature,
+            frozen: v["temperature_modifier"].as_str() == Some("frozen"),
+            downfall,
+            precipitation: v["has_precipitation"].as_bool().unwrap_or(true),
+            grass: color(&effects["grass_color"])
+                .unwrap_or_else(|| sample(&maps.grass, temperature, downfall, 0xFF00FF)),
+            modifier,
+            foliage: color(&effects["foliage_color"])
+                .unwrap_or_else(|| sample(&maps.foliage, temperature, downfall, 0x48B518)),
+            dry_foliage: color(&effects["dry_foliage_color"])
+                .unwrap_or_else(|| sample(&maps.dry, temperature, downfall, 0x5D4930)),
+            water: color(&effects["water_color"]).unwrap_or(0x3F76E4),
+            sky: color(&attributes["minecraft:visual/sky_color"]),
+            fog: color(&attributes["minecraft:visual/fog_color"]),
+            water_fog: color(&attributes["minecraft:visual/water_fog_color"]).unwrap_or(0x050533),
+            features: v["features"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|step| {
+                    step.as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .collect(),
+            name,
+        }
+    }
+}
+/// `Identifier.compareTo`: the path first, then the namespace.
+pub fn identifier_order(a: &str, b: &str) -> std::cmp::Ordering {
+    fn split(id: &str) -> (&str, &str) {
+        let (ns, path) = id.split_once(':').unwrap_or(("minecraft", id));
+        (path, ns)
+    }
+    split(a).cmp(&split(b))
+}
 impl Biomes {
     pub fn load(root: &Path) -> Result<Self> {
-        let grass = colormap(root, "grass")?;
-        let foliage = colormap(root, "foliage")?;
-        let dry = colormap(root, "dry_foliage")?;
+        let maps = Colormaps {
+            grass: colormap(root, "grass")?,
+            foliage: colormap(root, "foliage")?,
+            dry: colormap(root, "dry_foliage")?,
+        };
         let mut list = Vec::new();
         let mut names: Vec<_> = fs::read_dir(root.join("data/minecraft/worldgen/biome"))?
             .filter_map(|e| e.ok())
@@ -186,57 +290,7 @@ impl Biomes {
                     .ok_or("bad biome")?
             );
             let v: Value = serde_json::from_slice(&fs::read(&path)?)?;
-            let effects = &v["effects"];
-            let attributes = &v["attributes"];
-            let temperature = v["temperature"].as_f64().unwrap_or(0.5) as f32;
-            let downfall = v["downfall"].as_f64().unwrap_or(0.5) as f32;
-            let modifier = match effects["grass_color_modifier"].as_str() {
-                Some("dark_forest") => GrassModifier::DarkForest,
-                Some("swamp") => GrassModifier::Swamp,
-                _ => GrassModifier::None,
-            };
-            let mut spawns: HashMap<String, Vec<SpawnEntry>> = HashMap::new();
-            let natural = &attributes["minecraft:gameplay/natural_mob_spawns"];
-            // A modifier object ({argument, modifier: overlay}) or the plain value;
-            // the overlay over the dimension's empty default is the biome's value.
-            let natural = if natural["argument"].is_object() {
-                &natural["argument"]
-            } else {
-                natural
-            };
-            let categories = &natural["spawns_by_category"];
-            for (category, entries) in categories.as_object().into_iter().flatten() {
-                let list = parse_entries(entries);
-                spawns.insert(category.clone(), list);
-            }
-            list.push(BiomeInfo {
-                spawns,
-                spawn_costs: parse_costs(&natural["spawn_costs"]),
-                creature_probability:
-                    attributes["minecraft:gameplay/creature_world_gen_spawn_probability"]
-                        .as_f64()
-                        .unwrap_or(0.1) as f32,
-                increased_fire_burnout: attributes["minecraft:gameplay/increased_fire_burnout"]
-                    .as_bool()
-                    .unwrap_or(false),
-                temperature,
-                frozen: v["temperature_modifier"].as_str() == Some("frozen"),
-                downfall,
-                precipitation: v["has_precipitation"].as_bool().unwrap_or(true),
-                grass: color(&effects["grass_color"])
-                    .unwrap_or_else(|| sample(&grass, temperature, downfall, 0xFF00FF)),
-                modifier,
-                foliage: color(&effects["foliage_color"])
-                    .unwrap_or_else(|| sample(&foliage, temperature, downfall, 0x48B518)),
-                dry_foliage: color(&effects["dry_foliage_color"])
-                    .unwrap_or_else(|| sample(&dry, temperature, downfall, 0x5D4930)),
-                water: color(&effects["water_color"]).unwrap_or(0x3F76E4),
-                sky: color(&attributes["minecraft:visual/sky_color"]),
-                fog: color(&attributes["minecraft:visual/fog_color"]),
-                water_fog: color(&attributes["minecraft:visual/water_fog_color"])
-                    .unwrap_or(0x050533),
-                name,
-            });
+            list.push(BiomeInfo::from_json(name, &v, &maps));
         }
         let index = list
             .iter()
@@ -244,10 +298,64 @@ impl Biomes {
             .map(|(i, b)| (b.name.clone(), i as u16))
             .collect();
         Ok(Self {
+            builtin: Arc::new(list.clone()),
             list,
             index,
+            colormaps: Arc::new(maps),
+            packs: BTreeMap::new(),
             info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
         })
+    }
+    /// The built-in biomes with a world's data packs' biome files (id →
+    /// JSON) over them, as `RegistryDataLoader` builds the registry: a file
+    /// for a built-in biome replaces it, keeping its id, and new biomes join
+    /// after the built-in ones, in registry order. Starts from the built-in
+    /// table whatever packs `self` has.
+    pub fn with_packs<'a>(&self, files: impl IntoIterator<Item = (&'a str, &'a Value)>) -> Self {
+        let mut out = self.builtin_only();
+        let mut files: Vec<(&str, &Value)> = files.into_iter().collect();
+        files.sort_by(|a, b| identifier_order(a.0, b.0));
+        for (name, json) in files {
+            let info = BiomeInfo::from_json(name.to_owned(), json, &out.colormaps);
+            match out.index.get(name) {
+                Some(&id) => out.list[usize::from(id)] = info,
+                None if out.list.len() < usize::from(u16::MAX) => {
+                    out.index.insert(name.to_owned(), out.list.len() as u16);
+                    out.list.push(info);
+                }
+                None => continue,
+            }
+            out.packs.insert(name.to_owned(), Arc::new(json.clone()));
+        }
+        out
+    }
+    /// The built-in biomes alone: this table without what packs gave it.
+    pub fn builtin_only(&self) -> Self {
+        let mut out = self.clone();
+        if self.packs.is_empty() {
+            return out;
+        }
+        out.list = self.builtin.to_vec();
+        let builtin = out.list.len();
+        out.index.retain(|_, id| usize::from(*id) < builtin);
+        out.packs.clear();
+        out
+    }
+    /// The data pack file a world's biome `name` came from, if a pack added
+    /// or replaced it.
+    pub fn pack_file(&self, name: &str) -> Option<&Value> {
+        self.packs.get(name).map(|v| &**v)
+    }
+    /// Whether data packs added or replaced any biome.
+    pub fn has_packs(&self) -> bool {
+        !self.packs.is_empty()
+    }
+    /// The biome names in the network registry's order: `RegistryDataLoader`
+    /// sorts a registry's files by `Identifier` (path, then namespace).
+    pub fn registry_order(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.list.iter().map(|b| b.name.as_str()).collect();
+        names.sort_by(|a, b| identifier_order(a, b));
+        names
     }
     pub fn id(&self, name: &str) -> u16 {
         self.index
@@ -342,6 +450,88 @@ pub fn blend_rgb(weights: &[(u16, f64)], mut value: impl FnMut(u16) -> [f32; 3])
         });
     }
     result.unwrap_or([0.0; 3])
+}
+
+#[cfg(test)]
+mod pack_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A built-in table of `names` (no colormaps: sampled colours fall back).
+    fn builtin(names: &[&str]) -> Biomes {
+        let maps = Colormaps {
+            grass: Vec::new(),
+            foliage: Vec::new(),
+            dry: Vec::new(),
+        };
+        let list: Vec<BiomeInfo> = names
+            .iter()
+            .map(|n| BiomeInfo::from_json((*n).to_owned(), &json!({}), &maps))
+            .collect();
+        Biomes {
+            builtin: Arc::new(list.clone()),
+            index: list
+                .iter()
+                .enumerate()
+                .map(|(i, b)| (b.name.clone(), i as u16))
+                .collect(),
+            list,
+            info_noise: SimplexNoise::with_skipped_offsets(&mut LegacyRandom::new(2345), true),
+            colormaps: Arc::new(maps),
+            packs: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn registry_order_is_path_then_namespace() {
+        use std::cmp::Ordering::*;
+        assert_eq!(identifier_order("minecraft:a", "minecraft:b"), Less);
+        assert_eq!(identifier_order("z:a", "a:b"), Less);
+        assert_eq!(identifier_order("b:same", "a:same"), Greater);
+        assert_eq!(identifier_order("minecraft:a", "minecraft:a_b"), Less);
+        assert_eq!(identifier_order("minecraft:a-b", "minecraft:a"), Greater);
+    }
+
+    #[test]
+    fn packs_replace_in_place_and_add_after_the_builtin_biomes() {
+        let base = builtin(&["minecraft:meadow", "minecraft:plains", "minecraft:river"]);
+        let red = json!({"temperature": 2.0, "effects": {"water_color": "#ff0000"}});
+        let hot = json!({"effects": {"grass_color": 0x123456}});
+        let files = [
+            ("pack:zeta", &hot),
+            ("minecraft:molten_peaks", &hot),
+            ("minecraft:river", &red),
+        ];
+        let world = base.with_packs(files);
+        // The built-in ids stay; the river takes the pack's values.
+        assert_eq!(world.id("minecraft:plains"), 1);
+        assert_eq!(world.id("minecraft:river"), 2);
+        assert_eq!(world.get(2).water, 0xFF0000);
+        assert_eq!(world.get(2).temperature, 2.0);
+        // New biomes follow, in registry order.
+        assert_eq!(world.id("minecraft:molten_peaks"), 3);
+        assert_eq!(world.id("pack:zeta"), 4);
+        assert_eq!(world.get(3).grass, 0x123456);
+        assert!(world.pack_file("minecraft:river").is_some());
+        assert!(world.pack_file("minecraft:plains").is_none());
+        // The network registry sorts every name by path, then namespace.
+        assert_eq!(
+            world.registry_order(),
+            [
+                "minecraft:meadow",
+                "minecraft:molten_peaks",
+                "minecraft:plains",
+                "minecraft:river",
+                "pack:zeta"
+            ]
+        );
+        // Another world starts again from the built-in biomes.
+        let other = world.with_packs([]);
+        assert_eq!(other.list.len(), 3);
+        assert!(!other.contains("minecraft:molten_peaks"));
+        assert_eq!(other.get(2).water, 0x3F76E4);
+        assert!(!other.has_packs());
+    }
 }
 
 #[cfg(test)]

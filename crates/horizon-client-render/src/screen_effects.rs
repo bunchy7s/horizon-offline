@@ -5,6 +5,7 @@
 //! outline, nether portal swirl). Positions are clip-space quads; textures
 //! come from the shared 2D atlas and may repeat.
 use crate::{
+    effects::EffectInstance,
     hud::{Rect, TextureFlags},
     hud_layout::GuiDraw,
 };
@@ -269,6 +270,28 @@ impl ScreenEffects {
         }
         out
     }
+}
+
+/// The nausea effect's blend-out advance: over its last `NAUSEA_BLEND_OUT`
+/// ticks it has no effect (`MobEffects.NAUSEA`, `endsWithin(60)`).
+const NAUSEA_BLEND_OUT: i32 = 60;
+
+/// `MobEffectInstance.BlendState.hasEffect`: still past the blend-out point,
+/// so the effect counts as on (`!endsWithin(60)` for `MobEffects.NAUSEA`).
+pub fn nausea_has_effect(e: &EffectInstance) -> bool {
+    !e.ends_within(NAUSEA_BLEND_OUT)
+}
+
+/// A new nausea instance's `BlendState`: from nothing, or, when the server
+/// asked for no blending, at once (`MobEffectInstance.skipBlending`'s
+/// `BlendState.setImmediate`).
+pub fn nausea_blend_added(e: &EffectInstance, blend: bool) -> (f32, f32) {
+    let factor = if blend || !nausea_has_effect(e) {
+        0.0
+    } else {
+        1.0
+    };
+    (factor, factor)
 }
 
 #[cfg(test)]

@@ -191,7 +191,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// block entity, whose collision shape contains the extended base; the
     /// exported facts see no block entity and call every face unsupported,
     /// which made a lever on the piston's back pop off when it retracted.
-    fn support_state(&self, pos: BlockPos) -> BlockStateId {
+    pub(super) fn support_state(&self, pos: BlockPos) -> BlockStateId {
         let state = self.state(pos);
         if self.b.is_block(state, self.b.named.moving_piston) {
             if let Some(piston) = self.moving_piston(pos) {

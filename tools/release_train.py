@@ -76,20 +76,26 @@ LAUNCHER_PATHS = [
     "crates/horizon-release-sign/",
     "crates/horizon-telemetry/",
     "crates/horizon-theme/",
+    # Its icon, its menu entries and its AppImage are compiled or packaged into a release
+    # (launcher/build.rs, src/desktop.rs, packaging/linux/appimage.sh).
+    "packaging/icons/",
+    "packaging/linux/",
 ]
 LAUNCHER_IGNORED = ["launcher/links.json", "launcher/docs/", "launcher/tests/"]
 
 # A game release is GitHub's latest (servers and install.sh follow it), so it is the first release people land on:
 # its notes open with the way to the launcher (#1647). Raw HTML on one line, which GitHub shows and every launcher's
 # notes view and one-line summary skip (pulldown-cmark's HTML events), so launchers never tell players to get
-# themselves. The site's Releases page leaves it out too. Player notes always name horizon-rust/horizon, even when CI on a fork sets GITHUB_REPOSITORY to that fork.
-PLAYERS = ('<h3>Want to play? Download the <a href="https://playhorizon.dev">Horizon launcher</a>, not the files '
-           'below</h3><p>It installs this version and keeps it up to date. It is also on GitHub: <a href="'
-           'https://github.com/horizon-rust/horizon/releases?q=launcher&amp;expanded=true">the launcher releases</a>. You need your '
-           "own copy of Minecraft: Java Edition. The files below are what the launcher installs, and the dedicated "
-           "server for people who host one.</p>")
-LAUNCHER_FOOTER = ("Your launcher updates itself. New here? Download the archive for your system below, extract it, "
-                   "and run `horizon-launcher`. Website: https://playhorizon.dev")
+# themselves. The site's Releases page leaves it out too.
+# The same warning closes the notes, above the disclaimer, for whoever scrolls past the changes to the files.
+PLAYERS_FOOTER = ('<h1>Want to play? Download the <a href="https://playhorizon.dev">Horizon launcher</a>.</h1>'
+                  '<h1>Do NOT run the files below. They will not work on their own.</h1>')
+PLAYERS = (PLAYERS_FOOTER + '<p>The launcher installs this version and keeps it up to date. You need your own copy of '
+           'Minecraft: Java Edition. The files below are what the launcher installs, and the dedicated server for '
+           'people who host one.</p>')
+LAUNCHER_FOOTER = ("Your launcher updates itself. New here? On Linux take the .AppImage below, make it executable "
+                   "and run it; on Windows and macOS download the archive, extract it and run `horizon-launcher` "
+                   "(Horizon.app on macOS). Website: https://playhorizon.dev")
 DISCLAIMER = "Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft."
 # An open issue with this label holds every game release (docs/release-flow.md). Only people who can triage the
 # repository can add it, and the issue's text is never read: its author could edit it afterwards.
@@ -416,6 +422,8 @@ def notes(kind, version, prs, issues, previous=None):
         parts.append("### Contributors\nThanks to " + ", ".join(f"@{name}" for name in contributors) + ".")
     if kind == "launcher":
         parts.append(LAUNCHER_FOOTER)
+    if kind == "game":
+        parts.append(PLAYERS_FOOTER)
     parts.append("---\n" + DISCLAIMER)
     return title, "\n\n".join(parts) + "\n"
 
@@ -500,8 +508,10 @@ def green_main_head(parity=False):
     releases), the newest commit parity-main passed on, if its checks passed too: parity-main runs on batches of
     merges, so the commits a run skipped are covered by the next one, and a superseded run counts for nothing."""
     workflow = "parity-main" if parity else "checks"
+    # 50, not 10: every merge cancels the parity-main run before it, so a busy hour of merges pushes the last
+    # finished run out of a short window and no release goes out (2026-11-01: 14 h without a Nightly).
     runs = gh_json("run", "list", "--repo", REPO, "--workflow", workflow, "--branch", "main", "--event", "push",
-                   "--limit", "10", "--json", "headSha,status,conclusion")
+                   "--limit", "50", "--json", "headSha,status,conclusion")
     for entry in runs:
         if entry["status"] == "completed" and entry["conclusion"] != "cancelled":
             if entry["conclusion"] != "success":

@@ -28,6 +28,16 @@ pub struct Registries {
     /// Game rule name -> integer-valued.
     pub game_rules: Vec<(String, bool)>,
     pub players: Vec<String>,
+    /// A dedicated server's lists, for the completions of `/op`, `/deop`, `/pardon`, `/pardon-ip` and
+    /// `/whitelist`: the operators' names, the banned names and addresses, the whitelisted names.
+    pub ops: Vec<String>,
+    pub banned_players: Vec<String>,
+    pub banned_ips: Vec<String>,
+    pub whitelisted: Vec<String>,
+    /// `ClientSuggestionProvider.customCompletionSuggestions`: the extra chat
+    /// completions the server sent (ClientboundCustomChatCompletionsPacket),
+    /// each once.
+    pub custom_completions: std::collections::BTreeSet<String>,
     /// Scoreboard objective names, team names and tracked score holders.
     pub objectives: Vec<String>,
     pub teams: Vec<String>,
@@ -87,7 +97,55 @@ pub struct RegistryIds {
     pub tags: Vec<String>,
 }
 const EMPTY: &[String] = &[];
+/// ClientboundCustomChatCompletionsPacket.Action.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CustomCompletionAction {
+    Add,
+    Remove,
+    Set,
+}
+impl CustomCompletionAction {
+    /// `Action.BY_ID`: `ByIdMap.continuous` with `OutOfBoundsStrategy.ZERO`,
+    /// so an unknown id is `ADD`.
+    pub fn from_id(id: i32) -> Self {
+        match id {
+            1 => Self::Remove,
+            2 => Self::Set,
+            _ => Self::Add,
+        }
+    }
+}
+/// `ClientSuggestionProvider.modifyCustomCompletions`: the server adds,
+/// removes or replaces the extra chat completions.
+pub fn modify_custom_completions(
+    set: &mut std::collections::BTreeSet<String>,
+    action: CustomCompletionAction,
+    entries: &[String],
+) {
+    match action {
+        CustomCompletionAction::Add => set.extend(entries.iter().cloned()),
+        CustomCompletionAction::Remove => {
+            for e in entries {
+                set.remove(e);
+            }
+        }
+        CustomCompletionAction::Set => {
+            set.clear();
+            set.extend(entries.iter().cloned());
+        }
+    }
+}
 impl Registries {
+    /// `ClientSuggestionProvider.getCustomTabSuggestions`: what chat (not a
+    /// command) completes, the online players' names with the server's custom
+    /// completions, each once.
+    pub fn custom_tab_suggestions(&self) -> std::collections::BTreeSet<&str> {
+        self.players
+            .iter()
+            .chain(&self.custom_completions)
+            .map(String::as_str)
+            .collect()
+    }
     /// Fill what the game did not build itself from vanilla's exported
     /// registries (`command-registries.json`, written by
     /// `VanillaCommandParseOracle registries`): built-in registries such as

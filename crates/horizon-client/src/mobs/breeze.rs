@@ -6,7 +6,11 @@ use super::{
     anim::{Poses, State},
     keyframes::Animation,
 };
-use horizon_core::{geometry::Vec3, jmath, random::RandomSource};
+use horizon_core::{
+    geometry::{Aabb, Vec3},
+    jmath,
+    random::RandomSource,
+};
 use std::collections::HashMap;
 
 // `variant3` is the pose, `variant` the pose the animations last saw,
@@ -155,13 +159,16 @@ pub(super) fn jump_vector(
     }
     Some(Vec3::new(v0r * jmath::cos(xz), v0y, v0r * jmath::sin(xz)).scale(f64::from(0.95_f32)))
 }
-/// `LongJumpUtil.isClearTransition`: the box fits at points no further apart
-/// than nine tenths of its smaller side.
+/// `LongJumpUtil.isClearTransition`: the box of `Pose.LONG_JUMPING` fits at
+/// points no further apart than nine tenths of its smaller side.
 fn clear_transition(m: &Mob, w: &MobWorld, from: Vec3, to: Vec3) -> bool {
+    let (width, height, _) = m.awake_dims_in(true);
+    let (width, height) = (width as f32, height as f32);
     let d = to.subtract(from);
-    let min = f64::from(m.width().min(m.height()));
+    let min = f64::from(width.min(height));
     let checks = (d.length() / min).ceil() as i32;
     let step = d.normalize().scale(min * f64::from(0.9_f32));
+    let half = f64::from(width) / 2.0;
     let mut p = from;
     (0..checks).all(|i| {
         p = if i == checks - 1 {
@@ -169,7 +176,11 @@ fn clear_transition(m: &Mob, w: &MobWorld, from: Vec3, to: Vec3) -> bool {
         } else {
             p.add_vector(step)
         };
-        w.no_collision(m.bounds_at(p))
+        // `EntityDimensions.makeBoundingBox`.
+        w.no_collision(Aabb::new(
+            Vec3::new(p.x - half, p.y, p.z - half),
+            Vec3::new(p.x + half, p.y + f64::from(height), p.z + half),
+        ))
     })
 }
 /// `LongJump.calculateOptimalJumpVector`: the allowed angles shuffled, the

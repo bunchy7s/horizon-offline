@@ -25,7 +25,8 @@ pinned dependency checksums and compiler settings. Class checksums detect missin
 outputs. Compilation happens in a private staging folder before publishing a complete cache
 entry. Sources and paths are normalized so one release bundle works on all three platforms.
 
-Compatible exporters run sequentially through one server JVM and one client JVM. Both keep
+Compatible exporters run through one server JVM (two with 6 processors or more, below) and one
+client JVM, each worker's exporters in a fixed order, the workers side by side. They keep
 Minecraft's initialized built-in registries. Every task restores the original registry tags
 before replying; failures stop preparation. Collision exports share the first generated
 registry and collision files, encoded block states and shape grids within the server worker.
@@ -36,14 +37,49 @@ components as well as tags. The data generator also remains separate. Inspection
 `net.minecraft.data.Main.main` showed that it calls `Util.shutdownExecutors` after running
 its providers. Calling it inside a worker would shut down shared executors; incorporating
 its providers directly needs a separate comparison of registry and executor lifetimes.
-Fresh release preparation therefore starts five exporter/data-generator JVMs, down from 18,
-and invokes no compiler. `HORIZON_PREPARE_ISOLATED=1` retains separate exporter JVMs for
-output comparisons and diagnosis.
+Fresh release preparation therefore starts five exporter/data-generator JVMs, down from 18
+(six with 6 processors or more, below), and invokes no compiler. `HORIZON_PREPARE_ISOLATED=1`
+retains separate exporter JVMs for output comparisons and diagnosis.
+
+Those JVMs run on four lanes at once, so at most three run at a time (five lanes and four JVMs
+with the split below): the server worker's steps in their fixed order; the client worker's,
+then the command registries'; the data generator, then the creative tabs'; and the Rust-only
+copying (client assets and data, the world generator's bundle), spread over several threads.
+The world generator's tables, which need the block facts and the reports, and the manifest
+come after every lane. A worker stops when its lane is done. The two sides compile at once
+too. Imports and checks hash the pinned files on several threads; every file is still checked
+in full.
+
+`HORIZON_PREPARE_JOBS` is how many threads each copying, hashing or compiling step spreads
+over: the logical processors by default, at most 8. `1` also runs the lanes one after another
+(for a machine short on memory); any other number runs them all at once. From 6, the world
+generator's block behaviour and structure blocks, a quarter of the server lane, run on a fifth
+lane in a second server JVM: it costs a second Bootstrap and ~400 MB, and only pays off when
+the other lanes would leave processors idle. On a 6-core laptop they finished ~20 s before the
+server lane; the split itself is not yet timed on such a machine (on 3 cores it is slower,
+44.9 s against 40.5 s, so it stays off there). The release check prepares both ways.
+
+Every JVM preparing starts (javac too, through `-J`) runs with `-XX:TieredStopAtLevel=1
+-XX:+UseSerialGC`: short batch jobs side by side lose more CPU to the C2 compiler than it wins
+back, and the serial collector keeps their heaps small (fresh: 105 s before, 63–66 s after,
+same output). Inside the server worker the collision exporter skips its 62 MB verification
+inputs, which only the parity harness reads, and the gameplay facts exporter streams its 56 MB
+file: the worker peaks at about 480 MB instead of 1.25 GB, and a fresh preparation at about
+1.06 GB for all its processes instead of 1.47 GB (about 400 MB more with the second server
+JVM). Threads reading one jar share its parsed member list.
+
+A repeat run starts no JVM when nothing changed: each exporter is skipped by the hashes of its
+sources, its jar and its outputs. Most of those are in `horizon-resources.json`; the block
+behaviour and structure-block exporters keep a `stamp.json` beside their working files in
+`.local/` (the exporter bundle's key, the server jar, this preparer's sources, and the
+outputs' sha256), so the prepared files stay the same.
 
 `tools/check_prepare_exporters.py` requires identical resource file sets and identical bytes
 for every file stable across the two isolated runs. For the three known noisy JSON files,
 it also requires semantic equality after normalizing object key order, opaque JVM lambda
 addresses and creative-tab tag set order. Other variation fails the release check.
+It compares two batched runs with them, with 6 jobs and with 2 (six JVMs and five), then
+repeats the second: that run must start no JVM and leave every file as it was.
 
 On Linux with Java 25, the output comparisons used 23,204 resource files per run.
 All runs used precompiled exporters:

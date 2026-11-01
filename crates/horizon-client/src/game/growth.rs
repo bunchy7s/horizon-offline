@@ -1,9 +1,10 @@
 //! Client glue for sapling growth and bone meal: installs the live feature
-//! registry and routes `BoneMealItem.useOn` through the behaviour library.
+//! registry, routes `BoneMealItem.useOn` through the behaviour library, and
+//! crops a growing plant's head with shears (`ShearsItem.useOn`).
 use super::Game;
 use horizon_client::{Result, items::ItemStack, vanillagen};
 use horizon_core::{geometry::Direction, position::BlockPos};
-use horizon_world::worldgen::live::LiveFeatures;
+use horizon_world::{level::classes::Class, worldgen::live::LiveFeatures};
 use std::sync::Arc;
 
 impl Game<'_> {
@@ -47,6 +48,52 @@ impl Game<'_> {
             self.consume_held();
         }
         Ok(used)
+    }
+    /// `ShearsItem.useOn` on a growing plant's head below its top age (kelp,
+    /// weeping and twisting vines, cave vines): the head goes to
+    /// `GrowingPlantHeadBlock.getMaxAgeState` (age 25) with
+    /// `block.growing_plant.crop`, the level hears a `block_change`, and the
+    /// shears wear by one. True when it cropped (SUCCESS).
+    pub(super) fn shears_crop(&mut self, pos: [i32; 3], stack: &ItemStack) -> Result<bool> {
+        if &*stack.item != "minecraft:shears" {
+            return Ok(false);
+        }
+        let state = self.world.block(pos[0], pos[1], pos[2]);
+        let b = self.res.behaviours();
+        // A head grows and carries `AGE_25`; the plant's body below it does not.
+        if !b.data(state).is(Class::GrowingPlantHead) {
+            return Ok(false);
+        }
+        // `GrowingPlantHeadBlock.isMaxAge`: the property's top value.
+        if b.table.int(state, b.props.age) == 25 {
+            return Ok(false);
+        }
+        // `GrowingPlantHeadBlock.getMaxAgeState`.
+        let max_age = b.table.set_int(state, b.props.age, 25);
+        self.audio.play(
+            "minecraft:block.growing_plant.crop",
+            Some([
+                f64::from(pos[0]) + 0.5,
+                f64::from(pos[1]) + 0.5,
+                f64::from(pos[2]) + 0.5,
+            ]),
+            1.0,
+            1.0,
+        );
+        self.level_set(pos, max_age)?;
+        self.post_block_game_event(
+            "minecraft:block_change",
+            pos,
+            self.sculk_actor(),
+            Some(max_age),
+        );
+        self.damage_held(1);
+        // ItemStack.useOn: an item interaction counts as a use.
+        self.stats.add("used", &stack.item, 1);
+        self.swing_arm();
+        // ServerPlayerGameMode.useItemOn: a consuming useOn reports it.
+        self.trigger_block("minecraft:item_used_on_block", pos, stack);
+        Ok(true)
     }
 }
 

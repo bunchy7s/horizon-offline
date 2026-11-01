@@ -407,7 +407,7 @@ def parse_java(path_and_root):
     path, root = path_and_root
     rel = os.path.relpath(path, root).replace(os.sep, "/")
     try:
-        text = open(path, encoding="utf-8", errors="replace").read()
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
     code, strings = blank_java(text)
@@ -599,6 +599,7 @@ def parse_class_bytes(item):
         "extends": [x for x in [cf.super] + cf.interfaces if x and not x.startswith("java/")],
         "methods": {}, "imports": {}, "package": name.rsplit("/", 1)[0],
         "outer": name.rsplit("$", 1)[0] if "$" in name else None, "fields": {}, "bytecode": True,
+        "declared_fields": {field.split(" ", 1)[0] for field in cf.fields},
     }
     if any(p[:1].isdigit() for p in name.rsplit("/", 1)[-1].split("$")[1:]):
         cls["anonymous"] = True
@@ -1243,8 +1244,12 @@ def build(sources, jars, jobs):
                     decl, meth = van.find_method(cp, member)
                     if not decl:
                         cls = van.classes[cp]
-                        fields = re.search(r"\b" + re.escape(member) + r"\b", open(os.path.join(next(s for s in sources if os.path.exists(os.path.join(s, cls["file"]))), cls["file"]), errors="replace").read()) if member[0].islower() else None
-                        if not fields:
+                        field = any(member in van.classes[p].get("declared_fields", ()) for p in van.lineage(cp))
+                        source = next((Path(s) / cls["file"] for s in sources if (Path(s) / cls["file"]).is_file()), None)
+                        if not field and source is not None and member[0].islower():
+                            field = bool(re.search(r"\b" + re.escape(member) + r"\b",
+                                                   source.read_text(encoding="utf-8", errors="replace")))
+                        if not field:
                             stale.append({"what": "method", "cite": f"{short(cp)}.{member}", "file": f["file"], "line": line})
                         continue
                     k = key(decl, member)

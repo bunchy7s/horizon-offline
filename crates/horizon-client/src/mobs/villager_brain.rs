@@ -894,7 +894,10 @@ fn tickets(m: &Mob, others: &crate::fast_hash::FxHashMap<[i32; 3], usize>, p: [i
     n + others.get(&p).copied().unwrap_or(0)
 }
 /// The tickets the other living villagers' POIs take, by POI.
-fn others_tickets(m: &Mob, w: &MobWorld) -> crate::fast_hash::FxHashMap<[i32; 3], usize> {
+pub(super) fn others_tickets(
+    m: &Mob,
+    w: &MobWorld,
+) -> crate::fast_hash::FxHashMap<[i32; 3], usize> {
     let mut taken = crate::fast_hash::FxHashMap::default();
     for o in w.others {
         if o.id != m.id && o.alive && o.species == Species::Villager {
@@ -922,7 +925,7 @@ fn chunk_pois(
         return;
     };
     let kind = |state: u32| poi_of_state(w, horizon_world::registry::BlockStateId(state));
-    let min = crate::chunk::MIN_Y;
+    let min = w.world.bottom_y();
     for s in (y0 - min) >> 4..=(y1 - min) >> 4 {
         let section = &chunk.sections[s as usize];
         for &(i, poi) in w.world.pois.get((qx, s, qz), section, kind).iter() {
@@ -951,8 +954,8 @@ fn pois_in_range(
     let r2 = i64::from(radius) * i64::from(radius);
     let (cx, cz) = (c[0] >> 4, c[2] >> 4);
     let chunks = radius.div_euclid(16) + 1;
-    let y0 = (c[1] - radius).max(crate::chunk::MIN_Y);
-    let y1 = (c[1] + radius).min(crate::chunk::MIN_Y + crate::chunk::HEIGHT - 1);
+    let y0 = (c[1] - radius).max(w.world.bottom_y());
+    let y1 = (c[1] + radius).min(w.world.top_y() - 1);
     for qz in cz - chunks..=cz + chunks {
         for qx in cx - chunks..=cx + chunks {
             chunk_pois(w, (qx, qz), y0, y1, |poi, p| {
@@ -974,12 +977,42 @@ fn pois_in_range(
     found.sort_by_key(|&(_, p)| dist_sqr(p, c));
     found
 }
+/// `PoiManager.getInRange(poiType -> true, center, radius, IS_OCCUPIED)`: the
+/// POIs within `radius` of `center` that some villager holds a ticket on
+/// (`taken`, from [`others_tickets`]), in scan order.
+pub(super) fn occupied_pois_in_range(
+    w: &MobWorld,
+    taken: &crate::fast_hash::FxHashMap<[i32; 3], usize>,
+    center: [i32; 3],
+    radius: i32,
+) -> Vec<[i32; 3]> {
+    let mut found = Vec::new();
+    let r2 = i64::from(radius) * i64::from(radius);
+    let (cx, cz) = (center[0] >> 4, center[2] >> 4);
+    let chunks = radius.div_euclid(16) + 1;
+    let y0 = (center[1] - radius).max(w.world.bottom_y());
+    let y1 = (center[1] + radius).min(w.world.top_y() - 1);
+    for qz in cz - chunks..=cz + chunks {
+        for qx in cx - chunks..=cx + chunks {
+            chunk_pois(w, (qx, qz), y0, y1, |_, p| {
+                if (p[0] - center[0]).abs() <= radius
+                    && (p[2] - center[2]).abs() <= radius
+                    && dist_sqr(p, center) <= r2
+                    && taken.get(&p).is_some_and(|&n| n > 0)
+                {
+                    found.push(p);
+                }
+            });
+        }
+    }
+    found
+}
 /// `PoiManager.exists(pos, predicate)`.
 fn poi_exists(m: &Mob, w: &MobWorld, p: [i32; 3], f: PoiFilter) -> bool {
     poi_at(w, p[0], p[1], p[2]).is_some_and(|poi| poi_matches(m, f, poi))
 }
 /// `BlockPos.closerToCenterThan(position, d)`.
-fn closer_to_center(p: [i32; 3], at: Vec3, d: f64) -> bool {
+pub(super) fn closer_to_center(p: [i32; 3], at: Vec3, d: f64) -> bool {
     let c = Vec3::new(
         f64::from(p[0]) + 0.5,
         f64::from(p[1]) + 0.5,
@@ -991,7 +1024,7 @@ fn manhattan(a: [i32; 3], b: [i32; 3]) -> i32 {
     (a[0] - b[0]).abs() + (a[1] - b[1]).abs() + (a[2] - b[2]).abs()
 }
 /// The village sections: sections holding a taken village POI.
-fn village_sections(m: &Mob, w: &MobWorld) -> Vec<[i32; 3]> {
+pub(super) fn village_sections(m: &Mob, w: &MobWorld) -> Vec<[i32; 3]> {
     let mut out = Vec::new();
     let mut add = |p: [i32; 3]| {
         let s = [p[0] >> 4, p[1] >> 4, p[2] >> 4];
@@ -1029,7 +1062,7 @@ fn village_sections(m: &Mob, w: &MobWorld) -> Vec<[i32; 3]> {
 }
 /// `PoiManager.sectionsToVillage`: the Chebyshev distance in sections to a
 /// village section, at most 7.
-fn sections_to_village(villages: &[[i32; 3]], s: [i32; 3]) -> i32 {
+pub(super) fn sections_to_village(villages: &[[i32; 3]], s: [i32; 3]) -> i32 {
     villages
         .iter()
         .map(|v| {
@@ -1235,6 +1268,12 @@ enum B {
     ShowTrades {
         t: Timed,
         look_time: i32,
+        /// `playerItemStack` (outer `None`: null) and `displayItems`,
+        /// `cycleCounter`, `displayIndex`.
+        player_item: Option<Option<std::sync::Arc<str>>>,
+        items: Vec<crate::items::ItemStack>,
+        cycle: i32,
+        index: usize,
     },
     TradeWithVillager(Timed),
     MakeLove {
@@ -1535,7 +1574,7 @@ impl B {
                     t.begin(cx.lr, cx.now);
                     // start
                     mem(m).path.set_opt(path.clone());
-                    m.nav_move_to_path(path.clone(), f64::from(*speed));
+                    m.nav_move_to_path(cx.w, path.clone(), f64::from(*speed));
                     return true;
                 }
                 let mm = mem(m);
@@ -1614,7 +1653,13 @@ impl B {
                 mm.look_target.set(Tracker::Entity(Who::Player, true));
                 true
             }
-            B::ShowTrades { t, look_time } => {
+            B::ShowTrades {
+                t,
+                look_time,
+                cycle,
+                index,
+                ..
+            } => {
                 if !mem(m).interaction_target.present() || !show_trades_condition(m, cx.w) {
                     return false;
                 }
@@ -1623,6 +1668,8 @@ impl B {
                 if let Some(target) = mem(m).interaction_target.value() {
                     mem(m).look_target.set(Tracker::Entity(target, true));
                 }
+                *cycle = 0;
+                *index = 0;
                 *look_time = 40;
                 true
             }
@@ -2853,7 +2900,7 @@ impl B {
                     if d > 4 && compute_path(m, cx.w, cx.now, &walk, path, speed, cant_reach) {
                         *last_target = Some(now_target);
                         mem(m).path.set_opt(path.clone());
-                        m.nav_move_to_path(path.clone(), f64::from(*speed));
+                        m.nav_move_to_path(cx.w, path.clone(), f64::from(*speed));
                     }
                 }
             }
@@ -2942,7 +2989,14 @@ impl B {
                     });
                 }
             }
-            B::ShowTrades { t, look_time } => {
+            B::ShowTrades {
+                t,
+                look_time,
+                player_item,
+                items,
+                cycle,
+                index,
+            } => {
                 let still = show_trades_condition(m, cx.w)
                     && *look_time > 0
                     && mem(m).interaction_target.present();
@@ -2953,8 +3007,54 @@ impl B {
                 if let Some(target) = mem(m).interaction_target.value() {
                     mem(m).look_target.set(Tracker::Entity(target, true));
                 }
-                // No offer matches the player's item: look for a while only.
-                *look_time = (*look_time).min(40);
+                // findItemsToDisplay: the trades the player's item pays for.
+                let current = cx.w.player.as_ref().and_then(|p| p.main_hand.clone());
+                // getOffers makes the trades on first use: the level rolls
+                // them, and the cost is compared from the next tick on.
+                let unset = m.extra.trade.as_ref().is_none_or(|t| t.unset);
+                if current.is_some() && unset {
+                    cx.events.push(MobEvent::VillagerOffers { mob: m.id });
+                } else if player_item.as_ref() != Some(&current) {
+                    *player_item = Some(current.clone());
+                    items.clear();
+                    if let Some(held) = &current {
+                        if let Some(trade) = &m.extra.trade {
+                            for offer in &trade.offers {
+                                if !offer.out_of_stock()
+                                    && (offer.base_cost_a.stack.item == *held
+                                        || offer
+                                            .cost_b
+                                            .as_ref()
+                                            .is_some_and(|c| c.stack.item == *held))
+                                {
+                                    items.push(offer.result.clone());
+                                }
+                            }
+                        }
+                        if let Some(first) = items.first() {
+                            *look_time = 900;
+                            m.extra.set_main_hand_stack(Some(first.clone()));
+                        }
+                    }
+                }
+                if !items.is_empty() {
+                    // displayCyclingItems
+                    if items.len() >= 2 {
+                        *cycle += 1;
+                        if *cycle >= 40 {
+                            *index += 1;
+                            *cycle = 0;
+                            if *index > items.len() - 1 {
+                                *index = 0;
+                            }
+                            m.extra.set_main_hand_stack(Some(items[*index].clone()));
+                        }
+                    }
+                } else {
+                    // clearHeldItem; no offer matches: look for a while only.
+                    m.extra.set_main_hand(None);
+                    *look_time = (*look_time).min(40);
+                }
                 *look_time -= 1;
             }
             B::TradeWithVillager(t) => {
@@ -3206,9 +3306,12 @@ impl B {
                 mm.walk_target.clear();
                 mm.look_target.clear();
             }
-            B::ShowTrades { t, .. } => {
+            B::ShowTrades { t, player_item, .. } => {
                 t.running = false;
                 mem(m).interaction_target.clear();
+                // clearHeldItem
+                m.extra.set_main_hand(None);
+                *player_item = None;
             }
             B::TradeWithVillager(t) => {
                 t.running = false;
@@ -3472,6 +3575,7 @@ fn harvest_tick(
                 pos: p,
                 name: crop,
                 effect: false,
+                flags: horizon_world::level::flags::UPDATE_ALL,
             });
             cx.events.push(MobEvent::Sound(
                 "item.crop.plant",
@@ -3562,8 +3666,8 @@ fn homes_in_range(m: &Mob, w: &MobWorld, radius: i32) -> Vec<[i32; 3]> {
     let c = block_of(m.position);
     let r2 = i64::from(radius) * i64::from(radius);
     let mut out = Vec::new();
-    let y0 = (c[1] - radius).max(crate::chunk::MIN_Y);
-    let y1 = (c[1] + radius).min(crate::chunk::MIN_Y + crate::chunk::HEIGHT - 1);
+    let y0 = (c[1] - radius).max(w.world.bottom_y());
+    let y1 = (c[1] + radius).min(w.world.top_y() - 1);
     for qz in (c[2] - radius) >> 4..=(c[2] + radius) >> 4 {
         for qx in (c[0] - radius) >> 4..=(c[0] + radius) >> 4 {
             chunk_pois(w, (qx, qz), y0, y1, |poi, p| {
@@ -3796,7 +3900,7 @@ fn happy_particles(m: &Mob, cx: &mut Bx) {
     });
 }
 /// `BehaviorUtils.findSectionClosestToVillage`.
-fn closest_section(villages: &[[i32; 3]], center: [i32; 3], radius: i32) -> [i32; 3] {
+pub(super) fn closest_section(villages: &[[i32; 3]], center: [i32; 3], radius: i32) -> [i32; 3] {
     let here = sections_to_village(villages, center);
     let mut best: Option<([i32; 3], i32)> = None;
     for z in center[2] - radius..=center[2] + radius {
@@ -3893,6 +3997,10 @@ fn show_trades() -> B {
     B::ShowTrades {
         t: timed(400, 1600),
         look_time: 0,
+        player_item: None,
+        items: Vec::new(),
+        cycle: 0,
+        index: 0,
     }
 }
 fn interact(kind: Interact) -> B {

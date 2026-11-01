@@ -16,7 +16,9 @@ impl Game<'_> {
             }
         };
         if let Some(hit) = self.remote_object_hit(true) {
-            offer(hit.distance, Some(hit.id));
+            // Interaction.getPickResult is Entity's: nothing to pick.
+            let id = (!self.interactions.contains_key(&hit.id)).then_some(hit.id);
+            offer(hit.distance, id);
         }
         if let Some((i, d)) = self.mob_hit() {
             offer(d, Some(self.mobs[i].id as i32));
@@ -77,7 +79,7 @@ impl Game<'_> {
         } else if let Some(b) = self.boats.iter().find(|b| b.id == id) {
             b.entity_type()
         } else if let Some(c) = self.carts.iter().find(|c| c.id == id) {
-            c.kind.id().to_owned()
+            c.kind.item().to_owned()
         } else if self.armor_stands.iter().any(|a| a.id == id) {
             "minecraft:armor_stand".to_owned()
         } else if let Some(c) = self.cushions.iter().find(|c| c.id == id) {
@@ -124,7 +126,7 @@ impl Game<'_> {
         let d2: f64 = (0..3)
             .map(|a| (eye[a] - eye[a].clamp(b.0[a], b.1[a])).powi(2))
             .sum();
-        let range = if self.creative { 5.0 } else { 3.0 } + 3.0;
+        let range = self.entity_reach + 3.0;
         d2 < range * range
     }
 }

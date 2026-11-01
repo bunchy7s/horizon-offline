@@ -1,0 +1,25 @@
+# A native mod that uses every part of the bundle format (docs/native-mods.md): its own crate with
+# a dependency from Horizon's Cargo.lock, data files, a named hook point and a post-build step.
+[mod]
+id = "crate_demo"
+version = "0.1.0"
+
+# The hook point by its name in native-hooks.json, not its path in the source.
+[[injection]]
+id = "frame"
+hook = "frame"
+hook_version = 1
+kind = "HEAD"
+helper = "frame.rs"
+bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
+
+# engine/ (its own Cargo.toml): a workspace member that horizon-client depends on, compiled and
+# cached on its own.
+[[crate]]
+id = "engine"
+path = "engine"
+
+# Built after the game, then run in the new build's folder.
+[[post_build]]
+crate = "engine"
+bin = "bake"

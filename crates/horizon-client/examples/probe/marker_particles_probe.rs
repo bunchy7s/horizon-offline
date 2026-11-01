@@ -76,6 +76,7 @@ pub fn main() -> Result<()> {
             raining_at: &|_| false,
             height_no_leaves: &|_| 0,
             firefly_bush_sounds: false,
+            creaking_active: false,
             sky_darken: 0,
             marker: target.map(|name| (name, &options as &dyn Fn(_) -> _)),
             model_offset: &|_, _, _| None,

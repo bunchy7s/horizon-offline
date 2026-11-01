@@ -140,8 +140,8 @@ TreeDecorator.Context.isWaterOrWaterNearby	inline	crates/horizon-world/src/world
 TrunkPlacer.placeBelowTrunkBlock	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::place_below_trunk	places the block below the trunk when the provider gives one
 FlatLevelGeneratorSettings.validateHeight	skip:java		codec check that layers total at most 4064; flat.rs clamps each layer to that instead
 FlatLevelGeneratorSettings.withBiomeAndLayers	port	crates/horizon-client/src/title/flat.rs::FlatSettings::parse	gap: minor: builds the layers and biome from the preset text; structure overrides and decorations come from the base
-FlatLevelGeneratorSettings.adjustGenerationSettings	missing		player: superflat layers and decorations are saved with the world but no code applies them, so the generated world does not get the flat layers or its decorations
-FlatLevelGeneratorSettings.updateLayers	missing		player: nothing expands the flat layers into the world's block layers (see adjustGenerationSettings)
+FlatLevelGeneratorSettings.adjustGenerationSettings	port	crates/horizon-client/src/flatgen.rs::decoration_features	the world's biome features by step, without the structure steps and the lakes step when they are excluded
+FlatLevelGeneratorSettings.updateLayers	port	crates/horizon-client/src/flatgen.rs::FlatTerrain::from_settings	the layers expand into block ids and an all-air list is the void generator
 MaterialRuleContext.getBiome	port	crates/horizon-world/src/worldgen/material_condition.rs::Context::biome	the biome at the position, cached per column
 MaterialRuleContext.getMinSurfaceLevel	port	crates/horizon-world/src/worldgen/material_condition.rs::Context::minimum_surface_level	the preliminary surface level minus the depth, cached per column
 MaterialRuleContext.getNoiseSampler	port	crates/horizon-world/src/worldgen/material_condition.rs::Context::bind_noise	binds a noise by name and dimension, once

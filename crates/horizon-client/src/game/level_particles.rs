@@ -82,6 +82,13 @@ impl Game<'_> {
                 }
             }
             None if &*facts.get(state).name == "minecraft:water" => (p, count * 3, 3.0, 1.0, false),
+            // A mod block the level answered bone meal for: the port knows no
+            // `BonemealableBlock.Type` for it, and vanilla's `GROWER` is the
+            // one a block growing itself has, so the sparks stay inside it
+            // rather than spreading over its neighbours.
+            None if !facts.get(state).name.starts_with("minecraft:") => {
+                (p, count, 0.5, self.block_shape_top(p), true)
+            }
             None => return,
         };
         self.spawn_particles(at, count, xz, height, floating, ParticleType::HappyVillager);
@@ -249,10 +256,7 @@ impl Game<'_> {
         let mut root = None;
         for step in 1..11 {
             let y = pos.y + step;
-            if !(horizon_client::chunk::MIN_Y
-                ..horizon_client::chunk::MIN_Y + horizon_client::chunk::HEIGHT)
-                .contains(&y)
-            {
+            if !(self.world.bottom_y()..self.world.top_y()).contains(&y) {
                 break;
             }
             let state = self.world.block(pos.x, y, pos.z);

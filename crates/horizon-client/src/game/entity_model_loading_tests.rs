@@ -17,13 +17,14 @@ const WOODS: [&str; 11] = [
     "pale_oak",
     "test_wood",
 ];
-const CARTS: [&str; 6] = [
+const CARTS: [&str; 7] = [
     "minecart",
     "chest_minecart",
     "hopper_minecart",
     "furnace_minecart",
     "tnt_minecart",
     "command_block_minecart",
+    "spawner_minecart",
 ];
 
 fn fixture() -> Value {
@@ -178,7 +179,7 @@ fn entity_model_batches_preserve_parts_missing_layers_and_load_failures() {
     let mut all = fixture();
     fs::write(&file, serde_json::to_vec(&all).unwrap()).unwrap();
     assert_equivalent(&root.0);
-    assert_eq!(optimized(&root.0).len(), 42);
+    assert_eq!(optimized(&root.0).len(), 43);
     all.as_object_mut()
         .unwrap()
         .remove("minecraft:armor_stand_small#main");
@@ -187,7 +188,7 @@ fn entity_model_batches_preserve_parts_missing_layers_and_load_failures() {
         .remove("minecraft:boat/oak#main");
     fs::write(&file, serde_json::to_vec(&all).unwrap()).unwrap();
     assert_equivalent(&root.0);
-    assert_eq!(optimized(&root.0).len(), 40);
+    assert_eq!(optimized(&root.0).len(), 41);
     let document = EntityModelDocument::load(&root.0).unwrap();
     let mut first = document.model("minecraft:armor_stand#main").unwrap();
     first.children.clear();
@@ -207,9 +208,10 @@ fn armor_equipment_loads_without_an_entity_model_document() {
     fs::create_dir_all(&equipment).unwrap();
     fs::write(
         equipment.join("leather.json"),
-        serde_json::to_vec(&json!({"layers": {"humanoid": [{
-            "texture": "minecraft:leather", "dyeable": {"color_when_undyed": 0x123456}
-        }]}}))
+        serde_json::to_vec(&json!({"layers": {"humanoid": [
+            {"texture": "minecraft:leather", "dyeable": {"color_when_undyed": 0x123456}},
+            {"texture": "minecraft:leather_overlay"}
+        ]}}))
         .unwrap(),
     )
     .unwrap();
@@ -219,9 +221,40 @@ fn armor_equipment_loads_without_an_entity_model_document() {
     assert!(assets.layers.is_empty());
     assert_eq!(
         assets.equipment["minecraft:leather"]["humanoid"],
-        ("entity/equipment/humanoid/leather".into(), Some(0x123456))
+        vec![
+            ("entity/equipment/humanoid/leather".into(), Some(0x123456)),
+            ("entity/equipment/humanoid/leather_overlay".into(), None),
+        ]
     );
     assert!(!assets.equipment.contains_key("minecraft:invalid"));
+}
+
+#[test]
+fn content_mods_equipment_loads_under_its_namespace() {
+    let root = FixtureRoot::new();
+    let equipment = root.0.join("assets/gems/equipment");
+    fs::create_dir_all(&equipment).unwrap();
+    fs::write(
+        equipment.join("ruby.json"),
+        serde_json::to_vec(&json!({"layers": {
+            "humanoid": [{"texture": "gems:ruby"}],
+            "humanoid_leggings": [{"texture": "gems:ruby"}]
+        }}))
+        .unwrap(),
+    )
+    .unwrap();
+    // Not a content root: other namespaces stay unread, as before.
+    assert!(ArmorStandAssets::load(&root.0, None).equipment.is_empty());
+    fs::write(
+        root.0.join(horizon_items::content_namespaces::MARKER),
+        br#"["gems"]"#,
+    )
+    .unwrap();
+    let assets = ArmorStandAssets::load(&root.0, None);
+    assert_eq!(
+        assets.equipment["gems:ruby"]["humanoid_leggings"],
+        vec![("gems:entity/equipment/humanoid_leggings/ruby".into(), None)]
+    );
 }
 
 #[test]

@@ -4,12 +4,12 @@
 //! order only inserts the result (`ClientPacketListener.handleLevelChunkWithLight`).
 use super::Game;
 use horizon_client::{
-    chunk::{BIOME_STRATEGY, Chunk, Light, MIN_Y, SECTIONS, Section, block_strategy},
+    chunk::{BIOME_STRATEGY, Chunk, ColumnLayout, Light, Section, block_strategy},
     streaming::Streaming,
 };
 use horizon_core::paletted::{PalettedContainer, Strategy};
 use horizon_protocol::{
-    chunk::{LightData, SectionLight},
+    chunk::{LightData, Paletted, SectionLight},
     packets::play::{self, Clientbound as C},
     registry::DimensionType,
 };
@@ -24,6 +24,8 @@ use std::sync::{
 /// with an older one is decoded again.
 #[derive(Default)]
 pub(super) struct ChunkFormat {
+    /// The column decoded chunks hold: the client's for the level.
+    column: ColumnLayout,
     min_y: i32,
     sections: usize,
     has_skylight: bool,
@@ -34,6 +36,7 @@ pub(super) struct ChunkFormat {
 impl ChunkFormat {
     pub(super) fn new(dimension: &DimensionType, biome_map: Vec<u16>, biome_bits: u8) -> Self {
         Self {
+            column: ColumnLayout::VANILLA,
             min_y: dimension.min_y,
             sections: dimension.sections(),
             has_skylight: dimension.has_skylight,
@@ -41,33 +44,33 @@ impl ChunkFormat {
             biome_bits,
         }
     }
+    /// Decodes into chunks of `column`.
+    pub(super) fn in_column(self, column: ColumnLayout) -> Self {
+        Self { column, ..self }
+    }
+    /// The column decoded chunks hold.
+    pub(super) fn layout(&self) -> ColumnLayout {
+        self.column
+    }
     pub(super) fn with_dimension(&self, dimension: &DimensionType) -> Self {
-        Self::new(dimension, self.biome_map.clone(), self.biome_bits)
+        Self {
+            column: self.column,
+            ..Self::new(dimension, self.biome_map.clone(), self.biome_bits)
+        }
     }
 
-    /// LevelChunkSection data into the client's fixed -64..320 column.
+    /// LevelChunkSection data into the client's column.
     fn column(&self, p: &play::LevelChunkWithLight) -> Result<Chunk, String> {
         let sections = p
             .chunk
             .sections(self.sections, 16, self.biome_bits)
             .map_err(|e| e.to_string())?;
-        let mut chunk = Chunk::empty(p.x, p.z);
-        let offset = (self.min_y - MIN_Y).div_euclid(16);
-        // Biome table index per quart cell of the dimension's own sections.
-        let mut biome_cells: Vec<[u32; 64]> = Vec::with_capacity(sections.len());
+        let mut chunk = Chunk::with_layout(p.x, p.z, self.column);
+        let offset = (self.min_y - self.column.min_y()).div_euclid(16);
+        let column = self.column.sections() as i32;
         for (i, s) in sections.iter().enumerate() {
             let target = offset + i as i32;
-            let mut cells = [0u32; 64];
-            for (j, cell) in cells.iter_mut().enumerate() {
-                *cell = u32::from(
-                    self.biome_map
-                        .get(s.biomes.get(j) as usize)
-                        .copied()
-                        .unwrap_or(0),
-                );
-            }
-            biome_cells.push(cells);
-            if !(0..SECTIONS as i32).contains(&target) {
+            if !(0..column).contains(&target) {
                 continue;
             }
             // A global section is as wide as the server's registry: 16 bits
@@ -97,30 +100,14 @@ impl ChunkFormat {
             }
             let mut section = Section {
                 blocks,
-                biomes: PalettedContainer::from_values(BIOME_STRATEGY, &cells),
+                biomes: PalettedContainer::new(BIOME_STRATEGY, 0),
                 light: Light::Uniform(0xF0),
             };
             section.compact();
             chunk.sections[target as usize] = Arc::new(section);
         }
-        // Sections outside the dimension's range take its nearest biomes
-        // (the column's top or bottom cell layer repeated).
-        if !biome_cells.is_empty() {
-            let last = biome_cells.len() - 1;
-            for si in 0..SECTIONS as i32 {
-                let i = si - offset;
-                if (0..sections.len() as i32).contains(&i) {
-                    continue;
-                }
-                let (edge, layer) = if i < 0 { (0, 0) } else { (last, 3) };
-                let mut cells = [0u32; 64];
-                for (j, cell) in cells.iter_mut().enumerate() {
-                    *cell = biome_cells[edge][layer * 16 + j % 16];
-                }
-                Arc::make_mut(&mut chunk.sections[si as usize]).biomes =
-                    PalettedContainer::from_values(BIOME_STRATEGY, &cells);
-            }
-        }
+        let biomes: Vec<_> = sections.iter().map(|s| &s.biomes).collect();
+        self.put_biomes(&mut chunk, &biomes);
         // ClientPacketListener.applyLightData: the column keeps the light
         // the server sent; nothing is relit.
         let (layers, above) = self.light(&p.light);
@@ -128,21 +115,67 @@ impl ChunkFormat {
         Ok(chunk)
     }
 
+    /// The dimension's sections' biome containers (in the server's
+    /// registry) into the column's sections. Sections outside the
+    /// dimension's range take its nearest biomes (the column's top or bottom
+    /// cell layer repeated).
+    fn put_biomes(&self, chunk: &mut Chunk, biomes: &[&Paletted]) {
+        if biomes.is_empty() {
+            return;
+        }
+        let offset = (self.min_y - self.column.min_y()).div_euclid(16);
+        // Biome table index per quart cell of the dimension's own sections.
+        let biome_cells: Vec<[u32; 64]> = biomes
+            .iter()
+            .map(|b| {
+                std::array::from_fn(|j| {
+                    u32::from(self.biome_map.get(b.get(j) as usize).copied().unwrap_or(0))
+                })
+            })
+            .collect();
+        let last = biome_cells.len() - 1;
+        for si in 0..self.column.sections() as i32 {
+            let i = si - offset;
+            let cells = if (0..biome_cells.len() as i32).contains(&i) {
+                biome_cells[i as usize]
+            } else {
+                let (edge, layer) = if i < 0 { (0, 0) } else { (last, 3) };
+                std::array::from_fn(|j| biome_cells[edge][layer * 16 + j % 16])
+            };
+            let mut container = PalettedContainer::from_values(BIOME_STRATEGY, &cells);
+            if let Some(v) = container.uniform() {
+                container = PalettedContainer::new(BIOME_STRATEGY, v);
+            }
+            Arc::make_mut(&mut chunk.sections[si as usize]).biomes = container;
+        }
+    }
+
+    /// `LevelChunk.replaceBiomes`: each of the dimension's sections reads
+    /// its biome container from the packet's buffer, in order.
+    fn replace_biomes(&self, chunk: &mut Chunk, data: &play::ChunkBiomeData) -> Result<(), String> {
+        let biomes = data
+            .biomes(self.sections, self.biome_bits)
+            .map_err(|e| e.to_string())?;
+        self.put_biomes(chunk, &biomes.iter().collect::<Vec<_>>());
+        Ok(())
+    }
+
     /// `ClientPacketListener.readSectionList`: the sky and block layers of a
     /// light packet, by section of the client's column, and the sky light
     /// above the column's top section (from the light section just above
     /// it, else open sky).
     pub(super) fn light(&self, light: &LightData) -> (Vec<SectionLight>, [u8; 256]) {
-        let mut layers: Vec<SectionLight> = vec![(None, None); SECTIONS];
+        let column = self.column.sections() as i32;
+        let mut layers: Vec<SectionLight> = vec![(None, None); self.column.sections()];
         let sky = self.has_skylight;
         let mut above = [if sky { 15 } else { 0 }; 256];
         // Light section b is the dimension's section b - 1.
-        let first = (self.min_y - MIN_Y).div_euclid(16) - 1;
+        let first = (self.min_y - self.column.min_y()).div_euclid(16) - 1;
         for (b, layer) in light.layers(self.sections + 2).into_iter().enumerate() {
             let si = first + b as i32;
-            if (0..SECTIONS as i32).contains(&si) {
+            if (0..column).contains(&si) {
                 layers[si as usize] = layer;
-            } else if si == SECTIONS as i32
+            } else if si == column
                 && sky
                 && let Some(l) = &layer.0
             {
@@ -260,9 +293,46 @@ impl Game<'_> {
                 z * 16 + i32::from(info.packed_xz as u8 & 15),
             );
             let state = self.world.block(pos.0, pos.1, pos.2);
-            self.sync_block_entity(pos, state);
+            self.sync_block_entity(pos, None, state);
             // LevelChunk.replaceWithPacketData: the block entity loads its update tag.
             self.remote_block_entity_data([pos.0, pos.1, pos.2], info.kind, &info.tag);
+        }
+    }
+
+    /// `ClientPacketListener.handleChunksBiomes`: each loaded column takes
+    /// its new biomes (`ClientChunkCache.replaceBiomes`), then every section
+    /// of it and of its neighbours is drawn again, as their colours blend
+    /// across columns (`LevelExtractor.setSectionDirty`).
+    pub(super) fn remote_chunks_biomes(&mut self, p: &play::ChunksBiomes) {
+        let Some(format) = self.remote.as_ref().map(|r| r.chunk_format.clone()) else {
+            return;
+        };
+        for data in &p.chunks {
+            let [x, z] = data.pos;
+            if !self.remote_chunk_in_range(x, z) {
+                log::warn!("Ignoring chunk since it's not in the view range: {x}, {z}");
+                continue;
+            }
+            let Some(chunk) = self.world.chunks.get_mut(&(x, z)) else {
+                log::warn!("Ignoring chunk since it's not present: {x}, {z}");
+                continue;
+            };
+            if let Err(e) = format.replace_biomes(Arc::make_mut(chunk), data) {
+                log::warn!("Horizon: biomes of chunk {x} {z}: {e}");
+            }
+        }
+        for data in &p.chunks {
+            let [x, z] = data.pos;
+            for dz in -1..=1 {
+                for dx in -1..=1 {
+                    if !self.world.chunks.contains_key(&(x + dx, z + dz)) {
+                        continue;
+                    }
+                    for sy in 0..self.world.layout().sections() as i32 {
+                        self.world.dirty_sections.insert((x + dx, sy, z + dz));
+                    }
+                }
+            }
         }
     }
 
@@ -351,5 +421,46 @@ mod tests {
             }
         }
         assert!(matches!(decoder.next(), Next::Decoding));
+    }
+
+    /// `LevelChunk.replaceBiomes`: the packet's containers go to the
+    /// dimension's sections (y 0 to 255 in the Nether), mapped to our biome
+    /// table; the blocks stay, and the sections outside the dimension take
+    /// its nearest biomes as a chunk packet's do.
+    #[test]
+    fn chunks_biomes_replace_a_columns_biomes() {
+        let nether = DimensionType::vanilla("minecraft:the_nether");
+        let format = ChunkFormat::new(&nether, vec![0, 7, 9], 2);
+        let mut chunk = Chunk::empty(2, -3);
+        chunk.set(3, 70, 4, 5);
+        // Wire biome 1 everywhere, with 2 in the lowest and the highest cells.
+        let containers: Vec<Paletted> = (0..nether.sections())
+            .map(|i| {
+                let mut cells = [1; 64];
+                if i == 0 {
+                    cells[0] = 2;
+                }
+                if i == nether.sections() - 1 {
+                    cells[63] = 2;
+                }
+                Paletted::from_values(&cells, Wiring::Biomes, 2)
+            })
+            .collect();
+        let data = play::ChunkBiomeData::from_biomes([2, -3], &containers);
+        format.replace_biomes(&mut chunk, &data).unwrap();
+        assert_eq!(chunk.get(3, 70, 4), 5);
+        assert_eq!(chunk.biome(8, 70, 8), 7);
+        assert_eq!(chunk.biome(0, 0, 0), 9);
+        assert_eq!(chunk.biome(4, 0, 0), 7);
+        assert_eq!(chunk.biome(15, 255, 15), 9);
+        // Below and above the Nether: its bottom and top cell layers.
+        assert_eq!(chunk.biome(0, -64, 0), 9);
+        assert_eq!(chunk.biome(15, 319, 15), 9);
+        assert_eq!(chunk.biome(0, 319, 0), 7);
+        // A buffer short of the dimension's sections changes nothing.
+        let short = play::ChunkBiomeData::from_biomes([2, -3], &containers[..3]);
+        let mut other = Chunk::empty(2, -3);
+        assert!(format.replace_biomes(&mut other, &short).is_err());
+        assert_eq!(other.biome(8, 70, 8), 0);
     }
 }

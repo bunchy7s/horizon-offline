@@ -3,6 +3,10 @@ use crate::weather::{Time, Vertex};
 
 pub(super) struct Weather {
     pipeline: wgpu::RenderPipeline,
+    /// The layouts of groups 0 (the entities') and 1 (the fall clock), for a native pack's
+    /// weather pipeline.
+    pub entity_layout: wgpu::BindGroupLayout,
+    pub time_layout: wgpu::BindGroupLayout,
     group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     vertices: wgpu::Buffer,
@@ -53,13 +57,7 @@ impl Weather {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 ..Default::default()
             },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
+            depth_stencil: Some(depth_stencil()),
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
                 module: shader,
@@ -90,6 +88,8 @@ impl Weather {
         });
         Self {
             pipeline,
+            entity_layout: entities.clone(),
+            time_layout: bindings,
             group,
             uniform,
             vertices: Self::buffer(device, 4),
@@ -124,11 +124,44 @@ impl Weather {
         uploads.buffer(encoder, &self.vertices, 0, bytemuck::cast_slice(vertices));
         uploads.buffer(encoder, &self.uniform, 0, bytemuck::bytes_of(&time));
     }
-    pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>, entities: &wgpu::BindGroup) {
+    /// The classic pipeline, for its layouts.
+    pub fn pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.pipeline
+    }
+    /// `draw` with another pipeline of the same layouts and vertex format.
+    pub fn draw_with(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        pipeline: &wgpu::RenderPipeline,
+        entities: &wgpu::BindGroup,
+    ) {
         if self.count == 0 {
             return;
         }
-        pass.set_pipeline(&self.pipeline);
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, entities, &[]);
+        pass.set_bind_group(1, &self.group, &[]);
+        pass.set_vertex_buffer(0, self.vertices.slice(..));
+        pass.draw_indexed(0..self.count / 4 * 6, 0, 0..1);
+    }
+    /// Draws the streaks, through a native pack's weather stage when `native` is given (its
+    /// pipeline and the pack's frame group).
+    pub fn draw(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        entities: &wgpu::BindGroup,
+        native: Option<(&wgpu::RenderPipeline, &wgpu::BindGroup)>,
+    ) {
+        if self.count == 0 {
+            return;
+        }
+        match native {
+            Some((pipeline, frame)) => {
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(horizon_shader_api::stages::GROUP, frame, &[]);
+            }
+            None => pass.set_pipeline(&self.pipeline),
+        }
         pass.set_bind_group(0, entities, &[]);
         pass.set_bind_group(1, &self.group, &[]);
         pass.set_vertex_buffer(0, self.vertices.slice(..));
@@ -137,10 +170,180 @@ impl Weather {
     }
 }
 
+/// RenderPipelines.WEATHER: depth-tested, but no depth write, so the water
+/// and glass drawn behind the rain still show through it.
+fn depth_stencil() -> wgpu::DepthStencilState {
+    wgpu::DepthStencilState {
+        format: wgpu::TextureFormat::Depth32Float,
+        depth_write_enabled: Some(false),
+        depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+        stencil: Default::default(),
+        bias: Default::default(),
+    }
+}
+
+/// The entries around a native pack's `weather`: Horizon's weather vertex, then the texture
+/// as `fs_weather` reads it, handed to the pack with the light and the position.
+const NATIVE_ENTRIES: &str = "
+struct HorizonWeatherOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) color: vec4<f32>,
+    @location(2) @interpolate(flat) rect: vec4<f32>,
+    @location(3) light: vec2<f32>,
+    @location(4) position: vec3<f32>,
+    @location(5) @interpolate(flat) snow: u32,
+}
+@vertex fn horizon_weather_vs(@location(0) position: vec3<f32>, @location(1) uv: vec2<f32>,
+    @location(2) rect: vec4<f32>, @location(3) animation: vec4<f32>,
+    @location(4) bases: vec4<u32>, @location(5) color: vec4<f32>,
+    @location(6) light: vec4<u32>, @location(7) snow: u32) -> HorizonWeatherOut {
+    let phase = horizon_entity_weather_phase(animation, bases, snow,
+        horizon_entity_weather_time.values);
+    let v = horizon_entity_entity_vertex(position, uv + phase, 0u, color, light, vec4(0.0));
+    var out: HorizonWeatherOut;
+    out.clip = v.clip;
+    out.uv = v.uv;
+    out.color = v.color;
+    out.rect = rect;
+    // entity_vertex's light: block in y, sky in x, 0..240.
+    out.light = min(vec2(f32(light.y), f32(light.x)) / 240.0, vec2(1.0));
+    out.position = position;
+    out.snow = snow;
+    return out;
+}
+@fragment fn horizon_weather_fs(in: HorizonWeatherOut) -> @location(0) vec4<f32> {
+    let texel = horizon_entity_weather_texel(in.uv, in.rect,
+        textureDimensions(horizon_entity_atlas));
+    let color = textureLoad(horizon_entity_atlas, texel, 0) * in.color;
+    if color.a < 0.1 { discard; }
+    return weather(WeatherInput(color, in.light, in.position, in.snow != 0u));
+}
+";
+
+/// The shader of a native pack's weather stage `source`.
+fn native_source(source: &str) -> String {
+    format!(
+        "{source}\n// Horizon's weather (entity.wgsl)\n{}{NATIVE_ENTRIES}",
+        super::wgsl_prefix::prefixed(&super::entity_shader(), "horizon_entity_")
+    )
+}
+
+/// A native pack's weather pipeline: its `stage` (with the option values `constants`), then
+/// entity.wgsl with every name prefixed, then the entries above. Group 0 is the entities',
+/// 1 the fall clock (`time_layout`), 3 the pack's frame.
+pub(super) fn native_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    entities: &wgpu::BindGroupLayout,
+    time_layout: &wgpu::BindGroupLayout,
+    frame: &super::native_post::NativeFrame,
+    stage: &horizon_shader_api::check::CheckedStage,
+    constants: &[(String, f64)],
+) -> Result<wgpu::RenderPipeline, String> {
+    use horizon_shader_api::stages::GROUP;
+    let text = native_source(&stage.source);
+    let module = naga::front::wgsl::parse_str(&text)
+        .map_err(|e| format!("{}: {}", stage.file, e.emit_to_string(&text)))?;
+    let present = super::native_post::present_constants(&module, constants);
+    let mut groups: [Option<&wgpu::BindGroupLayout>; GROUP as usize + 1] = Default::default();
+    groups[0] = Some(entities);
+    groups[1] = Some(time_layout);
+    groups[GROUP as usize] = Some(&frame.layout);
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Native shader pack weather"),
+        bind_group_layouts: &groups,
+        ..Default::default()
+    });
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(&stage.label),
+        source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(module)),
+    });
+    let options = wgpu::PipelineCompilationOptions {
+        constants: &present,
+        ..Default::default()
+    };
+    let attributes = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32x4,
+        3=>Float32x4,4=>Uint32x4,5=>Unorm8x4,6=>Uint8x4,7=>Uint32];
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Native shader pack weather"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &module,
+            entry_point: Some("horizon_weather_vs"),
+            compilation_options: options.clone(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<Vertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &attributes,
+            })],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: Some(depth_stencil()),
+        multisample: Default::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some("horizon_weather_fs"),
+            compilation_options: options,
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState {
+                    color: wgpu::BlendState::ALPHA_BLENDING.color,
+                    // The frame's alpha stays as the surfaces left it (entities mark it 0).
+                    alpha: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::Zero,
+                        dst_factor: wgpu::BlendFactor::One,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                }),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    if let Some(e) = pollster::block_on(scope.pop()) {
+        return Err(format!("{}: {e}", stage.file));
+    }
+    Ok(pipeline)
+}
+
 #[cfg(test)]
 mod tests {
+    use super::native_source;
+
+    #[test]
+    fn a_native_weather_stage_validates() {
+        use horizon_shader_api::stages::StageKind;
+        let source = StageKind::Weather.prelude()
+            + "fn weather(input: WeatherInput) -> vec4<f32> {\n    \
+               return input.color * vec4(input.light, input.position.x, f32(input.snow));\n}\n";
+        let text = native_source(&source);
+        let module = naga::front::wgsl::parse_str(&text)
+            .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&text)));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&text)));
+    }
     use crate::weather::{Parameters, Time};
     use wgpu::util::DeviceExt;
+
+    #[test]
+    fn weather_writes_no_depth() {
+        let depth = super::depth_stencil();
+        assert_eq!(depth.depth_write_enabled, Some(false));
+        assert_eq!(
+            depth.depth_compare,
+            Some(wgpu::CompareFunction::GreaterEqual)
+        );
+    }
 
     #[repr(C)]
     #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]

@@ -226,10 +226,10 @@ impl Game<'_> {
     /// highest non-air one.
     pub(super) fn surface_height(&self, x: i32, z: i32) -> i32 {
         let top = if self.dim == Dim::Nether { 127 } else { 319 };
-        (horizon_client::chunk::MIN_Y..=top)
+        (self.world.bottom_y()..=top)
             .rev()
             .find(|&y| !self.res.facts().is_air(self.world.block(x, y, z)))
-            .map_or(horizon_client::chunk::MIN_Y, |y| y + 1)
+            .map_or(self.world.bottom_y(), |y| y + 1)
     }
     /// Every claimed village point of interest (job sites, beds, bells).
     fn village_pois(&self) -> Vec<[i32; 3]> {
@@ -744,7 +744,9 @@ impl Game<'_> {
         raider::finalize(&mut mob, reason);
         let id = mob.id;
         self.mobs.push(mob);
+        self.native_mobs_joined(self.mobs.len() - 1, false);
         self.enchant_spawn_equipment(id);
+        self.halloween_spawn_head(id);
         Some(id)
     }
 
@@ -903,7 +905,8 @@ impl Game<'_> {
                         s.banner_at = None;
                         s.patrol_leader = true;
                         s.patrolling = true;
-                        m.extra.head = Some(raider::BANNER.into());
+                        // wear_banner: head id + ominous stack for SetEquipment (#4567).
+                        raider::wear_banner(m);
                     }
                 }
             }
@@ -917,7 +920,7 @@ impl Game<'_> {
         }
         taken.sort_unstable();
         for i in taken.into_iter().rev() {
-            self.dropped.remove(i);
+            self.remove_dropped(i);
         }
         for (id, wave, mob) in new_leaders {
             if let Some(r) = self.raiding.raids.get_mut(id) {

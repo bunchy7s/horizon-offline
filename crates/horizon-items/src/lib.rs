@@ -11,6 +11,7 @@ pub mod content_namespaces;
 pub mod cooldowns;
 pub mod enchant;
 pub mod firework;
+pub mod flowers;
 pub mod item_data;
 pub mod item_nbt;
 pub mod items;

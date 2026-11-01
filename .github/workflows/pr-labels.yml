@@ -16,7 +16,9 @@ jobs:
   label:
     # Title-only edits change nothing: skip them before a runner starts.
     if: github.event.action != 'edited' || github.event.changes.body != null
-    runs-on: ubuntu-latest
+    # One of playhorizon's small runners, out of GitHub's shared pool: it runs main's script only (above), so a fork's
+    # pull request runs none of its code there (docs/ci-runners.md). SELF_HOSTED_CI=off: GitHub's runners.
+    runs-on: ${{ vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted", "linux", "playhorizon-light"]') || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       contents: read

@@ -21,7 +21,8 @@ A mismatch is counted by the oracle's no-mod block, the expected block and Horiz
 missing rule reads as one line. KNOWN names the mismatch classes the implementation does not cover yet, with
 the reason; they are reported, not failed.
 
-usage: test_structure_blocks_parity.py [--profile betterdungeons|ctov] [--filter REGEX] [--limit N]
+usage: test_structure_blocks_parity.py [--profile betterdungeons|ctov|lithostitched-probe] [--filter REGEX]
+                                      [--limit N]
 """
 import argparse
 import gzip
@@ -61,6 +62,13 @@ KNOWN = {
                    'changed the terrain',
         r'^minecraft:village_plains$': 'decoration (grass, trees) differs where the village changed the terrain',
     },
+    # The probe pack's swaps and references match block for block; its random choices do not (OPEN-L6).
+    'lithostitched-probe': {
+        r'^minecraft:village_plains$': "Lithostitched's random is not known (spec-lithostitched OPEN-L6): the "
+                                       'probe\'s blackstone/deepslate and per-piece palettes match by share, not '
+                                       'by block; and decoration (grass, trees) differs where the village changed '
+                                       'the terrain',
+    },
 }
 
 
@@ -81,11 +89,9 @@ def chunk_rect(box):
 
 
 def saved_element(element):
-    """A saved pool element as the game reads it: Lithostitched's wrappers place their `delegate`
-    (spec-lithostitched §3), and 1.21.1's `{"Name", "Properties"}` states are 26.3's `{"id", "properties"}`."""
+    """A saved pool element as the game reads it: 1.21.1's `{"Name", "Properties"}` states are 26.3's
+    `{"id", "properties"}` (Lithostitched's wrapped elements are read as saved, spec-lithostitched §7.3)."""
     if isinstance(element, dict):
-        if 'delegate' in element and str(element.get('element_type', '')).startswith('lithostitched:'):
-            return saved_element(element['delegate'])
         if 'Name' in element and set(element) <= {'Name', 'Properties'}:
             return {'id': element['Name'], **({'properties': element['Properties']} if 'Properties' in element else {})}
         return {k: saved_element(v) for k, v in element.items()}
@@ -193,10 +199,12 @@ def main():
     profile = PROFILES[args.profile]
     results = sorted((layout.ORACLE / args.profile).glob('seed-*.json.gz'))
     missing = [jar for jar in profile['mods'].values() if not layout.jar_path(jar).exists()]
+    missing += [n for n in profile.get('packs', {}).values() if not (layout.ORACLE / 'profiles' / f'{n}.json').exists()]
     if not results or missing:
         print(f'SKIP: oracle results or mod jars missing under {layout.ORACLE} (see test_structure_layout_parity.py)')
         return 0
-    resources = layout.overlay(args.profile, layout.carry(args.profile, profile['mods'], profile['carry']))
+    data = layout.carry(args.profile, profile['mods'], profile['carry'], profile.get('packs'))
+    resources = layout.overlay(args.profile, data)
     binary = layout.probe_binary()
     names = state_names(lab.RESOURCES)
     # structure -> [starts, compared by region, mismatches by region]

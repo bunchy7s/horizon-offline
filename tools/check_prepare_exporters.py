@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare two isolated preparations with a batched, runtime-only release preparation.
+"""Compare two isolated preparations with batched, runtime-only release preparations.
 
 Uses only locally imported pinned Minecraft files. Run after compile-exporters and copy its
 server/, client/ and manifest.json to exporters/. Byte differences are accepted only where
@@ -48,22 +48,24 @@ def normalize(path):
 
 
 def verify(folders):
-    a, b, batched = [hashes(folder) for folder in folders]
-    if a.keys() != b.keys() or a.keys() != batched.keys():
+    """`folders`: the two isolated runs' resources, then each batched run's."""
+    raw = [hashes(folder) for folder in folders]
+    a = raw[0]
+    if any(other.keys() != a.keys() for other in raw):
         raise SystemExit('Resource file sets differ')
     known = {'render-definitions.json', 'block-behaviours.json', 'creative-inventory.json'}
-    noise = [name for name in a if a[name] != b[name] or a[name] != batched[name]]
+    noise = [name for name in a if any(other[name] != a[name] for other in raw)]
     differences = []
     for name in noise:
         if name not in known:
             differences.append(name)
         else:
-            x, y, z = [normalize(folder / name) for folder in folders]
-            if x != y or x != z:
+            first, *rest = [normalize(folder / name) for folder in folders]
+            if any(value != first for value in rest):
                 differences.append(name)
     manifests = []
-    for folder, raw in zip(folders, [a, b, batched]):
-        replacements = {raw[name]: f'normalized:{name}' for name in noise}
+    for folder, hashed in zip(folders, raw):
+        replacements = {hashed[name]: f'normalized:{name}' for name in noise}
         def clean(node):
             if isinstance(node, str):
                 return replacements.get(node, node)
@@ -73,7 +75,7 @@ def verify(folders):
                 return {key: clean(item) for key, item in node.items()}
             return node
         manifests.append(clean(json.loads((folder / 'horizon-resources.json').read_text())))
-    if manifests[0] != manifests[1] or manifests[0] != manifests[2]:
+    if any(manifest != manifests[0] for manifest in manifests):
         differences.append('horizon-resources.json')
     print(f'Normalized exporter noise: {noise}')
     if differences:
@@ -96,7 +98,11 @@ def main():
         binary = frozen
         results = []
         times = []
-        for name in ['isolated-1', 'isolated-2', 'batched']:
+        # (name, HORIZON_PREPARE_JOBS, exporter/data-generator JVMs): with 6 jobs or more, block
+        # behaviour gets a second server JVM; below, most machines' path, it stays on the first.
+        runs = [('isolated-1', None, None), ('isolated-2', None, None),
+                ('batched', '6', 6), ('batched-2-jobs', '2', 5)]
+        for name, jobs, expected in runs:
             folder = work / name
             folder.mkdir()
             shutil.copyfile(ROOT / 'research-lock.json', folder / 'research-lock.json')
@@ -121,15 +127,17 @@ def main():
                 wrapper.chmod(0o755)
                 env['JAVA_HOME'] = str(runtime)
                 env['PATH'] = str(runtime / 'bin')
+                env['HORIZON_PREPARE_JOBS'] = jobs
             started = time.monotonic()
             with (work / f'{name}.log').open('w') as log:
                 subprocess.run([str(binary), '--root', str(folder)], cwd=folder, env=env,
                                stdout=log, stderr=subprocess.STDOUT, check=True, timeout=1200)
-            if name == 'batched':
+            if expected:
                 launches = [line for line in trace.read_text().splitlines() if line != '-version']
-                if len(launches) != 5:
-                    raise SystemExit(f'Expected 5 exporter/data-generator JVMs, got {len(launches)}')
-                print(f'Runtime-only preparation: {len(launches)} JVM launches', flush=True)
+                if len(launches) != expected:
+                    raise SystemExit(f'{name}: expected {expected} exporter/data-generator JVMs,'
+                                     f' got {len(launches)}')
+                print(f'{name}: {len(launches)} JVM launches', flush=True)
             text = (work / f'{name}.log').read_text()
             if 'Compiling ' in text:
                 raise SystemExit(f'{name} unexpectedly needed a compiler')
@@ -138,7 +146,20 @@ def main():
             times.append(round(time.monotonic() - started, 2))
             print(f'{name}: {times[-1]}s, prepared', flush=True)
         verify(results)
-        print(f'Isolated {times[:2]}s, batched {times[2]}s')
+        # Nothing changed since the last run: it starts no JVM and leaves every file as it was.
+        manifest = resources / 'horizon-resources.json'
+        before = hashes(resources), manifest.read_bytes()
+        trace.write_text('')
+        with (work / 'repeat.log').open('w') as log:
+            subprocess.run([str(binary), '--root', str(folder)], cwd=folder, env=env,
+                           stdout=log, stderr=subprocess.STDOUT, check=True, timeout=1200)
+        launches = [line for line in trace.read_text().splitlines() if line != '-version']
+        if launches:
+            raise SystemExit(f'A repeat preparation started {len(launches)} JVMs')
+        if (hashes(resources), manifest.read_bytes()) != before:
+            raise SystemExit('A repeat preparation changed the resources')
+        print('Repeat preparation: no JVM, same files')
+        print(f'Isolated {times[:2]}s, batched {times[2:]}s')
 
 
 if __name__ == '__main__':

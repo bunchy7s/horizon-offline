@@ -5,8 +5,8 @@ AbstractNautilus.canDispenserEquipIntoSlot	port	crates/horizon-client/src/game/d
 AbstractNautilus.getControllingPassenger	port	crates/horizon-client/src/mobs/nautilus.rs::controlled	a rider on a saddled nautilus
 AbstractNautilus.getRiddenSpeed	inline	crates/horizon-client/src/mobs/nautilus.rs::ridden	0.0325 in water, 0.02 on land, times the movement speed
 AbstractNautilus.doPlayerRide	inline	crates/horizon-client/src/game/nautili.rs::Game::interact_nautilus	the player mounts it and a lead breaks; there is no home to clear
-AbstractNautilus.getNautilusRestrictionRadius	missing		player: a tame nautilus is never kept near its home, so it wanders off instead of staying within 32 blocks (16 for a baby or a saddled one)
-AbstractNautilus.checkRestriction	missing		player: no home is set for a tame nautilus (ai.home is only set by leads and happy ghasts), see getNautilusRestrictionRadius
+AbstractNautilus.getNautilusRestrictionRadius	port	crates/horizon-client/src/mobs/nautilus.rs::restriction_radius	ticked in #3512; `AbstractNautilus.getNautilusRestrictionRadius` is cited at crates/horizon-client/src/mobs/nautilus.rs:231
+AbstractNautilus.checkRestriction	port	crates/horizon-client/src/mobs/nautilus.rs::check_restriction	ticked in #3512; `AbstractNautilus.checkRestriction` is cited at crates/horizon-client/src/mobs/nautilus.rs:240
 AbstractNautilus.applyEffects	inline	crates/horizon-client/src/mobs/nautilus.rs::ai_step	the rider gets breath of the nautilus for 60 ticks, refreshed every 40 ticks
 AbstractNautilus.onPlayerJump	inline	crates/horizon-client/src/game/mounts.rs::Game::charge_mount_jump	the charged jump scale (0.4 to 1.0) goes to the rider input; the dash itself waits for its cooldown in nautilus::ridden
 AbstractNautilus.executeRidersJump	port	crates/horizon-client/src/mobs/nautilus.rs::dash	gap: minor: the push leaves out getBlockSpeedFactor (soul sand, honey); 1.2 in water, 0.5 on land, 40 tick cooldown, dashing flag
@@ -17,7 +17,7 @@ AbstractNautilus.hurtServer	port	crates/horizon-client/src/mobs/nautilus.rs::aft
 AbstractNautilus.finalizeSpawn	port	crates/horizon-client/src/mobs/nautilus.rs::finalize	attack target cooldown of 2400 to 3600 ticks
 AbstractNautilus.getEquipSound	port	crates/horizon-client/src/mobs/nautilus.rs::saddle_sound	underwater saddle sound while the eyes are in water
 AbstractNautilus.createInventory	skip:other		getInventoryColumns is 0, so the container has no slots; saddle and armour are equipment slots
-AbstractNautilus.openCustomInventoryScreen	missing		player: shift-use on a tame nautilus or the inventory key while riding opens no screen (has_mount_menu is horses and llamas only), so a saddle or armour put on cannot be taken off again
+AbstractNautilus.openCustomInventoryScreen	port	crates/horizon-client/src/game/mount_menu.rs::has_mount_menu	shift-use on a tame nautilus and the inventory key while riding open the saddle/armour screen
 AbstractNautilus.getSlot	skip:other		slots 500 and up address the container, which has no slots; every other slot is an equipment slot
 AbstractNautilus.isAggravated	missing		minor: only feeds canBeLeashed; a charging or angry nautilus can still be leashed (leash.rs::can_be_leashed has no nautilus arm)
 Nautilus.customServerAiStep	inline	crates/horizon-client/src/mobs/nautilus.rs::register	the goal list replaces the brain and its fight or idle switch; the cooldowns tick in ai_step
@@ -55,18 +55,18 @@ Panda.PandaAttackGoal.canUse	port	crates/horizon-client/src/mobs/panda.rs::When:
 Panda.PandaAvoidGoal.canUse	port	crates/horizon-client/src/mobs/panda.rs::When::can_use	avoid goals only for a worried panda that can perform an action
 Parrot.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	random one of five variants, ageable group without babies
 Parrot.createAttributes	skip:data		attributes (health 6, flying speed 0.4) come from the entity type table
-Parrot.createNavigation	missing		player: parrots have no flying navigation or flying move control, so they walk and hop on the ground and never fly to where a path through the air would lead
-Parrot.calculateFlapping	missing		player: flap and flap_speed are only updated for chickens, so a parrot's wings never flap and a falling one does not glide (no 0.6 fall damping)
+Parrot.createNavigation	port	crates/horizon-client/src/mobs/parrot.rs::register	flying navigation and a flying move control, no doors, floats
+Parrot.calculateFlapping	port	crates/horizon-client/src/mobs/parrot.rs::calculate_flapping	
 Parrot.checkParrotSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Parrot arm: parrots_spawnable_on below and bright enough
-Parrot.onFlap	missing		player: no parrot wing sound while flying (entity.parrot.fly at 0.15), no next_flap tracking
-Parrot.hurtServer	missing		player: a hit does not stand a sitting tame parrot up (only wolves reset sitting in tame::after_hurt)
+Parrot.onFlap	port	crates/horizon-client/src/mobs/parrot.rs::process_flapping	the wing-beat sound at 0.15 and nextFlap
+Parrot.hurtServer	port	crates/horizon-client/src/mobs/tame.rs::stand_when_hurt	
 Parrot.get	skip:other		reads the variant as a data component for predicates; Horizon has no entity component view
 Parrot.applyImplicitComponent	missing		minor: a spawn egg's parrot_variant component is not applied (only bucketed mobs read item components)
 Parrot.defineSynchedData	skip:other		synched variant id; Horizon keeps it in extra.variant (remote_mob_data.rs reads index 20)
 Parrot.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::read_variant	Variant clamped to 0 to 4, red and blue when absent
 Parrot.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: minor: no parrot arm, the lead attaches at the full eye height instead of 0.5 times it
-Parrot.ParrotWanderGoal.getPosition	missing		player: parrots wander with a ground stroll (Stroll::avoiding_water in tame.rs::register_parrot), so they never pick a flying position or one of the tree perches
-Parrot.ParrotWanderGoal.getTreePos	missing		player: parrots never fly to settle on leaves or logs nearby
+Parrot.ParrotWanderGoal.getPosition	port	crates/horizon-client/src/mobs/parrot.rs::wander_pos	
+Parrot.ParrotWanderGoal.getTreePos	port	crates/horizon-client/src/mobs/parrot.rs::tree_pos	
 ShoulderRidingEntity.setEntityOnShoulder	port	crates/horizon-client/src/game/shoulders.rs::Game::parrot_to_shoulder	saved into the first free ShoulderEntityLeft or ShoulderEntityRight slot, the parrot removed from the world
 Pig.registerGoals	port	crates/horizon-client/src/mobs/farm.rs::register	Species::Pig arm: float, panic 1.25, breed, two temptations (stick and food), follow parent, stroll, look
 Pig.getControllingPassenger	port	crates/horizon-client/src/mobs/equine.rs::controlled	saddled and the rider holds the carrot on a stick (r.steer)
@@ -112,13 +112,13 @@ Rabbit.getRandomRabbitVariant	inline	crates/horizon-client/src/mobs/finalize.rs:
 Rabbit.checkRabbitSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Rabbit arm: rabbits_spawnable_on below and bright enough
 Rabbit.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: minor: no rabbit arm, the lead attaches at the full eye height instead of 0.6 times it
 Rabbit.shouldPlayIdleAnimation	inline	crates/horizon-client/src/mobs/rabbit.rs::base_tick	idle timeout over, not leashed, not no-AI
-Rabbit.RabbitAvoidEntityGoal.canUse	missing		player: rabbits never run from players (8 blocks), wolves (10) or monsters (4); no avoid goal is registered for them
+Rabbit.RabbitAvoidEntityGoal.canUse	port	crates/horizon-client/src/mobs/rabbit.rs::register	flees players (8), wolves (10) and monsters (4) unless it is the killer rabbit
 Rabbit.RaidGardenGoal.canUse	missing		player: rabbits never walk to ripe carrot crops to eat them; no MoreCarrotTicks clock
 Rabbit.RaidGardenGoal.tick	missing		player: a rabbit never eats carrots, so ripe carrots are never knocked back or destroyed by rabbits
 Rabbit.RaidGardenGoal.isValidTarget	missing		player: part of the missing carrot raid (a ripe carrot on a crop-supporting block)
 Sheep.registerGoals	port	crates/horizon-client/src/mobs/farm.rs::register	Species::Sheep arm: float, panic, breed, tempt, follow parent, eat block, stroll, look
 Sheep.aiStep	inline	crates/horizon-client/src/mobs/ai.rs::species_ai_step	the eat animation counter (anim_ticks) counts down each tick
-Sheep.handleEntityEvent	missing		player: on a server a sheep never lowers its head to eat grass, because entity event 10 is not handled in remote.rs (the integrated server sets anim_ticks itself)
+Sheep.handleEntityEvent	port	crates/horizon-client/src/mobs/sync.rs::entity_event	ticked in #3512; `Sheep.handleEntityEvent` is cited at crates/horizon-client/src/mobs/sync.rs:132 (in a comment, so `where` names the enclosing fn)
 Sheep.getHeadEatPositionScale	inline	crates/horizon-client/src/mobs/anim.rs::setup	Anim::Sheep arm: head drops by 9 times the scale (halved for a lamb)
 Sheep.getHeadEatAngleScale	inline	crates/horizon-client/src/mobs/anim.rs::setup	Anim::Sheep arm: head tilt of pi/5 with the nibbling wobble
 Sheep.mobInteract	port	crates/horizon-client/src/game/creatures.rs::Game::interact_mob	shears drop the shearing loot and set sheared; a dye recolours an unsheared sheep

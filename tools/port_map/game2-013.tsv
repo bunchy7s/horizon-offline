@@ -23,7 +23,7 @@ CrafterBlock.mirror	skip:data		mirror results come from the exported BlockState 
 CrafterBlock.createBlockStateDefinition	skip:data		orientation, triggered and crafting properties come from the block state tables
 CraftingTableBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	CraftingTable arm opens the menu; the interact_with_crafting_table stat is awarded in Game::open_station
 CreakingHeartBlock.getTicker	port	crates/horizon-world/src/level/creaking.rs::Sim::heart_tick	scheduled heart tick; the uprooted check is done inside heart_update_state
-CreakingHeartBlock.animateTick	missing		player: the creak idle sound near a heart with its logs at night is never played (no creaking_heart.idle sound in Horizon)
+CreakingHeartBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::step	ticked in #3516; `CreakingHeartBlock.animateTick` is cited at crates/horizon-client/src/animate_tick.rs:104
 CreakingHeartBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	CreakingHeart arm schedules the 1-tick heart update then the default shape
 CreakingHeartBlock.isSurroundedByLogs	missing		player: the six-side pale oak log check only gates the idle creak sound in animateTick
 CreakingHeartBlock.createBlockStateDefinition	skip:data		axis, creaking_heart_state and natural properties come from the block state tables
@@ -31,7 +31,7 @@ CreakingHeartBlock.tryAwardExperience	inline	crates/horizon-client/src/game/crea
 CreakingHeartBlock.getAnalogOutputSignal	port	crates/horizon-client/src/mobs/creaking_heart.rs::output_signal	gap: minor: distance-based signal, no explicit uprooted check; a heart with no creaking or protector gives 0
 CropBlock.growCrops	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	crop arm adds the bonemeal age increase capped at max age and sets the state
 CropBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	Crop arm: raw light of at least 8 and the supports_crops ground check
-CropBlock.entityInside	missing		player: ravagers no longer trample crops they walk into; Horizon only breaks leaves for ravagers
+CropBlock.entityInside	port	crates/horizon-client/src/mobs/ravager.rs::ai_step	ticked in #3516; `CropBlock.entityInside` is cited at crates/horizon-client/src/mobs/ravager.rs:134 (in a comment, so `where` names the enclosing fn)
 DaylightDetectorBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	DaylightDetector arm checks mayBuild, cycles inverted, sends block change and updates the signal
 DaylightDetectorBlock.getTicker	port	crates/horizon-world/src/level/mod.rs::Behaviours::tick_daylight_detector	gap: minor: every 20 game ticks; only the Nether is skipped here, the End has no sky light but is not excluded
 DaylightDetectorBlock.createBlockStateDefinition	skip:data		power and inverted properties come from the block state tables
@@ -40,8 +40,8 @@ DecoratedPotBlock.getStateForPlacement	port	crates/horizon-world/src/level/place
 DecoratedPotBlock.useWithoutItem	port	crates/horizon-client/src/game/decorated_pot.rs::Game::use_decorated_pot	empty-hand path plays insert_fail, negative wobble and block change
 DecoratedPotBlock.createBlockStateDefinition	skip:data		facing, waterlogged and cracked properties come from the block state tables
 DecoratedPotBlock.getFluidState	skip:data		waterlogged water source comes from the per-state fluid facts table (Level::fluid)
-DecoratedPotBlock.onProjectileHit	missing		player: a projectile hitting a pot does not crack it, and the pot is not broken by the hit
-DecoratedPotBlock.getCloneItemStack	missing		player: middle-click pick of a pot gives an empty pot, not one with its sherd decorations
+DecoratedPotBlock.onProjectileHit	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_breaks_block	the pot is cracked first, then shattered
+DecoratedPotBlock.getCloneItemStack	port	crates/horizon-client/src/game/block_items.rs::Game::picked_stack	ticked in #3516; `DecoratedPotBlock.getCloneItemStack` is cited at crates/horizon-client/src/game/block_items.rs:135 (in a comment, so `where` names the enclosing fn)
 DecoratedPotBlock.rotate	skip:data		rotation results come from the exported BlockState rotate table (worldgen/structure.rs)
 DetectorRailBlock.entityInside	port	crates/horizon-world/src/level/hooks.rs::Sim::entity_inside	when not powered, checks for minecarts inside the search box
 DetectorRailBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	when powered, rechecks the minecart presence
@@ -66,7 +66,7 @@ DispenserBlock.rotate	skip:data		rotation results come from the exported BlockSt
 DispenserBlock.createBlockStateDefinition	skip:data		facing and triggered properties come from the block state tables
 DoorBlock.getShape	skip:data		outline shapes come from the per-state shape table (facts shape index)
 DoorBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	Door arm: the other half follows, and the lower half breaks when unsupported
-DoorBlock.onExplosionHit	missing		player: a wind charge blast does not swing a door open; canOpenByWindCharge is read from data but no code uses it
+DoorBlock.onExplosionHit	port	crates/horizon-client/src/game/wind.rs::Game::wind_trigger_block	a can-trigger-blocks burst swings a wooden door and leaves iron ones shut
 DoorBlock.playerWillDestroy	port	crates/horizon-world/src/level/hooks.rs::Sim::player_destroy	creative break of the upper half removes the lower half without drops
 DoorBlock.isPathfindable	skip:data		path types come from the per-state path data (mobs/path.rs)
 DoorBlock.setPlacedBy	port	crates/horizon-world/src/level/place.rs::Sim::set_placed_by	Door branch places the upper half
@@ -124,9 +124,9 @@ FireBlock.onPlace	port	crates/horizon-world/src/level/hooks.rs::Sim::on_place	Fi
 FireBlock.createBlockStateDefinition	skip:data		age and the per-side properties come from the block state tables
 FireBlock.setFlammable	skip:data		flammability odds are data (burn odds table read by survive.rs), set by the registry bootstrap
 FireBlock.bootStrap	skip:data		registry bootstrap of the flammable blocks; Horizon reads the odds from data tables
-FlowerPotBlock.useItemOn	missing		player: right-clicking an empty flower pot with a flower or sapling does nothing, so no potted plant can be made
-FlowerPotBlock.useWithoutItem	missing		player: right-clicking a potted plant with an empty hand does not take the plant out
-FlowerPotBlock.getCloneItemStack	missing		player: middle-click pick of a potted plant gives an empty flower pot, not the plant
+FlowerPotBlock.useItemOn	port	crates/horizon-world/src/level/interact.rs::Behaviours::use_item_on	a plant on an empty flower pot pots it, awarding pot_flower and consuming 1 plant; non-empty pot with a plant CONSUMEs
+FlowerPotBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	FlowerPot arm: non-empty pot gives the plant back and resets to flower_pot; empty pot CONSUMEs
+FlowerPotBlock.getCloneItemStack	port	crates/horizon-client/src/game/block_items.rs::Game::clone_item_stack	potted plant picks as the plant item, empty pot as flower_pot
 FlowerPotBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	FlowerPot arm: breaks when the block under it stops supporting it
 GrassBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	grass arm: air above and inside build height
 GrassBlock.stopBonemealSpread	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::grass_bonemeal	the per-step stop test (grass below, full collision at the spot) is inline in the attempt loop

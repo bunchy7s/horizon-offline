@@ -121,6 +121,10 @@ pub fn warden_can_listen(event: &str) -> bool {
         || event == SHRIEK
         || shrieker_can_listen(event)
 }
+/// `GameEventTags.ALLAY_CAN_LISTEN`: note block notes.
+pub fn allay_can_listen(event: &str) -> bool {
+    event == "minecraft:note_block_play"
+}
 /// `GameEventTags.IGNORE_VIBRATIONS_SNEAKING`.
 pub fn ignored_when_sneaking(event: &str) -> bool {
     matches!(

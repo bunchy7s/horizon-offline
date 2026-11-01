@@ -15,7 +15,11 @@ use horizon_core::{
     random::PositionalRandom,
     ticks::ProtoChunkTicks,
 };
-use std::io;
+use std::{cell::RefCell, io};
+
+thread_local! {
+    static SCRATCH_DENSITY: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
+}
 
 /// Behavior and resolved tags for every state in the chunk's immutable registry.
 pub trait TerrainBlockStates {
@@ -202,6 +206,15 @@ impl<B: TerrainBlockStates> TerrainBlocks<'_, B> {
         }
         self.sections[section].state(local_index(x, y, z))
     }
+    /// Every state of section `index` in `local_index` order, as `block`
+    /// reads them one by one.
+    fn section_states(&self, index: usize, out: &mut [u32; 4096]) {
+        if self.non_air[index] == 0 {
+            out.fill(self.air.0);
+        } else {
+            self.sections[index].fill_states(out);
+        }
+    }
 }
 #[inline]
 fn local_index(x: i32, y: i32, z: i32) -> usize {
@@ -250,6 +263,11 @@ impl<'r, B: TerrainBlockStates> TerrainChunk<'r, B> {
     }
     pub(crate) fn registry(&self) -> &BlockRegistry {
         self.blocks.registry
+    }
+    /// The indexes of the sections holding a block other than air
+    /// (`LevelChunkSection.hasOnlyAir`, negated).
+    pub fn filled_sections(&self) -> impl Iterator<Item = usize> + '_ {
+        (0..self.blocks.non_air.len()).filter(|&i| self.blocks.non_air[i] != 0)
     }
     pub fn highest_filled_section_index(&self) -> Option<usize> {
         self.blocks.non_air.iter().rposition(|&count| count != 0)
@@ -353,6 +371,18 @@ impl<'r, B: TerrainBlockStates> TerrainChunk<'r, B> {
     #[inline]
     pub fn block(&self, x: i32, y: i32, z: i32) -> BlockStateId {
         self.blocks.block(x, y, z)
+    }
+    /// The states of the 16-block section starting at block `y` (a multiple
+    /// of 16 inside this chunk), in `(y << 8) | (z << 4) | x` order, read in
+    /// one pass; false (and `out` untouched) when `y` is not such a start.
+    pub fn section_states(&self, y: i32, out: &mut [u32; 4096]) -> bool {
+        match self.blocks.section_index(y) {
+            Some(index) if y & 15 == 0 => {
+                self.blocks.section_states(index, out);
+                true
+            }
+            _ => false,
+        }
     }
     /// `FeatureWorld::scan_column` in this chunk: an all-air section is
     /// tested once, a mixed one read without looking the section up per block.
@@ -553,6 +583,33 @@ pub fn fill_noise<B: TerrainBlockStates>(
     aquifer: &mut (impl TerrainAquifer + ?Sized),
     default_block: BlockStateId,
 ) -> Result<(), TerrainError> {
+    let size = volume.size();
+    SCRATCH_DENSITY.with_borrow_mut(|scratch| {
+        if scratch.len() < size {
+            scratch.resize(size, 0.0);
+        }
+        scratch[..size].fill(0.0);
+        fill_noise_inner(
+            chunk,
+            volume,
+            final_density,
+            context,
+            aquifer,
+            default_block,
+            &mut scratch[..size],
+        )
+    })
+}
+
+fn fill_noise_inner<B: TerrainBlockStates>(
+    chunk: &mut TerrainChunk<'_, B>,
+    volume: DensityVolume,
+    final_density: &dyn DensitySampler,
+    context: &mut SamplerContext,
+    aquifer: &mut (impl TerrainAquifer + ?Sized),
+    default_block: BlockStateId,
+    density: &mut [f32],
+) -> Result<(), TerrainError> {
     let [sx, sy, sz] = volume.sizes();
     let [bx, by, bz] = volume.minimum();
     if sx != 16
@@ -568,8 +625,7 @@ pub fn fill_noise<B: TerrainBlockStates>(
     }
     chunk.ensure_heightmap(HeightmapType::OceanFloorWg);
     chunk.ensure_heightmap(HeightmapType::WorldSurfaceWg);
-    let mut density = vec![0.; volume.size()];
-    final_density.sample_volume(context, &mut density, volume)?;
+    final_density.sample_volume(context, density, volume)?;
     let air_above = aquifer.air_above_y();
     // A non-air, non-fluid default block may be written as a run without asking
     // the aquifer or touching the heightmap below the run's top.
@@ -584,9 +640,13 @@ pub fn fill_noise<B: TerrainBlockStates>(
         let world_z = bz.wrapping_add(z as i32);
         for x in 0..sx {
             let world_x = bx.wrapping_add(x as i32);
-            // Heightmap updates at or below first-available - 2 are no-ops; the
-            // bound only changes through an update, so skip those calls.
-            let mut settled = MAPS.map(|kind| {
+            let col_base = (x + z * sx) * sy;
+            let col_density = &density[col_base..col_base + sy];
+            // Heightmap updates at or below first-available - 2 are no-ops. In a
+            // top-down vertical sweep, once an opaque block updates first-available
+            // to world_y + 1, all lower blocks have world_y <= bound and can be
+            // skipped entirely.
+            let mut bounds = MAPS.map(|kind| {
                 chunk.heightmaps[kind as usize]
                     .as_ref()
                     .expect("ensured heightmap")
@@ -597,28 +657,23 @@ pub fn fill_noise<B: TerrainBlockStates>(
             while y > 0 {
                 y -= 1;
                 let world_y = by.wrapping_add(y as i32);
-                let value = density[volume.index([x, y, z]).expect("valid density coordinates")];
+                let value = col_density[y];
                 // A positive-density run is entirely the default block. Write it
                 // through the section once instead of per block; the heightmap
                 // only changes at the run's top.
                 if solid_runs && value > 0.0 {
                     let mut run = 1usize;
-                    while run <= y
-                        && density[volume
-                            .index([x, y - run, z])
-                            .expect("valid density coordinates")]
-                            > 0.0
-                    {
+                    while run <= y && col_density[y - run] > 0.0 {
                         run += 1;
                     }
                     aquifer.note_skipped();
                     chunk.fill_solid_run(x as i32, world_y, z as i32, run as i32, default_block)?;
-                    for (kind, settled) in MAPS.into_iter().zip(&mut settled) {
-                        if matches!(settled, Ok(bound) if world_y <= *bound) {
+                    for (kind, bound) in MAPS.into_iter().zip(&mut bounds) {
+                        if matches!(bound, Ok(current) if world_y <= *current) {
                             continue;
                         }
                         chunk.update_heightmap(kind, x as i32, world_y, z as i32, default_block)?;
-                        *settled = chunk.heightmaps[kind as usize]
+                        *bound = chunk.heightmaps[kind as usize]
                             .as_ref()
                             .expect("ensured heightmap")
                             .first_available(x as i32, z as i32)
@@ -649,12 +704,12 @@ pub fn fill_noise<B: TerrainBlockStates>(
                     continue;
                 }
                 chunk.set_block_raw(x as i32, world_y, z as i32, state)?;
-                for (kind, settled) in MAPS.into_iter().zip(&mut settled) {
-                    if matches!(settled, Ok(bound) if world_y <= *bound) {
+                for (kind, bound) in MAPS.into_iter().zip(&mut bounds) {
+                    if matches!(bound, Ok(current) if world_y <= *current) {
                         continue;
                     }
                     chunk.update_heightmap(kind, x as i32, world_y, z as i32, state)?;
-                    *settled = chunk.heightmaps[kind as usize]
+                    *bound = chunk.heightmaps[kind as usize]
                         .as_ref()
                         .expect("ensured heightmap")
                         .first_available(x as i32, z as i32)
@@ -669,4 +724,203 @@ pub fn fill_noise<B: TerrainBlockStates>(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nbt::Tag;
+    use crate::worldgen::aquifer::FluidPicker;
+    use horizon_core::density::ConstantSampler;
+
+    #[derive(Clone, Copy)]
+    struct State(u32);
+    impl HeightmapState for State {
+        fn is_air(self) -> bool {
+            self.0 < 2
+        }
+        fn is_air_block(self) -> bool {
+            self.0 == 0
+        }
+        fn has_fluid(self) -> bool {
+            self.0 == 3
+        }
+        fn blocks_motion_in_heightmap(self) -> bool {
+            self.0 == 2
+        }
+        fn blocks_motion_in_heightmap_no_leaves(self) -> bool {
+            self.0 == 2
+        }
+    }
+    struct Properties;
+    impl TerrainBlockStates for Properties {
+        type State = State;
+        fn heightmap_state(&self, id: BlockStateId) -> Self::State {
+            State(id.0)
+        }
+    }
+    #[derive(Debug)]
+    struct TestPicker;
+    impl FluidPicker for TestPicker {
+        fn compute(&self, _: [i32; 3]) -> crate::worldgen::aquifer::FluidStatus {
+            crate::worldgen::aquifer::FluidStatus {
+                level: -64,
+                state: BlockStateId(3),
+            }
+        }
+    }
+
+    fn test_registry() -> BlockRegistry {
+        BlockRegistry::from_nbt(&Tag::compound([
+            ("DataVersion", Tag::Int(crate::DATA_VERSION)),
+            (
+                "states",
+                Tag::List(vec![
+                    Tag::compound([("id", Tag::String("minecraft:air".into()))]),
+                    Tag::compound([("id", Tag::String("minecraft:void_air".into()))]),
+                    Tag::compound([("id", Tag::String("minecraft:stone".into()))]),
+                    Tag::compound([("id", Tag::String("minecraft:water".into()))]),
+                ]),
+            ),
+            (
+                "defaults",
+                Tag::compound([
+                    ("minecraft:air", Tag::Int(0)),
+                    ("minecraft:void_air", Tag::Int(1)),
+                    ("minecraft:stone", Tag::Int(2)),
+                    ("minecraft:water", Tag::Int(3)),
+                ]),
+            ),
+        ]))
+        .unwrap()
+    }
+
+    #[test]
+    fn fill_noise_poisoned_scratch_does_not_leak() {
+        let registry = test_registry();
+        let volume = DensityVolume::new([16, 384, 16], [0, -64, 0], [1, 1, 1]).unwrap();
+        let sampler = ConstantSampler(1.0);
+        let mut context = SamplerContext::sparse();
+
+        let mut chunk_clean =
+            TerrainChunk::new(ChunkPos::new(0, 0), -64, 384, &registry, Properties).unwrap();
+        let mut aquifer_clean = DisabledAquifer::new(TestPicker, BlockStateId(0));
+        fill_noise(
+            &mut chunk_clean,
+            volume,
+            &sampler,
+            &mut context,
+            &mut aquifer_clean,
+            BlockStateId(2),
+        )
+        .unwrap();
+
+        // Deliberately poison the thread-local scratch buffer with NaN
+        SCRATCH_DENSITY.with_borrow_mut(|scratch| {
+            scratch.fill(f32::NAN);
+        });
+
+        let mut chunk_poisoned =
+            TerrainChunk::new(ChunkPos::new(0, 0), -64, 384, &registry, Properties).unwrap();
+        let mut aquifer_poisoned = DisabledAquifer::new(TestPicker, BlockStateId(0));
+        fill_noise(
+            &mut chunk_poisoned,
+            volume,
+            &sampler,
+            &mut context,
+            &mut aquifer_poisoned,
+            BlockStateId(2),
+        )
+        .unwrap();
+
+        for (sec1, sec2) in chunk_clean
+            .blocks
+            .sections
+            .iter()
+            .zip(&chunk_poisoned.blocks.sections)
+        {
+            for idx in 0..4096 {
+                assert_eq!(sec1.get(idx).unwrap(), sec2.get(idx).unwrap());
+            }
+        }
+        for (h1, h2) in chunk_clean
+            .heightmaps
+            .iter()
+            .zip(&chunk_poisoned.heightmaps)
+        {
+            assert_eq!(
+                h1.as_ref().map(|m| m.raw_data()),
+                h2.as_ref().map(|m| m.raw_data())
+            );
+        }
+    }
+
+    #[test]
+    fn fill_noise_heightmap_matches_top_down_surface() {
+        let registry = test_registry();
+        let volume = DensityVolume::new([16, 384, 16], [0, -64, 0], [1, 1, 1]).unwrap();
+        let sampler = ConstantSampler(1.0);
+        let mut context = SamplerContext::sparse();
+
+        let mut chunk =
+            TerrainChunk::new(ChunkPos::new(0, 0), -64, 384, &registry, Properties).unwrap();
+        let mut aquifer = DisabledAquifer::new(TestPicker, BlockStateId(0));
+        fill_noise(
+            &mut chunk,
+            volume,
+            &sampler,
+            &mut context,
+            &mut aquifer,
+            BlockStateId(2),
+        )
+        .unwrap();
+
+        let ocean_floor = chunk.heightmaps[HeightmapType::OceanFloorWg as usize]
+            .as_ref()
+            .unwrap();
+        let world_surface = chunk.heightmaps[HeightmapType::WorldSurfaceWg as usize]
+            .as_ref()
+            .unwrap();
+        for z in 0..16 {
+            for x in 0..16 {
+                assert_eq!(ocean_floor.first_available(x, z).unwrap(), 320);
+                assert_eq!(world_surface.first_available(x, z).unwrap(), 320);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn benchmark_fill_noise() {
+        use std::time::Instant;
+        let registry = test_registry();
+
+        let volume = DensityVolume::new([16, 384, 16], [0, -64, 0], [1, 1, 1]).unwrap();
+        let sampler = ConstantSampler(1.0);
+        let mut context = SamplerContext::sparse();
+
+        let iters = 50;
+        let start = Instant::now();
+        for _ in 0..iters {
+            let mut chunk =
+                TerrainChunk::new(ChunkPos::new(0, 0), -64, 384, &registry, Properties).unwrap();
+            let mut aquifer = DisabledAquifer::new(TestPicker, BlockStateId(0));
+            fill_noise(
+                &mut chunk,
+                volume,
+                &sampler,
+                &mut context,
+                &mut aquifer,
+                BlockStateId(2),
+            )
+            .unwrap();
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "benchmark_fill_noise ({} chunks, 384 height): {:?} total, {:.2} ms/chunk",
+            iters,
+            elapsed,
+            elapsed.as_secs_f64() * 1000.0 / iters as f64
+        );
+    }
 }

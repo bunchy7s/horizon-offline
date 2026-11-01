@@ -38,6 +38,21 @@ pub struct Settings {
     pub alpha_cutoff_bias: f32,
     pub has_transparent: bool,
     pub item: bool,
+    /// Whether a high-resolution cutout's small levels are dithered ([`dither_cutout_levels`]).
+    pub dither_cutouts: bool,
+}
+
+/// The `ditherCutoutMips` setting, for textures loaded from now on.
+static DITHER_CUTOUTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Sets `ditherCutoutMips`; true if that changes it, when the textures must load again.
+pub fn set_dither_cutouts(on: bool) -> bool {
+    DITHER_CUTOUTS.swap(on, std::sync::atomic::Ordering::Relaxed) != on
+}
+
+/// The `ditherCutoutMips` setting.
+pub fn dither_cutouts() -> bool {
+    DITHER_CUTOUTS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// A square or rectangular RGBA8 image, rows top to bottom.
@@ -362,5 +377,113 @@ fn generate_native(mut base: Image, levels: u32, settings: Settings) -> Vec<Imag
         }
         out.push(data);
     }
+    if settings.dither_cutouts && cutout && out[0].width >= DITHERED_CUTOUT_SIZE {
+        dither_cutout_levels(&mut out);
+    }
     out
+}
+
+/// From this size a cutout texture's mips can be dithered ([`dither_cutout_levels`]).
+const DITHERED_CUTOUT_SIZE: u32 = 64;
+/// A high-resolution cutout's detail is finer than its small mips: grass blades a few
+/// texels wide at 2048 average to about the same alpha everywhere at 64, and no scale of
+/// that alpha can keep the coverage, so the alpha test passes the whole quad or none of it.
+/// Each level below the base takes the base's mean alpha through an ordered dither instead:
+/// its texels are in or out, about as many in as the base has.
+fn dither_cutout_levels(levels: &mut [Image]) {
+    const BAYER: [[f32; 4]; 4] = [
+        [0.0, 8.0, 2.0, 10.0],
+        [12.0, 4.0, 14.0, 6.0],
+        [3.0, 11.0, 1.0, 9.0],
+        [15.0, 7.0, 13.0, 5.0],
+    ];
+    let (mut w, mut h) = (levels[0].width as usize, levels[0].height as usize);
+    let mut alpha: Vec<f32> = levels[0]
+        .pixels
+        .iter()
+        .map(|p| f32::from(p[3]) / 255.0)
+        .collect();
+    for level in &mut levels[1..] {
+        let (nw, nh) = (level.width as usize, level.height as usize);
+        let mut next = vec![0.0; nw * nh];
+        for y in 0..nh {
+            for x in 0..nw {
+                let at = |dx: usize, dy: usize| {
+                    alpha[(y * 2 + dy).min(h - 1) * w + (x * 2 + dx).min(w - 1)]
+                };
+                let mean = (at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1)) / 4.0;
+                next[y * nw + x] = mean;
+                let threshold = (BAYER[y % 4][x % 4] + 0.5) / 16.0;
+                level.pixels[y * nw + x][3] = if mean > threshold { 255 } else { 0 };
+            }
+        }
+        alpha = next;
+        (w, h) = (nw, nh);
+    }
+}
+
+#[cfg(test)]
+mod dither_tests {
+    use super::*;
+    #[test]
+    fn the_dither_only_runs_when_asked_for_and_from_its_size() {
+        let cutout = |side: u32| Image {
+            width: side,
+            height: side,
+            pixels: (0..side * side)
+                .map(|i| {
+                    [
+                        90,
+                        140,
+                        40,
+                        if (i % side).is_multiple_of(4) { 255 } else { 0 },
+                    ]
+                })
+                .collect(),
+        };
+        let settings = |dither_cutouts| Settings {
+            has_transparent: true,
+            dither_cutouts,
+            ..Settings::default()
+        };
+        assert_ne!(
+            generate(cutout(128), 4, settings(false)),
+            generate(cutout(128), 4, settings(true))
+        );
+        assert_eq!(
+            generate(cutout(32), 4, settings(false)),
+            generate(cutout(32), 4, settings(true))
+        );
+    }
+    #[test]
+    fn a_high_resolution_cutouts_fine_detail_keeps_its_coverage_in_small_mips() {
+        // Blades one texel wide, one column in four: too fine for the mips to hold.
+        let side = 128u32;
+        let pixels = (0..side * side)
+            .map(|i| {
+                [
+                    90,
+                    140,
+                    40,
+                    if (i % side).is_multiple_of(4) { 255 } else { 0 },
+                ]
+            })
+            .collect();
+        let base = Image {
+            width: side,
+            height: side,
+            pixels,
+        };
+        let settings = Settings {
+            has_transparent: true,
+            dither_cutouts: true,
+            ..Settings::default()
+        };
+        let mips = generate(base, 4, settings);
+        for level in &mips[3..] {
+            let passing = level.pixels.iter().filter(|p| p[3] >= 128).count() as f32;
+            let coverage = passing / level.pixels.len() as f32;
+            assert!((0.15..0.35).contains(&coverage), "{coverage}");
+        }
+    }
 }

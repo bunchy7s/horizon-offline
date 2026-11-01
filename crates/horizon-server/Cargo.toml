@@ -8,6 +8,10 @@ description = "Host a Horizon server: server.toml, the CLI and the supervisor th
 
 [dependencies]
 horizon-server-files = { path = "../horizon-server-files" }
+# server.toml's [anticheat], which the game reads: checked here before every start.
+horizon-anticheat = { path = "../horizon-anticheat" }
+# server.toml's [chat_filter], which the game reads too: checked here before every start.
+horizon-chat-filter = { path = "../horizon-chat-filter" }
 # The game process's RAM and CPU (the same probes the benchmark reports use).
 horizon-bench = { path = "../horizon-bench" }
 # The log's local times, as the game prints them.
@@ -21,9 +25,22 @@ toml_edit = "0.25"
 # lockfile, ureq through horizon-server-files).
 horizon-release-sign = { path = "../horizon-release-sign" }
 sha2 = "0.10"
+# Vanilla's management protocol: the WebSocket handshake's SHA-1 and Base64 (both already in the lockfile), and
+# the version `server/status` reports.
+sha1 = "0.10"
+base64 = "0.22"
+horizon-core = { path = "../horizon-core" }
+# Its TLS (on by default, as vanilla's): rustls on ring, both already in the lockfile through ureq; the keystore
+# is a PKCS12 file, as vanilla's, and one is generated (self-signed) when the owner sets none.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+p12-keystore = "0.2"
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 ureq = { version = "2", default-features = false, features = ["tls"] }
+# [discord]: the chat drawn as a PNG with Pixelify Sans (SIL OFL, crates/horizon-theme/fonts).
+ab_glyph = "0.2.32"
+png = "0.18"
 # Backups: one zip anyone can open, Windows included.
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 
 [target.'cfg(unix)'.dependencies]
 # SIGINT/SIGTERM/SIGHUP: stop the game cleanly when the terminal or the service manager asks.

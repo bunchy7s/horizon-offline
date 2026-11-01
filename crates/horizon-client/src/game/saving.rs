@@ -158,7 +158,7 @@ impl Game<'_> {
                         self.save.save_later(
                             &chunks,
                             self.pack.assets.registry,
-                            self.res.biomes(),
+                            world_biomes!(self),
                         )?;
                         self.world.modified.remove(&key);
                         keys.pop_front();
@@ -241,6 +241,15 @@ impl Game<'_> {
         ) {
             return Ok(());
         }
+        // disconnectWithSavingScreen: a GenericMessageScreen, its title and
+        // no navigation.
+        horizon_client::widgets::begin_screen(|| {
+            horizon_client::widgets::ScreenInfo::new(
+                "saving",
+                super::screen_info::tr("menu.savingLevel", &[]),
+            )
+            .without_navigation()
+        });
         let Some(renderer) = &mut self.renderer else {
             return Ok(());
         };

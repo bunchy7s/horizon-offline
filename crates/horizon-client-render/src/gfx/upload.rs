@@ -10,18 +10,35 @@ const CHUNK: u64 = 1 << 20;
 
 pub struct Uploads {
     belt: wgpu::util::StagingBelt,
+    chunk: u64,
 }
 
 impl Uploads {
     pub fn new(device: &wgpu::Device) -> Self {
         Self::with_chunk(device, CHUNK)
     }
-    /// A belt whose staging buffers hold `chunk` bytes (larger writes get
-    /// a buffer of their own).
+    /// A belt whose staging buffers hold `chunk` bytes (a larger write gets
+    /// a buffer of its own, rounded up to a power of two).
     pub fn with_chunk(device: &wgpu::Device, chunk: u64) -> Self {
         Self {
             belt: wgpu::util::StagingBelt::new(device.clone(), chunk),
+            chunk,
         }
+    }
+    /// A mapped staging slice of at least `size` bytes. The belt gives a
+    /// write larger than its chunk a buffer of exactly that size, keeps it for
+    /// good and only reuses it for writes that fit: an upload that grows a
+    /// little every frame (the entity batch while mobs appear) took a new
+    /// buffer each frame until the game ran out of memory (#2826). Rounded up
+    /// to a power of two, the large buffers it keeps are reused, one per
+    /// doubling.
+    fn allocate(&mut self, size: NonZeroU64, alignment: NonZeroU64) -> wgpu::BufferSlice<'_> {
+        let size = if size.get() > self.chunk {
+            size.checked_next_power_of_two().unwrap_or(size)
+        } else {
+            size
+        };
+        self.belt.allocate(size, alignment)
     }
     /// Copy tightly packed RGBA8 `pixels` (`width` by `height`) into one mip
     /// level of one array layer, padding rows to the copy alignment.
@@ -41,7 +58,7 @@ impl Uploads {
         };
         let alignment = NonZeroU64::new(u64::from(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT))
             .expect("non-zero alignment");
-        let slice = self.belt.allocate(size, alignment);
+        let slice = self.allocate(size, alignment);
         {
             let mut view = slice
                 .get_mapped_range_mut()
@@ -80,8 +97,20 @@ impl Uploads {
         let Some(size) = NonZeroU64::new(bytes.len() as u64) else {
             return;
         };
-        self.belt
-            .write_buffer(encoder, target, offset, size)
+        // The belt's own `write_buffer` checks, kept now that a large write's
+        // slice is rounded up past them.
+        assert!(
+            offset.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT)
+                && size.get().is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT),
+            "buffer upload at {offset} of {size} bytes must be 4-byte aligned"
+        );
+        let alignment = NonZeroU64::new(wgpu::COPY_BUFFER_ALIGNMENT).expect("non-zero alignment");
+        let slice = self.allocate(size, alignment).slice(..size.get());
+        encoder.copy_buffer_to_buffer(slice.buffer(), slice.offset(), target, offset, size.get());
+        slice
+            .get_mapped_range_mut()
+            .expect("staging belt slices are mapped")
+            .slice(..)
             .copy_from_slice(bytes);
     }
     /// Close this frame's staging buffers: they come back for reuse once the
@@ -215,6 +244,80 @@ mod tests {
                 "frame {frame}"
             );
         }
+    }
+
+    /// Staging buffers the belt holds, once every submitted frame is done
+    /// with them. The belt only reports its buffers through `Debug`.
+    fn kept_buffers(device: &wgpu::Device, uploads: &mut Uploads) -> usize {
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        // Finishing an empty frame takes back every recalled buffer.
+        uploads.finish(&device.create_command_encoder(&Default::default()));
+        let belt = format!("{:?}", uploads.belt);
+        let count = |field: &str| -> usize {
+            let at = belt.find(&format!("{field}: ")).expect(&belt) + field.len() + 2;
+            let digits = belt[at..].split(|c: char| !c.is_ascii_digit()).next();
+            digits.and_then(|d| d.parse().ok()).expect(&belt)
+        };
+        count("active_chunks") + count("closed_chunks") + count("free_chunks")
+    }
+
+    /// #2826: a write larger than the chunk that grows a little every frame
+    /// (the entity batch while mobs appear) got a new exact-size buffer each
+    /// frame, all of them kept, until the game ran out of memory.
+    #[test]
+    fn growing_large_writes_reuse_the_belt_buffers() {
+        let Some((device, queue)) = device() else {
+            eprintln!("no GPU adapter: skipped");
+            return;
+        };
+        const CHUNK: u64 = 1 << 16;
+        const TARGET: usize = 4 * CHUNK as usize;
+        let target = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: TARGET as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: TARGET as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut uploads = Uploads::with_chunk(&device, CHUNK);
+        let mut expected = vec![0u8; TARGET];
+        let frames = 64;
+        for frame in 0..frames {
+            let mut encoder = device.create_command_encoder(&Default::default());
+            // One small write, then the large one, 1.5 to 3.5 chunks long.
+            uploads.buffer(&mut encoder, &target, TARGET as u64 - 4, &[9; 4]);
+            expected[TARGET - 4..].fill(9);
+            let len = (3 * CHUNK as usize / 2 + frame * 2048).next_multiple_of(4);
+            let bytes: Vec<u8> = (0..len).map(|i| (i + frame) as u8).collect();
+            uploads.buffer(&mut encoder, &target, 0, &bytes);
+            expected[..len].copy_from_slice(&bytes);
+            encoder.copy_buffer_to_buffer(&target, 0, &readback, 0, TARGET as u64);
+            uploads.finish(&encoder);
+            queue.submit([encoder.finish()]);
+            readback
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, |r| r.unwrap());
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            // Only the written bytes land: the rest of the target is untouched.
+            assert!(
+                *readback.slice(..).get_mapped_range().unwrap() == expected[..],
+                "frame {frame}"
+            );
+            readback.unmap();
+        }
+        // A chunk for the small writes and a buffer per doubling of the large
+        // one (2 and 4 chunks), maybe one more where a small write took the
+        // start of a buffer the large one needed whole: not one per frame.
+        let kept = kept_buffers(&device, &mut uploads);
+        assert!(
+            kept <= 4,
+            "the belt kept {kept} buffers over {frames} frames"
+        );
     }
 
     #[test]

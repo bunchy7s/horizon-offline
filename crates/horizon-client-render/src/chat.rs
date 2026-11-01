@@ -21,6 +21,14 @@ const COMMAND_HISTORY_FILE: &str = "command_history.txt";
 const MAX_PERSISTED_COMMAND_HISTORY: usize = 50;
 /// GuiMessageTag.systemSinglePlayer's indicator colour.
 pub const SYSTEM_INDICATOR: u32 = 0xD0D0D0;
+/// `GuiMessageTag.CHAT_MODIFIED_INDICATOR_COLOR`.
+const MODIFIED_INDICATOR: u32 = 0x60_6060;
+/// A player message's signature (MessageSignature), which names it to a
+/// server's deletion.
+pub type Signature = horizon_protocol::secure_chat::Signature;
+/// How long a message shows before a deletion replaces it
+/// (`ChatComponent.deleteMessageOrDelay`: `addedTime + 60`).
+const DELETION_DELAY: u64 = 60;
 
 /// `ChatVisiblity`: the Chat option's three values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -163,15 +171,64 @@ impl ChatOptions {
 struct Message {
     added: u64,
     content: Text,
-    indicator: Option<u32>,
+    tag: Option<std::sync::Arc<Tag>>,
     source: ChatSource,
+    /// `GuiMessage.signature`: a signed player message's, for deletion.
+    signature: Option<Box<Signature>>,
 }
 /// A wrapped line (`GuiMessage.Line`).
 #[derive(Clone, Debug)]
 struct Line {
     added: u64,
     content: Text,
-    indicator: Option<u32>,
+    tag: Option<std::sync::Arc<Tag>>,
+}
+
+/// `GuiMessageTag`: the bar at the left of a message's lines, the tooltip
+/// over it, and for a modified message the icon after each line.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tag {
+    pub color: u32,
+    /// `GuiMessageTag.Icon.CHAT_MODIFIED`.
+    pub icon: bool,
+    pub text: Text,
+}
+impl Tag {
+    /// `GuiMessageTag.systemSinglePlayer`, in `color`.
+    pub fn system_single_player(color: u32) -> Self {
+        Self {
+            color,
+            icon: false,
+            text: Text::translate("chat.tag.system_single_player", &[]),
+        }
+    }
+    /// `GuiMessageTag.chatNotSecure`.
+    pub fn not_secure() -> Self {
+        Self {
+            color: SYSTEM_INDICATOR,
+            icon: false,
+            text: Text::translate("chat.tag.not_secure", &[]),
+        }
+    }
+    /// `GuiMessageTag.chatError`: red (`CHAT_ERROR`, 16733525), the tooltip `chat.tag.error`.
+    pub fn chat_error() -> Self {
+        Self {
+            color: 0xFF_5555,
+            icon: false,
+            text: Text::translate("chat.tag.error", &[]),
+        }
+    }
+    /// `GuiMessageTag.chatModified`: the tooltip adds the original content in grey.
+    pub fn modified(original_content: &str) -> Self {
+        Self {
+            color: MODIFIED_INDICATOR,
+            icon: true,
+            text: Text::empty()
+                .append(Text::translate("chat.tag.modified", &[]))
+                .append(Text::literal("\n"))
+                .append(Text::literal(original_content).with_color(text::GRAY)),
+        }
+    }
 }
 
 /// `ChatComponent.AlphaCalculator.timeBased`: opaque for 180 ticks, then
@@ -205,6 +262,9 @@ pub struct Chat {
     pub received: u64,
     /// The Chat option's `visibleMessageFilter` (`set_abilities`).
     abilities: ChatAbilities,
+    /// `ChatComponent.messageDeletionQueue`: deletions of messages still
+    /// too new to replace, with the tick from which they may be.
+    deletions: Vec<(Box<Signature>, u64)>,
 }
 impl Chat {
     pub fn lines_per_page(&self, focused: bool) -> usize {
@@ -225,38 +285,99 @@ impl Chat {
         ticks: u64,
         focused: bool,
     ) {
-        self.add_message(&atlas.font, content, indicator, source, ticks, focused);
+        let tag = indicator.map(|color| std::sync::Arc::new(Tag::system_single_player(color)));
+        self.add_message(&atlas.font, content, tag, source, ticks, focused);
+    }
+    /// `add` of a player message with its signature, which a server's
+    /// deletion names it by (`GuiMessage.signature`).
+    pub fn add_signed(
+        &mut self,
+        atlas: &HudAtlas,
+        content: Text,
+        signature: Option<Signature>,
+        tag: Option<Tag>,
+        ticks: u64,
+        focused: bool,
+    ) {
+        self.add_player_message(&atlas.font, content, signature, tag, ticks, focused);
+    }
+    #[cfg(test)]
+    fn add_signed_message(
+        &mut self,
+        font: &crate::font::Font,
+        content: Text,
+        signature: Option<Signature>,
+        ticks: u64,
+        focused: bool,
+    ) {
+        self.add_player_message(font, content, signature, None, ticks, focused);
+    }
+    /// `ChatComponent.addPlayerMessage`: the tag the message's trust level made.
+    fn add_player_message(
+        &mut self,
+        font: &crate::font::Font,
+        content: Text,
+        signature: Option<Signature>,
+        tag: Option<Tag>,
+        ticks: u64,
+        focused: bool,
+    ) {
+        self.push_message(
+            font,
+            Message {
+                added: ticks,
+                content,
+                tag: tag.map(std::sync::Arc::new),
+                source: ChatSource::Player,
+                signature: signature.map(Box::new),
+            },
+            focused,
+        );
     }
     fn add_message(
         &mut self,
         font: &crate::font::Font,
         content: Text,
-        indicator: Option<u32>,
+        tag: Option<std::sync::Arc<Tag>>,
         source: ChatSource,
         ticks: u64,
         focused: bool,
     ) {
-        if !self.abilities.shows(source) {
+        self.push_message(
+            font,
+            Message {
+                added: ticks,
+                content,
+                tag,
+                source,
+                signature: None,
+            },
+            focused,
+        );
+    }
+    fn push_message(&mut self, font: &crate::font::Font, message: Message, focused: bool) {
+        if !self.abilities.shows(message.source) {
             return;
         }
         // ChatComponent.logChatMessage: every message shown is in the log.
-        crate::logging::write_only(log::Level::Info, &format!("[CHAT] {}", content.plain()));
+        let plain = message.content.plain();
+        crate::logging::write_only(log::Level::Info, &format!("[CHAT] {plain}"));
         if self.log {
-            println!("[CHAT] {}", content.plain());
+            println!("[CHAT] {plain}");
         }
-        let message = Message {
-            added: ticks,
-            content,
-            indicator,
-            source,
-        };
         self.add_lines(font, &message, focused);
         self.messages.insert(0, message);
         self.messages.truncate(100);
         self.received += 1;
     }
     fn add_lines(&mut self, font: &crate::font::Font, message: &Message, focused: bool) {
-        let width = self.max_width();
+        // GuiMessage.splitLines: room for the tag's icon (its width, 4 before and 2 after).
+        let icon = if message.tag.as_ref().is_some_and(|tag| tag.icon) {
+            9 + 4 + 2
+        } else {
+            0
+        };
+        let width = self.max_width() - icon;
         let content = self.displayed(&message.content);
         for line in font.wrap_components(&content, width) {
             if focused && self.scroll > 0 {
@@ -268,7 +389,7 @@ impl Chat {
                 Line {
                     added: message.added,
                     content: line,
-                    indicator: message.indicator,
+                    tag: message.tag.clone(),
                 },
             );
         }
@@ -319,7 +440,67 @@ impl Chat {
     pub fn clear(&mut self) {
         self.messages.clear();
         self.lines.clear();
+        self.deletions.clear();
         self.scroll = 0;
+    }
+    /// `ChatComponent.deleteMessage`: the server deleted a message. One
+    /// shown for 60 ticks becomes the grey "deleted" marker now; a newer
+    /// one waits until then (`messageDeletionQueue`).
+    pub fn delete_message(&mut self, atlas: &HudAtlas, signature: &Signature, ticks: u64) {
+        self.delete_message_with(&atlas.font, signature, ticks);
+    }
+    fn delete_message_with(&mut self, font: &crate::font::Font, signature: &Signature, ticks: u64) {
+        if let Some(delayed) = self.delete_or_delay(font, signature, ticks) {
+            self.deletions.push((Box::new(*signature), delayed));
+        }
+    }
+    /// `ChatComponent.tick` (`processMessageDeletionQueue`): the delayed
+    /// deletions whose message has shown long enough.
+    pub fn tick(&mut self, atlas: &HudAtlas, ticks: u64) {
+        self.process_deletions(&atlas.font, ticks);
+    }
+    fn process_deletions(&mut self, font: &crate::font::Font, ticks: u64) {
+        let mut deletions = std::mem::take(&mut self.deletions);
+        deletions.retain(|(signature, after)| {
+            ticks < *after || self.delete_or_delay(font, signature, ticks).is_some()
+        });
+        self.deletions = deletions;
+    }
+    /// `ChatComponent.deleteMessageOrDelay`: the newest message with this
+    /// signature, replaced by `createDeletedMarker` once 60 ticks have
+    /// passed since it was added; otherwise the tick to retry from.
+    fn delete_or_delay(
+        &mut self,
+        font: &crate::font::Font,
+        signature: &Signature,
+        ticks: u64,
+    ) -> Option<u64> {
+        let message = self
+            .messages
+            .iter_mut()
+            .find(|m| m.signature.as_deref() == Some(signature))?;
+        let deletable = message.added + DELETION_DELAY;
+        if ticks < deletable {
+            return Some(deletable);
+        }
+        *message = Message {
+            added: message.added,
+            content: Self::deleted_marker(),
+            tag: Some(std::sync::Arc::new(Tag::system_single_player(
+                SYSTEM_INDICATOR,
+            ))),
+            source: ChatSource::Server,
+            signature: None,
+        };
+        // refreshTrimmedMessages.
+        self.rewrap(font);
+        None
+    }
+    /// `ChatComponent.DELETED_CHAT_MESSAGE`: grey, italic.
+    fn deleted_marker() -> Text {
+        Text::translate("chat.deleted_marker", &[])
+            .with_color(text::GRAY)
+            .italic()
     }
     /// `new CommandHistory(gameFolder)`: the commands kept from earlier runs
     /// start the chat's history (`ChatComponent`'s constructor).
@@ -431,8 +612,8 @@ impl Chat {
                     shadow: true,
                 });
             }
-            if let Some(indicator) = line.indicator {
-                let color = hud_layout::as8(opacity) << 24 | indicator & 0xFF_FFFF;
+            if let Some(tag) = &line.tag {
+                let color = hud_layout::as8(opacity) << 24 | tag.color & 0xFF_FFFF;
                 out.push(hud_layout::fill(
                     -4,
                     bottom - entry_height,
@@ -593,12 +774,91 @@ impl Chat {
         }
         None
     }
-    /// Whether the cursor is on a line's indicator bar while chat is focused
-    /// (`DrawingFocusedGraphicsAccess.handleTag`), whose tooltip is the
-    /// message tag's text.
-    pub fn indicator_at(&self, height: i32, x: f64, y: f64) -> bool {
-        self.line_at(height, x, y)
-            .is_some_and(|(line, x)| line.indicator.is_some() && (-4.0..-2.0).contains(&x))
+    /// `DrawingFocusedGraphicsAccess.handleTag` and `handleTagIcon` with the
+    /// cursor at GUI position `(x, y)` while chat is focused: the tooltip of
+    /// the tag under it (its bar, or its icon) and the icons to draw, those
+    /// under the cursor and those of the message the cursor is over.
+    pub fn focused_tags(
+        &self,
+        font: &crate::font::Font,
+        height: i32,
+        x: f64,
+        y: f64,
+    ) -> (Option<Text>, Vec<GuiDraw>) {
+        let o = &self.options;
+        let scale = o.scale as f32;
+        let chat_bottom = hud_layout::floor((height - 40) as f32 / scale);
+        let entry_height = o.line_height();
+        let bottom_to_text =
+            (8.0 * (o.line_spacing + 1.0) - 4.0 * o.line_spacing + 0.5).floor() as i32;
+        let (mouse_x, mouse_y) = (x / f64::from(scale) - 4.0, y / f64::from(scale));
+        let inside = |left: i32, top: i32, right: i32, bottom: i32| {
+            mouse_x >= f64::from(left)
+                && mouse_x < f64::from(right)
+                && mouse_y >= f64::from(top)
+                && mouse_y < f64::from(bottom)
+        };
+        let visible = self
+            .lines
+            .len()
+            .saturating_sub(self.scroll)
+            .min(self.lines_per_page(true));
+        let mut tooltip = None;
+        let mut icons = Vec::new();
+        let mut hovered_message = false;
+        for i in (0..visible).rev() {
+            let index = i + self.scroll;
+            let line = &self.lines[index];
+            let bottom = chat_bottom - i as i32 * entry_height;
+            let top = bottom - entry_height;
+            let width = font.width_text(&line.content).ceil() as i32;
+            hovered_message |= inside(0, top, width, bottom);
+            // GuiMessage.Line.endOfEntry: the next newer line is another message's.
+            let end_of_entry = index == 0
+                || match (&line.tag, &self.lines[index - 1].tag) {
+                    (Some(a), Some(b)) => !std::sync::Arc::ptr_eq(a, b),
+                    (None, None) => false,
+                    _ => true,
+                };
+            let force_icon = end_of_entry && hovered_message;
+            if end_of_entry {
+                hovered_message = false;
+            }
+            let Some(tag) = &line.tag else { continue };
+            if inside(-4, top, -2, bottom) {
+                tooltip = Some(tag.text.clone());
+            }
+            if tag.icon {
+                let (left, text_bottom) = (width + 4, bottom - bottom_to_text + 9);
+                let icon_top = text_bottom - 9 - 1;
+                let over = inside(left, icon_top, left + 9, text_bottom);
+                if over {
+                    tooltip = Some(tag.text.clone());
+                }
+                if force_icon || over {
+                    icons.push(GuiDraw::Sprite {
+                        sprite: "icon/chat_modified".into(),
+                        x: left,
+                        y: icon_top,
+                        w: 9,
+                        h: 9,
+                        region: None,
+                        color: hud_layout::WHITE,
+                        blend: hud_layout::Blend::Textured,
+                    });
+                }
+            }
+        }
+        if icons.is_empty() {
+            return (tooltip, icons);
+        }
+        let mut draws = vec![GuiDraw::Push(vec![
+            PoseOp::Scale(scale, scale),
+            PoseOp::Translate(4.0, 0.0),
+        ])];
+        draws.extend(icons);
+        draws.push(GuiDraw::Pop);
+        (tooltip, draws)
     }
     /// Plain text of the newest messages (for tests and the control socket).
     pub fn recent_lines(&self, n: usize) -> Vec<String> {
@@ -618,6 +878,22 @@ impl Chat {
     }
 }
 
+/// `SuggestionsList.getNarrationMessage` for entry `index` of `count`.
+fn suggestion_narration(index: usize, count: usize, text: &str, tooltip: Option<&str>) -> Text {
+    let mut args = vec![
+        Text::literal((index + 1).to_string()),
+        Text::literal(count.to_string()),
+        Text::literal(text),
+    ];
+    match tooltip {
+        Some(tooltip) => {
+            args.push(Text::literal(tooltip));
+            Text::translate("narration.suggestion.tooltip", &args)
+        }
+        None => Text::translate("narration.suggestion", &args),
+    }
+}
+
 /// `CommandSuggestions.SuggestionsList`.
 #[derive(Clone, Debug)]
 struct SuggestionList {
@@ -629,8 +905,17 @@ struct SuggestionList {
     current: usize,
     last_mouse: (i32, i32),
     tab_cycles: bool,
+    /// `lastNarratedEntry`: the entry the narrator last said (-1: none yet).
+    last_narrated: isize,
 }
 impl SuggestionList {
+    /// `getNarrationMessage`: "Selected suggestion 2 out of 5: …", with its
+    /// tooltip when it has one. It marks the entry said.
+    fn narration_message(&mut self) -> Text {
+        self.last_narrated = self.current as isize;
+        let s = &self.list[self.current];
+        suggestion_narration(self.current, self.list.len(), &s.text, s.tooltip.as_deref())
+    }
     fn contains(&self, x: i32, y: i32) -> bool {
         let [rx, ry, w, h] = self.rect;
         x >= rx && x <= rx + w && y >= ry && y <= ry + h
@@ -753,6 +1038,53 @@ fn last_word_index(s: &str) -> usize {
     }
     if prev_space { s.len() } else { out }
 }
+/// `ChatScreen.normalizeChatMessage`: `String.trim`, then
+/// `StringUtils.normalizeSpace` (one space for every run of whitespace), then
+/// `StringUtil.trimChatMessage` (the first 256 UTF-16 code units, the length
+/// `ServerboundChatPacket`'s `stringUtf8(256)` decodes). The chat screen sends
+/// this, not what was typed: a line of spaces sends nothing, and a message the
+/// packet cannot hold is cut on the client, as vanilla's is, instead of by the
+/// server.
+pub fn normalize_chat_message(message: &str) -> String {
+    // String.trim: the code points up to U+0020, which is not `str::trim`'s
+    // Unicode whitespace (U+00A0 is not Java whitespace and stays).
+    let trimmed = message.trim_matches(|c: char| c <= ' ');
+    truncate_utf16(&normalize_space(trimmed), 256)
+}
+/// `StringUtils.normalizeSpace`: one space for every run of
+/// `Character.isWhitespace`, and none at either end.
+fn normalize_space(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut space = false;
+    for c in s.chars() {
+        if crate::ui::java_whitespace(c) {
+            space = !out.is_empty();
+        } else {
+            if space {
+                out.push(' ');
+                space = false;
+            }
+            out.push(c);
+        }
+    }
+    out
+}
+/// `StringUtil.truncateStringIfNecessary(s, 256, false)`: Java counts UTF-16
+/// code units (`String.length`), so 129 emoji are cut to 128 of them, where
+/// `chars().take(256)` would keep all 129 (258 units) for the server to
+/// reject. A cut between the halves of a surrogate pair keeps the character
+/// below it: vanilla's `substring` leaves half a pair, which a Java `String`
+/// may hold and a Rust `String` may not.
+fn truncate_utf16(s: &str, max_units: usize) -> String {
+    let mut units = 0;
+    for (byte, c) in s.char_indices() {
+        units += c.len_utf16();
+        if units > max_units {
+            return s[..byte].to_owned();
+        }
+    }
+    s.to_owned()
+}
 impl ChatScreen {
     /// `ChatScreen.init`: the input at the bottom, focused, holding `initial`.
     pub fn new(
@@ -842,12 +1174,14 @@ impl ChatScreen {
             let value = self.input.value.clone();
             let auto = self.auto_suggestions;
             let abilities = self.abilities;
+            let message = std::mem::take(&mut self.input.message);
             *self = if self.layout == SuggestLayout::CHAT {
                 Self::new(m, c, &value, self.history_pos, width, height, abilities)
             } else {
                 Self::command_block(m, c, &value, width, height)
             };
             self.auto_suggestions = auto;
+            self.input.message = message;
         }
     }
     /// `ChatScreen.onEdited`.
@@ -929,7 +1263,9 @@ impl ChatScreen {
         } else if !command.chars().all(char::is_whitespace) {
             let partial = &command[..cursor_b];
             let mut builder = SuggestionsBuilder::new(partial, last_word_index(partial));
-            builder.suggest_matching(c.registries.players.iter().map(String::as_str));
+            // ClientSuggestionProvider.getCustomTabSuggestions: the players
+            // and the server's custom chat completions.
+            builder.suggest_matching(c.registries.custom_tab_suggestions());
             let (range, list) = merge_suggestions(partial, builder.out);
             self.awaiting = None;
             self.pending = Some((range.0, list));
@@ -1069,11 +1405,12 @@ impl ChatScreen {
         };
         self.suggestions = None;
         if self.allow_suggestions && self.auto_suggestions {
-            self.show_suggestions(m);
+            self.show_suggestions(m, false);
         }
     }
-    /// `CommandSuggestions.showSuggestions`.
-    fn show_suggestions(&mut self, m: &Measure) {
+    /// `CommandSuggestions.showSuggestions`: `immediate` (Tab asked for
+    /// them) has the narrator say the first one at once.
+    fn show_suggestions(&mut self, m: &Measure, immediate: bool) {
         let Some((start, list)) = self.pending.clone() else {
             return;
         };
@@ -1116,6 +1453,7 @@ impl ChatScreen {
             current: 0,
             last_mouse: (0, 0),
             tab_cycles: false,
+            last_narrated: if immediate { -1 } else { 0 },
         };
         self.select(&mut l, 0);
         self.suggestions = Some(l);
@@ -1135,6 +1473,9 @@ impl ChatScreen {
         self.input.suggestion = applied
             .strip_prefix(self.input.value.as_str())
             .map(str::to_owned);
+        if l.last_narrated != l.current as isize {
+            horizon_narrator::say_system_now(&l.narration_message().plain());
+        }
     }
     fn cycle(&mut self, l: &mut SuggestionList, dir: isize) {
         self.select(l, l.current as isize + dir);
@@ -1245,7 +1586,7 @@ impl ChatScreen {
             self.suggestions = Some(l);
             handled
         } else if key == K::Tab {
-            self.show_suggestions(m);
+            self.show_suggestions(m, true);
             true
         } else {
             false
@@ -1477,5 +1818,19 @@ impl ChatScreen {
     }
     pub fn suggestions_visible(&self) -> bool {
         self.suggestions.is_some()
+    }
+    /// `CommandSuggestions.getUsageNarration` while the list shows
+    /// (`isVisible`): whether Tab cycles it or fills the input in, and
+    /// whether Escape hides it (`allowHiding`, which only the chat's turns
+    /// off).
+    pub fn suggestions_usage(&self) -> Option<&'static str> {
+        let list = self.suggestions.as_ref()?;
+        let hidable = self.layout != SuggestLayout::CHAT;
+        Some(match (list.tab_cycles, hidable) {
+            (true, true) => "narration.suggestion.usage.cycle.hidable",
+            (true, false) => "narration.suggestion.usage.cycle.fixed",
+            (false, true) => "narration.suggestion.usage.fill.hidable",
+            (false, false) => "narration.suggestion.usage.fill.fixed",
+        })
     }
 }

@@ -17,6 +17,10 @@ use std::{
 pub const MAX_SIZE: u64 = 262_144_000;
 /// `DownloadQueue.MAX_KEPT_PACKS`.
 const MAX_KEPT: usize = 20;
+/// Longest wait for a connection, and for any one read from the server. The
+/// queue runs batches on one thread, so a server that accepts the connection
+/// and then goes silent would otherwise hold the pack screen forever.
+const NET_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// `createDownloadHeaders`: who is downloading, with which game.
 pub fn headers(name: &str, uuid: u128) -> Vec<(&'static str, String)> {
@@ -196,6 +200,17 @@ pub fn download_file(
     max_size: u64,
     progress: &Sender<Progress>,
 ) -> Result<PathBuf, String> {
+    download_file_within(dir, request, headers, max_size, progress, NET_TIMEOUT)
+}
+/// `download_file` with the connect and read timeout given.
+fn download_file_within(
+    dir: &Path,
+    request: &Request,
+    headers: &[(&'static str, String)],
+    max_size: u64,
+    progress: &Sender<Progress>,
+    timeout: std::time::Duration,
+) -> Result<PathBuf, String> {
     let target = request.sha1.as_ref().map(|sha1| dir.join(sha1));
     if let (Some(target), Some(sha1)) = (&target, &request.sha1) {
         if matches(target, sha1) {
@@ -219,7 +234,11 @@ pub fn download_file(
             })
             .map_err(|e| format!("Failed to remove existing file {}: {e}", target.display()))?;
     }
-    let mut call = ureq::AgentBuilder::new().build().get(&request.url);
+    let mut call = ureq::AgentBuilder::new()
+        .timeout_connect(timeout)
+        .timeout_read(timeout)
+        .build()
+        .get(&request.url);
     for (name, value) in headers {
         call = call.set(name, value);
     }
@@ -467,6 +486,38 @@ mod tests {
             sha1: None,
         };
         assert!(download_file(&dir, &missing, &[], MAX_SIZE, &channel().0).is_err());
+        server.join().unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_server_that_goes_silent_fails_the_download() {
+        let dir = scratch();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/pack.zip", listener.local_addr().unwrap());
+        let (release, hold) = channel::<()>();
+        let server = std::thread::spawn(move || {
+            // Accept, then answer nothing until the test is done.
+            let (_stream, _) = listener.accept().unwrap();
+            let _ = hold.recv();
+        });
+        let request = Request {
+            id: 9,
+            url,
+            sha1: None,
+        };
+        let started = std::time::Instant::now();
+        let result = download_file_within(
+            &dir,
+            &request,
+            &[],
+            MAX_SIZE,
+            &channel().0,
+            std::time::Duration::from_millis(300),
+        );
+        assert!(result.is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        drop(release);
         server.join().unwrap();
         fs::remove_dir_all(dir).unwrap();
     }

@@ -47,7 +47,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))?;
         let parse_ms = parse_started.elapsed().as_secs_f64() * 1000.0;
         let facts_started = Instant::now();
-        let (facts, gameplay) = BlockFacts::load_with_projection(root, assets.registry, &json)?;
+        let (facts, gameplay) =
+            BlockFacts::load_with_projection(root, assets.registry, &json, true)?;
         let facts_ms = facts_started.elapsed().as_secs_f64() * 1000.0;
         let behaviours_started = Instant::now();
         let behaviours = Behaviours::load_with_gameplay(assets.registry, root, &json, &gameplay)?;

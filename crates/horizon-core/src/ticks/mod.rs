@@ -6,13 +6,11 @@ pub use generation::{
 };
 mod heap;
 mod index;
+use crate::fast_hash::{FxHashMap, FxHashSet};
 use crate::position::{BlockPos, ChunkPos};
 use heap::Heap;
 use index::DeadlineIndex;
-use std::{
-    cmp::Ordering,
-    collections::{HashMap, HashSet, VecDeque},
-};
+use std::{cmp::Ordering, collections::VecDeque};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TickTypeId(pub u32);
@@ -96,7 +94,7 @@ impl SavedTick {
 pub struct ChunkTicks {
     queue: Heap<ScheduledTick>,
     pending: Option<Vec<SavedTick>>,
-    positions: HashSet<(TickTypeId, BlockPos)>,
+    positions: FxHashSet<(TickTypeId, BlockPos)>,
 }
 impl ChunkTicks {
     pub fn from_saved(ticks: Vec<SavedTick>) -> Self {
@@ -355,12 +353,12 @@ impl std::error::Error for TickError {}
 
 #[derive(Default)]
 pub struct LevelTicks {
-    chunks: HashMap<i64, ChunkTicks>,
+    chunks: FxHashMap<i64, ChunkTicks>,
     deadlines: DeadlineIndex,
     containers_to_tick: Heap<i64>,
     to_run: VecDeque<ScheduledTick>,
     already_run: Vec<ScheduledTick>,
-    to_run_set: HashSet<(TickTypeId, BlockPos)>,
+    to_run_set: FxHashSet<(TickTypeId, BlockPos)>,
     collecting: bool,
 }
 impl LevelTicks {

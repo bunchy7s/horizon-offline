@@ -1,0 +1,63 @@
+# Horizon's chat filter: the hate slurs a server refuses in chat, private messages, /say, /me, team
+# messages, signs, anvil names and book titles (docs/chat-filter.md). This is a moderation list: the
+# words are written here only so the filter can recognise them, because players spammed them on the
+# official server (2026-10-31). Add a word when players find a way around the list; keep insults that
+# aren't slurs out of it (moderators handle those).
+#
+# One entry a line, matched after normalising the text: lower case, accents and look-alike letters
+# (Cyrillic, Greek, full-width, small capitals...), leetspeak (1 i, 3 e, 4 a, 0 o, @ a, $ s, 9 g),
+# separators between letters (n.i.g, n_i_g) and repeated letters. A doubled letter in an entry must be
+# doubled in the text: "niger", the river and the country, isn't "nigger".
+#   word    matches inside a longer word too
+#   =word   only as a whole word ("spic", not "suspicious")
+#   ~word   also when it's spread over several words ("nig ger", "n i g g e r")
+#   !word   never a match: a word that contains an entry ("snigger"); !word* any word starting so
+
+~nigger
+~nigga
+nigguh
+niggah
+niqqa
+niqqer
+nlgger
+nlgga
+kneegrow
+=nig
+=nigs
+=niglet
+=niglets
+=nibba
+=nibbas
+=nibber
+=nibbers
+jigaboo
+porchmonkey
+=coon
+=coons
+~faggot
+=fag
+=fags
+=faggy
+=fagot
+=fagots
+=tranny
+=trannies
+=kike
+=kikes
+=chink
+=chinks
+=gook
+=gooks
+=spic
+=spics
+wetback
+=beaner
+=beaners
+raghead
+towelhead
+zipperhead
+=paki
+=pakis
+
+!snigger*
+!niggard*

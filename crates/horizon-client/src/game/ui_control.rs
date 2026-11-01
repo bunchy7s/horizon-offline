@@ -1,6 +1,7 @@
 //! The widget tree of the open screen for agents (`ui`, `click ID`, `set ID
 //! VALUE`; docs/agent-control.md): what the last frame drew, with ids, and
 //! clicks that go through the same window events as the mouse.
+use super::event_loop::EventLoopCtl;
 use super::{Game, Screen, agent::Handled};
 use horizon_client::{
     Result,
@@ -13,7 +14,7 @@ use std::{
     sync::mpsc::Sender,
     time::{Duration, Instant},
 };
-use winit::{event::MouseButton, event_loop::ActiveEventLoop};
+use winit::event::MouseButton;
 
 pub(super) const HELP: &[&str] = &[
     "ui                             every widget of the open screen: id, kind, label, bounds, value",
@@ -125,7 +126,7 @@ impl Game<'_> {
         words: &[&str],
         line: &str,
         reply: &Sender<String>,
-        event_loop: &ActiveEventLoop,
+        event_loop: &dyn EventLoopCtl,
     ) -> Result<Handled> {
         if !matches!(words[0], "ui" | "click" | "set") {
             return Ok(Handled::No);

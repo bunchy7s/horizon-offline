@@ -214,6 +214,7 @@ fn relit_columns_keep_every_mesh_current() {
         });
         let mut mesher = Mesher {
             nether_shading: false,
+            shader_pack_lighting: false,
             zoom: BiomeZoom::new(0),
             blend_radius: 2,
             smooth_lighting: true,

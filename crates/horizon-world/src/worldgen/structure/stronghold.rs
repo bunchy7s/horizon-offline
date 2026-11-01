@@ -56,6 +56,26 @@ impl RingSearch {
     /// keeps it on a tie; so `biomes` gets the whole square at once, in
     /// vanilla's order. Fresh lookups moved seed 1234's first stronghold 6
     /// chunks: one quart on a lush caves / ocean tie went to the ocean.
+    /// `FixedBiomeSource.findBiomeHorizontal`: the one biome is allowed or it is not, and an
+    /// allowed one gives a random block of the square (two draws), not the reservoir search.
+    pub fn find_fixed(
+        &self,
+        preferred: &BTreeSet<BiomeId>,
+        biomes: &mut dyn FnMut(&[[i32; 3]]) -> Vec<BiomeId>,
+    ) -> ChunkPos {
+        let mut search = self.random.clone();
+        let (cx, cz) = (self.x * 16 + 8, self.z * 16 + 8);
+        let allowed = biomes(&[[cx >> 2, 0, cz >> 2]])
+            .first()
+            .is_some_and(|biome| preferred.contains(biome));
+        if !allowed {
+            return ChunkPos::new(self.x, self.z);
+        }
+        let r = SEARCH_QUARTS * 4;
+        let x = cx - r + search.next_int_bound(r * 2 + 1).unwrap_or(0);
+        let z = cz - r + search.next_int_bound(r * 2 + 1).unwrap_or(0);
+        ChunkPos::new(x >> 4, z >> 4)
+    }
     pub fn find(
         &self,
         preferred: &BTreeSet<BiomeId>,

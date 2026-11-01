@@ -54,6 +54,9 @@ pub struct Response {
     pub content_type: &'static str,
     pub headers: Vec<(&'static str, String)>,
     pub body: String,
+    /// Writes the body itself instead of `body`, after the head (a file, a stream of events); the
+    /// connection's end ends the body unless it sets a Content-Length.
+    pub stream: Option<Box<dyn FnOnce(&TcpStream) + Send>>,
 }
 
 impl Response {
@@ -69,7 +72,26 @@ impl Response {
             content_type,
             headers: Vec::new(),
             body: body.into(),
+            stream: None,
         }
+    }
+    /// A file sent as it is read, for a download (`name` is what the browser saves it as).
+    pub fn file(path: std::path::PathBuf, name: &str) -> Self {
+        let Ok(length) = std::fs::metadata(&path).map(|m| m.len()) else {
+            return Self::error(404, "no such file");
+        };
+        let mut response = Self::text(200, "application/octet-stream", "")
+            .with("Content-Length", length.to_string())
+            .with(
+                "Content-Disposition",
+                format!("attachment; filename=\"{name}\""),
+            );
+        response.stream = Some(Box::new(move |mut stream: &TcpStream| {
+            if let Ok(mut file) = std::fs::File::open(&path) {
+                let _ = std::io::copy(&mut file, &mut stream);
+            }
+        }));
+        response
     }
     pub fn with(mut self, header: &'static str, value: impl Into<String>) -> Self {
         self.headers.push((header, value.into()));
@@ -106,11 +128,16 @@ fn read_line_bounded(reader: &mut impl BufRead, line: &mut String) -> std::io::R
     Ok(n)
 }
 
-fn read_request(stream: &TcpStream) -> Result<Request, Response> {
-    let bad = |m: &str| Response::error(400, m);
-    let mut reader = BufReader::new(stream);
-    let mut line = String::new();
-    let read_line = |reader: &mut BufReader<&TcpStream>, line: &mut String, what: &str| {
+/// Reads one request from a connection, plain or TLS (the management protocol's `websocket::Link`).
+pub fn read_request(stream: impl Read) -> Result<Request, Response> {
+    fn bad(m: &str) -> Response {
+        Response::error(400, m)
+    }
+    fn read_line(
+        reader: &mut impl BufRead,
+        line: &mut String,
+        what: &str,
+    ) -> Result<usize, Response> {
         read_line_bounded(reader, line).map_err(|e| {
             if e.kind() == std::io::ErrorKind::InvalidInput {
                 bad("line too long")
@@ -118,7 +145,9 @@ fn read_request(stream: &TcpStream) -> Result<Request, Response> {
                 bad(what)
             }
         })
-    };
+    }
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
     read_line(&mut reader, &mut line, "no request")?;
     let mut parts = line.split_whitespace();
     let (Some(method), Some(target)) = (parts.next(), parts.next()) else {
@@ -159,22 +188,37 @@ fn read_request(stream: &TcpStream) -> Result<Request, Response> {
     })
 }
 
-fn write_response(mut stream: &TcpStream, response: &Response) {
-    let mut head = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n",
-        response.status,
-        reason(response.status),
-        response.content_type,
-        response.body.len(),
-    );
+fn write_response(mut stream: &TcpStream, mut response: Response) {
+    let _ = write_head(stream, &response);
+    if let Some(body) = response.stream.take() {
+        body(stream);
+        let _ = stream.flush();
+    }
+}
+
+/// The status line, the headers and `body`: all of a response but its `stream`.
+pub fn write_head(mut out: impl Write, response: &Response) -> std::io::Result<()> {
+    // A WebSocket upgrade: only the headers the handshake needs, then the socket is the stream's.
+    let mut head = if response.status == 101 {
+        "HTTP/1.1 101 Switching Protocols\r\n".to_owned()
+    } else {
+        format!(
+            "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nCache-Control: no-store\r\nConnection: close\r\n",
+            response.status,
+            reason(response.status),
+            response.content_type,
+        )
+    };
+    if response.stream.is_none() && response.status != 101 {
+        head.push_str(&format!("Content-Length: {}\r\n", response.body.len()));
+    }
     for (name, value) in &response.headers {
         head.push_str(&format!("{name}: {value}\r\n"));
     }
     head.push_str("\r\n");
-    let _ = stream
-        .write_all(head.as_bytes())
-        .and_then(|()| stream.write_all(response.body.as_bytes()));
-    let _ = stream.flush();
+    out.write_all(head.as_bytes())?;
+    out.write_all(response.body.as_bytes())?;
+    out.flush()
 }
 
 /// Serves `handle` on `listener` until the process ends, a thread per connection.
@@ -196,7 +240,7 @@ pub fn serve(
                             Ok(request) => handle(&request),
                             Err(response) => response,
                         };
-                        write_response(&stream, &response);
+                        write_response(&stream, response);
                     });
             }
         })?;

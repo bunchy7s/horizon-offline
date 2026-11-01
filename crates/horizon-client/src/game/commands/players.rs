@@ -61,7 +61,11 @@ impl Game<'_> {
             .unwrap_or(Target::Player)
     }
 
-    /// `PlayerList.getPlayerByName`: names are not case sensitive.
+    /// `PlayerList.getPlayerByName`: names are not case sensitive. Horizon:
+    /// on a server where a mod gave players nicknames
+    /// (`native_set_nickname`), a name no player has finds the player going
+    /// by it, without its `~` or with it (quoted), so `/msg` and `/tell`
+    /// reach a player by the name chat shows. No nickname, no change.
     pub(super) fn player_named(&self, name: &str) -> Option<Target> {
         if self.player.is_some() && name.eq_ignore_ascii_case(self.acting_player_name()) {
             return Some(Target::Player);
@@ -69,6 +73,21 @@ impl Game<'_> {
         self.command_players()
             .find(|g| g.name.eq_ignore_ascii_case(name))
             .map(|g| Target::Guest(g.conn))
+            .or_else(|| self.player_nicknamed(name))
+    }
+
+    /// The player whose nickname is `name` (any case, a leading `~` either
+    /// side ignored).
+    fn player_nicknamed(&self, name: &str) -> Option<Target> {
+        let bare = |s: &str| s.strip_prefix('~').unwrap_or(s).to_ascii_lowercase();
+        let wanted = bare(name);
+        let hub = &self.lan.as_ref()?.hub;
+        let uuid = hub
+            .nicknames
+            .iter()
+            .find(|(_, nick)| bare(nick) == wanted)?
+            .0;
+        self.target_by_uuid(*uuid)
     }
 
     /// `EntitySelector.findEntities` with a UUID: the player with it, else

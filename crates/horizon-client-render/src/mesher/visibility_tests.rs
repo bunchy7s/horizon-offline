@@ -188,6 +188,21 @@ fn visibility_matches_reference() {
 }
 
 #[test]
+fn visibility_scratch_reuse_keeps_shortcuts_and_subsequent_fills_exact() {
+    let info = [info(false), info(true), info(false), info(true)];
+    let mut stack = vec![usize::MAX];
+    for _ in 0..3 {
+        for (name, pad) in cases() {
+            assert_eq!(
+                visibility_reusing(&pad, &info, &mut stack),
+                reference(&pad, &info),
+                "{name}"
+            );
+        }
+    }
+}
+
+#[test]
 fn visibility_preserves_every_face_pair() {
     let info = [info(false), info(true), info(false), info(true)];
     // Each subset of six arms is one connected cavity. Its exact flags are

@@ -132,7 +132,8 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         }
     }
     // Entity.checkInsideBlocks -> CropBlock.entityInside: a ravager walking
-    // through a crop destroys it, drops and all, with mobGriefing.
+    // through a crop destroys it, drops and all, with mobGriefing; a pitcher
+    // crop (PitcherCropBlock.entityInside) goes the same way, both halves.
     if w.mob_griefing {
         let b = m
             .bounds()
@@ -148,6 +149,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                             | "minecraft:potatoes"
                             | "minecraft:beetroots"
                             | "minecraft:torchflower_crop"
+                            | "minecraft:pitcher_crop"
                     ) {
                         events.push(MobEvent::BreakBlock {
                             pos: [x, y, z],

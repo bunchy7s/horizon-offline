@@ -11,7 +11,7 @@ use super::end::GatewayJob;
 use super::nether_portal::{PLAYER_DELAY, Plan};
 use super::respawn_anchor::RespawnConfig;
 use super::{Dim, Game, Mob, boats, lan::LanHost, minecarts};
-use horizon_client::{lan::hub::TickCtx, text::Text, world_spawn::PlayerSpawnFinder};
+use horizon_client::{lan::hub::TickCtx, world_spawn::PlayerSpawnFinder};
 use horizon_core::{geometry::Vec3, position::BlockPos};
 use horizon_protocol::packets::play::{self, Clientbound as C};
 
@@ -126,6 +126,13 @@ impl Trip {
 }
 
 impl Game<'_> {
+    pub(super) fn gateway_source_chunks(&self) -> Vec<(i32, i32)> {
+        self.server_trips
+            .iter()
+            .filter(|t| t.dim == self.dim)
+            .filter_map(|t| t.gateway.and_then(GatewayJob::source_chunk))
+            .collect()
+    }
     /// Whether `conn` is between two levels: the server leaves its body
     /// alone until it arrives.
     pub(super) fn on_server_trip(&self, conn: u32) -> bool {
@@ -422,8 +429,8 @@ impl Game<'_> {
 
     /// `findRespawnAndUseSpawnBlock` for the player in place, at its point
     /// in the level in place: where it stands up, facing the anchor (with
-    /// the deplete sound) or the bed; else the point is forgotten
-    /// (`block.minecraft.spawn.not_valid`).
+    /// the deplete sound) or the bed; else the point is forgotten, and the
+    /// caller tells the player (`Hub::missing_respawn_block`).
     pub(super) fn resolve_server_respawn(&mut self, config: RespawnConfig) -> Option<(Vec3, f32)> {
         let [x, y, z] = config.pos;
         let anchor = self.is_anchor(self.world.block(x, y, z));
@@ -442,7 +449,6 @@ impl Game<'_> {
             }
             Ok(None) | Err(_) => {
                 self.respawn_config = None;
-                self.system_message(Text::translate("block.minecraft.spawn.not_valid", &[]));
                 None
             }
         }
@@ -538,6 +544,10 @@ impl Game<'_> {
             );
             if trip.dim != self.dim
                 || !(-2..=2).all(|dz| (-2..=2).all(|dx| self.streaming.is_lit(cx + dx, cz + dz)))
+                || trip
+                    .gateway
+                    .and_then(GatewayJob::source_chunk)
+                    .is_some_and(|c| !self.world.chunks.contains_key(&c))
             {
                 k += 1;
                 continue;
@@ -554,6 +564,7 @@ impl Game<'_> {
                 match self.as_guest(host, trip.conn, |g| g.resolve_server_respawn(config)) {
                     Some(Some(found)) => found,
                     _ => {
+                        host.hub.missing_respawn_block(trip.conn);
                         self.respawn_at_world_spawn(host, trip.conn);
                         continue;
                     }
@@ -590,7 +601,11 @@ impl Game<'_> {
                     None => self.end_arrival(trip.target, &mut trip.finder),
                 };
                 match arrival {
-                    Ok(Some((at, turned))) => (at, turned.unwrap_or(yaw)),
+                    Ok(Some((at, turned))) => {
+                        // EndPortalBlock.getPortalDestination: PLACE_PORTAL_TICKET.
+                        self.place_portal_ticket(Self::chunk_of(at));
+                        (at, turned.unwrap_or(yaw))
+                    }
                     Ok(None) => {
                         self.server_trips.insert(k, trip);
                         k += 1;
@@ -725,6 +740,7 @@ impl Game<'_> {
             tick_steps: self.clock.step_state(),
             collision: Some(self.collision),
             border: &self.border,
+            streaming: Some(&self.streaming),
         }
     }
 }

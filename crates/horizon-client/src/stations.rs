@@ -30,7 +30,7 @@ impl StationData {
             enchantments: std::sync::Arc::clone(&items.enchantments),
             recipes: StationRecipes::load(root, items, overlay),
             brewing: crate::brewing::Brewing::load(root, items, overlay),
-            trades: crate::merchant::Trades::load(root),
+            trades: crate::merchant::Trades::load(root, overlay),
             banners: crate::banner::Banners::load(root),
             recipe_index: crate::recipe_book::RecipeIndex::load(root, overlay),
         }
@@ -489,31 +489,38 @@ impl StationRecipes {
         let mut files = Vec::new();
         let namespaces =
             std::iter::once("minecraft".to_owned()).chain(crate::mod_content::namespaces(root));
+        // NeoForge's load conditions: a file whose don't hold is silently
+        // absent (`mod_loaded` asks which mods' data is in this root).
+        let mods: Vec<String> = {
+            let mut mods = horizon_items::content_namespaces::mod_ids(root);
+            if !mods.iter().any(|m| m == "minecraft") {
+                mods.push("minecraft".to_owned());
+            }
+            mods
+        };
+        let conditions_hold = |v: &Value| {
+            horizon_world::conditions::conditions_hold(v, &|id: &str| mods.iter().any(|m| m == id))
+        };
         for namespace in namespaces {
-            let mut more: Vec<_> = fs::read_dir(root.join(format!("data/{namespace}/recipe")))
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|e| e == "json"))
-                .collect();
-            more.sort();
-            files.extend(more.into_iter().map(|p| (namespace.clone(), p)));
+            let dir = root.join(format!("data/{namespace}/recipe"));
+            let more = crate::crafting::recipe_files(&dir).unwrap_or_default();
+            files.extend(
+                more.into_iter()
+                    .map(|(name, p)| (namespace.clone(), name, p)),
+            );
         }
         let mut sources: Vec<(String, Value)> = files
             .iter()
-            .filter_map(|(namespace, p)| {
+            .filter_map(|(namespace, name, p)| {
                 let bytes = fs::read(p).ok()?;
                 let v = serde_json::from_slice::<Value>(&bytes).ok()?;
-                let id = format!(
-                    "{namespace}:{}",
-                    p.file_stem().and_then(|s| s.to_str()).unwrap_or("")
-                );
-                Some((id, v))
+                Some((format!("{namespace}:{name}"), v))
             })
             .collect();
         // The world's packs' recipes over the game's own: the top pack's
         // file for each id replaces it (`SimpleJsonResourceReloadListener`).
+        // The gate answers the merged file, as the crafting loader's does:
+        // a false-conditioned pack file leaves the lower one gone too.
         for (id, files) in overlay.kind("recipe") {
             let Ok(v) = serde_json::from_slice::<Value>(PackOverlay::top(files)) else {
                 continue;
@@ -523,6 +530,7 @@ impl StationRecipes {
                 None => sources.push((id.to_owned(), v)),
             }
         }
+        sources.retain(|(_, v)| conditions_hold(v));
         let mut smithing = Vec::new();
         let mut stonecutting = Vec::new();
         for (id, v) in sources {
@@ -532,8 +540,7 @@ impl StationRecipes {
                     template: ingredient(&v["template"], items),
                     base: ingredient(&v["base"], items),
                     addition: ingredient(&v["addition"], items),
-                    result: v["result"]["id"]
-                        .as_str()
+                    result: horizon_world::loot::recipe_result_id(&v["result"])
                         .unwrap_or("minecraft:air")
                         .to_owned(),
                 }),
@@ -551,7 +558,8 @@ impl StationRecipes {
                             id,
                             input: ingredient(&v["ingredient"], items),
                             result: ItemStack::new(
-                                v["result"]["id"].as_str().unwrap_or("minecraft:air"),
+                                horizon_world::loot::recipe_result_id(&v["result"])
+                                    .unwrap_or("minecraft:air"),
                                 count,
                             ),
                         });

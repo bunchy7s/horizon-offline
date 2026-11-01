@@ -14,7 +14,7 @@ A comment by Ludovic or by a login in .github/trusted-reviewers.txt, on any issu
     /nightly dry-run 2640  builds main + these and signs with a throwaway key; publishes nothing, the set stays
 
 The set (set.json on the nightly-state branch) keeps each pull request at the head it had when someone asked for
-it; the scheduled nightly takes their newest heads and drops the merged and closed ones (nightly.py pick).
+it; the scheduled nightly builds them at those heads and drops the merged and closed ones (nightly.py pick).
 builds.jsonl there records every build's set, for the stats. Nothing here runs a pull request's code: its commits
 are fetched and merged with `git merge-tree --write-tree`, which writes git objects and never a working tree, so no
 file of theirs reaches the disk and no hook, filter or script of theirs runs.
@@ -157,21 +157,12 @@ class PullRequest:
     author: str
     base: str
     files: list[str]
-    approvals: dict[str, str] = field(default_factory=dict)  # login (lowercase) -> the head their approval is on
 
 
-def approvers(pr: PullRequest, head: str, team: set[str]) -> list[str]:
-    """Who approved `pr` at exactly `head`: a trusted reviewer, or Ludovic (his own review or his agents', which post
-    as ludovic111), never its author. A Nightly reaches every player (Ludovic, 2026-10-28): nothing goes in that the
-    Team or the agents haven't reviewed, and a push after the review needs a new one."""
-    ok = {t.lower() for t in team} | {OWNER}
-    return sorted(login for login, sha in pr.approvals.items()
-                  if sha == head and login in ok and login != pr.author.lower())
-
-
-def check(pr: PullRequest | None, number: int, patterns: list[str], team: set[str] | None = None) -> str | None:
-    """Why `pr` can't go in a Nightly, or None. `team`: the trusted reviewers, whose approval (or Ludovic's) it needs
-    at its head; None skips that, for a dry run, which publishes nothing."""
+def check(pr: PullRequest | None, number: int, patterns: list[str]) -> str | None:
+    """Why `pr` can't go in a Nightly, or None. No review is needed (Ludovic, 2026-10-30, at the Team's request; it
+    needed an approving review at its head from 2026-10-28): a trusted reviewer or Ludovic picks any open pull
+    request to main, unreviewed or not, as long as it leaves the files CODEOWNERS guards alone."""
     if pr is None:
         return f"#{number} isn't a pull request here"
     if pr.state != "open":
@@ -182,9 +173,6 @@ def check(pr: PullRequest | None, number: int, patterns: list[str], team: set[st
     if bad:
         more = f" and {len(bad) - 1} more" if len(bad) > 1 else ""
         return f"#{number} changes `{bad[0]}`{more}, which only Ludovic merges (CODEOWNERS)"
-    if team is not None and not approvers(pr, pr.head, team):
-        return (f"#{number} has no approving review at its head {pr.head[:7]} from the Team or Ludovic's agents "
-                "(not its author)")
     return None
 
 
@@ -216,7 +204,7 @@ def describe(prs: list[dict], heading: str = "The set") -> str:
 
 
 def apply(state: dict, cmd: Command, login: str, now: str, lookup: Callable[[int], PullRequest | None],
-          patterns: list[str], team: set[str] = frozenset()) -> Result:
+          patterns: list[str]) -> Result:
     """What `cmd` by `login` makes of `state` (set.json). Pure but for `lookup`; raises Refused."""
     st = copy.deepcopy(state)
     prs: list[dict] = st.setdefault("prs", [])
@@ -241,7 +229,7 @@ def apply(state: dict, cmd: Command, login: str, now: str, lookup: Callable[[int
         problems, asked = [], []
         for n in cmd.prs:
             pr = lookup(n)
-            if why := check(pr, n, patterns, None if cmd.verb == "dry-run" else team):
+            if why := check(pr, n, patterns):
                 problems.append(why)
             else:
                 asked.append(entry(pr, login, now))
@@ -462,16 +450,7 @@ def lookup(repo: str) -> Callable[[int], PullRequest | None]:
         files = gh("api", "--paginate", f"repos/{repo}/pulls/{n}/files", "--jq",
                    ".[] | .filename, (.previous_filename // empty)").splitlines()
         state = "merged" if p.get("merged_at") else p["state"]
-        approvals: dict[str, str] = {}  # each reviewer's last say: an approval, or a change request or dismissal
-        for r in json.loads(gh("api", "--paginate", "--slurp", f"repos/{repo}/pulls/{n}/reviews") or "[]"):
-            for review in r if isinstance(r, list) else [r]:
-                who = (review.get("user") or {}).get("login", "").lower()
-                if review.get("state") == "APPROVED":
-                    approvals[who] = review.get("commit_id", "")
-                elif review.get("state") in ("CHANGES_REQUESTED", "DISMISSED"):
-                    approvals.pop(who, None)
-        return PullRequest(n, state, p["head"]["sha"], p["title"], p["user"]["login"], p["base"]["ref"], files,
-                           approvals)
+        return PullRequest(n, state, p["head"]["sha"], p["title"], p["user"]["login"], p["base"]["ref"], files)
     return get
 
 

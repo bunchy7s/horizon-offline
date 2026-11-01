@@ -1,6 +1,7 @@
 name: game build
 # Builds the game for every platform from `ref`: the Java exporters, then Linux and the Linux server and Windows on
-# GitHub, macOS on the Mac mini's runner with a 1500-frame offscreen run of a new world (smoke-test.json). Called by
+# GitHub, macOS on the Mac mini's runner with a 1500-frame offscreen run of a new world (smoke-test.json): Apple
+# Silicon, and Intel cross-built there for x86_64-apple-darwin and checked under Rosetta 2 (#1161). Called by
 # release.yml (the releases) and nightly-build.yml (the opt-in Nightly), always from main's copy of this file: the
 # caller's commit, never the one being built. It holds no secrets: signing the checksums is the callers' own job,
 # which never runs what this one built. See docs/release-flow.md.
@@ -104,6 +105,13 @@ jobs:
             mac: true
             dir: horizon-macos-arm64
             asset: horizon-macos-arm64.zip
+          # Intel Macs: built on the same runner for another target; its checks and smoke test run the x86_64
+          # programs under Rosetta 2.
+          - name: macos-x64
+            mac: true
+            target: x86_64-apple-darwin
+            dir: horizon-macos-x64
+            asset: horizon-macos-x64.zip
     runs-on: ${{ matrix.mac && (inputs.trusted && vars.MAC_RUNNER || fromJSON('["self-hosted", "macOS", "horizon-nightly"]')) || matrix.os }}
     # Notarizing the zip can take a few minutes.
     timeout-minutes: ${{ matrix.mac && 60 || 40 }}
@@ -114,6 +122,8 @@ jobs:
       HORIZON_VERSION: ${{ inputs.version }}
       # A nightly's date and commit ("2026-10-28 0c02067"), which the game shows; empty for a release.
       HORIZON_NIGHTLY: ${{ inputs.nightly }}
+      # Where cargo puts the programs: target/release, or target/<target>/release for another target.
+      BIN: ${{ matrix.target && format('target/{0}/release', matrix.target) || 'target/release' }}
     defaults:
       run:
         shell: bash
@@ -128,6 +138,8 @@ jobs:
           # keeps its preparations outside the checkout.
           clean: true
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         if: runner.environment == 'github-hosted'
         with:
@@ -138,11 +150,11 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
       - name: Build the client, horizon-ctl, horizon-prepare and horizon-server
-        run: cargo build --release --locked -p horizon-client --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+        run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
       - name: Every program the release folder takes was built
         run: |
           for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
-            test -f "target/release/$binary${{ matrix.exe }}" || { echo "::error::target/release/$binary${{ matrix.exe }} is missing"; exit 1; }
+            test -f "$BIN/$binary${{ matrix.exe }}" || { echo "::error::$BIN/$binary${{ matrix.exe }} is missing"; exit 1; }
           done
       - name: The signing keychain, unlocked
         if: runner.os == 'macOS' && vars.MACOS_SIGN_IDENTITY != '' && inputs.developer_id
@@ -157,15 +169,15 @@ jobs:
         run: |
           for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
             codesign --force --options runtime --timestamp --keychain "$MACOS_SIGN_KEYCHAIN" \
-              --identifier "dev.horizon.${binary#horizon-}" --sign "$MACOS_SIGN_IDENTITY" "target/release/$binary"
-            codesign --verify --strict --verbose=2 "target/release/$binary"
+              --identifier "dev.horizon.${binary#horizon-}" --sign "$MACOS_SIGN_IDENTITY" "$BIN/$binary"
+            codesign --verify --strict --verbose=2 "$BIN/$binary"
           done
       - name: Only system libraries
         # Windows: no non-system DLL (a "DLL not found" dialog on some players' machines). Linux: the standard
         # loader and libraries every desktop distribution has. macOS: only the system's own libraries.
         run: |
           for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
-            file="target/release/$binary${{ matrix.exe }}"
+            file="$BIN/$binary${{ matrix.exe }}"
             if [[ "$RUNNER_OS" == macOS ]]; then
               others=$(otool -L "$file" | tail -n +2 | awk '{print $1}' | grep -v -E '^(/usr/lib/|/System/Library/)' || true)
               [[ -z "$others" ]] || { echo "::error::$binary links $others"; exit 1; }
@@ -176,7 +188,7 @@ jobs:
       - name: Every program starts
         run: |
           set -euo pipefail
-          bin=target/release
+          bin=$BIN
           "$bin/horizon-client${{ matrix.exe }}" --help | grep -q -- '--resources'
           "$bin/horizon-ctl${{ matrix.exe }}" --help > /dev/null
           "$bin/horizon-prepare${{ matrix.exe }}" --help | grep -q -- '--minecraft-dir'
@@ -202,7 +214,7 @@ jobs:
           home="$RUNNER_TEMP/horizon-smoke"
           rm -rf "$home" && mkdir -p "$home"
           version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' research-lock.json | head -1)
-          client="$PWD/target/release/horizon-client"
+          client="$PWD/$BIN/horizon-client"
           resources="$PWD/.local/horizon-client/$version"
           (cd "$home" && HORIZON_HOME="$home" HORIZON_NO_AUDIO=1 "$client" --resources "$resources" --offscreen \
             --world smoke --seed 1 --render-distance 4 --world-frames 1500 --timeout-seconds 180 \
@@ -217,8 +229,9 @@ jobs:
           EOF
           # Published with the release; the publish job checks it again before it publishes anything.
           cp "$home/smoke.json" "$RUNNER_TEMP/smoke-test.json"
+      # One smoke-test.json per build, the Apple Silicon one's; the Intel build must pass its own run too.
       - uses: actions/upload-artifact@v4
-        if: runner.environment == 'self-hosted'
+        if: runner.environment == 'self-hosted' && !matrix.target
         with:
           name: smoke-test.json
           path: ${{ runner.temp }}/smoke-test.json
@@ -231,7 +244,7 @@ jobs:
       - name: Package
         run: |
           set -euo pipefail
-          cargo run --locked -p xtask -- package "target/release/horizon-client${{ matrix.exe }}" "dist/${{ matrix.dir }}"
+          cargo run --locked -p xtask -- package "$BIN/horizon-client${{ matrix.exe }}" "dist/${{ matrix.dir }}"
           cd dist
           rm -f "${{ matrix.asset }}"
           case "${{ matrix.asset }}" in

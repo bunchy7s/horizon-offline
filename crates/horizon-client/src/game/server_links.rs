@@ -29,6 +29,11 @@ const WARNING_BUTTON: f32 = 20.0;
 pub(super) struct LinksUi {
     pub scroll: f32,
     pub confirm: Option<String>,
+    /// `ConfirmLinkScreen.trusted`: the pause menu's buttons ask with the
+    /// trusted text and no warning; a server's link is untrusted.
+    pub trusted: bool,
+    /// The screen the confirmation returns to (its parent); Server Links when unset.
+    pub back: Option<Screen>,
 }
 
 /// `Util.parseAndValidateUntrustedUri`: an absolute `http`/`https` URI
@@ -139,6 +144,13 @@ impl Game<'_> {
     /// DialogScreen over the pause menu: `menu.server_links.title`, the
     /// scrollable link buttons and `gui.back` in the footer.
     pub(super) fn draw_server_links(&mut self, batch: &mut HudBatch) {
+        // ServerLinksDialogScreen: the dialog's title.
+        horizon_client::widgets::begin_screen(|| {
+            horizon_client::widgets::ScreenInfo::new(
+                "server_links",
+                super::screen_info::tr("menu.server_links.title", &[]),
+            )
+        });
         let atlas = &self.gui.atlas;
         let (w, h) = (batch.width, batch.height);
         ui::menu_background(batch, atlas, 0.0, 0.0, w, h, true);
@@ -155,6 +167,20 @@ impl Game<'_> {
         batch.text_styled(atlas, &title, tx, 12.0, u32::MAX, true);
         let (wx, wy) = warning_button(w, h, tw);
         let wh = ui::hovered(self.cursor, wx, wy, WARNING_BUTTON, WARNING_BUTTON);
+        // DialogScreen.createWarningButton: an ImageButton with its own
+        // message and its tooltip.
+        horizon_client::widgets::narratable(|| {
+            horizon_client::widgets::Narratable::button(
+                super::screen_info::tr("menu.custom_screen_info.button_narration", &[]),
+                [wx, wy, WARNING_BUTTON, WARNING_BUTTON],
+                true,
+            )
+            .hovered(wh)
+            .hint(super::screen_info::tr(
+                "menu.custom_screen_info.tooltip",
+                &[],
+            ))
+        });
         horizon_client::widgets::record(
             "menu.custom_screen_info.tooltip",
             [wx, wy, WARNING_BUTTON, WARNING_BUTTON],
@@ -259,10 +285,24 @@ impl Game<'_> {
         }
         if self.settings.chat_links_prompt {
             self.links_ui.confirm = Some(url.to_owned());
+            self.links_ui.trusted = false;
+            self.links_ui.back = None;
             self.screen = Screen::ConfirmLink;
         } else {
             open_uri(url);
         }
+    }
+    /// `ConfirmLinkScreen.confirmLinkNow(parent, uri, true)`: ask about a link
+    /// Mojang's own button names, whatever the "Web Links" options say.
+    pub(super) fn confirm_trusted_link(&mut self, url: &str, parent: Screen) {
+        self.links_ui.confirm = Some(url.to_owned());
+        self.links_ui.trusted = true;
+        self.links_ui.back = Some(parent);
+        self.screen = Screen::ConfirmLink;
+    }
+    /// The screen `ConfirmLinkScreen`'s callback returns to (`setScreen(parent)`).
+    pub(super) fn confirm_link_back(&self) -> Screen {
+        self.links_ui.back.unwrap_or(Screen::ServerLinks)
     }
     /// `ScrollableLayout`'s mouse wheel over the links.
     pub(super) fn server_links_scroll(&mut self, delta: f32) {
@@ -278,11 +318,24 @@ impl Game<'_> {
         let (w, h) = (batch.width, batch.height);
         ui::menu_background(batch, atlas, 0.0, 0.0, w, h, true);
         let url = self.links_ui.confirm.clone().unwrap_or_default();
-        let layout = confirm_link_layout(atlas, (w, h), &url);
+        let trusted = self.links_ui.trusted;
+        horizon_client::widgets::begin_screen(|| {
+            let title = if trusted {
+                "chat.link.confirmTrusted"
+            } else {
+                "chat.link.confirm"
+            };
+            super::screen_info::confirm(
+                "server_links/confirm_link",
+                &super::screen_info::tr(title, &[]),
+                &url,
+            )
+        });
+        let layout = confirm_link_layout(atlas, (w, h), &url, trusted);
         for (line, x, y) in &layout.lines {
             batch.text_styled(atlas, line, *x, *y, u32::MAX, true);
         }
-        let labels = ["gui.yes", "gui.copy_link_to_clipboard", "gui.no"];
+        let labels = confirm_link_labels(self.links_ui.trusted);
         for ((x, y), key) in layout.buttons.iter().zip(labels) {
             let hover = ui::hovered(self.cursor, *x, *y, 100.0, 20.0);
             ui::button(
@@ -303,7 +356,7 @@ impl Game<'_> {
     pub(super) fn confirm_link_click(&mut self) {
         let (w, h) = self.gui_size();
         let url = self.links_ui.confirm.clone().unwrap_or_default();
-        let layout = confirm_link_layout(&self.gui.atlas, (w, h), &url);
+        let layout = confirm_link_layout(&self.gui.atlas, (w, h), &url, self.links_ui.trusted);
         for (i, (x, y)) in layout.buttons.iter().enumerate() {
             if !ui::hovered(self.cursor, *x, *y, 100.0, 20.0) {
                 continue;
@@ -316,13 +369,20 @@ impl Game<'_> {
                 }
                 _ => {}
             }
-            self.screen = Screen::ServerLinks;
+            self.screen = self.confirm_link_back();
             return;
         }
     }
     /// `DialogScreen.WarningScreen`: the custom-screens note, a disconnect
     /// button ("Custom screen rejected" is the shown reason) and Back.
     pub(super) fn draw_dialog_warning(&mut self, batch: &mut HudBatch) {
+        horizon_client::widgets::begin_screen(|| {
+            super::screen_info::confirm(
+                "dialog_warning",
+                &super::screen_info::tr("menu.custom_screen_info.title", &[]),
+                &super::screen_info::tr("menu.custom_screen_info.contents", &[]),
+            )
+        });
         let atlas = &self.gui.atlas;
         let (w, h) = (batch.width, batch.height);
         ui::menu_background(batch, atlas, 0.0, 0.0, w, h, true);
@@ -436,17 +496,36 @@ fn confirm_link_layout(
     atlas: &horizon_client::hud::HudAtlas,
     size: (f32, f32),
     url: &str,
+    trusted: bool,
 ) -> ConfirmLayout {
-    // ConfirmLinkScreen (untrusted): `chat.link.confirm`, the link as the
-    // message, `chat.link.warning` in its red (0xFFCCCC).
+    // ConfirmLinkScreen: `chat.link.confirm` (`confirmTrusted` when trusted),
+    // the link as the message, and for an untrusted link `chat.link.warning`
+    // in its red (0xFFCCCC).
+    let warning = [Text::translate("chat.link.warning", &[]).with_color(0xFFCCCC)];
     confirm_layout(
         &atlas.font,
         size,
-        &Text::translate("chat.link.confirm", &[]),
+        &Text::translate(
+            if trusted {
+                "chat.link.confirmTrusted"
+            } else {
+                "chat.link.confirm"
+            },
+            &[],
+        ),
         &Text::literal(url.to_owned()),
-        &[Text::translate("chat.link.warning", &[]).with_color(0xFFCCCC)],
+        if trusted { &[] } else { &warning },
         &[100.0; 3],
     )
+}
+/// `ConfirmLinkScreen`'s yes, copy and no labels: Open in Browser and Cancel
+/// when trusted.
+fn confirm_link_labels(trusted: bool) -> [&'static str; 3] {
+    if trusted {
+        ["chat.link.open", "gui.copy_link_to_clipboard", "gui.cancel"]
+    } else {
+        ["gui.yes", "gui.copy_link_to_clipboard", "gui.no"]
+    }
 }
 fn dialog_warning_layout(atlas: &horizon_client::hud::HudAtlas, size: (f32, f32)) -> ConfirmLayout {
     confirm_layout(
@@ -462,6 +541,19 @@ fn dialog_warning_layout(atlas: &horizon_client::hud::HudAtlas, size: (f32, f32)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_trusted_link_asks_with_open_in_browser_and_cancel() {
+        // ConfirmLinkScreen: trusted swaps yes/no for chat.link.open / gui.cancel.
+        assert_eq!(
+            confirm_link_labels(true),
+            ["chat.link.open", "gui.copy_link_to_clipboard", "gui.cancel"]
+        );
+        assert_eq!(
+            confirm_link_labels(false),
+            ["gui.yes", "gui.copy_link_to_clipboard", "gui.no"]
+        );
+    }
 
     #[test]
     fn untrusted_uris_are_http_or_https_with_a_scheme() {

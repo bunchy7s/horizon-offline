@@ -43,7 +43,7 @@ impl Cull {
         keep: impl Fn(usize) -> bool,
         mut row: impl FnMut(usize) -> E,
     ) -> Div {
-        let max = handle.max_offset().height;
+        let max = handle.max_offset().y;
         if max > px(0.)
             && handle.offset().y <= -max + px(0.5)
             && self.0.borrow().heights.len() == rows
@@ -242,9 +242,7 @@ mod tests {
 #[cfg(all(test, target_os = "windows"))]
 mod desktop_tests {
     use super::*;
-    use gpui::{
-        prelude::*, AppContext, Application, Context, Render, Window, WindowBounds, WindowOptions,
-    };
+    use gpui::{prelude::*, AppContext, Context, Render, Window, WindowBounds, WindowOptions};
     use std::time::Duration;
 
     struct ListWindow {
@@ -281,7 +279,7 @@ mod desktop_tests {
     #[test]
     #[ignore = "requires an interactive desktop and graphics adapter"]
     fn desktop_list_renders_the_viewport_after_scrollbar_jumps() {
-        Application::new().run(|cx| {
+        gpui_platform::application().run(|cx| {
             let window = cx
                 .open_window(
                     WindowOptions {
@@ -340,7 +338,7 @@ mod desktop_tests {
                             }
                             drop(measured);
                             let offset = if step == 0 {
-                                -view.scroll.max_offset().height
+                                -view.scroll.max_offset().y
                             } else {
                                 px(0.)
                             };
@@ -349,7 +347,7 @@ mod desktop_tests {
                         })
                         .unwrap();
                 }
-                cx.update(|cx| cx.quit()).unwrap();
+                cx.update(|cx| cx.quit());
             })
             .detach();
         });

@@ -8,6 +8,7 @@ use crate::{
     items::{ItemStack, Items},
 };
 use horizon_core::random::{RandomSource, XoroshiroRandom, mix_stafford13, seed_from_hash};
+use horizon_world::loot::PackOverlay;
 use serde_json::Value;
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
@@ -471,7 +472,10 @@ fn walk(dir: &Path, base: &Path, out: &mut HashMap<String, Value>) {
     }
 }
 impl Trades {
-    pub fn load(root: &Path) -> Self {
+    /// Load from a resource root; `overlay` (the world's data packs'
+    /// content files) merges over it, the way a pack stack layers
+    /// (`SimpleJsonResourceReloadListener`, `TagLoader`).
+    pub fn load(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> Self {
         let data = root.join("data/minecraft");
         let (mut trades, mut raw_tags, mut sets) = (HashMap::new(), HashMap::new(), HashMap::new());
         walk(
@@ -491,6 +495,20 @@ impl Trades {
             &data.join("tags/potion"),
             &mut raw_potions,
         );
+        // The packs' trade files: a trade or set's top pack file replaces
+        // the game's own (`SimpleJsonResourceReloadListener` sees one
+        // resource per id), a tag's entries join in pack order with a
+        // `replace` file dropping the lower sources' (`TagLoader.load`).
+        for (id, files) in overlay.kind("villager_trade") {
+            if let Ok(v) = serde_json::from_slice(PackOverlay::top(files)) {
+                trades.insert(id.to_owned(), v);
+            }
+        }
+        for (id, files) in overlay.kind("trade_set") {
+            if let Ok(v) = serde_json::from_slice(PackOverlay::top(files)) {
+                sets.insert(id.to_owned(), v);
+            }
+        }
         let values = |v: Value| -> Vec<String> {
             v["values"]
                 .as_array()
@@ -499,11 +517,11 @@ impl Trades {
                 .filter_map(|e| e.as_str().map(str::to_owned))
                 .collect()
         };
-        let raw_potions: HashMap<String, Vec<String>> = raw_potions
+        let mut raw_potions: HashMap<String, Vec<String>> = raw_potions
             .into_iter()
             .map(|(k, v)| (k, values(v)))
             .collect();
-        let raw: HashMap<String, Vec<String>> = raw_tags
+        let mut raw: HashMap<String, Vec<String>> = raw_tags
             .into_iter()
             .map(|(k, v)| {
                 (
@@ -517,6 +535,22 @@ impl Trades {
                 )
             })
             .collect();
+        for (registry, raw) in [("villager_trade", &mut raw), ("potion", &mut raw_potions)] {
+            for (id, files) in overlay.tag_kind(registry) {
+                let slot = raw.entry(id).or_default();
+                for bytes in files {
+                    let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
+                        continue;
+                    };
+                    if v["replace"].as_bool() == Some(true) {
+                        slot.clear();
+                    }
+                    if let Some(vs) = v["values"].as_array() {
+                        slot.extend(vs.iter().filter_map(|e| e.as_str().map(str::to_owned)));
+                    }
+                }
+            }
+        }
         fn expand(
             name: &str,
             raw: &HashMap<String, Vec<String>>,

@@ -47,6 +47,9 @@ pub struct Rider {
     pub sprint: bool,
     /// Holding the jump key (a happy ghast rises).
     pub jumping: bool,
+    /// A server's player whose own client moves the mount
+    /// (`Entity.isClientAuthoritative`): here it only turns (`tickRidden`).
+    pub client: bool,
 }
 
 pub fn is_equine(s: Species) -> bool {
@@ -82,10 +85,38 @@ fn can_rear(s: Species) -> bool {
             | Species::ZombieHorse
     )
 }
+/// `AbstractHorse.getPassengerAttachmentPoint`: what it adds to its seat
+/// before the yaw turns it. A horse up on its hind legs slides its rider back
+/// and up by the stand animation of the last tick (`standAnimO`), at
+/// `getAgeScale`. Camels and llamas never rear.
+pub fn rear_offset(m: &Mob) -> [f64; 3] {
+    if !can_rear(m.species()) {
+        return [0.0; 3];
+    }
+    let stand = f64::from(m.anim.vo[STAND]);
+    let scale = f64::from(if m.is_baby() { 0.5_f32 } else { 1.0 });
+    [0.0, 0.15 * stand * scale, -0.7 * stand * scale]
+}
 /// `AbstractHorse.isImmobile`: no goals while it eats or rears. A mount its
 /// rider steers still takes their input (`travelRidden`).
 pub fn immobile(m: &Mob) -> bool {
     can_rear(m.species()) && (m.extra.flag || m.extra.counter > 0) && !controlled(m)
+}
+/// `AbstractHorse.onElasticLeashPull`: a lead pulled taut ends the horse's
+/// grazing, and `Camel.onElasticLeashPull` stands a sitting camel up.
+pub fn on_elastic_leash_pull(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+    if grazes(m.species()) {
+        m.extra.flag = false;
+    }
+    if super::camel::is_camel(m.species()) {
+        super::camel::on_elastic_leash_pull(m, w, events);
+    }
+}
+/// `AbstractHorse.onPlayerJump`: a released jump bar lets the horse slide on
+/// the rider's keys (`allowStandSliding`) and makes it rear.
+pub fn on_player_jump(m: &mut Mob) {
+    m.extra.stand_sliding = true;
+    stand_if_possible(m);
 }
 pub fn register(m: &mut Mob) {
     if super::camel::is_camel(m.species()) {
@@ -215,6 +246,18 @@ pub fn controlled(m: &Mob) -> bool {
         _ => m.extra.saddled,
     }
 }
+/// `AbstractHorse`s (camels too, not llamas, which no player steers): the
+/// player controlling one moves it on its own client
+/// (`Entity.isLocalInstanceAuthoritative`, `LivingEntity.travelRidden`) and
+/// sends the moves (`ServerboundMoveVehiclePacket`).
+pub fn moved_by_rider(s: Species) -> bool {
+    is_equine(s) && !super::llama::is_llama(s)
+}
+/// A server's mount that its rider's client moves: `travelRidden` without
+/// `canSimulateMovement` turns it (`tickRidden`) and stops it there.
+pub fn moved_by_client(m: &Mob) -> bool {
+    moved_by_rider(m.species()) && m.rider.is_some_and(|r| r.client) && controlled(m)
+}
 /// `ItemBasedSteering.boost`: 140 to 980 ticks of extra speed.
 pub fn boost(m: &mut Mob) -> bool {
     if m.extra.counter2 > 0 {
@@ -308,7 +351,7 @@ impl Goal for RunAroundLikeCrazy {
 }
 /// `AbstractHorse.standIfPossible`: `setStanding(20)` (which also stops the
 /// eating) when `canPerformRearing`.
-fn stand_if_possible(m: &mut Mob) {
+pub fn stand_if_possible(m: &mut Mob) {
     if can_rear(m.species()) {
         m.extra.counter = 20;
         m.extra.flag = false;
@@ -397,6 +440,9 @@ struct RandomStand {
 }
 impl Goal for RandomStand {
     goal_clone!();
+    fn name(&self) -> &'static str {
+        "RandomStandGoal"
+    }
     fn flags(&self) -> u8 {
         0
     }
@@ -412,8 +458,7 @@ impl Goal for RandomStand {
         false
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
-        m.extra.counter = 20;
-        m.extra.flag = false;
+        stand_if_possible(m);
         // playStandSound: getAmbientStandSound is the ambient sound, plain
         // playSound(sound) at volume and pitch 1.
         let sound = super::ai::voice_sounds(m)[0];
@@ -605,8 +650,10 @@ pub fn ridden_step(m: &mut Mob) {
         }
         return;
     }
+    // AbstractHorse.getRiddenInput: no input on the ground while rearing,
+    // unless a jump let it slide.
     let standing = m.extra.counter > 0;
-    if m.on_ground && r.jump == 0.0 && standing {
+    if m.on_ground && r.jump == 0.0 && standing && !m.extra.stand_sliding {
         m.ai.xxa = 0.0;
         m.ai.zza = 0.0;
         return;
@@ -693,7 +740,8 @@ pub fn stand_tick(m: &mut Mob) {
     }
 }
 /// `AbstractHorse.tick`'s eat, stand and mouth animations, which follow the
-/// eating and standing flags (`flag` and `counter > 0`).
+/// eating and standing flags (`flag` and `counter > 0`), and the end of
+/// `allowStandSliding` once it stands no more.
 pub fn animate(m: &mut Mob) {
     let (eating, standing) = (m.extra.flag, m.extra.counter > 0);
     let v = &mut m.anim.v;
@@ -702,6 +750,7 @@ pub fn animate(m: &mut Mob) {
         m.anim.vo[EAT] = 0.0;
         v[STAND] = (v[STAND] + (1.0 - v[STAND]) * 0.4 + 0.05).min(1.0);
     } else {
+        m.extra.stand_sliding = false;
         if eating {
             v[EAT] = (v[EAT] + (1.0 - v[EAT]) * 0.4 + 0.05).min(1.0);
         } else {

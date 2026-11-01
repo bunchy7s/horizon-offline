@@ -1,10 +1,11 @@
-//! Read-only ZIP archives held in memory (resource packs, data packs and the
-//! unifont glyph archive), on the `zip` crate. Like Java's `ZipFile` (what
-//! vanilla's `FilePackResources` reads with), entries aren't CRC-checked.
+//! Read-only ZIP archives (resource packs, data packs and the unifont glyph
+//! archive), on the `zip` crate. Like Java's `ZipFile` (what vanilla's
+//! `FilePackResources` reads with), the file stays open and only what is asked
+//! for is read, and entries aren't CRC-checked.
 use std::{
     collections::BTreeMap,
     fs,
-    io::{self, Cursor, Read},
+    io::{self, Read, Seek, SeekFrom},
     path::Path,
     sync::Arc,
 };
@@ -17,7 +18,7 @@ const MAX_ENTRY: usize = 1 << 30;
 /// One archive with its entries indexed by name (`\` read as `/`), files
 /// and folders apart.
 pub struct Zip {
-    archive: ZipArchive<Cursor<Arc<[u8]>>>,
+    archive: ZipArchive<Reader>,
     entries: BTreeMap<String, usize>,
     /// Folder entries (`name/`) by their name without the slash.
     folders: BTreeMap<String, usize>,
@@ -27,20 +28,112 @@ pub struct Zip {
 fn invalid(e: impl std::fmt::Display) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, e.to_string())
 }
+/// `file`'s bytes at `at`, which any number of readers may do at once: the
+/// file has no cursor for them to share.
+fn read_at(file: &fs::File, out: &mut [u8], at: u64) -> io::Result<usize> {
+    #[cfg(unix)]
+    return std::os::unix::fs::FileExt::read_at(file, out, at);
+    #[cfg(windows)]
+    return std::os::windows::fs::FileExt::seek_read(file, out, at);
+}
+/// The bytes of `file` from `start` to `end`.
+fn read_range(file: &fs::File, start: u64, end: u64) -> io::Result<Vec<u8>> {
+    let mut out = vec![0; (end - start) as usize];
+    let mut done = 0;
+    while done < out.len() {
+        match read_at(file, &mut out[done..], start + done as u64)? {
+            0 => return Err(io::ErrorKind::UnexpectedEof.into()),
+            read => done += read,
+        }
+    }
+    Ok(out)
+}
+/// The archive as the `zip` crate sees it: the file's bytes, with its tail
+/// (the central directory on, END record normalized) from memory. A clone
+/// shares both and has its own position.
+#[derive(Clone)]
+struct Reader {
+    /// What comes before the tail; none when the tail is the whole archive.
+    file: Option<Arc<fs::File>>,
+    tail: Arc<[u8]>,
+    tail_at: u64,
+    position: u64,
+}
+impl Read for Reader {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        let read = match self.position.checked_sub(self.tail_at) {
+            Some(into) => {
+                let rest = self.tail.get(into as usize..).unwrap_or_default();
+                let read = rest.len().min(out.len());
+                out[..read].copy_from_slice(&rest[..read]);
+                read
+            }
+            None => {
+                let before = (self.tail_at - self.position).min(out.len() as u64) as usize;
+                match &self.file {
+                    Some(file) => read_at(file, &mut out[..before], self.position)?,
+                    None => 0,
+                }
+            }
+        };
+        self.position += read as u64;
+        Ok(read)
+    }
+}
+impl Seek for Reader {
+    fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
+        let position = match to {
+            SeekFrom::Start(at) => Some(at),
+            SeekFrom::End(by) => (self.tail_at + self.tail.len() as u64).checked_add_signed(by),
+            SeekFrom::Current(by) => self.position.checked_add_signed(by),
+        };
+        self.position = position.ok_or_else(|| invalid("seek before the archive's start"))?;
+        Ok(self.position)
+    }
+}
 impl Zip {
+    /// Reads the central directory, not the entries: opening a pack of many
+    /// gigabytes for its `pack.mcmeta` costs what opening a small one does.
     pub fn open(path: &Path) -> io::Result<Self> {
-        Self::from_bytes(fs::read(path)?)
+        let file = fs::File::open(path)?;
+        let len = file.metadata()?.len();
+        let mut tail_at = len.saturating_sub((END_HEADER + u16::MAX as usize) as u64);
+        let mut tail = read_range(&file, tail_at, len)?;
+        if let Some(end) = find_end(&tail) {
+            let directory = u32_at(&tail, end + 12);
+            let start = (tail_at + end as u64).saturating_sub(directory.into());
+            // All ones says the real length is in the Zip64 record instead.
+            if directory != u32::MAX && start < tail_at {
+                tail_at = start;
+                tail = read_range(&file, tail_at, len)?;
+            }
+        }
+        normalize_end(&mut tail);
+        Self::new(Reader {
+            file: Some(Arc::new(file)),
+            tail: Arc::from(tail),
+            tail_at,
+            position: 0,
+        })
     }
     pub fn from_bytes(mut data: Vec<u8>) -> io::Result<Self> {
         normalize_end(&mut data);
-        let len = data.len();
-        let archive = ZipArchive::new(Cursor::new(Arc::from(data))).map_err(invalid)?;
+        Self::new(Reader {
+            file: None,
+            tail: Arc::from(data),
+            tail_at: 0,
+            position: 0,
+        })
+    }
+    fn new(reader: Reader) -> io::Result<Self> {
+        let len = (reader.tail_at + reader.tail.len() as u64) as usize;
+        let archive = ZipArchive::new(reader).map_err(invalid)?;
         let (mut entries, mut folders) = (BTreeMap::new(), BTreeMap::new());
         for i in 0..archive.len() {
             let Some(name) = archive.name_for_index(i) else {
                 continue;
             };
-            let name = name.replace('\\', "/");
+            let name = name.map_err(invalid)?.replace('\\', "/");
             match name.strip_suffix('/') {
                 Some(folder) => folders.insert(folder.to_owned(), i),
                 None => entries.insert(name, i),
@@ -52,6 +145,11 @@ impl Zip {
             folders,
             len,
         })
+    }
+    /// The central directory on, as read at opening: every entry's name, sizes
+    /// and checksum, so what changes with the archive's content.
+    pub fn directory(&self) -> Arc<[u8]> {
+        self.archive.clone().into_inner().tail
     }
     /// The files, as `FilePackResources.listResources` lists them (folder
     /// entries skipped).
@@ -74,7 +172,8 @@ impl Zip {
         let index = self
             .index(name)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?;
-        // A clone shares the bytes and the central directory: reading needs `&mut`.
+        // A clone shares the reader's data and the central directory: reading
+        // needs `&mut`.
         let mut archive = self.archive.clone();
         let mut entry = archive.by_index_raw(index).map_err(invalid)?;
         let method = entry.compression();
@@ -110,6 +209,26 @@ impl Zip {
 /// The 22 fixed bytes of the end-of-central-directory record.
 const END_HEADER: usize = 22;
 
+fn u16_at(data: &[u8], at: usize) -> u16 {
+    u16::from_le_bytes(data[at..at + 2].try_into().unwrap())
+}
+fn u32_at(data: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes(data[at..at + 4].try_into().unwrap())
+}
+
+/// Where the END record starts. Its comment can hide the signature: scan back
+/// through the last 64 KiB, like every zip reader.
+fn find_end(data: &[u8]) -> Option<usize> {
+    if data.len() < END_HEADER {
+        return None;
+    }
+    let start = data.len().saturating_sub(END_HEADER + u16::MAX as usize);
+    (start..=data.len() - END_HEADER).rev().find(|&pos| {
+        data[pos..pos + 4] == [0x50, 0x4b, 0x05, 0x06]
+            && pos + END_HEADER + u16_at(data, pos + 20) as usize <= data.len()
+    })
+}
+
 /// Java's `ZipFile` ignores the END record's disk numbers and file counts,
 /// reading the central directory from `cenpos` to `cenpos + cenlen` whatever
 /// they say; the `zip` crate insists the record agrees with the directory.
@@ -119,24 +238,7 @@ const END_HEADER: usize = 22;
 /// directory entries and normalize the record so it does not look multi-disk
 /// or empty.
 fn normalize_end(data: &mut [u8]) {
-    if data.len() < END_HEADER {
-        return;
-    }
-    let u16_at = |data: &[u8], at: usize| u16::from_le_bytes(data[at..at + 2].try_into().unwrap());
-    let u32_at = |data: &[u8], at: usize| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
-    // The END record's comment can hide the signature: scan back through the
-    // last 64 KiB, like every zip reader.
-    let start = data.len().saturating_sub(END_HEADER + u16::MAX as usize);
-    let mut end = None;
-    for pos in (start..=data.len().saturating_sub(END_HEADER)).rev() {
-        if data[pos..pos + 4] == [0x50, 0x4b, 0x05, 0x06]
-            && pos + END_HEADER + u16_at(data, pos + 20) as usize <= data.len()
-        {
-            end = Some(pos);
-            break;
-        }
-    }
-    let Some(end) = end else { return };
+    let Some(end) = find_end(data) else { return };
     // The directory's real position and length, as Java derives them; the
     // recorded offset is relative to the archive's start.
     let cenlen = u32_at(data, end + 12) as usize;
@@ -163,6 +265,56 @@ fn normalize_end(data: &mut [u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
+    /// `bytes` as a file and opened, the file removed again where the system lets it.
+    fn opened(test: &str, bytes: &[u8]) -> io::Result<Zip> {
+        let path =
+            std::env::temp_dir().join(format!("horizon-zip-{}-{test}.zip", std::process::id()));
+        fs::write(&path, bytes)?;
+        let zip = Zip::open(&path);
+        let _ = fs::remove_file(&path);
+        zip
+    }
+    #[test]
+    fn opening_a_file_reads_its_directory_and_not_its_entries() {
+        let body: Vec<u8> = (0..1 << 20).map(|i: u32| (i ^ i >> 8) as u8).collect();
+        let bytes = archive_of(&[
+            ("big.bin", &body, false),
+            ("pack.mcmeta", b"{\"pack\":{}}", false),
+            ("a/b.txt", b"hello hello hello hello", true),
+        ]);
+        let zip = opened("lazy", &bytes).unwrap();
+        assert!(zip.archive.clone().into_inner().tail.len() < 70_000);
+        assert_eq!(zip.read("big.bin").unwrap(), body);
+        assert_eq!(zip.read("pack.mcmeta").unwrap(), b"{\"pack\":{}}");
+        assert_eq!(zip.read("a/b.txt").unwrap(), b"hello hello hello hello");
+        assert!(zip.read("missing").is_err());
+    }
+    #[test]
+    fn a_directory_longer_than_the_end_scan_is_read_whole() {
+        let names: Vec<String> = (0..2000).map(|i| format!("{:0>60}.txt", i)).collect();
+        let files: Vec<(&str, &[u8], bool)> = names
+            .iter()
+            .map(|n| (n.as_str(), &b"x"[..], false))
+            .collect();
+        let zip = opened("long-directory", &archive_of(&files)).unwrap();
+        assert_eq!(zip.names().count(), 2000);
+        assert_eq!(zip.read(&names[0]).unwrap(), b"x");
+    }
+    #[test]
+    fn a_file_is_opened_past_end_counts_java_ignores() {
+        let mut bytes = archive();
+        let end = bytes.len() - END_HEADER;
+        bytes[end + 4..end + 6].fill(0xFF);
+        bytes[end + 8..end + 12].fill(0);
+        let zip = opened("end-counts", &bytes).unwrap();
+        assert_eq!(zip.read("a/b.txt").unwrap(), b"hello hello hello hello");
+    }
+    #[test]
+    fn a_file_that_is_no_archive_does_not_open() {
+        assert!(opened("empty", b"").is_err());
+        assert!(opened("garbage", b"PK not really").is_err());
+    }
     /// A hand-built archive with one stored and one deflated entry.
     fn archive() -> Vec<u8> {
         archive_of(&[
@@ -374,7 +526,7 @@ mod tests {
                 .unwrap();
             let entry = archive.by_index_raw(index).unwrap();
             (
-                entry.data_start() as usize,
+                entry.data_start().unwrap() as usize,
                 entry.compressed_size() as usize,
             )
         };

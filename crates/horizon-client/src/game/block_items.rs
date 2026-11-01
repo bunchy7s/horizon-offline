@@ -8,7 +8,8 @@ use horizon_client::{
     items::ItemStack, save,
 };
 use horizon_world::{
-    nbt::{Compound, Tag},
+    level::classes::Class,
+    nbt::{Compound, JavaString, Tag},
     registry::BlockStateId,
 };
 
@@ -17,6 +18,17 @@ fn components(stack: &ItemStack) -> Compound {
     match item_data::encode_components(stack) {
         Some(Tag::Compound(c)) => c,
         _ => Compound::new(),
+    }
+}
+
+/// `BlockState.getCloneItemStack`'s item: a stem's seed (`StemBlock` and
+/// `AttachedStemBlock` override it; a stem has no block item), else the
+/// block's own item.
+fn clone_item<'a>(name: &str, block_item: &'a str) -> &'a str {
+    match name {
+        "minecraft:pumpkin_stem" | "minecraft:attached_pumpkin_stem" => "minecraft:pumpkin_seeds",
+        "minecraft:melon_stem" | "minecraft:attached_melon_stem" => "minecraft:melon_seeds",
+        _ => block_item,
     }
 }
 
@@ -42,10 +54,32 @@ impl Game<'_> {
         let key = (pos[0], pos[1], pos[2]);
         let state = self.world.block(pos[0], pos[1], pos[2]);
         let facts = self.res.facts().get(state);
-        if &*facts.item == "minecraft:air" {
+        // PistonHeadBlock.getCloneItemStack: the piston the head belongs to.
+        let head = self
+            .pack
+            .assets
+            .registry
+            .state(state)
+            .filter(|s| s.name.as_str() == "minecraft:piston_head")
+            .map(|s| match s.properties.get("type") {
+                Some(t) if t == "sticky" => "minecraft:sticky_piston",
+                _ => "minecraft:piston",
+            });
+        let item = clone_item(&facts.name, head.unwrap_or(&facts.item));
+        if item == "minecraft:air" {
             return None;
         }
-        let mut stack = ItemStack::new(&facts.item, 1);
+        // FlowerPotBlock.getCloneItemStack: a potted plant picks as that plant
+        // (`new ItemStack(potted)`), an empty pot as the pot itself.
+        let behaviours = self.res.behaviours();
+        let plant = behaviours.data(state);
+        let plant_item = plant
+            .is(Class::FlowerPot)
+            .then_some(plant.link)
+            .flatten()
+            .map(|block| behaviours.block_data(block).item.clone())
+            .filter(|item| &**item != "minecraft:air");
+        let mut stack = ItemStack::new(plant_item.as_deref().unwrap_or(item), 1);
         let mut patch = Compound::new();
         // BeehiveBlock.getCloneItemStack: the honey level as the item's block state.
         if include_data
@@ -62,16 +96,53 @@ impl Game<'_> {
                 Tag::compound([("honey_level", Tag::String(level.as_str().into()))]),
             );
         }
+        // CopperGolemStatueBlock.getCloneItemStack: the statue's pose as the item's
+        // block_state (`CopperGolemStatueBlockEntity.getItem`), data or not.
+        if let Some(pose) = self
+            .pack
+            .assets
+            .registry
+            .state(state)
+            .filter(|s| s.name.ends_with("copper_golem_statue"))
+            .and_then(|s| s.properties.get("copper_golem_pose"))
+        {
+            patch.insert(
+                "minecraft:block_state".into(),
+                Tag::compound([("copper_golem_pose", Tag::String(pose.as_str().into()))]),
+            );
+        }
+        // LightBlock.getCloneItemStack, setLightOnStack: the light's level as
+        // the item's block state, whether or not the block data is picked.
+        if let Some(level) = self
+            .pack
+            .assets
+            .registry
+            .state(state)
+            .filter(|s| s.name.as_str() == "minecraft:light")
+            .and_then(|s| s.properties.get("level"))
+        {
+            patch.insert(
+                "minecraft:block_state".into(),
+                Tag::compound([("level", Tag::String(level.as_str().into()))]),
+            );
+        }
         // AbstractBannerBlock.getCloneItemStack: the banner's own item
         // (BannerBlockEntity.getItem), data or not.
         let banner = matches!(
             self.world.block_entities.get(&key),
             Some(BlockEntity::Banner(_))
         );
-        if (include_data || banner)
+        // DecoratedPotBlock.getCloneItemStack: createDecoratedPotInstance, the
+        // sherds only; the pot's item comes with include_data.
+        let pot = &*facts.name == "minecraft:decorated_pot";
+        if (include_data || banner || pot)
             && let Some(saved) = self.saved_block_entity(key)
         {
-            patch.extend(block_entity_item::pick(&saved));
+            let mut picked = block_entity_item::pick(&saved);
+            if pot && !include_data {
+                picked.retain(|k, _| *k == JavaString::from("minecraft:pot_decorations"));
+            }
+            patch.extend(picked);
         }
         if !patch.is_empty() {
             let mut all = components(&stack);
@@ -154,5 +225,29 @@ impl Game<'_> {
         }
         self.world.block_entities.insert(key, entity);
         self.update_spawner_display(key);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clone_item;
+
+    /// `StemBlock.getCloneItemStack` and `AttachedStemBlock.getCloneItemStack`:
+    /// pumpkin and melon stems, attached or not, pick the seed they grew from;
+    /// a block without an override still picks its own item.
+    #[test]
+    fn stems_pick_their_seeds_and_blocks_their_item() {
+        for (stem, seed) in [
+            ("minecraft:pumpkin_stem", "minecraft:pumpkin_seeds"),
+            ("minecraft:attached_pumpkin_stem", "minecraft:pumpkin_seeds"),
+            ("minecraft:melon_stem", "minecraft:melon_seeds"),
+            ("minecraft:attached_melon_stem", "minecraft:melon_seeds"),
+        ] {
+            assert_eq!(clone_item(stem, "minecraft:air"), seed, "{stem}");
+        }
+        assert_eq!(
+            clone_item("minecraft:stone", "minecraft:stone"),
+            "minecraft:stone"
+        );
     }
 }

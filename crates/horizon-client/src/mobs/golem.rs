@@ -8,6 +8,10 @@ use super::{
         Cx, Goal, HurtByTarget, LOOK, LookAtPlayer, MOVE, MeleeAttack, NearestTarget, Prey,
         RandomLookAround, Stroll, goal_clone, reduced,
     },
+    villager_brain::{
+        closest_section, occupied_pois_in_range, others_tickets, sections_to_village,
+        village_sections,
+    },
 };
 use crate::projectiles::{Projectile, ProjectileKind};
 use horizon_core::{geometry::Vec3, random::RandomSource};
@@ -16,6 +20,8 @@ use horizon_core::{geometry::Vec3, random::RandomSource};
 fn golem_prey(s: &super::Seen) -> bool {
     s.hostile && s.species != Species::Creeper
 }
+/// `IronGolem.registerGoals`, without `ResetUniversalAngerTargetGoal` (that
+/// goal is not ported).
 pub fn register_iron(m: &mut Mob) {
     let g = &mut m.ai.goals;
     g.add(1, MeleeAttack::new(1.0, true));
@@ -26,7 +32,19 @@ pub fn register_iron(m: &mut Mob) {
             within: 32.0,
         },
     );
-    g.add(4, Stroll::avoiding_water(0.6));
+    let mut back = Stroll::new(0.6)
+        .interval(10)
+        .named("MoveBackToVillageGoal")
+        .gate(outside_village)
+        .position(back_to_village_position);
+    back.check_no_action = false;
+    g.add(2, back);
+    let mut stroll = Stroll::new(0.6)
+        .interval(240)
+        .named("GolemRandomStrollInVillageGoal")
+        .position(village_stroll_position);
+    stroll.check_no_action = false;
+    g.add(4, stroll);
     g.add(
         5,
         OfferFlower {
@@ -49,6 +67,125 @@ pub fn register_iron(m: &mut Mob) {
         NearestTarget::new(Prey::Filter(golem_prey), false).interval(5),
     );
 }
+/// `SectionPos.of`: the section a position is in.
+fn section_of(p: Vec3) -> [i32; 3] {
+    [
+        (p.x.floor() as i32) >> 4,
+        (p.y.floor() as i32) >> 4,
+        (p.z.floor() as i32) >> 4,
+    ]
+}
+/// `SectionPos.center` as `Vec3.atBottomCenterOf` reads it.
+fn section_center(s: [i32; 3]) -> [f64; 3] {
+    [
+        f64::from(s[0] * 16 + 8) + 0.5,
+        f64::from(s[1] * 16 + 8),
+        f64::from(s[2] * 16 + 8) + 0.5,
+    ]
+}
+/// `MoveBackToVillageGoal.canUse`: only a golem outside the village
+/// (`ServerLevel.isVillage` at its feet, at most 1 section from a village
+/// section) goes back to it.
+fn outside_village(m: &Mob, w: &MobWorld) -> bool {
+    sections_to_village(&village_sections(m, w), section_of(m.position)) > 1
+}
+/// `MoveBackToVillageGoal.getPosition`: toward the section within 2 that
+/// is closest to a village, a quarter turn either side; none when the
+/// golem's own section already is.
+fn back_to_village_position(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]> {
+    let villages = village_sections(m, cx.w);
+    let here = section_of(m.position);
+    let best = closest_section(&villages, here, 2);
+    if best == here {
+        return None;
+    }
+    m.default_random_pos_towards(
+        cx.w,
+        10,
+        7,
+        section_center(best),
+        f64::from(std::f32::consts::FRAC_PI_2),
+    )
+}
+/// `GolemRandomStrollInVillageGoal.getPosition`: now and then anywhere
+/// (3 in 10); else toward a villager who wants a golem or toward a spot in
+/// a village section (7 in 10 the villager first), and anywhere if neither
+/// is found. The picks draw from the level's random.
+fn village_stroll_position(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]> {
+    if cx.lr.next_float() < 0.3 {
+        return m.land_random_pos(cx.w, 10, 7);
+    }
+    let target = if cx.lr.next_float() < 0.7 {
+        towards_villager_who_wants_golem(m, cx).or_else(|| towards_poi(m, cx))
+    } else {
+        towards_poi(m, cx).or_else(|| towards_villager_who_wants_golem(m, cx))
+    };
+    target.or_else(|| m.land_random_pos(cx.w, 10, 7))
+}
+/// `GolemRandomStrollInVillageGoal.getPositionTowardsVillagerWhoWantsGolem`:
+/// one of the villagers within 32 blocks that want a golem, picked from
+/// the level's random.
+fn towards_villager_who_wants_golem(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]> {
+    let area = m.bounds().inflate(Vec3::new(32.0, 32.0, 32.0));
+    let now = cx.w.game_time;
+    let villagers: Vec<Vec3> =
+        cx.w.others_near(area)
+            .filter(|s| {
+                s.species == Species::Villager
+                    && s.bounds.intersects(area)
+                    && s.villager.as_ref().is_some_and(|v| v.wants_golem(now))
+            })
+            .map(|s| s.position)
+            .collect();
+    if villagers.is_empty() {
+        return None;
+    }
+    let at = villagers[cx.lr.next_int_bound(villagers.len() as i32).unwrap_or(0) as usize];
+    m.land_random_pos_towards(cx.w, 10, 7, [at.x, at.y, at.z])
+}
+/// `GolemRandomStrollInVillageGoal.getPositionTowardsPoi`: a taken point of
+/// interest within 8 blocks of the centre of a random village section
+/// (`getRandomVillageSection`, `getRandomPoiWithinSection`) among those
+/// within 2 sections of the golem.
+fn towards_poi(m: &mut Mob, cx: &mut Cx) -> Option<[f64; 3]> {
+    let villages = village_sections(m, cx.w);
+    let here = section_of(m.position);
+    let mut sections = Vec::new();
+    for z in here[2] - 2..=here[2] + 2 {
+        for y in here[1] - 2..=here[1] + 2 {
+            for x in here[0] - 2..=here[0] + 2 {
+                if sections_to_village(&villages, [x, y, z]) == 0 {
+                    sections.push([x, y, z]);
+                }
+            }
+        }
+    }
+    if sections.is_empty() {
+        return None;
+    }
+    let s = sections[cx.lr.next_int_bound(sections.len() as i32).unwrap_or(0) as usize];
+    let taken = others_tickets(m, cx.w);
+    let pois = occupied_pois_in_range(
+        cx.w,
+        &taken,
+        [s[0] * 16 + 8, s[1] * 16 + 8, s[2] * 16 + 8],
+        8,
+    );
+    if pois.is_empty() {
+        return None;
+    }
+    let p = pois[cx.lr.next_int_bound(pois.len() as i32).unwrap_or(0) as usize];
+    m.land_random_pos_towards(
+        cx.w,
+        10,
+        7,
+        [
+            f64::from(p[0]) + 0.5,
+            f64::from(p[1]),
+            f64::from(p[2]) + 0.5,
+        ],
+    )
+}
 /// `DefendVillageTargetGoal`: a player that a villager nearby has no
 /// good word for (reputation of -100 or worse) is attacked on sight.
 #[derive(Clone, Debug)]
@@ -60,7 +197,7 @@ impl Goal for DefendVillage {
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         let Some(p) = &cx.w.player else { return false };
-        if !p.alive || p.creative || p.spectator || m.spares_players() {
+        if !p.alive || p.creative || p.spectator || m.spares_players(cx.w) {
             return false;
         }
         // The box around the golem: 10 across, 8 up and down.
@@ -81,7 +218,7 @@ impl Goal for DefendVillage {
         bad && m.sees(cx.w, Who::Player)
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        let spares = m.spares_players();
+        let spares = m.spares_players(cx.w);
         m.target_info(cx.w).is_some_and(|t| {
             t.alive
                 && !(t.is_player && (t.creative || spares))
@@ -392,8 +529,201 @@ pub fn snow_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                 pos: [xx, y, zz],
                 name: "minecraft:snow",
                 effect: false,
+                flags: horizon_world::level::flags::UPDATE_ALL,
             });
         }
     }
     let _ = z;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mobs::world::{test_player, with_test_world};
+    use std::sync::Arc;
+
+    fn mob(id: u32, species: Species, at: Vec3) -> Mob {
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = species;
+        Mob::new(id, Arc::new(kind), at, 0.0)
+    }
+
+    /// `IronGolem.canAttack` refuses creepers, and `HurtByTargetGoal.canUse`
+    /// asks it: the creeper that hurt the golem is never fought back, while
+    /// a zombie that hurts it is.
+    #[test]
+    fn a_creeper_that_hurts_an_iron_golem_is_never_fought_back() {
+        let creeper = mob(2, Species::Creeper, Vec3::new(1.5, 64.0, 0.5));
+        let zombie = mob(3, Species::Zombie, Vec3::new(1.5, 64.0, 0.5));
+        with_test_world(&[creeper.seen(None), zombie.seen(None)], |w, _| {
+            let mut golem = mob(1, Species::IronGolem, Vec3::new(0.5, 64.0, 0.5));
+            let mut goal = HurtByTarget::new();
+            let mut events = Vec::new();
+            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            let mut cx = Cx {
+                w,
+                lr: &mut lr,
+                events: &mut events,
+            };
+
+            golem.ai.last_hurt_by = Some(Who::Mob(2));
+            golem.ai.last_hurt_by_time = 1;
+            assert!(!goal.can_use(&mut golem, &mut cx));
+            assert_eq!(golem.ai.target, None, "a creeper is refused");
+
+            golem.ai.last_hurt_by = Some(Who::Mob(3));
+            golem.ai.last_hurt_by_time = 2;
+            assert!(goal.can_use(&mut golem, &mut cx));
+            goal.start(&mut golem, &mut cx);
+            assert_eq!(golem.ai.target, Some(Who::Mob(3)));
+        });
+    }
+
+    /// A village golem (not built by a player) still goes after the player
+    /// who angered it.
+    #[test]
+    fn a_village_golem_still_targets_the_player_who_angered_it() {
+        with_test_world(&[], |w, _| {
+            let mut w = w.clone();
+            w.player = Some(test_player(Vec3::new(3.5, 64.0, 0.5)));
+            let mut golem = mob(1, Species::IronGolem, Vec3::new(0.5, 64.0, 0.5));
+            golem.extra.anger = 100;
+            let mut events = Vec::new();
+            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            let mut cx = Cx {
+                w: &w,
+                lr: &mut lr,
+                events: &mut events,
+            };
+            let mut goal = NearestTarget::player(true)
+                .interval(0)
+                .when(|m, _| m.extra.anger > 0);
+            assert!(goal.can_use(&mut golem, &mut cx));
+            goal.start(&mut golem, &mut cx);
+            assert_eq!(golem.ai.target, Some(Who::Player));
+        });
+    }
+}
+
+#[cfg(test)]
+mod created_golem_tests {
+    use super::*;
+    use crate::mobs::world::{test_player, with_test_world};
+    use std::sync::Arc;
+
+    /// The target `m`'s target goals pick over `ticks` ticks in `w`.
+    fn target(m: &mut Mob, w: &MobWorld<'_>, ticks: u32) -> Option<Who> {
+        let mut events = Vec::new();
+        let mut lr = horizon_core::random::LegacyRandom::new(0);
+        let mut goals = std::mem::take(&mut m.ai.targets);
+        {
+            let mut cx = Cx {
+                w,
+                lr: &mut lr,
+                events: &mut events,
+            };
+            for _ in 0..ticks {
+                goals.tick(m, &mut cx);
+            }
+        }
+        m.ai.targets = goals;
+        m.ai.target
+    }
+    /// A player-built and a village iron golem, both angry at a player, and a
+    /// zombie; `None` without the extracted vanilla data.
+    fn angry_golems() -> Option<(Mob, Mob, crate::mobs::Seen)> {
+        let mut out = None;
+        with_test_world(&[], |_, types| {
+            let golem = |id: u32, created: bool| {
+                let kind = Arc::new(types.types["minecraft:iron_golem"].clone());
+                let mut m = Mob::new(id, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+                // `CarvedPumpkinBlock.trySpawnGolem`: setPlayerCreated(true).
+                m.extra.player_created = created;
+                // The anger a player's hit gives it (`after_hurt`).
+                m.extra.anger = 400;
+                m
+            };
+            let zombie = Mob::new(
+                3,
+                Arc::new(types.types["minecraft:zombie"].clone()),
+                Vec3::new(0.5, 64.0, 2.5),
+                0.0,
+            );
+            out = Some((golem(1, true), golem(2, false), zombie.seen(None)));
+        });
+        out
+    }
+
+    /// `IronGolem.canAttack`: a golem a player built never takes a player as
+    /// its target, though a village golem does and both still go after
+    /// monsters. The world holds one player, so "its builder" and "a player"
+    /// are the same check, as they are in vanilla.
+    #[test]
+    fn a_golem_a_player_built_never_targets_one() {
+        let Some((mut built, mut village, zombie)) = angry_golems() else {
+            return;
+        };
+        with_test_world(&[], |w, _| {
+            let mut w = w.clone();
+            w.player = Some(test_player(Vec3::new(2.5, 64.0, 0.5)));
+            assert_eq!(
+                target(&mut built, &w, 200),
+                None,
+                "a golem a player built turned on its builder"
+            );
+            assert_eq!(
+                target(&mut village, &w, 200),
+                Some(Who::Player),
+                "a village golem goes after the player"
+            );
+        });
+        with_test_world(&[zombie], |w, _| {
+            assert_eq!(
+                target(&mut built, w, 200),
+                Some(Who::Mob(3)),
+                "a golem a player built still fights monsters"
+            );
+        });
+    }
+}
+
+#[cfg(test)]
+mod crack_sound_tests {
+    use super::*;
+    use crate::mobs::Damage;
+    use std::sync::Arc;
+
+    /// An iron golem of its 100 health, from a made-up type.
+    fn golem() -> Mob {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let k = Arc::make_mut(&mut kind);
+        k.id = "minecraft:iron_golem".into();
+        k.species = Species::IronGolem;
+        k.max_health = 100.0;
+        Mob::new(1, kind, Vec3::ZERO, 0.0)
+    }
+    /// One hit of `amount` past the golem's hurt frames: how often it played
+    /// `entity.iron_golem.damage`.
+    fn cracks(m: &mut Mob, amount: f32) -> usize {
+        m.outbox.clear();
+        m.invulnerable = 0;
+        assert!(m.damage(amount, Damage::player([0.0, 0.0, 1.0])));
+        m.outbox
+            .iter()
+            .filter(|e| matches!(e, MobEvent::Sound("entity.iron_golem.damage", ..)))
+            .count()
+    }
+
+    /// `IronGolem.hurtServer`: a hit that leaves the golem in a new
+    /// `Crackiness.Level` (`Crackiness.GOLEM` is 0.75, 0.5, 0.25) plays
+    /// `entity.iron_golem.damage` once, and hits inside one level play none.
+    #[test]
+    fn a_crack_is_heard_once_at_the_threshold() {
+        let mut m = golem();
+        assert_eq!(cracks(&mut m, 30.0), 1, "100 to 70 crosses 0.75");
+        assert_eq!(cracks(&mut m, 10.0), 0, "70 to 60 stays at the same crack");
+        assert_eq!(cracks(&mut m, 20.0), 1, "60 to 40 crosses 0.5");
+        assert_eq!(cracks(&mut m, 10.0), 0, "40 to 30 stays at the same crack");
+        assert_eq!(cracks(&mut m, 10.0), 1, "30 to 20 crosses 0.25");
+    }
 }

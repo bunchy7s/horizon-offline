@@ -247,7 +247,9 @@ structure stages remain pending.
 
 The [structure-density sampler](structure-density.md) matches **1,360,095 output
 lines per reference JAR**, including ordered rigid-piece/junction contributions
-and scalar/bulk clipping. Live structure discovery and placement remain pending.
+and scalar/bulk clipping. Live placement of a start in a running level is ported
+(`/place structure`, through `StructureStart.placeInChunk`); structure discovery
+during chunk generation is compared by the structure-layout suite.
 
 The [vertical-anchor suite](vertical-anchors.md) matches **181,632 output lines per
 reference JAR**, including four anchor codecs, runtime overflow, nested exclusive
@@ -1451,8 +1453,9 @@ do not show attribute modifiers yet).
 `horizon_client::hotbar` reads the creative toolbars of an older `hotbar.nbt`
 through the `HOTBAR` data fixers (`EmptyItemInHotbarFix`, every item stack
 fixer): `tools/test_hotbar_parity.py` loads generated files of 34 versions with
-the real `HotbarManager`. The toolbar screen (save and load keys) is not wired
-to it yet.
+the real `HotbarManager`. The creative screen's Saved Hotbars tab shows its
+rows, and the save and load keys write and read it
+(`game/creative_hotbar.rs`).
 
 ## Player list and world border rendering
 
@@ -1527,15 +1530,20 @@ suggestion list and clipboard keys.
 vanilla's own `CreativeModeTabs.tryRebuildTabContents` over the vanilla data
 pack's registries: every stack with its components, and for each stack of the
 search tab the creative tooltip lines and item tags that the client's search
-trees index. The search ports `refreshSearchResults` and `SessionSearchTrees`
+trees index. The tabs are built with permissions, and the export marks the
+stacks only that build lists (`permissions_only`): the operator tab and its
+stacks at the end of the search tab, shown while the player
+`canUseGameMasterBlocks` with the Operator Items Tab option on
+(`CreativeModeInventoryScreen.hasPermissions`, checked on opening and every
+tick as `tryRefreshInvalidatedTabs` does). The search ports `refreshSearchResults` and `SessionSearchTrees`
 (substring matches over tooltip lines; after a colon the item id's namespace,
 then its path or a line; tags after `#`), and the scrollbar follows
 `mouseClicked`/`mouseDragged`/`mouseScrolled`. `tools/test_creative_parity.py`
 compares every shown tab's stacks, the search tab and 6,793 searches (fixed
 queries, then every stack's item path and tooltip lines and every tag, whole
 and halved) with the vanilla client's own search trees
-(`VanillaCreativeSearchOracle`). Not compared: the operator tab (off by
-default, `operatorItemsTab`) and the saved hotbars tab.
+(`VanillaCreativeSearchOracle`), then again with permissions (13 tabs, 2,034
+search stacks, 6,845 searches). Not compared: the saved hotbars tab.
 
 ## Pillager patrols and raids
 

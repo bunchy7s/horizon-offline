@@ -25,7 +25,7 @@ AbstractVillager.getSlot	missing		minor: commands cannot address a villager inve
 AbstractVillager.addOffersFromItemListings	port	crates/horizon-client/src/merchant.rs::Trades::offers_from_set	the allow_duplicates path: a picked trade stays in the pool
 AbstractVillager.addOffersFromItemListingsWithoutDuplicates	port	crates/horizon-client/src/merchant.rs::Trades::offers_from_set	the no-duplicates path: a picked trade leaves the pool
 AbstractVillager.getRopeHoldPosition	skip:ui		lead rope drawing point only; the lead is drawn by leash_geometry in game.rs
-AbstractVillager.stillValid	missing		player: the trade screen stays open after you walk away from the villager; vanilla closes it beyond 4 blocks, and no reach check exists for merchant screens
+AbstractVillager.stillValid	port	crates/horizon-client/src/game/lan_trading.rs::Game::lan_merchant_tick	closes when the trader is gone or dead, or the guest passes the interaction range plus 4 (7 blocks survival, 9 creative); the in-frame twin is game/trading.rs::Game::merchant_tick, and lan_e2e merchant-close covers the host and guest screens
 Villager.ageBoundaryReached	missing		player: a villager that grows up keeps the baby brain (the brain is built once with its baby flag), so it never goes to work
 Villager.startTrading	port	crates/horizon-client/src/game/trading.rs::Game::interact_trader	opens the trade screen for the player
 Villager.resetSpecialPrices	port	crates/horizon-client/src/merchant.rs::update_special_prices	recomputes special prices from scratch, which drops the old diff

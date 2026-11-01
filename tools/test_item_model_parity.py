@@ -3,14 +3,16 @@
 
 The vanilla side (VanillaItemModelOracle) decodes every `items/*.json` with the
 client codec, discovers and bakes all models with `ModelBakery` against real
-PNG sprites, and resolves stacks through `ItemStackRenderState` layers. The
-Rust side (`item_model_fixture`) must pick the same layers, tints, foil,
+PNG sprites, and resolves stacks through `ItemStackRenderState` layers.
+Pass `--component-conditions` to run only the synthetic component-condition corpus.
+The Rust side (`item_model_fixture`) must pick the same layers, tints, foil,
 transformations, special-renderer configurations and baked quads."""
 import json
 import os
 import platform
 import random
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 try:
@@ -246,6 +248,38 @@ def definitions():
     return rows
 
 
+def component_definitions():
+    """Original fixtures for ComponentMatches' discriminator and enchantment rules."""
+    leaf = lambda name: {'type': 'minecraft:model', 'model': 'minecraft:item/' + name}
+    def condition(value, predicate='minecraft:enchantments'):
+        return {'type': 'minecraft:condition', 'property': 'minecraft:component',
+                'predicate': predicate, 'value': value,
+                'on_true': leaf('diamond'), 'on_false': leaf('stick')}
+    values = [[], [{}], [{'enchantments': 'minecraft:density'}],
+              [{'enchantments': 'density', 'levels': {'min': 3}}],
+              [{'enchantments': ['minecraft:density', 'minecraft:breach'], 'levels': {'max': 4}}],
+              [{'enchantments': [], 'levels': {'min': 0}}],
+              [{'enchantments': 'minecraft:wind_burst', 'levels': 2}],
+              [{'levels': {'min': 2, 'max': 4}}], [{'levels': {'max': 0}}],
+              [{'levels': {}}],
+              [{'enchantments': 'minecraft:breach'}, {'enchantments': 'minecraft:wind_burst'}]]
+    rows = {f'horizon:component_enchant_{i}': {'model': condition(value)} for i, value in enumerate(values)}
+    rows['horizon:component_stored'] = {'model': condition([{'enchantments': 'minecraft:density'}],
+                                                        'minecraft:stored_enchantments')}
+    rows['horizon:component_composite'] = {'model': {'type': 'minecraft:composite', 'models': [
+        condition([{'enchantments': 'minecraft:density'}]),
+        dict(condition([{'enchantments': 'minecraft:wind_burst'}]), on_false={'type': 'minecraft:empty'})]}}
+    rows['horizon:component_nested'] = {'model': dict(condition([{'enchantments': 'minecraft:density'}]),
+        on_false=condition([{'enchantments': 'minecraft:breach'}]))}
+    rows['horizon:component_missing_value'] = {'model': condition([])}
+    del rows['horizon:component_missing_value']['model']['value']
+    rows['horizon:component_old_object'] = {'model': dict(condition([]), predicate={'minecraft:enchantments': []})}
+    rows['horizon:component_bad_list'] = {'model': condition({})}
+    rows['horizon:component_bad_levels'] = {'model': condition([{'levels': 'bad'}])}
+    rows['horizon:component_reversed_levels'] = {'model': condition([{'levels': {'min': 5, 'max': 2}}])}
+    return {name: json.dumps(row) for name, row in rows.items()}
+
+
 def definition_cases(rows):
     cases = []
     stacks = [('minecraft:diamond_sword', {'minecraft:damage': 100}, 1), ('minecraft:diamond_sword', {'minecraft:damage': 1560}, 1),
@@ -260,6 +294,13 @@ def definition_cases(rows):
               ('minecraft:bundle', {'minecraft:bundle_contents': []}, 1),
               ('minecraft:stone', {'minecraft:enchantments': {'minecraft:sharpness': 1}}, 1),
               ('minecraft:stone', {'minecraft:custom_name': '"x"'}, 1)]
+    stacks += [
+        ('minecraft:mace', {}, 1),
+        ('minecraft:mace', {'minecraft:enchantments': {'minecraft:density': 5}}, 1),
+        ('minecraft:mace', {'minecraft:enchantments': {'minecraft:breach': 4, 'minecraft:wind_burst': 2}}, 1),
+        ('minecraft:enchanted_book', {'minecraft:stored_enchantments': {'minecraft:density': 3}}, 1),
+        ('minecraft:mace', {'!minecraft:enchantments': {}}, 1),
+        ('minecraft:mace', {'minecraft:enchantments': {'minecraft:density': 0}}, 1)]
     for name in rows:
         for stack_index, (item, components, count) in enumerate(stacks):
             for context in ('gui', 'head', 'firstperson_lefthand', 'ground'):
@@ -314,8 +355,10 @@ def main():
     _, directory = lab.config()
     prototypes_path = lab.LOCAL / 'horizon-client' / lock['minecraft']['version'] / 'items.json'
     prototypes = json.loads(prototypes_path.read_text())
-    cases = corpus(prototypes)
-    rows = definitions()
+    focused = '--component-conditions' in sys.argv
+    cases = [] if focused else corpus(prototypes)
+    rows = {} if focused else definitions()
+    rows.update(component_definitions())
     cases += definition_cases(rows)
     inputs = build / 'cases.jsonl'; inputs.write_text(''.join(json.dumps(c) + '\n' for c in cases))
     (build / 'cases.jsonl.definitions').write_text(''.join(json.dumps({'name': n, 'json': j}) + '\n' for n, j in rows.items()))
@@ -407,7 +450,7 @@ def main():
               'rustc': subprocess.check_output(['rustc', '--version'], text=True).strip(),
               'cases': len(cases), 'compared': compared, 'rejected_by_vanilla': skipped, 'definitions_decoded': decoded,
               'definitions_unbaked': unbaked, 'sources_sha256': tested,
-              'scope': 'Actual ClientItem codec, ModelDiscovery, ModelBakery item baking and ItemModelResolver semantics against real sprites in a unit atlas. Every bundled items/*.json and synthetic definitions; every item prototype in every display context with representative components. Layer content, tints, foil, composed transformation matrices (numeric equality), special-renderer codec forms and arguments, baked quads by float bits, render properties. Not covered: GPU rendering, atlas packing, level-dependent needles (see the needle tests), player/keybind/team-based properties that need a live client.'}
+              'scope': ('Synthetic component-condition corpus only. ' if focused else '') + 'Actual ClientItem codec, ModelDiscovery, ModelBakery item baking and ItemModelResolver semantics against real sprites in a unit atlas. Every bundled items/*.json is decoded. Full mode resolves every item prototype in every display context; focused mode resolves synthetic component conditions on representative stacks. Layer content, tints, foil, composed transformation matrices (numeric equality), special-renderer codec forms and arguments, baked quads by float bits, render properties. Not covered: GPU rendering, atlas packing, level-dependent needles (see the needle tests), player/keybind/team-based properties that need a live client.'}
     lab.write_json(report_path, report)
     print(f'Item models: {compared:,} resolved stacks match ({skipped:,} rejected by vanilla, {decoded:,} definitions); {report_path}', flush=True)
 

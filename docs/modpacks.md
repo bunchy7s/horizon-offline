@@ -158,13 +158,14 @@ with advice if needed.
 Content mods (`.hmod`, API 0.2) carry data: blocks, items, and everything in the 26.3 data-pack and resource-pack
 formats ([mods.md](mods.md#content-mods-api-02)). Behaviour that needs code is not a content-mod feature: it is
 written as a native mod ([native-mods.md](native-mods.md)), one per ported mod. The "Planned in" column keeps the
-order of the original plan. The rows planned for 0.3 and later were designed as WebAssembly interfaces, which Horizon
-dropped: their "Shape" column is history, and a native mod hooks the game's code instead. What a content pack needs:
+order of the original plan; for the rows planned for 0.3 and later, a native mod hooks the game's code instead of
+using the "Shape" column. What a content pack needs:
 
 | Feature | Content mod today | Needed by (ATM10 content+integration, by tier) | Planned in | Shape |
 |---|---|---|---|---|
 | Block registry: ids, states, properties, shapes, sounds, light | — | data and up (all 331) | **0.2** | declared in `data/<mod>/horizon/block/*.json`, each from a vanilla *template* block (below) |
 | Item registry, block items | — | data and up | **0.2** | `data/<mod>/horizon/item/*.json`, from a vanilla template item |
+| Mob effect registry: category, colour, icon, name | — | data and up | **0.2** | `data/<mod>/horizon/mob_effect/*.json` ([mods.md](mods.md#content-mods-api-02)); no tick behaviour yet: that needs native hook points |
 | Recipes, loot tables, tags, advancements, lang, blockstates, models, textures, sounds in the mod's namespace | vanilla namespace only | data and up | **0.2** | the 26.3 data-pack and resource-pack formats, as they are |
 | Worldgen JSON: features, structures, template pools, processors, structure NBT, biome additions | vanilla bundle only | about 30 data-tier structure and biome mods | 0.2.x | carried into the `worldgen/` bundle |
 | Block and item behaviour callbacks: use, place, break, attack, random tick, scheduled tick, neighbour change, entity inside | — | logic and up (253) | **0.3** | `server` interface; hooks per registered id, budgeted |
@@ -177,7 +178,7 @@ dropped: their "Shape" column is history, and a native mod hooks the game's code
 | Accessory slots (what Curios does) | — | Curios users (6 require it, more use it optionally) | **0.4** | built-in slots API |
 | Mod networking between its client and server halves | — | machines and up | **0.4** | `net` interface |
 | Custom recipe types: machine recipes with their own JSON | — | machines and up | **0.4** | recipe-type registry: the mod declares its JSON schema and a display layout for the recipe viewer |
-| Entities: types, attributes, AI goals and brains, spawning | — | deep (87) | 0.5 | `entity` interface, AI in the mod with vanilla goals reusable |
+| Entities: types, attributes, AI goals and brains, spawning | — | deep (87) | 0.5 | `entity` interface, AI in the mod with vanilla goals reusable; thrown item projectiles are already data in 0.2 ([mods.md](mods.md)) |
 | Custom renderers and animated models (block-entity, entity, item; GeckoLib's format) | — | deep | 0.5 | data models (Bedrock geometry + animations), plus a budgeted draw-list interface for the rest |
 | Dimensions: dimension types, levels, chunk generators | — | about 10 (Twilight Forest, Aether, Ad Astra, Undergarden, ...) | 0.5 | JSON part with worldgen; custom generators as mod code |
 | New hooks into vanilla behaviour (what Mixins do) | — | deep | as asked | each becomes a named hook, added for everyone |
@@ -186,7 +187,7 @@ dropped: their "Shape" column is history, and a native mod hooks the game's code
 One rule stays: **free when unused** (no mods means vanilla code paths and the vanilla resource root, so the parity
 harnesses test the same game).
 
-### Registries 0.2: data-driven blocks and items
+### Registries 0.2: data-driven blocks, items and mob effects
 
 A content mod (`.hmod`) carries `assets/` and `data/` and no code:
 
@@ -217,12 +218,34 @@ properties and shapes the new block takes, and overrides what differs:
 }
 ```
 
+A block may define `shapes` to replace both its selection outline and collision
+shape. It selects a list of boxes by one template state property:
+
+```json
+"shapes": { "property": "axis", "values": {
+  "x": [[0, 0.25, 0.25, 1, 0.75, 0.75]],
+  "y": [[0.25, 0, 0.25, 0.75, 1, 0.75]],
+  "z": [[0.25, 0.25, 0, 0.75, 0.75, 1]]
+} }
+```
+
+Each box is `[min_x, min_y, min_z, max_x, max_y, max_z]` in block units.
+Each value of the template property needs an entry. Up to 16 boxes form a union;
+an empty list is an empty shape. Invalid bounds or values reject the content root.
+Without `shapes`, both shapes remain the template's. Other properties such as
+occlusion, light, and support still come from the template.
+
+A declaration may also set `"default_state": {"facing": "north"}`. The map
+changes only those state properties on the template's default; omitted properties keep
+their template values. Names and values must identify exactly one template state, or
+the content root is rejected. Leave the map out to keep the template default.
+
 Most decoration and resource blocks are vanilla classes with other numbers: Macaw's doors are
 `DoorBlock`s, XTones are full cubes, ore sets are `DropExperienceBlock`s. So templates cover the
 data tier without code. Templates also give mod blocks every behaviour Horizon already
 implements and the harnesses already check. Items work the same way (`"template":
-"minecraft:diamond"`, overriding `max_stack_size`, `rarity` and any data component in
-`components`).
+"minecraft:diamond"`, overriding `max_stack_size`, `rarity`, `crafting_remainder` and any
+data component in `components`; a block's item takes `components` too).
 
 How the game loads them, without touching vanilla's path:
 
@@ -308,6 +331,29 @@ cargo run -p horizon-port-pack -- report ~/.horizon/ports/pack        # coverage
 cargo run -p horizon-port-pack -- port ~/Downloads/pack.zip ~/.horizon/ports/pack [--from <folder>] [--resources <root>]
 ```
 
+### Resource packs from an imported modpack
+
+Import stages embedded resource packs in `<work>/resourcepacks/`: `.mrpack` common overrides and client
+overrides (the client copy wins), a CurseForge ZIP's declared override folder, or an installed instance's
+`resourcepacks/` directory. ZIP packs stay intact; directory packs must contain `pack.mcmeta`. Server-only
+overrides and unrelated files such as scripts and `options.txt` are not copied.
+
+`port` also obtains client-supported `.mrpack` resource-pack ZIPs from the existing permitted download hosts,
+checking the index's SHA-1 before keeping them. `<work>/resourcepacks.json` records available, missing, failed,
+conflicting and unsupported entries; they also appear in `coverage.json` and `coverage.md`. A copied pack is
+reported as partial, not as a rendering-verified port. Shader packs are reported as pending conversion.
+Old import folders without this report still open.
+
+The launcher copies staged packs into `<work>/home/resourcepacks/` on import, port and launch. It preserves any
+existing profile pack as a whole, including edits inside a directory pack, and lists name/content conflicts.
+`<work>/profile-resourcepacks.json` records those results. A profile with resource packs and no carried mods can
+play. Enable packs in the game's Resource Packs screen; importing never changes the enabled-pack list.
+
+Paths must stay within staging, links are refused, and one import is limited to 65,536 resource files and
+512 MiB of resource bytes (including both override layers). Indexed downloads are limited to 512 MiB each.
+These checks use synthetic packs and temporary profiles; in-game rendering still needs Minecraft 26.3 prepared
+resources and has not been verified for this local batch.
+
 `check <jar> <out>` takes one mod jar on its own, as the launcher's mod browser installs it
 ([mod-browser.md](mod-browser.md)): it carries the jar into `<out>/carry/` and reads its class
 files (constant pool, superclass, declared methods; no decompiling) for what the carry can't
@@ -366,7 +412,16 @@ resistance, light, tool need, friction, map colour and sounds as overrides. `--r
 <prepared>` limits templates to blocks Horizon's tables have. `carry-report.json` lists, per
 block, what the template does not reproduce (other shapes, sounds no vanilla block has, a class
 of its own), and the blocks left out: those whose vanilla class has no vanilla block with the
-same states (Macaw's garage doors, multi-part gates). Recipes get the convention tags they use
+same states (Macaw's garage doors, multi-part gates). An item of a vanilla tool or armour class
+(`SwordItem`, `PickaxeItem`, `ArmorItem`, ...) gets the iron item of that class and slot as its
+template, and the oracle's durability, attribute modifiers, tool rules, enchantability and repair
+items as a component patch over it, minus what the template already has (`--resources` gives the
+template's components); other items keep `minecraft:stick`. Armour of the mod's own material gets a
+26.3 equipment asset (`assets/<ns>/equipment/<material>.json`) made from its 1.21.1 layers, their
+`textures/models/armor/<name>_layer_1.png` and `_layer_2.png` copied to
+`textures/entity/equipment/humanoid/` and `humanoid_leggings/`, and its `equippable` names that
+asset and the material's equip sound. A material with no asset to name (layers elsewhere, another
+mod's) draws the template's armour, reported as a difference. Recipes get the convention tags they use
 (`c:dyes/red`), filled from the oracle with vanilla's and the mod's own members. Without the
 oracle, templates are guessed from the blockstate's properties: the template whose properties
 include them with the fewest left over (models often ignore `powered` or `waterlogged`), the
@@ -451,7 +506,9 @@ Two cases the oracle fills in:
   - `lithostitched:jigsaw`, MoogsStructureLib's and Repurposed Structures' generic jigsaws
     become `minecraft:jigsaw`;
   - their `advanced_random_spread` becomes `minecraft:random_spread`;
-  - their versioned, legacy and empty pool elements become vanilla's.
+  - their versioned, legacy and empty pool elements become vanilla's; Lithostitched's
+    `limited` and `guaranteed` elements are the game's own (its `delegating` places its
+    `delegate`).
 
   Three more rewrites make the mapped structures decode and start where their mod would:
   - **Block states.** 1.21.1 writes a block or fluid state as `{"Name", "Properties"}`, 26.3
@@ -518,6 +575,11 @@ Two cases the oracle fills in:
     CTOV's compat hooks for other mods (its `modular_compat`, 30 of them in 17 lists) become a
     `reference` when the mod they name is ported along, and are taken out (a no-op, as in the
     mod) when it is not. In ATM10 they all name Nature's Spirit, which the pack does not have.
+    Lithostitched's `add_template_pool_elements` and `add_processor_list_processors` modifiers
+    (CTOV's houses for 11 of ATM10's mods) become the game's additions, when the mods their
+    load conditions name are ported along. The houses are `limited` (at most once in a
+    village) or `guaranteed` (tried first, from the depth they name, until placed): the game
+    keeps both.
     In Java, Lithostitched also lays out every jigsaw structure its own way (villages,
     outposts, trial chambers; CTOV's villages are `lithostitched:jigsaw`, carried as vanilla's
     jigsaw). Horizon keeps vanilla's layouts, so with Lithostitched in a pack, structure layouts
@@ -760,7 +822,9 @@ python3 tools/mod_port_harness.py --work <work>      # or --jars/--deps to expor
   namespaces and every vanilla block: the class chain, states, per-state hardness, light, tool
   need, map colour, sounds, outline and collision shapes; drops for hand, diamond tools, shears
   and silk touch; placement on a floor and a wall; BlockSetType and WoodType. Then items (class,
-  stack size, rarity, food), recipes (type, result, count, resolved ingredients) and tags. One run
+  stack size, rarity, food; every default data component in 1.21.1's form, the effective attribute
+  modifiers, enchantability and repair items; armour's slot, defense, toughness, knockback resistance,
+  equip sound and texture layers), recipes (type, result, count, resolved ingredients) and tags. One run
   with the seven mods below takes about 30 s.
 - `crates/horizon-client/examples/mod_port_probe.rs` builds the content root from the carried
   mods and dumps what Horizon's loaders make of the same blocks, drops, recipes and tags.

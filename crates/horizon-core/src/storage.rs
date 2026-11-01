@@ -190,6 +190,16 @@ impl PackedStorage {
         Ok(())
     }
 
+    /// [`unpack`](Self::unpack) into `out` (the first `len` slots), without allocating.
+    pub fn unpack_into(&self, out: &mut [u32]) {
+        let mut i = 0;
+        for &word in &self.words {
+            for slot in 0..self.per_word.min(self.len - i) {
+                out[i] = ((word >> (slot * usize::from(self.bits))) & self.mask) as u32;
+                i += 1;
+            }
+        }
+    }
     pub fn unpack(&self) -> Vec<u32> {
         let mut values = Vec::with_capacity(self.len);
         for &word in &self.words {

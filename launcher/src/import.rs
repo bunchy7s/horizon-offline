@@ -87,7 +87,11 @@ pub fn what(file: &Path) -> Result<Dropped, String> {
     }
     let zip = open(file)?;
     let has = |n: &str| zip.index_for_name(n).is_some();
-    let under = |p: &str| zip.file_names().any(|n| n.starts_with(p));
+    let names: Vec<_> = zip
+        .file_names()
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let under = |p: &str| names.iter().any(|n| n.starts_with(p));
     if has("manifest.json") && !has("pack.mcmeta") {
         return Ok(Dropped::Modpack);
     }
@@ -181,7 +185,7 @@ fn fill(
     let count = zip.len();
     for i in 0..count {
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
-        let name = entry.name().to_string();
+        let name = entry.name().map_err(|e| e.to_string())?.into_owned();
         let relative = match index {
             Some(_) => match OVERRIDES.iter().find_map(|o| name.strip_prefix(o)) {
                 Some(r) => r.to_string(),

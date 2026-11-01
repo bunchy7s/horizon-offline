@@ -12,7 +12,10 @@ horizon_client::creative::Creative. The tabs it shows (id, title, icon,
 position, every stack with its components), the search tab's stacks and the
 results of every query must agree. The queries are QUERIES below, then every
 search stack's item path and tooltip lines, every item tag with and without
-"#", and half of each as a prefix.
+"#", and half of each as a prefix. Both run twice: as a player without
+permissions, then as an operator with the Operator Items Tab option on
+(CreativeModeInventoryScreen.hasPermissions), where the operator tab and its
+stacks in the search tab appear.
 
   test_creative_parity.py [--detail N]
 """
@@ -63,12 +66,24 @@ def main():
     run(['javac', '--release', lock['minecraft']['java_major'], '-proc:none', '-nowarn', '-cp', dependencies, '-d', classes,
          *(PARITY / f'{n}.java' for n in ('ParityData', 'VanillaCreativeTabsExporter', 'VanillaCreativeSearchOracle'))],
         'compile-java')
+    bad = 0
+    for mode in ('', 'permissions'):
+        print(f'== {mode or "no permissions"}')
+        bad += compare(args, build, classes, dependencies, queries, run, mode)
+    if bad:
+        sys.exit(1)
+    print('creative parity ok')
+
+
+def compare(args, build, classes, dependencies, queries, run, mode):
+    suffix = '-' + mode if mode else ''
     run(['java', '-Xmx2G', '-cp', str(classes) + os.pathsep + dependencies, 'dev.horizonlab.parity.VanillaCreativeSearchOracle',
-         queries, build / 'creative-inventory.json', build / 'vanilla.json'], 'vanilla')
+         queries, build / 'creative-inventory.json', build / f'vanilla{suffix}.json', *([mode] if mode else [])],
+        'vanilla' + suffix)
     lib.cargo_example('horizon-client', 'creative_search_fixture', lib.RESOURCES, build / 'creative-inventory.json',
-                      build / 'vanilla.json', build / 'rust.json')
-    vanilla = json.loads((build / 'vanilla.json').read_text())
-    rust = json.loads((build / 'rust.json').read_text())
+                      build / f'vanilla{suffix}.json', build / f'rust{suffix}.json', *([mode] if mode else []))
+    vanilla = json.loads((build / f'vanilla{suffix}.json').read_text())
+    rust = json.loads((build / f'rust{suffix}.json').read_text())
     bad = 0
     shown = [{k: t[k] for k in ('id', 'title', 'icon', 'row', 'column', 'items')} for t in vanilla['tabs'] if t['shown']]
     if [t['id'] for t in shown] != [t['id'] for t in rust['tabs']]:
@@ -101,9 +116,7 @@ def main():
                                                                       for i in hits[:6]))
     print(f'{len(vanilla["searches"]) - len(wrong)}/{len(vanilla["searches"])} searches match; {len(shown)} tabs, '
           f'{len(search)} search stacks')
-    if bad:
-        sys.exit(1)
-    print('creative parity ok')
+    return bad
 
 
 if __name__ == '__main__':

@@ -790,18 +790,7 @@ pub fn summon_golem<L: super::spawn_rules::SpawnLevel, R: RandomSource, T>(
 /// `Mob.finalizeSpawn` for a summoned iron golem, from the level's random:
 /// the follow range spawn bonus and left-handedness.
 pub fn finalize_summoned_golem(m: &mut Mob, random: &mut impl RandomSource) {
-    use super::finalize::{Attr, Op, add_modifier, has_modifier};
-    if !has_modifier(m, Attr::FollowRange, "minecraft:random_spawn_bonus") {
-        let bonus = random.triangle(0.0, 0.114_850_000_000_000_01);
-        add_modifier(
-            m,
-            Attr::FollowRange,
-            "minecraft:random_spawn_bonus",
-            bonus,
-            Op::AddMultipliedBase,
-        );
-    }
-    m.extra.left_handed = random.next_float() < 0.05;
+    super::finalize::mob_spawn(m, random);
 }
 /// `Villager.canBreed`: enough food, awake and an adult.
 pub fn can_breed(m: &Mob) -> bool {

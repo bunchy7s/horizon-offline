@@ -311,10 +311,14 @@ pub fn setup_fog(tables: &FogTables, state: &FogState, input: &FogInputs) -> Fog
             fog.cloud_end = fog.environmental_end;
         }
         FogType::PowderSnow => {
-            fog.environmental_start = 0.0;
-            fog.environmental_end = 2.0;
-            fog.sky_end = 2.0;
-            fog.cloud_end = 2.0;
+            // PowderedSnowFogEnvironment.setupFog.
+            (fog.environmental_start, fog.environmental_end) = if input.spectator {
+                (-8.0, rd * 0.5)
+            } else {
+                (0.0, 2.0)
+            };
+            fog.sky_end = fog.environmental_end;
+            fog.cloud_end = fog.environmental_end;
         }
         _ if input.blindness.is_some() => {
             let (duration, infinite) = input.blindness.unwrap_or((0, true));

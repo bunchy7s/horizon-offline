@@ -5,6 +5,7 @@
 //! does them all at once, as a converter).
 use super::dynamic::{as_bool, as_int, as_str, int_list, remove, set, string};
 use super::json::{self, Json};
+use super::progress::{UpgradeProgress, UpgradeType};
 use super::schema::Ty;
 use super::{CURRENT, update};
 use crate::compression::Compression;
@@ -20,6 +21,11 @@ pub const VERSION_NAME: &str = horizon_core::version::VANILLA_VERSION;
 const FILE_FIXER_INTRODUCTION: i32 = 4772;
 /// The versions of the file fixes, in order.
 const FILE_FIXES: [i32; 4] = [1493, 4772, 4773, 4899];
+
+/// `CanceledFileFixException`: the player pressed Cancel.
+fn canceled() -> io::Error {
+    io::Error::new(io::ErrorKind::Interrupted, "the world upgrade was canceled")
+}
 
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
@@ -135,7 +141,7 @@ fn delete(base: &Path, relative: &str) -> io::Result<()> {
     }
 }
 
-fn subdirectories(path: &Path) -> Vec<PathBuf> {
+pub(super) fn subdirectories(path: &Path) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = fs::read_dir(path)
         .map(|r| {
             r.filter_map(Result::ok)
@@ -490,7 +496,7 @@ pub(crate) fn fix_1493(base: &Path) -> io::Result<()> {
         } else {
             base.join(folder).join("region")
         };
-        upgrade_regions(&region, |tag| {
+        upgrade_regions(&region, &Progress::none(), |tag| {
             let version = as_int(tag.get("DataVersion"), -1);
             let x = as_int(tag.get("Level").and_then(|l| l.get("xPos")), 0);
             let z = as_int(tag.get("Level").and_then(|l| l.get("zPos")), 0);
@@ -589,7 +595,7 @@ fn add_versions(data: &mut Tag) {
 /// needs, then its level.dat at the current version. Returns the DataVersion
 /// the world had.
 pub fn fix_world_files(base: &Path) -> io::Result<i32> {
-    let (loaded, pending) = fix_world_files_deferred(base)?;
+    let (loaded, pending) = fix_world_files_deferred(base, &UpgradeProgress::new())?;
     if let Some(data) = pending {
         write_dat(&base.join("level.dat"), &Tag::compound([("Data", data)]))?;
     }
@@ -601,7 +607,10 @@ pub fn fix_world_files(base: &Path) -> io::Result<i32> {
 /// (`None` when the world is already current). A caller that converts the
 /// world's data afterwards writes it last, so a failed upgrade keeps the old
 /// DataVersion and is retried on the next open.
-fn fix_world_files_deferred(base: &Path) -> io::Result<(i32, Option<Tag>)> {
+fn fix_world_files_deferred(
+    base: &Path,
+    progress: &UpgradeProgress,
+) -> io::Result<(i32, Option<Tag>)> {
     let root = read_dat(&base.join("level.dat"))?.ok_or_else(|| invalid("missing level.dat"))?;
     let mut data = root
         .get("Data")
@@ -618,15 +627,31 @@ fn fix_world_files_deferred(base: &Path) -> io::Result<(i32, Option<Tag>)> {
         } else {
             loaded
         };
-        for version in FILE_FIXES {
-            if version > start && version <= CURRENT {
-                match version {
-                    1493 => fix_1493(base)?,
-                    4772 => fix_4772(base)?,
-                    4773 => fix_4773(base)?,
-                    _ => fix_4899(base)?,
-                }
+        // `FileFixerUpper.applyFileFixers`: the type, the count (a file fix is
+        // one operation here), then each fixer in turn.
+        let applicable: Vec<i32> = FILE_FIXES
+            .into_iter()
+            .filter(|&version| version > start && version <= CURRENT)
+            .collect();
+        progress.set_file_fixing();
+        progress.set_type(UpgradeType::Files);
+        progress.add_total_file_fix_operations(applicable.len() as i32);
+        progress.set_applicable_fixer_amount(applicable.len() as i32);
+        for (done, version) in applicable.into_iter().enumerate() {
+            // `FileFix.runFixOperations` stops on a cancel, which vanilla rolls
+            // back. These fixes move files in place, so only the one that
+            // would be the first leaves the world as it was.
+            if done == 0 && progress.is_canceled() {
+                return Err(canceled());
             }
+            progress.increment_running_file_fixer();
+            match version {
+                1493 => fix_1493(base)?,
+                4772 => fix_4772(base)?,
+                4773 => fix_4773(base)?,
+                _ => fix_4899(base)?,
+            }
+            progress.increment_finished_operations();
         }
         // `writeUpdatedLevelData`, then the world swapped in and read again.
         let root =
@@ -644,10 +669,39 @@ fn fix_world_files_deferred(base: &Path) -> io::Result<(i32, Option<Tag>)> {
     Ok((loaded, Some(data)))
 }
 
+/// The world's generator settings as 26.3 reads them once the file fixes have run, without
+/// running them: for a world older than 4772 they come out of level.dat the way
+/// `LevelDatToSavedDataFileFix` moves them (`world_gen_settings.dat` is not there yet), for any
+/// other from the saved data file, brought to the current version. `None` when there are none.
+pub fn current_world_gen_settings(base: &Path) -> io::Result<Option<Tag>> {
+    const V: i32 = 4772;
+    let Some(root) = read_dat(&base.join("level.dat"))? else {
+        return Ok(None);
+    };
+    let loaded = root.get("Data").map_or(-1, |data| data_version(data, -1));
+    if loaded < V {
+        let Some(content) = read_level(base, V)? else {
+            return Ok(None);
+        };
+        let Some(mut settings) = content.get("world_gen_settings").cloned() else {
+            return Ok(None);
+        };
+        let from = data_version(&content, -1);
+        update(Ty::WorldGenSettings, &mut settings, from, V);
+        update(Ty::WorldGenSettings, &mut settings, V, CURRENT);
+        return Ok(Some(settings));
+    }
+    read_saved_data(
+        &base.join("data/minecraft/world_gen_settings.dat"),
+        Ty::SavedWorldGenSettings,
+        CURRENT,
+    )
+}
+
 // ------------------------------------------------------------------ the read-time upgrades
 
 /// Chunk generator types per dimension from `world_gen_settings.dat`.
-fn generators(base: &Path) -> io::Result<Vec<(String, String)>> {
+pub(super) fn generators(base: &Path) -> io::Result<Vec<(String, String)>> {
     let Some(tag) = read_dat(&base.join("data/minecraft/world_gen_settings.dat"))? else {
         return Ok(Vec::new());
     };
@@ -676,9 +730,14 @@ fn files_with_suffix(folder: &Path, suffix: &str) -> Vec<PathBuf> {
 }
 
 /// Rewrite every chunk of the region files of a folder with `fix`.
-fn upgrade_regions(folder: &Path, mut fix: impl FnMut(&mut Tag)) -> io::Result<()> {
+fn upgrade_regions(
+    folder: &Path,
+    progress: &Progress,
+    mut fix: impl FnMut(&mut Tag),
+) -> io::Result<()> {
     let limits = Limits::default();
     for path in files_with_suffix(folder, ".mca") {
+        progress.check()?;
         let mut region = RegionFile::open(&path)?;
         let positions: Vec<_> = region.chunks().map(|(p, _)| p).collect();
         let mut records = Vec::new();
@@ -705,16 +764,45 @@ fn upgrade_regions(folder: &Path, mut fix: impl FnMut(&mut Tag)) -> io::Result<(
         writer.finish()?;
         fs::rename(&temporary, &path)?;
         fs::remove_dir(&staging)?;
+        progress.progress.increment_finished_operations();
     }
     Ok(())
 }
 
-/// `SavedDataStorage.readTagFromDisk` over every known file of a data folder.
-fn upgrade_saved_data(data: &Path) -> io::Result<()> {
-    if !data.is_dir() {
-        return Ok(());
+/// The progress a data upgrade reports to and whether it may stop early: a
+/// cancel is honoured only while the world's files are still unmoved, since
+/// the DataVersion is stamped last and a retry would run the file fixes again.
+struct Progress<'a> {
+    progress: &'a UpgradeProgress,
+    cancelable: bool,
+}
+impl Progress<'static> {
+    /// A converter run with nobody watching.
+    fn none() -> Self {
+        static NONE: std::sync::LazyLock<UpgradeProgress> =
+            std::sync::LazyLock::new(UpgradeProgress::new);
+        Progress {
+            progress: &NONE,
+            cancelable: false,
+        }
     }
+}
+impl Progress<'_> {
+    fn check(&self) -> io::Result<()> {
+        if self.cancelable && self.progress.is_canceled() {
+            Err(canceled())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// `SavedDataStorage.readTagFromDisk` over every known file of a data folder.
+fn saved_data_files(data: &Path) -> io::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
+    if !data.is_dir() {
+        return Ok(files);
+    }
     let mut stack = vec![data.to_path_buf()];
     while let Some(dir) = stack.pop() {
         for entry in fs::read_dir(&dir)?.filter_map(Result::ok) {
@@ -727,20 +815,25 @@ fn upgrade_saved_data(data: &Path) -> io::Result<()> {
         }
     }
     files.sort();
-    for file in files {
+    Ok(files)
+}
+
+fn upgrade_saved_data(data: &Path, progress: &Progress) -> io::Result<()> {
+    for file in saved_data_files(data)? {
+        progress.check()?;
         let relative = file
             .strip_prefix(data)
             .unwrap_or(&file)
             .to_string_lossy()
             .replace('\\', "/");
-        let Some(ty) = super::saved_data_type(&relative) else {
-            continue;
-        };
-        if let Some(mut tag) = read_saved_dat(&file)? {
+        if let Some(ty) = super::saved_data_type(&relative)
+            && let Some(mut tag) = read_saved_dat(&file)?
+        {
             super::update_saved_data(ty, &mut tag);
             set(&mut tag, "DataVersion", Tag::Int(CURRENT));
             write_dat(&file, &tag)?;
         }
+        progress.progress.increment_finished_operations();
     }
     Ok(())
 }
@@ -800,43 +893,83 @@ fn upgrade_json_to(path: &Path, ty: Ty, to: i32) -> io::Result<()> {
 /// entity chunk and POI chunk, saved data, player, advancements and
 /// statistics file. Run after [`fix_world_files`].
 pub fn upgrade_world_data(base: &Path) -> io::Result<()> {
+    upgrade_world_data_with(base, &UpgradeProgress::new(), false)
+}
+
+/// [`upgrade_world_data`] reporting to `progress` (type `Regions`, one
+/// operation per file) and stopping on its cancel when `cancelable`.
+pub fn upgrade_world_data_with(
+    base: &Path,
+    progress: &UpgradeProgress,
+    cancelable: bool,
+) -> io::Result<()> {
     let generators = generators(base)?;
-    for ns in subdirectories(&base.join("dimensions")) {
-        for dim in subdirectories(&ns) {
-            let id = format!(
-                "{}:{}",
-                ns.file_name().unwrap_or_default().to_string_lossy(),
-                dim.file_name().unwrap_or_default().to_string_lossy()
-            );
-            let generator = generators
-                .iter()
-                .find(|(d, _)| *d == id)
-                .map(|(_, g)| g.clone());
-            upgrade_regions(&dim.join("region"), |tag| {
-                super::update_chunk(tag, &id, generator.as_deref())
-            })?;
-            upgrade_regions(&dim.join("entities"), |tag| {
-                super::update_region_tag(Ty::EntityChunk, tag)
-            })?;
-            upgrade_regions(&dim.join("poi"), |tag| {
-                super::update_region_tag(Ty::PoiChunk, tag)
-            })?;
-            upgrade_saved_data(&dim.join("data"))?;
+    let dimensions: Vec<(String, PathBuf)> = subdirectories(&base.join("dimensions"))
+        .into_iter()
+        .flat_map(|ns| {
+            subdirectories(&ns).into_iter().map(move |dim| {
+                let id = format!(
+                    "{}:{}",
+                    ns.file_name().unwrap_or_default().to_string_lossy(),
+                    dim.file_name().unwrap_or_default().to_string_lossy()
+                );
+                (id, dim)
+            })
+        })
+        .collect();
+    let players = files_with_suffix(&base.join("players/data"), ".dat");
+    let advancements = files_with_suffix(&base.join("players/advancements"), ".json");
+    let stats = files_with_suffix(&base.join("players/stats"), ".json");
+    // Counting, as `FileFixerUpper.countFiles` does before the work.
+    progress.set_type(UpgradeType::Regions);
+    let mut total = players.len() + advancements.len() + stats.len();
+    total += saved_data_files(&base.join("data"))?.len();
+    for (_, dim) in &dimensions {
+        for folder in ["region", "entities", "poi"] {
+            total += files_with_suffix(&dim.join(folder), ".mca").len();
         }
+        total += saved_data_files(&dim.join("data"))?.len();
     }
-    upgrade_saved_data(&base.join("data"))?;
-    for file in files_with_suffix(&base.join("players/data"), ".dat") {
+    progress.add_total_file_fix_operations(total as i32);
+    let run = Progress {
+        progress,
+        cancelable,
+    };
+    for (id, dim) in &dimensions {
+        let generator = generators
+            .iter()
+            .find(|(d, _)| d == id)
+            .map(|(_, g)| g.clone());
+        upgrade_regions(&dim.join("region"), &run, |tag| {
+            super::update_chunk(tag, id, generator.as_deref())
+        })?;
+        upgrade_regions(&dim.join("entities"), &run, |tag| {
+            super::update_region_tag(Ty::EntityChunk, tag)
+        })?;
+        upgrade_regions(&dim.join("poi"), &run, |tag| {
+            super::update_region_tag(Ty::PoiChunk, tag)
+        })?;
+        upgrade_saved_data(&dim.join("data"), &run)?;
+    }
+    upgrade_saved_data(&base.join("data"), &run)?;
+    for file in players {
+        run.check()?;
         if let Some(mut tag) = read_dat(&file)? {
             super::update_player(&mut tag);
             set(&mut tag, "DataVersion", Tag::Int(CURRENT));
             write_dat(&file, &tag)?;
         }
+        progress.increment_finished_operations();
     }
-    for file in files_with_suffix(&base.join("players/advancements"), ".json") {
+    for file in advancements {
+        run.check()?;
         upgrade_json(&file, Ty::Advancements)?;
+        progress.increment_finished_operations();
     }
-    for file in files_with_suffix(&base.join("players/stats"), ".json") {
+    for file in stats {
+        run.check()?;
         upgrade_json(&file, Ty::Stats)?;
+        progress.increment_finished_operations();
     }
     Ok(())
 }
@@ -868,13 +1001,13 @@ pub fn upgrade_band(base: &Path, target: i32) -> io::Result<()> {
         ("DIM1", "minecraft:the_end"),
     ] {
         let dim = base.join(folder);
-        upgrade_regions(&dim.join("region"), |tag| {
+        upgrade_regions(&dim.join("region"), &Progress::none(), |tag| {
             super::update_chunk_to(tag, id, None, target)
         })?;
-        upgrade_regions(&dim.join("entities"), |tag| {
+        upgrade_regions(&dim.join("entities"), &Progress::none(), |tag| {
             super::update_region_tag_to(Ty::EntityChunk, tag, target)
         })?;
-        upgrade_regions(&dim.join("poi"), |tag| {
+        upgrade_regions(&dim.join("poi"), &Progress::none(), |tag| {
             super::update_region_tag_to(Ty::PoiChunk, tag, target)
         })?;
     }
@@ -917,8 +1050,14 @@ pub fn upgrade_band(base: &Path, target: i32) -> io::Result<()> {
 
 /// Bring a whole world saved by 1.20 to 26.2 to the 26.3 format in place.
 pub fn upgrade_world(base: &Path) -> io::Result<i32> {
-    let (version, pending) = fix_world_files_deferred(base)?;
-    upgrade_world_data(base)?;
+    upgrade_world_with(base, &UpgradeProgress::new())
+}
+
+/// [`upgrade_world`] reporting to `progress`, which also carries the player's
+/// cancel (`FileFixerProgressScreen`'s button).
+pub fn upgrade_world_with(base: &Path, progress: &UpgradeProgress) -> io::Result<i32> {
+    let (version, pending) = fix_world_files_deferred(base, progress)?;
+    upgrade_world_data_with(base, progress, !progress.is_file_fixing())?;
     // Stamp the current DataVersion only once everything converted, so a failed
     // upgrade is retried on the next open.
     if let Some(data) = pending {
@@ -934,6 +1073,52 @@ mod upgrade_tests {
     fn level_version(base: &Path) -> i32 {
         let root = read_dat(&base.join("level.dat")).unwrap().unwrap();
         data_version(root.get("Data").unwrap(), -1)
+    }
+
+    /// `FileFixerProgressScreen` reads the upgrade's counts: the data stage is
+    /// type `Regions` with one operation per file, and a world that needs no
+    /// file fixing does not open the screen.
+    #[test]
+    fn upgrade_reports_one_operation_per_file() {
+        let base = std::env::temp_dir().join(format!("horizon-progress-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let level = Tag::compound([("Data", Tag::compound([("DataVersion", Tag::Int(4899))]))]);
+        write_dat(&base.join("level.dat"), &level).unwrap();
+        let player = Tag::compound([("DataVersion", Tag::Int(4899))]);
+        write_dat(&base.join("players/data/a.dat"), &player).unwrap();
+        write_dat(&base.join("players/data/b.dat"), &player).unwrap();
+
+        let progress = UpgradeProgress::new();
+        upgrade_world_with(&base, &progress).unwrap();
+        assert!(!progress.is_file_fixing());
+        assert_eq!(progress.upgrade_type(), Some(UpgradeType::Regions));
+        assert_eq!(progress.total_file_fix_stats().total_operations(), 2);
+        assert_eq!(progress.total_file_fix_stats().finished_operations(), 2);
+        assert_eq!(progress.total_file_fix_stats().progress(), 1.0);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// Cancel stops the data stage of a world with no file fixing before the
+    /// next file, and the DataVersion stays old so the next open retries.
+    #[test]
+    fn cancel_stops_the_data_upgrade_and_keeps_the_version() {
+        let base = std::env::temp_dir().join(format!("horizon-cancel-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let level = Tag::compound([("Data", Tag::compound([("DataVersion", Tag::Int(4899))]))]);
+        write_dat(&base.join("level.dat"), &level).unwrap();
+        write_dat(
+            &base.join("players/data/a.dat"),
+            &Tag::compound([("DataVersion", Tag::Int(4899))]),
+        )
+        .unwrap();
+
+        let progress = UpgradeProgress::new();
+        progress.set_canceled();
+        let error = upgrade_world_with(&base, &progress).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(progress.total_file_fix_stats().finished_operations(), 0);
+        assert_eq!(level_version(&base), 4899);
+        let _ = fs::remove_dir_all(&base);
     }
 
     /// A failed data upgrade must keep the old DataVersion so the next open

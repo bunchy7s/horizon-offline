@@ -81,7 +81,12 @@ impl Launcher {
             .bg(t.surface)
             .flex()
             .flex_col()
-            .occlude();
+            .occlude()
+            .on_mouse_down_out(cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                this.account_menu = false;
+                this.menu_closed_at = Some(event.position);
+                cx.notify();
+            }));
         for (i, (who, name, how)) in self.players().into_iter().enumerate() {
             let chosen = who == now;
             menu = menu.child(
@@ -96,10 +101,20 @@ impl Launcher {
                     .rounded(px(theme::RADIUS))
                     .cursor_pointer()
                     .hover(move |s| s.bg(t.plate_soft))
+                    .child(self.profile_heads.draw(
+                        match &who {
+                            Player::Microsoft(uuid) => Some(uuid),
+                            _ => None,
+                        },
+                        24.,
+                        self.scale,
+                        &t,
+                    ))
                     .child(
                         div()
                             .flex()
                             .flex_col()
+                            .flex_1()
                             .min_w_0()
                             .child(text(theme::LABEL).truncate().text_color(t.ink).child(name))
                             .child(text(theme::CAPTION).text_color(t.muted).child(how)),

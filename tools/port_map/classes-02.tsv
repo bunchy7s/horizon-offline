@@ -32,12 +32,12 @@ ItemAttributeModifiers.forEach	inline	crates/horizon-client/src/item_tooltip.rs:
 ItemAttributeModifiers.withModifierAdded	missing		minor: the loot set_attributes function (SetAttributesFunction) is not ported; no loot path adds a modifier to a stack
 ItemAttributeModifiers.Builder.add	skip:java		
 ItemAttributeModifiers.Entry.matches	inline	crates/horizon-world/src/attributes/mod.rs::Instance::add_or_replace_permanent	modifier identity by id within one attribute
-OminousBottleAmplifier.addToTooltip	missing		player: an ominous bottle's tooltip shows no Bad Omen line for its level; Horizon's potion tooltip covers potion items only
+OminousBottleAmplifier.addToTooltip	port	crates/horizon-client/src/item_tooltip.rs::ominous_bottle_line	the Bad Omen line of an ominous bottle, listed in the stack tooltip (stack_tooltip_lines)
 SimpleMutableContainer.modifySlots	port	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item_modify	each slot is visited and set
 SimpleMutableContainer.replaceSlotItems	port	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item	/item replace fills slots from the item list
 SulfurCubeContent.addToTooltip	missing		minor: Horizon never writes sulfur_cube_content, so no item shows the absorbed block line
-SuspiciousStewEffects.addToTooltip	missing		player: in creative, a suspicious stew's tooltip should list its effects; Horizon's stack tooltip shows none
-TypedEntityData.addToTooltip	missing		player: in Peaceful, a hostile mob's spawn egg should show a red Peaceful line; Horizon shows only the OP-only warning
+SuspiciousStewEffects.addToTooltip	port	crates/horizon-client/src/item_tooltip.rs::stew_lines	the effects of a suspicious stew, in the stack tooltip (stack_tooltip_lines)
+TypedEntityData.addToTooltip	port	crates/horizon-client/src/item_tooltip.rs::spawn_egg_peaceful_line	in Peaceful, a spawn egg of a monster shows the red "Disabled in Peaceful" line
 TypedEntityData.equals	skip:java		
 TypedEntityData.stripId	skip:other		the stored entity data keeps its id; block_entity_item.rs reads it from the tag
 WritableBookContent.getPages	missing		minor: the filtered page text (chat filter) is not ported; pages always show raw text

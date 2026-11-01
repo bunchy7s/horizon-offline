@@ -9,10 +9,11 @@
 use super::{
     Joined, NetEvent, Out, Shared,
     data::{CORE_PACK, SyncData},
+    forwarding,
 };
 use horizon_protocol::{
     PROTOCOL_VERSION,
-    connection::{ConnReader, ConnWriter, Connection},
+    connection::{Closer, ConnReader, ConnWriter, Connection},
     crypto::{offline_uuid, server_hash, uuid_string},
     packets::{
         Empty,
@@ -237,6 +238,8 @@ pub struct PlayerSender {
     held: Arc<Mutex<Vec<Vec<u8>>>>,
     /// What [`flush_all`] gave the post thread and it hasn't passed on yet.
     posted: Arc<AtomicUsize>,
+    /// A network connection's keep-alive clock (none for a test's channel).
+    watch: Option<Arc<KeepAliveWatch>>,
 }
 impl PlayerSender {
     pub fn new(tx: Sender<Out>, pending: Arc<AtomicUsize>) -> Self {
@@ -245,6 +248,19 @@ impl PlayerSender {
             pending,
             held: Arc::default(),
             posted: Arc::default(),
+            watch: None,
+        }
+    }
+    /// Whether the client has answered no keep-alive for too long, read
+    /// without the writer thread, which a client that stops reading blocks.
+    pub fn timed_out(&self) -> bool {
+        self.watch.as_ref().is_some_and(|w| w.timed_out())
+    }
+    /// Close the connection now: the writer and reader threads then end,
+    /// even blocked on it.
+    pub fn close(&self) {
+        if let Some(w) = &self.watch {
+            w.closer.close();
         }
     }
     fn held(&self) -> std::sync::MutexGuard<'_, Vec<Vec<u8>>> {
@@ -444,14 +460,18 @@ pub fn serve(
     serve_connection(Connection::from_stream(stream).map_err(e)?, address, shared)
 }
 
+/// The address a memory connection logs in from: no network peer has port 0.
+pub const MEMORY_ADDRESS: std::net::SocketAddr = std::net::SocketAddr::V4(
+    std::net::SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0),
+);
+
 /// `ServerConnectionListener.startMemoryChannel`: an integrated server's
 /// own player, over one end of an in-memory pipe.
 pub fn serve_local(
     pipe: horizon_protocol::connection::Pipe,
     shared: Arc<Shared>,
 ) -> Result<(), String> {
-    let address = std::net::SocketAddr::from(([127, 0, 0, 1], 0));
-    serve_connection(Connection::local(pipe), address, shared)
+    serve_connection(Connection::local(pipe), MEMORY_ADDRESS, shared)
 }
 
 fn serve_connection(
@@ -693,21 +713,64 @@ fn serve_login(
         );
         return Ok(());
     }
-    let user = shared
-        .config
-        .log
-        .as_ref()
-        .map(|log| user_name(&hello.name, address, log))
-        .unwrap_or_default();
+    let (mut name, mut address) = (hello.name.clone(), address);
+    let user_of = |name: &str, address| {
+        shared
+            .config
+            .log
+            .as_ref()
+            .map(|log| user_name(name, address, log))
+            .unwrap_or_default()
+    };
+    let mut user = user_of(&name, address);
     // handleHello: online mode authenticates first; offline mode, and the
     // integrated server's own player through memory, derive the profile
-    // from the name.
+    // from the name. Behind a Velocity proxy (forwarding.secret) the proxy has
+    // authenticated the player and the profile is the one it forwards.
     let online = shared.config.online.as_ref().filter(|_| !c.is_memory());
-    let (uuid, properties) = match online {
-        Some(online) => match authenticate(&mut c, shared, online, &hello.name, address, &user) {
-            Ok(Ok(profile)) => profile,
-            Ok(Err(refused)) => {
-                lost(shared, &user, &refused);
+    let forwarding = shared
+        .config
+        .forwarding_secret
+        .as_deref()
+        .filter(|_| online.is_none() && !c.is_memory());
+    let (uuid, properties) = match (online, forwarding) {
+        (Some(online), _) => {
+            match authenticate(&mut c, shared, online, &hello.name, address, &user) {
+                Ok(Ok(profile)) => profile,
+                Ok(Err(refused)) => {
+                    lost(shared, &user, &refused);
+                    return Ok(());
+                }
+                Err(err) => {
+                    lost(shared, &user, "Disconnected");
+                    return Err(err);
+                }
+            }
+        }
+        (None, Some(secret)) => match forward(&mut c, secret) {
+            Ok(Ok(forwarded)) => {
+                (name, address) = (
+                    forwarded.name,
+                    std::net::SocketAddr::new(forwarded.address, address.port()),
+                );
+                user = user_of(&name, address);
+                (forwarded.uuid, forwarded.properties)
+            }
+            Ok(Err(reason)) => {
+                let text = "This server is behind a proxy: join through the proxy.";
+                let json = format!("{{\"text\":\"{text}\"}}");
+                let _ = c.send(
+                    &login::Clientbound::Disconnect(login::Disconnect { reason_json: json })
+                        .encode(),
+                );
+                if let Some(log) = &shared.config.log {
+                    (log.write)(
+                        "Server thread",
+                        "WARN",
+                        &format!("Refused {user}: {reason}"),
+                    );
+                }
+                lost(shared, &user, text);
                 return Ok(());
             }
             Err(err) => {
@@ -715,16 +778,16 @@ fn serve_login(
                 return Err(err);
             }
         },
-        None => (offline_uuid(&hello.name), Vec::new()),
+        (None, None) => (offline_uuid(&hello.name), Vec::new()),
     };
     // verifyLoginAndFinishConnectionSetup: PlayerList.canPlayerLogin, then
     // duplicates and a full server.
-    if let Some(reason) = shared.try_admit(address, uuid, &hello.name) {
+    if let Some(reason) = shared.try_admit(address, uuid, &name) {
         let text = refuse(&mut c, shared, "Server thread", &user, &reason);
         lost(shared, &user, &text);
         return Ok(());
     }
-    let result = login_and_configure(&mut c, shared, uuid, &hello.name, properties);
+    let result = login_and_configure(&mut c, shared, uuid, &name, properties);
     match result {
         Ok(Some(parts)) => {
             play(c, shared, parts, address);
@@ -737,10 +800,40 @@ fn serve_login(
         Err(err) => {
             shared.release(uuid);
             // ServerConfigurationPacketListenerImpl.onDisconnect.
-            let profile = format!("{} ({})", hello.name, uuid_string(uuid));
+            let profile = format!("{name} ({})", uuid_string(uuid));
             lost(shared, &profile, "Disconnected");
             Err(err)
         }
+    }
+}
+
+/// Asks the proxy for the player's forwarded information (login plugin channel `velocity:player_info`) and
+/// checks it against the shared secret. The outer error is the connection failing; the inner one is a refusal
+/// (the client isn't a proxy, or signed with another secret), with the reason for the log.
+fn forward(
+    c: &mut Connection,
+    secret: &[u8],
+) -> Result<Result<forwarding::Forwarded, String>, String> {
+    const TRANSACTION: i32 = 1;
+    let e = |e: horizon_protocol::Error| e.to_string();
+    c.send(
+        &login::Clientbound::CustomQuery(login::CustomQuery {
+            transaction: TRANSACTION,
+            channel: forwarding::CHANNEL.into(),
+            data: forwarding::request(),
+        })
+        .encode(),
+    )
+    .map_err(e)?;
+    let (id, payload) = c.recv().map_err(e)?;
+    match login::Serverbound::decode(id, &payload).map_err(e)? {
+        login::Serverbound::CustomQueryAnswer(answer) if answer.transaction == TRANSACTION => {
+            Ok(match answer.payload {
+                Some(data) => forwarding::verify(secret, &data),
+                None => Err("the client didn't answer the forwarding request".into()),
+            })
+        }
+        _ => Err("unexpected packet during login".into()),
     }
 }
 
@@ -789,7 +882,8 @@ fn login_and_configure(
         }
     }
     // Configuration.
-    let sync: &SyncData = &shared.sync;
+    let sync_data = shared.sync();
+    let sync: &SyncData = &sync_data;
     let send = |c: &mut Connection, p: cfg::Clientbound| c.send(&p.encode()).map_err(e);
     send(
         c,
@@ -835,7 +929,7 @@ fn login_and_configure(
     let mut brand = String::from("vanilla");
     let known_pack = loop {
         let (id, payload) = c.recv().map_err(e)?;
-        match cfg::Serverbound::decode(id, &payload).map_err(e)? {
+        match decode_config(id, &payload).map_err(e)? {
             cfg::Serverbound::ClientInformation(i) => info = i,
             cfg::Serverbound::CustomPayload(p) if p.channel == "minecraft:brand" => {
                 brand = horizon_protocol::buf::Reader::new(&p.data)
@@ -846,6 +940,27 @@ fn login_and_configure(
             _ => {}
         }
     };
+    // Custom component IDs need Horizon's registry check. The server may also
+    // require Horizon clients even when it has no custom components.
+    if brand != "horizon"
+        && (shared.config.horizon_clients_only
+            || horizon_protocol::item::custom::entries().next().is_some())
+    {
+        let text = if shared.config.horizon_clients_only {
+            super::HORIZON_CLIENTS_ONLY_REASON
+        } else {
+            crate::content_identity::MISMATCH
+        };
+        let reason = horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(text));
+        let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
+        if let Some(log) = &shared.config.log {
+            let line =
+                format!("Disconnecting {name}: its client is \"{brand}\", not Horizon ({text})");
+            (log.write)("Server thread", "INFO", &line);
+        }
+        lost(shared, &format!("{name} ({})", uuid_string(uuid)), text);
+        return Ok(None);
+    }
     // A Horizon client hears that this server runs its mods' quiet commands
     // (horizon_protocol::quiet); a vanilla one is told nothing.
     if brand == "horizon" {
@@ -853,6 +968,14 @@ fn login_and_configure(
             c,
             cfg::Clientbound::CustomPayload(cfg::CustomPayload {
                 channel: horizon_protocol::quiet::CHANNEL.into(),
+                data: Vec::new(),
+            }),
+        )?;
+        // And that it carries native mods' messages (horizon_protocol::mod_net).
+        send(
+            c,
+            cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                channel: horizon_protocol::mod_net::CHANNEL.into(),
                 data: Vec::new(),
             }),
         )?;
@@ -871,7 +994,7 @@ fn login_and_configure(
         let mut content_match = false;
         loop {
             let (id, payload) = c.recv().map_err(e)?;
-            match cfg::Serverbound::decode(id, &payload).map_err(e)? {
+            match decode_config(id, &payload).map_err(e)? {
                 cfg::Serverbound::CustomPayload(p)
                     if p.channel == crate::content_identity::CHANNEL =>
                 {
@@ -895,10 +1018,16 @@ fn login_and_configure(
             return Ok(None);
         }
     }
-    for packet in sync.registry_packets(known_pack) {
+    for packet in sync.registry_packets(known_pack, &shared.config.levels) {
         send(c, cfg::Clientbound::RegistryData(packet))?;
     }
     send(c, cfg::Clientbound::UpdateTags(sync.tags.clone()))?;
+    // addOptionalTasks: the code of conduct task comes first.
+    if let Some(text) =
+        super::code_of_conduct::pick(&shared.config.code_of_conducts, &info.language)
+    {
+        accept_code_of_conduct(c, text, &mut info)?;
+    }
     if let Some(pack) = &shared.config.resource_pack
         && let Some(rejected) = offer_pack(c, pack, &mut info)?
     {
@@ -910,7 +1039,7 @@ fn login_and_configure(
     send(c, cfg::Clientbound::FinishConfiguration(Empty))?;
     loop {
         let (id, payload) = c.recv().map_err(e)?;
-        match cfg::Serverbound::decode(id, &payload).map_err(e)? {
+        match decode_config(id, &payload).map_err(e)? {
             cfg::Serverbound::FinishConfiguration(_) => break,
             cfg::Serverbound::ClientInformation(i) => info = i,
             _ => {}
@@ -982,6 +1111,54 @@ fn offer_pack(
     };
     c.send(&cfg::Clientbound::ResourcePackPush(push).encode())
         .map_err(e)?;
+    wait_alive(c, |packet| match packet {
+        Ok(cfg::Serverbound::ResourcePack(r)) if !matches!(r.action, 3 | 4) => {
+            let rejected = r.action == PACK_DECLINED && pack.required;
+            Some(Ok(rejected.then_some(r.id)))
+        }
+        Ok(cfg::Serverbound::ClientInformation(i)) => {
+            *info = i;
+            None
+        }
+        Ok(_) => None,
+        Err(err) => Some(Err(err)),
+    })
+}
+
+/// ServerCodeOfConductConfigurationTask: send the text, then wait for
+/// ServerboundAcceptCodeOfConductPacket (`handleAcceptCodeOfConduct`),
+/// keeping the connection alive while the player reads. Finishing the
+/// configuration first is `finishCurrentTask` of the wrong task type, an
+/// error that drops the connection.
+fn accept_code_of_conduct(
+    c: &mut Connection,
+    text: &str,
+    info: &mut ClientInformation,
+) -> Result<(), String> {
+    let e = |e: horizon_protocol::Error| e.to_string();
+    c.send(&cfg::Clientbound::CodeOfConduct(cfg::CodeOfConduct { text: text.into() }).encode())
+        .map_err(e)?;
+    wait_alive(c, |packet| match packet {
+        Ok(cfg::Serverbound::AcceptCodeOfConduct(_)) => Some(Ok(())),
+        Ok(cfg::Serverbound::FinishConfiguration(_)) => {
+            Some(Err("Unexpected configuration task".to_owned()))
+        }
+        Ok(cfg::Serverbound::ClientInformation(i)) => {
+            *info = i;
+            None
+        }
+        Ok(_) => None,
+        Err(err) => Some(Err(err)),
+    })
+}
+
+/// Read configuration packets until `answer` has a result, sending a
+/// keep-alive every `KEEP_ALIVE_EVERY` meanwhile
+/// (ServerConfigurationPacketListenerImpl.tick).
+fn wait_alive<T>(
+    c: &mut Connection,
+    mut answer: impl FnMut(Result<cfg::Serverbound, String>) -> Option<Result<T, String>>,
+) -> Result<T, String> {
     std::thread::scope(|scope| {
         let (stop, stopped) = channel::<()>();
         let writer = &mut c.writer;
@@ -995,23 +1172,17 @@ fn offer_pack(
                 }
             }
         });
-        let answer = loop {
-            let (id, payload) = match c.reader.recv() {
-                Ok(packet) => packet,
+        let result = loop {
+            let packet = match c.reader.recv() {
+                Ok((id, payload)) => decode_config(id, &payload).map_err(|e| e.to_string()),
                 Err(err) => break Err(err.to_string()),
             };
-            match cfg::Serverbound::decode(id, &payload) {
-                Ok(cfg::Serverbound::ResourcePack(r)) if !matches!(r.action, 3 | 4) => {
-                    let rejected = r.action == PACK_DECLINED && pack.required;
-                    break Ok(rejected.then_some(r.id));
-                }
-                Ok(cfg::Serverbound::ClientInformation(i)) => *info = i,
-                Ok(_) => {}
-                Err(err) => break Err(err.to_string()),
+            if let Some(result) = answer(packet) {
+                break result;
             }
         };
         drop(stop);
-        answer
+        result
     })
 }
 
@@ -1024,7 +1195,15 @@ fn play(c: Connection, shared: &Arc<Shared>, parts: Parts, address: std::net::So
     let pending = Arc::new(AtomicUsize::new(0));
     let latency = Arc::new(AtomicI32::new(0));
     let alive = Arc::new(AtomicI64::new(-1));
-    let sender = PlayerSender::new(tx.clone(), pending.clone());
+    let start = Instant::now();
+    let mut sender = PlayerSender::new(tx.clone(), pending.clone());
+    if let Ok(closer) = reader.closer() {
+        sender.watch = Some(Arc::new(KeepAliveWatch {
+            start,
+            alive: alive.clone(),
+            closer,
+        }));
+    }
     let writer_thread = {
         let (alive, latency, pending) = (alive.clone(), latency.clone(), pending.clone());
         std::thread::Builder::new()
@@ -1032,7 +1211,7 @@ fn play(c: Connection, shared: &Arc<Shared>, parts: Parts, address: std::net::So
             .spawn(move || {
                 // Ticks and frames come first (horizon_threads).
                 horizon_threads::behind_server();
-                write_loop(writer, rx, alive, latency, pending)
+                write_loop(writer, rx, start, alive, latency, pending)
             })
             .ok()
     };
@@ -1154,7 +1333,7 @@ fn read_loop(
             // The client closed the connection: Connection.channelInactive
             // without details, multiplayer.disconnect.generic.
             Err(e)
-                if e.0 == "Connection closed by the server"
+                if e.is_end_of_stream()
                     || e.0.contains("reset by peer")
                     || e.0.contains("aborted") =>
             {
@@ -1165,7 +1344,7 @@ fn read_loop(
         if let Some(average) = rate.as_mut().and_then(|r| r.received(Instant::now())) {
             return Ended::RateExceeded(average);
         }
-        match play::Serverbound::decode(id, &payload) {
+        match play::Serverbound::decode(id, &payload).and_then(checked_play) {
             Ok(play::Serverbound::KeepAlive(k)) => alive.store(k.id, Ordering::Relaxed),
             Ok(play::Serverbound::ResourcePack(r))
                 if r.action == PACK_DECLINED && required_pack =>
@@ -1173,13 +1352,53 @@ fn read_loop(
                 return Ended::PackDeclined(r.id);
             }
             Ok(p) => {
-                if events.send(NetEvent::Packet(conn, Box::new(p))).is_err() {
+                if events
+                    .send(NetEvent::Packet(conn, Box::new(p), payload.len()))
+                    .is_err()
+                {
                     return Ended::Closed("server closed".to_owned());
                 }
             }
             // A malformed packet disconnects like vanilla's decoder exception.
             Err(e) => return Ended::Closed(format!("Invalid packet {id}: {e}")),
         }
+    }
+}
+
+/// ServerboundCustomPayloadPacket's codec (DiscardedPayload): a payload of at most
+/// 32767 bytes, in configuration and in play.
+const MAX_PAYLOAD: usize = horizon_protocol::quiet::MAX_PAYLOAD;
+const COMMAND_SUGGESTION: i32 = horizon_protocol::ids::play::serverbound::COMMAND_SUGGESTION;
+
+fn too_large() -> String {
+    format!("Payload may not be larger than {MAX_PAYLOAD} bytes")
+}
+
+/// A play packet as vanilla's decoders read it.
+fn checked_play(packet: play::Serverbound) -> horizon_protocol::Result<play::Serverbound> {
+    match &packet {
+        play::Serverbound::CustomPayload(p) if p.data.len() > MAX_PAYLOAD => {
+            Err(horizon_protocol::Error::new(too_large()))
+        }
+        // ServerboundCommandSuggestionPacket: a VarInt id, then the command, at most
+        // 32500 chars. The game reads it later; its codec's limits apply here.
+        play::Serverbound::Unknown(COMMAND_SUGGESTION, body) => {
+            let mut r = horizon_protocol::buf::Reader::new(body);
+            r.varint()?;
+            r.string(32500)?;
+            Ok(packet)
+        }
+        _ => Ok(packet),
+    }
+}
+
+/// A configuration packet as vanilla's decoders read it.
+fn decode_config(id: i32, payload: &[u8]) -> horizon_protocol::Result<cfg::Serverbound> {
+    match cfg::Serverbound::decode(id, payload)? {
+        cfg::Serverbound::CustomPayload(p) if p.data.len() > MAX_PAYLOAD => {
+            Err(horizon_protocol::Error::new(too_large()))
+        }
+        packet => Ok(packet),
     }
 }
 
@@ -1259,14 +1478,33 @@ fn send_body(writer: &mut ConnWriter, body: &[u8]) -> horizon_protocol::Result<(
     }
 }
 
+/// The keep-alive clock of a play connection, shared by the writer thread
+/// (which sends the keep-alives) and the game thread (which watches them).
+struct KeepAliveWatch {
+    /// What keep-alive ids count from: an id is its sending time in ms.
+    start: Instant,
+    /// The id of the last keep-alive the client answered (-1: none yet).
+    alive: Arc<AtomicI64>,
+    closer: Closer,
+}
+impl KeepAliveWatch {
+    /// keepConnectionAlive sends a keep-alive 15 s after the last and drops
+    /// a client that has not answered it 15 s later: nothing answered of
+    /// what was sent in the last 30 s.
+    fn timed_out(&self) -> bool {
+        let answered = u64::try_from(self.alive.load(Ordering::Relaxed)).unwrap_or(0);
+        self.start.elapsed() > Duration::from_millis(answered) + 2 * KEEP_ALIVE_EVERY
+    }
+}
+
 fn write_loop(
     mut writer: ConnWriter,
     rx: Receiver<Out>,
+    start: Instant,
     alive: Arc<AtomicI64>,
     latency: Arc<AtomicI32>,
     pending: Arc<AtomicUsize>,
 ) {
-    let start = Instant::now();
     let mut sent_at: Option<(i64, Instant)> = None;
     let mut next = Instant::now() + KEEP_ALIVE_EVERY;
     loop {
@@ -1295,22 +1533,16 @@ fn write_loop(
             Err(RecvTimeoutError::Timeout) => {}
         }
         let now = Instant::now();
-        if let Some((id, at)) = sent_at {
-            if alive.load(Ordering::Relaxed) == id {
-                let ms = i32::try_from(at.elapsed().as_millis()).unwrap_or(i32::MAX);
-                let old = latency.load(Ordering::Relaxed);
-                latency.store((old * 3 + ms) / 4, Ordering::Relaxed);
-                sent_at = None;
-            } else if at.elapsed() >= KEEP_ALIVE_EVERY {
-                let _ = writer.send(
-                    &play::Clientbound::Disconnect(cfg::Disconnect {
-                        reason: translatable("disconnect.timeout", &[]),
-                    })
-                    .encode(),
-                );
-                break;
-            }
+        if let Some((id, at)) = sent_at
+            && alive.load(Ordering::Relaxed) == id
+        {
+            let ms = i32::try_from(at.elapsed().as_millis()).unwrap_or(i32::MAX);
+            let old = latency.load(Ordering::Relaxed);
+            latency.store((old * 3 + ms) / 4, Ordering::Relaxed);
+            sent_at = None;
         }
+        // The game thread times a client out ([`PlayerSender::timed_out`]):
+        // this thread may be blocked on a client that stopped reading.
         if sent_at.is_none() && now >= next {
             let id = i64::try_from(start.elapsed().as_millis()).unwrap_or(0);
             if writer
@@ -1330,6 +1562,67 @@ fn write_loop(
 mod tests {
     use super::*;
 
+    /// Logs in through `c` and answers the `LoginFinished` profile.
+    fn login_profile(mut c: Connection, name: &str) -> login::GameProfile {
+        c.send(
+            &handshake::Serverbound::Intention(handshake::Intention {
+                protocol: horizon_protocol::PROTOCOL_VERSION,
+                host: "127.0.0.1".into(),
+                port: 0,
+                intent: handshake::LOGIN,
+            })
+            .encode(),
+        )
+        .unwrap();
+        c.send(
+            &login::Serverbound::Hello(login::ServerHello {
+                name: name.into(),
+                uuid: offline_uuid(name),
+            })
+            .encode(),
+        )
+        .unwrap();
+        loop {
+            let (id, payload) = c.recv().unwrap();
+            match login::Clientbound::decode(id, &payload).unwrap() {
+                login::Clientbound::Compression(p) => c.set_compression(p.threshold),
+                login::Clientbound::LoginFinished(p) => return p.profile,
+                other => panic!("unexpected login packet {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn payloads_and_suggestions_past_vanillas_limits_are_malformed() {
+        let payload = |len: usize| {
+            play::Serverbound::CustomPayload(cfg::CustomPayload {
+                channel: "a:b".into(),
+                data: vec![0; len],
+            })
+        };
+        assert!(checked_play(payload(MAX_PAYLOAD)).is_ok());
+        assert!(checked_play(payload(MAX_PAYLOAD + 1)).is_err());
+        let config = |len: usize| {
+            cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                channel: "a:b".into(),
+                data: vec![0; len],
+            })
+            .encode()
+        };
+        // The body after the packet's one-byte VarInt id.
+        let id = horizon_protocol::ids::configuration::serverbound::CUSTOM_PAYLOAD;
+        assert!(decode_config(id, &config(MAX_PAYLOAD)[1..]).is_ok());
+        assert!(decode_config(id, &config(MAX_PAYLOAD + 1)[1..]).is_err());
+        let suggestion = |len: usize| {
+            let mut w = horizon_protocol::buf::Writer::new();
+            w.varint(7);
+            w.string(&"a".repeat(len));
+            play::Serverbound::Unknown(COMMAND_SUGGESTION, w.data)
+        };
+        assert!(checked_play(suggestion(32500)).is_ok());
+        assert!(checked_play(suggestion(32501)).is_err());
+    }
+
     #[test]
     fn prompts_become_the_components_vanilla_sends() {
         let tag = |json: &str| {
@@ -1346,6 +1639,34 @@ mod tests {
             tag(r#"{"translate":"a","with":["b",{"text":"c","color":"red"}]}"#),
             r#"{"translate":"a","with":["b",{"text":"c","color":"red"}]}"#
         );
+    }
+
+    /// The owner's login never waits on the profile fetch, even one that
+    /// never answers, and carries no properties.
+    #[test]
+    fn the_owners_login_never_waits_on_the_profile_fetch() {
+        let (_hold, never) = channel::<()>();
+        let config = crate::lan::NetConfig {
+            announce: false,
+            listen: false,
+            owner_profile: Some(Arc::new(crate::lan::OwnerProfile::new(move || {
+                let _ = never.recv();
+                Vec::new()
+            }))),
+            ..crate::lan::NetConfig::lan(0, "Owner - World".into(), 8)
+        };
+        let lan =
+            crate::lan::Lan::start_with(Arc::new(crate::lan::data::SyncData::empty()), config)
+                .unwrap();
+        let start = Instant::now();
+        let owner = login_profile(Connection::local(lan.connect_local().unwrap()), "Owner");
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            start.elapsed()
+        );
+        assert_eq!(owner.uuid, offline_uuid("Owner"));
+        assert!(owner.properties.is_empty());
     }
 
     fn unpack(out: Out) -> Vec<Vec<u8>> {
@@ -1455,6 +1776,31 @@ mod tests {
         sender.flush();
         assert_eq!(bodies(&rx), [vec![vec![5]], vec![b"disconnect".to_vec()]]);
         assert_eq!(sender.pending.load(Ordering::Relaxed), 5);
+    }
+
+    /// A client that answers no keep-alive is timed out 30 s after the last
+    /// one it answered was sent (or after joining), and closing ends a read
+    /// blocked on its connection.
+    #[test]
+    fn a_silent_client_times_out_and_closes() {
+        let (a, _b) = horizon_protocol::connection::Pipe::pair();
+        let (mut reader, _writer) = Connection::local(a).split();
+        let ago = |s| Instant::now().checked_sub(Duration::from_secs(s)).unwrap();
+        let watch = |start, answered| KeepAliveWatch {
+            start,
+            alive: Arc::new(AtomicI64::new(answered)),
+            closer: reader.closer().unwrap(),
+        };
+        assert!(!watch(ago(29), -1).timed_out());
+        assert!(watch(ago(31), -1).timed_out());
+        // Answered the keep-alive sent 15 s in: fine until 45 s.
+        assert!(!watch(ago(44), 15_000).timed_out());
+        assert!(watch(ago(46), 15_000).timed_out());
+        let closer = watch(ago(0), -1).closer;
+        let blocked = std::thread::spawn(move || reader.recv().is_err());
+        std::thread::sleep(Duration::from_millis(50));
+        closer.close();
+        assert!(blocked.join().unwrap(), "the read should end once closed");
     }
 
     #[test]

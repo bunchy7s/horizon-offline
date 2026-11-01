@@ -429,6 +429,28 @@ mod tests {
         );
     }
 
+    /// An item sitting on a slime block that a piston is pushing up is inside
+    /// the bounce search area and is pushed (`moveCollidedEntities`).
+    #[test]
+    fn an_item_on_slime_is_caught_by_an_upward_piston() {
+        let piston = moving(Direction::Up, true, 0.0);
+        let dest = BlockPos::new(0, 2, 0);
+        let visual = move_by_position_and_progress(dest, unit(), piston);
+        assert_eq!(visual.min_position(), Vec3::new(0.0, 1.0, 0.0));
+        let search = movement_search_area(visual, Direction::Up, 0.5);
+        let item = Aabb::new(Vec3::new(0.375, 2.0, 0.375), Vec3::new(0.625, 2.25, 0.625));
+        assert!(
+            search.intersects(item),
+            "item sitting on slime must be in the bounce search"
+        );
+        let amount = collided_amount(&[unit()], dest, piston, 0.5, Direction::Up, item);
+        assert!(
+            amount > 0.0,
+            "item sitting on slime must be pushed, got {amount}"
+        );
+        assert_eq!(bounce_velocity(Direction::Up, Vec3::ZERO).y, 1.0);
+    }
+
     /// The moved block sits along the piston's own direction, half a block short
     /// at mid-travel and in place once landed.
     #[test]

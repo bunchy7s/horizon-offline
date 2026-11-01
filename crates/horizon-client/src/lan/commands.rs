@@ -84,6 +84,11 @@ impl CommandTree {
         })
     }
 
+    /// Whether vanilla has a command of this name.
+    pub fn has(&self, name: &str) -> bool {
+        self.root["children"].get(name).is_some()
+    }
+
     /// The ClientboundCommandsPacket for a player with `level` permissions.
     pub fn packet(&self, level: u8, dedicated: bool, builtin: &Builtin) -> Commands {
         self.packet_with(level, dedicated, builtin, &Value::Null)

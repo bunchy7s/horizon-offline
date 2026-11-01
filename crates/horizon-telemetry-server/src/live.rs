@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::time::{Duration, Instant};
 
-use horizon_telemetry::live::{Count, PLATFORMS, Ping, round};
+use horizon_telemetry::live::{Count, PLATFORMS, Ping};
 
 /// Versions listed by name in a count; the rest are summed under `other`.
 const VERSIONS_SHOWN: usize = 12;
@@ -71,7 +71,7 @@ impl Live {
             .retain(|_, s| now.saturating_duration_since(s.at) < window);
     }
 
-    /// Who is playing at `now`, rounded.
+    /// Who is playing at `now`, exactly.
     pub fn count(&mut self, now: Instant) -> Count {
         self.forget_expired(now);
         let mut versions: HashMap<&str, u64> = HashMap::new();
@@ -88,23 +88,23 @@ impl Live {
         let mut other = 0;
         for (i, (version, n)) in by_count.into_iter().enumerate() {
             if i < VERSIONS_SHOWN {
-                shown.insert(version.to_owned(), round(n));
+                shown.insert(version.to_owned(), n);
             } else {
                 other += n;
             }
         }
         if other > 0 {
-            *shown.entry("other".to_owned()).or_default() += round(other);
+            *shown.entry("other".to_owned()).or_default() += other;
         }
         Count {
-            playing: round(self.sessions.len() as u64),
-            lan: round(lan),
+            playing: self.sessions.len() as u64,
+            lan,
             versions: shown,
             platforms: PLATFORMS
                 .iter()
                 .zip(platforms)
                 .filter(|(_, n)| *n > 0)
-                .map(|(p, n)| ((*p).to_owned(), round(n)))
+                .map(|(p, n)| ((*p).to_owned(), n))
                 .collect(),
         }
     }
@@ -178,10 +178,10 @@ mod tests {
     }
 
     #[test]
-    fn rare_versions_are_summed_and_counts_rounded() {
+    fn rare_versions_are_summed_and_counts_exact() {
         let t = Instant::now();
         let mut live = Live::new(Duration::from_secs(120), 1000);
-        for n in 0..40 {
+        for n in 0..41 {
             live.ping(&ping(n, "0.2.0", "windows", n % 4 == 0), t)
                 .unwrap();
         }
@@ -190,12 +190,13 @@ mod tests {
                 .unwrap();
         }
         let count = live.count(t);
-        assert_eq!(count.playing, 55);
-        assert_eq!(count.lan, 10);
-        assert_eq!(count.versions["0.2.0"], 40);
+        // Exact to the unit: 41 and 56 stay 41 and 56.
+        assert_eq!(count.playing, 56);
+        assert_eq!(count.lan, 11);
+        assert_eq!(count.versions["0.2.0"], 41);
         assert_eq!(count.versions["other"], 4);
         assert_eq!(count.versions.len(), VERSIONS_SHOWN + 1);
-        assert_eq!(count.platforms["windows"], 40);
+        assert_eq!(count.platforms["windows"], 41);
         assert_eq!(count.platforms["other"], 15);
     }
 }

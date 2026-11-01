@@ -113,6 +113,16 @@ impl PackAtlas {
     }
 }
 
+/// A `TerrainVertex` of flat draws' arena page (`hz_vertices`, six words each) into the vertex
+/// inputs, for vertex `hz_vertex_index`.
+pub const PULL: &str = "        uint hz_pw = hz_vertex_index * 6u;\n        \
+    hz_v_pos = uintBitsToFloat(uvec3(hz_vertices[hz_pw], hz_vertices[hz_pw + 1u], hz_vertices[hz_pw + 2u]));\n        \
+    hz_v_uv = uvec2(hz_vertices[hz_pw + 3u] & 65535u, hz_vertices[hz_pw + 3u] >> 16u);\n        \
+    hz_v_layer = hz_vertices[hz_pw + 4u] & 65535u;\n        \
+    uint hz_pl = hz_vertices[hz_pw + 4u] >> 16u;\n        \
+    hz_v_light = uvec2(hz_pl & 255u, hz_pl >> 8u);\n        \
+    hz_v_color = unpackUnorm4x8(hz_vertices[hz_pw + 5u]);\n";
+
 /// GLSL: the face normal and tangent of a flat-drawn vertex, from its quad's first three corners
 /// (quads are four consecutive vertices of the page; position words 0-2, UV word 3).
 const FACE: &str = "    uint hz_q = (uint(gl_VertexIndex) & ~3u) * 6u;\n    \
@@ -176,7 +186,7 @@ impl PackAtlas {
              hz_cell = vec2(float(hz_layer % {columns}u), float(hz_layer / {columns}u));\n    \
              hz_scale = vec2({:?}, {:?});\n    \
              hz_Vertex = vec4(hz_v_pos + hz_origin.xyz, 1.0);\n    \
-             hz_MultiTexCoord0 = vec4((hz_cell + clamp(vec2(hz_v_uv) * hz_origin.w, 0.0, 1.0)) * hz_scale, 0.0, 1.0);\n    \
+             hz_MultiTexCoord0 = vec4((hz_cell + clamp(vec2(hz_v_uv) * (hz_origin.w > 0.0 ? uintBitsToFloat(floatBitsToUint(hz_origin.w) & 0xff800000u) : fract(abs(hz_origin.w))), 0.0, 1.0)) * hz_scale, 0.0, 1.0);\n    \
              hz_MultiTexCoord1 = vec4(float(hz_v_light.y), float(hz_v_light.x), 0.0, 1.0);\n    \
              hz_MultiTexCoord2 = hz_MultiTexCoord1;\n    \
              hz_Color = vec4(hz_v_color.rgb, 1.0);\n    \
@@ -194,8 +204,15 @@ impl PackAtlas {
         } else {
             "vec4(-1.0, -1.0, 0.0, 0.0)"
         };
+        // The block a face belongs to: half a block behind its centre (the quad's diagonal).
+        let mid_block = if flat {
+            "vec4((floor((hz_p0 + hz_p2) * 0.5 - 0.5 * hz_Normal) + 0.5 - hz_v_pos) * 64.0, 0.0)"
+        } else {
+            "vec4(0.0)"
+        };
         let attributes = [
             ("mc_Entity", entity),
+            ("at_midBlock", mid_block),
             (
                 "mc_midTexCoord",
                 "vec4((hz_cell + 0.5) * hz_scale, 0.0, 1.0)",

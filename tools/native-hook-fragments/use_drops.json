@@ -1,0 +1,6 @@
+{
+  "hooks": [],
+  "rust_summary": "player-use drops to `native_loot_drops` (`NativeLootDrops::used`): shearing, brushing, carving a\npumpkin, picking berries and breaking an item frame, with the player named.",
+  "doc_summary": "player-use drops to `native_loot_drops`: shears on a sheep, a mooshroom, a snow golem or a bogged, a brush on an\narmadillo or a suspicious block, carving a pumpkin, picking sweet berries or cave vines, and a player taking an item frame or\nits item now pass through it too, with `NativeLootDrops::used` set and the player named. Bundles that read `used` need\n`\"hooks\": @API:use_drops@`.",
+  "comments": []
+}

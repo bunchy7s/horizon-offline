@@ -279,14 +279,16 @@ pub fn read_pack(path: &Path) -> Result<BTreeMap<String, Vec<u8>>, String> {
             if entry.is_dir() {
                 continue;
             }
-            // A pack from the internet may name entries `../x` or `/x`.
-            let name = entry
-                .enclosed_name()
-                .filter(|name| is_inside(name))
-                .ok_or_else(|| at(&format!("entry {:?} leaves the pack", entry.name())))?;
+            // A pack from the internet may name entries `../x` or `/x`. The
+            // stored name is checked: zip 9's `enclosed_name` drops a leading
+            // `..` instead of refusing it.
+            let raw = String::from_utf8_lossy(entry.name_raw()).replace('\\', "/");
+            if entry.enclosed_name().is_none() || !is_inside(Path::new(&raw)) {
+                return Err(at(&format!("entry {raw:?} leaves the pack")));
+            }
             let mut bytes = Vec::new();
             entry.read_to_end(&mut bytes).map_err(|e| at(&e))?;
-            files.insert(name.to_string_lossy().replace('\\', "/"), bytes);
+            files.insert(raw, bytes);
         }
     }
     if !files.contains_key("pack.mcmeta") {

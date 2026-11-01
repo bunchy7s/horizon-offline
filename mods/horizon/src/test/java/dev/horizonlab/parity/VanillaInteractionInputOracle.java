@@ -151,6 +151,18 @@ public final class VanillaInteractionInputOracle {
                 field(KeyMapping.class, "isDown").setBoolean(options.keyAttack, flag(row, "attack_down"));
                 field(KeyMapping.class, "isDown").setBoolean(options.keyUse, flag(row, "use_down"));
                 field(Minecraft.class, "rightClickDelay").setInt(mc, row.get("delay").getAsInt());
+                if (row.has("screen") && flag(row, "screen")) {
+                    // A keybind opened a screen: Gui.setScreen runs
+                    // KeyMapping.releaseAll() before the same handleKeybinds call
+                    // reaches its release branch.
+                    var release = KeyMapping.class.getDeclaredMethod("release");
+                    release.setAccessible(true);
+                    for (var holder : Options.class.getDeclaredFields()) {
+                        if (Modifier.isStatic(holder.getModifiers()) || holder.getType() != KeyMapping.class) continue;
+                        holder.setAccessible(true);
+                        release.invoke(holder.get(options));
+                    }
+                }
                 events.clear(); handle.invoke(mc);
                 out.println("== " + i++);
                 for (String event : events) out.println(event);

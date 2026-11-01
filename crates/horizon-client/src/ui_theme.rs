@@ -71,6 +71,9 @@ pub(crate) mod color {
 /// The launcher's type scale and shapes (`horizon_theme`), in dp.
 pub(crate) const SMALL: f32 = horizon_theme::CAPTION.px;
 pub(crate) const BODY: f32 = horizon_theme::LABEL.px;
+/// The boot screen's wordmark (`DISPLAY`) and console lines (`MICRO`).
+pub(crate) const DISPLAY: f32 = horizon_theme::DISPLAY.px;
+pub(crate) const MICRO: f32 = horizon_theme::MICRO.px;
 /// Fields; plates (hover rows, selection); pills (buttons, segments).
 pub(crate) const RADIUS: f32 = horizon_theme::RADIUS;
 pub(crate) const RADIUS_PLATE: f32 = horizon_theme::RADIUS_PLATE;
@@ -79,9 +82,13 @@ pub(crate) const RADIUS_PLATE: f32 = horizon_theme::RADIUS_PLATE;
 pub(crate) enum Face {
     Regular,
     Medium,
+    /// The wordmark and page titles (the design system's 500).
+    SemiBold,
+    /// Counts, timestamps and the boot screen's console lines.
+    Mono,
 }
 struct Fonts {
-    faces: [FontRef<'static>; 2],
+    faces: [FontRef<'static>; 4],
 }
 impl Fonts {
     fn load() -> Self {
@@ -90,6 +97,8 @@ impl Fonts {
             faces: [
                 f(horizon_theme::fonts::GEIST_REGULAR),
                 f(horizon_theme::fonts::GEIST_MEDIUM),
+                f(horizon_theme::fonts::GEIST_SEMIBOLD),
+                f(horizon_theme::fonts::GEIST_MONO),
             ],
         }
     }
@@ -524,6 +533,115 @@ impl<'a> Ui<'a> {
     // ---- the launcher's components ----
 }
 
+// ---- the boot screen ----
+
+/// The boot screen's palette on the pure black: a white wordmark and dimmed
+/// console lines (the theme's ink is for light pages).
+const BOOT_TEXT: u32 = color::hex(0xFFFFFF, 255);
+const BOOT_LOG: u32 = color::hex(0x9BA1A6, 255);
+
+/// The boot screen while the menu is not ready yet: the wordmark centred on
+/// pure black and the console's last lines at the bottom right, as the
+/// terminal prints them.
+pub fn draw_boot(atlas: &HudAtlas, batch: &mut HudBatch, logs: &[String]) {
+    // Pure black under everything: the frame's panorama (the title artwork
+    // once the bundle is in) must not leak through.
+    batch.fill(
+        atlas,
+        0.0,
+        0.0,
+        batch.width,
+        batch.height,
+        color::hex(0x000000, 255),
+    );
+    wordmark(atlas, batch);
+    draw_boot_log(atlas, batch, logs);
+}
+
+/// The wordmark with its tagline, centred.
+fn wordmark(atlas: &HudAtlas, batch: &mut HudBatch) {
+    let mut ui = Ui::new(atlas, batch, (0.0, 0.0));
+    let size = (ui.w / 16.0).clamp(DISPLAY, 96.0);
+    let small = (size * 0.25).clamp(MICRO, 18.0);
+    let block = size * 1.45 + small * 0.6 + small * 1.5;
+    let top = (ui.h - block) / 2.0;
+    ui.text_centered(Face::SemiBold, size, ui.w / 2.0, top, BOOT_TEXT, "Horizon");
+    ui.text_centered(
+        Face::Mono,
+        small,
+        ui.w / 2.0,
+        top + size * 1.45 + small * 0.6,
+        BOOT_LOG,
+        "Rust based minecraft client",
+    );
+    ui.finish();
+}
+
+/// The console's last lines at the bottom left, over any loading screen: long
+/// lines wrap word-wise, the block grows upwards.
+pub fn draw_boot_log(atlas: &HudAtlas, batch: &mut HudBatch, logs: &[String]) {
+    if logs.is_empty() {
+        return;
+    }
+    let mut ui = Ui::new(atlas, batch, (0.0, 0.0));
+    let (size, line, pad) = (MICRO, MICRO * 1.5, 16.0);
+    let max_w = ui.w / 2.0;
+    let max_rows = (((ui.h - pad) / line) as usize).clamp(1, 24);
+    let mut y = ui.h - pad - line;
+    let mut drawn = 0;
+    'lines: for text in logs.iter().rev() {
+        let chunks = wrapping_lines(&ui, Face::Mono, size, text, max_w);
+        for chunk in chunks.iter().rev() {
+            if drawn == max_rows {
+                break 'lines;
+            }
+            ui.text(Face::Mono, size, pad, y, BOOT_LOG, chunk);
+            y -= line;
+            drawn += 1;
+        }
+    }
+    ui.finish();
+}
+
+/// The lines `text` wraps into at `max_w`, word-wise; a word wider than
+/// `max_w` on its own breaks at the edge.
+fn wrapping_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split(' ') {
+        let mut word = word;
+        loop {
+            let candidate = if line.is_empty() {
+                word.to_owned()
+            } else {
+                format!("{line} {word}")
+            };
+            if ui.measure(face, size, &candidate) <= max_w {
+                line = candidate;
+                break;
+            }
+            if line.is_empty() {
+                // The word alone does not fit: hard-break it at the edge.
+                let mut end = 0;
+                for (i, ch) in word.char_indices() {
+                    if i > 0 && ui.measure(face, size, &word[..i]) > max_w {
+                        break;
+                    }
+                    end = i + ch.len_utf8();
+                }
+                lines.push(word[..end].to_owned());
+                word = &word[end..];
+            } else {
+                lines.push(std::mem::take(&mut line));
+            }
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,6 +671,95 @@ mod tests {
             assert_eq!((a.x, a.y, a.width, a.height), (b.x, b.y, b.width, b.height));
             assert_eq!(a.rgba, b.rgba);
         }
+        reset_atlas();
+    }
+
+    #[test]
+    fn the_boot_atlas_holds_the_run_time_glyph_region_without_a_pack() {
+        let atlas = HudAtlas::boot();
+        assert_eq!((atlas.width, atlas.height), (1024, 1024));
+        assert_eq!(
+            atlas.sprites["horizon/ui-text"].texels((atlas.width, atlas.height)),
+            (1024, 512)
+        );
+        assert_eq!(
+            atlas.sprites["horizon/white"].texels((atlas.width, atlas.height)),
+            (4, 4)
+        );
+    }
+
+    #[test]
+    fn the_boot_screen_centres_the_wordmark_and_left_aligns_the_console() {
+        reset_atlas();
+        let atlas = HudAtlas::boot();
+        let mut batch = HudBatch::new([1280, 720]);
+        draw_boot(&atlas, &mut batch, &[]);
+        // The first quad is the pure black backdrop over the frame's panorama.
+        let (w, h) = (batch.width, batch.height);
+        let bg = &batch.vertices[..6];
+        assert!(bg.iter().all(|v| v.color == 0xFF00_0000));
+        assert!(bg.iter().all(|v| v.pos[0] == 0.0 || v.pos[0] == w));
+        assert!(bg.iter().all(|v| v.pos[1] == 0.0 || v.pos[1] == h));
+        assert!(
+            !batch.patches.is_empty(),
+            "the glyphs are queued for the atlas"
+        );
+
+        let mut batch = HudBatch::new([1280, 720]);
+        wordmark(&atlas, &mut batch);
+        let (min, max) = batch
+            .vertices
+            .iter()
+            .map(|v| v.pos[0])
+            .fold((f32::MAX, f32::MIN), |(a, b), x| (a.min(x), b.max(x)));
+        assert!(
+            min < batch.width / 2.0 && max > batch.width / 2.0,
+            "the wordmark straddles the centre"
+        );
+        assert!(((min + max) / 2.0 - batch.width / 2.0).abs() < 1.0);
+
+        let long = "[12:34:56] [Render thread/INFO]: Horizon: resources loaded in 1.0s; 1240 block states, 1500 items, 62 biomes; 8 worker threads".to_owned();
+        let mut batch = HudBatch::new([1280, 720]);
+        draw_boot_log(&atlas, &mut batch, &[long]);
+        let (min, max) = batch
+            .vertices
+            .iter()
+            .map(|v| v.pos[0])
+            .fold((f32::MAX, f32::MIN), |(a, b), x| (a.min(x), b.max(x)));
+        assert!(min >= 4.0, "the line stays inside the left inset");
+        assert!(
+            max - min <= batch.width / 2.0 + 1.0,
+            "a too wide line is cut to half the screen"
+        );
+
+        let mut batch = HudBatch::new([1280, 720]);
+        let ui = Ui::new(&atlas, &mut batch, (0.0, 0.0));
+        let lines = wrapping_lines(
+            &ui,
+            Face::Mono,
+            MICRO,
+            "the quick brown fox jumps over the lazy dog",
+            90.0,
+        );
+        assert!(lines.len() > 1, "a long line wraps");
+        assert!(
+            lines
+                .iter()
+                .all(|l| ui.measure(Face::Mono, MICRO, l) <= 90.0),
+            "every wrapped line fits"
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .map(|l| l.split_whitespace().count())
+                .sum::<usize>(),
+            9,
+            "the wrap keeps every word"
+        );
+
+        let mut batch = HudBatch::new([1280, 720]);
+        draw_boot_log(&atlas, &mut batch, &[]);
+        assert!(batch.vertices.is_empty() && batch.patches.is_empty());
         reset_atlas();
     }
 }

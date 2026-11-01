@@ -144,6 +144,71 @@ pub fn launchd_plist(label: &str, program: &Path, dir: &Path) -> String {
     )
 }
 
+/// The account the Windows task runs as and starts with: `DOMAIN\user`.
+fn windows_user() -> Result<String, String> {
+    let user = std::env::var("USERNAME").map_err(|_| "USERNAME is not set".to_string())?;
+    Ok(match std::env::var("USERDOMAIN") {
+        Ok(domain) if !domain.is_empty() => format!("{domain}\\{user}"),
+        _ => user,
+    })
+}
+
+/// A Task Scheduler task that starts the supervisor when `user` logs on, as that user and without
+/// elevation, and again a minute after it exits with an error. Unlike `schtasks /Create`'s defaults it
+/// has no 72-hour time limit and also starts on battery power.
+pub fn windows_task_xml(user: &str, program: &Path, dir: &Path) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Horizon server in {dir}</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>{user}</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>{user}</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>999</Count>
+    </RestartOnFailure>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>{program}</Command>
+      <Arguments>--dir "{dir}" run</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"#,
+        user = xml(user),
+        program = xml(&program.display().to_string()),
+        dir = xml(&dir.display().to_string()),
+    )
+}
+
+/// `schtasks /XML` reads only UTF-16 files: little-endian, after a byte order mark.
+fn utf16_with_bom(text: &str) -> Vec<u8> {
+    std::iter::once(0xfeff)
+        .chain(text.encode_utf16())
+        .flat_map(u16::to_le_bytes)
+        .collect()
+}
+
 fn home() -> Result<PathBuf, String> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -242,14 +307,25 @@ pub fn command(dir: &Path, args: &[String]) -> Result<(), String> {
 
 fn install(dir: &Path, service: &str, system: bool) -> Result<(), String> {
     if cfg!(windows) {
-        let program = program()?;
-        let action = format!("\"{}\" --dir \"{}\" run", program.display(), dir.display());
-        run(
+        // `/SC ONLOGON` makes a trigger for every user's logon, which only an administrator may
+        // create ("Access is denied" otherwise). A task defined in XML can name the user instead.
+        let task = windows_task_xml(&windows_user()?, &program()?, dir);
+        let file = std::env::temp_dir().join(format!("{service}.xml"));
+        std::fs::write(&file, utf16_with_bom(&task))
+            .map_err(|e| format!("{}: {e}", file.display()))?;
+        let created = run(
             "schtasks",
             &[
-                "/Create", "/TN", service, "/TR", &action, "/SC", "ONLOGON", "/RL", "LIMITED", "/F",
+                "/Create",
+                "/TN",
+                service,
+                "/XML",
+                &file.display().to_string(),
+                "/F",
             ],
-        )?;
+        );
+        let _ = std::fs::remove_file(&file);
+        created?;
         run("schtasks", &["/Run", "/TN", service])?;
         println!("Installed the task {service}: the server starts when you log in, and now.");
         return Ok(());
@@ -387,13 +463,76 @@ mod tests {
         );
         assert!(unit.contains("User=mc\n"));
         assert!(unit.contains("WantedBy=multi-user.target"));
+        let dir = Path::new("/srv/R&D");
         let plist = launchd_plist(
             "dev.horizon.server.mc",
             Path::new("/opt/h/horizon-server"),
-            Path::new("/srv/R&D"),
+            dir,
         );
         assert!(plist.contains("<string>/srv/R&amp;D</string>"));
+        // The log is `dir.join("logs/supervisor.log")`, which a `Path` prints with the host's own
+        // separator where it adds one (a `\` on Windows), and the `&` of the folder's name is escaped.
+        let log = dir
+            .join("logs/supervisor.log")
+            .display()
+            .to_string()
+            .replace('&', "&amp;");
+        assert!(plist.contains(&format!("<string>{log}</string>")));
+        // Where the separator is `/`, the path is the one a launchd agent has on macOS.
+        #[cfg(unix)]
         assert!(plist.contains("<string>/srv/R&amp;D/logs/supervisor.log</string>"));
+    }
+
+    #[test]
+    fn windows_tasks_start_at_the_users_own_logon() {
+        let task = windows_task_xml(
+            r"PC\ann",
+            Path::new(r"C:\Users\ann\horizon-server.exe"),
+            Path::new(r"C:\Servers\R&D"),
+        );
+        // A logon trigger without a user is every user's, which needs an administrator.
+        assert!(task.contains(
+            "<LogonTrigger>\n      <Enabled>true</Enabled>\n      <UserId>PC\\ann</UserId>"
+        ));
+        assert!(task.contains("<UserId>PC\\ann</UserId>\n      <LogonType>InteractiveToken"));
+        assert!(task.contains("<RunLevel>LeastPrivilege</RunLevel>"));
+        assert!(task.contains(r"<Command>C:\Users\ann\horizon-server.exe</Command>"));
+        assert!(task.contains(r#"<Arguments>--dir "C:\Servers\R&amp;D" run</Arguments>"#));
+        assert!(task.contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"));
+        assert_eq!(
+            utf16_with_bom("<a>"),
+            [0xff, 0xfe, b'<', 0, b'a', 0, b'>', 0]
+        );
+    }
+
+    /// Creates and deletes a real task as this user, unelevated, as the launcher's toggle does.
+    /// By hand on Windows: `cargo test -p horizon-server -- --ignored windows_task`.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "creates a scheduled task on this computer"]
+    fn windows_task_installs_without_elevation() {
+        let name = format!("horizon-server-test-{}", std::process::id());
+        let task = windows_task_xml(
+            &windows_user().unwrap(),
+            Path::new(r"C:\Windows\System32\cmd.exe"),
+            &std::env::temp_dir(),
+        );
+        let file = std::env::temp_dir().join(format!("{name}.xml"));
+        std::fs::write(&file, utf16_with_bom(&task)).unwrap();
+        let created = run(
+            "schtasks",
+            &[
+                "/Create",
+                "/TN",
+                &name,
+                "/XML",
+                &file.display().to_string(),
+                "/F",
+            ],
+        );
+        std::fs::remove_file(&file).unwrap();
+        created.unwrap();
+        run("schtasks", &["/Delete", "/TN", &name, "/F"]).unwrap();
     }
 
     #[cfg(unix)]

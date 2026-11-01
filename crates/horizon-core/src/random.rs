@@ -121,6 +121,14 @@ impl LegacyRandom {
         }
     }
 
+    /// Construct from an already-masked 48-bit state.
+    pub const fn from_state(state: u64) -> Self {
+        Self {
+            state,
+            gaussian: None,
+        }
+    }
+
     /// The 48-bit generator state (differential tests compare it).
     pub fn state(&self) -> u64 {
         self.state

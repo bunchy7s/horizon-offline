@@ -1468,8 +1468,8 @@ fn process_infos<W: PlacementContext>(
     Ok(processed)
 }
 
-/// StructureTemplate.placeInWorld without entities or neighbor shape updates.
-/// Returns false for empty templates.
+/// StructureTemplate.placeInWorld. Returns false for a template with no
+/// palette, with no blocks and no entities to place, or with a side below 1.
 #[allow(clippy::too_many_arguments)]
 pub fn place_in_world<W: FeatureWorld + PlacementContext>(
     world: &mut W,
@@ -1494,7 +1494,10 @@ pub fn place_in_world<W: FeatureWorld + PlacementContext>(
         .next_int_bound(template.palettes().len() as i32)
         .unwrap_or(0) as usize,
     };
-    if template.palettes()[palette].blocks().is_empty() || template.size.iter().any(|s| *s < 1) {
+    let has_entities = !settings.ignore_entities && !template.entities.is_empty();
+    if (template.palettes()[palette].blocks().is_empty() && !has_entities)
+        || template.size.iter().any(|s| *s < 1)
+    {
         return Ok(false);
     }
     let infos = process_infos(

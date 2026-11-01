@@ -11,7 +11,7 @@ class RustChangesTests(unittest.TestCase):
     def test_only_content_changes_skip_rust(self):
         self.assertFalse(needs_rust([]))
         self.assertFalse(needs_rust([
-            "docs/setup.md", "docs/media/banner.html", "README.md",
+            "docs/setup.md", "docs/media/banner.webp", "README.md",
         ]))
         for path in [
             "crates/horizon-client/src/game.rs", "xtask/src/main.rs", "Cargo.lock",

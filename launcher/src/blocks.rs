@@ -4,7 +4,7 @@
 use crate::theme::{self, Theme};
 use gpui::{
     div, img, prelude::*, px, svg, AnyElement, App, ClickEvent, Div, FontWeight, Hsla, ImageSource,
-    ObjectFit, SharedString, Stateful, Svg, Window,
+    ObjectFit, SharedString, Svg, Window,
 };
 use std::borrow::Cow;
 
@@ -80,6 +80,8 @@ pub fn panel(t: &Theme) -> Div {
 
 /// A small label in a block of its colour: "Runs", "Partly", a version.
 pub fn badge(label: impl Into<SharedString>, color: Hsla, t: &Theme) -> Div {
+    let label: SharedString = label.into();
+    let label = SharedString::from(crate::i18n::tr(&label).to_string());
     let tint = if t.dark { 0.14 } else { 0.12 };
     div()
         .flex()
@@ -95,7 +97,7 @@ pub fn badge(label: impl Into<SharedString>, color: Hsla, t: &Theme) -> Div {
         .child(
             pixel(12., FontWeight::MEDIUM)
                 .text_color(color)
-                .child(label.into()),
+                .child(label),
         )
 }
 
@@ -141,7 +143,7 @@ pub fn tabs<T: Copy + PartialEq + 'static>(
                 .child(
                     pixel(15., FontWeight::MEDIUM)
                         .text_color(if open { t.ink } else { t.muted })
-                        .child(label),
+                        .child(crate::i18n::tr(label)),
                 )
                 .when(!open, |d| d.hover(move |s| s.bg(t.raised)))
                 // The open tab covers the panel's outline under it.
@@ -178,31 +180,4 @@ pub fn slot(source: Option<ImageSource>, name: &str, size: f32, t: &Theme) -> Di
                 ),
         ),
     }
-}
-
-/// A clickable block in the sidebar: an instance or a server.
-pub fn side_item(id: SharedString, selected: bool, t: &Theme) -> Stateful<Div> {
-    let t = *t;
-    div()
-        .id(id)
-        .relative()
-        .flex()
-        .items_center()
-        .gap(px(10.))
-        .p(px(6.))
-        .cursor_pointer()
-        .when(selected, |d| {
-            d.bg(t.raised)
-                .children(edges(t.bevel, t.lip, theme::BEVEL))
-                .child(
-                    div()
-                        .absolute()
-                        .left(px(-10.))
-                        .top(px(8.))
-                        .bottom(px(8.))
-                        .w(px(4.))
-                        .bg(t.accent),
-                )
-        })
-        .when(!selected, |d| d.hover(move |s| s.bg(t.raised.opacity(0.6))))
 }

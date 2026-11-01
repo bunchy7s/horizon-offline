@@ -484,7 +484,7 @@ fn fill(x0: i32, y0: i32, x1: i32, y1: i32, color: i32) -> Call {
 }
 
 /// `RecipeButton.getDisplayStack`.
-fn display_stack(entries: &[Vec<ItemStack>], index: usize) -> ItemStack {
+pub fn display_stack(entries: &[Vec<ItemStack>], index: usize) -> ItemStack {
     let n = entries.len().max(1);
     let (offset, entry) = (index / n, index % n);
     match entries.get(entry) {

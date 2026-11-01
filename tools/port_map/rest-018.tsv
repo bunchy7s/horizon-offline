@@ -24,8 +24,8 @@ ServerGamePacketListenerImpl.handleJigsawGenerate	missing		player: the jigsaw bl
 ServerGamePacketListenerImpl.handleSelectTrade	port	crates/horizon-client/src/game/lan_trading.rs::Game::lan_select_trade	
 ServerGamePacketListenerImpl.updateBookContents	port	crates/horizon-client/src/game/books.rs::Game::write_book	writes the pages into the writable book in the slot
 ServerGamePacketListenerImpl.filterableFromOutgoing	skip:service		text filter pass-through: with no filter on the LAN host the page is the raw text
-ServerGamePacketListenerImpl.handleEntityTagQuery	missing		player: an op's entity NBT query (ENTITY_TAG_QUERY) gets no reply
-ServerGamePacketListenerImpl.handleBlockEntityTagQuery	missing		player: an op's block entity NBT query (BLOCK_ENTITY_TAG_QUERY) gets no reply
+ServerGamePacketListenerImpl.handleEntityTagQuery	port	crates/horizon-client/src/game/lan_actions.rs::Game::level_entity_tag	reached from the EntityTagQuery arm of lan_guest_packet, which checks permission 2 or more
+ServerGamePacketListenerImpl.handleBlockEntityTagQuery	inline	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	the BlockEntityTagQuery arm, with debug_keys.rs block_entity_tag
 ServerGamePacketListenerImpl.shouldCheckPlayerMovement	inline	crates/horizon-client/src/lan/hub.rs::Hub::position_change	gap: minor: the changing-dimension exemption is not checked; the single-player owner, movement and elytra gates are
 ServerGamePacketListenerImpl.forceSendPlayerSupportBlocks	missing		minor: the blocks under a player standing on air are never sent again (vanilla's desync fix)
 ServerGamePacketListenerImpl.updateAwaitingTeleport	port	crates/horizon-client/src/lan/hub.rs::Hub::move_player	gap: minor: vanilla runs it every tick; here it runs only when a move packet arrives

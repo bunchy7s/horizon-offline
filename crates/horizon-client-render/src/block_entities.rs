@@ -23,7 +23,7 @@
 //! Which states tick is a table by state id, built by the game from the block
 //! registry; whether a slot is made is decided when the slot is promoted at
 //! the start of the next tick, from the block state then.
-use crate::chunk::block_entity::BlockEntity;
+use crate::chunk::block_entity::{BlockEntity, ModContainer, ModFluidTanks};
 use crate::fast_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -70,6 +70,12 @@ pub struct BlockEntities {
     replaced: FxHashSet<Pos>,
     /// `Ticking` by block state id; empty until the game builds it.
     states: Vec<Ticking>,
+    /// The containers of mod blocks' block entities, by block state id;
+    /// built with `states`.
+    mod_containers: FxHashMap<u32, Arc<ModContainer>>,
+    /// The fluid tanks of mod blocks' block entities, by block state id;
+    /// built with `states`, like the containers.
+    mod_fluids: FxHashMap<u32, Arc<ModFluidTanks>>,
 }
 
 impl std::ops::Deref for BlockEntities {
@@ -151,6 +157,20 @@ impl BlockEntities {
     }
     pub fn ticking(&self, state: u32) -> Ticking {
         self.states.get(state as usize).copied().unwrap_or_default()
+    }
+    pub fn set_mod_containers(&mut self, containers: FxHashMap<u32, Arc<ModContainer>>) {
+        self.mod_containers = containers;
+    }
+    /// The container of a mod block's block entity in block state `state`.
+    pub fn mod_container(&self, state: u32) -> Option<&Arc<ModContainer>> {
+        self.mod_containers.get(&state)
+    }
+    pub fn set_mod_fluids(&mut self, fluids: FxHashMap<u32, Arc<ModFluidTanks>>) {
+        self.mod_fluids = fluids;
+    }
+    /// The fluid tanks of a mod block's block entity in block state `state`.
+    pub fn mod_fluids(&self, state: u32) -> Option<&Arc<ModFluidTanks>> {
+        self.mod_fluids.get(&state)
     }
 
     fn next(&mut self) -> u32 {

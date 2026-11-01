@@ -43,7 +43,7 @@ pub fn pose_id(m: &Mob) -> u8 {
         Species::Warden => warden::pose_id(m),
         Species::Breeze => breeze::pose_id(m),
         Species::Camel | Species::CamelHusk if camel::sitting(m) => SITTING,
-        Species::Frog | Species::Cat | Species::Ocelot => m.extra.pose,
+        Species::Frog | Species::Cat | Species::Ocelot | Species::Goat => m.extra.pose,
         // LivingEntity.startSleeping: the pose, with the bed in index 14.
         Species::Villager if villager::sleeping(m) => SLEEPING,
         _ => STANDING,
@@ -91,6 +91,8 @@ pub fn client_tick(m: &mut Mob, game_time: i64) {
         Species::Armadillo => armadillo::tick(m),
         Species::Frog => frog::tick(m),
         Species::Goat => goat::tick(m),
+        // Sheep.aiStep on a client: the eating head's clock.
+        Species::Sheep if m.extra.anim_ticks > 0 => m.extra.anim_ticks -= 1,
         s if equine::grazes(s) => equine::client_tick(m),
         Species::Drowned => undead::drowned_client_tick(m),
         // Wolf.tick (alive only): the begging head tilt follows the synched flag.
@@ -126,6 +128,9 @@ pub fn entity_event(m: &mut Mob, event: u8) {
         Species::Hoglin | Species::Zoglin => piglin::client_event(m, event),
         Species::IronGolem => golem::client_event(m, event),
         Species::Creaking => creaking::entity_event(m, event),
+        Species::Wolf => tame::entity_event(m, event),
+        // Sheep.handleEntityEvent 10: the head goes down to eat grass.
+        Species::Sheep if event == 10 => m.extra.anim_ticks = 40,
         _ => {}
     }
 }

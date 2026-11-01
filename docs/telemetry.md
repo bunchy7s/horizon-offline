@@ -80,13 +80,27 @@ While the game runs (not a dedicated server, a benchmark or a run that quits by 
 - `version` is the release, `platform` is `linux`, `macos`, `windows` or `other`, and `lan` says whether a LAN or play-with-friends world is open.
 - Nothing else: no account, install ID, world, server, settings or hardware. The server checks each field (`live::Ping::check`) and refuses anything more.
 
-The server keeps sessions in memory only, never on disk, and never with the sender's address. A session counts while its last ping is under 2 minutes old. `GET /v1/live` gives the count, rounded (`live::round`: exact under 10, then to 5, 10 and 100):
+The server keeps sessions in memory only, never on disk, and never with the sender's address. A session counts while its last ping is under 2 minutes old. `GET /v1/live` gives the exact count; versions past the 12 most played are summed under `other`:
 
 ```json
-{ "playing": 1240, "lan": 85, "versions": { "v2026.10.22": 1100, "other": 140 }, "platforms": { "linux": 300, "macos": 240, "windows": 700 } }
+{ "playing": 1243, "lan": 87, "versions": { "v2026.10.22": 1102, "other": 141 }, "platforms": { "linux": 301, "macos": 238, "windows": 704 } }
 ```
 
-The launcher reads it when it opens and every minute after, and shows "N playing now" on the Play page. It shows nothing when the server can't be reached. `HORIZON_TELEMETRY_URL=off` turns both off; `HORIZON_NO_HEARTBEAT=1` keeps a single automated run out of the count.
+Once a minute the server writes down only those totals (playing, LAN, per platform; no session, version or address) for the history at [playhorizon.dev/stats](https://playhorizon.dev/stats): every minute for 7 days, then per hour (average and peak) for 90 days, then per day (average and peak) for good. `GET /v1/live/history?range=24h|7d|30d|all` serves it (`&series=official`: the official server's count instead, below):
+
+```json
+{ "source": "players", "range": "24h", "step": 300, "from": 1793404800, "to": 1793491260,
+  "series": [[1793404800, 41.2, 44], [1793405100, 43.0, 47]],
+  "peak": { "playing": 1243, "at": 1793480400 }, "all_time": { "playing": 1243, "at": 1793480400 },
+  "latest": { "playing": 1190, "at": 1793491200 },
+  "platforms": { "linux": 290.5, "macos": 230.1, "windows": 690.4 } }
+```
+
+`series` holds `[start, average, peak]` per point (5 minutes for 24h, an hour for 7d, 3 hours for 30d, a day for all; UTC Unix seconds), `peak` the range's highest minute, `all_time` the highest ever, `latest` the newest minute, `platforms` the range's average per platform.
+
+The server also asks the official server (`horizon_telemetry::server_status::OFFICIAL_STATUS_ADDRESS`, its address with the port its SRV record gives, or `HORIZON_TELEMETRY_OFFICIAL_SERVER`) for its player count every minute, with the server-list status ping every client sends to show a server in its Multiplayer list, and keeps it the same way (`series=official`, playing only; a minute it didn't answer stays empty). Its TPS and MSPT come later, once its admin API is reachable from outside the machine.
+
+The launcher reads the count when it opens and every minute after, and shows "N playing now" on the Play page, exact, with thousands separators; clicking it opens playhorizon.dev/stats. Beside it, "M on the official SMP" is the official server's own count, from the same status ping the launcher sends once a minute (3-second timeout, nothing shown when it doesn't answer); clicking it opens the Servers page. It shows nothing when the server can't be reached. `HORIZON_TELEMETRY_URL=off` turns both off; `HORIZON_NO_HEARTBEAT=1` keeps a single automated run out of the count.
 
 ## Server
 
@@ -95,6 +109,7 @@ The launcher reads it when it opens and every minute after, and shows "N playing
 - `GET /v1/aggregate`: the anonymous totals the website's results page reads. Its `breakdowns` split the play sessions of the period by hardware class (below), each class with its installs, sessions, hours and mean p50 and p99 frame times.
 - `GET /v1/benchmarks/summary`: players' benchmark uploads grouped by GPU, CPU, render distance and game for playhorizon.dev/benchmarks. A group shows only with at least 3 different installs, and only its medians and counts: no install ID, day, OS version, driver, exact memory or screen. Uploads are never published one by one. Each group's `breakdowns` count its installs per hardware class.
 - `POST /v1/live` and `GET /v1/live`: the "I'm playing" ping and the live count.
+- `GET /v1/live/history?range=24h|7d|30d|all&series=players|official`: the live count, or the official server's, over time (above).
 
 Public output never holds a raw hardware value, only these classes (`src/classes.rs`, the same in the website's `scripts/benchmarks.mjs`, horizon-rust/horizon-site), and a class is published only with at least 3 different installs:
 

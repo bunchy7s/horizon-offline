@@ -1,11 +1,11 @@
-Interaction.defineSynchedData	missing		minor: no interaction entity; /summon interaction (the invisible click hitbox map makers use) creates nothing
-Interaction.readAdditionalSaveData	missing		minor: no interaction entity; /summon interaction (the invisible click hitbox map makers use) creates nothing
-Interaction.addAdditionalSaveData	missing		minor: no interaction entity; /summon interaction (the invisible click hitbox map makers use) creates nothing
-Interaction.onSyncedDataUpdated	missing		minor: no interaction entity; /summon interaction (the invisible click hitbox map makers use) creates nothing
-Interaction.skipAttackInteraction	missing		minor: no interaction entity; /summon interaction (the invisible click hitbox map makers use) creates nothing
-Interaction.interact	missing		minor: no interaction entity; /summon interaction (the invisible click hitbox map makers use) creates nothing
-Interaction.getLastAttacker	missing		minor: no interaction entity; /summon interaction (the invisible click hitbox map makers use) creates nothing
-Interaction.getTarget	missing		minor: no interaction entity; /summon interaction (the invisible click hitbox map makers use) creates nothing
+Interaction.defineSynchedData	port	crates/horizon-client/src/game/interactions.rs::RemoteInteraction::new	width 1.0, height 1.0, response false
+Interaction.readAdditionalSaveData	missing		server side: Horizon's own server has no interaction entity, and a client never saves a remote one
+Interaction.addAdditionalSaveData	missing		server side: Horizon's own server has no interaction entity, and a client never saves a remote one
+Interaction.onSyncedDataUpdated	port	crates/horizon-client/src/game/interactions.rs::RemoteInteraction::metadata	DATA_WIDTH 8, DATA_HEIGHT 9, DATA_RESPONSE 10
+Interaction.skipAttackInteraction	inline	crates/horizon-client/src/game/remote_vehicles.rs::Game::remote_object_hit	false: an attack click picks the box like any entity, and the box ignores the hurt on the server
+Interaction.interact	port	crates/horizon-client/src/game/remote.rs::Game::remote_use_entity	SUCCESS when the response is set (the arm swings), CONSUME otherwise; both end the click and nothing behind the box is used
+Interaction.getLastAttacker	missing		client copy only: the server keeps the attack targets; a client's copy answers only the click
+Interaction.getTarget	missing		client copy only: the server keeps the attack targets; a client's copy answers only the click
 Leashable.isLeashed	inline	crates/horizon-client/src/mobs/leash.rs::tick	the mob's extra.leash being set
 Leashable.setDelayedLeashHolderId	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetEntityLink arm: a holder id not known yet waits as Holder::Mob until the knot arrives (remote_objects.rs)
 Leashable.readLeashData	port	crates/horizon-client/src/mobs/leash.rs::pending_from_nbt	holder UUID or fence knot block; kept pending until the holder exists
@@ -14,7 +14,7 @@ Leashable.angularFriction	inline	crates/horizon-client/src/mobs/leash.rs::tick	g
 Leashable.checkElasticInteractions	port	crates/horizon-client/src/mobs/leash.rs::tick	gap: minor: one attachment pair only; no quad leash for a horse, llama or sniffer led by a happy ghast
 Leashable.getHolderMovement	port	crates/horizon-client/src/mobs/leash.rs::holder_state	gap: minor: the holder's velocity is always used; a NoAI mob holder should count as standing still
 Leashable.computeElasticInteraction	port	crates/horizon-client/src/mobs/leash.rs::spring	gap: minor: single attachment pair (0, 0.5, 0.5 of the mob and 0, 0.5, 0 of the holder); the four-point version is missing
-Leashable.createQuadLeashOffsets	missing		player: a horse, llama or sniffer led by a happy ghast is drawn with one rope to its middle and pulled by one spring instead of four ropes to its corners
+Leashable.createQuadLeashOffsets	port	crates/horizon-client/src/mobs/leash.rs::Holder::create_quad_leash_offsets	four attachment points around an entity, front-left first, clockwise from above
 Leashable.leashableLeashedTo	port	crates/horizon-client/src/game/leads.rs::Game::player_leashed	only the player as holder (box of 32); mob and knot holders are filtered inline in interact_leash and interact_knot
 Leashable.leashableInArea	port	crates/horizon-client/src/game/leads.rs::Game::player_leashed	the 32 block box around a point, for the player's lead only
 Leashable.Wrench.torqueFromForce	inline	crates/horizon-client/src/mobs/leash.rs::spring	lever.z * force.x - lever.x * force.z
@@ -25,13 +25,13 @@ LightningBolt.getStrikePosition	inline	crates/horizon-client/src/game/lightning.
 LightningBolt.spawnFire	port	crates/horizon-client/src/game/lightning.rs::Game::bolt_fire	gap: minor: no fire_spread_radius_around_player check (canSpreadFireAround)
 LightningBolt.randomWalkCleaningCopper	inline	crates/horizon-world/src/level/tick.rs::Sim::lightning_clear_copper	3 to 5 walks of up to 8 steps
 LightningBolt.randomStepCleaningCopper	inline	crates/horizon-world/src/level/tick.rs::Sim::lightning_clear_copper	up to 10 random blocks in the 3x3x3 cube, first weathering copper steps back
-LightningBolt.shouldRenderAtSqrDistance	missing		player: a bolt more than 64 blocks away (scaled by Entity Distance) is still drawn; vanilla shows only the sky flash and thunder there
+LightningBolt.shouldRenderAtSqrDistance	port	crates/horizon-client/src/game/lightning.rs::Game::bolt_instances	ticked in #3514; `LightningBolt.shouldRenderAtSqrDistance` is cited at crates/horizon-client/src/game/lightning.rs:591
 LinearInterpolationHandler.create	inline	crates/horizon-client/src/game/remote.rs::Game::move_entity	3 steps (lerps.insert); only on a server's client, a local game moves boats, carts and bobbers directly
 LinearInterpolationHandler.startInterpolating	inline	crates/horizon-client/src/game/remote.rs::Game::move_entity	target kept as Lerp with steps 3
 LinearInterpolationHandler.doInterpolate	inline	crates/horizon-client/src/game/remote.rs::Game::tick_remote_entities	gap: minor: position eased by 1/steps; a boat's or minecart's yaw is set at once, not eased
 LivingEntity.<init>	port	crates/horizon-client/src/mobs.rs::Mob::new	box, health, random yaw
 LivingEntity.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	gap: player: arrow count (12) and stinger count (13) are never kept or sent, so arrows and bee stingers do not stay stuck in a body
-LivingEntity.hasLandedInLiquid	missing		minor: the fall impulse context (mace, wind charge) is not cleared when a server player lands in a liquid
+LivingEntity.hasLandedInLiquid	port	crates/horizon-world/src/living_fall.rs::ImpulseContext::landed_in_liquid	water or lava with getDeltaMovement().y below 9.9999997E-6, from the guest move loop; the grace time still defers it
 LivingEntity.getScale	missing		minor: no scale attribute, so /attribute scale and datapack scaling do nothing; baby and slime sizes come from tables in Mob::dims
 LivingEntity.shouldDropLoot	inline	crates/horizon-client/src/mobs/drops.rs::die	mob_drops rule and not a baby (monsters excepted)
 LivingEntity.decreaseAirSupply	port	crates/horizon-client/src/motion/environment.rs::MotionWorld::tick_environment_damage	gap: minor: only the player reads oxygen_bonus (Respiration); a mob loses one air per tick in ai.rs::base_tick
@@ -49,7 +49,7 @@ LivingEntity.dealDefaultKnockback	inline	crates/horizon-client/src/mobs.rs::Mob:
 LivingEntity.applyItemBlocking	port	crates/horizon-client/src/health.rs::Environment::apply_blocking	gap: minor: the player's shield only; a mob holding a shield never blocks
 LivingEntity.playSecondaryHurtSound	port	crates/horizon-client/src/game/enchant_effects.rs::Game::thorns	enchant.thorns.hit at the attacker
 LivingEntity.resolveMobResponsibleForDamage	inline	crates/horizon-client/src/mobs.rs::Mob::damage_with	gap: minor: last_hurt_by comes from any attacker; no #no_anger damage types or wind charge exemption
-LivingEntity.resolvePlayerResponsibleForDamage	inline	crates/horizon-client/src/mobs.rs::Mob::damage_with	gap: player: damage by a player's tamed wolf or cat sets no last-hurt-by-player, so the kill drops no experience and no player-only loot
+LivingEntity.resolvePlayerResponsibleForDamage	inline	crates/horizon-client/src/game/creatures.rs::Game::resolve_player_responsible	a tamed wolf's or cat's hit is its owner's (setLastHurtByPlayer), so the kill drops experience and player-only loot
 LivingEntity.breakItem	port	crates/horizon-client/src/game.rs::Game::damage_held	gap: player: a tool or armor breaking shows no crumb particles and always plays entity.item.break, not the item's own break sound
 LivingEntity.dropExperience	inline	crates/horizon-client/src/mobs/drops.rs::die	orbs only when a player killed it and mob_drops is on
 LivingEntity.getKnockback	port	crates/horizon-client/src/game/enchant_effects.rs::Game::extra_knockback	gap: minor: the Knockback enchant halved (player and gear::knockback for mobs); the attack_knockback attribute counts only for the hoglin shove
@@ -65,7 +65,7 @@ LivingEntity.setIgnoreFallDamageFromCurrentImpulse	port	crates/horizon-world/src
 LivingEntity.getDamageAfterArmorAbsorb	inline	crates/horizon-client/src/mobs.rs::Mob::damage_with	the player's armor wear is health.rs hurt_armor; the mob path also scales armor effectiveness (breach)
 LivingEntity.getKillCredit	port	crates/horizon-client/src/game/creatures.rs::Game::mob_died	the last player to hit it, else the last mob
 LivingEntity.getTicksSinceLastKineticHitFeedback	port	crates/horizon-client/src/game/spear.rs::Game::kinetic_hit_ticks	
-LivingEntity.swapHandItems	missing		player: on a server another player's hand swap (entity event 55) is not handled, so their held items do not swap on screen
+LivingEntity.swapHandItems	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	entity event 55 swaps another player's hands; the arm is in `handle_packet`
 LivingEntity.getAttackRangeWith	inline	crates/horizon-client/src/game.rs::Game::reach	gap: minor: only the spear's range is item specific (spear.rs REACH); other items use the default reach
 LivingEntity.getActiveItem	inline	crates/horizon-client/src/game.rs::Game::held	the selected slot; the item in use is the `using` slot
 LivingEntity.getItemInHand	inline	crates/horizon-client/src/game.rs::Game::held	main hand; the off hand is the `offhand` field
@@ -79,7 +79,7 @@ LivingEntity.calculateEntityAnimation	port	crates/horizon-client/src/mobs/living
 LivingEntity.causeExtraKnockback	port	crates/horizon-client/src/game/enchant_effects.rs::Game::extra_knockback_direction	target pushed along the attacker's yaw; the attacker stops sprinting
 LivingEntity.wasRecentlyStabbed	inline	crates/horizon-client/src/game/spear.rs::Game::spear_tick	Game::stabbed with contact_cooldown_ticks
 LivingEntity.rememberStabbedEntity	inline	crates/horizon-client/src/game/spear.rs::Game::spear_tick	stabbed.insert(key, now)
-LivingEntity.stabbedEntities	missing		player: the count of mobs stabbed in one use is never read, so the Spear Many Mobs advancement (spear_mobs trigger) never unlocks
+LivingEntity.stabbedEntities	port	crates/horizon-client/src/game/spear.rs::Game::spear_tick	the living entities stabbed in one use feed the minecraft:spear_mobs trigger
 LivingEntity.stabAttack	port	crates/horizon-client/src/game/spear.rs::Game::stab_mob	gap: minor: the player's spear only; mobs never stab
 LivingEntity.handleHandSwap	skip:other		the LAN server sends both changed slots in one SetEquipment instead of entity event 55; clients end in the same state
 LivingEntity.handleEquipmentChanges	port	crates/horizon-client/src/lan/entity.rs::ServerEntity::send_equipment	changed slots as one SetEquipment
@@ -95,7 +95,7 @@ LivingEntity.getLocalBoundsForPose	missing		minor: no pose boxes; a dismounting 
 LivingEntity.wouldNotSuffocateAtTargetPose	port	crates/horizon-client/src/pose.rs::MotionWorld::can_fit_pose	gap: minor: the player's poses only; a camel changing pose is not checked
 LivingEntity.canUsePortal	port	crates/horizon-client/src/game/nether_portal.rs::Game::mob_can_use_portal	gap: minor: a sleeping mob is not excluded
 LivingEntity.setPosToBed	port	crates/horizon-client/src/mobs/villager.rs::start_sleeping	x and z at the bed's centre, y 0.6875 above its base (sleep height plus 0.125)
-LivingEntity.entityEventForEquipmentBreak	missing		player: on a server another player's or mob's tool or armor breaking (entity events 47 to 52, 65 and 68) makes no break sound or crumbs
+LivingEntity.entityEventForEquipmentBreak	inline	crates/horizon-client/src/mobs/item_break.rs::equipment_break_event	the slot-to-event table itself; a mob's worn armour that breaks broadcasts 49 to 52 and 65 (Game::hurt_mob_armor, #5317) and a player's hands, armour and shield reach every client through onEquippedItemBroken (#5392)
 LivingEntity.onEquippedItemBroken	inline	crates/horizon-client/src/game.rs::Game::damage_held	gap: minor: the stack is cleared and modifiers rebuilt, but no break event is broadcast
 LivingEntity.stopLocationBasedEffects	inline	crates/horizon-client/src/game.rs::Game::apply_equipment	all applied modifiers are dropped and re-added from what is worn
 LivingEntity.getEquipmentSlotForItem	inline	crates/horizon-client/src/game/mob_gear.rs::Game::equip_from_table	resolveSlot: the item's equip_slot, else the main hand
@@ -114,7 +114,7 @@ Mob.spawnAnim	port	crates/horizon-client/src/game/spawner.rs::Game::poof_particl
 Mob.updateControlFlags	inline	crates/horizon-client/src/mobs/riders.rs::drive	gap: minor: a mob in a boat keeps its JUMP goals
 Mob.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	gap: minor: drop_chances and DeathLootTable survive only from the loaded raw tag
 Mob.burnUndead	inline	crates/horizon-client/src/mobs/ai.rs::ai_step	gap: player: a helmeted undead never loses helmet durability in sunlight (vanilla 0 to 1 per burn tick), so the helmet never wears out or breaks
-Mob.pickUpItem	missing		player: mobs do not pick up dropped gear: zombies, skeletons, husks, drowned (tridents), vindicators, pillagers and wither skeletons that can pick up loot ignore items on the ground; only piglins, villagers, pandas, allays and sulfur cubes pick things up
+Mob.pickUpItem	port	crates/horizon-client/src/mobs/equip.rs::Slot::wants_to_pick_up	ticked in #3514; `Mob.pickUpItem` is cited at crates/horizon-client/src/mobs/equip.rs:211
 Mob.attemptToShearEquipment	inline	crates/horizon-client/src/game/ghasts.rs::Game::interact_happy_ghast	gap: minor: the happy ghast harness and the llama carpet (llamas.rs interact_llama) only
 Mob.shearItem	inline	crates/horizon-client/src/game/ghasts.rs::Game::interact_happy_ghast	the item is dropped and the shears lose 1 durability
 Mob.canReplaceCurrentItem	missing		minor: only used by loot pickup (Mob.pickUpItem, missing)
@@ -141,7 +141,7 @@ Mob.swingForAttack	port	crates/horizon-client/src/mobs/ai.rs::Mob::swing_hand_mo
 NeutralMob.addPersistentAngerSaveData	port	crates/horizon-client/src/mobs/bee.rs::to_nbt	gap: minor: anger_end_time only; angry_at (the target's UUID) is not saved, and wolves and polar bears keep a tick counter instead
 NeutralMob.readPersistentAngerSaveData	port	crates/horizon-client/src/mobs/bee.rs::from_nbt	gap: minor: anger_end_time only; angry_at is not read, so a reloaded angry bee picks its target again
 NeutralMob.isAngryAtAllPlayers	missing		minor: the universal_anger game rule has no effect (default off)
-NeutralMob.playerDied	missing		player: the forgive_dead_players rule (on by default) is not implemented, so bees, wolves and polar bears stay angry at a player who died and respawned
+NeutralMob.playerDied	port	crates/horizon-client/src/mobs/ai.rs::forgive_dead_player	ticked in #3514; `NeutralMob.playerDied` is cited at crates/horizon-client/src/mobs/ai.rs:2334
 OminousItemSpawner.tick	port	crates/horizon-client/src/game/ominous_item_spawner.rs::Game::tick_ominous_item_spawners	count, then server and client parts
 OminousItemSpawner.tickServer	inline	crates/horizon-client/src/game/ominous_item_spawner.rs::Game::tick_ominous_item_spawners	the about-to-spawn sound 36 ticks ahead, then the item
 OminousItemSpawner.tickClient	inline	crates/horizon-client/src/game/ominous_item_spawner.rs::Game::tick_ominous_item_spawners	particles every 5 game ticks

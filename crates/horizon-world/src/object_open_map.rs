@@ -4,6 +4,7 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
+#[derive(Clone)]
 struct Table<K, V> {
     keys: Vec<Option<K>>,
     values: Vec<Option<V>>,
@@ -42,6 +43,16 @@ pub struct ObjectOpenMap<K, V> {
     table: Rc<RefCell<Table<K, V>>>,
     size: i32,
     null: bool,
+}
+/// A copy with its own table: the copy's changes never reach the original.
+impl<K: Clone, V: Clone> Clone for ObjectOpenMap<K, V> {
+    fn clone(&self) -> Self {
+        Self {
+            table: Rc::new(RefCell::new(self.table.borrow().clone())),
+            size: self.size,
+            null: self.null,
+        }
+    }
 }
 impl<K, V> Default for ObjectOpenMap<K, V> {
     fn default() -> Self {
@@ -372,5 +383,30 @@ impl<K: ObjectKey + Clone, V: Clone> ObjectOpenMap<K, V> {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, PartialEq, Eq)]
+    struct K(i32);
+    impl ObjectKey for K {
+        fn object_hash(&self) -> i32 {
+            self.0
+        }
+    }
+
+    #[test]
+    fn a_copy_has_its_own_table() {
+        let mut map = ObjectOpenMap::default();
+        map.put(Some(K(1)), Some("one"));
+        let mut copy = map.clone();
+        copy.put(Some(K(1)), Some("uno"));
+        copy.put(Some(K(2)), Some("dos"));
+        assert_eq!(map.get(Some(&K(1))), Some("one"));
+        assert!(!map.contains_key(Some(&K(2))));
+        assert_eq!((map.len(), copy.len()), (1, 2));
     }
 }

@@ -27,12 +27,11 @@ pub fn inputs() -> horizon_shaders::GbuffersInputs {
     inputs
 }
 
-/// The hand's projection in GL's conventions: `hud_fov` degrees, the view bob, depth scaled by
-/// `MC_HAND_DEPTH`.
-pub fn projection(hud_fov: f32, aspect: f32, far: f32, bob: Mat4) -> Mat4 {
+/// The hand's projection in GL's conventions: `hud_fov` degrees, depth scaled by
+/// `MC_HAND_DEPTH` (the view bob is in `gbufferModelView`).
+pub fn projection(hud_fov: f32, aspect: f32, far: f32) -> Mat4 {
     Mat4::from_scale(glam::Vec3::new(1.0, 1.0, HAND_DEPTH))
         * Mat4::perspective_rh_gl(hud_fov.to_radians(), aspect, 0.05, far)
-        * bob
 }
 
 /// The hand's vertices (also read at set 1 for normals and tangents), its uniform and quad
@@ -153,7 +152,7 @@ mod tests {
     /// apart by it), and x, y match the plain projection.
     #[test]
     fn hand_depth_is_scaled_around_the_middle() {
-        let p = projection(70.0, 16.0 / 9.0, 512.0, Mat4::IDENTITY);
+        let p = projection(70.0, 16.0 / 9.0, 512.0);
         let plain = Mat4::perspective_rh_gl(70f32.to_radians(), 16.0 / 9.0, 0.05, 512.0);
         for z in [-0.06f32, -0.5, -3.0, -400.0] {
             let v = glam::Vec4::new(0.1, -0.2, z, 1.0);

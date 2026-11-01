@@ -4,6 +4,7 @@
 use super::{
     Behaviours, LevelAccess, LevelEvent, Sim, Ticks,
     classes::{Class, Interface},
+    feature_world::LevelFeatureWorld,
     growth::grower,
     update::{HORIZONTAL, above, below, rel},
 };
@@ -117,6 +118,59 @@ impl Behaviours {
         self.live_features()?.configured(name)?;
         Some(self.sim(level, ticks).place_configured_feature(name, pos))
     }
+    /// `StructureBlockEntity.placeStructure`'s `StructureTemplate.placeInWorld`
+    /// on the live level: `pos` is both the position and the pivot, the
+    /// template rots at `integrity` below 1 (`BlockRotProcessor`) drawing from
+    /// `LegacyRandomSource(seed)`, the loot seeds from a second one, and
+    /// `flags` are the `setBlock` flags. Returns whether the template placed
+    /// and the entities it carried (their NBT, for the caller to spawn);
+    /// `None` when the level has no structure resources.
+    #[allow(clippy::too_many_arguments)]
+    pub fn place_template<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        template: &crate::worldgen::structure::StructureTemplate,
+        pos: BlockPos,
+        settings: TemplateSettings,
+    ) -> Option<(bool, Vec<crate::nbt::Compound>)> {
+        use crate::worldgen::structure::processor::{PlaceSettings, Processor, place_in_world};
+        let features = self.live_features()?;
+        let resources = features.structure_resources()?;
+        let mut sim = self.sim(level, ticks);
+        let rot = Processor::BlockRot {
+            rottable: None,
+            integrity: settings.integrity,
+        };
+        let mut random = horizon_core::random::LegacyRandom::new(settings.seed);
+        let mut loot_random = horizon_core::random::LegacyRandom::new(settings.seed);
+        let mut place = PlaceSettings::new(settings.rotation);
+        place.mirror = settings.mirror;
+        place.known_shape = settings.known_shape;
+        place.ignore_entities = settings.ignore_entities;
+        if settings.integrity < 1.0 {
+            place.processors.push(&rot);
+            place.random = Some(&mut random);
+        }
+        let mut world = LevelFeatureWorld {
+            sim: &mut sim,
+            features,
+            entities: Vec::new(),
+        };
+        let at = [pos.x, pos.y, pos.z];
+        let placed = place_in_world(
+            &mut world,
+            &resources,
+            template,
+            at,
+            at,
+            &mut place,
+            Some(&mut loot_random),
+            settings.flags,
+        )
+        .ok()?;
+        Some((placed, world.entities))
+    }
     /// `BoneMealItem.useOn` for a player clicking `pos` on `face`. Returns
     /// whether bone meal was used (the caller then shrinks the stack unless
     /// the player is in creative mode). Reports level event 1505 (growth
@@ -155,7 +209,16 @@ impl Behaviours {
         let mut ticks = Ticks::default();
         let mut sim = self.sim(level, &mut ticks);
         let state = sim.state(pos);
-        if let Some(kind) = self.bonemeal_kind(state)
+        // A mod block answers `isValidBonemealTarget` on both sides, so the
+        // client predicts the use with the mod's own answer.
+        let answer = sim.level.is_valid_bonemeal_target(pos, state);
+        if answer == Some(true) {
+            return true;
+        }
+        // Refused (`Some(false)`): growCrop fails, and only growWaterPlant
+        // below can still take the meal.
+        if answer.is_none()
+            && let Some(kind) = self.bonemeal_kind(state)
             && !matches!(kind, Kind::Sapling | Kind::Azalea | Kind::Mushroom)
             && sim.bonemeal_valid(kind, pos, state)
         {
@@ -220,6 +283,20 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// meal is consumed even when `isBonemealSuccess` fails).
     pub(crate) fn grow_crop(&mut self, pos: BlockPos) -> bool {
         let state = self.state(pos);
+        // A mod block answers vanilla's three questions itself, ahead of the
+        // `BonemealableBlock` its template would give it; a block nothing
+        // answers for keeps its own, and vanilla's is what the port runs.
+        match self.level.is_valid_bonemeal_target(pos, state) {
+            Some(true) => {
+                if self.level.is_bonemeal_success(pos, state) {
+                    self.level.perform_bonemeal(self.ticks, pos, state);
+                }
+                return true;
+            }
+            // `growCrop` returns false and keeps the meal.
+            Some(false) => return false,
+            None => {}
+        }
         let Some(kind) = self.b.bonemeal_kind(state) else {
             return false;
         };
@@ -1163,4 +1240,17 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
         }
     }
+}
+
+/// What `StructurePlaceSettings` a `place_template` call sets.
+#[derive(Clone, Copy, Debug)]
+pub struct TemplateSettings {
+    pub mirror: crate::worldgen::structure::Mirror,
+    pub rotation: crate::worldgen::structure::Rotation,
+    pub ignore_entities: bool,
+    pub known_shape: bool,
+    /// `BlockRotProcessor`'s integrity; 1 places everything.
+    pub integrity: f32,
+    pub seed: i64,
+    pub flags: i32,
 }

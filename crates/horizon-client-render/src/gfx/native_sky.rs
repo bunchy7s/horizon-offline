@@ -252,7 +252,7 @@ mod tests {
                 resource: globals_buffer.as_entire_binding(),
             }],
         });
-        let frame = NativeFrame::new(&device);
+        let frame = NativeFrame::new(&device, None, Vec::new(), Default::default(), None);
         queue.write_buffer(
             &frame.buffer,
             0,

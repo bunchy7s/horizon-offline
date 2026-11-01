@@ -1,23 +1,21 @@
-//! What players send from the hub (playhorizon.dev/hub) for the maintainers: bug reports and suggestions.
+//! What players send from the hub (playhorizon.dev/hub) for the maintainers: bug reports.
 //! roadmap/README.md documents it for Kira and the website.
 //!
 //! - `POST /hub/report`: a bug report, opened at once as a GitHub issue (labels `bug`, `from-website`) in
 //!   the template Kira's `/report` uses (`github`). Kept and tried again by the upkeep if GitHub fails.
-//! - `POST /hub/suggest`: a suggestion, into the queue. Never published: Kira relays it to the
-//!   maintainers' private channel.
-//! - `GET /hub/suggestions?after=<id>`: the queue for Kira, with the `HORIZON_TELEMETRY_HUB_TOKEN` bearer.
 //!
-//! Stored: reports and suggestions as their text, for `hub_keep_days`. Never an IP address.
+//! Roadmap suggestions come only from #horizon-ideas posts on Discord (Kira), not from here.
+//!
+//! Stored: reports as their text, for `hub_keep_days`. Never an IP address.
 use std::sync::Arc;
 
-use axum::extract::{Query, Request, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
-use axum::response::{IntoResponse, Response};
+use axum::extract::{Request, State};
+use axum::http::StatusCode;
+use axum::response::Response;
 use rusqlite::params;
-use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::hub::{answer, item_id, json_body, refuse};
+use crate::hub::{answer, json_body, refuse};
 use crate::store::Store;
 use crate::{App, github, take, utc_now};
 
@@ -43,11 +41,6 @@ const REPORT: &[Field] = &[
     Field("expected", true, 3..=2000, true),
     Field("version", false, 0..=60, false),
     Field("system", true, 3..=200, false),
-    Field("name", false, 0..=64, false),
-];
-const SUGGESTION: &[Field] = &[
-    Field("text", true, 10..=1000, true),
-    Field("item", false, 0..=48, false),
     Field("name", false, 0..=64, false),
 ];
 
@@ -127,21 +120,6 @@ impl Store {
         Ok((self.db.last_insert_rowid(), None))
     }
 
-    /// Suggestions after `after`, oldest first: `{id, text, item?, name?, created_at}`.
-    pub fn suggestions(&self, after: i64, limit: u32) -> rusqlite::Result<Vec<Value>> {
-        let mut statement = self.db.prepare(
-            "SELECT id, created, body FROM hub_queue WHERE kind = 'suggestion' AND id > ?1 ORDER BY id LIMIT ?2",
-        )?;
-        let rows = statement.query_map(params![after, limit], |r| {
-            let mut entry: Map<String, Value> =
-                serde_json::from_str(&r.get::<_, String>(2)?).unwrap_or_default();
-            entry.insert("id".into(), r.get::<_, i64>(0)?.into());
-            entry.insert("created_at".into(), r.get::<_, String>(1)?.into());
-            Ok(Value::Object(entry))
-        })?;
-        rows.collect()
-    }
-
     /// Reports whose issue isn't open yet, from `since` on: id and fields.
     pub fn unfiled(&self, since: u32) -> rusqlite::Result<Vec<(i64, Map<String, Value>)>> {
         let mut statement = self.db.prepare(
@@ -178,7 +156,7 @@ impl Store {
 }
 
 impl App {
-    /// The same for reports and suggestions, a much smaller bucket.
+    /// The same for bug reports, a much smaller bucket.
     fn allow_post(&self, req: &Request) -> bool {
         take(
             &self.hub_post_buckets,
@@ -225,7 +203,7 @@ impl App {
 /// What `receive` keeps: the entry's id, its issue if already opened, its fields.
 type Received = (i64, Option<String>, Map<String, Value>);
 
-/// Checks a report or a suggestion and queues it.
+/// Checks a report and queues it.
 async fn receive(
     app: &App,
     req: Request,
@@ -246,11 +224,6 @@ async fn receive(
         return Err(Box::new(thanks));
     }
     let entry = fields(&body, rules).map_err(|e| no(StatusCode::BAD_REQUEST, &e))?;
-    if let Some(item) = entry.get("item").and_then(Value::as_str)
-        && !item_id(item)
-    {
-        return Err(no(StatusCode::BAD_REQUEST, "item: a roadmap item id"));
-    }
     let today = (app.today)();
     let mut store = app.store();
     if store.queued_on(kind, today).unwrap_or(u32::MAX) >= per_day {
@@ -307,64 +280,4 @@ pub async fn report(State(app): State<Arc<App>>, req: Request) -> Response {
             )
         }
     }
-}
-
-/// `POST /hub/suggest` `{"text", "item"?, "name"?}`: 202 `{"id"}`.
-pub async fn suggest(State(app): State<Arc<App>>, req: Request) -> Response {
-    let per_day = app.config.hub_suggestions_per_day;
-    match receive(&app, req, "suggestion", SUGGESTION, per_day).await {
-        Ok((id, ..)) => answer(&app, StatusCode::ACCEPTED, json!({ "id": id })),
-        Err(response) => *response,
-    }
-}
-
-#[derive(Deserialize)]
-pub struct After {
-    after: Option<i64>,
-    limit: Option<u32>,
-}
-
-/// `GET /hub/suggestions?after=<id>&limit=100` with `Authorization: Bearer <HORIZON_TELEMETRY_HUB_TOKEN>`:
-/// `{"suggestions": [{"id", "text", "item"?, "name"?, "created_at"}]}`, oldest first. 404 when no token is
-/// set, 401 for a wrong one.
-pub async fn suggestions(
-    State(app): State<Arc<App>>,
-    headers: HeaderMap,
-    Query(after): Query<After>,
-) -> Response {
-    let Some(token) = app.config.hub_token.as_deref() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    let sent = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .unwrap_or("");
-    if !same(sent.as_bytes(), token.as_bytes()) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    let limit = after.limit.unwrap_or(100).clamp(1, 500);
-    let listed = app.store().suggestions(after.after.unwrap_or(0), limit);
-    match listed {
-        Ok(list) => (
-            [
-                (
-                    header::CONTENT_TYPE,
-                    HeaderValue::from_static("application/json"),
-                ),
-                (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
-            ],
-            json!({ "suggestions": list }).to_string(),
-        )
-            .into_response(),
-        Err(e) => {
-            eprintln!("horizon-telemetry-server: could not read the suggestions: {e}");
-            StatusCode::SERVICE_UNAVAILABLE.into_response()
-        }
-    }
-}
-
-/// Equal, in a time that doesn't depend on where they differ.
-fn same(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0, |diff, (x, y)| diff | (x ^ y)) == 0
 }

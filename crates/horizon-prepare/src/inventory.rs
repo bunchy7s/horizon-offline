@@ -110,7 +110,7 @@ pub fn inventory(jar: &Path) -> Result<Value, String> {
     let mut method_count = 0;
     for index in 0..archive.len() {
         let mut item = archive.by_index(index).map_err(|e| e.to_string())?;
-        let name = item.name().to_string();
+        let name = item.name().map_err(|e| e.to_string())?.into_owned();
         if !name.ends_with(".class") {
             continue;
         }

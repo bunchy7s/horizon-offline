@@ -347,17 +347,11 @@ pub fn sting(m: &mut Mob, who: Who, cx: &mut Cx) {
                 3 => 18,
                 _ => 0,
             };
-            if seconds > 0 {
-                cx.events.push(MobEvent::AttackPlayerWithEffect {
-                    amount,
-                    from,
-                    effect: "minecraft:poison",
-                    ticks: seconds * 20,
-                    amplifier: 0,
-                });
-            } else {
-                cx.events.push(MobEvent::AttackPlayer(amount, from));
-            }
+            cx.events.push(MobEvent::StingPlayer {
+                amount,
+                from,
+                poison_ticks: seconds * 20,
+            });
         }
         Who::Mob(id) => cx.events.push(MobEvent::AttackMob {
             target: id,
@@ -946,7 +940,7 @@ impl GoToHive {
         let close_enough = if closer_than(m, p, 3) { 1 } else { 2 };
         m.ai.nav.max_visited_multiplier = 10.0;
         let path = m.create_path_to(w, p, close_enough);
-        m.nav_move_to_path(path, 1.0);
+        m.nav_move_to_path(w, path, 1.0);
         m.ai.nav.path.as_ref().is_some_and(|path| path.reached)
     }
 }
@@ -1188,7 +1182,7 @@ impl Goal for Wander {
                 at[2].floor() as i32,
             ];
             let path = m.create_path_to(cx.w, p, 1);
-            m.nav_move_to_path(path, 1.0);
+            m.nav_move_to_path(cx.w, path, 1.0);
         }
     }
 }

@@ -151,7 +151,7 @@ impl Game<'_> {
                     6.0,
                     horizon_client::mobs::Damage {
                         kind: horizon_client::mobs::DamageKind::Magic,
-                        attacker: Some(horizon_client::mobs::Who::Mob(f.owner)),
+                        attacker: owner.map(horizon_client::mobs::Who::Mob),
                         from: Some(f.pos),
                     },
                 );

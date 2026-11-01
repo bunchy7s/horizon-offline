@@ -10,13 +10,15 @@ use super::{
     goals::{Cx, Goal, JUMP, LOOK, MOVE, goal_clone},
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 // Sulfur cube state (on top of `cube`'s `size`, `counter` jump delay,
 // `flag` aggressive, `flag2` was on ground, `vector[0]` direction):
 // `head` the swallowed block, `counter2` the fuse plus one (0 unprimed),
-// `ints[3]` the pickup timer, `scratch[1]` a fuse just lit (sound pending),
+// `ints[3]` the pickup timer, `scratch[1]` the sounds pending (1 a fuse just
+// lit, 2 a hit),
 // `scratch[2]` the push sound cooldown, `scratch[3]` from a bucket,
 // `point` the item it is after.
 pub const PICKUP_TIMER: i32 = 100;
@@ -246,6 +248,31 @@ pub fn swallowable(m: &Mob, item: &str) -> bool {
 pub fn has_body(m: &Mob) -> bool {
     m.extra.head.is_some()
 }
+
+#[cfg(test)]
+mod knockback_sync_tests {
+    use super::*;
+    use crate::mobs::{Mob, Species};
+    use std::sync::Arc;
+
+    /// `SulfurCube.knockback` sets `needsSync`, as `LivingEntity.knockback`
+    /// does, so a guest sees a cube with a block knocked about at once.
+    #[test]
+    fn a_knocked_cube_with_a_block_syncs_at_once() {
+        load_archetype_items(&HashMap::from([(
+            "minecraft:sulfur_cube_archetype/explosive".to_owned(),
+            HashSet::from(["minecraft:tnt".to_owned()]),
+        )]));
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = Species::SulfurCube;
+        let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
+        m.extra.head = Some("minecraft:tnt".into());
+        assert!(!m.needs_sync);
+        m.damage(5.0, Damage::player([2.0, 0.0, 0.0]));
+        assert!(m.velocity.x < 0.0, "velocity {:?}", m.velocity);
+        assert!(m.needs_sync);
+    }
+}
 pub fn archetype(m: &Mob) -> Option<&'static Archetype> {
     m.extra.head.as_deref().and_then(archetype_of)
 }
@@ -264,8 +291,135 @@ pub fn fuse(m: &Mob) -> i32 {
 pub fn primed(m: &Mob) -> bool {
     fuse(m) >= 0
 }
+/// `hurtServer`'s priming by a hit whose direct entity is a burning
+/// `AbstractArrow` (an arrow or a trident): a cube with a block that can
+/// explode lights its fuse, the long one.
+pub fn burning_arrow_hit(m: &mut Mob) -> bool {
+    has_body(m) && can_explode(m) && prime(m, false)
+}
+
+#[cfg(test)]
+mod burning_arrow_tests {
+    use super::*;
+    use crate::mobs::{Mob, Species};
+    use std::sync::Arc;
+
+    fn cube(head: Option<&str>) -> Mob {
+        load_archetype_items(&HashMap::from([(
+            "minecraft:sulfur_cube_archetype/explosive".to_owned(),
+            HashSet::from(["minecraft:tnt".to_owned()]),
+        )]));
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = Species::SulfurCube;
+        let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
+        m.extra.head = head.map(Into::into);
+        m
+    }
+
+    #[test]
+    fn a_burning_arrow_lights_the_long_fuse() {
+        let mut m = cube(Some("minecraft:tnt"));
+        assert!(burning_arrow_hit(&mut m));
+        let (fuse_ticks, _, _) = archetype(&m).and_then(|a| a.explosion).unwrap();
+        assert_eq!(fuse(&m), fuse_ticks);
+        assert!(m.invulnerable_flag);
+        // lit once: a second arrow leaves the fuse alone.
+        m.extra.counter2 -= 5;
+        assert!(!burning_arrow_hit(&mut m));
+        assert_eq!(fuse(&m), fuse_ticks - 5);
+    }
+
+    #[test]
+    fn a_burning_arrow_lights_only_an_explosive_block() {
+        for head in [None, Some("minecraft:dirt")] {
+            let mut m = cube(head);
+            assert!(!burning_arrow_hit(&mut m), "{head:?}");
+            assert!(!primed(&m) && !m.invulnerable_flag, "{head:?}");
+        }
+    }
+
+    /// the arrow's knock, then the fuse lit: the next tick plays
+    /// `entity.tnt.primed`, then the archetype's hit sound.
+    #[test]
+    fn a_knock_and_a_lit_fuse_both_sound() {
+        let mut events = Vec::new();
+        let ran = crate::mobs::world::with_test_world(&[], |w, _| {
+            let mut m = cube(Some("minecraft:tnt"));
+            m.damage(5.0, Damage::player([2.0, 0.0, 0.0]));
+            assert!(burning_arrow_hit(&mut m));
+            ai_step(&mut m, w, &mut events);
+        });
+        if !ran {
+            return; // needs the prepared 26.3 data
+        }
+        let sounds: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                MobEvent::Sound(id, ..) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let hit = archetype_of("minecraft:tnt").unwrap().hit_sound;
+        assert_eq!(sounds, ["entity.tnt.primed", hit]);
+    }
+}
+/// Client copy of `tickFuse`: count the fuse down for the renderer. The
+/// server alone explodes (`ai_step`); a guest never fires `Explode` here.
+pub fn client_tick(m: &mut Mob) {
+    if m.extra.counter2 > 1 {
+        m.extra.counter2 -= 1;
+    }
+}
 fn can_explode(m: &Mob) -> bool {
     archetype(m).is_some_and(|a| a.explosion.is_some()) && m.alive() && !primed(m)
+}
+
+#[cfg(test)]
+mod immune_tests {
+    use super::*;
+    use crate::mobs::{Mob, Species};
+    use std::sync::Arc;
+
+    fn cube(head: Option<&str>) -> Mob {
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = Species::SulfurCube;
+        let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
+        m.extra.head = head.map(Into::into);
+        m
+    }
+
+    /// `#sulfur_cube_with_block_immune_to` has these too: a cube with a block
+    /// takes none of them, a cube without one does.
+    #[test]
+    fn a_cube_with_a_block_shrugs_off_the_whole_tag() {
+        for kind in [
+            DamageKind::FallingAnvil,
+            DamageKind::FallingBlock,
+            DamageKind::FallingStalactite,
+            DamageKind::DryOut,
+            DamageKind::Spit,
+            DamageKind::Stalagmite,
+            DamageKind::SulfurCubeHot,
+            DamageKind::WindCharge,
+        ] {
+            let mut m = cube(Some("minecraft:dirt"));
+            let health = m.health;
+            assert!(!m.damage(1.0, Damage::of(kind)), "{kind:?}");
+            assert_eq!(m.health, health, "{kind:?}");
+            let mut m = cube(None);
+            assert!(m.damage(1.0, Damage::of(kind)), "{kind:?}");
+            assert_eq!(m.health, health - 1.0, "{kind:?}");
+        }
+    }
+
+    /// outside the tag (`magic`) a cube with a block is hurt.
+    #[test]
+    fn a_cube_with_a_block_takes_magic() {
+        let mut m = cube(Some("minecraft:dirt"));
+        let health = m.health;
+        assert!(m.damage(1.0, Damage::of(DamageKind::Magic)));
+        assert_eq!(m.health, health - 1.0);
+    }
 }
 pub fn register(m: &mut Mob) {
     use super::cube;
@@ -335,12 +489,23 @@ pub fn sounds(m: &Mob) -> [&'static str; 3] {
         ["", "entity.sulfur_cube.hurt", "entity.sulfur_cube.death"]
     }
 }
-/// `primeTime`: light the fuse (short when an explosion did it).
+thread_local! {
+    /// The `tnt_explodes` game rule of the level this thread ticks, which
+    /// `primeTime` and `tickFuse` read (shared by the game each tick and on
+    /// a rule change).
+    static TNT_EXPLODES: Cell<bool> = const { Cell::new(true) };
+}
+/// Share the `tnt_explodes` rule with this thread's sulfur cubes.
+pub fn set_tnt_explodes(on: bool) {
+    TNT_EXPLODES.set(on);
+}
+/// `primeTime`: light the fuse (short when an explosion did it), only
+/// while `tnt_explodes` is on.
 pub fn prime(m: &mut Mob, imminent: bool) -> bool {
     let Some((fuse, _, _)) = archetype(m).and_then(|a| a.explosion) else {
         return false;
     };
-    if !m.alive() || primed(m) {
+    if !m.alive() || !TNT_EXPLODES.get() || primed(m) {
         return false;
     }
     let t = if imminent {
@@ -350,11 +515,12 @@ pub fn prime(m: &mut Mob, imminent: bool) -> bool {
     };
     m.invulnerable_flag = true;
     m.extra.counter2 = t + 1;
-    m.extra.scratch[1] = 1;
+    m.extra.scratch[1] |= 1;
     true
 }
-/// `hurtServer`: fire or explosions light an explosive cube; with a block
-/// it shrugs off blows, falls and explosions and is only knocked about.
+/// `hurtServer`: fire or `#is_explosion` (a firework rocket's burst too)
+/// light an explosive cube; with a block it shrugs off blows, falls and
+/// explosions and is only knocked about.
 pub fn accepts_damage(m: &mut Mob, source: &Damage, amount: f32) -> bool {
     if !has_body(m) {
         return true;
@@ -362,7 +528,7 @@ pub fn accepts_damage(m: &mut Mob, source: &Damage, amount: f32) -> bool {
     if can_explode(m) && !primed(m) {
         if source.is_fire() {
             prime(m, false);
-        } else if source.kind == DamageKind::Explosion {
+        } else if matches!(source.kind, DamageKind::Explosion | DamageKind::Fireworks) {
             prime(m, true);
         }
     }
@@ -375,72 +541,215 @@ pub fn accepts_damage(m: &mut Mob, source: &Damage, amount: f32) -> bool {
             | DamageKind::Arrow
             | DamageKind::Thrown
             | DamageKind::Explosion
+            | DamageKind::Fireworks
             | DamageKind::Fall
             | DamageKind::Sting
             | DamageKind::Cactus
             | DamageKind::Freeze
             | DamageKind::SweetBerryBush
+            | DamageKind::HotFloor
+            | DamageKind::FallingAnvil
+            | DamageKind::FallingBlock
+            | DamageKind::FallingStalactite
+            | DamageKind::DryOut
+            | DamageKind::Spit
+            | DamageKind::Stalagmite
+            | DamageKind::SulfurCubeHot
+            | DamageKind::WindCharge
     );
     if immune {
-        if let Some(from) = source.from {
-            knockback(m, from, amount);
+        // `dealDefaultKnockback`, unless the damage type is tagged no_knockback.
+        if !source.no_knockback() {
+            deal_default_knockback(m, source, amount);
         }
         return false;
     }
     true
 }
-/// `SulfurCube.knockback` with a block: the archetype's powers, turned by
-/// where the blow came from (the attacker taken to aim at its centre).
-pub fn knockback(m: &mut Mob, from: [f64; 3], damage: f32) -> bool {
-    let Some(a) = archetype(m) else {
-        return false;
-    };
-    let (h0, v0) = (a.horizontal_power, a.vertical_power);
-    let (xd, zd) = (from[0] - m.position.x, from[2] - m.position.z);
+/// `Vec2.rotate`: `Mth.sin`/`Mth.cos` of the angle, in floats.
+fn rotate(x: f32, y: f32, angle: f64) -> (f32, f32) {
+    let (cosine, sine) = (
+        horizon_core::geometry::trig::cos(angle),
+        horizon_core::geometry::trig::sin(angle),
+    );
+    (x * cosine - y * sine, y * cosine + x * sine)
+}
+fn normalize(v: [f64; 3]) -> [f64; 3] {
+    let length = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if length < f64::from(1.0e-5_f32) {
+        [0.0; 3]
+    } else {
+        [v[0] / length, v[1] / length, v[2] / length]
+    }
+}
+/// `SulfurCube.applyHorizontalHitAngleScale`: the knock's direction turned by how far the
+/// attacker's aim is from the cube, in the horizontal plane, times the scale.
+fn horizontal_hit_angle_scale(
+    scale: f32,
+    angle: (f32, f32),
+    eye: [f64; 3],
+    aim: [f64; 3],
+    center: [f64; 3],
+) -> (f32, f32) {
+    let to_target = normalize([center[0] - eye[0], center[1] - eye[1], center[2] - eye[2]]);
+    let diff = horizon_core::jmath::atan2(
+        aim[0] * to_target[2] - aim[2] * to_target[0],
+        aim[0] * to_target[0] + aim[2] * to_target[2],
+    ) as f32;
+    rotate(angle.0, angle.1, f64::from(diff * scale))
+}
+/// `SulfurCube.applyVerticalHitAnglePowerTransfer`: power moved between the horizontal and the
+/// vertical launch by where the attacker aims between the cube's top and bottom.
+fn vertical_hit_angle_power_transfer(
+    scale: f32,
+    powers: (f32, f32),
+    eye: [f64; 3],
+    aim: [f64; 3],
+    center: [f64; 3],
+    height: f32,
+) -> (f32, f32) {
+    let half = f64::from(0.5 * height);
+    let top = normalize([
+        center[0] - eye[0],
+        center[1] + half - eye[1],
+        center[2] - eye[2],
+    ]);
+    let bottom = normalize([
+        center[0] - eye[0],
+        center[1] - half - eye[1],
+        center[2] - eye[2],
+    ]);
+    // Mth.clampedMap(aim.y, top.y, bottom.y, -1, 1): clampedLerp(inverseLerp(..), -1, 1).
+    let t = (aim[1] - top[1]) / (bottom[1] - top[1]);
+    let factor = if t < 0.0 {
+        -1.0
+    } else if t > 1.0 {
+        1.0
+    } else {
+        -1.0 + t * 2.0
+    } as f32;
+    let mut ratio = (factor * scale).abs();
+    if factor < 0.0 {
+        ratio = -ratio;
+    }
+    (powers.0 * (1.0 - ratio), powers.1 * (1.0 + ratio))
+}
+/// What `SulfurCube.knockback` adds to the cube's movement for a blow of `damage`: the
+/// archetype's `powers` (horizontal, vertical) turned by where the blow came from (`from`, the
+/// direct entity: the direction of the knock) and, with the causing entity's `aim` (eye, view
+/// direction), by where it points; the rotation by height uses its feet (`attacker_feet`).
+#[allow(clippy::too_many_arguments)]
+fn launch(
+    powers: (f32, f32),
+    resistance: f32,
+    damage: f32,
+    (xd, zd): (f64, f64),
+    attacker_feet: [f64; 3],
+    position: [f64; 3],
+    center: [f64; 3],
+    height: f32,
+    aim: Option<([f64; 3], [f64; 3])>,
+) -> [f64; 3] {
+    let (h0, v0) = powers;
+    let (mut xd, mut zd) = (xd as f32, zd as f32);
+    let (mut h, mut v) = (h0, v0);
+    if let Some((eye, look)) = aim {
+        let look = normalize(look);
+        (xd, zd) = horizontal_hit_angle_scale(1.6, (xd, zd), eye, look, center);
+        (h, v) = vertical_hit_angle_power_transfer(0.5, (h, v), eye, look, center, height);
+    }
     // applyVerticalPositionAnglePowerRotation from feet to feet.
     let d = [
-        m.position.x - from[0],
-        m.position.y - from[1],
-        m.position.z - from[2],
+        position[0] - attacker_feet[0],
+        position[1] - attacker_feet[1],
+        position[2] - attacker_feet[2],
     ];
-    let angle = (-d[1]).atan2((d[0] * d[0] + d[2] * d[2]).sqrt()) as f32;
-    let rot = -angle * 0.8;
-    let (s, c) = (rot.sin(), rot.cos());
-    let (mut h, mut v) = (h0 * c - v0 * s, h0 * s + v0 * c);
+    let angle = horizon_core::jmath::atan2(-d[1], (d[0] * d[0] + d[2] * d[2]).sqrt()) as f32;
+    let (mut h, mut v) = rotate(h, v, f64::from(-angle * 0.8));
     let hr = if h0 > 0.0 { h.abs() / h0 } else { 0.0 };
     let vr = if v0 > 0.0 { v.abs() / v0 } else { 0.0 };
     let max = hr.max(vr);
     if max > 1.0 {
-        h /= max;
-        v /= max;
+        h *= 1.0 / max;
+        v *= 1.0 / max;
     }
     let k = damage.sqrt();
-    let resist = a.knockback_resistance.clamp(0.0, 1.0) as f32;
-    h *= k * (1.0 - resist) * 0.4;
-    v *= k * (1.0 - resist);
+    h *= k;
+    v *= k;
+    h *= 1.0 - resistance;
+    v *= 1.0 - resistance;
+    h *= 0.4;
     let (h, v) = (h.clamp(-128.0, 128.0), v.clamp(-128.0, 128.0));
-    let len = (xd * xd + zd * zd).sqrt().max(1.0e-4);
+    let (xd, zd) = (f64::from(xd), f64::from(zd));
+    let len = (xd * xd + zd * zd).sqrt();
+    let (kx, kz) = if len < f64::from(1.0e-5_f32) {
+        (0.0, 0.0)
+    } else {
+        (xd / len * f64::from(h), zd / len * f64::from(h))
+    };
+    [-kx, f64::from(v) * 1.2, -kz]
+}
+/// `LivingEntity.dealDefaultKnockback` for a cube with a block: from where the blow came
+/// (`source.getSourcePosition()`) with `knockback(0.4, ...)`. A source with a causing entity goes
+/// through `SulfurCube.knockback`; one with none (a cactus, a fall) through `super.knockback`.
+fn deal_default_knockback(m: &mut Mob, source: &Damage, damage: f32) {
+    // A projectile knocks the way it travelled (`calculateHorizontalHurtKnockbackDirection`),
+    // else from the source's position.
+    let (xd, zd) = match m.projectile_motion.take() {
+        Some([x, z]) => (-x, -z),
+        None => source
+            .from
+            .map_or((0.0, 0.0), |f| (f[0] - m.position.x, f[2] - m.position.z)),
+    };
+    if source.attacker.is_some() {
+        knockback(m, (xd, zd), source.from, damage);
+    } else {
+        m.knockback(f64::from(0.4_f32), xd, zd);
+    }
+}
+/// `SulfurCube.knockback` with a block and a causing entity: the archetype's powers, turned by
+/// where the blow came from and by the entity's aim (`Mob::attacker_aim`, from the game).
+pub fn knockback(m: &mut Mob, direction: (f64, f64), from: Option<[f64; 3]>, damage: f32) -> bool {
+    let Some(a) = archetype(m) else {
+        return false;
+    };
+    let aim = m.attacker_aim.take();
+    let from = from.unwrap_or([m.position.x, m.position.y, m.position.z]);
+    let delta = launch(
+        (a.horizontal_power, a.vertical_power),
+        a.knockback_resistance.clamp(0.0, 1.0) as f32,
+        damage,
+        direction,
+        aim.map_or(from, |a| a.feet),
+        [m.position.x, m.position.y, m.position.z],
+        m.center(),
+        m.height(),
+        aim.map(|a| (a.eye, a.look)),
+    );
     m.velocity = Vec3::new(
-        m.velocity.x - xd / len * f64::from(h),
-        m.velocity.y + f64::from(v) * 1.2,
-        m.velocity.z - zd / len * f64::from(h),
+        m.velocity.x + delta[0],
+        m.velocity.y + delta[1],
+        m.velocity.z + delta[2],
     );
     // The hit sound plays on the next tick (no event queue here).
     m.extra.scratch[1] = 2;
+    // needsSync: the push reaches the other players at once.
+    m.needs_sync = true;
     true
 }
 /// `SulfurCube.tick` and `customServerAiStep` additions after the cube's
 /// own: the fuse, the timers, a swallowed block's stillness, buoyancy and
 /// facing, growing up, and players pushing it.
 pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
-    match m.extra.scratch[1] {
-        1 => events.push(MobEvent::Sound("entity.tnt.primed", m.center(), 1.0, 1.0)),
-        2 => {
-            if let Some(a) = archetype(m) {
-                events.push(MobEvent::Sound(a.hit_sound, m.center(), 1.0, 1.0));
-            }
-        }
-        _ => {}
+    // primeTime's sound, then knockback's: a burning arrow plays both.
+    let pending = m.extra.scratch[1];
+    if pending & 1 != 0 {
+        events.push(MobEvent::Sound("entity.tnt.primed", m.center(), 1.0, 1.0));
+    }
+    if pending & 2 != 0
+        && let Some(a) = archetype(m)
+    {
+        events.push(MobEvent::Sound(a.hit_sound, m.center(), 1.0, 1.0));
     }
     m.extra.scratch[1] = 0;
     // tickFuse.
@@ -450,11 +759,26 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if fuse(m) == 0
         && let Some((_, power, _)) = archetype(m).and_then(|a| a.explosion)
     {
-        events.push(MobEvent::Explode(
-            [m.position.x, m.position.y + 0.0625, m.position.z],
-            power,
-            m.species(),
-        ));
+        // With `tnt_explodes` off the cube still goes, without a blast.
+        if TNT_EXPLODES.get() {
+            // `level.explode(this, ...)`: the cube is the blast's source and its
+            // causing entity, so its entity query leaves it out.
+            let name = match &m.custom_name {
+                Some(name) => crate::text::Text::literal(name.clone()),
+                None => crate::text::Text::translate("entity.minecraft.sulfur_cube", &[]),
+            };
+            events.push(MobEvent::ExplosionSource {
+                mob: m.id,
+                charged: false,
+                name,
+                in_water: m.fluids.in_water,
+            });
+            events.push(MobEvent::Explode(
+                [m.position.x, m.position.y + 0.0625, m.position.z],
+                power,
+                m.species(),
+            ));
+        }
         m.removed = true;
         return;
     }
@@ -702,5 +1026,274 @@ pub fn from_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
     m.extra.counter2 = int("fuse").unwrap_or(-1).max(-1) + 1;
     if primed(m) {
         m.invulnerable_flag = true;
+    }
+}
+
+#[cfg(test)]
+mod tnt_rule_tests {
+    use super::*;
+    use crate::mobs::{Damage, DamageKind, Mob, Species};
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    fn tnt_cube() -> Mob {
+        load_archetype_items(&HashMap::from([(
+            "minecraft:sulfur_cube_archetype/explosive".to_owned(),
+            HashSet::from(["minecraft:tnt".to_owned()]),
+        )]));
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = Species::SulfurCube;
+        let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
+        m.extra.head = Some("minecraft:tnt".into());
+        m
+    }
+
+    #[test]
+    fn no_fuse_is_lit_while_tnt_does_not_explode() {
+        // primeTime checks the tnt_explodes rule: no fuse, no invulnerability,
+        // and no draw for the short fuse.
+        let mut m = tnt_cube();
+        let state = m.random.state();
+        set_tnt_explodes(false);
+        m.damage(5.0, Damage::of(DamageKind::Explosion));
+        let lit = prime(&mut m, true);
+        let (unprimed, vulnerable) = (!primed(&m), !m.invulnerable_flag);
+        set_tnt_explodes(true);
+        assert!(!lit && unprimed && vulnerable);
+        assert_eq!(m.random.state(), state);
+        assert!(prime(&mut m, false));
+        assert!(m.invulnerable_flag);
+    }
+
+    #[test]
+    fn a_fuse_running_out_while_tnt_does_not_explode_makes_no_blast() {
+        // tickFuse: the blast (and its source) only with tnt_explodes, the
+        // discard either way.
+        let mut events = Vec::new();
+        let ran = crate::mobs::world::with_test_world(&[], |w, _| {
+            let mut m = tnt_cube();
+            assert!(prime(&mut m, false));
+            m.extra.counter2 = 2; // fuse 1, 0 after this tick
+            set_tnt_explodes(false);
+            ai_step(&mut m, w, &mut events);
+            set_tnt_explodes(true);
+            assert!(m.removed);
+        });
+        if !ran {
+            return; // needs the prepared 26.3 data
+        }
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, MobEvent::Explode(..) | MobEvent::ExplosionSource { .. })),
+            "{events:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod fuse_anim_tests {
+    use super::*;
+    use crate::mobs::{Mob, Species};
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    fn cube() -> Mob {
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = Species::SulfurCube;
+        Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0)
+    }
+
+    #[test]
+    fn a_primed_cube_is_still_knocked_about() {
+        // SulfurCube.hurtServer runs the immune knockback before
+        // LivingEntity's invulnerability check, and priming makes it invulnerable.
+        load_archetype_items(&HashMap::from([(
+            "minecraft:sulfur_cube_archetype/explosive".to_owned(),
+            HashSet::from(["minecraft:tnt".to_owned()]),
+        )]));
+        let mut m = cube();
+        m.extra.head = Some("minecraft:tnt".into());
+        assert!(prime(&mut m, false));
+        assert!(m.invulnerable_flag);
+        let (health, fuse_left) = (m.health, fuse(&m));
+        m.damage(5.0, crate::mobs::Damage::player([2.0, 0.0, 0.0]));
+        assert!(m.velocity.x < 0.0, "velocity {:?}", m.velocity);
+        assert_eq!(m.health, health);
+        assert_eq!(fuse(&m), fuse_left);
+    }
+
+    #[test]
+    fn client_fuse_counts_down_without_going_negative() {
+        let mut m = cube();
+        m.extra.counter2 = 5; // fuse() == 4
+        assert!(primed(&m));
+        client_tick(&mut m);
+        assert_eq!(fuse(&m), 3);
+        for _ in 0..10 {
+            client_tick(&mut m);
+        }
+        // Stops at counter2 == 1 → fuse 0 (primed until the server removes it).
+        assert_eq!(m.extra.counter2, 1);
+        assert_eq!(fuse(&m), 0);
+    }
+
+    #[test]
+    fn a_rockets_burst_primes_a_tnt_cube_that_shrugs_it_off() {
+        // `fireworks` is in #is_explosion, so it lights the short fuse
+        // (`PrimedTnt.getRandomShortFuse`: 15 to 44 of 120 ticks), and so in
+        // #sulfur_cube_with_block_immune_to; it is not in #no_knockback.
+        load_archetype_items(&HashMap::from([(
+            "minecraft:sulfur_cube_archetype/explosive".to_owned(),
+            HashSet::from(["minecraft:tnt".to_owned()]),
+        )]));
+        let source = Damage::fireworks(Some(crate::mobs::Who::Player), [2.0, 0.0, 0.0]);
+        assert_eq!(source.kind, DamageKind::Fireworks);
+        assert!(!source.no_knockback());
+        let mut m = cube();
+        m.extra.head = Some("minecraft:tnt".into());
+        let health = m.health;
+        m.damage(7.0, source);
+        assert!((15..45).contains(&fuse(&m)), "fuse {}", fuse(&m));
+        assert_eq!(m.health, health);
+        assert!(m.velocity.x < 0.0);
+        // Without a block it takes the hit, records it and is knocked away
+        // from the rocket.
+        let mut m = cube();
+        m.damage(1.0, source);
+        assert_eq!(m.health, health - 1.0);
+        assert_eq!(
+            m.last_damage.map(|(d, _)| d.kind),
+            Some(DamageKind::Fireworks)
+        );
+        assert!(m.velocity.x < 0.0);
+    }
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::launch;
+
+    /// What vanilla 26.3's `SulfurCube.knockback` adds to the movement, computed by running its
+    /// three private helpers' bodies on the real `Vec2`, `Vec3` and `Mth` classes: four blows
+    /// with the attacker at the blow's position (a melee hit), one with no aim (an attacker that
+    /// gives none) and two from an arrow, whose position is where the knock comes from while
+    /// the owner's feet give the rotation by height.
+    #[test]
+    fn the_launch_follows_the_vanilla_helpers() {
+        struct Case {
+            powers: (f32, f32),
+            resistance: f32,
+            damage: f32,
+            /// The direct entity's position.
+            from: [f64; 3],
+            /// Its horizontal motion, if it is a projectile.
+            motion: Option<[f64; 2]>,
+            attacker_feet: [f64; 3],
+            position: [f64; 3],
+            aim: Option<([f64; 3], [f64; 3])>,
+            expected: [f64; 3],
+        }
+        let height = 0.5;
+        let cases = [
+            Case {
+                powers: (1.0, 0.6),
+                resistance: 0.0,
+                damage: 5.0,
+                from: [0.5, 64.0, 0.5],
+                motion: None,
+                attacker_feet: [0.5, 64.0, 0.5],
+                position: [3.5, 64.0, 0.5],
+                aim: Some(([0.5, 65.62, 0.5], [1.0, -0.1, 0.0])),
+                expected: [0.8944272398948669, 0.536656379699707, -0.0],
+            },
+            Case {
+                powers: (1.0, 0.6),
+                resistance: 0.25,
+                damage: 8.0,
+                from: [0.5, 64.0, 0.5],
+                motion: None,
+                attacker_feet: [0.5, 64.0, 0.5],
+                position: [3.5, 64.0, 1.5],
+                aim: Some(([0.5, 65.62, 0.5], [0.95, -0.3, 0.2])),
+                expected: [0.7428210177564502, 0.5091168880462646, 0.41014247554144134],
+            },
+            Case {
+                powers: (2.0, 1.0),
+                resistance: 0.0,
+                damage: 6.0,
+                from: [10.5, 70.0, -3.5],
+                motion: None,
+                attacker_feet: [10.5, 70.0, -3.5],
+                position: [7.5, 64.0, -2.0],
+                aim: Some(([10.5, 71.62, -3.5], [-0.5, -0.7, 0.4])),
+                expected: [-1.1930282398964365, -2.939387798309326, 0.15109800367878837],
+            },
+            Case {
+                powers: (1.5, 0.8),
+                resistance: 0.5,
+                damage: 4.0,
+                from: [0.5, 64.0, 0.5],
+                motion: None,
+                attacker_feet: [0.5, 64.0, 0.5],
+                position: [2.5, 64.0, 0.5],
+                aim: None,
+                expected: [0.6000000238418579, 0.9600000143051147, -0.0],
+            },
+            Case {
+                powers: (1.0, 0.6),
+                resistance: 0.0,
+                damage: 6.0,
+                from: [1.5, 64.9, 0.5],
+                motion: Some([0.9, 0.1]),
+                attacker_feet: [-6.5, 64.0, 0.5],
+                position: [3.5, 64.0, 0.5],
+                aim: Some(([-6.5, 65.62, 0.5], [1.0, -0.05, 0.1])),
+                expected: [0.9786302987781631, 0.5878775954246521, -0.04777874198383045],
+            },
+            Case {
+                powers: (2.0, 1.0),
+                resistance: 0.25,
+                damage: 5.0,
+                from: [-2.5, 66.0, 3.5],
+                motion: Some([-0.7, 0.4]),
+                attacker_feet: [-9.5, 64.0, 6.5],
+                position: [1.5, 64.0, -0.5],
+                aim: Some(([-9.5, 65.62, 6.5], [0.8, -0.2, -0.5])),
+                expected: [-0.38538593044563885, 2.012461280822754, 0.22688699055044273],
+            },
+        ];
+        for (i, c) in cases.into_iter().enumerate() {
+            // The box centre: the feet position plus half the height.
+            let center = [
+                c.position[0],
+                c.position[1] + f64::from(height) / 2.0,
+                c.position[2],
+            ];
+            // dealDefaultKnockback: a projectile knocks the way it travelled, else away from the
+            // source's position.
+            let direction = match c.motion {
+                Some([x, z]) => (-x, -z),
+                None => (c.from[0] - c.position[0], c.from[2] - c.position[2]),
+            };
+            let got = launch(
+                c.powers,
+                c.resistance,
+                c.damage,
+                direction,
+                c.attacker_feet,
+                c.position,
+                center,
+                height,
+                c.aim,
+            );
+            for axis in 0..3 {
+                assert!(
+                    (got[axis] - c.expected[axis]).abs() < 1.0e-9,
+                    "case {i} axis {axis}: {got:?} against {:?}",
+                    c.expected
+                );
+            }
+        }
     }
 }

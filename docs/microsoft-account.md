@@ -117,7 +117,21 @@ one is selected. "Sign out" deletes the account's secrets from the keychain.
   keychain, one item per account: Keychain on macOS, Credential Manager on Windows, the Secret
   Service (GNOME Keyring, KWallet) on Linux. Service name `dev.playhorizon.launcher`, account = the
   Minecraft UUID. Credential Manager takes at most 2560 bytes per item, which the secrets of a sign-in
-  exceed: on macOS and Windows a longer secret is split over the items `<uuid>`, `<uuid>.1`, `<uuid>.2`...
+  exceed: on Windows a longer secret is split over the items `<uuid>`, `<uuid>.1`, `<uuid>.2`... The
+  Keychain has no such limit, and every item is a consent prompt for a launcher signature it doesn't
+  know yet, so on macOS a secret is one item (#4912); pieces older launchers left fold into it on the
+  first read, and launchers that still split read a merged item as its first piece. A write or a
+  clean-up delete the store refuses puts the old secret back: on Windows new pieces in front of old
+  ones would read back as no secret, and the account would be signed out at the next start; on macOS
+  a merged item beside leftover pieces would read as a longer secret that doesn't parse.
+- **Windows: "Windows Credential Manager is full" (Windows error 8, #4313, #4366).** Credential
+  Manager refuses every new item with `ERROR_NOT_ENOUGH_MEMORY` once the player's store reaches an
+  undocumented total size, whatever the item's size; it is not the computer's memory. The Xbox app
+  and the Minecraft Launcher are known to leave hundreds of `XblGrts…` and `Xbl|…` items there. The
+  launcher says so and nothing is saved; the player opens Credential Manager (Start menu) → Windows
+  Credentials, removes entries they no longer use (`cmdkey /list` in a terminal lists them), and
+  signs in again. Removing an entry can sign the app that made it out. The launcher never deletes
+  other apps' items.
 - `accounts.json` in the launcher's data folder keeps only public data: UUID, name, skin URL, which
   account is selected. Never a token.
 - No keychain available (a Linux box without a Secret Service, a locked keychain): sign-in still
@@ -125,6 +139,59 @@ one is selected. "Sign out" deletes the account's secrets from the keychain.
   have to sign in again next time" (it never falls back to a plain file).
 - Tokens never appear in logs, errors, `horizon-launcher` CLI output, MCP results or crash reports.
   Requests are logged by endpoint name only.
+
+## Account status and renewal
+
+Settings shows each account's current authentication status. “Ready for online play” means
+its saved access token is not near expiry and its last ownership check succeeded; service
+revocation can only be discovered by a later request. “Needs refresh” means its access token
+has an hour or less left. On launcher startup these due sessions are renewed in the background;
+Play also keeps its existing ownership and renewal checks. Fresh tokens are not renewed on a
+startup status check.
+
+**Refresh** explicitly renews an account even when its access token is fresh. Microsoft
+rejecting the refresh credential marks the account **Sign in again** until a successful browser
+sign-in replaces it. A network outage offers retry rather than discarding the account or
+claiming it requires a full login. Unreadable keychain data is never overwritten by refresh.
+If Microsoft rotates its refresh credential before Xbox/Minecraft fails, the rotated credential
+is still saved so another attempt can recover.
+
+`horizon-launcher account refresh NAME_OR_UUID` exposes the same operation (MCP:
+`account_refresh`). `account list --json` includes public authentication status and token
+expiry, never tokens. `account refresh --json` returns a status object, including when renewal
+needs attention; callers inspect `state` rather than treating transport success as an online
+session. Inspection, refresh and sign-out run off the window's drawing thread. Credential
+operations are serialized in-process and between launchers using the same launcher data folder.
+
+The reusable `account::session` API has no GPUI dependency. Keychain reads and browser sign-in
+remain owned by the launcher. A running game asks it for a renewed session through the CLI:
+the launcher passes its own path to the game as `HORIZON_LAUNCHER_EXE`, and
+`account session NAME_OR_UUID --json` renews that account and returns a new read-once session
+file (`{"session_file"}`), or the public status (`{"authentication"}`) when the account needs a
+browser sign-in or a retry. `account sign-in --for NAME_OR_UUID` is the targeted sign-in below,
+from the command line: it prints the link and code, refuses another Microsoft account, and
+leaves who plays unchanged. `account session` is not an MCP tool: its file holds a token, and
+only the game reads it. Renewing in the launcher does not change the token a running game
+already holds until the game asks.
+
+### Profile heads, progress, and targeted re-sign-in
+
+Microsoft accounts show their public Minecraft profile head in Settings, the selected-account
+chip, and the account switcher. Skins are fetched on workers and cached by their texture URL
+under `profile-heads/` in launcher data. Changing the skin invalidates that image; an unavailable
+image uses the UUID's default skin from installed resources, or a neutral placeholder when
+those resources are absent. The cache contains public images, never authentication tokens.
+
+Account operations report the actual stage: waiting for account access, reading the keychain,
+renewing the Microsoft sign-in, Xbox Live, getting a Minecraft session, checking ownership,
+loading the profile, and saving. A browser flow separately says it is waiting for the player.
+Progress is public metadata and does not expose credentials through the UI or MCP.
+
+**Sign in again** on an account row targets that exact Minecraft UUID. The browser instructions
+name the expected player. Signing in to a different account is rejected before storing its
+credentials or adding/selecting that identity. Retry keeps the same target; Cancel leaves the
+saved account alone. Successful re-sign-in restores that account without changing the player
+or offline name currently selected for Play. Adding a new account remains a separate action.
 
 ## Handing the session to the game
 
@@ -138,6 +205,8 @@ machine can read it in the process list. Horizon keeps it out of argv:
   A file older than two minutes is refused (and deleted), so a stale file can't be replayed.
 - Without a session file the game is offline as today (`--name`, offline UUID).
 - `HORIZON_SESSION_FILE` is the same as `--session-file` (development and harnesses).
+- `--session-stdin` takes the same JSON on standard input instead, so nothing touches the disk (for other
+  launchers: [the Launch API](api/launch.md)).
 
 ## Online-mode login (game)
 
@@ -191,16 +260,28 @@ player renderer. Until a skin arrives the default skin for the UUID shows (as to
 26.3's dedicated servers default to `enforce-secure-profile=true`. A client without a chat session
 can join and play, but every chat message and signed command argument is refused with "Chat
 disabled due to missing profile public key. Please try reconnecting." (`SignedMessageChain.Decoder.unsigned`).
-To chat on such servers the game will:
+To chat on such servers the game (`auth.rs`, `game/remote_chat.rs`, `horizon_protocol::secure_chat`):
 
-- fetch the profile key pair from the services `player/getCertificates` endpoint (Minecraft token);
-- send `ServerboundChatSessionUpdatePacket` (random session UUID, key expiry, public key, Mojang's
-  key signature) after joining;
-- sign each chat message and signable command argument with SHA256withRSA over vanilla's
-  `SignedMessageBody` layout and keep the last-seen message tracker and acknowledgements.
+- fetches the profile key pair from the services `player/getCertificates` endpoint with the Minecraft
+  token, on a background thread at start and on each join (AccountProfileKeyPairManager): the PKCS#8
+  private key, the X.509 public key, `publicKeySignatureV2`, `expiresAt` and `refreshedAfter`. Like the
+  token, the pair stays in memory (vanilla's `profilekeys/` file is not written). Past `refreshedAfter` a
+  new pair is fetched (checked at most hourly while playing, and on every join); a failed fetch keeps the
+  old pair and tries again an hour later;
+- sends `ServerboundChatSessionUpdatePacket` (random session UUID, key expiry, public key, Mojang's
+  key signature) after each login packet, and again when the pair is renewed, only when the server
+  plays the account under its own profile id (`isLocalPlayer`): an offline-mode server's offline id
+  gets no session, so chat stays unsigned there as before;
+- signs each chat message and each message argument of a command (`SignableCommand.of` over the
+  server's command tree, e.g. `/msg`'s `message`) with SHA256withRSA over vanilla's
+  `PlayerChatMessage.updateSignature` layout, one chain link each, and keeps the last-seen tracker
+  (`LastSeenMessagesTracker`: the 20-message window, offsets, checksums, a `ServerboundChatAckPacket`
+  past 64) and the 128-entry signature cache that unpacks other players' last-seen lists.
 
-Until part d lands, Horizon joins online servers but chat works only where
-`enforce-secure-profile=false` (or the server can't validate keys).
+`tools/secure_chat_client_e2e.py` checks it against vanilla 26.3's server with a mock of the services
+that issues certificates: online mode with `enforce-secure-profile=true` (signed chat logged as secure,
+a `/msg` whisper delivered, a message flushed from Chat Delay still counted as seen, nothing refused) and
+offline mode (unsigned chat, as before). Other players' signatures are not verified yet.
 
 ## Harnesses
 

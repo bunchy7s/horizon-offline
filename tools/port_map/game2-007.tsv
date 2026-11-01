@@ -7,10 +7,10 @@ AbstractBoat.tickBubbleColumn	missing		player: a boat in a bubble column does no
 AbstractBoat.handleEntityEvent	missing		player: the bubble column effect event (71 or 72) never reaches a boat, same gap as the bubble column lift
 AbstractBoat.handleBubbleColumnEffect	missing		player: a boat in an up or down bubble column keeps its speed; Horizon never changes its vertical velocity from a column
 AbstractBoat.setPaddleState	inline	crates/horizon-client/src/game/boats.rs::Game::tick_boat	paddle flags are set from the rider's input inside the controlled branch
-AbstractBoat.getLeashOffset	missing		player: a lead can be tied to a boat in vanilla (AbstractBoat is Leashable); Horizon leads only mobs
+AbstractBoat.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::Holder::boat_leash_offset	1.375 by 0.5625 for a boat or raft
 AbstractBoat.getStatus	port	crates/horizon-client/src/game/boats.rs::Game::boat_status	in air, in water, under water or on land
 AbstractBoat.getWaterLevelAbove	port	crates/horizon-client/src/game/boats.rs::Game::water_level_above	
-AbstractBoat.getGroundFriction	inline	crates/horizon-client/src/game/boats.rs::Game::boat_status	land friction is the average of the full blocks under the hull
+AbstractBoat.getGroundFriction	port	crates/horizon-client/src/game/boats.rs::Game::boat_ground_friction	average friction of blocks whose collision shape meets a thin slab under the hull; lily pads skipped
 AbstractBoat.checkInWater	inline	crates/horizon-client/src/game/boats.rs::Game::boat_status	sets the water level and reports the in-water status
 AbstractBoat.isUnderwater	inline	crates/horizon-client/src/game/boats.rs::Game::boat_status	the under-water and flowing-water check runs first in boat_status
 AbstractBoat.floatBoat	inline	crates/horizon-client/src/game/boats.rs::Game::tick_boat	buoyancy, friction and the first-water-touch snap are in tick_boat
@@ -25,7 +25,7 @@ AbstractBoat.getPaddleState	port	crates/horizon-client/src/game/boats.rs::Boat::
 AbstractBoat.getControllingPassenger	inline	crates/horizon-client/src/game/boats.rs::Game::tick_riding	the riding player is the controller; mobs never steer
 AbstractBoat.setInput	inline	crates/horizon-client/src/game/boats.rs::Game::tick_riding	input flags are copied from the keys each tick
 AbstractBoat.isUnderWater	port	crates/horizon-client/src/game/boats.rs::Boat::under_water	
-AbstractBoat.modifyPassengerFluidInteractionBox	missing		minor: a rider's water check still uses the whole body; horizon-world boat_passenger_box exists but no game code calls it
+AbstractBoat.modifyPassengerFluidInteractionBox	inline	crates/horizon-client/src/motion/fluids.rs::MotionWorld::interaction_box	the ridden boat (RiddenBoat) is set on clients in remote.rs and for served players in lan_actions.rs; the passenger box keeps only the part above the boat's top
 AbstractChestBoat.remove	inline	crates/horizon-client/src/game/boats.rs::Game::hurt_boat	a destroyed chest boat spills its 27 slots
 AbstractChestBoat.openCustomInventoryScreen	inline	crates/horizon-client/src/game/boats.rs::Game::interact_boat	sneaking opens the chest; gap: minor: no piglin anger
 AbstractChestBoat.createMenu	inline	crates/horizon-client/src/game/boats.rs::Game::interact_boat	the chest container is set up there; gap: minor: no spectator or loot table check

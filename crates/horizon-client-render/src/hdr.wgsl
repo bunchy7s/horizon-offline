@@ -26,8 +26,14 @@ struct Params {
     share: vec4<f32>,
     start: vec4<f32>,
     full: vec4<f32>,
+    // HDR calibration (hdr_calibration.rs): x its step (0 none, 1 black level,
+    // 2 peak, 3 paper white), y the slider in nits, z where its controls start,
+    // a share of the height.
+    calibration: vec4<f32>,
 };
 @group(0) @binding(2) var<uniform> params: Params;
+// Horizon's logo, 1 inside, 0 outside, for calibration's test pictures.
+@group(0) @binding(3) var logo: texture_2d<f32>;
 
 // Light sources are lifted evenly rather than by a highlight curve: vanilla's
 // textures were drawn for SDR, so a curve on their brightest pixels blows out
@@ -81,6 +87,48 @@ fn lift_black(e: vec3<f32>) -> vec3<f32> {
     return e + pq(vec3(params.black)).x * pow(vec3(1.0) - n, vec3(4.0));
 }
 
+// Whether `p` falls on the logo drawn `size` pixels wide around `centre`.
+fn on_logo(p: vec2<f32>, centre: vec2<f32>, size: f32) -> bool {
+    let uv = (p - centre) / size + 0.5;
+    if any(uv < vec2(0.0)) || any(uv >= vec2(1.0)) {
+        return false;
+    }
+    let texels = vec2<f32>(textureDimensions(logo));
+    return textureLoad(logo, vec2<i32>(uv * texels), 0).r > 0.5;
+}
+
+// A calibration step's test picture at `p`, in nits, the way display calibration
+// tools draw them: nothing in it is bright over a large area, so the display
+// doesn't dim itself while it is judged.
+fn calibration_nits(p: vec2<f32>, size: vec2<f32>) -> f32 {
+    let top = size.y * params.calibration.z;
+    let centre = vec2(size.x, top) / 2.0;
+    let v = params.calibration.y;
+    switch u32(params.calibration.x) {
+        // Black level: the logo at the slider on 0. Lowered until it disappears,
+        // it sits on the darkest the display shows.
+        case 1u: {
+            return select(0.0, v, on_logo(p, centre, top * 0.4));
+        }
+        // Peak: a tenth of the screen at 10 000 nits, which the display clips at
+        // its brightest, the logo inside at the slider. Raised until it
+        // disappears, it sits on that brightest.
+        case 2u: {
+            let side = sqrt(0.1 * size.x * size.y);
+            if all(abs(p - centre) < vec2(side / 2.0)) {
+                return select(10000.0, v, on_logo(p, centre, side * 0.7));
+            }
+            return 0.0;
+        }
+        // Paper white: a white card at the slider, on a dim grey, to match a
+        // sheet of paper held beside the screen.
+        default: {
+            let card = vec2(top * 0.9, top * 0.6);
+            return select(3.0, v, all(abs(p - centre) < card / 2.0));
+        }
+    }
+}
+
 @vertex fn vs_hdr(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
     let p = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
     return vec4(p * 2.0 - 1.0, 0.0, 1.0);
@@ -93,6 +141,16 @@ fn lift_black(e: vec3<f32>) -> vec3<f32> {
 
 @fragment fn fs_hdr(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let at = vec2<i32>(pos.xy);
+    // Calibration: above its controls the test picture, straight in nits, past
+    // paper white, the lift and the black level.
+    let size = vec2<f32>(textureDimensions(frame));
+    if params.calibration.x > 0.5 && pos.y < size.y * params.calibration.z {
+        let nits = vec3(calibration_nits(pos.xy, size));
+        if params.pq > 0.5 {
+            return vec4(pq(nits), 1.0);
+        }
+        return vec4(nits / 80.0, 1.0);
+    }
     let f = textureLoad(frame, at, 0);
     let c = f.rgb;
     // What covers the world here (Hdr::keep_world): nothing at 0, the hand at

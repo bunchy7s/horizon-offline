@@ -113,6 +113,8 @@ impl Game<'_> {
             );
             self.block_entity_event(pos, 1, WOBBLE_NEGATIVE);
             self.post_block_game_event("minecraft:block_change", pos, Some(Who::Player), None);
+            // ServerPlayerGameMode.useItemOn: useWithoutItem consumed the click.
+            self.trigger_default_block_use(pos);
             return true;
         };
         let stack = stack.clone();

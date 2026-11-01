@@ -15,7 +15,7 @@ IronBarsBlock.createBlockStateDefinition	skip:data	-	state properties come from 
 JigsawBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	orientation property through the rotate table
 JigsawBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	orientation property through the mirror table
 JigsawBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	orientation from clicked face and horizontal facing
-JigsawBlock.useWithoutItem	missing	-	player: a game master right-clicking a jigsaw block gets no jigsaw editor; the client has no jigsaw screen
+JigsawBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	a game master gets the jigsaw editor (game/jigsaw_edit.rs)
 JukeboxBlock.setPlacedBy	missing	-	minor: a jukebox item carrying a disc (creative Ctrl+pick) fills the block entity in Game::apply_placed_item but HAS_RECORD stays false, so no disc model shows
 JukeboxBlock.useWithoutItem	port	crates/horizon-client/src/game/jukebox.rs::Game::use_jukebox	takes the disc out through eject_record when one is in
 JukeboxBlock.ownSignal	port	crates/horizon-client/src/game/jukebox.rs::jukebox_signals	15 while a song plays
@@ -47,8 +47,8 @@ LecternBlock.getAnalogOutputSignal	port	crates/horizon-client/src/game/books.rs:
 LecternBlock.useWithoutItem	port	crates/horizon-client/src/game/books.rs::Game::open_lectern	opens the book view when a book is on the lectern
 LecternBlock.getMenuProvider	port	crates/horizon-client/src/game/books.rs::Game::lectern_menu	the lectern menu over the block entity's book and page
 LeverBlock.makeShapes	skip:data	-	collision and outline shapes are precomputed from the data
-LeverBlock.useWithoutItem	port	crates/horizon-world/src/level/redstone.rs::Sim::lever_pull	gap: player: powering a lever on shows no redstone dust puff at the lever (makeParticle)
-LeverBlock.onExplosionHit	missing	-	player: an explosion that can trigger blocks does not toggle a lever; explosion.rs has no lever case
+LeverBlock.useWithoutItem	port	crates/horizon-world/src/level/redstone.rs::Sim::lever_pull	the toggle, its click, game event and neighbour updates; the clicking client's red dust puff is crates/horizon-client/src/game.rs::Game::lever_puff (LeverBlock.makeParticle)
+LeverBlock.onExplosionHit	port	crates/horizon-client/src/game/wind.rs::Game::wind_trigger_block	the same path toggles a lever, powered or not
 LeverBlock.playSound	inline	crates/horizon-world/src/level/redstone.rs::Sim::lever_pull	click sound at volume 0.3 and pitch 0.6 on or 0.5 off
 LeverBlock.affectNeighborsAfterRemoval	port	crates/horizon-world/src/level/hooks.rs::Sim::affect_neighbors_after_removal	powered lever updates neighbours on removal unless moved by a piston
 LeverBlock.getDirectSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::state_direct_signal	powered lever's strong power from the data table
@@ -57,8 +57,8 @@ LightBlock.createBlockStateDefinition	skip:data	-	state properties come from the
 LightBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	game masters cycle the light level
 LightBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	waterlogged tick
 LightBlock.getFluidState	port	crates/horizon-world/src/level/update.rs::Sim::fluid_at	waterlogged fluid from block data
-LightBlock.getCloneItemStack	missing	-	player: creative pick-block on a light block gives a light at level 0; Game::picked_stack writes no block state for light
-LightBlock.setLightOnStack	missing	-	player: the light level is never put on a picked light item, so pick-block loses the level
+LightBlock.getCloneItemStack	port	crates/horizon-client/src/game/block_items.rs::Game::picked_stack	the light's level goes on the picked stack's block_state
+LightBlock.setLightOnStack	port	crates/horizon-client/src/game/block_items.rs::Game::picked_stack	the picked light carries its level as the stack's block_state
 LightningRodBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	facing from clicked face, waterlogged from the replaced fluid
 LightningRodBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	waterlogged tick
 LightningRodBlock.getFluidState	port	crates/horizon-world/src/level/update.rs::Sim::fluid_at	waterlogged fluid from block data
@@ -135,7 +135,7 @@ PitcherCropBlock.getCollisionShape	skip:data	-	collision shape per state comes f
 PitcherCropBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
 PitcherCropBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
 PitcherCropBlock.createBlockStateDefinition	skip:data	-	state properties come from the data tables
-PitcherCropBlock.entityInside	missing	-	player: a ravager walking through a pitcher crop does not break it when mob griefing is on
+PitcherCropBlock.entityInside	port	crates/horizon-client/src/mobs/ravager.rs::ai_step	ticked in #3516; `PitcherCropBlock.entityInside` is cited at crates/horizon-client/src/mobs/ravager.rs:136 (in a comment, so `where` names the enclosing fn)
 PitcherCropBlock.isRandomlyTicking	inline	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	the lower half and not max age test gates the pitcher arm
 PitcherCropBlock.canGrowInto	port	crates/horizon-world/src/level/bonemeal.rs::Sim::pitcher_can_grow	
 PitcherCropBlock.isLower	inline	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	lower-half test used by the survival check

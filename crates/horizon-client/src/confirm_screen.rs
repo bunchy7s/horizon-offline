@@ -13,6 +13,7 @@ pub struct Confirm {
     pub lines: Vec<(Text, f32, f32)>,
     /// The yes and no buttons' corners.
     pub buttons: [(f32, f32); 2],
+    pub focus: Option<usize>,
 }
 impl Confirm {
     pub fn new(font: &Font, size: (f32, f32), title: &Text, message: &Text) -> Self {
@@ -20,6 +21,28 @@ impl Confirm {
         Self {
             lines,
             buttons: [buttons[0], buttons[1]],
+            focus: None,
+        }
+    }
+    /// Tab cycles focus between yes (0) and no (1).
+    pub fn tab(&mut self, reverse: bool) {
+        self.focus = match self.focus {
+            Some(0) => Some(1),
+            Some(1) => Some(0),
+            None => Some(if reverse { 1 } else { 0 }),
+            _ => Some(0),
+        };
+    }
+    /// Left or right arrow key focuses yes or no.
+    pub fn arrow(&mut self, left: bool) {
+        self.focus = Some(if left { 0 } else { 1 });
+    }
+    /// The answer of the currently focused button.
+    pub fn answer(&self) -> Option<bool> {
+        match self.focus {
+            Some(0) => Some(true),
+            Some(1) => Some(false),
+            _ => None,
         }
     }
     /// The answer a click at `cursor` gives: true for yes, false for no.
@@ -56,8 +79,9 @@ impl Confirm {
         for (line, x, y) in &self.lines {
             batch.text_styled(atlas, line, *x, *y, u32::MAX, true);
         }
-        for ((bx, by), label) in self.buttons.into_iter().zip(labels) {
-            let hover = active && ui::hovered(cursor, bx, by, 150.0, 20.0);
+        for (i, ((bx, by), label)) in self.buttons.into_iter().zip(labels).enumerate() {
+            let is_focused = self.focus == Some(i);
+            let hover = active && (ui::hovered(cursor, bx, by, 150.0, 20.0) || is_focused);
             ui::button(batch, atlas, bx, by, 150.0, 20.0, label, active, hover);
         }
     }
@@ -71,6 +95,7 @@ pub struct Choice {
     /// The buttons' corners, left to right.
     pub buttons: Vec<(f32, f32)>,
     pub width: f32,
+    pub focus: Option<usize>,
 }
 impl Choice {
     pub fn new(
@@ -111,7 +136,46 @@ impl Choice {
                 .map(|i| (bx + (width + 4.0) * i as f32, by))
                 .collect(),
             width,
+            focus: None,
         }
+    }
+    /// Tab cycles focus across the buttons.
+    pub fn tab(&mut self, reverse: bool) {
+        let count = self.buttons.len();
+        if count == 0 {
+            return;
+        }
+        self.focus = match self.focus {
+            Some(cur) => {
+                if reverse {
+                    Some(if cur == 0 { count - 1 } else { cur - 1 })
+                } else {
+                    Some((cur + 1) % count)
+                }
+            }
+            None => Some(if reverse { count - 1 } else { 0 }),
+        };
+    }
+    /// Left or right arrow key moves focus.
+    pub fn arrow(&mut self, left: bool) {
+        let count = self.buttons.len();
+        if count == 0 {
+            return;
+        }
+        self.focus = match self.focus {
+            Some(cur) => {
+                if left {
+                    Some(cur.saturating_sub(1))
+                } else {
+                    Some((cur + 1).min(count - 1))
+                }
+            }
+            None => Some(if left { 0 } else { count - 1 }),
+        };
+    }
+    /// The index of the currently focused button.
+    pub fn pressed(&self) -> Option<usize> {
+        self.focus
     }
     /// The button a click at `cursor` hits, counted from the left.
     pub fn pressed_at(&self, cursor: (f32, f32)) -> Option<usize> {
@@ -130,8 +194,9 @@ impl Choice {
         for (line, x, y) in &self.lines {
             batch.text_styled(atlas, line, *x, *y, u32::MAX, true);
         }
-        for (&(bx, by), label) in self.buttons.iter().zip(labels) {
-            let hover = ui::hovered(cursor, bx, by, self.width, 20.0);
+        for (i, (&(bx, by), label)) in self.buttons.iter().zip(labels).enumerate() {
+            let is_focused = self.focus == Some(i);
+            let hover = ui::hovered(cursor, bx, by, self.width, 20.0) || is_focused;
             ui::button(batch, atlas, bx, by, self.width, 20.0, label, true, hover);
         }
     }
@@ -176,5 +241,51 @@ mod tests {
         let two = Confirm::new(&font(), (480.0, 270.0), &title, &message);
         assert_eq!(two.buttons[0].0, 88.0);
         assert_eq!(two.buttons[1].0, 242.0);
+    }
+
+    #[test]
+    fn confirm_and_choice_keyboard_navigation() {
+        let (title, message) = (Text::literal("Title"), Text::literal("Message"));
+        let mut confirm = Confirm::new(&font(), (480.0, 270.0), &title, &message);
+        assert_eq!(confirm.focus, None);
+        assert_eq!(confirm.answer(), None);
+
+        confirm.tab(false);
+        assert_eq!(confirm.focus, Some(0));
+        assert_eq!(confirm.answer(), Some(true));
+
+        confirm.tab(false);
+        assert_eq!(confirm.focus, Some(1));
+        assert_eq!(confirm.answer(), Some(false));
+
+        confirm.tab(true);
+        assert_eq!(confirm.focus, Some(0));
+
+        confirm.arrow(false);
+        assert_eq!(confirm.focus, Some(1));
+        confirm.arrow(true);
+        assert_eq!(confirm.focus, Some(0));
+
+        let mut choice = Choice::new(&font(), (480.0, 270.0), &title, &message, 3, 100.0);
+        assert_eq!(choice.focus, None);
+        assert_eq!(choice.pressed(), None);
+
+        choice.tab(false);
+        assert_eq!(choice.focus, Some(0));
+        assert_eq!(choice.pressed(), Some(0));
+
+        choice.tab(false);
+        assert_eq!(choice.focus, Some(1));
+
+        choice.tab(false);
+        assert_eq!(choice.focus, Some(2));
+
+        choice.tab(false);
+        assert_eq!(choice.focus, Some(0));
+
+        choice.arrow(false);
+        assert_eq!(choice.focus, Some(1));
+        choice.arrow(true);
+        assert_eq!(choice.focus, Some(0));
     }
 }

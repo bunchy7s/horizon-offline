@@ -52,11 +52,16 @@ pub(super) struct Pickup {
 pub(super) struct Pickups {
     pub live: Vec<Pickup>,
     added: Vec<Pickup>,
+    /// The particles made so far, by kind of taken entity (for horizon-ctl).
+    made: std::collections::BTreeMap<&'static str, u64>,
 }
 impl Pickups {
     pub fn clear(&mut self) {
         self.live.clear();
         self.added.clear();
+    }
+    pub fn made(&self) -> &std::collections::BTreeMap<&'static str, u64> {
+        &self.made
     }
 }
 
@@ -113,6 +118,12 @@ impl Game<'_> {
         collector: Collector,
         target: [f64; 3],
     ) {
+        let kind = match taken {
+            Taken::Item(_) => "item",
+            Taken::Orb(_) => "orb",
+            Taken::Arrow(_) => "arrow",
+        };
+        *self.pickups.made.entry(kind).or_default() += 1;
         self.pickups.added.push(Pickup {
             taken,
             collector,
@@ -157,6 +168,7 @@ mod tests {
             on_ground: false,
             count: 1,
             ticks: 0,
+            health: 5,
         }))
     }
 

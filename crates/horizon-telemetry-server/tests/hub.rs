@@ -1,5 +1,4 @@
-//! The hub's intake through its HTTP interface: votes, bug reports (opened as issues by a fake GitHub),
-//! suggestions and the queue Kira reads.
+//! The hub's intake through its HTTP interface: votes and bug reports (opened as issues by a fake GitHub).
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -59,7 +58,6 @@ fn hub(config: Config) -> Hub {
 
 fn config() -> Config {
     Config {
-        hub_token: Some("kira-secret".into()),
         hub_posts_per_hour: 1000.0,
         ..Config::default()
     }
@@ -83,12 +81,9 @@ impl Hub {
         .await
     }
 
-    async fn get(&self, path: &str, token: Option<&str>) -> (StatusCode, Value) {
-        let mut req = Request::get(path);
-        if let Some(token) = token {
-            req = req.header("authorization", format!("Bearer {token}"));
-        }
-        self.send(req.body(Body::empty()).unwrap()).await
+    async fn get(&self, path: &str) -> (StatusCode, Value) {
+        self.send(Request::get(path).body(Body::empty()).unwrap())
+            .await
     }
 }
 
@@ -126,7 +121,7 @@ async fn votes_count_once_per_browser_and_can_be_taken_back() {
         2
     );
     assert_eq!(
-        hub.get("/hub/votes", None).await,
+        hub.get("/hub/votes").await,
         (StatusCode::OK, json!({ "votes": { "smooth-frames": 2 } }))
     );
     assert_eq!(
@@ -134,7 +129,7 @@ async fn votes_count_once_per_browser_and_can_be_taken_back() {
         1
     );
     assert_eq!(
-        hub.get("/hub/votes", None).await.1["votes"]["smooth-frames"],
+        hub.get("/hub/votes").await.1["votes"]["smooth-frames"],
         1,
         "a vote drops the cached counts"
     );
@@ -238,114 +233,40 @@ async fn reports_are_closed_without_a_github_token() {
 }
 
 #[tokio::test]
-async fn suggestions_wait_in_the_queue_for_kira() {
-    let hub = hub(config());
-    let first = json!({ "text": "  Add a waypoint mod\r\nto the\u{7} browser ", "item": "mod-registry", "name": "alex", "extra": 1 });
-    let (code, body) = hub.post("/hub/suggest", first).await;
-    assert_eq!(code, StatusCode::ACCEPTED);
-    let first_id = body["id"].as_i64().unwrap();
-    hub.post(
-        "/hub/suggest",
-        json!({ "text": "Bigger render distance on the Steam Deck" }),
-    )
-    .await;
-    assert_eq!(
-        hub.post("/hub/suggest", json!({ "text": "too short" }))
-            .await
-            .0,
-        StatusCode::BAD_REQUEST
-    );
-    assert_eq!(
-        hub.post(
-            "/hub/suggest",
-            json!({ "text": "A long enough idea", "item": "Bad Id" })
-        )
-        .await
-        .0,
-        StatusCode::BAD_REQUEST
-    );
-
-    assert_eq!(
-        hub.get("/hub/suggestions", None).await.0,
-        StatusCode::UNAUTHORIZED
-    );
-    assert_eq!(
-        hub.get("/hub/suggestions", Some("wrong-secret")).await.0,
-        StatusCode::UNAUTHORIZED
-    );
-    let (code, all) = hub.get("/hub/suggestions", Some("kira-secret")).await;
-    assert_eq!(code, StatusCode::OK);
-    let list = all["suggestions"].as_array().unwrap();
-    assert_eq!(list.len(), 2);
-    assert_eq!(
-        list[0]["text"], "Add a waypoint mod\nto the browser",
-        "trimmed, no control characters"
-    );
-    assert!(list[0].get("extra").is_none());
-    assert_eq!(list[0]["item"], "mod-registry");
-    assert_eq!(list[0]["name"], "alex");
-    assert!(list[0]["created_at"].as_str().unwrap().ends_with('Z'));
-    assert!(list[1].get("name").is_none());
-    let (_, after) = hub
-        .get(
-            &format!("/hub/suggestions?after={first_id}"),
-            Some("kira-secret"),
-        )
-        .await;
-    assert_eq!(after["suggestions"].as_array().unwrap().len(), 1);
-
-    let closed = hub_without_token();
-    assert_eq!(
-        closed.get("/hub/suggestions", Some("anything")).await.0,
-        StatusCode::NOT_FOUND
-    );
-}
-
-fn hub_without_token() -> Hub {
-    hub(Config::default())
-}
-
-#[tokio::test]
-async fn posts_are_rate_limited_per_address_and_capped_per_day() {
+async fn reports_are_rate_limited_per_address_and_capped_per_day() {
     let hub = hub(Config {
         hub_posts_per_hour: 20.0,
-        hub_suggestions_per_day: 3,
+        hub_reports_per_day: 3,
         ..config()
     });
     // A burst of a tenth of the hourly rate: two, then refused.
-    let idea = |n: u32| json!({ "text": format!("Idea number {n}, long enough") });
+    let bug = |n: u32| report(&format!("Bug number {n}"));
+    assert_eq!(hub.post("/hub/report", bug(1)).await.0, StatusCode::CREATED);
+    assert_eq!(hub.post("/hub/report", bug(2)).await.0, StatusCode::CREATED);
     assert_eq!(
-        hub.post("/hub/suggest", idea(1)).await.0,
-        StatusCode::ACCEPTED
-    );
-    assert_eq!(
-        hub.post("/hub/suggest", idea(2)).await.0,
-        StatusCode::ACCEPTED
-    );
-    assert_eq!(
-        hub.post("/hub/suggest", idea(3)).await.0,
+        hub.post("/hub/report", bug(3)).await.0,
         StatusCode::TOO_MANY_REQUESTS
     );
 
     let busy = self::hub(Config {
         hub_posts_per_hour: 1000.0,
-        hub_suggestions_per_day: 3,
+        hub_reports_per_day: 3,
         ..config()
     });
     for n in 0..3 {
         assert_eq!(
-            busy.post("/hub/suggest", idea(n)).await.0,
-            StatusCode::ACCEPTED
+            busy.post("/hub/report", bug(n)).await.0,
+            StatusCode::CREATED
         );
     }
     assert_eq!(
-        busy.post("/hub/suggest", idea(9)).await.0,
+        busy.post("/hub/report", bug(9)).await.0,
         StatusCode::SERVICE_UNAVAILABLE
     );
     busy.day.store(DAY + 1, Ordering::SeqCst);
     assert_eq!(
-        busy.post("/hub/suggest", idea(9)).await.0,
-        StatusCode::ACCEPTED,
+        busy.post("/hub/report", bug(9)).await.0,
+        StatusCode::CREATED,
         "a new day"
     );
 }
@@ -358,8 +279,6 @@ async fn old_entries_go_and_reports_never_opened_are_given_up() {
         .post("/hub/report", report("Crash when opening a chest"))
         .await;
     assert!(body["id"].as_i64().unwrap() > 0);
-    hub.post("/hub/suggest", json!({ "text": "An idea from long ago" }))
-        .await;
     hub.day.store(DAY + 8, Ordering::SeqCst);
     hub.app.maintain().unwrap();
     *hub.github.down.lock().unwrap() = false;
@@ -368,10 +287,25 @@ async fn old_entries_go_and_reports_never_opened_are_given_up() {
         hub.github.opened.lock().unwrap().is_empty(),
         "past a week a report is given up"
     );
-    hub.day.store(DAY + 91, Ordering::SeqCst);
-    hub.app.maintain().unwrap();
-    let (_, left) = hub.get("/hub/suggestions", Some("kira-secret")).await;
-    assert!(left["suggestions"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn entries_past_the_keep_days_are_removed() {
+    let mut store = Store::open(":memory:").unwrap();
+    let fields = report("Crash when opening a chest")
+        .as_object()
+        .unwrap()
+        .clone();
+    store.enqueue("report", DAY, DAY - 1, &fields).unwrap();
+    // Looked for duplicates from DAY + 1 only: a second entry, not the first one again.
+    store.enqueue("report", DAY + 1, DAY + 1, &fields).unwrap();
+    assert_eq!(
+        store.expire_queue(DAY + 1, DAY).unwrap(),
+        1,
+        "the older day goes"
+    );
+    assert_eq!(store.queued_on("report", DAY).unwrap(), 0);
+    assert_eq!(store.queued_on("report", DAY + 1).unwrap(), 1);
 }
 
 #[tokio::test]

@@ -7,7 +7,7 @@ StructureTemplate.Palette.jigsaws	port	crates/horizon-world/src/worldgen/structu
 SkyLightEngine.updateSourcesInColumn	inline	crates/horizon-client-render/src/light.rs::relight_region	column loop finds the lowest sky source and reseeds cells above and below it
 FlyNodeEvaluator.findAcceptedNode	port	crates/horizon-client/src/mobs/path.rs::Finder::fly_accepted	cost, walkable +1 and node update match vanilla
 LevelStorageSource.writeGameRules	port	crates/horizon-client-core/src/gamerules.rs::GameRules::save	gap: minor: writes in place with no temp-file swap; no runtime caller, the game saves rules through level.game_rules in level.dat
-LevelStorageSource.readLevelSummary	port	crates/horizon-client/src/title.rs::list_worlds	gap: player: a world whose level.dat cannot be read is left out of the list; vanilla lists it as corrupted; symlinked worlds are not flagged
+LevelStorageSource.readLevelSummary	port	crates/horizon-client/src/title.rs::list_worlds	a world whose level.dat cannot be read is listed as corrupted (#4219); gap: minor: symlinked worlds are not flagged
 LevelStorageSource.readLightweightData	port	crates/horizon-client/src/save.rs::read_dat	gap: minor: reads the whole level.dat; Player and WorldGenSettings are not skipped
 LevelStorageSource.validateAndCreateAccess	missing		minor: opening a world does not refuse a folder holding symbolic links, vanilla does; backup and delete do check links (title/world_management.rs)
 SavedDataStorage.scheduleSave	inline	crates/horizon-client/src/game.rs::Game::save_game_metadata	gap: minor: each saved-data file is written directly on every save; no dirty check and no async batching

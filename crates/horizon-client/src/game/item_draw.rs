@@ -22,6 +22,9 @@ pub(super) struct Env<'a, 'g> {
     game: &'a Game<'g>,
 }
 impl ItemEnv for Env<'_, '_> {
+    fn enchantment_in_tag(&self, enchantment: &str, tag: &str) -> bool {
+        self.game.stations().enchantments.in_tag(tag, enchantment)
+    }
     fn potion_effect_color(&self, contents: &Value) -> Option<i32> {
         // `PotionContents.getColorOr`: the effect mix when any effect is visible.
         let id = contents["potion"].as_str();
@@ -265,10 +268,13 @@ impl Game<'_> {
             && self.stack_in(slot) == Some(stack)
         {
             let view = item_render::stack_view(stack);
-            let duration = use_duration(&self.pack.item_renderer.models.components(&view));
+            let mut duration = use_duration(&self.pack.item_renderer.models.components(&view));
+            self.native_use_duration(stack, &mut duration);
             owner.using_this_item = true;
             owner.use_duration = duration;
-            owner.use_item_remaining_ticks = duration - ticks as i32;
+            // getUseItemRemainingTicks: the duration the use started with,
+            // as LivingEntityUseItemEvent.Start left it (`start_using_item`).
+            owner.use_item_remaining_ticks = self.use_duration - ticks as i32;
             owner.crossbow_charge_duration = Self::charge_ticks(stack).max(1) as i32;
         }
         owner.fishing_cast_with_this_item = stack
@@ -309,32 +315,28 @@ impl Game<'_> {
             batch,
             x,
             y,
-            self.started.elapsed().as_secs_f32(),
-            self.settings.file.double("glintSpeed") as f32,
-            self.settings.file.double("glintStrength") as f32,
+            self.glint_frame.millis / 1000.0,
+            self.glint_frame.speed,
+            self.glint_frame.alpha,
         );
     }
-    /// The `GLINT_TEXTURING` inputs the atlas and options provide.
-    pub(super) fn glint(&self) -> Option<item_render::Glint> {
-        self.gui
-            .atlas
-            .sprites
-            .get("misc/enchanted_glint_item")
-            .copied()
-            .map(|_| item_render::Glint {
-                speed: self.settings.file.double("glintSpeed") as f32,
-                alpha: self.settings.file.double("glintStrength") as f32,
-                millis: self.started.elapsed().as_secs_f32() * 1000.0,
-                scale: 0.5,
-            })
+    /// The glint clock, options and sprite for this frame: read once per
+    /// frame, not per item (`GameRenderer.extractOptions`).
+    pub(super) fn capture_glint_frame(&self) -> item_render::GlintFrame {
+        item_render::GlintFrame {
+            millis: self.started.elapsed().as_secs_f32() * 1000.0,
+            speed: self.settings.file.double("glintSpeed") as f32,
+            alpha: self.settings.file.double("glintStrength") as f32,
+            sprite: self
+                .gui
+                .atlas
+                .sprites
+                .contains_key("misc/enchanted_glint_item"),
+        }
     }
-    /// The glint scroll phase shared by world items and armour
-    /// (`item_render::Glint::scroll_ticks`).
-    pub(super) fn glint_ticks(&self) -> f32 {
-        item_render::Glint::scroll_ticks(
-            self.started.elapsed().as_secs_f32() * 1000.0,
-            self.settings.file.double("glintSpeed") as f32,
-        )
+    /// The `ENTITY_GLINT_TEXTURING` inputs of this frame.
+    pub(super) fn glint(&self) -> Option<item_render::Glint> {
+        self.glint_frame.glint(0.5)
     }
     /// Submit a resolved item under `pose` (camera-relative) at `light`
     /// (packed lightmap coordinates).
@@ -408,21 +410,32 @@ impl Game<'_> {
                 p.y + (q.y - p.y) * alpha,
                 p.z + (q.z - p.z) * alpha,
             ];
-            (item, at, alpha as f32)
+            (item, at, alpha as f32, true)
         });
         // ItemPickupParticle: the render state extracted at partial tick 1.
         let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
             super::pickups::Taken::Item(item) => {
-                Some((&**item, super::pickups::position(p, alpha), 1.0))
+                Some((&**item, super::pickups::position(p, alpha), 1.0, false))
             }
             _ => None,
         });
-        for (item, at, partial) in live.chain(taken) {
+        for (item, at, partial, entity) in live.chain(taken) {
             let entity_start = out.len();
             let q = item.position;
             let pos = glam::DVec3::from_array(at) - camera;
             if pos.length_squared() > 64.0 * 64.0 {
                 continue;
+            }
+            // EntityRenderer.shouldRender: the item's 0.25 box, grown by 0.5,
+            // in the view frustum. Checked before its model is resolved.
+            if entity && let Some(view) = &self.view_frustum {
+                let feet = (glam::DVec3::new(q.x, q.y, q.z) - camera).as_vec3();
+                let half = glam::Vec3::new(0.125 + 0.5, 0.5, 0.125 + 0.5);
+                let lo = feet - half;
+                let hi = feet + glam::Vec3::new(half.x, 0.25 + 0.5, half.z);
+                if !view.intersects(lo, hi) {
+                    continue;
+                }
             }
             // `extractItemGroupRenderState`: GROUND, seeded by the entity id.
             let owner = owner_at([q.x, q.y, q.z], 0.0, "minecraft:item");

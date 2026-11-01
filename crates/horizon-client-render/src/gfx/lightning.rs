@@ -83,7 +83,8 @@ fn geometry(seed: i64, uv: [f32; 2]) -> Vec<Vertex> {
                             normal: [0; 4],
                             pos: c,
                             uv,
-                            layer: 2,
+                            // HDR output: the bolt shines like the sun (entity.wgsl fs_hdr_mark).
+                            layer: 2 | u32::from(crate::mesher::VERY_BRIGHT) << 16,
                             color,
                             light: 240 | 240 << 8,
 

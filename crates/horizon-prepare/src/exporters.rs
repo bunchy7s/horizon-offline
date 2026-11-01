@@ -42,7 +42,7 @@ fn files(dir: &Path) -> Result<Vec<PathBuf>, String> {
 
 // research-lock pins both jars and every accepted client manifest (which pins its libraries).
 // artifacts::verify/client_libraries check those dependencies before any bundle is used.
-fn key(root: &Path) -> Result<String, String> {
+pub(crate) fn key(root: &Path) -> Result<String, String> {
     let mut hash = sha2::Sha256::new();
     hash.update(SETTINGS);
     // The launcher's bundled preparer may differ from the selected game's. Hash that
@@ -118,11 +118,14 @@ pub(crate) fn classes(run: &Run) -> Result<PathBuf, String> {
     }
     mkdir(&cached)?;
     let jdk = java::find(run.java_major, &[run.jdk.home()])?;
-    for (side, mains, cp) in [
+    // The two sides compile at once: neither reads the other's classes.
+    let sides = [
         ("server", SERVER, &run.server_classpath),
         ("client", CLIENT, &run.client_classpath),
-    ] {
+    ];
+    crate::pool::map(&sides, |(side, mains, cp)| {
         (run.log)(&format!("Compiling {side} exporters (shared helpers once)"));
+        let started = std::time::Instant::now();
         let classes = cached.join(side);
         mkdir(&classes)?;
         let log = run.log_file(&cached.join(format!("{side}.log")))?;
@@ -130,7 +133,7 @@ pub(crate) fn classes(run: &Run) -> Result<PathBuf, String> {
             "-encoding".into(),
             "UTF-8".into(),
             "-cp".into(),
-            cp.clone(),
+            cp.to_string(),
             "-sourcepath".into(),
             arg(&run.root.join("mods/horizon/src/test/java")),
             "-d".into(),
@@ -152,8 +155,13 @@ pub(crate) fn classes(run: &Run) -> Result<PathBuf, String> {
             arg(&classes),
         ];
         // No exporter executes here: resolve every class and its signatures against pinned jars.
-        run.jdk.java(&validate, None, &log)?;
-    }
+        run.jdk.java(&validate, Some(&run.local), &log)?;
+        (run.log)(&format!(
+            "Compiled {side} exporters{}",
+            crate::took(started)
+        ));
+        Ok(())
+    })?;
     let manifest = Value::Object(vec![
         ("key".into(), Value::Str(key.clone())),
         ("classes".into(), outputs(&cached)?),

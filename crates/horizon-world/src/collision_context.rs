@@ -79,6 +79,13 @@ impl<'a> CollisionContext<'a> {
         }
     }
 
+    /// The same context for an entity that is (or is not) sneaking. Only block
+    /// shapes that read `isDescending` (scaffolding) see the difference.
+    pub const fn with_descending(mut self, descending: bool) -> Self {
+        self.descending = descending;
+        self
+    }
+
     /// Ordinary EntityCollisionContext. The native factory overload taking an
     /// explicit fluid flag also uses this path for experimental minecarts.
     pub fn for_entity(entity: CollisionEntity<'a>, always_fluid: bool) -> Self {

@@ -47,18 +47,34 @@ pub enum PlaceOutcome {
     Failed,
 }
 
-/// `BlockPlaceContext` after resolving the replaced position.
+/// `BlockPlaceContext` after resolving the replaced position: what
+/// `Block.getStateForPlacement` reads, and what a mod block is handed when it
+/// chooses the state it is placed in
+/// (`LevelAccess::before_state_for_placement`).
 #[derive(Clone, Debug)]
-pub(crate) struct Ctx {
+pub struct PlacementContext {
+    /// Where the block would go (`getClickedPos`): the clicked block itself
+    /// when it can be replaced, else the block beside it.
     pub pos: BlockPos,
+    /// The block that was clicked (`getHitResult().getBlockPos`).
     pub hit_pos: BlockPos,
+    /// The face that was clicked (`getClickedFace`).
     pub face: Direction,
+    /// Where the click landed (`getClickLocation`).
     pub hit: Vec3,
+    /// `BlockHitResult.isInside`: the click hit the inside of the clicked
+    /// block's shape.
     pub inside: bool,
+    /// The placer's rotation, in degrees (`getRotation`).
     pub yaw: f32,
     pub pitch: f32,
+    /// `isSecondaryUseActive`: the player placing it is sneaking.
     pub sneaking: bool,
+    /// The item in the placer's hand (`getItemInHand().getItem()`), as its
+    /// registry name: `minecraft:oak_stairs`.
     pub item: String,
+    /// Whether the clicked block is replaceable (`replacingClickedOnBlock`),
+    /// i.e. whether the block goes into the clicked position.
     pub replace_clicked: bool,
 }
 
@@ -132,7 +148,7 @@ fn rotation_segment_of(direction: Direction) -> i32 {
     }
 }
 
-impl Ctx {
+impl PlacementContext {
     fn horizontal_direction(&self) -> Direction {
         from_y_rot(f64::from(self.yaw))
     }
@@ -171,11 +187,11 @@ impl Ctx {
 }
 
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
-    fn item_is(&self, ctx: &Ctx, block: BlockId) -> bool {
+    fn item_is(&self, ctx: &PlacementContext, block: BlockId) -> bool {
         !ctx.item.is_empty() && *self.b.block_data(block).item == *ctx.item
     }
     /// `BlockState.canBeReplaced(BlockPlaceContext)`.
-    pub(crate) fn can_be_replaced(&self, state: BlockStateId, ctx: &Ctx) -> bool {
+    pub(crate) fn can_be_replaced(&self, state: BlockStateId, ctx: &PlacementContext) -> bool {
         let b = self.b;
         let p = b.props;
         let block = b.block(state);
@@ -267,16 +283,42 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
     }
 
-    /// `Block.getStateForPlacement(context)` for `block`.
+    /// `Block.getStateForPlacement(context)` for `block`, after the level's
+    /// hook (`LevelAccess::before_state_for_placement`), which a mod block
+    /// answers for itself.
     pub(crate) fn state_for_placement(
         &mut self,
         block: BlockId,
-        ctx: &Ctx,
+        ctx: &PlacementContext,
     ) -> Option<BlockStateId> {
+        let default = self.b.default_of(block);
+        let fluid = self.fluid_at(ctx.pos);
+        let mut answer = None;
+        self.level
+            .before_state_for_placement(default, ctx, fluid, &mut answer);
+        match answer {
+            // A mod's answer, for a state of the block being placed, as
+            // vanilla's `getStateForPlacement` returns its own `defaultBlockState`
+            // set out. Another block's answer, or an id past the state table
+            // (which would panic the server), leaves vanilla's state as it is.
+            Some(Some(new))
+                if (new.0 as usize) < self.b.table.state_count() && self.b.block(new) == block =>
+            {
+                return Some(new);
+            }
+            // Vanilla's `null` return: the block goes nowhere.
+            Some(None) => return None,
+            _ => {}
+        }
         self.placement_at(block, 0, ctx)
     }
 
-    fn placement_at(&mut self, block: BlockId, depth: usize, ctx: &Ctx) -> Option<BlockStateId> {
+    fn placement_at(
+        &mut self,
+        block: BlockId,
+        depth: usize,
+        ctx: &PlacementContext,
+    ) -> Option<BlockStateId> {
         let b = self.b;
         let chain = &b.block_data(block).chain;
         for (index, class) in chain.iter().copied().enumerate().skip(depth) {
@@ -293,7 +335,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         class: Class,
         depth: usize,
         block: BlockId,
-        ctx: &Ctx,
+        ctx: &PlacementContext,
     ) -> Option<Option<BlockStateId>> {
         let b = self.b;
         let p = b.props;
@@ -728,6 +770,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 Some(self.copper_chest_least_oxidized(state, pos))
             }
             Class::ChorusPlant => Some(self.chorus_plant_with_connections(pos, default)),
+            // A content mod's connecting block (alone, PipeBlock places as
+            // Block does).
+            Class::Pipe if depth == 0 => Some(self.pipe_with_connections(pos, default)),
             Class::ConcretePowder => {
                 let replaced = self.state(pos);
                 if b.is_water_fluid(b.fluid(replaced).kind()) || self.concrete_touches_liquid(pos) {
@@ -1247,6 +1292,29 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             None
         }
     }
+    /// A content mod's connecting block (a `PipeBlock` alone in its chain):
+    /// joined on each side to itself and to its `connects_to` tag.
+    pub(crate) fn pipe_with_connections(&self, pos: BlockPos, state: BlockStateId) -> BlockStateId {
+        let mut result = state;
+        for direction in Direction::ALL {
+            let connect = self.pipe_connects(state, self.rel_state(pos, direction));
+            result = self
+                .b
+                .table
+                .with_bool(result, self.direction_prop(direction), connect)
+                .unwrap_or(result);
+        }
+        result
+    }
+    /// Whether connecting block `state` joins `neighbour`.
+    pub(crate) fn pipe_connects(&self, state: BlockStateId, neighbour: BlockStateId) -> bool {
+        let b = self.b;
+        b.is_block(neighbour, b.block(state))
+            || b.data(state)
+                .support_tag
+                .as_ref()
+                .is_some_and(|t| b.in_set(neighbour, t))
+    }
     /// `ChorusPlantBlock.getStateWithConnections`.
     pub(crate) fn chorus_plant_with_connections(
         &self,
@@ -1366,7 +1434,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
     }
     /// `DoorBlock.getHinge`.
-    fn door_hinge(&self, ctx: &Ctx) -> &'static str {
+    fn door_hinge(&self, ctx: &PlacementContext) -> &'static str {
         let b = self.b;
         let pos = ctx.pos;
         let place = ctx.horizontal_direction();
@@ -1426,6 +1494,14 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
         } else if data.is(Class::Door) {
             self.set_block_and_update(above(pos), b.table.set_text(state, p.half, "upper"));
+        } else if data.is(Class::DriedGhast) {
+            // DriedGhastBlock.setPlacedBy: the place sound, the water one when waterlogged.
+            let sound = if b.table.bool(state, p.waterlogged) {
+                "minecraft:block.dried_ghast.place_in_water"
+            } else {
+                "minecraft:block.dried_ghast.place"
+            };
+            self.sound(pos, &sound.into(), 1.0, 1.0);
         } else if data.is(Class::PitcherCrop) {
         } else if data.is(Class::SmallDripleaf) {
             let above_pos = above(pos);
@@ -1493,10 +1569,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     pub(crate) fn placement(
         &mut self,
         input: &PlaceContext,
-    ) -> Option<(Ctx, super::data::ItemBinding, BlockStateId)> {
+    ) -> Option<(PlacementContext, super::data::ItemBinding, BlockStateId)> {
         let b = self.b;
         let binding = b.item_binding(&input.item).cloned()?;
-        let mut ctx = Ctx {
+        let mut ctx = PlacementContext {
             pos: input.clicked_pos,
             hit_pos: input.clicked_pos,
             face: input.face,
@@ -1602,7 +1678,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
     }
     /// `ScaffoldingBlockItem.updatePlacementContext`.
-    fn scaffolding_update_context(&self, ctx: &Ctx, block: BlockId) -> Option<Ctx> {
+    fn scaffolding_update_context(
+        &self,
+        ctx: &PlacementContext,
+        block: BlockId,
+    ) -> Option<PlacementContext> {
         let b = self.b;
         let pos = ctx.pos;
         if !b.is_block(self.state(pos), block) {
@@ -1633,7 +1713,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             if !b.is_block(replaced, block) {
                 if self.can_be_replaced(replaced, ctx) {
                     let [dx, dy, dz] = direction.normal();
-                    return Some(Ctx {
+                    return Some(PlacementContext {
                         pos: placement,
                         hit_pos: placement,
                         face: direction,
@@ -1680,7 +1760,7 @@ impl Behaviours {
         ctx: &PlaceContext,
     ) -> bool {
         let sim = self.sim(level, ticks);
-        let inner = Ctx {
+        let inner = PlacementContext {
             pos: ctx.clicked_pos,
             hit_pos: ctx.clicked_pos,
             face: ctx.face,
@@ -1717,7 +1797,7 @@ impl Behaviours {
         input: &PlaceContext,
     ) -> Option<BlockStateId> {
         let mut sim = self.sim(level, ticks);
-        let mut ctx = Ctx {
+        let mut ctx = PlacementContext {
             pos: input.clicked_pos,
             hit_pos: input.clicked_pos,
             face: input.face,

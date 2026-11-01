@@ -25,6 +25,12 @@ enum MendSlot {
     Armor(usize),
 }
 
+/// `Player.getDestroySpeed` multiplies by `BLOCK_BREAK_SPEED`; a player
+/// without the attribute keeps the vanilla default of 1.0.
+fn block_break_speed_factor(value: Option<f64>) -> f32 {
+    value.map_or(1.0, |value| value as f32)
+}
+
 impl Game<'_> {
     /// `Player.getDestroySpeed` after the tool speed: mining efficiency, haste
     /// and mining fatigue.
@@ -38,6 +44,15 @@ impl Game<'_> {
                 .attribute_add(held, "minecraft:mining_efficiency") as f32;
         }
         speed * self.potions.effects.mining_speed_factor()
+    }
+    /// `Player.getDestroySpeed`'s final `Attributes.BLOCK_BREAK_SPEED` factor:
+    /// 1.0 by default, so a missing player or attribute changes nothing.
+    pub(super) fn block_break_speed(&mut self) -> f32 {
+        block_break_speed_factor(
+            self.player
+                .as_mut()
+                .and_then(|p| p.attribute("minecraft:block_break_speed").ok()),
+        )
     }
     /// `Attributes.SUBMERGED_MINING_SPEED` (0.2, raised by aqua affinity).
     pub(super) fn submerged_mining_speed(&self) -> f32 {
@@ -76,7 +91,7 @@ impl Game<'_> {
     pub(super) fn wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
         let loss = self.durability_loss(stack, amount);
         if loss > 0 {
-            self.trigger_item_durability(stack);
+            self.trigger_item_durability(stack, stack.damage + loss);
         }
         loss
     }
@@ -107,19 +122,11 @@ impl Game<'_> {
             base,
         )
     }
-    /// Strength / weakness on the attack damage attribute.
-    pub(super) fn effect_attack_bonus(&self) -> f32 {
-        let fx = &self.potions.effects;
-        fx.amplifier("strength")
-            .map_or(0.0, |a| 3.0 * (a + 1) as f32)
-            - fx.amplifier("weakness")
-                .map_or(0.0, |a| 4.0 * (a + 1) as f32)
-    }
     /// `Player.attack`'s extra knockback: `getKnockback` (the weapon's knockback
     /// enchantment, halved) plus 0.5 for a sprinting full-strength hit, and
     /// whether the hit is that knockback attack.
     pub(super) fn extra_knockback(&mut self, target_kind: &str, scale: f32) -> (f32, bool) {
-        let knockback_attack = scale > 0.9 && self.player.as_ref().is_some_and(|p| p.sprinting);
+        let sprinting = self.player.as_ref().is_some_and(|p| p.sprinting);
         let enchanted = match self.held().cloned() {
             Some(held) => {
                 let ctx = EffectContext {
@@ -140,8 +147,7 @@ impl Game<'_> {
             }
             None => 0.0,
         };
-        let bonus = if knockback_attack { 0.5 } else { 0.0 };
-        (enchanted / 2.0 + bonus, knockback_attack)
+        horizon_client::attack_strength::extra_knockback(enchanted, scale, sprinting)
     }
     /// `causeExtraKnockback`'s direction, `(sin yRot, -cos yRot)` from Mth's
     /// sine table: the target flies where the attacker looks, not away from
@@ -152,9 +158,11 @@ impl Game<'_> {
         (f64::from(trig::sin(yaw)), -f64::from(trig::cos(yaw)))
     }
     /// The attacker's side of `causeExtraKnockback` as the attacking client
-    /// sees it: the server's player stops sprinting, and its flag reaches the
-    /// client. (The server's 0.6 speed cut never does: the client's own
-    /// `Player.attack` simulates no hurt, so it skips the knockback.)
+    /// sees it after a hit on a mob: the server's player stops sprinting, and
+    /// its flag reaches the client. (The server's 0.6 speed cut never does:
+    /// the client's own `Player.attack` simulates no hurt on a mob, so it
+    /// skips the knockback. A hit on another player does simulate one:
+    /// `remote_player_attack`.)
     pub(super) fn stop_sprint_after_extra_knockback(&mut self) {
         if let Some(p) = self.player.as_mut() {
             let _ = p.set_sprinting(false);
@@ -167,6 +175,7 @@ impl Game<'_> {
         };
         let Some(m) = self.mobs.get(mob) else { return };
         let kind = m.kind.id.clone();
+        let victim = m.id;
         let ctx = EffectContext {
             this: Some(&kind),
             attacker: Some("minecraft:player"),
@@ -179,6 +188,7 @@ impl Game<'_> {
         // ignite (fire aspect) and apply_mob_effect (bane of arthropods).
         let mut ignite = 0.0f32;
         let mut mob_effects = Vec::new();
+        let mut hook_calls: Vec<(String, String, Value, u32)> = Vec::new();
         for (id, level) in held.enchantments() {
             let Some(def) = world_stations!(self).enchantments.get(id) else {
                 continue;
@@ -189,14 +199,17 @@ impl Game<'_> {
                 .flatten()
             {
                 let e = &effect["effect"];
-                let kind_of = e["type"].as_str();
-                if effect["enchanted"] != "attacker"
-                    || effect["affected"] != "victim"
-                    || !matches!(
-                        kind_of,
-                        Some("minecraft:ignite" | "minecraft:apply_mob_effect")
-                    )
-                {
+                if effect["enchanted"] != "attacker" || effect["affected"] != "victim" {
+                    continue;
+                }
+                // A bare type name is minecraft's own, as a bare item id is.
+                let kind_of = match e["type"].as_str() {
+                    Some(k) if k.contains(':') => k.to_owned(),
+                    Some(k) => format!("minecraft:{k}"),
+                    None => continue,
+                };
+                let own = !kind_of.starts_with("minecraft:");
+                if !own && !matches!(&*kind_of, "minecraft:ignite" | "minecraft:apply_mob_effect") {
                     continue;
                 }
                 let mut random = self.world.random.clone();
@@ -210,7 +223,11 @@ impl Game<'_> {
                 if !ok {
                     continue;
                 }
-                if kind_of == Some("minecraft:ignite") {
+                // A mod's own kind: its hook answers, after this loop (the
+                // stations borrow is held here).
+                if own {
+                    hook_calls.push((id.to_string(), kind_of, e.clone(), *level));
+                } else if kind_of == "minecraft:ignite" {
                     ignite =
                         ignite.max(horizon_client::enchant::level_value(&e["duration"], *level));
                 } else {
@@ -226,6 +243,9 @@ impl Game<'_> {
         }
         for (effect, level) in mob_effects {
             self.apply_mob_effect(mob, &effect, level);
+        }
+        for (id, kind_of, data, level) in hook_calls {
+            self.native_enchant_effect(&id, &kind_of, &data, level, victim);
         }
         self.post_attack_bursts(&held, &kind);
     }
@@ -356,7 +376,9 @@ impl Game<'_> {
         let ticks = (between("min_duration", "max_duration") * 20.0).round() as i32;
         let amplifier = (between("min_amplifier", "max_amplifier").round() as i32).max(0);
         if let Some(id) = super::potions::mob_effect_id(ids[pick]) {
+            let (new, entity) = (!m.has_effect(id), m.id as i32);
             m.add_effect(id, ticks, amplifier);
+            self.mod_effect_added(id, Some(entity), amplifier, new);
         }
     }
     /// `minecraft:post_attack` explode effects on the attacker (wind burst):
@@ -480,14 +502,7 @@ impl Game<'_> {
                     .is_some_and(|i| s.damage >= i.max_damage)
                 {
                     self.armor[slot] = None;
-                    if let Some(eye) = self.eye_position() {
-                        self.audio.play(
-                            "minecraft:entity.item.break",
-                            Some(eye),
-                            0.8,
-                            0.8 + self.world.random.next_float() * 0.4,
-                        );
-                    }
+                    self.player_equipment_broke(super::armor_slot(slot), &stack);
                     self.apply_equipment();
                 }
             }
@@ -752,14 +767,11 @@ impl Game<'_> {
         boots.damage += loss;
         if boots.damage >= max {
             self.armor[3] = None;
-            if let Some(eye) = self.eye_position() {
-                self.audio.play(
-                    "minecraft:entity.item.break",
-                    Some(eye),
-                    0.8,
-                    0.8 + self.world.random.next_float() * 0.4,
-                );
-            }
+            // LivingEntity.onEquippedItemBroken: the broken boots.
+            self.player_equipment_broke(
+                horizon_world::player_inventory::EquipmentSlot::Feet,
+                &stack,
+            );
             self.apply_equipment();
         }
     }
@@ -1008,5 +1020,21 @@ fn location_requirements(req: &Value, on_ground: bool, riding: bool) -> bool {
                 && (p["minecraft:vehicle"].is_null() || riding)
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::block_break_speed_factor;
+
+    /// #4094: `BLOCK_BREAK_SPEED` is a multiplier on the destroy speed.
+    #[test]
+    fn block_break_speed_is_a_destroy_speed_multiplier() {
+        assert_eq!(block_break_speed_factor(None), 1.0);
+        assert_eq!(block_break_speed_factor(Some(1.0)), 1.0);
+        assert_eq!(block_break_speed_factor(Some(0.5)), 0.5);
+        assert_eq!(block_break_speed_factor(Some(2.0)), 2.0);
+        assert_eq!(8.0 * block_break_speed_factor(Some(0.5)), 4.0);
+        assert_eq!(8.0 * block_break_speed_factor(Some(2.0)), 16.0);
     }
 }

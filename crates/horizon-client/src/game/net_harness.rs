@@ -1,9 +1,10 @@
 //! Headless multiplayer client for `tools/test_dedicated_server_parity.py`:
 //! with `--server` and `HORIZON_NET_REPORT` set, the client joins without a
 //! window, waits until it stands in the world with the chunks around it,
-//! sends a chat message and `/list`, collects the chat it is shown, leaves
-//! and writes a JSON report (position, chunks, chat lines, whether the
-//! server kept it connected throughout). With `HORIZON_NET_QUIET` (lines
+//! sends a chat message and `/list` (or the lines of `HORIZON_NET_CHAT`,
+//! split by `;`, one at a time; `.delay N` sets Chat Delay instead), collects the chat it is shown, leaves and
+//! writes a JSON report (position, chunks, chat lines, whether it signed its
+//! chat, whether the server kept it connected throughout). With `HORIZON_NET_QUIET` (lines
 //! split by `;`) it then sends them as one batch of a mod's quiet commands
 //! (`horizon_protocol::quiet`, `tools/quiet_commands_e2e.py`) and waits two
 //! seconds for any chat they bring.
@@ -29,6 +30,11 @@ impl Game<'_> {
         let quiet: Vec<String> = std::env::var("HORIZON_NET_QUIET")
             .map(|v| v.split(';').map(str::to_owned).collect())
             .unwrap_or_default();
+        let lines: Vec<String> = std::env::var("HORIZON_NET_CHAT")
+            .map(|v| v.split(';').map(str::to_owned).collect())
+            .unwrap_or_else(|_| vec!["hello from the horizon client".into(), "/list".into()]);
+        let mut sent = 0;
+        let mut signed = false;
         let mut chunks = 0;
         let mut error = None;
         while Instant::now() < deadline {
@@ -45,6 +51,8 @@ impl Game<'_> {
             if Instant::now() >= next {
                 next += Duration::from_millis(50);
                 self.tick()?;
+                // Gui.tick: ChatListener.tick, which the frame runs in play.
+                self.tick_chat_queue();
             }
             let now = Instant::now();
             if let Some(p) = &self.player {
@@ -66,14 +74,19 @@ impl Game<'_> {
                     && now - quiet_since > Duration::from_secs(3) =>
                 {
                     chunks = count;
-                    self.send_chat("hello from the horizon client");
-                    step = 1;
+                    signed = self.remote.as_ref().is_some_and(|r| r.secure_chat.signed());
+                    self.send_chat(&lines[0]);
+                    sent = 1;
+                    step = 2;
                     step_at = now;
                     chat_at = shown;
                 }
-                1 if answered => {
-                    self.send_chat("/list");
-                    step = 2;
+                2 if answered && sent < lines.len() => {
+                    match lines[sent].strip_prefix(".delay ") {
+                        Some(delay) => self.settings.chat_delay = delay.parse().unwrap_or(0.0),
+                        None => self.send_chat(&lines[sent]),
+                    }
+                    sent += 1;
                     step_at = now;
                     chat_at = shown;
                 }
@@ -118,6 +131,7 @@ impl Game<'_> {
                 "position": position,
                 "chunks": chunks,
                 "chat": chat,
+                "signed": signed,
                 "error": error,
             })
             .to_string(),

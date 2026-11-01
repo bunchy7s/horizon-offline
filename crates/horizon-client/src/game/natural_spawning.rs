@@ -164,7 +164,7 @@ impl GameLevel<'_, '_> {
     }
     fn biome(&self, x: i32, y: i32, z: i32) -> Option<&BiomeInfo> {
         let chunk = self.game.world.chunks.get(&(x >> 4, z >> 4))?;
-        Some(self.game.res.biomes().get(chunk.biome(x, y, z)))
+        Some(world_biomes!(self.game).get(chunk.biome(x, y, z)))
     }
     /// The block whose noise cell `BiomeManager.getBiome` reads.
     fn zoomed(&self, x: i32, y: i32, z: i32) -> [i32; 3] {
@@ -234,10 +234,10 @@ impl SpawnLevel for GameLevel<'_, '_> {
 }
 impl NaturalLevel for GameLevel<'_, '_> {
     fn min_y(&self) -> i32 {
-        horizon_client::chunk::MIN_Y
+        self.w.world.bottom_y()
     }
     fn max_y(&self) -> i32 {
-        horizon_client::chunk::MIN_Y + horizon_client::chunk::HEIGHT - 1
+        self.w.world.top_y() - 1
     }
     fn ambient_light(&self) -> f32 {
         match self.game.dim {
@@ -356,7 +356,7 @@ impl NaturalLevel for GameLevel<'_, '_> {
                     spawn_selection::heightmap_blocks(self, kind, x, y, z)
                 })
             })
-            .map_or(horizon_client::chunk::MIN_Y, |y| y + 1)
+            .map_or(self.w.world.bottom_y(), |y| y + 1)
     }
     fn pathfindable_land(&self, x: i32, y: i32, z: i32) -> bool {
         self.w.data.state(self.state(x, y, z)).flags & data::LAND != 0
@@ -434,7 +434,9 @@ impl<'a> Game<'a> {
             mob.persistent = persistent;
             let id = mob.id;
             self.mobs.push(mob);
+            self.native_mobs_joined(self.mobs.len() - 1, true);
             self.enchant_spawn_equipment(id);
+            self.halloween_spawn_head(id);
             if !persistent {
                 self.spawn_jockeys(id, true);
             }
@@ -520,6 +522,10 @@ impl<'a> Game<'a> {
     /// then `tickSpawningChunk` in the shuffled spawning chunks of every
     /// player: inhabited time, then `spawnForChunk`.
     pub(super) fn spawn_natural(&mut self) {
+        // `tickChunks` does nothing in a Debug world.
+        if self.world_debug {
+            return;
+        }
         let players = self.level_players();
         if players.is_empty() {
             return;
@@ -533,6 +539,7 @@ impl<'a> Game<'a> {
         let spawn_enemies = self.ui.rules.bool("spawn_monsters");
         let mut random = std::mem::replace(&mut self.world.random, LegacyRandom::new(0));
         let mut pending = Vec::new();
+        let last_state;
         {
             let level = self.natural_level();
             let counted: Vec<Counted> = self
@@ -561,6 +568,7 @@ impl<'a> Game<'a> {
             let mut state = SpawnState::new(&level, spawnable, players, &counted, |cx, cz| {
                 self.world.chunks.contains_key(&(cx, cz))
             });
+            last_state = state.counts();
             let categories = if spawn_mobs {
                 state.filtered_categories(spawn_enemies, self.world.game_time % 400 == 0)
             } else {
@@ -593,6 +601,8 @@ impl<'a> Game<'a> {
             }
         }
         self.world.random = random;
+        // ServerChunkCache.lastSpawnState, for the debug overlay.
+        self.spawn_counts.insert(self.dim, last_state);
         self.add_spawned(pending, false);
         self.spawn_scratch = scratch;
     }
@@ -608,6 +618,10 @@ impl<'a> Game<'a> {
         let Some(terrain) = self.end.locator() else {
             return;
         };
+        // `FlatLevelSource.spawnOriginalMobs` is empty: a superflat world places no packs.
+        if terrain.is_flat() {
+            return;
+        }
         let mut region = terrain.region_random(cx, cz);
         let any = region.as_any();
         let added = if let Some(r) = any.downcast_mut::<LegacyRandom>() {

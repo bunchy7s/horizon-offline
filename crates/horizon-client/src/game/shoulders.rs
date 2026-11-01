@@ -4,6 +4,7 @@
 //! falls, swims, flies or sleeps (`ServerPlayer.handleShoulderEntities`).
 use super::Game;
 use horizon_client::mobs::Species;
+use horizon_core::{geometry::Vec3, random::RandomSource};
 use horizon_world::nbt::Tag;
 
 const KEYS: [&str; 2] = ["ShoulderEntityLeft", "ShoulderEntityRight"];
@@ -11,6 +12,23 @@ const KEYS: [&str; 2] = ["ShoulderEntityLeft", "ShoulderEntityRight"];
 /// A shoulder slot holds a parrot when its compound is not empty.
 fn occupied(extra: &Tag, key: &str) -> bool {
     matches!(extra.get(key), Some(Tag::Compound(c)) if !c.is_empty())
+}
+
+/// `ServerPlayer.extractParrotVariant` for both slots: the variant of the
+/// parrot kept there (`Parrot.Variant.byId` clamps the saved `Variant`, 0
+/// when absent), `None` for an empty slot or another entity.
+pub(super) fn shoulder_variants(extra: Option<&Tag>) -> [Option<i32>; 2] {
+    KEYS.map(|key| {
+        let parrot = extra?.get(key)?;
+        match parrot.get("id") {
+            Some(Tag::String(id)) if id.to_string_lossy() == "minecraft:parrot" => {}
+            _ => return None,
+        }
+        Some(match parrot.get("Variant") {
+            Some(Tag::Int(v)) => (*v).clamp(0, 4),
+            _ => 0,
+        })
+    })
 }
 
 impl Game<'_> {
@@ -59,6 +77,9 @@ impl Game<'_> {
     /// of a player who falls, swims, flies, sleeps, is hurt, dying, a
     /// spectator or spinning with a riptide.
     pub(super) fn handle_shoulder_entities(&mut self) {
+        for key in KEYS {
+            self.play_shoulder_entity_ambient_sound(key);
+        }
         let Some(p) = self.player.as_ref() else {
             return;
         };
@@ -79,6 +100,50 @@ impl Game<'_> {
                 || self.sleeping.is_some())
         {
             self.remove_entities_on_shoulder();
+        }
+    }
+
+    /// `ServerPlayer.playShoulderEntityAmbientSound`: a parrot that is not
+    /// `Silent` chirps or imitates a mob within 20 blocks, one tick in 200
+    /// (drawn from the level's random; the player's own is not kept).
+    fn play_shoulder_entity_ambient_sound(&mut self, key: &str) {
+        let Some(Tag::Compound(tag)) = self.level.player_extra.as_ref().and_then(|e| e.get(key))
+        else {
+            return;
+        };
+        let silent = matches!(tag.get(&"Silent".into()), Some(Tag::Byte(b)) if *b != 0);
+        let parrot = matches!(
+            tag.get(&"id".into()),
+            Some(Tag::String(id)) if id.to_string_lossy() == "minecraft:parrot"
+        );
+        if tag.is_empty() || silent || self.world.random.next_int_bound(200).unwrap_or(1) != 0 {
+            return;
+        }
+        let Some(p) = self.player.as_ref() else {
+            return;
+        };
+        if !parrot {
+            return;
+        }
+        let area = p.bounds().inflate(Vec3::new(20.0, 20.0, 20.0));
+        let at = [p.position.x, p.position.y, p.position.z];
+        let alive = !p.health.dead_or_dying();
+        let nearby: Vec<_> = self
+            .mobs
+            .iter()
+            .filter(|m| m.alive() && !m.removed && m.bounds().intersects(area))
+            .map(|m| (m.species(), m.silent))
+            .collect();
+        let peaceful = self.ui.difficulty == 0;
+        if let Some((sound, volume, pitch)) = horizon_client::mobs::parrot::shoulder_sound(
+            &mut self.world.random,
+            alive,
+            false,
+            peaceful,
+            &nearby,
+        ) {
+            self.audio
+                .play(&format!("minecraft:{sound}"), Some(at), volume, pitch);
         }
     }
 
@@ -120,5 +185,29 @@ impl Game<'_> {
             c.insert("Owner".into(), Tag::IntArray(uuid.to_vec()));
             self.load_mob(tag, None);
         }
+    }
+}
+
+#[cfg(test)]
+mod variant_tests {
+    use super::*;
+    #[test]
+    fn shoulder_slots_hold_parrots_by_variant() {
+        let parrot = |variant: Option<i32>, id: &str| {
+            let mut entries = vec![("id", Tag::String(id.into()))];
+            if let Some(v) = variant {
+                entries.push(("Variant", Tag::Int(v)));
+            }
+            Tag::compound(entries)
+        };
+        let extra = Tag::compound([
+            ("ShoulderEntityLeft", parrot(Some(9), "minecraft:parrot")),
+            ("ShoulderEntityRight", parrot(None, "minecraft:parrot")),
+        ]);
+        // Variant.byId clamps; a parrot saved without one is the first.
+        assert_eq!(shoulder_variants(Some(&extra)), [Some(4), Some(0)]);
+        let other = Tag::compound([("ShoulderEntityRight", parrot(Some(1), "minecraft:cat"))]);
+        assert_eq!(shoulder_variants(Some(&other)), [None, None]);
+        assert_eq!(shoulder_variants(None), [None, None]);
     }
 }

@@ -3,8 +3,8 @@
 use super::{
     Damage, DamageKind, Mob, MobEvent, MobWorld, Species, Who,
     goals::{
-        Avoid, AvoidEntity, Cx, Float, Goal, HurtByTarget, LeapAtTarget, LookAtPlayer, MOVE,
-        MeleeAttack, NearestTarget, RandomLookAround, Stroll, goal_clone,
+        Avoid, AvoidEntity, ClimbOnTopOfPowderSnow, Cx, Float, Goal, HurtByTarget, LeapAtTarget,
+        LookAtPlayer, MOVE, MeleeAttack, NearestTarget, RandomLookAround, Stroll, goal_clone,
     },
 };
 use horizon_core::random::RandomSource;
@@ -57,6 +57,7 @@ pub fn register(m: &mut Mob) {
         S::Silverfish => {
             let g = &mut m.ai.goals;
             g.add(1, Float);
+            g.add(1, ClimbOnTopOfPowderSnow);
             g.add(3, SilverfishWakeUpFriends);
             g.add(4, MeleeAttack::new(1.0, false));
             g.add(5, SilverfishMergeWithStone::default());
@@ -337,12 +338,57 @@ pub fn creeper_tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
             mob: m.id,
             charged: m.extra.charged,
             name,
+            in_water: m.fluids.in_water,
         });
         events.push(MobEvent::Explode(
             [m.position.x, m.position.y, m.position.z],
             radius,
             m.species(),
         ));
+        // Creeper.spawnLingeringCloud: the effects it has make a cloud where it stood, after the
+        // blast. A hidden effect (`hideParticles`) takes no part in the cloud's colour.
+        if !m.extra.effects.is_empty() {
+            // The ids a potion's effects carry: vanilla ones without the namespace.
+            let effects: Vec<_> = m
+                .extra
+                .effects
+                .iter()
+                .map(|(id, ticks, amp)| (id.strip_prefix("minecraft:").unwrap_or(id), *ticks, *amp))
+                .collect();
+            let color = horizon_client_core::potions::effects_color(
+                effects
+                    .iter()
+                    .filter(|(id, ..)| !m.extra.hidden_effects.contains(id))
+                    .map(|(id, _, amp)| (*id, *amp)),
+            );
+            let hidden = effects
+                .iter()
+                .filter(|(id, ..)| {
+                    m.extra
+                        .hidden_effects
+                        .iter()
+                        .any(|h| h.strip_prefix("minecraft:").unwrap_or(h) == *id)
+                })
+                .map(|(id, ..)| *id)
+                .collect();
+            let ambient = effects
+                .iter()
+                .filter(|(id, ..)| {
+                    m.extra
+                        .ambient_effects
+                        .iter()
+                        .any(|h| h.strip_prefix("minecraft:").unwrap_or(h) == *id)
+                })
+                .map(|(id, ..)| *id)
+                .collect();
+            events.push(MobEvent::LingeringCloud {
+                at: [m.position.x, m.position.y, m.position.z],
+                effects,
+                hidden,
+                ambient,
+                color,
+            });
+        }
         m.removed = true;
     }
 }

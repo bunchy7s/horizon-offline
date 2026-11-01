@@ -1,6 +1,7 @@
 //! A content mod's `assets/` and `data/` (API 0.2, docs/modpacks.md): the
-//! files it adds to the game's resource tree, and the blocks and items it
-//! declares in `data/<id>/horizon/block/` and `data/<id>/horizon/item/`.
+//! files it adds to the game's resource tree, and the blocks, items, mob
+//! effects, entity types and menu types it declares in
+//! `data/<id>/horizon/{block,item,mob_effect,entity_type,menu}/`.
 //!
 //! Content is data, not code: nothing here runs in the sandbox. What a mod
 //! may add is fenced instead. Its own namespaces (its id and the ones its
@@ -48,6 +49,18 @@ pub fn check_path(name: &str) -> Result<(), String> {
 }
 
 /// A vanilla identifier, `minecraft:path`.
+/// `Identifier.isValidNamespace` and `isValidPath` on an id with both parts
+/// given: `[a-z0-9_.-]`, and `/` in the path too.
+fn namespaced_id(id: &str) -> bool {
+    let ok = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b);
+    id.split_once(':').is_some_and(|(namespace, path)| {
+        !namespace.is_empty()
+            && !path.is_empty()
+            && namespace.bytes().all(ok)
+            && path.bytes().all(|b| ok(b) || b == b'/')
+    })
+}
+
 fn vanilla_id(id: &str) -> bool {
     id.strip_prefix("minecraft:").is_some_and(|path| {
         !path.is_empty()
@@ -75,14 +88,64 @@ pub struct BlockProperties {
     pub sounds: Option<String>,
 }
 
+/// Per-state outline and collision boxes, selected by one state property.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BlockShapes {
+    pub property: String,
+    pub values: BTreeMap<String, Vec<[f64; 6]>>,
+}
+
+/// A state property a block declares on its own, beside its template's.
+/// A block's states become the template's states times these values, so a
+/// pipe can have a connection per side without a template that has one.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum StateProperty {
+    /// `false` and `true`, in vanilla's spelling.
+    Boolean,
+    /// A list of values, in the order the state space is built in.
+    Enum { values: Vec<String> },
+}
+
+impl StateProperty {
+    /// Its values, in the order the state space is built in; a boolean's two
+    /// come `false` first, as vanilla orders them.
+    pub fn values(&self) -> Vec<&str> {
+        match self {
+            StateProperty::Boolean => vec!["false", "true"],
+            StateProperty::Enum { values } => values.iter().map(String::as_str).collect(),
+        }
+    }
+}
+
+/// A vanilla state property's name, and a value's: lower case, digits and
+/// underscores (`minecraft:oak_log` is `axis`, a repeater is `delay`).
+fn state_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BlockFile {
     template: String,
     #[serde(default)]
     properties: BlockProperties,
+    shapes: Option<BlockShapes>,
+    #[serde(default)]
+    state_properties: BTreeMap<String, StateProperty>,
+    #[serde(default)]
+    default_state: BTreeMap<String, String>,
+    #[serde(default)]
+    connects_to: Option<String>,
+    #[serde(default)]
+    thickness: Option<f32>,
     #[serde(default = "yes")]
     item: bool,
+    #[serde(default)]
+    components: BTreeMap<String, serde_json::Value>,
 }
 fn yes() -> bool {
     true
@@ -97,8 +160,42 @@ pub struct Block {
     /// The vanilla block it copies, `minecraft:<path>`.
     pub template: String,
     pub properties: BlockProperties,
+    pub shapes: Option<BlockShapes>,
+    /// State properties of its own, which its template does not have.
+    pub state_properties: BTreeMap<String, StateProperty>,
+    /// State properties overlaid on the template default.
+    pub default_state: BTreeMap<String, String>,
     /// Also add a block item with the same id.
     pub item: bool,
+    /// Its item's component patch, as an [`Item`]'s.
+    pub components: BTreeMap<String, serde_json::Value>,
+    /// A connecting block (template `minecraft:chorus_plant`, a `PipeBlock`
+    /// without the chorus plant's rules): the block tag, without `#`, whose
+    /// blocks it joins besides itself (a cable's machines).
+    pub connects_to: Option<String>,
+    /// A connecting block's width in pixels (2 to 14): its shapes, the
+    /// chorus plant's (10) when unset.
+    pub thickness: Option<f32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreativeTabFile {
+    title: String,
+    icon: String,
+    items: Vec<String>,
+}
+
+/// A creative inventory tab the mod adds (`data/<id>/horizon/creative_tab/`):
+/// its title, the item on its button, and its items in order. Items no mod
+/// or vanilla registers are left out when the game loads.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CreativeTab {
+    /// `<mod id>:<path>`.
+    pub id: String,
+    pub title: String,
+    pub icon: String,
+    pub items: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -118,6 +215,7 @@ struct ItemFile {
     rarity: Option<Rarity>,
     #[serde(default)]
     components: BTreeMap<String, serde_json::Value>,
+    crafting_remainder: Option<String>,
 }
 
 /// An item the mod adds: a vanilla template item's components under a new
@@ -131,7 +229,77 @@ pub struct Item {
     pub rarity: Option<Rarity>,
     /// A 26.3 data component patch over the template's: `!minecraft:<type>` removes one.
     pub components: BTreeMap<String, serde_json::Value>,
+    /// What it leaves in the crafting grid (`Item.Properties.craftRemainder`):
+    /// a vanilla item or one of the mod's own.
+    pub crafting_remainder: Option<String>,
 }
+
+/// `MobEffectCategory`.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EffectCategory {
+    Beneficial,
+    Harmful,
+    Neutral,
+}
+
+/// A mob effect the mod adds: what `new MobEffect(category, color)` takes.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MobEffect {
+    /// `<mod id>:<path>`.
+    #[serde(skip)]
+    pub id: String,
+    pub category: EffectCategory,
+    /// RGB, `0x000000` to `0xFFFFFF`.
+    pub color: u32,
+}
+
+/// the vanilla entity types a mod's type may copy: thrown item
+/// projectiles (`ThrowableItemProjectile`).
+pub const ENTITY_TEMPLATES: [&str; 1] = ["minecraft:snowball"];
+
+/// an entity type the mod adds: a copy of a vanilla template's, thrown
+/// from `item` and drawn as it.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct EntityType {
+    /// `<mod id>:<path>`.
+    #[serde(skip)]
+    pub id: String,
+    /// one of [`ENTITY_TEMPLATES`].
+    pub template: String,
+    /// one of the mod's own items, which throws it.
+    pub item: String,
+    /// what a hit deals to an entity, as `thrown` damage.
+    #[serde(default)]
+    pub damage: f32,
+}
+
+/// a menu type the mod adds (vanilla's `MenuType`, NeoForge's
+/// `IMenuTypeExtension.create`): its container's slot count, the
+/// `ContainerData` count its menu syncs, and its take-only slots
+/// (`FurnaceResultSlot.mayPlace`). The slots come first in the menu, then the
+/// player's 36, and a mod screen (`native_screen`) places them.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MenuType {
+    /// `<mod id>:<path>`.
+    #[serde(skip)]
+    pub id: String,
+    /// 1 to [`MAX_MENU_SLOTS`].
+    pub slots: u16,
+    /// 0 to [`MAX_MENU_SLOTS`].
+    #[serde(default)]
+    pub data_slots: u16,
+    /// slots a player takes from but never puts into, each below `slots`.
+    #[serde(default)]
+    pub results: Vec<u16>,
+}
+
+/// the most container or data slots a mod menu type has, as many as a mod
+/// container (`native_block_entity_container`) may.
+pub const MAX_MENU_SLOTS: u16 = 256;
 
 #[derive(Debug)]
 enum Source {
@@ -147,6 +315,11 @@ pub struct Content {
     pub files: Vec<String>,
     pub blocks: Vec<Block>,
     pub items: Vec<Item>,
+    pub effects: Vec<MobEffect>,
+    /// Its creative inventory tabs, by id.
+    pub creative_tabs: Vec<CreativeTab>,
+    pub entity_types: Vec<EntityType>,
+    pub menu_types: Vec<MenuType>,
     /// The namespaces it owns: the mod id, then the manifest's `namespaces`.
     pub namespaces: Vec<String>,
 }
@@ -203,7 +376,7 @@ impl Content {
             let mut out = Vec::new();
             for i in 0..zip.len() {
                 let entry = zip.by_index_raw(i).map_err(|e| e.to_string())?;
-                let name = entry.name();
+                let name = entry.name().map_err(|e| e.to_string())?.into_owned();
                 if (name.starts_with("assets/") || name.starts_with("data/")) && !entry.is_dir() {
                     out.push((name.to_owned(), entry.size()));
                 }
@@ -233,6 +406,10 @@ impl Content {
             files,
             blocks: Vec::new(),
             items: Vec::new(),
+            effects: Vec::new(),
+            creative_tabs: Vec::new(),
+            entity_types: Vec::new(),
+            menu_types: Vec::new(),
             namespaces: manifest.owned_namespaces().map(str::to_owned).collect(),
         };
         content.check(manifest)?;
@@ -275,6 +452,10 @@ impl Content {
         }
         let mut blocks = Vec::new();
         let mut items = Vec::new();
+        let mut effects = Vec::new();
+        let mut tabs = Vec::new();
+        let mut types = Vec::new();
+        let mut menus = Vec::new();
         for name in &self.files {
             let mut parts = name.splitn(3, '/');
             let (top, namespace, rest) = (
@@ -295,7 +476,7 @@ impl Content {
             }
             if !own && top == "data" && rest.starts_with("horizon/") {
                 return Err(format!(
-                    "{name}: blocks and items are declared in data/{id}/horizon/"
+                    "{name}: blocks, items, mob effects, entity types and menu types are declared in data/{id}/horizon/"
                 ));
             }
             let Some(decl) = (own && top == "data")
@@ -315,9 +496,17 @@ impl Content {
                 blocks.push((block, name.clone()));
             } else if let Some(item) = parse("item") {
                 items.push((item, name.clone()));
+            } else if let Some(effect) = parse("mob_effect") {
+                effects.push((effect, name.clone()));
+            } else if let Some(tab) = parse("creative_tab") {
+                tabs.push((tab, name.clone()));
+            } else if let Some(kind) = parse("entity_type") {
+                types.push((kind, name.clone()));
+            } else if let Some(menu) = parse("menu") {
+                menus.push((menu, name.clone()));
             } else {
                 return Err(format!(
-                    "{name}: data/{id}/horizon/ holds block/*.json and item/*.json only"
+                    "{name}: data/{id}/horizon/ holds block/, item/, mob_effect/, creative_tab/, entity_type/ and menu/*.json only"
                 ));
             }
         }
@@ -333,9 +522,18 @@ impl Content {
                 id: block,
                 template: file.template,
                 properties: file.properties,
+                shapes: file.shapes,
+                state_properties: file.state_properties,
+                default_state: file.default_state,
                 item: file.item,
+                components: file.components,
+                connects_to: file
+                    .connects_to
+                    .map(|t| t.trim_start_matches('#').to_owned()),
+                thickness: file.thickness,
             });
         }
+        let mut remainders = Vec::new();
         for (item, name) in items {
             let file: ItemFile =
                 serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
@@ -348,9 +546,13 @@ impl Content {
             if file.max_stack_size.is_some_and(|n| !(1..=99).contains(&n)) {
                 return Err(format!("{name}: max_stack_size is 1 to 99"));
             }
-            check_components(&file.components).map_err(|e| format!("{name}: {e}"))?;
+            check_components(&file.components, &["max_stack_size", "rarity"])
+                .map_err(|e| format!("{name}: {e}"))?;
             if !ids.insert(item.clone()) {
                 return Err(format!("{name}: {item} is also a block's item"));
+            }
+            if let Some(rest) = &file.crafting_remainder {
+                remainders.push((name, rest.clone()));
             }
             self.items.push(Item {
                 id: item,
@@ -358,25 +560,120 @@ impl Content {
                 max_stack_size: file.max_stack_size,
                 rarity: file.rarity,
                 components: file.components,
+                crafting_remainder: file.crafting_remainder,
             });
+        }
+        for (effect, name) in effects {
+            let file: MobEffect =
+                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+            if file.color > 0xFF_FFFF {
+                return Err(format!("{name}: color is RGB, 0 to 16777215 (0xFFFFFF)"));
+            }
+            self.effects.push(MobEffect { id: effect, ..file });
+        }
+        // After every item, so a remainder may be declared in a later file.
+        for (name, rest) in remainders {
+            if rest == "minecraft:air" {
+                return Err(format!(
+                    "{name}: crafting_remainder {rest:?} is no remainder (leave it out)"
+                ));
+            }
+            if !vanilla_id(&rest) && !ids.contains(&rest) {
+                return Err(format!(
+                    "{name}: crafting_remainder {rest:?} is not a vanilla item (minecraft:...) or one of this mod's"
+                ));
+            }
+        }
+        for (tab, name) in tabs {
+            let file: CreativeTabFile =
+                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+            let id_like = |s: &str| {
+                s.split_once(':')
+                    .is_some_and(|(n, p)| !n.is_empty() && !p.is_empty())
+            };
+            if !id_like(&file.icon) || !file.items.iter().all(|i| id_like(i)) {
+                return Err(format!(
+                    "{name}: icon and items are item ids (namespace:path)"
+                ));
+            }
+            self.creative_tabs.push(CreativeTab {
+                id: tab,
+                title: file.title,
+                icon: file.icon,
+                items: file.items,
+            });
+        }
+        for (kind, name) in types {
+            let file: EntityType =
+                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+            if !ENTITY_TEMPLATES.contains(&file.template.as_str()) {
+                return Err(format!(
+                    "{name}: template {:?} is not one of {ENTITY_TEMPLATES:?}",
+                    file.template
+                ));
+            }
+            // its own item, so no vanilla item loses its use to it.
+            if !ids.contains(&file.item) {
+                return Err(format!(
+                    "{name}: item {:?} is not one of this mod's items",
+                    file.item
+                ));
+            }
+            if self.entity_types.iter().any(|t| t.item == file.item) {
+                return Err(format!(
+                    "{name}: item {:?} already throws another entity type",
+                    file.item
+                ));
+            }
+            if !(file.damage.is_finite() && file.damage >= 0.0) {
+                return Err(format!("{name}: damage is 0 or more"));
+            }
+            self.entity_types.push(EntityType { id: kind, ..file });
+        }
+        for (menu, name) in menus {
+            let file: MenuType =
+                serde_json::from_slice(&self.file(&name)?).map_err(|e| format!("{name}: {e}"))?;
+            if !(1..=MAX_MENU_SLOTS).contains(&file.slots) || file.data_slots > MAX_MENU_SLOTS {
+                return Err(format!(
+                    "{name}: slots is 1 to {MAX_MENU_SLOTS}, data_slots 0 to {MAX_MENU_SLOTS}"
+                ));
+            }
+            let mut seen = BTreeSet::new();
+            for &r in &file.results {
+                if r >= file.slots {
+                    return Err(format!(
+                        "{name}: result {r} is past the last slot, {}",
+                        file.slots - 1
+                    ));
+                }
+                if !seen.insert(r) {
+                    return Err(format!("{name}: result {r} is listed twice"));
+                }
+            }
+            self.menu_types.push(MenuType { id: menu, ..file });
         }
         Ok(())
     }
 }
 
-/// Vanilla component types only, removals as `{}`, none the item file has its own key for.
-fn check_components(components: &BTreeMap<String, serde_json::Value>) -> Result<(), String> {
+/// Namespaced component types, removals as `{}`, and none of `fields`,
+/// which the file sets with its own keys.
+fn check_components(
+    components: &BTreeMap<String, serde_json::Value>,
+    fields: &[&str],
+) -> Result<(), String> {
     for (key, value) in components {
         let (removed, kind) = match key.strip_prefix('!') {
             Some(kind) => (true, kind),
             None => (false, key.as_str()),
         };
-        if !vanilla_id(kind) {
-            return Err(format!(
-                "component {key:?} is not a vanilla type (minecraft:...)"
-            ));
+        if !namespaced_id(kind) {
+            return Err(format!("component {key:?} must be namespaced and valid"));
         }
-        if let Some(own @ ("max_stack_size" | "rarity")) = kind.strip_prefix("minecraft:") {
+        if let Some(own) = kind
+            .strip_prefix("minecraft:")
+            .filter(|k| fields.contains(k))
+        {
             return Err(format!("component {key:?}: set {own} instead"));
         }
         if removed && !value.as_object().is_some_and(|o| o.is_empty()) {
@@ -392,6 +689,49 @@ fn check_block(file: &BlockFile) -> Result<(), String> {
             "template {:?} is not a vanilla block (minecraft:...)",
             file.template
         ));
+    }
+    if let Some(shapes) = &file.shapes {
+        if shapes.property.is_empty() || shapes.values.is_empty() {
+            return Err("shapes needs a property and values".into());
+        }
+        for boxes in shapes.values.values() {
+            if boxes.len() > 16
+                || boxes
+                    .iter()
+                    .any(|b| b.iter().any(|n| !n.is_finite()) || (0..3).any(|i| b[i] > b[i + 3]))
+            {
+                return Err("shape needs at most 16 finite boxes with ordered bounds".into());
+            }
+        }
+    }
+    for (name, property) in &file.state_properties {
+        if !state_name(name) {
+            return Err(format!(
+                "state property {name:?} is lower case letters, digits and underscores"
+            ));
+        }
+        let values = property.values();
+        if values.is_empty() {
+            return Err(format!("state property {name:?} needs a value"));
+        }
+        let mut seen = BTreeSet::new();
+        for value in values {
+            if !state_name(value) {
+                return Err(format!(
+                    "state property {name:?}: value {value:?} is lower case letters, digits and underscores"
+                ));
+            }
+            if !seen.insert(value) {
+                return Err(format!("state property {name:?}: value {value:?} repeats"));
+            }
+        }
+    }
+    for key in file.default_state.keys() {
+        if !state_name(key) {
+            return Err(format!(
+                "default_state key {key:?} is lower case letters, digits and underscores"
+            ));
+        }
     }
     let p = &file.properties;
     let finite = |v: Option<f32>| v.is_none_or(f32::is_finite);
@@ -415,6 +755,48 @@ fn check_block(file: &BlockFile) -> Result<(), String> {
     }
     if p.sounds.as_deref().is_some_and(|s| !vanilla_id(s)) {
         return Err("sounds names a vanilla block (minecraft:...)".into());
+    }
+    if !file.item && !file.components.is_empty() {
+        return Err("item is false, so the block has no item to take components".into());
+    }
+    check_components(&file.components, &[])?;
+    // A block file has no `max_stack_size` / `rarity` keys, so those two take the same checks here.
+    if let Some(n) = file.components.get("minecraft:max_stack_size")
+        && !n.as_u64().is_some_and(|n| (1..=99).contains(&n))
+    {
+        return Err("component \"minecraft:max_stack_size\" is an integer 1 to 99".into());
+    }
+    if let Some(r) = file.components.get("minecraft:rarity")
+        && serde_json::from_value::<Rarity>(r.clone()).is_err()
+    {
+        return Err("component \"minecraft:rarity\" is common, uncommon, rare or epic".into());
+    }
+    if let Some(tag) = &file.connects_to {
+        if file.template != "minecraft:chorus_plant" {
+            return Err("connects_to needs template minecraft:chorus_plant (a PipeBlock)".into());
+        }
+        let id = tag.strip_prefix('#').unwrap_or_default();
+        let valid = |s: &str| {
+            !s.is_empty()
+                && s.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "_-./".contains(c))
+        };
+        if !id
+            .split_once(':')
+            .is_some_and(|(ns, path)| valid(ns) && valid(path))
+        {
+            return Err("connects_to is a block tag, #namespace:path".into());
+        }
+    }
+    match file.thickness {
+        Some(_) if file.connects_to.is_none() => {
+            return Err("thickness is a connecting block's (connects_to)".into());
+        }
+        Some(t) if !(2.0..=14.0).contains(&t) => return Err("thickness is 2 to 14 pixels".into()),
+        Some(_) if file.shapes.is_some() => {
+            return Err("thickness sets the shapes, so a block has one or the other".into());
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -499,6 +881,9 @@ capabilities = ["registries"]
             [Block {
                 id: "ruby:ruby_block".into(),
                 template: "minecraft:iron_block".into(),
+                shapes: None,
+                state_properties: BTreeMap::new(),
+                default_state: BTreeMap::new(),
                 properties: BlockProperties {
                     hardness: Some(4.0),
                     light: Some(3),
@@ -506,11 +891,37 @@ capabilities = ["registries"]
                     ..BlockProperties::default()
                 },
                 item: true,
+                components: BTreeMap::new(),
+                connects_to: None,
+                thickness: None,
             }]
         );
         assert_eq!(content.items[0].id, "ruby:ruby");
         assert_eq!(content.items[0].rarity, Some(Rarity::Uncommon));
         assert!(content.items[0].components.is_empty());
+        assert_eq!(content.items[0].crafting_remainder, None);
+    }
+
+    #[test]
+    fn items_name_their_crafting_remainder() {
+        let files: &[(&str, &[u8])] = &[
+            (
+                "data/ruby/horizon/item/a_stew.json",
+                br#"{"template": "minecraft:mushroom_stew", "crafting_remainder": "minecraft:bowl"}"#,
+            ),
+            (
+                "data/ruby/horizon/item/b_flask.json",
+                br#"{"template": "minecraft:potion", "crafting_remainder": "ruby:c_flask"}"#,
+            ),
+            ("data/ruby/horizon/item/c_flask.json", ITEM),
+        ];
+        let content = hmod("remainder", MANIFEST_TEXT, files).unwrap();
+        let rests: Vec<_> = content
+            .items
+            .iter()
+            .map(|i| i.crafting_remainder.as_deref())
+            .collect();
+        assert_eq!(rests, [Some("minecraft:bowl"), Some("ruby:c_flask"), None]);
     }
 
     #[test]
@@ -536,6 +947,192 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn mob_effects_take_a_category_and_a_colour() {
+        let files: &[(&str, &[u8])] = &[
+            (
+                "data/ruby/horizon/mob_effect/glow.json",
+                br#"{"category": "beneficial", "color": 16711680}"#,
+            ),
+            (
+                "data/ruby/horizon/mob_effect/curse/dark.json",
+                br#"{"category": "harmful", "color": 0}"#,
+            ),
+        ];
+        let content = hmod("effects", MANIFEST_TEXT, files).unwrap();
+        let effects: Vec<_> = content
+            .effects
+            .iter()
+            .map(|e| (e.id.as_str(), e.category, e.color))
+            .collect();
+        assert_eq!(
+            effects,
+            [
+                ("ruby:curse/dark", EffectCategory::Harmful, 0),
+                ("ruby:glow", EffectCategory::Beneficial, 0xFF0000),
+            ]
+        );
+        for (case, file, why) in [
+            (
+                "effect-colour",
+                r#"{"category": "neutral", "color": 16777216}"#,
+                "color is RGB",
+            ),
+            (
+                "effect-category",
+                r#"{"category": "good", "color": 1}"#,
+                "unknown variant",
+            ),
+            (
+                "effect-key",
+                r#"{"category": "neutral", "color": 1, "id": "x"}"#,
+                "unknown field",
+            ),
+            (
+                "effect-missing",
+                r#"{"category": "neutral"}"#,
+                "missing field",
+            ),
+        ] {
+            let files: &[(&str, &[u8])] =
+                &[("data/ruby/horizon/mob_effect/a.json", file.as_bytes())];
+            let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
+            assert!(e.contains(why), "{case}: {e}");
+        }
+    }
+
+    #[test]
+    fn menu_types_take_slots_data_slots_and_results() {
+        let files: &[(&str, &[u8])] = &[
+            (
+                "data/ruby/horizon/menu/press.json",
+                br#"{"slots": 9, "data_slots": 2, "results": [7, 8]}"#,
+            ),
+            ("data/ruby/horizon/menu/bag.json", br#"{"slots": 4}"#),
+        ];
+        let content = hmod("menus", MANIFEST_TEXT, files).unwrap();
+        let menus: Vec<_> = content
+            .menu_types
+            .iter()
+            .map(|m| (m.id.as_str(), m.slots, m.data_slots, m.results.clone()))
+            .collect();
+        assert_eq!(
+            menus,
+            [("ruby:bag", 4, 0, vec![]), ("ruby:press", 9, 2, vec![7, 8])]
+        );
+        for (case, file, why) in [
+            ("menu-empty", r#"{"slots": 0}"#, "slots is 1 to 256"),
+            ("menu-large", r#"{"slots": 257}"#, "slots is 1 to 256"),
+            (
+                "menu-data",
+                r#"{"slots": 1, "data_slots": 257}"#,
+                "data_slots 0 to 256",
+            ),
+            (
+                "menu-result",
+                r#"{"slots": 3, "results": [3]}"#,
+                "result 3 is past the last slot, 2",
+            ),
+            (
+                "menu-twice",
+                r#"{"slots": 3, "results": [1, 1]}"#,
+                "result 1 is listed twice",
+            ),
+            ("menu-key", r#"{"slots": 3, "rows": 1}"#, "unknown field"),
+            ("menu-missing", r#"{"data_slots": 1}"#, "missing field"),
+        ] {
+            let files: &[(&str, &[u8])] = &[("data/ruby/horizon/menu/a.json", file.as_bytes())];
+            let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
+            assert!(e.contains(why), "{case}: {e}");
+        }
+    }
+
+    #[test]
+    fn entity_types_copy_a_throwable_and_name_its_item() {
+        let files: &[(&str, &[u8])] = &[
+            ("data/ruby/horizon/item/gem.json", ITEM),
+            (
+                "data/ruby/horizon/entity_type/bolt.json",
+                br#"{"template": "minecraft:snowball", "item": "ruby:gem", "damage": 2.5}"#,
+            ),
+            ("data/ruby/horizon/item/dust.json", ITEM),
+            (
+                "data/ruby/horizon/entity_type/puff.json",
+                br#"{"template": "minecraft:snowball", "item": "ruby:dust"}"#,
+            ),
+        ];
+        let content = hmod("types", MANIFEST_TEXT, files).unwrap();
+        let types: Vec<_> = content
+            .entity_types
+            .iter()
+            .map(|t| (t.id.as_str(), t.item.as_str(), t.damage))
+            .collect();
+        assert_eq!(
+            types,
+            [
+                ("ruby:bolt", "ruby:gem", 2.5),
+                ("ruby:puff", "ruby:dust", 0.0)
+            ]
+        );
+        let snowball = |rest: &str| format!(r#"{{"template": "minecraft:snowball"{rest}}}"#);
+        for (case, file, why) in [
+            (
+                "type-template",
+                r#"{"template": "minecraft:egg", "item": "ruby:gem"}"#.to_owned(),
+                "is not one of",
+            ),
+            (
+                "type-vanilla-item",
+                snowball(r#", "item": "minecraft:stick""#),
+                "is not one of this mod's items",
+            ),
+            (
+                "type-unknown-item",
+                snowball(r#", "item": "ruby:none""#),
+                "is not one of this mod's items",
+            ),
+            (
+                "type-damage",
+                snowball(r#", "item": "ruby:gem", "damage": -1"#),
+                "damage is 0 or more",
+            ),
+            (
+                "type-key",
+                snowball(r#", "item": "ruby:gem", "size": 1"#),
+                "unknown field",
+            ),
+        ] {
+            let files: &[(&str, &[u8])] = &[
+                ("data/ruby/horizon/item/gem.json", ITEM),
+                ("data/ruby/horizon/entity_type/a.json", file.as_bytes()),
+            ];
+            let e = hmod(case, MANIFEST_TEXT, files).unwrap_err();
+            assert!(e.contains(why), "{case}: {e}");
+        }
+        let shared = snowball(r#", "item": "ruby:gem""#);
+        let files: &[(&str, &[u8])] = &[
+            ("data/ruby/horizon/item/gem.json", ITEM),
+            ("data/ruby/horizon/entity_type/a.json", shared.as_bytes()),
+            ("data/ruby/horizon/entity_type/b.json", shared.as_bytes()),
+        ];
+        let e = hmod("type-shared", MANIFEST_TEXT, files).unwrap_err();
+        assert!(e.contains("already throws another entity type"), "{e}");
+    }
+
+    #[test]
+    fn block_items_patch_their_components() {
+        let block = br#"{"template": "minecraft:iron_block", "components": {
+            "minecraft:max_stack_size": 16, "!minecraft:lore": {}}}"#;
+        let files: &[(&str, &[u8])] = &[("data/ruby/horizon/block/ruby_block.json", block)];
+        let content = hmod("block-components", MANIFEST_TEXT, files).unwrap();
+        let components = &content.blocks[0].components;
+        assert_eq!(
+            components.keys().collect::<Vec<_>>(),
+            ["!minecraft:lore", "minecraft:max_stack_size"]
+        );
+        assert_eq!(components["minecraft:max_stack_size"], 16);
+    }
+
+    #[test]
     fn folder_mod_reads_the_same() {
         let dir = scratch("folder");
         std::fs::write(dir.join(MANIFEST), MANIFEST_TEXT).unwrap();
@@ -548,6 +1145,65 @@ capabilities = ["registries"]
         assert_eq!(content.files, ["data/ruby/horizon/block/ruby_block.json"]);
         assert_eq!(content.file(&content.files[0]).unwrap(), BLOCK);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A connecting block names a block tag and copies a `PipeBlock`.
+    #[test]
+    fn connecting_blocks_copy_a_pipe_and_name_a_tag() {
+        let block = |json: &str| {
+            let files: &[(&str, &[u8])] =
+                &[("data/ruby/horizon/block/cable.json", json.as_bytes())];
+            hmod("cable", MANIFEST_TEXT, files)
+        };
+        let content = block(
+            r##"{"template": "minecraft:chorus_plant", "connects_to": "#ruby:cable_joins"}"##,
+        )
+        .unwrap();
+        assert_eq!(
+            content.blocks[0].connects_to.as_deref(),
+            Some("ruby:cable_joins")
+        );
+        let thin =
+            r##"{"template": "minecraft:chorus_plant", "connects_to": "#ruby:j", "thickness": 4}"##;
+        assert_eq!(block(thin).unwrap().blocks[0].thickness, Some(4.0));
+        let e = block(r#"{"template": "minecraft:chorus_plant", "thickness": 4}"#).unwrap_err();
+        assert!(e.contains("connects_to"), "{e}");
+        let e = block(r##"{"template": "minecraft:chorus_plant", "connects_to": "#ruby:j", "thickness": 16}"##)
+            .unwrap_err();
+        assert!(e.contains("2 to 14"), "{e}");
+        let e = block(r##"{"template": "minecraft:stone", "connects_to": "#ruby:cable_joins"}"##)
+            .unwrap_err();
+        assert!(e.contains("chorus_plant"), "{e}");
+        for tag in ["ruby:cable_joins", "#cable_joins", "#Ruby:Cable"] {
+            let json =
+                format!(r#"{{"template": "minecraft:chorus_plant", "connects_to": "{tag}"}}"#);
+            let e = block(&json).unwrap_err();
+            assert!(e.contains("block tag"), "{tag}: {e}");
+        }
+    }
+
+    /// A creative tab: a title, an icon and its items, all item ids.
+    #[test]
+    fn creative_tabs_name_their_items() {
+        let tab = |json: &str| {
+            let files: &[(&str, &[u8])] =
+                &[("data/ruby/horizon/creative_tab/gems.json", json.as_bytes())];
+            hmod("tab", MANIFEST_TEXT, files)
+        };
+        let content =
+            tab(r#"{"title": "Ruby Gems", "icon": "ruby:ruby", "items": ["ruby:ruby", "minecraft:diamond"]}"#)
+                .unwrap();
+        assert_eq!(
+            content.creative_tabs,
+            [CreativeTab {
+                id: "ruby:gems".into(),
+                title: "Ruby Gems".into(),
+                icon: "ruby:ruby".into(),
+                items: vec!["ruby:ruby".into(), "minecraft:diamond".into()],
+            }]
+        );
+        let e = tab(r#"{"title": "Gems", "icon": "ruby", "items": []}"#).unwrap_err();
+        assert!(e.contains("item ids"), "{e}");
     }
 
     #[test]
@@ -591,6 +1247,15 @@ capabilities = ["registries"]
                 br#"{"template": "minecraft:stone", "glow": true}"#,
             )],
         );
+        refused("shape-reversed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"property":"axis","values":{"x":[[1,0,0,0,1,1]]}}}"#)]);
+        refused("shape-malformed", &[("data/ruby/horizon/block/a.json", br#"{"template":"minecraft:stone","shapes":{"property":"axis","values":{"x":[[0,0,0,1,1]]}}}"#)]);
+        refused(
+            "shape-no-values",
+            &[(
+                "data/ruby/horizon/block/a.json",
+                br#"{"template":"minecraft:stone","shapes":{"property":"axis","values":{}}}"#,
+            )],
+        );
         let e = refused(
             "clash",
             &[
@@ -609,14 +1274,34 @@ capabilities = ["registries"]
         );
         for (case, components, why) in [
             (
-                "modded-component",
-                r#"{"ruby:mana": 3}"#,
-                "not a vanilla type",
-            ),
-            (
                 "bare-component",
                 r#"{"max_damage": 3}"#,
-                "not a vanilla type",
+                "must be namespaced",
+            ),
+            (
+                "uppercase-path",
+                r#"{"minecraft:Foo": 3}"#,
+                "must be namespaced and valid",
+            ),
+            (
+                "uppercase-namespace",
+                r#"{"Example:charge": 3}"#,
+                "must be namespaced and valid",
+            ),
+            (
+                "empty-namespace",
+                r#"{":charge": 3}"#,
+                "must be namespaced and valid",
+            ),
+            (
+                "empty-path",
+                r#"{"example:": 3}"#,
+                "must be namespaced and valid",
+            ),
+            (
+                "invalid-removal",
+                r#"{"!example:Foo": {}}"#,
+                "must be namespaced and valid",
             ),
             (
                 "own-key",
@@ -636,6 +1321,62 @@ capabilities = ["registries"]
         ] {
             let item = format!(r#"{{"template": "minecraft:stick", "components": {components}}}"#);
             let e = refused(case, &[("data/ruby/horizon/item/a.json", item.as_bytes())]);
+            assert!(e.contains(why), "{case}: {e}");
+        }
+        let glass = br#"{"template": "minecraft:glass", "item": false}"#;
+        for (case, rest) in [
+            ("bare-remainder", "bowl"),
+            ("missing-remainder", "ruby:bowl"),
+            ("other-mod-remainder", "jade:bowl"),
+            ("itemless-remainder", "ruby:glass"),
+            ("air-remainder", "minecraft:air"),
+        ] {
+            let item =
+                format!(r#"{{"template": "minecraft:stick", "crafting_remainder": "{rest}"}}"#);
+            let files: &[(&str, &[u8])] = &[
+                ("data/ruby/horizon/item/a.json", item.as_bytes()),
+                ("data/ruby/horizon/block/glass.json", glass),
+            ];
+            let e = refused(case, files);
+            assert!(e.contains("crafting_remainder"), "{case}: {e}");
+        }
+        for (case, block, why) in [
+            (
+                "block-removal-value",
+                r#"{"template": "minecraft:stone", "components": {"!minecraft:lore": []}}"#,
+                "a removal's value is {}",
+            ),
+            (
+                "block-stack-zero",
+                r#"{"template": "minecraft:stone", "components": {"minecraft:max_stack_size": 0}}"#,
+                "integer 1 to 99",
+            ),
+            (
+                "block-stack-100",
+                r#"{"template": "minecraft:stone", "components": {"minecraft:max_stack_size": 100}}"#,
+                "integer 1 to 99",
+            ),
+            (
+                "block-stack-string",
+                r#"{"template": "minecraft:stone", "components": {"minecraft:max_stack_size": "16"}}"#,
+                "integer 1 to 99",
+            ),
+            (
+                "block-rarity",
+                r#"{"template": "minecraft:stone", "components": {"minecraft:rarity": "bogus"}}"#,
+                "common, uncommon",
+            ),
+            (
+                "block-without-item",
+                r#"{"template": "minecraft:glass", "item": false,
+                    "components": {"minecraft:max_stack_size": 16}}"#,
+                "item is false",
+            ),
+        ] {
+            let e = refused(
+                case,
+                &[("data/ruby/horizon/block/a.json", block.as_bytes())],
+            );
             assert!(e.contains(why), "{case}: {e}");
         }
     }

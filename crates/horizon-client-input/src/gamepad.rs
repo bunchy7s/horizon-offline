@@ -567,6 +567,34 @@ fn length(v: [f32; 2]) -> f32 {
     (v[0] * v[0] + v[1] * v[1]).sqrt()
 }
 
+/// 8BitDo Ultimate 2 Wireless (`2dc8:6012`). gilrs' bundled SDL DB only has a
+/// Windows row for it; on Linux/Bluetooth the right stick is on ABS_Z/ABS_RX
+/// (`LeftZ`/`RightStickX`) until an SDL mapping matches.
+pub const BITDO_ULTIMATE2_VID_PID: (u16, u16) = (0x2dc8, 0x6012);
+
+/// Stick axes after correcting pads whose right stick gilrs still exposes on
+/// `LeftZ`/`RightStickX` (no matching SDL row for this device version).
+/// `sdl_mapped` is true when gilrs already applied an SDL gamecontroller row.
+pub fn stick_axes(
+    left: [f32; 2],
+    right: [f32; 2],
+    left_z: f32,
+    vendor: Option<u16>,
+    product: Option<u16>,
+    sdl_mapped: bool,
+) -> ([f32; 2], [f32; 2]) {
+    if !sdl_mapped
+        && vendor == Some(BITDO_ULTIMATE2_VID_PID.0)
+        && product == Some(BITDO_ULTIMATE2_VID_PID.1)
+    {
+        // Default map: RightStickX is the stick's Y, LeftZ its X; RightStickY
+        // is the right trigger and must not drive look.
+        (left, [left_z, right[0]])
+    } else {
+        (left, right)
+    }
+}
+
 /// A radial deadzone: inside it the stick is centred; beyond it the rest of
 /// the travel is rescaled to 0..1 in the same direction, so diagonals aren't
 /// clipped and the first movement past the deadzone is small.
@@ -1176,6 +1204,38 @@ mod tests {
         let odd =
             PadSettings::parse("lookSensitivity:NaN\nbind_key.nope:south\nbind_key.jump:x9\n");
         assert_eq!(odd, PadSettings::default());
+    }
+
+    #[test]
+    fn ultimate2_right_stick_on_z_without_sdl() {
+        let (left, right) = stick_axes(
+            [0.2, 0.3],
+            [0.7, -0.9],
+            -0.5,
+            Some(BITDO_ULTIMATE2_VID_PID.0),
+            Some(BITDO_ULTIMATE2_VID_PID.1),
+            false,
+        );
+        assert_eq!(left, [0.2, 0.3]);
+        assert_eq!(right, [-0.5, 0.7], "X from LeftZ, Y from RightStickX");
+        let kept = stick_axes(
+            [0.2, 0.3],
+            [0.7, -0.9],
+            -0.5,
+            Some(BITDO_ULTIMATE2_VID_PID.0),
+            Some(BITDO_ULTIMATE2_VID_PID.1),
+            true,
+        );
+        assert_eq!(kept, ([0.2, 0.3], [0.7, -0.9]), "SDL row already remapped");
+        let other = stick_axes(
+            [0.0, 0.0],
+            [1.0, 0.0],
+            0.5,
+            Some(0x045e),
+            Some(0x028e),
+            false,
+        );
+        assert_eq!(other, ([0.0, 0.0], [1.0, 0.0]));
     }
 
     #[test]

@@ -85,18 +85,93 @@ pub struct Sprites {
     /// Each layer's frames at the texture's own resolution (square), and the
     /// frame shown first.
     native: Vec<(u32, Arc<Vec<Vec<u8>>>, usize)>,
-    /// Still textures by their pixels and mip settings: mods copy vanilla's
-    /// textures under their own names, and one layer serves them all (the
-    /// GPU's array may hold as few as 2048).
-    still: std::collections::HashMap<(Vec<u8>, u32, [u32; 2], [bool; 4]), u32>,
+    /// Each layer's LabPBR maps (`_n` normals, `_s` specular) beside its texture: their first
+    /// frame at their own resolution (square).
+    pbr: Vec<[Option<(u32, Vec<u8>)>; 2]>,
+    /// The layers' normal and specular maps at `pbr_size`, layer after layer, set by
+    /// [`Sprites::finish`]: empty when no texture has either.
+    pub normals: Vec<u8>,
+    pub specular: Vec<u8>,
+    pub pbr_size: u32,
+    /// Still textures by their pixels, their LabPBR maps and mip settings: mods copy vanilla's
+    /// textures under their own names, and one layer serves them all (the GPU's array may
+    /// hold as few as 2048).
+    still: std::collections::HashMap<(Vec<u8>, u64, u32, [u32; 2], [bool; 4]), u32>,
     /// Decoded textures kept on disk between launches ([`Sprites::with_disk_cache`]).
     disk: Option<crate::sprite_cache::SpriteCache>,
 }
 /// Edge length of vanilla's block textures: the smallest array layer.
 pub const SPRITE_SIZE: u32 = 16;
-/// Largest sprite array (all layers of the top mip level): resource packs
-/// with bigger textures are sampled down to fit.
-const MAX_ARRAY_BYTES: u64 = 256 << 20;
+/// The largest sprite array (all layers of the top mip level) when the settings leave it to
+/// Horizon: resource packs with bigger textures are sampled down to fit.
+pub const DEFAULT_TEXTURE_BUDGET: u64 = 256 << 20;
+/// The budget in bytes the next resource load keeps to (`set_texture_budget`).
+static TEXTURE_BUDGET: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(DEFAULT_TEXTURE_BUDGET);
+/// The block textures' budget from the `textureBudgetMiB` setting (0 for the default), for
+/// resources loaded from now on.
+pub fn set_texture_budget(mib: u32) {
+    let bytes = match mib {
+        0 => DEFAULT_TEXTURE_BUDGET,
+        mib => u64::from(mib) << 20,
+    };
+    TEXTURE_BUDGET.store(bytes, std::sync::atomic::Ordering::Relaxed);
+}
+/// Whether resource loads read the resource packs' LabPBR maps (`set_labpbr_maps`).
+static LABPBR_MAPS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Whether resource loads from now on read the resource packs' LabPBR maps beside their block
+/// textures. Only a native shader pack's material stage reads them, so without one they cost
+/// neither loading time nor video memory.
+pub fn set_labpbr_maps(on: bool) {
+    LABPBR_MAPS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+/// Whether resource loads read the LabPBR maps (`set_labpbr_maps`).
+pub fn labpbr_maps() -> bool {
+    LABPBR_MAPS.load(std::sync::atomic::Ordering::Relaxed)
+}
+/// Largest array of each LabPBR map, which only a native shader pack reads.
+const MAX_MAP_BYTES: u64 = DEFAULT_TEXTURE_BUDGET / 4;
+/// Fewer layers than any game has (vanilla's are about 1300): what a map is kept at while
+/// loading assumes at least these many share the array.
+const LAYERS_AT_LEAST: u64 = 1024;
+/// A layer's normal map where its texture has none: flat, unoccluded, at full height.
+pub const FLAT_NORMAL: [u8; 4] = [128, 128, 255, 255];
+/// A layer's specular map where its texture has none: rough, not metal, not glowing.
+pub const NO_SPECULAR: [u8; 4] = [0, 0, 0, 0];
+/// The largest power-of-two side from `start` down (at least `SPRITE_SIZE`) at which `layers`
+/// square RGBA layers take at most `bytes`.
+fn side_within(start: u32, layers: u64, bytes: u64) -> u32 {
+    let mut size = start.max(SPRITE_SIZE).next_power_of_two();
+    while size > SPRITE_SIZE && layers * u64::from(size) * u64::from(size) * 4 > bytes {
+        size /= 2;
+    }
+    size
+}
+/// A LabPBR map's square `frame` of `side` averaged down by whole powers of two to at most
+/// `max`, channel by channel: they are data, not colour.
+fn shrink_map(frame: Vec<u8>, side: u32, max: u32) -> (u32, Vec<u8>) {
+    if side <= max || !side.is_power_of_two() || !max.is_power_of_two() {
+        return (side, frame);
+    }
+    let (out_side, f, side) = (max as usize, (side / max) as usize, side as usize);
+    let mut out = Vec::with_capacity(out_side * out_side * 4);
+    for y in 0..out_side {
+        for x in 0..out_side {
+            let mut sum = [0u32; 4];
+            for dy in 0..f {
+                let row = ((y * f + dy) * side + x * f) * 4;
+                for texel in frame[row..row + f * 4].as_chunks::<4>().0 {
+                    for (s, &v) in sum.iter_mut().zip(texel) {
+                        *s += u32::from(v);
+                    }
+                }
+            }
+            let n = (f * f) as u32;
+            out.extend(sum.map(|s| ((s + n / 2) / n) as u8));
+        }
+    }
+    (max, out)
+}
 /// Nearest-resample a square RGBA frame to another square size.
 pub(crate) fn resample(frame: &[u8], from: u32, to: u32) -> Vec<u8> {
     if from == to {
@@ -156,7 +231,7 @@ impl Sprites {
     }
     /// Lay every layer out at one size: the largest texture's (resource packs
     /// may ship 32x, 64x... textures, like vanilla's stitched atlas), rounded
-    /// up to a power of two and limited to [`MAX_ARRAY_BYTES`]. Smaller
+    /// up to a power of two and limited to the texture budget (`set_texture_budget`). Smaller
     /// textures are scaled up by whole pixels, so UVs stay per layer.
     pub fn finish(&mut self) {
         self.lay_out(true);
@@ -170,13 +245,18 @@ impl Sprites {
         let layers = self.native.len().max(1) as u64;
         let largest = self.native.iter().map(|n| n.0).max().unwrap_or(SPRITE_SIZE);
         self.minimum_size = self.native.iter().map(|n| n.0).min().unwrap_or(SPRITE_SIZE);
-        let mut size = largest.max(SPRITE_SIZE).next_power_of_two();
-        while size > SPRITE_SIZE && layers * u64::from(size * size) * 4 > MAX_ARRAY_BYTES {
-            size /= 2;
+        let budget = TEXTURE_BUDGET.load(std::sync::atomic::Ordering::Relaxed);
+        let size = side_within(largest, layers, budget);
+        if pixels {
+            log::info!(
+                "Horizon: block sprites: {layers} layers at {size} px (largest {largest} px, budget {} MiB)",
+                budget >> 20
+            );
         }
         if !pixels {
             self.pixels = Vec::new();
             self.animations = Vec::new();
+            self.pbr = Vec::new();
             self.size = size;
             return;
         }
@@ -192,6 +272,30 @@ impl Sprites {
             animation.frames = resized[animation.layer as usize].clone();
         }
         self.size = size;
+        self.normals.clear();
+        self.specular.clear();
+        let largest_map = self.pbr.iter().flatten().flatten().map(|m| m.0).max();
+        self.pbr_size = largest_map.map_or(SPRITE_SIZE, |l| {
+            side_within(l.min(size), layers, MAX_MAP_BYTES)
+        });
+        if largest_map.is_some() {
+            let pbr_size = self.pbr_size;
+            log::info!("Horizon: LabPBR maps at {pbr_size} px, {layers} layers");
+            for maps in std::mem::take(&mut self.pbr) {
+                for (map, (out, none)) in maps.into_iter().zip([
+                    (&mut self.normals, FLAT_NORMAL),
+                    (&mut self.specular, NO_SPECULAR),
+                ]) {
+                    match map {
+                        Some((from, pixels)) => {
+                            let (from, pixels) = shrink_map(pixels, from, pbr_size);
+                            out.extend(resample(&pixels, from, pbr_size));
+                        }
+                        None => out.extend(none.repeat((pbr_size * pbr_size) as usize)),
+                    }
+                }
+            }
+        }
     }
     /// The layer of a texture, added on first use. A texture that is missing
     /// or does not load (a resource pack's filter or a broken file) becomes
@@ -222,6 +326,7 @@ impl Sprites {
                     .collect();
                 let layer = u32::try_from(self.native.len())?;
                 self.opaque.push(true);
+                self.pbr.push([None, None]);
                 self.translucent.push(false);
                 self.mips.push(crate::mipmap::Settings::default());
                 self.layers.insert(name.to_owned(), layer);
@@ -242,7 +347,7 @@ impl Sprites {
                 decoded
             }
         };
-        self.register(name, decoded)
+        self.register(root, name, decoded)
     }
     /// Read and decode one texture and its `.mcmeta`.
     fn decode(root: &Path, name: &str) -> Result<crate::sprite_cache::Decoded> {
@@ -263,40 +368,19 @@ impl Sprites {
             .as_deref()
             .map(AnimationMetadata::from_json)
             .transpose()?;
-        let mut decoder = png::Decoder::new(BufReader::new(File::open(path)?));
-        decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-        let mut reader = decoder.read_info()?;
-        let mut bytes = vec![
-            0;
-            reader
-                .output_buffer_size()
-                .ok_or("sprite exceeds decoder limits")?
-        ];
-        let info = reader.next_frame(&mut bytes)?;
+        let (png_width, png_height, pixels) = read_rgba(&path)?;
         let (width, height) = if let Some(animation) = &animation {
             let [width, height] =
-                animation.frame_size(i32::try_from(info.width)?, i32::try_from(info.height)?);
+                animation.frame_size(i32::try_from(png_width)?, i32::try_from(png_height)?);
             (u32::try_from(width)?, u32::try_from(height)?)
         } else {
-            (info.width, info.height)
+            (png_width, png_height)
         };
-        if width == 0 || height == 0 || info.width % width != 0 || info.height % height != 0 {
+        if width == 0 || height == 0 || png_width % width != 0 || png_height % height != 0 {
             return Err(format!("sprite {name} has invalid frame dimensions").into());
         }
-        let channels = info.color_type.samples();
-        let mut pixels = Vec::with_capacity(info.width as usize * info.height as usize * 4);
-        for pixel in bytes[..info.buffer_size()].chunks_exact(channels) {
-            let rgba = match info.color_type {
-                png::ColorType::Rgba => [pixel[0], pixel[1], pixel[2], pixel[3]],
-                png::ColorType::Rgb => [pixel[0], pixel[1], pixel[2], 255],
-                png::ColorType::Grayscale => [pixel[0], pixel[0], pixel[0], 255],
-                png::ColorType::GrayscaleAlpha => [pixel[0], pixel[0], pixel[0], pixel[1]],
-                _ => return Err("unsupported expanded sprite format".into()),
-            };
-            pixels.extend(rgba);
-        }
-        let columns = info.width / width;
-        let count = columns * (info.height / height);
+        let columns = png_width / width;
+        let count = columns * (png_height / height);
         // Layers are square; a frame of another shape is nearest-resampled to
         // its longer side so UVs (normalized per layer) are unchanged.
         let side = width.max(height);
@@ -309,7 +393,7 @@ impl Sprites {
                 let source_row = y + row * height / side;
                 for column in 0..side {
                     let offset =
-                        ((source_row * info.width + x + column * width / side) * 4) as usize;
+                        ((source_row * png_width + x + column * width / side) * 4) as usize;
                     frame.extend_from_slice(&pixels[offset..offset + 4]);
                 }
             }
@@ -339,7 +423,12 @@ impl Sprites {
         })
     }
     /// Give a decoded texture its layer (or the one an identical still has).
-    fn register(&mut self, name: &str, decoded: crate::sprite_cache::Decoded) -> Result<u32> {
+    fn register(
+        &mut self,
+        root: &Path,
+        name: &str,
+        decoded: crate::sprite_cache::Decoded,
+    ) -> Result<u32> {
         let crate::sprite_cache::Decoded {
             side,
             frames,
@@ -356,6 +445,13 @@ impl Sprites {
             .transpose()?;
         let count = frames.len() as u32;
         let layer = u32::try_from(self.native.len())?;
+        let pbr = match name.split_once(':') {
+            Some((namespace, path)) if labpbr_maps() => {
+                let path = root.join(format!("assets/{namespace}/textures/{path}.png"));
+                ["_n", "_s"].map(|suffix| pbr_map(&path, suffix, count))
+            }
+            _ => [None, None],
+        };
         let settings = crate::mipmap::Settings {
             native_size: side,
             strategy,
@@ -364,10 +460,15 @@ impl Sprites {
             item: name
                 .split_once(':')
                 .is_some_and(|(_, p)| p.starts_with("item/")),
+            dither_cutouts: crate::mipmap::dither_cutouts(),
         };
         let still = (animation.is_none() && frames.len() == 1).then(|| {
+            use std::hash::{Hash, Hasher};
+            let mut maps = std::collections::hash_map::DefaultHasher::new();
+            pbr.hash(&mut maps);
             (
                 frames[0].clone(),
+                maps.finish(),
                 side,
                 [
                     settings.strategy as u32,
@@ -401,10 +502,64 @@ impl Sprites {
         self.mips.push(settings);
         self.opaque.push(opaque);
         self.translucent.push(translucent);
+        self.pbr.push(pbr);
         self.layers.insert(name.to_owned(), layer);
         self.native.push((side, frames, initial));
         Ok(layer)
     }
+}
+
+/// A PNG's width, height and pixels as RGBA.
+fn read_rgba(path: &Path) -> Result<(u32, u32, Vec<u8>)> {
+    let mut decoder = png::Decoder::new(BufReader::new(File::open(path)?));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info()?;
+    let mut bytes = vec![
+        0;
+        reader
+            .output_buffer_size()
+            .ok_or("sprite exceeds decoder limits")?
+    ];
+    let info = reader.next_frame(&mut bytes)?;
+    let channels = info.color_type.samples();
+    let mut pixels = Vec::with_capacity(info.width as usize * info.height as usize * 4);
+    for pixel in bytes[..info.buffer_size()].chunks_exact(channels) {
+        let rgba = match info.color_type {
+            png::ColorType::Rgba => [pixel[0], pixel[1], pixel[2], pixel[3]],
+            png::ColorType::Rgb => [pixel[0], pixel[1], pixel[2], 255],
+            png::ColorType::Grayscale => [pixel[0], pixel[0], pixel[0], 255],
+            png::ColorType::GrayscaleAlpha => [pixel[0], pixel[0], pixel[0], pixel[1]],
+            _ => return Err("unsupported expanded sprite format".into()),
+        };
+        pixels.extend(rgba);
+    }
+    Ok((info.width, info.height, pixels))
+}
+
+/// The LabPBR map with `suffix` beside the texture at `path`, whose frames lie in a column of
+/// `count`: its first frame, square, no larger than the maps' array allows any game's
+/// textures (a 512x pack's maps would otherwise fill the memory while loading).
+fn pbr_map(path: &Path, suffix: &str, count: u32) -> Option<(u32, Vec<u8>)> {
+    let stem = path.file_stem()?.to_str()?;
+    let map = path.with_file_name(format!("{stem}{suffix}.png"));
+    let (map_width, map_height, pixels) = read_rgba(&map).ok()?;
+    let (w, h) = (map_width, map_height / count.max(1));
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let side = w.max(h);
+    let mut frame = Vec::with_capacity((side * side * 4) as usize);
+    for row in 0..side {
+        for column in 0..side {
+            let offset = (((row * h / side) * map_width + column * w / side) * 4) as usize;
+            frame.extend_from_slice(&pixels[offset..offset + 4]);
+        }
+    }
+    Some(shrink_map(
+        frame,
+        side,
+        side_within(side, LAYERS_AT_LEAST, MAX_MAP_BYTES),
+    ))
 }
 
 /// SpriteContents: the `.mcmeta` `texture` section (TextureMetadataSection's
@@ -451,6 +606,54 @@ pub(crate) fn sprite_mipmap_limit(requested: u32, size: u32, minimum: u32, avail
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_texture_budget_picks_the_largest_side_that_fits() {
+        // 1300 layers: vanilla's count, about.
+        assert_eq!(side_within(512, 1300, DEFAULT_TEXTURE_BUDGET), 128);
+        assert_eq!(side_within(512, 1300, 1536 << 20), 512);
+        assert_eq!(side_within(64, 1300, 1536 << 20), 64);
+        // Never under vanilla's size, whatever the budget.
+        assert_eq!(side_within(512, 1300, 1), SPRITE_SIZE);
+    }
+    #[test]
+    fn a_labpbr_map_shrinks_by_plain_means_and_a_layer_without_one_gets_the_default() {
+        // Alpha is data here: it does not weigh the other channels.
+        let frame = [
+            [200, 100, 0, 255],
+            [0, 0, 0, 0],
+            [200, 100, 0, 255],
+            [0, 0, 0, 0],
+        ]
+        .concat();
+        assert_eq!(shrink_map(frame, 2, 1), (1, vec![100, 50, 0, 128]));
+        let mut sprites = Sprites {
+            native: vec![
+                (SPRITE_SIZE, Arc::new(vec![vec![0; 16 * 16 * 4]]), 0),
+                (SPRITE_SIZE, Arc::new(vec![vec![0; 16 * 16 * 4]]), 0),
+            ],
+            pbr: vec![
+                [Some((16, [9, 8, 7, 6].repeat(16 * 16))), None],
+                [None, None],
+            ],
+            ..Default::default()
+        };
+        sprites.finish();
+        assert_eq!(sprites.pbr_size, 16);
+        assert_eq!(sprites.normals[..4], [9, 8, 7, 6]);
+        assert_eq!(sprites.normals[16 * 16 * 4..][..4], FLAT_NORMAL);
+        assert_eq!(sprites.specular[..4], NO_SPECULAR);
+        assert_eq!(sprites.specular.len(), 2 * 16 * 16 * 4);
+    }
+    #[test]
+    fn textures_without_labpbr_maps_keep_none() {
+        let mut sprites = Sprites {
+            native: vec![(SPRITE_SIZE, Arc::new(vec![vec![0; 16 * 16 * 4]]), 0)],
+            pbr: vec![[None, None]],
+            ..Default::default()
+        };
+        sprites.finish();
+        assert!(sprites.normals.is_empty() && sprites.specular.is_empty());
+    }
     #[test]
     fn mipmap_option_keeps_real_16px_reductions() {
         for levels in 0..=4 {

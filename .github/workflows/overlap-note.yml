@@ -19,7 +19,9 @@ jobs:
     concurrency:
       group: overlap-note-${{ github.event.pull_request.number }}
       cancel-in-progress: true
-    runs-on: ubuntu-latest
+    # One of playhorizon's small runners, out of GitHub's shared pool: it runs main's script only (above), so a fork's
+    # pull request runs none of its code there (docs/ci-runners.md). SELF_HOSTED_CI=off: GitHub's runners.
+    runs-on: ${{ vars.SELF_HOSTED_CI != 'off' && fromJSON('["self-hosted", "linux", "playhorizon-light"]') || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: read

@@ -91,6 +91,8 @@ impl Game<'_> {
                 key(&format!("key.hotbar.{}", index + 1)),
             ],
         );
+        // handleHotbarLoadOrSave: the overlay, said at once.
+        self.say_system_now(&message);
         self.titles.set_overlay(message, false);
     }
 }

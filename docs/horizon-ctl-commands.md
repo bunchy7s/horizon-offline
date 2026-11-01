@@ -7,7 +7,7 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 
 | Command | MCP tool | What it does | Arguments |
 | --- | --- | --- | --- |
-| `launch [--world NAME] [--seed N] [--creative] [--version TAG] [--game PATH] [--wait] [GAME ARGS...]` | `launch` | Start Horizon with the control socket and wait until it answers | `--world` (string): world folder to open or create<br>`--seed` (string): seed for a new world<br>`--creative` (boolean): creative mode for a new world<br>`--version` (string): an installed launcher version tag such as v2026.10.13<br>`--game` (string): path to a horizon-client binary<br>`--wait` (boolean): also wait until the world is ready (default in MCP)<br>`--offscreen` (boolean): render without showing a window (screenshots still work): locked or headless sessions |
+| `launch [--world NAME] [--seed N] [--creative] [--version TAG] [--game PATH] [--wait] [GAME ARGS...]` | `launch` | Start Horizon with the control socket and wait until it answers | `--world` (string): world folder to open or create<br>`--seed` (string): seed for a new world<br>`--creative` (boolean): creative mode for a new world<br>`--version` (string): an installed launcher version tag such as v2026.10.13<br>`--game` (string): path to a horizon-client binary<br>`--wait` (boolean): also wait until the world is ready (default in MCP)<br>`--offscreen` (boolean): render without showing a window (screenshots still work): locked or headless sessions<br>`--headless` (boolean): no display, window or GPU: a player that plays through these commands only (no screenshots) |
 | `wait-for screen NAME\|widget ID\|loaded\|chat TEXT\|event KIND [--timeout S] [--since SEQ]` | `wait_for` | Wait until the game reaches a state, then reply | `--timeout` (number): seconds (default 30)<br>`--since` (integer): chat and event: count from this event seq<br>`condition` (screen, widget, loaded, chat, event, required): what to wait for<br>`value` (text): the screen name, widget id, chat text or event kind |
 | `wait-ready [SECONDS]` | `wait_ready` | Wait until the player has spawned and no chunks are pending | `seconds` (number): how long to wait (default 120) |
 | `logs [--lines N] [--crash]` | `logs` | The end of the game's log, or its newest crash report | `--lines` (integer): how many lines of latest.log (default 100)<br>`--crash` (boolean): the newest crash report instead |
@@ -37,6 +37,7 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 | `screen` | `screen` | The open screen or title menu, its buttons and its slots | none |
 | `messages [N]` | `messages` | Recent chat and system messages, the title and the action bar | `n` (integer): how many chat lines (default 20) |
 | `menu` | CLI only | The open menu's slots and carried stack, with station details | none |
+| `narration` | `narration` | What the narrator was last asked to say, oldest first, and its status | none |
 
 ## Move and look
 

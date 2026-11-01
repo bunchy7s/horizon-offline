@@ -16,6 +16,9 @@ const ROOT: &str = "shaders";
 pub struct Pack {
     name: String,
     files: Files,
+    /// The values the player chose for the pack's options, applied to its sources as they are
+    /// read (`options::apply`).
+    chosen: BTreeMap<String, String>,
 }
 
 enum Files {
@@ -69,7 +72,11 @@ impl Pack {
         } else {
             Self::zip_files(fs::read(path)?)?
         };
-        Ok(Self { name, files })
+        Ok(Self {
+            name,
+            files,
+            chosen: BTreeMap::new(),
+        })
     }
 
     /// An archive held in memory; `name` is what [`Pack::name`] returns.
@@ -78,23 +85,44 @@ impl Pack {
         Ok(Self {
             name: name.to_owned(),
             files,
+            chosen: BTreeMap::new(),
         })
     }
 
     fn zip_files(bytes: Vec<u8>) -> Result<Files, PackError> {
         let archive = ZipArchive::new(Cursor::new(Arc::from(bytes)))
             .map_err(|e| PackError::Zip(e.to_string()))?;
-        let entries: BTreeMap<String, usize> = (0..archive.len())
-            .filter_map(|i| {
-                let name = archive.name_for_index(i)?.replace('\\', "/");
-                let inner = name.strip_prefix(ROOT)?.strip_prefix('/')?;
-                (!inner.is_empty() && !inner.ends_with('/')).then(|| (inner.to_owned(), i))
-            })
-            .collect();
+        let mut entries = BTreeMap::new();
+        for i in 0..archive.len() {
+            let Some(name) = archive.name_for_index(i) else {
+                continue;
+            };
+            let name = name
+                .map_err(|e| PackError::Zip(e.to_string()))?
+                .replace('\\', "/");
+            if let Some(inner) = name.strip_prefix(ROOT).and_then(|n| n.strip_prefix('/'))
+                && !inner.is_empty()
+                && !inner.ends_with('/')
+            {
+                entries.insert(inner.to_owned(), i);
+            }
+        }
         if entries.is_empty() {
             return Err(PackError::NoShadersFolder);
         }
         Ok(Files::Zip { archive, entries })
+    }
+
+    /// The pack with options at the values in `chosen` (name to value, `true` or `false` for a
+    /// switch) instead of their defaults. A value the option doesn't list (a file edited by
+    /// hand) is left out.
+    pub fn with_chosen(mut self, chosen: BTreeMap<String, String>) -> Self {
+        let options = crate::options(&self);
+        self.chosen = chosen
+            .into_iter()
+            .filter(|(name, value)| options.get(name).is_some_and(|o| o.values.contains(value)))
+            .collect();
+        self
     }
 
     /// The folder or file name the pack was opened from (`BSL.zip`).
@@ -119,11 +147,18 @@ impl Pack {
         }
     }
 
-    /// A text file, decoded as UTF-8 (invalid bytes replaced) without its byte-order mark.
+    /// A text file, decoded as UTF-8 (invalid bytes replaced) without its byte-order mark, with
+    /// the chosen option values in its sources.
     pub fn read_text(&self, path: &str) -> Option<String> {
         let bytes = self.read(path)?;
         let text = String::from_utf8_lossy(&bytes);
-        Some(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+        let source = !path.ends_with(".properties") && !path.ends_with(".lang");
+        Some(if source && !self.chosen.is_empty() {
+            crate::options::apply(text, &self.chosen)
+        } else {
+            text.to_owned()
+        })
     }
 
     pub fn exists(&self, path: &str) -> bool {
@@ -223,13 +258,13 @@ pub(crate) mod tests {
     use std::io::Write;
 
     /// A zip of `(path, contents)` pairs, paths from the archive root.
-    pub(crate) fn zip(files: &[(&str, &str)]) -> Vec<u8> {
+    pub(crate) fn zip<C: AsRef<[u8]>>(files: &[(&str, C)]) -> Vec<u8> {
         let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated);
         for (path, contents) in files {
             w.start_file(*path, options).unwrap();
-            w.write_all(contents.as_bytes()).unwrap();
+            w.write_all(contents.as_ref()).unwrap();
         }
         w.finish().unwrap().into_inner()
     }

@@ -112,11 +112,22 @@ impl Game<'_> {
         if !integrated && (!host.settings.guest_commands || !allowed) {
             return false;
         }
-        let Some(permission) = host.hub.guest(conn).map(|g| g.permission) else {
+        let Some((permission, uuid, name)) = host
+            .hub
+            .guest(conn)
+            .map(|g| (g.permission, g.uuid, g.name.clone()))
+        else {
             return false;
         };
         let command = line.trim_start_matches('/');
         if !self.signable_arguments(permission, command).is_empty() {
+            return false;
+        }
+        // The mods hear it as they hear a typed command; the batch is quiet,
+        // so their replies go nowhere.
+        let mut canceled = false;
+        self.native_player_command(uuid, &name, command, &mut canceled, &mut Vec::new());
+        if canceled {
             return false;
         }
         self.run_guest_command(GuestCommand {

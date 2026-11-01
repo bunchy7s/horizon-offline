@@ -8,6 +8,7 @@ use super::Game;
 use horizon_client::{
     Result,
     block_entities::{Pos, Ticking},
+    block_entity_anim::Ticker,
     containers::{BlockEntity, FurnaceKind, HOPPER_SLOTS},
     furnace::FurnaceCooking,
 };
@@ -23,6 +24,10 @@ impl Game<'_> {
         if !self.world.block_entities.has_states() {
             let states = self.ticking_states();
             self.world.block_entities.set_states(states);
+            let containers = self.native_containers();
+            self.world.block_entities.set_mod_containers(containers);
+            let fluids = self.native_fluid_tables();
+            self.world.block_entities.set_mod_fluids(fluids);
         }
         // Only lingering cooldowns are dropped; a hopper that ticks checks
         // its own block. Once a second is soon enough for the rest.
@@ -64,6 +69,7 @@ impl Game<'_> {
                 Some(BlockEntity::Brewing(_)) => self.tick_brewing_stand(pos)?,
                 Some(BlockEntity::DaylightDetector) => self.tick_daylight_detector(pos),
                 Some(BlockEntity::Campfire(_)) => self.tick_campfire(pos)?,
+                Some(BlockEntity::Mod(_)) => self.tick_mod_block_entity(pos),
                 Some(BlockEntity::PotentSulfur(_)) => {
                     self.tick_potent_sulfur(pos)?;
                     // A window that simulates the world itself is its own
@@ -87,7 +93,59 @@ impl Game<'_> {
                 self.client_tick_trial_spawner(key);
             }
         }
+        // `ShulkerBoxBlockEntity.tick`: the lids of the boxes this level
+        // animates. Their grown collision shape reaches the collision queries
+        // through `World::shulkers`, and an opening lid pushes what it runs
+        // into (`moveCollidedEntities`), as a moving piston does.
+        let pushes = self.tick_shulkers();
+        self.sync_shulkers();
+        self.push_shulker_entities(pushes);
         Ok(())
+    }
+    /// `ShulkerBoxBlockEntity.tick` for the boxes in block-ticking chunks, in
+    /// position order: the lid's new progress, and the swept box of an opening
+    /// lid for `moveCollidedEntities`. A box whose block is gone is dropped.
+    /// The boxes are those the level animates: a box opens (`start_open` and
+    /// block event 1) before it has one, exactly as vanilla's block entity is
+    /// there from the start.
+    fn tick_shulkers(&mut self) -> Vec<super::piston_push::ShulkerPush> {
+        let ticking = self.block_ticking_area();
+        let mut pushes = Vec::new();
+        let mut gone = Vec::new();
+        let positions: Vec<[i32; 3]> = self.be_anims.shulkers.keys().copied().collect();
+        for pos in positions {
+            let state = self.world.block(pos[0], pos[1], pos[2]);
+            let Some(Ticker::Shulker { facing }) = self.be_anims.ticker(state.0) else {
+                gone.push(pos);
+                continue;
+            };
+            if !ticking(pos[0], pos[2])
+                || !self.border.contains(f64::from(pos[0]), f64::from(pos[2]))
+            {
+                continue;
+            }
+            let tick = self
+                .be_anims
+                .shulkers
+                .get_mut(&pos)
+                .map(|shulker| shulker.tick(pos, facing));
+            if let Some(push) = tick.and_then(|tick| tick.push) {
+                pushes.push((pos, facing, push));
+            }
+        }
+        for pos in gone {
+            self.be_anims.shulkers.remove(&pos);
+        }
+        pushes
+    }
+    /// Copies the shulker box lids into the world, where the collision queries
+    /// read them (`SceneCollisions::shulker_collision_state`), as
+    /// `sync_moving_pistons` does for pistons.
+    pub(super) fn sync_shulkers(&mut self) {
+        self.world.shulkers.clear();
+        self.world
+            .shulkers
+            .extend(self.be_anims.shulkers.iter().map(|(p, s)| (*p, s.clone())));
     }
     /// `BlockState.getTicker` of every state, for the block entities ticked
     /// here. A creaking heart keeps its slot while uprooted (see
@@ -129,6 +187,7 @@ impl Game<'_> {
                         if record { Ticking::Yes } else { Ticking::Idle }
                     }
                     n if FurnaceKind::from_block(n).is_some() => Ticking::Yes,
+                    n if !n.starts_with("minecraft:") && self.native_ticks(n) => Ticking::Yes,
                     _ => Ticking::No,
                 }
             })
@@ -170,7 +229,7 @@ impl Game<'_> {
         {
             s.properties.insert("lit".into(), lit.to_string());
             if let Ok(id) = self.pack.assets.registry.resolve(&s) {
-                self.world.set(pos.0, pos.1, pos.2, id)?;
+                self.level_set([pos.0, pos.1, pos.2], id)?;
             }
         }
         Ok(())

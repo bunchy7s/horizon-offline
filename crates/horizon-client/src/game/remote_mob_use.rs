@@ -30,6 +30,11 @@ impl Game<'_> {
         {
             return true;
         }
+        // AgeableMob.mobInteract: a golden dandelion on a baby that can be age
+        // locked is SUCCESS on a client too (the server sets the lock).
+        if self.age_lock_takes(m, item) {
+            return true;
+        }
         // Animal.mobInteract: its food is CONSUME on a client.
         if m.kind.flags.animal && m.kind.food.iter().any(|f| f.as_str() == item) {
             return true;
@@ -55,10 +60,12 @@ impl Game<'_> {
             Species::Allay => !item.is_empty() || m.extra.main_hand.is_some(),
             Species::Cow | Species::Goat => item == "minecraft:bucket" && !baby,
             Species::Mooshroom => {
-                matches!(
-                    item,
-                    "minecraft:bucket" | "minecraft:bowl" | "minecraft:shears"
-                ) && !baby
+                !baby
+                    && (matches!(
+                        item,
+                        "minecraft:bucket" | "minecraft:bowl" | "minecraft:shears"
+                    ) || m.extra.variant == 1
+                        && horizon_client::flowers::stew_effect(item).is_some())
             }
             Species::Sheep => item == "minecraft:shears" || item.ends_with("_dye"),
             // SnowGolem.mobInteract: shears take the pumpkin off.
@@ -69,9 +76,10 @@ impl Game<'_> {
             | Species::TropicalFish
             | Species::Pufferfish
             | Species::Axolotl => item == "minecraft:water_bucket",
-            // Tadpole.mobInteract: frog food, else the bucket.
+            // Tadpole.mobInteract: frog food (not while age locked), else the bucket.
             Species::Tadpole => {
-                item == "minecraft:water_bucket" || m.kind.food.iter().any(|f| f.as_str() == item)
+                item == "minecraft:water_bucket"
+                    || !m.extra.age_locked && m.kind.food.iter().any(|f| f.as_str() == item)
             }
             Species::Armadillo => item == "minecraft:brush",
             // ZombieVillager.mobInteract: CONSUME for a golden apple.

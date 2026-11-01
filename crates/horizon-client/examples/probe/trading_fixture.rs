@@ -241,7 +241,7 @@ pub fn main() -> horizon_client::Result<()> {
     let items = Items::catalog(root, &PackOverlay::NONE)?;
     let enchantments = Enchantments::load(root);
     let names = horizon_client::creative::Names::default();
-    let trades = Trades::load(root);
+    let trades = Trades::load(root, &PackOverlay::NONE);
     let recipes = horizon_client::crafting::Recipes::load(root, &items, &PackOverlay::NONE)?;
     let brewing = horizon_client::brewing::Brewing::load(root, &items, &PackOverlay::NONE);
     let banners = horizon_client::banner::Banners::load(root);
@@ -353,8 +353,9 @@ pub fn main() -> horizon_client::Result<()> {
                 if let Tag::Compound(c) = &mut tag {
                     c.insert("id".into(), Tag::String(id.into()));
                 }
-                let mob = entity_nbt::mob_from_nbt(&tag, &types, 1).ok_or("unreadable villager")?;
-                let back = entity_nbt::mob_to_nbt(&mob, [0; 4], None);
+                let mob =
+                    entity_nbt::mob_from_nbt(&tag, &types, 1, None).ok_or("unreadable villager")?;
+                let back = entity_nbt::mob_to_nbt(&mob, [0; 4], None, None);
                 writeln!(out, "{name} snbt {text}")?;
                 let mut kept = horizon_world::nbt::Compound::new();
                 for key in [

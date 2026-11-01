@@ -128,6 +128,94 @@ pub(super) fn parse_state_string(registry: &BlockRegistry, text: &str) -> Option
     registry.resolve(&descriptor).ok()
 }
 
+/// `StructureTemplate.fillFromWorld`'s result written by `StructureTemplate.save`:
+/// the blocks (positions relative to the box) sorted full blocks, then other
+/// blocks, then block entities, each by y, x, z, the palette in first-use
+/// order, the entities and the size, with the data version. The author is not
+/// part of the file.
+pub fn save_nbt(
+    registry: &BlockRegistry,
+    transforms: &StateTransforms,
+    size: [i32; 3],
+    blocks: Vec<BlockInfo>,
+    entities: &[EntityInfo],
+    data_version: i32,
+) -> Tag {
+    let mut lists: [Vec<BlockInfo>; 3] = Default::default();
+    for block in blocks {
+        let class = if block.nbt.is_some() {
+            2
+        } else if transforms.full_block(block.state) {
+            0
+        } else {
+            1
+        };
+        lists[class].push(block);
+    }
+    let mut ordered = Vec::new();
+    for mut list in lists {
+        list.sort_by_key(|b| (b.pos[1], b.pos[0], b.pos[2]));
+        ordered.extend(list);
+    }
+    let int_list = |v: [i32; 3]| Tag::List(v.iter().map(|i| Tag::Int(*i)).collect());
+    let mut palette: Vec<BlockStateId> = Vec::new();
+    let mut block_list = Vec::with_capacity(ordered.len());
+    for block in &ordered {
+        let index = palette
+            .iter()
+            .position(|s| *s == block.state)
+            .unwrap_or_else(|| {
+                palette.push(block.state);
+                palette.len() - 1
+            });
+        let mut tag = Compound::new();
+        tag.insert("pos".into(), int_list(block.pos));
+        tag.insert("state".into(), Tag::Int(index as i32));
+        if let Some(nbt) = &block.nbt {
+            tag.insert("nbt".into(), Tag::Compound(nbt.clone()));
+        }
+        block_list.push(Tag::Compound(tag));
+    }
+    // NbtUtils.writeBlockState: `id` and every property as a string.
+    let palette_list = palette
+        .iter()
+        .map(|id| {
+            let mut tag = Compound::new();
+            if let Some(state) = registry.state(*id) {
+                tag.insert("id".into(), Tag::String(state.name.as_str().into()));
+                if !state.properties.is_empty() {
+                    let mut properties = Compound::new();
+                    for (k, v) in &state.properties {
+                        properties.insert(k.as_str().into(), Tag::String(v.as_str().into()));
+                    }
+                    tag.insert("properties".into(), Tag::Compound(properties));
+                }
+            }
+            Tag::Compound(tag)
+        })
+        .collect();
+    let entity_list = entities
+        .iter()
+        .map(|e| {
+            let mut tag = Compound::new();
+            tag.insert(
+                "pos".into(),
+                Tag::List(e.pos.iter().map(|v| Tag::Double(v.to_bits())).collect()),
+            );
+            tag.insert("blockPos".into(), int_list(e.block_pos));
+            tag.insert("nbt".into(), Tag::Compound(e.nbt.clone()));
+            Tag::Compound(tag)
+        })
+        .collect();
+    let mut root = Compound::new();
+    root.insert("blocks".into(), Tag::List(block_list));
+    root.insert("palette".into(), Tag::List(palette_list));
+    root.insert("entities".into(), Tag::List(entity_list));
+    root.insert("size".into(), int_list(size));
+    root.insert("DataVersion".into(), Tag::Int(data_version));
+    Tag::Compound(root)
+}
+
 impl StructureTemplate {
     /// A new, never-loaded template: zero size and no palettes.
     pub fn empty() -> Self {
@@ -369,5 +457,83 @@ impl StructureTemplate {
                 })
                 .collect()
         })
+    }
+}
+
+#[cfg(test)]
+mod save_tests {
+    use super::*;
+    use horizon_core::version::DATA_VERSION;
+
+    fn registry() -> BlockRegistry {
+        let state = |name: &str| Tag::compound([("id", Tag::String(name.into()))]);
+        let tag = Tag::compound([
+            ("DataVersion", Tag::Int(DATA_VERSION)),
+            (
+                "states",
+                Tag::List(vec![
+                    state("minecraft:air"),
+                    state("minecraft:stone"),
+                    state("minecraft:torch"),
+                ]),
+            ),
+            (
+                "defaults",
+                Tag::compound([
+                    ("minecraft:air", Tag::Int(0)),
+                    ("minecraft:stone", Tag::Int(1)),
+                    ("minecraft:torch", Tag::Int(2)),
+                ]),
+            ),
+        ]);
+        BlockRegistry::from_nbt(&tag).unwrap()
+    }
+
+    #[test]
+    fn save_orders_like_fill_from_world_and_reads_back() {
+        let registry = registry();
+        let transforms = StateTransforms::from_json(
+            r#"{"rotate":[[0,0,0],[1,1,1],[2,2,2]],"mirror":[[0,0],[1,1],[2,2]],
+                "full_block":[false,true,false],"loot_containers":[],"block_entities":{}}"#,
+            3,
+        )
+        .unwrap();
+        let block = |pos: [i32; 3], state: u32, nbt: bool| BlockInfo {
+            pos,
+            state: BlockStateId(state),
+            nbt: nbt.then(|| {
+                let mut c = Compound::new();
+                c.insert("id".into(), Tag::String("minecraft:chest".into()));
+                c
+            }),
+        };
+        let blocks = vec![
+            block([0, 1, 0], 2, false),
+            block([1, 0, 0], 1, false),
+            block([0, 0, 0], 1, false),
+            block([0, 0, 1], 2, true),
+        ];
+        let tag = save_nbt(&registry, &transforms, [2, 2, 2], blocks, &[], DATA_VERSION);
+        assert_eq!(tag.get("DataVersion"), Some(&Tag::Int(DATA_VERSION)));
+        assert_eq!(
+            tag.get("size"),
+            Some(&Tag::List(vec![Tag::Int(2), Tag::Int(2), Tag::Int(2)]))
+        );
+        let Some(Tag::List(palette)) = tag.get("palette") else {
+            panic!("palette")
+        };
+        // First use order: the stone full blocks come first.
+        assert_eq!(palette.len(), 2);
+        assert_eq!(
+            palette[0].get("id"),
+            Some(&Tag::String("minecraft:stone".into()))
+        );
+        let read = StructureTemplate::from_nbt(&tag, &registry, &transforms);
+        assert_eq!(read.size, [2, 2, 2]);
+        let blocks = read.palettes()[0].blocks();
+        let order: Vec<_> = blocks.iter().map(|b| b.pos).collect();
+        // Full blocks by y, x, z; then other blocks; block entities last.
+        assert_eq!(order, [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]);
+        assert!(blocks[3].nbt.is_some());
     }
 }

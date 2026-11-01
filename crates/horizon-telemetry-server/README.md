@@ -1,6 +1,6 @@
 # horizon-telemetry-server
 
-This server receives what players choose to send (performance summaries, crash and bug reports, benchmark uploads: [docs/telemetry.md](../../docs/telemetry.md)) and stores it in one SQLite file. It serves anonymous totals to the website. It also keeps the live player count from the games' anonymous "I'm playing" pings, in memory only, and takes what players send from the hub (playhorizon.dev/hub): votes, bug reports and suggestions. It is one small Rust process, about 7 MB of memory when idle.
+This server receives what players choose to send (performance summaries, crash and bug reports, benchmark uploads: [docs/telemetry.md](../../docs/telemetry.md)) and stores it in one SQLite file. It serves anonymous totals to the website. It also keeps the live player count from the games' anonymous "I'm playing" pings, in memory only, and takes what players send from the hub (playhorizon.dev/hub): votes and bug reports. It is one small Rust process, about 7 MB of memory when idle.
 
     cargo run --release                     # in this folder: its own workspace, like the launcher's
     PORT=8080 HORIZON_TELEMETRY_DB=/data/telemetry.sqlite3 horizon-telemetry-server
@@ -16,12 +16,11 @@ It runs at **https://telemetry.playhorizon.dev** (`DEFAULT_ENDPOINT` in `crates/
 | `GET /v1/aggregate?days=30` | The totals the website reads. Cached 10 minutes, with `Access-Control-Allow-Origin` set to the website. |
 | `GET /v1/benchmarks/summary` | Players' benchmark uploads grouped by GPU, CPU, render distance and game, for the website's Benchmarks page (below). Cached 10 minutes, same `Access-Control-Allow-Origin`. |
 | `POST /v1/live` | A game's "I'm playing" ping (JSON, at most 512 bytes). Returns 204. Returns 400 for a bad ping, 413 for one too large, 429 over the address's limit, 503 when it holds `LIVE_MAX_SESSIONS` already. |
-| `GET /v1/live` | How many play now, rounded: `playing`, `lan`, `versions`, `platforms`. Made again at most every 15 seconds, with the same `Access-Control-Allow-Origin`. |
+| `GET /v1/live` | How many play now, exactly: `playing`, `lan`, `versions` (the 12 most played, the rest under `other`), `platforms`. Made again at most every 15 seconds, with the same `Access-Control-Allow-Origin`. |
+| `GET /v1/live/history?range=24h\|7d\|30d\|all&series=players\|official` | The live count (`players`, the default) or the official server's player count (`official`) over time for playhorizon.dev/stats: `series` of `[start, average, peak]`, the range's `peak` and the `all_time` one with their minute, the `latest` minute, the average per platform ([docs/telemetry.md](../../docs/telemetry.md)). Made again at most every minute (`Cache-Control: max-age=60`), on the live count's rate limit. 400 for another range or series. |
 | `POST /hub/vote` | `{"item": "<roadmap id>", "voter": "<the browser's random id>", "up": true}`: a 👍 on a roadmap item, one per voter; `"up": false` takes it back. Returns `{"item", "votes"}`. 400 for a bad id, 429 over the address's limit. |
 | `GET /hub/votes` | `{"votes": {"<item>": n}}`. Made again at most every minute. |
 | `POST /hub/report` | A bug report from the hub's form: `{"title", "did", "happened", "expected", "version"?, "system", "name"?}`. Opens a GitHub issue at once (labels `bug` and `from-website`, the `#horizon-bugs` template, "Reported on playhorizon.dev") and returns 201 `{"id", "issue": "<url>"}`. If GitHub fails: 202 `{"id", "issue": null}`, and the upkeep tries again for a week. The same report twice in a day returns the first one's issue. 400 for an empty or too long field, 429 over the address's limit, 503 past the day's cap or without `GITHUB_TOKEN`. |
-| `POST /hub/suggest` | `{"text", "item"?, "name"?}` into the suggestion queue. Returns 202 `{"id"}`. Never published: Kira relays it to the maintainers' private channel. |
-| `GET /hub/suggestions?after=<id>&limit=100` | The queue, oldest first, for Kira: `{"suggestions": [{"id", "text", "item"?, "name"?, "created_at"}]}`. Needs `Authorization: Bearer <HORIZON_TELEMETRY_HUB_TOKEN>`: 401 without it, 404 when the server has none. |
 | `GET /healthz` | `ok` |
 
 The hub's posts take JSON from the website (`OPTIONS` preflights answer with its origin). A form's hidden `website` field filled in (a bot) gets 202 and is dropped.
@@ -59,11 +58,13 @@ Frame rates are whole numbers, milliseconds have one decimal under 10, megabytes
 
 Measured: **about 190 bytes per play session** on disk, indexes included (`tests/server.rs`, 10 000 sessions). 1 000 players playing twice a day for 180 days is about 70 MB.
 
+The live count's history (`src/history.rs`) is three small tables of totals, never sessions: `live_minute` (one row a minute, kept `LIVE_MINUTE_DAYS`, 7), `live_hour` (sum, sample count, peak and its minute, kept `LIVE_HOUR_DAYS`, 90) and `live_day` (the same per UTC day, kept for good). The server writes one sample a minute, starting a whole window (2 minutes) after it starts so a restart doesn't record a dip. About 1 MB a year. The `official_` tables hold the official server's player count the same way, from a server-list status ping every minute (`HORIZON_TELEMETRY_OFFICIAL_SERVER`, default `horizon_telemetry::server_status::OFFICIAL_STATUS_ADDRESS`, the SRV target of the official address since this server doesn't look SRV up; `off` for none); a minute it didn't answer has no row.
+
 The live count is a table in memory: a session ID, when it last pinged, its version, platform and LAN flag, about 100 bytes a session. A session counts while its last ping is under 2 minutes old and is forgotten after that. Nothing of it reaches the disk, so a restart empties it; it is whole again a minute later.
 
 The day stored is the day the server received an item. The sender's IP address is never written down. The per-address rate limit keeps addresses in memory for an hour at most.
 
-The hub keeps votes as an item ID and the browser's random ID, and reports and suggestions as their text, for `HORIZON_TELEMETRY_HUB_KEEP_DAYS` (90). Its rate limits key their buckets by a hash of the address with a key drawn at each start, in memory.
+The hub keeps votes as an item ID and the browser's random ID, and bug reports as their text, for `HORIZON_TELEMETRY_HUB_KEEP_DAYS` (90). Its rate limits key their buckets by a hash of the address with a key drawn at each start, in memory.
 
 Raw rows are deleted after `HORIZON_TELEMETRY_RETENTION_DAYS` (180). The daily totals stay; they hold no install ID.
 
@@ -82,12 +83,12 @@ All are environment variables:
 - `HORIZON_TELEMETRY_LIVE_PER_HOUR` per address, pings and reads (600, bursts of 60: ten players behind one address)
 - `HORIZON_TELEMETRY_LIVE_WINDOW_SECONDS` (120)
 - `HORIZON_TELEMETRY_LIVE_MAX_SESSIONS` (200 000)
+- `HORIZON_TELEMETRY_OFFICIAL_SERVER` (`play.playhorizon.dev:24454`; `off` asks no server): the server whose player count is kept as the `official` series
+- `HORIZON_TELEMETRY_LIVE_MINUTE_DAYS` (7) and `…_LIVE_HOUR_DAYS` (90, at least 31): how long the history keeps minute and hourly samples; daily ones stay
 - `HORIZON_TELEMETRY_HUB_PER_HOUR` votes and vote reads per address (600, bursts of 60: a page load is one read, and several players can share an address)
-- `HORIZON_TELEMETRY_HUB_POSTS_PER_HOUR` reports and suggestions per address (20, bursts of 2)
+- `HORIZON_TELEMETRY_HUB_POSTS_PER_HOUR` bug reports per address (20, bursts of 2)
 - `HORIZON_TELEMETRY_HUB_REPORTS_PER_DAY` from everyone (30): each opens an issue
-- `HORIZON_TELEMETRY_HUB_SUGGESTIONS_PER_DAY` from everyone (200)
 - `HORIZON_TELEMETRY_HUB_KEEP_DAYS` (90)
-- `HORIZON_TELEMETRY_HUB_TOKEN`: the token Kira reads the suggestions with (unset: `GET /hub/suggestions` is off)
 - `HORIZON_TELEMETRY_GITHUB_TOKEN`: a fine-grained token with Issues read and write on the repository only (unset: `POST /hub/report` answers 503 and the form points to GitHub and Discord)
 - `HORIZON_TELEMETRY_GITHUB_REPO` (`horizon-rust/horizon`)
 

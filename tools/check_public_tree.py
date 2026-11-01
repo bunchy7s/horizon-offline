@@ -52,9 +52,12 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--history", action="store_true", help="Inspect paths in all local Git history")
     mode.add_argument("--pre-push", action="store_true", help="Inspect history reachable from Git's ref updates on stdin")
+    # CI's pull requests: only the commits a merge would add, not every ref's whole history.
+    mode.add_argument("--range", metavar="BASE..HEAD", help="Inspect the commits of a revision range")
     args = parser.parse_args()
-    revisions = pushed_revisions(sys.stdin) if args.pre_push else None
-    rejected = sorted({path for path in paths_in_repository(args.history or args.pre_push, revisions)
+    revisions = pushed_revisions(sys.stdin) if args.pre_push else [args.range] if args.range else None
+    history = args.history or args.pre_push or bool(args.range)
+    rejected = sorted({path for path in paths_in_repository(history, revisions)
                        if path and prohibited(path)})
     if rejected:
         print("Private game/profiling artifacts must stay outside Git:", file=sys.stderr)

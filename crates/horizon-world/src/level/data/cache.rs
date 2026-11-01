@@ -674,6 +674,7 @@ impl Snapshot {
                 }
             }
         }
+        let potted_by_content = super::potted_by_content(&blocks, &table);
         Ok(Behaviours {
             table,
             props,
@@ -686,6 +687,7 @@ impl Snapshot {
             fluid_tags,
             blocks,
             items,
+            potted_by_content,
             liquid_blocks,
             dynamic,
             occlusion_cache: Default::default(),

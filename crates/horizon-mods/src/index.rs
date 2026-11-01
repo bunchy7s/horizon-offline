@@ -625,7 +625,8 @@ fn check_resource_pack(path: &Path) -> Result<String, String> {
             .by_index_raw(i)
             .map_err(|e| e.to_string())?
             .name()
-            .to_owned();
+            .map_err(|e| e.to_string())?
+            .into_owned();
         if name.starts_with('/') || name.split('/').any(|part| part == "..") || name.contains('\\')
         {
             return Err(format!("{name:?} is not a plain path"));

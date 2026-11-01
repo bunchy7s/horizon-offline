@@ -35,8 +35,8 @@ TamableAnimal.handleEntityEvent	port	crates/horizon-client-render/src/particles.
 TamableAnimal.isTame	skip:other		a field: Mob.extra.tame
 TamableAnimal.setInSittingPose	skip:other		a field: Mob.extra.sitting, set by the sit goals and interactions
 TamableAnimal.tame	inline	crates/horizon-client/src/game/creatures.rs::interact_mob	wolf (bone, 1 in 3), cat and parrot set tame, owner and sitting in their interaction arms, then the tame_animal trigger; mobs/tame.rs::set_tame gives the wolf 40 health
-TamableAnimal.getTeam	missing		minor: a tame pet does not take its owner's scoreboard team (mob_team looks up only the pet's own UUID), so team glow colour, collision rules and friendly fire ignore the owner's team
-TamableAnimal.die	missing		player: when a tamed wolf, cat or parrot dies its owner gets no chat death message; death_message only covers the player's own death
+TamableAnimal.getTeam	port	crates/horizon-client/src/game/scoreboard.rs::mob_team	own team first, else a tamed pet's root owner's (getRootOwner through pet owners); `@e[team=]` (selector_extra_filter) and the teamkill criteria still read the pet's own name only
+TamableAnimal.die	port	crates/horizon-client/src/game/combat.rs::Game::tell_owner_pet_died	ticked in #3514; `TamableAnimal.die` is cited at crates/horizon-client/src/game/combat.rs:506
 TamableAnimal.shouldTryTeleportToOwner	port	crates/horizon-client/src/mobs/tame.rs::owner_distance_sqr	the >= 144 comparison is made in TamePanic::tick and the follow-owner goal
 TamableAnimal.teleportToAroundBlockPos	port	crates/horizon-client/src/mobs/tame.rs::teleport_to_owner	ten tries within 3 blocks; the walkable test is approximated (solid block below, not leaves, no fluid, no collision)
 WalkAnimationState.speed	port	crates/horizon-client/src/mobs/anim.rs::state	speed(partial) lerps previous and current limb speed, capped at 1; the plain speed() is the limb_speed field
@@ -96,12 +96,12 @@ AnimalPanic.checkExtraStartConditions	inline	crates/horizon-client/src/mobs/anim
 AnimalPanic.start	port	crates/horizon-client/src/mobs/animal_brain.rs::try_start	panic memory set, walk target cleared, navigation stopped
 AnimalPanic.lookForWater	missing		minor: a burning brain animal (sniffer, ghastling) does not run for nearby water; goal-driven animals do (goals.rs Panic)
 BabyFollowAdult.create	port	crates/horizon-client/src/mobs/animal_brain.rs::trigger	B::FollowAdult for the ghastling; goat, camel, armadillo, axolotl and hoglin babies use the FollowParent goal
-BackUpIfTooClose.create	missing		player: a crossbow piglin stays put when you come within 5 blocks; vanilla backs away strafing while it keeps aiming
+BackUpIfTooClose.create	inline	crates/horizon-client/src/mobs/piglin.rs::BackUpIfTooClose	goal stand-in for the piglin brain (no tick parity: the probe has no piglin brain); only a crossbow piglin
 BecomePassiveIfMemoryPresent.create	port	crates/horizon-client/src/mobs/piglin.rs::hoglin_repellent	a hoglin near a repellent is pacified for 200 ticks and drops its target
 Behavior.hasRequiredMemories	inline	crates/horizon-client/src/mobs/villager_brain.rs::try_start	each behaviour tests its memories at the top of its try_start arm
 BehaviorUtils.entityIsVisible	port	crates/horizon-client/src/mobs/villager_brain.rs::visible_contains	also copied in the animal, warden and monster brains
 BehaviorUtils.setWalkAndLookTargetMemoriesToEachOther	port	crates/horizon-client/src/mobs/animal_brain.rs::lock_gaze_and_walk	this mob's half; the partner's half comes with the breed-target event
-BehaviorUtils.isOtherTargetMuchFurtherAwayThanCurrentAttackTarget	missing		minor: piglins, hoglins and zoglins switch to any attacker, even one more than 4 blocks further than their current target
+BehaviorUtils.isOtherTargetMuchFurtherAwayThanCurrentAttackTarget	port	crates/horizon-client/src/mobs/piglin.rs::much_further_than_target	the empty-target guard and the +16.0 (4 blocks squared) margin; hoglin_retaliates checks sight, piglin_retaliates ignores it; vanilla has no line-of-sight test of its own, the callers do it
 BehaviorUtils.getNearestTarget	skip:other		picks among attack, avoid and nearest targets for PiglinAi and HoglinAi; those mobs choose with goals (NearestTarget, HurtByTarget)
 BehaviorUtils.getTargetNearestMe	skip:other		same helper
 BehaviorUtils.getLivingEntityFromUUIDMemory	skip:other		the ANGRY_AT memory is the mob's anger and target fields

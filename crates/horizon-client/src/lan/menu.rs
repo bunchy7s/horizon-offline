@@ -6,6 +6,7 @@
 use super::guest::Guest;
 use crate::{
     bundle::{Contents, can_be_in_bundle, toggle_selected},
+    containers::BlockEntity,
     items::{ItemStack, Items},
     world::World,
 };
@@ -33,8 +34,34 @@ pub struct Menu {
     pub sent: Vec<Option<ItemStack>>,
     /// An unfinished drag: (mode, slots).
     pub drag: Option<(u8, Vec<usize>)>,
-    /// The data slots the client was last sent (ContainerSetData), a furnace's progress.
-    pub sent_data: Vec<i16>,
+    /// The data slots the client was last sent (ContainerSetData), a furnace's
+    /// progress; None until sent, so any first value goes out.
+    pub sent_data: Vec<Option<i16>>,
+    /// Container slots the menu does not have: a mod's screen hides them, so
+    /// no click or quick move reaches them (`Slot` positions are the screen's).
+    pub hidden: Vec<usize>,
+    /// A mod menu type's take-only slots (`FurnaceResultSlot.mayPlace`).
+    pub results: Vec<usize>,
+    /// A mod menu type's data slot count (`addDataSlots`); None for vanilla's.
+    pub data_slots: Option<usize>,
+}
+
+/// What a guest did with a native mod's menu (`Slots::Native`), for the game
+/// to tell the mod once the hub is back in its hands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeMenuEvent {
+    /// A click (`ServerboundContainerClickPacket`): the menu's slot (its own
+    /// first, then the player's 36; -999 outside), the button and the mode.
+    Click {
+        uuid: u128,
+        window: i32,
+        slot: i32,
+        button: i32,
+        mode: i32,
+    },
+    /// The menu closed: by the player, by the server, another opened, or
+    /// the player left.
+    Closed { uuid: u128, window: i32 },
 }
 
 /// The y of the key a chest minecart's or chest boat's items are kept under
@@ -51,6 +78,9 @@ pub enum Slots {
     Double((i32, i32, i32), (i32, i32, i32)),
     /// The player's own ender chest inventory (`PlayerEnderChestContainer`).
     Ender,
+    /// A native mod's menu (`Guest::native_menu`): items to look at, which no
+    /// click moves; the clicks go to the mod.
+    Native,
 }
 
 impl Slots {
@@ -58,7 +88,7 @@ impl Slots {
         match self {
             Slots::Block(k) => vec![k],
             Slots::Double(a, b) => vec![a, b],
-            Slots::Ender => Vec::new(),
+            Slots::Ender | Slots::Native => Vec::new(),
         }
     }
     /// Whether the block entities behind the slots are still there
@@ -74,6 +104,7 @@ impl Slots {
     pub fn still_valid(self, world: &World, guest: &Guest, at: Option<(i32, i32, i32)>) -> bool {
         let blocks = match self {
             Slots::Ender => at.into_iter().collect(),
+            Slots::Native => Vec::new(),
             _ => self.halves(),
         };
         // A vehicle's container is kept under a key, not a block: the game
@@ -88,8 +119,11 @@ impl Slots {
         if self == Slots::Ender {
             return guest.ender_items.get(n).cloned().flatten();
         }
+        if self == Slots::Native {
+            return guest.native_menu.get(n).cloned().flatten();
+        }
         for k in self.halves() {
-            let slots = world.block_entities.get(&k)?.slots();
+            let slots = shown(world, k)?;
             if n < slots.len() {
                 return slots[n].clone();
             }
@@ -102,9 +136,12 @@ impl Slots {
         if self == Slots::Ender {
             return Some(guest.ender_items.clone());
         }
+        if self == Slots::Native {
+            return Some(guest.native_menu.clone());
+        }
         let mut items = Vec::new();
         for k in self.halves() {
-            items.extend_from_slice(world.block_entities.get(&k)?.slots());
+            items.extend_from_slice(shown(world, k)?);
         }
         Some(items)
     }
@@ -114,15 +151,36 @@ impl Slots {
             guest.ender_items = items;
             return;
         }
+        if self == Slots::Native {
+            // Only the mod changes what it shows.
+            return;
+        }
         let mut rest = items.into_iter();
         for k in self.halves() {
+            let n = shown(world, k).map_or(0, <[_]>::len);
             if let Some(e) = world.block_entities.get_mut(&k) {
-                for slot in e.slots_mut() {
+                for slot in e.slots_mut().iter_mut().take(n) {
                     *slot = rest.next().flatten();
                 }
             }
         }
     }
+}
+
+/// The slots of the block entity at `k` its menu shows: a mod container's
+/// count, though items past it stay saved.
+fn shown(world: &World, k: (i32, i32, i32)) -> Option<&[Option<ItemStack>]> {
+    let e = world.block_entities.get(&k)?;
+    let slots = e.slots();
+    if !matches!(e, BlockEntity::Mod(_)) {
+        return Some(slots);
+    }
+    let state = world.block(k.0, k.1, k.2).0;
+    let count = world
+        .block_entities
+        .mod_container(state)
+        .map_or(0, |c| c.slots);
+    Some(&slots[..count.min(slots.len())])
 }
 
 /// Slots of a menu seen as one list.
@@ -132,6 +190,10 @@ pub struct View<'a> {
     pub container: Option<&'a mut [Option<ItemStack>]>,
     /// The container is a shulker box (`ShulkerBoxSlot`).
     pub shulker: bool,
+    /// Container slots that do not exist in this menu (see [`Menu::hidden`]).
+    pub hidden: &'a [usize],
+    /// Container slots nothing is put into (see [`Menu::results`]).
+    pub results: &'a [usize],
 }
 
 impl View<'_> {
@@ -168,7 +230,7 @@ impl View<'_> {
     }
     /// Whether the slot takes part in clicks at all.
     fn enabled(&self, i: usize) -> bool {
-        self.container.is_some() || i >= 5
+        (self.container.is_some() || i >= 5) && !self.hidden.contains(&i)
     }
     fn may_place(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> bool {
         if self.container.is_none() && (5..=8).contains(&i) {
@@ -180,7 +242,11 @@ impl View<'_> {
         {
             return false;
         }
-        self.enabled(i)
+        self.enabled(i) && !self.result(i)
+    }
+    /// A take-only container slot of a mod menu type.
+    fn result(&self, i: usize) -> bool {
+        self.container.is_some() && self.results.contains(&i)
     }
     fn slot_max(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> u32 {
         if self.container.is_none() && (5..=8).contains(&i) {
@@ -219,7 +285,9 @@ fn move_to(
         if stack.count == 0 {
             break;
         }
-        if !view.enabled(i) {
+        // A quick move tops up no result slot either, as a furnace's never
+        // aims at its result (`AbstractFurnaceMenu.quickMoveStack`).
+        if !view.enabled(i) || view.result(i) {
             continue;
         }
         if let Some(mut existing) = view.get(i)
@@ -428,6 +496,16 @@ fn pickup(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
         }
         (Some(mut s), Some(mut c)) => {
             if !view.may_place(i, &c, rules) {
+                // A slot that takes nothing gives onto the same carried item,
+                // as far as the hand holds (`tryRemove`).
+                if s.same_item_same_components(&c) {
+                    let max = rules.max_stack(&c.item).max(1);
+                    let moved = s.count.min(max.saturating_sub(c.count));
+                    s.count -= moved;
+                    c.count += moved;
+                    view.set(i, (s.count > 0).then_some(s));
+                    view.guest.carried = Some(c);
+                }
                 return;
             }
             if s.same_item_same_components(&c) {
@@ -533,13 +611,26 @@ fn swap(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
     if i >= view.len() || !view.enabled(i) {
         return;
     }
-    // Hotbar slot `button` (0..9) or the off hand (40).
+    // Hotbar slot `button` (0..9) or the off hand (40). A chest has no
+    // off-hand slot, so F swaps with `Guest.offhand` (Inventory slot 40).
+    if button == 40 && view.container.is_some() {
+        let (clicked, off) = (view.get(i), view.guest.offhand.clone());
+        if off
+            .as_ref()
+            .is_some_and(|off| !view.may_place(i, off, rules))
+        {
+            return;
+        }
+        view.set(i, off);
+        view.guest.offhand = clicked;
+        return;
+    }
     let other = match button {
         0..=8 => match &view.container {
             Some(c) => c.len() + 27 + button as usize,
             None => 36 + button as usize,
         },
-        40 if view.container.is_none() => 45,
+        40 => 45,
         _ => return,
     };
     if other == i {
@@ -745,6 +836,8 @@ mod tests {
             guest: &mut g,
             container: Some(&mut chest),
             shulker: false,
+            hidden: &[],
+            results: &[],
         };
         view.guest.carried = Some(ItemStack::new("minecraft:bundle", 1));
         // Left click with the bundle: the stone goes in.
@@ -778,6 +871,241 @@ mod tests {
         assert_eq!(contents(&view.get(2)), []);
     }
 
+    /// A mod container saved with more items than its menu has slots: the
+    /// menu reads and writes only its count, the rest stay saved.
+    #[test]
+    fn mod_menu_shows_only_its_container_slots() {
+        use crate::containers::{ModBlockEntity, ModContainer};
+        let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
+        let container = ModContainer {
+            slots: 5,
+            ..Default::default()
+        };
+        world
+            .block_entities
+            .set_mod_containers([(0, Arc::new(container))].into_iter().collect());
+        let mut items = vec![None; 9];
+        items[1] = Some(ItemStack::new("minecraft:stone", 3));
+        items[7] = Some(ItemStack::new("minecraft:iron_ore", 2));
+        let k = (0, 64, 0);
+        world.block_entities.insert(
+            k,
+            BlockEntity::Mod(Box::new(ModBlockEntity {
+                id: "gtmod:machine".into(),
+                items,
+                ..Default::default()
+            })),
+        );
+        let mut g = guest();
+        let slots = Slots::Block(k);
+        let mut read = slots.read(&world, &g).unwrap();
+        assert_eq!(read.len(), 5);
+        assert_eq!(slots.get(&world, &g, 7), None);
+        // A shift-click from the hotbar (menu slot 5 + 27) lands in the
+        // container's first empty slot, not past its count.
+        if let Some(rules) = rules() {
+            g.inventory[0] = Some(ItemStack::new("minecraft:dirt", 1));
+            let mut drag = None;
+            let mut view = View {
+                guest: &mut g,
+                container: Some(&mut read),
+                shulker: false,
+                hidden: &[],
+                results: &[],
+            };
+            click(&mut view, &mut drag, 5 + 27, 0, input::QUICK_MOVE, &rules);
+            assert_eq!(view.get(0).map(|s| s.item), Some("minecraft:dirt".into()));
+        } else {
+            read[0] = Some(ItemStack::new("minecraft:dirt", 1));
+        }
+        slots.write(&mut world, &mut g, read);
+        let Some(BlockEntity::Mod(m)) = world.block_entities.get(&k) else {
+            panic!("not a mod's");
+        };
+        assert_eq!(m.items.len(), 9);
+        assert_eq!(
+            m.items[0].as_ref().map(|s| &*s.item),
+            Some("minecraft:dirt")
+        );
+        assert_eq!(m.items[1].as_ref().map(|s| s.count), Some(3));
+        assert_eq!(m.items[7].as_ref().map(|s| s.count), Some(2));
+    }
+
+    /// A slot a mod's screen hides is not in the menu: a shift-click from the
+    /// inventory skips it, and a shift-click on it moves nothing.
+    #[test]
+    fn a_hidden_slot_takes_no_quick_move() {
+        let Some(rules) = rules() else {
+            return;
+        };
+        let mut g = guest();
+        let mut container = vec![None; 3];
+        container[2] = Some(ItemStack::new("minecraft:stone", 1));
+        g.inventory[0] = Some(ItemStack::new("minecraft:dirt", 1));
+        let hidden = [0, 2];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut container),
+            shulker: false,
+            hidden: &hidden,
+            results: &[],
+        };
+        // The hotbar's first slot (menu slot 3 + 27) lands in the one slot shown.
+        click(&mut view, &mut drag, 3 + 27, 0, input::QUICK_MOVE, &rules);
+        assert!(view.get(0).is_none());
+        assert_eq!(view.get(1).map(|s| s.item), Some("minecraft:dirt".into()));
+        // Nothing leaves a hidden slot either.
+        click(&mut view, &mut drag, 2, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(2).map(|s| s.item), Some("minecraft:stone".into()));
+    }
+
+    /// A mod menu type's result slot takes nothing in, a click or a
+    /// shift-click alike, even onto the same item, and gives what it holds
+    /// onto the same carried item (`AbstractContainerMenu.doClick`).
+    #[test]
+    fn a_result_slot_is_take_only() {
+        let Some(rules) = rules() else {
+            return;
+        };
+        let mut g = guest();
+        let mut container = vec![None, Some(ItemStack::new("minecraft:iron_ingot", 1))];
+        g.inventory[0] = Some(ItemStack::new("minecraft:iron_ingot", 3));
+        g.carried = Some(ItemStack::new("minecraft:iron_ingot", 2));
+        let results = [1];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut container),
+            shulker: false,
+            hidden: &[],
+            results: &results,
+        };
+        // The hotbar's first slot (menu slot 2 + 27) goes to slot 0, not onto the result.
+        click(&mut view, &mut drag, 2 + 27, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(3));
+        assert_eq!(view.get(1).map(|s| s.count), Some(1));
+        // The carried ingots take the result's one instead of going in.
+        click(&mut view, &mut drag, 1, 0, input::PICKUP, &rules);
+        assert_eq!(view.get(1), None);
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(3));
+        // Nor does an empty result take any.
+        click(&mut view, &mut drag, 1, 0, input::PICKUP, &rules);
+        assert_eq!(view.get(1), None);
+    }
+
+    struct SwapRules;
+    impl Rules for SwapRules {
+        fn items(&self) -> &Items {
+            unreachable!("swap does not read the item catalog");
+        }
+        fn max_stack(&self, _: &str) -> u32 {
+            64
+        }
+        fn armor_index(&self, _: &str) -> Option<usize> {
+            None
+        }
+    }
+
+    /// A result slot takes nothing from a swap, F or a drag, but gives to a
+    /// swap into an empty hand and to a double click's collect
+    /// (`canTakeItemForPickAll` is true for it, as for a furnace's result).
+    #[test]
+    fn a_result_slot_takes_no_swap_or_drag() {
+        let rules = SwapRules;
+        let mut g = guest();
+        let ingots = |n| Some(ItemStack::new("minecraft:iron_ingot", n));
+        let mut container = vec![None, ingots(2), None];
+        g.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
+        g.offhand = Some(ItemStack::new("minecraft:stone", 1));
+        let results = [1];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut container),
+            shulker: false,
+            hidden: &[],
+            results: &results,
+        };
+        // A hotbar key and F over the result: the stone goes nowhere.
+        click(&mut view, &mut drag, 1, 0, input::SWAP, &rules);
+        click(&mut view, &mut drag, 1, 40, input::SWAP, &rules);
+        assert_eq!(view.get(1), ingots(2));
+        assert!(view.guest.offhand.is_some() && view.guest.inventory[0].is_some());
+        // F with an empty off hand takes the ingots out.
+        view.guest.offhand = None;
+        click(&mut view, &mut drag, 1, 40, input::SWAP, &rules);
+        assert_eq!((view.get(1), view.guest.offhand.clone()), (None, ingots(2)));
+        // A drag over slots 0 to 2 passes the result by.
+        view.guest.carried = Some(ItemStack::new("minecraft:dirt", 4));
+        for (slot, button) in [(-999, 0), (0, 1), (1, 1), (2, 1), (-999, 2)] {
+            click(
+                &mut view,
+                &mut drag,
+                slot,
+                button,
+                input::QUICK_CRAFT,
+                &rules,
+            );
+        }
+        let count = |s: Option<ItemStack>| s.map(|s| s.count);
+        assert_eq!(
+            [view.get(0), view.get(1), view.get(2)].map(count),
+            [Some(2), None, Some(2)]
+        );
+        // A double click collects from it.
+        view.set(1, ingots(3));
+        view.guest.carried = ingots(1);
+        click(&mut view, &mut drag, 0, 0, input::PICKUP_ALL, &rules);
+        assert_eq!((view.get(1), view.guest.carried.clone()), (None, ingots(4)));
+    }
+
+    /// F (SWAP button 40) over a chest or the inventory below it swaps with
+    /// the off hand, even though the menu has no off-hand slot.
+    #[test]
+    fn guest_chest_f_swaps_with_the_off_hand() {
+        let rules = SwapRules;
+        let mut g = guest();
+        g.offhand = Some(ItemStack::new("minecraft:shield", 1));
+        let mut chest = vec![Some(ItemStack::new("minecraft:diamond", 1)), None];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+            results: &[],
+        };
+        click(&mut view, &mut drag, 0, 40, input::SWAP, &rules);
+        assert_eq!(
+            view.get(0).as_ref().map(|s| &*s.item),
+            Some("minecraft:shield")
+        );
+        assert_eq!(
+            view.guest.offhand.as_ref().map(|s| &*s.item),
+            Some("minecraft:diamond")
+        );
+        // Empty chest slot: the off hand goes in.
+        click(&mut view, &mut drag, 1, 40, input::SWAP, &rules);
+        assert_eq!(
+            view.get(1).as_ref().map(|s| &*s.item),
+            Some("minecraft:diamond")
+        );
+        assert!(view.guest.offhand.is_none());
+        // F over the first hotbar slot (menu slot 2 + 27).
+        view.guest.offhand = Some(ItemStack::new("minecraft:oak_boat", 1));
+        view.guest.inventory[0] = Some(ItemStack::new("minecraft:apple", 1));
+        click(&mut view, &mut drag, 2 + 27, 40, input::SWAP, &rules);
+        assert_eq!(
+            view.guest.inventory[0].as_ref().map(|s| &*s.item),
+            Some("minecraft:oak_boat")
+        );
+        assert_eq!(
+            view.guest.offhand.as_ref().map(|s| &*s.item),
+            Some("minecraft:apple")
+        );
+    }
+
     #[test]
     fn guest_shulker_box_menu_refuses_shulker_boxes() {
         let Some(rules) = rules() else {
@@ -791,6 +1119,8 @@ mod tests {
                 guest: &mut g,
                 container: Some(&mut container),
                 shulker,
+                hidden: &[],
+                results: &[],
             };
             // Carried onto an empty slot, shift-clicked from the hotbar
             // (menu slot 27 + 27) and swapped in with the number key 1.

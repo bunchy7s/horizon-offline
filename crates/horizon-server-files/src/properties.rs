@@ -592,6 +592,7 @@ fn is_component(v: &Json) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::java_properties::line_separator;
     struct Fixed;
     impl Entropy for Fixed {
         fn next_long(&mut self) -> i64 {
@@ -604,7 +605,8 @@ mod tests {
     #[test]
     fn defaults_match_vanilla_init_settings() {
         let p = ServerProperties::new(Properties::default(), &mut Fixed).unwrap();
-        let stored = p.stored(0);
+        // Lines end in System.lineSeparator() (java_properties checks that): read them as "\n".
+        let stored = p.stored(0).replace(line_separator(), "\n");
         assert!(stored.starts_with(
             "#Minecraft server properties\n#Thu Jan 01 00:00:00 UTC 1970\naccepts-transfers=false\n"
         ));

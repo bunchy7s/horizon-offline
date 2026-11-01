@@ -259,6 +259,7 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
                 mob: m.id,
                 charged: false,
                 name,
+                in_water: m.fluids.in_water,
             });
             events.push(MobEvent::Explode(
                 [m.position.x, m.eye_y(), m.position.z],

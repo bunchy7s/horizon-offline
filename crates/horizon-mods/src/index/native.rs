@@ -66,8 +66,36 @@ impl Manifest {
 
 pub struct Bundle {
     pub manifest: Manifest,
-    /// Validated relative paths: Rust and TOML, plus files under `mixins/<id>/data/`.
+    /// Validated relative paths: Rust and TOML, plus files under `mixins/<id>/data/` or a
+    /// `data/` folder deeper in (a crate's).
     pub files: BTreeMap<String, Vec<u8>>,
+}
+
+/// Whether `rest` (a path inside `mixins/<id>/`) is a data file: under the bundle's `data/`, or
+/// under the top-level `data/` of a folder of it (a crate's, `engine/data/`), not any folder
+/// named `data` deeper in.
+fn in_data(rest: &str) -> bool {
+    let parts: Vec<&str> = rest.split('/').collect();
+    parts.len() >= 2 && (parts[0] == "data" || (parts.len() >= 3 && parts[1] == "data"))
+}
+
+/// Whether `rest` is one of the text files a crate folder usually carries, which a crate may need
+/// to compile (`#![doc = include_str!("../README.md")]`): `README*`, `LICENSE*`, `COPYING*`,
+/// `NOTICE*` and `.gitignore`, in the bundle's folder or a top-level folder of it.
+fn text(rest: &str) -> bool {
+    let parts: Vec<&str> = rest.split('/').collect();
+    let name = parts[parts.len() - 1];
+    parts.len() <= 2
+        && (["README", "LICENSE", "LICENCE", "COPYING", "NOTICE"]
+            .iter()
+            .any(|p| name.starts_with(p))
+            || name == ".gitignore")
+}
+
+/// Whether a bundle may carry the file `rest` (its path under `mixins/<id>/`): sources and
+/// manifests, data, and the text files of a crate folder.
+pub fn allowed(rest: &str) -> bool {
+    rest.ends_with(".rs") || rest.ends_with(".toml") || in_data(rest) || text(rest)
 }
 
 impl Bundle {
@@ -81,7 +109,7 @@ impl Bundle {
         let mut total = 0u64;
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
-            let name = entry.name().to_owned();
+            let name = entry.name().map_err(|e| e.to_string())?.into_owned();
             if entry.is_dir() {
                 continue;
             }
@@ -115,13 +143,11 @@ impl Bundle {
                 .map_err(|e| e.to_string())?;
         manifest.check()?;
         let prefix = format!("mixins/{}/", manifest.id);
-        let data_prefix = format!("{prefix}data/");
         for name in files.keys().filter(|n| n.as_str() != MANIFEST) {
-            if !name.starts_with(&prefix)
-                || !(name.ends_with(".rs")
-                    || name.ends_with(".toml")
-                    || name.starts_with(&data_prefix))
-            {
+            let Some(rest) = name.strip_prefix(&prefix) else {
+                return Err(format!("unexpected native source: {name}"));
+            };
+            if !allowed(rest) {
                 return Err(format!("unexpected native source: {name}"));
             }
         }
@@ -217,7 +243,13 @@ mod tests {
         let bytes = [0, 255, 42];
         let bundle = read(
             "data",
-            &[("mixins/veinminer/data/nested/table.bin", &bytes)],
+            &[
+                ("mixins/veinminer/data/nested/table.bin", &bytes),
+                ("mixins/veinminer/engine/data/model.bin", &bytes),
+                ("mixins/veinminer/engine/README.md", b"# engine"),
+                ("mixins/veinminer/engine/LICENSE-MIT", b"MIT"),
+                ("mixins/veinminer/.gitignore", b"target/"),
+            ],
             &mixin(),
         )
         .unwrap();
@@ -235,6 +267,11 @@ mod tests {
             "mixins/veinminer/code.dll",
             "mixins/veinminer/data/../code.dll",
             "mixins/veinminer/database/file.bin",
+            "mixins/veinminer/engine/data.bin",
+            "mixins/veinminer/engine/src/data/blob.bin",
+            "mixins/veinminer/engine/src/README.md",
+            "mixins/veinminer/engine/README.dll/x.bin",
+            "mixins/veinminer/engine/Cargo.lock",
             "mixins/other/data/file.bin",
             "mixins\\veinminer\\hook.rs",
         ]

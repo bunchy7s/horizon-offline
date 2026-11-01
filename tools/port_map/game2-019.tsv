@@ -73,7 +73,7 @@ LevelChunk.removeGameEventListener	skip:java	-	listener registry bookkeeping; ga
 LevelChunk.removeBlockEntityTicker	skip:java	-	tickers are rebuilt from block state (block_entities.rs tickers)
 LevelChunk.runPostLoad	missing	-	minor: unsure: no post-load step for block entities found
 LevelChunk.replaceBiomes	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_fillbiome	the /fillbiome command replaces the biomes of a region
-LevelChunk.postProcessGeneration	missing	-	player: unsure: post-generation fixups (fluids, block shapes) may not run when a chunk goes live; not confirmed
+LevelChunk.postProcessGeneration	port	crates/horizon-client/src/game/postprocess.rs::Game::postprocess_chunks	the marked positions are updated once the chunk is live (aquifer fluids, shape-dependent blocks)
 LevelChunk.promotePendingBlockEntity	skip:java	-	pending NBT slot; Horizon decodes block entities when they load (save.rs decode_block_entity)
 LevelChunk.unregisterTickContainerFromLevel	skip:java	-	tick container bookkeeping; scheduled ticks live in level/update.rs
 LevelChunk.registerDebugValues	skip:debug	-	debug values only

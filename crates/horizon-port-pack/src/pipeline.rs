@@ -22,9 +22,14 @@ pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Strin
 }
 
 /// Step 1: the pack at `pack` to `<work>/pack.json`.
-pub fn import(pack: &Path, work: &Path, log: Log) -> Result<import::Pack, String> {
-    let pack = import::import(pack)?;
+pub fn import(source: &Path, work: &Path, log: Log) -> Result<import::Pack, String> {
+    let pack = import::import(source)?;
     fs::create_dir_all(work).map_err(|e| format!("{}: {e}", work.display()))?;
+    // A bad resource-pack entry must not stop the pack's mods from importing.
+    match crate::resourcepacks::stage(source, work, &pack).and_then(|r| r.save(work)) {
+        Ok(()) => {}
+        Err(e) => log(format!("resource packs not staged: {e}")),
+    }
     write_json(&work.join("pack.json"), &pack)?;
     let mut kinds = BTreeMap::<&str, usize>::new();
     for f in &pack.files {
@@ -102,7 +107,12 @@ pub fn carry(
     let records: Vec<inventory::Record> = read_json(&work.join("inventory.json"))?;
     let facts_path = work.join("oracle/facts.json");
     let facts = if facts_path.exists() {
-        let f = oracle::Facts::read(&facts_path)?;
+        let mut f = oracle::Facts::read(&facts_path)?;
+        if let Some(r) = resources {
+            f.vanilla_items = read_json(&r.join("items.json"))
+                .inspect_err(|e| log(format!("items patched without the game's tables: {e}")))
+                .unwrap_or_default();
+        }
         log(format!(
             "oracle facts: {} blocks, {} items",
             f.blocks.len(),
@@ -328,6 +338,7 @@ pub fn port(
         Ok(r) => r,
         Err(_) => inventory(work, false, log)?,
     };
+    crate::resourcepacks::fetch(work, log)?;
     let fetched = fetch::fetch(work, &records, from, &portable, log)?;
     // The jars tell classes and tiers better than metadata alone.
     let records = inventory(work, true, log)?;
@@ -347,6 +358,32 @@ pub fn port(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_resources_without_items_json_still_carry() {
+        let root = std::env::temp_dir().join(format!("port-pack-no-items-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (work, resources) = (root.join("work"), root.join("resources"));
+        fs::create_dir_all(work.join("oracle")).unwrap();
+        fs::create_dir_all(&resources).unwrap();
+        fs::write(work.join("inventory.json"), "[]").unwrap();
+        fs::write(
+            work.join("oracle/facts.json"),
+            r#"{"blocks": {}, "items": {}}"#,
+        )
+        .unwrap();
+        let logged = std::cell::RefCell::new(Vec::new());
+        let log = |line: String| logged.borrow_mut().push(line);
+        assert_eq!(carry(&work, Some(&resources), &[], &log), Ok(0));
+        let logged = logged.borrow();
+        assert!(
+            logged
+                .iter()
+                .any(|l| l.contains("without the game's tables")),
+            "{logged:?}"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn a_namespace_two_mods_claim_is_neither_s() {

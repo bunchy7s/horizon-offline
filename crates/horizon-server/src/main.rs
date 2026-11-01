@@ -1,16 +1,26 @@
 //! `horizon-server`: host a Horizon server (docs/server.md). It keeps the server's settings in `server.toml`,
 //! runs the game headless as the engine, and manages the vanilla files around it.
 
+mod admin;
 mod api;
 mod backup;
 mod cli;
 mod config;
+mod console;
+mod discord;
 mod engine;
+mod events;
 mod http;
 mod init;
 mod lists;
+mod management;
+mod management_methods;
+mod management_schema;
+mod management_tls;
+mod mcp;
 mod panel;
 mod process;
+mod rcon;
 #[cfg(test)]
 mod reference;
 mod service;
@@ -18,6 +28,7 @@ mod settings;
 mod signals;
 mod supervisor;
 mod update;
+mod websocket;
 
 use std::{path::PathBuf, process::ExitCode};
 
@@ -44,8 +55,15 @@ Usage: horizon-server [--dir DIR] <command>
               Up or not, TPS, MSPT, players, RAM and CPU
   cmd COMMAND...
               Run a console command on the running server and print what it answers
+  report [SECONDS]
+              Record a performance report for SECONDS (default 60): where the ticks' time goes,
+              entities, chunks, network, memory; saved in reports/ (JSON and text, no player data)
   logs [-f] [-n N]
               The last N lines of the log (default 50); -f follows it
+  console     Attach to the running server: its log as it happens, TPS, MSPT, players and RAM at the
+              top, and a command line for console commands; Ctrl-D detaches
+  mcp         An MCP server on stdin and stdout, for an AI agent to run and moderate the server
+              (players, kick, ban, whitelist, logs, events, backups, settings, restart...)
   backup [NAME]
               Zip the world and the settings into backups/ (a running server saves first and stays up)
   backups [--json]
@@ -73,6 +91,10 @@ Usage: horizon-server [--dir DIR] <command>
   op NAME, deop NAME
   whitelist on|off|list, whitelist add|remove NAME
               Who may join (on the running server, or in the files when it is stopped)
+  players [--json]
+              Who is online, the operators, the whitelist and the bans
+  kick NAME [REASON], ban NAME [REASON], pardon NAME, ban-ip ADDRESS|NAME [REASON], pardon-ip ADDRESS
+              Moderate the running server (vanilla's commands, as from its console)
 
   --dir DIR   The server folder (default: the current folder)
 
@@ -106,7 +128,10 @@ fn main() -> ExitCode {
         Some("restart") => cli::stop(&dir, true),
         Some("status") => cli::status(&dir, args[1..].iter().any(|a| a == "--json")),
         Some("cmd") => cli::command(&dir, &args[1..]),
+        Some("report") => cli::report(&dir, &args[1..]),
         Some("logs") => logs(&dir, &args[1..]),
+        Some("console") => console::run(&dir),
+        Some("mcp") => mcp::serve(&dir),
         Some("panel") => cli::panel(&dir),
         Some("backup") => cli::backup(&dir, args.get(1).map(String::as_str)),
         Some("backups") => cli::backups(&dir, args[1..].iter().any(|a| a == "--json")),
@@ -120,6 +145,10 @@ fn main() -> ExitCode {
         Some("update") => update::command(&dir, &args[1..]),
         Some("rollback") => update::rollback(&dir, &args[1..]),
         Some(command @ ("op" | "deop" | "whitelist")) => lists::run(&dir, command, &args[1..]),
+        Some("players") => cli::players(&dir, args[1..].iter().any(|a| a == "--json")),
+        Some(command @ ("kick" | "ban" | "pardon" | "ban-ip" | "pardon-ip")) => {
+            cli::moderate(&dir, command, &args[1..])
+        }
         Some(other) => Err(format!(
             "unknown command {other}; `horizon-server help` lists them"
         )),

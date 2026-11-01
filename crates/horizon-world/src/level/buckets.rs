@@ -25,10 +25,20 @@ pub enum BucketContent {
     Nothing,
 }
 
+impl BucketContent {
+    /// `BucketItem.content == Fluids.WATER` (`MobBucketItem` holding water
+    /// counts too): the only content a bucket pours inside a liquid
+    /// container, and the only one `canBeReplaced(Fluid)` sees as water.
+    pub fn is_water(self) -> bool {
+        matches!(self, Self::Fluid(FluidKind::Water) | Self::MobWater)
+    }
+}
+
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
-    /// `BucketPickup.pickupBlock(null, level, pos, state)`: the filled bucket
-    /// that results, None when the block gives nothing.
-    pub(crate) fn bucket_pickup(&mut self, pos: BlockPos) -> Option<&'static str> {
+    /// `BucketPickup.pickupBlock(user, level, pos, state)`: the filled bucket
+    /// that results, None when the block gives nothing. `creative` is whether
+    /// `user` is a creative player (only barriers care).
+    pub(crate) fn bucket_pickup(&mut self, pos: BlockPos, creative: bool) -> Option<&'static str> {
         let b = self.b;
         let state = self.state(pos);
         let item = if b.instance_of(state, Class::Liquid) {
@@ -43,18 +53,24 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             "minecraft:water_bucket"
         } else if b.is_block(state, b.named.powder_snow) {
             "minecraft:powder_snow_bucket"
+        } else if b.is_block(state, b.named.bubble_column) {
+            "minecraft:water_bucket"
         } else {
             return None;
         };
-        self.pickup_block(pos, state).then_some(item)
+        self.pickup_block(pos, state, creative).then_some(item)
     }
-    /// `BucketItem.emptyContents(null, level, pos, null)`. `sound` is the
-    /// bucket's empty sound (mob buckets have their own).
+    /// `BucketItem.emptyContents(user, level, pos, hitResult)`. `sound` is the
+    /// bucket's empty sound (mob buckets have their own); `sneaking` is
+    /// `user.isShiftKeyDown()` (false for a dispenser, whose user is null);
+    /// `creative` is whether that user is a creative player.
     pub(crate) fn bucket_empty(
         &mut self,
         pos: BlockPos,
         content: BucketContent,
         sound: &str,
+        sneaking: bool,
+        creative: bool,
     ) -> bool {
         let b = self.b;
         let fluid = match content {
@@ -85,9 +101,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             && !b.instance_of(state, Class::EndGateway)
             && (b.is_replaceable(state) || !b.is_solid(state));
         let liquid_container = self.is_liquid_container(state);
-        let container = liquid_container && self.can_place_liquid(state, fluid);
+        let container = liquid_container && self.can_place_liquid(state, fluid, creative);
         let place_liquid = may_replace || container;
-        if !(b.is_air(state) || place_liquid) {
+        // `canPlaceFluidInsideBlock`: air always takes the fluid; a block that
+        // merely holds it (a waterloggable block, a replaceable plant) only
+        // when the player is not sneaking (a dispenser has no user and so
+        // no hit result, which always allows it).
+        if !(b.is_air(state) || place_liquid && !sneaking) {
             return false;
         }
         let water = matches!(fluid, FluidKind::Water | FluidKind::FlowingWater);
@@ -103,7 +123,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             return true;
         }
         if liquid_container && water {
-            self.place_liquid(pos, state, FluidState::new(FluidKind::Water, 8, false));
+            self.place_liquid(
+                pos,
+                state,
+                FluidState::new(FluidKind::Water, 8, false),
+                creative,
+            );
             self.empty_sound(pos, sound, mob);
             return true;
         }
@@ -139,16 +164,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 }
 
 impl Behaviours {
-    /// `BucketPickup.pickupBlock` by a dispenser: the filled bucket item.
+    /// `BucketPickup.pickupBlock(user, level, pos, state)`: the filled bucket
+    /// item. A dispenser has no user (`false`).
     pub fn bucket_pickup<L: LevelAccess + ?Sized>(
         &self,
         level: &mut L,
         ticks: &mut Ticks,
         pos: BlockPos,
+        creative: bool,
     ) -> Option<&'static str> {
-        self.sim(level, ticks).bucket_pickup(pos)
+        self.sim(level, ticks).bucket_pickup(pos, creative)
     }
-    /// `DispensibleContainerItem.emptyContents(null, level, pos, null)`.
+    /// `DispensibleContainerItem.emptyContents(user, level, pos, hitResult)`.
     pub fn bucket_empty<L: LevelAccess + ?Sized>(
         &self,
         level: &mut L,
@@ -156,7 +183,10 @@ impl Behaviours {
         pos: BlockPos,
         content: BucketContent,
         sound: &str,
+        sneaking: bool,
+        creative: bool,
     ) -> bool {
-        self.sim(level, ticks).bucket_empty(pos, content, sound)
+        self.sim(level, ticks)
+            .bucket_empty(pos, content, sound, sneaking, creative)
     }
 }

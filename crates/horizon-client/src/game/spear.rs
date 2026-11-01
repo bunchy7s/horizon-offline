@@ -8,6 +8,7 @@
 //! players around as entity event 2. A left click jabs instead
 //! (`PiercingWeapon.attack`), which Lunge turns into a dash.
 use super::{Game, view_vector};
+pub(super) use horizon_client::spear::hits_in_reach;
 use horizon_client::{
     attack_strength::delay,
     collisions::SceneCollisions,
@@ -31,8 +32,7 @@ impl Game<'_> {
         let Some(kinetic) = Kinetic::of(&stack.item) else {
             return false;
         };
-        if self.using.is_none() {
-            self.using = Some((self.held_slot(), 0));
+        if self.start_using_item() {
             let actor = self.lan_acting;
             self.stabbed.retain(|(who, _), _| *who != actor);
             if let Some(p) = &self.player {
@@ -221,6 +221,9 @@ impl Game<'_> {
         };
         let old_health = self.mobs[index].health;
         let hurt = deals_damage && self.hurt_by_player(index, total, Damage::spear(from));
+        if hurt && old_health > 0.0 && !self.mobs[index].alive() {
+            self.native_kill_event(index);
+        }
         // causeExtraKnockback: a push of 0.4, then the weapon's Knockback.
         if deals_knockback {
             let (xd, zd) = self.extra_knockback_direction();
@@ -303,9 +306,7 @@ impl Game<'_> {
         let look = view_vector(self.yaw, self.pitch);
         let look = Vec3::new(look[0], look[1], look[2]);
         // The attack damage attribute.
-        let damage = 1.0
-            + self.attack_item_info().map_or(0.0, |i| i.attack_damage)
-            + self.effect_attack_bonus();
+        let damage = self.attack_damage();
         let movement = self.known_player_movement();
         let mut hit = false;
         for i in self.stab_targets(eye, look, movement) {
@@ -387,61 +388,4 @@ impl Game<'_> {
             self.kinetic_hit_feedback(if own { OWN } else { id }, &kinetic, [at.x, at.y, at.z]);
         }
     }
-}
-
-/// `ProjectileUtil.getManyEntityHitResult` over `boxes`: those the segment
-/// `from`..`to` meets, or comes within the margin of with no block between
-/// (`clip`: where a segment first meets a block), each with where it is hit.
-fn hits_along(
-    boxes: &[(usize, Aabb)],
-    from: Vec3,
-    to: Vec3,
-    margin: f64,
-    clip: &impl Fn(Vec3, Vec3) -> Option<Vec3>,
-) -> Vec<(usize, Vec3)> {
-    let grow = Vec3::new(margin, margin, margin);
-    let mut hits = Vec::new();
-    for &(i, bounds) in boxes {
-        let hit = if bounds.contains(from) {
-            Some(from)
-        } else if let Some(at) = bounds.clip(from, to) {
-            Some(at)
-        } else if margin > 0.0 {
-            bounds.inflate(grow).clip(from, to).and_then(|outside| {
-                let centre = bounds.center();
-                let toward = clip(outside, centre).unwrap_or(centre);
-                bounds.clip(outside, toward)
-            })
-        } else {
-            None
-        };
-        if let Some(at) = hit {
-            hits.push((i, at));
-        }
-    }
-    hits
-}
-
-/// `ProjectileUtil.getHitEntitiesAlong` with an `AttackRange` of `reach` (its
-/// effective min and max range and hitbox margin): the boxes along `look`
-/// from the minimum reach to the maximum plus the attacker's own movement,
-/// none when a block (`clip`) is closer than the minimum.
-pub(super) fn hits_in_reach(
-    boxes: &[(usize, Aabb)],
-    eye: Vec3,
-    look: Vec3,
-    movement: Vec3,
-    (min, max, margin): (f32, f32, f32),
-    clip: impl Fn(Vec3, Vec3) -> Option<Vec3>,
-) -> Vec<(usize, Vec3)> {
-    let from = eye.add_vector(look.scale(f64::from(min)));
-    let mut to = eye.add_vector(look.scale(f64::from(max) + movement.dot(look).max(0.0)));
-    // A block closer than the minimum reach takes the whole stab.
-    if let Some(block) = clip(eye, to) {
-        to = block;
-        if eye.distance_squared(to) < eye.distance_squared(from) {
-            return Vec::new();
-        }
-    }
-    hits_along(boxes, from, to, f64::from(margin), &clip)
 }

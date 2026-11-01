@@ -1,0 +1,8 @@
+{
+  "hooks": [],
+  "rust_summary": "falling blocks for server mods (`native_spawn_falling_block`,\nin `native_falling.rs`).",
+  "doc_summary": "[falling blocks](#falling-blocks) for server mods: `native_spawn_falling_block(dimension, state, pos, velocity, falling)`\nthrows a block that flies, lands and places itself as sand does, for debris and collapsing structures. Bundles that\nuse it need `\"hooks\": @API:native_falling_block@`.",
+  "comments": [
+    "crates/horizon-client/src/game/native_falling.rs"
+  ]
+}

@@ -72,11 +72,11 @@ harness named checks that loader against vanilla).
 | Paintings, mob effect icons | `atlases/paintings.json`, `textures/mob_effect/` | works | loaded from the overlay |
 | Locator bar styles | `waypoint_style/` | **no** | the locator bar isn't drawn yet |
 | Post effects (spectating a creeper, spider or enderman; glowing outlines) | `post_effect/`, `shaders/post/` | **no** | Horizon's effects are WGSL; a pack's GLSL post chain isn't run |
-| Core shaders | `shaders/core/`, `shaders/include/` | **no** | Horizon draws with WGSL; a pack's GLSL core shaders aren't run |
+| Core shaders | `shaders/core/`, `shaders/include/` | partly | `core/text` draws the GUI's text (HUDs moved by its vertex shader, text effects), translated by naga (`horizon-shaders` `core_shader.rs`, `hud/pack_text.rs`); the other core shaders aren't run |
 | GPU warn list, regional compliance | `gpu_warnlist.json`, `regional_compliancies.json` | n/a | OpenGL driver warnings and play-time notices for some regions; not used |
 
-Summary: 45 rows; 32 work, 3 partly, 8 don't (interpolated animation, TrueType fonts, credits and end poem,
-villager hats, trims on worn armour, locator bar styles, post effects, core shaders), 2 don't apply. Except the
+Summary: 45 rows; 32 work, 4 partly, 7 don't (interpolated animation, TrueType fonts, credits and end poem,
+villager hats, trims on worn armour, locator bar styles, post effects), 2 don't apply. Except the
 shaders, the missing pieces are missing vanilla features too, and each vanilla parity fix covers the pack case as well.
 
 ## Gaps and their work
@@ -91,7 +91,7 @@ shaders, the missing pieces are missing vanilla features too, and each vanilla p
 | Trims on worn armour (paletted textures) | medium | [#337](https://github.com/horizon-rust/horizon/issues/337) |
 | Credits and end poem screen | medium | [#338](https://github.com/horizon-rust/horizon/issues/338) |
 | Locator bar | medium | [#339](https://github.com/horizon-rust/horizon/issues/339) |
-| Post effects and core shaders | large | none yet |
+| Post effects, core shaders but GUI text | large | none yet |
 
 ## Testing a pack
 

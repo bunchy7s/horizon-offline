@@ -1,8 +1,9 @@
 [workspace]
-exclude = ["launcher", "crates/horizon-telemetry-server", "crates/horizon-mod-registry", "third_party/wgpu-hal"]
+exclude = ["launcher", "crates/horizon-telemetry-server", "crates/horizon-mod-registry", "third_party/wgpu-hal", "third_party/naga"]
 members = [
     "crates/horizon-core",
     "crates/horizon-dualsense",
+    "crates/horizon-narrator",
     "crates/horizon-threads",
     "crates/horizon-hdr",
     "crates/horizon-world",
@@ -13,6 +14,8 @@ members = [
     "crates/horizon-command",
     "crates/horizon-items",
     "crates/horizon-server-files",
+    "crates/horizon-anticheat",
+    "crates/horizon-chat-filter",
     "crates/horizon-server",
     "crates/horizon-bots",
     "crates/horizon-assets",
@@ -27,6 +30,7 @@ members = [
     "crates/cargo-horizon-mod",
     "crates/horizon-port-pack",
     "crates/horizon-shaders",
+    "crates/horizon-optifine",
     "crates/horizon-shader-api",
     "crates/horizon-release-sign",
     "xtask",
@@ -52,9 +56,14 @@ large_enum_variant = "allow"
 # UHD 620/630) crashes on it with an access violation (#746). It also fixes the
 # Metal backend's lookup of the CoreGraphics HDR colour space names, which handed
 # CoreGraphics a symbol's address as the string and crashed HDR output on macOS.
-# Drop this and the folder once a wgpu release has both fixes.
+# And gfx-rs/wgpu#10714: on Windows, Vulkan waits for the acquire fence only in
+# FIFO (VSync), where it was meant to pace frames; with VSync off it made every
+# frame wait for the GPU to finish the one before (#4604).
+# Drop this and the folder once a wgpu release has these fixes.
 [patch.crates-io]
 wgpu-hal = { path = "third_party/wgpu-hal" }
+# naga 30.0.1, with the fixes to its GLSL frontend that shader packs need (THIRD_PARTY_NOTICES.md).
+naga = { path = "third_party/naga" }
 
 # Line tables keep file:line in backtraces; full debug info made every
 # example and test binary hundreds of megabytes and slow to link.

@@ -22,7 +22,7 @@ pub mod tree_world;
 pub mod vanilla;
 mod vanilla_order;
 
-pub use args::{Arg, ArgType, Registries};
+pub use args::{Arg, ArgType, CustomCompletionAction, Registries, modify_custom_completions};
 use horizon_client_core::text::Text;
 
 /// The command id of a mod's command (`Dispatcher::with_mod_commands`).
@@ -298,6 +298,18 @@ pub enum Suggests {
     /// SuggestionProviders.ASK_SERVER: the server completes the node
     /// (ClientSuggestionProvider.customSuggestion); nothing locally.
     AskServer,
+    /// OpCommand: the online players who are not operators.
+    NonOperators,
+    /// DeOpCommands: the operators' names (PlayerList.getOpNames).
+    Operators,
+    /// PardonCommand: the banned players' names (UserBanList.getUserList).
+    BannedPlayers,
+    /// PardonIpCommand: the banned addresses (IpBanList.getUserList).
+    BannedIps,
+    /// WhitelistCommand `add`: the online players who are not whitelisted.
+    NonWhitelisted,
+    /// WhitelistCommand `remove`: the whitelisted names (PlayerList.getWhiteListNames).
+    Whitelisted,
 }
 impl Node {
     pub fn name(&self) -> &str {
@@ -418,6 +430,28 @@ impl ParseResults {
         } else {
             CommandError::tr_at("command.unknown.argument", &[], &reader)
         })
+    }
+    /// SignableCommand.of: the message arguments a signed command signs, by
+    /// name, with their text, not past a redirect to the root (`execute ...
+    /// run`). `dispatcher` is the one that made this parse.
+    pub fn signable_arguments(&self, dispatcher: &Dispatcher) -> Vec<(String, String)> {
+        let root = self.context.root;
+        let mut out = Vec::new();
+        let mut context = Some(&self.context);
+        while let Some(c) = context {
+            for &(node, (start, end)) in &c.nodes {
+                if let NodeKind::Argument {
+                    ty: ArgType::Message,
+                    name,
+                } = &dispatcher.nodes[node].kind
+                    && let Some(text) = self.input.get(start..end)
+                {
+                    out.push((name.clone(), text.to_owned()));
+                }
+            }
+            context = c.child.as_deref().filter(|child| child.root != root);
+        }
+        out
     }
     /// The executable context and command id, or the vanilla error.
     pub fn executable(&self) -> CmdResult<(&Context, &'static str)> {
@@ -666,6 +700,25 @@ impl Suggests {
             }
             Suggests::Triggers => {
                 builder.suggest_matching(reg.trigger_objectives.iter().map(String::as_str))
+            }
+            Suggests::NonOperators => {
+                let listed = |name: &&String| !reg.ops.iter().any(|o| o.eq_ignore_ascii_case(name));
+                builder.suggest_matching(reg.players.iter().filter(listed).map(String::as_str))
+            }
+            Suggests::Operators => builder.suggest_matching(reg.ops.iter().map(String::as_str)),
+            Suggests::BannedPlayers => {
+                builder.suggest_matching(reg.banned_players.iter().map(String::as_str))
+            }
+            Suggests::BannedIps => {
+                builder.suggest_matching(reg.banned_ips.iter().map(String::as_str))
+            }
+            Suggests::NonWhitelisted => {
+                let listed =
+                    |name: &&String| !reg.whitelisted.iter().any(|w| w.eq_ignore_ascii_case(name));
+                builder.suggest_matching(reg.players.iter().filter(listed).map(String::as_str))
+            }
+            Suggests::Whitelisted => {
+                builder.suggest_matching(reg.whitelisted.iter().map(String::as_str))
             }
             Suggests::Nothing | Suggests::AskServer => {}
         }

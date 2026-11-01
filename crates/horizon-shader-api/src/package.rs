@@ -72,7 +72,7 @@ impl Pack {
                 if entry.is_dir() {
                     continue;
                 }
-                let name = entry.name().to_owned();
+                let name = entry.name().map_err(|e| e.to_string())?.into_owned();
                 let mut bytes = Vec::new();
                 (&mut entry)
                     .take(MAX_OTHER.max(MAX_WGSL) + 1)
@@ -111,11 +111,14 @@ impl Pack {
                     return Err(format!("{name}: not UTF-8"));
                 }
                 MAX_WGSL
-            } else if name == MANIFEST || EXTRAS.contains(&name.as_str()) {
+            } else if name == MANIFEST
+                || EXTRAS.contains(&name.as_str())
+                || manifest.textures.iter().any(|t| &t.file == name)
+            {
                 MAX_OTHER
             } else {
                 return Err(format!(
-                    "{name}: a pack holds only {MANIFEST}, .wgsl files and {}",
+                    "{name}: a pack holds only {MANIFEST}, .wgsl files, its [[textures]] and {}",
                     EXTRAS.join(", ")
                 ));
             };
@@ -126,10 +129,22 @@ impl Pack {
         if total > MAX_TOTAL {
             return Err(format!("the pack is over {} MiB", MAX_TOTAL >> 20));
         }
+        if let Some(t) = manifest
+            .textures
+            .iter()
+            .find(|t| !files.contains_key(&t.file))
+        {
+            return Err(format!("{}: named in {MANIFEST} but missing", t.file));
+        }
         if let Some(missing) = used.iter().find(|f| !files.contains_key(**f)) {
             return Err(format!("{missing}: named in {MANIFEST} but missing"));
         }
         Ok(Pack { manifest, files })
+    }
+
+    /// The bytes of the pack's file `file` (a `[[textures]]` image).
+    pub fn source_bytes(&self, file: &str) -> Option<&[u8]> {
+        self.files.get(file).map(Vec::as_slice)
     }
 
     /// A WGSL file's text (every file the manifest names is checked UTF-8).

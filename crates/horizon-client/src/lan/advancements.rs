@@ -6,7 +6,7 @@
 use super::data::{SyncData, json_to_nbt};
 use crate::{
     advancements::{Progress, Tree},
-    recipe_book::{RecipeIndex, Settings},
+    recipe_book::{Category, RecipeIndex, Settings, crafting_category, crafting_station},
 };
 use horizon_protocol::buf::Writer;
 use serde_json::Value;
@@ -128,6 +128,50 @@ impl ServerAdvancements {
             recipe_book_add,
             update_advancements: w.data,
         }
+    }
+
+    /// `PlayerAdvancements.reload` (`PlayerList.reloadResources`): the
+    /// progress is read again against the new tree (`applyFrom` ignores an
+    /// advancement that no longer exists and `AdvancementProgress.update`
+    /// drops a criterion it lost), the next `flushDirty` is a first packet
+    /// again, and the next `CriteriaTriggers.TICK` meets the new tree's
+    /// `minecraft:tick` criteria, rewarding the recipes of the advancements
+    /// that complete. Returns the recipe book packet those recipes need.
+    pub fn reload(
+        &self,
+        sync: &SyncData,
+        now_millis: i64,
+        progress: &mut Progress,
+        book: &mut Settings,
+    ) -> Option<Vec<u8>> {
+        let by_id: HashMap<&str, &crate::advancements::Advancement> =
+            self.tree.list.iter().map(|a| (a.id.as_str(), a)).collect();
+        progress
+            .criteria
+            .retain(|id, got| match by_id.get(id.as_str()) {
+                Some(a) => {
+                    got.retain(|name, _| a.criteria.iter().any(|c| &c.name == name));
+                    true
+                }
+                None => false,
+            });
+        let date = crate::advancements::date_text(now_millis.div_euclid(1000));
+        let mut entries = Vec::new();
+        for a in &self.tree.list {
+            let was_done = progress.done(a);
+            for c in &a.criteria {
+                if c.trigger == "minecraft:tick" && c.conditions.is_null() {
+                    progress.grant(&a.id, &c.name, &date);
+                }
+            }
+            if !was_done && progress.done(a) {
+                book.add_recipes(&self.displays, &a.rewards.recipes);
+                for id in &a.rewards.recipes {
+                    entries.extend(self.book_entries(id, sync, NOTIFY_AND_HIGHLIGHT));
+                }
+            }
+        }
+        (!entries.is_empty()).then(|| book_add(entries, false))
     }
 
     /// `PlayerAdvancements.flushDirty`: the advancements that became visible
@@ -320,7 +364,36 @@ impl ServerAdvancements {
         let slot = |n: &str| sync.id("minecraft:slot_display", n).unwrap_or(0);
         let mut w = Writer::new();
         w.varint(ids.start);
-        let (ingredients, category): (Vec<Option<&Value>>, &str) = match kind {
+        // The ingredients' TagSlotDisplays, an empty cell as an empty slot.
+        let slots = |w: &mut Writer, cells: &[Option<&Value>]| {
+            w.varint(cells.len() as i32);
+            for cell in cells {
+                match cell {
+                    Some(v) => {
+                        w.varint(slot("minecraft:tag"));
+                        holder_set(w, v, &item);
+                    }
+                    None => w.varint(slot("minecraft:empty")),
+                }
+            }
+        };
+        // The result as its ItemStackSlotDisplay, the station as its item.
+        let result = |w: &mut Writer| {
+            w.varint(slot("minecraft:item_stack"));
+            w.varint(item(
+                horizon_world::loot::recipe_result_id(&r["result"]).unwrap_or("minecraft:air"),
+            ));
+            w.varint(r["result"]["count"].as_i64().unwrap_or(1) as i32);
+            w.varint(0);
+            w.varint(0);
+        };
+        let station = |w: &mut Writer, name: &str| {
+            w.varint(slot("minecraft:item"));
+            w.varint(item(name));
+        };
+        // The display, then the ingredients the craftable filter checks and
+        // the category of the tab that lists it.
+        let (category, placed): (&str, Vec<&Value>) = match kind {
             "minecraft:crafting_shaped" => {
                 let pattern = shrink(r["pattern"].as_array().map_or(&[][..], |p| p));
                 let (width, height) = (pattern.first().map_or(0, Vec::len), pattern.len());
@@ -332,53 +405,61 @@ impl ServerAdvancements {
                     .flatten()
                     .map(|c| (*c != ' ').then(|| &r["key"][c.to_string()]))
                     .collect();
-                (cells, "misc")
+                slots(&mut w, &cells);
+                result(&mut w);
+                station(&mut w, "minecraft:crafting_table");
+                let placed = cells.iter().flatten().copied().collect();
+                (
+                    crafting_category(r["category"].as_str().unwrap_or("")).name(),
+                    placed,
+                )
             }
             "minecraft:crafting_shapeless" => {
                 w.varint(sync.id("minecraft:recipe_display", kind).unwrap_or(0));
-                let cells = r["ingredients"]
+                let cells: Vec<Option<&Value>> = r["ingredients"]
                     .as_array()
                     .map_or(Vec::new(), |a| a.iter().map(Some).collect());
-                (cells, "misc")
+                slots(&mut w, &cells);
+                result(&mut w);
+                station(&mut w, "minecraft:crafting_table");
+                let placed = cells.iter().flatten().copied().collect();
+                (
+                    crafting_category(r["category"].as_str().unwrap_or("")).name(),
+                    placed,
+                )
+            }
+            // AbstractCookingRecipe.display: the furnace, blast furnace,
+            // smoker and campfire share one FurnaceRecipeDisplay; only the
+            // station and the category differ.
+            "minecraft:smelting"
+            | "minecraft:blasting"
+            | "minecraft:smoking"
+            | "minecraft:campfire_cooking" => {
+                w.varint(
+                    sync.id("minecraft:recipe_display", "minecraft:furnace")
+                        .unwrap_or(0),
+                );
+                w.varint(slot("minecraft:tag"));
+                holder_set(&mut w, &r["ingredient"], &item);
+                w.varint(slot("minecraft:any_fuel"));
+                result(&mut w);
+                station(&mut w, crafting_station(kind));
+                w.varint(r["cookingtime"].as_i64().unwrap_or(0) as i32);
+                w.f32(r["experience"].as_f64().unwrap_or(0.0) as f32);
+                (cooking_category(kind, r), vec![&r["ingredient"]])
             }
             _ => return Vec::new(),
         };
-        // ShapedCraftingRecipeDisplay / ShapelessCraftingRecipeDisplay:
-        // the ingredients' TagSlotDisplays, the result, the crafting table.
-        w.varint(ingredients.len() as i32);
-        for cell in &ingredients {
-            match cell {
-                Some(v) => {
-                    w.varint(slot("minecraft:tag"));
-                    holder_set(&mut w, v, &item);
-                }
-                None => w.varint(slot("minecraft:empty")),
-            }
-        }
-        w.varint(slot("minecraft:item_stack"));
-        w.varint(item(r["result"]["id"].as_str().unwrap_or("minecraft:air")));
-        w.varint(r["result"]["count"].as_i64().unwrap_or(1) as i32);
-        w.varint(0);
-        w.varint(0);
-        w.varint(slot("minecraft:item"));
-        w.varint(item("minecraft:crafting_table"));
         // The group, the recipe book category and the placement's ingredients.
         match r["group"].as_str().and_then(|g| self.groups.get(g)) {
             Some(g) => w.varint(g + 1),
             None => w.varint(0),
         }
-        let category = format!(
-            "minecraft:crafting_{}",
-            match r["category"].as_str().unwrap_or(category) {
-                "building" => "building_blocks",
-                c => c,
-            }
-        );
+        let category = format!("minecraft:{category}");
         w.varint(
             sync.id("minecraft:recipe_book_category", &category)
                 .unwrap_or(0),
         );
-        let placed: Vec<&Value> = ingredients.iter().flatten().copied().collect();
         w.bool(true);
         w.varint(placed.len() as i32);
         for v in placed {
@@ -403,6 +484,28 @@ fn book_add(entries: Vec<Vec<u8>>, replace: bool) -> Vec<u8> {
     }
     w.bool(replace);
     w.data
+}
+
+/// `SmeltingRecipe.recipeBookCategory` and the other cooking recipes': the
+/// category of the station's book, from the recipe's `CookingBookCategory`.
+fn cooking_category(kind: &str, r: &Value) -> &'static str {
+    let category = match kind {
+        // BlastingRecipe: a blocks tab, and one misc tab for the rest.
+        "minecraft:blasting" => match r["category"].as_str() {
+            Some("blocks") => Category::BlastBlocks,
+            _ => Category::BlastMisc,
+        },
+        "minecraft:smoking" => Category::SmokerFood,
+        // CampfireCookingRecipe: its own category, which no book's tab lists.
+        "minecraft:campfire_cooking" => return "campfire",
+        // SmeltingRecipe: blocks, food and misc, the default.
+        _ => match r["category"].as_str() {
+            Some("food") => Category::FurnaceFood,
+            Some("blocks") => Category::FurnaceBlocks,
+            _ => Category::FurnaceMisc,
+        },
+    };
+    category.name()
 }
 
 /// ShapedRecipePattern.shrink: the pattern without blank border rows and columns.
@@ -454,5 +557,186 @@ fn holder_set(w: &mut Writer, v: &Value, item: &dyn Fn(&str) -> i32) {
             }
         }
         _ => w.varint(1),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use horizon_protocol::{
+        buf::Reader,
+        item::Stack,
+        packets::recipes::{HolderSet, RecipeBookEntry, RecipeDisplay, SlotDisplay},
+    };
+    use std::path::PathBuf;
+
+    /// The registries `book_entries` looks up, in the game's order
+    /// (`RecipeBookCategories` and the two display registries).
+    const REGISTRIES: &str = r#"{
+      "minecraft:item": {"entries": {
+        "minecraft:raw_copper": {"protocol_id": 0},
+        "minecraft:copper_ingot": {"protocol_id": 1},
+        "minecraft:redstone_ore": {"protocol_id": 2},
+        "minecraft:redstone": {"protocol_id": 3},
+        "minecraft:furnace": {"protocol_id": 4},
+        "minecraft:blast_furnace": {"protocol_id": 5}
+      }},
+      "minecraft:slot_display": {"entries": {
+        "minecraft:empty": {"protocol_id": 0},
+        "minecraft:any_fuel": {"protocol_id": 1},
+        "minecraft:with_any_potion": {"protocol_id": 2},
+        "minecraft:only_with_component": {"protocol_id": 3},
+        "minecraft:item": {"protocol_id": 4},
+        "minecraft:item_stack": {"protocol_id": 5},
+        "minecraft:tag": {"protocol_id": 6},
+        "minecraft:dyed": {"protocol_id": 7},
+        "minecraft:smithing_trim": {"protocol_id": 8},
+        "minecraft:with_remainder": {"protocol_id": 9},
+        "minecraft:composite": {"protocol_id": 10}
+      }},
+      "minecraft:recipe_display": {"entries": {
+        "minecraft:crafting_shapeless": {"protocol_id": 0},
+        "minecraft:crafting_shaped": {"protocol_id": 1},
+        "minecraft:furnace": {"protocol_id": 2},
+        "minecraft:stonecutter": {"protocol_id": 3},
+        "minecraft:smithing": {"protocol_id": 4}
+      }},
+      "minecraft:recipe_book_category": {"entries": {
+        "minecraft:crafting_building_blocks": {"protocol_id": 0},
+        "minecraft:crafting_redstone": {"protocol_id": 1},
+        "minecraft:crafting_equipment": {"protocol_id": 2},
+        "minecraft:crafting_misc": {"protocol_id": 3},
+        "minecraft:furnace_food": {"protocol_id": 4},
+        "minecraft:furnace_blocks": {"protocol_id": 5},
+        "minecraft:furnace_misc": {"protocol_id": 6},
+        "minecraft:blast_furnace_blocks": {"protocol_id": 7},
+        "minecraft:blast_furnace_misc": {"protocol_id": 8},
+        "minecraft:smoker_food": {"protocol_id": 9},
+        "minecraft:stonecutter": {"protocol_id": 10},
+        "minecraft:smithing": {"protocol_id": 11},
+        "minecraft:campfire": {"protocol_id": 12}
+      }}
+    }"#;
+
+    /// A resources dir with those registries and the given recipe files.
+    fn resources(name: &str, recipes: &[(&str, &str)]) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("horizon-recipe-book-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("data/minecraft/recipe");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(root.join("registries.json"), REGISTRIES).unwrap();
+        for (id, json) in recipes {
+            std::fs::write(dir.join(format!("{id}.json")), json).unwrap();
+        }
+        root
+    }
+
+    /// The server's sync over `root`, and the one entry of `id` read back as
+    /// the client's `RecipeBookEntry::read` reads it.
+    fn entry(root: &std::path::Path, id: &str) -> (SyncData, RecipeBookEntry) {
+        let sync = SyncData::load(root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        let entries = sync
+            .advancements
+            .book_entries(id, &sync, NOTIFY_AND_HIGHLIGHT);
+        assert_eq!(entries.len(), 1, "{id} has one display");
+        let mut r = Reader::new(&entries[0]);
+        let entry = RecipeBookEntry::read(&mut r).unwrap();
+        assert_eq!(r.remaining(), 0, "the entry ends with its flags");
+        (sync, entry)
+    }
+
+    #[test]
+    fn smelting_reaches_the_furnace_book() {
+        let root = resources(
+            "smelting",
+            &[(
+                "copper_ingot_from_smelting_raw_copper",
+                r#"{"type":"minecraft:smelting","cookingtime":200,"experience":0.7,
+                    "group":"copper_ingot","ingredient":"minecraft:raw_copper",
+                    "result":{"id":"minecraft:copper_ingot"}}"#,
+            )],
+        );
+        let (sync, e) = entry(&root, "minecraft:copper_ingot_from_smelting_raw_copper");
+        let item = |n: &str| sync.id("minecraft:item", n).unwrap();
+        // The fixture's only recipe: display ids are numbered over the sorted ids.
+        assert_eq!(e.id, 0);
+        assert_eq!(
+            e.category,
+            sync.id("minecraft:recipe_book_category", "minecraft:furnace_misc")
+                .unwrap()
+        );
+        assert_eq!(e.group, 1, "copper_ingot is the first group");
+        assert_eq!(e.flags, NOTIFY_AND_HIGHLIGHT);
+        assert_eq!(
+            e.requirements,
+            Some(vec![HolderSet::Items(vec![item("minecraft:raw_copper")])])
+        );
+        let RecipeDisplay::Furnace {
+            ingredient,
+            fuel,
+            result,
+            station,
+            duration,
+            experience,
+        } = e.display
+        else {
+            panic!("a smelting recipe shows a furnace display");
+        };
+        assert_eq!(
+            ingredient,
+            SlotDisplay::Tag(HolderSet::Items(vec![item("minecraft:raw_copper")]))
+        );
+        assert_eq!(fuel, SlotDisplay::AnyFuel);
+        assert_eq!(
+            result,
+            SlotDisplay::ItemStack(Stack::new(item("minecraft:copper_ingot"), 1))
+        );
+        assert_eq!(station, SlotDisplay::Item(item("minecraft:furnace")));
+        assert_eq!(duration, 200);
+        assert_eq!(experience, 0.7);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn blasting_reaches_the_blast_furnace_book() {
+        let root = resources(
+            "blasting",
+            &[(
+                "redstone_from_blasting_redstone_ore",
+                r#"{"type":"minecraft:blasting","category":"blocks","cookingtime":200,
+                    "experience":0.7,"group":"redstone",
+                    "ingredient":"minecraft:redstone_ore","result":{"id":"minecraft:redstone"}}"#,
+            )],
+        );
+        let (sync, e) = entry(&root, "minecraft:redstone_from_blasting_redstone_ore");
+        let item = |n: &str| sync.id("minecraft:item", n).unwrap();
+        assert_eq!(e.id, 0);
+        assert_eq!(
+            e.category,
+            sync.id(
+                "minecraft:recipe_book_category",
+                "minecraft:blast_furnace_blocks"
+            )
+            .unwrap()
+        );
+        let RecipeDisplay::Furnace {
+            ingredient,
+            station,
+            duration,
+            experience,
+            ..
+        } = e.display
+        else {
+            panic!("a blasting recipe shows a furnace display");
+        };
+        assert_eq!(
+            ingredient,
+            SlotDisplay::Tag(HolderSet::Items(vec![item("minecraft:redstone_ore")]))
+        );
+        assert_eq!(station, SlotDisplay::Item(item("minecraft:blast_furnace")));
+        assert_eq!(duration, 200);
+        assert_eq!(experience, 0.7);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

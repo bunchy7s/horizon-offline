@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:add",
+  "left": {
+    "type": "minecraft:noise",
+    "noise": "horizon_tall:peaks",
+    "xz_scale": 1.0,
+    "y_scale": 0.0
+  },
+  "right": {
+    "type": "minecraft:gradient",
+    "axis": "y",
+    "from_coordinate": 0,
+    "from_value": 1.0,
+    "to_coordinate": 1900,
+    "to_value": -1.0
+  }
+}

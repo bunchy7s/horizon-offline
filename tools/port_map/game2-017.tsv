@@ -78,13 +78,13 @@ HopperBlockEntity.canTakeItemFromContainer	port	crates/horizon-client/src/game/m
 HopperBlockEntity.getSourceContainer	port	crates/horizon-client/src/game/machines.rs::Game::suck_from_container	container above the hopper
 HopperBlockEntity.getItemsAtAndAbove	port	crates/horizon-client/src/game/machines.rs::Game::suck_item_entities	item entities in the suck box
 HopperBlockEntity.entityInside	inline	crates/horizon-client/src/game/machines.rs::Game::suck_item_entities	item entering the hopper is polled each tick instead
-JigsawBlockEntity.generate	missing		player: creative: the Jigsaw block's Generate button and structure growth do not exist; no jigsaw screen or block-driven generation found (/place only places templates)
+JigsawBlockEntity.generate	port	crates/horizon-client/src/game/jigsaw_blocks.rs::Game::generate_jigsaw_block	
 JukeboxBlockEntity.notifyItemChangedInJukebox	port	crates/horizon-client/src/game/jukebox.rs::Game::set_has_record	gap: minor: no BLOCK_CHANGE game event
 JukeboxBlockEntity.getComparatorOutput	port	crates/horizon-client/src/game/jukebox.rs::jukebox_signals	comparator value of the song
 JukeboxBlockEntity.loadAdditional	port	crates/horizon-client/src/save.rs::decode_block_entity	RecordItem and ticks
 JukeboxBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	RecordItem and ticks
-JukeboxBlockEntity.setTheItem	inline	crates/horizon-client/src/game/jukebox.rs::Game::use_jukebox	gap: player: hoppers and other containers cannot insert a disc
-JukeboxBlockEntity.canPlaceItem	port	crates/horizon-client/src/game/jukebox.rs::Game::use_jukebox	gap: player: hopper insertion of discs is missing
+JukeboxBlockEntity.setTheItem	port	crates/horizon-client/src/game/jukebox.rs::Game::jukebox_inserted	a disc a hopper or dropper feeds into the slot starts the song, with the block state, the level event and the neighbour and comparator updates
+JukeboxBlockEntity.canPlaceItem	port	crates/horizon-client/src/game/machines.rs::Containers::can_place	a playable disc into the empty single slot (`Jukebox.items`, which `BlockEntity.slots` now exposes), so a hopper reaches a jukebox
 JukeboxBlockEntity.setSongItemWithoutPlaying	skip:other		@VisibleForTesting setter; no player behaviour
 JukeboxBlockEntity.tryForcePlaySong	skip:other		@VisibleForTesting hook; no player behaviour
 LecternBlockEntity.hasBook	inline	crates/horizon-client/src/game/books.rs::Game::use_lectern	book-present check before a book is placed
@@ -93,7 +93,7 @@ LecternBlockEntity.resolveBook	missing		minor: unsure: written-book components (
 LecternBlockEntity.createCommandSourceStack	missing		minor: unsure: only used by resolveBook (see there)
 LecternBlockEntity.loadAdditional	port	crates/horizon-client/src/save.rs::decode_block_entity	Book and Page
 LecternBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	Book and Page
-SculkCatalystBlockEntity.CatalystListener.tryAwardItSpreadsAdvancement	missing		player: no 'It Spreads' advancement for a mob killed next to a sculk catalyst; Horizon never fires kill_mob_near_sculk_catalyst
+SculkCatalystBlockEntity.CatalystListener.tryAwardItSpreadsAdvancement	port	crates/horizon-client/src/game/creatures.rs::Game::mob_died	kill_mob_near_sculk_catalyst fires when the catalyst takes a mob's experience
 SculkShriekerBlockEntity.loadAdditional	port	crates/horizon-client/src/save.rs::decode_block_entity	shrieker state from the sculk arm
 SculkShriekerBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	shrieker state from the sculk arm
 SculkShriekerBlockEntity.tryGetPlayer	inline	crates/horizon-client/src/game/sculk.rs::Game::sculk_listen	ctx.player flag decides whether a player set it off
@@ -106,11 +106,11 @@ SculkShriekerBlockEntity.VibrationUser.onReceiveVibration	port	crates/horizon-cl
 ShelfBlockEntity.loadAdditional	skip:other		no own code: the raw saved tag keeps Items (shelf_signal reads it)
 ShelfBlockEntity.saveAdditional	skip:other		no own code: the raw saved tag keeps Items (shelf_signal reads it)
 ShelfBlockEntity.getUpdateTag	missing		minor: unsure: no client update tag for shelves
-ShelfBlockEntity.setChanged	missing		player: shelves cannot be used: no item insert or take on a shelf; no shelf interaction code found
+ShelfBlockEntity.setChanged	inline	crates/horizon-client/src/game/machines.rs::Containers::container_changed	the shelf's own arm marks the block entity updated so clients see the swap
 ShelfBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	Items as container component
 ShelfBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	Items as container component
 ShulkerBoxBlockEntity.updateAnimation	port	crates/horizon-client-render/src/block_entity_anim.rs::Shulker::tick	lid progress
-ShulkerBoxBlockEntity.moveCollidedEntities	missing		player: unsure: a player in the swept lid box is not pushed out when the box opens; the code comment says the level does it and no push code was found
+ShulkerBoxBlockEntity.moveCollidedEntities	inline	crates/horizon-client/src/game/piston_push.rs::Game::push_shulker_entities	the sweeping lid box moves every body it meets out along the facing by the box's size plus 0.01 (`Entity.move(MoverType.SHULKER_BOX, …)`), through the piston push machinery
 ShulkerBoxBlockEntity.doNeighborUpdates	missing		minor: unsure: neighbour updates on lid open and close are left to the level; no code found
 ShulkerBoxBlockEntity.saveAdditional	port	crates/horizon-client/src/save.rs::encode_block_entity	shulker box uses the chest arm (27 slots)
 ShulkerBoxBlockEntity.loadFromTag	port	crates/horizon-client/src/block_entity_item.rs::place	contents from the item's data
@@ -122,8 +122,8 @@ SignBlockEntity.resolveLine	missing		minor: unsure: sign text selectors are not 
 SignBlockEntity.updateText	port	crates/horizon-client/src/game/sign_edit.rs::Game::lan_sign_update	guest's sign write
 SignBlockEntity.updateMessages	missing		minor: unsure: sign text selectors are not resolved; SignText keeps plain strings (component_text)
 SignBlockEntity.setText	port	crates/horizon-client/src/game/sign_edit.rs::Game::sign_write	
-SignBlockEntity.canExecuteClickCommands	missing		player: sign text click events are not kept; Horizon flattens sign text to plain strings, so clicking a sign runs nothing
-SignBlockEntity.executeClickCommandsIfPresent	missing		player: sign text click events are not kept; clicking a sign runs nothing
+SignBlockEntity.canExecuteClickCommands	port	crates/horizon-client/src/game/sign_edit.rs::Game::sign_can_execute_click_commands	ticked in #3516; `SignBlockEntity.canExecuteClickCommands` is cited at crates/horizon-client/src/game/sign_edit.rs:97
+SignBlockEntity.executeClickCommandsIfPresent	port	crates/horizon-client/src/game/sign_edit.rs::Game::execute_sign_click_commands	ticked in #3516; `SignBlockEntity.executeClickCommandsIfPresent` is cited at crates/horizon-client/src/game/sign_edit.rs:139
 SignBlockEntity.createCommandSourceStack	missing		minor: unsure: only used by click commands (see executeClickCommandsIfPresent)
 SignBlockEntity.markUpdated	port	crates/horizon-client/src/game/trial_spawner.rs::Game::mark_block_entity_updated	
 SignBlockEntity.setWaxed	port	crates/horizon-client/src/game/sign_edit.rs::Game::use_sign_applicator	honeycomb wax
@@ -137,7 +137,7 @@ SignText.withColor	port	crates/horizon-client/src/game/sign_edit.rs::Game::use_s
 SignText.hasMessage	port	crates/horizon-client-render/src/signs.rs::SignText::is_empty	inverse of is_empty
 SignText.getRenderMessages	port	crates/horizon-client-render/src/block_entity_render.rs::sign_text_calls	lines drawn on the sign
 SignText.filteredMessagesForSerialization	skip:service		chat-filtered sign text for clients; Horizon has no text filter
-SignText.hasAnyClickCommands	missing		player: sign text click events are not kept; no click command exists on any sign
+SignText.hasAnyClickCommands	port	crates/horizon-client-render/src/signs.rs::SignText::has_any_click_commands	ticked in #3516; `SignText.hasAnyClickCommands` is cited at crates/horizon-client-render/src/signs.rs:81
 SignText.hasEditableText	skip:other		Horizon sign text has no click events, so every line is editable
 SignText.equals	skip:java		value equality
 SignText.hashCode	skip:java		value hashing

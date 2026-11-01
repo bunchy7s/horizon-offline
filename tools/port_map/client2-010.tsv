@@ -4,9 +4,9 @@ Button.Builder.build	skip:java		builder: makes a Plain button and sets its toolt
 ChatComponent.forEachLine	port	crates/horizon-client-render/src/chat.rs::Chat::layout	visible lines bottom-up with the alpha filter, inlined in layout
 ChatComponent.addMessageToDisplayQueue	port	crates/horizon-client-render/src/chat.rs::Chat::add_lines	wrap at width/scale, keep the scroll when chatting, trim to 100 lines
 ChatComponent.addMessageToQueue	port	crates/horizon-client-render/src/chat.rs::Chat::add_message	newest first, trimmed to 100 messages
-ChatComponent.processMessageDeletionQueue	missing		player: a message the server deletes stays in chat; the delete-chat packet is only named in horizon-protocol/src/ids.rs and never decoded
-ChatComponent.deleteMessage	missing		player: a server message delete does nothing in Horizon; the removed line stays visible
-ChatComponent.deleteMessageOrDelay	missing		player: no 60-tick delayed removal and no deleted marker; see deleteMessage
+ChatComponent.processMessageDeletionQueue	port	crates/horizon-client-render/src/chat.rs::Chat::process_deletions	
+ChatComponent.deleteMessage	port	crates/horizon-client-render/src/chat.rs::Chat::delete_message	
+ChatComponent.deleteMessageOrDelay	port	crates/horizon-client-render/src/chat.rs::Chat::delete_or_delay	
 ChatComponent.refreshTrimmedMessages	port	crates/horizon-client-render/src/chat.rs::Chat::rewrap	gap: minor: rewrap also resets the scroll to 0; vanilla keeps the position
 ChatComponent.scrollChat	port	crates/horizon-client-render/src/chat.rs::Chat::scroll_by	clamp to the page and clear new-message marker at the bottom
 ChatComponent.getHeight	port	crates/horizon-client-render/src/chat.rs::ChatOptions::height_px	focused or unfocused chat height in px

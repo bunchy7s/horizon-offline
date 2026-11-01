@@ -241,12 +241,14 @@ impl BlockFacts {
     }
 
     /// Decode state facts once, retaining only the small owned fields needed later.
+    /// `parallel`: the JSON validation pass may run on a thread of its own.
     pub fn load_with_projection(
         root: &Path,
         registry: &BlockRegistry,
         behaviours: &Value,
+        parallel: bool,
     ) -> Result<(Self, Vec<GameplayProjection>)> {
-        Self::load_with_callback(root, registry, behaviours, |entries| {
+        Self::load_with_callback(root, registry, behaviours, parallel, |entries| {
             let mut strings = HashMap::new();
             Ok(entries
                 .iter()
@@ -260,7 +262,7 @@ impl BlockFacts {
         registry: &BlockRegistry,
         behaviours: &Value,
     ) -> Result<Self> {
-        Ok(Self::load_with_callback(root, registry, behaviours, |_| Ok(()))?.0)
+        Ok(Self::load_with_callback(root, registry, behaviours, true, |_| Ok(()))?.0)
     }
 
     /// Build both tables from the same behaviour document and gameplay decoder.
@@ -269,7 +271,7 @@ impl BlockFacts {
         registry: &BlockRegistry,
         behaviours: &Value,
     ) -> Result<(Self, Behaviours)> {
-        Self::load_with_callback(root, registry, behaviours, |entries| {
+        Self::load_with_callback(root, registry, behaviours, true, |entries| {
             Ok(Behaviours::load_with_gameplay(
                 registry, root, behaviours, entries,
             )?)
@@ -280,11 +282,34 @@ impl BlockFacts {
         root: &Path,
         registry: &BlockRegistry,
         behaviours: &Value,
+        parallel: bool,
         callback: impl FnOnce(&[decode::Entry<'_>]) -> Result<T>,
     ) -> Result<(Self, T)> {
         let bytes = fs::read(root.join("gameplay-facts.json"))?;
-        serde_json::from_slice::<decode::Validate>(&bytes)?;
-        let raw: decode::Gameplay<'_> = serde_json::from_slice(&bytes)?;
+        let validate = || serde_json::from_slice::<decode::Validate>(&bytes).map(drop);
+        if !parallel {
+            validate()?;
+            return Self::decode_with_callback(&bytes, registry, behaviours, callback);
+        }
+        // The validation pass (a third of the load) only reports errors: it
+        // reads the file beside the decode, and its error still wins.
+        std::thread::scope(|scope| {
+            let validated = scope.spawn(validate);
+            let decoded = Self::decode_with_callback(&bytes, registry, behaviours, callback);
+            validated
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))?;
+            decoded
+        })
+    }
+
+    fn decode_with_callback<T>(
+        bytes: &[u8],
+        registry: &BlockRegistry,
+        behaviours: &Value,
+        callback: impl FnOnce(&[decode::Entry<'_>]) -> Result<T>,
+    ) -> Result<(Self, T)> {
+        let raw: decode::Gameplay<'_> = serde_json::from_slice(bytes)?;
         let entries = raw
             .states
             .0

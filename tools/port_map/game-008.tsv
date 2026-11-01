@@ -3,7 +3,7 @@ HarvestFarmland.start	inline	crates/horizon-client/src/mobs/villager_brain.rs::B
 HarvestFarmland.stop	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::do_stop	clears look and walk target, worked = 0, next_ok = now + 40
 InsideBrownianWalk.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	InsideBrownianWalk arm: shuffled 3x3x3 cells, first one without sky view that is solid; a solid-block test stands in for loadedAndEntityCanStandOn
 InteractWith.of	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	InteractWith arm for villager, breeding villager and cat targets (range 8, speed 0.5, stop distance 2); piglins and piglin brutes use goals instead
-InteractWithDoor.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	gap: player: only the villager brain opens doors on its path (interact_with_doors); copper golems and piglins never do, so a golem's route through a wooden door ends against the closed door and a piglin cannot path through one
+InteractWithDoor.create	inline	crates/horizon-client/src/mobs/animal_brain.rs::B::InteractWithDoor (copper golem), villager_brain.rs::B::try_start (villager)	gap: piglins have no door behaviour yet (the probe has no piglin brain); a golem does not look for another golem coming through the door
 InteractWithDoor.areOtherMobsComingThroughDoor	inline	crates/horizon-client/src/mobs/villager_brain.rs::close_doors	villagers within 2 blocks of the door whose path has the door as previous or next node
 InteractWithDoor.isMobComingThroughDoor	inline	crates/horizon-client/src/mobs/villager_brain.rs::close_doors	read from the other villager's Seen.path_nodes
 InteractWithDoor.isDoorTooFarAway	inline	crates/horizon-client/src/mobs/villager_brain.rs::close_doors	3 block test; no dimension compare needed
@@ -19,18 +19,18 @@ JumpOnBed.onOrOverBed	inline	crates/horizon-client/src/mobs/villager_brain.rs::B
 JumpOnBed.tiredOfWalking	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	folded into the still-using test
 JumpOnBed.tiredOfJumping	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	folded into the still-using test
 LocateHidingPlace.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	LocateHidingPlace arm: a home POI within close+1 and near, else a shuffled one within the radius, else the home memory; sets the hiding place and walks there when far
-LongJumpMidJump.stop	missing		player: frogs and goats never long jump (no long-jump activity; only the frog's jump animation exists), so there is no leap, landing thud or jump cooldown
-LongJumpToPreferredBlock.start	missing		player: frogs never aim their jumps at lily pads or big dripleaf, since they never long jump
-LongJumpToPreferredBlock.getJumpCandidate	missing		minor: the lily pad and big dripleaf preference of the frog's missing long jump
-LongJumpToRandomPos.defaultAcceptableLandingSpot	missing		minor: landing test of the missing long jump (the breeze has its own jump in monster_brain.rs)
-LongJumpToRandomPos.checkExtraStartConditions	missing		player: frogs and goats never start a long jump (goats leaping between ledges, frogs hopping across water and lily pads)
-LongJumpToRandomPos.canStillUse	missing		minor: part of the missing frog and goat long jump
-LongJumpToRandomPos.start	missing		player: no long jump for frogs and goats, so no 40 tick crouch and leap
-LongJumpToRandomPos.tick	missing		player: no leap velocity or jump sound for frogs and goats
-LongJumpToRandomPos.pickCandidate	missing		minor: landing spot search of the missing long jump
-LongJumpToRandomPos.getJumpCandidate	missing		minor: weighted pick of the missing long jump
-LongJumpToRandomPos.isAcceptableLandingPosition	missing		minor: landing test of the missing long jump
-LongJumpToRandomPos.calculateOptimalJumpVector	missing		minor: jump angle search of the missing frog and goat long jump (the breeze has its own in breeze.rs)
+LongJumpMidJump.stop	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::end	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
+LongJumpToPreferredBlock.start	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::start (wanting_preferred)	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
+LongJumpToPreferredBlock.getJumpCandidate	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::candidate	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
+LongJumpToRandomPos.defaultAcceptableLandingSpot	inline	crates/horizon-client/src/mobs/frog.rs::default_acceptable_landing	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
+LongJumpToRandomPos.checkExtraStartConditions	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::can_use	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
+LongJumpToRandomPos.canStillUse	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::can_continue	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
+LongJumpToRandomPos.start	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::start	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
+LongJumpToRandomPos.tick	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::tick	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
+LongJumpToRandomPos.pickCandidate	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::pick	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
+LongJumpToRandomPos.getJumpCandidate	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::draw	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
+LongJumpToRandomPos.isAcceptableLandingPosition	inline	crates/horizon-client/src/mobs/frog.rs::acceptable_landing	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
+LongJumpToRandomPos.calculateOptimalJumpVector	inline	crates/horizon-client/src/mobs/frog.rs::optimal_jump_vector	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
 LookAndFollowTradingPlayerSink.followPlayer	port	crates/horizon-client/src/mobs/villager_brain.rs::follow_trading_player	
 LookAtTargetSink.canStillUse	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	the look target must still be visible; the sniffer, warden and breeze brains have the same arm
 LookAtTargetSink.tick	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	look_at the target position
@@ -144,4 +144,4 @@ TryFindLand.create	inline	crates/horizon-client/src/mobs/goals.rs::Stroll::can_u
 TryFindLand.canStandOn	missing		minor: no scan for the nearest solid land next to water; see TryFindLand.create
 TryFindLandNearLiquid.create	missing		minor: only runs in the frog's lay-spawn activity, which needs a pregnant frog (see TryLaySpawnOnFluidNearLand)
 TryFindLiquid.create	port	crates/horizon-client/src/mobs/animal_brain.rs::axolotl_action	FindLiquid arm: nearest water within 6, speed 0.15, re-run every 40 ticks
-TryLaySpawnOnFluidNearLand.create	missing		player: frogs cannot be bred (no slimeball feeding, no pregnancy), so no frogspawn is ever laid by a frog and no tadpoles follow
+TryLaySpawnOnFluidNearLand.create	inline	crates/horizon-client/src/mobs/frog.rs::LaySpawn	goal stand-in for the frog brain (no tick parity: the probe has no frog brain): feeding, pregnancy, walk to land beside water, frogspawn

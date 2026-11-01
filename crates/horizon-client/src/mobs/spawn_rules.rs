@@ -244,8 +244,7 @@ pub fn is_valid_empty_spawn<L: SpawnLevel>(s: Species, l: &L, x: i32, y: i32, z:
 }
 /// `SpawnPlacements.isSpawnPositionOk`.
 pub fn is_spawn_position_ok<L: SpawnLevel>(s: Species, l: &L, x: i32, y: i32, z: i32) -> bool {
-    let id = format!("minecraft:{}", super::species::def(s).name);
-    match l.mob_data().placement(&id) {
+    match l.mob_data().species_placement(s) {
         data::Placement::OnGround => {
             is_valid_spawn(s, l, x, y - 1, z)
                 && is_valid_empty_spawn(s, l, x, y, z)

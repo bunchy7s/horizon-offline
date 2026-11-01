@@ -1,0 +1,12 @@
+{
+  "hooks": [
+    {
+      "name": "block_highlight",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_highlight",
+      "side": "client",
+      "cancellable": true
+    }
+  ],
+  "rust_summary": "a cancellable targeted-block highlight hook (`native_block_highlight`).",
+  "doc_summary": "`native_block_highlight(pos, state, partial, canceled)` runs before building the eligible targeted block's selection outline, after hidden-HUD and game-mode restrictions. Set `canceled` to suppress only that outline; default behavior is unchanged otherwise. Position is block coordinates and state is the current block state ID. No entity outlines are affected. Bundles need \"hooks\": @API:block_highlight@."
+}

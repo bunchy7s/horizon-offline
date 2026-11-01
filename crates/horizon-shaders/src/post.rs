@@ -14,10 +14,11 @@ use std::collections::BTreeSet;
 
 use crate::config::{self, Config};
 use crate::custom::Custom;
-use crate::{GbuffersInputs, Macros, Pack, Preprocessed, Program, Properties, Target};
 use crate::{
-    eval_condition, preprocess, translate_composite, translate_gbuffers, translate_shadow,
+    ComputeProgram, eval_condition, preprocess, translate_composite, translate_compute,
+    translate_gbuffers, translate_shadow,
 };
+use crate::{GbuffersInputs, Macros, Pack, Preprocessed, Program, Properties, Target};
 
 /// Which group of 2.1 a program belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -201,7 +202,8 @@ pub struct PostProgram {
     /// The program's name (`composite3`).
     pub name: String,
     pub group: Group,
-    pub program: Program,
+    /// The vertex and fragment stages; `None` for a program of compute stages only.
+    pub program: Option<Program>,
     /// colortex buffer of each fragment output location (location n writes `buffers[n]`).
     pub buffers: Vec<u32>,
     /// `flip.<name>.<buffer>`: buffers forced to flip (true) or kept (false) after this program.
@@ -211,6 +213,153 @@ pub struct PostProgram {
     /// Bit n: `colortex<n>MipmapEnabled` in its fragment stage, so buffer n's mip chain is
     /// regenerated right before it (6.1.7; not for gbuffers programs).
     pub mipmaps: u16,
+    /// Compute programs that run before this one, in order: `<name>.csh`, then `_a` to `_z`.
+    pub compute: Vec<(String, ComputeProgram)>,
+    /// A geometry stage folded into the vertex stage (`translate_geometry`): drawn non-indexed,
+    /// six vertices per quad, with this many instances. 0 without one.
+    pub geometry_triangles: u32,
+}
+
+/// `size.buffer.<buffer>`: a size of its own, relative to the render size (floats) or in
+/// pixels (integers).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BufferSize {
+    Relative([f32; 2]),
+    Absolute([u32; 2]),
+}
+
+impl BufferSize {
+    fn parse(value: &str) -> Option<Self> {
+        let words: Vec<&str> = value.split_whitespace().collect();
+        let [w, h] = words[..] else {
+            return None;
+        };
+        if w.contains('.') || h.contains('.') {
+            let (w, h): (f32, f32) = (w.parse().ok()?, h.parse().ok()?);
+            let fine = |f: f32| f.is_finite() && f > 0.0;
+            (fine(w) && fine(h)).then_some(Self::Relative([w, h]))
+        } else {
+            Some(Self::Absolute([w.parse().ok()?, h.parse().ok()?]))
+        }
+    }
+
+    /// The size for a render size of `render`, at least one pixel and at most
+    /// [`BufferSize::MAX`].
+    pub fn resolve(self, render: [u32; 2]) -> [u32; 2] {
+        let size = match self {
+            Self::Relative(s) => [0, 1].map(|k| (render[k] as f32 * s[k]) as u32),
+            Self::Absolute(s) => s,
+        };
+        size.map(|n| n.clamp(1, Self::MAX))
+    }
+
+    /// The largest side a buffer may have, the size every device takes for a 2D texture.
+    pub const MAX: u32 = 8192;
+}
+
+/// `bufferObject.<n>`: an SSBO's size in bytes, or bytes per pixel of the render size scaled.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BufferObject {
+    Bytes(u64),
+    PerPixel { bytes: u64, scale: [f32; 2] },
+}
+
+impl BufferObject {
+    fn parse(value: &str) -> Option<Self> {
+        let words: Vec<&str> = value.split_whitespace().collect();
+        let bytes = words.first()?.parse().ok()?;
+        match words[..] {
+            [_] | [_, "false", ..] => Some(Self::Bytes(bytes)),
+            [_, "true", x, y] => Some(Self::PerPixel {
+                bytes,
+                scale: [x.parse().ok()?, y.parse().ok()?],
+            }),
+            _ => None,
+        }
+    }
+
+    /// The size in bytes for a render size of `render`, at least 16.
+    pub fn size(self, render: [u32; 2]) -> u64 {
+        match self {
+            Self::Bytes(b) => b,
+            Self::PerPixel { bytes, scale } => {
+                let [w, h] = [0, 1].map(|k| (render[k] as f32 * scale[k]) as u64);
+                bytes.saturating_mul(w).saturating_mul(h)
+            }
+        }
+        .max(16)
+    }
+}
+
+/// `image.<name>`: an image of the pack's, read and written as `name`, sampled as `sampler`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CustomImage {
+    pub name: String,
+    pub sampler: Option<String>,
+    pub format: crate::Format,
+    /// The internal format's GLSL name (`r32i`), for declarations without a format.
+    pub qualifier: String,
+    /// Relative to the render size (width and height), or in pixels.
+    pub size: ImageSize,
+    /// Cleared to zero before each frame.
+    pub clear: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ImageSize {
+    Relative([f32; 2]),
+    Absolute([u32; 2]),
+    /// Three sizes: a 3D image, whatever its depth.
+    Volume([u32; 3]),
+}
+
+impl CustomImage {
+    fn parse(name: &str, value: &str) -> Option<Self> {
+        let w: Vec<&str> = value.split_whitespace().collect();
+        let [sampler, _format, internal, _ty, clear, relative, rest @ ..] = &w[..] else {
+            return None;
+        };
+        let size = match (*relative, rest) {
+            ("true", [x, y, ..]) => ImageSize::Relative([x.parse().ok()?, y.parse().ok()?]),
+            ("false", [x, y]) => ImageSize::Absolute([x.parse().ok()?, y.parse().ok()?]),
+            ("false", [x, y, z]) => {
+                ImageSize::Volume([x.parse().ok()?, y.parse().ok()?, z.parse().ok()?])
+            }
+            _ => return None,
+        };
+        Some(Self {
+            name: name.to_owned(),
+            sampler: (*sampler != "none").then(|| sampler.to_string()),
+            format: crate::Format::parse(internal)?,
+            qualifier: internal.to_ascii_lowercase(),
+            size,
+            clear: *clear == "true",
+        })
+    }
+
+    /// Width, height and depth for a render size of `render`.
+    pub fn extent(&self, render: [u32; 2]) -> [u32; 3] {
+        match self.size {
+            ImageSize::Relative(s) => {
+                let [w, h] = [0, 1].map(|k| ((render[k] as f32 * s[k]) as u32).max(1));
+                [w, h, 1]
+            }
+            ImageSize::Absolute([w, h]) => [w.max(1), h.max(1), 1],
+            ImageSize::Volume(s) => s.map(|n| n.max(1)),
+        }
+    }
+
+    /// A 3D image (`image3D`), not a 2D one.
+    pub fn is_3d(&self) -> bool {
+        matches!(self.size, ImageSize::Volume(_))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ShadowCulling {
+    On,
+    Off,
+    Reversed,
 }
 
 pub struct Post {
@@ -265,6 +414,17 @@ pub struct Post {
     pub particles_late: bool,
     /// The custom uniforms of `shaders.properties` (3.4).
     pub custom: Custom,
+    /// `texture.*`: the textures the pack binds to sampler names.
+    pub textures: Vec<crate::CustomTexture>,
+    /// `size.buffer.*`, by buffer.
+    pub sizes: [Option<BufferSize>; crate::BUFFERS],
+    /// `bufferObject.*`, by binding.
+    pub buffer_objects: std::collections::BTreeMap<u32, BufferObject>,
+    /// `image.*`.
+    pub images: Vec<CustomImage>,
+    /// `shadow.culling`: `false` draws everything within the shadow distance, every face, not
+    /// only what casts a shadow into view; `reversed` within `voxelDistance` of the player.
+    pub shadow_culling: ShadowCulling,
     pub config: Config,
     /// Programs skipped and why, as `program: message` or `file:line: message`.
     pub notes: Vec<String>,
@@ -296,6 +456,8 @@ pub struct GameInputs {
     pub weather: Option<GbuffersInputs>,
     /// The first-person hand and held items.
     pub hand: Option<GbuffersInputs>,
+    /// Terrain read vertex by vertex, for a shadow program with a geometry stage.
+    pub terrain_geometry: Option<crate::GeometryInputs>,
 }
 
 /// Loads the post-processing programs of `folder` and, for the geometry `inputs` describes, the
@@ -334,15 +496,54 @@ pub fn load_post(
         translucent_late: false,
         particles_late: false,
         custom: Custom::parse(properties),
+        textures: Vec::new(),
+        sizes: [None; crate::BUFFERS],
+        buffer_objects: Default::default(),
+        images: Vec::new(),
+        shadow_culling: match properties.get("shadow.culling").map(str::trim) {
+            Some("false") => ShadowCulling::Off,
+            Some("reversed") => ShadowCulling::Reversed,
+            _ => ShadowCulling::On,
+        },
         config: Config::default(),
         notes: Vec::new(),
     };
+    for e in &properties.entries {
+        if let Some(n) = e.key.strip_prefix("bufferObject.") {
+            match (n.parse(), BufferObject::parse(&e.value)) {
+                (Ok(n), Some(b)) => _ = post.buffer_objects.insert(n, b),
+                _ => post.notes.push(format!("`{}`: not a buffer object", e.key)),
+            }
+            continue;
+        }
+        if let Some(name) = e.key.strip_prefix("image.") {
+            match CustomImage::parse(name, &e.value) {
+                Some(i) => post.images.push(i),
+                None => post.notes.push(format!("`{}`: not an image", e.key)),
+            }
+            continue;
+        }
+        let Some(name) = e.key.strip_prefix("size.buffer.") else {
+            continue;
+        };
+        match (crate::buffer_index(name), BufferSize::parse(&e.value)) {
+            (Some(b), Some(size)) => post.sizes[b] = Some(size),
+            _ => post
+                .notes
+                .push(format!("`{}`: not a buffer and a size", e.key)),
+        }
+    }
+    let (textures, notes) = crate::load_textures(pack, properties);
+    post.textures = textures;
+    post.notes.extend(notes);
     let mut loader = Loader {
         pack,
         folder,
         properties,
         macros,
         switches: crate::switches_on(pack),
+        options: crate::with_options(pack, macros),
+        geometry: None,
         post: &mut post,
     };
     for (group, base) in GROUPS {
@@ -455,7 +656,14 @@ pub fn load_post(
             p
         });
     if let Some(inputs) = &inputs.terrain {
-        let terrain = gbuffers(&TERRAIN, Group::Gbuffers, inputs);
+        // Solid and cutout terrain draw together: the cutout test, unless `alphaTest.*` says
+        // otherwise (3.2).
+        let mut cutout = inputs.clone();
+        cutout.alpha_test = cutout.alpha_test.or(Some(crate::AlphaTest {
+            op: ">",
+            reference: 0.1,
+        }));
+        let terrain = gbuffers(&TERRAIN, Group::Gbuffers, &cutout);
         // gbuffers_water falls back to gbuffers_terrain's chain (2.3).
         let water = gbuffers(&WATER, Group::Translucent, inputs);
         loader.post.terrain = terrain;
@@ -489,6 +697,7 @@ pub fn load_post(
         &mut loader,
         inputs.terrain.as_ref(),
         inputs.entities.as_ref(),
+        inputs.terrain_geometry.as_ref(),
     );
     post.config = std::mem::take(&mut post.config).finish();
     post
@@ -501,6 +710,7 @@ fn load_shadow(
     loader: &mut Loader<'_>,
     terrain: Option<&GbuffersInputs>,
     entities: Option<&GbuffersInputs>,
+    geometry: Option<&crate::GeometryInputs>,
 ) {
     let post = &*loader.post;
     let gbuffers = [
@@ -518,7 +728,7 @@ fn load_shadow(
     ];
     let reads = (post.programs.iter())
         .chain(gbuffers.into_iter().flatten())
-        .flat_map(|p| &p.program.interface.samplers)
+        .flat_map(|p| p.program.iter().flat_map(|q| &q.interface.samplers))
         .any(|s| SHADOW_SAMPLERS.contains(&s.name.as_str()));
     let forced = match loader.properties.get("shadow.enabled").map(str::trim) {
         Some("true") => Some(true),
@@ -539,18 +749,36 @@ fn load_shadow(
         loader.post.shadow_comp.extend(program);
     }
     let properties = loader.properties;
-    let mut load = |names: &[&str], inputs: Option<&GbuffersInputs>| {
-        let inputs = inputs?;
-        names.iter().find_map(|name| {
-            let p = loader.load(name.to_string(), Group::Shadow, |v, f| {
-                translate_shadow(v, f, inputs)
-            });
-            p.map(|mut p| {
-                p.blend = blend(properties, &p.name).flatten();
-                p
+    let mut load =
+        |names: &[&str], inputs: Option<&GbuffersInputs>, terrain: bool, cutout: bool| {
+            let inputs = inputs?;
+            names.iter().find_map(|name| {
+                // Cutout geometry (leaves) casts the shadow of its texels only: the cutout test,
+                // unless `alphaTest.<program>` says otherwise, as for the gbuffers programs.
+                // Translucent terrain keeps no test, as gbuffers_water does.
+                let test = match properties.get(&format!("alphaTest.{name}")) {
+                    Some(v) => crate::AlphaTest::parse(v.trim()).flatten(),
+                    None if !cutout => inputs.alpha_test,
+                    None => inputs.alpha_test.or(Some(crate::AlphaTest {
+                        op: ">",
+                        reference: 0.1,
+                    })),
+                };
+                let mut inputs = inputs.clone();
+                inputs.alpha_test = test;
+                loader.geometry = geometry.filter(|_| terrain).cloned().map(|mut g| {
+                    g.inputs.alpha_test = test;
+                    g
+                });
+                let p = loader.load(name.to_string(), Group::Shadow, |v, f| {
+                    translate_shadow(v, f, &inputs)
+                });
+                p.map(|mut p| {
+                    p.blend = blend(properties, &p.name).flatten();
+                    p
+                })
             })
-        })
-    };
+        };
     // `shadowTerrain`, `shadowTranslucent`, `shadowEntities` and `shadowBlockEntities` (3.2)
     // leave their part out of the shadow pass; all are on by default (OQ-19). `shadowPlayer`
     // and `shadowLightBlockEntities` (E, off by default) keep the player, and block entities
@@ -560,16 +788,16 @@ fn load_shadow(
     let only_player = !keep("shadowEntities") && set("shadowPlayer");
     let only_lit = !keep("shadowBlockEntities") && set("shadowLightBlockEntities");
     let shadow = keep("shadowTerrain")
-        .then(|| load(&["shadow"], terrain))
+        .then(|| load(&["shadow"], terrain, true, true))
         .flatten();
     let water = keep("shadowTranslucent")
-        .then(|| load(&["shadow_water", "shadow"], terrain))
+        .then(|| load(&["shadow_water", "shadow"], terrain, true, false))
         .flatten();
     let shadow_entities = (keep("shadowEntities") || only_player)
-        .then(|| load(&["shadow_entities", "shadow"], entities))
+        .then(|| load(&["shadow_entities", "shadow"], entities, false, true))
         .flatten();
     let shadow_block = (keep("shadowBlockEntities") || only_lit)
-        .then(|| load(&["shadow_block", "shadow"], entities))
+        .then(|| load(&["shadow_block", "shadow"], entities, false, true))
         .flatten();
     if shadow.is_none() && terrain.is_some() {
         loader
@@ -577,6 +805,7 @@ fn load_shadow(
             .notes
             .push("shadow: no program; the shadow map stays clear".to_owned());
     }
+    loader.geometry = None;
     loader.post.shadow = shadow;
     loader.post.shadow_water = water;
     loader.post.shadow_entities = shadow_entities;
@@ -591,6 +820,10 @@ struct Loader<'a> {
     properties: &'a Properties,
     macros: &'a Macros,
     switches: BTreeSet<String>,
+    /// `macros` with the pack's options, for the program switches.
+    options: Macros,
+    /// The game's terrain read vertex by vertex, while loading shadow programs of terrain.
+    geometry: Option<crate::GeometryInputs>,
     post: &'a mut Post,
 }
 
@@ -608,27 +841,57 @@ impl Loader<'_> {
             f => format!("{f}/{name}.{ext}"),
         };
         let (vsh, fsh) = (path("vsh"), path("fsh"));
-        let notes = &mut self.post.notes;
         if !self.pack.exists(&fsh) || !self.pack.exists(&vsh) {
-            return None;
+            let on = enabled(
+                self.properties,
+                self.folder,
+                &name,
+                &self.options,
+                &self.switches,
+            );
+            // A program of compute stages only (`.csh` without `.vsh` and `.fsh`).
+            let composite = matches!(
+                group,
+                Group::Prepare | Group::Deferred | Group::Composite | Group::ShadowComp
+            );
+            if !on || !composite || !self.pack.exists(&path("csh")) {
+                return None;
+            }
+            let compute = self.compute(&name);
+            return (!compute.is_empty()).then(|| PostProgram {
+                flips: flips(self.properties, &name),
+                name,
+                group,
+                program: None,
+                buffers: Vec::new(),
+                blend: None,
+                mipmaps: 0,
+                compute,
+                geometry_triangles: 0,
+            });
         }
         if !enabled(
             self.properties,
             self.folder,
             &name,
-            self.macros,
+            &self.options,
             &self.switches,
         ) {
             return None;
         }
         if self.pack.exists(&path("gsh")) {
-            notes.push(format!(
-                "{name}: uses a geometry stage (not supported); skipped"
-            ));
-            return None;
+            let Some(inputs) = self.geometry.clone() else {
+                self.post.notes.push(format!(
+                    "{name}: uses a geometry stage (supported for terrain's shadow only); skipped"
+                ));
+                return None;
+            };
+            let (vsh, gsh) = (path("vsh"), path("gsh"));
+            return self.load_geometry(name, group, &vsh, &gsh, &fsh, &inputs);
         }
-        let vertex = preprocess(self.pack, &vsh, self.macros);
-        let fragment = preprocess(self.pack, &fsh, self.macros);
+        let vertex = self.preprocess(&vsh);
+        let fragment = self.preprocess(&fsh);
+        let notes = &mut self.post.notes;
         let problems: Vec<String> = [&vertex, &fragment]
             .iter()
             .flat_map(|pp| diagnostics(pp))
@@ -638,6 +901,7 @@ impl Loader<'_> {
             notes.push(format!("{name}: skipped"));
             return None;
         }
+        notes.extend([&vertex, &fragment].iter().flat_map(|pp| warnings(pp)));
         let program = match translate(&vertex, &fragment) {
             Ok(p) => p,
             Err(errors) => {
@@ -671,21 +935,181 @@ impl Loader<'_> {
                     .fold(0, |m, (i, _)| m | 1 << i)
             }
         };
+        let compute = match group {
+            Group::Prepare
+            | Group::Deferred
+            | Group::Composite
+            | Group::Final
+            | Group::ShadowComp => self.compute(&name),
+            _ => Vec::new(),
+        };
         Some(PostProgram {
             flips: flips(self.properties, &name),
             name,
             group,
-            program,
+            program: Some(program),
             buffers,
             blend: None,
             mipmaps,
+            compute,
+            geometry_triangles: 0,
         })
+    }
+
+    /// Stage file `path` through the preprocessor; the pack's images declared without a format
+    /// (GLSL lets a write-only image omit it) get the one `image.*` gives them.
+    fn preprocess(&self, path: &str) -> Preprocessed {
+        let mut pp = preprocess(self.pack, path, self.macros);
+        if self.post.images.is_empty() || !pp.code.contains("image") {
+            return pp;
+        }
+        let source: Vec<&str> = pp.code.split('\n').collect();
+        let lines: Vec<String> = source
+            .iter()
+            .enumerate()
+            .map(|(n, &line)| {
+                // A qualifier on the line before (`layout(r32ui)` then `uniform uimage3D v;`).
+                let qualified = line.contains("layout")
+                    || source[..n]
+                        .iter()
+                        .rev()
+                        .find(|l| !l.trim().is_empty())
+                        .is_some_and(|l| l.trim_start().starts_with("layout") && !l.contains(';'));
+                let words: Vec<&str> = line
+                    .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                    .collect();
+                let image = self
+                    .post
+                    .images
+                    .iter()
+                    .find(|i| words.contains(&i.name.as_str()));
+                match image {
+                    Some(i)
+                        if words.contains(&"uniform")
+                            && !qualified
+                            && words
+                                .iter()
+                                .any(|w| w.ends_with("image2D") || w.ends_with("image3D")) =>
+                    {
+                        format!("layout({}) {line}", i.qualifier)
+                    }
+                    _ => line.to_owned(),
+                }
+            })
+            .collect();
+        pp.code = lines.join("\n");
+        pp
+    }
+
+    /// A program with a geometry stage, folded into its vertex stage.
+    fn load_geometry(
+        &mut self,
+        name: String,
+        group: Group,
+        vsh: &str,
+        gsh: &str,
+        fsh: &str,
+        inputs: &crate::GeometryInputs,
+    ) -> Option<PostProgram> {
+        let stages = [vsh, gsh, fsh].map(|p| self.preprocess(p));
+        let notes = &mut self.post.notes;
+        let problems: Vec<String> = stages.iter().flat_map(diagnostics).collect();
+        if !problems.is_empty() {
+            notes.extend(problems);
+            notes.push(format!("{name}: skipped"));
+            return None;
+        }
+        let [vertex, geometry, fragment] = &stages;
+        let (program, triangles) =
+            match crate::translate_geometry(vertex, geometry, fragment, inputs) {
+                Ok(p) => p,
+                Err(errors) => {
+                    notes.extend(
+                        errors
+                            .iter()
+                            .map(|e| format!("{}:{}: {}", e.file, e.line, e.message)),
+                    );
+                    notes.push(format!("{name}: skipped"));
+                    return None;
+                }
+            };
+        self.post.config.read(vertex);
+        self.post.config.read(fragment);
+        let mut buffers = config::draw_buffers(fragment).unwrap_or_else(|| (0..8).collect());
+        let kept = buffers
+            .iter()
+            .position(|&b| b >= 2)
+            .unwrap_or(buffers.len());
+        buffers.truncate(kept);
+        Some(PostProgram {
+            flips: flips(self.properties, &name),
+            name,
+            group,
+            program: Some(program),
+            buffers,
+            blend: None,
+            mipmaps: 0,
+            compute: Vec::new(),
+            geometry_triangles: triangles,
+        })
+    }
+
+    /// The compute programs of composite-style program `name` that are on and translate.
+    fn compute(&mut self, name: &str) -> Vec<(String, ComputeProgram)> {
+        let mut out = Vec::new();
+        let names =
+            std::iter::once(name.to_owned()).chain(('a'..='z').map(|c| format!("{name}_{c}")));
+        for name in names {
+            let path = match self.folder {
+                "" => format!("{name}.csh"),
+                f => format!("{f}/{name}.csh"),
+            };
+            if !self.pack.exists(&path)
+                || !enabled(
+                    self.properties,
+                    self.folder,
+                    &name,
+                    &self.options,
+                    &self.switches,
+                )
+            {
+                continue;
+            }
+            let pp = self.preprocess(&path);
+            let problems = diagnostics(&pp);
+            let notes = &mut self.post.notes;
+            if !problems.is_empty() {
+                notes.extend(problems);
+                notes.push(format!("{name}: skipped"));
+                continue;
+            }
+            match translate_compute(&pp) {
+                Ok(program) => out.push((name, program)),
+                Err(errors) => {
+                    notes.extend(
+                        errors
+                            .iter()
+                            .map(|e| format!("{}:{}: {}", e.file, e.line, e.message)),
+                    );
+                    notes.push(format!("{name}: skipped"));
+                }
+            }
+        }
+        out
     }
 }
 
 fn diagnostics(pp: &Preprocessed) -> Vec<String> {
-    pp.diagnostics
-        .iter()
+    located(pp, &pp.diagnostics)
+}
+
+/// `pp`'s warnings (conditions read as false), located.
+fn warnings(pp: &Preprocessed) -> Vec<String> {
+    located(pp, &pp.warnings)
+}
+
+fn located(pp: &Preprocessed, list: &[crate::preprocess::Diagnostic]) -> Vec<String> {
+    list.iter()
         .map(|d| {
             let file = pp
                 .files
@@ -772,6 +1196,67 @@ mod tests {
                        gl_FragData[0] = texture2D(colortex0, uv);\n}\n";
 
     #[test]
+    fn buffer_objects_and_images_parse() {
+        assert_eq!(BufferObject::parse("4096"), Some(BufferObject::Bytes(4096)));
+        assert_eq!(
+            BufferObject::parse("64 false 1.0 1.0"),
+            Some(BufferObject::Bytes(64))
+        );
+        assert_eq!(
+            BufferObject::parse("16 true 0.5 0.25"),
+            Some(BufferObject::PerPixel {
+                bytes: 16,
+                scale: [0.5, 0.25]
+            })
+        );
+        assert_eq!(BufferObject::parse("16 true 0.5"), None);
+        assert_eq!(BufferObject::parse("many"), None);
+        let voxels = CustomImage::parse(
+            "voxels",
+            "voxelSampler RED_INTEGER R32UI UNSIGNED_INT true false 64 32 16",
+        )
+        .unwrap();
+        assert_eq!(voxels.sampler.as_deref(), Some("voxelSampler"));
+        assert_eq!(voxels.size, ImageSize::Volume([64, 32, 16]));
+        assert!(voxels.clear);
+        let half =
+            CustomImage::parse("half", "none RGBA RGBA16F HALF_FLOAT false true 0.5 0.5").unwrap();
+        assert_eq!(
+            (half.sampler, half.size),
+            (None, ImageSize::Relative([0.5, 0.5]))
+        );
+        assert!(!half.clear);
+        assert!(
+            CustomImage::parse("bad", "none RGBA RGBA17Q HALF_FLOAT false true 0.5 0.5").is_none()
+        );
+        assert!(CustomImage::parse("short", "none RGBA RGBA16F HALF_FLOAT false").is_none());
+        let flat = CustomImage::parse("flat", "none RGBA RGBA8 BYTE false false 8 8 1").unwrap();
+        assert!(flat.is_3d());
+        assert_eq!(flat.extent([1, 1]), [8, 8, 1]);
+        assert!(
+            !CustomImage::parse("plain", "none RGBA RGBA8 BYTE false false 8 8")
+                .unwrap()
+                .is_3d()
+        );
+    }
+
+    #[test]
+    fn buffer_sizes_are_bounded() {
+        let relative = BufferSize::parse("0.5 0.25").unwrap();
+        assert_eq!(relative.resolve([1920, 1080]), [960, 270]);
+        assert_eq!(
+            BufferSize::parse("1e30 1.0").unwrap().resolve([1920, 1080])[0],
+            BufferSize::MAX
+        );
+        assert_eq!(BufferSize::parse("inf 1.0"), None);
+        assert_eq!(BufferSize::parse("-0.5 1.0"), None);
+        assert_eq!(
+            BufferSize::parse("100000 0").unwrap().resolve([1, 1]),
+            [BufferSize::MAX, 1]
+        );
+    }
+
+    #[test]
     fn programs_load_in_order_with_their_settings() {
         let pack = Pack::from_zip_bytes(
             "t",
@@ -830,7 +1315,9 @@ mod tests {
         assert_eq!(p[3].group, Group::Final);
         let notes = post.notes.join("\n");
         assert!(
-            notes.contains("composite4: uses a geometry stage"),
+            notes.contains(
+                "composite4: uses a geometry stage (supported for terrain's shadow only)"
+            ),
             "{notes}"
         );
         assert!(notes.contains("composite5.fsh:2:"), "{notes}");
@@ -849,6 +1336,47 @@ mod tests {
         assert_eq!(names, ["final"]);
         let post = load_post(&pack, "", &properties, &macros, &GameInputs::default());
         assert!(post.programs.iter().any(|p| p.name == "composite3"));
+    }
+
+    #[test]
+    fn image_declarations_get_their_format_once() {
+        let csh = |decl: &str| {
+            format!(
+                "#version 430\nlayout(local_size_x = 1) in;\n{decl}\nvoid main() {{ imageStore(voxels, ivec3(0), uvec4(1u)); }}\n"
+            )
+        };
+        let bare = csh("writeonly uniform uimage3D voxels;");
+        let split = csh("layout(r32ui)\nwriteonly uniform uimage3D voxels;");
+        let pack = Pack::from_zip_bytes(
+            "P.zip",
+            zip(&[
+                ("shaders/composite.vsh", VSH),
+                (
+                    "shaders/composite.fsh",
+                    "#version 120\nvoid main() { gl_FragColor = vec4(1.0); }\n",
+                ),
+                ("shaders/composite.csh", &bare),
+                ("shaders/composite_a.csh", &split),
+            ]),
+        )
+        .unwrap();
+        let properties = Properties::parse(
+            "image.voxels = none RED_INTEGER R32UI UNSIGNED_INT false false 4 4 4\n",
+            &Macros::standard(),
+        );
+        let post = load_post(
+            &pack,
+            "",
+            &properties,
+            &Macros::standard(),
+            &GameInputs::default(),
+        );
+        let compute: Vec<&str> = post.programs[0]
+            .compute
+            .iter()
+            .map(|c| c.0.as_str())
+            .collect();
+        assert_eq!(compute, ["composite", "composite_a"], "{:?}", post.notes);
     }
 
     /// The shadow pass runs when a program reads a shadow buffer or `shadow.enabled` says so;
@@ -955,6 +1483,7 @@ mod tests {
             clouds: Some(inputs.clone()),
             weather: Some(inputs.clone()),
             hand: Some(inputs),
+            terrain_geometry: None,
         };
         let post = load_post(&pack, "", &Properties::default(), &macros, &inputs);
         let (terrain, water) = (post.terrain.unwrap(), post.water.unwrap());

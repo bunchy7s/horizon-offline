@@ -76,8 +76,12 @@ impl Game<'_> {
         (cps, self.extras.mouse)
     }
     /// Auto-reconnect: a connection to `address` as `name` starts.
-    pub(super) fn extras_connecting(&mut self, address: &str, name: &str) {
-        self.extras.reconnect.connecting(address, name);
+    pub(super) fn extras_connecting(&mut self, address: &str, name: &str, lan: bool) {
+        self.extras.reconnect.connecting(address, name, lan);
+    }
+    /// The server this game connected to last.
+    pub(super) fn server_address(&self) -> Option<&str> {
+        self.extras.reconnect.address()
     }
     /// Auto-reconnect: the server let the player in.
     pub(super) fn extras_joined(&mut self) {
@@ -89,13 +93,18 @@ impl Game<'_> {
     }
     /// Auto-reconnect's next attempt after a disconnect, when it is on and
     /// the reason allows one.
-    pub(super) fn reconnect_after(&mut self, reason: &str, from_server: bool) -> Option<Retry> {
+    pub(super) fn reconnect_after(
+        &mut self,
+        reason: &str,
+        key: Option<&str>,
+        from_server: bool,
+    ) -> Option<Retry> {
         if !self.settings.extras.auto_reconnect {
             self.extras.reconnect.reset();
             return None;
         }
         let now = std::time::Instant::now();
-        self.extras.reconnect.ended(reason, from_server, now)
+        self.extras.reconnect.ended(reason, key, from_server, now)
     }
     /// Show the attempt's countdown on the Disconnected screen.
     pub(super) fn offer_reconnect(&mut self, retry: Option<Retry>) {
@@ -120,7 +129,7 @@ impl Game<'_> {
     /// (the launcher's session file is gone after the first read).
     pub(super) fn extras_retry(&mut self) -> horizon_client::Result<()> {
         if let Some(retry) = self.title.as_mut().and_then(|t| t.due_retry()) {
-            self.connect_server(&retry.address, &retry.name)?;
+            self.connect_server_with_options(&retry.address, &retry.name, None, retry.lan)?;
         }
         Ok(())
     }

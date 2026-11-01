@@ -2,9 +2,9 @@
 //! controls and sorting, both off by default: while an extra is off its
 //! hooks return false and the screen clicks exactly as vanilla's. Each action is made of ordinary slot clicks
 //! (the menu engine's, or `ContainerClick`s on a server), so it works
-//! wherever vanilla's clicks do. They run in the player inventory and the
+//! wherever vanilla's clicks do. They run in the player inventory, the
 //! chest-like containers (chests, barrels, ender chests, shulker boxes,
-//! hoppers, dispensers).
+//! hoppers, dispensers), furnaces and crafting tables.
 //!
 //! - Right-drag holding a stack: one item into each slot entered, at once.
 //! - Left-drag holding a stack, before vanilla's drag has spread over a
@@ -12,8 +12,10 @@
 //!   the hand (when it all fits); with Shift, those slots are quick-moved.
 //! - Shift + left-drag with an empty hand: every slot entered is quick-moved.
 //! - The wheel over a slot, with an empty hand: down moves one of its items
-//!   to the other side (container and inventory, or hotbar and inventory),
-//!   up brings one of the same item back.
+//!   where a Shift click would send it (`quickMoveStack`: fuel to the fuel
+//!   slot, a smeltable to the input), up brings one of the same item from the
+//!   other side. Down over a result slot takes one craft or the whole furnace
+//!   output to the inventory; nothing ever goes into a result slot.
 //!
 //! Sorting draws a small button by the container's title and one by the
 //! inventory's (an optional key sorts the part under the cursor); the
@@ -39,6 +41,23 @@ pub(super) struct Tweaks {
     /// Wheel steps not yet acted on (a trackpad scrolls in fractions).
     wheel: f32,
 }
+/// A server's menu the tweaks run in: their clicks are vanilla's in these,
+/// and the menu engine knows which slot takes what. Not the menus whose slots
+/// cost or trigger something (anvils, enchanting, merchants, beacons, crafters).
+pub(super) fn tweak_menu(name: &str) -> bool {
+    name == "inventory"
+        || name.starts_with("minecraft:generic_9x")
+        || matches!(
+            name,
+            "minecraft:shulker_box"
+                | "minecraft:hopper"
+                | "minecraft:generic_3x3"
+                | "minecraft:furnace"
+                | "minecraft:blast_furnace"
+                | "minecraft:smoker"
+                | "minecraft:crafting"
+        )
+}
 /// A drag the tweaks follow.
 #[derive(Clone, Debug)]
 struct Drag {
@@ -62,7 +81,7 @@ impl Game<'_> {
             return false;
         }
         if self.remote.is_some() {
-            self.remote_storage_open()
+            self.remote_menu_type().is_none_or(tweak_menu)
         } else {
             matches!(self.container_kind(), None | Some(BlockEntity::Chest(_)))
         }
@@ -73,6 +92,28 @@ impl Game<'_> {
             return self.remote_menu_ops(&[(Some(slot), button, input)]);
         }
         if !self.menu_click(Some(slot), button, input) {
+            return false;
+        }
+        if let Some(key) = self.container {
+            self.container_changed(key);
+        }
+        true
+    }
+    /// Puts the hand's stack (`right`: one of it) in `slot`, as a one-slot
+    /// drag (`QUICK_CRAFT`) and not a click: a server that has the hand empty
+    /// (the stack it was to come from just burned as fuel) ignores a drag, but
+    /// a click would pick up what's in `slot`.
+    fn tweak_put(&mut self, slot: usize, right: bool) -> bool {
+        let kind = i32::from(right) << 2;
+        let ops = [
+            (None, kind, Input::QuickCraft),
+            (Some(slot), kind | 1, Input::QuickCraft),
+            (None, kind | 2, Input::QuickCraft),
+        ];
+        if self.remote.is_some() {
+            return self.remote_menu_ops(&ops);
+        }
+        if !self.menu_ops(&ops) {
             return false;
         }
         if let Some(key) = self.container {
@@ -92,7 +133,8 @@ impl Game<'_> {
         }
         let held = self.carried.clone();
         if right {
-            if shift || held.is_none() {
+            // A result slot takes nothing: its press stays vanilla's.
+            if shift || held.is_none() || self.tweak_result(slot) {
                 return false;
             }
             // RMB: the press places at once, then the drag goes on.
@@ -123,11 +165,7 @@ impl Game<'_> {
         let Some(held) = drag.held.clone() else {
             return;
         };
-        let accepts = match self.slot_view(slot) {
-            None => true,
-            Some(s) => s.same_item_same_components(&held) && s.count < self.max_stack(&s),
-        };
-        if accepts && self.tweak_click(slot, 1, Input::Pickup) {
+        if self.tweak_takes_one(slot, &held) && self.tweak_put(slot, true) {
             drag.held = (held.count > 1).then(|| ItemStack {
                 count: held.count - 1,
                 ..held
@@ -192,7 +230,7 @@ impl Game<'_> {
         if !self.settings.extras.mouse_tweaks_wheel || !self.tweaks_on() || self.carried.is_some() {
             return false;
         }
-        let Some(slot) = slot.filter(|&s| s != 200) else {
+        let Some(slot) = slot else {
             self.tweaks.wheel = 0.0;
             return false;
         };
@@ -208,73 +246,111 @@ impl Game<'_> {
         }
         true
     }
-    /// The slots across from `slot`, in quick-move order: a container's
-    /// go to the inventory (hotbar first, from the right), the inventory's
-    /// to the container; without one, hotbar and main inventory trade.
+    /// `slot` is a result slot of the open menu.
+    fn tweak_result(&mut self, slot: usize) -> bool {
+        let mut result = false;
+        self.menu_session(|menu, _, to_menu| {
+            result = to_menu(slot).is_some_and(|i| menu.is_result(i));
+            Some(false)
+        });
+        result
+    }
+    /// `slot` takes one more of `stack`, by the open menu's rules.
+    fn tweak_takes_one(&mut self, slot: usize, stack: &ItemStack) -> bool {
+        let mut takes = false;
+        self.menu_session(|menu, env, to_menu| {
+            takes = to_menu(slot).is_some_and(|i| menu.takes_one(env, i, stack));
+            Some(false)
+        });
+        takes
+    }
+    /// Where vanilla's quick move would put `slot`'s items, tried on a copy
+    /// of the menu that's dropped (`Some(false)` keeps nothing).
+    fn tweak_landing(&mut self, slot: usize) -> Vec<usize> {
+        let slots = self.slots();
+        let mut landing = Vec::new();
+        self.menu_session(|menu, env, to_menu| {
+            let from = to_menu(slot)?;
+            landing = menu
+                .quick_move_landing(env, from)
+                .into_iter()
+                .filter_map(|i| slots.iter().copied().find(|&g| to_menu(g) == Some(i)))
+                .collect();
+            Some(false)
+        });
+        landing
+    }
+    /// The slots across from `slot`: a container's or crafting grid's face
+    /// the inventory (hotbar first, from the right), the inventory's face
+    /// them; without one, hotbar and main inventory trade.
     fn other_side(&self, slot: usize) -> Vec<usize> {
-        let container: Vec<usize> = self
+        let table = self.craft_size == 3;
+        let own: Vec<usize> = self
             .slots()
             .into_iter()
-            .filter(|s| (300..500).contains(s))
+            .filter(|s| (300..500).contains(s) || (table && (100..109).contains(s)))
             .collect();
         let player = || (0..9).rev().chain((9..36).rev());
         match slot {
-            300..500 => player().collect(),
-            0..36 if !container.is_empty() => container,
+            100..109 | 300..500 => player().collect(),
+            0..36 if !own.is_empty() => own,
             0..9 => (9..36).collect(),
             9..36 => (0..9).collect(),
             _ => Vec::new(),
         }
     }
-    /// Wheel down: one item of `slot` to the other side, where a stack of
-    /// it has room, else to the first empty slot (`moveItemStackTo`).
+    /// Wheel down: one item of `slot` to where a quick move sends it. A
+    /// result can't be split or put back: one craft (or the furnace's whole
+    /// output) goes, when it all fits.
     fn tweak_push(&mut self, slot: usize) {
         let Some(stack) = self.slot_view(slot) else {
             return;
         };
-        let max = self.max_stack(&stack);
-        let side = self.other_side(slot);
-        let views: Vec<(usize, Option<ItemStack>)> =
-            side.iter().map(|&s| (s, self.slot_view(s))).collect();
-        let target = views
-            .iter()
-            .find(|(_, v)| {
-                v.as_ref()
-                    .is_some_and(|v| v.same_item_same_components(&stack) && v.count < max)
-            })
-            .or_else(|| views.iter().find(|(_, v)| v.is_none()))
-            .map(|(s, _)| *s);
-        let Some(target) = target else {
+        let landing = self.tweak_landing(slot);
+        let Some(&target) = landing.first() else {
             return;
         };
+        if self.tweak_result(slot) {
+            if self.tweak_click(slot, 0, Input::Pickup) {
+                for target in landing {
+                    self.tweak_put(target, false);
+                }
+            }
+            return;
+        }
         if self.tweak_click(slot, 0, Input::Pickup) {
-            self.tweak_click(target, 1, Input::Pickup);
+            self.tweak_put(target, true);
             if stack.count > 1 {
-                self.tweak_click(slot, 0, Input::Pickup);
+                self.tweak_put(slot, false);
             }
         }
     }
     /// Wheel up: one item of the same kind from the other side into `slot`.
+    /// A result slot takes none and gives none.
     fn tweak_pull(&mut self, slot: usize) {
         let Some(stack) = self.slot_view(slot) else {
             return;
         };
-        if stack.count >= self.max_stack(&stack) {
+        if !self.tweak_takes_one(slot, &stack) {
             return;
         }
-        let side = self.other_side(slot);
-        let source = side.into_iter().find_map(|s| {
-            self.slot_view(s)
-                .filter(|v| v.same_item_same_components(&stack))
-                .map(|v| (s, v.count))
-        });
+        let mut source = None;
+        for s in self.other_side(slot) {
+            if let Some(v) = self.slot_view(s)
+                && v.same_item_same_components(&stack)
+                && !self.tweak_result(s)
+            {
+                source = Some((s, v.count));
+                break;
+            }
+        }
         let Some((source, count)) = source else {
             return;
         };
         if self.tweak_click(source, 0, Input::Pickup) {
-            self.tweak_click(slot, 1, Input::Pickup);
+            self.tweak_put(slot, true);
             if count > 1 {
-                self.tweak_click(source, 0, Input::Pickup);
+                self.tweak_put(source, false);
             }
         }
     }
@@ -373,6 +449,31 @@ impl Game<'_> {
     pub(super) fn sort_mouse_press(&mut self, button: MouseButton) -> bool {
         self.sort_input(&keybinds::mouse_name(button))
     }
+    /// The HDR settings key (`Graphics::hdr_key`): opens Graphics: HDR from the game, where
+    /// the display offers HDR; Done goes back to the game.
+    pub(super) fn hdr_key_press(&mut self, key: KeyCode) -> bool {
+        keybinds::key_name(key).is_some_and(|name| self.hdr_input(name))
+    }
+    pub(super) fn hdr_mouse_press(&mut self, button: MouseButton) -> bool {
+        self.hdr_input(&keybinds::mouse_name(button))
+    }
+    fn hdr_input(&mut self, name: &str) -> bool {
+        if self.screen != Screen::Playing
+            || self.settings.horizon.hdr_key != name
+            || !horizon_client::graphics::hdr_offered()
+        {
+            return false;
+        }
+        if self.title.is_none() {
+            self.capture(false);
+        }
+        self.open_options_at(
+            self.title.is_some(),
+            horizon_client::options_ui::Page::GraphicsHdr,
+        );
+        self.options_to_game = self.title.is_none();
+        true
+    }
     fn sort_input(&mut self, name: &str) -> bool {
         let e = &self.settings.extras;
         if !e.sort || e.sort_key != name || self.recipe_search_focused() {
@@ -408,6 +509,42 @@ impl Game<'_> {
         };
         for i in clicks {
             self.tweak_click(slots[i], 0, Input::Pickup);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tweak_menu;
+
+    #[test]
+    fn the_tweaks_run_in_the_menus_with_plain_click_rules() {
+        for menu in [
+            "inventory",
+            "minecraft:generic_9x1",
+            "minecraft:generic_9x6",
+            "minecraft:shulker_box",
+            "minecraft:hopper",
+            "minecraft:generic_3x3",
+            "minecraft:furnace",
+            "minecraft:blast_furnace",
+            "minecraft:smoker",
+            "minecraft:crafting",
+        ] {
+            assert!(tweak_menu(menu), "{menu}");
+        }
+        for menu in [
+            "minecraft:anvil",
+            "minecraft:enchantment",
+            "minecraft:merchant",
+            "minecraft:beacon",
+            "minecraft:grindstone",
+            "minecraft:stonecutter",
+            "minecraft:loom",
+            "minecraft:brewing_stand",
+            "minecraft:crafter_3x3",
+        ] {
+            assert!(!tweak_menu(menu), "{menu}");
         }
     }
 }

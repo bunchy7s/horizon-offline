@@ -157,27 +157,39 @@ impl Launch {
     pub fn summary(&self) -> Option<String> {
         let mut parts = Vec::new();
         if !self.pre_launch.trim().is_empty() {
-            parts.push(format!("runs {} first", self.pre_launch.trim()));
+            parts.push(crate::i18n::trf(
+                "runs {command} first",
+                &[("command", self.pre_launch.trim())],
+            ));
         }
         if !self.wrapper.trim().is_empty() {
-            parts.push(format!("through {}", self.wrapper.trim()));
+            parts.push(crate::i18n::trf(
+                "through {wrapper}",
+                &[("wrapper", self.wrapper.trim())],
+            ));
         }
         if !self.post_exit.trim().is_empty() {
-            parts.push(format!("runs {} after", self.post_exit.trim()));
+            parts.push(crate::i18n::trf(
+                "runs {command} after",
+                &[("command", self.post_exit.trim())],
+            ));
         }
         if self.gamemode {
-            parts.push("with GameMode".into());
+            parts.push(crate::i18n::tr("with GameMode").to_string());
         }
         if self.mangohud {
-            parts.push("with MangoHud".into());
+            parts.push(crate::i18n::tr("with MangoHud").to_string());
         }
         if self.dedicated_gpu {
-            parts.push("on the dedicated GPU".into());
+            parts.push(crate::i18n::tr("on the dedicated GPU").to_string());
         }
         match self.env.len() {
             0 => {}
-            1 => parts.push("with 1 variable".into()),
-            n => parts.push(format!("with {n} variables")),
+            1 => parts.push(crate::i18n::tr("with 1 variable").to_string()),
+            n => parts.push(crate::i18n::trf(
+                "with {count} variables",
+                &[("count", &n.to_string())],
+            )),
         }
         (!parts.is_empty()).then(|| parts.join(", "))
     }

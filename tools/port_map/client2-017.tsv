@@ -112,8 +112,8 @@ KeyBindsScreen.mouseClicked	port	crates/horizon-client-render/src/options_ui.rs:
 KeyBindsScreen.extractRenderState	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	gap: minor: Reset All drawn in layout; its enabled-when-changed check was not confirmed
 PackSelectionModel.getUnselected	port	crates/horizon-client-render/src/packs.rs::SelectionModel::list	unselected list (list(false)), returned as a slice rather than a stream
 PackSelectionModel.getSelected	port	crates/horizon-client-render/src/packs.rs::SelectionModel::list	selected list (list(true)), returned as a slice rather than a stream
-PackSelectionModel.updateRepoSelectedList	port	crates/horizon-client-render/src/packs.rs::SelectionModel::commit	selection written bottom first, as options.txt stores it
-PackSelectionModel.findNewPacks	port	crates/horizon-client/src/game/packs.rs::Game::refresh_pack_lists	gap: minor: rescans when the options open, not while the screen is open (no folder watch)
+PackSelectionModel.updateRepoSelectedList	port	crates/horizon-client-render/src/packs.rs::SelectionModel::commit	selection written bottom first, as options.txt stores it; downloaded server/… packs are omitted from the saved list
+PackSelectionModel.findNewPacks	port	crates/horizon-client/src/game/packs.rs::Game::refresh_pack_lists	gap: minor: rescans when the options open, not while the screen is open (no folder watch); active server packs are included
 PackSelectionModel.EntryBase.updateHighContrastOptionInstance	missing		minor: selecting the high_contrast pack does not switch the High Contrast option on, as vanilla does
 PackSelectionModel.EntryBase.move	port	crates/horizon-client-render/src/packs.rs::SelectionModel::move_by	move up or down within the list when the neighbour is not fixed
 PackSelectionScreen.closeWatcher	missing		minor: no folder watcher to close (see PackSelectionScreen.Watcher)

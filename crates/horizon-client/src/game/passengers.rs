@@ -27,16 +27,7 @@ fn zombie_kind(s: Species) -> bool {
 impl Game<'_> {
     /// `Entity.startRiding` for two mobs.
     pub(super) fn mount_mob(&mut self, rider: u32, vehicle: u32) {
-        if rider == vehicle {
-            return;
-        }
-        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == rider) {
-            m.extra.mount = Some(vehicle);
-            m.extra.passenger = true;
-        }
-        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == vehicle) {
-            m.extra.rider = Some(rider);
-        }
+        riders::link(&mut self.mobs, rider, vehicle);
     }
     /// Riders sit on their vehicles (`Entity.positionRider`), mobs or boats,
     /// and let go when the vehicle dies or is gone.
@@ -48,6 +39,7 @@ impl Game<'_> {
             }
         }
         let boats: std::collections::HashSet<u32> = self.boats.iter().map(|b| b.id).collect();
+        let carts: std::collections::HashSet<u32> = self.carts.iter().map(|c| c.id).collect();
         let index: HashMap<u32, usize> = self
             .mobs
             .iter()
@@ -59,9 +51,12 @@ impl Game<'_> {
             let Some(v) = self.mobs[i].extra.mount else {
                 continue;
             };
+            // Not a text display: a server's display mounts come through
+            // `remote_set_passengers`, which seats them in `position_riders`.
             let valid = self.mobs[i].alive()
                 && !self.mobs[i].removed
                 && (boats.contains(&v)
+                    || carts.contains(&v)
                     || index
                         .get(&v)
                         .is_some_and(|&j| self.mobs[j].alive() && !self.mobs[j].removed));
@@ -83,6 +78,7 @@ impl Game<'_> {
     /// no passenger's position.
     pub(super) fn position_riders(&mut self) {
         self.seat_boat_mobs();
+        self.seat_cart_mobs();
         let index: HashMap<u32, usize> = self
             .mobs
             .iter()
@@ -90,12 +86,34 @@ impl Game<'_> {
             .map(|(i, m)| (m.id, i))
             .collect();
         // Riders of riders settle over a few passes.
-        for _ in 0..3 {
+        for pass in 0..3 {
             for i in 0..self.mobs.len() {
                 let Some(v) = self.mobs[i].extra.mount else {
                     continue;
                 };
-                let Some(&j) = index.get(&v) else { continue };
+                let Some(&j) = index.get(&v) else {
+                    // The display doesn't move between passes.
+                    if pass > 0 {
+                        continue;
+                    }
+                    // A mob on a text display: NPC plugins seat their sitting
+                    // NPCs on one. The server's position for a passenger
+                    // gives way to its seat, as `rideTick` places it.
+                    let Some((at, before)) = self.text_displays.get(&(v as i32)).map(|d| d.seat())
+                    else {
+                        continue;
+                    };
+                    let m = &mut self.mobs[i];
+                    let offset = riders::vehicle_attachment(m);
+                    m.position = Vec3::new(at.x, at.y - offset, at.z);
+                    m.previous = Vec3::new(before.x, before.y - offset, before.z);
+                    m.velocity = Vec3::ZERO;
+                    m.fall_distance = 0.0;
+                    m.on_ground = false;
+                    m.extra.passenger = true;
+                    m.ai.nav.stop();
+                    continue;
+                };
                 let vehicle = &self.mobs[j];
                 let attach = riders::passenger_attachment(vehicle);
                 let (pos, prev) = (vehicle.position, vehicle.previous);
@@ -115,37 +133,164 @@ impl Game<'_> {
                 m.ai.nav.stop();
             }
         }
-        // Text displays riding a mob, as NPC plugins put a name over a head:
-        // `LivingEntity.getPassengerRidingPosition`, the vehicle's passenger
-        // attachment (the top of its box in its pose), less the display's own
-        // vehicle attachment, which is 0 (Display's dimensions are 0 by 0).
-        // On the local player, the top of its box in its pose and scale (`Avatar.POSES`).
+        // Displays and interaction boxes riding anything the client tracks,
+        // as NPC plugins put a name over a head or a model's bones on a
+        // pivot: `Entity.rideTick` -> `positionRider`, the vehicle's passenger
+        // attachment (the top of its box in its pose and scale) less the rider's own,
+        // which is 0 for both (Display and Interaction are 0 by 0). On the
+        // local player, the top of its box in its pose and scale
+        // (`Avatar.POSES`).
         let me = self.remote.as_ref().map(|r| r.entity_id as u32);
         let own_seat = self.player.as_ref().map(|p| {
             p.position
                 .add_vector(Vec3::new(0.0, f64::from(p.dimensions.height), 0.0))
         });
-        for display in self.text_displays.values_mut() {
-            let Some(vehicle) = display.vehicle else {
+        // A rider of a rider settles over a few passes, as the mobs above.
+        for _ in 0..3 {
+            let mut vehicles: Vec<u32> = self
+                .text_displays
+                .values()
+                .filter_map(|d| d.vehicle)
+                .chain(self.interactions.values().filter_map(|i| i.vehicle))
+                .collect();
+            vehicles.sort_unstable();
+            vehicles.dedup();
+            let seats: HashMap<u32, glam::DVec3> = vehicles
+                .into_iter()
+                .filter_map(|v| {
+                    self.passenger_riding_position(v, me, own_seat, &index)
+                        .map(|at| (v, at))
+                })
+                .collect();
+            for display in self.text_displays.values_mut() {
+                if let Some(at) = display.vehicle.and_then(|v| seats.get(&v)) {
+                    display.ride(*at);
+                }
+            }
+            for interaction in self.interactions.values_mut() {
+                if let Some(at) = interaction.vehicle.and_then(|v| seats.get(&v)) {
+                    interaction.ride_to(*at);
+                }
+            }
+        }
+        // Armor stands riding a mob (a server's name tag hologram): seated
+        // like the displays above, so the name follows its vehicle instead of
+        // staying where the stand spawned. The stand's own vehicle attachment
+        // is the default 0, so its feet sit on the seat. The seat at the
+        // start of the tick too (`commonTick` runs before `rideTick`), so the
+        // stand is drawn between the two even while the level is frozen and
+        // its vehicle is not. Those riding the local player are seated after
+        // its move (`seat_own_stands`).
+        for i in 0..self.armor_stands.len() {
+            let Some(vehicle) = self.armor_stands[i].vehicle else {
                 continue;
             };
-            let at = if Some(vehicle) == me {
-                let Some(at) = own_seat else { continue };
-                at
-            } else {
-                let Some(&j) = index.get(&vehicle) else {
-                    continue;
-                };
-                let vehicle = &self.mobs[j];
-                riders::seat(
-                    riders::passenger_attachment(vehicle),
-                    0.0,
-                    vehicle.position,
-                    vehicle.yaw,
-                )
+            let Some(&j) = index.get(&vehicle).filter(|_| Some(vehicle) != me) else {
+                continue;
             };
-            display.ride(glam::DVec3::new(at.x, at.y, at.z));
+            let vehicle = &self.mobs[j];
+            let attach = riders::passenger_attachment(vehicle);
+            let at = riders::seat(attach, 0.0, vehicle.position, vehicle.yaw);
+            let before = riders::seat(attach, 0.0, vehicle.previous, vehicle.previous_yaw);
+            let stand = &mut self.armor_stands[i];
+            stand.position = at;
+            stand.previous = before;
+            stand.velocity = Vec3::ZERO;
         }
+    }
+
+    /// Armor stands riding the local player, on the top of its box. Vanilla
+    /// ticks the player (`tickNonPassenger`) before its passengers
+    /// (`tickPassenger` -> `positionRider`), so a rider's `xo` and `x` are the
+    /// seats before and after the same move: call this after the player's.
+    pub(super) fn seat_own_stands(&mut self) {
+        let (Some(me), Some(p)) = (
+            self.remote.as_ref().map(|r| r.entity_id as u32),
+            self.player.as_ref(),
+        ) else {
+            return;
+        };
+        let up = Vec3::new(0.0, f64::from(p.dimensions.height), 0.0);
+        let (at, before) = (
+            p.position.add_vector(up),
+            self.previous_position.add_vector(up),
+        );
+        for stand in self
+            .armor_stands
+            .iter_mut()
+            .filter(|a| a.vehicle == Some(me))
+        {
+            stand.position = at;
+            stand.previous = before;
+            stand.velocity = Vec3::ZERO;
+        }
+    }
+
+    /// `Entity.getPassengerRidingPosition` of a vehicle: where the feet of a
+    /// passenger whose own vehicle attachment is 0 land.
+    fn passenger_riding_position(
+        &self,
+        vehicle: u32,
+        me: Option<u32>,
+        own_seat: Option<Vec3>,
+        index: &HashMap<u32, usize>,
+    ) -> Option<glam::DVec3> {
+        if Some(vehicle) == me {
+            let at = own_seat?;
+            return Some(glam::DVec3::new(at.x, at.y, at.z));
+        }
+        if let Some(&j) = index.get(&vehicle) {
+            let v = &self.mobs[j];
+            let at = riders::seat(riders::passenger_attachment(v), 0.0, v.position, v.yaw);
+            return Some(glam::DVec3::new(at.x, at.y, at.z));
+        }
+        if let Some(d) = self.text_displays.get(&(vehicle as i32)) {
+            return Some(d.position());
+        }
+        if let Some(i) = self.interactions.get(&(vehicle as i32)) {
+            let at = i.position;
+            return Some(glam::DVec3::new(at.x, at.y, at.z));
+        }
+        if let Some(b) = self.boats.iter().find(|b| b.id == vehicle) {
+            let count = self.boat_players(vehicle).max(1) + self.boat_mobs(vehicle).len();
+            let at = b.seat(0, count, false, 0.0, false);
+            return Some(glam::DVec3::new(at.x, at.y, at.z));
+        }
+        if let Some(c) = self.carts.iter().find(|c| c.id == vehicle) {
+            let at = c
+                .position
+                .add_vector(Vec3::new(0.0, super::minecarts::SEAT, 0.0));
+            return Some(glam::DVec3::new(at.x, at.y, at.z));
+        }
+        if let Some(a) = self.armor_stands.iter().find(|a| a.id == vehicle) {
+            // ArmorStand.getDefaultDimensions: a marker has no box to sit on.
+            let height = if a.marker {
+                0.0
+            } else if a.small {
+                0.9875
+            } else {
+                1.975
+            };
+            return Some(glam::DVec3::new(
+                a.position.x,
+                a.position.y + height,
+                a.position.z,
+            ));
+        }
+        // Any other tracked entity sits on its feet; an area effect cloud is
+        // 0.5 tall, and ModelEngine parks a model's pivot half a block below
+        // its feet for exactly that.
+        let (kind, position) = self.remote.as_ref()?.tracked(vehicle as i32)?;
+        let lift = if kind == "minecraft:area_effect_cloud" {
+            0.5
+        } else {
+            0.0
+        };
+        Some(glam::DVec3::new(
+            position[0],
+            position[1] + lift,
+            position[2],
+        ))
     }
 
     /// `finalizeSpawn` jockeys of a naturally spawned mob: baby zombies on
@@ -246,7 +391,7 @@ impl Game<'_> {
             at[2].floor() as i32,
         );
         let frequent = self.world.chunks.get(&(x >> 4, z >> 4)).is_some_and(|c| {
-            let b = self.res.biomes().get(c.biome(x, y, z));
+            let b = world_biomes!(self).get(c.biome(x, y, z));
             self.res
                 .mob_data()
                 .biome_has("minecraft:more_frequent_drowned_spawns", &b.name)

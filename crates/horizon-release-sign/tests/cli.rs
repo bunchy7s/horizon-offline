@@ -106,8 +106,10 @@ fn unsigned_releases_go_out_only_until_a_key_is_listed() {
 
 #[test]
 fn the_openssl_script_signs_what_the_launcher_checks() {
-    if openssl().is_none() {
-        eprintln!("no OpenSSL 3 here: tools/ci/sign_release.sh is tested on Linux");
+    // The script runs on Linux runners only (the `sign` jobs of launcher.yml and nightly-build.yml).
+    // On Windows, Command finds System32's bash (WSL's) before the one on PATH.
+    if cfg!(windows) || openssl().is_none() {
+        eprintln!("skipped: tools/ci/sign_release.sh is tested on Linux (bash, OpenSSL 3)");
         return;
     }
     // A dry run: a throwaway key, its public key for the check.

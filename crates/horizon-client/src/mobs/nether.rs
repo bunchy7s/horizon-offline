@@ -227,8 +227,10 @@ pub fn ghast_move_control(m: &mut Mob, w: &MobWorld) {
     if m.ai.mov.operation != Operation::MoveTo {
         return;
     }
+    // `floatDuration-- <= 0`: the test is on the value before the decrement.
+    let before = m.extra.counter2;
     m.extra.counter2 -= 1;
-    if m.extra.counter2 > 0 {
+    if before > 0 {
         return;
     }
     m.extra.counter2 += m.random.next_int_bound(5).unwrap_or(0) + 2;
@@ -261,6 +263,10 @@ pub fn ghast_move_control(m: &mut Mob, w: &MobWorld) {
         m.ai.mov.operation = Operation::Wait;
     }
 }
+/// `(180.0F / (float)Math.PI)` of `GhastLookGoal.tick`.
+fn ghast_deg() -> f32 {
+    180.0_f32 / std::f32::consts::PI
+}
 /// `Ghast.RandomFloatAroundGoal`.
 #[derive(Clone, Debug)]
 struct RandomFloatAround;
@@ -281,15 +287,13 @@ impl Goal for RandomFloatAround {
     fn can_continue(&mut self, _: &mut Mob, _: &mut Cx) -> bool {
         false
     }
-    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
+    fn start(&mut self, m: &mut Mob, _: &mut Cx) {
         let c = m.position;
         let mut r = || f64::from(m.random.next_float() * 2.0 - 1.0) * 16.0;
-        let mut t = [c.x + r(), c.y + r(), c.z + r()];
-        let top =
-            cx.w.motion_blocking_height(t[0].floor() as i32, t[2].floor() as i32);
-        if f64::from(top) < t[1].floor() && top > crate::chunk::MIN_Y {
-            t[1] = c.y - (c.y - t[1]).abs();
-        }
+        // `getSuitableFlyToPosition` with distanceToBlocks 0: the first random
+        // position is the target (the mirror under the heightmap only follows
+        // 64 rejected tries, which a ghast without a home never has).
+        let t = [c.x + r(), c.y + r(), c.z + r()];
         m.ai.mov.set_wanted(t[0], t[1], t[2], 1.0);
     }
 }
@@ -311,13 +315,13 @@ impl Goal for GhastLook {
         match m.ai.target.and_then(|t| cx.w.target_info(t)) {
             None => {
                 let v = m.velocity;
-                m.yaw = -(v.x.atan2(v.z) as f32).to_degrees();
+                m.yaw = -(horizon_core::geometry::trig::atan2(v.x, v.z) as f32) * ghast_deg();
                 m.body_yaw = m.yaw;
             }
             Some(t) => {
                 if m.distance_sqr(t.position) < 4096.0 {
                     let (dx, dz) = (t.position.x - m.position.x, t.position.z - m.position.z);
-                    m.yaw = -(dx.atan2(dz) as f32).to_degrees();
+                    m.yaw = -(horizon_core::geometry::trig::atan2(dx, dz) as f32) * ghast_deg();
                     m.body_yaw = m.yaw;
                 }
             }
@@ -356,13 +360,15 @@ impl Goal for GhastShoot {
         if m.distance_sqr(t.position) < 4096.0 && m.sees(cx.w, who) {
             self.charge += 1;
             if self.charge == 10 {
-                // LevelEvent 1015: the warning cry.
-                cx.events.push(MobEvent::Sound(
-                    "entity.ghast.warn",
-                    m.center(),
-                    10.0,
-                    (m.random.next_float() - m.random.next_float()) * 0.2 + 1.0,
-                ));
+                // LevelEvent 1015: the warning cry, its pitch the client's.
+                if !m.silent {
+                    cx.events.push(MobEvent::LevelEventSound {
+                        sound: "entity.ghast.warn",
+                        at: m.center(),
+                        volume: 10.0,
+                        spread: 0.2,
+                    });
+                }
             }
             if self.charge == 20 {
                 let yaw = m.yaw.to_radians();
@@ -374,13 +380,15 @@ impl Goal for GhastShoot {
                     ty - (0.5 + m.position.y + half),
                     t.position.z - (m.position.z + view[1] * 4.0),
                 ];
-                // LevelEvent 1016: the shot.
-                cx.events.push(MobEvent::Sound(
-                    "entity.ghast.shoot",
-                    m.center(),
-                    10.0,
-                    (m.random.next_float() - m.random.next_float()) * 0.2 + 1.0,
-                ));
+                // LevelEvent 1016: the shot, its pitch the client's.
+                if !m.silent {
+                    cx.events.push(MobEvent::LevelEventSound {
+                        sound: "entity.ghast.shoot",
+                        at: m.center(),
+                        volume: 10.0,
+                        spread: 0.2,
+                    });
+                }
                 let start = Vec3::new(
                     m.position.x + view[0] * 4.0,
                     m.position.y + half + 0.5,

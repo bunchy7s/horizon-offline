@@ -98,7 +98,7 @@ Direction.Axis.getDirections	port	crates/horizon-world/src/level/creaking.rs::ax
 Direction.Axis.getPlane	port	crates/horizon-world/src/level/query.rs::is_horizontal	takes a direction and checks its axis is X or Z
 Direction.Axis.choose	port	crates/horizon-core/src/geometry/mod.rs::Vec3::component	gap: minor: selects a double component of a Vec3; no integer version
 Direction.Plane.test	port	crates/horizon-world/src/level/query.rs::is_horizontal	the horizontal plane only; the vertical plane has no test
-GlobalPos.isCloseEnough	missing		player: an allay never remembers a liked jukebox or note block, so the same-dimension, 1024-block check never runs (see AllayAi.hearNoteblock)
+GlobalPos.isCloseEnough	port	crates/horizon-client/src/mobs/allay.rs::GlobalPos::is_close_enough	same dimension and chessboard distance within max; the allay's liked block is checked with the 1024-block limit
 Holder.direct	skip:data		wraps a value as a registry holder; Horizon has no holders
 Holder.Reference.key	skip:data		registry holder bookkeeping
 Holder.Reference.value	skip:data		registry holder bookkeeping

@@ -220,7 +220,7 @@ pub fn main() -> Result<()> {
                 }
                 writeln!(out)?;
             }
-            for (name, p, volume, pitch) in std::mem::take(&mut engine.sounds) {
+            for (name, p, volume, pitch, _) in std::mem::take(&mut engine.sounds) {
                 writeln!(
                     out,
                     "~ {name} {} {} {} {} {}",

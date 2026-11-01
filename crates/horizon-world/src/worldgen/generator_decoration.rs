@@ -75,6 +75,9 @@ pub(super) struct Decoration {
     /// their own position (mushrooms) or the one above (soul sand, magma).
     postprocess_self: Vec<BlockStateId>,
     postprocess_above: Vec<BlockStateId>,
+    /// A superflat world's `FillLayerFeature`s (`TOP_LAYER_MODIFICATION`): the level Y and state
+    /// of each layer that is not opaque to `MOTION_BLOCKING`, filled after the structures.
+    pub(super) top_layers: Vec<(i32, BlockStateId)>,
 }
 fn resource(message: impl Into<String>) -> GeneratorError {
     GeneratorError::Resource(message.into())
@@ -114,6 +117,15 @@ impl Decoration {
     pub(super) fn new(
         data: &Arc<GeneratorData>,
         source: &ResolvedBiomeSource,
+    ) -> Result<Option<Self>, GeneratorError> {
+        Self::new_with(data, source, true)
+    }
+    /// `new`, with `features` off: the biome's decoration steps, none of its placed features
+    /// (a superflat world without `features`).
+    pub(super) fn new_with(
+        data: &Arc<GeneratorData>,
+        source: &ResolvedBiomeSource,
+        with_features: bool,
     ) -> Result<Option<Self>, GeneratorError> {
         let Some(resources) = &data.feature_resources else {
             return Ok(None);
@@ -208,6 +220,9 @@ impl Decoration {
                     _ => return Err(resource("biome feature step")),
                 };
                 for entry in entries {
+                    if !with_features {
+                        continue;
+                    }
                     let feature = identity(&super::tags::identifier(&entry)?);
                     list.push(feature);
                     biome_features[id.0 as usize].insert(feature);
@@ -238,6 +253,7 @@ impl Decoration {
             bindings,
             catalog,
             named: std::sync::Mutex::new(HashMap::new()),
+            top_layers: Vec::new(),
         }))
     }
     fn named_feature(&self, name: &str) -> Option<Arc<PlacedFeatureDefinition>> {
@@ -476,6 +492,24 @@ impl Decoration {
                 Ok(placed.unwrap_or(false))
             },
         );
+        // `FillLayerFeature.place` for the chunk: air at the layer's Y becomes the layer.
+        if result.is_ok() && !structures_only {
+            for &(y, state) in &self.top_layers {
+                for dz in 0..16 {
+                    for dx in 0..16 {
+                        let at = [center.x * 16 + dx, y, center.z * 16 + dz];
+                        let current = world
+                            .block(at)
+                            .map_err(|e| GeneratorError::Stage("features", e.to_string()))?;
+                        if data.block_states().get(current).is_air() {
+                            world
+                                .set_block(at, state, 2)
+                                .map_err(|e| GeneratorError::Stage("features", e.to_string()))?;
+                        }
+                    }
+                }
+            }
+        }
         for (pos, nbt) in std::mem::take(&mut world.block_entities) {
             let index = ((pos[2] >> 4).wrapping_sub(center.z) + 1) * 3
                 + (pos[0] >> 4).wrapping_sub(center.x)

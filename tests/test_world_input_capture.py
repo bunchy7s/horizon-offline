@@ -45,12 +45,14 @@ class WorldInputCaptureTests(unittest.TestCase):
         spawn = method(game, "spawn_player")
         self.assertLess(spawn.index("self.player = Some(player)"),
                         spawn.index("self.capture_loaded_world()"))
-        tick = remote[remote.index("    pub(super) fn tick_remote("):]
-        ready = tick[tick.index("if self.remote.as_ref().is_some_and(|r| !r.loaded_sent)"):]
+        # ClientPacketListener.tick: the level load tracker ends the loading screen,
+        # the server hears PlayerLoaded, the mouse is captured, then the player moves.
+        ready = remote[remote.index("    fn tick_client_load("):]
         self.assertLess(ready.index("r.loaded_sent = true"),
                         ready.index("self.capture_loaded_world()"))
-        self.assertLess(ready.index("self.capture_loaded_world()"),
-                        ready.index("let stick = self.pad_move()"))
+        level = remote[remote.index("    fn tick_remote_level("):]
+        self.assertLess(level.index("self.tick_client_load()"),
+                        level.index("let stick = self.pad_move()"))
 
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_capture_lifecycle(self):
@@ -99,13 +101,15 @@ struct Mouse { ignore_first: bool }
 impl Mouse { fn set_ignore_first_move(&mut self) { self.ignore_first = true; } }
 struct Remote;
 #[derive(Default)]
+struct Options { offscreen: bool }
+#[derive(Default)]
 struct ServerPacks { prompt: Option<()> }
 struct Game {
     focused: bool, agent_pointer: bool, window: Option<Window>, mouse: Mouse,
     keyboard_mouse: bool, view_at: [u32; 2],
     captured: bool, title: Option<()>, screen: Screen, remote: Option<Remote>,
     mining: bool, lan_acting: Option<u32>, renderer: Option<Renderer>, cursor: (f32, f32),
-    server_packs: ServerPacks,
+    server_packs: ServerPacks, options: Options,
 }
 impl Default for Game {
     fn default() -> Self {
@@ -113,13 +117,15 @@ impl Default for Game {
             keyboard_mouse: true, view_at: [0, 0],
             mouse: Mouse::default(), captured: false, title: None,
             screen: Screen::Playing, remote: None, mining: false, lan_acting: None,
-            renderer: None, cursor: (0.0, 0.0), server_packs: ServerPacks::default() }
+            renderer: None, cursor: (0.0, 0.0), server_packs: ServerPacks::default(),
+            options: Options::default() }
     }
 }
 HELPER
 impl Game {
     fn stop_mining(&mut self) { self.mining = false; }
     fn reset_inventory_clicks(&mut self) {}
+    fn restore_held_keys(&mut self) {}
     fn dialog_open(&self) -> bool { false }
 METHODS
 }
@@ -211,6 +217,23 @@ fn main() {
         assert!(!game.captured);
         assert_eq!(game.window.as_ref().unwrap().at.get(), (1700.0, 700.0));
         assert_eq!(game.cursor, (250.0, 150.0));
+    }
+    // `--offscreen` shows no window: the grab is the game's own, and the system
+    // pointer is never grabbed, warped or hidden.
+    {
+        let mut game = Game::default();
+        game.options.offscreen = true;
+        game.window.as_ref().unwrap().visible.set(true);
+        game.capture_loaded_world();
+        assert!(game.captured);
+        assert!(game.mouse.ignore_first);
+        game.capture(false);
+        assert!(!game.captured);
+        game.capture(true);
+        assert!(game.captured);
+        let window = game.window.as_ref().unwrap();
+        assert_eq!((window.grabs.get(), window.warps.get()), (0, 0));
+        assert!(window.visible.get());
     }
     let mut game = Game::default();
     // On a server the chat is ChatScreen (#708): loading never grabs over it.

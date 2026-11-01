@@ -32,6 +32,8 @@ class PrepareOutputTests(unittest.TestCase):
             'block-behaviours.json': b'{"c": "Foo$$Lambda/0x00000ff0"}',
             'export.log': b'run 2',
             'assets/minecraft/sounds/a.ogg': b'two',
+            'horizon-prepare.json': b'{"output_version": 1}',
+            '.horizon-prepare.lock': b'',
         }
         with tempfile.TemporaryDirectory() as tmp:
             first = prepare_output.digest(self.preparation(Path(tmp) / 'a', a))

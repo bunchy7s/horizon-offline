@@ -65,7 +65,7 @@ impl Scrollbar {
                     .track_scroll(&self.handle)
                     .mr(px(GUTTER))
                     // Nested scroll areas must not also move the page behind them.
-                    .on_scroll_wheel(|_, _, cx| cx.stop_propagation()),
+                    .on_scroll(|_, _, cx| cx.stop_propagation()),
             )
             .child(
                 canvas(
@@ -73,7 +73,7 @@ impl Scrollbar {
                         let geometry = Geometry::new(
                             bounds.size.height.into(),
                             state.handle.bounds().size.height.into(),
-                            state.handle.max_offset().height.into(),
+                            state.handle.max_offset().y.into(),
                             state.handle.offset().y.into(),
                         );
                         let hitbox =

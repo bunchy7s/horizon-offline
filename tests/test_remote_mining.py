@@ -28,7 +28,7 @@ struct Hit { pos: [i32; 3], face: u8 }
 struct Stack { item: &'static str }
 struct Mining { pos: [i32; 3], progress: f32, ticks: u32 }
 #[derive(Default)]
-struct Remote { destroy_delay: u32, destroying: Option<([i32; 3], u8, f32)>, destroying_item: String }
+struct Remote { destroy_delay: u32, destroying: Option<([i32; 3], u8, f32)>, destroying_item: String, is_destroying: bool }
 struct Ground { on_ground: bool }
 struct Player { ground: Ground }
 #[derive(Clone)]
@@ -100,6 +100,8 @@ impl Game {
     fn predict_break(&mut self, pos: [i32; 3], _: u32, _: i32) { self.world.broken.push(pos); }
     fn send(&mut self, S::PlayerAction(packet): S) { self.packets.push(packet); }
     fn crack_particle(&mut self, _: [i32; 3], _: u8, _: u32) {}
+    // RedStoneOreBlock.attack's dust (sculk.rs): no particles in this fixture.
+    fn redstone_ore_particles(&mut self, _: [i32; 3]) {}
     // ClientLevel.addBreakingBlockEffects: the hit sound once, when the dig
     // starts; the server's level events play it while the block is mined.
     fn breaking_block_effects(&mut self, _: [i32; 3], _: u8, play_sound: bool) {
@@ -178,7 +180,14 @@ fn main() {
     game.creative = true;
     game.remote_mining(false);
     assert_eq!(game.packets.iter().map(|p| p.action).collect::<Vec<_>>(), [0, 2]);
-    assert!(game.remote.as_ref().unwrap().destroying.is_none());
+    // stopDestroyBlock keeps destroyBlockPos and the item and zeroes only the progress, so a
+    // resumed dig on the same block sends no new START (#4124).
+    let stopped = game.remote.as_ref().unwrap();
+    assert_eq!(
+        stopped.destroying.map(|(p, _, progress)| (p, progress)),
+        Some((game.hit.pos, 0.0))
+    );
+    assert!(!stopped.is_destroying);
     assert!(game.mining.is_none());
     assert!(game.world.broken.is_empty());
     // An adventure player without can_break (#3027): startDestroyBlock

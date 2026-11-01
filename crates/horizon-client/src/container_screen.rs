@@ -117,8 +117,8 @@ impl Clicks {
         self.quick_crafting
     }
 
-    /// A press Horizon handled itself (a double click's `PICKUP_ALL`): its
-    /// release clicks nothing more.
+    /// A press another screen control handled (such as a book button or
+    /// double click's `PICKUP_ALL`): its release clicks nothing more.
     pub fn skip_release(&mut self) {
         self.quick_crafting = None;
         self.skip_next_release = true;
@@ -265,6 +265,43 @@ mod tests {
         );
         assert_eq!(
             clicks.release(&out, Button::Right, true, false, true, false),
+            Release::Nothing
+        );
+    }
+
+    #[test]
+    fn a_recipe_book_click_does_not_throw_a_carried_stack_after_the_layout_shifts() {
+        let mut clicks = Clicks::default();
+        let button = Target::<usize>::Nothing;
+        // The book button consumes the press while the player carries a stack.
+        assert_eq!(
+            clicks.press(&button, Button::Left, false, false, false),
+            None
+        );
+        clicks.skip_release();
+
+        // Closing the book shifts the inventory before mouseReleased tests the
+        // pointer again; it may now look like an outside click.
+        assert_eq!(
+            clicks.release(
+                &Target::<usize>::Outside,
+                Button::Left,
+                false,
+                false,
+                false,
+                false,
+            ),
+            Release::Nothing
+        );
+    }
+
+    #[test]
+    fn a_creative_page_release_does_not_throw_a_carried_stack() {
+        let mut clicks = Clicks::default();
+        let out = Target::<usize>::Outside;
+        clicks.skip_release();
+        assert_eq!(
+            clicks.release(&out, Button::Left, false, false, false, false),
             Release::Nothing
         );
     }

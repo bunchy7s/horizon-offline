@@ -378,9 +378,9 @@ impl super::Adapter {
         } else {
             vertex_shader_storage_textures.min(fragment_shader_storage_textures)
         };
-        // NOTE: GL_ARB_compute_shader adds support for indirect dispatch
-        let indirect_execution = supported((3, 1), (4, 3))
-            || (extensions.contains("GL_ARB_draw_indirect") && supports_compute);
+        // Desktop GL 4.0+ and GLES 3.1+ support indirect drawing (glDrawArraysIndirect, glDrawElementsIndirect).
+        let indirect_execution =
+            supported((3, 1), (4, 0)) || extensions.contains("GL_ARB_draw_indirect");
         let supports_cube_array = supported((3, 2), (4, 0))
             || (supported((3, 1), (4, 0)) && extensions.contains("GL_EXT_texture_cube_map_array"));
 
@@ -1368,11 +1368,7 @@ impl crate::Adapter for super::Adapter {
 
             Some(crate::SurfaceCapabilities {
                 formats,
-                present_modes: if cfg!(windows) {
-                    vec![wgt::PresentMode::Fifo, wgt::PresentMode::Immediate]
-                } else {
-                    vec![wgt::PresentMode::Fifo] //TODO
-                },
+                present_modes: vec![wgt::PresentMode::Fifo, wgt::PresentMode::Immediate],
                 composite_alpha_modes: vec![wgt::CompositeAlphaMode::Opaque], //TODO
                 maximum_frame_latency: 2..=2, //TODO, unused currently
                 current_extent: None,

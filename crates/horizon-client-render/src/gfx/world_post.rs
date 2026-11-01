@@ -335,8 +335,11 @@ impl Post {
                     view_formats: &[],
                 })
             };
-            let sampled =
-                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+            // COPY_SRC: a native pack's material stage reads copies of them (`opaque_depth`,
+            // `opaque_color`).
+            let sampled = wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC;
             let color = make_tex("Scaled world", size, self.format, sampled)
                 .create_view(&Default::default());
             // TEXTURE_BINDING: occlusion culling and TAA read it.
@@ -344,7 +347,7 @@ impl Post {
                 "Scaled world depth",
                 size,
                 wgpu::TextureFormat::Depth32Float,
-                sampled,
+                sampled | wgpu::TextureUsages::COPY_SRC,
             )
             .create_view(&Default::default());
             let group = self.bind(device, &color);

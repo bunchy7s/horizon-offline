@@ -42,10 +42,10 @@ ClientRecipeBook.categorizeAndGroupRecipes	port	crates/horizon-client/src/recipe
 CommandHistory.addCommand	port	crates/horizon-client-render/src/chat.rs::Chat::add_recent	no repeats; keeps the last 50 saved commands
 CommandHistory.save	inline	crates/horizon-client-render/src/chat.rs::Chat::add_recent	writes command_history.txt there
 ComponentCollector.getResult	skip:java		collector helper
-DebugQueryHandler.handleResponse	skip:debug		F3 NBT query: packet ids exist in horizon-protocol but nothing sends them
-DebugQueryHandler.startTransaction	skip:debug		F3 NBT query transaction; see handleResponse
-DebugQueryHandler.queryEntityTag	skip:debug		F3 entity NBT query; see handleResponse
-DebugQueryHandler.queryBlockEntityTag	skip:debug		F3 block entity NBT query; see handleResponse
+DebugQueryHandler.handleResponse	port	crates/horizon-client/src/game/debug_keys.rs::DebugQuery::answer	
+DebugQueryHandler.startTransaction	port	crates/horizon-client/src/game/debug_keys.rs::DebugQuery::start	
+DebugQueryHandler.queryEntityTag	inline	crates/horizon-client/src/game/debug_keys.rs::Game::copy_recreate_command	the query waits in Remote.debug_query
+DebugQueryHandler.queryBlockEntityTag	inline	crates/horizon-client/src/game/debug_keys.rs::Game::copy_recreate_command	the query waits in Remote.debug_query
 DeltaTracker.Timer.pause	port	crates/horizon-client/src/clock.rs::Timer::update_pause_state	residual kept while paused
 DeltaTracker.Timer.unPause	port	crates/horizon-client/src/clock.rs::Timer::update_pause_state	residual restored on resume
 GameNarrator	missing		minor: no text-to-speech; the narrator option is stored but nothing is spoken
@@ -89,7 +89,7 @@ Minecraft.debugClientMetricsStart	skip:debug		metrics recording
 Minecraft.archiveProfilingReport	skip:debug		profiling archive
 Minecraft.isLevelRunningNormally	port	crates/horizon-client/src/clock.rs::TickRateManager::runs_normally	
 Minecraft.isMultiplayerServer	skip:other		no single predicate; remote and LAN code test their own state
-Minecraft.getQuickActionsDialog	missing		minor: no key.quickActions binding, so the quick actions dialog cannot open
+Minecraft.getQuickActionsDialog	port	crates/horizon-client/src/game/quick_actions.rs::Game::open_quick_actions	key.quickActions opens the tag's dialog, or minecraft:quick_actions when it names several
 Minecraft.disconnectFromWorld	port	crates/horizon-client/src/game/remote.rs::Game::leave_server	gap: minor: only the remote exit; local worlds exit via close_world
 Minecraft.disconnectWithProgressScreen	inline	crates/horizon-client/src/game.rs::Game::close_world	the exit is folded into the world close
 Minecraft.clearClientLevel	inline	crates/horizon-client/src/game/remote.rs::Game::leave_server	level teardown is part of leave_server

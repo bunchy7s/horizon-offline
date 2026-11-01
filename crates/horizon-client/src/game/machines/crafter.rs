@@ -253,6 +253,7 @@ impl Game<'_> {
             )
             .resolve_legacy()
         });
+        crate::game::screen_info::name_container(|| title.plain());
         let tw = atlas.font.width_text(&title);
         batch.text_styled(
             atlas,

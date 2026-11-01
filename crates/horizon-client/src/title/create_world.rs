@@ -69,6 +69,7 @@ impl WorldOptions {
         dir: &std::path::Path,
     ) -> Self {
         let generation = crate::save::WorldGen::read(dir).unwrap_or_default();
+        let (pack_dir, data_packs) = crate::datapack::for_recreate(dir);
         Self {
             hardcore: level.hardcore,
             difficulty: DIFFICULTIES
@@ -83,6 +84,8 @@ impl WorldOptions {
             structures: generation.structures,
             bonus_chest: generation.bonus_chest,
             rules: crate::gamerules::GameRules::load(dir),
+            data_packs,
+            pack_dir,
             ..Self::default()
         }
     }
@@ -113,19 +116,30 @@ impl WorldOptions {
     }
     /// A press on one of the open tab's cycle buttons or switches.
     pub(super) fn press(&mut self, id: u8, creative: &mut bool) {
+        self.cycle(id, creative, 1);
+    }
+    /// A step on one of the open tab's cycle buttons or switches (mouse wheel or keyboard).
+    pub(super) fn cycle(&mut self, id: u8, creative: &mut bool, step: i32) {
         match id {
             // Survival, Hardcore, Creative.
             20 => {
-                (*creative, self.hardcore) = match (*creative, self.hardcore) {
-                    (false, false) => (false, true),
-                    (false, true) => (true, false),
-                    _ => (false, false),
-                }
+                let modes = [(false, false), (false, true), (true, false)];
+                let cur = (*creative, self.hardcore);
+                let idx = modes.iter().position(|&m| m == cur).unwrap_or(0);
+                let next_idx = ((idx as i32 + step).rem_euclid(modes.len() as i32)) as usize;
+                (*creative, self.hardcore) = modes[next_idx];
             }
-            23 => self.difficulty = (self.difficulty + 1) % DIFFICULTIES.len(),
+            23 => {
+                let len = DIFFICULTIES.len() as i32;
+                self.difficulty = ((self.difficulty as i32 + step).rem_euclid(len)) as usize;
+            }
             24 => self.commands = Some(!self.commands(*creative)),
             25 => {
-                self.world_type = self.world_type.next();
+                self.world_type = if step >= 0 {
+                    self.world_type.next()
+                } else {
+                    self.world_type.prev()
+                };
                 if self.world_type == crate::save::WorldPreset::Flat {
                     // setWorldType starts the generator from the flat preset.
                     self.flat_settings = Some(super::flat::FlatSettings::default());
@@ -221,6 +235,7 @@ pub(super) fn buttons(w: f32, h: f32, creative: bool, o: &WorldOptions) -> Vec<B
         enabled,
         id,
         icon: None,
+        trailing: None,
     };
     let (gx, gy) = grid(w, h, o.tab);
     let mut buttons = match o.tab {
@@ -285,7 +300,8 @@ pub(super) fn buttons(w: f32, h: f32, creative: bool, o: &WorldOptions) -> Vec<B
                 28,
             ),
         ],
-        // Experiments have no screen yet.
+        // The More tab, as vanilla lays it out: Game Rules, Experiments
+        // (the resources' feature packs), Data Packs.
         _ => [
             "selectWorld.gameRules",
             "selectWorld.experiments",
@@ -293,16 +309,7 @@ pub(super) fn buttons(w: f32, h: f32, creative: bool, o: &WorldOptions) -> Vec<B
         ]
         .iter()
         .enumerate()
-        .map(|(i, key)| {
-            b(
-                gx,
-                gy + 28.0 * i as f32,
-                210.0,
-                tr(key),
-                i != 1,
-                29 + i as u8,
-            )
-        })
+        .map(|(i, key)| b(gx, gy + 28.0 * i as f32, 210.0, tr(key), true, 29 + i as u8))
         .collect(),
     };
     // The footer: two 150-wide buttons 8 apart, centred in its 33 pixels.
@@ -324,6 +331,88 @@ pub(super) fn buttons(w: f32, h: f32, creative: bool, o: &WorldOptions) -> Vec<B
         22,
     ));
     buttons
+}
+
+/// What button `b` of the screen narrates: the cycle buttons their message
+/// and the value a click moves to, the SwitchGrid switches their label (and
+/// info) around their value, each with its tooltip; in the order the screen
+/// adds them (the tab's widgets after the tab bar, the footer last).
+pub(super) fn button_narration(
+    b: &Button,
+    creative: bool,
+    o: &WorldOptions,
+) -> crate::widgets::Narratable {
+    use crate::widgets::{Narratable, join_for_narration as join};
+    let rect = [b.x, b.y, b.w, 20.0];
+    let cycle = |next: String| Narratable::cycle(b.label.clone(), next, rect, b.enabled);
+    // SwitchGrid: a value-only CycleButton named `""`, narrated as
+    // joinForNarration(label, its default narration[, info]).
+    let switch = |label: &str, info: Option<&str>, value: bool| {
+        let own = Text::translate(
+            "options.generic_value",
+            &[Text::literal(""), Text::literal(on_off(value))],
+        )
+        .plain();
+        let own = Text::translate("gui.narrate.button", &[Text::literal(own)]).plain();
+        let title = match info {
+            Some(info) => join(&[&tr(label), &own, &tr(info)]),
+            None => join(&[&tr(label), &own]),
+        };
+        let n = Narratable::new(
+            crate::widgets::What::NamedCycle {
+                title,
+                next: on_off(!value),
+                active: b.enabled,
+            },
+            rect,
+        );
+        match info {
+            Some(info) => n.hint(tr(info)),
+            None => n,
+        }
+    };
+    let narratable = match b.id {
+        // Survival, Hardcore, Creative.
+        20 => {
+            let next = match (creative, o.hardcore) {
+                (false, false) => game_mode(false, true),
+                (false, true) => game_mode(true, false),
+                _ => game_mode(false, false),
+            };
+            cycle(tr(next)).hint(tr(&format!("{}.info", game_mode(creative, o.hardcore))))
+        }
+        23 => cycle(tr(&format!(
+            "options.difficulty.{}",
+            DIFFICULTIES[(o.difficulty + 1) % DIFFICULTIES.len()]
+        )))
+        .hint(tr(&format!(
+            "options.difficulty.{}.info",
+            DIFFICULTIES[o.difficulty()]
+        ))),
+        24 => cycle(on_off(!o.commands(creative))).hint(tr("selectWorld.allowCommands.info")),
+        25 => {
+            let n = cycle(tr(o.world_type.next().label()));
+            if o.world_type == crate::save::WorldPreset::Amplified {
+                n.hint(tr("generator.minecraft.amplified.info"))
+            } else {
+                n
+            }
+        }
+        27 => switch(
+            "selectWorld.mapFeatures",
+            Some("selectWorld.mapFeatures.info"),
+            o.structures,
+        ),
+        28 => switch("selectWorld.bonusItems", None, o.bonus_chest()),
+        _ => Narratable::button(b.label.clone(), rect, b.enabled),
+    };
+    // The World tab adds its type and Customize row before the seed box,
+    // which Horizon draws first; the footer is tab order group 1.
+    narratable.order(match b.id {
+        25 | 26 => -1,
+        21 | 22 => 1,
+        _ => 0,
+    })
 }
 
 impl Title {
@@ -356,6 +445,25 @@ impl Title {
         // MenuTabBar: header separators either side of the tabs.
         let (x0, tw) = tabs(w);
         let right = x0 + tw * TABS.len() as f32;
+        // TabNavigationBar: the tab under the mouse, else the open one, each a
+        // GridLayoutTab with no extra narration. The screen adds it first.
+        crate::widgets::narratable(|| {
+            use crate::widgets::{ListKind, Narratable, Row};
+            let tab = |i: usize| {
+                let mut row = Row::new(i, tr(TABS[i]));
+                row.hint = Some(String::new());
+                row
+            };
+            Narratable::list(
+                ListKind::Tabs,
+                TABS.len(),
+                tab_at(w, cursor).map(tab),
+                Some(tab(o.tab)),
+                [x0, 0.0, right - x0, TAB_BAR],
+            )
+            .key(crate::widgets::key_of(&"create_world/tabs"))
+            .order(-2)
+        });
         for (x, width) in [(0.0, x0), (right, w - right)] {
             ui::tiled_sized(
                 batch,
@@ -422,6 +530,16 @@ impl Title {
                     focus == 0,
                     None,
                 );
+                // Its tooltip: the folder the world will be saved in.
+                crate::widgets::last_narratable(|n| {
+                    n.hint = Some(
+                        Text::translate(
+                            "selectWorld.targetFolder",
+                            &[Text::literal(self.target_folder(name))],
+                        )
+                        .plain(),
+                    );
+                });
             }
             1 => {
                 label(batch, "selectWorld.enterSeed", gx, gy + 28.0);
@@ -466,6 +584,13 @@ impl Title {
         self.caret
             .borrow_mut()
             .draw(batch, atlas, (id, value, max), rect, focused, self.started);
+        crate::widgets::name_last_edit_box(|| {
+            tr(if id == super::WORLD_NAME {
+                "selectWorld.enterName"
+            } else {
+                "selectWorld.enterSeed"
+            })
+        });
         let field = ui::EditBox::new(x, y, width, 20.0);
         if let Some(hint) = hint
             && value.is_empty()
@@ -509,6 +634,10 @@ impl Title {
             )),
             0 if over(gx, gy + 97.0, 210.0) => {
                 Some(Text::translate("selectWorld.allowCommands.info", &[]))
+            }
+            // WorldTab: the Amplified preset's help text on the type button.
+            1 if o.world_type == crate::save::WorldPreset::Amplified && over(gx, gy, 150.0) => {
+                Some(Text::translate("generator.minecraft.amplified.info", &[]))
             }
             1 if over(gx + 266.0, gy + 73.0, 44.0) => {
                 Some(Text::translate("selectWorld.mapFeatures.info", &[]))

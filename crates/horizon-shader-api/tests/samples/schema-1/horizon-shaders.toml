@@ -34,6 +34,19 @@ min = 0.0
 max = 2.0
 step = 0.05
 
+[reflection]
+option = "reflections"
+
+[shadow]
+resolution = 1024
+distance = 96.0
+
+[[options]]
+id = "reflections"
+name = "Water reflections"
+type = "bool"
+default = true
+
 [[options]]
 id = "vignette"
 name = "Vignette"
@@ -54,6 +67,10 @@ name = "Tone mapping"
 type = "choice"
 values = ["None", "Soft", "Filmic"]
 default = "Soft"
+
+[[tags]]
+id = "glass"
+sprites = ["minecraft:block/glass", "block/*_stained_glass"]
 
 [budget]
 gpu_ms = 1.5

@@ -6,15 +6,11 @@ from tools.ci import nightly
 from tools.ci import nightly_set as ns
 
 NOW = "2026-10-28T12:00:00+00:00"
-TEAM = {"kacpherek", "rdbtcvs", "online5277", "levzzz5154"}
 PATTERNS = ns.guarded_patterns((Path(__file__).resolve().parents[1] / ".github/CODEOWNERS").read_text())
 
 
-def pr(n, head="h", state="open", files=("crates/horizon-world/src/lib.rs",), base="main", approved_by=("rdbtcvs",),
-       approved_at=None):
-    sha = f"{head}{n}"
-    return ns.PullRequest(n, state, sha, f"Fix {n}", f"dev{n}", base, list(files),
-                          {who: approved_at or sha for who in approved_by})
+def pr(n, head="h", state="open", files=("crates/horizon-world/src/lib.rs",), base="main"):
+    return ns.PullRequest(n, state, f"{head}{n}", f"Fix {n}", f"dev{n}", base, list(files))
 
 
 def lookup(*prs):
@@ -23,7 +19,7 @@ def lookup(*prs):
 
 
 def run(state, text, login="kacpherek", *prs):
-    return ns.apply(state, ns.parse(text), login, NOW, lookup(*prs), PATTERNS, TEAM)
+    return ns.apply(state, ns.parse(text), login, NOW, lookup(*prs), PATTERNS)
 
 T = dt.datetime(2026, 10, 28, 12, 0, tzinfo=dt.timezone.utc)
 
@@ -63,6 +59,10 @@ class NightlyTests(unittest.TestCase):
         self.assertNotIn("### Not merged yet", text)
         self.assertIn("Nothing new for players on main", notes())
 
+    def test_notes_open_with_the_way_to_the_launcher(self):
+        # A raw HTML line that launchers skip, as on a game release.
+        self.assertTrue(notes().startswith(nightly.train.PLAYERS + "\n\nNightly 2026-10-28 · bbbbbbb: "))
+
     def test_notes_name_the_commit_and_its_permanent_source_tag(self):
         sha = "0c0206714abc" + "0" * 28
         text = notes(chosen=nightly.Ref("main", sha, None))
@@ -76,22 +76,27 @@ class NightlyTests(unittest.TestCase):
 
 
 class ScheduledTests(unittest.TestCase):
-    def test_the_scheduled_nightly_takes_new_heads_and_drops_closed_ones(self):
+    def test_the_scheduled_nightly_drops_merged_closed_and_refused_ones(self):
         state = run({}, "/nightly 1 2 3 4", "kacpherek", pr(1), pr(2), pr(3), pr(4)).state
         get = lookup(pr(1, head="new"), pr(2, state="merged"), pr(3, state="closed"),
                      pr(4, files=[".github/workflows/x.yml"]))
-        kept, left_out = nightly.refresh(state["prs"], get, PATTERNS, TEAM)
-        self.assertEqual([(e["number"], e["head"]) for e in kept], [(1, "new1")])
+        kept, left_out = nightly.refresh(state["prs"], get, PATTERNS)
+        self.assertEqual([(e["number"], e["head"]) for e in kept], [(1, "h1")])
         self.assertEqual(len(left_out), 3)
         self.assertIn("merged", left_out[0])
 
-    def test_a_new_head_waits_for_its_review_and_unreviewed_ones_drop(self):
-        state = run({}, "/nightly 1 2", "kacpherek", pr(1), pr(2)).state
-        get = lookup(pr(1, head="new", approved_at="h1"), pr(2, head="new", approved_by=()))
-        kept, left_out = nightly.refresh(state["prs"], get, PATTERNS, TEAM)
+    def test_the_scheduled_nightly_builds_the_head_that_was_picked(self):
+        state = run({}, "/nightly 1", "kacpherek", pr(1)).state
+        kept, left_out = nightly.refresh(state["prs"], lookup(pr(1, head="new")), PATTERNS)
         self.assertEqual([(e["number"], e["head"]) for e in kept], [(1, "h1")])
-        self.assertIn("isn't approved yet", left_out[0])
-        self.assertIn("no approving review", left_out[1])
+        self.assertEqual(left_out, [])
+
+    def test_an_unreviewed_pull_request_stays_in_the_scheduled_set(self):
+        # No review is looked at: a pull request nobody reviewed is kept as long as nothing else refuses it.
+        state = run({}, "/nightly 1", "kacpherek", pr(1)).state
+        kept, left_out = nightly.refresh(state["prs"], lookup(pr(1)), PATTERNS)
+        self.assertEqual([e["number"] for e in kept], [1])
+        self.assertEqual(left_out, [])
 
     def test_notes_list_each_pull_request_and_who_picked_it(self):
         prs = run({}, "/nightly 1 2", "kacpherek", pr(1), pr(2)).state["prs"]
@@ -109,7 +114,7 @@ WORKFLOWS = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 
 
 class UntrustedBuildTests(unittest.TestCase):
-    """A nightly can hold unreviewed pull requests: nothing its build leaves may reach a release (game-build.yml)."""
+    """A nightly can hold pull requests nobody reviewed: nothing its build leaves may reach a release (game-build.yml)."""
 
     def setUp(self):
         self.game = (WORKFLOWS / "game-build.yml").read_text()

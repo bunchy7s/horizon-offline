@@ -5,6 +5,7 @@ use super::Game;
 use horizon_client::{
     items::ItemStack,
     mobs::{Mob, Species, sniffer},
+    sound_engine::{SoundEngine, SoundInstance, Sounds},
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
 
@@ -75,8 +76,11 @@ impl Game<'_> {
                 continue;
             };
             if ms == 0 {
-                self.audio
-                    .play("minecraft:entity.sniffer.digging", Some(at), 1.0, 1.0);
+                // ClientPacketListener.handleEntityEvent 63: a
+                // SnifferSoundInstance that follows the sniffer.
+                let id = self.mobs[i].id;
+                let instance = SoundInstance::sniffer(id, SoundEngine::unseeded());
+                self.audio.play_instance(instance, false);
             }
             if ms <= 1700 || ms >= 6000 {
                 continue;

@@ -55,7 +55,7 @@ CompressionDecoder.decode	port	crates/horizon-protocol/src/frame.rs::decompress	
 CompressionDecoder.setupInflaterInput	skip:java		ByteBuffer plumbing for the inflater
 CompressionDecoder.inflate	inline	crates/horizon-protocol/src/frame.rs::decompress	zlib inflate with the declared-length check
 net/minecraft/network/Connection#channelActive	skip:other		Netty channel open; the blocking Connection is connected before use
-net/minecraft/network/Connection#exceptionCaught	inline	crates/horizon-client/src/net.rs::run	gap: player: a failed read or malformed packet shows Horizon's raw error text, not vanilla's Timed out or Internal Exception disconnect
+net/minecraft/network/Connection#exceptionCaught	port	crates/horizon-client/src/net.rs::connection_lost	Timed out for a read timeout (READ_TIMEOUT, ReadTimeoutHandler(30)), Internal Exception: ... for other failures
 net/minecraft/network/Connection#channelRead0	port	crates/horizon-client/src/net.rs::receive_play	play-phase dispatch; gap: minor: configuration packets dispatch in configure
 net/minecraft/network/Connection#validateListener	skip:other		the per-phase decode enums fix the listener's side and protocol
 net/minecraft/network/Connection#syncAfterConfigurationChange	skip:other		Netty future sync
@@ -131,9 +131,9 @@ FriendlyByteBuf.forEachByteDesc	skip:java		Netty buffer search
 FriendlyByteBuf.toString	skip:java		Netty buffer text
 FriendlyByteBuf.retain	skip:java		Netty reference counting
 FriendlyByteBuf.touch	skip:java		Netty leak detection
-HashedPatchMap.create	port	crates/horizon-protocol/src/item.rs::Hashed::of	gap: player: component hashes are never sent (added stays empty), so a vanilla server resyncs a slot that holds components
+HashedPatchMap.create	port	crates/horizon-protocol/src/item.rs::Hashed::of	component hashes are sent for every component the client keeps (item/hash/); gap: minor: a container or bundle_contents predicate whose nested exact components hold a byte no Codec.BOOL field names is left unhashed
 HashedPatchMap.matches	port	crates/horizon-client/src/lan/containers.rs::Hub::hashed_matches	gap: minor: compares item id and count only, not the component patch
-HashedStack.create	port	crates/horizon-protocol/src/item.rs::Hashed::of	gap: player: component hashes are never sent, so a vanilla server resyncs a slot that holds components
+HashedStack.create	port	crates/horizon-protocol/src/item.rs::Hashed::of	component hashes are sent for every component the client keeps (item/hash/); gap: minor: a container or bundle_contents predicate whose nested exact components hold a byte no Codec.BOOL field names is left unhashed
 HashedStack.ActualItem.matches	port	crates/horizon-client/src/lan/containers.rs::Hub::hashed_matches	gap: minor: compares item id and count only, not the component patch
 HiddenByteBuf.pack	skip:java		Netty in-memory channel wrapper
 HiddenByteBuf.unpack	skip:java		Netty in-memory channel wrapper

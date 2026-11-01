@@ -300,26 +300,36 @@ impl super::Queue {
                 topology,
                 indirect_buf,
                 indirect_offset,
+                draw_count,
                 ref first_instance_location,
             } => {
                 unsafe { gl.uniform_1_u32(first_instance_location.as_ref(), 0) };
 
                 unsafe { gl.bind_buffer(glow::DRAW_INDIRECT_BUFFER, Some(indirect_buf)) };
-                unsafe { gl.draw_arrays_indirect_offset(topology, indirect_offset as i32) };
+                let stride = size_of::<wgt::DrawIndirectArgs>() as wgt::BufferAddress;
+                for draw in 0..draw_count as wgt::BufferAddress {
+                    let offset = indirect_offset + draw * stride;
+                    unsafe { gl.draw_arrays_indirect_offset(topology, offset as i32) };
+                }
             }
             C::DrawIndexedIndirect {
                 topology,
                 index_type,
                 indirect_buf,
                 indirect_offset,
+                draw_count,
                 ref first_instance_location,
             } => {
                 unsafe { gl.uniform_1_u32(first_instance_location.as_ref(), 0) };
 
                 unsafe { gl.bind_buffer(glow::DRAW_INDIRECT_BUFFER, Some(indirect_buf)) };
-                unsafe {
-                    gl.draw_elements_indirect_offset(topology, index_type, indirect_offset as i32)
-                };
+                let stride = size_of::<wgt::DrawIndexedIndirectArgs>() as wgt::BufferAddress;
+                for draw in 0..draw_count as wgt::BufferAddress {
+                    let offset = indirect_offset + draw * stride;
+                    unsafe {
+                        gl.draw_elements_indirect_offset(topology, index_type, offset as i32)
+                    };
+                }
             }
             C::Dispatch(group_counts) => {
                 unsafe { gl.dispatch_compute(group_counts[0], group_counts[1], group_counts[2]) };

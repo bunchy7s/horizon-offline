@@ -3,7 +3,9 @@ use super::{
     Mob, MobEvent, MobWorld, Species,
     control::Operation,
     goals::{
-        Avoid, AvoidEntity, Breed, Cx, Float, Goal, LookAtPlayer, Panic, Stroll, Tempt, goal_clone,
+        Avoid, AvoidEntity, Breed, ClimbOnTopOfPowderSnow, Cx, Float, Goal, HurtByTarget, JUMP,
+        LookAtPlayer, MOVE, MeleeAttack, MoveToBlock, NearestTarget, Panic, Stroll, Tempt,
+        goal_clone, reduced,
     },
 };
 use horizon_core::{
@@ -23,8 +25,7 @@ const CLIENT_JUMP_DURATION: usize = 5;
 /// The killer bunny's variant id (`Rabbit.Variant.EVIL`).
 const EVIL: u8 = 99;
 
-/// Rabbit.registerGoals. Not ported yet: ClimbOnTopOfPowderSnowGoal (1) and
-/// RaidGardenGoal (5).
+/// Rabbit.registerGoals.
 pub fn register(m: &mut Mob) {
     let food = m.kind.food.clone();
     let monsters = super::species::ALL
@@ -34,6 +35,7 @@ pub fn register(m: &mut Mob) {
         .collect::<Vec<Species>>();
     let g = &mut m.ai.goals;
     g.add(1, Float);
+    g.add(1, ClimbOnTopOfPowderSnow);
     g.add(1, Panic::new(2.2));
     g.add(2, Breed::new(0.8));
     g.add(3, Tempt::new(1.0, food, false));
@@ -43,11 +45,136 @@ pub fn register(m: &mut Mob) {
         RabbitAvoid::new(Avoid::Species(vec![Species::Wolf]), 10.0),
     );
     g.add(4, RabbitAvoid::new(Avoid::Species(monsters), 4.0));
+    g.add(5, RaidGarden::new());
     g.add(6, Stroll::avoiding_water(0.6));
     g.add(11, LookAtPlayer::new(10.0));
     m.ai.mov.kind = super::control::MoveKind::Custom;
     m.ai.nav.can_float = true;
     m.extra.ints[IDLE_TIMEOUT] = m.random.next_int_bound(40).unwrap_or(0) + 180;
+}
+
+/// `Rabbit.RaidGardenGoal.isValidTarget`: farmland-like ground (`#supports_crops`) under a
+/// carrot crop at its maximum age, while the rabbit wants more food and has not found one.
+fn raid_target(w: &MobWorld, p: [i32; 3], wants_to_raid: bool, can_raid: bool) -> bool {
+    w.has_tag("minecraft:supports_crops", w.block_name(p[0], p[1], p[2]))
+        && wants_to_raid
+        && !can_raid
+        && w.block_name(p[0], p[1] + 1, p[2]) == "minecraft:carrots"
+        && w.prop(p[0], p[1] + 1, p[2], "age")
+            .and_then(|a| a.parse::<i32>().ok())
+            .is_some_and(|age| age >= CARROT_MAX_AGE)
+}
+/// `CarrotBlock.MAX_AGE`.
+const CARROT_MAX_AGE: i32 = 7;
+
+/// `Rabbit.RaidGardenGoal`: a `MoveToBlockGoal` (0.7, 16) to ripe carrots that eats one age
+/// of them, then keeps the rabbit full for 40 ticks (`moreCarrotTicks`).
+#[derive(Clone, Debug)]
+struct RaidGarden {
+    block: MoveToBlock,
+    wants_to_raid: bool,
+    can_raid: bool,
+}
+impl RaidGarden {
+    fn new() -> Self {
+        Self {
+            block: MoveToBlock::new(0.7, 16, 1),
+            wants_to_raid: false,
+            can_raid: false,
+        }
+    }
+}
+impl Goal for RaidGarden {
+    goal_clone!();
+    fn name(&self) -> &'static str {
+        "RaidGardenGoal"
+    }
+    fn flags(&self) -> u8 {
+        MOVE | JUMP
+    }
+    fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
+        // MoveToBlockGoal.canUse draws the next delay only once the last one ran out.
+        if self.block.next_start > 0 {
+            self.block.next_start -= 1;
+            return false;
+        }
+        if !cx.w.mob_griefing {
+            return false;
+        }
+        self.can_raid = false;
+        self.wants_to_raid = m.extra.more_carrot_ticks <= 0;
+        let next = reduced(200 + m.random.next_int_bound(200).unwrap_or(0));
+        let wants = self.wants_to_raid;
+        let found = std::cell::Cell::new(false);
+        let target = self.block.can_use(m, cx.w, next, |w, p| {
+            let ok = raid_target(w, p, wants, false);
+            found.set(found.get() || ok);
+            ok
+        });
+        self.can_raid = found.get();
+        target
+    }
+    fn can_continue(&mut self, _: &mut Mob, cx: &mut Cx) -> bool {
+        let (wants, raid) = (self.wants_to_raid, self.can_raid);
+        self.can_raid
+            && self
+                .block
+                .can_continue(cx.w, |w, p| raid_target(w, p, wants, raid))
+    }
+    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
+        self.block.start(m, cx.w);
+    }
+    fn every_tick(&self) -> bool {
+        true
+    }
+    fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
+        self.block.tick(m, cx.w);
+        let b = self.block.block;
+        m.ai.look.set_look_at(
+            [
+                f64::from(b[0]) + 0.5,
+                f64::from(b[1] + 1),
+                f64::from(b[2]) + 0.5,
+            ],
+            10.0,
+            m.max_head_x_rot(),
+        );
+        if !self.block.reached {
+            return;
+        }
+        let crop = [b[0], b[1] + 1, b[2]];
+        if self.can_raid && cx.w.block_name(crop[0], crop[1], crop[2]) == "minecraft:carrots" {
+            let age =
+                cx.w.prop(crop[0], crop[1], crop[2], "age")
+                    .and_then(|a| a.parse::<i32>().ok())
+                    .unwrap_or(0);
+            let old = cx.w.world.block(crop[0], crop[1], crop[2]);
+            if age == 0 {
+                // `setBlock(AIR, 2)`, then `destroyBlock` finds air and does nothing.
+                if let Some(air) = cx.w.registry.default_state("minecraft:air") {
+                    cx.events.push(MobEvent::CropRaided {
+                        pos: crop,
+                        state: air,
+                        old: None,
+                        mob: m.id,
+                    });
+                }
+            } else if let Some(mut s) = cx.w.registry.state(old).cloned() {
+                s.properties.insert("age".into(), (age - 1).to_string());
+                if let Some(state) = cx.w.registry.id(&s) {
+                    cx.events.push(MobEvent::CropRaided {
+                        pos: crop,
+                        state,
+                        old: Some(old),
+                        mob: m.id,
+                    });
+                }
+            }
+            m.extra.more_carrot_ticks = 40;
+        }
+        self.can_raid = false;
+        self.block.next_start = 10;
+    }
 }
 
 /// `Rabbit.RabbitAvoidEntityGoal(rabbit, class, maxDist, 2.2, 2.2)`: the
@@ -103,6 +230,33 @@ pub fn base_tick(m: &mut Mob) {
     }
 }
 
+/// `Rabbit.facePoint`.
+fn face_point(m: &mut Mob, x: f64, z: f64) {
+    m.yaw = trig::atan2_degrees(z - m.position.z, x - m.position.x) - 90.0;
+}
+
+/// `Rabbit.setVariant(EVIL)`, run the first time a killer bunny ticks (its
+/// variant comes from `/summon`, a save or a spawn): armor 8, the bite and
+/// target goals, attack damage plus 5 and the "Killer Bunny" name.
+fn set_evil(m: &mut Mob) {
+    use super::finalize::{Attr, Op, add_modifier, set_base};
+    if m.ai.goals.has("MeleeAttack") {
+        return;
+    }
+    set_base(m, Attr::Armor, 8.0);
+    m.ai.goals.add(4, MeleeAttack::new(1.4, true));
+    m.ai.targets.add(1, HurtByTarget::new().alert());
+    m.ai.targets.add(2, NearestTarget::player(true));
+    m.ai.targets
+        .add(2, NearestTarget::species(&[Species::Wolf], true));
+    add_modifier(m, Attr::AttackDamage, "minecraft:evil", 5.0, Op::AddValue);
+    if m.custom_name.is_none() && m.custom_name_text.is_none() {
+        let name = crate::text::Text::translate("entity.minecraft.killer_bunny", &[]);
+        m.custom_name = Some(name.plain());
+        m.custom_name_text = Some(name);
+    }
+}
+
 fn start_jumping(m: &mut Mob) {
     m.ai.jumping = true;
     m.extra.ints[JUMP_DURATION] = 15;
@@ -118,8 +272,12 @@ fn start_jumping(m: &mut Mob) {
     }
 }
 
-/// Rabbit.customServerAiStep: start a hop toward the current path waypoint.
-pub fn server_ai_step(m: &mut Mob) {
+/// Rabbit.customServerAiStep: start a hop toward the current path waypoint;
+/// `target` is where the rabbit's target stands, if it has one.
+pub fn server_ai_step(m: &mut Mob, target: Option<Vec3>) {
+    if m.extra.variant == EVIL {
+        set_evil(m);
+    }
     // RabbitMoveControl.setWantedPosition applies the water override before landing checks.
     if m.fluids.in_water && m.ai.mov.speed_modifier > 0.0 {
         m.ai.mov.speed_modifier = 1.5;
@@ -127,10 +285,26 @@ pub fn server_ai_step(m: &mut Mob) {
     if m.extra.ints[MOVE_DELAY] > 0 {
         m.extra.ints[MOVE_DELAY] -= 1;
     }
+    // `moreCarrotTicks` runs down by up to 2 a tick.
+    if m.extra.more_carrot_ticks > 0 {
+        m.extra.more_carrot_ticks =
+            (m.extra.more_carrot_ticks - m.random.next_int_bound(3).unwrap_or(0)).max(0);
+    }
     if m.on_ground {
         if !m.extra.flag {
             m.ai.jumping = false;
             m.extra.ints[MOVE_DELAY] = if m.ai.mov.speed_modifier < 2.2 { 10 } else { 3 };
+        }
+        // A killer bunny within 4 blocks of its target faces it and hops at it.
+        if m.extra.variant == EVIL
+            && m.extra.ints[MOVE_DELAY] == 0
+            && let Some(t) = target
+            && m.distance_sqr(t) < 16.0
+        {
+            face_point(m, t.x, t.z);
+            let speed = m.ai.mov.speed_modifier;
+            m.ai.mov.set_wanted(t.x, t.y, t.z, speed);
+            start_jumping(m);
         }
         if !m.ai.jump && m.ai.mov.has_wanted() && m.extra.ints[MOVE_DELAY] == 0 {
             let mut at = m.ai.mov.wanted;
@@ -138,7 +312,7 @@ pub fn server_ai_step(m: &mut Mob) {
                 let p = path.entity_pos_at(path.next, m.width());
                 at = [p.x, p.y, p.z];
             }
-            m.yaw = trig::atan2_degrees(at[2] - m.position.z, at[0] - m.position.x) - 90.0;
+            face_point(m, at[0], at[2]);
             start_jumping(m);
         }
     }
@@ -357,7 +531,7 @@ mod tests {
                 "{{id:\"minecraft:rabbit\",Pos:[0.0d,0.0d,0.0d],Age:{age}}}"
             ))
             .unwrap();
-            let m = crate::entity_nbt::mob_from_nbt(&tag, &types, 2).unwrap();
+            let m = crate::entity_nbt::mob_from_nbt(&tag, &types, 2, None).unwrap();
             assert_eq!(m.extra.age, age);
             assert_eq!(m.is_baby(), baby);
             assert_eq!(
@@ -398,10 +572,10 @@ mod tests {
         // Animal.addAdditionalSaveData / readAdditionalSaveData: "InLove" (#1396).
         let mut m = rabbit();
         m.extra.in_love = 570;
-        let tag = crate::entity_nbt::mob_to_nbt(&m, [0, 0, 0, 1], None);
+        let tag = crate::entity_nbt::mob_to_nbt(&m, [0, 0, 0, 1], None, None);
         assert_eq!(tag.get("InLove"), Some(&horizon_world::nbt::Tag::Int(570)));
         let types = HashMap::from([(m.kind.id.clone(), m.kind.clone())]);
-        let back = crate::entity_nbt::mob_from_nbt(&tag, &types, 2).unwrap();
+        let back = crate::entity_nbt::mob_from_nbt(&tag, &types, 2, None).unwrap();
         assert_eq!(back.extra.in_love, 570);
     }
 
@@ -410,14 +584,14 @@ mod tests {
         let mut m = rabbit();
         m.on_ground = true;
         m.ai.mov.set_wanted(0.0, 0.0, 5.0, 0.6);
-        server_ai_step(&mut m);
+        server_ai_step(&mut m, None);
         assert_eq!(m.extra.ints[MOVE_DELAY], 10);
         assert!(!m.ai.jumping);
         for _ in 0..9 {
-            server_ai_step(&mut m);
+            server_ai_step(&mut m, None);
         }
         assert!(!m.ai.jumping);
-        server_ai_step(&mut m);
+        server_ai_step(&mut m, None);
         assert!(m.ai.jumping);
         assert_eq!(m.extra.ints[JUMP_DURATION], 15);
         assert_eq!(m.anim.states[0].started, None);
@@ -455,7 +629,7 @@ mod tests {
         let mut m = rabbit();
         m.on_ground = true;
         m.ai.mov.set_wanted(0.0, 0.0, 5.0, 2.2);
-        server_ai_step(&mut m);
+        server_ai_step(&mut m, None);
         assert_eq!(m.extra.ints[MOVE_DELAY], 3);
         m.ai.jump = true;
         m.jump_control_tick();
@@ -525,7 +699,7 @@ mod tests {
         assert!(m.ai.nav.can_float);
         m.extra.flag = false;
         m.ai.mov.set_wanted(0.0, 0.0, 5.0, 2.2);
-        server_ai_step(&mut m);
+        server_ai_step(&mut m, None);
         assert_eq!(m.ai.mov.speed_modifier, 1.5);
         assert_eq!(m.extra.ints[MOVE_DELAY], 10);
     }

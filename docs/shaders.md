@@ -54,6 +54,13 @@ fails, with its problems in the chat. While it runs, the game looks at the pack 
 and the pack is checked and rebuilt in place ("Shader pack ... reloaded"); if the new version fails, the chat says
 where and the last good version keeps drawing. All three stages run.
 
+A picked pack in the `shaders/` format gets a Shader Options... button at the top of the page: its options on the
+screens and with the names the pack gives them, its profiles, and Reset. A click picks an option's next value, a
+right click the one before, shift-click the pack's default, and the options the pack lists in `sliders` are sliders;
+values that differ from the pack's are yellow. Hovering one shows what the pack says of it (`option.NAME.comment`),
+and the whole label when its name was shortened to fit. Leaving the page saves them to
+`shaderpacks/<pack>.txt` (`NAME=value` lines) and loads the pack again with them.
+
 ## A pack
 
 A folder (or the same files zipped as a `.hshader`) with `horizon-shaders.toml` and WGSL files:
@@ -89,6 +96,7 @@ by Horizon: a pack changes how things look, not how they are drawn.
 | --- | --- | --- |
 | `[sky]` | `fn sky(input: SkyInput) -> vec4<f32>` | the sky's colour along each view ray, opaque (alpha is ignored), drawn where vanilla draws its sky dome (the Overworld's sky; not the Nether's or the End's); the sun, moon, stars and clouds are drawn over it |
 | `[material]` | `fn material(input: MaterialInput) -> Surface` | the lit colour of each point of a block's surface, before the alpha test and fog: every terrain section and distant tile, solid, cutout and translucent (not entities, block entities or particles) |
+| `[weather]` | `fn weather(input: WeatherInput) -> vec4<f32>` | the colour of each point of a rain or snow streak, blended over the world with its alpha; Horizon's light and fog aren't applied, so the pack applies its own |
 | `[[post]]` | `fn post(input: PostInput) -> vec4<f32>` | a full-screen pass over the world's picture (up to 8, in order), under the hand and HUD |
 
 A pack has at least one stage; a stage it leaves out keeps vanilla's look. Each input says what vanilla would draw
@@ -103,7 +111,97 @@ Post passes also read `scene_color`, `scene_depth`, `previous` (the last pass's 
 Rules the check enforces: your files declare no bindings (`@group`/`@binding`), no entry points and no names starting
 with `horizon_`. Code shared by several stages goes in files listed in `shared`, put before every stage.
 
+## Sprite tags
+
+The material stage can tell block sprites apart through tags the manifest declares. Each `[[tags]]` is a bit of
+`input.tags`, in the order they appear (32 at most); its `sprites` are sprite names, the namespace `minecraft` by
+default, each with at most one `*`:
+
+```toml
+[[tags]]
+id = "glass"                                      # bit 0: (input.tags & 1u) != 0u
+sprites = ["block/glass", "block/*_stained_glass"]
+```
+
+Terrain carries its sprite, not its block, so a sprite drawn by several blocks gets the tag for all of them.
+
+## Material ids
+
+Tags answer "is it one of these"; a pack that treats hundreds of kinds of surface differently numbers them
+instead. Each sprite takes the `id` of the first `[[materials]]` entry that names it, 0 without one, as
+`input.material`. Patterns may hold any number of `*`:
+
+```toml
+[[materials]]
+id = 10
+sprites = ["block/*_leaves"]
+
+[shadow]
+solid_materials = [10]   # these cast whole shadows: their cutouts are ignored in the shadow map
+```
+
+## Textures
+
+Each `[[textures]]` entry is a PNG in the pack that every stage reads under the name of its `id`, with a sampler named
+`<id>_sampler`. Eight at most, without mipmaps; `filter` is `linear` (the default) or `nearest`, `wrap` is `repeat` (the
+default) or `clamp`:
+
+```toml
+[[textures]]
+id = "noise"
+file = "noise.png"
+```
+
+```wgsl
+let n = textureSample(noise, noise_sampler, input.uv);
+```
+
+## Coloured block light
+
+Each `[[lights]]` entry gives the blocks it names a colour. The material stage reads the colour at a point with
+`block_light_color(input.position)`: rgb the colours of the sources nearby, averaged by how near each is, and a how
+strongly they reach it (0 where none does). Block light keeps its own brightness, so walls still stop it: this is only its
+colour, and only what a pack does with it shows.
+
+```toml
+[[lights]]
+color = [0.3, 0.7, 1.0]
+blocks = ["soul_torch", "soul_wall_torch", "soul_lantern"]
+```
+
+```wgsl
+let tint = block_light_color(input.position);
+let block = mix(vec3(1.0), tint.rgb, min(tint.a, 1.0)) * input.light.x;
+```
+
+It covers 128 blocks around the camera, moved in steps of 16, and is rebuilt on the CPU when the camera steps or a source
+changes, from at most 2048 sources, the nearest first.
+
 ## Options
+
+A picked pack with options gets a Shader Options... button at the top of the Shader Packs page. A click picks an
+option's next value, a right click the one before, shift-click its default, and Reset all of them; hovering one shows its
+`description`. Each change is saved to `shaderpacks/<pack>.txt` (`id=value` lines, values at their defaults left out) and
+the pack reloads with it within half a second.
+
+The page shows every option two a row, unless the pack lays them out in `[[pages]]`: it opens on the first page, and an
+item `"page:<id>"` is a button opening another, so options can be grouped into categories. `""` leaves a slot empty, and
+`columns = 1` gives a page full-width buttons:
+
+```toml
+[[pages]]
+id = "main"
+name = "My Pack"
+items = ["page:lighting", "page:water"]
+
+[[pages]]
+id = "lighting"
+name = "Lighting"
+description = "Shadows and the light of blocks."   # the tooltip of the button opening it
+items = ["shadow_softness", "block_light"]
+```
+
+Every page has to be reached from the first and every option has to be on a page, or the check refuses the pack.
 
 Each `[[options]]` entry is a WGSL `override` of the same name, set when the game builds the pipeline: no text
 substitution, no recompiling a different program per value.
@@ -137,4 +235,4 @@ without the pack.
 
 ## Next
 
-The overlay, lighting and shadow stages, and option values other than the defaults.
+The overlay and lighting stages, and option values other than the defaults.

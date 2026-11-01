@@ -7,7 +7,8 @@
 //! made when the game starts and kept only in its memory (not the install ID), the Horizon
 //! version, the platform and whether a LAN or play-with-friends world is open. The game sends
 //! one every [`INTERVAL`]; the server counts a session while its last ping is under
-//! [`WINDOW`] old, keeps nothing on disk and serves the counts rounded ([`round`]).
+//! [`WINDOW`] old and serves the counts exactly. It writes down only the totals, once a minute,
+//! for the history on playhorizon.dev/stats: never a session.
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -86,7 +87,7 @@ pub fn platform() -> &'static str {
     }
 }
 
-/// The live count, as `GET /v1/live` serves it: every number already [`round`]ed.
+/// The live count, as `GET /v1/live` serves it: exact numbers.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Count {
@@ -98,19 +99,6 @@ pub struct Count {
     pub versions: BTreeMap<String, u64>,
     /// Per platform.
     pub platforms: BTreeMap<String, u64>,
-}
-
-/// Rounds a count for showing: exact under 10, then to the nearest 5 under 100, the nearest 10
-/// under 1000 and the nearest 100 above. Small numbers stay true; large ones don't pretend to
-/// a precision a two-minute window doesn't have.
-pub fn round(n: u64) -> u64 {
-    let step = match n {
-        0..10 => return n,
-        10..100 => 5,
-        100..1000 => 10,
-        _ => 100,
-    };
-    (n + step / 2) / step * step
 }
 
 /// Sends `ping` to `endpoint` (`https://host`, without a trailing slash).
@@ -188,28 +176,5 @@ mod tests {
         assert!(!bad(|p| p.version = "dev 0.1.0".into()));
         let extra = r#"{"session":"00000000000000000000000000000000","version":"0.2.0","platform":"linux","lan":false,"name":"Steve"}"#;
         assert!(serde_json::from_str::<Ping>(extra).is_err());
-    }
-
-    #[test]
-    fn counts_round_more_as_they_grow() {
-        let cases = [
-            (0, 0),
-            (1, 1),
-            (9, 9),
-            (10, 10),
-            (12, 10),
-            (13, 15),
-            (97, 95),
-            (98, 100),
-            (104, 100),
-            (105, 110),
-            (994, 990),
-            (995, 1000),
-            (1049, 1000),
-            (1050, 1100),
-        ];
-        for (n, shown) in cases {
-            assert_eq!(round(n), shown, "{n}");
-        }
     }
 }

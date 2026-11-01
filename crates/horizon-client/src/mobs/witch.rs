@@ -259,8 +259,14 @@ pub fn ai_step(m: &mut Mob, cx_events: &mut Vec<MobEvent>, target_far: bool) {
     // healRaidersGoal.decrementCooldown (the attack goal's canAttack reads it).
     m.extra.counter2 -= 1;
     drink(m, cx_events, target_far);
-    // The angry-witch particles (entity event 15).
-    let _ = m.random.next_float();
+    // `broadcastEntityEvent(this, 15)`: the magic puffs over its hat on every client.
+    if m.random.next_float() < 7.5E-4 {
+        cx_events.push(MobEvent::EntityEvent {
+            mob: m.id,
+            event: 15,
+            at: [m.position.x, m.position.y, m.position.z],
+        });
+    }
 }
 fn drink(m: &mut Mob, cx_events: &mut Vec<MobEvent>, target_far: bool) {
     if m.extra.flag {
@@ -319,6 +325,19 @@ fn drink(m: &mut Mob, cx_events: &mut Vec<MobEvent>, target_far: bool) {
             pitch,
         ));
     }
+}
+/// `WitchRenderer.extractRenderState`'s `isHoldingPotion`: the main hand holds
+/// a potion, either a drunk one (kept by the potion's name, `drink`) or a
+/// plain potion item.
+pub fn holds_potion(item: &str) -> bool {
+    matches!(
+        item,
+        "minecraft:potion"
+            | "minecraft:water_breathing"
+            | "minecraft:fire_resistance"
+            | "minecraft:healing"
+            | "minecraft:swiftness"
+    )
 }
 /// WitchModel.setupAnim (VillagerModel base with a wobbling nose).
 pub fn anim(m: &Mob, s: &State, p: &mut Poses) {

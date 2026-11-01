@@ -2,9 +2,10 @@
 """Compare a player's right click on a block with vanilla's, for items that are
 both food and blocks (sweet and glow berries, carrots, potatoes), for sweet
 berry bushes, for spawn eggs used on a monster spawner, for shears carving
-pumpkins, for copper golem statues turned to their next pose, for blocks
-placed where mobs and armor stands stand, for respawn anchors and for beds in
-the Nether and the End.
+pumpkins or cropping a growing plant's head (kelp, weeping and twisting vines,
+cave vines) to its top age, for copper golem statues turned to their next pose,
+for blocks placed where mobs and armor stands stand, for respawn anchors and for
+beds in the Nether and the End.
 
 Every case has a block at the origin, something above it, and a player three
 blocks south, survival or creative, hungry or full, sneaking or not, who
@@ -16,9 +17,9 @@ dispenser harness (`VanillaDispenserOracle.useItem`): the block's `useItemOn`
 and `useWithoutItem` (picking a bush's berries, `SweetBerryBushBlock.useItemOn`
 passing bone meal on, `PumpkinBlock.useItemOn` carving with shears and
 dropping the seeds from the carved side), then `ItemStack.useOn`
-(`BlockItem.place` with its `mayPlaceOn` rules, `BoneMealItem.useOn`, eating
-a consumable that could not be placed, and `SpawnEggItem.useOn` setting a
-spawner's mob). Respawn
+(`BlockItem.place` with its `mayPlaceOn` rules, `BoneMealItem.useOn`,
+`ShearsItem.useOn` cropping a growing plant's head, eating a consumable that
+could not be placed, and `SpawnEggItem.useOn` setting a spawner's mob). Respawn
 anchors are charged with glowstone, set the respawn point in the Nether and
 explode elsewhere (`RespawnAnchorBlock`, through the stand-in level's real
 `ServerExplosion`, with water at the anchor). Respawn cases call
@@ -229,6 +230,42 @@ def pumpkin_case(rng, states, case):
     case['cells'] = cells
 
 
+# Growing plant heads (kelp, the two nether vines, cave vines) and the plants' bodies.
+HEADS = ['kelp', 'weeping_vines', 'twisting_vines', 'cave_vines']
+BODIES = ['kelp_plant', 'weeping_vines_plant', 'twisting_vines_plant', 'cave_vines_plant']
+
+
+def crop_case(rng, states, case):
+    """Shears (or something else) on a growing plant's head (`ShearsItem.useOn`): a head below its
+    top age is cropped to `GrowingPlantHeadBlock.getMaxAgeState` (age 25) with a
+    `block.growing_plant.crop` sound, a `block_change` game event and one point of wear; a head
+    already at 25, or a plant's body (`GrowingPlantBodyBlock`), takes nothing (`Item.useOn`)."""
+    head = rng.random() < 0.85
+    name = rng.choice(HEADS) if head else rng.choice(BODIES)
+    props = {}
+    if name in ('cave_vines', 'cave_vines_plant'):
+        # Berry-less: a berry-bearing vine picks its berries first (`useWithoutItem`), which is
+        # another arm's.
+        props['berries'] = 'false'
+    if head:
+        # Heads carry `AGE_25`; the bodies below them carry no age at all.
+        props['age'] = str(rng.choice([0, 3, 11, 24, 25, 25]))
+    state = states.get(name, **props) if props else states.any(rng, name)
+    cells = [[0, 0, 0, state]]
+    if rng.random() < 0.3:
+        cells.append([0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'sand', 'water']))])
+    damage = rng.choice([0, 0, 0, 100, 236])
+    shears = d_plain('shears', 1) if damage == 0 else \
+        '{id:"minecraft:shears",count:1,components:{"minecraft:damage":%d}}' % damage
+    item = rng.choice([shears] * 6 + [d_plain('stick', 1), d_plain('stick', 1), '-'])
+    use = {'item': item, 'creative': rng.random() < 0.2, 'sneaking': rng.random() < 0.15, 'food': 20}
+    if rng.random() < 0.2:
+        # Shears in the off hand, something else or nothing in the main hand.
+        use.update(offhand=item, item=rng.choice(['-', d_plain('stick', 1)]))
+    case['use_item'] = use
+    case['cells'] = cells
+
+
 STATUES = [f'{wax}{age}copper_golem_statue' for wax in ('', 'waxed_')
            for age in ('', 'exposed_', 'weathered_', 'oxidized_')]
 
@@ -325,6 +362,12 @@ def cases(facts, count, seed):
             continue
         if rng.random() < 0.12:
             pumpkin_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
+        if rng.random() < 0.08:
+            crop_case(rng, states, case)
             case['items'] = []
             case['mode'] = 'dispense'
             yield case

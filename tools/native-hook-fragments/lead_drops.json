@@ -1,0 +1,6 @@
+{
+  "hooks": [],
+  "rust_summary": "lead drops to `native_loot_drops`: untying a lead or cutting it with shears, and the lead a mob a player\nkilled while leashed drops on its next tick, with the player named.",
+  "doc_summary": "lead drops to `native_loot_drops`: untying a lead or cutting it with shears (`used`), and the lead a mob a\nplayer killed while leashed drops on its next tick, naming the killer. Bundles that rely on them need\n`\"hooks\": @API:lead_drops@`.",
+  "comments": []
+}

@@ -299,6 +299,10 @@ public final class VanillaDispenserOracle {
             marker.setAccessible(true);
             marker.invoke(stand, true);
         }
+        // ArmorStand.lastHit: the game tick of the stand's previous punch.
+        if (e.has("last_hit") && ent instanceof net.minecraft.world.entity.decoration.ArmorStand stand) {
+            stand.lastHit = e.get("last_hit").getAsLong();
+        }
         if (e.has("brown") && ent instanceof net.minecraft.world.entity.animal.cow.MushroomCow cow) {
             Method variant = net.minecraft.world.entity.animal.cow.MushroomCow.class.getDeclaredMethod("setVariant", net.minecraft.world.entity.animal.cow.MushroomCow.Variant.class);
             variant.setAccessible(true);
@@ -800,6 +804,11 @@ public final class VanillaDispenserOracle {
             Entity e = targets.get(i);
             var v = e.getDeltaMovement();
             String health = e instanceof LivingEntity living && !(e instanceof net.minecraft.world.entity.decoration.ArmorStand) ? num(living.getHealth()) : "-";
+            // A stand the hit broke has left the level.
+            if (e.isRemoved()) {
+                out.add("V " + i + " gone");
+                continue;
+            }
             out.add("V " + i + " " + health + " " + num(v.x) + " " + num(v.y) + " " + num(v.z));
         }
         var v = player.getDeltaMovement();

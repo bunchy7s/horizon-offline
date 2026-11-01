@@ -82,9 +82,9 @@ pub fn inputs() -> horizon_shaders::GbuffersInputs {
          }}\n    \
          hz_Vertex = vec4(hz_p, 1.0);\n    \
          hz_MultiTexCoord0 = vec4(0.0, 0.0, 0.0, 1.0);\n    \
-         hz_MultiTexCoord1 = vec4(0.0, 240.0, 0.0, 1.0);\n    \
+         hz_MultiTexCoord1 = vec4(240.0, 240.0, 0.0, 1.0);\n    \
          hz_MultiTexCoord2 = hz_MultiTexCoord1;\n    \
-         hz_Normal = vec3(0.0, 1.0, 0.0);\n"
+         hz_Normal = vec3(0.0, 0.0, 1.0);\n"
     );
     horizon_shaders::GbuffersInputs {
         declarations,
@@ -109,7 +109,7 @@ pub fn celestial_inputs() -> horizon_shaders::GbuffersInputs {
                 .into(),
         body: "    hz_Vertex = vec4(hz_v_pos, 1.0);\n    \
              hz_MultiTexCoord0 = vec4(hz_v_uv, 0.0, 1.0);\n    \
-             hz_MultiTexCoord1 = vec4(0.0, 240.0, 0.0, 1.0);\n    \
+             hz_MultiTexCoord1 = vec4(240.0, 240.0, 0.0, 1.0);\n    \
              hz_MultiTexCoord2 = hz_MultiTexCoord1;\n    \
              hz_Color = hz_v_color;\n    \
              hz_Normal = vec3(0.0, 0.0, 1.0);\n"

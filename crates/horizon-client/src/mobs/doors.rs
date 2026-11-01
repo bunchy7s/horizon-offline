@@ -18,7 +18,7 @@ const DOOR_BREAK_TIME: i32 = 240;
 pub fn can_navigate_ground(m: &Mob) -> bool {
     matches!(
         m.ai.nav.kind,
-        NavKind::Ground | NavKind::WallClimber | NavKind::Amphibious
+        NavKind::Ground | NavKind::WallClimber | NavKind::Amphibious { .. }
     )
 }
 /// `Zombie.setCanBreakDoors`: only a mob that walks can break doors, and
@@ -40,7 +40,7 @@ pub fn is_zombie(s: Species) -> bool {
     )
 }
 /// `DoorBlock.isWoodenDoor`: a door a hand opens, which is any but iron.
-fn wooden_door(w: &MobWorld, p: [i32; 3]) -> bool {
+pub fn wooden_door(w: &MobWorld, p: [i32; 3]) -> bool {
     let name = w.block_name(p[0], p[1], p[2]);
     name.ends_with("_door") && name != "minecraft:iron_door"
 }
@@ -105,7 +105,7 @@ impl Interact {
     }
 }
 /// `BlockPos.closerToCenterThan`.
-fn closer_to_center(p: [i32; 3], at: Vec3, distance: f64) -> bool {
+pub(super) fn closer_to_center(p: [i32; 3], at: Vec3, distance: f64) -> bool {
     Vec3::new(
         f64::from(p[0]) + 0.5,
         f64::from(p[1]) + 0.5,
@@ -248,5 +248,98 @@ impl Goal for RaiderOpenDoor {
     }
     fn stop(&mut self, _m: &mut Mob, cx: &mut Cx) {
         self.interact.set_open(cx, false);
+    }
+}
+
+/// `InteractWithDoor.create()`, the piglin brain's core behaviour: while it
+/// follows a path, open the doors it is leaving and entering and close the
+/// ones it opened or passed through (within 3 blocks, and not the two of the
+/// step it takes). It takes no flags and runs every tick, as a core behaviour
+/// does. (Another piglin coming through a door is not looked for.)
+#[derive(Clone, Debug, Default)]
+pub struct InteractWithDoor {
+    /// `lastCheckedNode` and `remainingCooldown`.
+    last_checked: Option<[i32; 3]>,
+    cooldown: i32,
+    /// `DOORS_TO_CLOSE`.
+    doors: Vec<[i32; 3]>,
+}
+impl InteractWithDoor {
+    /// A door mobs open (`MOB_INTERACTABLE_DOORS`) at `p`, and whether it is open.
+    fn door_open(w: &MobWorld, p: [i32; 3]) -> Option<bool> {
+        let name = w.block_name(p[0], p[1], p[2]);
+        (name.ends_with("_door") && w.has_tag("minecraft:mob_interactable_doors", name))
+            .then(|| w.prop(p[0], p[1], p[2], "open") == Some("true"))
+    }
+    /// `closeDoorsThatIHaveOpenedOrPassedThrough`.
+    fn close_doors(&mut self, m: &Mob, cx: &mut Cx, from: [i32; 3], to: [i32; 3]) {
+        let doors = std::mem::take(&mut self.doors);
+        for door in doors {
+            if from == door || to == door {
+                self.doors.push(door);
+                continue;
+            }
+            if !closer_to_center(door, m.position, 3.0) || Self::door_open(cx.w, door) != Some(true)
+            {
+                continue;
+            }
+            cx.events.push(MobEvent::SetDoorOpen {
+                pos: door,
+                open: false,
+            });
+        }
+    }
+}
+impl Goal for InteractWithDoor {
+    goal_clone!();
+    fn flags(&self) -> u8 {
+        0
+    }
+    fn can_use(&mut self, m: &mut Mob, _cx: &mut Cx) -> bool {
+        m.ai.nav
+            .path
+            .as_ref()
+            .is_some_and(|p| p.next > 0 && !p.is_done())
+    }
+    fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
+        self.can_use(m, cx)
+    }
+    fn every_tick(&self) -> bool {
+        true
+    }
+    fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
+        let Some(path) =
+            m.ai.nav
+                .path
+                .as_ref()
+                .filter(|p| p.next > 0 && !p.is_done())
+        else {
+            return;
+        };
+        let node = |i: usize| [path.nodes[i].x, path.nodes[i].y, path.nodes[i].z];
+        let (from, to) = (node(path.next - 1), node(path.next));
+        if self.last_checked == Some(to) {
+            self.cooldown = 20;
+        } else {
+            self.cooldown -= 1;
+            if self.cooldown > 0 {
+                return;
+            }
+        }
+        self.last_checked = Some(to);
+        // The door being left is remembered even when it is open already; the
+        // one ahead only when this mob opens it.
+        for (p, always) in [(from, true), (to, false)] {
+            let Some(open) = Self::door_open(cx.w, p) else {
+                continue;
+            };
+            if !open {
+                cx.events.push(MobEvent::SetDoorOpen { pos: p, open: true });
+            }
+            if (always || !open) && !self.doors.contains(&p) {
+                self.doors.push(p);
+            }
+        }
+        self.close_doors(m, cx, from, to);
     }
 }

@@ -103,6 +103,17 @@ public final class VanillaCollisionOracle {
         write(registry, base.resolve("block-registry.nbt"));
         CompoundTag collision = new CompoundTag(); collision.putInt("DataVersion", SharedConstants.getCurrentVersion().dataVersion().version()); collision.put("states", states); collision.put("shapes", shapes); collision.putIntArray("cached_shapes", mapping);
         write(collision, base.resolve("cached-collision.nbt"));
+        // The verification inputs (62 MB, printf'd) are the parity harness's; preparing reads none.
+        if (!REUSE) writeInputs(base, mapping);
+        else {
+            // Consumers can overwrite block-registry.nbt; preserve the original bytes.
+            generated = new HashMap<>();
+            for (String file : List.of("block-registry.nbt", "cached-collision.nbt"))
+                generated.put(file, Files.readAllBytes(base.resolve(file)));
+        }
+        System.out.printf("HORIZON_COLLISION_RESULT {\"registry_states\":%d,\"cached_states\":%d,\"uncached_states\":%d,\"unique_shapes\":%d,\"unique_grids\":%d,\"queries\":%d}%n", mapping.length,cachedCount,mapping.length-cachedCount,shapes.size(),grids.size(),cachedCount*6);
+    }
+    private static void writeInputs(Path base, int[] mapping) throws IOException {
         Random random = new Random(0x484f52495a4f4eL);
         try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(base.resolve("inputs.txt")))) {
             for (int id = 0; id < mapping.length; id++) {
@@ -123,13 +134,6 @@ public final class VanillaCollisionOracle {
                 }
             }
         }
-        if (REUSE) {
-            // Consumers can overwrite block-registry.nbt; preserve the original bytes.
-            generated = new HashMap<>();
-            for (String file : List.of("block-registry.nbt", "cached-collision.nbt", "inputs.txt"))
-                generated.put(file, Files.readAllBytes(base.resolve(file)));
-        }
-        System.out.printf("HORIZON_COLLISION_RESULT {\"registry_states\":%d,\"cached_states\":%d,\"uncached_states\":%d,\"unique_shapes\":%d,\"unique_grids\":%d,\"queries\":%d}%n", mapping.length,cachedCount,mapping.length-cachedCount,shapes.size(),grids.size(),cachedCount*6);
     }
     private static void values(PrintWriter out, String label, double... values) { out.print(label); for (double value : values) out.printf(" %016x",Double.doubleToLongBits(value)); out.println(); }
     private static void box(PrintWriter out, String label, AABB b) { values(out,label,b.minX,b.minY,b.minZ,b.maxX,b.maxY,b.maxZ); }

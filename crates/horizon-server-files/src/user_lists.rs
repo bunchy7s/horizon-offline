@@ -369,6 +369,13 @@ impl<E: Entry> UserList<E> {
         }
         true
     }
+    /// StoredUserList.clear: no entry left; saves.
+    pub fn clear(&mut self) {
+        self.map.clear();
+        if let Err(e) = self.save() {
+            log::warn!("Could not save the list after removing a user. {e}");
+        }
+    }
     pub fn to_json(&self) -> String {
         let items = self
             .map
@@ -439,5 +446,22 @@ mod tests {
             "2026-10-12 08:00:00 +0000"
         );
         assert_eq!(parse_date("forever"), None);
+    }
+
+    #[test]
+    fn a_cleared_list_saves_empty() {
+        let dir = std::env::temp_dir().join(format!("horizon-lists-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut white = WhiteList::new(dir.join("whitelist.json"));
+        assert!(white.add(WhiteEntry {
+            user: NameAndId::offline("Kim")
+        }));
+        white.clear();
+        assert!(white.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("whitelist.json")).unwrap(),
+            "[]"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

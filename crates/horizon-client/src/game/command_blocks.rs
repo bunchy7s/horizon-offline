@@ -30,13 +30,16 @@ type Pos = (i32, i32, i32);
 
 /// The open `CommandBlockEditScreen`.
 pub(super) struct CommandBlockScreen {
-    pub(super) pos: Pos,
+    pos: Pos,
+    /// The command block minecart being edited (`MinecartCommandBlockEditScreen`);
+    /// `pos` is unused then.
+    cart: Option<u32>,
     /// The command box with its `CommandSuggestions`.
-    command: ChatScreen,
+    pub(super) command: ChatScreen,
     /// When the command box was focused, for its cursor's blink.
     opened: std::time::Instant,
     previous: EditBox,
-    track_output: bool,
+    pub(super) track_output: bool,
     mode: Mode,
     conditional: bool,
     auto: bool,
@@ -62,23 +65,46 @@ enum Button {
     Cancel,
 }
 
+/// `AbstractCommandBlockEditScreen.getPreviousY`.
+fn previous_y(cart: bool) -> f32 {
+    if cart { 150.0 } else { 135.0 }
+}
+
 /// `EditBox.textColorUneditable`.
 const UNEDITABLE: u32 = 0xFF70_7070;
 
 impl CommandBlockScreen {
     /// `AbstractCommandBlockEditScreen.init` and `CommandBlockEditScreen`'s
     /// buttons, in GUI pixels of a `w`×`h` screen.
-    fn buttons(w: f32, h: f32) -> [(Button, f32, f32, f32); 6] {
+    /// A minecart's screen has no mode buttons (`getPreviousY` 150).
+    fn buttons(w: f32, h: f32, cart: bool) -> Vec<(Button, f32, f32, f32)> {
         let mid = (w / 2.0).floor();
         let low = (h / 4.0).floor() + 132.0;
-        [
-            (Button::Output, mid + 130.0, 135.0, 20.0),
-            (Button::Mode, mid - 154.0, 165.0, 100.0),
-            (Button::Conditional, mid - 50.0, 165.0, 100.0),
-            (Button::Auto, mid + 54.0, 165.0, 100.0),
+        let mut out = vec![(Button::Output, mid + 130.0, previous_y(cart), 20.0)];
+        if !cart {
+            out.extend([
+                (Button::Mode, mid - 154.0, 165.0, 100.0),
+                (Button::Conditional, mid - 50.0, 165.0, 100.0),
+                (Button::Auto, mid + 54.0, 165.0, 100.0),
+            ]);
+        }
+        out.extend([
             (Button::Done, mid - 154.0, low, 150.0),
             (Button::Cancel, mid + 4.0, low, 150.0),
-        ]
+        ]);
+        out
+    }
+    /// What button `b` narrates: the switches are `CycleButton`s that show
+    /// only their value (`displayOnlyValue`), "<name>: <value> button" and
+    /// the value a click moves to.
+    fn narration(
+        &self,
+        b: Button,
+        rect: [f32; 4],
+        tr: super::screen_info::Tr<'_>,
+    ) -> horizon_client::widgets::Narratable {
+        let state = (self.track_output, self.mode, self.conditional, self.auto);
+        button_narration(b, state, rect, tr)
     }
     fn label(&self, b: Button) -> Text {
         let tr = |key: &str| Text::translate(key, &[]);
@@ -112,6 +138,49 @@ impl CommandBlockScreen {
         self.previous.set_value(&shown);
     }
 }
+
+/// [`CommandBlockScreen::narration`] of the switches' state (track output,
+/// mode, conditional, automatic).
+fn button_narration(
+    b: Button,
+    (track_output, mode, conditional_on, auto_on): (bool, Mode, bool, bool),
+    rect: [f32; 4],
+    tr: super::screen_info::Tr<'_>,
+) -> horizon_client::widgets::Narratable {
+    use horizon_client::widgets::Narratable;
+    let full_tr = tr;
+    let tr = |key: &str| full_tr(key, &[]);
+    let o_x = |on: bool| if on { "O" } else { "X" }.to_owned();
+    let conditional = |on: bool| {
+        tr(if on {
+            "advMode.mode.conditional"
+        } else {
+            "advMode.mode.unconditional"
+        })
+    };
+    let auto = |on: bool| {
+        tr(if on {
+            "advMode.mode.autoexec.bat"
+        } else {
+            "advMode.mode.redstoneTriggered"
+        })
+    };
+    let (name, value, next) = match b {
+        Button::Output => ("advMode.trackOutput", o_x(track_output), o_x(!track_output)),
+        Button::Mode => ("advMode.mode", tr(mode.label()), tr(mode.next().label())),
+        Button::Conditional => (
+            "advMode.type",
+            conditional(conditional_on),
+            conditional(!conditional_on),
+        ),
+        Button::Auto => ("advMode.triggering", auto(auto_on), auto(!auto_on)),
+        Button::Done => return Narratable::button(tr("gui.done"), rect, true),
+        Button::Cancel => return Narratable::button(tr("gui.cancel"), rect, true),
+    };
+    let full = full_tr("options.generic_value", &[&tr(name), &value]);
+    Narratable::cycle(full, next, rect, true)
+}
+
 fn state_of(registry: &BlockRegistry, state: BlockStateId) -> Option<&BlockState> {
     registry.state(state)
 }
@@ -223,6 +292,14 @@ impl Game<'_> {
             _ => None,
         }
     }
+    /// The `BaseCommandBlock` an edit screen shows: the block entity's or the
+    /// minecart's.
+    fn edit_base(&self, s: &CommandBlockScreen) -> Option<&CommandBlock> {
+        match s.cart {
+            Some(id) => self.carts.iter().find(|c| c.id == id).map(|c| &c.command),
+            None => self.command_block(s.pos),
+        }
+    }
     fn block_state_at(&self, pos: Pos) -> Option<&'static BlockState> {
         let registry = self.pack.assets.registry;
         state_of(registry, self.world.block(pos.0, pos.1, pos.2))
@@ -240,21 +317,25 @@ impl Game<'_> {
         let at = BlockPos::new(pos.0, pos.1, pos.2);
         self.with_level(|b, level, ticks| b.update_neighbour_for_output_signal(level, ticks, at));
     }
-    /// `CommandBlockEditScreen.updateGui`: the server's block-entity data
-    /// arrived while the screen is open; refresh the fields from the entity.
-    /// The mode and conditional live in the block state here (vanilla's
-    /// `CommandBlockEntity.Mode`).
-    pub(super) fn update_command_block_screen(&mut self) {
-        let Some(screen_pos) = self.command_block_screen.as_ref().map(|s| s.pos) else {
+    /// `ClientPacketListener.handleBlockEntityData` then
+    /// `CommandBlockEditScreen.updateGui`: new data for the command block the
+    /// edit screen shows refreshes its fields. The mode and conditional live in
+    /// the block state here (vanilla's `CommandBlockEntity.Mode`).
+    pub(super) fn command_block_data_arrived(&mut self, pos: Pos) {
+        if self
+            .command_block_screen
+            .as_ref()
+            .is_none_or(|s| s.cart.is_some() || s.pos != pos)
+        {
             return;
-        };
-        let state = self.block_state_at(screen_pos).map(|s| {
+        }
+        let state = self.block_state_at(pos).map(|s| {
             (
                 Mode::of_block(&s.name).unwrap_or(Mode::Redstone),
                 conditional(s),
             )
         });
-        let block = self.command_block(screen_pos).cloned();
+        let block = self.command_block(pos).cloned();
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
             dispatcher: super::chat::chat_tree(&self.remote),
@@ -424,17 +505,11 @@ impl Game<'_> {
                 dimension: self.dim,
                 level: None,
                 block: Some(pos),
+                cart: None,
             };
-            // performPrefixedCommand: a leading slash is allowed.
-            let line = command.strip_prefix('/').unwrap_or(&command).to_owned();
-            let outer = self.cmds.results.replace(Vec::new());
-            let level = std::mem::replace(&mut self.ui.registries.permission, 2);
-            self.with_source(source, |g| g.run_command(&line));
-            self.ui.registries.permission = level;
-            let results = std::mem::replace(&mut self.cmds.results, outer).unwrap_or_default();
-            let successes = results.iter().filter(|(success, _)| *success).count();
+            let successes = self.run_as_game_master(&command, source);
             if let Some(c) = command_block_mut(&mut self.world, pos) {
-                c.success_count = successes as i32;
+                c.success_count = successes;
             }
         }
         if let Some(c) = command_block_mut(&mut self.world, pos) {
@@ -445,6 +520,19 @@ impl Game<'_> {
             };
         }
         true
+    }
+    /// `Commands.performPrefixedCommand` for a `BaseCommandBlock`: `command`
+    /// from `source` at game master level, and how many of its results
+    /// succeeded.
+    pub(super) fn run_as_game_master(&mut self, command: &str, source: Source) -> i32 {
+        // performPrefixedCommand: a leading slash is allowed.
+        let line = command.strip_prefix('/').unwrap_or(command).to_owned();
+        let outer = self.cmds.results.replace(Vec::new());
+        let level = std::mem::replace(&mut self.ui.registries.permission, 2);
+        self.with_source(source, |g| g.run_command(&line));
+        self.ui.registries.permission = level;
+        let results = std::mem::replace(&mut self.cmds.results, outer).unwrap_or_default();
+        results.iter().filter(|(success, _)| *success).count() as i32
     }
     /// `CloseableCommandBlockSource.sendSystemMessage`: the block's last
     /// output, stamped with the time. Nothing when it doesn't track output
@@ -488,6 +576,18 @@ impl Game<'_> {
         let Some(state) = self.block_state_at(pos) else {
             return;
         };
+        let mode = Mode::of_block(&state.name).unwrap_or(Mode::Redstone);
+        self.open_edit_screen(pos, None, block, mode, conditional(state));
+    }
+    /// The screen over `block`: a command block's at `pos`, or a minecart's.
+    pub(super) fn open_edit_screen(
+        &mut self,
+        pos: Pos,
+        cart: Option<u32>,
+        block: CommandBlock,
+        mode: Mode,
+        conditional: bool,
+    ) {
         let (w, h) = self.gui_size();
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
@@ -496,18 +596,21 @@ impl Game<'_> {
         };
         let mut command = ChatScreen::command_block(&m, &c, &block.command, w as i32, h as i32);
         command.auto_suggestions = self.settings.auto_suggestions;
-        let mut previous = EditBox::new(0.0, 135.0, 276.0, 20.0);
+        command.input.message = super::screen_info::tr("advMode.command", &[]);
+        let mut previous = EditBox::new(0.0, previous_y(cart.is_some()), 276.0, 20.0);
+        previous.message = super::screen_info::tr("advMode.previousOutput", &[]);
         previous.max_length = 32500;
         previous.text_color = UNEDITABLE;
         previous.focused = false;
         let mut screen = CommandBlockScreen {
             pos,
+            cart,
             command,
             opened: std::time::Instant::now(),
             previous,
             track_output: block.track_output,
-            mode: Mode::of_block(&state.name).unwrap_or(Mode::Redstone),
-            conditional: conditional(state),
+            mode,
+            conditional,
             auto: block.auto,
         };
         screen.show_previous(&block);
@@ -524,11 +627,21 @@ impl Game<'_> {
         let Some(mut s) = self.command_block_screen.take() else {
             return;
         };
-        // AbstractCommandBlockEditScreen.tick: the block is gone.
-        if self.command_block(s.pos).is_none() {
+        // AbstractCommandBlockEditScreen.tick: the block (or the cart) is gone.
+        if self.edit_base(&s).is_none() {
             self.close_command_block();
             return;
         }
+        // AbstractCommandBlockEditScreen: `GameNarrator.NO_TITLE`; its usage
+        // is the suggestions' while they show (`getUsageNarration`).
+        let usage = s.command.suggestions_usage();
+        horizon_client::widgets::begin_screen(|| {
+            let info = horizon_client::widgets::ScreenInfo::new("command_block", "");
+            match usage {
+                Some(key) => info.usage(super::screen_info::tr(key, &[])),
+                None => info,
+            }
+        });
         let atlas = &self.gui.atlas;
         let (w, h) = (batch.width, batch.height);
         let mid = (w / 2.0).floor();
@@ -555,13 +668,26 @@ impl Game<'_> {
         batch.text_styled(atlas, &label, mid - 149.0, 40.0, grey, true);
         if !s.previous.value.is_empty() {
             let label = Text::translate("advMode.previousOutput", &[]);
-            batch.text_styled(atlas, &label, mid - 149.0, 125.0, grey, true);
+            // 75 + 5 * 9 + 1 + getPreviousY() - 135, then the label's 4.
+            let y = 125.0 + previous_y(s.cart.is_some()) - 135.0;
+            batch.text_styled(atlas, &label, mid - 149.0, y, grey, true);
             s.previous.x = mid - 150.0;
             s.previous.draw(batch, atlas, None);
         }
-        for (b, x, y, bw) in CommandBlockScreen::buttons(w, h) {
+        for (b, x, y, bw) in CommandBlockScreen::buttons(w, h, s.cart.is_some()) {
             let hover = ui::hovered(self.cursor, x, y, bw, 20.0);
-            ui::button(batch, atlas, x, y, bw, 20.0, &s.label(b), true, hover);
+            ui::button_as(
+                batch,
+                atlas,
+                x,
+                y,
+                bw,
+                20.0,
+                &s.label(b),
+                true,
+                hover,
+                |rect| s.narration(b, rect, &super::screen_info::tr),
+            );
         }
         // The command box, then its suggestions over the widgets.
         let m = Measure(&atlas.font);
@@ -572,7 +698,10 @@ impl Game<'_> {
         s.command.resize(&m, &c, w as i32, h as i32);
         let mouse = (self.cursor.0.floor() as i32, self.cursor.1.floor() as i32);
         let blink = s.opened.elapsed().as_millis() as u64;
+        // The command box is added first.
+        let mark = horizon_client::widgets::narratables_mark();
         let draws = s.command.draw(&m, mouse, blink, 0);
+        horizon_client::widgets::move_narratables(mark, 0);
         horizon_client::screen_draw::paint(batch, atlas, &draws);
         self.command_block_screen = Some(s);
     }
@@ -627,7 +756,7 @@ impl Game<'_> {
             .as_ref()
             .map_or([1, 1], |r| [r.config.width, r.config.height]);
         let b = HudBatch::new(size);
-        let hit = CommandBlockScreen::buttons(b.width, b.height)
+        let hit = CommandBlockScreen::buttons(b.width, b.height, s.cart.is_some())
             .into_iter()
             .find(|(_, x, y, bw)| ui::hovered(self.cursor, *x, *y, *bw, 20.0))
             .map(|b| b.0);
@@ -637,7 +766,7 @@ impl Game<'_> {
         match hit {
             Some(Button::Output) => {
                 s.track_output = !s.track_output;
-                if let Some(block) = self.command_block(s.pos) {
+                if let Some(block) = self.edit_base(&s) {
                     s.show_previous(block);
                 }
             }
@@ -746,6 +875,10 @@ impl Game<'_> {
             self.system_message(Text::translate("advMode.notAllowed", &[]));
             return;
         }
+        if let Some(id) = s.cart {
+            self.set_command_minecart(id, s);
+            return;
+        }
         let edit = CommandBlockEdit {
             pos: s.pos,
             command: s.command.value().to_owned(),
@@ -825,18 +958,6 @@ impl Game<'_> {
             }),
         );
     }
-    /// `ClientPacketListener.handleBlockEntityData`: new data for the command
-    /// block the edit screen shows refills it (`CommandBlockEditScreen.updateGui`).
-    pub(super) fn command_block_data_arrived(&mut self, pos: Pos) {
-        let open = self.screen == Screen::CommandBlock
-            && self
-                .command_block_screen
-                .as_ref()
-                .is_some_and(|s| s.pos == pos);
-        if open {
-            self.open_command_block(pos);
-        }
-    }
     /// What `handleSetCommandBlock` does once the player may edit the block.
     fn apply_command_block(&mut self, s: &CommandBlockEdit) {
         let pos = s.pos;
@@ -896,5 +1017,81 @@ impl Game<'_> {
             };
             self.system_message(Text::translate(key, &[Text::literal(command)]));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_minecart_screen_has_no_mode_buttons_and_a_lower_output_row() {
+        let cart = CommandBlockScreen::buttons(400.0, 240.0, true);
+        let kinds: Vec<_> = cart.iter().map(|b| b.0).collect();
+        assert!(kinds == [Button::Output, Button::Done, Button::Cancel]);
+        // MinecartCommandBlockEditScreen.getPreviousY.
+        assert_eq!(cart[0].2, 150.0);
+        let block = CommandBlockScreen::buttons(400.0, 240.0, false);
+        assert_eq!(block.len(), 6);
+        assert_eq!(block[0].2, 135.0);
+        // Done and Cancel sit at the same height on both.
+        assert_eq!(cart[1].2, block[4].2);
+    }
+}
+
+#[cfg(test)]
+mod narration_tests {
+    use super::*;
+    use horizon_client::widgets::What;
+
+    fn keys(key: &str, args: &[&str]) -> String {
+        if args.is_empty() {
+            key.to_owned()
+        } else {
+            format!("{key}({})", args.join(", "))
+        }
+    }
+
+    #[test]
+    fn the_switches_narrate_as_cycle_buttons_showing_their_value() {
+        let state = (true, Mode::Redstone, false, true);
+        let cycle = |b| button_narration(b, state, [0.0; 4], &keys).what;
+        let expect = |message: &str, next: &str| What::Cycle {
+            message: message.into(),
+            next: next.into(),
+            active: true,
+        };
+        assert_eq!(
+            cycle(Button::Output),
+            expect("options.generic_value(advMode.trackOutput, O)", "X")
+        );
+        assert_eq!(
+            cycle(Button::Mode),
+            expect(
+                "options.generic_value(advMode.mode, advMode.mode.redstone)",
+                "advMode.mode.sequence"
+            )
+        );
+        assert_eq!(
+            cycle(Button::Conditional),
+            expect(
+                "options.generic_value(advMode.type, advMode.mode.unconditional)",
+                "advMode.mode.conditional"
+            )
+        );
+        assert_eq!(
+            cycle(Button::Auto),
+            expect(
+                "options.generic_value(advMode.triggering, advMode.mode.autoexec.bat)",
+                "advMode.mode.redstoneTriggered"
+            )
+        );
+        assert_eq!(
+            cycle(Button::Done),
+            What::Button {
+                message: "gui.done".into(),
+                active: true
+            }
+        );
     }
 }

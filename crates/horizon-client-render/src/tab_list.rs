@@ -200,6 +200,31 @@ pub fn sorted_players<'a>(players: &'a [TabPlayer], board: &Scoreboard) -> Vec<&
     out
 }
 
+/// What `setVisible(true)` has the narrator say:
+/// `multiplayer.player.list.narration` with the listed players' names
+/// (`ComponentUtils.formatList` with ", ").
+pub fn narration(players: &[TabPlayer], board: &Scoreboard) -> Text {
+    Text::translate(
+        "multiplayer.player.list.narration",
+        &[listed_names(players, board)],
+    )
+}
+
+/// The names the list shows, in its order, ", " between them.
+fn listed_names(players: &[TabPlayer], board: &Scoreboard) -> Text {
+    sorted_players(players, board)
+        .into_iter()
+        .enumerate()
+        .fold(Text::empty(), |names, (i, p)| {
+            let names = if i == 0 {
+                names
+            } else {
+                names.append(Text::literal(", "))
+            };
+            names.append(name_for_display(p, board))
+        })
+}
+
 /// `MutableComponent.withStyle(ITALIC)` on a component's root.
 fn italic_root(c: &Comp) -> Comp {
     use serde_json::Value;
@@ -321,11 +346,15 @@ struct Entry {
 }
 impl TabList {
     /// `setVisible`: showing or hiding forgets the heart states.
-    pub fn set_visible(&mut self, visible: bool) {
+    /// `setVisible`: true when the list has just come up, which vanilla
+    /// narrates ([`narration`]).
+    pub fn set_visible(&mut self, visible: bool) -> bool {
         if self.visible != visible {
             self.health.clear();
             self.visible = visible;
+            return visible;
         }
+        false
     }
     /// `reset`.
     pub fn reset(&mut self) {
@@ -619,6 +648,20 @@ impl TabList {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_list_is_narrated_once_as_it_comes_up_with_its_names_in_order() {
+        let board = Scoreboard::default();
+        let mut alice = TabPlayer::new(2, "Alice");
+        alice.list_order = -1;
+        let players = [TabPlayer::new(1, "bob"), alice];
+        assert_eq!(listed_names(&players, &board).plain(), "bob, Alice");
+        let mut list = TabList::default();
+        assert!(list.set_visible(true));
+        assert!(!list.set_visible(true), "only as it comes up");
+        assert!(!list.set_visible(false));
+        assert!(list.set_visible(true));
+    }
 
     #[test]
     fn order_ping_and_skins() {

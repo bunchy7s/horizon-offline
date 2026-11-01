@@ -92,9 +92,7 @@ impl Banners {
             });
         }
         banners.no_item_required = read_tag(root, "no_item_required", 0);
-        if let Some(raw) = fs::read(root.join("items.json")).ok().and_then(|b| {
-            serde_json::from_slice::<std::collections::BTreeMap<String, Value>>(&b).ok()
-        }) {
+        if let Ok(raw) = horizon_world::item_defaults::read(root) {
             for (item, c) in raw {
                 let id: Arc<str> = Arc::from(item.as_str());
                 if let Some(dye) = c["minecraft:dye"].as_str() {

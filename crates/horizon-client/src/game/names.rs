@@ -12,6 +12,9 @@ use horizon_client::{
     scoreboard as sb, text::Text,
 };
 
+/// The world size of one text pixel in a name tag: `Matrix4f.scale(0.025F, -0.025F, 0.025F)`.
+pub(super) const NAME_TAG_UNIT: f32 = 0.025;
+
 impl Game<'_> {
     /// A named name tag names the mob under the crosshair.
     pub(super) fn name_mob(&mut self, index: usize) -> bool {
@@ -77,18 +80,20 @@ impl Game<'_> {
             || self.camera_type.first_person()
             || self.sleeping.is_some()
             || self.spectator()
-            || self.potions.effects.get("invisibility").is_some()
+            || self.own_invisible()
         {
             return None;
         }
         let m = self.player_model.as_ref()?;
-        // The name others see: the profile's on a server (single player's
-        // server thread included), else the local player's.
-        let name = match self.remote.as_ref() {
+        Some((m, self.own_profile_name()))
+    }
+    /// The local player's profile name as others see it: the session's on a
+    /// server (single player's server thread included), else the local player's.
+    pub(super) fn own_profile_name(&self) -> String {
+        match self.remote.as_ref() {
             Some(r) if !r.profile_name.is_empty() => r.profile_name.clone(),
             _ => self.acting_player_name().to_owned(),
-        };
-        Some((m, name))
+        }
     }
     /// The names the name tags show this frame (the control socket's status).
     pub(super) fn shown_name_tags(&self, camera: glam::DVec3) -> Vec<String> {
@@ -104,11 +109,16 @@ impl Game<'_> {
         let mut tags = Vec::new();
         let players = self.other_players();
         let named = self.mobs.iter().filter_map(|m| {
-            let name = m.custom_name.as_ref()?;
+            // A mannequin with no name still shows its description.
+            let name = match &m.custom_name {
+                Some(name) => name.clone(),
+                None if m.species() == horizon_client::mobs::Species::Mannequin => String::new(),
+                None => return None,
+            };
             // The tag's 64 block distance is measured to the entity: copy the
             // name only for a mob the frame can show it on.
             let at = glam::DVec3::new(m.position.x, m.position.y, m.position.z);
-            (at.distance_squared(camera) < 64.0 * 64.0).then(|| (m, name.clone(), false))
+            (at.distance_squared(camera) < 64.0 * 64.0).then_some((m, name, false))
         });
         let players = players
             .into_iter()
@@ -122,17 +132,8 @@ impl Game<'_> {
             if !m.alive() {
                 continue;
             }
-            // EntityAttachment.NAME_TAG: 0.5 above the (crouching) height.
-            let height = if player && m.extra.crouching {
-                1.5
-            } else {
-                f64::from(m.height())
-            };
-            let p = glam::DVec3::new(
-                m.previous.x + (m.position.x - m.previous.x) * alpha,
-                m.previous.y + (m.position.y - m.previous.y) * alpha + height + 0.5,
-                m.previous.z + (m.position.z - m.previous.z) * alpha,
-            );
+            // EntityAttachment.NAME_TAG: 0.5 above the box of the current pose.
+            let p = name_tag_at(m, alpha);
             // The name tag distance (64) is measured to the entity.
             let distance_sqr =
                 glam::DVec3::new(m.position.x, m.position.y, m.position.z).distance_squared(camera);
@@ -148,7 +149,7 @@ impl Game<'_> {
             let team = if player {
                 self.score.board.players_team(&name)
             } else {
-                self.mob_team(m.id)
+                self.mob_team_of(m)
             };
             // LivingEntityRenderer.shouldShowName (team rules included), then
             // MobRenderer: a visible name, or the mob under the crosshair.
@@ -170,9 +171,30 @@ impl Game<'_> {
             };
             // MobRenderer.shouldShowName: a visible name, or the mob under the
             // crosshair; players (LivingEntityRenderer) need neither.
-            if !sb::name_shown(team, viewer, view)
-                || !(player || m.name_visible || Some(m.id) == target)
-            {
+            // `ClientMannequin.belowNameDisplay`: the description is `scoreText`, drawn
+            // within the below-name distance (10) whether the name shows or not.
+            let description = (m.species() == horizon_client::mobs::Species::Mannequin
+                && distance_sqr < 10.0 * 10.0)
+                .then(|| m.extra.description.component())
+                .flatten()
+                .map(|tag| horizon_client::entity_nbt::name_text(&tag).resolve_legacy());
+            let name_shown = sb::name_shown(team, viewer, view)
+                && (player || m.name_visible || Some(m.id) == target)
+                && (player || m.custom_name.is_some());
+            if !name_shown {
+                if let Some(text) = description {
+                    let l = self.world.light(
+                        m.position.x.floor() as i32,
+                        (m.position.y + f64::from(m.height())).floor() as i32,
+                        m.position.z.floor() as i32,
+                    );
+                    tags.push(NameTag {
+                        at: p,
+                        lines: vec![(text, 0.0)],
+                        light: l,
+                        discrete,
+                    });
+                }
                 continue;
             }
             // getDisplayName: the name in the team's prefix, suffix and colour.
@@ -194,7 +216,12 @@ impl Game<'_> {
             // EntityRenderer.extractNameTags: the score shows within the
             // below-name distance (10), under the name.
             let mut lift = 0.0;
-            if distance_sqr < 10.0 * 10.0
+            if m.species() == horizon_client::mobs::Species::Mannequin {
+                if let Some(text) = description {
+                    lines.push((text, 0.0));
+                    lift = f64::from(9.0f32 * 1.15 * 0.025);
+                }
+            } else if distance_sqr < 10.0 * 10.0
                 && let Some(score) = holder.and_then(|h| self.below_name_text(&h))
             {
                 lines.push((score.resolve_legacy(), 0.0));
@@ -203,7 +230,7 @@ impl Game<'_> {
             lines.push((shown, lift));
             let l = self.world.light(
                 m.position.x.floor() as i32,
-                (m.position.y + height).floor() as i32,
+                (m.position.y + f64::from(m.height())).floor() as i32,
                 m.position.z.floor() as i32,
             );
             tags.push(NameTag {
@@ -260,13 +287,15 @@ impl Game<'_> {
                 lift = f64::from(9.0f32 * 1.15 * 0.025);
             }
             lines.push((shown, lift));
+            // The tag rides with the body, between last tick's position and this one's.
+            let at = a.render_position(alpha);
             let l = self.world.light(
-                a.position.x.floor() as i32,
-                (a.position.y + height).floor() as i32,
-                a.position.z.floor() as i32,
+                at.x.floor() as i32,
+                (at.y + height).floor() as i32,
+                at.z.floor() as i32,
             );
             tags.push(NameTag {
-                at: glam::DVec3::new(a.position.x, a.position.y + height + 0.5, a.position.z),
+                at: glam::DVec3::new(at.x, at.y + height + 0.5, at.z),
                 lines,
                 light: l,
                 discrete: false,
@@ -331,16 +360,43 @@ impl Game<'_> {
             if tag.discrete {
                 self.mark_translucent_entity(out.len(), "minecraft:name_tag");
                 let light = vertex_light(tag.light);
-                patches.extend(self.name_tag_quads(o, &tag.lines, FADED, true, 0, light, out));
+                patches.extend(self.name_tag_quads(
+                    o,
+                    &tag.lines,
+                    FADED,
+                    true,
+                    0,
+                    light,
+                    NAME_TAG_UNIT,
+                    out,
+                ));
                 continue;
             }
             // LightCoordsUtil.lightCoordsWithEmission(lightCoords, 2).
             let lit = (tag.light >> 4).max(2) << 4 | (tag.light & 15).max(2);
             self.mark_entity(out.len(), "minecraft:name_tag");
             let light = vertex_light(lit);
-            patches.extend(self.name_tag_quads(o, &tag.lines, 0xFF, false, 0, light, out));
+            patches.extend(self.name_tag_quads(
+                o,
+                &tag.lines,
+                0xFF,
+                false,
+                0,
+                light,
+                NAME_TAG_UNIT,
+                out,
+            ));
             // RenderPipelines.TEXT_SEE_THROUGH: no depth test, no lightmap.
-            patches.extend(self.name_tag_quads(o, &tag.lines, FADED, true, 2, 0, see_through));
+            patches.extend(self.name_tag_quads(
+                o,
+                &tag.lines,
+                FADED,
+                true,
+                2,
+                0,
+                NAME_TAG_UNIT,
+                see_through,
+            ));
         }
         self.map_patches.extend(patches);
     }
@@ -349,7 +405,7 @@ impl Game<'_> {
     /// (in `text_layer` like the glyphs, a hair behind) when `background`.
     /// Returns the glyph pixels the atlas still needs.
     #[allow(clippy::too_many_arguments)]
-    fn name_tag_quads(
+    pub(super) fn name_tag_quads(
         &self,
         o: glam::DVec3,
         lines: &[(Text, f64)],
@@ -357,6 +413,7 @@ impl Game<'_> {
         background: bool,
         text_layer: u32,
         light: u32,
+        unit: f32,
         out: &mut Vec<Vertex>,
     ) -> Vec<horizon_client::font::Patch> {
         // Options.getBackgroundOpacity(0.25) black, as ARGB.color.
@@ -376,7 +433,7 @@ impl Game<'_> {
         let mut batch = HudBatch::new([1, 1]);
         for (text, lift) in lines {
             let o = (o + glam::DVec3::new(0.0, *lift, 0.0)).as_vec3();
-            let (r, u) = (right.as_vec3() * 0.025, up.as_vec3() * 0.025);
+            let (r, u) = (right.as_vec3() * unit, up.as_vec3() * unit);
             // Text space: x right, y down (scale 0.025, -0.025).
             let at = |x: f32, y: f32| o + r * x - u * y;
             let y0 = if text.plain() == "deadmau5" {
@@ -419,6 +476,19 @@ impl Game<'_> {
     }
 }
 
+/// `EntityAttachment.NAME_TAG`: `(0, bbHeight, 0)` of the box of the entity's
+/// current pose, which the submitter lifts 0.5 more, between the last two tick
+/// positions. The player box is `Pose::dimensions(1.0)`.
+/// shortcut: the scale attribute is not in the tag height, add `model_scale`
+/// when tags on scaled players matter.
+fn name_tag_at(m: &Mob, alpha: f64) -> glam::DVec3 {
+    glam::DVec3::new(
+        m.previous.x + (m.position.x - m.previous.x) * alpha,
+        m.previous.y + (m.position.y - m.previous.y) * alpha + f64::from(m.height()) + 0.5,
+        m.previous.z + (m.position.z - m.previous.z) * alpha,
+    )
+}
+
 /// A name tag: where it hangs, its lines (text, lift), the packed light at
 /// the entity and whether it is discrete.
 struct NameTag {
@@ -426,4 +496,89 @@ struct NameTag {
     lines: Vec<(Text, f64)>,
     light: u8,
     discrete: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use horizon_client::mobs::{Anim, Brain, MobType, Part, Species};
+    use horizon_client::pose::Pose;
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    /// The player model `perspective::player_type` builds from the prepared
+    /// resources, without them: its box only needs the id and the pointer.
+    fn player_mob() -> Mob {
+        let part = Part {
+            name: "root".into(),
+            pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            polygons: Vec::new(),
+            children: Vec::new(),
+        };
+        let kind = MobType {
+            id: "minecraft:player".into(),
+            species: Species::Zombie,
+            width: 0.6,
+            height: 1.8,
+            eye_height: 1.62,
+            category: "misc".into(),
+            max_health: 20.0,
+            speed: 0.1,
+            flying_speed: 0.02,
+            attack_damage: 1.0,
+            attack_knockback: 0.0,
+            follow_range: 0.0,
+            step_height: 0.6,
+            armor: 0.0,
+            armor_toughness: 0.0,
+            knockback_resistance: 0.0,
+            jump_strength: 0.42,
+            attributes: Default::default(),
+            gravity: 0.08,
+            safe_fall_distance: 3.0,
+            fall_damage_multiplier: 1.0,
+            water_efficiency: 0.0,
+            water_slowdown: 0.8,
+            air_speed: 0.02,
+            baby_scale: 0.5,
+            head_rot_speed: 10.0,
+            max_head_x_rot: 40.0,
+            max_head_y_rot: 75.0,
+            ambient_interval: 80,
+            flags: Default::default(),
+            model: Arc::new(part),
+            layers: Default::default(),
+            texture: String::new(),
+            brain: Brain::Passive,
+            anim: Anim::Humanoid { zombie_arms: false },
+            sounds: [
+                "entity.player.hurt",
+                "entity.player.hurt",
+                "entity.player.death",
+            ],
+            step_sound: None,
+            food: Default::default(),
+            tempt: Default::default(),
+        };
+        Mob::new(0, Arc::new(kind), Vec3::ZERO, 0.0)
+    }
+
+    /// #4129: the tag hangs from the box of the pose (0.6 swimming, 1.5
+    /// crouching, 1.8 standing) and never from the sneak flag, which a
+    /// sprint-swimming or gliding player still has set. Today's
+    /// `if player && m.extra.crouching { 1.5 }` gives 2.0 for the first.
+    #[test]
+    fn a_name_tag_hangs_from_the_pose_box_not_the_sneak_flag() {
+        let mut m = player_mob();
+        let at_y = |m: &Mob| name_tag_at(m, 1.0).y;
+        m.extra.crouching = true;
+        m.extra.avatar_pose = Pose::Swimming;
+        assert!((at_y(&m) - 1.1).abs() < 1e-6, "0.6 + 0.5, not 2.0");
+        // A crouching player's tag keeps the height it had: 1.5 + 0.5.
+        m.extra.avatar_pose = Pose::Crouching;
+        assert!((at_y(&m) - 2.0).abs() < 1e-6, "1.5 + 0.5, as before");
+        m.extra.avatar_pose = Pose::Standing;
+        m.extra.crouching = false;
+        assert!((at_y(&m) - 2.3).abs() < 1e-6, "1.8 + 0.5");
+    }
 }

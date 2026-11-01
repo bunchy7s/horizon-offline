@@ -88,11 +88,11 @@ ClientboundSetPlayerTeamPacket.shouldHavePlayerList	port	crates/horizon-protocol
 ClientboundSetTitlesAnimationPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! TitlesAnimation {fade_in, stay, fade_out Int}
 ClientboundSoundEntityPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SoundEntity with the sound holder
 ClientboundSoundPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! Sound with the sound holder and fixed-point position
-ClientboundTagQueryPacket.write	missing		minor: answers to F3+I NBT queries are not handled; Horizon has no tag_query packet (ids.rs only)
+ClientboundTagQueryPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! TagQuery {transaction VarInt, tag Nbt}
 ClientboundTakeItemEntityPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! TakeItemEntity {item, player, amount VarInt}
 DebugEntityNameGenerator.getEntityName	skip:debug		debug name for entities
-ServerboundBlockEntityTagQueryPacket.write	missing		minor: the F3+I block NBT query is not sent; Horizon has no such packet (ids.rs only)
-ServerboundEntityTagQueryPacket.write	missing		minor: the F3+I entity NBT query is not sent; Horizon has no such packet (ids.rs only)
+ServerboundBlockEntityTagQueryPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! BlockEntityTagQuery {transaction VarInt, pos Pos}
+ServerboundEntityTagQueryPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! EntityTagQuery {transaction VarInt, entity VarInt}
 ServerboundJigsawGeneratePacket.write	missing		minor: no jigsaw generate packet; the client has no jigsaw screen (only block_entity_nbt reads jigsaw data)
 ServerboundMovePlayerPacket.packFlags	inline	crates/horizon-client/src/player_sync.rs::PositionSender::update	on-ground and horizontal-collision bits set when the move is sent
 ServerboundPlayerActionPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! PlayerAction {action VarInt, pos, direction UByte, sequence VarInt}

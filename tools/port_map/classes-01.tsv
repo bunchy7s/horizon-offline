@@ -1,6 +1,6 @@
-GlowSquid.aiStep	missing		player: glow squids shed no glow particles and their dark timer is not kept, so a hit squid does not dim
+GlowSquid.aiStep	port	crates/horizon-client/src/mobs/aquatic.rs::glow_squid_ai_step	
 GlowSquid.checkGlowSquidSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::GlowSquid arm: 33 blocks below sea level, dark, in water
-GlowSquid.hurtServer	missing		player: a glow squid hit does not get the 100-tick dark timer, so it does not dim
+GlowSquid.hurtServer	port	crates/horizon-client/src/mobs/aquatic.rs::hurt_server	
 WolfSoundVariants	skip:data		registry bootstrap of the wolf sound sets; sounds are in species.rs and finalize.rs
 AbstractDragonPhaseInstance.getTurnSpeed	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_dragon	0.7 / dist / rot turn for every phase but Landing; only applied while a fly target is set
 DragonChargePlayerPhase.doServerTick	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_phase	Charging arm: 10-tick countdown once close; gap: minor: no collision re-target
@@ -28,12 +28,12 @@ DragonTakeoffPhase.navigateToNextPathNode	port	crates/horizon-client/src/game/dr
 EnderDragonPhase.create	skip:data		phase registry; the ids are fixed in Phase::id
 EnderDragonPhase.createInstance	port	crates/horizon-client/src/game/dragon.rs::Phase::from_id	builds the default instance for an id
 EnderDragonPhase.getById	port	crates/horizon-client/src/game/dragon.rs::Phase::from_id	id to phase, unknown ids fall back to Holding
-Mannequin.addAdditionalSaveData	missing		player: a saved mannequin is written without its profile, so after a reload it wears the default skin
+Mannequin.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::Base::mob_to_nbt	ticked in #3514; `Mannequin.addAdditionalSaveData` is cited at crates/horizon-client/src/entity_nbt.rs:376 (in a comment, so `where` names the enclosing fn)
 Mannequin.applyImplicitComponent	missing		minor: the profile from a spawning item is not applied; Horizon has no mannequin item, only summon with a profile tag
-Mannequin.defineSynchedData	inline	crates/horizon-client/src/game/remote_mob_data.rs::apply	gap: player: reads the profile (slot 17) only; DATA_IMMOVABLE and DATA_DESCRIPTION are not read
+Mannequin.defineSynchedData	inline	crates/horizon-client/src/game/remote_mob_data.rs::apply	slots 17 to 19: the profile, DATA_IMMOVABLE and DATA_DESCRIPTION are all read now
 Mannequin.get	skip:other		data-component getter for the PROFILE component; the profile is Mob.profile, read directly
-Mannequin.readAdditionalSaveData	missing		player: the profile is not read back, so a reloaded mannequin wears the default skin
-Mannequin.updateDescription	missing		player: the mannequin's description (default 'Mannequin') is never drawn under its name
+Mannequin.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	ticked in #3514; `Mannequin.readAdditionalSaveData` is cited at crates/horizon-client/src/entity_nbt.rs:1380 (in a comment, so `where` names the enclosing fn)
+Mannequin.updateDescription	port	crates/horizon-client/src/mobs.rs::MannequinDescription::component	the description component: the default `entity.minecraft.mannequin.label`, none when hidden, or the server's own (the text drawn under the name tag)
 Giant.createAttributes	skip:data		attributes come from entity-types.json
 ShootWhenStuck.checkExtraStartConditions	inline	crates/horizon-client/src/mobs/breeze.rs::register	
 Evoker.createAttributes	skip:data		attributes come from entity-types.json
@@ -43,10 +43,10 @@ Pillager.applyRaidBuffs	port	crates/horizon-client/src/game/mob_gear.rs::Game::a
 Pillager.createAttributes	skip:data		attributes come from entity-types.json
 Pillager.finalizeSpawn	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::mob	crossbow in the main hand via populate; the enchant roll is in Ctx::enchant
 Pillager.getArmPose	port	crates/horizon-client/src/mobs/illager.rs::arm_pose	
-Pillager.getSlot	missing		minor: the pillager's five spare slots (ids 300 and up, used by /item) are not modelled
-Pillager.pickUpItem	missing		player: during a raid a pillager does not pick up a white banner lying on the ground
+Pillager.getSlot	skip:other		Horizon's /item addresses named slots (weapon.mainhand, armor.head, ...); a mob has no numeric slot ids, so the pillager's 300+ inventory slots have no target
+Pillager.pickUpItem	inline	crates/horizon-client/src/game/raids.rs::Game::sync_raiders	an ominous banner beside a raider in a live raid with no leader becomes its head slot and the wave's leader (banner scan at 779-789, pickup at 894-906); gap: minor: a plain banner falls through to Mob.pickUpItem's gear swap, which Horizon does not do
 Pillager.registerGoals	port	crates/horizon-client/src/mobs/illager.rs::register_pillager	
-Pillager.wantsItem	missing		player: the raid banner pickup check is missing (see pickUpItem)
+Pillager.wantsItem	skip:other		dead code: only a white banner passes, and Pillager.pickUpItem sends every BannerItem to Raider.pickUpItem before consulting it; the ominous banner pickup is in game/raids.rs
 PiglinBrute.createAttributes	skip:data		attributes come from entity-types.json
 PiglinBrute.customServerAiStep	inline	crates/horizon-client/src/mobs/piglin.rs::register_brute	gap: minor: the brain tick is replaced by the goals set in register_brute; the activity update is in PiglinBruteAi rows
 PiglinBrute.finalizeSpawn	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::mob	golden axe in the main hand via populate; initMemories is missing
@@ -76,8 +76,8 @@ Abilities.apply	port	crates/horizon-client/src/game/remote.rs::Game::apply_remot
 Abilities.pack	skip:java		record copy for the abilities packet; the flags are read in remote.rs
 PlayerSkin.with	missing		minor: skin patches (body, cape, elytra and model overrides) are not applied on top of a profile skin
 PlayerSkin.Patch.create	skip:java		record factory for the patch; the patch itself is missing (see PlayerSkin.with)
-SpectralArrow.doPostHurtEffects	missing		player: a spectral arrow shot from a bow or crossbow does not make its target glow; release_bow and crossbow use no effect
-SpectralArrow.tick	missing		player: a spectral arrow in flight leaves no yellow effect trail
+SpectralArrow.doPostHurtEffects	port	crates/horizon-client/src/game/potions.rs::Game::arrow_post_hurt_effects	200-tick Glowing on any target a spectral arrow lands on (creatures.rs:3589); a bow, a crossbow and a dispenser also store the effect on the arrow
+SpectralArrow.tick	port	crates/horizon-client/src/game/remote_projectiles.rs::Game::arrow_effect_particles	client tick: an effect sparkle at the arrow's position while it is not stuck; the tipped arrow's colour swirls share the fn
 Fireball.getSlot	missing		minor: the fireball's item slot (its displayed fire charge) is not modelled
 Fireball.readAdditionalSaveData	missing		unsure: fireball_from_nbt reads no Item key, so the displayed item is not restored
 Fireball.setItem	missing		minor: the displayed item of a fireball is not set
@@ -85,10 +85,10 @@ Fireball.shouldRenderAtSqrDistance	skip:ui		render distance rule for the first t
 LargeFireball.onHit	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_hit	LargeFireball arm: explosion of the given power, then the projectile is gone
 LargeFireball.onHitEntity	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_hit	LargeFireball arm: 6 damage to the entity
 SmallFireball.onHitEntity	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_hit	SmallFireball arm: ignites for 5 seconds and deals 5 damage
-AbstractThrownPotion.affectEntitiesAround	missing		player: a splash water potion does not hurt water-sensitive mobs or put out burning entities nearby
+AbstractThrownPotion.affectEntitiesAround	port	crates/horizon-client/src/game/splash_water.rs::Game::affect_entities_around	water potion in the potion's (4, 2, 4) box: 1 indirect-magic damage to water-sensitive mobs, put out burning mobs, players and armor stands, then Axolotl.rehydrate
 AbstractThrownPotion.calculateHorizontalHurtKnockbackDirection	missing		minor: the splash hurt pushes nothing away from the potion's position
-AbstractThrownPotion.douseFire	missing		player: a splash water potion does not put out fire blocks, candles or campfires around where it lands
-AbstractThrownPotion.onHitBlock	missing		player: a water splash that lands on a block does not douse fire, candles or campfires next to it
+AbstractThrownPotion.douseFire	port	crates/horizon-client/src/game/splash_water.rs::Game::douse_fire	fire blocks break without drops, lit candles and campfires go out (campfire with level event 1009 and the block-change game event); gap: minor: that game event carries no source entity
+AbstractThrownPotion.onHitBlock	port	crates/horizon-client/src/game/splash_water.rs::Game::potion_hit_block	a potion in #douses_fire puts out the cell in front of the face it hit, the block it hit and the four horizontal neighbours of the cell in front
 Snowball.getParticle	port	crates/horizon-client/src/game/creatures.rs::Game::item_burst	snowball item burst on break
 Snowball.handleEntityEvent	port	crates/horizon-client/src/game/creatures.rs::Game::thrown_break_event	break event 3 for thrown items
 Snowball.onHit	inline	crates/horizon-client/src/game/creatures.rs::Game::projectile_hit	Snowball arm: 3 damage to blazes, then the break burst
@@ -106,7 +106,7 @@ AbstractMinecartContainer.remove	inline	crates/horizon-client/src/game/minecarts
 MinecartChest.interact	inline	crates/horizon-client/src/game/minecarts.rs::Game::interact_cart	chest arm: opens the cart's items and plays the chest sound
 MinecartCommandBlock.activateMinecart	inline	crates/horizon-client/src/game/minecarts.rs::Game::activate_cart	gap: minor: no command ever runs; the cart holds no command since its editor is missing
 MinecartCommandBlock.defineSynchedData	missing		minor: the command text and last output are not synced; no command cart holds a command
-MinecartCommandBlock.interact	missing		player: a creative player right-clicking a command minecart gets no command editor; vanilla opens it
+MinecartCommandBlock.interact	port	crates/horizon-client/src/game/remote.rs::Game::remote_use_entity	the client opens the command editor of the cart it right-clicked
 MinecartCommandBlock.onSyncedDataUpdated	missing		minor: no synced command text to load into the cart
 MinecartCommandBlock.readAdditionalSaveData	inline	crates/horizon-client/src/game/minecarts.rs::Minecart::from_nbt	gap: minor: the saved Command text is not read
 MinecartCommandBlock.MinecartCommandBase.createCommandSourceStack	missing		minor: no command runs from a cart, so no source stack is built
@@ -120,7 +120,11 @@ MinecartFurnace.getMaxSpeed	port	crates/horizon-client/src/game/minecarts.rs::Ga
 MinecartFurnace.interact	inline	crates/horizon-client/src/game/minecarts.rs::Game::interact_cart	furnace arm
 MinecartFurnace.readAdditionalSaveData	port	crates/horizon-client/src/game/minecarts.rs::Minecart::from_nbt	
 MinecartFurnace.tick	inline	crates/horizon-client/src/game/minecarts.rs::Game::tick_cart	furnace variant: fuel counts down, push clears at zero, smoke puffs
-MinecartSpawner	missing		player: spawner minecarts do not exist in Horizon: no cart kind, so a spawner minecart item does nothing on a rail
+MinecartSpawner.tick	port	crates/horizon-client/src/game/minecarts.rs::Game::tick_cart	BaseSpawner.serverTick at the cart's block (spawner.rs server_tick_spawner_of); its broadcastEvent is an entity event on the cart
+MinecartSpawner.createTicker	port	crates/horizon-client/src/game/minecarts.rs::Game::tick_cart	the server ticker: the CartKind::Spawner arm
+MinecartSpawner.readAdditionalSaveData	port	crates/horizon-client/src/game/minecarts.rs::Minecart::from_nbt	BaseSpawner.load
+MinecartSpawner.addAdditionalSaveData	port	crates/horizon-client/src/game/minecarts.rs::Minecart::to_nbt	BaseSpawner.save
+MinecartSpawner.getDefaultDisplayBlockState	port	crates/horizon-client/src/game/minecarts.rs::Game::display_state	the spawner block
 NewMinecartBehavior	skip:other		experimental minecart_improvements physics; Horizon always runs the old behaviour in minecarts.rs and writes that pack disabled in save.rs
 NewMinecartBehavior.TrackIteration	skip:other		part of the experimental minecart_improvements physics; see NewMinecartBehavior
 FeatureFlagRegistry	skip:data		name table of the feature packs (functions.rs FEATURE_PACKS); codecs are not needed

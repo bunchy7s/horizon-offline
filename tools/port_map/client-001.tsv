@@ -1,10 +1,10 @@
-AccountProfileKeyPairManager.prepareKeyPair	skip:service		Mojang profile key pair for chat signing; Horizon fetches none
-AccountProfileKeyPairManager.shouldRefreshKeyPair	skip:service		profile key refresh timer; no chat signing key pair
-AccountProfileKeyPairManager.readOrFetchProfileKeyPair	skip:service		profile key pair fetch; no chat signing
-AccountProfileKeyPairManager.readProfileKeyPair	skip:service		reads the cached profile key pair file; no chat signing
-AccountProfileKeyPairManager.writeProfileKeyPair	skip:service		writes the cached profile key pair file; no chat signing
-AccountProfileKeyPairManager.fetchProfileKeyPair	skip:service		fetches a profile key pair from the Mojang API
-AccountProfileKeyPairManager.parsePublicKey	skip:service		parses a profile public key from the Mojang API
+AccountProfileKeyPairManager.prepareKeyPair	port	crates/horizon-client-render/src/auth.rs::prepare_chat_keys	on a background thread, at start and on each online-mode join
+AccountProfileKeyPairManager.shouldRefreshKeyPair	port	crates/horizon-client-render/src/auth.rs::prepare_chat_keys	at most hourly, from the remote tick, once there is a chat session
+AccountProfileKeyPairManager.readOrFetchProfileKeyPair	port	crates/horizon-client-render/src/auth.rs::prepare_chat_keys	kept until due a refresh; a failed fetch keeps the old pair
+AccountProfileKeyPairManager.readProfileKeyPair	skip:service		the pair stays in memory like the access token; no profilekeys file
+AccountProfileKeyPairManager.writeProfileKeyPair	skip:service		the pair stays in memory like the access token; no profilekeys file
+AccountProfileKeyPairManager.fetchProfileKeyPair	port	crates/horizon-client-render/src/auth.rs::fetch_chat_keys	the player/getCertificates endpoint with the access token
+AccountProfileKeyPairManager.parsePublicKey	port	crates/horizon-client-render/src/auth.rs::parse_certificates	publicKeySignatureV2, expiresAt
 CacheSlot.compute	skip:java		memo slot for a computed value; Horizon has no per-context cache slot
 ChunkBatchSizeCalculator.onBatchFinished	missing		minor: Horizon answers every ChunkBatchFinished with a fixed 64 chunks per tick (remote.rs), so the server's batch pace is never tuned to batch timing
 ClientAdvancements.setSelectedTab	port	crates/horizon-client/src/game/advancements_screen.rs::Game::advancements_mouse	gap: minor: the tab change is local; the openedTab packet to the server is not sent

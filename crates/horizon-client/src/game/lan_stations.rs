@@ -20,7 +20,7 @@ use horizon_protocol::packets::play::{self, Clientbound as C};
 
 /// A guest's open workstation menu.
 pub(super) struct GuestStation {
-    window: i32,
+    pub(super) window: i32,
     state: i32,
     kind: StationKind,
     pos: [i32; 3],
@@ -34,9 +34,9 @@ pub(super) struct GuestStation {
 /// A guest's open lectern: `LecternMenu` over the block entity, made on the
 /// menu engine for each click (`Game::lectern_menu`).
 pub(super) struct GuestLectern {
-    window: i32,
+    pub(super) window: i32,
     state: i32,
-    key: (i32, i32, i32),
+    pub(super) key: (i32, i32, i32),
     /// The book and page the client was last sent (`broadcastChanges`).
     sent: Option<(Option<ItemStack>, i32)>,
 }
@@ -69,10 +69,8 @@ impl Game<'_> {
         let Some((menu_type, kind, _)) = menu_of(station.kind) else {
             return false;
         };
-        self.lan_station_closed(host, conn, None);
-        self.lan_crafting_closed(host, conn, None);
-        // The container it replaces loses its opener.
-        self.guest_container_closed(host, conn);
+        // ServerPlayer.openMenu closes the menu that was open.
+        self.guest_close_all(host, conn);
         let title = horizon_protocol::text::translatable(station.kind.title_key(), &[]);
         let Some(window) = host.hub.open_window(conn, menu_type, title) else {
             return true;
@@ -141,12 +139,18 @@ impl Game<'_> {
         true
     }
 
+    /// How many slots of its own the guest's open station menu has before the
+    /// player's inventory (`slot_count - 36`), if one is open.
+    pub(super) fn lan_station_own_slots(host: &LanHost, conn: u32) -> Option<usize> {
+        let gs = host.play.get(&conn)?.station.as_ref()?;
+        Some(gs.menu.slot_count() - 36)
+    }
+
     /// `LecternBlock.openScreen` for a guest: `minecraft:lectern` over the
     /// block entity, with its book and page.
     pub(super) fn lan_open_lectern(&mut self, host: &mut LanHost, conn: u32, key: (i32, i32, i32)) {
-        self.lan_station_closed(host, conn, None);
-        self.lan_crafting_closed(host, conn, None);
-        self.guest_container_closed(host, conn);
+        // ServerPlayer.openMenu closes the menu that was open.
+        self.guest_close_all(host, conn);
         let title = horizon_protocol::text::translatable("container.lectern", &[]);
         let Some(window) = host.hub.open_window(conn, "minecraft:lectern", title) else {
             return;
@@ -350,7 +354,14 @@ impl Game<'_> {
             .get(&conn)
             .and_then(|p| p.station.as_ref())
             .is_some_and(|s| s.kind == StationKind::Anvil);
-        if anvil {
+        if anvil
+            && self.chat_filter_text(
+                host,
+                conn,
+                &[name],
+                horizon_client::lan::hub::chat_filter::Place::Anvil,
+            )
+        {
             self.lan_station_op(host, conn, None, |menu, env| {
                 menu.rename(env, name);
             });
@@ -392,6 +403,31 @@ impl Game<'_> {
         window: i32,
         id: i32,
     ) {
+        // A mod container's menu: its mod's buttons (`native_menu_button`),
+        // as handleContainerButtonClick checks them: the open menu, not a
+        // spectator, still valid.
+        if let Some(g) = host.hub.guest(conn)
+            && let Some(menu) = g.menu.as_ref().filter(|m| m.window == window)
+            && let Some(pos) = menu.pos
+            && self.mod_menu_at(pos).is_some()
+        {
+            if !g.spectator() && menu.slots.still_valid(&self.world, g, menu.pos) {
+                // The clicking player's cursor stack (`clickMenuButton`'s
+                // other half). Single player's own player is a guest of
+                // its own host too (`lan.rs:165`), so this one path covers
+                // both single player and a LAN guest.
+                let mut carried = g.carried.clone();
+                self.mod_menu_button(pos, id, &mut carried);
+                if host.hub.guest(conn).is_some_and(|g| g.carried != carried) {
+                    let net = host.hub.stack(&carried);
+                    if let Some(g) = host.hub.guest_mut(conn) {
+                        g.carried = carried;
+                        g.send(&C::SetCursorItem(play::SetCursorItem { item: net }));
+                    }
+                }
+            }
+            return;
+        }
         // LecternMenu's page buttons and Take Book.
         if self.lan_lectern_op(host, conn, window, |menu, env| {
             menu.button(env, id);
@@ -438,6 +474,7 @@ impl Game<'_> {
             }
         }
         host.hub.send_to(conn, &packet);
+        host.hub.guests[gi].inventory_told();
         for packet in data {
             host.hub.send_to(conn, &packet);
         }
@@ -543,13 +580,30 @@ impl Game<'_> {
             }
         }
         let data = self.beacon_data(host, pos);
-        let mut updated = false;
+        let mut updated = None;
         self.lan_station_op(host, conn, None, |menu, env| {
             menu.data.copy_from_slice(&data);
             let power = |k: usize| powers[k].as_ref().map(|(id, n)| (*id, n.as_str()));
-            updated = menu.beacon_update(env, power(0), power(1));
+            updated = Some(menu.beacon_update(env, power(0), power(1)));
         });
-        if !updated {
+        // handleSetBeaconPacket: effects the beacon can't give, or no payment, disconnect.
+        if updated == Some(false) {
+            let name = host
+                .hub
+                .guests
+                .iter()
+                .find(|g| g.conn == conn)
+                .map(|g| g.name.clone());
+            eprintln!(
+                "Player {} tried to set invalid beacon effects",
+                name.unwrap_or_default()
+            );
+            host.hub.kick(
+                conn,
+                horizon_protocol::text::translatable("multiplayer.disconnect.generic", &[]),
+            );
+        }
+        if updated != Some(true) {
             return;
         }
         let [primary, secondary] = powers.map(|p| p.map(|(_, n)| n));
@@ -587,10 +641,7 @@ impl Game<'_> {
             let Some(gs) = host.play.get(&conn).and_then(|p| p.station.as_ref()) else {
                 continue;
             };
-            let [x, y, z] = gs.pos;
-            let name = &self.res.facts().get(self.world.block(x, y, z)).name;
-            let block = StationKind::from_block(name) == Some(gs.kind);
-            if !(block && g.within_block_range(gs.pos, 4.0)) {
+            if !self.lan_station_valid(g, gs) {
                 let window = gs.window;
                 self.lan_station_closed(host, conn, Some(window));
                 host.hub.send_to(
@@ -612,6 +663,32 @@ impl Game<'_> {
 }
 
 impl Game<'_> {
+    /// A station menu's `stillValid`: its block is still that station and the
+    /// guest is within `isWithinBlockInteractionRange(pos, 4)`.
+    pub(super) fn lan_station_valid(
+        &self,
+        g: &horizon_client::lan::guest::Guest,
+        gs: &GuestStation,
+    ) -> bool {
+        let [x, y, z] = gs.pos;
+        let name = &self.res.facts().get(self.world.block(x, y, z)).name;
+        StationKind::from_block(name) == Some(gs.kind) && g.within_block_range(gs.pos, 4.0)
+    }
+
+    /// `LecternMenu.stillValid` (`Container.stillValidBlockEntity`): the block
+    /// entity still holds a book and the guest is within the interaction
+    /// range and its buffer.
+    pub(super) fn lan_lectern_valid(
+        &self,
+        g: &horizon_client::lan::guest::Guest,
+        key: (i32, i32, i32),
+    ) -> bool {
+        matches!(
+            self.world.block_entities.get(&key),
+            Some(BlockEntity::Lectern(l)) if l.book.is_some()
+        ) && g.within_block_range([key.0, key.1, key.2], 4.0)
+    }
+
     /// The guests' lecterns each tick: `stillValid` (the block entity, its
     /// book, the reach) closes them, and `broadcastChanges` sends a book or
     /// page another player changed.
@@ -628,13 +705,7 @@ impl Game<'_> {
             if !host.hub.here(g) {
                 continue;
             }
-            let has_book = matches!(
-                self.world.block_entities.get(&key),
-                Some(BlockEntity::Lectern(l)) if l.book.is_some()
-            );
-            // Container.stillValidBlockEntity: the interaction range and its buffer.
-            let near = g.within_block_range([key.0, key.1, key.2], 4.0);
-            if has_book && near {
+            if self.lan_lectern_valid(g, key) {
                 self.lan_send_lectern(host, conn, false);
             } else {
                 self.lan_station_closed(host, conn, Some(window));

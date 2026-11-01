@@ -10,7 +10,7 @@ description = "Horizon's mod files: content mods, modpacks and the registry inde
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1.6"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 log = "0.4"
 # The functions a published WebAssembly mod imports, for its API level (src/api_level.rs): the registry index.
 wasmparser = { version = "0.254", optional = true }

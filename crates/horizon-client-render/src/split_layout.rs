@@ -25,6 +25,30 @@ const ROWS: [&[u32]; MAX_PLAYERS - 4] = [
     &[4, 4, 4, 4],
 ];
 
+/// Where a window is.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Placement {
+    /// A normal window: its corner on the desktop and its size in pixels (`None`: a new one,
+    /// where the system opens it).
+    Free(Option<([i32; 2], [u32; 2])>),
+    /// Borderless over the monitor of this name.
+    Fill(String),
+}
+
+/// How far window `number` opens right and down of the centre, in logical pixels: Window 2
+/// centred, each next one a step further, as systems cascade new windows (back to the centre
+/// after six), so new windows never open exactly on one another.
+pub fn cascade(number: u8) -> f64 {
+    f64::from(number.saturating_sub(2) % 6) * 32.0
+}
+
+/// A window: its number (1 is the game's own) and where it is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Window {
+    pub number: u8,
+    pub placement: Placement,
+}
+
 /// `order` made a whole order of `n` players: those it names (once, if there are), then the
 /// others, P1 first.
 pub fn ordered(order: &[usize], n: usize) -> Vec<usize> {

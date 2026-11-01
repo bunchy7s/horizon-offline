@@ -65,7 +65,7 @@ in Controls, and adding one would put a non-vanilla mapping into `options.txt`.
 The **FPS counter**, **Keystrokes**, **Zoom** and the **Minimap** are official native mods now (in
 horizon-rust/horizon-mods under `native/<name>/`, [mods.md](mods.md#horizons-official-mods)), with the same look and
 options. Players install them from the launcher's Mods page, and the launcher builds them into the game
-([native-mods.md](native-mods.md)). They were WebAssembly mods for a while; those don't run any more. The game keeps
+([native-mods.md](native-mods.md)). The game keeps
 the hook points they use (`crates/horizon-client/src/game/native_hooks.rs`), and `horizon-extras.txt` keeps the old
 keys and `movedToMods`.
 
@@ -105,8 +105,11 @@ The game still draws the minimap, for the native mod (`native_minimap` in `nativ
   written to disk.
 
 ### Mouse Tweaks controls (`mouseTweaks`, default off; `mouseTweaksWheel`, default on)
-In the player inventory and chest-like containers (chests, barrels, ender
-chests, shulker boxes, hoppers, dispensers), in singleplayer and on servers:
+In the player inventory, chest-like containers (chests, barrels, ender chests,
+shulker boxes, hoppers, dispensers and droppers), furnaces (also blast furnaces
+and smokers) and crafting tables, in singleplayer and on servers. Anvils,
+enchanting tables, merchants, beacons, brewing stands, crafters and the other
+workstations keep vanilla's controls:
 - Right-drag holding a stack: one item goes into each slot entered, at once
   (slots holding another item, or full, are skipped).
 - Left-drag holding a stack: each slot entered that holds the same item is
@@ -116,9 +119,15 @@ chests, shulker boxes, hoppers, dispensers), in singleplayer and on servers:
 - Shift + left-drag: every slot entered is quick-moved (with a stack in hand,
   only the slots of its item).
 - The wheel over a slot, with an empty hand (`mouseTweaksWheel`): down moves
-  one item to the other side (container and inventory, or hotbar and main
-  inventory: to a stack of it with room, else the first empty slot, as
-  quick-move picks), up brings one of the same item back.
+  one item where a Shift click would send it (vanilla's `quickMoveStack`: fuel
+  to the fuel slot, a smeltable to the input, into the crafting grid, across a
+  container, between hotbar and main inventory, an armour piece onto the
+  player), up brings one of the same item from the other side.
+- Nothing goes into a result slot. The wheel down over one takes one craft, or a
+  furnace's whole output, to the inventory when it all fits (a result can't be
+  split or put back); the wheel up over one does nothing, and it isn't a source
+  for the wheel up elsewhere. A right-drag skips it, and a right press on it is
+  vanilla's.
 
 Every action is ordinary slot clicks (`ContainerClick` on a server), so a
 vanilla server sees nothing unusual. With the extra off, the hooks return at

@@ -57,7 +57,8 @@ fn reference(seed: i64, at: [f64; 3], camera: DVec3, uv: [f32; 2]) -> Vec<Vertex
                                 normal: [0; 4],
                                 pos: (o + glam::Vec3::from_array(c)).to_array(),
                                 uv,
-                                layer: 2,
+                                // The HDR tier lightning.rs adds; the geometry is vanilla's.
+                                layer: 2 | u32::from(crate::mesher::VERY_BRIGHT) << 16,
                                 color,
                                 light: 240 | 240 << 8,
 

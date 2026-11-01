@@ -114,19 +114,34 @@ pub fn register(m: &mut Mob) {
                 gravity: false,
             };
             m.ai.look.kind = super::control::LookKind::SmoothSwimming(20.0);
-            m.ai.nav.kind = NavKind::Amphibious;
+            m.ai.nav.kind = NavKind::Amphibious {
+                prefers_shallow: false,
+            };
             // `Axolotl()`: water costs nothing, so swim targets in water pass
             // DefaultRandomPos's malus check.
             m.set_malus(super::path::PathType::Water, 0.0);
             super::animal_brain::init(m, i64::from(m.id));
         }
         S::Tadpole => {
-            // TadpoleAi: panic, swim around and look about.
-            let g = &mut m.ai.goals;
-            g.add(0, Panic::new(2.0));
-            g.add(4, Stroll::swimming(1.0, 40));
-            m.ai.mov.kind = MoveKind::Custom;
+            // `Tadpole()`: `SmoothSwimmingMoveControl(this, 85, 10, 0.02, 0.1, true)`,
+            // `SmoothSwimmingLookControl(this, 10)` and a water-bound navigation.
+            m.ai.mov.kind = MoveKind::SmoothSwimming {
+                max_turn_x: 85.0,
+                max_turn_y: 10.0,
+                in_water: 0.02,
+                outside: 0.1,
+                gravity: true,
+            };
+            m.ai.look.kind = super::control::LookKind::SmoothSwimming(10.0);
             m.ai.nav.kind = NavKind::Water { breach: false };
+            // A tadpole is an `AbstractFish`: its goals (panic 1.25, avoid the player, the fish
+            // swim goal) run beside `TadpoleAi`'s brain (panic 2.0, looking at players, frog
+            // food, swimming about).
+            let g = &mut m.ai.goals;
+            g.add(0, Panic::new(1.25));
+            g.add(2, AvoidEntity::new(Avoid::Player, 8.0, 1.6, 1.4));
+            g.add(4, FishSwim(Stroll::swimming(1.0, 40)));
+            super::animal_brain::init(m, i64::from(m.id));
         }
         S::Cod | S::Salmon | S::TropicalFish | S::Pufferfish => {
             let puffer = m.species() == S::Pufferfish;
@@ -154,7 +169,25 @@ pub fn register(m: &mut Mob) {
             g.add(5, LookAtPlayer::new(6.0));
             g.add(5, super::dolphin::Jump::new(10));
             g.add(6, MeleeAttack::new(1.2, true));
-            m.ai.targets.add(1, HurtByTarget::new().alert());
+            g.add(8, super::dolphin::FollowPlayerRidden::new(false));
+            g.add(8, super::dolphin::FollowPlayerRidden::new(true));
+            // `Dolphin.registerGoals`: AvoidEntityGoal(Guardian.class, 8, 1, 1).
+            g.add(
+                9,
+                AvoidEntity::new(
+                    Avoid::Species(vec![S::Guardian, S::ElderGuardian]),
+                    8.0,
+                    1.0,
+                    1.0,
+                ),
+            );
+            // `HurtByTargetGoal(this, Guardian.class)`: guardians' hits are ignored.
+            m.ai.targets.add(
+                1,
+                HurtByTarget::new()
+                    .alert()
+                    .ignoring(&[S::Guardian, S::ElderGuardian]),
+            );
             m.ai.mov.kind = MoveKind::SmoothSwimming {
                 max_turn_x: 85.0,
                 max_turn_y: 10.0,
@@ -203,6 +236,13 @@ pub fn puff_scale(state: i32) -> f64 {
         _ => 1.0,
     }
 }
+/// `Tadpole.setAgeLockedData`: a golden dandelion flips the lock, puts the
+/// age back to 0 and starts the particle timer (40 ticks).
+pub fn set_age_locked_data(m: &mut Mob) {
+    m.extra.age_locked = !m.extra.age_locked;
+    m.extra.age = 0;
+    m.extra.age_lock_particle_timer = 40;
+}
 /// Species aiStep additions.
 pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     use Species as S;
@@ -218,14 +258,20 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                 m.extra.age += 1;
                 if m.extra.age >= 24_000 && !m.removed {
                     m.removed = true;
-                    m.sound("entity.tadpole.grow_up", events);
-                    events.push(MobEvent::SpawnKind {
-                        kind: "minecraft:frog".into(),
-                        at: [m.position.x, m.position.y, m.position.z],
-                        setup: super::SpawnSetup {
-                            yaw: m.yaw,
-                            persistent: true,
-                            ..Default::default()
+                    // Tadpole.ageUp: playSound at its feet, volume 0.15 (not
+                    // when silent: Entity.playSound).
+                    if !m.silent {
+                        let at = [m.position.x, m.position.y, m.position.z];
+                        events.push(MobEvent::Sound("entity.tadpole.grow_up", at, 0.15, 1.0));
+                    }
+                    // `ConversionParams.single(this, false, false)`; the game
+                    // finalizes the frog and keeps it persistent.
+                    events.push(MobEvent::Convert {
+                        from: Box::new(m.clone()),
+                        kind: "minecraft:frog",
+                        params: super::conversion::Params {
+                            keep_equipment: false,
+                            preserve_can_pick_up_loot: false,
                         },
                     });
                 }
@@ -240,6 +286,8 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                 m.on_ground = false;
                 m.sound("entity.tadpole.flop", events);
             }
+            // Tadpole.aiStep: the age lock's particles, after the age.
+            super::ai::make_age_locked_particle(m, events);
         }
         S::Cod | S::Salmon | S::TropicalFish | S::Pufferfish => {
             // AbstractFish.aiStep flops on land (applied before travel next tick).
@@ -467,7 +515,9 @@ pub fn travel(m: &mut Mob, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>
             true
         }
         // AbstractFish.travelInWater / Dolphin.travelInWater.
-        S::Cod | S::Salmon | S::TropicalFish | S::Pufferfish | S::Dolphin if m.fluids.in_water => {
+        S::Cod | S::Salmon | S::TropicalFish | S::Pufferfish | S::Tadpole | S::Dolphin
+            if m.fluids.in_water =>
+        {
             let speed = if m.species() == S::Dolphin {
                 m.ai.speed
             } else {
@@ -477,7 +527,9 @@ pub fn travel(m: &mut Mob, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>
             m.do_move(w, events);
             m.velocity = Vec3::new(m.velocity.x * 0.9, m.velocity.y * 0.9, m.velocity.z * 0.9);
             if m.ai.target.is_none() {
-                m.velocity.y -= 0.005;
+                // `Vec3.add(0.0, -0.005, 0.0)`: adding 0.0 turns a -0.0 into 0.0.
+                m.velocity =
+                    Vec3::new(m.velocity.x + 0.0, m.velocity.y - 0.005, m.velocity.z + 0.0);
             }
             true
         }
@@ -707,6 +759,9 @@ impl FollowFlockLeader {
 }
 impl Goal for FollowFlockLeader {
     goal_clone!();
+    fn set_start_delay(&mut self, ticks: i32) {
+        self.next_start = ticks;
+    }
     fn name(&self) -> &'static str {
         "FollowFlockLeaderGoal"
     }
@@ -729,20 +784,25 @@ impl Goal for FollowFlockLeader {
         // follow no one, in level order; itself as it is now.
         let species = m.species();
         let area = m.bounds().inflate(Vec3::new(8.0, 8.0, 8.0));
-        let candidates: Vec<(u32, Option<u32>, i32)> =
+        let mut near: Vec<&crate::mobs::Seen> =
             cx.w.others_near(area)
                 .filter(|s| s.species == species && s.alive && s.bounds.intersects(area))
-                .map(|s| {
-                    if s.id == m.id {
-                        (s.id, m.extra.leader, m.extra.followers)
-                    } else {
-                        (s.id, s.school.0, s.school.1)
-                    }
-                })
-                .filter(|&(_, leader, followers)| {
-                    can_be_followed(species, followers) || !follows(cx.w, leader)
-                })
                 .collect();
+        // `getEntitiesOfClass`: the sections by x, z, y; in each, as they entered it.
+        near.sort_by_key(|s| (s.section.0[0], s.section.0[2], s.section.0[1], s.section.1));
+        let candidates: Vec<(u32, Option<u32>, i32)> = near
+            .into_iter()
+            .map(|s| {
+                if s.id == m.id {
+                    (s.id, m.extra.leader, m.extra.followers)
+                } else {
+                    (s.id, s.school.0, s.school.1)
+                }
+            })
+            .filter(|&(_, leader, followers)| {
+                can_be_followed(species, followers) || !follows(cx.w, leader)
+            })
+            .collect();
         let (leader, school_size) = candidates
             .iter()
             .find(|c| can_be_followed(species, c.2))

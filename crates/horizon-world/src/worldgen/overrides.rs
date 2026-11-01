@@ -12,11 +12,15 @@ use std::collections::BTreeMap;
 /// The bundle of `dimension/<id>.json` level stems. Nothing prepared has
 /// it: a pack's level stem stands in for the world preset's.
 pub const DIMENSIONS: &str = "dimensions";
+/// The bundle of `dimension_type/<id>.json` dimension types. Nothing
+/// prepared has it: the vanilla types' are `LevelHeight::vanilla`.
+pub const DIMENSION_TYPES: &str = "dimension_types";
 
 /// Pack folders (`data/<ns>/<kind>/`) the chunk generator reads, and the
 /// bundle each joins.
-const KINDS: [(&str, &str); 15] = [
+const KINDS: [(&str, &str); 16] = [
     ("dimension", DIMENSIONS),
+    ("dimension_type", DIMENSION_TYPES),
     ("worldgen/biome", "biomes"),
     ("worldgen/block_state_provider", "state_providers"),
     // 26.3's names: 26.2 called them configured_carver and configured_feature.
@@ -57,15 +61,72 @@ fn resource_id(file: &str, kind: &str) -> Option<String> {
 pub enum PackFile {
     /// An entry or tag file the generator reads.
     Read,
-    /// A dimension type: Horizon keeps each dimension's vanilla build
-    /// height, so it is not read.
-    DimensionType { id: String, min_y: i64, height: i64 },
     /// A worldgen file of a kind the generator does not read (its folder).
     NotRead(String),
     /// A generator file whose text could not be read.
     Unreadable,
     /// Not worldgen.
     Other,
+}
+
+/// A level's build range (`LevelHeightAccessor`: `min_y`, `height`) and the
+/// rest of its dimension type the game reads: `logical_height` and
+/// `has_skylight`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LevelHeight {
+    pub min_y: i32,
+    pub height: i32,
+    pub logical_height: i32,
+    pub has_skylight: bool,
+}
+impl LevelHeight {
+    /// The vanilla dimension types'.
+    pub fn vanilla(dimension_type: &str) -> Option<Self> {
+        let (min_y, height, logical_height, has_skylight) = match dimension_type {
+            "minecraft:overworld" | "minecraft:overworld_caves" => (-64, 384, 384, true),
+            "minecraft:the_nether" => (0, 256, 128, false),
+            "minecraft:the_end" => (0, 256, 256, true),
+            _ => return None,
+        };
+        Some(Self {
+            min_y,
+            height,
+            logical_height,
+            has_skylight,
+        })
+    }
+    /// A dimension type's JSON, if its codec accepts the range: multiples
+    /// of 16, at least 16 high, within `DimensionType.MIN_Y` (-2032) and
+    /// `MAX_Y` (2031), and a logical height within the height.
+    pub fn of_json(v: &Value) -> Option<Self> {
+        let int = |k: &str| i32::try_from(v[k].as_i64()?).ok();
+        let (min_y, height) = (int("min_y")?, int("height")?);
+        let logical_height = int("logical_height").unwrap_or(height);
+        let valid = min_y % 16 == 0
+            && height % 16 == 0
+            && height >= 16
+            && min_y >= -2032
+            && min_y + height <= 2032
+            && (0..=height).contains(&logical_height);
+        valid.then_some(Self {
+            min_y,
+            height,
+            logical_height,
+            has_skylight: v["has_skylight"].as_bool().unwrap_or(true),
+        })
+    }
+    /// A level stem's `type` (a dimension type id, or one inline), with the
+    /// packs' `types` over the vanilla ones.
+    pub fn of_type(ty: &Value, types: &BTreeMap<String, String>) -> Option<Self> {
+        match ty {
+            Value::String(id) => match types.get(id) {
+                Some(json) => Self::of_json(&serde_json::from_str(json).ok()?),
+                None => Self::vanilla(id),
+            },
+            inline @ Value::Object(_) => Self::of_json(inline),
+            _ => None,
+        }
+    }
 }
 
 /// Replacement and added bundle entries, and tag files, from data packs.
@@ -127,15 +188,6 @@ impl WorldgenOverrides {
             };
             self.add_tag(bundle, &id, pack, json);
             PackFile::Read
-        } else if let Some(id) = resource_id(file, "dimension_type") {
-            let v: Value = read()
-                .and_then(|t| serde_json::from_str(&t).ok())
-                .unwrap_or_default();
-            PackFile::DimensionType {
-                id,
-                min_y: v["min_y"].as_i64().unwrap_or_default(),
-                height: v["height"].as_i64().unwrap_or_default(),
-            }
         } else if rest.starts_with("worldgen/") || rest.starts_with("tags/worldgen/") {
             PackFile::NotRead(rest.rsplit_once('/').map_or(rest, |(k, _)| k).to_owned())
         } else {
@@ -198,6 +250,21 @@ impl WorldgenOverrides {
             }
         }
         warnings
+    }
+    /// The build range of the vanilla level `level` (`minecraft:overworld`,
+    /// `minecraft:the_nether`, `minecraft:the_end`) with these packs: the
+    /// dimension type its level stem names (a pack's stem, else the
+    /// preset's, whose type has the level's name), a pack's file for that
+    /// type over the vanilla one. `None` when the packs give it a range the
+    /// codec refuses.
+    pub fn level_height(&self, level: &str) -> Option<LevelHeight> {
+        let none = BTreeMap::new();
+        let types = self.entries.get(DIMENSION_TYPES).unwrap_or(&none);
+        let ty = match self.entries.get(DIMENSIONS).and_then(|d| d.get(level)) {
+            Some(stem) => serde_json::from_str::<Value>(stem).ok()?["type"].clone(),
+            None => Value::String(level.to_owned()),
+        };
+        LevelHeight::of_type(&ty, types)
     }
     /// The entries packs give `bundle`.
     pub fn entries(&self, bundle: &str) -> impl Iterator<Item = (&str, &str)> {
@@ -301,11 +368,7 @@ mod tests {
                 "data/minecraft/dimension_type/overworld.json",
                 r#"{"min_y":-64,"height":2096}"#
             ),
-            PackFile::DimensionType {
-                id: "minecraft:overworld".into(),
-                min_y: -64,
-                height: 2096
-            }
+            PackFile::Read
         );
         assert_eq!(
             add("data/minecraft/worldgen/carver/cave.json", "6"),
@@ -346,6 +409,46 @@ mod tests {
         assert_eq!(get("state_providers"), [("p:stony_cliffs", "8")]);
         assert_eq!(get("structures"), []);
         assert_eq!(o.tags("biome_tags").count(), 1);
+    }
+
+    #[test]
+    fn levels_take_their_height_from_the_packs_dimension_types() {
+        let mut o = WorldgenOverrides::default();
+        let overworld = o.level_height("minecraft:overworld");
+        assert_eq!(overworld, LevelHeight::vanilla("minecraft:overworld"));
+        let nether = o.level_height("minecraft:the_nether").unwrap();
+        assert_eq!((nether.logical_height, nether.has_skylight), (128, false));
+        o.set(
+            DIMENSION_TYPES,
+            "minecraft:overworld",
+            r#"{"min_y":-64,"height":2096,"logical_height":384,"has_skylight":true}"#.into(),
+        );
+        let tall = LevelHeight {
+            min_y: -64,
+            height: 2096,
+            logical_height: 384,
+            has_skylight: true,
+        };
+        assert_eq!(o.level_height("minecraft:overworld"), Some(tall));
+        let end = o.level_height("minecraft:the_end");
+        assert_eq!(end, LevelHeight::vanilla("minecraft:the_end"));
+        // A pack's level stem names another type.
+        o.set(
+            DIMENSIONS,
+            "minecraft:the_end",
+            r#"{"type":"minecraft:overworld"}"#.into(),
+        );
+        assert_eq!(o.level_height("minecraft:the_end"), Some(tall));
+        // Ranges the codec refuses.
+        for bad in [
+            r#"{"min_y":-60,"height":384}"#,
+            r#"{"min_y":-64,"height":2112}"#,
+            r#"{"min_y":0,"height":0}"#,
+            r#"{"min_y":0,"height":256,"logical_height":300}"#,
+        ] {
+            o.set(DIMENSION_TYPES, "minecraft:overworld", bad.into());
+            assert_eq!(o.level_height("minecraft:overworld"), None, "{bad}");
+        }
     }
 
     #[test]

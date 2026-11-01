@@ -1,0 +1,14 @@
+[package]
+name = "horizon-anticheat"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version = "1.85"
+description = "The dedicated server's anticheat: its [anticheat] settings, violation levels and the checks' rules, with no game state (docs/anticheat.md)"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"
+
+[lints]
+workspace = true

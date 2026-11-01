@@ -7,3 +7,4 @@ kacpherek    # added by Ludovic, 2026-10-27
 rdbtCVS      # added by Ludovic, 2026-10-27
 Online5277   # added by Ludovic, 2026-10-27 (his top three by merged pull requests)
 levzzz5154   # added by Ludovic, 2026-10-28 (Horizon Team; author of horizon-mixins)
+Qwerner88880 # added by Ludovic, 2026-10-31 (Discord vladislav_hagen; native-mod hooks)

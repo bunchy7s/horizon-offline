@@ -9,7 +9,7 @@ OptionInstance.UnitDouble.validateValue	port	crates/horizon-client-render/src/op
 OptionInstance.UnitDouble.codec	port	crates/horizon-client-render/src/options_file.rs::codec_double	
 Options.updateResourcePacks	port	crates/horizon-client/src/game/options.rs::Game::handle_option_events	gap: minor: saves and reloads on every packs event; vanilla only when the list changed
 Options.maxAnisotropyValue	missing		player: no anisotropic filtering setting; textures are sampled without anisotropy
-Options.createSoundSliderOptionInstance	port	crates/horizon-client-render/src/audio.rs::Audio::sync_volumes	gap: player: no sound preview outside a level and no now-playing toast when master or music changes
+Options.createSoundSliderOptionInstance	port	crates/horizon-client-render/src/audio.rs::Audio::sync_volumes	gap: player: no now-playing toast when master or music changes
 Options.setGraphicsPresetToCustom	inline	crates/horizon-client-render/src/options_ui.rs::Opt::set_slider	gap: minor: cycle buttons set custom in Opt::cycle as well
 Options.processOptions	inline	crates/horizon-client-render/src/options_file.rs::OptionsFile::parse	gap: minor: the save direction is OptionsFile::serialize
 Options.dataFix	port	crates/horizon-client-render/src/options_fixes.rs::update	

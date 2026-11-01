@@ -32,13 +32,6 @@ required; refusing input that was accepted; a JSON field that changes type.
 Not breaking: a new function, interface, capability, command, endpoint, tool or `server.toml` key; a new optional
 argument or JSON field (readers must ignore fields they don't know); faster, or fixing behaviour to what the reference already says.
 
-### Mod API levels (WebAssembly mods, removed)
-
-While WebAssembly mods ran, every function the game offered them had an **API level**, the one it arrived at, read
-from the mod's file (`crates/horizon-mods/src/api_level.rs`, levels 0 to 7). Nothing new is added to it. The registry
-index still records each old version's level (`api_level`, [mod-index.md](mod-index.md)), for the modpacks that
-require those mods.
-
 ## Stability levels
 
 Every part of an API has one level, shown in its reference and its surface page.
@@ -75,10 +68,11 @@ Every preview and stable API has tests that run old users against the current co
 | API | The test |
 | --- | --- |
 | Content mods | the content template builds and checks with `cargo horizon-mod`, and `mod_content`'s tests load content mods; a line is served as long as they pass |
-| Native mods | hook points are only ever added, and a test keeps each one hookable (`tests::hook_points_stay_hookable`, `game/native_hooks.rs`) |
+| Native mods | hook points are only ever added, and tests keep each one hookable (`tests::hook_points_stay_hookable` and `tests::loot_table_load_stays_hookable`, `game/native_hooks.rs`) |
 | Agent control | a transcript per protocol version: commands and the reply keys each must have |
 | Server | `api::ROUTES` against `route()` (generated reference); a `server.toml` from each release line parses to the same settings; golden replies per endpoint |
 | Launcher | the generated reference; golden `--json` output per command |
+| Launch | the generated reference, which holds `--launch-api`'s reply; every listed option is accepted; `horizon-prepare`'s `--progress json` lines (`progress_json_lines_keep_their_shape`) |
 | Data formats | a sample file of every version a reader accepts, read by today's reader |
 
 The generated references are the API's own diff: a pull request that changes an API changes its reference, and the
@@ -93,7 +87,7 @@ Deprecations and breaking changes are in bold. The release notes of the game rel
 
 | Part | Level | Version |
 | --- | --- | --- |
-| Content mods (`registries`: data-driven blocks and items) | preview | manifest `api = "0.2"` |
+| Content mods (`registries`: data-driven blocks, items, mob effects, thrown entity types and menu types) | preview | manifest `api = "0.2"` |
 | Native mods (horizon-mixins bundles, [native-mods.md](../native-mods.md)) | experimental | the pinned revisions |
 | `cargo horizon-mod` (`new`, `build`, `run`, `check`) | preview | none yet (unversioned) |
 | Shader API | not started | |
@@ -102,6 +96,7 @@ Deprecations and breaking changes are in bold. The release notes of the game rel
 | `horizon-server` commands, `server.toml` | stable | `horizon-server --version` |
 | Server control API | stable | `/api/v1` |
 | `horizon-launcher` commands and MCP tools | preview | none yet (unversioned) |
+| Launch API: `horizon-client`'s launch options, session JSON, exit codes; `horizon-prepare`'s output and progress | experimental | 0.1.0, `horizon-client --launch-api` |
 | Benchmark report | stable | `"version": 1` |
 | Telemetry batch and consent | stable | `"schema": 1`, consent `2` |
 | `horizon-graphics.txt`, `horizon-extras.txt`, `horizon-mods.txt` | preview | none |

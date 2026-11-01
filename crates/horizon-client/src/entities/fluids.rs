@@ -1,5 +1,5 @@
-//! Dropped-item immersion and currents through the shared vanilla fluid helpers.
-use super::ItemEntity;
+//! Dropped-item and armor-stand immersion and currents through the shared vanilla fluid helpers.
+use super::{ArmorStand, ItemEntity};
 use crate::{
     motion::{FluidResources, FluidTags, LAVA, WATER},
     world::World,
@@ -18,88 +18,133 @@ use horizon_world::{
     registry::BlockStateId,
 };
 type Error = std::convert::Infallible;
-struct ItemFluidWorld<'a> {
-    item: &'a mut ItemEntity,
+struct EntityFluidWorld<'a> {
+    bounds: Aabb,
+    position: Vec3,
+    eye_y: f64,
+    velocity: &'a mut Vec3,
     world: &'a World,
     fluids: &'a FluidResources,
 }
+fn update_entity_fluids(
+    bounds: Aabb,
+    position: Vec3,
+    eye_y: f64,
+    velocity: &mut Vec3,
+    world: &World,
+    fluids: &FluidResources,
+) -> (f64, f64) {
+    let mut interaction = EntityFluidInteraction::new([WATER, LAVA]);
+    let mut scene = EntityFluidWorld {
+        bounds,
+        position,
+        eye_y,
+        velocity,
+        world,
+        fluids,
+    };
+    if interaction.update(&mut scene, false, 4096).is_err() {
+        return (0.0, 0.0);
+    }
+    let water_height = interaction.fluid_height(&scene, WATER);
+    let lava_height = interaction.fluid_height(&scene, LAVA);
+    let _ = interaction.apply_current(&mut scene, WATER, 0.014);
+    let _ = interaction.apply_current(
+        &mut scene,
+        LAVA,
+        if world.fast_lava {
+            0.007
+        } else {
+            0.0023333333333333335
+        },
+    );
+    (water_height, lava_height)
+}
 impl ItemEntity {
     pub(super) fn update_fluids(&mut self, world: &World, fluids: &FluidResources) -> (f64, f64) {
-        let mut interaction = EntityFluidInteraction::new([WATER, LAVA]);
-        let mut scene = ItemFluidWorld {
-            item: self,
+        update_entity_fluids(
+            self.bounds(),
+            self.position,
+            self.position.y + f64::from(0.2125f32),
+            &mut self.velocity,
             world,
             fluids,
-        };
-        if interaction.update(&mut scene, false, 4096).is_err() {
-            return (0.0, 0.0);
-        }
-        let water_height = interaction.fluid_height(&scene, WATER);
-        let lava_height = interaction.fluid_height(&scene, LAVA);
-        let _ = interaction.apply_current(&mut scene, WATER, 0.014);
-        let _ = interaction.apply_current(
-            &mut scene,
-            LAVA,
-            if world.fast_lava {
-                0.007
-            } else {
-                0.0023333333333333335
-            },
-        );
-        (water_height, lava_height)
+        )
     }
 }
-impl FluidMembership for ItemFluidWorld<'_> {
+impl ArmorStand {
+    /// `Entity.updateFluidHeightAndDoFluidPushing`: refreshes water and lava
+    /// immersion over the stand's deflated box and pushes its velocity by any
+    /// water or lava current. Returns whether the stand is in water (`isInWater`).
+    pub fn update_fluids(&mut self, world: &World, fluids: &FluidResources) -> bool {
+        if self.marker {
+            return false;
+        }
+        let eye = if self.small {
+            f64::from(0.9875f32 * 0.9)
+        } else {
+            f64::from(1.7775f32)
+        };
+        let (water_height, _) = update_entity_fluids(
+            self.bounds(),
+            self.position,
+            self.position.y + eye,
+            &mut self.velocity,
+            world,
+            fluids,
+        );
+        water_height > 0.0
+    }
+}
+impl FluidMembership for EntityFluidWorld<'_> {
     fn fluid_in_tag(&self, kind: FluidKind, tag: FluidTagId) -> bool {
         FluidTags.fluid_in_tag(kind, tag)
     }
 }
-impl CurrentTarget for ItemFluidWorld<'_> {
+impl CurrentTarget for EntityFluidWorld<'_> {
     type Error = Error;
     fn is_player_class(&self) -> bool {
         false
     }
     fn velocity(&mut self) -> Result<Vec3, Error> {
-        Ok(self.item.velocity)
+        Ok(*self.velocity)
     }
     fn add_delta_movement(&mut self, delta: Vec3) -> Result<(), Error> {
-        let v = self.item.velocity;
+        let v = *self.velocity;
         let sum = Vec3::new(v.x + delta.x, v.y + delta.y, v.z + delta.z);
         if delta.is_finite() && sum.is_finite() {
-            self.item.velocity = sum;
+            *self.velocity = sum;
         }
         Ok(())
     }
 }
-impl FluidInteractionWorld for ItemFluidWorld<'_> {
+impl FluidInteractionWorld for EntityFluidWorld<'_> {
     type Error = Error;
     type Chunk = ();
     fn interaction_box(&mut self) -> Result<Option<Aabb>, Error> {
-        Ok(Some(
-            self.item.bounds().deflate(Vec3::new(0.001, 0.001, 0.001)),
-        ))
+        Ok(Some(self.bounds.deflate(Vec3::new(0.001, 0.001, 0.001))))
     }
     fn loaded_chunk(&mut self, x: i32, z: i32) -> Result<Option<()>, Error> {
         Ok(self.world.chunks.contains_key(&(x, z)).then_some(()))
     }
     fn chunk_sections(&mut self, _: ()) -> Result<FluidSections<'_>, Error> {
-        static SECTIONS: [bool; crate::chunk::SECTIONS] = [true; crate::chunk::SECTIONS];
+        let layout = self.world.layout();
         Ok(FluidSections {
-            minimum_section_y: crate::chunk::MIN_Y >> 4,
-            has_fluid: &SECTIONS,
+            minimum_section_y: layout.min_y() >> 4,
+            has_fluid: crate::chunk::every_section(layout),
         })
     }
     fn bounding_box_min_y(&self) -> f64 {
-        self.item.position.y
+        self.position.y
     }
     fn block_x(&self) -> i32 {
-        self.item.position.x.floor() as i32
+        self.position.x.floor() as i32
     }
     fn eye_y(&mut self) -> Result<f64, Error> {
-        Ok(self.item.position.y + f64::from(0.2125f32))
+        Ok(self.eye_y)
     }
     fn block_z(&self) -> i32 {
-        self.item.position.z.floor() as i32
+        self.position.z.floor() as i32
     }
     fn fluid_state(&mut self, p: BlockPos) -> Result<FluidState, Error> {
         Ok(self.fluids.fluid(self.world.block(p.x, p.y, p.z)))
@@ -114,7 +159,7 @@ impl FluidInteractionWorld for ItemFluidWorld<'_> {
         flow_at(self, f, p)
     }
 }
-impl FluidHeightWorld for ItemFluidWorld<'_> {
+impl FluidHeightWorld for EntityFluidWorld<'_> {
     type Error = Error;
     fn fluid(&mut self, p: [i32; 3]) -> Result<FluidState, Error> {
         Ok(self.fluids.fluid(self.world.block(p[0], p[1], p[2])))
@@ -124,7 +169,7 @@ impl FluidHeightWorld for ItemFluidWorld<'_> {
         Ok(self.fluids.sturdy(state, Direction::Down))
     }
 }
-impl FluidFlowWorld for ItemFluidWorld<'_> {
+impl FluidFlowWorld for EntityFluidWorld<'_> {
     type Error = Error;
     type Block = BlockStateId;
     fn fluid(&mut self, p: BlockPos) -> Result<FluidState, Error> {
@@ -198,19 +243,96 @@ mod tests {
             pickup_delay: 0,
             bob_offset: 0.0,
             ticks: 0,
+            needs_sync: false,
         };
         let mut still = item.clone();
-        assert!(still.tick(&world, &facts, &collision, false, &fluids));
+        assert!(still.tick(&world, assets.registry, &facts, &collision, false, &fluids));
         assert_eq!(still.position.x, at.x);
         assert_eq!(still.velocity.x, 0.0);
         world.set(21, 4, 20, flowing).unwrap();
         let mut carried = item;
-        assert!(carried.tick(&world, &facts, &collision, false, &fluids));
+        assert!(carried.tick(&world, assets.registry, &facts, &collision, false, &fluids));
         // First push is damped by buoyancy before motion, second follows drag.
         assert!((carried.position.x - at.x - 0.014 * 0.99).abs() < 1e-12);
         assert!((carried.velocity.x - (0.014 * 0.99 * 0.98 + 0.014)).abs() < 1e-12);
         for _ in 0..20 {
-            carried.tick(&world, &facts, &collision, false, &fluids);
+            carried.tick(&world, assets.registry, &facts, &collision, false, &fluids);
+        }
+        assert!(carried.position.x > at.x + 0.5);
+    }
+
+    #[test]
+    fn armor_stands_follow_flowing_water_but_markers_and_still_water_stay_in_place() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let fluids = FluidResources::new(&assets, &facts).unwrap();
+        let collision = crate::collisions::load(&root, assets.registry).unwrap();
+        let mut world = World::test_scene(&assets, &render, 3).unwrap();
+        let stone = assets.registry.default_state("minecraft:stone").unwrap();
+        let water = assets.registry.default_state("minecraft:water").unwrap();
+        let mut state = assets.registry.state(water).unwrap().clone();
+        state.properties.insert("level".into(), "1".into());
+        let flowing = assets.registry.resolve(&state).unwrap();
+        for x in 19..=21 {
+            for z in 19..=21 {
+                world.set(x, 3, z, stone).unwrap();
+                world.set(x, 4, z, water).unwrap();
+            }
+        }
+        let at = Vec3::new(20.5, 4.0, 20.5);
+        let stand = ArmorStand::new(1, at, 0.0);
+        let mut still = stand.clone();
+        let in_water = still.update_fluids(&world, &fluids);
+        assert!(in_water);
+        let mut scene = crate::collisions::SceneCollisions {
+            world: &world,
+            binding: &collision,
+            subject: None,
+        };
+        still.tick(&mut scene, &facts, in_water, &mut |_, _| {});
+        assert_eq!(still.position.x, at.x);
+        assert_eq!(still.velocity.x, 0.0);
+
+        world.set(21, 4, 20, flowing).unwrap();
+        let mut marker = stand.clone();
+        marker.marker = true;
+        let in_water = marker.update_fluids(&world, &fluids);
+        assert!(!in_water);
+        let mut scene = crate::collisions::SceneCollisions {
+            world: &world,
+            binding: &collision,
+            subject: None,
+        };
+        marker.tick(&mut scene, &facts, in_water, &mut |_, _| {});
+        assert_eq!(marker.position, at);
+        assert_eq!(marker.velocity, Vec3::ZERO);
+
+        let mut carried = stand;
+        let in_water = carried.update_fluids(&world, &fluids);
+        assert!(in_water);
+        let mut scene = crate::collisions::SceneCollisions {
+            world: &world,
+            binding: &collision,
+            subject: None,
+        };
+        carried.tick(&mut scene, &facts, in_water, &mut |_, _| {});
+        assert!((carried.position.x - (at.x + 0.014)).abs() < 1e-12);
+        assert!((carried.velocity.x - 0.014 * f64::from(0.8f32)).abs() < 1e-12);
+        for _ in 0..20 {
+            let in_water = carried.update_fluids(&world, &fluids);
+            let mut scene = crate::collisions::SceneCollisions {
+                world: &world,
+                binding: &collision,
+                subject: None,
+            };
+            carried.tick(&mut scene, &facts, in_water, &mut |_, _| {});
         }
         assert!(carried.position.x > at.x + 0.5);
     }

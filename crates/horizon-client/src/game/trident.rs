@@ -5,6 +5,7 @@
 //! lightning on a hit (`channeling.json`).
 use super::{Game, view_vector};
 use horizon_client::{
+    arrows::{back_off, clip_block_stop},
     collisions::SceneCollisions,
     enchant::EffectContext,
     items::ItemStack,
@@ -29,6 +30,8 @@ pub(super) struct ThrownTrident {
     pub(super) pitch: f32,
     pub(super) in_ground: bool,
     in_ground_time: u32,
+    /// `AbstractArrow.shakeTime`: seven ticks after sticking, no pickup.
+    shake: u32,
     dealt_damage: bool,
     pub(super) loyalty: u32,
     pub(super) no_physics: bool,
@@ -64,6 +67,7 @@ impl ThrownTrident {
             pitch,
             in_ground: false,
             in_ground_time: 0,
+            shake: 0,
             dealt_damage: false,
             loyalty: 0,
             no_physics: false,
@@ -96,6 +100,7 @@ impl ThrownTrident {
     /// server decides what it hits.
     pub(super) fn remote_tick(&mut self, w: &impl ProjectileWorld, owner_eye: Option<Vec3>) {
         self.previous = self.position;
+        self.shake = self.shake.saturating_sub(1);
         if self.in_ground_time > 4 {
             self.dealt_damage = true;
         }
@@ -124,9 +129,11 @@ impl ThrownTrident {
         if !self.no_physics
             && let Some((at, _, _)) = w.clip(self.position, to)
         {
-            self.position = at;
+            // AbstractArrow.onHitBlock's back-off, as the server's tick does it.
+            self.position = back_off(at, m);
             self.velocity = Vec3::ZERO;
             self.in_ground = true;
+            self.shake = 7;
             return;
         }
         self.position = to;
@@ -138,12 +145,6 @@ impl ThrownTrident {
     }
 }
 const HALF: f64 = 0.25;
-fn bounds(p: Vec3) -> Aabb {
-    Aabb::new(
-        Vec3::new(p.x - HALF, p.y, p.z - HALF),
-        Vec3::new(p.x + HALF, p.y + 2.0 * HALF, p.z + HALF),
-    )
-}
 /// The entry distance of a segment into a box, if it crosses it.
 fn segment_box(from: Vec3, d: Vec3, b: Aabb) -> Option<f64> {
     let (lo, hi) = (b.min_position(), b.max_position());
@@ -185,9 +186,7 @@ impl Game<'_> {
         if stack.damage + 1 >= max || (riptide && !self.in_water_or_rain()) {
             return true;
         }
-        if self.using.is_none() {
-            self.using = Some((self.held_slot(), 0));
-        }
+        self.start_using_item();
         true
     }
     fn in_water_or_rain(&mut self) -> bool {
@@ -409,6 +408,7 @@ impl Game<'_> {
             pitch: projectile.pitch,
             in_ground: false,
             in_ground_time: 0,
+            shake: 0,
             dealt_damage: false,
             no_physics: false,
             returning: 0,
@@ -521,6 +521,8 @@ impl Game<'_> {
         while i < self.tridents.len() {
             let mut t = self.tridents.remove(i);
             t.previous = t.position;
+            // AbstractArrow.tick: `if (shakeTime > 0) --shakeTime;`.
+            t.shake = t.shake.saturating_sub(1);
             if t.in_ground_time > 4 {
                 t.dealt_damage = true;
             }
@@ -589,15 +591,18 @@ impl Game<'_> {
                     );
                     t.dealt_damage = true;
                     let mut hurt_at = None;
+                    let aim = self.attacker_aim(Some(Who::Player));
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                         let from = Some([t.position.x, t.position.y, t.position.z]);
-                        let hurt = m.damage(
+                        let hurt = m.damage_projectile(
                             damage,
                             Damage {
                                 kind: DamageKind::Arrow,
                                 attacker: Some(Who::Player),
                                 from,
                             },
+                            aim,
+                            [t.velocity.x, t.velocity.z],
                         );
                         if hurt {
                             hurt_at = Some([m.position.x, m.position.y, m.position.z]);
@@ -634,34 +639,32 @@ impl Game<'_> {
                         -t.velocity.z * 0.02,
                     );
                 } else {
-                    let mut scene = SceneCollisions {
-                        world: &self.world,
-                        binding: self.collision,
-                        subject: None,
-                    };
-                    if let Ok(moved) = scene.resolve(bounds(t.position), t.velocity, 0.0, false) {
-                        let (from, flight) = (t.position, t.velocity);
-                        let blocked = (moved.x - t.velocity.x).abs() > 1e-7
-                            || (moved.y - t.velocity.y).abs() > 1e-7
-                            || (moved.z - t.velocity.z).abs() > 1e-7;
-                        t.position = Vec3::new(
-                            t.position.x + moved.x,
-                            t.position.y + moved.y,
-                            t.position.z + moved.z,
-                        );
-                        if blocked {
-                            if t.stack.enchantment_level("minecraft:channeling") > 0 {
-                                self.channel_rod_hit(from, flight, t.guest);
-                            }
-                            t.in_ground = true;
-                            t.velocity = Vec3::ZERO;
-                            self.audio.play(
-                                "minecraft:item.trident.hit_ground",
-                                Some([t.position.x, t.position.y, t.position.z]),
-                                1.0,
-                                1.0,
-                            );
+                    // AbstractArrow.tick: a zero-width ray clip of the movement
+                    // (`ClipContext.Block.COLLIDER`, no fluids), then
+                    // `AbstractArrow.onHitBlock` on a hit.
+                    let from = t.position;
+                    let flight = t.velocity;
+                    if let Some((stop, _)) =
+                        clip_block_stop(&self.world, self.res.facts(), self.collision, from, flight)
+                    {
+                        if t.stack.enchantment_level("minecraft:channeling") > 0 {
+                            self.channel_rod_hit(from, flight, t.guest);
                         }
+                        // 0.05 back along signum(movement), stopped, stuck, shaking.
+                        t.position = stop;
+                        t.velocity = Vec3::ZERO;
+                        t.in_ground = true;
+                        t.shake = 7;
+                        self.audio.play(
+                            "minecraft:item.trident.hit_ground",
+                            Some([stop.x, stop.y, stop.z]),
+                            1.0,
+                            1.0,
+                        );
+                    } else {
+                        // A MISS moves the whole segment.
+                        t.position =
+                            Vec3::new(from.x + flight.x, from.y + flight.y, from.z + flight.z);
                     }
                 }
                 if !t.in_ground {
@@ -679,8 +682,9 @@ impl Game<'_> {
             }
             // playerTouch: stuck or returning tridents go back to a player.
             // ThrownTrident.playerTouch: only its owner takes it, or anyone
-            // once the owner is not in this level (`getOwner() == null`).
-            if t.in_ground || t.no_physics {
+            // once the owner is not in this level (`getOwner() == null`), and
+            // not while `AbstractArrow.shakeTime` still runs.
+            if (t.in_ground || t.no_physics) && t.shake == 0 {
                 let near = |c: &&Catcher| {
                     c.touches
                         && (owner_eye.is_none() || c.guest == t.guest)

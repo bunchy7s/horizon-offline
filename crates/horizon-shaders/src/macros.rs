@@ -3,6 +3,14 @@
 
 use std::collections::BTreeMap;
 
+/// The Iris feature flags (`iris.features.*`) Horizon has.
+const FEATURES: [&str; 4] = [
+    "COMPUTE_SHADERS",
+    "CUSTOM_IMAGES",
+    "ENTITY_TRANSLUCENT",
+    "SSBO",
+];
+
 /// `MC_VERSION` of the version Horizon plays: 26.3 → 260300.
 pub const MC_VERSION: u32 = mc_version(horizon_core::version::VERSION_ID);
 
@@ -91,7 +99,31 @@ impl Macros {
         m.define("MC_SHADOW_QUALITY", "1.0");
         m.define("MC_HAND_DEPTH", "0.125");
         m.define("MAX_COLOR_BUFFERS", "16");
+        // Packs take Iris's extensions (compute programs, images, custom textures) where this
+        // is defined.
+        m.define("IS_IRIS", "");
         m
+    }
+
+    /// `iris.features.optional`'s features Horizon has, as `IRIS_FEATURE_<name>`; a note for
+    /// each feature `iris.features.required` names that it lacks.
+    pub fn define_features(&mut self, properties: &crate::Properties) -> Vec<String> {
+        let words = |key: &str| {
+            properties
+                .get(key)
+                .map(|v| v.split_whitespace().map(str::to_owned).collect::<Vec<_>>())
+                .unwrap_or_default()
+        };
+        for feature in words("iris.features.optional") {
+            if FEATURES.contains(&feature.as_str()) {
+                self.define(format!("IRIS_FEATURE_{feature}"), "");
+            }
+        }
+        words("iris.features.required")
+            .into_iter()
+            .filter(|f| !FEATURES.contains(&f.as_str()))
+            .map(|f| format!("the pack requires `{f}`, which is not supported yet"))
+            .collect()
     }
 
     pub fn define(&mut self, name: impl Into<String>, value: impl Into<String>) {
@@ -124,6 +156,19 @@ impl Macros {
             .get(name)
             .filter(|m| m.params.is_none())
             .map(|m| m.body.as_str())
+    }
+
+    /// Whether `text` calls a function-like macro whose arguments go on past its end.
+    pub(crate) fn unfinished_call(&self, text: &str) -> bool {
+        let tokens = lex(text);
+        tokens.iter().enumerate().any(|(i, t)| {
+            self.0.get(*t).is_some_and(|m| m.params.is_some())
+                && tokens[i + 1..]
+                    .iter()
+                    .find(|t| !t.trim().is_empty())
+                    .is_some_and(|t| *t == "(")
+                && arguments(&tokens, i + 1).is_none()
+        })
     }
 
     /// `text` with every macro expanded, repeatedly; a macro is not expanded again inside its own
@@ -283,6 +328,23 @@ pub(crate) fn is_ident(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn iris_features_are_defined_or_noted() {
+        let properties = crate::Properties::parse(
+            "iris.features.optional = COMPUTE_SHADERS NOT_A_FEATURE\n\
+             iris.features.required = ENTITY_TRANSLUCENT NOT_A_FEATURE\n",
+            &Macros::standard(),
+        );
+        let mut m = Macros::standard();
+        let notes = m.define_features(&properties);
+        assert!(m.is_defined("IRIS_FEATURE_COMPUTE_SHADERS"));
+        assert!(!m.is_defined("IRIS_FEATURE_NOT_A_FEATURE"));
+        assert_eq!(
+            notes,
+            ["the pack requires `NOT_A_FEATURE`, which is not supported yet"]
+        );
+    }
 
     #[test]
     fn versions_follow_the_documented_rule() {

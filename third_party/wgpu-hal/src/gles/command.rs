@@ -1136,21 +1136,21 @@ impl crate::CommandEncoder for super::CommandEncoder {
         offset: wgt::BufferAddress,
         draw_count: u32,
     ) {
-        self.prepare_draw(0);
-        for draw in 0..draw_count as wgt::BufferAddress {
-            let indirect_offset =
-                offset + draw * size_of::<wgt::DrawIndirectArgs>() as wgt::BufferAddress;
-            #[allow(
-                clippy::clone_on_copy,
-                reason = "False positive when cloning glow::UniformLocation"
-            )]
-            self.cmd_buffer.commands.push(C::DrawIndirect {
-                topology: self.state.topology,
-                indirect_buf: buffer.raw.unwrap(),
-                indirect_offset,
-                first_instance_location: self.state.first_instance_location.clone(),
-            });
+        if draw_count == 0 {
+            return;
         }
+        self.prepare_draw(0);
+        #[allow(
+            clippy::clone_on_copy,
+            reason = "False positive when cloning glow::UniformLocation"
+        )]
+        self.cmd_buffer.commands.push(C::DrawIndirect {
+            topology: self.state.topology,
+            indirect_buf: buffer.raw.unwrap(),
+            indirect_offset: offset,
+            draw_count,
+            first_instance_location: self.state.first_instance_location.clone(),
+        });
     }
     unsafe fn draw_indexed_indirect(
         &mut self,
@@ -1158,26 +1158,26 @@ impl crate::CommandEncoder for super::CommandEncoder {
         offset: wgt::BufferAddress,
         draw_count: u32,
     ) {
+        if draw_count == 0 {
+            return;
+        }
         self.prepare_draw(0);
         let index_type = match self.state.index_format {
             wgt::IndexFormat::Uint16 => glow::UNSIGNED_SHORT,
             wgt::IndexFormat::Uint32 => glow::UNSIGNED_INT,
         };
-        for draw in 0..draw_count as wgt::BufferAddress {
-            let indirect_offset =
-                offset + draw * size_of::<wgt::DrawIndexedIndirectArgs>() as wgt::BufferAddress;
-            #[allow(
-                clippy::clone_on_copy,
-                reason = "False positive when cloning glow::UniformLocation"
-            )]
-            self.cmd_buffer.commands.push(C::DrawIndexedIndirect {
-                topology: self.state.topology,
-                index_type,
-                indirect_buf: buffer.raw.unwrap(),
-                indirect_offset,
-                first_instance_location: self.state.first_instance_location.clone(),
-            });
-        }
+        #[allow(
+            clippy::clone_on_copy,
+            reason = "False positive when cloning glow::UniformLocation"
+        )]
+        self.cmd_buffer.commands.push(C::DrawIndexedIndirect {
+            topology: self.state.topology,
+            index_type,
+            indirect_buf: buffer.raw.unwrap(),
+            indirect_offset: offset,
+            draw_count,
+            first_instance_location: self.state.first_instance_location.clone(),
+        });
     }
     unsafe fn draw_mesh_tasks_indirect(
         &mut self,

@@ -3,6 +3,59 @@ use super::{Arg, Context, Game, R, Target, err};
 use horizon_client::{hud_overlays::Titles, lan::data::component_nbt, text::Text};
 use horizon_protocol::packets::play::{self, Clientbound as C};
 
+/// `EntitySelector.COMPILABLE_CODEC` (`CompilableString.CommandParserHelper.apply`):
+/// the `selector` of a selector component and the `entity` of an nbt
+/// component are parsed when the component is decoded, and text left after
+/// the selector is `command.trailing_data`. Either failure makes the whole
+/// component invalid, with vanilla's message. (A score `name` is an `Either`
+/// that falls back to a plain name, so it never fails.)
+fn invalid_selector(
+    v: &serde_json::Value,
+    reg: &horizon_client::command::Registries,
+) -> Option<String> {
+    match v {
+        serde_json::Value::Array(a) => a.iter().find_map(|x| invalid_selector(x, reg)),
+        serde_json::Value::Object(o) => {
+            let source = o.get("selector").and_then(|s| s.as_str()).or_else(|| {
+                o.contains_key("nbt")
+                    .then(|| o.get("entity").and_then(|s| s.as_str()))
+                    .flatten()
+            });
+            if let Some(source) = source
+                && let Some(why) = compile_selector(source, reg)
+            {
+                return Some(format!("Invalid selector component: {source}: {why}"));
+            }
+            o.values().find_map(|x| invalid_selector(x, reg))
+        }
+        _ => None,
+    }
+}
+
+/// `EntitySelectorParser.parse` on all of `source`; the error's
+/// `getMessage` on failure.
+fn compile_selector(source: &str, reg: &horizon_client::command::Registries) -> Option<String> {
+    let mut reader = horizon_client::command::Reader::new(source);
+    match horizon_client::command::selector::parse(&mut reader, reg, true) {
+        Err(e) => Some(match e.context() {
+            Some(context) => format!("{} at position {}: {context}", e.message.plain(), e.cursor),
+            None => e.message.plain(),
+        }),
+        Ok(_) if reader.can_read() => {
+            let parsed = &source[..reader.cursor];
+            let leftovers = &source[reader.cursor..];
+            Some(
+                horizon_client::text::Text::tr(
+                    "command.trailing_data",
+                    &[&format!("{parsed}[{leftovers}]")],
+                )
+                .plain(),
+            )
+        }
+        Ok(_) => None,
+    }
+}
+
 impl Game<'_> {
     /// ComponentArgument with selectors resolved for the source
     /// (ComponentUtils.updateForEntity: names joined by ", ").
@@ -12,6 +65,9 @@ impl Game<'_> {
         };
         let value: serde_json::Value =
             serde_json::from_str(json).map_err(|e| err("argument.component.invalid", &[&e]))?;
+        if let Some(message) = invalid_selector(&value, &self.ui.registries) {
+            return Err(err("argument.component.invalid", &[&message]));
+        }
         // NbtContents.resolve: the path's values in the entity, block or
         // storage data, rich-styled (or plain, or interpreted), ", "-joined.
         // ScoreContents.resolve: the holder's score in the objective.
@@ -299,5 +355,48 @@ impl Game<'_> {
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::invalid_selector;
+    use horizon_client::command::Registries;
+
+    fn check(json: &str) -> Option<String> {
+        invalid_selector(&serde_json::from_str(json).unwrap(), &Registries::default())
+    }
+
+    #[test]
+    fn a_selector_component_is_compiled_when_decoded() {
+        assert_eq!(check(r#"{"selector":"@a"}"#), None);
+        let bad = check(r#"{"selector":"@a[x"}"#).unwrap();
+        assert!(
+            bad.starts_with("Invalid selector component: @a[x: "),
+            "{bad}"
+        );
+    }
+
+    #[test]
+    fn text_after_the_selector_is_trailing_data() {
+        let bad = check(r#"["x",{"extra":[{"selector":"@s foo"}]}]"#).unwrap();
+        assert!(
+            bad.starts_with("Invalid selector component: @s foo: "),
+            "{bad}"
+        );
+        assert!(
+            bad.contains("command.trailing_data") || bad.contains("Trailing"),
+            "{bad}"
+        );
+    }
+
+    #[test]
+    fn an_nbt_entity_is_compiled_and_a_score_name_is_not() {
+        assert!(check(r#"{"nbt":"a","entity":"@e[type"}"#).is_some());
+        assert_eq!(check(r#"{"nbt":"a","storage":"x:y"}"#), None);
+        assert_eq!(
+            check(r#"{"score":{"name":"@a foo","objective":"o"}}"#),
+            None
+        );
     }
 }

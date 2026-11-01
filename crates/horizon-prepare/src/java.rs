@@ -14,6 +14,14 @@ pub struct Jdk {
 
 const TIMEOUT: Duration = Duration::from_secs(3600);
 
+/// Options for every JVM preparing starts (the exporters, the data generator, javac with `-J`).
+/// They are short batch jobs that run side by side: the C2 compiler's background work costs
+/// more CPU than it wins back, and the serial collector keeps their heaps small. Measured on the
+/// pinned jars, a fresh preparation took 105 s with the defaults and 63-66 s with these, same
+/// output; the serial collector was as fast as the parallel one and its JVMs together took
+/// 1.25 GB instead of 2 GB.
+pub(crate) const BATCH_OPTIONS: [&str; 2] = ["-XX:TieredStopAtLevel=1", "-XX:+UseSerialGC"];
+
 /// Exporters and JDK probes write to pipes or log files: on Windows they open no terminal.
 pub(crate) fn command(program: impl AsRef<OsStr>) -> Command {
     let command = Command::new(program);
@@ -303,7 +311,14 @@ fn find_tools(major: i64, more: &[PathBuf], compiler: bool) -> Result<Jdk, Strin
                 }
             });
         match checked {
-            Ok(()) => return Ok(Jdk { javac, java }),
+            // Absolute: the exporters run in another working directory, where a relative
+            // `JAVA_HOME`, `--java-home` or `PATH` entry would name nothing.
+            Ok(()) => {
+                return Ok(Jdk {
+                    javac: std::path::absolute(&javac).unwrap_or(javac),
+                    java: std::path::absolute(&java).unwrap_or(java),
+                });
+            }
             Err(e) => problems.push(format!("{from}: {e}")),
         }
     }
@@ -339,6 +354,7 @@ impl Jdk {
     pub fn javac(&self, major: i64, args: &[String], log: &fs::File) -> Result<(), String> {
         let mut command = command(&self.javac);
         command
+            .args(BATCH_OPTIONS.map(|option| format!("-J{option}")))
             .args(["--release", &major.to_string(), "-proc:none"])
             .args(args);
         run(command, log)
@@ -346,7 +362,7 @@ impl Jdk {
 
     pub fn java(&self, args: &[String], cwd: Option<&Path>, log: &fs::File) -> Result<(), String> {
         let mut command = command(&self.java);
-        command.args(args);
+        command.args(BATCH_OPTIONS).args(args);
         if let Some(dir) = cwd {
             command.current_dir(dir);
         }

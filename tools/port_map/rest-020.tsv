@@ -1,5 +1,5 @@
 PlayerList.updateEntireScoreboard	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	the join is View::changes against the guest's empty view, sent from game/scoreboard.rs lan_sync_scoreboard
-PlayerList.loadPlayerData	port	crates/horizon-client/src/lan/playerdata.rs::load	gap: minor: the single-player owner's saved level is applied in Game::lan_guest_joined instead
+PlayerList.loadPlayerData	port	crates/horizon-client/src/lan/playerdata.rs::load_owner	gap: minor: the owner gets the file level.dat names as Level::read_root read it, anyone else playerdata.rs::load; the files are datafixed when the world is upgraded (datafix/files.rs), not on load
 PlayerList.save	port	crates/horizon-client/src/game/lan.rs::Game::save_guest	player file, advancements and statistics of a guest
 PlayerList.disconnectAllPlayersWithProfile	port	crates/horizon-client/src/lan/hub.rs::Hub::poll	kicks every connection of the uuid on NetEvent::Duplicate; the refusal of a second login is Shared::try_admit (lan/mod.rs)
 PlayerList.broadcastSystemToTeam	missing		player: when a dead player's team hides death messages from other teams, its own members should read the death in chat; Horizon sends it to nobody (game/lan_actions.rs guest_die sends only when the team shows its own death)
@@ -35,13 +35,13 @@ UserWhiteList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserLis
 UserWhiteList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
 UserWhiteList.getUserList	skip:ui		tab-completion names only (WhitelistCommand suggestions)
 NetworkDataOutputStream.writeString	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
-PktUtils.stringFromByteArray	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
-PktUtils.intFromByteArray	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
+PktUtils.stringFromByteArray	inline	crates/horizon-server/src/rcon.rs::read_request	the payload up to its first NUL; the rest of PktUtils is the GS4 query server
+PktUtils.intFromByteArray	inline	crates/horizon-server/src/rcon.rs::read_request	the little-endian length, request id and type; the rest of PktUtils is the GS4 query server
 PktUtils.intFromNetworkByteArray	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
 PktUtils.toHexString	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
-RconConsoleSource.createCommandSourceStack	skip:server		RCON command source; RCON and query server code; Horizon has no RCON or GS4 query port
-GenericThread.start	skip:server		thread helper of the RCON and query servers; RCON and query server code; Horizon has no RCON or GS4 query port
-GenericThread.stop	skip:server		thread helper of the RCON and query servers; RCON and query server code; Horizon has no RCON or GS4 query port
+RconConsoleSource.createCommandSourceStack	inline	crates/horizon-server/src/rcon.rs::run_on_game	gap: minor: a command runs as the console does, through the game's `console` request; the sender shows as Server, not Rcon, and broadcast-rcon-to-ops is not read
+GenericThread.start	inline	crates/horizon-server/src/rcon.rs::serve	the listener and a thread per connection; GenericThread is also the GS4 query server's helper
+GenericThread.stop	skip:server		the RCON threads end with the supervisor; GenericThread is also the GS4 query server's helper
 QueryThreadGs4.create	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
 QueryThreadGs4.sendTo	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
 QueryThreadGs4.processPacket	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
@@ -53,15 +53,15 @@ QueryThreadGs4.run	skip:server		GS4 query server; RCON and query server code; Ho
 QueryThreadGs4.start	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
 QueryThreadGs4.recoverSocketError	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
 QueryThreadGs4.initSocket	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
-RconClient.run	skip:server		RCON client connection; RCON and query server code; Horizon has no RCON or GS4 query port
-RconClient.send	skip:server		RCON client connection; RCON and query server code; Horizon has no RCON or GS4 query port
-RconClient.sendCmdResponse	skip:server		RCON client connection; RCON and query server code; Horizon has no RCON or GS4 query port
-RconClient.closeSocket	skip:server		RCON client connection; RCON and query server code; Horizon has no RCON or GS4 query port
-RconThread.clearClients	skip:server		RCON listener; RCON and query server code; Horizon has no RCON or GS4 query port
-RconThread.run	skip:server		RCON listener; RCON and query server code; Horizon has no RCON or GS4 query port
-RconThread.create	skip:server		RCON listener; RCON and query server code; Horizon has no RCON or GS4 query port
-RconThread.stop	skip:server		RCON listener; RCON and query server code; Horizon has no RCON or GS4 query port
-RconThread.closeSocket	skip:server		RCON listener; RCON and query server code; Horizon has no RCON or GS4 query port
+RconClient.run	port	crates/horizon-server/src/rcon.rs::client	login, command and unknown request, with vanilla's answers; gap: minor: the packets are read from the stream, not one read each
+RconClient.send	port	crates/horizon-server/src/rcon.rs::send	-
+RconClient.sendCmdResponse	port	crates/horizon-server/src/rcon.rs::send_output	packets of 4096 characters, one even when empty; gap: minor: cut at 4096 characters, vanilla at 4096 UTF-16 units
+RconClient.closeSocket	inline	crates/horizon-server/src/rcon.rs::client	the stream is dropped when the connection ends
+RconThread.clearClients	inline	crates/horizon-server/src/rcon.rs::serve	the open connections are counted (Place) and capped at 16, where vanilla keeps a list
+RconThread.run	port	crates/horizon-server/src/rcon.rs::serve	accept a connection and start its thread; gap: minor: past 16 connections the new one is closed
+RconThread.create	port	crates/horizon-server/src/rcon.rs::start	server-ip (0.0.0.0 when empty), rcon.port 1 to 65535 and a password, with vanilla's three warnings
+RconThread.stop	skip:server		the listener runs as long as the supervisor does, through game restarts
+RconThread.closeSocket	skip:server		the listener runs as long as the supervisor does
 ServerWaypointManager.trackWaypoint	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::track	
 ServerWaypointManager.updateWaypoint	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::update_waypoint	
 ServerWaypointManager.untrackWaypoint	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::untrack	

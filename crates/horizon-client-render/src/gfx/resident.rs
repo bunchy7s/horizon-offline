@@ -2,7 +2,9 @@
 //! per-frame culling walk: a column whose box misses the frustum or lies past
 //! the render distance rejects all of its sections with one test, and the
 //! sections that remain are reached by index rather than by hashing keys.
-use super::{Frustum, SectionKey};
+#[cfg(test)]
+use super::Frustum;
+use super::{Cull, SectionKey};
 use crate::{fast_hash::FxHashMap, streaming::in_view_distance};
 use glam::{DVec3, Vec3};
 
@@ -27,7 +29,10 @@ impl Column {
 /// Values of type `T` per section key, in a dense list with stable keys and
 /// slots that move only when a section is removed.
 pub struct Resident<T> {
+    /// The minimum Y of section index 0 (the level's column).
+    min_y: i32,
     items: Vec<(SectionKey, T)>,
+    bounds: Vec<Option<[Vec3; 2]>>,
     slots: FxHashMap<SectionKey, u32>,
     columns: Vec<Column>,
     column_index: FxHashMap<(i32, i32), u32>,
@@ -36,7 +41,9 @@ pub struct Resident<T> {
 impl<T> Default for Resident<T> {
     fn default() -> Self {
         Self {
+            min_y: crate::chunk::MIN_Y,
             items: Vec::new(),
+            bounds: Vec::new(),
             slots: FxHashMap::default(),
             columns: Vec::new(),
             column_index: FxHashMap::default(),
@@ -54,6 +61,17 @@ impl<T> Resident<T> {
     pub fn values(&self) -> impl Iterator<Item = &T> {
         self.items.iter().map(|(_, v)| v)
     }
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.items.iter_mut().map(|(_, v)| v)
+    }
+    /// `key`'s value, when it is resident.
+    pub fn find(&self, key: SectionKey) -> Option<&T> {
+        self.slots.get(&key).map(|&slot| self.get(slot))
+    }
+    pub fn find_mut(&mut self, key: SectionKey) -> Option<&mut T> {
+        let slot = *self.slots.get(&key)?;
+        Some(self.get_mut(slot))
+    }
     /// The section in `slot` (`Visible::slot`).
     pub fn get(&self, slot: u32) -> &T {
         &self.items[slot as usize].1
@@ -61,20 +79,32 @@ impl<T> Resident<T> {
     pub fn get_mut(&mut self, slot: u32) -> &mut T {
         &mut self.items[slot as usize].1
     }
+    /// Sections from now on count from `min_y` (a level of another column).
+    pub fn set_min_y(&mut self, min_y: i32) {
+        self.min_y = min_y;
+    }
     pub fn clear(&mut self) {
         self.items.clear();
+        self.bounds.clear();
         self.slots.clear();
         self.columns.clear();
         self.column_index.clear();
     }
-    /// Adds or replaces `key`'s value.
+    /// Adds or replaces `key`'s value with default 16x16x16 bounds.
+    #[cfg(test)]
     pub fn insert(&mut self, key: SectionKey, value: T) {
+        self.insert_with_bounds(key, value, None);
+    }
+    /// Adds or replaces `key`'s value with optional tight geometry bounds.
+    pub fn insert_with_bounds(&mut self, key: SectionKey, value: T, bounds: Option<[Vec3; 2]>) {
         if let Some(&slot) = self.slots.get(&key) {
             self.items[slot as usize].1 = value;
+            self.bounds[slot as usize] = bounds;
             return;
         }
         let slot = self.items.len() as u32;
         self.items.push((key, value));
+        self.bounds.push(bounds);
         self.slots.insert(key, slot);
         let column = match self.column_index.get(&(key.0, key.2)) {
             Some(&c) => &mut self.columns[c as usize],
@@ -114,6 +144,7 @@ impl<T> Resident<T> {
         } else {
             column.bounds();
         }
+        let _ = self.bounds.swap_remove(slot as usize);
         let (_, value) = self.items.swap_remove(slot as usize);
         // The last item now sits in `slot`: point its key and column at it.
         if let Some(&(moved, _)) = self.items.get(slot as usize) {
@@ -144,10 +175,10 @@ pub struct Visible {
 }
 
 /// The camera-relative origin of the section at `key`.
-fn origin(key: SectionKey, camera: DVec3) -> DVec3 {
+fn origin(key: SectionKey, min_y: i32, camera: DVec3) -> DVec3 {
     DVec3::new(
         f64::from(key.0 * 16),
-        f64::from(crate::chunk::MIN_Y + key.1 * 16),
+        f64::from(min_y + key.1 * 16),
         f64::from(key.2 * 16),
     ) - camera
 }
@@ -160,30 +191,57 @@ fn camera_column(camera: DVec3) -> (i32, i32) {
     )
 }
 
+/// The world AABB (min, max) of a section from its origin and optional tight bounds.
+#[inline]
+fn section_box(min: Vec3, bounds: Option<[Vec3; 2]>) -> (Vec3, Vec3) {
+    match bounds {
+        Some([bmin, bmax]) => (min + bmin, min + bmax),
+        None => (min, min + Vec3::splat(16.0)),
+    }
+}
+
 /// Whether the section at `key` is drawn: its column within the render
 /// distance of the camera's (`SectionOcclusionGraph.isInViewDistance`), and
 /// partly inside the frustum. `None` when it is not, else its squared centre
 /// distance and origin. `Resident::visible` walks columns instead.
 #[cfg(test)]
 fn in_view(key: SectionKey, camera: DVec3, radius: i32, frustum: &Frustum) -> Option<(f64, Vec3)> {
+    in_view_with_bounds(key, camera, radius, frustum, None)
+}
+
+/// `in_view` with optional tight bounds.
+#[cfg(test)]
+fn in_view_with_bounds(
+    key: SectionKey,
+    camera: DVec3,
+    radius: i32,
+    frustum: &Frustum,
+    bounds: Option<[Vec3; 2]>,
+) -> Option<(f64, Vec3)> {
     if !in_view_distance(camera_column(camera), radius, key.0, key.2) {
         return None;
     }
-    in_frustum(key, camera, frustum, false)
+    in_frustum(key, crate::chunk::MIN_Y, camera, frustum, false, bounds)
 }
 
 /// `in_view` without the distance test; `inside`: the section's column is
 /// entirely inside the frustum, so the section is too.
+#[cfg(test)]
 fn in_frustum(
     key: SectionKey,
+    min_y: i32,
     camera: DVec3,
-    frustum: &Frustum,
+    frustum: &impl Cull,
     inside: bool,
+    bounds: Option<[Vec3; 2]>,
 ) -> Option<(f64, Vec3)> {
-    let origin = origin(key, camera);
+    let origin = origin(key, min_y, camera);
     let min = origin.as_vec3();
-    if !inside && !frustum.intersects(min, min + Vec3::splat(16.0)) {
-        return None;
+    if !inside {
+        let (bmin, bmax) = section_box(min, bounds);
+        if !frustum.intersects(bmin, bmax) {
+            return None;
+        }
     }
     Some(((origin + DVec3::splat(8.0)).length_squared(), min))
 }
@@ -205,7 +263,7 @@ impl<T> Resident<T> {
         &self,
         camera: DVec3,
         radius: i32,
-        frustum: &Frustum,
+        frustum: &impl Cull,
         reachable: impl Fn(SectionKey) -> bool,
         beyond: impl Fn(i32, i32) -> bool,
         out: &mut Vec<Visible>,
@@ -216,24 +274,57 @@ impl<T> Resident<T> {
             if !near && !beyond(column.x, column.z) {
                 continue;
             }
-            let min = origin((column.x, column.low, column.z), camera).as_vec3();
-            let top = origin((column.x, column.high, column.z), camera).as_vec3();
+            let min = origin((column.x, column.low, column.z), self.min_y, camera).as_vec3();
+            let top = origin((column.x, column.high, column.z), self.min_y, camera).as_vec3();
             let max = top + Vec3::splat(16.0);
             let inside = frustum.contains(min, max);
             if !inside && !frustum.intersects(min, max) {
                 continue;
             }
-            for &(y, slot) in &column.sections {
-                let key = (column.x, y, column.z);
-                if near && !reachable(key) {
-                    continue;
-                }
-                if let Some((d, o)) = in_frustum(key, camera, frustum, inside) {
+            let ox = f64::from(column.x * 16) - camera.x;
+            let oz = f64::from(column.z * 16) - camera.z;
+            let min_x = ox as f32;
+            let min_z = oz as f32;
+            let dx8 = ox + 8.0;
+            let dz8 = oz + 8.0;
+            let xz_sq = dx8 * dx8 + dz8 * dz8;
+
+            if inside {
+                for &(y, slot) in &column.sections {
+                    let key = (column.x, y, column.z);
+                    if near && !reachable(key) {
+                        continue;
+                    }
+                    let oy = f64::from(self.min_y + y * 16) - camera.y;
+                    let min = Vec3::new(min_x, oy as f32, min_z);
+                    let dy8 = oy + 8.0;
+                    let distance = xz_sq + dy8 * dy8;
                     out.push(Visible {
-                        distance: d.to_bits(),
+                        distance: distance.to_bits(),
                         key,
                         slot,
-                        origin: o.to_array(),
+                        origin: min.to_array(),
+                    });
+                }
+            } else {
+                for &(y, slot) in &column.sections {
+                    let key = (column.x, y, column.z);
+                    if near && !reachable(key) {
+                        continue;
+                    }
+                    let oy = f64::from(self.min_y + y * 16) - camera.y;
+                    let min = Vec3::new(min_x, oy as f32, min_z);
+                    let (bmin, bmax) = section_box(min, self.bounds[slot as usize]);
+                    if !frustum.intersects(bmin, bmax) {
+                        continue;
+                    }
+                    let dy8 = oy + 8.0;
+                    let distance = xz_sq + dy8 * dy8;
+                    out.push(Visible {
+                        distance: distance.to_bits(),
+                        key,
+                        slot,
+                        origin: min.to_array(),
                     });
                 }
             }
@@ -255,7 +346,15 @@ mod tests {
                 for y in 0..24 {
                     // Leave holes so columns have uneven bounds.
                     if (x * 7 + y * 3 + z * 5).rem_euclid(4) != 0 {
-                        r.insert((x, y, z), ());
+                        // Mix of sections with fallback None and randomized tight bounds.
+                        let bounds = if (x + y + z).rem_euclid(2) == 0 {
+                            let y_min = ((x + z).rem_euclid(4)) as f32;
+                            let y_max = y_min + 2.0 + ((y.rem_euclid(5)) as f32);
+                            Some([Vec3::new(0.0, y_min, 0.0), Vec3::new(16.0, y_max, 16.0)])
+                        } else {
+                            None
+                        };
+                        r.insert_with_bounds((x, y, z), (), bounds);
                     }
                 }
             }
@@ -281,12 +380,21 @@ mod tests {
                 let mut slow: Vec<(SectionKey, f64, [f32; 3])> = r
                     .items
                     .iter()
-                    .filter_map(|&(k, _)| {
+                    .enumerate()
+                    .filter_map(|(slot, &(k, _))| {
                         let near = in_view_distance(camera_column(camera), radius, k.0, k.2);
                         if near {
-                            in_view(k, camera, radius, &frustum).filter(|_| reachable(k))
+                            in_view_with_bounds(k, camera, radius, &frustum, r.bounds[slot])
+                                .filter(|_| reachable(k))
                         } else if beyond(k.0, k.2) {
-                            in_frustum(k, camera, &frustum, false)
+                            in_frustum(
+                                k,
+                                crate::chunk::MIN_Y,
+                                camera,
+                                &frustum,
+                                false,
+                                r.bounds[slot],
+                            )
                         } else {
                             None
                         }
@@ -329,8 +437,8 @@ mod tests {
             .columns
             .iter()
             .filter(|c| {
-                let min = origin((c.x, c.low, c.z), camera).as_vec3();
-                let top = origin((c.x, c.high, c.z), camera).as_vec3();
+                let min = origin((c.x, c.low, c.z), crate::chunk::MIN_Y, camera).as_vec3();
+                let top = origin((c.x, c.high, c.z), crate::chunk::MIN_Y, camera).as_vec3();
                 frustum.contains(min, top + Vec3::splat(16.0))
             })
             .count();
@@ -454,5 +562,153 @@ mod tests {
             r.len(),
             list.len()
         );
+    }
+
+    #[test]
+    fn tight_mesh_bounds_culls_section_outside_frustum() {
+        let mut r = Resident::default();
+        let key = (0, 0, 0);
+        // Section geometry only occupies local Y in [0.0, 2.0]
+        let tight = Some([Vec3::new(0.0, 0.0, 0.0), Vec3::new(16.0, 2.0, 16.0)]);
+        r.insert_with_bounds(key, (), tight);
+
+        let camera = DVec3::new(8.0, f64::from(crate::chunk::MIN_Y + 15), -2.0);
+        let projection = super::super::world_projection(70.0, 16.0 / 9.0, 512.0);
+        let view = crate::camera::view_matrix(0.0, -60.0);
+        let frustum = Frustum {
+            planes: super::super::frustum(projection * view),
+        };
+
+        // Tight bounds culls the section whose geometry is entirely outside the frustum
+        let mut out = Vec::new();
+        r.visible(camera, 4, &frustum, |_| true, |_, _| false, &mut out);
+        assert!(
+            out.is_empty(),
+            "tight bounds should cull section whose geometry is below frustum"
+        );
+
+        // With fallback 16x16x16 bounds, the section intersects the frustum and is visible
+        r.insert_with_bounds(key, (), None);
+        out.clear();
+        r.visible(camera, 4, &frustum, |_| true, |_, _| false, &mut out);
+        assert_eq!(
+            out.len(),
+            1,
+            "full 16x16x16 bounds intersect frustum and are accepted"
+        );
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn tight_bounds_benchmark() {
+        use std::time::Instant;
+
+        let mut r_fallback = Resident::default();
+        let mut r_tight = Resident::default();
+
+        let radius = 16;
+        for x in -radius..=radius {
+            for z in -radius..=radius {
+                // Section 0..4: underground rock
+                for y in 0..4 {
+                    r_fallback.insert((x, y, z), ());
+                    r_tight.insert_with_bounds((x, y, z), (), None);
+                }
+                // Section 4: surface terrain with grass / hills (e.g. Y in [0, 4] or [0, 6])
+                let height = 2.0 + (((x * 3 + z * 5).rem_euclid(5)) as f32) * 1.5;
+                let surface_bounds =
+                    Some([Vec3::new(0.0, 0.0, 0.0), Vec3::new(16.0, height, 16.0)]);
+                r_fallback.insert((x, 4, z), ());
+                r_tight.insert_with_bounds((x, 4, z), (), surface_bounds);
+            }
+        }
+
+        println!("\n=== Tight Bounds Culling Benchmark ===");
+        println!("Total Resident Sections: {}", r_tight.len());
+
+        let test_views = [
+            ("Looking level across terrain (pitch 0°)", 0.0, 0.0),
+            ("Looking slightly up (pitch -15°)", 45.0, -15.0),
+            ("Looking up towards sky (pitch -35°)", 90.0, -35.0),
+            ("Looking down at ground (pitch 25°)", 180.0, 25.0),
+            ("Diagonal view (yaw 135°, pitch -10°)", 135.0, -10.0),
+        ];
+
+        let camera = DVec3::new(8.0, f64::from(crate::chunk::MIN_Y + 4 * 16 + 10), 8.0);
+        let projection = super::super::world_projection(70.0, 16.0 / 9.0, 512.0);
+
+        for (desc, yaw, pitch) in test_views {
+            let view = crate::camera::view_matrix(yaw, pitch);
+            let frustum = Frustum {
+                planes: super::super::frustum(projection * view),
+            };
+
+            let mut out_fallback = Vec::new();
+            let mut out_tight = Vec::new();
+
+            r_fallback.visible(
+                camera,
+                radius,
+                &frustum,
+                |_| true,
+                |_, _| false,
+                &mut out_fallback,
+            );
+            r_tight.visible(
+                camera,
+                radius,
+                &frustum,
+                |_| true,
+                |_, _| false,
+                &mut out_tight,
+            );
+
+            let culled_extra = out_fallback.len().saturating_sub(out_tight.len());
+            let pct_saved = if !out_fallback.is_empty() {
+                (culled_extra as f64 / out_fallback.len() as f64) * 100.0
+            } else {
+                0.0
+            };
+
+            // Timing over 1,000 passes
+            let iters = 1_000;
+            let t0 = Instant::now();
+            for _ in 0..iters {
+                out_fallback.clear();
+                r_fallback.visible(
+                    camera,
+                    radius,
+                    &frustum,
+                    |_| true,
+                    |_, _| false,
+                    &mut out_fallback,
+                );
+            }
+            let dur_fallback = t0.elapsed();
+
+            let t1 = Instant::now();
+            for _ in 0..iters {
+                out_tight.clear();
+                r_tight.visible(
+                    camera,
+                    radius,
+                    &frustum,
+                    |_| true,
+                    |_, _| false,
+                    &mut out_tight,
+                );
+            }
+            let dur_tight = t1.elapsed();
+
+            println!(
+                "{desc}\n  Fallback 16x16: {} sections | {:?}\n  Tight Bounds:   {} sections | {:?}\n  Reduction:      -{} sections ({:.1}% culled)\n",
+                out_fallback.len(),
+                dur_fallback / iters,
+                out_tight.len(),
+                dur_tight / iters,
+                culled_extra,
+                pct_saved
+            );
+        }
     }
 }

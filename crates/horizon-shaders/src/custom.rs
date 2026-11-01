@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::Properties;
 
-/// A value: up to 16 components (matrices only as names, for `m.row.column`).
+/// A value: up to 16 components (matrices only as names, for `m.column.row`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Val {
     pub v: [f64; 16],
@@ -63,7 +63,7 @@ impl Val {
 #[derive(Clone, Debug)]
 enum Expr {
     Num(f64),
-    /// A name and its component (`x`, `2`, `2.1` as row 2, column 1).
+    /// A name and its component (`x`, `2`, `2.1` as column 2, row 1).
     Name(String, Option<(usize, Option<usize>)>),
     Call(String, Vec<Expr>, usize),
     Neg(Box<Expr>),
@@ -127,6 +127,13 @@ impl Custom {
             }
         }
         out
+    }
+
+    /// Forgets what `smooth` keeps: each starts again from its next value, as on the first frame
+    /// (for runs whose values are not the world's: the load-time dry run, frames before the
+    /// camera's biome is known).
+    pub fn restart_smoothing(&mut self) {
+        self.smooth.clear();
     }
 
     /// Names the game's biomes (registry identifiers, in id order) for `BIOME_*`.
@@ -218,8 +225,9 @@ impl Custom {
                 };
                 match component {
                     None => v,
-                    // GLSL's m[column][row] is stored column after column.
-                    Some((row, Some(column))) => Val::scalar(v.v[column * 4 + row]),
+                    // `m.c.r` is GLSL's m[c][r], stored column after column: packs transform a
+                    // view vector to the world as `inverse.0.0 * x + inverse.1.0 * y + ...`.
+                    Some((column, Some(row))) => Val::scalar(v.v[column * 4 + row]),
                     Some((i, None)) => Val::scalar(v.v[*i]),
                 }
             }
@@ -541,7 +549,7 @@ mod tests {
              uniform.int.d = -7 / 2\n\
              uniform.vec3.e = vec3(a, cameraPosition.y, 2) * 2\n\
              uniform.float.f = if(a < 0, 1, a < 7, 2, 3) + clamp(fmod(-1, 4), 0, 2.5) + min(4, 2, 3)\n\
-             uniform.float.g = gbufferModelView.1.0 + frac(sunAngle - 0.25) + pi * 0\n\
+             uniform.float.g = gbufferModelView.0.1 + frac(sunAngle - 0.25) + pi * 0\n\
              uniform.float.h = unknownThing + in(biome, 3, BIOME_DESERT)\n\
              uniform.int.i = biome == BIOME_PALE_GARDEN || biome == BIOME_OLD\n\
              uniform.int.j = CAT_OCEAN + PPT_RAIN\n",
@@ -600,6 +608,20 @@ mod tests {
         assert_eq!(run(0.0, 0.0), 0.0);
         assert!((run(1.0, 2.0) - 0.5).abs() < 1e-9, "rising: fadeIn");
         assert!((run(0.0, 0.5) - 0.25).abs() < 1e-9, "falling: fadeOut");
+    }
+
+    /// After a restart `smooth` starts from its next value, as on the first frame, instead of
+    /// fading from the old one (a 1000-second fade from a dry run's zero).
+    #[test]
+    fn smooth_starts_again_from_its_next_value_after_a_restart() {
+        let mut c = custom("uniform.float.s = smooth(target, 1000, 1000)\n");
+        let eval = |c: &mut Custom, t: f64| {
+            c.eval(0.05, &|n: &str| (n == "target").then(|| Val::scalar(t)))[0].v[0]
+        };
+        assert_eq!(eval(&mut c, 0.0), 0.0);
+        assert!(eval(&mut c, 0.6) < 0.01, "the fade holds the old value");
+        c.restart_smoothing();
+        assert_eq!(eval(&mut c, 0.6), 0.6);
     }
 
     #[test]

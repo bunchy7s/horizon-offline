@@ -126,6 +126,7 @@ impl Game<'_> {
                 .play(&format!("minecraft:{sound}"), Some(at), 1.0, 1.0);
         }
         self.mobs.push(golem);
+        self.native_mobs_joined(self.mobs.len() - 1, false);
         true
     }
 
@@ -353,7 +354,7 @@ impl Game<'_> {
                 }
                 match rest {
                     None => {
-                        self.dropped.remove(j);
+                        self.remove_dropped(j);
                     }
                     Some(rest) => {
                         self.dropped[j].stack.count = rest.count;

@@ -3,7 +3,7 @@
 //! pixels, 1024 characters, 100 pages), signing it into a written book,
 //! reading written books, and lecterns (placing a book, turning its pages
 //! with a redstone pulse, the comparator output and taking the book).
-use super::{Game, lan::LanHost};
+use super::{Game, lan::LanHost, screen_info};
 use horizon_client::{
     containers::{BlockEntity, Lectern},
     first_person::Hand,
@@ -13,6 +13,7 @@ use horizon_client::{
     menu::{Kind, Menu},
     text::Text,
     ui,
+    widgets::{self, Narratable, ScreenInfo},
 };
 use horizon_core::position::BlockPos;
 use horizon_protocol::packets::play::{self, Clientbound as C, Serverbound as S};
@@ -323,6 +324,16 @@ impl Game<'_> {
         if !((0..9).contains(&p.slot) || p.slot == super::shield::OFFHAND_SLOT as i32) {
             return;
         }
+        if let Some(title) = &p.title
+            && !self.chat_filter_text(
+                host,
+                conn,
+                &[title],
+                horizon_client::lan::hub::chat_filter::Place::Book,
+            )
+        {
+            return;
+        }
         self.as_guest(host, conn, |g| {
             g.write_book(p.slot as usize, p.pages, p.title)
         });
@@ -378,6 +389,11 @@ impl Game<'_> {
                 Some(KeyCode::PageDown) => self.turn_page(true),
                 Some(KeyCode::ArrowUp) => self.book_move_line(-1),
                 Some(KeyCode::ArrowDown) => self.book_move_line(1),
+                // MultilineTextField.keyPressed: Home and End seek the caret's
+                // line; with Ctrl they go to the page's start and end.
+                Some(edge @ (KeyCode::Home | KeyCode::End)) if !self.has_control_down() => {
+                    self.book_line_edge(edge == KeyCode::End)
+                }
                 Some(KeyCode::Enter | KeyCode::NumpadEnter) => self.page_insert("\n"),
                 Some(key) if self.book_page_key(key) => {}
                 _ => {
@@ -537,9 +553,30 @@ impl Game<'_> {
         let (start, end) = rows[next];
         let chars: Vec<char> = text.chars().collect();
         let slice: String = chars[start..end].iter().collect();
-        let pos = start + self.gui.atlas.font.fit(&slice, x);
+        // MultilineTextField.LINE_SEEK_PIXEL_BIAS: vanilla biases this seek, not the drawn caret.
+        let pos = start + self.gui.atlas.font.fit(&slice, x + 2.0);
         if let Some(BookScreen::Edit { page_edit, .. }) = self.book.as_mut() {
             page_edit.set_cursor(pos, shift);
+        }
+    }
+    /// Home and End: the start or end of the visual line holding the caret
+    /// (`getCursorLineView`'s beginIndex and endIndex).
+    fn book_line_edge(&mut self, end: bool) {
+        let shift = self.has_shift_down();
+        let (text, cursor) = match self.book.as_ref() {
+            Some(BookScreen::Edit {
+                pages,
+                page,
+                page_edit,
+                ..
+            }) => (pages[*page].clone(), page_edit.cursor),
+            _ => return,
+        };
+        let rows = self.page_rows(&text);
+        let (_, line) = self.caret_on(&text, &rows, cursor);
+        let (start, stop) = rows[line];
+        if let Some(BookScreen::Edit { page_edit, .. }) = self.book.as_mut() {
+            page_edit.set_cursor(if end { stop } else { start }, shift);
         }
     }
     /// Wrapped rows of a page as character ranges, the same breaks as `font.split`.
@@ -833,6 +870,23 @@ impl Game<'_> {
         self.lectern_menu_done(key, &menu);
         self.follow_lectern();
     }
+    /// LecternScreen's Take Book: the menu's button 3. The book leaves the
+    /// lectern, so the screen closes (the server closes the menu once the
+    /// book is gone; a server's client closes at once rather than wait).
+    fn take_lectern_book(&mut self, key: (i32, i32, i32)) {
+        self.lectern_button(key, 3);
+        if self.may_build()
+            && matches!(
+                self.book,
+                Some(BookScreen::View {
+                    lectern: Some(_),
+                    ..
+                })
+            )
+        {
+            self.close_book();
+        }
+    }
     /// The `book` control command: a button of the open book or lectern
     /// screen (the page arrows, Take Book, Done), then its page.
     pub(super) fn book_control(
@@ -849,7 +903,7 @@ impl Game<'_> {
             Some("next") => self.turn_page(true),
             Some("back") => self.turn_page(false),
             Some("take") => match lectern {
-                Some(key) => self.lectern_button(key, 3),
+                Some(key) => self.take_lectern_book(key),
                 None => return Err("not a lectern".into()),
             },
             // The book and quill's buttons: Sign, then Sign and Close; Done
@@ -1058,14 +1112,13 @@ impl Game<'_> {
                     self.turn_page(true);
                 } else if page > 0 && inside(left + 43.0, 159.0, 23.0, 13.0) {
                     self.turn_page(false);
-                } else if let Some(key) = lectern {
+                } else if let Some(key) = lectern.filter(|_| self.may_build()) {
                     if inside(w / 2.0 - 100.0, 196.0, 98.0, 20.0) {
                         click(self);
                         self.close_book();
                     } else if inside(w / 2.0 + 2.0, 196.0, 98.0, 20.0) {
                         click(self);
-                        // LecternScreen's Take Book: the menu's button 3.
-                        self.lectern_button(key, 3);
+                        self.take_lectern_book(key);
                     }
                 } else if inside((w - 200.0) / 2.0, 196.0, 200.0, 20.0) {
                     click(self);
@@ -1117,6 +1170,27 @@ impl Game<'_> {
             let tw = HudBatch::text_width(atlas, &text);
             batch.text(atlas, &text, left + 148.0 - tw, top + 16.0, BLACK, false);
         };
+        // PageButton: a button named for where it turns, there while it can;
+        // the view adds the forward one first, the editor the back one.
+        let page_narratables = |back: bool, forward: bool, view: bool| {
+            let back = (back, 43.0, "book.page_button.previous");
+            let forward = (forward, 116.0, "book.page_button.next");
+            let order = if view {
+                [forward, back]
+            } else {
+                [back, forward]
+            };
+            for (show, x, key) in order {
+                if show {
+                    widgets::narratable(|| {
+                        let rect = [left + x, top + 157.0, 23.0, 13.0];
+                        Narratable::button(screen_info::tr(key, &[]), rect, true)
+                            .hovered(hover(rect[0], rect[1], rect[2], rect[3]))
+                            .order(i32::from(view))
+                    });
+                }
+            }
+        };
         let button = |batch: &mut HudBatch, x: f32, bw: f32, label: &str, active: bool| {
             ui::button(
                 batch,
@@ -1137,6 +1211,19 @@ impl Game<'_> {
                 title_edit,
                 ..
             } => {
+                // BookSignScreen: its title, and the title box focused.
+                widgets::begin_screen(|| {
+                    ScreenInfo::new("book/sign", screen_info::tr("book.sign.title", &[]))
+                });
+                widgets::narratable(|| {
+                    let rect = [((w - 114.0) / 2.0).floor() - 3.0, 50.0, 114.0, 20.0];
+                    Narratable::edit_box(
+                        screen_info::tr("book.sign.titlebox", &[]),
+                        title_edit.value.clone(),
+                        rect,
+                    )
+                    .focused(title_edit.focused)
+                });
                 let edit = tr("book.editTitle", "Enter Book Title:");
                 let tw = HudBatch::text_width(atlas, &edit);
                 batch.text(
@@ -1234,6 +1321,16 @@ impl Game<'_> {
                 page_edit,
                 ..
             } => {
+                widgets::begin_screen(|| {
+                    screen_info::book_edit(*page, pages.len(), &screen_info::tr)
+                });
+                // The page's MultiLineEditBox (no message), focused, then the
+                // page buttons.
+                widgets::narratable(|| {
+                    let rect = [((w - 114.0) / 2.0).floor() - 8.0, 28.0, 122.0, 134.0];
+                    Narratable::edit_box("", pages[*page].clone(), rect).focused(page_edit.focused)
+                });
+                page_narratables(*page > 0, true, false);
                 indicator(batch, *page, pages.len());
                 let text = &pages[*page];
                 let lines = self.book_lines(text);
@@ -1300,6 +1397,13 @@ impl Game<'_> {
                 page,
                 lectern,
             } => {
+                widgets::begin_screen(|| {
+                    let text = pages.get(*page).map(Text::plain).unwrap_or_default();
+                    screen_info::book_view(*page, pages.len(), &text, &screen_info::tr)
+                });
+                // createMenuControls comes before createPageControlButtons
+                // (forward, then back).
+                page_narratables(*page > 0, *page + 1 < pages.len(), true);
                 indicator(batch, *page, pages.len());
                 if let Some(text) = pages.get(*page) {
                     for (i, line) in self.page_lines(text).iter().take(LINES).enumerate() {
@@ -1314,7 +1418,9 @@ impl Game<'_> {
                     }
                 }
                 page_buttons(batch, *page > 0, *page + 1 < pages.len());
-                if lectern.is_some() {
+                // LecternScreen.createMenuControls: Done and Take Book only with
+                // build permission, else BookViewScreen's wide Done.
+                if lectern.is_some() && self.may_build() {
                     button(batch, w / 2.0 - 100.0, 98.0, &tr("gui.done", "Done"), true);
                     button(
                         batch,

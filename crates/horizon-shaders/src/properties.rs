@@ -47,16 +47,27 @@ impl Properties {
                 }
                 continue;
             }
-            // Continuation lines belong to their entry even inside a skipped branch.
+            if !on {
+                continue;
+            }
+            // A directive line ends a continued entry, as the empty line the preprocessor leaves
+            // for it would.
             let mut logical = line.to_owned();
             while ends_with_continuation(&logical) {
                 logical.pop();
-                match lines.next() {
-                    Some((next, _)) => logical.push_str(next.trim()),
-                    None => break,
+                let Some((next, n)) = lines.next() else {
+                    break;
+                };
+                let next = next.trim();
+                if let Some(directive) = next.strip_prefix('#') {
+                    if let Some((word, rest)) = split_directive(directive) {
+                        out.directive(word, rest, n, &mut conditionals, &mut macros);
+                    }
+                    break;
                 }
+                logical.push_str(next);
             }
-            if !on || logical.is_empty() {
+            if logical.is_empty() {
                 continue;
             }
             match logical.split_once('=') {
@@ -180,6 +191,17 @@ mod tests {
             ]
         );
         assert_eq!(p.entry("sliders").unwrap().line, 4);
+    }
+
+    /// A continued value ending before `#else` stops there, and the line after `#endif` is an
+    /// entry of its own.
+    #[test]
+    fn continuations_stop_at_directives() {
+        let text = "#define ON\n#ifdef ON\nu = if( \\\n  a, 1.0, \\\n  0.5) \\\n#else\nu = 1.0\n#endif\n\n\
+                    #ifdef OFF\nv = 1 \\\n  2\n#endif\nw = 3";
+        assert_eq!(pairs(&read(text)), [("u", "if( a, 1.0, 0.5)"), ("w", "3")]);
+        let text = "#define ON\n#ifdef ON\nu = 1 \\\n#else\nu = 2\n#endif\nw = 3";
+        assert_eq!(pairs(&read(text)), [("u", "1"), ("w", "3")]);
     }
 
     #[test]

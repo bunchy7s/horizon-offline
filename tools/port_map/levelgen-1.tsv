@@ -27,7 +27,7 @@ LegacyRandomSource.LegacyPositionalRandomFactory.fromHashOf	port	crates/horizon-
 NoiseBasedChunkGenerator.createFluidPicker	port	crates/horizon-world/src/worldgen/aquifer.rs::GlobalFluidPicker::new	lava below -54 or sea level, else the default fluid
 NoiseBasedChunkGenerator.createNoiseChunk	inline	crates/horizon-world/src/worldgen/generator.rs::Pipeline::generate_with_context	beardifier field, density volume and aquifer built inline
 NoiseBasedChunkGenerator.chunkVolume	inline	crates/horizon-world/src/worldgen/generator.rs::Pipeline::generate_with_context	DensityVolume 16 x height x 16
-NoiseBasedChunkGenerator.addDebugScreenInfo	missing		F3 has no Density line (N, T, V, C, E, D, W, PV, PS values at the feet)
+NoiseBasedChunkGenerator.addDebugScreenInfo	port	crates/horizon-world/src/worldgen/generator.rs::GeneratorWorker::debug_density_line	F3 Density line of the noise settings debug_functions, shown for the window of a server thread or an in-frame world
 NoiseBasedChunkGenerator.iterateNoiseColumn	port	crates/horizon-world/src/worldgen/generator.rs::Pipeline::noise_column	base_height and base_column are built on it
 NoiseBasedChunkGenerator.buildSurface	port	crates/horizon-world/src/worldgen/material_stage.rs::build_surface	
 NoiseBasedChunkGenerator.generateCarvers	port	crates/horizon-world/src/worldgen/carver/generation.rs::generate_carving_mask	the mask is applied by apply_carving_mask; no old-chunk filter
@@ -85,20 +85,20 @@ XoroshiroRandomSource.XoroshiroPositionalRandomFactory.at	port	crates/horizon-co
 XoroshiroRandomSource.XoroshiroPositionalRandomFactory.fromHashOf	port	crates/horizon-core/src/random/positional.rs::XoroshiroPositionalRandom::from_hash_of	
 XoroshiroRandomSource.XoroshiroPositionalRandomFactory.fromSeed	port	crates/horizon-core/src/random/positional.rs::XoroshiroPositionalRandom::from_seed	
 XoroshiroRandomSource.XoroshiroPositionalRandomFactory.parityConfigString	skip:debug		test helper
-Blender.of	missing		no old-chunk blending: worlds upgraded from before 1.18 show terrain seams where old chunks meet new ones
-Blender.isEmpty	port	crates/horizon-core/src/density/world_fields.rs::EmptyBlender::is_empty	only the empty blender exists
-Blender.blendOffsetAndFactor	missing		old-chunk height blending not implemented; the empty case is alpha 1, offset 0 (WorldField::fallback)
-Blender.heightToOffset	missing		part of old-chunk height blending
-Blender.blendDensity	missing		DensityBlender::blend_density hook exists but only EmptyBlender (returns the input) implements it
-Blender.getBlendingDataValue	missing		no BlendingData is read or kept
-Blender.getBiomeResolver	missing		no biome blending next to old chunks
-Blender.blendBiome	missing		no biome blending next to old chunks
-Blender.generateBorderTicks	missing		no leaf or fluid post-processing at the old/new chunk border
-Blender.generateBorderTick	missing		part of generateBorderTicks
-Blender.createAroundOldChunksCarvingMaskFilter	missing		carvers run unfiltered next to old chunks (apply_carving_mask gets |_| true)
-Blender.makeOldChunkDistanceGetter	missing		part of the carving filter
-Blender.makeOffsetOldChunkDistanceGetter	missing		part of the carving filter
-Blender.distanceToCube	missing		part of the carving filter
-Blender.OutputBuffer.getAlpha	missing		only the empty-blender value exists (alpha 1 via WorldField::fallback)
-Blender.OutputBuffer.getOffset	missing		only the empty-blender value exists (offset 0 via WorldField::fallback)
-Blender.OutputBuffer.getIndex	missing		part of the blend output buffer
+Blender.of	port	crates/horizon-world/src/worldgen/blending.rs::Blender::of	the blender of a chunk; the old chunks come from an `OldWorld` (the client reads them from the save)
+Blender.isEmpty	port	crates/horizon-world/src/worldgen/blending.rs::Blender::is_empty	
+Blender.blendOffsetAndFactor	port	crates/horizon-world/src/worldgen/blending.rs::Blender::blend_offset_and_factor	per block column; the volume form is `output_buffer`
+Blender.heightToOffset	inline	crates/horizon-world/src/worldgen/blending.rs::height_to_offset	
+Blender.blendDensity	port	crates/horizon-world/src/worldgen/blending.rs::Blender::blend_density	
+Blender.getBlendingDataValue	inline	crates/horizon-world/src/worldgen/blending.rs::Blender::blending_value	
+Blender.getBiomeResolver	inline	crates/horizon-world/src/worldgen/blending.rs::Blender::blend_biome	the generator asks `blend_biome` before its own biome source
+Blender.blendBiome	port	crates/horizon-world/src/worldgen/blending.rs::Blender::blend_biome	
+Blender.generateBorderTicks	skip:other		does something only for a chunk that has blending data and is being generated again (retrogen); Horizon never regenerates an old chunk
+Blender.generateBorderTick	skip:other		does something only for a chunk that has blending data and is being generated again (retrogen); Horizon never regenerates an old chunk
+Blender.createAroundOldChunksCarvingMaskFilter	inline	crates/horizon-world/src/worldgen/blending.rs::OldChunkDistance::around	the carving filter is `Blender::carving_filter`
+Blender.makeOldChunkDistanceGetter	inline	crates/horizon-world/src/worldgen/blending.rs::OldChunkDistance::distance	
+Blender.makeOffsetOldChunkDistanceGetter	inline	crates/horizon-world/src/worldgen/blending.rs::OldChunkDistance::around	
+Blender.distanceToCube	inline	crates/horizon-world/src/worldgen/blending.rs::OldChunkDistance::distance	
+Blender.OutputBuffer.getAlpha	inline	crates/horizon-world/src/worldgen/blending.rs::OutputBuffer::alpha	
+Blender.OutputBuffer.getOffset	inline	crates/horizon-world/src/worldgen/blending.rs::OutputBuffer::offset	
+Blender.OutputBuffer.getIndex	inline	crates/horizon-world/src/worldgen/blending.rs::OutputBuffer::index	

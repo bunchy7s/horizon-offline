@@ -14,7 +14,7 @@ ServerExplosion.interactWithBlocks	inline	crates/horizon-client/src/game/explosi
 ServerExplosion.createFire	inline	crates/horizon-client/src/game/explosion.rs::Game::server_explode_as	one in three chance on air above a solid block, with the block's fire state
 ServerExplosion.canTriggerBlocks	inline	crates/horizon-client/src/game/wind.rs::Game::wind_burst	breeze charges need mob griefing before the trigger pass; the trigger-only check is implicit because only wind bursts reach it
 ServerExplosion.StackCollector.tryMerge	port	crates/horizon-client/src/game/explosion.rs::add_or_append_stack	merges up to 16 of the same item and damage
-SignalGetter.getBestOwnOrNeighbourSignal	missing		player: an explosive sulfur cube on or next to redstone power does not light its fuse every tick; Horizon's sulfur cube only primes on fire or explosion damage and best_neighbor_signal has no own-signal part
+SignalGetter.getBestOwnOrNeighbourSignal	inline	crates/horizon-client/src/game/sulfur_cubes.rs::Game::sulfur_cube_power_priming	best_neighbor_signal at the cube; no block overrides ownSignal
 SpawnData.CustomSpawnRules.checkLightBoundaries	skip:java		codec validation of the light limit range; Horizon decodes the limits in spawner.rs
 StructureManager.forWorldGenRegion	skip:other		wraps the level as a worldgen region view; Horizon passes the level into worldgen fns, no manager object
 StructureManager.startsForStructure	inline	crates/horizon-client/src/game/structures.rs::Game::structures_reaching_where	gap: minor: returns starts whose box holds the position, not every start the section references
@@ -69,8 +69,8 @@ MultiNoiseBiomeSource.createResolver	port	crates/horizon-world/src/worldgen/biom
 MultiNoiseBiomeSource.createResolverForChunk	port	crates/horizon-world/src/worldgen/biome.rs::BiomeResolver::prepare_volume	samples the climate volume for the chunk; sample_prepared then resolves each quart
 MultiNoiseBiomeSource.addDebugInfo	skip:debug		debug screen line with the climate values
 AbstractBedBlock.getSleepHeight	inline	crates/horizon-client/src/game.rs::Game::tick_sleep	the sleep height is the fixed bed top 0.5625 above the head cell; the shape is not read
-AbstractBedBlock.onStopSleeping	missing		player: waking up on a straw bed in the Overworld should break it (straw_bed_rule destroy_on_leave); Horizon's wake_up never breaks the bed
-AbstractBedBlock.kickVillagerOutOfBed	missing		player: right-clicking a bed a villager sleeps in neither wakes the villager nor shows the occupied message; Horizon's bed use never reads the occupied state
+AbstractBedBlock.onStopSleeping	port	crates/horizon-client/src/game/beds.rs::Game::free_left_beds	ticked in #3516; `AbstractBedBlock.onStopSleeping` is cited at crates/horizon-client/src/game/beds.rs:70 (in a comment, so `where` names the enclosing fn)
+AbstractBedBlock.kickVillagerOutOfBed	port	crates/horizon-client/src/game/villagers.rs::Game::kick_villager_out_of_bed	
 AbstractBedBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	the other half removed takes this half with it, and occupied comes from the other half
 AbstractBedBlock.playerWillDestroy	port	crates/horizon-world/src/level/hooks.rs::Sim::player_destroy	creative breaking of the foot removes the head
 AbstractBedBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	the cell in front must be replaceable; gap: minor: no world border check on that cell
@@ -138,5 +138,5 @@ BeehiveBlock.resetHoneyLevel	port	crates/horizon-client/src/game/beehives.rs::Ga
 BeehiveBlock.spawnParticle	inline	crates/horizon-client/src/animate_tick.rs::beehive_drip	the drip point from the hive shape; the honey drip particle is added there
 BeehiveBlock.spawnFluidParticle	inline	crates/horizon-client/src/animate_tick.rs::beehive_drip	the dripping honey particle position
 BeehiveBlock.createBlockStateDefinition	skip:data		state definition comes from the block data tables
-BeehiveBlock.playerWillDestroy	missing		player: in survival, breaking a hive with bees or honey should give the hive item back with its bees and honey level; Horizon's break path only angers the bees
+BeehiveBlock.playerWillDestroy	port	crates/horizon-client/src/game.rs::Game::break_block_as_player	a creative break drops the hive with its bees and honey level
 BeehiveBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	rotation through the state transform table

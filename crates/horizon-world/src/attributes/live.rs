@@ -69,6 +69,7 @@ pub enum Error {
     ForeignInstance,
     DuplicateModifier(String),
 }
+#[derive(Clone)]
 struct Node {
     handle: Handle,
     key: Key,
@@ -88,6 +89,7 @@ impl Observer for Dirty<'_> {
             .modified(Some(self.handle.clone()), |_, _| Ok(self.syncable))
     }
 }
+#[derive(Clone)]
 struct Data<G> {
     catalog: Arc<Catalog>,
     bases: Arc<[Option<f64>]>,
@@ -271,9 +273,25 @@ impl<G: FnMut() -> i32> AttributeAccess<Key, Handle> for Data<G> {
         self.edit(map, h, |a, o| a.add_permanent(modifier, o))
     }
 }
+/// An identity allocator that can be copied with its state, so the attributes holding it can be.
+pub trait Identities: FnMut() -> i32 {
+    fn clone_box(&self) -> Box<dyn Identities>;
+}
+impl<F: FnMut() -> i32 + Clone + 'static> Identities for F {
+    fn clone_box(&self) -> Box<dyn Identities> {
+        Box::new(self.clone())
+    }
+}
+impl Clone for Box<dyn Identities> {
+    fn clone(&self) -> Self {
+        // The boxed allocator's own copy, not a box around this box.
+        (**self).clone_box()
+    }
+}
 /// Owns an entity's instances and pending queues. Holder hashes come from the
 /// registry runtime; instance hashes come from the supplied identity allocator.
 /// Supplying oracle hashes permits reproducible JVM-order differential checks.
+#[derive(Clone)]
 pub struct LiveAttributes<G> {
     map: AttributeMap<Key, Handle>,
     data: Data<G>,

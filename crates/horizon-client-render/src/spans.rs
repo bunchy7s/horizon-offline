@@ -27,6 +27,10 @@ pub struct Span {
 pub fn enable(on: bool) {
     ENABLED.store(on, Ordering::Relaxed);
 }
+/// Whether spans are being recorded.
+pub fn enabled() -> bool {
+    ENABLED.load(Ordering::Relaxed)
+}
 /// Run `f`, recording its duration under `name` when spans are enabled.
 #[inline]
 pub fn time<T>(name: &'static str, f: impl FnOnce() -> T) -> T {

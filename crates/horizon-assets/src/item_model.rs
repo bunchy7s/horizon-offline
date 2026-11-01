@@ -16,6 +16,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+mod component_predicate;
 mod special;
 pub use special::{SpecialKind, SpecialModel};
 
@@ -628,7 +629,7 @@ pub enum ConditionProperty {
     ExtendedView,
     KeybindDown(String),
     ViewEntity,
-    /// A `component` predicate, evaluated by the host.
+    /// A single `component` predicate; external predicate types use the host.
     Component(Value),
 }
 impl ConditionProperty {
@@ -651,13 +652,7 @@ impl ConditionProperty {
             "minecraft:extended_view" => Self::ExtendedView,
             "minecraft:keybind_down" => Self::KeybindDown(string(required(m, "keybind")?)?),
             "minecraft:view_entity" => Self::ViewEntity,
-            "minecraft:component" => {
-                let predicate = required(m, "predicate")?;
-                if object(predicate)?.len() != 1 {
-                    return Err(err("a single component predicate is expected"));
-                }
-                Self::Component(predicate.clone())
-            }
+            "minecraft:component" => Self::Component(component_predicate::decode(m)?),
             _ => return Err(err("unknown condition property")),
         })
     }
@@ -964,8 +959,12 @@ pub trait ItemEnv {
     fn bundle_fullness(&self, _stack: &StackView, _components: &Components) -> f32 {
         0.0
     }
-    /// `ItemStack.getMaxStackSize` when the prototype has no component.
+    /// Additional component predicate types supplied by the host.
     fn component_matches(&self, _stack: &StackView, _predicate: &Value) -> bool {
+        false
+    }
+    /// Membership in the level's enchantment registry tags.
+    fn enchantment_in_tag(&self, _enchantment: &str, _tag: &str) -> bool {
         false
     }
     fn is_keybind_down(&self, _keybind: &str) -> bool {
@@ -1335,7 +1334,8 @@ impl Resolve<'_> {
             ConditionProperty::KeybindDown(key) => self.env.is_keybind_down(key),
             ConditionProperty::ViewEntity => owner.is_some_and(|o| o.is_view_entity),
             ConditionProperty::Component(predicate) => {
-                self.env.component_matches(self.stack, predicate)
+                component_predicate::matches(predicate, self.components, self.env)
+                    .unwrap_or_else(|| self.env.component_matches(self.stack, predicate))
             }
         }
     }

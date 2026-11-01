@@ -22,11 +22,11 @@ ChatAbilities.selectVisibleMessages	port	crates/horizon-client-render/src/chat.r
 ChatAbilities.Builder.build	inline	crates/horizon-client-render/src/chat.rs::ChatAbilities::new	restrictions come from the Chat option alone; new() maps the visibility to them
 ChatListener.tick	missing		player: the Chat Delay option does nothing; lines show at once instead of after the delay
 ChatListener.setMessageDelay	missing		player: no delayed-message queue, so Chat Delay has no effect
-ChatListener.flushQueue	missing		player: no queue to flush (part of Chat Delay)
-ChatListener.removeFromDelayedMessageQueue	missing		minor: only matters while a delayed message is queued
+ChatListener.flushQueue	port	crates/horizon-client/src/game/remote.rs::Game::flush_chat_queue	each message through accept_chat, so it counts as processed
+ChatListener.removeFromDelayedMessageQueue	inline	crates/horizon-client/src/game/remote.rs::Game::handle_delete_chat	
 ChatListener.handleMessage	missing		player: nothing is held back, so Chat Delay is ignored
 ChatListener.handlePlayerChatMessage	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	gap: player: no Only Show Secure Chat filter, no server filter-mask text, no block or friend-only hiding of chat lines
-ChatListener.handleChatMessageError	missing		player: a signed chat line that fails validation shows no red chat.validation_error line; Horizon checks no chat signatures (rare on most servers)
+ChatListener.handleChatMessageError	port	crates/horizon-client/src/game/remote.rs::Game::handle_chat_message_error	the red italic chat.validation_error in the message's chat type, tagged chatError; gap: minor: a blocked or friends-only sender is not skipped (no social list), no narration, no markMessageAsProcessed
 ChatListener.handleDisguisedChatMessage	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	gap: minor: no narration and no chat log entry
 ChatListener.showMessageToPlayer	port	crates/horizon-client/src/game/remote.rs::Game::chat_line	gap: player: trust, block, friend-only and secure-only checks are not run before showing
 ChatListener.evaluateTrustLevel	missing		player: no secure, modified or not-secure marking, so unsigned lines show with no Not Secure bar and Only Show Secure Chat does nothing
@@ -138,8 +138,8 @@ CushionRenderer.extractRenderState	port	crates/horizon-client/src/game/cushions.
 CushionRenderer.submit	port	crates/horizon-client/src/game/cushions.rs::Game::cushion_geometry	turned to its facing and drawn
 DisplayRenderer.getSkyLightLevel	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	brightness override
 DisplayRenderer.getBlockLightLevel	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	brightness override
-DisplayRenderer.getShadowRadius	missing		minor: display shadows are not drawn (shadow_radius is stored and not read)
-DisplayRenderer.getShadowStrength	missing		minor: display shadows are not drawn (shadow_strength is stored and not read)
+DisplayRenderer.getShadowRadius	port	crates/horizon-client/src/shadows.rs::display_caster	the interpolated radius, which shadows::shadow clamps to 32
+DisplayRenderer.getShadowStrength	port	crates/horizon-client/src/shadows.rs::display_caster	the interpolated strength, which shadows::shadow fades over the camera distance
 DisplayRenderer.submit	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	gap: player: only text displays are drawn; block and item displays are not
 DisplayRenderer.calculateOrientation	port	crates/horizon-client/src/text_display.rs::TextDisplayData::matrix	billboard orientation (fixed, horizontal, vertical, center)
 DisplayRenderer.extractRenderState	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	interpolation progress and the entity yaw and pitch are read there

@@ -14,7 +14,7 @@ pub const WASM: &str = "mod.wasm";
 /// built for any 0.1.x SDK.
 pub const API: &str = "0.1";
 /// The manifest `api` lines this build loads. 0.2 is 0.1 plus content:
-/// `assets/` and `data/` in the `.hmod`, with blocks and items declared in
+/// `assets/` and `data/` in the `.hmod`, with blocks, items and mob effects declared in
 /// `data/<id>/horizon/` (docs/modpacks.md). Code still links API 0.1.
 /// 0.3 is a server mod (experimental): the `horizon-server-mod` world.
 pub const APIS: [&str; 3] = [API, "0.2", SERVER_API];
@@ -83,7 +83,7 @@ pub enum Capability {
     Storage,
     /// Runs vanilla commands as the player, with the player's permissions.
     Command,
-    /// New blocks and items from the mod's `data/` (API 0.2): no WIT
+    /// New blocks, items and mob effects from the mod's `data/` (API 0.2): no WIT
     /// interface, the game reads them before the world loads.
     Registries,
     /// A screen the mod owns and a settings page in Options > Mods, drawn
@@ -159,7 +159,9 @@ impl Capability {
             Capability::Hud => "draw text on your screen",
             Capability::Storage => "save its own settings to disk",
             Capability::Command => "run commands as you, with your permissions",
-            Capability::Registries => "add blocks and items to your worlds",
+            Capability::Registries => {
+                "add blocks, items, mob effects and entity types to your worlds"
+            }
             Capability::Ui => "show its own screens and a settings page",
             Capability::Render => "draw on your screen, shake and zoom the camera",
             Capability::Input => {

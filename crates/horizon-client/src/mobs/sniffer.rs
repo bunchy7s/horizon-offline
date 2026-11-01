@@ -34,6 +34,10 @@ fn now(m: &Mob) -> i32 {
 pub fn digging(m: &Mob) -> bool {
     state(m) == DIGGING
 }
+/// `Sniffer.canPlayDiggingSound`.
+pub fn can_play_digging_sound(m: &Mob) -> bool {
+    matches!(state(m), DIGGING | SEARCHING)
+}
 pub fn register(m: &mut Mob) {
     use super::path::PathType;
     m.ai.nav.can_float = true;

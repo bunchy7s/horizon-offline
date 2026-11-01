@@ -4,6 +4,9 @@
 //! golem. Players placing the pumpkin and dispensers share it.
 use super::Game;
 use horizon_client::Result;
+use horizon_client::block_pattern::{
+    IRON_GOLEM_BASE, IRON_GOLEM_FULL, SNOW_GOLEM_BASE, SNOW_GOLEM_FULL,
+};
 
 impl Game<'_> {
     fn golem_block(&self, p: [i32; 3]) -> &str {
@@ -17,12 +20,12 @@ impl Game<'_> {
         )
     }
     /// The blocks of the golem completed at `head` and its spawn base
-    /// (`BlockPattern.find`), snow golems first: the snow column ("^", "#",
-    /// "#") spawns at its bottom, the iron T ("~^~", "###", "~#~") under its
-    /// head. The blocks come column by column, top first, as
-    /// `clearPatternBlocks` visits them. With `base`, the head's cell takes
-    /// any block, as in the base patterns (" ", "#", "#") and ("~ ~", "###",
-    /// "~#~") that `canSpawnGolem` checks before the head is there.
+    /// (`BlockPattern.find`), snow golems first: the snow column
+    /// (`SNOW_GOLEM_FULL`: "^", "#", "#") spawns at its bottom, the iron T
+    /// (`IRON_GOLEM_FULL`: "~^~", "###", "~#~") under its head. The blocks
+    /// come column by column, top first, as `clearPatternBlocks` visits them.
+    /// With `base`, `SNOW_GOLEM_BASE` and `IRON_GOLEM_BASE` take any block
+    /// where the head will go, as `canSpawnGolem` checks before it is there.
     fn find_golem(
         &self,
         head: [i32; 3],
@@ -30,24 +33,24 @@ impl Game<'_> {
     ) -> Option<(&'static str, Vec<[i32; 3]>, [i32; 3])> {
         let air = |p: [i32; 3]| self.res.facts().is_air(self.world.block(p[0], p[1], p[2]));
         let snow = |c: char, p: [i32; 3]| match c {
-            '^' => base || self.is_golem_head(p),
+            '^' => self.is_golem_head(p),
             _ => self.golem_block(p) == "minecraft:snow_block",
         };
         let iron = |c: char, p: [i32; 3]| match c {
-            '^' => base || self.is_golem_head(p),
+            '^' => self.is_golem_head(p),
             '#' => self.golem_block(p) == "minecraft:iron_block",
             _ => air(p),
         };
-        if let Some(cell) = find_pattern(head, &["^", "#", "#"], snow) {
-            let blocks = (0..3).map(|y| cell(0, y)).collect();
-            return Some(("minecraft:snow_golem", blocks, cell(0, 2)));
+        let (snow_pattern, iron_pattern) = if base {
+            (SNOW_GOLEM_BASE, IRON_GOLEM_BASE)
+        } else {
+            (SNOW_GOLEM_FULL, IRON_GOLEM_FULL)
+        };
+        if let Some(m) = snow_pattern.find(head, snow) {
+            return Some(("minecraft:snow_golem", m.front_cells(), m.block(0, 2, 0)));
         }
-        let cell = find_pattern(head, &["~^~", "###", "~#~"], iron)?;
-        let blocks = (0..3)
-            .flat_map(|x| (0..3).map(move |y| (x, y)))
-            .map(|(x, y)| cell(x, y))
-            .collect();
-        Some(("minecraft:iron_golem", blocks, cell(1, 2)))
+        let m = iron_pattern.find(head, iron)?;
+        Some(("minecraft:iron_golem", m.front_cells(), m.block(1, 2, 0)))
     }
     /// `CarvedPumpkinBlock.canSpawnGolem`: a snow or iron golem base, or a
     /// copper block (`#minecraft:copper`) below.
@@ -157,6 +160,7 @@ impl Game<'_> {
         mob.previous_head_yaw = yaw;
         let id = mob.id;
         self.mobs.push(mob);
+        self.native_mobs_joined(self.mobs.len() - 1, false);
         Some(id)
     }
     /// `CarvedPumpkinBlock.clearPatternBlocks`: every cell of the match
@@ -254,78 +258,24 @@ impl Game<'_> {
     }
 }
 
-/// `BlockPattern.find` for a one-aisle pattern (`rows`, top first): the
-/// pattern's corner at every block from `pos` to `pos + size - 1` (x fastest,
-/// then y, then z), turned every way (`forwards`, then `up`, in `Direction`
-/// order, never along each other), until every cell passes `test`. The match
-/// gives the block of column x, row y (`BlockPatternMatch.getBlock(x, y, 0)`).
-fn find_pattern(
-    pos: [i32; 3],
-    rows: &[&str],
-    test: impl Fn(char, [i32; 3]) -> bool,
-) -> Option<impl Fn(i32, i32) -> [i32; 3]> {
-    // Direction.values(): down, up, north, south, west, east.
-    const DIRECTIONS: [[i32; 3]; 6] = [
-        [0, -1, 0],
-        [0, 1, 0],
-        [0, 0, -1],
-        [0, 0, 1],
-        [-1, 0, 0],
-        [1, 0, 0],
-    ];
-    let size = rows.len().max(rows[0].len()) as i32;
-    let corners =
-        (0..size).flat_map(|z| (0..size).flat_map(move |y| (0..size).map(move |x| [x, y, z])));
-    for d in corners {
-        let origin = [pos[0] + d[0], pos[1] + d[1], pos[2] + d[2]];
-        for forwards in DIRECTIONS {
-            for up in DIRECTIONS {
-                if up == forwards || up == forwards.map(|v| -v) {
-                    continue;
-                }
-                // translateAndRotate: right is forwards × up, rows go down `up`.
-                let right = [
-                    forwards[1] * up[2] - forwards[2] * up[1],
-                    forwards[2] * up[0] - forwards[0] * up[2],
-                    forwards[0] * up[1] - forwards[1] * up[0],
-                ];
-                let cell =
-                    move |x: i32, y: i32| [0, 1, 2].map(|i| origin[i] - up[i] * y + right[i] * x);
-                let matches = rows.iter().enumerate().all(|(y, row)| {
-                    row.chars()
-                        .enumerate()
-                        .all(|(x, c)| test(c, cell(x as i32, y as i32)))
-                });
-                if matches {
-                    return Some(cell);
-                }
-            }
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
-    use super::find_pattern;
+    use horizon_client::block_pattern::{
+        BlockPattern, IRON_GOLEM_BASE, IRON_GOLEM_FULL, SNOW_GOLEM_BASE, SNOW_GOLEM_FULL,
+    };
     use std::collections::HashMap;
 
-    const SNOW: [&str; 3] = ["^", "#", "#"];
-    const IRON: [&str; 3] = ["~^~", "###", "~#~"];
-
-    /// `find_pattern` over `blocks` (anything else is air): the cells of the
-    /// match, column by column, top first.
-    fn find(rows: &[&str], head: [i32; 3], blocks: &[([i32; 3], char)]) -> Option<Vec<[i32; 3]>> {
+    /// `BlockPattern.find` over `blocks` (anything else is air): the cells of
+    /// the match, column by column, top first.
+    fn find(
+        pattern: BlockPattern,
+        head: [i32; 3],
+        blocks: &[([i32; 3], char)],
+    ) -> Option<Vec<[i32; 3]>> {
         let world: HashMap<_, _> = blocks.iter().copied().collect();
         let at = |p: [i32; 3]| world.get(&p).copied().unwrap_or('~');
-        let cell = find_pattern(head, rows, |c, p| at(p) == c)?;
-        let width = rows[0].len() as i32;
-        Some(
-            (0..width)
-                .flat_map(|x| (0..rows.len() as i32).map(move |y| (x, y)))
-                .map(|(x, y)| cell(x, y))
-                .collect(),
-        )
+        let m = pattern.find(head, |c, p| at(p) == c)?;
+        Some(m.front_cells())
     }
 
     #[test]
@@ -342,7 +292,7 @@ mod tests {
             let at = |n: i32| [0, 1, 2].map(|i| head[i] + step[i] * n);
             let blocks = [(at(0), '^'), (at(1), '#'), (at(2), '#')];
             assert_eq!(
-                find(&SNOW, head, &blocks),
+                find(SNOW_GOLEM_FULL, head, &blocks),
                 Some(vec![at(0), at(1), at(2)]),
                 "snow blocks going {step:?} from the head"
             );
@@ -353,8 +303,11 @@ mod tests {
     fn a_bent_or_short_snow_column_is_no_golem() {
         let head = [0, 0, 0];
         let bent = [(head, '^'), ([0, -1, 0], '#'), ([1, -1, 0], '#')];
-        assert_eq!(find(&SNOW, head, &bent), None);
-        assert_eq!(find(&SNOW, head, &[(head, '^'), ([0, -1, 0], '#')]), None);
+        assert_eq!(find(SNOW_GOLEM_FULL, head, &bent), None);
+        assert_eq!(
+            find(SNOW_GOLEM_FULL, head, &[(head, '^'), ([0, -1, 0], '#')]),
+            None
+        );
     }
 
     #[test]
@@ -368,15 +321,76 @@ mod tests {
             ([1, 0, 1], '#'),
             ([2, 0, 0], '#'),
         ];
-        let cells = find(&IRON, head, &blocks).expect("a lying iron golem");
+        let cells = find(IRON_GOLEM_FULL, head, &blocks).expect("a lying iron golem");
         // Column 1, rows 0 to 2: the head, the body and the legs.
         assert_eq!(&cells[3..6], &[[0, 0, 0], [1, 0, 0], [2, 0, 0]]);
         let mut arms_out = blocks.to_vec();
         arms_out.push(([2, 0, 1], '#'));
         assert_eq!(
-            find(&IRON, head, &arms_out),
+            find(IRON_GOLEM_FULL, head, &arms_out),
             None,
             "a block beside the legs"
+        );
+    }
+
+    #[test]
+    fn the_base_patterns_ignore_the_head() {
+        // canSpawnGolem checks the base patterns before the head is there: the
+        // head's cell (' ' in the pattern) takes any block.
+        let snow = [([0, -1, 0], '#'), ([0, -2, 0], '#')];
+        assert_eq!(
+            find(SNOW_GOLEM_BASE, [0, 0, 0], &snow),
+            Some(vec![[0, 0, 0], [0, -1, 0], [0, -2, 0]])
+        );
+        assert_eq!(find(SNOW_GOLEM_FULL, [0, 0, 0], &snow), None);
+        let iron = [
+            ([-1, 0, 0], '#'),
+            ([0, 0, 0], '#'),
+            ([1, 0, 0], '#'),
+            ([0, -1, 0], '#'),
+        ];
+        assert!(find(IRON_GOLEM_BASE, [0, 1, 0], &iron).is_some());
+        assert_eq!(find(IRON_GOLEM_FULL, [0, 1, 0], &iron), None);
+    }
+
+    #[test]
+    fn the_first_corner_of_the_search_cube_wins() {
+        // There is no snow at the head, so the corners x fastest, then y, then
+        // z decide: the column one step along +x is the one taken.
+        let column = |c: [i32; 3]| {
+            [
+                (c, '^'),
+                ([c[0], c[1] - 1, c[2]], '#'),
+                ([c[0], c[1] - 2, c[2]], '#'),
+            ]
+        };
+        let blocks: Vec<_> = [column([1, 0, 0]), column([0, 1, 0]), column([0, 0, 1])].concat();
+        assert_eq!(
+            find(SNOW_GOLEM_FULL, [0, 0, 0], &blocks),
+            Some(vec![[1, 0, 0], [1, -1, 0], [1, -2, 0]])
+        );
+    }
+
+    #[test]
+    fn forwards_then_up_in_direction_order_picks_the_column() {
+        // One head with a snow block below it and along both z ways. Every
+        // `up` is tried for one `forwards` before the next forwards, in
+        // Direction order and never along `forwards`: down's first usable up
+        // is north, so the +z column is the match, not the column below (up,
+        // under forwards north) nor the one along -z (south, later).
+        let head = [0, 0, 0];
+        let blocks = [
+            (head, '^'),
+            ([0, -1, 0], '#'),
+            ([0, -2, 0], '#'),
+            ([0, 0, 1], '#'),
+            ([0, 0, 2], '#'),
+            ([0, 0, -1], '#'),
+            ([0, 0, -2], '#'),
+        ];
+        assert_eq!(
+            find(SNOW_GOLEM_FULL, head, &blocks),
+            Some(vec![[0, 0, 0], [0, 0, 1], [0, 0, 2]])
         );
     }
 }

@@ -21,7 +21,7 @@ AbstractContainerScreen.getHoveredSlot	port	crates/horizon-client/src/game.rs::G
 AbstractContainerScreen.slotClicked	port	crates/horizon-client/src/game.rs::Game::menu_ops	includes the bundle unselect of onMouseClickAction; sent to the server on a remote game
 AbstractContainerScreen.mouseClicked	port	crates/horizon-client/src/game.rs::Game::inventory_press	press logic is container_screen::Clicks::press; double click gathers, Shift double click quick-moves all
 AbstractContainerScreen.mouseDragged	port	crates/horizon-client/src/game.rs::Game::inventory_drag_move	
-AbstractContainerScreen.isHovering	port	crates/horizon-client/src/game.rs::Game::slot_at	hit box is the 16x16 slot; vanilla uses 18x18 (one pixel more each side), so the border between slots hits nothing
+AbstractContainerScreen.isHovering	port	crates/horizon-client/src/game.rs::Game::slot_at	hit box is the 16x16 slot grown by one pixel on each side, like vanilla
 AbstractContainerScreen.onMouseClickAction	inline	crates/horizon-client/src/game.rs::Game::menu_ops	Shift click or swap clears a bundle's selection
 AbstractContainerScreen.keyPressed	port	crates/horizon-client/src/game.rs::Game::inventory_hotkey	number keys, F and Q over a slot; keyPickItem bound to a keyboard key does not clone the hovered slot
 AbstractContainerScreen.checkHotbarKeyPressed	port	crates/horizon-client/src/game.rs::Game::inventory_hotkey	hotbar and off hand swaps while the hand is empty

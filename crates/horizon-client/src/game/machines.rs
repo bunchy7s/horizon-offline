@@ -2,17 +2,20 @@
 //! transfer cooldowns), `DispenserBlock` / `DropperBlock.dispenseFrom` with
 //! the vanilla dispense behaviours Horizon has entities for, and container
 //! comparator signals (`AbstractContainerMenu.getRedstoneSignalFromContainer`).
-use super::Game;
+use super::{Game, storage::is_shulker_box};
 
 mod crafter;
+pub(in crate::game) mod native_fluids;
+pub(in crate::game) mod native_items;
 use horizon_client::{
     Result,
-    containers::{BlockEntity, HOPPER_SLOTS},
+    containers::{BlockEntity, HOPPER_SLOTS, ModContainer},
     items::{ItemStack, Items},
     world::World,
 };
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
 use horizon_world::{level::Behaviours, registry::BlockStateId};
+use std::sync::Arc;
 
 type Pos = (i32, i32, i32);
 
@@ -43,6 +46,12 @@ enum Kind {
     Brewing,
     /// `ChiseledBookShelfBlockEntity`: books only, one to a slot.
     Bookshelf,
+    /// `JukeboxBlockEntity`'s single slot: a playable disc only.
+    Jukebox,
+    /// A mod block's block entity (`ModContainer`).
+    Mod,
+    /// `ShulkerBoxBlockEntity`: a shulker box doesn't go through a face into one.
+    Shulker,
     /// `ComposterBlock.getContainer` at this level (a `WorldlyContainerHolder`
     /// without a block entity): input below 7, empty at 7, bone meal at 8.
     Composter(i32),
@@ -53,6 +62,8 @@ enum Kind {
 struct View {
     parts: Vec<(Pos, usize)>,
     kind: Kind,
+    /// A mod block's container rules (`Kind::Mod`).
+    container: Option<Arc<ModContainer>>,
 }
 impl View {
     fn len(&self) -> usize {
@@ -79,7 +90,19 @@ impl View {
             (Kind::Composter(8), Some(Direction::Down)) => vec![0],
             (Kind::Composter(level), Some(Direction::Up)) if level < 7 => vec![0],
             (Kind::Composter(_), _) => vec![],
+            (Kind::Mod, Some(face)) => self
+                .container
+                .as_ref()
+                .map_or_else(Vec::new, |c| c.faces[face as usize].clone()),
             _ => (0..self.len()).collect(),
+        }
+    }
+    /// The slots `HopperBlockEntity.addItem` tries through `face`.
+    fn slots_to_add(&self, face: Option<Direction>) -> Vec<usize> {
+        if matches!(self.kind, Kind::Furnace | Kind::Brewing | Kind::Mod) && face.is_some() {
+            self.slots_for_face(face)
+        } else {
+            (0..self.len()).collect()
         }
     }
 }
@@ -131,7 +154,14 @@ impl Containers<'_> {
     fn name(&self, state: BlockStateId) -> &str {
         self.registry.state(state).map_or("", |s| s.name.as_str())
     }
+    /// `ItemStack.getMaxStackSize`: its component, else the item's.
     fn max_stack(&self, stack: &ItemStack) -> u32 {
+        if let Some(horizon_world::nbt::Tag::Int(n)) = stack
+            .data()
+            .and_then(|d| d.other("minecraft:max_stack_size"))
+        {
+            return (*n).clamp(1, 99) as u32;
+        }
         self.items
             .get(&stack.item)
             .map_or(64, |i| i.max_stack)
@@ -148,6 +178,7 @@ impl Containers<'_> {
             return Some(View {
                 parts: vec![(pos, usize::from(level != 7))],
                 kind: Kind::Composter(level),
+                container: None,
             });
         }
         let entity = self.world.block_entities.get(&pos)?;
@@ -161,12 +192,28 @@ impl Containers<'_> {
         ) {
             return None;
         }
+        // A mod's block entity is a container when its block says so. The one
+        // ticking now is out of the world (an empty id marks its place): what
+        // went into its place would be lost when it comes back.
+        if let BlockEntity::Mod(m) = entity {
+            if m.id.is_empty() {
+                return None;
+            }
+            let container = Arc::clone(self.world.block_entities.mod_container(state.0)?);
+            return Some(View {
+                parts: vec![(pos, container.slots)],
+                kind: Kind::Mod,
+                container: Some(container),
+            });
+        }
         let kind = match (entity, name) {
             (BlockEntity::Furnace(_), _) => Kind::Furnace,
             (BlockEntity::Crafter(_), _) => Kind::Crafter,
             (BlockEntity::Brewing(_), _) => Kind::Brewing,
             (BlockEntity::ChiseledBookshelf(_), _) => Kind::Bookshelf,
+            (BlockEntity::Jukebox(_), _) => Kind::Jukebox,
             (_, "minecraft:hopper") => Kind::Hopper,
+            (_, n) if is_shulker_box(n) => Kind::Shulker,
             _ => Kind::Generic,
         };
         let size = entity.slots().len();
@@ -207,13 +254,18 @@ impl Containers<'_> {
                     } else {
                         vec![(other, 27), (pos, size)]
                     };
-                    return Some(View { parts, kind });
+                    return Some(View {
+                        parts,
+                        kind,
+                        container: None,
+                    });
                 }
             }
         }
         Some(View {
             parts: vec![(pos, size)],
             kind,
+            container: None,
         })
     }
     fn get(&self, view: &View, slot: usize) -> Option<&ItemStack> {
@@ -228,12 +280,21 @@ impl Containers<'_> {
             .slots()
             .get(i)?
             .as_ref()
+            // A mod can leave an empty stack in its own slots.
+            .filter(|s| s.count > 0)
     }
     fn is_empty(&self, view: &View) -> bool {
         (0..view.len()).all(|i| self.get(view, i).is_none())
     }
     /// `Container.canPlaceItem` (+ `canPlaceItemThroughFace` for furnaces).
     fn can_place(&self, view: &View, slot: usize, stack: &ItemStack) -> bool {
+        if let Some(c) = &view.container {
+            return c.inputs.contains(&slot);
+        }
+        // ShulkerBoxBlockEntity.canPlaceItemThroughFace
+        if view.kind == Kind::Shulker {
+            return !is_shulker_box(&stack.item);
+        }
         if view.kind == Kind::Crafter {
             return match self.world.block_entities.get(&view.parts[0].0) {
                 Some(BlockEntity::Crafter(c)) => {
@@ -243,6 +304,15 @@ impl Containers<'_> {
                 }
                 _ => false,
             };
+        }
+        if view.kind == Kind::Jukebox {
+            // JukeboxBlockEntity.canPlaceItem: a playable disc, into the one
+            // slot, which has to be empty first (its maximum stack is 1).
+            return self
+                .items
+                .get(&stack.item)
+                .is_some_and(|i| i.jukebox_song.is_some())
+                && self.get(view, slot).is_none();
         }
         if view.kind == Kind::Bookshelf {
             // ListBackedContainer.canPlaceItem: `acceptsItemType` (the books)
@@ -300,6 +370,9 @@ impl Containers<'_> {
         if view.kind == Kind::Brewing {
             return slot != 3 || &*stack.item == "minecraft:glass_bottle";
         }
+        if let Some(c) = &view.container {
+            return c.outputs.contains(&slot);
+        }
         view.kind != Kind::Furnace
             || face != Direction::Down
             || slot != 1
@@ -324,12 +397,13 @@ impl Containers<'_> {
         let mut total = 0.0f32;
         for i in 0..view.len() {
             if let Some(s) = self.get(view, i) {
-                total += s.count as f32 / self.max_stack(s).min(64) as f32;
+                total += s.count as f32 / self.max_stack(s) as f32;
             }
         }
         total /= view.len().max(1) as f32;
-        // Mth.lerpDiscrete(total, 0, 15)
-        (total * 14.0).floor() as i32 + i32::from(total > 0.0)
+        // Mth.lerpDiscrete(total, 0, 15). A mod can write a stack over its own
+        // limit, so the ratio itself is clamped, as vanilla's invariant does.
+        (total.min(1.0) * 14.0).floor() as i32 + i32::from(total > 0.0)
     }
 }
 
@@ -457,11 +531,14 @@ impl Game<'_> {
     }
     fn slot_mut_at(&mut self, view: &View, slot: usize) -> Option<&mut Option<ItemStack>> {
         let (pos, i) = view.locate(slot)?;
-        self.world
-            .block_entities
-            .get_mut(&pos)?
-            .slots_mut()
-            .get_mut(i)
+        let entity = self.world.block_entities.get_mut(&pos)?;
+        // A mod's slots grow to its container's count when first used.
+        if let BlockEntity::Mod(m) = entity
+            && m.items.len() <= i
+        {
+            m.items.resize(view.len(), None);
+        }
+        entity.slots_mut().get_mut(i)
     }
     /// `BlockEntity.setChanged` for every block entity of a container.
     fn view_changed(&mut self, view: &View) {
@@ -501,17 +578,44 @@ impl Game<'_> {
         &mut self,
         from_hopper: Option<Pos>,
         view: &View,
-        mut stack: ItemStack,
+        stack: ItemStack,
         slot: usize,
     ) -> Option<ItemStack> {
+        let (rest, moved) = self.move_in_item(from_hopper, view, stack, slot);
+        if moved {
+            self.view_changed(view);
+            // JukeboxBlockEntity.setTheItem through a hopper's or a dropper's
+            // transfer: the disc it lands on starts playing.
+            if view.kind == Kind::Jukebox {
+                let (x, y, z) = view.parts[0].0;
+                self.jukebox_inserted([x, y, z]);
+            }
+        }
+        rest
+    }
+    /// `tryMoveInItem` before its `setChanged`: the remainder, and whether
+    /// anything moved.
+    fn move_in_item(
+        &mut self,
+        from_hopper: Option<Pos>,
+        view: &View,
+        mut stack: ItemStack,
+        slot: usize,
+    ) -> (Option<ItemStack>, bool) {
         let c = self.containers();
         if !c.can_place(view, slot, &stack) {
-            return Some(stack);
+            return (Some(stack), false);
         }
         let was_empty = c.is_empty(view);
         let max = c.max_stack(&stack);
         let mut success = false;
-        let target = self.slot_mut_at(view, slot)?;
+        let Some(target) = self.slot_mut_at(view, slot) else {
+            return (Some(stack), false);
+        };
+        // An empty stack a mod left in its slot: the slot is free (`isEmpty`).
+        if target.as_ref().is_some_and(|s| s.count == 0) {
+            *target = None;
+        }
         match target {
             None => {
                 *target = Some(stack.clone());
@@ -530,19 +634,16 @@ impl Game<'_> {
             }
             Some(_) => {}
         }
-        if success {
-            if was_empty && view.kind == Kind::Hopper {
-                let dest = view.parts[0].0;
-                let from_ticked = from_hopper.and_then(|p| self.hoppers.get(&p).map(|h| h.ticked));
-                let state = self.hoppers.entry(dest).or_default();
-                if state.cooldown <= 8 {
-                    let skip = i32::from(from_ticked.is_some_and(|t| state.ticked >= t));
-                    state.cooldown = 8 - skip;
-                }
+        if success && was_empty && view.kind == Kind::Hopper {
+            let dest = view.parts[0].0;
+            let from_ticked = from_hopper.and_then(|p| self.hoppers.get(&p).map(|h| h.ticked));
+            let state = self.hoppers.entry(dest).or_default();
+            if state.cooldown <= 8 {
+                let skip = i32::from(from_ticked.is_some_and(|t| state.ticked >= t));
+                state.cooldown = 8 - skip;
             }
-            self.view_changed(view);
         }
-        (stack.count > 0).then_some(stack)
+        ((stack.count > 0).then_some(stack), success)
     }
     /// `HopperBlockEntity.addItem(from, container, stack, direction)`; the remainder.
     fn add_item(
@@ -556,13 +657,8 @@ impl Game<'_> {
             let (x, y, z) = view.parts[0].0;
             return self.composter_container_insert([x, y, z], stack, face == Some(Direction::Up));
         }
-        let slots = if matches!(view.kind, Kind::Furnace | Kind::Brewing) && face.is_some() {
-            view.slots_for_face(face)
-        } else {
-            (0..view.len()).collect()
-        };
         let mut rest = Some(stack);
-        for slot in slots {
+        for slot in view.slots_to_add(face) {
             let Some(stack) = rest.take() else { break };
             rest = self.try_move_in_item(from_hopper, view, stack, slot);
         }
@@ -571,7 +667,7 @@ impl Game<'_> {
     /// Remove one item from a slot (`removeItem(slot, 1)`).
     fn take_one(&mut self, view: &View, slot: usize) -> Option<ItemStack> {
         let target = self.slot_mut_at(view, slot)?;
-        let current = target.as_mut()?;
+        let current = target.as_mut().filter(|s| s.count > 0)?;
         let one = ItemStack {
             count: 1,
             ..current.clone()
@@ -790,6 +886,12 @@ impl Game<'_> {
             match self.add_item(source_hopper, hopper, one, None) {
                 None => {
                     self.view_changed(source);
+                    // JukeboxBlockEntity.removeItem -> setTheItem(EMPTY): a
+                    // disc a hopper takes out stops the song.
+                    if source.kind == Kind::Jukebox {
+                        let (x, y, z) = source.parts[0].0;
+                        self.jukebox_taken([x, y, z]);
+                    }
                     return true;
                 }
                 Some(rest) => self.put_back(source, slot, rest),
@@ -879,6 +981,7 @@ impl Game<'_> {
         let view = View {
             parts: vec![(key, size)],
             kind: Kind::Generic,
+            container: None,
         };
         (view, open)
     }
@@ -912,7 +1015,7 @@ impl Game<'_> {
                 let stack = self.dropped[i].stack.clone();
                 match self.add_item(None, hopper, stack, None) {
                     None => {
-                        self.dropped.remove(i);
+                        self.remove_dropped(i);
                         return true;
                     }
                     Some(rest) => self.dropped[i].stack = rest,
@@ -1058,6 +1161,10 @@ enum Screen {
 impl Game<'_> {
     fn machine_screen(&self) -> Option<Screen> {
         let key = self.container?;
+        // A mod's screen over a hopper or dispenser menu lays out its own slots.
+        if self.native_screen_inventory_y().is_some() {
+            return None;
+        }
         // A server's menu shows by its type, whatever block (or minecart) holds it.
         if let Some(menu) = self.remote_menu_type() {
             return match menu {
@@ -1080,6 +1187,9 @@ impl Game<'_> {
     }
     /// `imageHeight` of the open screen (HopperScreen is 133 tall).
     pub(super) fn screen_height(&self) -> f32 {
+        if let Some(height) = self.native_screen_height() {
+            return height;
+        }
         if self
             .station
             .as_ref()
@@ -1170,6 +1280,7 @@ impl Game<'_> {
             horizon_client::text::Text::literal(self.container_title(self.translate(key, fallback)))
                 .resolve_legacy()
         });
+        super::screen_info::name_container(|| title.plain());
         let title_x = if screen == Screen::Hopper {
             8.0
         } else {
@@ -1205,6 +1316,7 @@ mod item_column_tests {
             pickup_delay: 0,
             bob_offset: 0.0,
             ticks: 0,
+            needs_sync: false,
         }
     }
     /// `hopper_suck`'s test: some item box meets the hopper's SUCK_AABB.
@@ -1299,5 +1411,38 @@ mod item_column_tests {
             skipped += usize::from(!reach);
         }
         assert!(skipped > 1000, "skipped only {skipped}");
+    }
+}
+
+#[cfg(test)]
+mod mod_container_tests {
+    use super::{Kind, ModContainer, View};
+    use horizon_core::geometry::Direction;
+    use std::sync::Arc;
+
+    /// A mod's container reaches the slots its block names for each face;
+    /// without a face, every slot.
+    #[test]
+    fn mod_container_slots_by_face() {
+        let mut faces: [Vec<usize>; 6] = Default::default();
+        faces[Direction::Up as usize] = vec![0];
+        faces[Direction::Down as usize] = vec![2];
+        faces[Direction::North as usize] = vec![1];
+        let view = View {
+            parts: vec![((0, 0, 0), 3)],
+            kind: Kind::Mod,
+            container: Some(Arc::new(ModContainer {
+                slots: 3,
+                faces,
+                inputs: vec![0, 1],
+                outputs: vec![2],
+                menu: None,
+            })),
+        };
+        assert_eq!(view.slots_for_face(Some(Direction::Up)), [0]);
+        assert_eq!(view.slots_for_face(Some(Direction::Down)), [2]);
+        assert_eq!(view.slots_for_face(Some(Direction::North)), [1]);
+        assert!(view.slots_for_face(Some(Direction::East)).is_empty());
+        assert_eq!(view.slots_for_face(None), [0, 1, 2]);
     }
 }

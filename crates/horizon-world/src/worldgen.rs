@@ -9,6 +9,7 @@ pub mod biome_predicate;
 pub mod biome_source;
 pub mod biome_temperature;
 pub mod biome_weather;
+pub mod blending;
 pub mod block_blob;
 pub mod block_column;
 pub mod block_feature;

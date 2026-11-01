@@ -90,6 +90,19 @@ def game_env(base=None, **extra):
     return env
 
 
+def link_dir(target, link):
+    """Make `link` a link to the folder `target`: a symbolic link, or on Windows, where creating one needs
+    Developer Mode or an administrator (WinError 1314), a directory junction, which needs neither.
+    shutil.rmtree removes a junction without touching what it points to, as it does a symbolic link."""
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except OSError as error:
+        if sys.platform != "win32" or getattr(error, "winerror", None) != 1314:
+            raise
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(Path(target).resolve())],
+                       check=True, capture_output=True)
+
+
 def write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

@@ -1,7 +1,7 @@
 ItemFrame.defineSynchedData	skip:other		entity data defaults; ItemFrame starts with item None and rotation 0 in place_item_frame
 ItemFrame.setDirection	inline	crates/horizon-client/src/game/frames.rs::Game::frame_geometry	facing sets the pose in frame_geometry; the box comes from ItemFrame::bounds
 ItemFrame.recalculateBoundingBox	inline	crates/horizon-client/src/entities.rs::ItemFrame::bounds	boxes are computed on demand; the position sync codec is network-only
-ItemFrame.shouldDamageDropItem	missing		player: explosions never reach item frames here, so a blast does not break a frame and drop its item as in vanilla
+ItemFrame.shouldDamageDropItem	inline	crates/horizon-client/src/game/explosion.rs::Game::explosion_hurt_entities	a blast breaks a frame in reach and drops its item (`explosion_breaks_frames`)
 ItemFrame.canHurtWhenFixed	missing		minor: creative players cannot break a fixed frame (vanilla lets them); attack_frame returns early for fixed frames
 ItemFrame.hurtClient	inline	crates/horizon-client/src/game/frames.rs::Game::attack_frame	gap: minor: no separate client-side fixed-frame gate; the creative exception is missing
 ItemFrame.removeFramedMap	inline	crates/horizon-client/src/game/maps.rs::Game::lan_map_updates	frame map markers come from item_frames each tick, so a removed frame needs no step
@@ -26,7 +26,7 @@ FallingBlockEntity.causeFallDamage	port	crates/horizon-client/src/game/falling_d
 FallingBlockEntity.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::falling_block_to_nbt	gap: minor: TileEntityData of the carried block is not written
 FallingBlockEntity.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::falling_block_from_nbt	gap: minor: TileEntityData is not read; damage settings come from falling_block::Damage::from_nbt
 FallingBlockEntity.fillCrashReportCategory	skip:debug		crash report detail
-FallingBlockEntity.getTypeName	missing		player: death texts for falling blocks cannot name the block (Falling Anvil) because the hit has no source entity
+FallingBlockEntity.getTypeName	skip:data	-	the anvil death text is its damage type's message id (death.attack.anvil), which takes no block-name argument; game/falling_damage.rs picks falling_anvil, falling_stalactite or falling_block
 FallingBlockEntity.teleport	missing		unsure: no portal travel for falling blocks found in nether_portal.rs and no end-arrival tick
 ItemEntity.restoreFrom	skip:other		the ItemEntity value moves between levels with thrower kept; nothing to copy
 ItemEntity.setFluidMovement	inline	crates/horizon-client/src/entities.rs::ItemEntity::tick	water and lava drag and buoyancy are applied in tick
@@ -53,7 +53,7 @@ Creeper.getMaxFallDistance	missing		minor: the creeper's own comfortable fall di
 Creeper.defineSynchedData	skip:other		swell, powered and ignited are Mob fields
 Creeper.addAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	gap: minor: Fuse and ExplosionRadius are written as constants 30 and 3, not the creeper's values
 Creeper.thunderHit	port	crates/horizon-client/src/game/lightning.rs::Game::thunder_hit	
-Creeper.spawnLingeringCloud	missing		player: a creeper that explodes with potion effects leaves no lingering area cloud
+Creeper.spawnLingeringCloud	port	crates/horizon-client/src/mobs/hostile.rs::explode	MobEvent::LingeringCloud after the Explode: radius 2.5, wait 10, 300 ticks, -radius/duration a tick, the creeper's effects at 0.25 of their duration with their ambient and visible flags (game/potions.rs::spawn_creeper_cloud); a mob keeps ambient_effects now (NBT, /effect, expiry, conversion, the synchronized particles)
 ElderGuardian.createAttributes	skip:data		attribute defaults come from data tables
 Enderman.registerGoals	port	crates/horizon-client/src/mobs/enderman.rs::register	gap: minor: no anger-reset target goal (priority 4)
 Enderman.createAttributes	skip:data		attribute defaults come from data tables
@@ -65,7 +65,7 @@ Enderman.addAdditionalSaveData	missing		minor: the carried block is not written 
 Enderman.readAdditionalSaveData	missing		minor: the carried block is not read from saves
 Enderman.canRandomlyTeleportTo	port	crates/horizon-client/src/mobs/enderman.rs::teleport_to	the water check on the ground block
 Enderman.repeatedlyTryToTeleport	port	crates/horizon-client/src/mobs/enderman.rs::ai_step	pending teleports retry up to 64 times
-Enderman.dropCustomDeathLoot	missing		player: an Enderman killed while holding a block drops no block
+Enderman.dropCustomDeathLoot	port	crates/horizon-client/src/mobs/enderman.rs::carried_block_drops	the carried block's drops with a silk-touch diamond axe (carried_block_tool), drawn from the block table's random sequence (game/creatures.rs, the death handling)
 Enderman.hurtWithCleanWater	missing		player: a thrown splash water potion does nothing to an Enderman; vanilla hurts it
 Enderman.EndermanLeaveBlockGoal.canPlaceBlock	inline	crates/horizon-client/src/mobs/enderman.rs::LeaveBlock::tick	gap: minor: the place-on blacklist tag and the carried block canSurvive check are not in the tick
 Endermite.registerGoals	port	crates/horizon-client/src/mobs/ai.rs::register	Hostile family defaults; gap: unsure: the ClimbOnTopOfPowderSnow goal is not checked
