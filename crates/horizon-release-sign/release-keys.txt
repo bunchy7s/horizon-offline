@@ -6,3 +6,6 @@ MU4oiIQcCxkZvbwSjjXs7SySCuM6ywRQ3nGaJYZG0gw=
 # This fork's releases are signed with its own key (the RELEASE_SIGNING_KEY secret of the fork's
 # repository, no environment), so launchers built here accept the fork's updates.
 /Md2nqCrj2UwSf0LRY1Rxem5Hh6KBoLo7ATmmil0sD0=
+# The fork's key before 2026-10-30: the RELEASE_SIGNING_KEY secret still holds its private key, so
+# new releases are signed with it until that secret is replaced; keep it trusted so launchers accept them.
+2zza2dKGwE0Crcvnatub8fU8Vk0rkExjzK1t+iN2BXk=
