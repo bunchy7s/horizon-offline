@@ -13,6 +13,7 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 | `logs [--lines N] [--crash]` | `logs` | The end of the game's log, or its newest crash report | `--lines` (integer): how many lines of latest.log (default 100)<br>`--crash` (boolean): the newest crash report instead |
 | `status` | `status` | Game, renderer and streaming state (the scripting socket's original summary) | none |
 | `hello` | `hello` | The control protocol's version, the game's release and the command groups it serves | none |
+| `memory` | `memory` | What holds the game's memory: resident set, allocator, client and server columns by part, renderer, GPU memory by resource | none |
 | `worlds` | `worlds` | The saved worlds, newest first: folder, name, mode, last played, version | none |
 | `world-rename FOLDER NAME` | `world_rename` | Rename a world, as Edit World does (its folder stays) | `folder` (string, required): world folder from worlds<br>`name` (text, required): the new name |
 | `world-backup FOLDER` | `world_backup` | Zip a world into backups/, as Edit World's Make Backup does | `folder` (string, required): world folder from worlds |
