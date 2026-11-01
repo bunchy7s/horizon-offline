@@ -133,6 +133,10 @@ name = "chunk_load_bench"
 path = "../horizon-client/examples/chunk_load_bench.rs"
 
 [[example]]
+name = "gen_light_bench"
+path = "../horizon-client/examples/gen_light_bench.rs"
+
+[[example]]
 name = "gameplay_decode_profile"
 path = "../horizon-client/examples/gameplay_decode_profile.rs"
 
