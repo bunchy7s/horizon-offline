@@ -377,6 +377,7 @@ impl Game<'_> {
             "sculk" => Ok(Some(self.sculk_command(&words)?)),
             "hello" => Ok(Some(hello())),
             "status" => Ok(Some(self.control_status())),
+            "memory" => Ok(Some(self.memory_report())),
             "stall" => {
                 let millis: u64 = arg(1)?.parse()?;
                 if millis > 5000 {

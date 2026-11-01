@@ -180,6 +180,7 @@ mod loom;
 mod mace;
 mod machines;
 mod maps;
+mod memory;
 mod minecarts;
 mod mob_blocks;
 mod mob_gear;

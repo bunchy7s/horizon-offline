@@ -1841,6 +1841,53 @@ impl Renderer {
         let arenas = self.arena.bytes() + translucent.map_or(0, arena::Arena::bytes);
         [arenas, vertices * stride]
     }
+    /// Device memory the backend's allocator holds, by the label of what holds
+    /// it, largest first, with its allocated and reserved totals (Vulkan and
+    /// DirectX 12; none on Metal and OpenGL) (`horizon-ctl memory`).
+    pub fn gpu_memory_by_label(&self) -> Option<(u64, u64, Vec<(String, u64)>)> {
+        let report = self.device.generate_allocator_report()?;
+        let mut by_label: HashMap<String, u64> = HashMap::new();
+        for a in report.allocations {
+            *by_label.entry(a.name).or_default() += a.size;
+        }
+        let mut labels: Vec<_> = by_label.into_iter().collect();
+        labels.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        Some((
+            report.total_allocated_bytes,
+            report.total_reserved_bytes,
+            labels,
+        ))
+    }
+    /// Heap bytes of the renderer's per-section bookkeeping (`horizon-ctl memory`):
+    /// resident sections, far tiles, block entities and light sources by section.
+    pub fn cpu_census(&self) -> [(&'static str, usize); 4] {
+        use std::mem::size_of;
+        let per_section = |map_len: usize, lists: usize| {
+            map_len * (size_of::<SectionKey>() + size_of::<Vec<([i32; 3], u32)>>() + 1)
+                + lists * size_of::<([i32; 3], u32)>()
+        };
+        let lists = |map: &crate::fast_hash::FxHashMap<SectionKey, Vec<([i32; 3], u32)>>| {
+            per_section(
+                map.capacity(),
+                map.values().map(Vec::capacity).sum::<usize>(),
+            )
+        };
+        let animated: usize = self
+            .sections
+            .values()
+            .map(|s| s.animated_layers.len() * size_of::<u16>())
+            .sum();
+        [
+            ("resident_sections", self.sections.heap_bytes() + animated),
+            (
+                "far_tiles",
+                self.lods.capacity()
+                    * (size_of::<crate::lod::TileKey>() + size_of::<lod::Tile>() + 1),
+            ),
+            ("block_entities", lists(&self.block_entities)),
+            ("light_sources", lists(&self.light_blocks)),
+        ]
+    }
 }
 impl Renderer {
     pub async fn new(

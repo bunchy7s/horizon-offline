@@ -373,6 +373,38 @@ impl Section {
         }
     }
 }
+/// The heap bytes of a set of columns by what holds them (`Chunk::census`,
+/// `horizon-ctl memory`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ColumnCensus {
+    pub columns: usize,
+    /// Section slots of every column, shared ones included.
+    pub sections: usize,
+    /// Distinct section allocations.
+    pub unique_sections: usize,
+    /// Distinct sections of a single block state (no data array).
+    pub uniform_block_sections: usize,
+    /// Distinct sections whose light is a full 4,096-byte array.
+    pub light_arrays: usize,
+    pub block_bytes: usize,
+    pub biome_bytes: usize,
+    pub light_bytes: usize,
+    pub heightmap_bytes: usize,
+    /// The section records themselves (`Arc<Section>`).
+    pub section_record_bytes: usize,
+    /// The column records and their lists of sections.
+    pub column_bytes: usize,
+}
+impl ColumnCensus {
+    pub fn total_bytes(&self) -> usize {
+        self.block_bytes
+            + self.biome_bytes
+            + self.light_bytes
+            + self.heightmap_bytes
+            + self.section_record_bytes
+            + self.column_bytes
+    }
+}
 #[derive(Clone)]
 pub struct Chunk {
     pub x: i32,
@@ -582,6 +614,42 @@ impl Chunk {
     /// Heap bytes held by the sections (benchmark accounting).
     pub fn heap_bytes(&self) -> usize {
         self.sections.iter().map(|s| s.heap_bytes()).sum::<usize>()
+    }
+    /// Adds this column's heap bytes to `census` by what holds them. A
+    /// section shared with another column (`share_uniform`, or a copy not yet
+    /// written to) counts once: `seen` holds the sections counted so far.
+    pub fn census(
+        &self,
+        census: &mut ColumnCensus,
+        seen: &mut crate::fast_hash::FxHashSet<*const Section>,
+    ) {
+        census.columns += 1;
+        census.sections += self.sections.len();
+        census.column_bytes += std::mem::size_of::<Self>()
+            + self.sections.capacity() * std::mem::size_of::<Arc<Section>>();
+        census.heightmap_bytes += [&self.surface, &self.motion_blocking]
+            .iter()
+            .filter(|map| map.get().is_some())
+            .count()
+            * std::mem::size_of::<[i16; 256]>();
+        for section in &self.sections {
+            if !seen.insert(Arc::as_ptr(section)) {
+                continue;
+            }
+            census.unique_sections += 1;
+            // The `Arc`'s two counts and the section record.
+            census.section_record_bytes +=
+                2 * std::mem::size_of::<usize>() + std::mem::size_of::<Section>();
+            if section.blocks.bits() == 0 {
+                census.uniform_block_sections += 1;
+            }
+            census.block_bytes += section.blocks.heap_bytes();
+            census.biome_bytes += section.biomes.heap_bytes();
+            if let Light::Full(_) = section.light {
+                census.light_arrays += 1;
+                census.light_bytes += 4096;
+            }
+        }
     }
     /// Biome table index at a block position (`ChunkAccess.getNoiseBiome` with
     /// the quart y clamped to the column).
