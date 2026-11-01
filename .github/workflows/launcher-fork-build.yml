@@ -79,11 +79,11 @@ jobs:
         include:
           - name: linux
             os: ubuntu-22.04
-            asset: horizon-launcher-linux-x86_64.tar.gz
+            platform: linux-x86_64
             binary: horizon-launcher
           - name: windows
             os: windows-latest
-            asset: horizon-launcher-windows-x64.zip
+            platform: windows-x64
             binary: horizon-launcher.exe
             # The C runtime linked in: without it the launcher asks for VCRUNTIME140.dll,
             # which only the Visual C++ redistributable installs.
@@ -122,18 +122,16 @@ jobs:
           [[ "$out" == "horizon-launcher $expected" ]] || { echo "::error::expected horizon-launcher $expected"; exit 1; }
       - name: Package
         run: |
-          rm -rf dist out && mkdir -p dist out
-          cp target/release/${{ matrix.binary }} dist/
-          if [[ "${{ matrix.asset }}" == *.tar.gz ]]; then
-            (cd dist && tar czf ../out/${{ matrix.asset }} ${{ matrix.binary }})
-          else
-            (cd dist && 7z a ../out/${{ matrix.asset }} ${{ matrix.binary }})
-          fi
-          ls -l out
+          rm -rf dist && mkdir -p dist
+          suffix=""
+          [[ "${{ matrix.name }}" == "windows" ]] && suffix=".exe"
+          asset="horizon-launcher-${{ matrix.platform }}-${HORIZON_LAUNCHER_VERSION}${suffix}"
+          cp target/release/${{ matrix.binary }} "dist/${asset}"
+          ls -l dist
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset }}
-          path: launcher/out/*
+          name: launcher-${{ matrix.name }}
+          path: launcher/dist/*
           retention-days: 7
 
   sign:

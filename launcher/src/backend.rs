@@ -69,11 +69,11 @@ pub const ASSET: Option<&str> = Some("horizon-windows-x64.zip");
 pub const ASSET: Option<&str> = None;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-pub const LAUNCHER_ASSET: Option<&str> = Some("horizon-launcher-linux-x86_64.tar.gz");
+pub const LAUNCHER_ASSET: Option<&str> = Some("horizon-launcher-linux-x86_64");
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub const LAUNCHER_ASSET: Option<&str> = Some("horizon-launcher-macos-arm64.zip");
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-pub const LAUNCHER_ASSET: Option<&str> = Some("horizon-launcher-windows-x64.zip");
+pub const LAUNCHER_ASSET: Option<&str> = Some("horizon-launcher-windows-x64.exe");
 #[cfg(not(any(
     all(target_os = "linux", target_arch = "x86_64"),
     all(target_os = "macos", target_arch = "aarch64"),
@@ -292,7 +292,10 @@ pub(crate) fn parse_releases(
             continue;
         }
         let found = r["assets"].as_array().into_iter().flatten().find_map(|a| {
-            (Some(a["name"].as_str()?) == asset).then(|| {
+            let name = a["name"].as_str()?;
+            // Game assets match exactly; a launcher's raw binary carries its version in the name
+            // (`horizon-launcher-linux-x86_64-0.2.3`), so a prefix matches both forms.
+            (Some(name) == asset || asset.is_some_and(|prefix| name.starts_with(prefix))).then(|| {
                 Some((
                     a["browser_download_url"].as_str()?.to_string(),
                     a["size"].as_u64()?,
@@ -2647,33 +2650,45 @@ pub fn self_update(release: &Release, progress: impl Fn(f32)) -> Result<(), Stri
         progress(1.0);
         return Ok(());
     }
-    let sha256 = signed_digest(&release.tag, LAUNCHER_ASSET.unwrap_or_default())?;
+    let asset_name = url.rsplit('/').next().unwrap_or(LAUNCHER_ASSET.unwrap_or_default());
+    let sha256 = signed_digest(&release.tag, asset_name)?;
     let work = data_dir().join(".launcher-update");
     let _ = fs::remove_dir_all(&work);
     fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let archive = work.join("download");
     download(&url, size, &sha256, &archive, &progress)?;
-    let unpacked = work.join("unpacked");
-    unpack(&archive, &url, &unpacked)?;
-    // A launcher inside Horizon.app replaces the whole bundle (its Info.plist, icon and
-    // signature belong with the binary); a bare binary, as older launchers are, only the binary,
-    // which the macOS archive also holds (Horizon.app/Contents/MacOS/horizon-launcher).
-    if let Some(app) = app_bundle(exe_path()) {
-        if let Some(new) = find_app(&unpacked) {
-            replace_bundle(&new, app)?;
-            let _ = fs::remove_dir_all(&work);
-            progress(1.0);
-            return Ok(());
+    // An archive (older launcher releases) is unpacked; a raw binary (this fork's launcher
+    // releases) is already the file to put in place.
+    if url.ends_with(".tar.gz") || url.ends_with(".zip") {
+        let unpacked = work.join("unpacked");
+        unpack(&archive, &url, &unpacked)?;
+        // A launcher inside Horizon.app replaces the whole bundle (its Info.plist, icon and
+        // signature belong with the binary); a bare binary, as older launchers are, only the binary,
+        // which the macOS archive also holds (Horizon.app/Contents/MacOS/horizon-launcher).
+        if let Some(app) = app_bundle(exe_path()) {
+            if let Some(new) = find_app(&unpacked) {
+                replace_bundle(&new, app)?;
+                let _ = fs::remove_dir_all(&work);
+                progress(1.0);
+                return Ok(());
+            }
         }
+        let binary =
+            find_file(&unpacked, LAUNCHER_BINARY).ok_or("The download has no launcher binary.")?;
+        replace_binary(&binary, exe_path()).map_err(|e| {
+            format!(
+                "Could not replace the launcher at {}: {e}",
+                exe_path().display()
+            )
+        })?;
+    } else {
+        replace_binary(&archive, exe_path()).map_err(|e| {
+            format!(
+                "Could not replace the launcher at {}: {e}",
+                exe_path().display()
+            )
+        })?;
     }
-    let binary =
-        find_file(&unpacked, LAUNCHER_BINARY).ok_or("The download has no launcher binary.")?;
-    replace_binary(&binary, exe_path()).map_err(|e| {
-        format!(
-            "Could not replace the launcher at {}: {e}",
-            exe_path().display()
-        )
-    })?;
     let _ = fs::remove_dir_all(&work);
     progress(1.0);
     Ok(())
