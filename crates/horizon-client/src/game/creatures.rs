@@ -7117,6 +7117,8 @@ mod pearl_tests {
     /// box (#3072), not the block at its feet.
     #[test]
     fn a_pearl_feels_the_water_its_box_touches() {
+        // The throwable air drag is the float 0.99 widened to a double.
+        let air = f64::from(0.99f32);
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -7204,7 +7206,7 @@ mod pearl_tests {
         assert!(p.position.y > 4.9, "the pearl dipped: {p:?}");
         p.tick(&pw);
         assert!(
-            (p.velocity.x - 0.3 * 0.99 * 0.99).abs() < 1e-9,
+            (p.velocity.x - 0.3 * air * air).abs() < 1e-9,
             "a pearl above the surface slowed as in water: {p:?}"
         );
         // At the pool's edge: its feet over the dry block at x = 19, a side
@@ -7213,12 +7215,12 @@ mod pearl_tests {
         let mut p = pearl(19.95, 4.3, Vec3::ZERO);
         p.tick(&pw);
         assert!(
-            (p.velocity.y - (-0.03 * 0.99)).abs() < 1e-9,
+            (p.velocity.y - (-0.03 * air)).abs() < 1e-9,
             "the first tick has the air drag: {p:?}"
         );
         p.tick(&pw);
         assert!(
-            (p.velocity.y - (-0.03 * 0.99 - 0.03) * 0.8).abs() < 1e-9,
+            (p.velocity.y - (-0.03 * air - 0.03) * 0.8).abs() < 1e-9,
             "a pearl whose box is in the water kept the air drag: {p:?}"
         );
         // Thrown under water, a pearl moves with the air drag on its first
@@ -7226,12 +7228,12 @@ mod pearl_tests {
         let mut p = pearl(30.5, 4.2, Vec3::ZERO);
         p.tick(&pw);
         assert!(
-            (p.velocity.y - (-0.03 * 0.99)).abs() < 1e-9,
+            (p.velocity.y - (-0.03 * air)).abs() < 1e-9,
             "the first tick under water has the air drag: {p:?}"
         );
         p.tick(&pw);
         assert!(
-            (p.velocity.y - (-0.03 * 0.99 - 0.03) * 0.8).abs() < 1e-9,
+            (p.velocity.y - (-0.03 * air - 0.03) * 0.8).abs() < 1e-9,
             "the second tick under water has the water drag: {p:?}"
         );
     }
