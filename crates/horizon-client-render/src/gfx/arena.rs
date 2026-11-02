@@ -506,12 +506,17 @@ impl Arena {
             by_page[page].push((start, Self::span(vertices).min(self.page_limit)));
         }
         for (page, ranges) in by_page.into_iter().enumerate() {
-            if !ranges.is_empty() {
-                self.pages[page]
-                    .as_mut()
-                    .expect("live arena page")
-                    .free
-                    .give_all(ranges);
+            if ranges.is_empty() {
+                continue;
+            }
+            let page = self.pages[page].as_mut().expect("live arena page");
+            // Every range of the page given back (a far teleport empties the arena): one
+            // free range, without sorting tens of thousands into the list.
+            let given: u64 = ranges.iter().map(|r| r.1).sum();
+            if page.free_vertices() + given == page.capacity {
+                page.free = FreeList::new(page.capacity);
+            } else {
+                page.free.give_all(ranges);
             }
         }
     }
@@ -744,6 +749,41 @@ mod tests {
         queue.submit([encoder.finish()]);
         assert_eq!(read(&device, &queue, arena.buffer(page), start * 4), 7);
         assert_eq!(read(&device, &queue, arena.buffer(page), next * 4), 9);
+    }
+
+    /// Released together, every range of a page leaves it one free range (a far teleport
+    /// empties the arena at once), while a page keeping some ranges frees only the others.
+    #[test]
+    fn ranges_released_at_once_free_exactly_their_vertices() {
+        let Some((device, queue)) = device() else {
+            eprintln!("no GPU adapter: skipped");
+            return;
+        };
+        let mut arena = Arena::new(&device, 4, GRAIN, false);
+        arena.page_limit = 4 * GRAIN;
+        let ranges: Vec<(u32, u64)> = (0..8)
+            .map(|_| alloc(&mut arena, &device, &queue, GRAIN).unwrap())
+            .collect();
+        let (first, second) = (ranges[0].0, ranges[7].0);
+        assert_ne!(first, second);
+        // All four of the first page, the middle two of the second.
+        let released: Vec<(u32, u64, u64)> = ranges
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| i < 4 || i == 5 || i == 6)
+            .map(|(_, &(page, start))| (page, start, GRAIN))
+            .collect();
+        arena.release_all(released);
+        let free = |page: u32| -> Vec<(u64, u64)> {
+            let free = &arena.pages[page as usize].as_ref().unwrap().free.0;
+            free.iter().map(|(&start, &len)| (start, len)).collect()
+        };
+        assert_eq!(free(first), vec![(0, 4 * GRAIN)]);
+        assert_eq!(free(second), vec![(ranges[5].1, 2 * GRAIN)]);
+        // The emptied page takes a whole page's range again, without growing.
+        let pages = arena.pages.iter().flatten().count();
+        assert_eq!(arena.alloc_existing(4 * GRAIN), Some((first, 0)));
+        assert_eq!(arena.pages.iter().flatten().count(), pages);
     }
 
     #[test]

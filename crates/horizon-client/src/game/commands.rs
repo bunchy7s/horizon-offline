@@ -69,6 +69,8 @@ pub(super) enum Target {
     Falling(u32),
     /// A firework rocket, by its entity id (`minecraft:firework_rocket`).
     Rocket(u32),
+    /// A thrown trident, by its entity id (`minecraft:trident`).
+    Trident(u32),
     /// An ominous item spawner, by its entity id (`minecraft:ominous_item_spawner`).
     Spawner(u32),
 }
@@ -152,6 +154,7 @@ fn non_player_entity_id(t: Target) -> Option<i32> {
     | Target::Tnt(id)
     | Target::Falling(id)
     | Target::Rocket(id)
+    | Target::Trident(id)
     | Target::Spawner(id)) = t
     else {
         return None;
@@ -549,6 +552,11 @@ impl Game<'_> {
                 .iter()
                 .find(|r| r.id == id)
                 .map(|r| [r.position.x, r.position.y, r.position.z]),
+            Target::Trident(id) => self
+                .tridents
+                .iter()
+                .find(|t| t.id == id)
+                .map(|t| [t.position.x, t.position.y, t.position.z]),
             Target::Spawner(id) => self
                 .ominous_spawners
                 .iter()
@@ -603,6 +611,7 @@ impl Game<'_> {
             Target::Tnt(_) => "minecraft:tnt".into(),
             Target::Falling(_) => "minecraft:falling_block".into(),
             Target::Rocket(_) => "minecraft:firework_rocket".into(),
+            Target::Trident(_) => "minecraft:trident".into(),
             Target::Spawner(_) => "minecraft:ominous_item_spawner".into(),
         }
     }
@@ -905,6 +914,7 @@ impl Game<'_> {
             Target::Tnt(id),
             Target::Falling(id),
             Target::Rocket(id),
+            Target::Trident(id),
             Target::Spawner(id),
         ]
         .into_iter()
@@ -930,6 +940,7 @@ impl Game<'_> {
             Target::Tnt(id) => self.tnts.iter().any(|t| t.id == id),
             Target::Falling(id) => self.falling.iter().any(|f| f.id == id),
             Target::Rocket(id) => self.rockets.iter().any(|r| r.id == id),
+            Target::Trident(id) => self.tridents.iter().any(|t| t.id == id),
             Target::Spawner(id) => self.ominous_spawners.iter().any(|s| s.id == id),
         }
     }
@@ -1600,6 +1611,12 @@ impl Game<'_> {
                     r.previous = v;
                 }
             }
+            Target::Trident(id) => {
+                if let Some(t) = self.tridents.iter_mut().find(|t| t.id == id) {
+                    t.position = v;
+                    t.previous = v;
+                }
+            }
             Target::Spawner(id) => {
                 if let Some(s) = self.ominous_spawners.iter_mut().find(|s| s.id == id) {
                     s.position = [v.x, v.y, v.z];
@@ -2102,12 +2119,12 @@ impl Game<'_> {
             Target::Tnt(id) => self.tnts.retain(|t| t.id != id),
             Target::Falling(id) => self.falling.retain(|f| f.id != id),
             Target::Rocket(id) => self.rockets.retain(|r| r.id != id),
+            Target::Trident(id) => self.tridents.retain(|t| t.id != id),
             Target::Spawner(id) => self.ominous_spawners.retain(|s| s.id != id),
         }
         // The orbs marked for removal are gone (Entity.kill removes them).
-        let before = self.orb_ids();
         self.orbs.retain(|o| o.age < u32::MAX / 2);
-        self.native_orbs_left_since(&before);
+        self.native_leaves_flush();
     }
     fn cmd_kill(&mut self, ctx: &Context) -> R<i32> {
         let targets = if ctx.get("targets").is_some() {
@@ -2243,6 +2260,10 @@ impl Game<'_> {
                         beam: None,
                         invulnerable: false,
                     });
+                    // tryAddFreshEntityWithPassengers refused: ERROR_DUPLICATE_UUID.
+                    if !self.native_joins_flush(false, self.next_entity) {
+                        return Err(err("commands.summon.failed.uuid", &[]));
+                    }
                     name = Text::translate("entity.minecraft.end_crystal", &[]);
                 }
                 k if super::minecarts::CartKind::from_id(&kind).is_some() => {
@@ -3842,6 +3863,7 @@ mod look_at_tests {
             Target::Tnt(7),
             Target::Falling(7),
             Target::Rocket(7),
+            Target::Trident(7),
             Target::Spawner(7),
         ] {
             assert_eq!(non_player_entity_id(t), Some(7), "{t:?}");

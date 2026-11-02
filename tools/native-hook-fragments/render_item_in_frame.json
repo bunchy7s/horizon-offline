@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "render_item_in_frame",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_render_item_in_frame",
+      "neoforge": "RenderItemInFrameEvent",
+      "side": "client",
+      "cancellable": true,
+      "mod_api": {"contract": "cancel", "out": "canceled"}
+    }
+  ],
+  "rust_summary": "a cancellable item frame item render hook (`native_render_item_in_frame`).",
+  "doc_summary": "a cancellable item frame item render hook (`native_render_item_in_frame`). Bundles need \"hooks\": @API:render_item_in_frame@."
+}
