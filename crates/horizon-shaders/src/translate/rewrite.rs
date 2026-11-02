@@ -46,6 +46,9 @@ impl Stage<'_> {
         if self.gather_offsets {
             p.push_str(&gather_offsets());
         }
+        if self.query_lod {
+            p.push_str(&query_lod());
+        }
         // GLSL's scalar `dot` and `normalize` (genType includes `float`); naga's are vector only.
         if self.scalar_dot {
             p.push_str("float dot(float a, float b) { return a * b; }\n");
@@ -372,6 +375,7 @@ impl Stage<'_> {
                 // GLSL's `modf`, which naga's frontend lacks.
                 "modf" if called => Some("hz_modf".into()),
                 "textureGatherOffsets" if called => Some("hz_textureGatherOffsets".into()),
+                "textureQueryLod" if called => Some("hz_textureQueryLod".into()),
                 // Matrix inverse, which naga writes for neither Metal nor WGSL.
                 "inverse" if called && self.inverse => Some("hz_inverse".into()),
                 "texture2D" | "texture1D" | "texture3D" | "textureCube" if called => {
@@ -686,6 +690,48 @@ fn gather_offsets() -> String {
          \x20       textureGather(sampler2DShadow(t, s), p + vec2(o[2]) * px, r).z,\n\
          \x20       textureGather(sampler2DShadow(t, s), p + vec2(o[3]) * px, r).w);\n}\n",
     );
+    p
+}
+
+/// `textureQueryLod` (GLSL 4.60, 8.9.1), which naga's frontend lacks: `y` is the level of
+/// detail relative to the base level, worked out as texturing does (OpenGL 4.6, 8.14.1: the log2 of the
+/// larger of the coordinates' texel-space changes from one pixel to the next), and `x` the level
+/// that would be read, that clamped to the texture's levels. For a cube map the direction is
+/// first taken to its face.
+fn query_lod() -> String {
+    let mut p = String::new();
+    for prefix in ["", "i", "u"] {
+        for (dim, coord, texel) in [
+            ("2D", "vec2", "p * vec2(textureSize({smp}(t, s), 0))"),
+            (
+                "2DArray",
+                "vec2",
+                "p * vec2(textureSize({smp}(t, s), 0).xy)",
+            ),
+            ("3D", "vec3", "p * vec3(textureSize({smp}(t, s), 0))"),
+            (
+                "Cube",
+                "vec3",
+                "p / max(max(abs(p.x), abs(p.y)), abs(p.z)) * 0.5 * float(textureSize({smp}(t, s), 0).x)",
+            ),
+        ] {
+            let (tex, smp) = (
+                format!("{prefix}texture{dim}"),
+                format!("{prefix}sampler{dim}"),
+            );
+            let texel = texel.replace("{smp}", &smp);
+            write!(
+                p,
+                "vec2 hz_textureQueryLod({tex} t, sampler s, {coord} p) {{\n\
+                 \x20   {coord} q = {texel};\n\
+                 \x20   {coord} dx = dFdx(q), dy = dFdy(q);\n\
+                 \x20   float lod = 0.5 * log2(max(dot(dx, dx), dot(dy, dy)));\n\
+                 \x20   float levels = float(textureQueryLevels({smp}(t, s)));\n\
+                 \x20   return vec2(clamp(lod, 0.0, levels - 1.0), lod);\n}}\n"
+            )
+            .unwrap();
+        }
+    }
     p
 }
 

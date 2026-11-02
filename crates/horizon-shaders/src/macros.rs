@@ -3,11 +3,13 @@
 
 use std::collections::BTreeMap;
 
-/// The Iris feature flags (`iris.features.*`) Horizon has. `SEPARATE_HARDWARE_SAMPLERS`
-/// (ShaderDoc, "Separate Hardware Shadow Samplers"): `shadowtex0`/`shadowtex1` stay plain depth
-/// samplers when hardware filtering is on, `shadowtex0HW`/`shadowtex1HW` compare; Horizon picks
-/// a comparison sampler by the declared type (`sampler2DShadow`), so they always are.
-const FEATURES: [&str; 5] = [
+/// The Iris feature flags (`iris.features.*`) Horizon has. `BLOCK_EMISSION_ATTRIBUTE`: terrain's
+/// `at_midBlock.w` is the light its block gives. `SEPARATE_HARDWARE_SAMPLERS` (ShaderDoc,
+/// "Separate Hardware Shadow Samplers"): `shadowtex0`/`shadowtex1` stay plain depth samplers when
+/// hardware filtering is on, `shadowtex0HW`/`shadowtex1HW` compare; Horizon picks a comparison
+/// sampler by the declared type (`sampler2DShadow`), so they always are.
+const FEATURES: [&str; 6] = [
+    "BLOCK_EMISSION_ATTRIBUTE",
     "COMPUTE_SHADERS",
     "CUSTOM_IMAGES",
     "ENTITY_TRANSLUCENT",
@@ -412,6 +414,20 @@ mod tests {
                    #ifdef MC_SPECULAR_MAP\nconst float shine = 2.0;\n#endif\n\
                    void main() { c = vec4(bump, shine, 0.0, 1.0); }\n";
         translates(fsh, &Macros::standard()).unwrap();
+    }
+
+    /// `BLOCK_EMISSION_ATTRIBUTE` (terrain's `at_midBlock.w` is its block's light) is one
+    /// Horizon has: defined when optional, no note when required.
+    #[test]
+    fn block_emission_attribute_is_a_feature() {
+        let properties = crate::Properties::parse(
+            "iris.features.optional = BLOCK_EMISSION_ATTRIBUTE\n\
+             iris.features.required = BLOCK_EMISSION_ATTRIBUTE\n",
+            &Macros::standard(),
+        );
+        let mut m = Macros::standard();
+        assert!(m.define_features(&properties).is_empty());
+        assert!(m.is_defined("IRIS_FEATURE_BLOCK_EMISSION_ATTRIBUTE"));
     }
 
     #[test]

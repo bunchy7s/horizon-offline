@@ -200,13 +200,10 @@ impl Game<'_> {
                     Ok(pack) => {
                         let mut macros = Macros::standard();
                         renderer.define_pack_macros(&mut macros);
-                        let text = pack.read_text("shaders.properties").unwrap_or_default();
                         // Its conditionals test the pack's options too.
-                        let properties = Properties::parse(
-                            &text,
-                            &horizon_shaders::with_options(&pack, &macros),
-                        );
-                        for note in macros.define_features(&properties) {
+                        let (properties, notes) =
+                            horizon_shaders::read_properties(&pack, &mut macros);
+                        for note in notes {
                             log::warn!("shader pack {name}: {note}");
                         }
                         for note in &properties.notes {
@@ -274,11 +271,14 @@ impl Game<'_> {
                             block_states: RefCell::default(),
                         });
                         let started_ids = std::time::Instant::now();
-                        let table = block_id_table(&self.pack, &ids);
+                        let table = terrain_table(
+                            &block_id_table(&self.pack, &ids),
+                            &block_emission_table(&self.pack),
+                        );
                         log::info!(
                             "shader pack {name}: mc_Entity for {} of {} block sprites in {} ms",
-                            table.chunks(2).filter(|p| p[0] != -1).count(),
-                            table.len() / 2,
+                            table.chunks(3).filter(|p| p[0] != -1).count(),
+                            table.len() / 3,
                             started_ids.elapsed().as_millis()
                         );
                         if let Some((programs, notes)) =
@@ -354,6 +354,13 @@ impl Game<'_> {
                 sky.cloud_color[3],
                 sky.cloud_height,
             ),
+            // Vanilla's drift in float, times its 0.030000001F blocks a tick.
+            cloud_time: horizon_client::clouds::drift(
+                self.world.game_time,
+                f64::from(partial),
+                self.pack.clouds.0,
+            ) as f32
+                * 0.030_000_001,
             mod_params: self.native_shader_params_now(partial),
             status,
             end_flash,
@@ -661,6 +668,129 @@ pub(super) fn block_id_table(pack: &super::PackResources, ids: &BlockIds) -> Vec
         }
     }
     table
+}
+
+/// `at_midBlock.w` of each block sprite layer: the light the block drawing it gives (Iris's
+/// `BLOCK_EMISSION_ATTRIBUTE`; 0 to 15, as Iris 1.11.7 passes it). Terrain vertices carry their
+/// sprite layer, not their block, so as for `mc_Entity` a layer takes the light of the block
+/// named like its sprite, else the light most block states drawing it give (ties: the lowest).
+pub(super) fn block_emission_table(pack: &super::PackResources) -> Vec<i32> {
+    use std::collections::BTreeMap;
+    let layers = pack
+        .render
+        .sprite_layers
+        .values()
+        .max()
+        .map_or(0, |l| l + 1) as usize;
+    let registry = pack.assets.registry;
+    let catalog = &pack.render.model_catalog;
+    let sprite = |name: &str| pack.render.sprite_layers.get(name).copied();
+    // (layer, light) -> (a block named like the sprite draws it, how many states do).
+    let mut votes: BTreeMap<(u32, u8), (bool, usize)> = BTreeMap::new();
+    for i in 0..registry.len() {
+        let state_id = horizon_world::registry::BlockStateId(i as u32);
+        let Some(state) = registry.state(state_id) else {
+            continue;
+        };
+        let light = pack
+            .context
+            .tables
+            .facts(state_id)
+            .map_or(0, |f| f.emission);
+        let block = state.name.strip_prefix("minecraft:").unwrap_or(&state.name);
+        let mut vote = |layer: u32| {
+            let named = pack
+                .layer_names
+                .get(&layer)
+                .and_then(|n| n.strip_prefix("block/"))
+                == Some(block);
+            let v = votes.entry((layer, light)).or_default();
+            v.0 |= named;
+            v.1 += 1;
+        };
+        let fluid = match block {
+            "water" => ["water_still", "water_flow"],
+            "lava" => ["lava_still", "lava_flow"],
+            _ => ["", ""],
+        };
+        for f in fluid.iter().filter(|f| !f.is_empty()) {
+            if let Some(l) = sprite(&format!("minecraft:block/{f}")) {
+                vote(l);
+            }
+        }
+        let origin = horizon_core::position::BlockPos::new(0, 0, 0);
+        for (_, model) in catalog.collect(state_id, origin).unwrap_or_default() {
+            for face in &model.faces {
+                vote(face.layer);
+            }
+        }
+    }
+    layer_lights(&votes, layers)
+}
+
+/// Each of `layers` sprite layers' light from `votes`, (layer, light) -> (a block named like the
+/// sprite draws it, how many states do): the named block's, else the most states', ties the
+/// lowest; 0 for a layer no block draws.
+fn layer_lights(
+    votes: &std::collections::BTreeMap<(u32, u8), (bool, usize)>,
+    layers: usize,
+) -> Vec<i32> {
+    let mut best: std::collections::BTreeMap<u32, (bool, usize, i32)> = Default::default();
+    for (&(layer, light), &(named, states)) in votes {
+        let candidate = (named, states, -i32::from(light));
+        let b = best.entry(layer).or_insert(candidate);
+        if candidate > *b {
+            *b = candidate;
+        }
+    }
+    let mut table = vec![0; layers];
+    for (layer, (_, _, light)) in best {
+        if let Some(slot) = table.get_mut(layer as usize) {
+            *slot = -light;
+        }
+    }
+    table
+}
+
+/// The table a `shaders/` pack's terrain reads per sprite layer: `mc_Entity`'s (id, fluid) pair
+/// from `ids` (`block_id_table`), then `at_midBlock.w` from `emission`.
+fn terrain_table(ids: &[i32], emission: &[i32]) -> Vec<i32> {
+    ids.chunks(2)
+        .enumerate()
+        .flat_map(|(layer, pair)| [pair[0], pair[1], emission.get(layer).copied().unwrap_or(0)])
+        .collect()
+}
+
+#[cfg(test)]
+mod emission_tests {
+    use super::{layer_lights, terrain_table};
+
+    /// A sprite's light: the block named like it gives its own (a torch, 14, over a wall
+    /// torch's); a shared one takes what most states drawing it give (a furnace's side: as
+    /// many lit states, 13, as unlit, 0: the lowest), and a layer no block draws stays 0.
+    #[test]
+    fn a_sprite_takes_the_light_of_its_block() {
+        let votes = std::collections::BTreeMap::from([
+            ((0, 14), (true, 1)),
+            ((0, 0), (false, 5)),
+            ((1, 13), (false, 4)),
+            ((1, 0), (false, 4)),
+            ((2, 15), (false, 4)),
+            ((2, 0), (false, 5)),
+            ((3, 7), (false, 2)),
+        ]);
+        assert_eq!(layer_lights(&votes, 5), [14, 0, 0, 7, 0]);
+    }
+
+    /// The table `shaders/` packs' terrain reads: three values a layer, `mc_Entity`'s pair
+    /// then the light.
+    #[test]
+    fn the_terrain_table_holds_ids_then_light() {
+        assert_eq!(
+            terrain_table(&[10, -1, 20, 1], &[14, 0]),
+            [10, -1, 14, 20, 1, 0]
+        );
+    }
 }
 
 #[cfg(test)]

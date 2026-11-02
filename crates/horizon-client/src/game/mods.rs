@@ -273,10 +273,20 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
 /// What the launcher writes beside a game it built with native mods: their ids under `mods`.
 const BUILD_INFO: &str = "native-mods.json";
 
-/// Whether the launcher built this game with native mods (`built`: its [`BUILD_INFO`]).
-fn built_with_mods(built: &str) -> bool {
+/// The native mods the launcher built this game with, `id version, id version`, for the crash
+/// report (`built`: its [`BUILD_INFO`]). None for a release or Nightly, which have no mods.
+fn native_mods_detail(built: &str) -> Option<String> {
     let info: serde_json::Value = serde_json::from_str(built).unwrap_or_default();
-    info["mods"].as_array().is_some_and(|mods| !mods.is_empty())
+    let list = info["mods"]
+        .as_array()?
+        .iter()
+        .map(|m| {
+            let text = |key: &str| m[key].as_str().unwrap_or("?").to_owned();
+            format!("{} {}", text("id"), text("version"))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    (!list.is_empty()).then_some(list)
 }
 
 /// A row for each native mod the launcher installed in `dir` (`<id>.hnmod`) that this game wasn't
@@ -366,8 +376,13 @@ impl Game<'_> {
             .ok()
             .and_then(|exe| std::fs::read_to_string(exe.with_file_name(BUILD_INFO)).ok())
             .unwrap_or_default();
+        let built_mods = native_mods_detail(&built);
+        let built_with_mods = built_mods.is_some();
+        if let Some(list) = built_mods {
+            horizon_client::crash::set_detail("Native Mods", list);
+        }
         horizon_client::gfx::native_render::set_mods_built_in(
-            built_with_mods(&built)
+            built_with_mods
                 || self
                     .settings
                     .mods
@@ -426,6 +441,18 @@ mod tests {
             .unwrap();
         zip.write_all(mixin.as_bytes()).unwrap();
         zip.finish().unwrap();
+    }
+
+    #[test]
+    fn the_crash_report_lists_the_builds_native_mods() {
+        let built = r#"{"mods":[{"id":"machine_sample","version":"0.1.0","sha256":null},{"id":"pipes","version":"2.0"}]}"#;
+        assert_eq!(
+            native_mods_detail(built).as_deref(),
+            Some("machine_sample 0.1.0, pipes 2.0")
+        );
+        // A release has no file; a build without mods has an empty list.
+        assert_eq!(native_mods_detail(""), None);
+        assert_eq!(native_mods_detail(r#"{"mods":[]}"#), None);
     }
 
     #[test]

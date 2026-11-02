@@ -79,8 +79,8 @@ addition; a change to one starts `/api/v2`, served beside `/api/v1`.
 - **Backups**: restore a single dimension.
 - **Mods on a dedicated server**: list, turn on and off, and their settings, once native mods can be built for the
   server ([mods.md](../mods.md), [native-mods.md](../native-mods.md#multiplayer)).
-- **Vanilla's management protocol**: `serversettings/*`, `gamerules`, the notifications of the game rules, the
-  server's activity and the world upgrade, and the status heartbeat (the others are sent). The methods answer
+- **Vanilla's management protocol**: `serversettings/*` (the live settings not yet done) and the world
+  upgrade's notifications (the others are sent). The methods answer
   an internal error saying so; a kick's translatable message is sent as its key.
 - **Compatibility tests**: golden replies per endpoint, and a `server.toml` from each release line.
 

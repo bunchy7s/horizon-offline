@@ -1770,6 +1770,7 @@ mod tests {
                 },
             }),
             copy_on_death: false,
+            sync: false,
         };
         let root_id = [1, 2, 3, 4];
         let child_id = [5, 6, 7, 8];

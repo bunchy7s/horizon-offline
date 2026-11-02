@@ -269,6 +269,103 @@ pub(super) fn clear(
 /// The most bytes of zeros kept to clear images without `CLEAR_TEXTURE`.
 const ZEROS: u64 = 4 << 20;
 
+/// What an image no `image.*` gives binds. Iris 1.11.7 runs the program, and its loads read
+/// zero, also after it stored into the image (observed with a probe pack). Here it is one texel
+/// of the declared format, cleared before every pass that binds it; loads and stores outside
+/// that texel are out of bounds (with the same probe pack on Vulkan, the loads read zero).
+pub(super) struct StandIn {
+    format: wgpu::TextureFormat,
+    dimension: wgpu::TextureViewDimension,
+    pub(super) view: wgpu::TextureView,
+    zeros: wgpu::Buffer,
+}
+
+impl StandIn {
+    /// Zero again, before a pass that binds it.
+    pub(super) fn clear(&self, encoder: &mut wgpu::CommandEncoder) {
+        encoder.copy_buffer_to_texture(
+            wgpu::TexelCopyBufferInfo {
+                buffer: &self.zeros,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: None,
+                    rows_per_image: None,
+                },
+            },
+            self.view.texture().as_image_copy(),
+            self.view.texture().size(),
+        );
+    }
+}
+
+/// One stand-in for each format and dimension of `wanted`.
+pub(super) fn stand_ins(
+    device: &wgpu::Device,
+    wanted: Vec<(wgpu::TextureFormat, wgpu::TextureViewDimension)>,
+) -> Vec<StandIn> {
+    wanted
+        .into_iter()
+        .map(|(format, dimension)| {
+            let atomic = device.features().contains(wgpu::Features::TEXTURE_ATOMIC)
+                && matches!(
+                    format,
+                    wgpu::TextureFormat::R32Sint | wgpu::TextureFormat::R32Uint
+                );
+            let view = device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Shader pack image stand-in"),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: if dimension == wgpu::TextureViewDimension::D3 {
+                        wgpu::TextureDimension::D3
+                    } else {
+                        wgpu::TextureDimension::D2
+                    },
+                    format,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING
+                        | wgpu::TextureUsages::COPY_DST
+                        | wgpu::TextureUsages::COPY_SRC
+                        | if atomic {
+                            wgpu::TextureUsages::STORAGE_ATOMIC
+                        } else {
+                            wgpu::TextureUsages::empty()
+                        },
+                    view_formats: &[],
+                })
+                .create_view(&Default::default());
+            // New buffers start zeroed; one texel is at most 16 bytes.
+            let zeros = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Shader pack image stand-in zeros"),
+                size: 16,
+                usage: wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            StandIn {
+                format,
+                dimension,
+                view,
+                zeros,
+            }
+        })
+        .collect()
+}
+
+/// The stand-in of this format and dimension.
+pub(super) fn stand_in(
+    stand_ins: &[StandIn],
+    format: wgpu::TextureFormat,
+    dimension: wgpu::TextureViewDimension,
+) -> Option<&StandIn> {
+    stand_ins
+        .iter()
+        .find(|s| s.format == format && s.dimension == dimension)
+}
+
 /// The pack's storage buffers, bound in set 4.
 pub(super) struct Buffers {
     pub(super) layout: wgpu::BindGroupLayout,

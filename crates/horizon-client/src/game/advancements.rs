@@ -614,6 +614,11 @@ impl Game<'_> {
             let criterion = &a.criteria[ci].name;
             if self.adv.progress.grant(&a.id, criterion, &date) {
                 self.advancement_progress(&a.id, criterion, true);
+                if let (Some(player), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    self.native_player_advancement_criterion_grant(player, &name, &a.id, criterion);
+                }
             }
             self.progress_changed(ai);
             if !was && self.adv.progress.done(a) {
@@ -740,7 +745,9 @@ impl Game<'_> {
         }
         // AdvancementRewards.grant
         if a.rewards.experience > 0 {
+            let old_level = self.experience.level;
             self.experience.give(a.rewards.experience);
+            self.native_player_level_changed(old_level);
         }
         // ServerPlayer.awardRecipesByKey: the rewards that name a recipe.
         let rewards: Vec<String> = a

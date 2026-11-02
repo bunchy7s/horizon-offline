@@ -287,7 +287,7 @@ fn drink(m: &mut Mob, cx_events: &mut Vec<MobEvent>, target_far: bool) {
                     "minecraft:fire_resistance" => {
                         m.add_effect("minecraft:fire_resistance", 3600, 0)
                     }
-                    "minecraft:healing" => m.health = (m.health + 4.0).min(m.attrs.max_health),
+                    "minecraft:healing" => m.heal(4.0),
                     "minecraft:swiftness" => m.add_effect("minecraft:speed", 3600, 0),
                     _ => {}
                 }
