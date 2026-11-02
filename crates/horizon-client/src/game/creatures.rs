@@ -2194,6 +2194,7 @@ impl Game<'_> {
                     self.mob_bow_ammo(mob, &weapon, &mut arrow);
                     self.launch_mob_projectile(arrow);
                 }
+                MobEvent::CrossbowLoad { mob, weapon } => self.mob_crossbow_ammo(mob, &weapon),
                 MobEvent::Spawn(mut m) => {
                     self.next_entity += 1;
                     m.id = self.next_entity;

@@ -1560,6 +1560,12 @@ pub enum MobEvent {
         weapon: crate::items::ItemStack,
         arrow: crate::projectiles::Projectile,
     },
+    /// `mob` finished charging `weapon` (`CrossbowItem.onUseTick`): the game
+    /// asks for the ammunition (`getProjectile`).
+    CrossbowLoad {
+        mob: u32,
+        weapon: crate::items::ItemStack,
+    },
     /// Spawn a new mob (breeding, slime splitting, chicken eggs...).
     Spawn(Box<Mob>),
     /// Spawn a mob by type id at a position (conversions, splits).

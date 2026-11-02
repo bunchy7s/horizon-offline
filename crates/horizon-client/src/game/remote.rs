@@ -7884,7 +7884,7 @@ impl Game<'_> {
                 if held.data().is_some_and(|d| !d.charged.is_empty()) {
                     return true;
                 }
-                self.get_projectile(held).is_some() || self.creative
+                self.get_projectile(held).is_some()
             }
             // TridentItem.use: not about to break, Riptide only in water or rain.
             "minecraft:trident" => {

@@ -147,13 +147,26 @@ impl Game<'_> {
         if let ProjectileKind::Arrow { effect, .. } = &mut arrow.kind {
             if &*ammo.item == "minecraft:spectral_arrow" {
                 *effect = Some(("minecraft:glowing", 200));
-            } else if let Some(tipped) = super::dispenser::tipped_effect(&ammo) {
+            } else if effect.is_none()
+                && let Some(tipped) = super::dispenser::tipped_effect(&ammo)
+            {
+                // Stray.getArrow and Bogged.getArrow add their effect to the tipped arrow.
                 *effect = Some(tipped);
             }
         }
         if let Some(a) = arrow.arrow.as_mut() {
             a.set_item(&horizon_client::arrows::drawn_ammo(&ammo, false));
         }
+    }
+    /// `CrossbowItem.onUseTick`'s `getProjectile` for a mob that finished
+    /// charging `weapon` (pillagers and piglins: `Monster.getProjectile`).
+    pub(super) fn mob_crossbow_ammo(&mut self, mob: u32, weapon: &ItemStack) {
+        let Some(shooter) = self.mobs.iter().find(|m| m.id == mob) else {
+            return;
+        };
+        let kind = shooter.kind.id.clone();
+        let mut projectile = Some(ItemStack::new(ARROW, 1));
+        self.native_living_get_projectile(None, "", Some(mob), &kind, weapon, &mut projectile);
     }
     /// `CrossbowItem.use`: shoot when charged, else start charging.
     pub(super) fn use_crossbow(&mut self, stack: &ItemStack) -> bool {
@@ -166,7 +179,7 @@ impl Game<'_> {
         }
         if stack.data().is_some_and(|d| !d.charged.is_empty()) {
             self.shoot_crossbow();
-        } else if self.get_projectile(stack).is_some() || self.creative {
+        } else if self.get_projectile(stack).is_some() {
             self.start_using_item();
         }
         true
@@ -199,12 +212,11 @@ impl Game<'_> {
             } else {
                 1
             };
-            let ammo = self.get_projectile(stack);
-            if !self.creative && ammo.is_none() {
+            let Some(ammo) = self.get_projectile(stack) else {
                 return;
-            }
+            };
             if !self.creative
-                && let Some(i) = ammo.as_ref().and_then(|a| a.slot)
+                && let Some(i) = ammo.slot
             {
                 let cell = self.stack_in_mut(i);
                 if let Some(s) = cell.as_mut() {
@@ -214,7 +226,7 @@ impl Game<'_> {
                     }
                 }
             }
-            let ammo = ammo.map_or_else(|| ItemStack::new(ARROW, 1), |a| a.stack);
+            let ammo = ammo.stack;
             // useAmmo: the extra multishot arrows and creative's are intangible.
             let drawn = (0..shots)
                 .map(|i| horizon_client::arrows::drawn_ammo(&ammo, self.creative || i > 0))
