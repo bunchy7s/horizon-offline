@@ -2684,6 +2684,7 @@ dependencies = [
  "horizon-bench",
  "horizon-core",
  "horizon-friends",
+ "horizon-mcp",
  "horizon-mods",
  "horizon-port-pack",
  "horizon-prepare",
@@ -2714,8 +2715,16 @@ dependencies = [
  "trash",
  "ureq",
  "windows-sys 0.61.2",
+ "winreg",
  "winresource",
  "zip",
+]
+
+[[package]]
+name = "horizon-mcp"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
@@ -2817,6 +2826,7 @@ dependencies = [
  "flate2",
  "horizon-core",
  "libm",
+ "log",
  "lz4_flex",
  "postcard",
  "serde",

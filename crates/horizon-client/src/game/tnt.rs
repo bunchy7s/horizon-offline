@@ -3,7 +3,7 @@
 //! (flint and steel / fire charge).
 use super::Game;
 use horizon_client::{
-    Result, collisions::SceneCollisions, items::ItemStack, mesher::Vertex, mobs::Who,
+    Result, collisions::SceneCollisions, items::ItemStack, mesher::Vertex, mobs::Who, text::Text,
 };
 use horizon_core::{
     geometry::{Aabb, Vec3},
@@ -25,9 +25,12 @@ pub(super) struct PrimedTnt {
     pub guest: Option<u32>,
     /// `Entity.noGravity` (`NoGravity` in its save).
     pub no_gravity: bool,
+    /// `PrimedTnt.explosionPower`: 4 by default, saved as `explosion_power`
+    /// and clamped to 0..128 when read back.
+    pub power: f32,
 }
 impl PrimedTnt {
-    const SIZE: f64 = 0.98;
+    pub(super) const SIZE: f64 = 0.98;
     pub(super) fn bounds(&self) -> Aabb {
         let h = Self::SIZE / 2.0;
         Aabb::new(
@@ -128,6 +131,31 @@ impl PrimedTnt {
 }
 
 impl Game<'_> {
+    /// Asks the mods whether the TNT at `pos` may be primed
+    /// (`native_tnt_primed`); the acting guest, if any, is its player.
+    pub(super) fn tnt_prime_allowed(&mut self, pos: BlockPos) -> bool {
+        let mut cancel = false;
+        self.native_tnt_primed(self.lan_acting_uuid, [pos.x, pos.y, pos.z], &mut cancel);
+        !cancel
+    }
+    /// Primes TNT a level event announced, or, when the mods refuse, puts
+    /// back the block the fire or signal had already taken out.
+    pub(super) fn prime_tnt_event(&mut self, pos: BlockPos, rot: f64) {
+        if self.tnt_prime_allowed(pos) {
+            self.add_primed_tnt(pos, rot, 80, None, None);
+            return;
+        }
+        // Refused: the level queued the fuse sound and the game event right
+        // after the prime; they are dropped as they come up.
+        self.tnt_refused = Some(pos);
+        let Some(tnt) = self.pack.assets.registry.default_state("minecraft:tnt") else {
+            return;
+        };
+        if self.world.block(pos.x, pos.y, pos.z) == self.world.air {
+            let flags = level_flags::UPDATE_CLIENTS | level_flags::UPDATE_SKIP_ON_PLACE;
+            self.with_level(|b, level, ticks| b.set_block(level, ticks, pos, tnt, flags));
+        }
+    }
     /// `new PrimedTnt(level, x + 0.5, y, z + 0.5, owner)`; `short` applies
     /// `wasExploded`'s random short fuse. Plays `entity.tnt.primed` for primes.
     pub(super) fn spawn_primed_tnt(
@@ -186,6 +214,8 @@ impl Game<'_> {
             on_ground: false,
             owner,
             guest,
+            // PrimedTnt's constructor: 4 when nothing sets it.
+            power: 4.0,
         });
     }
     /// `PrimedTnt.tick` for every primed TNT, in order; an expired fuse
@@ -219,7 +249,7 @@ impl Game<'_> {
                     t.position.z,
                 ];
                 let bounds = t.bounds();
-                let (owner, guest) = (t.owner, t.guest);
+                let (owner, guest, power) = (t.owner, t.guest, t.power);
                 let in_water = self.bounds_in_water(bounds);
                 self.tnts.remove(i);
                 count -= 1;
@@ -229,15 +259,17 @@ impl Game<'_> {
                 // `Explosion.getIndirectSourceEntity`: a player-lit TNT names
                 // its igniter, which `blast_attacker` and the damage type read.
                 self.combat.blast_guest = guest;
-                self.combat.blast_owner = match owner {
-                    Some(Who::Player) => self
-                        .lan
-                        .as_ref()
-                        .and_then(|host| self.player_attacker(host, guest)),
-                    Some(Who::Mob(_)) | None => None,
-                };
+                self.combat.blast_owner = tnt_blast_owner(
+                    owner,
+                    || {
+                        self.lan
+                            .as_ref()
+                            .and_then(|host| self.player_attacker(host, guest))
+                    },
+                    |id| self.mob_display_name(id),
+                );
                 let result = self.with_hive_emptying_blast(|g| {
-                    g.server_explode(center, 4.0, interaction, false)
+                    g.server_explode(center, power, interaction, false)
                 });
                 self.combat.blast_owner = None;
                 self.combat.blast_guest = None;
@@ -263,6 +295,9 @@ impl Game<'_> {
             return Ok(false);
         }
         let pos = BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
+        if !self.tnt_prime_allowed(pos) {
+            return Ok(true);
+        }
         let guest = self.lan_acting;
         self.spawn_primed_tnt(pos, false, Some(Who::Player), guest);
         let air = self.world.air;
@@ -575,6 +610,19 @@ impl Game<'_> {
     }
 }
 
+/// `PrimedTnt.getOwner` as the blast's causing entity: the player, or a mob
+/// that is still in the level (null once it is gone).
+fn tnt_blast_owner(
+    owner: Option<Who>,
+    player: impl FnOnce() -> Option<(u32, Text)>,
+    mob_name: impl Fn(u32) -> Option<Text>,
+) -> Option<(u32, Text)> {
+    match owner? {
+        Who::Player => player(),
+        Who::Mob(id) => mob_name(id).map(|name| (id, name)),
+    }
+}
+
 fn tnt_seat(tnt: Vec3, rider_offset: f64) -> Vec3 {
     Vec3::new(tnt.x, tnt.y + PrimedTnt::SIZE - rider_offset, tnt.z)
 }
@@ -582,6 +630,19 @@ fn tnt_seat(tnt: Vec3, rider_offset: f64) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tnt_lit_by_a_skeletons_arrow_names_the_skeleton_as_its_cause() {
+        let name = || Text::translate("entity.minecraft.skeleton", &[]);
+        let by_mob = tnt_blast_owner(Some(Who::Mob(7)), || None, |id| (id == 7).then(name));
+        assert_eq!(by_mob, Some((7, name())));
+        // The skeleton died before the blast: `getOwner` is null.
+        assert_eq!(tnt_blast_owner(Some(Who::Mob(7)), || None, |_| None), None);
+        let player = Text::literal("Steve");
+        let by_player = tnt_blast_owner(Some(Who::Player), || Some((1, player.clone())), |_| None);
+        assert_eq!(by_player, Some((1, player)));
+        assert_eq!(tnt_blast_owner(None, || None, |_| None), None);
+    }
 
     #[test]
     fn a_rider_sits_on_top_of_the_tnt_less_its_own_attachment() {
@@ -605,6 +666,7 @@ mod tests {
             on_ground: true,
             owner: None,
             guest: None,
+            power: 4.0,
         };
         tnt.velocity = bounce_velocity(Direction::Up, tnt.velocity);
         tnt.on_ground = false;
@@ -648,6 +710,7 @@ mod tests {
             on_ground: false,
             owner: None,
             guest: None,
+            power: 4.0,
         };
         tnt.tick(&world, &collision, &assets, &facts).unwrap();
         assert_eq!(
@@ -743,6 +806,7 @@ mod tests {
             on_ground: false,
             owner: None,
             guest: None,
+            power: 4.0,
         };
         for _ in 0..10 {
             tnt.tick(&world, &collision, &assets, &facts).unwrap();
@@ -817,6 +881,7 @@ mod tests {
             on_ground: false,
             owner: None,
             guest: None,
+            power: 4.0,
         };
         let mut tops = Vec::new();
         let mut tnt = primed();

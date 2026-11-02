@@ -1,8 +1,8 @@
-RemotePlayer.shouldRenderAtSqrDistance	missing		unsure: no remote-player cull distance (box x 10 x 64 x view scale) found in game/remote.rs
+RemotePlayer.shouldRenderAtSqrDistance	port	crates/horizon-client/src/game/entity_culling.rs::entity_view_scale	every entity's draw distance is scaled by the view scale and the limit, remote players included
 RemotePlayer.aiStep	missing		unsure: remote players are drawn from Mob records in game/remote.rs; no per-tick motion lerp or push step found
 RemotePlayer.lerpMotion	missing		unsure: no lerp of received remote-player motion found in game/remote.rs
 Hotbar.storeFrom	port	crates/horizon-client/src/game/creative_hotbar.rs::Game::hotbar_load_or_save	save copies the nine slots into the hotbar.nbt row
-Hotbar.isEmpty	missing		player: an empty creative Toolbar row shows no paper hint with the save key (no inventory.hotbarInfo in Horizon)
+Hotbar.isEmpty	port	crates/horizon-client/src/game/creative_hotbar.rs	the empty creative hotbar row carries the inventory.hotbarInfo hint
 ClientMetricsSamplersProvider.registerStaticSamplers	skip:debug		F3 metrics samplers
 ClientMetricsSamplersProvider.samplers	skip:debug		F3 metrics samplers
 QuickPlay.connect	port	crates/horizon-client/src/game.rs::Options::read	gap: minor: no Realms variant and no latest-world fallback
@@ -30,12 +30,12 @@ IntegratedServer.getPersonalGameMode	port	crates/horizon-client/src/game/integra
 IntegratedServer.updateGameModeBasedOnPermission	inline	crates/horizon-client/src/game/lan.rs::Game::lan_guest_joined	gap: player: a guest already in the world keeps their mode when force-gamemode or the default mode changes; only a join applies it
 IntegratedServer.updatePermissions	port	crates/horizon-client/src/lan/hub.rs::Hub::resend_commands	permission level and commands sent to every guest
 IntegratedServer.setDefaultGameType	port	crates/horizon-client/src/game/lan.rs::Game::set_default_game_mode	
-IntegratedServer.isSingleplayerOwner	missing		unsure: the owner is kept by uuid in hub.singleplayer_owner; no name-based check found
+IntegratedServer.isSingleplayerOwner	port	crates/horizon-client/src/game/integrated.rs: host.hub.singleplayer_owner	the owner is kept by uuid on the hub and read back in commands and LAN actions
 IntegratedServer.getScaledTrackingDistance	missing		player: the Entity Distance option is not applied to what a LAN host tracks
 IntegratedServer.getForcedGameType	inline	crates/horizon-client/src/game/lan.rs::Game::lan_guest_joined	forced mode is sent when a guest joins
 IntegratedServer.selectLevelLoadFocusPos	missing		unsure: no load focus at the owner's saved position found in game/integrated.rs open_integrated
-IntegratedServer.reportChunkLoadFailure	missing		player: no low-disk-space toast when a chunk fails to load (LOW_DISK_SPACE_WARNING is only an id constant)
-IntegratedServer.reportChunkSaveFailure	missing		player: no low-disk-space toast when a chunk fails to save
+IntegratedServer.reportChunkLoadFailure	port	crates/horizon-client/src/chunk_io.rs::load_failed	a failed load sets low_disk_space, which is warnOnLowDiskSpace plus reportChunkLoadFailure
+IntegratedServer.reportChunkSaveFailure	port	crates/horizon-client/src/chunk_io.rs	the same low_disk_space flag is raised by the save side
 LanServerDetection.LanServerDetector.run	port	crates/horizon-client/src/lan/discovery.rs::listen	receive loop for LAN announcements
 LanServerDetection.LanServerList.takeDirtyServers	skip:java		dirty flag; Scanner::games returns a copy on each call
 LanServerPinger.run	port	crates/horizon-client/src/lan/discovery.rs::Pinger::start	announce loop on a thread until dropped

@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "sponge_absorb",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_sponge_absorb",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A sponge absorbs water (`native_sponge_absorb`).",
+  "doc_summary": "`native_sponge_absorb(dimension, pos)` is called after a sponge at `pos` has absorbed water and become wet. Bundles need \"hooks\": @API:sponge_absorb@."
+}

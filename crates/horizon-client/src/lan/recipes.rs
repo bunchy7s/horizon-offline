@@ -52,17 +52,16 @@ fn ingredient(v: &Value) -> Option<Ingredient> {
     }
 }
 
-/// Every recipe file, by recipe id (the registry's order).
-pub(super) fn recipes(dir: &Path, prefix: &str, out: &mut BTreeMap<String, Value>) {
-    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if path.is_dir() {
-            recipes(&path, &format!("{prefix}{name}/"), out);
-        } else if let Some(stem) = name.strip_suffix(".json")
-            && let Ok(v) = serde_json::from_slice(&std::fs::read(&path).unwrap_or_default())
-        {
-            out.insert(format!("minecraft:{prefix}{stem}"), v);
+/// Every recipe file, by recipe id (the registry's order): read through
+/// `json_folder`, so a load holding the folder shares one read of it. A file
+/// that can't be read or doesn't parse is left out.
+pub(super) fn recipes(dir: &Path, out: &mut BTreeMap<String, Value>) {
+    let Ok(folder) = horizon_world::json_folder::read(dir) else {
+        return;
+    };
+    for file in &folder.files {
+        if let Ok(v) = serde_json::from_slice(file.bytes().unwrap_or_default()) {
+            out.insert(format!("minecraft:{}", file.name), v);
         }
     }
 }
@@ -94,7 +93,7 @@ pub(super) fn network_recipes(
     overlay: &horizon_world::loot::PackOverlay,
 ) -> (BTreeMap<String, Box<str>>, HashMap<String, i32>) {
     let mut all = BTreeMap::new();
-    recipes(&resources.join("data/minecraft/recipe"), "", &mut all);
+    recipes(&resources.join("data/minecraft/recipe"), &mut all);
     overlay_recipes(overlay, &mut all);
     // The data's recipe filters, as the server's own tables apply them
     // (#5910), once, before the ingredient normalization, so a swapped

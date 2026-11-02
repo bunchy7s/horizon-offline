@@ -96,11 +96,15 @@ impl Game<'_> {
                     .to_string_lossy()
                     .into_owned(),
             });
-        status_lines(
+        let mut lines = status_lines(
             server,
             self.agent_last.map(|t| t.elapsed().as_secs()),
             self.options.control.is_some() && !self.agent_control_on,
-        )
+        );
+        if let Some(line) = self.repro.agent_line(self.input_trace.events()) {
+            lines.push(line);
+        }
+        lines
     }
 
     /// What Copy Connection Details puts on the clipboard: the socket, a horizon-ctl line to try,

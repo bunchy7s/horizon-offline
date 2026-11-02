@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "potion_splash",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_potion_splash",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A thrown potion applied its hit effects (`native_potion_splash`).",
+  "doc_summary": "A thrown splash or lingering potion finished applying its hit effects; the hook reports the potion item and impact position. Experience bottles are excluded. Bundles need \"hooks\": @API:potion_splash@."
+}

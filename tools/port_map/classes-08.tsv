@@ -1,14 +1,14 @@
-ExperimentalRedstoneWireEvaluator	missing		minor: only worlds with the Redstone Experiments flag use this evaluator; Horizon has no experimental wire evaluator
+ExperimentalRedstoneWireEvaluator	port	crates/horizon-world/src/level/redstone/experimental.rs::Sim::experimental_wire_update	two queues and insertion-ordered power changes with oriented neighbor notifications
 InstantNeighborUpdater	skip:other		never instantiated in vanilla 26.3; Level always uses CollectingNeighborUpdater
 NeighborUpdater.executeShapeUpdate	port	crates/horizon-world/src/level/update.rs::Sim::execute	Shape arm: wire skip flag, then update_shape and update_or_destroy
 NeighborUpdater.executeUpdate	port	crates/horizon-world/src/level/hooks.rs::Sim::neighbor_changed	per-block neighbour change dispatch
-NeighborUpdater.updateNeighborsAtExceptFromFacing	port	crates/horizon-world/src/level/update.rs::Sim::update_neighbors_at_except	
-Orientation.<init>	skip:java		constructor of the experimental redstone orientation value
-Orientation.generateContext	missing		minor: builds the orientation lookup of the experimental wire evaluator only
-Orientation.generateIndex	skip:java		index arithmetic for the orientation table
+NeighborUpdater.updateNeighborsAtExceptFromFacing	port	crates/horizon-world/src/level/update.rs::Sim::update_neighbors_at_except_oriented	skips the source-facing neighbor and carries the orientation
+Orientation.<init>	port	crates/horizon-world/src/level/orientation.rs::Orientation::new	48 contexts with perpendicular up and front axes
+Orientation.generateContext	port	crates/horizon-world/src/level/orientation.rs::Orientation::with_front	value transforms replace the precomputed lookup graph; with_up and with_side_bias cover its other edges
+Orientation.generateIndex	port	crates/horizon-world/src/level/orientation.rs::Orientation::index	48-state vanilla index encoding
 Orientation.toString	skip:debug		debug string
-Orientation.withFrontAdjustSideBias	missing		minor: experimental redstone orientation transform; only the experimental evaluator uses it
-Orientation.withFrontPreserveUp	missing		minor: experimental redstone orientation transform; only the experimental evaluator uses it
+Orientation.withFrontAdjustSideBias	port	crates/horizon-world/src/level/orientation.rs::Orientation::with_front_adjust_side_bias	mirrors the bias when the old front becomes the new side
+Orientation.withFrontPreserveUp	port	crates/horizon-world/src/level/orientation.rs::Orientation::with_front_preserve_up	preserves the context for a front on the up axis
 RedstoneWireEvaluator.getIncomingWireSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_incoming_signal	
 RedstoneWireEvaluator.getWireSignal	port	crates/horizon-world/src/level/redstone.rs::Sim::wire_power_of	
 SavedDataType	skip:java		equals over the saved-data type record; Horizon keys saved data by name
@@ -16,7 +16,7 @@ WanderingTraderData.setSpawnChance	inline	crates/horizon-client/src/game/wanderi
 WanderingTraderData.setSpawnDelay	inline	crates/horizon-client/src/game/wandering_trader.rs::Game::tick_wandering_trader	field write of spawn_delay inside the tick; no setter
 MapBanner.fromWorld	port	crates/horizon-client/src/game/banners.rs::Game::map_banner_at	ticked in #3517; `MapBanner.fromWorld` is cited at crates/horizon-client/src/game/banners.rs:19
 MapBanner.getDecoration	port	crates/horizon-client/src/game/maps.rs::MapBanner::sprite	ticked in #3517; `MapBanner.getDecoration` is cited at crates/horizon-client/src/game/maps.rs:50
-MapBanner.getId	missing		minor: key string of a banner marker, only used by the marker feature
+MapBanner.getId	inline	crates/horizon-client/src/game/maps.rs::toggle_banner	a banner marker is filed under Key::Banner(pos): the id as an enum key, so the map keeps one marker per banner
 MapDecorationTypes	skip:data		registry of map decoration types; maps.rs keeps its own DECORATION_TYPES table
 MapId.addToTooltip	port	crates/horizon-client/src/item_tooltip.rs::PlayerHeadName::map_id_lines	ticked in #3517; `MapId.addToTooltip` is cited at crates/horizon-client/src/item_tooltip.rs:412
 MapIndex.getNextMapId	port	crates/horizon-client/src/game/maps.rs::Game::next_map_id	
@@ -33,13 +33,13 @@ LevelStorageSource.loadLevelSummaries	port	crates/horizon-client/src/title.rs::l
 LevelStorageSource.makeLevelSummary	inline	crates/horizon-client/src/title.rs::list_worlds	per-folder name, version, mode and last played
 LevelStorageSource.parseFeatureFlagsFromSummary	missing		unsure: list_worlds does not read enabled_features, so experimental worlds are not flagged
 LevelStorageSource.parseValidator	skip:other		symlink allow-list (allowed_symlinks.txt); Horizon does not read that file
-LevelStorageSource.readDataConfig	missing		minor: the world's own enabled datapacks and features are not read back from level.dat
-LevelSummary.backupStatus	inline	crates/horizon-client/src/title.rs::list_worlds	FILE_FIXING_REQUIRED from save.rs::needs_file_fixes and DOWNGRADE from save.rs::downgraded_from; UPGRADE_TO_SNAPSHOT never applies to a stable build
+LevelStorageSource.readDataConfig	port	crates/horizon-client/src/save.rs::Level::read	DataPacks and enabled_features are read with the level (data_packs, enabled_features), and datapack::enabled_ids layers the world's own packs over the bundle with them
+LevelSummary.backupStatus	inline	crates/horizon-client/src/title.rs::should_backup	FILE_FIXING_REQUIRED when the world needs its files fixed or comes from a newer version; UPGRADE_TO_SNAPSHOT never applies to a stable build
 LevelSummary.compareTo	inline	crates/horizon-client/src/title.rs::list_worlds	newest first by last played
-LevelSummary.createInfo	missing		unsure: row status text (locked, needs conversion) is not carried in WorldEntry
+LevelSummary.createInfo	port	crates/horizon-client/src/title.rs::world_info	locked, incompatible and corrupt rows in red, else the mode (hardcore in red), the commands marker and the version, italic or red when a backup is due
 LevelSummary.getLevelName	inline	crates/horizon-client/src/title.rs::list_worlds	WorldEntry.name
 LevelSummary.getWorldVersionName	inline	crates/horizon-client/src/title.rs::list_worlds	WorldEntry.version from Version.Name
-LevelSummary.isDisabled	missing		unsure: list_worlds drops folders whose level.dat does not read instead of showing them disabled
+LevelSummary.isDisabled	port	crates/horizon-client/src/title.rs::disabled	locked, or saved by another series; primaryActionActive (can_play) and canEdit build on it
 LevelVersion.parse	inline	crates/horizon-client/src/title.rs::list_worlds	reads Version.Name only
 PrimaryLevelData.createTag	port	crates/horizon-client/src/save.rs::Level::write	
 PrimaryLevelData.setModdedInfo	inline	crates/horizon-client/src/save.rs::Level::write	gap: minor: writes WasModded 0 and the brand list; there is no modded save state
