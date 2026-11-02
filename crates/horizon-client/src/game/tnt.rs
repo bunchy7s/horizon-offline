@@ -62,11 +62,13 @@ impl PrimedTnt {
         let moved = scene
             .resolve(self.bounds(), wanted, 0.0, self.on_ground)
             .unwrap_or(Vec3::ZERO);
-        self.position = Vec3::new(
-            self.position.x + moved.x,
-            self.position.y + moved.y,
-            self.position.z + moved.z,
-        );
+        if horizon_client::entities::move_applies(wanted, moved) {
+            self.position = Vec3::new(
+                self.position.x + moved.x,
+                self.position.y + moved.y,
+                self.position.z + moved.z,
+            );
+        }
         self.on_ground = wanted.y < 0.0 && moved.y != wanted.y;
         if moved.x != wanted.x {
             self.velocity.x = 0.0;
@@ -75,7 +77,19 @@ impl PrimedTnt {
             self.velocity.z = 0.0;
         }
         if moved.y != wanted.y {
-            self.velocity.y = 0.0;
+            // Entity.restituteMovementAfterCollisions: slime bounces it.
+            let below = world.block(
+                self.position.x.floor() as i32,
+                (self.position.y - f64::from(1.0e-5_f32)).floor() as i32,
+                self.position.z.floor() as i32,
+            );
+            self.velocity.y = horizon_client::entities::vertical_collision_velocity(
+                wanted.y,
+                moved.y,
+                0.04,
+                wanted.y < 0.0,
+                &*facts.get(below).name == "minecraft:slime_block",
+            );
         }
         // Entity.applyEffectsFromBlocks: a bubble column lifts or drags it, and the
         // columns it is at the top of send their surface particles.
@@ -89,6 +103,20 @@ impl PrimedTnt {
             &mut self.velocity,
             |pos| tops.push(pos),
         );
+        if self.on_ground {
+            // Entity.applyEffectsFromBlocks -> SlimeBlock.stepOn.
+            let under = world.block(
+                self.position.x.floor() as i32,
+                (self.position.y - f64::from(0.2_f32)).floor() as i32,
+                self.position.z.floor() as i32,
+            );
+            if &*facts.get(under).name == "minecraft:slime_block"
+                && let Some(scale) = horizon_client::entities::slime_step_on_scale(self.velocity.y)
+            {
+                self.velocity.x *= scale;
+                self.velocity.z *= scale;
+            }
+        }
         self.velocity = Vec3::new(
             self.velocity.x * 0.98,
             self.velocity.y * 0.98,

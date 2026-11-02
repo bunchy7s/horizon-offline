@@ -1204,6 +1204,23 @@ mod tests {
         ));
     }
 
+    /// `ServerEntity.getRequiresPrecisePosition` is false for an item, so a
+    /// drop whose data has to be sent again still moves by a delta; only the
+    /// collision case takes the exact-position packet.
+    #[test]
+    fn an_item_that_needs_its_data_sent_again_still_moves_by_a_delta() {
+        let mut e = state(0.0);
+        e.kind = "minecraft:item".into();
+        e.position = [0.3, 64.0, 0.3];
+        let mut s = added(&e);
+        e.needs_sync = true;
+        e.position = [0.7, 64.0, 0.3];
+        assert!(matches!(
+            changes(&mut s, &e)[..],
+            [play::Clientbound::MoveEntityPos(_)]
+        ));
+    }
+
     #[test]
     fn fireballs_bundle_their_motion_with_their_power() {
         let mut e = state(0.0);
