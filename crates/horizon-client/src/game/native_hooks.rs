@@ -8494,7 +8494,7 @@ mod tests {
 
     #[test]
     fn native_ingredient_stays_hookable() {
-        let source = include_str!("../crafting.rs");
+        let source = include_str!("../crafting.rs").replace("\r\n", "\n");
         let at = source.find("pub fn native_ingredient(").unwrap();
         let start = source[..at].rfind("///").unwrap();
         let body = &source[start..start + source[start..].find("\n}\n").unwrap()];

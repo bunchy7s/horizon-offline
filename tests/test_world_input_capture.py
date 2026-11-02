@@ -306,9 +306,9 @@ fn main() {
     // Grabbing and releasing put the pointer at the window's centre
     // (MouseHandler.grabMouse / releaseMouse), in the surface's pixels when it
     // has one; releasing an already released pointer leaves it where it is.
-    // Windows also warps before the Locked grab, which clips the pointer
-    // where it is (#6076).
-    let grab_warps = if cfg!(windows) { 2 } else { 1 };
+    // A grab warps once on every system: Windows before the Locked grab, which
+    // clips the pointer where it is (#6076).
+    let grab_warps = 1;
     game.renderer = Some(Renderer { config: Config { width: 1000, height: 600 } });
     game.capture(true);
     assert!(game.captured);
