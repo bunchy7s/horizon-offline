@@ -67,7 +67,7 @@ SoundBufferLibrary.enumerate	port	crates/horizon-client-render/src/audio.rs::Aud
 SoundBufferLibrary.DebugOutput.Counter.accountBuffer	inline	crates/horizon-client-render/src/audio.rs::Audio::census	counts buffers and sizes
 SoundEngine.reload	port	crates/horizon-client-render/src/audio.rs::Audio::reload	stops sounds and reads the new resource root
 SoundEngine.loadLibrary	port	crates/horizon-client-render/src/audio.rs::Audio::with_output	opens the output device
-SoundEngine.shouldChangeDevice	missing		player: when the output device is lost or the system default changes, vanilla reopens sound output; Horizon's Audio has no device watch
+SoundEngine.shouldChangeDevice	port	crates/horizon-client-render/src/audio.rs: devices_seen / last_seen_devices	the output device list is watched and the sink reopened when it changes
 SoundEngine.notifyListeners	port	crates/horizon-client-render/src/sound_engine.rs::SoundEngine::notify	subtitle and listener notification with range
 SoundEngine.updateSource	port	crates/horizon-client-render/src/audio.rs::Audio::set_listener	listener position and orientation
 SoundEngineExecutor.createThread	skip:other		sound thread creation; Horizon's audio runs on the cpal callback
@@ -78,7 +78,7 @@ SoundManager.apply	port	crates/horizon-client-render/src/audio.rs::Audio::reload
 SoundManager.validateSoundResource	inline	crates/horizon-client-render/src/sound_events.rs::SoundRegistry::add_file	file existence check through the exists closure
 SoundManager.Preparations.handleRegistration	port	crates/horizon-client-render/src/sound_events.rs::SoundRegistry::add_file	replace flag and sound entries
 SoundManager.Preparations.apply	inline	crates/horizon-client-render/src/sound_events.rs::SoundRegistry::load	registry replaced with the prepared one
-SoundPreviewHandler.preview	port	crates/horizon-client-render/src/sound_preview.rs::SoundPreview::preview	
+SoundPreviewHandler.preview	port	crates/horizon-client-render/src/audio.rs::preview	the pack screen's sound preview
 SoundPreviewHandler.stopOtherCategoryPreview	port	crates/horizon-client-render/src/sound_preview.rs::SoundPreview::stop_other_category_preview	
 WeighedSoundEvents.preloadIfRequired	skip:java		preload is a cache; Horizon decodes on demand
 CraftPlanksTutorialStep.tick	missing		player: a new survival world shows no craft-planks tutorial toast; Horizon has no tutorial steps (tutorialStep is only stored in options)
