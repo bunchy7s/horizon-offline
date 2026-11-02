@@ -9164,9 +9164,12 @@ mod tests {
                 // split): horizon-mixins resolves the crate by its package.
                 format!("horizon_client_lib::crafting::native_{name}")
             } else if menu_hooks.contains(name) {
-                format!("horizon_client::menu::native_{name}")
+                // menu.rs compiles into horizon-client-lib (#5446's
+                // split): horizon-mixins resolves the crate by its package.
+                format!("horizon_client_lib::menu::native_{name}")
             } else if breath_hooks.contains(name) {
-                format!("horizon_client::breathing::native_{name}")
+                // breathing.rs compiles into horizon-client-lib too.
+                format!("horizon_client_lib::breathing::native_{name}")
             } else if level_hooks.contains(name) {
                 format!("horizon_client::game::native_hooks::GameLevel<'_>::native_{name}")
             } else {
@@ -9175,6 +9178,32 @@ mod tests {
             assert_eq!(hook["target"].as_str().unwrap(), target);
         }
         assert_eq!(names, declared);
+        // Every target's crate really compiles its module: #5446 moved
+        // files between horizon-client and horizon-client-lib, and a
+        // target left on the old crate applies to no bundle — the string
+        // comparison above shares its expectation with the catalog, so it
+        // alone cannot catch a move. The first path segment after the
+        // crate must be a module of that crate's lib root.
+        let client_root = include_str!("../lib.rs");
+        let lib_root = include_str!("../client_lib.rs");
+        for hook in &hooks {
+            let target = hook["target"].as_str().unwrap();
+            let (root, crate_name, rest) =
+                if let Some(rest) = target.strip_prefix("horizon_client::") {
+                    (client_root, "horizon_client", rest)
+                } else if let Some(rest) = target.strip_prefix("horizon_client_lib::") {
+                    (lib_root, "horizon_client_lib", rest)
+                } else {
+                    // The other crates (render, world) are their own packages,
+                    // never split.
+                    continue;
+                };
+            let module = rest.split("::").next().unwrap_or(rest);
+            assert!(
+                root.contains(&format!("mod {module};")),
+                "{crate_name} does not compile module `{module}` (target {target})"
+            );
+        }
     }
 
     /// The damage hook gets a mob's source from its damage: the causing mob,
