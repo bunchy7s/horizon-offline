@@ -6,11 +6,11 @@ use std::sync::OnceLock;
 /// Client-library hooks, installed before any menu, entity or recipe is used.
 pub struct NativeClientHooks {
     pub menu_slot_rules: fn(&str, usize, &ItemStack, &mut bool, &mut u32),
-    pub living_heal: fn(Option<u32>, &mut f32, &mut bool),
+    pub living_heal: fn(u32, &mut f32, &mut bool),
     pub living_breathe: fn(u32, &str, &mut bool, &mut i32, &mut i32),
     pub living_drown: fn(u32, &str, &mut bool, &mut f32, &mut i32, &mut bool),
-    pub living_fall: fn(i32, &str, &mut f64, &mut f32, &mut bool),
-    pub living_jump: fn(i32, &str),
+    pub living_fall: fn(u32, &str, &mut f64, &mut f32, &mut bool),
+    pub living_jump: fn(u32, &str),
     pub ingredient: fn(&str, &Map<String, Value>, &mut Vec<String>),
 }
 
@@ -33,7 +33,7 @@ pub(crate) fn menu_slot_rules(
     }
 }
 
-pub(crate) fn living_heal(entity: Option<u32>, amount: &mut f32, cancel: &mut bool) {
+pub(crate) fn living_heal(entity: u32, amount: &mut f32, cancel: &mut bool) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_heal)(entity, amount, cancel);
     }
@@ -72,7 +72,7 @@ pub(crate) fn living_drown(
 }
 
 pub(crate) fn living_fall(
-    entity: i32,
+    entity: u32,
     kind: &str,
     distance: &mut f64,
     multiplier: &mut f32,
@@ -83,7 +83,7 @@ pub(crate) fn living_fall(
     }
 }
 
-pub(crate) fn living_jump(entity: i32, kind: &str) {
+pub(crate) fn living_jump(entity: u32, kind: &str) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_jump)(entity, kind);
     }

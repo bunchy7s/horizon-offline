@@ -30,7 +30,7 @@ use std::{collections::BTreeMap, fs, path::Path};
 /// @API:native_living_fall@.
 #[inline(never)]
 pub fn native_living_fall(
-    entity: i32,
+    entity: u32,
     kind: &str,
     distance: &mut f64,
     multiplier: &mut f32,
@@ -308,7 +308,7 @@ impl MotionWorld<'_, '_, '_> {
         let mut multiplier = multiplier;
         let mut cancel = false;
         native_living_fall(
-            self.player.entity_id,
+            self.player.entity_id as u32,
             "minecraft:player",
             &mut distance,
             &mut multiplier,

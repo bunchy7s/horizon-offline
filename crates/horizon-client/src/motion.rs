@@ -45,7 +45,7 @@ use std::{
 
 /// A living entity jumped (`LivingEvent.LivingJumpEvent`). @API:native_living_jump@.
 #[inline(never)]
-pub fn native_living_jump(entity: i32, kind: &str) {
+pub fn native_living_jump(entity: u32, kind: &str) {
     crate::native_client_hooks::living_jump(entity, kind);
 }
 
@@ -1959,7 +1959,7 @@ impl MotionWorld<'_, '_, '_> {
     }
     pub fn jump_from_ground(&mut self) -> Result<()> {
         living_motion::jump_from_ground(self)?;
-        native_living_jump(self.player.entity_id, "minecraft:player");
+        native_living_jump(self.player.entity_id as u32, "minecraft:player");
         self.player
             .events
             .push(MotionEvent::Health(crate::health::HealthEvent::Statistic {

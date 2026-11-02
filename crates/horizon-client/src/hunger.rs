@@ -16,7 +16,7 @@ use horizon_world::{
 /// A living entity is about to heal. Mods may change the amount or cancel.
 /// `entity` identifies the affected entity. @API:native_living_heal@.
 #[inline(never)]
-pub fn native_living_heal(entity: Option<u32>, amount: &mut f32, cancel: &mut bool) {
+pub fn native_living_heal(entity: u32, amount: &mut f32, cancel: &mut bool) {
     crate::native_client_hooks::living_heal(entity, amount, cancel);
 }
 
@@ -42,7 +42,7 @@ impl PlayerMotion {
             if health < maximum {
                 let mut amount = 1.0;
                 let mut cancel = false;
-                native_living_heal(Some(self.entity_id as u32), &mut amount, &mut cancel);
+                native_living_heal(self.entity_id as u32, &mut amount, &mut cancel);
                 if !cancel {
                     let h = &mut self.health;
                     let mut observer = Updates(&mut self.events);
@@ -131,7 +131,7 @@ impl FoodWorld for TickWorld<'_> {
     }
     fn heal(&mut self, _: &mut FoodData, mut amount: f32) -> Result<()> {
         let mut cancel = false;
-        native_living_heal(Some(self.entity as u32), &mut amount, &mut cancel);
+        native_living_heal(self.entity as u32, &mut amount, &mut cancel);
         if cancel {
             return Ok(());
         }

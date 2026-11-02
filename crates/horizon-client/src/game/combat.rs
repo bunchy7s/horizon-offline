@@ -181,8 +181,9 @@ pub(super) fn send_drown_particles(
     at: [f64; 3],
     velocity: [f64; 3],
     count: i32,
+    random: &mut horizon_core::random::LegacyRandom,
 ) {
-    use horizon_core::random::{LegacyRandom, RandomSource};
+    use horizon_core::random::RandomSource;
     use horizon_protocol::{
         entity_data::Particle,
         packets::play::{self, Clientbound},
@@ -193,11 +194,6 @@ pub(super) fn send_drown_particles(
     else {
         return;
     };
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as i64;
-    let mut random = LegacyRandom::new(seed);
     for _ in 0..count {
         let pos = at.map(|v| v + random.next_double() - random.next_double());
         let packet = Clientbound::LevelParticles(play::LevelParticles {

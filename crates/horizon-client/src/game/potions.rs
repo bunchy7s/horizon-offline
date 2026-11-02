@@ -768,7 +768,7 @@ impl Game<'_> {
             EffectAction::Heal(mut amount) if self.player.is_some() => {
                 let mut cancel = false;
                 let entity = self.player.as_ref().unwrap().entity_id as u32;
-                horizon_client::hunger::native_living_heal(Some(entity), &mut amount, &mut cancel);
+                horizon_client::hunger::native_living_heal(entity, &mut amount, &mut cancel);
                 if cancel {
                     return;
                 }

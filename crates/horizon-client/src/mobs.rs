@@ -3268,7 +3268,7 @@ impl Mob {
     /// `LivingEntity.heal`, with the native heal hook.
     pub fn heal(&mut self, mut amount: f32) {
         let mut cancel = false;
-        crate::hunger::native_living_heal(Some(self.id), &mut amount, &mut cancel);
+        crate::hunger::native_living_heal(self.id, &mut amount, &mut cancel);
         if !cancel && self.health > 0.0 {
             self.health = (self.health + amount).clamp(0.0, self.attrs.max_health);
         }

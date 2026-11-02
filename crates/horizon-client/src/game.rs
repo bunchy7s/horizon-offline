@@ -7520,7 +7520,13 @@ impl Game<'_> {
                             host.hub
                                 .entity_event(host.host_entity, combat::DROWN_EVENT, feet);
                         } else {
-                            combat::send_drown_particles(host, feet, player_velocity, bubbles);
+                            combat::send_drown_particles(
+                                host,
+                                feet,
+                                player_velocity,
+                                bubbles,
+                                &mut self.world.random,
+                            );
                         }
                     }
                     self.drown_particles(feet, player_velocity, bubbles);

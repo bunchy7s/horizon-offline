@@ -10193,14 +10193,14 @@ pub fn dispatch_living_drown(
 /// What [`Hooks::living_fall`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct LivingFallEvent<'a> {
-    pub entity: i32,
+    pub entity: u32,
     pub kind: &'a str,
     pub distance: f64,
     pub multiplier: f32,
 }
 pub fn dispatch_living_fall(
     mods: &[Box<dyn Hooks>],
-    entity: i32,
+    entity: u32,
     kind: &str,
     distance: &mut f64,
     multiplier: &mut f32,
@@ -10227,12 +10227,12 @@ pub fn dispatch_living_fall(
 /// What [`Hooks::living_heal`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct LivingHealEvent {
-    pub entity: Option<u32>,
+    pub entity: u32,
     pub amount: f32,
 }
 pub fn dispatch_living_heal(
     mods: &[Box<dyn Hooks>],
-    entity: Option<u32>,
+    entity: u32,
     amount: &mut f32,
     cancel: &mut bool,
 ) {
@@ -10254,10 +10254,10 @@ pub fn dispatch_living_heal(
 /// What [`Hooks::living_jump`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct LivingJumpEvent<'a> {
-    pub entity: i32,
+    pub entity: u32,
     pub kind: &'a str,
 }
-pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: i32, kind: &str) {
+pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
     let mut event = LivingJumpEvent { entity, kind };
     for mod_hook in mods {
         mod_hook.living_jump(&mut event);

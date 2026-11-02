@@ -4296,7 +4296,13 @@ impl Game<'_> {
                                 .entity_event(g.entity_id, super::combat::DROWN_EVENT, at);
                         }
                     } else {
-                        super::combat::send_drown_particles(host, at, [0.0; 3], bubbles);
+                        super::combat::send_drown_particles(
+                            host,
+                            at,
+                            [0.0; 3],
+                            bubbles,
+                            &mut self.world.random,
+                        );
                     }
                     self.drown_particles(at, [0.0; 3], bubbles);
                 }
