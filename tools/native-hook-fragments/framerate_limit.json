@@ -5,7 +5,8 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_framerate_limit",
       "neoforge": "none (vanilla FramerateLimitTracker.getFramerateLimit fires no event)",
       "side": "client",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {"contract": "listen"}
     }
   ],
   "rust_summary": "lowering the frame rate limit, as Dynamic FPS does (`native_framerate_limit`).",

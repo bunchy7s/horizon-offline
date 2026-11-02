@@ -40,7 +40,12 @@ pub(super) fn player_for(
             return Some(*conn);
         }
     }
+    // An iron golem's anger is for the player who hit it (`NeutralMob` keeps
+    // the angry-at UUID), and outlasts the 100 ticks of `getLastHurtByMob`:
+    // while it lasts, the golem keeps that player, not whoever is nearest.
+    let angry = m.species() == Species::IronGolem && m.extra.anger > 0;
     let targeting = m.ai.target == Some(Who::Player)
+        || angry
         || m.ai.last_hurt_by == Some(Who::Player) && m.age as i32 - m.ai.last_hurt_by_time <= 100;
     // A tame wolf, cat or parrot sees its owner (`TamableAnimal.getOwner`), while they
     // are in play, whoever is nearer. Not while it targets or was just hurt by
@@ -505,5 +510,36 @@ mod tests {
         // Without a target the nearest player wins.
         let guests = vec![(7, view(12.0, false))];
         assert_eq!(choose(MOB, false, Some(&host), &guests, Some(7)), None);
+    }
+
+    /// The mob of the prepared resources' type `kind` (None without them).
+    fn mob_of(kind: &str) -> Option<Mob> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        let types = horizon_client::mobs::MobTypes::load(&root).ok()?;
+        let t = std::sync::Arc::new(types.types.get(kind)?.clone());
+        Some(Mob::new(1, t, MOB, 0.0))
+    }
+
+    /// #6781: a golem a guest hit stays angry for 400+ ticks but remembers
+    /// its last attacker for 100. After that it must still see the guest it
+    /// is angry at, not the bystander standing nearer.
+    #[test]
+    fn an_angry_golem_keeps_the_player_who_hit_it() {
+        let Some(mut golem) = mob_of("minecraft:iron_golem") else {
+            return;
+        };
+        golem.age = 500;
+        golem.ai.last_hurt_by = Some(Who::Player);
+        golem.ai.last_hurt_by_time = 100;
+        golem.ai.target = None;
+        golem.extra.anger = 300;
+        // The attacker (conn 7) ran off; a bystander (conn 8) is nearer.
+        let guests = vec![(7, view(30.0, false)), (8, view(3.0, false))];
+        assert_eq!(player_for(&golem, None, &guests, Some(7)), Some(7));
+        // Calm again: the nearest player is seen.
+        golem.extra.anger = 0;
+        assert_eq!(player_for(&golem, None, &guests, Some(7)), Some(8));
     }
 }

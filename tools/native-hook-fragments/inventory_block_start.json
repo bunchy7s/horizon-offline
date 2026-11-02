@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "inventory_block_start",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_inventory_block_start",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A guest is about to open a block inventory (`native_inventory_block_start`).",
+  "doc_summary": "`native_inventory_block_start(player, name, pos, cancel)` runs before a guest opens an inventory supplied by a block at `pos`. Set `cancel` to leave it closed; the guest's state is not swapped in. Bundles need \"hooks\": @API:inventory_block_start@."
+}

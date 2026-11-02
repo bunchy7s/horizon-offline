@@ -73,7 +73,7 @@ pub fn native_loot_function(
     ctx: &NativeLootContext<'_>,
     stack: &mut LootStack,
 ) {
-    let _ = (kind, data, ctx, stack);
+    crate::native_load_hooks::loot_function(kind, data, ctx, stack);
 }
 
 /// A loot condition of a mod's own kind: the entry named a `type` in a
@@ -87,7 +87,7 @@ pub fn native_loot_condition(
     ctx: &NativeLootContext<'_>,
     holds: &mut bool,
 ) {
-    let _ = (kind, data, ctx, holds);
+    crate::native_load_hooks::loot_condition(kind, data, ctx, holds);
 }
 
 /// The tool a loot context names: its item id and enchantments.
@@ -635,20 +635,15 @@ fn load_dir(
     prefix: &str,
     out: &mut HashMap<String, Value>,
 ) -> io::Result<()> {
-    let Ok(entries) = fs::read_dir(dir) else {
+    // Through `json_folder`: a load holding the folder (the recipes, read by
+    // the item tables, the recipe book and the server's sync too) shares one
+    // read of it.
+    let Ok(folder) = crate::json_folder::read(dir) else {
         return Ok(());
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        if path.is_dir() {
-            load_dir(&path, namespace, &format!("{prefix}{stem}/"), out)?;
-        } else if path.extension().is_some_and(|e| e == "json") {
-            let value = serde_json::from_slice(&fs::read(&path)?)?;
-            out.insert(format!("{namespace}:{prefix}{stem}"), value);
-        }
+    for file in &folder.files {
+        let value = serde_json::from_slice(file.bytes()?)?;
+        out.insert(format!("{namespace}:{prefix}{}", file.name), value);
     }
     Ok(())
 }

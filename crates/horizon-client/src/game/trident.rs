@@ -286,6 +286,9 @@ impl Game<'_> {
         if self.world.light(x, y, z) >> 4 != 15 {
             return;
         }
+        if !self.lightning_strike_allowed(self.lan_acting_uuid, [x, y, z], "trident") {
+            return;
+        }
         self.spawn_bolt(at, false);
         // The summon effect's owner is the thrower: LightningBolt.setCause.
         if let Some(bolt) = self.bolts.last_mut() {
@@ -401,6 +404,11 @@ impl Game<'_> {
             if !server_client {
                 let sound = format!("minecraft:item.trident.riptide_{}", riptide.min(3));
                 self.audio.play(&sound, at, 1.0, 1.0);
+                if let (Some(player), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    self.native_player_riptide(player, &name);
+                }
             }
             return;
         }

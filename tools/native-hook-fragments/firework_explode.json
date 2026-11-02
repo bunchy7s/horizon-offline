@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "firework_explode",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_firework_explode",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A firework rocket completed explosion effects (`native_firework_explode`).",
+  "doc_summary": "A firework rocket completed its damage, particles and explosion effects; the hook reports its entity id, position and number of burst shapes. Bundles need \"hooks\": @API:firework_explode@."
+}

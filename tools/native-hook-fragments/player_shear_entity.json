@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "player_shear_entity",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_shear_entity",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerShearEntityEvent)",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A player about to shear a mob, cancellable (`native_player_shear_entity`).",
+  "doc_summary": "A server player about to shear a sheep, mooshroom, snow golem or bogged. `off_hand` says which hand holds the shears; set `cancel` to leave the mob and tool unchanged. Bundles need \"hooks\": @API:player_shear_entity@."
+}

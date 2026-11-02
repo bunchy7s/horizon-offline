@@ -32,7 +32,7 @@ pub struct Diagnostic {
     pub message: String,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Preprocessed {
     /// The code, one line per entry of `lines`.
     pub code: String,

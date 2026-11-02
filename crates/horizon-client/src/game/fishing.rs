@@ -186,6 +186,19 @@ impl Game<'_> {
         self.swing_arm();
         true
     }
+    /// The boat the hook's owner rides (`Entity.isPassengerOfSameVehicle`).
+    fn own_vehicle(&self) -> Option<u32> {
+        match self.lan_acting {
+            None => self.riding,
+            Some(conn) => self.lan.as_ref().and_then(|h| {
+                h.hub
+                    .guests
+                    .iter()
+                    .find(|g| g.conn == conn)
+                    .and_then(|g| g.vehicle)
+            }),
+        }
+    }
     /// `FishingHook.retrieve`: the rod damage it costs.
     fn retrieve_hook(&mut self, rod: &ItemStack) -> u32 {
         let Some(hook) = self.hook.take() else {
@@ -210,6 +223,12 @@ impl Game<'_> {
             } else if let Some(item) = self.dropped.iter_mut().find(|i| i.id == id) {
                 item.velocity = pulled(item.velocity);
                 hooked_item = true;
+            } else if let Some(t) = self.tnts.iter_mut().find(|t| t.id != 0 && t.id == id) {
+                t.velocity = pulled(t.velocity);
+            } else if let Some(a) = self.armor_stands.iter_mut().find(|a| a.id == id) {
+                a.velocity = pulled(a.velocity);
+            } else if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
+                b.velocity = pulled(b.velocity);
             } else if self.creatures.hook_targets.iter().any(|t| t.id == id) {
                 // A player: the hub moves them when the tick ends.
                 self.creatures
@@ -603,10 +622,35 @@ impl Game<'_> {
                             .map(|t| t.id)
                     })
                     .or_else(|| {
+                        // Entity.canBeHitByProjectile: `isAlive() && isPickable()`;
+                        // ArmorStand.isPickable is false for a marker.
+                        self.armor_stands
+                            .iter()
+                            .find(|a| a.health > 0.0 && !a.marker && touches(a.bounds()))
+                            .map(|a| a.id)
+                    })
+                    .or_else(|| {
+                        // AbstractBoat.isPickable; Projectile.canHitEntity skips the
+                        // boat the owner rides (approximating `leftOwner`, as the
+                        // players above skip their owner).
+                        let own = self.own_vehicle();
+                        self.boats
+                            .iter()
+                            .find(|b| Some(b.id) != own && touches(b.bounds()))
+                            .map(|b| b.id)
+                    })
+                    .or_else(|| {
                         self.dropped
                             .iter()
                             .find(|i| touches(i.bounds()))
                             .map(|i| i.id)
+                    })
+                    // A lit TNT is pickable too (`PrimedTnt.isPickable`).
+                    .or_else(|| {
+                        self.tnts
+                            .iter()
+                            .find(|t| t.id != 0 && touches(t.bounds()))
+                            .map(|t| t.id)
                     });
                 if let Some(id) = hit {
                     // Projectile.onHit on an entity: PROJECTILE_LAND.
@@ -670,10 +714,28 @@ impl Game<'_> {
                             })
                     })
                     .or_else(|| {
+                        self.armor_stands.iter().find(|a| a.id == id).map(|a| {
+                            let b = a.bounds();
+                            (a.position, b.max_position().y - b.min_position().y)
+                        })
+                    })
+                    .or_else(|| {
+                        self.boats
+                            .iter()
+                            .find(|b| b.id == id)
+                            .map(|b| (b.position, super::boats::HEIGHT))
+                    })
+                    .or_else(|| {
                         self.dropped
                             .iter()
                             .find(|i| i.id == id)
                             .map(|i| (i.position, horizon_client::entities::ItemEntity::WIDTH))
+                    })
+                    .or_else(|| {
+                        self.tnts
+                            .iter()
+                            .find(|t| t.id != 0 && t.id == id)
+                            .map(|t| (t.position, super::tnt::PrimedTnt::SIZE))
                     });
                 match hooked {
                     Some((at, height)) => h.position = Vec3::new(at.x, at.y + height * 0.8, at.z),
