@@ -101,11 +101,11 @@ DownloadCacheCleaner.prioritizeFilesInDirs	inline	crates/horizon-client/src/serv
 DownloadQueue.getFileInfo	port	crates/horizon-client/src/server_packs/download.rs::run	the size and relative name of each downloaded file are in the log entry built by run
 DownloadQueue.downloadBatch	port	crates/horizon-client/src/server_packs/download.rs::Queue::download	queues the batch for the download thread, which runs run
 FilePackResources.getPathFromLocation	skip:data		pack file access; Horizon reads its data from tables and files
-FilePackResources.getResource	skip:data		pack file access; Horizon reads its data from tables and files
+FilePackResources.getResource	port	crates/horizon-client-render/src/datapack.rs::DataPack::read	the prefixed path through the pack's source: `Zip::index` looks the entry up (folder entries included), a folder pack reads the file
 FilePackResources.addPrefix	skip:data		pack file access; Horizon reads its data from tables and files
 FilePackResources.getNamespaces	skip:data		pack file access; Horizon reads its data from tables and files
 FilePackResources.extractNamespace	skip:data		pack file access; Horizon reads its data from tables and files
-FilePackResources.listResources	skip:data		pack file access; Horizon reads its data from tables and files
+FilePackResources.listResources	port	crates/horizon-client-render/src/datapack.rs::DataPack::list	the pack's files under a prefix: zip entry names or a folder walk, folder entries and directories skipped
 FilePackResources.FileResourcesSupplier.openMetadata	skip:data		pack file access; Horizon reads its data from tables and files
 FilePackResources.FileResourcesSupplier.openResources	skip:data		pack file access; Horizon reads its data from tables and files
 FilePackResources.SharedZipFileAccess.getOrCreateZipFile	skip:java		lazily opened zip cache
