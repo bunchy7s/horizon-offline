@@ -326,6 +326,9 @@ impl Game<'_> {
             return;
         }
         if !self.server_player_portal_allowed(host, conn, plan.dim, "nether_portal") {
+            // The processor already reached its threshold. Forget this attempt
+            // so a canceled trip must complete a fresh portal wait before retrying.
+            self.portals.player.process = None;
             return;
         }
         self.start_server_trip(host, conn, plan.dim, Some(plan));
