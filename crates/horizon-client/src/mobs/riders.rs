@@ -409,4 +409,39 @@ mod tests {
         assert!(ranged(Species::Skeleton) && ranged(Species::Pillager));
         assert!(!ranged(Species::Zombie) && !ranged(Species::Vindicator));
     }
+    /// `Spider.getVehicleAttachmentPoint` and
+    /// `CaveSpider.getVehicleAttachmentPoint`: a vehicle no wider than the
+    /// spider takes the spider's fixed seat — 0.3125 of its scale, and a cave
+    /// spider's 0.21875 — and a wider one the type's default.
+    #[test]
+    fn a_spider_sits_by_its_own_rule_on_a_narrow_vehicle() {
+        let ran = crate::mobs::world::with_test_world(&[], |_, types| {
+            let new = |kind: &str| {
+                Mob::new(
+                    1,
+                    std::sync::Arc::new(types.types[kind].clone()),
+                    Vec3::ZERO,
+                    0.0,
+                )
+            };
+            let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+            let chicken = f32::from(0.4);
+            // Wider than either spider (the boat's 1.375 is not).
+            let wide = 2.0;
+            let spider = new("minecraft:spider");
+            let cave = new("minecraft:cave_spider");
+            assert!(spider.width() > chicken && cave.width() > chicken);
+            assert!(spider.width() < wide && cave.width() < wide);
+            assert!(close(vehicle_attachment(&spider, chicken), 0.3125));
+            assert!(close(vehicle_attachment(&cave, chicken), 0.21875));
+            assert!(close(vehicle_attachment(&spider, wide), 0.0));
+            assert!(close(vehicle_attachment(&cave, wide), 0.0));
+            let mut big = new("minecraft:cave_spider");
+            big.extra.model_scale = 2.0;
+            assert!(close(vehicle_attachment(&big, chicken), 0.4375));
+        });
+        if !ran {
+            return;
+        }
+    }
 }
