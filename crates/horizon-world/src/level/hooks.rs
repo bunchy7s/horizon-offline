@@ -584,6 +584,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if self.sponge_remove_water(start) {
             let b = self.b;
             self.set_block(start, b.default_of(b.named.wet_sponge), 2);
+            self.level.observe_sponge_absorb(start);
             self.emit(super::LevelEvent::Sound {
                 pos: start,
                 sound: "minecraft:block.sponge.absorb".into(),

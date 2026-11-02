@@ -603,6 +603,13 @@ impl GameLevel<'_> {
         let _ = (dimension, pos, from, to, cancel);
     }
 
+    /// A sponge at `pos` absorbed water and became wet. Server-side.
+    /// @API:native_sponge_absorb@.
+    #[inline(always)]
+    pub(super) fn native_sponge_absorb(&self, dimension: LevelDimension, pos: BlockPos) {
+        let _ = (dimension, pos);
+    }
+
     /// The Ender Dragon fight is about to place its first dragon egg at `pos`.
     /// Set `cancel` to leave the block unchanged. Server-side. @API:native_dragon_egg_form@.
     #[inline(always)]
