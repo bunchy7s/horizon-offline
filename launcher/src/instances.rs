@@ -445,6 +445,8 @@ const NOT_COPIED: &[&str] = &[
     "telemetry",
     "mod-browser",
     ".horizon-cache",
+    // Far terrain's copies of what servers sent, rebuilt as the instance plays.
+    "server-terrain",
 ];
 
 /// Files of the player, not of one instance, that a new instance starts with: the keys and video

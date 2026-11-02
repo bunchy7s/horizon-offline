@@ -103,6 +103,10 @@ impl Macros {
         m.define("MC_SHADOW_QUALITY", "1.0");
         m.define("MC_HAND_DEPTH", "0.125");
         m.define("MAX_COLOR_BUFFERS", "16");
+        // The normal and specular maps are on (OptiFine's shaders.txt, H: their options, on by
+        // default; Iris 1.11.7 defines both too, with or without a resource pack's maps).
+        m.define("MC_NORMAL_MAP", "");
+        m.define("MC_SPECULAR_MAP", "");
         // Packs take Iris's extensions (compute programs, images, custom textures) where this
         // is defined.
         m.define("IS_IRIS", "");
@@ -393,6 +397,17 @@ mod tests {
         let mut m = Macros::standard();
         m.define_renderer(2);
         translates(fsh, &m).unwrap();
+    }
+
+    /// Packs take their normal- and specular-map branches, as they do with the maps on: a
+    /// declaration made only there is seen.
+    #[test]
+    fn programs_take_the_normal_and_specular_map_branches() {
+        let fsh = "#version 330\nout vec4 c;\n\
+                   #ifdef MC_NORMAL_MAP\nconst float bump = 1.0;\n#endif\n\
+                   #ifdef MC_SPECULAR_MAP\nconst float shine = 2.0;\n#endif\n\
+                   void main() { c = vec4(bump, shine, 0.0, 1.0); }\n";
+        translates(fsh, &Macros::standard()).unwrap();
     }
 
     #[test]

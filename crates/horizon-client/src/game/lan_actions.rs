@@ -309,13 +309,23 @@ impl Game<'_> {
         conn: u32,
         f: impl FnOnce(&mut Self) -> R,
     ) -> Option<R> {
+        self.as_guest_with_host(host, conn, |g, _| f(g))
+    }
+
+    /// `as_guest`, passing the active `&LanHost` to `f`.
+    pub(super) fn as_guest_with_host<R>(
+        &mut self,
+        host: &mut LanHost,
+        conn: u32,
+        f: impl FnOnce(&mut Self, &LanHost) -> R,
+    ) -> Option<R> {
         let swap = self.enter_guest(host, conn)?;
         super::dedicated::crash_fixture("guest", || {
             host.hub.guests.iter().any(|g| g.conn == conn && g.placed)
         });
         let dimension =
             (self.serving.is_some() || self.options.dedicated.is_some()).then_some(self.dim.id());
-        let result = horizon_client::block_contact::in_level(dimension, || f(self));
+        let result = horizon_client::block_contact::in_level(dimension, || f(self, host));
         self.leave_guest(host, swap);
         Some(result)
     }
@@ -2205,6 +2215,8 @@ impl Game<'_> {
                     });
                 }
             }
+            // AbstractContainerMenu.quickMoveStack of a mod container: the mods first.
+            S::ContainerClick(p) if self.lan_mod_quick_move(host, conn, &p) => {}
             S::ContainerClick(p) if self.lan_merchant_click(host, conn, &p) => {}
             S::ContainerClick(p) if self.lan_inventory_click(host, conn, &p) => {}
             S::ContainerClick(p) if self.lan_crafting_click(host, conn, &p) => {}
@@ -2643,12 +2655,15 @@ impl Game<'_> {
     /// What ServerboundSetCreativeModeSlotPacket asks of a stack. Its codec
     /// (`ItemStack.validatedStreamCodec`) encodes the stack with `ItemStack.CODEC`, whose count is
     /// 1 to 99: more fails the packet and disconnects the player, as vanilla's decoder error does.
-    /// handleSetCreativeModeSlot's `validData` then ignores a stack beyond its own stack size.
+    /// A native mod can raise an item's stack size past 99 (`item_defaults::MAX_STACK_SIZE`), so
+    /// the count is held to what the wire carries instead. handleSetCreativeModeSlot's `validData`
+    /// then ignores a stack beyond its own stack size.
     fn creative_stack_valid(&self, host: &mut LanHost, gi: usize, s: &ItemStack) -> bool {
-        if s.count > 99 {
+        let max = horizon_world::item_defaults::MAX_STACK_SIZE as u32;
+        if s.count > max {
             let g = &host.hub.guests[gi];
             let conn = g.conn;
-            let reason = format!("Invalid packet: count {} is not in 1..99", s.count);
+            let reason = format!("Invalid packet: count {} is not in 1..={max}", s.count);
             eprintln!("{} sent an invalid creative stack: {reason}", g.name);
             host.hub
                 .kick(conn, horizon_protocol::text::literal(&reason));
@@ -2988,13 +3003,13 @@ impl Game<'_> {
             .iter()
             .position(|p| p.id != 0 && p.id as i32 == id && super::deflect::attackable(p))
         {
-            self.as_guest(host, conn, |g| {
+            self.as_guest_with_host(host, conn, |g, host| {
                 if g.within_interaction_range(i) {
                     if matches!(
                         g.creatures.projectiles[i].kind,
                         horizon_client::projectiles::ProjectileKind::ShulkerBullet { .. }
                     ) {
-                        g.hit_shulker_bullet(i);
+                        g.hit_shulker_bullet(Some(host), i);
                     } else {
                         g.deflect(i);
                     }

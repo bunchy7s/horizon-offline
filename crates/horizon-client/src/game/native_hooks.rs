@@ -278,7 +278,7 @@
 //! change a cauldron.
 //!
 //! API 53 adds entities leaving a level (`native_entity_leave_level`), for
-//! item entities and experience orbs so far.
+//! item entities, experience orbs and mobs so far.
 //!
 //! API 52 adds `native_block_entity_sync`: a mod block entity's block and update tag
 //! sent to clients again (`Level.sendBlockUpdated`).
@@ -450,6 +450,7 @@
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
 use super::native_data_maps::NativeDataMapType;
+use super::native_item_energy::ItemEnergyBuffer;
 use super::{
     Game, GameLevel, LevelDimension, Screen,
     execution_role::ExecutionRole,
@@ -486,6 +487,7 @@ use horizon_client::{
     items::ItemStack,
     keybinds,
     lan::menu::Slots,
+    merchant::MerchantOffer,
     mobs::{Damage, Who},
     mod_list::{self, Installed, NativePage},
     music::{Music, MusicLayer},
@@ -2194,6 +2196,22 @@ impl Game<'_> {
     pub(super) fn native_item_fluid_tank(&self, item: &str, capacity: &mut Option<i32>) {
         mod_api::dispatch_item_fluid_tank(self, mod_api::mods(), item, capacity);
     }
+    /// Item `item` (`mod_id:name`) holds energy (`Capabilities.Energy.ITEM`):
+    /// set `buffer` when the item is yours, as `SimpleEnergyHandler` is built:
+    /// its capacity and the most one insert and one extract move. A capacity
+    /// under 1 leaves the buffer out, and the limits are clamped to
+    /// 0..=capacity; vanilla's items have none. Asked at each call of the item
+    /// energy helpers (`native_item_energy`, `native_item_energy_insert`,
+    /// `native_item_energy_extract`, in `native_item_energy.rs`). The amount
+    /// is kept in the stack's `minecraft:custom_data`, as the int
+    /// `horizon_energy`. API @API:item_energy_buffer@.
+    pub(super) fn native_item_energy_buffer(
+        &self,
+        item: &str,
+        buffer: &mut Option<ItemEnergyBuffer>,
+    ) {
+        mod_api::dispatch_item_energy_buffer(self, mod_api::mods(), item, buffer);
+    }
     /// A server tick of the block entity at `pos`, in vanilla's order among
     /// the others (`Level.tickBlockEntities`), when its `id` is yours: read
     /// and change its saved compound `nbt`, its item slots `items` (keep
@@ -2863,6 +2881,50 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_menu_button_v2(self, mod_api::mods(), pos, entity, id, carried);
     }
+    /// A player shift-clicked slot `slot` of the menu of the mod block
+    /// entity at `pos` (`AbstractContainerMenu.quickMoveStack`, the method a
+    /// Java menu overrides), on the server, before the game's own routing:
+    /// move the stack where your block wants it. `slot` is the menu's index:
+    /// below `container_slots` it is the block's own slot (`entity.items`),
+    /// from there on the player's inventory (27 main slots, then the hotbar).
+    /// `stack` is a copy of what the slot holds; take what you move out of
+    /// it (put it in `entity.items`, or in another block with
+    /// `native_insert_item`) and set `handled`: the slot then holds what is
+    /// left of `stack` (whatever you wrote to that slot of `entity.items`),
+    /// the game's routing is skipped, and the player's client gets the menu
+    /// again. Left unhandled, `entity.items` goes back to what it held and
+    /// the game moves the stack as for any container; a later mod sees what
+    /// an earlier one did to `stack`.
+    ///
+    /// For a mod container on a vanilla menu type and on a mod menu type,
+    /// the left or right button, a slot that holds something and that the
+    /// mod's screen shows; not for a spectator or a dead player, a menu no
+    /// longer valid, nor during a drag.
+    /// Asked once per click, where vanilla asks `quickMoveStack` again while
+    /// it keeps moving the same item. The player's state is swapped in, so
+    /// `native_acting_player` names them; `entity` is out of the world
+    /// during the call, as in `native_menu_button`.
+    /// API @API:menu_quick_move@.
+    pub(super) fn native_menu_quick_move(
+        &mut self,
+        pos: [i32; 3],
+        entity: &mut ModBlockEntity,
+        container_slots: usize,
+        slot: usize,
+        stack: &mut ItemStack,
+        handled: &mut bool,
+    ) {
+        mod_api::dispatch_menu_quick_move(
+            self,
+            mod_api::mods(),
+            pos,
+            entity,
+            container_slots,
+            slot,
+            stack,
+            handled,
+        );
+    }
     /// The commands native mods add to the server's command tree: push
     /// yours. Asked once when a world opens to players (a dedicated
     /// server, a LAN host, single player's server thread); every player's
@@ -3153,6 +3215,67 @@ impl Game<'_> {
     pub(super) fn native_perform_console_command(&mut self, command: &str, ran: &mut bool) {
         mod_api::dispatch_perform_console_command(self, mod_api::mods(), command, ran);
     }
+    /// A server player's ender pearl landed and is about to teleport them
+    /// (NeoForge's `EntityTeleportEvent.EnderPearl`, vanilla's
+    /// `ThrownEnderpearl.onHit` for a player owner): `pearl` is the pearl's
+    /// entity id, `from` their feet now, `target` where the pearl started
+    /// its last tick and `damage` the fall damage they then take (5). A mod
+    /// may move `target` (a value that is not a number is ignored) or change
+    /// `damage` (0 or less: none). Canceling
+    /// keeps the player where they are: no endermite roll, no teleport, no
+    /// damage and no sound; the pearl is used up either way. The player's
+    /// state is swapped in (`native_acting_player`). The hit itself is
+    /// heard by `native_projectile_impact`. @API:ender_pearl_teleport@.
+    pub(super) fn native_ender_pearl_teleport(
+        &mut self,
+        player: u128,
+        name: &str,
+        pearl: u32,
+        from: [f64; 3],
+        target: &mut [f64; 3],
+        damage: &mut f32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_ender_pearl_teleport(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            pearl,
+            from,
+            target,
+            damage,
+            cancel,
+        );
+    }
+    /// A server player who ate chorus fruit (or another item with the
+    /// `teleport_randomly` consume effect) is about to try a random spot
+    /// (NeoForge's `EntityTeleportEvent.ChorusFruit`, vanilla's
+    /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
+    /// after they stopped riding. `from` is their feet, `target` the spot
+    /// drawn; a mod may move it (its y kept inside the level's height, a
+    /// value that is not a number ignored), and the game still looks down
+    /// from it for ground it may land on. Canceling ends the effect: no teleport and no
+    /// more attempts. The player's state is swapped in
+    /// (`native_acting_player`). Foxes are not heard. @API:chorus_fruit_teleport@.
+    pub(super) fn native_chorus_fruit_teleport(
+        &mut self,
+        player: u128,
+        name: &str,
+        from: [f64; 3],
+        target: &mut [f64; 3],
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_chorus_fruit_teleport(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            from,
+            target,
+            cancel,
+        );
+    }
     /// A server player a command teleported (NeoForge's
     /// `EntityTeleportEvent`, for a player): `/tp` and `/teleport`, inside
     /// their level or into another one. `from` and `to` are their feet before
@@ -3161,9 +3284,9 @@ impl Game<'_> {
     /// teleport: when the new level is entered, before it has loaded around
     /// them), so it cannot stop it. The player's state is swapped in, so the
     /// helpers that read the acting player and `native_tell` work. Once for
-    /// each teleported player, on a server. Other teleports are not heard
-    /// yet: ender pearls, chorus fruit, a spectator's teleport menu; portals
-    /// and respawns are not teleports here. @API:native_player_teleported@.
+    /// each teleported player, on a server. Ender pearls and chorus fruit
+    /// have their own hooks; a spectator's teleport menu is not heard yet;
+    /// portals and respawns are not teleports here. @API:native_player_teleported@.
     pub(super) fn native_player_teleported(
         &mut self,
         player: u128,
@@ -3945,6 +4068,24 @@ impl Game<'_> {
     pub(super) fn native_player_trade(&mut self, player: u128, name: &str, entity_id: u32) {
         mod_api::dispatch_player_trade(self, mod_api::mods(), player, name, entity_id);
     }
+    /// A server player traded with a villager or a wandering trader
+    /// (NeoForge's `TradeWithVillagerEvent`, at vanilla's
+    /// `MerchantResultSlot.onTake` once the offer is taken): `merchant` is
+    /// the trader's entity id and `kind` its type (`minecraft:villager`,
+    /// `minecraft:wandering_trader`), `offer` the trade as it is after this
+    /// one (its `uses` counted, `result` what the player got). Once per
+    /// trade, so a shift-click that trades several times is heard for each,
+    /// after the trade's statistic and `villager_trade` trigger. Listen
+    /// only: the trade is made. The player's state is swapped in
+    /// (`native_acting_player`). API @API:trade_with_villager@.
+    pub(super) fn native_trade_with_villager(
+        &mut self,
+        merchant: u32,
+        kind: &str,
+        offer: &MerchantOffer,
+    ) {
+        mod_api::dispatch_trade_with_villager(self, mod_api::mods(), merchant, kind, offer);
+    }
     /// A server player's shield was disabled by a blocked melee hit. The
     /// shield cooldown is set immediately after this call. Helpers looking up
     /// the guest through `self.lan` may find nothing during packet handling.
@@ -4389,6 +4530,29 @@ impl Game<'_> {
         cancel: &mut bool,
     ) {
         mod_api::dispatch_lightning_strike(self, mod_api::mods(), player, pos, cause, cancel);
+    }
+
+    /// Enough players have slept through the night in level `dimension`
+    /// and the clock is about to move to the morning (NeoForge's
+    /// `SleepFinishedTimeEvent`, vanilla's `ServerLevel.tick` when it moves
+    /// the clock to `wake_up_from_sleep`): `new_time` comes in as the next
+    /// morning's day time and may be changed to wake everyone at another
+    /// time. A time before `current` (the day time now) is refused, as
+    /// `setTimeAddition` refuses one, and the morning stays. Unlike
+    /// NeoForge, which refuses a bad value as it is set, the check runs once
+    /// after every mod, so a later mod sees the value an earlier one left.
+    /// On the server, only when the `advance_time` rule is on;
+    /// `native_time_skip` then hears the jump to the time chosen here and
+    /// may still cancel it. The players wake and the weather resets as
+    /// usual either way.
+    /// API @API:sleep_finished_time@.
+    pub(super) fn native_sleep_finished_time(
+        &mut self,
+        dimension: &str,
+        current: i64,
+        new_time: &mut i64,
+    ) {
+        mod_api::dispatch_sleep_finished_time(self, mod_api::mods(), dimension, current, new_time);
     }
 
     /// The overworld clock is about to jump, from sleep or `/time`. Set
@@ -5313,8 +5477,8 @@ impl Game<'_> {
     /// a level closing with nobody in it included. Not for the entities still
     /// loaded when the server stops, as in vanilla. `entity` is its ID and
     /// `kind` its type (`minecraft:item`); it is no longer in the level's lists.
-    /// It only hears. 53 tells item entities and experience orbs; later
-    /// APIs add other kinds, so check `kind`. Server-side.
+    /// It only hears. 53 tells item entities, experience orbs and mobs (`kind`
+    /// the mob type); later APIs add other kinds, so check `kind`. Server-side.
     pub(super) fn native_entity_leave_level(&mut self, dimension: &str, entity: u32, kind: &str) {
         mod_api::dispatch_entity_leave_level(self, mod_api::mods(), dimension, entity, kind);
     }
@@ -5833,10 +5997,9 @@ impl Game<'_> {
     /// does not happen: no damage, no knockback, no sound, no block reaction, the
     /// arrow does not stick, a pearl does not teleport, a potion or a fireball
     /// does not burst. The projectile flies on and is not discarded, so a mod
-    /// that cancels also decides what becomes of it: it hits again the next tick
-    /// unless the mod moves, turns or removes it. An arrow stays where it would
-    /// have hit, and the other projectiles go on through the whole of their
-    /// motion. Covers what `tick_projectiles` flies: arrows, tridents, snowballs,
+    /// that cancels also decides what becomes of it. It continues through its
+    /// whole motion and may hit something on a later tick. Covers what
+    /// `tick_projectiles` flies: arrows, tridents, snowballs,
     /// eggs, pearls, potions, fireballs, wither skulls, wind charges, llama spit and
     /// shulker bullets, from players, mobs and dispensers. It does not fire for
     /// a breeze's deflection, for a hit on a wind charge, for fireworks or for
@@ -6768,6 +6931,24 @@ impl Game<'_> {
         batch.scale_since(start, at[0], at[1], size / 16.0, size / 16.0);
         true
     }
+    /// Draw a stack and its slot decorations, except the count, at `at`,
+    /// `size` GUI pixels square. False for an unknown item. API @API:item_stack@.
+    pub(super) fn native_item_stack(
+        &self,
+        batch: &mut HudBatch,
+        stack: &ItemStack,
+        at: [f32; 2],
+        size: f32,
+    ) -> bool {
+        if self.res.items().get(&stack.item).is_none() {
+            return false;
+        }
+        let start = batch.vertices.len();
+        self.draw_item_model(batch, stack, at[0], at[1]);
+        self.draw_item_decorations(batch, stack, at[0], at[1], Some(String::new()));
+        batch.scale_since(start, at[0], at[1], size / 16.0, size / 16.0);
+        true
+    }
     /// Item `item`'s icon drawn with model `model` (`minecraft:paper` as
     /// `mymod:wheel_icon`, an `item_model` of a content mod's), as `native_item`
     /// draws one; false for an unknown item. API 111.
@@ -7156,6 +7337,22 @@ pub(super) fn mob_kind(mob: &horizon_client::mobs::Mob) -> String {
     ["minecraft:", mob.kind.id.trim_start_matches("minecraft:")].concat()
 }
 
+/// The ids of `before` (id, kind) that are not in `now`, grouped by kind in
+/// first-seen order: the entities that left the level.
+fn vanished_by_kind(
+    before: &[(u32, String)],
+    now: &std::collections::HashSet<u32>,
+) -> Vec<(String, Vec<u32>)> {
+    let mut out: Vec<(String, Vec<u32>)> = Vec::new();
+    for (id, kind) in before.iter().filter(|(id, _)| !now.contains(id)) {
+        match out.iter_mut().find(|(k, _)| k == kind) {
+            Some((_, ids)) => ids.push(*id),
+            None => out.push((kind.clone(), Vec::from([*id]))),
+        }
+    }
+    out
+}
+
 /// Where the game calls the hook points.
 impl Game<'_> {
     /// The acting player as the hook points name one: the guest whose turn
@@ -7289,20 +7486,44 @@ impl Game<'_> {
     /// The IDs of the level's item entities, for `native_items_left_since`
     /// (none on a client of a server, which tells nothing).
     pub(super) fn dropped_ids(&self) -> Vec<u32> {
-        if self.remote.is_some() {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
             return Vec::new();
         }
         self.dropped.iter().map(|e| e.id).collect()
     }
     /// The IDs of the level's experience orbs, for `native_orbs_left_since`.
     pub(super) fn orb_ids(&self) -> Vec<u32> {
-        if self.remote.is_some() {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
             return Vec::new();
         }
         self.orbs.iter().map(|o| o.id).collect()
     }
+    /// The (id, kind) of the level's mobs, for `native_mobs_left_since` (none
+    /// on a client of a server, which tells nothing).
+    pub(super) fn mob_ids(&self) -> Vec<(u32, String)> {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
+            return Vec::new();
+        }
+        self.mobs.iter().map(|m| (m.id, mob_kind(m))).collect()
+    }
+    /// The mobs of `before` gone since have left the level (died, despawned,
+    /// entered a hive, unloaded). Mobs spawned meanwhile are not counted.
+    pub(super) fn native_mobs_left_since(&mut self, before: &[(u32, String)]) {
+        // Nothing was taken: no mod listens, or a client of a server.
+        if before.is_empty() {
+            return;
+        }
+        let now: std::collections::HashSet<u32> = self.mobs.iter().map(|m| m.id).collect();
+        for (kind, ids) in vanished_by_kind(before, &now) {
+            self.native_entities_left(&kind, &ids);
+        }
+    }
     /// The item entities of `before` gone since have left the level.
     pub(super) fn native_items_left_since(&mut self, before: &[u32]) {
+        // Nothing was taken: no mod listens, or a client of a server.
+        if before.is_empty() {
+            return;
+        }
         let now: std::collections::HashSet<u32> = self.dropped.iter().map(|e| e.id).collect();
         let gone: Vec<u32> = before
             .iter()
@@ -7313,6 +7534,10 @@ impl Game<'_> {
     }
     /// The experience orbs of `before` gone since have left the level.
     pub(super) fn native_orbs_left_since(&mut self, before: &[u32]) {
+        // Nothing was taken: no mod listens, or a client of a server.
+        if before.is_empty() {
+            return;
+        }
         let now: std::collections::HashSet<u32> = self.orbs.iter().map(|o| o.id).collect();
         let gone: Vec<u32> = before
             .iter()
@@ -7400,6 +7625,16 @@ impl Game<'_> {
     /// `EntityBlock.newBlockEntity` of block `name`: Horizon's own, else a
     /// native mod's.
     pub(super) fn new_block_entity(&mut self, name: &str) -> Option<BlockEntity> {
+        // `SignBlock.newBlockEntity`: a mod's sign is one by its template's class.
+        if !name.starts_with("minecraft:")
+            && let Some(state) = self.pack.assets.registry.default_state(name)
+            && let Some(form) = self.res.facts().get(state).sign_form()
+        {
+            return Some(BlockEntity::Sign(horizon_client::signs::SignData {
+                hanging: form.hanging,
+                ..Default::default()
+            }));
+        }
         if let Some(entity) = BlockEntity::for_block(name) {
             return Some(entity);
         }
@@ -7721,37 +7956,39 @@ impl Game<'_> {
             return false;
         };
         let atlas = &self.gui.atlas;
-        let (w, h) = (s.screen.width, s.screen.height);
-        batch.fill(atlas, ox, oy, w, h, rgba(0, 0, 0, 255));
-        batch.fill(
-            atlas,
-            ox + 1.0,
-            oy + 1.0,
-            w - 2.0,
-            h - 2.0,
-            rgba(198, 198, 198, 255),
-        );
-        let container = self.native_screen_slots().unwrap_or_default();
-        for i in (0..36).chain(container) {
-            let (x, y) = self.slot_position(i);
-            let (x, y) = (ox + x - 1.0, oy + y - 1.0);
-            batch.fill(atlas, x, y, 18.0, 18.0, rgba(55, 55, 55, 255));
+        if !s.screen.own_background {
+            let (w, h) = (s.screen.width, s.screen.height);
+            batch.fill(atlas, ox, oy, w, h, rgba(0, 0, 0, 255));
             batch.fill(
                 atlas,
-                x + 1.0,
-                y + 1.0,
-                17.0,
-                17.0,
-                rgba(255, 255, 255, 255),
+                ox + 1.0,
+                oy + 1.0,
+                w - 2.0,
+                h - 2.0,
+                rgba(198, 198, 198, 255),
             );
-            batch.fill(
-                atlas,
-                x + 1.0,
-                y + 1.0,
-                16.0,
-                16.0,
-                rgba(139, 139, 139, 255),
-            );
+            let container = self.native_screen_slots().unwrap_or_default();
+            for i in (0..36).chain(container) {
+                let (x, y) = self.slot_position(i);
+                let (x, y) = (ox + x - 1.0, oy + y - 1.0);
+                batch.fill(atlas, x, y, 18.0, 18.0, rgba(55, 55, 55, 255));
+                batch.fill(
+                    atlas,
+                    x + 1.0,
+                    y + 1.0,
+                    17.0,
+                    17.0,
+                    rgba(255, 255, 255, 255),
+                );
+                batch.fill(
+                    atlas,
+                    x + 1.0,
+                    y + 1.0,
+                    16.0,
+                    16.0,
+                    rgba(139, 139, 139, 255),
+                );
+            }
         }
         self.native_screen_draw(&s.block, &s.data, batch, [ox, oy]);
         if s.screen.own_labels {
@@ -7794,7 +8031,7 @@ impl Game<'_> {
     }
     /// Puts back a mod block entity taken out for a call, unless the call
     /// removed or replaced it, with what its `setChanged` does.
-    fn put_back_mod_block_entity(
+    pub(super) fn put_back_mod_block_entity(
         &mut self,
         pos: Pos,
         mut taken: ModBlockEntity,
@@ -8177,6 +8414,128 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn vanished_mobs_are_reported_by_kind() {
+        use std::collections::HashSet;
+        let z = || "minecraft:zombie".to_string();
+        let b = || "minecraft:bee".to_string();
+        let before = vec![(1, z()), (2, b()), (3, z()), (4, b())];
+        let now: HashSet<u32> = [1, 4, 99].into_iter().collect(); // 99 spawned meanwhile
+        assert_eq!(
+            super::vanished_by_kind(&before, &now),
+            vec![(b(), vec![2]), (z(), vec![3])]
+        );
+        let all: HashSet<u32> = [1, 2, 3, 4, 5].into_iter().collect();
+        assert!(super::vanished_by_kind(&before, &all).is_empty());
+        assert_eq!(
+            super::vanished_by_kind(&before, &HashSet::new()),
+            vec![(z(), vec![1, 3]), (b(), vec![2, 4])]
+        );
+        assert!(super::vanished_by_kind(&[], &now).is_empty());
+    }
+
+    /// Exercise the gameplay constructor, where name-based entities compete
+    /// with a mod block's sign template.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_sign_constructor_prioritizes_templates_over_suffixes() {
+        use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
+        use horizon_client::mod_content::{ContentMod, build};
+        use horizon_mods::content::{Block, Content};
+
+        let base = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES")
+                .expect("set HORIZON_TEST_RESOURCES to prepared resources"),
+        );
+        let root = std::env::temp_dir().join(format!(
+            "horizon-sign-constructor-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let cases = [
+            ("ruby:notice_banner", "minecraft:oak_sign", false),
+            ("ruby:board_shelf", "minecraft:oak_wall_sign", false),
+            ("ruby:lantern_head", "minecraft:oak_hanging_sign", true),
+            (
+                "ruby:bracket_skull",
+                "minecraft:oak_wall_hanging_sign",
+                true,
+            ),
+        ];
+        let mut content = Content::declared("ruby");
+        let blocks: Vec<_> = cases
+            .iter()
+            .map(|&(id, template, _)| (id, template))
+            .chain([("ruby:road_sign", "minecraft:stone")])
+            .map(|(id, template)| Block {
+                id: id.into(),
+                template: template.into(),
+                item: false,
+                ..Default::default()
+            })
+            .collect();
+        content.declare(&blocks, &[]).unwrap();
+        build(
+            &base,
+            &[ContentMod {
+                id: "ruby".into(),
+                content,
+            }],
+            &root,
+        )
+        .unwrap();
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!("no menu handoff"),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = super::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+
+        for (name, hanging) in cases
+            .map(|(name, _, hanging)| (name, hanging))
+            .into_iter()
+            .chain([
+                ("minecraft:oak_sign", false),
+                ("minecraft:oak_hanging_sign", true),
+            ])
+        {
+            match game.new_block_entity(name) {
+                Some(super::BlockEntity::Sign(sign)) => {
+                    assert_eq!(sign.hanging, hanging, "{name}")
+                }
+                entity => panic!("{name}: expected a sign, got {entity:?}"),
+            }
+        }
+        assert!(game.new_block_entity("ruby:road_sign").is_none());
+        assert!(matches!(
+            game.new_block_entity("minecraft:white_banner"),
+            Some(super::BlockEntity::Banner(_))
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// A mod's own screen opens only over the world, never over another
     /// screen, an overlay (the title screen, a book, loading, no window) or

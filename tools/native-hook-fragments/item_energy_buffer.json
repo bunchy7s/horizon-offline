@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "item_energy_buffer",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_energy_buffer",
+      "neoforge": "Capabilities.Energy.ITEM",
+      "mod_api": {
+        "contract": "replace",
+        "out": "buffer"
+      }
+    }
+  ],
+  "rust_summary": "a mod item holding energy (`native_item_energy_buffer`), and the item energy helpers in\n`native_item_energy.rs`: `native_item_energy`, `native_item_energy_insert`, `native_item_energy_extract`.",
+  "doc_summary": "energy held by items (`Capabilities.Energy.ITEM`). `native_item_energy_buffer(item, buffer)` gives a mod item a buffer as `SimpleEnergyHandler` is built: its capacity and the most one insert and one extract move (a capacity under 1 leaves it out; the limits are clamped to 0..=capacity). The amount lives in the stack's `minecraft:custom_data` as the int `horizon_energy`, so it is saved and sent with the stack; an empty item carries nothing, so it stacks with a new one. `native_item_energy(stack)` reads one item of a stack (amount, capacity, limits); `native_item_energy_insert(stack, amount)` and `native_item_energy_extract(stack, amount)` answer the amount one item takes or gives and the single item it becomes, as `EnergyHandler.insert`/`extract` through an `ItemAccess`; the stack given is not changed, so the caller shrinks it by one and hands out the result, or leaves the result unused to simulate. They work on any side. Bundles need \"hooks\": @API:item_energy_buffer@.",
+  "comments": []
+}
