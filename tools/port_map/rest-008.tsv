@@ -31,7 +31,7 @@ SectionPos.blockToSection	port	crates/horizon-core/src/position.rs::BlockPos::se
 SectionPos.origin	inline	crates/horizon-client-render/src/gfx/resident.rs::origin	gap: minor: camera-relative origin; the block corner is the same sum without the camera
 SectionPos.asLong	port	crates/horizon-core/src/position.rs::SectionPos::pack	asLong(BlockPos): BlockPos::section then this pack; bit layout matches
 SectionPos.blocksInside	inline	crates/horizon-client/src/mobs/villager_brain.rs::chunk_pois	the POI scan visits every block of each section
-SectionPos.aroundChunk	missing		minor: unsure: ensureLoadedAndValid pre-loads POI chunks around a point; Horizon's chunk_pois reads loaded chunks only
+SectionPos.aroundChunk	missing		`mobs/villager_brain.rs::chunk_pois` reads the chunks it has, with no `ensureLoadedAndValid`: a search near an unloaded chunk sees fewer points of interest
 SectionPos.betweenClosedStream	skip:java		Java stream over a 3-D section box; the loops in pois_in_range and chunk_pois do the iteration
 SectionPos.aroundAndAtBlockPos	port	crates/horizon-client-render/src/light.rs::LightChanges::dirty_sections	the sections within one block of a changed cell
 TypedInstance.is	skip:java		holder type checks; Horizon compares registry names
@@ -78,15 +78,15 @@ DataComponentInitializers.Initializer.add	skip:data		item default component init
 DataComponentInitializers.SingleComponentInitializer.asInitializer	skip:data		item default component initializers; Horizon reads item defaults from its tables
 DataComponentLookup.getOrCreateStorage	skip:java		cache
 DataComponentLookup.scanForComponents	skip:java		index build behind the lookup
-DataComponentLookup.findAll	missing		minor: unsure: DyeColor mixing and the recipe fuel list read it; Horizon finds dyes and fuels by name and table
-DataComponentLookup.ComponentStorage.findMatching	missing		minor: unsure: spawn egg from an entity type; Horizon builds egg ids by name
+DataComponentLookup.findAll	missing		no component-driven item search: dyes are found by their `_dye` name and fuels by the table in `crafting.rs`/`furnace.rs`
+DataComponentLookup.ComponentStorage.findMatching	missing		a spawn egg is built from the entity type's id by name, with no component lookup
 DataComponentMap.makeCodecFromMap	skip:java		codec
 DataComponentMap.iterator	skip:java		iterator
 DataComponentMap.Builder.setUnchecked	skip:java		builder
 DataComponentMap.Builder.addAll	skip:java		builder
 DataComponentMap.Builder.buildFromMapTrusted	skip:java		builder
 DataComponentPatch.getFromPatchAndPrototype	skip:java		patch-or-default read; typed StackData fields plus the item table cover it
-DataComponentPatch.forget	missing		minor: unsure: BlockEntity.setComponents strips implicit components with forget; not checked in Horizon's block entity placement
+DataComponentPatch.forget	missing		a block entity's implicit components are not stripped on placement: `block_entity_item.rs` merges the explicit ones over the implicit
 DataComponentPatch.split	skip:java		added and removed parts kept as separate fields (protocol Stack.removed, StackData)
 DataComponentPatch.equals	skip:java		equality
 DataComponentPatch.toString	skip:debug		debug string
@@ -109,20 +109,20 @@ PatchedDataComponentMap.asPatch	skip:java		generic component map; Horizon sets t
 PatchedDataComponentMap.copy	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
 PatchedDataComponentMap.equals	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
 TypedDataComponent.encodeValue	skip:java		codec
-AttributeModifiersPredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
-AttributeModifiersPredicate.EntryPredicate.test	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
-BundlePredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
-ContainerPredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
+AttributeModifiersPredicate.matches	missing		`advancements.rs::item` reads `items`, `count`, the `potion_contents` and `damage` components and the `enchantments` and `damage` predicates; a `minecraft:attribute_modifiers` predicate is ignored, so the criterion matches too broadly
+AttributeModifiersPredicate.EntryPredicate.test	missing		same as `matches`: no entry of an `attribute_modifiers` predicate is tested
+BundlePredicate.matches	missing		ignored by `advancements.rs::item`, so a bundle contents criterion matches any bundle
+ContainerPredicate.matches	missing		ignored by `advancements.rs::item`, so a container contents criterion matches too broadly
 net/minecraft/core/component/predicates/DamagePredicate#matches	inline	crates/horizon-client/src/advancements.rs::item	gap: minor: only the damage range; the durability range (max damage minus damage) is not checked
 DataComponentPredicate.Single.wrapCodec	skip:java		codec
 DataComponentPredicate.Type.unpackType	skip:java		codec helper
 EnchantmentsPredicate.matches	inline	crates/horizon-client/src/advancements.rs::item	the enchantments predicate inside item()
-FireworkExplosionPredicate.FireworkPredicate.test	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
-FireworksPredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
-JukeboxPlayablePredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
+FireworkExplosionPredicate.FireworkPredicate.test	missing		ignored by `advancements.rs::item`
+FireworksPredicate.matches	missing		ignored by `advancements.rs::item`, so a fireworks criterion matches any firework
+JukeboxPlayablePredicate.matches	missing		ignored by `advancements.rs::item`
 PotionsPredicate.matches	port	crates/horizon-client/src/advancements.rs::potions	
-WritableBookPredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
-WrittenBookPredicate.matches	missing		minor: unsure: item() in advancements.rs ignores this key, so a criterion using it matches too broadly
+WritableBookPredicate.matches	missing		ignored by `advancements.rs::item`
+WrittenBookPredicate.matches	missing		ignored by `advancements.rs::item`
 BoatDispenseItemBehavior.execute	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_boat	
 DefaultDispenseItemBehavior.dispense	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_default	the click and dispense events of dispense_default
 DefaultDispenseItemBehavior.addToInventoryOrDispense	port	crates/horizon-client/src/game/dispenser.rs::Game::consume_with_remainder	
