@@ -21,8 +21,8 @@ StructureBlockEntity.isStructureLoadable	port	crates/horizon-client/src/game/str
 StructureBlockEntity.renderMode	port	crates/horizon-client-render/src/structure_block.rs::StructureBlock::render_mode	a creative structure block shows its mode's outline
 StructureBlockEntity.getRenderableBox	port	crates/horizon-client-render/src/structure_block.rs::StructureBlock::renderable_box	the outline box of SAVE and LOAD modes
 TestInstanceBlockEntity.Data.withSize	skip:java		record copy-with builder; no behaviour of its own
-TestInstanceBlockEntity.Data.withStatus	missing		minor: test instance status never changes; Horizon has no game test runner (/test only reports no instances)
-TestInstanceBlockEntity.Data.withError	missing		minor: no game test runner, so no error message is ever set on a test instance block
+TestInstanceBlockEntity.Data.withStatus	port	crates/horizon-client/src/game/game_tests.rs::Game::set_test_status	setRunning and setSuccess write the status through it and mark the block entity updated; a new status clears the error message
+TestInstanceBlockEntity.Data.withError	port	crates/horizon-client/src/game/game_tests.rs::Game::set_test_status	setErrorMessage carries the text as the block entity's error_message, which the next status change clears
 TheEndGatewayBlockEntity.beamAnimationTick	port	crates/horizon-client-render/src/block_entity_anim.rs::EndGateway::tick	client ticker: age goes up and the teleport cooldown goes down
 TheEndGatewayBlockEntity.getSpawnPercent	inline	crates/horizon-client-render/src/block_entity_render.rs::gateway_beam	spawn percent is (age + partial) / 200, clamped, inside the beam function
 TheEndGatewayBlockEntity.getCooldownPercent	inline	crates/horizon-client-render/src/block_entity_render.rs::gateway_beam	cooldown percent is one minus the clamped cooldown over 40, inside the beam function
@@ -91,7 +91,7 @@ TreeGrower.removeSaplings	inline	crates/horizon-world/src/level/growth.rs::Sim::
 TreeGrower.resetSaplings	inline	crates/horizon-world/src/level/growth.rs::Sim::grow_tree	restores the four blocks after a failed placement
 TreeGrower.isTwoByTwoSapling	inline	crates/horizon-world/src/level/growth.rs::Sim::two_by_two	all four blocks must be the sapling's own block
 MovingPistonBlock.destroy	port	crates/horizon-world/src/level/update.rs::Sim::destroy_moving_piston_base	a removed moving piston removes the extended base behind it, and leaves an unextended one
-MovingPistonBlock.useWithoutItem	missing		minor: a right click on a moving piston with no block entity does not remove it
+MovingPistonBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	the MovingPiston arm: a server-side click removes a moving piston whose block entity is gone, and one still in flight passes
 MovingPistonBlock.getDrops	port	crates/horizon-world/src/level/pistons.rs::dropped_state	the block the moving piston carries, or None (vanilla's empty list) when its block entity is gone; drop_resources calls it
 MovingPistonBlock.getBlockEntity	port	crates/horizon-world/src/level/pistons.rs::Sim::moving_piston	
 MovingPistonBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	rotation goes through the table built from block data
