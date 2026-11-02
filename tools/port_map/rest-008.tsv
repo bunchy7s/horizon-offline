@@ -23,7 +23,7 @@ RegistrySetBuilder.BuildState.throwOnError	skip:data		bootstrap and datagen regi
 RegistrySetBuilder.BuildState.createBootstrap	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
 RegistrySynchronization.packRegistries	inline	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	gap: minor: packs every registry SyncData holds; the synchronized-registry list is not checked here
 RegistrySynchronization.packRegistry	port	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	gap: minor: known_pack leaves out contents for every entry; vanilla checks each entry's known pack
-RegistrySynchronization.networkSafeRegistries	inline	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	gap: minor: unsure which registries count as networkable; decided when SyncData is built
+RegistrySynchronization.networkSafeRegistries	inline	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	the networkable set is `SYNCHRONIZED` (lan/data.rs:18: 32 registries, `RegistryDataLoader.SYNCHRONIZED_REGISTRIES` in vanilla's order) and registry_packets packs every one of them
 SectionPos.offset	inline	crates/horizon-client-render/src/light.rs::Region::slot	gap: minor: the light engine reaches neighbour sections by block coordinate; the SectionTracker walk is not checked
 SectionPos.sectionRelativePos	port	crates/horizon-core/src/position.rs::BlockPos::section_relative	
 SectionPos.relativeToBlockPos	port	crates/horizon-core/src/position.rs::SectionPos::relative_to_block	
@@ -108,7 +108,7 @@ PatchedDataComponentMap.size	skip:java		generic component map; Horizon sets type
 PatchedDataComponentMap.asPatch	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
 PatchedDataComponentMap.copy	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
 PatchedDataComponentMap.equals	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
-TypedDataComponent.encodeValue	skip:java		codec
+TypedDataComponent.encodeValue	port	crates/horizon-protocol/src/item/hash.rs::Component::code	the component's own codec form, hashed; one arm per component kind, with the kinds that have no persistent codec (map_post_processing, creative_slot_lock) as the None
 AttributeModifiersPredicate.matches	missing		`advancements.rs::item` reads `items`, `count`, the `potion_contents` and `damage` components and the `enchantments` and `damage` predicates; a `minecraft:attribute_modifiers` predicate is ignored, so the criterion matches too broadly
 AttributeModifiersPredicate.EntryPredicate.test	missing		same as `matches`: no entry of an `attribute_modifiers` predicate is tested
 BundlePredicate.matches	missing		ignored by `advancements.rs::item`, so a bundle contents criterion matches any bundle

@@ -141,6 +141,15 @@ impl Game<'_> {
                 json!({ "active": active, "cached": cached })
             }),
             "renderer": renderer,
+            // A build with the `alloc-census` feature: the live heap by the
+            // startup step, span or pool job that allocated it, else its thread.
+            "heap_by_tag_mb": horizon_threads::HEAP_CENSUS.then(|| {
+                horizon_threads::heap_census::census()
+                    .into_iter()
+                    .take(60)
+                    .map(|(tag, bytes)| json!([tag, mb(bytes.max(0) as u64)]))
+                    .collect::<Vec<_>>()
+            }),
         })
     }
 }
