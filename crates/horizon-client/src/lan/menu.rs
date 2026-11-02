@@ -17,6 +17,11 @@ pub trait Rules {
     fn max_stack(&self, item: &str) -> u32;
     /// The armor slot (0 head .. 3 feet) an item can be worn in.
     fn armor_index(&self, item: &str) -> Option<usize>;
+    /// `ItemStack.getEquipmentSlot`: the `minecraft:equippable` component's
+    /// slot ("head", "chest", "legs", "feet", "mainhand", "offhand").
+    fn equip_slot(&self, item: &str) -> Option<&str> {
+        self.items().get(item)?.equip_slot.as_deref()
+    }
 }
 
 /// An open block container.
@@ -346,6 +351,23 @@ fn quick_move(view: &mut View, i: usize, rules: &dyn Rules) {
             let mut rest = stack.clone();
             rest.count -= 1;
             (rest.count > 0).then_some(rest)
+        } else if rules.equip_slot(&stack.item) == Some("offhand") && view.get(45).is_none() {
+            // A shield or a totem goes to the empty off hand before the
+            // hotbar (InventoryMenu.quickMoveStack's OFFHAND branch).
+            let max = view.slot_max(45, &stack, rules);
+            let moved = stack.count.min(max);
+            view.set(
+                45,
+                Some(ItemStack {
+                    count: moved,
+                    ..stack.clone()
+                }),
+            );
+            let rest = stack.count - moved;
+            (rest > 0).then_some(ItemStack {
+                count: rest,
+                ..stack.clone()
+            })
         } else if hotbar.contains(&i) {
             move_to(view, stack, main, false, rules)
         } else {
