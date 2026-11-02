@@ -120,7 +120,7 @@ Shulker.findNewAttachment	inline	crates/horizon-client/src/mobs/shulker.rs::tick
 Shulker.makeBoundingBox	port	crates/horizon-client/src/mobs/shulker.rs::progress_aabb	
 Shulker.getDefaultDimensions	inline	crates/horizon-client/src/mobs/shulker.rs::progress_aabb	gap: minor: the down-face height scale is not seen here
 Shulker.startRiding	missing		unsure: no attach-face reset to DOWN when a shulker mounts a vehicle in shulker.rs
-Shulker.stopRiding	missing		unsure: no body yaw reset after a shulker dismounts in shulker.rs
+Shulker.stopRiding	inline	crates/horizon-client/src/mobs/shulker.rs::tick	the body yaw is pinned to 0 on every tick (`shulker::tick`, and `client_tick` for a remote one), so a dismounted shulker shows no leftover body yaw without a reset of its own
 Shulker.move	missing		unsure: no shulker-box move type (teleport) found in the piston code
 Shulker.findAttachableSurface	port	crates/horizon-client/src/mobs/shulker.rs::attachable	
 Shulker.isPositionBlocked	inline	crates/horizon-client/src/mobs/shulker.rs::can_stay_at	the blocked-position check is part of can_stay_at
