@@ -401,6 +401,7 @@ impl Game<'_> {
             "sculk" => Ok(Some(self.sculk_command(&words)?)),
             "hello" => Ok(Some(hello())),
             "status" => Ok(Some(self.control_status())),
+            "memory" => Ok(Some(self.memory_report())),
             "stall" => {
                 let millis: u64 = arg(1)?.parse()?;
                 if millis > 5000 {
@@ -418,7 +419,7 @@ impl Game<'_> {
                                 json!({ "game_time": g.world.game_time, "projectiles": g.projectiles_status() })
                             })
                         })
-                        .ok_or("the integrated server stopped")?
+                        .ok_or(super::integrated::NO_ANSWER)?
                 } else {
                     json!({ "game_time": self.world.game_time, "projectiles": self.projectiles_status() })
                 };
@@ -434,7 +435,7 @@ impl Game<'_> {
                 if let Some(server) = &self.integrated {
                     server
                         .call(move |g| g.agent.hold_server = held)
-                        .ok_or("the integrated server stopped")?;
+                        .ok_or(super::integrated::NO_ANSWER)?;
                 } else if self.remote.is_some() {
                     return Err("server-hold requires the world's host".into());
                 } else {
@@ -452,10 +453,10 @@ impl Game<'_> {
                     )
                     .into());
                 }
-                // ConfirmScreen.keyPressed: Escape answers no, nothing else goes past it.
+                // The command confirmation takes the keys; none go past it.
                 if self.command_prompt.is_some() {
-                    if key == KeyCode::Escape && arg(2)? != "up" {
-                        self.answer_command_prompt(false);
+                    if arg(2)? != "up" {
+                        self.command_prompt_key(key);
                     }
                     return ok();
                 }
@@ -698,7 +699,7 @@ impl Game<'_> {
                     let command = format!("give @s {item} {count}");
                     server
                         .call(move |g| g.owner_console_command(&command))
-                        .ok_or("the integrated server stopped")?;
+                        .ok_or(super::integrated::NO_ANSWER)?;
                     return Ok(Some(json!({ "ok": true, "given": count })));
                 }
                 let max = info.max_stack;
@@ -751,7 +752,7 @@ impl Game<'_> {
                 if let Some(server) = &self.integrated {
                     server
                         .call(move |g| g.world.day_time = time)
-                        .ok_or("the integrated server stopped")?;
+                        .ok_or(super::integrated::NO_ANSWER)?;
                 }
                 ok()
             }
@@ -770,7 +771,7 @@ impl Game<'_> {
                     let center = self.player.as_ref().map_or(Vec3::ZERO, |p| p.position);
                     let value = server
                         .call(move |g| g.in_owner_level(|g| g.control_mobs_at(radius, center)))
-                        .ok_or("the integrated server stopped")?;
+                        .ok_or(super::integrated::NO_ANSWER)?;
                     return Ok(Some(value));
                 }
                 Ok(Some(self.control_mobs(radius)))
@@ -780,7 +781,7 @@ impl Game<'_> {
                 if let Some(server) = &self.integrated {
                     let value = server
                         .call(|g| g.control_hurt_log())
-                        .ok_or("the integrated server stopped")?;
+                        .ok_or(super::integrated::NO_ANSWER)?;
                     return Ok(Some(value));
                 }
                 Ok(Some(self.control_hurt_log()))
@@ -1010,7 +1011,7 @@ impl Game<'_> {
                 if let Some(server) = &self.integrated {
                     server
                         .call(move |g| g.control_save(all).map_err(|e| e.to_string()))
-                        .ok_or("the integrated server stopped")??;
+                        .ok_or(super::integrated::NO_ANSWER)??;
                 } else if self.remote.is_none() {
                     self.begin_control_save(all, reply.clone())?;
                     return Ok(None);

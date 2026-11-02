@@ -90,7 +90,7 @@ fn a_tall_column_streams_lights_and_meshes_to_its_top() {
         while quiet < 40 {
             assert!(Instant::now() < deadline, "streaming never settled");
             let (uploads, _) = streaming.update(world);
-            let idle = uploads.is_empty() && streaming.pending() == 0;
+            let idle = uploads.is_empty() && !streaming.busy();
             meshes.extend(uploads);
             thread::sleep(Duration::from_millis(5));
             quiet = if idle { quiet + 1 } else { 0 };

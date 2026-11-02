@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "player_portal",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_portal",
+      "neoforge": "EntityTravelToDimensionEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A server player about to travel through a portal, cancellable (`native_player_portal`).",
+  "doc_summary": "A server player about to travel through a Nether portal, End portal or End gateway: `native_player_portal(player, name, from_dimension, to_dimension, cause, cancel)` supplies the source and target dimension ids; `cause` is `nether_portal`, `end_portal` or `end_gateway`. Set `cancel` to leave the player where they are. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest tick is handled. Bundles need \"hooks\": @API:player_portal@."
+}
