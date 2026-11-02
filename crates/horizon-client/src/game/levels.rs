@@ -425,6 +425,7 @@ impl Game<'_> {
         let observe_level =
             running.is_some() && (self.serving.is_some() || self.options.dedicated.is_some());
         let dims = self.levels_to_tick();
+        let order = dims.clone();
         let n = dims.len();
         let mut result = Ok(());
         for (k, dim) in dims.into_iter().enumerate() {
@@ -467,6 +468,22 @@ impl Game<'_> {
                 self.native_level_tick_post(dim.id());
             }
             self.publish_server_debug(dim);
+            // An entity that crossed into a level that already ticked this
+            // server tick is in it when the tick ends (`addDuringTeleport`).
+            if running == Some(true) {
+                let mut moved = false;
+                for &earlier in &order[..k] {
+                    if !self.arrival_chunks(earlier).is_empty()
+                        && self.enter_level(None, earlier).is_ok()
+                    {
+                        self.land_portal_arrivals();
+                        moved = true;
+                    }
+                }
+                if moved {
+                    self.enter_level(None, dim)?;
+                }
+            }
         }
         self.level_pass = Pass::default();
         if result.is_err() {
