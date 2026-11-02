@@ -28,8 +28,8 @@ CrudeIncrementalIntIdentityHashBiMap.copy	skip:java		identity bimap over registr
 Crypt.generateKeyPair	port	crates/horizon-protocol/src/rsa.rs::RsaPrivateKey::generate	RSA key pair with the bit size passed in; vanilla passes 1024
 Crypt.digestData	port	crates/horizon-protocol/src/crypto.rs::server_hash	returns the signed hex string; vanilla returns bytes and the caller converts them
 Crypt.rsaStringToKey	port	crates/horizon-client-render/src/auth.rs::pem_der	the PEM armour around the services' keys
-Crypt.rsaPublicKeyToString	missing		minor: PEM writer for the account chat public key; Horizon has no PEM writer
-Crypt.pemRsaPrivateKeyToString	missing		minor: PEM writer for the account chat private key; Horizon has no PEM writer
+Crypt.rsaPublicKeyToString	missing		the writer half of the key-pair codec Crypt's static initialiser builds (its only caller); Horizon reads a PEM key pair (auth.rs::pem_der, parse_certificates) and writes none
+Crypt.pemRsaPrivateKeyToString	missing		the writer half of the key-pair codec Crypt's static initialiser builds (its only caller); Horizon reads a PEM key pair (auth.rs::pem_der, parse_certificates) and writes none
 Crypt.byteToPrivateKey	port	crates/horizon-protocol/src/rsa.rs::RsaPrivateKey::from_der	the account chat key pair's PEM key is decoded and read as PKCS8EncodedKeySpec (a bare PKCS#1 key too) in auth.rs::parse_certificates
 Crypt.byteToPublicKey	port	crates/horizon-protocol/src/rsa.rs::RsaPublicKey::from_der	X.509 SubjectPublicKeyInfo decode
 Crypt.decryptByteToSecretKey	port	crates/horizon-protocol/src/rsa.rs::RsaPrivateKey::decrypt	RSA PKCS#1 v1.5 decrypt of the shared secret; the bytes are used as the AES key as given
@@ -63,17 +63,17 @@ DependencySorter.addDependencyIfNotCyclic	inline	crates/horizon-world/src/worldg
 DependencySorter.orderByDependencies	inline	crates/horizon-world/src/worldgen/tags.rs::TagDefinitions::build	required edges first, then optional ones, then the visit order
 DirectoryLock.create	port	crates/horizon-client/src/save.rs::SessionLock::acquire	exclusive file lock on session.lock with the two-byte snowman content
 DirectoryLock.isLocked	port	crates/horizon-client/src/save.rs::SessionLock::is_locked	trying for the world's session.lock tells a locked world; title.rs uses it to flag the entry
-Ease.inBack	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
-Ease.inElastic	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
-Ease.inExpo	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
-Ease.inOutBounce	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
-Ease.inOutCirc	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
-Ease.inOutQuad	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
-Ease.inOutQuart	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
-Ease.inOutQuint	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
-Ease.outBounce	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
-Ease.outElastic	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
-Ease.outExpo	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
+Ease.inBack	missing		a named easing only a datapack's timeline can reach: the four shipped timelines ask for constant, cubic_bezier or no ease, and environment.rs::Environment::load_dimension reads those two
+Ease.inElastic	missing		a named easing only a datapack's timeline can reach: the four shipped timelines ask for constant, cubic_bezier or no ease, and environment.rs::Environment::load_dimension reads those two
+Ease.inExpo	missing		a named easing only a datapack's timeline can reach: the four shipped timelines ask for constant, cubic_bezier or no ease, and environment.rs::Environment::load_dimension reads those two
+Ease.inOutBounce	missing		a named easing only a datapack's timeline can reach: the four shipped timelines ask for constant, cubic_bezier or no ease, and environment.rs::Environment::load_dimension reads those two
+Ease.inOutCirc	missing		a named easing only a datapack's timeline can reach: the four shipped timelines ask for constant, cubic_bezier or no ease, and environment.rs::Environment::load_dimension reads those two
+Ease.inOutQuad	missing		a named easing only a datapack's timeline can reach: the four shipped timelines ask for constant, cubic_bezier or no ease, and environment.rs::Environment::load_dimension reads those two
+Ease.inOutQuart	missing		a named easing only a datapack's timeline can reach: the four shipped timelines ask for constant, cubic_bezier or no ease, and environment.rs::Environment::load_dimension reads those two
+Ease.inOutQuint	missing		a named easing only a datapack's timeline can reach: the four shipped timelines ask for constant, cubic_bezier or no ease, and environment.rs::Environment::load_dimension reads those two
+Ease.outBounce	missing		a named easing only a datapack's timeline can reach: the four shipped timelines ask for constant, cubic_bezier or no ease, and environment.rs::Environment::load_dimension reads those two
+Ease.outElastic	missing		a named easing only a datapack's timeline can reach: the four shipped timelines ask for constant, cubic_bezier or no ease, and environment.rs::Environment::load_dimension reads those two
+Ease.outExpo	missing		a named easing only a datapack's timeline can reach: the four shipped timelines ask for constant, cubic_bezier or no ease, and environment.rs::Environment::load_dimension reads those two
 EasingType.cubicBezier	inline	crates/horizon-client-render/src/environment.rs::Environment::load_dimension	reads the four control points of a cubic_bezier ease; gap: minor: no range check, see CubicBezierControls.validate
 EasingType.CubicBezier.curveFromControls	inline	crates/horizon-client-render/src/environment.rs::Easing::apply	the curve coefficients closure
 EasingType.CubicBezier.solveT	inline	crates/horizon-client-render/src/environment.rs::Easing::apply	Newton steps with the 1e-5 tolerance
@@ -82,7 +82,7 @@ EasingType.CubicBezier.equals	skip:java		value equality
 EasingType.CubicBezier.toString	skip:debug		debug string
 EasingType.CubicBezier.CubicCurve.sample	inline	crates/horizon-client-render/src/environment.rs::Easing::apply	the sample closure
 EasingType.CubicBezier.CubicCurve.sampleGradient	inline	crates/horizon-client-render/src/environment.rs::Easing::apply	the gradient closure
-EasingType.CubicBezierControls.validate	missing		minor: vanilla rejects control points outside [0;1] when a timeline loads; Horizon takes any value
+EasingType.CubicBezierControls.validate	missing		vanilla rejects control points outside [0;1] when a timeline loads; environment.rs::Environment::load_dimension takes the four numbers as given
 EncoderCache.Key.equals	skip:java		cache key equality
 EncoderCache.Key.hashCode	skip:java		cache key hashing
 ExceptionCollector.add	skip:java		suppressed exception collector
@@ -117,7 +117,7 @@ FastBufferedInputStream.skip	skip:java		buffered stream helper; Rust readers do 
 FastBufferedInputStream.fill	skip:java		buffered stream helper; Rust readers do their own buffering
 FileSystemUtil.safeGetPath	skip:other		opens a jar or zip filesystem for a URI; Horizon reads archives with the zip crate
 FileUtil.sanitizeName	port	crates/horizon-client/src/title.rs::Title::target_folder	gap: minor: replaces every non-alphanumeric character with _; vanilla only replaces illegal file characters, dots, slashes and quotes
-FileUtil.isPathPortable	skip:other		portable path check; no caller in the 26.3 source
+FileUtil.isPathPortable	port	crates/horizon-client/src/game/structure_blocks.rs::portable_path	the structure path's check: no empty, `.` or `..` segment; vanilla also tests the part's characters (isPathPartPortable)
 FileUtil.decomposePath	skip:data		resource path handling; Horizon reads its data from tables and files
 FileUtil.resolvePath	skip:data		resource path handling; Horizon reads its data from tables and files
 FileUtil.isValidPathSegment	skip:data		resource path handling; Horizon reads its data from tables and files
@@ -127,8 +127,8 @@ FileUtil.isEmptyPath	skip:data		resource path handling; Horizon reads its data f
 FileZipper.add	skip:debug		profiling report archive (Minecraft.archiveProfilingReport, PerfCommand); Horizon writes no zip report
 FileZipper.close	skip:debug		profiling report archive (Minecraft.archiveProfilingReport, PerfCommand); Horizon writes no zip report
 FormattedCharSequence.forward	port	crates/horizon-client-core/src/text.rs::Text::styled	styled text object; the per-character walk is Text::chars
-FormattedCharSequence.backward	skip:other		two-argument reverse walk; no caller in the 26.3 source (SubStringSource uses the three-argument form)
-FormattedCharSequence.decorateOutput	missing		minor: char-code modifier for reversed text, used only for right-to-left languages; Horizon has no right-to-left layout
+FormattedCharSequence.backward	skip:other		the reverse walk SubStringSource.substring does, which is skip:ui (the HUD draws each span with its own style)
+FormattedCharSequence.decorateOutput	inline	crates/horizon-client-render/src/bidi.rs::reorder	the mirror a right-to-left character is drawn as; vanilla's sink mirrors every code point when the language reads right to left, here only the code points in a right-to-left run
 FormattedCharSequence.composite	port	crates/horizon-client-core/src/text.rs::Text::empty	zero parts give the empty sequence
 FormattedCharSequence.fromPair	port	crates/horizon-client-core/src/text.rs::Text::append	concatenation of two sequences
 FutureChain.append	skip:other		ordering helper for the async chat-signature checks in ServerGamePacketListenerImpl; a scheduling wrapper, no game behaviour of its own

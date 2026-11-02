@@ -585,6 +585,7 @@ public final class VanillaMobAiOracle {
                             new net.minecraft.world.item.ItemStack(BuiltInRegistries.ITEM.getValue(
                                 net.minecraft.resources.Identifier.parse("minecraft:red_harness"))));
                         case "noai" -> mob.setNoAi(true);
+                        case "agelocked" -> method(AgeableMob.class, "setAgeLocked", boolean.class).invoke(mob, true);
                         case "profession" -> {
                             Villager villager = (Villager) mob;
                             villager.setVillagerData(villager.getVillagerData().withProfession(level.registryAccess(),
@@ -1109,6 +1110,7 @@ public final class VanillaMobAiOracle {
                 mem.sort(null);
                 sb.append("\tmem ").append(String.join(" ", mem));
             }
+            if (m instanceof AgeableMob ageable) sb.append("\tage ").append(ageable.getAge());
             if (m instanceof Villager villager) sb.append("\tvx ").append(villager(villager));
             if (m instanceof net.minecraft.world.entity.animal.golem.CopperGolem golem) {
                 Object opened = get(golem, "openedChestPos");
