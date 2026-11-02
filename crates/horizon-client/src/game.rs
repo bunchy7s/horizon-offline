@@ -386,6 +386,16 @@ use horizon_world::{
     },
     registry::BlockStateId,
 };
+pub use maps::{NativeMapDecoration, NativeMapInfo};
+pub use native_block_entity_draw::BlockEntityDraw;
+pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
+pub use native_data_maps::NativeDataMapType;
+pub use native_falling::NativeFalling;
+pub use native_hooks::{NativeClock, NativeShake};
+pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
+pub use native_server::NativeExperienceOrb;
+pub use native_world_columns::NativeColumnBlocks;
+pub use native_world_edit::{NativeBlockEdit, NativeBlockRun, NativeHeightmap};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
