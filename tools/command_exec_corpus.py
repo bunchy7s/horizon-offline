@@ -834,6 +834,37 @@ def items_and_loot():
     ]
 
 
+def item_nbt_count_bounds():
+    """ItemStack's NBT count codec defaults invalid counts to one (#7724)."""
+    stand = '@e[type=minecraft:armor_stand,tag=h085,limit=1]'
+    chest = '12 220 4'
+    ops = setup('/tick freeze', '/kill @e[tag=h085]',
+                f'/setblock {chest} minecraft:air strict',
+                f'/setblock {chest} minecraft:chest strict',
+                '/summon minecraft:armor_stand 8 220 4 {Tags:["h085"],NoGravity:1b}')
+    ops += [cmd(f'/execute if entity {stand}'),
+            cmd(f'/execute if block {chest} minecraft:chest')]
+    for item in ('minecraft:stone', 'minecraft:diamond_sword'):
+        for count in (None, '-1', '0', '1', '2', '64', '99', '100', '255', '256',
+                      '2147483647', '1b', '1.5f', '"1"'):
+            nbt = '{id:"' + item + '"' + ('' if count is None else ',count:' + count) + '}'
+            ops += setup(f'/item replace entity {stand} weapon.mainhand with minecraft:air')
+            ops += [
+                cmd(f'/data modify entity {stand} equipment.mainhand set value {nbt}'),
+                cmd(f'/data get entity {stand} equipment.mainhand.id'),
+                cmd(f'/data get entity {stand} equipment.mainhand.count'),
+            ]
+            entry = '{Slot:0b,' + nbt[1:]
+            ops += setup(f'/data modify block {chest} Items set value []')
+            ops += [
+                cmd(f'/data modify block {chest} Items set value [{entry}]'),
+                cmd(f'/data get block {chest} Items[0].id'),
+                cmd(f'/data get block {chest} Items[0].count'),
+            ]
+    return ops + setup('/kill @e[tag=h085]', f'/setblock {chest} minecraft:air strict',
+                       '/tick unfreeze')
+
+
 def world_misc():
     return [
         # BlockInput.place calculates neighbour shapes before setting the block,
@@ -1833,6 +1864,7 @@ def groups():
         ('levels', levels()),
         ('end portal entities', end_portal_entities()),
         ('items and loot', items_and_loot()),
+        ('item NBT count bounds', item_nbt_count_bounds()),
         ('world', world_misc()),
         ('progression', progression()),
         ('functions and packs', functions_and_packs()),
