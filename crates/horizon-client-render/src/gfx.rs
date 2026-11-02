@@ -821,6 +821,7 @@ pub struct Renderer {
     /// `RenderPipelines.WATER_MASK`: depth writes only, no colour.
     water_mask_pipeline: wgpu::RenderPipeline,
     cloud_pipeline: wgpu::RenderPipeline,
+    hdr_cloud_mark_pipeline: wgpu::RenderPipeline,
     cloud_mesh: crate::clouds::Mesh,
     cloud_buffer: wgpu::Buffer,
     cloud_capacity: u64,
@@ -2984,6 +2985,17 @@ impl Renderer {
             alpha_blend,
             true,
         );
+        let hdr_cloud_mark_pipeline = entity_pipeline_with(
+            "HDR cloud mark",
+            Some(wgpu::Face::Back),
+            false,
+            wgpu::CompareFunction::GreaterEqual,
+            Default::default(),
+            wgpu::BlendState::REPLACE,
+            true,
+            "fs_hdr_cloud_mark",
+            wgpu::ColorWrites::ALPHA,
+        );
         // RenderPipelines.TEXT_SEE_THROUGH: translucent, no depth test or
         // writes, culled like every world text pipeline (TEXT_SNIPPET keeps
         // RenderPipeline.Builder's default): a name tag or text display hides
@@ -3677,6 +3689,7 @@ impl Renderer {
             translucent_item_pipeline,
             water_mask_pipeline,
             cloud_pipeline,
+            hdr_cloud_mark_pipeline,
             cloud_mesh: Default::default(),
             cloud_buffer,
             cloud_capacity: 4,
@@ -3834,6 +3847,19 @@ impl Renderer {
             pass.set_pipeline(&self.hdr_mark_pipeline);
             pass.draw_indexed(0..quads * 6, (first * 4) as i32, 0..1);
         }
+    }
+    /// HDR lighting on the clouds just drawn: the sky's value (`fs_hdr_cloud_mark`).
+    fn mark_clouds(&self, pass: &mut wgpu::RenderPass<'_>, quads: u32) {
+        if self.hdr.as_ref().is_none_or(|h| !h.lighting) {
+            return;
+        }
+        pass.set_pipeline(&self.hdr_cloud_mark_pipeline);
+        pass.set_bind_group(0, &self.entity_group, &[]);
+        pass.set_bind_group(1, &self.cloud_group, &[]);
+        pass.set_vertex_buffer(0, self.cloud_buffer.slice(..));
+        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..quads * 6, 0, 0..1);
+        pass.set_bind_group(0, &self.group, &[]);
     }
     /// LevelRenderer.submitBlockOutline: the buffer holds `edges` per stroke, the black
     /// secondary stroke first when high contrast is on.
@@ -7811,6 +7837,9 @@ impl Renderer {
                     );
                     pass.set_bind_group(0, &self.group, &[]);
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    if cloud_quads > 0 && !pack_draws_clouds {
+                        self.mark_clouds(&mut pass, cloud_quads);
+                    }
                     // HDR output's mark on what shines in the stages, as the classic
                     // pass marks it after drawing it: eyes, the dragon's eyes and rays,
                     // firework sparks and lightning.
@@ -7906,6 +7935,7 @@ impl Renderer {
                 pass.set_bind_group(1, &self.cloud_group, &[]);
                 pass.set_vertex_buffer(0, self.cloud_buffer.slice(..));
                 pass.draw_indexed(0..cloud_quads * 6, 0, 0..1);
+                self.mark_clouds(&mut pass, cloud_quads);
             }
             // LevelRenderer.executeClassicTransparency: weather after translucent
             // terrain and clouds, so the water behind the rain is drawn first.
