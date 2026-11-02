@@ -611,7 +611,7 @@ impl Game<'_> {
             }
             horizon_client::graphics::Pacing::Efficient => {
                 let mut clock = horizon_client::window::SleepingClock(self.frame_clock);
-                horizon_client::window::end_frame(&mut self.limiter, limit, &mut clock);
+                horizon_client::window::end_frame_on_grid(&mut self.limiter, limit, &mut clock);
             }
         }
     }

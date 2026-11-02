@@ -31,6 +31,23 @@ pub(super) fn symbol() -> Div {
         }))
 }
 
+/// The symbol at `size` pixels square (the glass top bar's button draws it at 16).
+pub(super) fn logo(size: f32) -> Div {
+    let u = size / 21.;
+    div()
+        .relative()
+        .flex_none()
+        .size(px(size))
+        .children(SQUARES.map(|(x, y, colour)| {
+            div()
+                .absolute()
+                .left(px(x * u))
+                .top(px(y * u))
+                .size(px(9. * u))
+                .bg(gpui::rgb(colour))
+        }))
+}
+
 /// The button, in the dark or light form the launcher's look calls for.
 pub(super) fn sign_in_button(id: &'static str, t: &Theme) -> Stateful<Div> {
     let (fill, ink, border) = if t.dark {
