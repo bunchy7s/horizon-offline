@@ -2929,6 +2929,7 @@ impl Game<'_> {
             let (x, y, z) = pos;
             self.world.modified.insert((x >> 4, z >> 4));
             if out.brewed {
+                self.native_brewing_complete([x, y, z]);
                 self.play_at("minecraft:block.brewing_stand.brew", [x, y, z], 1.0, 1.0);
             }
             for d in out.drops {
