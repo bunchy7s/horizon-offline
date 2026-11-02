@@ -1398,6 +1398,9 @@ fn matches_focus(id: &FocusId, i: usize, wd: &Widget) -> bool {
 pub enum Event {
     /// An accepted button press or the release of a slider.
     ButtonClick,
+    /// Horizon's own: download the Modrinth hit at this index of the pack
+    /// screen's browser. The game owns the packs folder, not this screen.
+    DownloadPack(usize),
     /// Close the options screens (back to the pause menu or title).
     Close,
     /// Settings changed: apply and save them.
@@ -1492,6 +1495,8 @@ pub struct OptionsUi {
     language_choice: Option<String>,
     language_search: ui::EditBox,
     pub(crate) settings_search: ui::EditBox,
+    /// Horizon's `packBrowser` extra: the pack screen's Add button.
+    pub pack_browser: bool,
     /// Packs: the packs found and the selection the screen opens with.
     pub pack_infos: Vec<crate::pack_screen::PackInfo>,
     pub pack_selection: Vec<String>,
@@ -1568,6 +1573,7 @@ impl Default for OptionsUi {
             language_choice: None,
             language_search: search,
             settings_search,
+            pack_browser: false,
             pack_infos: Vec::new(),
             pack_selection: Vec::new(),
             pack_screen: None,
@@ -3820,6 +3826,9 @@ impl OptionsUi {
                     None => Event::OpenPackFolder,
                 }),
                 crate::pack_screen::Action::Done => events.extend(self.back(s)),
+                crate::pack_screen::Action::BrowsePick(i) => {
+                    events.push(Event::DownloadPack(i));
+                }
                 crate::pack_screen::Action::None => {}
             }
             return events;
@@ -4386,6 +4395,7 @@ impl OptionsUi {
                     self.pack_infos.clone(),
                     &self.pack_selection,
                 );
+                screen.browsing_allowed = self.pack_browser;
                 screen.changed = std::mem::take(&mut self.pack_reselected);
                 self.pack_screen = Some(screen);
             }

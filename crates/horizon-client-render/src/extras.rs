@@ -60,6 +60,10 @@ impl Corner {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Extras {
+    /// The Select Resource Packs screen's Add button, which browses
+    /// Modrinth. Off by default: it is Horizon's own and the screen is
+    /// otherwise vanilla's (tools/test_pack_screen_parity.py).
+    pub pack_browser: bool,
     pub fullbright: bool,
     /// Held, dropped and burning light sources light their surroundings (`dynamic_light`).
     pub dynamic_lights: bool,
@@ -142,6 +146,7 @@ pub struct Extras {
 impl Default for Extras {
     fn default() -> Self {
         Self {
+            pack_browser: false,
             fullbright: false,
             dynamic_lights: false,
             zoom: false,
@@ -206,6 +211,7 @@ impl Extras {
                 _ => d,
             };
             match key.trim() {
+                "packBrowser" => e.pack_browser = flag(e.pack_browser),
                 "fullbright" => e.fullbright = flag(e.fullbright),
                 "dynamicLights" => e.dynamic_lights = flag(e.dynamic_lights),
                 "zoom" => e.zoom = flag(e.zoom),
@@ -273,7 +279,8 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\n",
+            "packBrowser:{}\nfullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\n",
+            bool_text(self.pack_browser),
             bool_text(self.fullbright),
             bool_text(self.dynamic_lights),
             bool_text(self.zoom),

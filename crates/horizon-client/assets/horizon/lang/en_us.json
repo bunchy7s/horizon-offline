@@ -440,5 +440,22 @@
   "horizon.repro.bundle": "Repro bundle: %s",
   "horizon.repro.error": "Repro: %s",
   "horizon.repro.no_recording": "There is no recording to export yet.",
-  "horizon.repro.replay_started": "Replay started: %s"
+  "horizon.repro.replay_started": "Replay started: %s",
+  "horizon.pack.add": "+",
+  "horizon.pack.addInfo": "Add a resource pack from Modrinth",
+  "horizon.pack.addWorking": "Asking Modrinth...",
+  "horizon.pack.addNone": "No resource packs found",
+  "horizon.pack.addTitle": "Add a Resource Pack",
+  "horizon.pack.install": "Install",
+  "horizon.pack.installing": "Installing",
+  "horizon.pack.installed": "Installed",
+  "horizon.pack.search": "Search",
+  "horizon.pack.searchHint": "Search Modrinth...",
+  "horizon.pack.filters": "Filters",
+  "horizon.pack.filter.realistic": "Realistic",
+  "horizon.pack.filter.simplistic": "Simplistic",
+  "horizon.pack.filter.vanillaLike": "Vanilla-like",
+  "horizon.pack.filter.x16": "16x",
+  "horizon.pack.filter.x32": "32x",
+  "horizon.pack.filter.x64": "64x"
 }
