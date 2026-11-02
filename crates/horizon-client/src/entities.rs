@@ -130,6 +130,10 @@ pub struct ItemEntity {
 pub struct ItemEnvironmentTick {
     pub alive: bool,
     pub lava_hurt: bool,
+    /// `ItemStack.onDestroyed` of the damage that emptied the health: the
+    /// stacks the destroyed item left, which `ItemUtils.onContainerDestroyed`
+    /// adds to the level where it lay.
+    pub spilled: Vec<ItemStack>,
 }
 impl ItemEnvironmentTick {
     pub fn should_play_lava_hurt_sound(&self, tick: u32) -> bool {
@@ -183,6 +187,7 @@ impl ItemEntity {
         );
         let fluid = facts.get(at).fluid;
         let fire_immune = items.resists_fire(&self.stack, "minecraft:in_fire");
+        let mut spilled = Vec::new();
         if fluid == Fluid::Water || fire_immune {
             self.fire_ticks = 0;
         }
@@ -191,7 +196,7 @@ impl ItemEntity {
                 && fluid != Fluid::Lava
                 && !items.resists_fire(&self.stack, "minecraft:on_fire")
             {
-                self.health -= 1;
+                spilled.extend(self.hurt(1).unwrap_or_default());
             }
             self.fire_ticks -= 1;
         }
@@ -199,7 +204,7 @@ impl ItemEntity {
         if fluid == Fluid::Lava && !fire_immune {
             self.fire_ticks = self.fire_ticks.max(300);
             if !items.resists_fire(&self.stack, "minecraft:lava") {
-                self.health -= 4;
+                spilled.extend(self.hurt(4).unwrap_or_default());
                 lava_hurt = true;
             }
         }
@@ -207,7 +212,7 @@ impl ItemEntity {
         if fire_damage > 0.0 && !fire_immune {
             self.fire_ticks = self.fire_ticks.max(160);
             if !items.resists_fire(&self.stack, "minecraft:in_fire") {
-                self.health -= fire_damage as i32;
+                spilled.extend(self.hurt(fire_damage as i32).unwrap_or_default());
             }
         }
         // CactusBlock.entityInside: `entity.hurt(cactus, 1.0)`. An item has no
@@ -217,12 +222,28 @@ impl ItemEntity {
         if crate::motion::environment::cactus_contact(world, registry, self.bounds())
             && !items.resists_cactus(&self.stack)
         {
-            self.health -= 1;
+            spilled.extend(self.hurt(1).unwrap_or_default());
         }
         ItemEnvironmentTick {
             alive: self.health > 0,
             lava_hurt,
+            spilled,
         }
+    }
+    /// `ItemEntity.hurtServer`'s health: `amount` off the health, and an item
+    /// whose health reaches 0 is destroyed at once (`ItemStack.onDestroyed`,
+    /// then `discard`), so what it held leaves it here. None while the item
+    /// survives; the emptied stacks otherwise.
+    pub fn hurt(&mut self, amount: i32) -> Option<Vec<ItemStack>> {
+        self.health -= amount;
+        if self.health > 0 {
+            return None;
+        }
+        // `ItemStack.onDestroyed` runs the item's own arm. A bundle's
+        // (`BundleItem.onDestroyed`) empties its `bundle_contents` and hands
+        // them back; only a bundle holds that component, so the component is
+        // the dispatch (a mod's own bundle carries one too).
+        Some(crate::bundle::destroyed(&mut self.stack))
     }
     /// `ItemEntity.tick` on a server: an item whose box is inside a block
     /// (one placed where it lay) has no physics this tick
@@ -2875,3 +2896,4 @@ mod armor_stand_motion_tests {
         );
     }
 }
+
