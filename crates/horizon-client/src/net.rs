@@ -1184,8 +1184,14 @@ mod tests {
             let (host, port) = parse_address(address).unwrap();
             connecting_line(&host, port)
         };
-        assert_eq!(line("play.example.net"), "Connecting to play.example.net, 25565");
-        assert_eq!(line("play.example.net:25577"), "Connecting to play.example.net, 25577");
+        assert_eq!(
+            line("play.example.net"),
+            "Connecting to play.example.net, 25565"
+        );
+        assert_eq!(
+            line("play.example.net:25577"),
+            "Connecting to play.example.net, 25577"
+        );
         assert_eq!(line("[::1]:25566"), "Connecting to ::1, 25566");
     }
 
