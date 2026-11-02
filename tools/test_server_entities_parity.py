@@ -100,10 +100,12 @@ SCENE = [
 # finalizeSpawn's random modifiers on client-syncable attributes (a leader zombie's max health); their amounts
 # differ from one server to the other.
 RANDOM_MODIFIERS = re.compile(r'(id=minecraft:(?:random_spawn_bonus|leader_zombie_bonus), amount=)[^,]+')
-# An item's yaw and its sideways motion come from the level's random (ItemEntity's constructor), and so does
-# where it slides to; where it was added and its upward motion don't.
+# An item's yaw and its sideways motion come from the level's random (ItemEntity's constructor), and so do where
+# it slides to and the motion last synced as it comes to rest (vanilla's own runs differ there); where it was added,
+# its upward motion then and the height it rests at don't.
 ITEM_ROTATION = re.compile(r' rot \S+')
 ITEM_SIDEWAYS = re.compile(r'(motion|now) \([^,]+, ([^,]+), [^)]+\)')
+ITEM_LAST_MOTION = re.compile(r'(\| now .* motion )\([^)]+\)')
 
 
 def scene_lines(lines):
@@ -116,6 +118,7 @@ def scene_lines(lines):
             line = RANDOM_MODIFIERS.sub(r'\1~', line)
             if line.startswith('play-entities entity minecraft:item '):
                 line = ITEM_SIDEWAYS.sub(r'\1 (~, \2, ~)', ITEM_ROTATION.sub(' rot ~', line))
+                line = ITEM_LAST_MOTION.sub(r'\1~', line)
             out.append(line)
     return out
 
