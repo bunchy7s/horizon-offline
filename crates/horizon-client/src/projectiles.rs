@@ -1080,6 +1080,91 @@ mod tests {
             &self.0
         }
     }
+    /// Open air inside a border from x, z = -4.5 to 5.5 (`/worldborder set
+    /// 10` centred on 0.5, 0.5).
+    const BORDER: [f64; 4] = [-4.5, -4.5, 5.5, 5.5];
+    /// `WorldBorder.clampVec3ToBound`'s far-edge inset, the float 1.0E-5F as
+    /// the class file holds it.
+    const INSET: f64 = 9.999999747378752E-6;
+    struct Bordered(Vec<(Who, Aabb)>);
+    impl ProjectileWorld for Bordered {
+        fn clip(&self, from: Vec3, to: Vec3) -> Option<(Vec3, [i32; 3], [i32; 3])> {
+            clip_including_border(None, from, to, BORDER)
+        }
+        fn in_water(&self, _: Aabb) -> bool {
+            false
+        }
+        fn targets(&self) -> &[(Who, Aabb)] {
+            &self.0
+        }
+    }
+    #[test]
+    fn a_pearl_thrown_at_the_world_border_stops_on_it() {
+        let mut p = Projectile::new(
+            ProjectileKind::EnderPearl,
+            Vec3::new(3.5, 100.0, 0.5),
+            Some(Who::Player),
+        );
+        (p.left_owner, p.velocity) = (true, Vec3::new(3.0, 0.0, 0.0));
+        let (keep, hit) = p.tick(&Bordered(vec![]));
+        // It would end at x = 3.5 + 3 * 0.99F = 6.47, past maxX 5.5: the hit
+        // is on the border, 1.0E-5F inside it, facing east (+x), at the
+        // height it reached (100 - 0.03 * 0.99F).
+        let at = Vec3::new(5.5 - INSET, 100.0 - 0.03 * f64::from(0.99_f32), 0.5);
+        assert!(!keep, "ThrownEnderpearl.onHit discards the pearl");
+        let Hit::Block {
+            pos,
+            at: hit_at,
+            face,
+        } = hit
+        else {
+            panic!("no border hit: {hit:?}");
+        };
+        assert!((hit_at.x - at.x).abs() < 1e-12, "{hit_at:?}");
+        assert!((hit_at.y - at.y).abs() < 1e-9, "{hit_at:?}");
+        assert_eq!(hit_at.z, 0.5);
+        assert_eq!((pos, face), ([5, 99, 0], [1, 0, 0]));
+        assert_eq!(p.position, hit_at, "the pearl stays where it hit");
+        // It teleports its owner to where it started that tick (oldPosition),
+        // inside the border.
+        assert_eq!(p.previous, Vec3::new(3.5, 100.0, 0.5));
+    }
+    #[test]
+    fn the_border_clamps_each_axis_and_faces_the_travel() {
+        // Out across the near edge of z: minZ is kept as is, facing north.
+        let from = Vec3::new(0.5, 70.0, -4.0);
+        let hit = clip_including_border(None, from, Vec3::new(0.7, 70.0, -6.0), BORDER);
+        assert_eq!(
+            hit,
+            Some((Vec3::new(0.7, 70.0, -4.5), [0, 70, -5], [0, 0, -1]))
+        );
+        // Ending on maxX itself is outside (isWithinBounds: x < maxX).
+        let hit = clip_including_border(None, from, Vec3::new(5.5, 70.0, -4.0), BORDER)
+            .expect("a border hit");
+        assert_eq!(hit.0.x, 5.5 - INSET);
+        assert_eq!(hit.2, [1, 0, 0]);
+    }
+    #[test]
+    fn the_border_leaves_inner_hits_and_rays_from_outside_alone() {
+        let inside = Vec3::new(0.5, 70.0, 0.5);
+        // A miss that stays inside.
+        assert_eq!(
+            clip_including_border(None, inside, Vec3::new(5.0, 70.0, 5.0), BORDER),
+            None
+        );
+        // A block struck before the border.
+        let block = Some((Vec3::new(2.0, 70.0, 0.5), [2, 70, 0], [-1, 0, 0]));
+        assert_eq!(
+            clip_including_border(block, inside, Vec3::new(9.0, 70.0, 0.5), BORDER),
+            block
+        );
+        // A ray that starts outside the border is not stopped by it.
+        let outside = Vec3::new(7.0, 70.0, 0.5);
+        assert_eq!(
+            clip_including_border(None, outside, Vec3::new(9.0, 70.0, 0.5), BORDER),
+            None
+        );
+    }
     fn thrown(kind: ProjectileKind) -> Projectile {
         let mut p = Projectile::new(kind, Vec3::new(0.0, 100.0, 0.0), Some(Who::Player));
         (p.left_owner, p.velocity) = (true, Vec3::new(1.5, 0.0, 0.0));
