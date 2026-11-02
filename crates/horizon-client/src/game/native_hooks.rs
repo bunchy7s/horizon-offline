@@ -1030,21 +1030,6 @@ impl Game<'_> {
         }
         self.observed_screen = current;
     }
-
-    /// A screen was observed opening, at most once per frame.
-    pub(super) fn native_screen_opening(&self, screen: &NativeScreenView<'_>) {
-        mod_api::dispatch_screen_opening(self, mod_api::mods(), screen);
-    }
-
-    /// A screen was observed opening or changing rectangle, at most once per frame.
-    pub(super) fn native_screen_init_post(&self, screen: &NativeScreenView<'_>) {
-        mod_api::dispatch_screen_init_post(self, mod_api::mods(), screen);
-    }
-
-    /// A screen was observed closing, at most once per frame.
-    pub(super) fn native_screen_closing(&self, screen: &NativeScreenView<'_>) {
-        mod_api::dispatch_screen_closing(self, mod_api::mods(), screen);
-    }
 }
 
 /// `Level.setBlock`'s flags, for the `native_set_block_property` helpers:
@@ -2950,6 +2935,20 @@ impl Game<'_> {
         origin: [f32; 2],
     ) {
         mod_api::dispatch_screen_draw(self, mod_api::mods(), block, data, batch, origin);
+    }
+    /// A screen was observed opening, at most once per frame.
+    pub(super) fn native_screen_opening(&self, screen: &NativeScreenView<'_>) {
+        mod_api::dispatch_screen_opening(self, mod_api::mods(), screen);
+    }
+
+    /// A screen was observed opening or changing rectangle, at most once per frame.
+    pub(super) fn native_screen_init_post(&self, screen: &NativeScreenView<'_>) {
+        mod_api::dispatch_screen_init_post(self, mod_api::mods(), screen);
+    }
+
+    /// A screen was observed closing, at most once per frame.
+    pub(super) fn native_screen_closing(&self, screen: &NativeScreenView<'_>) {
+        mod_api::dispatch_screen_closing(self, mod_api::mods(), screen);
     }
     /// The open screen has drawn itself and its tooltips (`Screen.render`,
     /// the point of `ScreenEvent.Render.Post`): draw over it with
