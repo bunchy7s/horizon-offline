@@ -1541,6 +1541,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_tab_complete(player, name, command, range, suggestions)`**: a guest's server completion request was evaluated; mods may add or filter suggestions. `range` is the replaced byte range. Guest state is not swapped in, and helpers that look through `self.lan` may find nothing while the guest packet is handled.
 - **`native_broadcast_message(line, cancel)`**: a system broadcast line is about to be logged and sent to every player. A mod may change `line` or set `cancel` to drop the broadcast.
 - **`native_whitelist_state_update(enabled)`**: the dedicated server's player whitelist was enabled or disabled.
+- **`native_player_bundle_item_select(player, name, slot, index)`**: a server player selected an item in a bundle;
+  `slot` is the packet's menu slot and `index` is the chosen item index.
 - **`native_player_ready_arrow(player, name, arrow)`**: a server player released a drawn bow, with `arrow` naming
   the selected projectile item. The guest's state is not swapped in while the packet is handled.
 - **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and

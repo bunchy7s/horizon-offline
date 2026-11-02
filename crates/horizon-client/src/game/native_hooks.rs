@@ -4652,6 +4652,17 @@ impl Game<'_> {
     pub(super) fn native_player_ready_arrow(&mut self, player: u128, name: &str, arrow: &str) {
         let _ = (player, name, arrow);
     }
+    /// A server player selected a bundle item in `slot` at `index`. The guest's
+    /// state is not swapped in during packet handling. @API:native_player_bundle_item_select@.
+    pub(super) fn native_player_bundle_item_select(
+        &mut self,
+        player: u128,
+        name: &str,
+        slot: i32,
+        index: i32,
+    ) {
+        let _ = (player, name, slot, index);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
