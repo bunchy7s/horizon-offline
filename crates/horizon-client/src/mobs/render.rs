@@ -1121,7 +1121,9 @@ pub fn base_transform_at(m: &Mob, alpha: f32, origin: glam::Mat4) -> glam::Mat4 
             // The eye height of the standing pose (LivingEntityRenderer
             // extracts `getEyeHeight(Pose.STANDING)` for a bed).
             let eye = if avatar(m) {
-                m.kind.eye_height as f32
+                // `getEyeHeight(Pose.STANDING)` on an avatar is the standing
+                // box's eye height, `minecraft:scale` included.
+                m.kind.eye_height as f32 * m.model_scale()
             } else {
                 m.awake_dims().2 as f32
             };
@@ -3928,6 +3930,39 @@ mod random_texture_tests {
         // The eye height of the standing pose, as `submit` extracts it.
         let bed = |m: &Mob| {
             let eye = m.awake_dims().2 as f32;
+            glam::Vec3::new(0.0, 0.0, eye - 0.1)
+        };
+        let unscaled = base_transform_at(&m, 0.5, glam::Mat4::IDENTITY);
+        let unscaled_pose = glam::Mat4::from_translation(-bed(&m)) * unscaled;
+        m.extra.model_scale = 2.0;
+        let scaled = base_transform_at(&m, 0.5, glam::Mat4::IDENTITY);
+        let scaled_pose = glam::Mat4::from_translation(-bed(&m)) * scaled;
+        let expected = glam::Mat4::from_scale(glam::Vec3::splat(2.0)) * unscaled_pose;
+        let got = scaled_pose.to_cols_array();
+        let want = expected.to_cols_array();
+        for i in 0..16 {
+            assert!(
+                (got[i] - want[i]).abs() < 1.0e-4,
+                "element {i}: {} != {}\nscaled: {got:?}\nunscaled x2: {want:?}",
+                got[i],
+                want[i]
+            );
+        }
+    }
+
+    /// A sleeping avatar's bed offset is `getEyeHeight(Pose.STANDING) - 0.1`,
+    /// and the standing eye height carries `minecraft:scale`: at scale 2 the
+    /// bed offset is 3.14, not the type's 1.52, and the pose after it doubles.
+    #[test]
+    fn a_scaled_sleeping_avatar_uses_its_scaled_eye_height() {
+        use horizon_core::geometry::Vec3;
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.id = "minecraft:player".into();
+        (kind.width, kind.height, kind.eye_height) = (0.6, 1.8, 1.62);
+        let mut m = Mob::new(1, std::sync::Arc::new(kind), Vec3::ZERO, 0.0);
+        m.extra.ints[1] = 1;
+        let bed = |m: &Mob| {
+            let eye = m.kind.eye_height as f32 * m.model_scale();
             glam::Vec3::new(0.0, 0.0, eye - 0.1)
         };
         let unscaled = base_transform_at(&m, 0.5, glam::Mat4::IDENTITY);
