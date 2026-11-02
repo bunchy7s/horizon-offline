@@ -510,6 +510,19 @@ fn solid_finish(in: TerrainOut, texel: vec4<f32>, color: vec4<f32>) -> vec4<f32>
     }
     return apply_fog(vec4(color.rgb, emissive), in.spherical, in.cylindrical);
 }
+// HDR lighting on what's mostly opaque among translucent faces (water), drawn again after
+// them with only alpha written: `fs_translucent` blends its alpha as coverage, so a lake's
+// value would be diluted. Clear glass leaves what's behind it, light sources included, alone.
+@fragment fn fs_translucent_mark(in: TerrainOut) -> @location(0) vec4<f32> {
+    let dx = dpdx(in.local);
+    let dy = dpdy(in.local);
+    hdr_normal = normalize(cross(dy, dx));
+    if sprite(in.uv, in.layer & 0x7fffu).a < 0.6 { discard; }
+    let fogged = max(linear_fog(in.spherical, globals.fog.x, globals.fog.y),
+        linear_fog(in.cylindrical, globals.fog.z, globals.fog.w)) * globals.fog_color.a;
+    let scene = mix(hdr_scene(in.scene.x, in.scene.y, hdr_facing()), globals.hdr_light.y, fogged);
+    return vec4(0.0, 0.0, 0.0, hdr_scene_alpha(scene));
+}
 // Water, glass and other see-through faces draw whole as they fade in, the
 // layer drawn first in front (gfx.rs's water tiers): dithered, the faded-out
 // pixels showed the layer behind through the one in front, twice the water.
