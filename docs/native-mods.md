@@ -2146,14 +2146,14 @@ injections go at the head of the body, before the dispatch, so they still run fi
 
 ### Server attachments
 
-A mod can declare an `AttachmentType<T>` once and call its `get`, `set`, `remove`, `has` and `get_existing`
-methods with the hook's host and a `Holder`. `T` is `Clone + Send + Sync + 'static`;
-`get` returns a clone and inserts the default on first access.
-`has` and `get_existing` read without inserting (NeoForge's `hasData` and
-`getExistingData`): `has` says whether a value is stored, saved or set, even before it
-decodes, and `get_existing` returns `None` instead of the default. Neither adds
-anything to the holder's saved data. `set` runs the optional
-codec before changing the value, returning an `AttachmentError` if it cannot encode.
+A mod can declare an `AttachmentType<T>` once and call its `get`, `set`, `remove`,
+`has` and `get_existing` methods with the hook's host and a `Holder`. `T` is
+`Clone + Send + Sync + 'static`; `get` returns a clone and inserts the default on
+first access. `has` and `get_existing` read without inserting (NeoForge's `hasData`
+and `getExistingData`): `has` says whether a value is stored, saved or set, even
+before it decodes, and `get_existing` returns `None` instead of the default. Neither
+adds anything to the holder's saved data. `set` runs the optional codec before
+changing the value, returning an `AttachmentError` if it cannot encode.
 Keys are the pair `(namespace, name)`; a key already decoded as another Rust type is
 an error. A missing or non-server holder is an error, not a new phantom holder.
 `AttachmentError` distinguishes `MissingHolder`, `TypeMismatch`, `Decode`, `Encode`,
@@ -2198,8 +2198,8 @@ file, not `level.dat`.
 encoded representation, including raw entries of an absent mod; other entries are
 removed. Living-entity conversion is not supported. This follows the default supplier,
 persistence and respawn option of NeoForge 26.3's public `AttachmentType.Builder`
-contract and `IAttachmentHolder`'s `hasData`/`getExistingData`, but not its holder-aware supplier, custom copy
-handler, conditional serialization or sync APIs.
+contract and `IAttachmentHolder`'s `hasData`/`getExistingData`, but not its
+holder-aware supplier, custom copy handler, conditional serialization or sync APIs.
 
 `Host` exposes the documented `Game` helpers listed under `helpers` in
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's

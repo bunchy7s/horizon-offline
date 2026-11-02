@@ -73,7 +73,8 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
     ) -> Result<T, AttachmentError> {
         host.attachments(holder)?.get(self)
     }
-    /// Whether a holder carries a value, like NeoForge's `hasData`; never inserts the default. API @API:attachment_existing@.
+    /// Whether a holder carries a value, like NeoForge's `hasData`; never inserts the default.
+    /// API @API:attachment_existing@.
     pub fn has<H: AttachmentHost + ?Sized>(
         &self,
         host: &mut H,
@@ -245,7 +246,8 @@ impl Attachments {
     }
     /// Whether a value is stored, saved or set, without decoding or inserting it.
     pub fn has<T: Clone + Send + Sync + 'static>(&self, ty: &AttachmentType<T>) -> bool {
-        self.entries.contains_key(&(ty.namespace.into(), ty.name.into()))
+        self.entries
+            .contains_key(&(ty.namespace.into(), ty.name.into()))
     }
     /// Get a stored value without inserting the default; saved values decode lazily.
     pub fn get_existing<T: Clone + Send + Sync + 'static>(
@@ -310,9 +312,7 @@ impl Attachments {
         {
             return Err(AttachmentError::InvalidNamespace);
         }
-        if let Some(Entry::Decoded(old)) = self
-            .entries
-            .get(&(ty.namespace.into(), ty.name.into()))
+        if let Some(Entry::Decoded(old)) = self.entries.get(&(ty.namespace.into(), ty.name.into()))
             && !old.as_any().is::<T>()
         {
             return Err(AttachmentError::TypeMismatch);
