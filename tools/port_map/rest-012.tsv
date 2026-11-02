@@ -22,10 +22,10 @@ DiscardedPayload.codec	missing		minor: no 32767-byte cap on unknown custom paylo
 ServerboundCookieResponsePacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! CookieResponse {key Ident, payload Option<Bytes>}
 ClientboundAddEntityPacket.<init>	port	crates/horizon-client/src/lan/entity.rs::ServerEntity::pairing	builds the spawn packet from the entity state
 ClientboundAddEntityPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! AddEntity (play.rs) in the vanilla field order
-ClientboundAddTransientBlockPacket.write	missing		player: a temporary block the server sends never appears; Horizon has no such packet (ids.rs only)
+ClientboundAddTransientBlockPacket.write	inline	crates/horizon-client/src/game/remote.rs: C::AddTransientBlock => add_transient_block	the client applies a transient block when a server sends one; the LAN host does not send them, which is the remaining half of the row
 ClientboundAnimatePacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! Animate {id VarInt, action UByte}
 ClientboundBlockDestructionPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! BlockDestruction {id, pos, progress}
-ClientboundBlockEntityDataPacket.create	missing		player: block entity changes after load (sign text, banner, chest name) are not sent to other players; the LAN host has no BlockEntityData sender
+ClientboundBlockEntityDataPacket.create	port	crates/horizon-client/src/game/command_blocks.rs:952 + game/decorated_pot.rs	block entity changes are pushed to guests as the packet (command block text, decorated pot sherds)
 ClientboundBlockEventPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! BlockEvent {pos, b0, b1, block}
 ClientboundBossEventPacket.createUpdateProgressPacket	missing		player: boss bar progress is never sent to other players; the LAN host has no BossEvent sender
 ClientboundBossEventPacket.createUpdateNamePacket	missing		player: boss bar name changes are never sent to other players; the LAN host has no BossEvent sender
@@ -82,8 +82,8 @@ ClientboundSetEntityDataPacket.pack	port	crates/horizon-protocol/src/entity_data
 ClientboundSetEntityDataPacket.unpack	port	crates/horizon-protocol/src/entity_data.rs::EntityData::read	entries until 0xFF
 ClientboundSetExperiencePacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SetExperience {progress Float, level, total VarInt}
 ClientboundSetHealthPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SetHealth {health, food VarInt, saturation}
-ClientboundSetPlayerTeamPacket.createAddOrModifyPacket	missing		player: team changes made on the host (name, colours, friendly fire, members) do not reach guests; the LAN host never sends team packets
-ClientboundSetPlayerTeamPacket.createPlayerPacket	missing		player: adding or removing a player from a team does not reach guests; the LAN host never sends team packets
+ClientboundSetPlayerTeamPacket.createAddOrModifyPacket	port	crates/horizon-client/src/lan/scoreboard.rs:124	team add/modify packets are built for guests from the host's teams
+ClientboundSetPlayerTeamPacket.createPlayerPacket	inline	crates/horizon-client/src/lan/scoreboard.rs	the same builder covers the player add/remove method
 ClientboundSetPlayerTeamPacket.shouldHavePlayerList	port	crates/horizon-protocol/src/packets/play.rs::SetPlayerTeam::read	the player list is read only for methods 0, 3 and 4
 ClientboundSetTitlesAnimationPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! TitlesAnimation {fade_in, stay, fade_out Int}
 ClientboundSoundEntityPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SoundEntity with the sound holder
