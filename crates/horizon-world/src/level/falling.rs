@@ -12,7 +12,9 @@ pub enum Landing {
     /// solidified); discard the entity.
     Placed(BlockStateId),
     /// The block could not be placed: discard the entity and, if the entity
-    /// drops items, spawn the block's item (vanilla `spawnAtLocation`).
+    /// drops items, run `Fallable.onBrokenAfterFall` (the anvil's level event
+    /// 1029) and spawn the block's item from the entity's position (vanilla
+    /// `spawnAtLocation`).
     Broken,
     /// The landing position holds a moving piston: keep falling.
     Continue,
@@ -109,9 +111,6 @@ impl Behaviours {
         let would_continue = sim.is_free(sim.below_state(pos)) && (!concrete || !stuck_in_water);
         let would_survive = sim.can_survive(state, pos) && !would_continue;
         if !(may_replace && would_survive) {
-            if self.instance_of(state, Class::Anvil) {
-                sim.level_event(1029, pos, 0);
-            }
             return Landing::Broken;
         }
         let mut placed = state;
@@ -121,9 +120,6 @@ impl Behaviours {
             placed = self.table.set_bool(placed, self.props.waterlogged, true);
         }
         if !sim.set_block_and_update(pos, placed) {
-            if self.instance_of(state, Class::Anvil) {
-                sim.level_event(1029, pos, 0);
-            }
             return Landing::Broken;
         }
         // Fallable.onLand

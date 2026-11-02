@@ -124,6 +124,19 @@ impl Item {
             Payload::Benchmark(report) if !report.is_object() => {
                 Err("a benchmark report is a JSON object".into())
             }
+            Payload::Perf(perf)
+                if perf.slow_frames.len() > SlowFrames::MAX_SPANS
+                    || perf
+                        .slow_frames
+                        .iter()
+                        .any(|s| s.span.len() > SlowFrames::MAX_NAME) =>
+            {
+                Err(format!(
+                    "at most {} slow-frame spans of {} bytes",
+                    SlowFrames::MAX_SPANS,
+                    SlowFrames::MAX_NAME
+                ))
+            }
             _ => Ok(()),
         }
     }
@@ -217,6 +230,69 @@ pub struct Perf {
     /// From choosing a world to playing in it, the first time this session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub to_world_ms: Option<u32>,
+    /// The frames of [`SLOW_FRAME_MS`] or more while playing, by what took longest in each:
+    /// what froze. At most [`SlowFrames::MAX_SPANS`] entries.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub slow_frames: Vec<SlowFrames>,
+}
+
+/// A frame this long or longer is a freeze worth explaining ([`Perf::slow_frames`]): the
+/// edge of [`Summary::buckets`]' last bucket.
+pub const SLOW_FRAME_MS: f32 = 250.0;
+
+/// The slow frames whose longest step was one span: a named step of the render thread's frame
+/// (`spans.rs` in the client: `render.upload`, `tick`, `world.stream`…), the same names in
+/// every game of a release. `span` is empty when no step was timed in the frame (it waited
+/// outside them).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SlowFrames {
+    pub span: String,
+    pub frames: u32,
+    /// The longest of these frames and the longest this span took in one of them.
+    pub frame_max_ms: f32,
+    pub span_max_ms: f32,
+}
+
+impl SlowFrames {
+    /// Distinct spans a session keeps; the later ones count under [`SlowFrames::OTHER`].
+    pub const MAX_SPANS: usize = 16;
+    pub const MAX_NAME: usize = 64;
+    pub const OTHER: &'static str = "other";
+
+    /// Counts a slow frame of `frame_ms` whose longest span was `span` (`""`: none) for
+    /// `span_ms`, in a session's list.
+    pub fn record(list: &mut Vec<Self>, frame_ms: f32, span: &str, span_ms: f32) {
+        let span = if span.len() > Self::MAX_NAME {
+            Self::OTHER
+        } else {
+            span
+        };
+        let at = match list.iter().position(|s| s.span == span) {
+            Some(at) => at,
+            None if list.len() + 1 < Self::MAX_SPANS => {
+                list.push(Self {
+                    span: span.to_owned(),
+                    ..Self::default()
+                });
+                list.len() - 1
+            }
+            None => match list.iter().position(|s| s.span == Self::OTHER) {
+                Some(at) => at,
+                None => {
+                    list.push(Self {
+                        span: Self::OTHER.to_owned(),
+                        ..Self::default()
+                    });
+                    list.len() - 1
+                }
+            },
+        };
+        let entry = &mut list[at];
+        entry.frames = entry.frames.saturating_add(1);
+        entry.frame_max_ms = entry.frame_max_ms.max(frame_ms);
+        entry.span_max_ms = entry.span_max_ms.max(span_ms);
+    }
 }
 
 /// A crash, scrubbed: the error and its stack, the thread, and the details that say what the
@@ -452,5 +528,51 @@ mod tests {
         let size = serde_json::to_vec(&perf).unwrap().len();
         assert!(size < 1024, "{size} bytes");
         assert!(perf.validate().is_ok());
+    }
+
+    /// Slow frames count under their longest span; past the cap, new spans share one entry,
+    /// so a session full of different freezes still fits its item.
+    #[test]
+    fn slow_frames_are_counted_by_span_within_a_cap() {
+        let mut list = Vec::new();
+        SlowFrames::record(&mut list, 300.0, "render.upload", 200.0);
+        SlowFrames::record(&mut list, 900.0, "render.upload", 120.0);
+        SlowFrames::record(&mut list, 260.0, "", 0.0);
+        assert_eq!(
+            list[0],
+            SlowFrames {
+                span: "render.upload".into(),
+                frames: 2,
+                frame_max_ms: 900.0,
+                span_max_ms: 200.0,
+            }
+        );
+        assert_eq!((list[1].span.as_str(), list[1].frames), ("", 1));
+        for i in 0..40 {
+            SlowFrames::record(&mut list, 400.0, &format!("step.{i}"), 300.0);
+        }
+        SlowFrames::record(&mut list, 400.0, &"x".repeat(200), 300.0);
+        assert_eq!(list.len(), SlowFrames::MAX_SPANS);
+        let other = list.iter().find(|s| s.span == SlowFrames::OTHER).unwrap();
+        // 40 spans, 13 of which found room after the first two.
+        assert_eq!(other.frames, 40 - 13 + 1);
+        let perf = Item::new(
+            Source::Game,
+            "v0.4.2",
+            Payload::Perf(Perf {
+                slow_frames: list.clone(),
+                ..Perf::default()
+            }),
+        );
+        assert!(perf.validate().is_ok());
+        let too_many = Item::new(
+            Source::Game,
+            "v0.4.2",
+            Payload::Perf(Perf {
+                slow_frames: [list.clone(), list].concat(),
+                ..Perf::default()
+            }),
+        );
+        assert!(too_many.validate().is_err());
     }
 }

@@ -175,6 +175,13 @@ pub enum HostEvent {
     },
 }
 
+/// The criteria `CriteriaTriggers.TICK` granted one player.
+pub struct TickGrants {
+    pub player: u128,
+    pub name: String,
+    pub grants: Vec<super::advancements::CriterionGrant>,
+}
+
 /// What one player started and stopped tracking, in order, for the game to
 /// tell the mods.
 pub struct TrackingBatch {
@@ -201,6 +208,9 @@ pub struct Hub {
     /// The entities players started and stopped tracking, collected by
     /// `collect_tracking`, for the game to tell the mods.
     pub native_tracking: Vec<TrackingBatch>,
+    /// Criteria `CriteriaTriggers.TICK` granted to players, for the game to
+    /// tell the mods.
+    pub native_advancement_grants: Vec<TickGrants>,
     /// Players a native mod hid (`native_hide_player`), by UUID, on or off:
     /// only players of at least that permission level see them, in the
     /// player list, the world and their joining and leaving.
@@ -547,6 +557,7 @@ impl Hub {
             mod_commands: (serde_json::Value::Null, None),
             native_menu_events: Vec::new(),
             native_tracking: Vec::new(),
+            native_advancement_grants: Vec::new(),
             hidden: Default::default(),
             teams: Vec::new(),
             nicknames: std::collections::HashMap::new(),
@@ -2610,6 +2621,11 @@ impl Hub {
                     g.send(&raw(ids::RECIPE_BOOK_ADD, add));
                 }
                 g.send(&raw(ids::UPDATE_ADVANCEMENTS, first.update_advancements));
+                self.native_advancement_grants.push(TickGrants {
+                    player: g.uuid,
+                    name: g.name.clone(),
+                    grants: first.granted,
+                });
                 g.advancements_visible = sync.advancements.visibility(&g.advancements);
                 g.advancements_changed.clear();
             } else {
@@ -2744,6 +2760,7 @@ impl Hub {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as i64);
         for g in &mut self.guests {
+            let mut granted = Vec::new();
             // PlayerAdvancements.reload: isFirstPacket again, the progress
             // read against the new tree; a player whose advancements were
             // never loaded does that on their first tick.
@@ -2752,12 +2769,20 @@ impl Hub {
             }
             g.advancements_visible.clear();
             g.advancements_changed.clear();
-            if let Some(add) =
-                sync.advancements
-                    .reload(&sync, now, &mut g.advancements, &mut g.recipe_book)
-            {
+            if let Some(add) = sync.advancements.reload(
+                &sync,
+                now,
+                &mut g.advancements,
+                &mut g.recipe_book,
+                &mut granted,
+            ) {
                 g.send(&raw(ids::RECIPE_BOOK_ADD, add));
             }
+            self.native_advancement_grants.push(TickGrants {
+                player: g.uuid,
+                name: g.name.clone(),
+                grants: granted,
+            });
         }
         // broadcastAll(ClientboundUpdateTagsPacket).
         self.broadcast(&C::UpdateTags(sync.tags.clone()));

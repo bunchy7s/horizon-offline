@@ -71,7 +71,7 @@ impl Game<'_> {
             });
         } else {
             self.close_container();
-            self.stats.custom("leave_game", 1);
+            self.award_custom_stat("leave_game", 1);
             self.lan_close(false);
             self.free_player_beds()?;
             self.pending_save = Some(ClosingSave {

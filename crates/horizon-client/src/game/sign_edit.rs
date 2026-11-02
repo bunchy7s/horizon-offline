@@ -313,7 +313,7 @@ impl Game<'_> {
             self.sculk_actor(),
             Some(state),
         );
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.consume_held();
         self.trigger_block("minecraft:item_used_on_block", pos, stack);
         true

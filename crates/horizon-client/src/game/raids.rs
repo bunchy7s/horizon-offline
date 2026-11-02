@@ -434,7 +434,7 @@ impl Game<'_> {
             .raids
             .create_or_extend(center, difficulty, amplifier, seed);
         if triggered {
-            self.stats.custom("raid_trigger", 1);
+            self.award_custom_stat("raid_trigger", 1);
             self.trigger_player("minecraft:voluntary_exile");
             self.native_raid_state_change(id, center, "triggered");
         }
@@ -660,7 +660,7 @@ impl Game<'_> {
                         EffectInstance::new("hero_of_the_village", raid::HERO_DURATION, amplifier);
                     effect.visible = false;
                     g.potions.effects.add(effect);
-                    g.stats.custom("raid_win", 1);
+                    g.award_custom_stat("raid_win", 1);
                     g.trigger_player("minecraft:hero_of_the_village");
                 }
             }),
