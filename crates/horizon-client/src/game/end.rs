@@ -1456,6 +1456,7 @@ impl Game<'_> {
             // A gateway keeps the item in its level (teleportSameDimension
             // moves it): it doesn't leave, so no native_entity_leave_level.
             self.dropped.remove(i);
+            self.native_leave_skip(id);
             self.detach_entity(id);
             tag
         } else if let Some(i) = self.mobs.iter().position(|m| m.id == id) {
@@ -1479,11 +1480,13 @@ impl Game<'_> {
             }
             self.mobs.retain(|m| !gone.contains(&m.id));
             for g in gone {
+                self.native_leave_skip(g);
                 self.detach_entity(g);
             }
             tag
         } else if let Some(i) = self.creatures.projectiles.iter().position(|p| p.id == id) {
             let pearl = Box::new(self.creatures.projectiles.remove(i));
+            self.native_leave_skip(id);
             let (job, target) = self.gateway_job([gateway.x, gateway.y, gateway.z]);
             let arrival = GatewayArrival {
                 traveller: Arriving::Pearl(pearl),

@@ -101,7 +101,7 @@ SpawnerRenderer.submit	port	crates/horizon-client/src/game/spawner.rs::Game::spa
 StandingSignRenderer.extractRenderState	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: minor: the text filtering option is not read
 StandingSignRenderer.createTransformations	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	front and back text transforms per attachment
 TestInstanceRenderer.extractRenderState	missing		player: creative players placing a test instance block see no beacon beam, box or error markers
-TestInstanceRenderer.submit	missing		player: creative players placing a test instance block see no beacon beam or box
+TestInstanceRenderer.submit	port	crates/horizon-client/src/game/test_instances.rs::Game::test_instance_marker_geometry	the per-block loop drawing the error markers and their billboards; the beam sections come from Game::test_instance_beam and the box from Game::bounding_box_gizmos, both drawn per frame
 TestInstanceRenderer.submitErrorMarker	port	crates/horizon-client/src/gizmos.rs::error_marker_shape	the red box and its text, drawn by Game::test_instance_marker_geometry
 TestInstanceRenderer.shouldRenderOffScreen	missing		minor: culling policy of a renderer Horizon lacks
 TestInstanceRenderer.shouldRender	missing		minor: culling policy of a renderer Horizon lacks

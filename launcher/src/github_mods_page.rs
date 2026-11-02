@@ -125,7 +125,7 @@ impl Launcher {
                         self.github.newer.clear();
                         // The review above was the trust notice; the Mods page offers Build.
                         self.settings.native_mods_noticed = true;
-                        self.settings.save();
+                        self.save_settings();
                     }
                     self.instance_mods_changed();
                     self.github.message = Some(result);
