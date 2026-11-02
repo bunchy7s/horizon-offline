@@ -376,7 +376,7 @@ from integration_env import game_environment, require_server_reports  # noqa: E4
 ROOT = Path(__file__).resolve().parents[1]
 GUEST_NAME = 'Guest'
 CHECKS = ['tab', 'self', 'armour', 'nametags', 'walls', 'chest', 'menu-transfer', 'crafting', 'spawned', 'sign', 'damage', 'mobs', 'hazards', 'pvp', 'deaths',
-          'flow-push', 'bubble-column', 'arrows', 'flame-arrows', 'kills', 'looting', 'leave', 'hurt', 'looks', 'leads', 'respawn', 'containers', 'names', 'feedback', 'titles', 'chat', 'styles',
+          'flow-push', 'bubble-column', 'arrows', 'projectile-vehicles', 'flame-arrows', 'kills', 'looting', 'leave', 'hurt', 'looks', 'leads', 'respawn', 'containers', 'names', 'feedback', 'titles', 'chat', 'styles',
           'commands', 'recipes', 'machines', 'brewing', 'loom', 'stonecutter', 'grindstone', 'anvil', 'smithing',
           'enchanting', 'beacon', 'crafter', 'lectern', 'cartography', 'trials', 'clicks', 'shift-double-click', 'recipe-shift', 'shift-drag', 'modifier-release', 'wheel', 'sleep', 'sleep-villager', 'bed-occupied', 'sleep-reload', 'predict', 'push',
           'piston-push', 'piston-entities', 'piston-slime', 'eat', 'eat-on-block', 'cauldron', 'eating', 'xp', 'objects', 'projectiles', 'thrown', 'sparks', 'hud', 'sidebar', 'border', 'particles',
@@ -1469,6 +1469,65 @@ def check_arrows(host, guest, out):
     assert hits['host shoots guest'][1] < hits['host shoots guest'][0], f"the host's arrow did not hurt the guest: {hits}"
     assert hits['pvp off'][1] >= hits['pvp off'][0], f'pvp off, an arrow still hurts: {hits}'
     return hits
+
+
+def command_says(player, command):
+    """What the server printed back to `command` (the lines that are its own reply)."""
+    since = player.raw('events')['last']
+    player('command', command=command)
+    for _ in range(40):
+        lines = [e.get('text', '') for e in player.raw('events', '--since', since)['events'] if own_reply(e)]
+        if lines:
+            return ' '.join(lines)
+        player.wait(2)
+    raise Failed(f'no answer to {command}')
+
+
+def check_projectile_vehicles(host, guest, out):
+    """An arrow, a trident and a snowball strike a boat or a minecart (`VehicleEntity.isPickable`), and
+    `VehicleEntity.hurtServer` takes their damage (+10 per point, destroyed past 40): an arrow of speed 3
+    (damage 6) and a trident (8) destroy the boat or cart; a snowball (0) stops at it and leaves it whole.
+    Before, boats were no target at all and carts only for arrows: the trident and the snowball flew on through."""
+    x, y, z = apart(host, guest)['host']
+    host('command', command='gamemode creative')
+    host('command', command=f'fill {x - 2} {y} {z - 4} {x + 3} {y + 3} {z + 7} minecraft:air')
+    host('command', command=f'fill {x - 2} {y - 1} {z - 4} {x + 3} {y - 1} {z + 7} minecraft:stone')
+    host('command', command=f'forceload add {x - 2} {z - 4} {x + 3} {z + 7}')
+    still = 'NoGravity:1b,Silent:1b'
+    result = {}
+    try:
+        for shot, speed, target, destroyed in (
+                ('arrow', 3.0, 'oak_boat', True), ('arrow', 3.0, 'minecart', True),
+                ('trident', 1.5, 'oak_boat', True), ('trident', 1.5, 'minecart', True),
+                ('snowball', 1.5, 'oak_boat', False), ('snowball', 1.5, 'minecart', False),
+                ('arrow', 0.5, 'oak_boat', False)):
+            name = f'{shot}-{speed}-{target}'
+            host('command', command=f'kill @e[type=!minecraft:player,x={x},y={y},z={z},distance=..30]')
+            host('command', command=f'summon minecraft:{target} {x + 2.5} {y + 0.1} {z + 3.5} {{{still},Tags:["hv_v"]}}')
+            host('command', command=f'summon minecraft:{shot} {x + 2.5} {y + 0.35} {z - 2.5} '
+                                    f'{{{still},Tags:["hv_s"],Motion:[0.0d,0.0d,{speed}d]}}')
+            host.wait(40)
+            vehicles = [o for o in host('status')['objects'] if o['kind'].endswith(target)
+                        and abs(o['position'][2] - (z + 3.5)) < 4]
+            shot_left = command_says(host, f'execute if entity @e[tag=hv_s]')
+            result[name] = {'vehicle left': len(vehicles), 'projectile still flying': 'passed' in shot_left}
+            where = command_says(host, 'data get entity @e[tag=hv_s,limit=1] Pos') if shot_left and 'passed' in shot_left else ''
+            assert (not vehicles) == destroyed, (f'{name}: the {target} {"stays" if destroyed else "was destroyed"}: '
+                                                 f'{result[name]}, projectile {where}')
+            if shot == 'trident':
+                # ThrownTrident.onHitEntity: REVERSE (-0.5) times 0.02, so it leaves at -1/100 of its speed
+                # (a trident that flew on, or bounced twice as hard, has a Motion far from that).
+                reply = command_says(host, 'data get entity @e[tag=hv_s,limit=1] Motion[2]')
+                back = float(reply.rsplit(':', 1)[1].strip().rstrip('d'))
+                result[name]['bounce'] = back
+                assert -0.02 < back < 0, f'{name}: the trident leaves the {target} at Motion z {back}, vanilla\'s is -0.015'
+            # An arrow or snowball is spent on the hit; a trident bounces off and stays.
+            assert shot == 'trident' or 'passed' not in shot_left, \
+                f'{name}: the {shot} flew through or past the {target}: {result[name]}'
+    finally:
+        host('command', command=f'kill @e[type=!minecraft:player,x={x},y={y},z={z},distance=..30]')
+        host('command', command=f'forceload remove {x - 2} {z - 4} {x + 3} {z + 7}')
+    return result
 
 
 def check_flame_arrows(host, guest, out):
@@ -6713,7 +6772,7 @@ CHECK_FNS = {'tab': check_tab, 'self': check_self, 'armour': check_armour,
              'flight': check_flight, 'fireball': check_fireball, 'deflect': check_deflect,
              'barter': check_barter, 'piglin_offspring': check_piglin_offspring,
              'worn': check_worn, 'kills': check_kills, 'looting': check_looting, 'leave': check_leave,
-             'arrows': check_arrows, 'flame-arrows': check_flame_arrows, 'predict': check_predict, 'ladder': check_ladder,
+             'arrows': check_arrows, 'projectile-vehicles': check_projectile_vehicles, 'flame-arrows': check_flame_arrows, 'predict': check_predict, 'ladder': check_ladder,
              'boats': check_boats, 'boat_ice_reboard': check_boat_ice_reboard, 'boat_shoved': check_boat_shoved, 'minecarts': check_minecarts, 'frames': check_frames, 'hands': check_hands,
              'lightning': check_lightning, 'riding': check_riding, 'occupied_horse': check_occupied_horse, 'mounts': check_mounts,
              'worldspawn': check_world_spawn, 'beds': check_beds, 'shield': check_shield, 'deathmining': check_death_mining,
@@ -7134,7 +7193,7 @@ def check_cart_mob_rider(host, guest, out):
     host('command', command='tick freeze')
     try:
         host('command', command=f'summon minecraft:minecart {x + 0.5} {y + 0.1} {z + 0.5} {{Motion:[0.4d,0.0d,0.0d],Tags:["cmr_empty"]}}')
-        host('command', command=f'summon minecraft:minecart {x + 0.5} {y + 0.1} {z + 3.5} {{Motion:[0.4d,0.0d,0.0d],'
+        host('command', command=f'summon minecraft:minecart {x + 2.5} {y + 0.1} {z + 3.5} {{Motion:[0.4d,0.0d,0.0d],'
              'Tags:["cmr_pig"],Passengers:[{id:"minecraft:pig",NoAI:1b}]}')
         host('command', command='tick step 40')
         host.wait(40)
