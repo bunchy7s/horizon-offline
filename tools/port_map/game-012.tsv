@@ -38,7 +38,7 @@ Frog.get	port	crates/horizon-client/src/mobs/finalize.rs::species_variant_compon
 Frog.applyImplicitComponent	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	the `minecraft:frog/variant` name sets the variant (WARM over TEMPERATE)
 Frog.customServerAiStep	port	crates/horizon-client/src/mobs/frog.rs::server_ai_step	the attackables sensor and memory timers; the activities run as goals
 Frog.getBreedOffspring	port	crates/horizon-client/src/mobs/goals.rs::Breed::tick	the mother becomes pregnant with frogspawn instead of a baby
-Frog.spawnChildFromBreeding	missing		player: frogs never become pregnant (IS_PREGNANT) and so never lay frogspawn; no breed goal means this is never reached, and the generic baby spawn would be wrong for frogs anyway
+Frog.spawnChildFromBreeding	port	crates/horizon-client/src/mobs/goals.rs::Breed::tick	the mother takes IS_PREGNANT (frog.rs::set_pregnant) instead of a baby, and the LaySpawn goal then lays the frogspawn on the water
 Frog.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	variant by biome (live spawns set it in spawning.rs::finalize from biome.frog); the long jump cooldown it sets has no user
 Frog.createAttributes	skip:data		attributes come from entity-types.json
 Frog.checkFrogSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	frogs_spawnable_on below and bright enough
@@ -97,7 +97,7 @@ CopperGolemAi.getTargetReachedInteractions	inline	crates/horizon-client/src/mobs
 CopperGolemAi.onReachedTargetInteraction	inline	crates/horizon-client/src/mobs/transport_items.rs::Transport::on_reached	tick 1 opens the chest and sets the state, tick 9 plays the sound, tick 60 closes it
 IronGolem.registerGoals	port	crates/horizon-client/src/mobs/golem.rs::register_iron	gap: player: no MoveBackToVillageGoal and no village-bound stroll (plain stroll 0.6), so golems wander off from their village; no ResetUniversalAngerTargetGoal
 IronGolem.createAttributes	skip:data		attributes come from entity-types.json
-IronGolem.doPush	missing		minor: a hostile mob that bumps the golem is not picked as its target one time in 20 (the golem still finds enemies by its nearest-target goal)
+IronGolem.doPush	port	crates/horizon-client/src/mobs/ai.rs::push_entities	a monster that is not a creeper becomes the target one time in 20, drawn only for those, then the push
 IronGolem.canSpawnSprintParticle	port	crates/horizon-client/src/mobs/ai.rs::Mob::base_tick	ticked in #3512; `IronGolem.canSpawnSprintParticle` is cited at crates/horizon-client/src/mobs/ai.rs:862 (in a comment, so `where` names the enclosing fn)
 IronGolem.canAttack	port	crates/horizon-client/src/mobs/goals.rs::Mob::spares_players	the creator rule: player_created makes every player-target path skip players; gap: minor: the creeper refusal is only golem_prey's nearest-target filter, so HurtByTarget can still target a creeper that hits the golem
 IronGolem.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	PlayerCreated in the iron golem arm; persistent anger writes anger_end_time and angry_at

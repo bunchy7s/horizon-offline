@@ -171,4 +171,54 @@ mod tests {
             Some("minecraft:saddle".into())
         );
     }
+
+    /// `Wolf.actuallyHurt`: each time the armor's crackiness level changes it
+    /// plays the crack sound and sends twenty armadillo scute particles.
+    #[test]
+    fn a_wolfs_armor_throws_scutes_as_it_cracks() {
+        use crate::mobs::MobEvent;
+        let mut wolf = mob("minecraft:wolf", Species::Wolf);
+        wolf.extra.head = Some("minecraft:wolf_armor".into());
+        // Levels change below 95%, 69% and 32% of the 64 points left, that is
+        // after 4, 20 and 44 points of wear.
+        let hurt = |wolf: &mut Mob, damage: f32| {
+            wolf.hurt_wolf_armor(damage);
+            std::mem::take(&mut wolf.outbox)
+        };
+        let scutes = |events: &[MobEvent]| {
+            events
+                .iter()
+                .filter(|e| {
+                    matches!(
+                        e,
+                        MobEvent::ItemParticles {
+                            item: "minecraft:armadillo_scute",
+                            at,
+                            spread,
+                            speed,
+                            count: 20,
+                        } if *at == [0.0, 1.0, 0.0] && *spread == [0.2, 0.1, 0.2] && *speed == 0.1
+                    )
+                })
+                .count()
+        };
+        let cracks = |events: &[MobEvent]| {
+            events
+                .iter()
+                .filter(|e| matches!(e, MobEvent::Sound("item.wolf_armor.crack", ..)))
+                .count()
+        };
+        // Three points: still the first level.
+        let events = hurt(&mut wolf, 3.0);
+        assert_eq!((cracks(&events), scutes(&events)), (0, 0));
+        // The fourth point cracks it, with the sound and the scutes together.
+        let events = hurt(&mut wolf, 1.0);
+        assert_eq!((cracks(&events), scutes(&events)), (1, 1));
+        // Within the level: nothing.
+        let events = hurt(&mut wolf, 10.0);
+        assert_eq!((cracks(&events), scutes(&events)), (0, 0));
+        // Over 69%: the next level.
+        let events = hurt(&mut wolf, 6.0);
+        assert_eq!((cracks(&events), scutes(&events)), (1, 1));
+    }
 }
