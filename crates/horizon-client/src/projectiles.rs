@@ -1161,6 +1161,82 @@ mod tests {
         assert!((p.velocity.y - (-0.03 * 0.99)).abs() < 1e-9);
         assert!((p.position.x - f64::from(0.99_f32)).abs() < 1e-9);
     }
+    /// One fire block in the cell (0, 99, 0), open air around it: a throwable
+    /// inside that cell is set alight, and one that has left it burns down.
+    struct Fire {
+        targets: Vec<(Who, Aabb)>,
+        water: bool,
+    }
+    impl ProjectileWorld for Fire {
+        fn clip(&self, _: Vec3, _: Vec3) -> Option<(Vec3, [i32; 3], [i32; 3])> {
+            None
+        }
+        fn in_water(&self, _: Aabb) -> bool {
+            self.water
+        }
+        fn targets(&self) -> &[(Who, Aabb)] {
+            &self.targets
+        }
+        fn ignites(&self, p: [i32; 3]) -> bool {
+            p == [0, 99, 0]
+        }
+    }
+    /// `ThrowableProjectile.tick` calls `applyEffectsFromBlocks`, so a snowball
+    /// thrown through a fire block burns for `BaseFireBlock.fireIgnite`'s 160
+    /// ticks and is drawn with the flame (`Entity.displayFireAnimation`). The
+    /// port had no fire at all on a thrown projectile: `fire_ticks` stayed 0
+    /// however long it sat in the flames (#7456).
+    #[test]
+    fn a_snowball_in_a_fire_block_burns_and_the_fire_counts_down() {
+        let mut p = Projectile::new(ProjectileKind::Snowball, Vec3::new(0.5, 99.5, 0.5), None);
+        // Falling slowly: it stays inside (0, 99, 0) for this tick.
+        p.velocity = Vec3::ZERO;
+        let w = Fire {
+            targets: vec![],
+            water: false,
+        };
+        assert!(!p.on_fire());
+        p.tick(&w);
+        // Ignited for 160, then `Entity.baseTick`'s countdown for this tick.
+        assert_eq!(p.fire_ticks, 159);
+        assert!(p.on_fire());
+        // Out of the flames, the rest of the 160 ticks burn down.
+        let air = Empty(vec![]);
+        p.position = Vec3::new(0.5, 120.0, 0.5);
+        p.tick(&air);
+        assert_eq!(p.fire_ticks, 158);
+        for _ in 0..158 {
+            p.tick(&air);
+        }
+        assert_eq!(p.fire_ticks, 0, "the fire runs out");
+        assert!(!p.on_fire());
+        // Water puts it out at once: `Entity.baseTick`'s `isInWaterRainOrBubble`.
+        let mut wet = Projectile::new(ProjectileKind::Snowball, Vec3::new(0.5, 99.5, 0.5), None);
+        wet.velocity = Vec3::ZERO;
+        wet.tick(&w);
+        assert_eq!(wet.fire_ticks, 159);
+        wet.tick(&Fire {
+            targets: vec![],
+            water: true,
+        });
+        assert_eq!(wet.fire_ticks, 0, "water puts the snowball out");
+    }
+    /// A fireball is an `AbstractHurtingProjectile`: it does not apply the
+    /// effects of the blocks it flies through, so the fire block leaves it cold.
+    #[test]
+    fn a_fireball_is_not_ignited_by_a_fire_block() {
+        let mut p = Projectile::new(
+            ProjectileKind::SmallFireball,
+            Vec3::new(0.5, 99.5, 0.5),
+            None,
+        );
+        p.velocity = Vec3::ZERO;
+        p.tick(&Fire {
+            targets: vec![],
+            water: false,
+        });
+        assert_eq!(p.fire_ticks, 0);
+    }
     /// A wall of blocks across x = 1.
     struct Wall(Vec<(Who, Aabb)>);
     impl ProjectileWorld for Wall {
