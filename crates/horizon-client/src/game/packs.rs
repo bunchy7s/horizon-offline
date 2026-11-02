@@ -456,10 +456,14 @@ pub(super) fn stage_pack(
     // The world's models and sprites and the GUI atlas read the same root and nothing of
     // each other: about a second each, side by side.
     let (render, atlas, panorama) = std::thread::scope(|s| {
-        let atlas =
-            s.spawn(|| HudAtlas::build_over(&root, vanilla_root).map_err(|e| e.to_string()));
-        let panorama = s.spawn(|| horizon_client::gfx::panorama::Faces::load(&root, vanilla_root));
-        (assets.reload(&root), atlas.join(), panorama.join())
+        let mod_image = !horizon_client::mod_api::mods().is_empty();
+        let root = &root;
+        let atlas = s.spawn(move || {
+            HudAtlas::build_over_with_image(root, vanilla_root, mod_image)
+                .map_err(|e| e.to_string())
+        });
+        let panorama = s.spawn(|| horizon_client::gfx::panorama::Faces::load(root, vanilla_root));
+        (assets.reload(root), atlas.join(), panorama.join())
     });
     let render = Arc::new(render?);
     let mut atlas = atlas.unwrap_or_else(|p| std::panic::resume_unwind(p))?;

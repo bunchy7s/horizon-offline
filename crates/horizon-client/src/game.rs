@@ -2030,7 +2030,10 @@ impl UiResources {
                     horizon_client::gfx::panorama::Faces::load(root, defaults)
                 })
             });
-            let atlas = startup::time("ui.atlas", || HudAtlas::build_over(root, defaults));
+            let mod_image = !horizon_client::mod_api::mods().is_empty();
+            let atlas = startup::time("ui.atlas", || {
+                HudAtlas::build_over_with_image(root, defaults, mod_image)
+            });
             let panorama = panorama
                 .join()
                 .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
