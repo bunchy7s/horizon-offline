@@ -2105,9 +2105,8 @@ impl Game<'_> {
             Target::Spawner(id) => self.ominous_spawners.retain(|s| s.id != id),
         }
         // The orbs marked for removal are gone (Entity.kill removes them).
-        let before = self.orb_ids();
         self.orbs.retain(|o| o.age < u32::MAX / 2);
-        self.native_orbs_left_since(&before);
+        self.native_leaves_flush();
     }
     fn cmd_kill(&mut self, ctx: &Context) -> R<i32> {
         let targets = if ctx.get("targets").is_some() {

@@ -14,7 +14,7 @@ use std::{
     path::PathBuf,
     sync::{
         Mutex, OnceLock,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU32, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -24,7 +24,7 @@ const VERSION: u32 = 2;
 const FILE_NAME: &str = "behaviours-v2.bin";
 const MAX_FILE_BYTES: usize = 128 * 1024 * 1024;
 const MAX_DECODED_BYTES: usize = 256 * 1024 * 1024;
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+static NEXT_TEMP: AtomicU32 = AtomicU32::new(0);
 static DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Keep snapshots in `dir` (the client passes `<game folder>/.horizon-cache`).
@@ -776,9 +776,9 @@ fn write(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::AtomicU32;
 
-    static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
+    static NEXT_FIXTURE: AtomicU32 = AtomicU32::new(0);
 
     struct FixtureDir(PathBuf);
     impl Drop for FixtureDir {

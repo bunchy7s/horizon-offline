@@ -1100,6 +1100,7 @@ impl Game<'_> {
                 | K::EnderPearl
                 | K::LlamaSpit
                 | K::Potion { .. }
+                | K::ExperienceBottle
                 | K::Thrown(_) => (0.25, 0.2125),
                 K::SmallFireball | K::ShulkerBullet { .. } | K::WitherSkull { .. } => {
                     (0.3125, 0.265_625)
