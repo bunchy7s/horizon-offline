@@ -391,7 +391,7 @@ pub struct MobType {
     pub model: Arc<Part>,
     /// Every baked layer of this entity's models keyed by `model#layer`
     /// (e.g. `sheep#wool`, `zombie_baby#main`).
-    pub layers: HashMap<String, Arc<Part>>,
+    pub layers: crate::fast_hash::FxHashMap<String, Arc<Part>>,
     pub texture: String,
     pub brain: Brain,
     pub anim: Anim,
@@ -465,7 +465,7 @@ impl MobTypes {
             };
             let defaults = exact.get(&id).cloned().unwrap_or_default();
             let attr = |k: &str| defaults.get(&format!("minecraft:{k}")).copied();
-            let mut layers = HashMap::new();
+            let mut layers = crate::fast_hash::FxHashMap::default();
             if let Some(all) = models.as_object() {
                 for prefix in def.layer_prefixes() {
                     let start = format!("minecraft:{prefix}#");
@@ -830,6 +830,11 @@ pub fn anger_left(anger_end: i64, game_time: i64) -> i32 {
 /// Species-specific persistent state (variants, colours, taming, ageing...).
 #[derive(Clone, Debug, Default)]
 pub struct Extra {
+    /// `Mob.lootTable`: the table its death rolls instead of its type's
+    /// (saved as `DeathLootTable`).
+    pub death_loot_table: Option<String>,
+    /// `Mob.lootTableSeed` (`DeathLootTableSeed`): 0 for none.
+    pub death_loot_seed: i64,
     /// `Rabbit.moreCarrotTicks`: how long it is full of carrots (saved as `MoreCarrotTicks`).
     pub more_carrot_ticks: i32,
     /// `Ocelot.DATA_TRUSTING`: it no longer runs from players.
@@ -1161,6 +1166,8 @@ pub struct Mob {
     pub previous_limb_speed: f32,
     pub swell: i32,
     pub previous_swell: i32,
+    /// Creeper.maxSwell (`Fuse`): local NBT state, not synced entity data.
+    pub max_swell: i32,
     pub ambient_timer: i32,
     pub fall_distance: f64,
     /// `Entity.stuckSpeedMultiplier`: the next move is scaled by it.
@@ -1545,6 +1552,18 @@ pub enum MobEvent {
         amount: f32,
         source: Damage,
     },
+    /// A melee hit on another mob whose effect rides the hit:
+    /// `CaveSpider`, `Husk` and `WitherSkeleton.doHurtTarget` add it inside
+    /// the `super.doHurtTarget` branch, to any `LivingEntity`, so a mob the
+    /// hit lands on gets it too.
+    AttackMobWithEffect {
+        target: u32,
+        amount: f32,
+        source: Damage,
+        effect: &'static str,
+        ticks: i32,
+        amplifier: i32,
+    },
     /// `AbstractCubeMob.dealDamage` on the player (`playerTouch`): the hit,
     /// then, only when `hurtServer` let it land, the cube's
     /// `entity.slime.attack` with its pitch drawn from the cube's random.
@@ -1613,6 +1632,27 @@ pub enum MobEvent {
         vehicle: u32,
     },
     Projectile(crate::projectiles::Projectile),
+    /// An arrow `mob` shot with `weapon` (`AbstractSkeleton.performRangedAttack`):
+    /// the game asks for the ammunition (`getProjectile`) before it flies.
+    BowShot {
+        mob: u32,
+        weapon: crate::items::ItemStack,
+        arrow: crate::projectiles::Projectile,
+    },
+    /// `mob` finished charging `weapon` (`CrossbowItem.onUseTick`): the game
+    /// asks for the ammunition (`getProjectile`), and plays the end sound
+    /// at `at` only when the crossbow loaded.
+    CrossbowLoad {
+        mob: u32,
+        weapon: crate::items::ItemStack,
+        at: [f64; 3],
+        pitch: f32,
+    },
+    /// `arrow` shot from the `ammo` a mob's crossbow was charged with.
+    CrossbowShot {
+        ammo: crate::items::ItemStack,
+        arrow: crate::projectiles::Projectile,
+    },
     /// Spawn a new mob (breeding, slime splitting, chicken eggs...).
     Spawn(Box<Mob>),
     /// Spawn a mob by type id at a position (conversions, splits).
@@ -2603,6 +2643,7 @@ impl Mob {
             previous_limb_speed: 0.0,
             swell: 0,
             previous_swell: 0,
+            max_swell: 30,
             // Mob.ambientSoundTime starts at 0.
             ambient_timer: 0,
             fall_distance: 0.0,
@@ -3968,7 +4009,7 @@ pub(crate) mod sensor_scan_tests {
                 ..Default::default()
             },
             model: Arc::new(Part::parse("root", &json!({}))),
-            layers: HashMap::new(),
+            layers: Default::default(),
             texture: String::new(),
             brain: Brain::Passive,
             anim: Anim::Rabbit,

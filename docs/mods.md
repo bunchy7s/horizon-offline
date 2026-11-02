@@ -40,7 +40,10 @@ cargo horizon-mod build             # only build: target/horizon-mod/my_mod.hmod
 cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks; --json for JSON
 ```
 
-- `new <path> [--name "Name"]` writes the template. It makes content mods only: any other `--template` is refused.
+- `new <path> [--name "Name"]` writes the template. `--template native [--horizon <commit>]` writes a native trait
+  mod's bundle instead: `horizon-mixin.toml` (pinned to that Horizon commit, else unpinned) and an `[api]` crate with
+  one hook, built with `horizon-launcher native-build <path> --trust-native-code`
+  ([native-mods.md](native-mods.md#trait-mods-draft)). Any other `--template` is refused.
 - `build` packs `horizon-mod.toml`, `assets/` and `data/` into `target/horizon-mod/<id>.hmod`, with the same checks
   the game makes when it reads the content. It refuses a folder with a `Cargo.toml` (code is native now) and a
   manifest without capability `registries`.
@@ -151,6 +154,38 @@ signs `template_hanging_sign_rot_0` to `_rot_3`, `template_attached_hanging_sign
 `minecraft:standing_signs`, `minecraft:wall_signs`, `minecraft:ceiling_hanging_signs` and
 `minecraft:wall_hanging_signs`, which vanilla's other sign tags and `minecraft:mineable/axe` include. Give the
 wall form a loot table of its own, or name it `<x>_wall_sign` so that it drops what `<x>_sign`'s table does.
+
+A block can override its targeting outline with `shapes` and independently override movement
+collision with `collision_shapes`. Both take the same table format. Boxes are
+`[minX,minY,minZ,maxX,maxY,maxZ]` in block units (one block is 1), at most 16 per shape.
+Coordinates must be finite and each minimum must not exceed its maximum. `[]` is an empty shape.
+
+```json
+{
+  "template": "minecraft:stone",
+  "state_properties": {
+    "facing": { "type": "enum", "values": ["north", "south"] },
+    "count": { "type": "enum", "values": ["1", "2"] }
+  },
+  "shapes": {
+    "properties": ["facing", "count"],
+    "values": { "north,2": [[0,0,0,1,0.5,1]] },
+    "default": [[0,0,0,1,1,1]]
+  },
+  "collision_shapes": { "default": [] }
+}
+```
+
+`properties` names an ordered tuple of template and/or declared state properties; each `values` key
+lists their values in that order, separated by commas without spaces. A nonmatching tuple uses
+`default`. Without `default`, every tuple must be covered. A default-only table gives every state the
+same shape. The existing `{"property":"axis","values":{"x":[...],"y":[...],"z":[...]}}`
+format still works; use either `property` or `properties`, not both. Unknown properties, unreachable
+value tuples, malformed boxes and duplicate property names reject the mod with a load error rather
+than silently ignoring a typo. Omitted `shapes` preserves the template outline (or the connecting
+block's `thickness` outline). Omitted `collision_shapes` preserves the existing behavior: a declared
+outline also becomes collision, otherwise the template collision is retained. An explicit collision
+table can be used without an outline override, and overrides `thickness` collision too.
 
 An item copies its template's data components, with `max_stack_size` and
 `rarity` changed, and any other 26.3 component set or removed in

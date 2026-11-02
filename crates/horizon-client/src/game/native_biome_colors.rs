@@ -4,7 +4,6 @@
 //! game runs.
 
 use super::Game;
-use horizon_client::streaming::WorkerContext;
 use std::sync::Arc;
 
 // Native mods call it; nothing in Horizon does.
@@ -17,22 +16,26 @@ impl Game<'_> {
     /// slow fade) and once when the player joins, not every frame: a rebuild
     /// takes the workers a few seconds. API 107.
     pub(super) fn native_refresh_biome_colors(&mut self) {
-        let base = self.res.biomes().clone();
-        let biomes = base
-            .with_colors(|biome, colors| self.native_biome_colors(biome, colors))
-            .map_or(base, Arc::new);
-        if Arc::ptr_eq(&biomes, &self.pack.context.biomes) {
-            return;
+        // A world's own table is asked from the biome files' colours each
+        // time, so a mod's colours do not stack; a plain world's is the pack's.
+        if let (Some(base), Some(current)) = (&self.world_biomes_base, &self.world_biomes) {
+            let Some(biomes) = base.recolored_from(current, |biome, colors| {
+                self.native_biome_colors(biome, colors)
+            }) else {
+                return;
+            };
+            self.world_biomes = Some(Arc::new(biomes));
+        } else {
+            let base = self.res.biomes().clone();
+            let biomes = base
+                .with_colors(|biome, colors| self.native_biome_colors(biome, colors))
+                .map_or_else(|| base.clone(), Arc::new);
+            if Arc::ptr_eq(&biomes, &self.pack.context.biomes) {
+                return;
+            }
+            self.pack.context = self.pack.context_with(biomes);
         }
-        let old = &self.pack.context;
-        let context = Arc::new(WorkerContext {
-            assets: old.assets.clone(),
-            render: old.render.clone(),
-            tables: old.tables.clone(),
-            biomes,
-            light: old.light.clone(),
-        });
-        self.pack.context = context.clone();
+        let context = self.worker_context();
         self.clear_lod();
         self.streaming.reload_resources(&mut self.world, context);
     }
