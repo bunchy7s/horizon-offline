@@ -173,7 +173,8 @@ impl Game<'_> {
                 let raw = self.persist.raw.get(&id);
                 entity_nbt::arrow_to_nbt(p, random_uuid(), owner, in_block, raw)
                     .or_else(|| entity_nbt::fireball_to_nbt(p, random_uuid(), owner, raw))
-                    .or_else(|| entity_nbt::throwable_to_nbt(p, random_uuid(), owner, raw))?
+                    .or_else(|| entity_nbt::throwable_to_nbt(p, random_uuid(), owner, raw))
+                    .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, random_uuid(), owner, raw))?
             }
             Target::Crystal(id) => {
                 let c = self.crystals.iter().find(|c| c.id == id)?;
@@ -879,7 +880,9 @@ impl Game<'_> {
         let target = self.spawn_entity_from_nbt(tag);
         self.native_mobs_joined(from, false);
         // A mod kept the entity out: tryAddFreshEntityWithPassengers is false.
-        if target.is_none() && self.persist.joins_canceled != canceled {
+        if self.persist.joins_canceled != canceled
+            && target.is_none_or(|t| self.target_position(t).is_none())
+        {
             return Err(err("commands.summon.failed.uuid", &[]));
         }
         Ok(target)
