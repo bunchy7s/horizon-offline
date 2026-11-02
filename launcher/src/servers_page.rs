@@ -900,9 +900,21 @@ impl Launcher {
         self.servers.text(f).show(((width - 24.) / 7.5) as usize);
         // Home's Add server line is in the glass look already; the other fields follow with
         // their pages.
-        let glass = t.dark && matches!(f, Field::ServerName | Field::ServerAddress);
+        let glass = t.dark
+            && matches!(
+                f,
+                Field::ServerName
+                    | Field::ServerAddress
+                    | Field::InstanceModsFilter
+                    | Field::ConsoleSearch
+            );
         let base = if glass {
-            crate::glass_ui::field(focused, invalid)
+            // The mods filter and the log search sit by buttons: the mockup's small `FIELD`, as
+            // tall as they are.
+            crate::glass_ui::field(focused, invalid).when(
+                matches!(f, Field::InstanceModsFilter | Field::ConsoleSearch),
+                |d| d.h(px(36.)).px(px(12.)).rounded(px(10.)),
+            )
         } else {
             div()
                 .flex()

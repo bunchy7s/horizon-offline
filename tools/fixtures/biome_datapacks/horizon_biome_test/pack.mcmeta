@@ -1,0 +1,7 @@
+{
+  "pack": {
+    "description": "Horizon's data pack biome harness: new biomes with their own climate points",
+    "min_format": 121,
+    "max_format": 121
+  }
+}
