@@ -1,4 +1,4 @@
-GhostSlots.extractTooltip	port	crates/horizon-client/src/game/recipe_book.rs::Game::draw_ghost	the ghost stack in a menu slot shows its tooltip at the slot, after the ghosts themselves are drawn (GhostSlots.extractRenderState)
+GhostSlots.extractTooltip	port	crates/horizon-client/src/game/recipe_book.rs::Game::ghost_stack	the stack a ghost slot is showing, cycling like the ghost's own draw, becomes that slot's tooltip: draw_slot_tooltip asks ghost_stack first, so a ghost's tooltip wins over the slot's own
 GhostSlots.GhostSlot.getItem	port	crates/horizon-client/src/recipe_book_screen.rs::ghost	the stack cycles with index % items; empty ghost slots are dropped in Book::ghost
 OverlayRecipeComponent.mouseClicked	port	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_book_click	left click places the overlay's recipe; right click and outside clicks close the overlay
 OverlayRecipeComponent.OverlayCraftingRecipeButton.calculateIngredientsPositions	port	crates/horizon-client/src/recipe_book_screen.rs::overlay_cells	shaped recipes use the 3x3 grid cells, shapeless ones i % 3 and i / 3; empty ingredients are dropped
