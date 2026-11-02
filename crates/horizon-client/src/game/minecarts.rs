@@ -127,6 +127,9 @@ pub(super) struct Minecart {
     pub loot: Option<horizon_client::save::RolledLoot>,
     /// `Entity.firstTick`: not ticked yet (saved as `HasTicked`).
     pub first_tick: bool,
+    /// `Entity.isInWater`: set by the end of the last tick's fluid update, so a
+    /// cart's first tick still falls at the dry rate.
+    pub in_water: bool,
     /// Command block minecarts: the cart's `BaseCommandBlock` (command,
     /// success count, last output, output tracking). The block-only flags of
     /// `CommandBlock` stay unset.
@@ -276,6 +279,7 @@ impl Minecart {
             enabled: true,
             loot: None,
             first_tick: true,
+            in_water: false,
             command: horizon_client::command_block::CommandBlock::default(),
             tick_count: 0,
             last_activated: 0,
@@ -367,13 +371,7 @@ impl Game<'_> {
             .full_collision
     }
     fn cart_in_water(&self, c: &Minecart) -> bool {
-        let p = c.position;
-        let f = self.res.facts().get(self.world.block(
-            p.x.floor() as i32,
-            (p.y + 0.1).floor() as i32,
-            p.z.floor() as i32,
-        ));
-        f.fluid == Fluid::Water
+        c.in_water
     }
     /// `OldMinecartBehavior.getPos`: the point on the rail under (x, y, z).
     fn rail_pos(&self, x: f64, y: f64, z: f64) -> Option<[f64; 3]> {
@@ -512,6 +510,16 @@ impl Game<'_> {
                 c.fall_distance -= moved.y;
             }
         }
+        // Entity.move ends with applyEffectsFromBlocks: a bubble column lifts
+        // or drags the cart (tick_cart runs it a second time, like vanilla).
+        horizon_client::motion::bubble_column_push(
+            &self.world,
+            self.pack.assets.registry,
+            self.res.facts(),
+            self.collision,
+            c.bounds(),
+            &mut c.velocity,
+        );
     }
     fn max_speed(&self, c: &Minecart) -> f64 {
         let base = if self.cart_in_water(c) { 0.2 } else { 0.4 };
@@ -970,6 +978,25 @@ impl Game<'_> {
             c.flipped = !c.flipped;
         }
         c.yaw %= 360.0;
+        // applyEffectsFromBlocks: a bubble column lifts or drags the cart.
+        horizon_client::motion::bubble_column_push(
+            &self.world,
+            self.pack.assets.registry,
+            self.res.facts(),
+            self.collision,
+            c.bounds(),
+            &mut c.velocity,
+        );
+        // AbstractMinecart.tick: updateFluidInteraction, a stream pushes the cart.
+        c.in_water = horizon_client::entities::update_entity_fluids(
+            c.bounds(),
+            c.position,
+            c.bounds().max_position().y,
+            &mut c.velocity,
+            &self.world,
+            &self.res.motion().fluids,
+        )
+        .0 > 0.0;
         // Variants.
         match c.kind {
             CartKind::Furnace => {
