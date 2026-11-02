@@ -18417,7 +18417,8 @@ impl Game<'_> {
             }
             return;
         }
-        if let Err(error) = horizon_client::spans::time("world_entry", || self.resume_world_entry()) {
+        if let Err(error) = horizon_client::spans::time("world_entry", || self.resume_world_entry())
+        {
             self.error = Some(error);
             self.exit_on_error(event_loop);
             return;
