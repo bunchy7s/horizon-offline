@@ -1490,23 +1490,31 @@ def check_flame_arrows(host, guest, out):
         for label, shooter, other in (('host', host, guest), ('guest', guest, host)):
             x, y, z = spots[label]
             shooter('command', command='gamemode survival')
-            shooter('command', command='give @s minecraft:arrow 4')
             for bow in ('flame', 'plain'):
                 item = 'minecraft:bow[minecraft:enchantments={"minecraft:flame":1}]' if bow == 'flame' else 'minecraft:bow'
                 shooter('command', command=f'item replace entity @s weapon.mainhand with {item}')
+                shooter('command', command='give @s minecraft:arrow 1')
                 shooter.wait(10)
-                # Up at 45 degrees to the south, into open sky.
-                shooter.raw('look-at', f'{x + 0.5:.2f}', f'{y + 11.6:.2f}', f'{z + 10.5:.2f}')
-                shooter.raw('use-item', '--hold', 1.3)  # a full draw (BowItem: 20 ticks)
+                # Straight up into open sky: it slows down over the shooter, where the other player looks.
+                shooter.raw('look-at', f'{x + 0.5:.2f}', f'{y + 60:.2f}', f'{z + 0.52:.2f}')
+                shooter.raw('use-item', '--hold', 1.3)  # a full draw (BowItem: 20 ticks); returns at once
                 case = {'own': set(), 'other': set()}
-                for i in range(6):
-                    shooter.wait(3)
-                    if i == 1:
-                        shooter.shot(out, f'flame-arrows-{label}-{bow}')
+                shot = False
+                for _ in range(40):
+                    shooter.wait(2)
                     for side, game in (('own', shooter), ('other', other)):
                         for p in game('status')['projectiles']:
-                            if p['kind'] == 'Arrow' and abs(p['position'][0] - (x + 0.5)) < 4:
-                                case[side].add(bool(p.get('on_fire')))
+                            if p['kind'] != 'Arrow' or abs(p['position'][0] - (x + 0.5)) > 4:
+                                continue
+                            case[side].add(bool(p.get('on_fire')))
+                            # Near the top of its flight: the other player looks at it and shows it.
+                            if side == 'other' and not shot and abs(p['velocity'][1]) < 0.6:
+                                other.raw('look-at', *(f'{v:.2f}' for v in p['position']))
+                                other.wait(1)
+                                other.shot(out, f'flame-arrows-{label}-{bow}')
+                                shot = True
+                    if shot:
+                        break
                 seen[f'{label} {bow}'] = {k: sorted(v) for k, v in case.items()}
                 shooter('command', command='kill @e[type=minecraft:arrow]')
                 shooter.wait(5)
@@ -1517,6 +1525,7 @@ def check_flame_arrows(host, guest, out):
         want = [True] if name.endswith('flame') else [False]
         assert case['own'] == want and case['other'] == want, f'{name}: on_fire seen in flight {seen}'
     return seen
+
 
 def check_deaths(host, guest, out):
     def other_player(watcher):
