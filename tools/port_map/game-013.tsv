@@ -90,7 +90,7 @@ PigVariants.bootstrap	skip:data		variant registry; the variants and their biome 
 PigVariants.register	skip:data		registry helper
 PolarBear.createAttributes	skip:data		attributes come from the entity type table
 PolarBear.checkPolarBearSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::PolarBear arm: ice-block rule in the alternate biomes, animal rule elsewhere
-PolarBear.getDefaultDimensions	missing		minor: the box of a rearing bear stays its normal height (vanilla grows it up to twice with the stand animation); Mob::dims has no polar bear arm
+PolarBear.getDefaultDimensions	port	crates/horizon-client/src/mobs/living.rs::Mob::awake_dims_in	the rear-up animation scales the box by (1, 1 + animation / 6), widening nothing, through polar_bear::stand_box_scale
 PolarBear.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	ageable group with chance 1.0 (the PolarBear and Ocelot arm)
 Rabbit.getJumpPower	port	crates/horizon-client/src/mobs/rabbit.rs::jump_scale	0.5 toward higher ground or a wall, 0.2 when slow, else 0.3, divided by 0.42 (jump_power adds the block factor and boost)
 Rabbit.getJumpCompletion	skip:other		only copied into the render state; the rabbit model plays the hop and idle keyframe animations instead
