@@ -1228,8 +1228,8 @@ const SHAKE_MAX_DEGREES: f32 = 10.0;
 /// The largest offset a shake gives, in blocks, along each axis.
 const SHAKE_MAX_OFFSET: f32 = 0.5;
 
-/// `shake` scaled by `scale` (Distortion Effects) and bounded on each axis;
-/// a value that isn't finite counts as none.
+/// The pose a native mod asks for the first-person hand, each out-of-range
+/// or non-finite component replaced by its identity.
 pub(super) fn hand_pose_matrix(values: [f32; 7]) -> glam::Mat4 {
     let valid = |value: f32, min: f32, max: f32, default: f32| {
         if value.is_finite() && (min..=max).contains(&value) {
@@ -1249,6 +1249,8 @@ pub(super) fn hand_pose_matrix(values: [f32; 7]) -> glam::Mat4 {
         * glam::Mat4::from_scale(glam::Vec3::splat(valid(scale, 0.01, 100.0, 1.0)))
 }
 
+/// `shake` scaled by `scale` (Distortion Effects) and bounded on each axis;
+/// a value that isn't finite counts as none.
 fn bounded_shake(shake: NativeShake, scale: f32) -> NativeShake {
     let scale = if scale.is_finite() {
         scale.clamp(0.0, 1.0)
