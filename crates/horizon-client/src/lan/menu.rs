@@ -1129,4 +1129,61 @@ mod tests {
             Some("minecraft:shield")
         );
     }
+
+    struct ArmorRules;
+    impl Rules for ArmorRules {
+        fn items(&self) -> &Items {
+            unreachable!("a quick move reads no item catalog");
+        }
+        fn max_stack(&self, _: &str) -> u32 {
+            64
+        }
+        fn armor_index(&self, item: &str) -> Option<usize> {
+            (item == "minecraft:iron_helmet").then_some(0)
+        }
+        fn equip_slot(&self, _: &str) -> Option<&str> {
+            None
+        }
+    }
+
+    /// A shift-click from the off-hand slot wears the armour it holds:
+    /// `InventoryMenu.quickMoveStack` asks for the item's equipment slot
+    /// before it looks at the clicked index, so the helmet goes to the empty
+    /// helmet slot. With that slot taken, and for anything else in the off
+    /// hand, the stack fills the main inventory before the hotbar.
+    #[test]
+    fn inventory_quick_move_wears_armor_from_the_off_hand() {
+        let rules = ArmorRules;
+        let mut g = guest();
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: None,
+            shulker: false,
+            hidden: &[],
+        };
+        // Menu slot 45 is the off hand; 5 to 8 are the armour slots, head first.
+        view.guest.offhand = Some(ItemStack::new("minecraft:iron_helmet", 1));
+        click(&mut view, &mut drag, 45, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(
+            view.get(5).as_ref().map(|s| &*s.item),
+            Some("minecraft:iron_helmet")
+        );
+        assert!(view.get(45).is_none());
+        assert!(view.get(9).is_none());
+        // The helmet slot is taken: the next helmet goes to the inventory.
+        view.guest.offhand = Some(ItemStack::new("minecraft:iron_helmet", 1));
+        click(&mut view, &mut drag, 45, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(
+            view.get(9).as_ref().map(|s| &*s.item),
+            Some("minecraft:iron_helmet")
+        );
+        assert!(view.get(45).is_none());
+        // Anything else fills the main inventory before the hotbar.
+        view.guest.offhand = Some(ItemStack::new("minecraft:diamond", 3));
+        click(&mut view, &mut drag, 45, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(10).as_ref().map(|s| s.count), Some(3));
+        assert!(view.get(36).is_none());
+        assert!(view.get(45).is_none());
+    }
 }
