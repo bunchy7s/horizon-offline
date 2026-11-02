@@ -1769,6 +1769,85 @@ mod fire_environment_tests {
     }
 }
 #[cfg(test)]
+mod destroyed_bundle_environment_tests {
+    use super::*;
+    use horizon_world::loot::PackOverlay;
+
+    /// `BundleItem.onDestroyed`: the lava that destroys a dropped bundle
+    /// hands its stacks to the item tick (`ItemUtils.onContainerDestroyed`),
+    /// and the bundle keeps none of them.
+    #[test]
+    fn lava_that_destroys_a_bundle_spills_its_contents() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = BlockFacts::load(&root, assets.registry).unwrap();
+        let items =
+            crate::items::Items::load(&root, assets.registry, &facts, &PackOverlay::NONE).unwrap();
+        let mut world = World::test_scene(&assets, &render, 3).unwrap();
+        let at = Vec3::new(20.5, 4.0, 20.5);
+        world
+            .set(
+                20,
+                4,
+                20,
+                assets.registry.default_state("minecraft:lava").unwrap(),
+            )
+            .unwrap();
+        let mut stack = ItemStack::new("minecraft:bundle", 1);
+        stack.data_mut().bundle_contents = vec![
+            ItemStack::new("minecraft:stone", 3),
+            ItemStack::new("minecraft:diamond", 1),
+        ];
+        let mut bundle = ItemEntity {
+            no_gravity: false,
+            id: 1,
+            thrower: None,
+            target: None,
+            stack,
+            health: 5,
+            fire_ticks: 0,
+            position: at,
+            previous: at,
+            velocity: Vec3::ZERO,
+            on_ground: false,
+            vertical_collision: false,
+            horizontal_collision: false,
+            age: 0,
+            pickup_delay: 0,
+            bob_offset: 0.0,
+            ticks: 0,
+            needs_sync: false,
+            stuck: Vec3::ZERO,
+        };
+        // 5 health against 4 a tick: the first tick leaves 1 and nothing out.
+        let first = bundle.environment_tick(&world, &facts, assets.registry, &items);
+        assert!(first.alive && first.spilled.is_empty());
+        let second = bundle.environment_tick(&world, &facts, assets.registry, &items);
+        assert!(!second.alive);
+        assert_eq!(
+            second
+                .spilled
+                .iter()
+                .map(|s| (&*s.item, s.count))
+                .collect::<Vec<_>>(),
+            [("minecraft:stone", 3), ("minecraft:diamond", 1)]
+        );
+        assert!(
+            bundle
+                .stack
+                .data()
+                .is_none_or(|d| d.bundle_contents.is_empty()),
+            "the destroyed bundle keeps nothing inside"
+        );
+    }
+}
+#[cfg(test)]
 mod armor_stand_render_tests {
     use super::*;
 
@@ -2897,3 +2976,70 @@ mod armor_stand_motion_tests {
     }
 }
 
+#[cfg(test)]
+mod item_destroyed_tests {
+    use super::*;
+
+    fn item(id: &str, contents: &[(&str, u32)]) -> ItemEntity {
+        let mut stack = ItemStack::new(id, 1);
+        stack.data_mut().bundle_contents = contents
+            .iter()
+            .map(|(id, count)| ItemStack::new(id, *count))
+            .collect();
+        ItemEntity {
+            no_gravity: false,
+            id: 1,
+            thrower: None,
+            target: None,
+            stack,
+            health: 5,
+            fire_ticks: 0,
+            position: Vec3::new(8.5, 64.0, 8.5),
+            previous: Vec3::new(8.5, 64.0, 8.5),
+            velocity: Vec3::ZERO,
+            on_ground: false,
+            vertical_collision: false,
+            horizontal_collision: false,
+            age: 0,
+            pickup_delay: 0,
+            bob_offset: 0.0,
+            ticks: 0,
+            needs_sync: false,
+            stuck: Vec3::ZERO,
+        }
+    }
+
+    /// `BundleItem.onDestroyed` (`ItemStack.onDestroyed` → `dropContents`):
+    /// the damage that empties an item's health (`ItemEntity.hurtServer`,
+    /// which `environment_tick` calls for fire, lava and cactus) hands back
+    /// the bundle's stacks, and the bundle keeps none of them.
+    #[test]
+    fn a_destroyed_bundle_spills_its_contents() {
+        let mut bundle = item(
+            "minecraft:bundle",
+            &[("minecraft:stone", 3), ("minecraft:diamond", 1)],
+        );
+        // Above zero after the hit: nothing leaves the bundle.
+        assert_eq!(bundle.hurt(1), None);
+        assert_eq!(bundle.health, 4);
+        let spent = bundle.hurt(4).expect("the hit that destroys it");
+        assert_eq!(
+            spent
+                .iter()
+                .map(|s| (&*s.item, s.count))
+                .collect::<Vec<_>>(),
+            [("minecraft:stone", 3), ("minecraft:diamond", 1)]
+        );
+        assert!(
+            bundle
+                .stack
+                .data()
+                .is_none_or(|d| d.bundle_contents.is_empty()),
+            "the destroyed bundle keeps nothing inside"
+        );
+        // A second hit has nothing left to spill, and an item that holds
+        // nothing never reports any.
+        assert_eq!(bundle.hurt(1), Some(Vec::new()));
+        assert_eq!(item("minecraft:stone", &[]).hurt(5), Some(Vec::new()));
+    }
+}
