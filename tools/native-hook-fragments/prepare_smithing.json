@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "prepare_smithing",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_smithing",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "replace",
+        "out": "result"
+      }
+    }
+  ],
+  "rust_summary": "Smithing result prepared (`native_prepare_smithing`).",
+  "doc_summary": "A smithing result was prepared: `native_prepare_smithing(player, name, pos, result)` is called for a server player at `pos`; change the result before it is sent to the menu. Guest state is not swapped in. Bundles need \"hooks\": @API:prepare_smithing@."
+}

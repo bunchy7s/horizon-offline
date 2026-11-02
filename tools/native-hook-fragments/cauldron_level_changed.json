@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "cauldron_level_changed",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_cauldron_level_changed",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event; Bukkit's CauldronLevelChangeEvent)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "Cauldron fill level about to change (`native_cauldron_level_changed`).",
+  "doc_summary": "A cauldron's fill level is about to change: `native_cauldron_level_changed(dimension, player, pos, from_level, to_level, reason, cancel)` is asked for rain, snow, dripstone and extinguishing. Set `cancel` to leave it as it was. `from_level` and `to_level` use 0 for empty and 1 to 3 for filled levels. `player` is the acting server player when available. Bucket, bottle and dyeing interactions are not covered yet. Bundles need \"hooks\": @API:cauldron_level_changed@."
+}

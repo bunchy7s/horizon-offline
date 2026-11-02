@@ -17,6 +17,7 @@ use horizon_client::{
     projectiles::ProjectileKind,
     text::Text,
 };
+use horizon_core::position::BlockPos;
 use horizon_core::{
     geometry::{Aabb, Vec3},
     random::{LegacyRandom, RandomSource},
@@ -2272,7 +2273,17 @@ impl Game<'_> {
                     f.full_collision || f.legacy_solid
                 })
                 .map_or(64, |y| y + 1);
-            let _ = self.level_set([0, y, 0], egg);
+            let pos = BlockPos::new(0, y, 0);
+            let allowed = self.with_level(|_, level, _| {
+                let mut cancel = false;
+                if level.native_authoritative {
+                    level.native_dragon_egg_form(level.dimension, pos, &mut cancel);
+                }
+                !cancel
+            });
+            if allowed {
+                let _ = self.level_set([0, y, 0], egg);
+            }
         }
         self.fight.previously_killed = true;
         self.fight.killed = true;

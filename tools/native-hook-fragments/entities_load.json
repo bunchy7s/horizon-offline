@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "entities_load",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entities_load",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "Saved entity records finished loading into a chunk (`native_entities_load`).",
+  "doc_summary": "Saved entity records for a chunk finished loading into the server world: `native_entities_load(dimension, chunk, count)` reports the dimension, chunk coordinates and number of records read. Bundles need \"hooks\": @API:entities_load@."
+}

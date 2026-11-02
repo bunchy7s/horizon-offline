@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "prepare_item_craft",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_item_craft",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "replace",
+        "out": "result"
+      }
+    }
+  ],
+  "rust_summary": "Crafting-grid result prepared (`native_prepare_item_craft`).",
+  "doc_summary": "A crafting-grid result was prepared: `native_prepare_item_craft(player, name, pos, result)` is called for the inventory grid (None) or a table at `pos`; change the result before it is sent to the menu. Guest state is not swapped in. Bundles need \"hooks\": @API:prepare_item_craft@."
+}

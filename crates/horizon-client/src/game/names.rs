@@ -29,11 +29,18 @@ impl Game<'_> {
         if !m.alive() {
             return false;
         }
+        let entity_id = m.id;
+        let entity_name = name.clone();
         m.custom_name = Some(name);
         m.persistent = true;
         // itemStack.shrink(1), in creative too.
         self.consume_held();
         self.swing_arm();
+        if let (Some(player), Some(player_name)) =
+            (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            self.native_player_name_entity(player, &player_name, entity_id, &entity_name);
+        }
         true
     }
     /// `Entity.belowNameDisplay`: the score holder's score in the objective

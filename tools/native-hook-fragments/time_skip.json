@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "time_skip",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_time_skip",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "The server clock is about to jump, cancellable (`native_time_skip`).",
+  "doc_summary": "The overworld clock is about to jump after sleep or a `/time` command: `native_time_skip(dimension, from, to, cause, cancel)`. Set `cancel` to keep the old time. Bundles need \"hooks\": @API:time_skip@."
+}

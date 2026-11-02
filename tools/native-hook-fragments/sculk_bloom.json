@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "sculk_bloom",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_sculk_bloom",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A sculk catalyst begins blooming (`native_sculk_bloom`).",
+  "doc_summary": "`native_sculk_bloom(dimension, pos)` is called after a sculk catalyst at `pos` takes experience and enters the blooming state. Bundles need \"hooks\": @API:sculk_bloom@."
+}

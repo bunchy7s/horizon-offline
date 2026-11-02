@@ -365,6 +365,7 @@ impl Game<'_> {
                         &[shown],
                     ));
                 }
+                self.native_world_border_bounds_changed();
                 Ok((distance - current) as i32)
             }
             "worldborder.center" => {
@@ -382,6 +383,7 @@ impl Game<'_> {
                     ));
                 }
                 self.border.set_center([x, z]);
+                self.native_world_border_center_changed();
                 self.feedback(Text::translate(
                     "commands.worldborder.center.success",
                     &[Text::literal(float2(x)), Text::literal(float2(z))],

@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "entity_pose_change",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_pose_change",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A guest player's synchronized pose changed (`native_entity_pose_change`).",
+  "doc_summary": "A guest player's synchronized pose changed: `native_entity_pose_change(player, name, from, to)` reports the old and new pose names. Bundles need \"hooks\": @API:entity_pose_change@."
+}

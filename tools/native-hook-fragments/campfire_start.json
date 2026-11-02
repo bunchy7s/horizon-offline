@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "campfire_start",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_campfire_start",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "An item starts cooking on a campfire (`native_campfire_start`).",
+  "doc_summary": "An item was placed on a campfire and began cooking. Bundles need \"hooks\": @API:campfire_start@."
+}

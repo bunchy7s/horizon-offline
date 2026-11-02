@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_egg_throw",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_egg_throw",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A server player threw an egg (`native_player_egg_throw`).",
+  "doc_summary": "A server player threw an egg after its projectile was launched and its use applied. Bundles need \"hooks\": @API:player_egg_throw@."
+}

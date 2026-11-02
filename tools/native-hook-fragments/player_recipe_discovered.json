@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "player_recipe_discovered",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_recipe_discovered",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerRecipeDiscoverEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A recipe about to be discovered by a server player, cancellable (`native_player_recipe_discovered`).",
+  "doc_summary": "A recipe about to become known to a server player: `native_player_recipe_discovered(player, name, recipe, cancel)` is heard for advancement rewards, knowledge books and `/recipe give`. Set `cancel` to keep it locked; the client is sent the matching removal. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled. Bundles need \"hooks\": @API:player_recipe_discovered@."
+}

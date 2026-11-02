@@ -206,7 +206,9 @@ impl Game<'_> {
             .properties
             .insert("vault_state".into(), state.name().into());
         let id = self.pack.assets.registry.resolve(&block)?;
-        self.level_set([key.0, key.1, key.2], id)
+        self.level_set([key.0, key.1, key.2], id)?;
+        self.native_vault_change_state(self.dim.id(), [key.0, key.1, key.2], state.name());
+        Ok(())
     }
     /// `VaultRenderer`: the display item of every vault near the camera that
     /// shows one, turning above its floor.

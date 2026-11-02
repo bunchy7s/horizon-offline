@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "leaves_decay",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_leaves_decay",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A leaf block decaying (`native_leaves_decay`).",
+  "doc_summary": "`native_leaves_decay(dimension, pos, cancel)` is called when a non-persistent leaf block at distance 7 is about to decay. Set `cancel` to keep it. Bundles need \"hooks\": @API:leaves_decay@."
+}

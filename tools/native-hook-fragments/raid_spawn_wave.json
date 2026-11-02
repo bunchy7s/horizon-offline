@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "raid_spawn_wave",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_raid_spawn_wave",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A raid wave that has spawned (`native_raid_spawn_wave`).",
+  "doc_summary": "A raid wave has spawned at its position, with its raid id, wave number and raider count (riders' mounts not counted). Bundles need \"hooks\": @API:raid_spawn_wave@."
+}

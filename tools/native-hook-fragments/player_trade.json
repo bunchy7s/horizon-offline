@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_trade",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_trade",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A server player completed a merchant trade (`native_player_trade`).",
+  "doc_summary": "A server player completed a villager or wandering trader trade, after the merchant menu applied the trade: `native_player_trade(player, name, entity_id)` gives the merchant's network id. Bundles need \"hooks\": @API:player_trade@."
+}

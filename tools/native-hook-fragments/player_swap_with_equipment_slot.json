@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_swap_with_equipment_slot",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_swap_with_equipment_slot",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A server player swapped with an equipment slot (`native_player_swap_with_equipment_slot`).",
+  "doc_summary": "A server player swapped their main hand with an equipment slot: `native_player_swap_with_equipment_slot(player, name, slot)` fires after both hands changed; `slot` is currently `offhand`. Guest lookup helpers may find nothing during packet handling. Bundles need \"hooks\": @API:player_swap_with_equipment_slot@."
+}

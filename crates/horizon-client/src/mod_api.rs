@@ -7,6 +7,7 @@ use std::sync::{Arc, OnceLock};
 
 pub use crate::biome::BiomeColors;
 pub use crate::camera::CameraEntity;
+pub use crate::command::Suggestion;
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
 pub use crate::crafting::{CustomRecipe, Ingredient};
 pub use crate::extras::Corner;

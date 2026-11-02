@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_open_sign",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_open_sign",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A server player opened a sign editor (`native_player_open_sign`).",
+  "doc_summary": "A server player opened a sign editor at `pos`, for the front or back side, after the editor state was made: `native_player_open_sign(player, name, pos, front)`. Bundles need \"hooks\": @API:player_open_sign@."
+}

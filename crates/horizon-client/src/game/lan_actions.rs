@@ -1251,10 +1251,15 @@ impl Game<'_> {
             Slots::Block(k) => [Some(*k), None],
             _ => [None, None],
         };
-        let locked = halves
-            .iter()
-            .flatten()
-            .any(|&k| self.container_locked_for(k, spectator, hand.as_ref()));
+        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
+            return false;
+        };
+        let mut locked = false;
+        for key in halves.iter().flatten().copied() {
+            let mut check = self.container_locked_for(key, spectator, hand.as_ref());
+            self.native_block_lock_check(uuid, &name, [key.0, key.1, key.2], &mut check);
+            locked |= check;
+        }
         if locked {
             host.hub.send_to(
                 conn,
@@ -1298,6 +1303,11 @@ impl Game<'_> {
         // The mods may stop the menu; the click is spent.
         if !self.guest_may_open(host, conn, menu, Some([pos.0, pos.1, pos.2])) {
             return true;
+        }
+        let mut cancel = false;
+        self.native_inventory_block_start(uuid, &name, [pos.0, pos.1, pos.2], &mut cancel);
+        if cancel {
+            return false;
         }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(host, conn);
@@ -1872,6 +1882,8 @@ impl Game<'_> {
                         g.player_on_equip("offhand", main.as_ref(), offhand.as_ref());
                         g.player_on_equip("mainhand", offhand.as_ref(), main.as_ref());
                     });
+                    let guest = &host.hub.guests[gi];
+                    self.native_player_swap_with_equipment_slot(guest.uuid, &guest.name, "offhand");
                 }
                 // STAB: `PiercingWeapon.attack` of a left click with a spear.
                 8 if !spectator => self.guest_jab(host, conn),
@@ -1879,11 +1891,37 @@ impl Game<'_> {
             },
             // handleSetCarriedItem: a new slot stops a main-hand use.
             S::SetCarriedItem(p) => {
-                let g = &mut host.hub.guests[gi];
                 if !(0..9).contains(&p.slot) {
-                    eprintln!("{} tried to set an invalid carried item", g.name);
+                    eprintln!(
+                        "{} tried to set an invalid carried item",
+                        host.hub.guests[gi].name
+                    );
                     return;
                 }
+                let (uuid, name, old_slot) = {
+                    let g = &host.hub.guests[gi];
+                    (g.uuid, g.name.clone(), g.selected)
+                };
+                if old_slot != p.slot as usize {
+                    let mut cancel = false;
+                    self.native_player_item_held(
+                        uuid,
+                        &name,
+                        old_slot as i32,
+                        i32::from(p.slot),
+                        &mut cancel,
+                    );
+                    if cancel {
+                        host.hub.send_to(
+                            conn,
+                            &C::SetHeldSlot(play::SetHeldSlot {
+                                slot: old_slot as i32,
+                            }),
+                        );
+                        return;
+                    }
+                }
+                let g = &mut host.hub.guests[gi];
                 let changed = g.selected != p.slot as usize;
                 g.selected = p.slot as usize;
                 if let Some(play) = host.play.get_mut(&conn)
@@ -1900,10 +1938,15 @@ impl Game<'_> {
             // click on nothing), seen by the players around, and the attack
             // strength starts again.
             S::Punch(_) => {
+                let (player, name) = {
+                    let g = &host.hub.guests[gi];
+                    (g.uuid, g.name.clone())
+                };
                 self.as_guest(host, conn, |g| {
                     g.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
                     g.reset_attack_strength();
                 });
+                self.native_player_attack_cooldown_reset(player, &name);
             }
             S::UseItemOn(p) => {
                 host.hub.ack(conn, p.sequence);
@@ -2342,6 +2385,13 @@ impl Game<'_> {
             S::SetGameRule(p) if host.hub.guests[gi].permission >= 2 => {
                 for entry in p.entries {
                     if self.ui.rules.set_string(&entry.name, &entry.value) {
+                        let guest = &host.hub.guests[gi];
+                        self.native_world_game_rule_change(
+                            guest.uuid,
+                            &guest.name,
+                            &entry.name,
+                            &entry.value,
+                        );
                         let message = horizon_client::text::Text::tr(
                             "commands.gamerule.set",
                             &[&entry.name, &entry.value],
@@ -2465,7 +2515,7 @@ impl Game<'_> {
             // handlePickItemFromBlock: a block within the block reach plus 1, its
             // data only with infinite materials.
             S::PickItemFromBlock(p) => {
-                self.guest_pick_item(host, conn, |g| {
+                self.guest_pick_item(host, conn, false, p.pos, 0, |g| {
                     // handlePickItemFromBlock: within reach and loaded.
                     if !g.world.loaded(p.pos[0], p.pos[2]) {
                         return None;
@@ -2486,7 +2536,7 @@ impl Game<'_> {
             }
             // handlePickItemFromEntity.
             S::PickItemFromEntity(p) => {
-                self.guest_pick_item(host, conn, |g| {
+                self.guest_pick_item(host, conn, true, [0; 3], p.id, |g| {
                     g.within_entity_range(p.id)
                         .then(|| g.entity_pick_result(p.id))
                         .flatten()
@@ -2528,11 +2578,22 @@ impl Game<'_> {
         &mut self,
         host: &mut LanHost,
         conn: u32,
+        from_entity: bool,
+        pos: [i32; 3],
+        entity_id: i32,
         stack: impl FnOnce(&mut Self) -> Option<ItemStack>,
     ) {
+        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
+            return;
+        };
         let picked = self.as_guest(host, conn, |g| {
             let stack = stack(g)?;
             let infinite = g.creative;
+            let mut cancel = false;
+            g.native_player_pick_item(uuid, &name, from_entity, pos, entity_id, &mut cancel);
+            if cancel {
+                return None;
+            }
             horizon_client::pick_item::pick(
                 &mut g.inventory[..36],
                 &mut g.selected,
@@ -3227,6 +3288,11 @@ impl Game<'_> {
         let Some(permission) = host.hub.guest(conn).map(|g| g.permission) else {
             return;
         };
+        let Some((player_uuid, player_name)) =
+            host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
+        else {
+            return;
+        };
         let skip = usize::from(text.starts_with('/'));
         let command = &text[skip..];
         let d = vanilla::game_dispatcher();
@@ -3273,6 +3339,13 @@ impl Game<'_> {
         let parse = d.parse(command, &self.ui.registries);
         let ((start, end), mut suggestions) =
             d.suggestions(&parse, command.len(), &self.ui.registries);
+        self.native_tab_complete(
+            player_uuid,
+            &player_name,
+            command,
+            [start, end],
+            &mut suggestions,
+        );
         let reg = &mut self.ui.registries;
         reg.permission = level;
         reg.players = own_players;
@@ -3746,6 +3819,11 @@ impl Game<'_> {
     /// teleport the client there.
     fn wake_guest_from(&mut self, host: &mut LanHost, gi: usize, head: [i32; 3]) {
         let yaw = host.hub.guests[gi].yaw;
+        let (player, name) = {
+            let g = &host.hub.guests[gi];
+            (g.uuid, g.name.clone())
+        };
+        self.native_player_bed_leave(player, &name, head);
         let Some((stand, yaw)) = self.bed_wake_pose(head, yaw) else {
             return;
         };
@@ -3791,7 +3869,10 @@ impl Game<'_> {
     /// sleeper who died or whose bed is gone.
     fn guest_sleep_tick(&mut self, host: &mut LanHost, gi: usize) {
         let g = &mut host.hub.guests[gi];
+        let was_deep = g.sleep_timer >= 100;
         g.sleep_timer = super::tick_sleep_timer(g.sleep_timer, g.bed.is_some());
+        let deep_sleep = !was_deep && g.sleep_timer >= 100 && g.bed.is_some();
+        let identity = deep_sleep.then(|| (g.uuid, g.name.clone()));
         if let Some(head) = g.bed {
             let block = self.world.block(head[0], head[1], head[2]);
             let bed = self.res.facts().get(block).name.ends_with("_bed");
@@ -3804,6 +3885,9 @@ impl Game<'_> {
                     m.pitch = 0.0;
                 }
             }
+        }
+        if let Some((player, name)) = identity {
+            self.native_player_deep_sleep(player, &name);
         }
     }
 
@@ -4244,6 +4328,7 @@ impl Game<'_> {
             }
         }
         if let (Some(v), Some(g)) = (marked, host.hub.guest(conn)) {
+            self.native_player_velocity(g.uuid, &g.name, [v.x, v.y, v.z]);
             g.send(&C::SetEntityMotion(play::SetEntityMotion {
                 id: g.entity_id,
                 velocity: [v.x, v.y, v.z],
@@ -4266,8 +4351,16 @@ impl Game<'_> {
                     .is_some_and(|p| p.fluids.was_touching_water || p.is_in_lava())
             })
             .unwrap_or(true);
+        let mut changed = None;
         if let Some(g) = host.hub.guest_mut(conn) {
-            g.fall_flying = start && !in_liquid;
+            let gliding = start && !in_liquid;
+            if g.fall_flying != gliding {
+                g.fall_flying = gliding;
+                changed = Some((g.uuid, g.name.clone(), gliding));
+            }
+        }
+        if let Some((uuid, name, gliding)) = changed {
+            self.native_entity_toggle_glide(uuid, &name, gliding);
         }
     }
 
@@ -4442,6 +4535,8 @@ impl Game<'_> {
         let swinging = play.swing.swinging();
         if progress != play.last_progress && progress >= 0 {
             play.last_progress = progress;
+            let guest = &host.hub.guests[gi];
+            self.native_block_break_progress_update(guest.uuid, &guest.name, pos, progress);
             // The host player sees it too (on the server thread its window is a guest).
             self.destroy_block_progress(host.hub.guests[gi].entity_id, pos, progress);
             host.hub.broadcast_near(
@@ -4583,7 +4678,7 @@ impl Game<'_> {
     /// (`handleTakeItemEntity`).
     fn guest_arrows(&mut self, host: &mut LanHost, gi: usize) {
         use horizon_client::arrows::Touch;
-        let (conn, id, at, creative, unable, dims) = {
+        let (conn, id, at, creative, unable, dims, player, name) = {
             let g = &host.hub.guests[gi];
             (
                 g.conn,
@@ -4592,6 +4687,8 @@ impl Game<'_> {
                 g.creative(),
                 g.spectator() || g.dead || g.health <= 0.0,
                 g.dimensions(),
+                g.uuid,
+                g.name.clone(),
             )
         };
         if unable || self.creatures.projectiles.is_empty() {
@@ -4635,6 +4732,9 @@ impl Game<'_> {
         });
         self.creatures.projectiles = projectiles;
         for shot in picked {
+            if let Some(arrow) = shot.arrow.as_ref() {
+                self.native_player_pickup_arrow(player, &name, shot.id, &arrow.pickup_item.item);
+            }
             host.hub.take_item(shot.id as i32, id, 1, at);
             if let Some(target) = super::pickups::guest_target(host, id as u32) {
                 self.add_pickup_toward(
@@ -4653,11 +4753,13 @@ impl Game<'_> {
     fn guest_orbs(&mut self, host: &mut LanHost, gi: usize) {
         let g = &host.hub.guests[gi];
         let height = f64::from(g.dimensions().height);
-        let (conn, id, at) = (g.conn, g.entity_id, g.position);
+        let (conn, id, at, player, name) =
+            (g.conn, g.entity_id, g.position, g.uuid, g.name.clone());
         let unable = g.spectator() || g.dead || g.health <= 0.0;
         let play = host.play.entry(conn).or_default();
         if play.xp_delay > 0 {
             play.xp_delay -= 1;
+            self.native_player_exp_cooldown_change(player, &name, play.xp_delay);
         }
         if unable || play.xp_delay > 0 {
             return;
@@ -4725,6 +4827,7 @@ impl Game<'_> {
             self.orbs[index].count -= 1;
         }
         host.play.entry(conn).or_default().xp_delay = 2;
+        self.native_player_exp_cooldown_change(player, &name, 2);
         host.hub.take_item(orb.id as i32, id, 1, at);
         // ClientPacketListener.handleTakeItemEntity's sound, at the orb.
         let pitch = (self.world.random.next_float() - self.world.random.next_float()) * 0.35 + 0.9;
@@ -4747,7 +4850,14 @@ impl Game<'_> {
         self.as_guest(host, conn, |game| {
             let rest = game.mending(value);
             if rest > 0 {
-                game.give_orb_points(rest);
+                let (Some(player), Some(name)) =
+                    (game.lan_acting_uuid, game.lan_acting_name.clone())
+                else {
+                    return;
+                };
+                let mut amount = rest.min(i32::MAX as u32) as i32;
+                game.native_player_exp_change(player, &name, &mut amount);
+                game.give_orb_points(amount.max(0) as u32);
             }
         });
     }

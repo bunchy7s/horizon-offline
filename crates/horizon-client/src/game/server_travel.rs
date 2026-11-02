@@ -202,6 +202,24 @@ impl Game<'_> {
         }
     }
 
+    /// Whether this guest's dimension change may start (`native_player_portal`).
+    fn server_player_portal_allowed(
+        &mut self,
+        host: &LanHost,
+        conn: u32,
+        target: Dim,
+        cause: &str,
+    ) -> bool {
+        let Some(g) = host.hub.guest(conn) else {
+            return false;
+        };
+        let (player, name) = (g.uuid, g.name.clone());
+        let (from, to) = (self.dim.id(), target.id());
+        let mut cancel = false;
+        self.native_player_portal(player, &name, from, to, cause, &mut cancel);
+        !cancel
+    }
+
     /// `Entity.handlePortal` for one player, whose portal state is in place.
     fn handle_server_portal(&mut self, host: &mut LanHost, conn: u32) {
         let Some(g) = host.hub.guest(conn) else {
@@ -221,10 +239,19 @@ impl Game<'_> {
         }
         // `ServerPlayer.showEndCredits`: the player stays out of the world while the
         // poem rolls, then PERFORM_RESPAWN takes it to its respawn point.
-        let play = host.play.entry(conn).or_default();
-        if play.won_game {
-            if std::mem::take(&mut play.respawn_requested) {
-                play.won_game = false;
+        if host.play.get(&conn).is_some_and(|play| play.won_game) {
+            if host
+                .play
+                .get(&conn)
+                .is_some_and(|play| play.respawn_requested)
+            {
+                if !self.server_player_portal_allowed(host, conn, Dim::Overworld, "end_portal") {
+                    return;
+                }
+                if let Some(play) = host.play.get_mut(&conn) {
+                    play.respawn_requested = false;
+                    play.won_game = false;
+                }
                 self.start_server_trip(host, conn, Dim::Overworld, None);
                 self.portals.player.cooldown = 10;
             }
@@ -254,6 +281,9 @@ impl Game<'_> {
                 } else {
                     Dim::End
                 };
+                if !self.server_player_portal_allowed(host, conn, target, "end_portal") {
+                    return;
+                }
                 self.start_server_trip(host, conn, target, None);
             }
             // Entity.setAsInsidePortal while cooling down restarts the cooldown.
@@ -264,14 +294,30 @@ impl Game<'_> {
         // takes the player at once (no transition time) and cools down
         // (triggerCooldown), even for a player still on its own cooldown.
         if let Some(g) = gateway
-            && self.gateway_enter(g)
+            && self.gateway_available(g)
         {
             if self.portals.player.cooldown == 0 {
-                self.start_gateway_trip(host, conn, g);
+                let Some(player) = host.hub.guest(conn) else {
+                    return;
+                };
+                let (id, name) = (player.uuid, player.name.clone());
+                let mut cancel = false;
+                self.native_player_teleport_end_gateway(id, &name, g, &mut cancel);
+                if cancel {
+                    return;
+                }
+                if !self.server_player_portal_allowed(host, conn, self.dim, "end_gateway") {
+                    return;
+                }
             }
-            // setPortalCooldown: after the trip, or again while cooling down.
-            self.portals.player.cooldown = 10;
-            return;
+            if self.gateway_enter(g) {
+                if self.portals.player.cooldown == 0 {
+                    self.start_gateway_trip(host, conn, g);
+                }
+                // setPortalCooldown: after the trip, or again while cooling down.
+                self.portals.player.cooldown = 10;
+                return;
+            }
         }
         let rule = if invulnerable {
             "players_nether_portal_creative_delay"
@@ -288,6 +334,12 @@ impl Game<'_> {
         };
         let plan = self.portal_plan(entry, at, WIDTH as f32, HEIGHT as f32, true);
         if !self.may_enter(plan.dim) {
+            return;
+        }
+        if !self.server_player_portal_allowed(host, conn, plan.dim, "nether_portal") {
+            // The processor already reached its threshold. Forget this attempt
+            // so a canceled trip must complete a fresh portal wait before retrying.
+            self.portals.player.process = None;
             return;
         }
         self.start_server_trip(host, conn, plan.dim, Some(plan));
@@ -477,6 +529,22 @@ impl Game<'_> {
                 Some((at, yaw))
             }
             Ok(None) | Err(_) => {
+                let mut cancel = false;
+                if let (Some(player), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    self.native_player_spawn_point_set(
+                        player,
+                        &name,
+                        config.dim.id(),
+                        config.pos,
+                        "death_reset",
+                        &mut cancel,
+                    );
+                }
+                if cancel {
+                    return None;
+                }
                 self.respawn_config = None;
                 None
             }

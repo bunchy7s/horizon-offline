@@ -186,6 +186,21 @@ impl Game<'_> {
             .respawn_config
             .is_some_and(|c| c.dim == config.dim && c.pos == config.pos);
         if !same {
+            let mut cancel = false;
+            if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+            {
+                self.native_player_spawn_point_set(
+                    player,
+                    &name,
+                    self.dim.id(),
+                    pos,
+                    "respawn_anchor",
+                    &mut cancel,
+                );
+            }
+            if cancel {
+                return Ok(());
+            }
             // setRespawnPosition(config, true): the message, the point; the
             // anchor replaces a bed.
             self.system_message(Text::translate("block.minecraft.set_spawn", &[]));

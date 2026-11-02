@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "block_form",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_form",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "Precipitation forms ice or snow (`native_block_form`).",
+  "doc_summary": "`native_block_form(dimension, pos, from, to, cancel)` runs when precipitation is about to place ice or snow, or add a snow layer at `pos`. `from` and `to` are block state IDs. Set `cancel` to keep the old state. Bundles need \"hooks\": @API:block_form@."
+}

@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "entity_change_block",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_change_block",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A mob changed a block (`native_entity_change_block`).",
+  "doc_summary": "A mob changed the block at `pos`; the hook reports the mob id and kind, and the old and new block names after the new state was applied. Bundles need \"hooks\": @API:entity_change_block@."
+}

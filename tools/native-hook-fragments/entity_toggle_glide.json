@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "entity_toggle_glide",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_toggle_glide",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A guest player's fall flying state changed (`native_entity_toggle_glide`).",
+  "doc_summary": "A guest player's fall flying state changed after the server accepted or ended a glide: `native_entity_toggle_glide(player, name, gliding)`. Bundles need \"hooks\": @API:entity_toggle_glide@."
+}
