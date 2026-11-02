@@ -4315,7 +4315,7 @@ impl Game<'_> {
         craft: &horizon_client::menu::AnvilCraft,
         cancel: &mut bool,
     ) {
-        let _ = (player, name, pos, craft, cancel);
+        mod_api::dispatch_anvil_craft_pre(self, mod_api::mods(), player, name, pos, craft, cancel);
     }
     /// A player took an anvil's result at `pos` and the levels, inputs and anvil wear are done (`AnvilCraftEvent.Post`); a broken anvil is already air. `craft` holds the inputs and the result as they were before. Not called when `native_anvil_craft_pre` cancelled. @API:native_anvil_craft_post@.
     pub(super) fn native_anvil_craft_post(
@@ -4325,7 +4325,7 @@ impl Game<'_> {
         pos: [i32; 3],
         craft: &horizon_client::menu::AnvilCraft,
     ) {
-        let _ = (player, name, pos, craft);
+        mod_api::dispatch_anvil_craft_post(self, mod_api::mods(), player, name, pos, craft);
     }
     /// A grindstone result was prepared for a server player at `pos`. Change it before it is sent. @API:native_prepare_grindstone@.
     pub(super) fn native_prepare_grindstone(
