@@ -1891,6 +1891,7 @@ impl Game<'_> {
                     self.score.board = Default::default();
                     self.clear_waypoints();
                     if let Some(r) = self.remote.as_mut() {
+                        r.attachments.clear();
                         r.players.clear();
                         r.tab_players.clear();
                         r.listed.clear();
@@ -3030,6 +3031,7 @@ impl Game<'_> {
                 // replaces ServerReconfigScreen.
                 if let Some(r) = self.remote.as_mut() {
                     r.reconfiguring = None;
+                    r.attachments.clear();
                 }
                 // handleLogin makes a new MultiPlayerGameMode (carried index 0) and a
                 // new LocalPlayer (slot 0, no effects, riding nothing: the server

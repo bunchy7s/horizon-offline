@@ -72,6 +72,18 @@ pub struct AttachmentType<T: 'static> {
     pub sync: bool,
 }
 
+impl<T> AttachmentType<T> {
+    fn validate_policy(&self) -> Result<(), AttachmentError> {
+        if self.copy_on_death && self.codec.is_none() {
+            return Err(AttachmentError::InvalidCopyPolicy);
+        }
+        if self.sync && self.codec.is_none() {
+            return Err(AttachmentError::InvalidSyncPolicy);
+        }
+        Ok(())
+    }
+}
+
 /// One attachment's new state for a client; `None` means removed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AttachmentSync {
@@ -183,6 +195,13 @@ fn envelope(value: &dyn Value) -> Option<Compound> {
         envelope
     })
 }
+fn raw_value(raw: &Compound) -> Option<&Compound> {
+    match raw.get(&"value".into()) {
+        Some(Tag::Compound(value)) => Some(value),
+        _ => None,
+    }
+}
+
 enum Entry {
     Raw(Compound),
     Decoded(Box<dyn Value>),
@@ -191,10 +210,7 @@ impl Entry {
     /// The encoded value, as clients receive it.
     fn synced_value(&self) -> Option<&Compound> {
         match self {
-            Self::Raw(raw) => match raw.get(&"value".into()) {
-                Some(Tag::Compound(value)) => Some(value),
-                _ => None,
-            },
+            Self::Raw(raw) => raw_value(raw),
             Self::Decoded(value) => value.encoded(),
         }
     }
@@ -303,12 +319,7 @@ impl Attachments {
         &mut self,
         ty: &AttachmentType<T>,
     ) -> Result<Option<T>, AttachmentError> {
-        if ty.copy_on_death && ty.codec.is_none() {
-            return Err(AttachmentError::InvalidCopyPolicy);
-        }
-        if ty.sync && ty.codec.is_none() {
-            return Err(AttachmentError::InvalidSyncPolicy);
-        }
+        ty.validate_policy()?;
         if self
             .raw
             .get(&ty.namespace.into())
@@ -318,9 +329,7 @@ impl Attachments {
         }
         let value = match self.entries.get(&(ty.namespace.into(), ty.name.into())) {
             Some(Entry::Raw(raw)) => {
-                let Some(Tag::Compound(value)) = raw.get(&"value".into()) else {
-                    return Err(AttachmentError::Decode);
-                };
+                let value = raw_value(raw).ok_or(AttachmentError::Decode)?;
                 (ty.codec.as_ref().ok_or(AttachmentError::Decode)?.decode)(value)?
             }
             Some(Entry::Decoded(value)) => {
@@ -357,12 +366,7 @@ impl Attachments {
         ty: &AttachmentType<T>,
         value: T,
     ) -> Result<(), AttachmentError> {
-        if ty.copy_on_death && ty.codec.is_none() {
-            return Err(AttachmentError::InvalidCopyPolicy);
-        }
-        if ty.sync && ty.codec.is_none() {
-            return Err(AttachmentError::InvalidSyncPolicy);
-        }
+        ty.validate_policy()?;
         if self
             .raw
             .get(&ty.namespace.into())
@@ -426,9 +430,7 @@ impl Attachments {
     }
     /// Queue a value to be sent to clients again; nothing for an unsynced type.
     pub fn mark_sync<T: 'static>(&mut self, ty: &AttachmentType<T>) -> Result<(), AttachmentError> {
-        if ty.sync && ty.codec.is_none() {
-            return Err(AttachmentError::InvalidSyncPolicy);
-        }
+        ty.validate_policy()?;
         if ty.sync {
             self.pending.insert((ty.namespace.into(), ty.name.into()));
         }

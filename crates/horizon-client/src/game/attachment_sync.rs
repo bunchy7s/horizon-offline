@@ -67,9 +67,7 @@ impl Game<'_> {
         }
         holders
             .into_iter()
-            .filter(|(holder, changes)| {
-                !changes.is_empty() || matches!(holder, Holder::Player(_))
-            })
+            .filter(|(holder, changes)| !changes.is_empty() || matches!(holder, Holder::Player(_)))
             .map(|(holder, changes)| Message {
                 holder,
                 replace: true,
@@ -84,9 +82,6 @@ impl Game<'_> {
     /// who see them.
     pub(super) fn flush_attachment_sync(&mut self, host: &mut LanHost) {
         let hub = &mut host.hub;
-        if crate::mod_api::mods().is_empty() {
-            hub.attachment_snapshots.clear();
-        }
         for snapshot in std::mem::take(&mut hub.attachment_snapshots) {
             let AttachmentSnapshot { player, holder } = snapshot;
             let Some(guest) = hub.guests.iter().find(|g| g.uuid == player) else {

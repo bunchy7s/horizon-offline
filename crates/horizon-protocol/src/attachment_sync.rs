@@ -67,7 +67,9 @@ pub fn encode(message: &Message) -> Result<Vec<u8>> {
                 .to_string()
                 .map_err(|_| Error::new("attachment sync: name is not UTF-16"))?;
             if name.encode_utf16().count() > MAX_NAME {
-                return Err(Error::new(format!("attachment sync: name {name} is too long")));
+                return Err(Error::new(format!(
+                    "attachment sync: name {name} is too long"
+                )));
             }
             w.string(&name);
         }
