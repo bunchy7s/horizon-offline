@@ -11,7 +11,7 @@ StringUtil.truncateStringIfNecessary	port	crates/horizon-client-render/src/scree
 StringUtil.lineCount	skip:other		no caller in 26.3 (dead helper)
 StringUtil.isBlank	port	crates/horizon-client/src/title.rs::Title::buttons	Save of the rename screen is active only for a non-blank name; trim() uses Unicode whitespace, a tiny difference from Java's isWhitespace
 ThreadingDetector	skip:debug		debug check that two threads enter the same structure; Rust's ownership rules rule it out
-TickThrottler.isUnderThreshold	port	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	gap: player: chat and command spam kicks (disconnect.spam) are missing; the throttle only guards creative drops (limit 1480, decays in tick_guests)
+TickThrottler.isUnderThreshold	port	crates/horizon-client/src/game/lan_chat.rs::detect_rate_spam	a chat message or command adds 20 to the guest's counter, and a guest over the threshold who is not an operator is kicked with disconnect.spam; a threshold of 0 or less never kicks
 Util.makeDescriptionId	inline	crates/horizon-client/src/game/commands.rs::Game::stack_display_name	gap: minor: each caller builds its own item, block or entity key (creative.rs, brewing.rs, stats_screen.rs, combat.rs); no shared key builder
 Util.makeExecutor	skip:java		background ForkJoin pool with thread names
 Util.getMaxThreads	skip:java		max.bg.threads pool size; Horizon sizes its own pools

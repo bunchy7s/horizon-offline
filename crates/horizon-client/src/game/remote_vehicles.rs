@@ -26,8 +26,39 @@ pub(super) struct ObjectHit {
 }
 
 impl Game<'_> {
+    /// BlockAttachedEntity.isPickable: the nearest fence knot's box the view meets, with its id,
+    /// distance and position. Its box is wider than the post inside it, so the crosshair meets it
+    /// first and LeashFenceKnotEntity.interact takes the click. The fence block behind only ties
+    /// the player's own mobs (LeadItem.useOn), it never takes one back.
+    fn remote_knot_hit(&self) -> Option<(i32, f64, [f64; 3])> {
+        let (eye, dir) = self.aim()?;
+        self.remote_knots
+            .iter()
+            .filter_map(|(&id, &block)| {
+                let knot = horizon_client::mobs::leash::knot_state(block);
+                let p = knot.position;
+                let half = knot.width / 2.0;
+                let bounds = Aabb::new(
+                    Vec3::new(p.x - half, p.y, p.z - half),
+                    Vec3::new(p.x + half, p.y + knot.height, p.z + half),
+                );
+                ray_box(eye, dir, self.entity_reach, bounds)
+                    .map(|d| (id as i32, d, [p.x, p.y, p.z]))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+    }
+
+    /// Whether a use starts on an entity: the crosshair's `EntityHitResult`, or a fence knot.
+    /// Only a use: Horizon's attacks still go to the fence behind a knot.
+    pub(super) fn remote_use_targets_entity(&self) -> bool {
+        self.entity_targeted()
+            || self
+                .remote_knot_hit()
+                .is_some_and(|(_, d, _)| self.before_block(d))
+    }
+
     /// The nearest boat, minecart, item frame, armor stand or painting the
-    /// view hits within reach; also End crystals when attacking.
+    /// view hits within reach; also End crystals when attacking, and fence knots when using.
     pub(super) fn remote_object_hit(&self, attacking: bool) -> Option<ObjectHit> {
         let (eye, dir) = self.aim()?;
         let at = |d: f64| {
@@ -79,6 +110,9 @@ impl Game<'_> {
                 let p = i.position;
                 hits.push((id, d, [p.x, p.y, p.z]));
             }
+        }
+        if !attacking && let Some((id, d, p)) = self.remote_knot_hit() {
+            hits.push((id, d, p));
         }
         if attacking {
             // EndCrystal.isPickable: its 2 x 2 box, with the server's entity

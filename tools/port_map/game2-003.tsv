@@ -12,7 +12,7 @@ Strider.tickRidden	port	crates/horizon-client/src/mobs/equine.rs::ridden_step	st
 Strider.playStepSound	port	crates/horizon-client/src/mobs/ai.rs::step_sound	lava or normal step sound
 Strider.isBeingTempted	inline	crates/horizon-client/src/mobs/ai.rs::play_ambient	the Tempt goal running check is folded into the ambient sound guard
 Strider.canAddPassenger	missing		no boarding rule of its own: `mobs/riders.rs::start_riding` tests the mount and the cooldown only, so a player can still board a saddled strider whose head is in lava where vanilla refuses (`isEyeInFluid` LAVA)
-Strider.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: minor: the strider 0.6 x eye height override is not applied; the default eye-height offset is used
+Strider.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	0.6 of the eye height, the default width/2 forwards
 Strider.StriderPathNavigation.createPathFinder	port	crates/horizon-client/src/mobs/nav.rs::Navigation::evaluator	ground nav kind gets the walk evaluator, as WalkNodeEvaluator
 Strider.StriderPathNavigation.isStableDestination	port	crates/horizon-client/src/mobs/nav.rs::Mob::stable_destination	lava counts as stable for lava walkers
 Vex.registerGoals	port	crates/horizon-client/src/mobs/vex.rs::register	float, charge, random move, look goals, owner and player targets

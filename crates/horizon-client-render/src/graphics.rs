@@ -933,10 +933,7 @@ impl Graphics {
         // and render threads are raised above four cores, where vanilla
         // raises its server thread). Leaving two idled a core of a 4-thread
         // laptop while a world loaded: a teleport there took ~15% longer.
-        let auto = std::thread::available_parallelism()
-            .map_or(2, |n| n.get())
-            .saturating_sub(1)
-            .max(1);
+        let auto = horizon_threads::worker_count().saturating_sub(1).max(1);
         if self.battery { auto.div_ceil(2) } else { auto }
     }
     /// The frame cap battery mode adds: 60 in a world, 30 in menus without a
@@ -1233,10 +1230,12 @@ mod tests {
             assert_eq!(g.lod_distance_on(&discrete), distance);
         }
         assert!(
-            crate::graphics_ui::rows(crate::graphics_ui::Level::Simple)
-                .iter()
-                .any(|row| matches!(row, crate::graphics_ui::Row::Setting(s)
-                    if s.text.contains(&format!("{INTEGRATED_LOD_DISTANCE} chunks")))),
+            crate::graphics_ui::rows()
+                .into_iter()
+                .flat_map(|(_, groups)| groups.into_iter().flat_map(|(_, rows)| rows))
+                .any(|r| r
+                    .text
+                    .contains(&format!("{INTEGRATED_LOD_DISTANCE} chunks"))),
             "the LOD Distance description names the cap"
         );
     }
@@ -1294,7 +1293,7 @@ mod tests {
     fn automatic_workers_leave_a_core_as_vanilla_does() {
         let g = Graphics::default();
         assert_eq!(g.workers, 0);
-        let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
+        let cores = horizon_threads::worker_count();
         assert_eq!(g.worker_threads(), cores.saturating_sub(1).max(1));
         // A manual count is the player's own choice, kept as asked.
         let manual = Graphics { workers: 3, ..g };
