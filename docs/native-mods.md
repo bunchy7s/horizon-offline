@@ -1440,6 +1440,23 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   the border. Canceling ends the effect: no
   teleport and no more attempts. Foxes eating chorus fruit are not heard. Bundles need
   `"hooks": @API:chorus_fruit_teleport@`.
+- **`native_player_clone(player, name, was_death)`**: a player's data was copied to their new player (NeoForge's
+  `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): after a death respawn (`was_death` true) and when a player
+  leaves the End after the credits (`was_death` false, vanilla's `keepAllPlayerData`). It is heard after the copy and
+  before the new player is placed, once each, on a server. The uuid stays the same, so `player` names the old and the
+  new player alike; no player's state is swapped in, so the helpers that look a player up may find nothing. It cannot
+  stop anything.
+- **`native_player_load_from_file(player, name, directory)`**: a joining player's saved state was read and applied
+  (NeoForge's `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`), before they are placed in a level: once for each
+  join on a server, for an integrated server's owner (loaded from the file `level.dat` names, else their own) as for
+  anyone else. `directory` is the world's `players/data` folder, created if missing; read your own file there, named `<uuid>.<suffix>`. It
+  is heard whether or not the player was in the world before (a new player has no file). No player's state is swapped
+  in. It cannot change or stop anything.
+- **`native_player_save_to_file(player, name, directory)`**: a placed player's data was saved (NeoForge's
+  `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the world closes, when the dedicated server saves
+  everyone, and for an integrated server's owner when the world saves their state into `level.dat`. `directory` is the
+  world's `players/data` folder, created if missing; write your own file there, named `<uuid>.<suffix>`, and never the player's `.dat`.
+  The player may be leaving, so no player's state is swapped in. It cannot change or stop anything.
 - **`native_player_commands_sent(player, name, names)`**: the command tree a player is sent, when they join and when
   their level changes (`/op`, `/deop`, the LAN settings). `names` are the root commands their client would get, vanilla's
   they may use and the mods'; remove a name and that client's tree lacks it, so its chat box neither completes nor

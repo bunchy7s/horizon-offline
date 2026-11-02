@@ -3453,6 +3453,10 @@ impl Game<'_> {
         };
         xp.respawn(self.ui.rules.bool("keep_inventory") || g.game_mode == SPECTATOR);
         (g.xp_level, g.xp_progress, g.xp_total) = (xp.level, xp.progress, xp.total);
+        // PlayerEvent.Clone, at the end of `restoreFrom`: the data is copied,
+        // the new player not yet placed.
+        let (cloned, name) = (g.uuid, g.name.clone());
+        self.native_player_clone(cloned, &name, true);
         let clock_rate = self.network_clock_rate();
         let ctx = TickCtx {
             world: &mut self.world,

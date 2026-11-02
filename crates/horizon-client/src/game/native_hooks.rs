@@ -5366,6 +5366,48 @@ impl Game<'_> {
     pub(super) fn native_player_respawned(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_respawned(self, mod_api::mods(), player, name);
     }
+    /// A player was saved to the world's store (NeoForge's
+    /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the
+    /// world closes, when the dedicated server saves everyone, and for an
+    /// integrated server's owner when the world saves them. LAN guests are
+    /// not heard on integrated autosaves. Once for each save. `directory`
+    /// is the world's player directory (`players/data`): write your own file
+    /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
+    /// may be leaving, so no player's state is swapped in. Not cancellable.
+    pub(super) fn native_player_save_to_file(
+        &mut self,
+        player: u128,
+        name: &str,
+        directory: &std::path::Path,
+    ) {
+        mod_api::dispatch_player_save_to_file(self, mod_api::mods(), player, name, directory);
+    }
+    /// A player was loaded from the world's save (NeoForge's
+    /// `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`): their `.dat`
+    /// has been read and applied, and they are not placed in a level yet.
+    /// `directory` is the world's player directory (`players/data`): a mod
+    /// reads its own file there, named `<uuid>.<suffix>` as
+    /// `getPlayerFile(suffix)` names it. Heard once for each join, for the
+    /// owner of an integrated server as for anyone else, on a server, with no
+    /// player's state swapped in. Not cancellable.
+    pub(super) fn native_player_load_from_file(
+        &mut self,
+        player: u128,
+        name: &str,
+        directory: &std::path::Path,
+    ) {
+        mod_api::dispatch_player_load_from_file(self, mod_api::mods(), player, name, directory);
+    }
+    /// A player's data was copied to their new player (NeoForge's
+    /// `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): `was_death` is
+    /// true after a death, false when they left the End after the credits
+    /// (`respawn` with `keepAllPlayerData`). The uuid stays the same, so the
+    /// old and the new player share `player`. Heard before the new player is
+    /// placed, on a server, with no player's state swapped in. Not
+    /// cancellable.
+    pub(super) fn native_player_clone(&mut self, player: u128, name: &str, was_death: bool) {
+        mod_api::dispatch_player_clone(self, mod_api::mods(), player, name, was_death);
+    }
     /// The number of players with the mod container at `pos` of `dimension`
     /// open went from `previous` to `viewers` (vanilla's
     /// `ContainerOpenersCounter`, as a barrel keeps it): 0 to more than 0 is

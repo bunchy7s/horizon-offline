@@ -3298,6 +3298,17 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A player's data was copied to their new player (NeoForge's
+    /// `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): `was_death` is
+    /// true after a death, false when they left the End after the credits
+    /// (`respawn` with `keepAllPlayerData`). The uuid stays the same, so the
+    /// old and the new player share `player`. Heard before the new player is
+    /// placed, on a server, with no player's state swapped in. Not
+    /// cancellable.
+    fn player_clone(&self, host: &mut dyn Host, event: &mut PlayerCloneEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// The command tree a server sends a player (NeoForge's and Paper's
     /// "commands sent to a player" stage): when they join and when their
     /// level changes (`/op`, `/deop`, the LAN settings). `names` are the
@@ -3428,6 +3439,18 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A player was loaded from the world's save (NeoForge's
+    /// `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`): their `.dat`
+    /// has been read and applied, and they are not placed in a level yet.
+    /// `directory` is the world's player directory (`players/data`): a mod
+    /// reads its own file there, named `<uuid>.<suffix>` as
+    /// `getPlayerFile(suffix)` names it. Heard once for each join, for the
+    /// owner of an integrated server as for anyone else, on a server, with no
+    /// player's state swapped in. Not cancellable.
+    fn player_load_from_file(&self, host: &mut dyn Host, event: &mut PlayerLoadFromFileEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A player whose login the server has accepted (NeoForge's
     /// `PlayerNegotiationEvent` stage): the name, whitelist, ban and
     /// server-full checks have passed and the player holds a place, but their
@@ -3447,6 +3470,18 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         Flow::Continue
+    }
+    /// A player was saved to the world's store (NeoForge's
+    /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the
+    /// world closes, when the dedicated server saves everyone, and for an
+    /// integrated server's owner when the world saves them. LAN guests are
+    /// not heard on integrated autosaves. Once for each save. `directory`
+    /// is the world's player directory (`players/data`): write your own file
+    /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
+    /// may be leaving, so no player's state is swapped in. Not cancellable.
+    fn player_save_to_file(&self, host: &mut dyn Host, event: &mut PlayerSaveToFileEvent<'_>) {
+        let _ = host;
+        let _ = event;
     }
     /// A server player's sprint started or stopped: their client sent
     /// `START_SPRINTING` or `STOP_SPRINTING` (the sprint key, a double tap
@@ -10580,6 +10615,29 @@ pub fn dispatch_player_changed_dimension(
         mod_hook.player_changed_dimension(host, &mut event);
     }
 }
+/// What [`Hooks::player_clone`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerCloneEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub was_death: bool,
+}
+pub fn dispatch_player_clone(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    was_death: bool,
+) {
+    let mut event = PlayerCloneEvent {
+        player,
+        name,
+        was_death,
+    };
+    for mod_hook in mods {
+        mod_hook.player_clone(host, &mut event);
+    }
+}
 /// What [`Hooks::player_commands_sent`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerCommandsSentEvent<'a> {
@@ -10834,6 +10892,29 @@ pub fn dispatch_player_lectern_page_change(
         mod_hook.player_lectern_page_change(host, &mut event);
     }
 }
+/// What [`Hooks::player_load_from_file`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerLoadFromFileEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub directory: &'a std::path::Path,
+}
+pub fn dispatch_player_load_from_file(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    directory: &std::path::Path,
+) {
+    let mut event = PlayerLoadFromFileEvent {
+        player,
+        name,
+        directory,
+    };
+    for mod_hook in mods {
+        mod_hook.player_load_from_file(host, &mut event);
+    }
+}
 /// What [`Hooks::player_login`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerLoginEvent<'a> {
@@ -10862,6 +10943,29 @@ pub fn dispatch_player_login(
             *cancel = true;
             break;
         }
+    }
+}
+/// What [`Hooks::player_save_to_file`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerSaveToFileEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub directory: &'a std::path::Path,
+}
+pub fn dispatch_player_save_to_file(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    directory: &std::path::Path,
+) {
+    let mut event = PlayerSaveToFileEvent {
+        player,
+        name,
+        directory,
+    };
+    for mod_hook in mods {
+        mod_hook.player_save_to_file(host, &mut event);
     }
 }
 /// What [`Hooks::player_sprint`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
