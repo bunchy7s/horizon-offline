@@ -8749,6 +8749,7 @@ impl Renderer {
                     first_crosshair: debug_depth + debug_top,
                     world_depth: false,
                     real: false,
+                    hand_drawn: !pack_draws_hand,
                     hand_view_proj,
                 };
                 self.draw_overlay(&mut encoder, frame, &generated_view, generated, &overlay);
@@ -8792,6 +8793,7 @@ impl Renderer {
             first_crosshair: debug_depth + debug_top,
             world_depth: scaled.is_none(),
             real: true,
+            hand_drawn: !pack_draws_hand,
             hand_view_proj,
         };
         let readback =
@@ -9090,11 +9092,7 @@ impl Renderer {
                 color_view: view_target,
                 color_format: self.config.format.remove_srgb_suffix(),
                 size: [self.config.width, self.config.height],
-                hand: if overlay.hand_quads > 0 {
-                    frame.hand
-                } else {
-                    &[]
-                },
+                hand: if overlay.hand_drawn { frame.hand } else { &[] },
                 view_proj: overlay.hand_view_proj,
                 camera: frame.camera,
                 atlas: self.hud.atlas_texture.as_ref(),
@@ -9637,6 +9635,9 @@ struct Overlay {
     world_depth: bool,
     /// The real frame, not frame generation's made one: the world icon grabs it.
     real: bool,
+    /// The game drew the first-person hand, in its own pass or at the end of the world's
+    /// (`hand_in_world`), not a shader pack.
+    hand_drawn: bool,
     /// Camera-relative world to clip space for the hand: its own field of view and the bob.
     hand_view_proj: Mat4,
 }
