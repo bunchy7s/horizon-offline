@@ -1752,8 +1752,21 @@ impl Game<'_> {
                         .map_or([0.0; 3], |m| [m.velocity.x, m.velocity.y, m.velocity.z]);
                     if bubbles == 8 {
                         self.lan_entity_event(mob as i32, super::combat::DROWN_EVENT, at);
-                    } else if let Some(host) = &self.lan {
-                        super::combat::send_drown_particles(host, at, v, bubbles);
+                    } else {
+                        for _ in 0..bubbles {
+                            let random = self.particles.random();
+                            let pos = at.map(|x| x + random.next_double() - random.next_double());
+                            self.lan_send_particles(super::lan_particles::QueuedParticle {
+                                dimension: self.dim.id(),
+                                options: ParticleOptions::simple(ParticleType::Bubble),
+                                state: None,
+                                at: pos,
+                                spread: v,
+                                speed: 1.0,
+                                count: 0,
+                                randomization: 0,
+                            });
+                        }
                     }
                     self.drown_particles(at, v, bubbles);
                 }
