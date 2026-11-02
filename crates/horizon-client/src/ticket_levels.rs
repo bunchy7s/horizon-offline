@@ -61,9 +61,9 @@ pub struct Sources {
 pub struct Levels(Option<Arc<Map>>, Option<(i32, i32, i32, i32)>);
 
 /// The levels by chunk: a grid over the tickets' bounding box while it is
-/// small (players near each other, the usual case), a map otherwise. Every
-/// block entity, mob and ticking chunk asks each tick, so an index beats a
-/// hash; and a player crossing into another chunk rebuilds it all.
+/// small (players near each other, the usual case), sparse 16×16 tiles otherwise.
+/// Every block entity, mob and ticking chunk asks each tick. Tiling also avoids
+/// hashing every chunk when a player crossing a chunk boundary rebuilds the map.
 enum Map {
     Grid {
         x0: i32,
@@ -72,7 +72,9 @@ enum Map {
         depth: u32,
         cells: Box<[(u8, u8)]>,
     },
+    #[cfg(test)]
     Sparse(FxHashMap<(i32, i32), (u8, u8)>),
+    Tiled(Tiled),
 }
 
 /// The largest grid, in chunks: 1 MiB of levels, a box 724 chunks wide.
@@ -95,7 +97,67 @@ impl Map {
                     NONE
                 }
             }
+            #[cfg(test)]
             Self::Sparse(map) => map.get(&(x, z)).copied().unwrap_or(NONE),
+            Self::Tiled(map) => map.get(x, z),
+        }
+    }
+}
+
+type Tile = Box<[(u8, u8); 256]>;
+
+/// Sparse tiles keep each nearby run of levels contiguous. Construction hashes
+/// once per intersecting tile rather than once per chunk of every ticket.
+struct Tiled(FxHashMap<(i32, i32), Tile>);
+impl Tiled {
+    /// Store the existing loading, simulation, forced and portal source
+    /// minima without changing their levels or radii.
+    fn new(s: &Sources) -> Self {
+        let mut map = Self(FxHashMap::default());
+        let (view, sim, reach) = reach(s);
+        for &p in &s.players {
+            map.add(p, reach, i32::from(ENTITY_TICKING), view, sim);
+        }
+        for &p in &s.forced {
+            map.add(
+                p,
+                1,
+                i32::from(ENTITY_TICKING),
+                0,
+                i32::from(ENTITY_TICKING),
+            );
+        }
+        for &p in &s.portal {
+            map.add(p, PORTAL_RADIUS, PORTAL_LEVEL, 0, PORTAL_LEVEL);
+        }
+        map
+    }
+    fn get(&self, x: i32, z: i32) -> (u8, u8) {
+        self.0
+            .get(&(x >> 4, z >> 4))
+            .map_or(NONE, |tile| tile[((z & 15) * 16 + (x & 15)) as usize])
+    }
+    /// Lower each cell by the source level plus its Chebyshev distance;
+    /// loading stays flat within the view distance.
+    fn add(&mut self, (px, pz): (i32, i32), r: i32, loading: i32, flat: i32, sim: i32) {
+        let (x0, z0, x1, z1) = (px - r, pz - r, px + r, pz + r);
+        for tz in z0 >> 4..=z1 >> 4 {
+            for tx in x0 >> 4..=x1 >> 4 {
+                let tile = self
+                    .0
+                    .entry((tx, tz))
+                    .or_insert_with(|| Box::new([NONE; 256]));
+                let (bx, bz) = (tx * 16, tz * 16);
+                for z in z0.max(bz)..=z1.min(bz + 15) {
+                    for x in x0.max(bx)..=x1.min(bx + 15) {
+                        let d = (x - px).abs().max((z - pz).abs());
+                        let e = &mut tile[((z - bz) * 16 + (x - bx)) as usize];
+                        e.0 =
+                            e.0.min((loading + (d - flat).max(0)).min(i32::from(NONE.0)) as u8);
+                        e.1 = e.1.min((sim + d).min(i32::from(NONE.1)) as u8);
+                    }
+                }
+            }
         }
     }
 }
@@ -257,11 +319,11 @@ fn compute(s: &Sources) -> Map {
             Some((a, b, c, d)) => (lo_x.min(a), lo_z.min(b), hi_x.max(c), hi_z.max(d)),
         })
     }) else {
-        return Map::Sparse(FxHashMap::default());
+        return Map::Tiled(Tiled(FxHashMap::default()));
     };
     let (width, depth) = ((x1 - x0 + 1) as u64, (z1 - z0 + 1) as u64);
     if width * depth > GRID_CELLS {
-        return Map::Sparse(compute_sparse(s));
+        return Map::Tiled(Tiled::new(s));
     }
     let (x0, z0, width, depth) = (x0 as i32, z0 as i32, width as u32, depth as u32);
     let mut cells = vec![NONE; (width * depth) as usize].into_boxed_slice();
@@ -310,6 +372,7 @@ fn compute(s: &Sources) -> Map {
 }
 
 /// The levels as a map, for tickets spread too far apart for a grid.
+#[cfg(test)]
 fn compute_sparse(s: &Sources) -> FxHashMap<(i32, i32), (u8, u8)> {
     let (view, player_sim, reach) = reach(s);
     let mut levels: FxHashMap<(i32, i32), (u8, u8)> = FxHashMap::default();
@@ -472,14 +535,13 @@ mod tests {
     }
 
     #[test]
-    fn far_apart_tickets_use_the_map() {
+    fn far_apart_tickets_tick_only_their_neighbourhoods() {
         let l = levels(
             &[(0, 0), (100_000, -100_000)],
             &[(i32::MAX - 2, i32::MIN + 2)],
             10,
             10,
         );
-        assert!(matches!(**l.0.as_ref().unwrap(), Map::Sparse(_)));
         assert!(l.entity_ticking(100_010, -100_010) && !l.block_ticking(50_000, 0));
         assert!(l.entity_ticking(i32::MAX - 2, i32::MIN + 2));
     }
@@ -520,7 +582,7 @@ mod tests {
         }
     }
 
-    /// cargo test --release -p horizon-client --lib ticket_levels::tests::levels_cost -- --ignored --nocapture
+    /// cargo test --release -p horizon-client-lib --lib ticket_levels::tests::levels_cost -- --ignored --nocapture
     #[test]
     #[ignore]
     fn levels_cost() {
@@ -575,6 +637,56 @@ mod tests {
                 ask(&map),
                 ask(&grid)
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tiled_tests {
+    use super::*;
+    #[test]
+    fn tiles_match_scalar_levels_with_overlaps_and_portals() {
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |n: i32| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % (2 * n as u64 + 1)) as i32 - n
+        };
+        for case in 0..60 {
+            let s = Sources {
+                players: (0..case % 13)
+                    .map(|_| (next(4000), next(4000)))
+                    .chain([(15, -16), (16, -15)])
+                    .collect(),
+                forced: (0..case % 4).map(|_| (next(100), next(100))).collect(),
+                portal: (0..case % 5)
+                    .map(|_| (next(100), next(100)))
+                    .chain([(16, -16)])
+                    .collect(),
+                view_distance: [0, 2, 10, 32][case % 4],
+                simulation_distance: [32, 10, 2, 0][case % 4],
+            };
+            let expected = compute_sparse(&s);
+            let tiled = Tiled::new(&s);
+            for (&(x, z), &want) in &expected {
+                assert_eq!(tiled.get(x, z), want, "case {case}, {x}, {z}");
+            }
+            // Query a fixed neighbourhood of every source, including holes
+            // and negative coordinates, without depending on the tile layout.
+            for &(cx, cz) in s.players.iter().chain(&s.forced).chain(&s.portal) {
+                for dz in -48..=48 {
+                    for dx in -48..=48 {
+                        let key = (cx + dx, cz + dz);
+                        assert_eq!(
+                            tiled.get(key.0, key.1),
+                            expected.get(&key).copied().unwrap_or(NONE),
+                            "case {case}, {key:?}"
+                        );
+                    }
+                }
+            }
+            assert_eq!(tiled.get(50_000, -50_000), NONE);
         }
     }
 }
