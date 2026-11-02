@@ -20,6 +20,22 @@ pub(super) fn redraw_flow(frame_drawn: &mut bool, offscreen: bool, now: Instant)
     }
 }
 
+pub(super) trait EventLoopCtl {
+    /// Ends the loop after the current iteration (`ActiveEventLoop::exit`).
+    fn exit(&self);
+    /// When the loop wakes next (`ActiveEventLoop::set_control_flow`).
+    fn set_control_flow(&self, flow: ControlFlow);
+}
+
+impl EventLoopCtl for ActiveEventLoop {
+    fn exit(&self) {
+        ActiveEventLoop::exit(self);
+    }
+    fn set_control_flow(&self, flow: ControlFlow) {
+        ActiveEventLoop::set_control_flow(self, flow);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -44,21 +60,5 @@ mod tests {
             redraw_flow(&mut frame_drawn, true, Instant::now()),
             ControlFlow::Poll
         );
-    }
-}
-
-pub(super) trait EventLoopCtl {
-    /// Ends the loop after the current iteration (`ActiveEventLoop::exit`).
-    fn exit(&self);
-    /// When the loop wakes next (`ActiveEventLoop::set_control_flow`).
-    fn set_control_flow(&self, flow: ControlFlow);
-}
-
-impl EventLoopCtl for ActiveEventLoop {
-    fn exit(&self) {
-        ActiveEventLoop::exit(self);
-    }
-    fn set_control_flow(&self, flow: ControlFlow) {
-        ActiveEventLoop::set_control_flow(self, flow);
     }
 }
