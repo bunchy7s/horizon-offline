@@ -15345,7 +15345,9 @@ impl Game<'_> {
         let distance = (terrain_distance * 16) as f32;
         let depth_far =
             horizon_client::camera::depth_far(terrain_distance, self.settings.cloud_range);
-        self.native_camera_frame = (!title && view.is_some()).then(|| {
+        // Only native mods read it: no matrices or allocation per frame without one.
+        let mods_read_camera = !horizon_client::mod_api::mods().is_empty();
+        self.native_camera_frame = (mods_read_camera && !title && view.is_some()).then(|| {
             let partial = camera_alpha as f32;
             horizon_client::mod_api::NativeCamera {
                 position: camera.to_array(),
