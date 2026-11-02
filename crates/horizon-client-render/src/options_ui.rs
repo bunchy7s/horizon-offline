@@ -4081,8 +4081,11 @@ impl OptionsUi {
         let slider = self.dragging.take().is_some() | self.shader_dragging.take().is_some();
         let graphics_slider = self.graphics.release();
         let calibration_slider = self.calibration.as_mut().is_some_and(|c| c.release());
+        let split_drop = self.split_setup.release();
         if slider || graphics_slider || calibration_slider {
             vec![Event::ButtonClick, Event::Changed]
+        } else if split_drop {
+            vec![Event::ButtonClick]
         } else {
             Vec::new()
         }

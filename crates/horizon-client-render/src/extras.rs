@@ -124,6 +124,14 @@ pub struct Extras {
     pub discord_presence: bool,
     /// Another controller can join P1's world (`splitscreen`, off by default).
     pub splitscreen: bool,
+    /// Two players in one window: 0 auto (side by side when wider than tall), 1 side by side,
+    /// 2 top and bottom (`splitscreenTwo`).
+    pub splitscreen_two: u8,
+    /// Three players on a screen: 0 one wide on top, 1 one tall on the left, 2 side by side
+    /// (`splitscreenThree`).
+    pub splitscreen_three: u8,
+    /// Splitscreen: each player's name in the corner of their view (`splitscreenNames`).
+    pub splitscreen_names: bool,
 }
 impl Default for Extras {
     fn default() -> Self {
@@ -162,6 +170,9 @@ impl Default for Extras {
             agent_control: false,
             discord_presence: true,
             splitscreen: false,
+            splitscreen_two: 0,
+            splitscreen_three: 0,
+            splitscreen_names: true,
         }
     }
 }
@@ -242,6 +253,9 @@ impl Extras {
                 "agentControl" => e.agent_control = flag(e.agent_control),
                 "discordPresence" => e.discord_presence = flag(e.discord_presence),
                 "splitscreen" => e.splitscreen = flag(e.splitscreen),
+                "splitscreenTwo" => e.splitscreen_two = value.parse().unwrap_or(0).min(2),
+                "splitscreenThree" => e.splitscreen_three = value.parse().unwrap_or(0).min(2),
+                "splitscreenNames" => e.splitscreen_names = flag(e.splitscreen_names),
                 _ => {}
             }
         }
@@ -249,7 +263,7 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\ndiscordPresence:{}\nsplitscreen:{}\n",
+            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\n",
             bool_text(self.fullbright),
             bool_text(self.dynamic_lights),
             bool_text(self.zoom),
@@ -289,6 +303,9 @@ impl Extras {
             bool_text(self.agent_control),
             bool_text(self.discord_presence),
             bool_text(self.splitscreen),
+            self.splitscreen_two,
+            self.splitscreen_three,
+            bool_text(self.splitscreen_names),
         )
     }
     /// Binds the extra key `name` (`SORT_KEY`); false for
@@ -402,6 +419,10 @@ impl Cps {
         self.clicks.len()
     }
 }
+/// Two players sharing a window (`splitscreen_two`): halves this way.
+pub const SPLIT_TWO: [&str; 3] = ["Auto", "Side by side", "Top and bottom"];
+/// Three players sharing a window (`splitscreen_three`).
+pub const SPLIT_THREE: [&str; 3] = ["One wide on top", "One tall on the left", "Side by side"];
 
 /// The settings the Extras page shows, one per row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
