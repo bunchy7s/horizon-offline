@@ -43,6 +43,8 @@ pub struct EntityMemory {
     /// Entities a native mod kept out of the level (`native_entity_join_level`),
     /// counted so `/summon` can fail as vanilla's refused add does.
     pub(super) joins_canceled: u32,
+    /// The highest entity id `native_entity_join_level` has been told of.
+    pub(super) joined_mark: u32,
 }
 
 /// The key that marks a compound queued with the chunk loads as a fresh add
@@ -342,6 +344,8 @@ impl Game<'_> {
                 let from_disk = !take_fresh(&mut tag);
                 // An End gateway's traveller never left the level: nothing joins.
                 let moved = take_moved(&mut tag);
+                // Whatever was added since the last tick joins before this one.
+                self.native_joins_flush(false, 0);
                 let kind = entity_nbt::kind(&tag).unwrap_or_default();
                 let uuid = entity_nbt::uuid(&tag);
                 if uuid.is_some_and(|u| self.restored_vehicle(u).is_some()) {
@@ -377,37 +381,19 @@ impl Game<'_> {
                         if let Some(e) =
                             entity_nbt::item_entity_from_nbt(&tag, self.next_entity, bob)
                         {
-                            let (id, p) = (e.id, e.position);
                             self.remember(e.id, uuid, tag);
                             self.dropped.push(e);
-                            if !moved
-                                && !self.native_entity_joins(
-                                    id,
-                                    "minecraft:item",
-                                    [p.x, p.y, p.z],
-                                    from_disk,
-                                )
-                            {
-                                self.dropped.pop();
-                                self.forget_entity(id);
-                            }
                         }
                     }
                     "minecraft:experience_orb" => {
                         for mut orb in entity_nbt::orbs_from_nbt(&tag) {
                             self.next_entity += 1;
                             orb.id = self.next_entity;
-                            let (id, p) = (orb.id, orb.position);
+                            let id = orb.id;
                             // An orb that came through a portal keeps its cooldown.
                             self.restore_portal_cooldown(id, &tag);
                             self.orbs.push(orb);
                             self.remember_tags(id, &tag);
-                            let kind = "minecraft:experience_orb";
-                            if !moved
-                                && !self.native_entity_joins(id, kind, [p.x, p.y, p.z], from_disk)
-                            {
-                                self.orbs.pop();
-                            }
                         }
                     }
                     "minecraft:arrow" => {
@@ -668,6 +654,13 @@ impl Game<'_> {
                         self.load_other(tag, &kind);
                     }
                     _ => self.persist.unknown.entry(key).or_default().push(tag),
+                }
+                // PersistentEntitySectionManager.addEntity: every kind that
+                // just joined tells the mods; a moved one does not join.
+                if moved {
+                    self.native_joins_skip();
+                } else {
+                    self.native_joins_flush(from_disk, 0);
                 }
             }
             self.native_entities_load(self.dim.id(), [key.0, key.1], count);

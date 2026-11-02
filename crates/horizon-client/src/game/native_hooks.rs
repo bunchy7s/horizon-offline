@@ -296,8 +296,10 @@
 //! `native_extract_item`, `native_move_items`, and `native_dimension` for a
 //! machine's tick, in `machines/native_items.rs`).
 //!
-//! API 47 adds entities joining a level (`native_entity_join_level`), for
-//! item entities and experience orbs so far.
+//! API 47 adds entities joining a level (`native_entity_join_level`); it tells
+//! every kind the game keeps in its entity lists (items, orbs, mobs, boats,
+//! minecarts, armor stands, TNT, falling blocks, projectiles, rockets,
+//! tridents).
 //!
 //! API 46 adds bounded world-space rim and colored-light requests
 //! (`native_visuals`) and opt-in texture-matched emissive material
@@ -5489,9 +5491,15 @@ impl Game<'_> {
     /// an arrival through a portal). `entity` is its ID and `kind` its type
     /// (`minecraft:item`). It is already in the level's lists, so helpers that
     /// take an entity ID find it. Set `canceled` to keep it out: it is taken
-    /// back out as if never added, and a `/summon` of it fails. 47 tells
-    /// item entities and experience orbs; later APIs add other kinds, so check
-    /// `kind`. Server-side.
+    /// back out as if never added, and a `/summon` of it fails. Tells every
+    /// kind in the game's entity lists (items, orbs, mobs, boats, minecarts,
+    /// armor stands, primed TNT, falling blocks, projectiles, rockets,
+    /// tridents), once each, in the order they were created; check `kind`. A
+    /// gameplay spawn is told when the next tick starts (a drop, an orb, a mob, a
+    /// `/summon` and a chunk's entities are told at once). A mod that
+    /// cancels one of the others sees it removed before it ticks again.
+    /// Not told: end crystals, the dragon, cushions, paintings, item frames and
+    /// the entities Horizon keeps without simulating. Server-side.
     pub(super) fn native_entity_join_level(
         &mut self,
         dimension: &str,
@@ -7466,6 +7474,8 @@ impl Game<'_> {
     }
     /// The mobs from index `from` on are new in the world.
     pub(super) fn native_mobs_joined(&mut self, from: usize, natural: bool) {
+        // A mod can keep a mob out; it is then taken out and not told of.
+        self.native_joins_flush(false, 0);
         for i in from..self.mobs.len() {
             let m = &self.mobs[i];
             let (kind, pos) = (mob_kind(m), [m.position.x, m.position.y, m.position.z]);
@@ -7545,34 +7555,6 @@ impl Game<'_> {
             .filter(|id| !now.contains(id))
             .collect();
         self.native_entities_left("minecraft:experience_orb", &gone);
-    }
-    /// `native_entity_join_level` for `entity`, just put at the end of its
-    /// list: false when a mod canceled, and the caller takes it back out.
-    /// A client of a server tells nothing.
-    pub(super) fn native_entity_joins(
-        &mut self,
-        entity: u32,
-        kind: &str,
-        pos: [f64; 3],
-        loaded_from_disk: bool,
-    ) -> bool {
-        if self.remote.is_some() {
-            return true;
-        }
-        let mut canceled = false;
-        let dimension = self.dim.id();
-        self.native_entity_join_level(
-            dimension,
-            entity,
-            kind,
-            pos,
-            loaded_from_disk,
-            &mut canceled,
-        );
-        if canceled {
-            self.persist.joins_canceled += 1;
-        }
-        !canceled
     }
     /// The acting player's blow killed mob `index`.
     pub(super) fn native_kill_event(&mut self, index: usize) {

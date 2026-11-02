@@ -18,6 +18,7 @@ use horizon_client::projectiles::Projectile;
 use horizon_core::geometry::{Aabb, Direction, Vec3};
 use horizon_core::position::BlockPos;
 use horizon_world::{level::data::PushReaction, piston_push};
+use std::borrow::Cow;
 
 /// What `Entity.thunderHit` does to a kind: it sets the entity on fire and
 /// calls `hurtServer(lightning_bolt, 5)`, so a kind whose `hurtServer` does
@@ -57,6 +58,8 @@ pub(super) trait Entity {
     /// What a selector finds this entity as (`@e`), or `None` for one it cannot
     /// name yet. Required, so a new kind states which.
     fn selector_target(&self) -> Option<Target>;
+    /// The entity type id a native mod's join hook names (`minecraft:oak_boat`).
+    fn native_type(&self) -> Cow<'static, str>;
 
     fn on_ground(&self) -> bool {
         false
@@ -251,6 +254,15 @@ macro_rules! define_entity_handles {
                     $(.chain((0..self$(.$list)+.len()).map(EntityHandle::$kind)))*
             }
 
+            /// Takes the entity out of its list (`Entity.discard` before it ever ticked).
+            pub(super) fn discard_entity(&mut self, handle: EntityHandle) {
+                match handle {
+                    $(EntityHandle::$kind(i) => {
+                        self$(.$list)+.remove(i);
+                    })*
+                }
+            }
+
             /// [`Self::entity_handles`], last of each list first, so the
             /// caller can remove the entity it is on.
             pub(super) fn entity_handles_rev(&self) -> impl Iterator<Item = EntityHandle> + use<> {
@@ -357,6 +369,9 @@ macro_rules! with_entity_mut {
 pub(super) use with_entity_mut;
 
 impl Entity for Mob {
+    fn native_type(&self) -> Cow<'static, str> {
+        super::native_hooks::mob_kind(self).into()
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((self.width(), self.height()))
@@ -432,6 +447,9 @@ impl Entity for Mob {
 }
 
 impl Entity for ItemEntity {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:item".into()
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((0.25, 0.25))
@@ -467,6 +485,9 @@ impl Entity for ItemEntity {
 }
 
 impl Entity for ExperienceOrb {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:experience_orb".into()
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((0.5, 0.5))
@@ -499,6 +520,9 @@ impl Entity for ExperienceOrb {
 }
 
 impl Entity for Boat {
+    fn native_type(&self) -> Cow<'static, str> {
+        self.entity_type().into()
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((super::boats::WIDTH as f32, super::boats::HEIGHT as f32))
@@ -528,6 +552,9 @@ impl Entity for Boat {
 }
 
 impl Entity for Minecart {
+    fn native_type(&self) -> Cow<'static, str> {
+        self.kind.id().into()
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((
@@ -571,6 +598,9 @@ fn armor_stand_size(stand: &ArmorStand) -> (f64, f64) {
 }
 
 impl Entity for ArmorStand {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:armor_stand".into()
+    }
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Stand(self.id))
@@ -630,6 +660,9 @@ impl Entity for ArmorStand {
 }
 
 impl Entity for PrimedTnt {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:tnt".into()
+    }
     stored_motion!();
     /// `PrimedTnt` is 0.98 across.
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -660,6 +693,9 @@ impl Entity for PrimedTnt {
 }
 
 impl Entity for FallingBlock {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:falling_block".into()
+    }
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Falling(self.id))
@@ -670,6 +706,9 @@ impl Entity for FallingBlock {
 }
 
 impl Entity for Projectile {
+    fn native_type(&self) -> Cow<'static, str> {
+        self.kind.id().into()
+    }
     stored_motion!();
     /// Arrows and the thrown items and fireballs a chunk saves.
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -723,6 +762,9 @@ impl Entity for Projectile {
 }
 
 impl Entity for Rocket {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:firework_rocket".into()
+    }
     stored_motion!();
     /// A rocket that carries its owner stays.
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -748,6 +790,9 @@ impl Entity for Rocket {
 }
 
 impl Entity for ThrownTrident {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:trident".into()
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((0.5, 0.5))
