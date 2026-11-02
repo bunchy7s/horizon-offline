@@ -5935,8 +5935,8 @@ impl Game<'_> {
         mod_api::dispatch_explosion_detonate(self, mod_api::mods(), dimension, center, blocks);
     }
     /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
-    /// `entity` (None for the acting player): `ServerExplosion.hurtEntities`,
-    /// after the knockback is calculated. Change `knockback_velocity` to change
+    /// `entity` (None for a player, whom `native_acting_player` names):
+    /// `ServerExplosion.hurtEntities`, after the knockback is calculated. Change `knockback_velocity` to change
     /// what is added to the entity's velocity; a player's client is sent the
     /// same. Wind bursts too, except dragons and end crystals. End crystals
     /// are also omitted from ordinary blasts: Horizon removes them without a
