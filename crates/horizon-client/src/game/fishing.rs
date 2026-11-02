@@ -1472,6 +1472,7 @@ mod tests {
     #[test]
     fn reeling_an_item_requests_an_immediate_motion_update() {
         let mut item = ItemEntity {
+            no_gravity: false,
             health: 5,
             fire_ticks: 0,
             id: 1,
@@ -1482,6 +1483,8 @@ mod tests {
             previous: Vec3::ZERO,
             velocity: Vec3::new(0.2, 0.0, -0.1),
             on_ground: true,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 0,
             pickup_delay: 0,
             bob_offset: 0.0,
