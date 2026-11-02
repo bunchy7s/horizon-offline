@@ -128,10 +128,10 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         renderer.skins_entities(),
         "fixture requires compute skinning"
     );
-    let unmodified_eyes = renderer.skins_eyes();
+    let unmodified_tagged = renderer.skins_tagged();
     pack(&mut renderer, &out.join("valid-pack"), true);
     assert!(
-        !renderer.skins_eyes(),
+        !renderer.skins_tagged(),
         "eye/tagged layers keep the CPU path with a pack"
     );
 
@@ -262,7 +262,7 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         renderer.skins_entities(),
         "ordinary path returns when the pack is dropped"
     );
-    assert_eq!(renderer.skins_eyes(), unmodified_eyes);
+    assert_eq!(renderer.skins_tagged(), unmodified_tagged);
     std::fs::write(
         out.join("result.json"),
         serde_json::to_vec_pretty(&serde_json::json!({
