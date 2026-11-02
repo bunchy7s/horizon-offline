@@ -563,6 +563,20 @@ impl GameLevel<'_> {
         let _ = (dimension, kind, from, to, canceled);
     }
 
+    /// On an authoritative server, fire is about to be placed at `pos` by
+    /// flint and steel, a fire charge, lava, lightning or fire spread. Set
+    /// `cancel` to leave the position unchanged. @API:native_block_ignite@.
+    #[inline(always)]
+    pub(super) fn native_block_ignite(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        cause: &str,
+        cancel: &mut bool,
+    ) {
+        let _ = (dimension, pos, cause, cancel);
+    }
+
     /// On an authoritative server, the piston at `piston` is about to push
     /// the blocks at `push` one step `direction` (`[0, 1, 0]` is up; pulling
     /// when it retracts) and destroy those at `destroy`:

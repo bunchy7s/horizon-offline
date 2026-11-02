@@ -1166,6 +1166,13 @@ impl LevelAccess for GameLevel<'_> {
         }
         !canceled
     }
+    fn allow_block_ignite(&self, pos: BlockPos, cause: &'static str) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_block_ignite(self.dimension, pos, cause, &mut cancel);
+        }
+        !cancel
+    }
     fn allow_piston_move(
         &self,
         piston: BlockPos,

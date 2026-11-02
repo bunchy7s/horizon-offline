@@ -1321,6 +1321,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   spreading (`kind` `fluid` or `fire`) from `from` into `to`, and a piston moving blocks once its structure resolved.
   Canceled, the block at `to` stays as it is, and the piston moves nothing. Fluids ask on every flow: answer from
   memory, fast.
+- **`native_block_ignite(dimension, pos, cause, cancel)`** (on `GameLevel`): fire is about to spread into `pos`
+  from another fire block. Set `cancel` to leave the position unchanged. Other fire sources are not covered yet.
 - **`native_random_tick(ticks, dimension, pos, state, handled)`** (API 33, on `GameLevel`): a block `tickChunk`
   random-ticks, before its own `randomTick`. Change the block with the level's `native_set_block_property(ticks, pos,
   key, value, flags)`; set `handled` to skip the block's own random tick.

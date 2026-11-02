@@ -643,7 +643,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                             && (!self.level.is_raining() || !self.fire_near_rain(test))
                         {
                             let spread_age = 15.min(age + self.rand_int(5) / 4);
-                            if self.level.allow_spread(Spread::Fire, pos, test) {
+                            if self.level.allow_spread(Spread::Fire, pos, test)
+                                && self.level.allow_block_ignite(test, "spread")
+                            {
                                 let next = self.fire_state_with_age(test, spread_age);
                                 self.set_block_and_update(test, next);
                             }
@@ -687,7 +689,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             } else if allowed {
                 self.remove_block(pos, false);
             }
-            if allowed && b.instance_of(old, Class::Tnt) {
+            if allowed && !b.is_air(self.state(pos)) && b.instance_of(old, Class::Tnt) {
                 self.prime_tnt(pos);
             }
         }

@@ -1,0 +1,12 @@
+{
+  "hooks": [
+    {
+      "name": "block_ignite",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_ignite",
+      "side": "server",
+      "cancellable": true
+    }
+  ],
+  "rust_summary": "Fire about to be placed (`native_block_ignite`).",
+  "doc_summary": "Fire about to be placed: `native_block_ignite(dimension, pos, cause, cancel)` is heard when fire spreads into `pos` (`cause` is `spread`). Set `cancel` to leave the position unchanged. Other fire sources are not covered yet. Bundles need \"hooks\": @API:block_ignite@."
+}
