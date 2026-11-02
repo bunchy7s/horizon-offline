@@ -1671,11 +1671,7 @@ impl Hub {
     /// are kept in `native_tracking`.
     pub fn collect_tracking(&mut self) {
         for g in &mut self.guests {
-            take_tracking(
-                g,
-                &mut self.native_tracking,
-                &mut self.attachment_snapshots,
-            );
+            take_tracking(g, &mut self.native_tracking, &mut self.attachment_snapshots);
         }
     }
 

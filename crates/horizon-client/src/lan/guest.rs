@@ -497,10 +497,14 @@ impl Guest {
         }
         self.sender.send(packet.encode());
     }
-    /// A holder's synced attachments, if the guest is placed and on a Horizon
-    /// client (the only one that reads them).
+    /// Whether the guest is placed and on a Horizon client (the only one that
+    /// reads synced attachments).
+    pub fn reads_attachment_sync(&self) -> bool {
+        self.placed && self.brand == "horizon"
+    }
+    /// A holder's synced attachments, if the guest reads them.
     pub fn send_attachment_sync(&self, message: &attachment_sync::Message) {
-        if !self.placed || self.brand != "horizon" {
+        if !self.reads_attachment_sync() {
             return;
         }
         match attachment_sync::encode(message) {

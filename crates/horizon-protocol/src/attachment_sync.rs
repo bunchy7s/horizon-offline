@@ -65,6 +65,9 @@ pub fn encode(message: &Message) -> Result<Vec<u8>> {
             let name = name
                 .to_string()
                 .map_err(|_| Error::new("attachment sync: name is not UTF-16"))?;
+            if name.encode_utf16().count() > MAX_NAME {
+                return Err(Error::new("attachment sync: name too long"));
+            }
             w.string(&name);
         }
         match &change.value {
@@ -171,5 +174,18 @@ mod tests {
         payload.push(0);
         assert!(decode(&payload).is_err(), "trailing bytes");
         assert!(decode(&[5, 0, 0]).is_err(), "unknown holder kind");
+    }
+
+    #[test]
+    fn encode_refuses_a_name_decode_would_refuse() {
+        let mut message = Message {
+            holder: Holder::Level,
+            replace: false,
+            changes: changes(),
+        };
+        message.changes[0].name = "n".repeat(MAX_NAME).as_str().into();
+        assert!(decode(&encode(&message).unwrap()).is_ok());
+        message.changes[0].name = "n".repeat(MAX_NAME + 1).as_str().into();
+        assert!(encode(&message).is_err());
     }
 }
