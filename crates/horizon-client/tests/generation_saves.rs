@@ -156,7 +156,7 @@ impl Session {
             let before = (self.streaming.generated_total, self.world.chunks.len());
             self.update();
             thread::sleep(Duration::from_millis(5));
-            let idle = self.streaming.pending() == 0
+            let idle = !self.streaming.busy()
                 && before == (self.streaming.generated_total, self.world.chunks.len());
             quiet = if idle { quiet + 1 } else { 0 };
         }
