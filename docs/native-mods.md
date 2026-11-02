@@ -1549,6 +1549,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_ready_arrow(player, name, arrow)`**: a server player released a drawn bow, with `arrow` naming
   the selected projectile item. The guest's state is not swapped in while the packet is handled.
 - **`native_prepare_hopper_transfer(pos)`**: a hopper at `pos` begins a transfer attempt, after its cooldown and enabled checks and before pushing or pulling items.
+- **`native_inventory_move_item(source, destination, item, cancel)`**: a hopper is about to move one item between containers. Set `cancel` to leave it in the source slot.
 - **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and
   their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
   player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a

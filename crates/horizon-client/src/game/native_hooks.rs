@@ -4675,6 +4675,17 @@ impl Game<'_> {
     pub(super) fn native_prepare_hopper_transfer(&self, pos: [i32; 3]) {
         let _ = (pos,);
     }
+    /// A hopper is about to move one item between containers. Set `cancel`
+    /// to leave it in its source slot. @API:native_inventory_move_item@.
+    pub(super) fn native_inventory_move_item(
+        &self,
+        source: [i32; 3],
+        destination: [i32; 3],
+        item: &str,
+        cancel: &mut bool,
+    ) {
+        let _ = (source, destination, item, cancel);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

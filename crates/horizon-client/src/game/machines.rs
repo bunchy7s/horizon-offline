@@ -885,6 +885,20 @@ impl Game<'_> {
             return false;
         }
         for slot in 0..hopper.len() {
+            let containers = self.containers();
+            let Some(stack) = containers.get(hopper, slot) else {
+                continue;
+            };
+            let mut cancel = false;
+            self.native_inventory_move_item(
+                [pos.0, pos.1, pos.2],
+                target.parts[0].0.into(),
+                &stack.item,
+                &mut cancel,
+            );
+            if cancel {
+                continue;
+            }
             let Some(one) = self.take_one(hopper, slot) else {
                 continue;
             };
@@ -983,6 +997,18 @@ impl Game<'_> {
                 continue;
             };
             if !c.can_take(source, slot, stack, Direction::Down) {
+                continue;
+            }
+            let source_pos = source.parts[0].0;
+            let destination = hopper.parts[0].0;
+            let mut cancel = false;
+            self.native_inventory_move_item(
+                [source_pos.0, source_pos.1, source_pos.2],
+                [destination.0, destination.1, destination.2],
+                &stack.item,
+                &mut cancel,
+            );
+            if cancel {
                 continue;
             }
             let Some(one) = self.take_one(source, slot) else {
