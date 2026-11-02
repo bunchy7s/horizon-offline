@@ -336,6 +336,17 @@ impl Game<'_> {
             | Target::Crystal(id)
             | Target::Dragon(id)
             | Target::Other(id) => Some(self.persist.raw.entry(id).or_insert_with(empty)),
+            // `tags_of` reads these two from the same map and a falling
+            // block from its saved compound; without these arms `/tag`
+            // wrote nothing and still reported success.
+            Target::Rocket(id) | Target::Trident(id) => {
+                Some(self.persist.raw.entry(id).or_insert_with(empty))
+            }
+            Target::Falling(id) => {
+                let uuid = self.uuid_for(id);
+                let f = self.falling.iter_mut().find(|f| f.id == id)?;
+                Some(&mut f.saved.get_or_insert_with(|| Box::new((uuid, empty()))).1)
+            }
             _ => None,
         }
     }
