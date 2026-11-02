@@ -1094,8 +1094,8 @@ fn enderman_render_offset(m: &Mob, alpha: f32) -> glam::DVec3 {
     }
     let frame = (m.age as f32 + alpha).to_bits();
     let mut random = LegacyRandom::new((i64::from(m.id) << 32) ^ i64::from(frame));
-    // `0.02 * state.scale`, the enderman's scale being 1.
-    let d = 0.02;
+    // `0.02 * state.scale`.
+    let d = 0.02 * f64::from(m.model_scale());
     let x = random.next_gaussian() * d;
     let z = random.next_gaussian() * d;
     glam::DVec3::new(x, 0.0, z)
@@ -3887,5 +3887,27 @@ mod random_texture_tests {
         let drawn = uvs(&m, &data, &vanilla_only);
         assert_eq!(drawn.len(), 4, "still drawn");
         assert!(drawn.iter().all(|uv| uv[0] <= 0.5 && uv[1] <= 0.5));
+    }
+
+    /// `EndermanRenderer.getRenderOffset` moves a creepy enderman by
+    /// `0.02 * state.scale` blocks sideways: at `minecraft:scale` 2 the same
+    /// gaussian offset doubles, and at the default it is the old 0.02.
+    #[test]
+    fn a_scaled_creepy_endermans_render_offset_scales() {
+        use horizon_core::geometry::Vec3;
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.id = "minecraft:enderman".into();
+        kind.species = Species::Enderman;
+        let mut m = Mob::new(1, std::sync::Arc::new(kind), Vec3::ZERO, 0.0);
+        // Enderman.isCreepy: the angry flag that adds the offset.
+        m.extra.flag = true;
+        m.extra.model_scale = 1.0;
+        let one = enderman_render_offset(&m, 0.5);
+        assert!(one.length() > 0.0, "the offset is the renderer's gaussian");
+        m.extra.model_scale = 2.0;
+        let two = enderman_render_offset(&m, 0.5);
+        assert!((two.x - 2.0 * one.x).abs() < 1.0e-12, "{two:?} vs {one:?}");
+        assert!((two.z - 2.0 * one.z).abs() < 1.0e-12, "{two:?} vs {one:?}");
+        assert_eq!(two.y, 0.0);
     }
 }
