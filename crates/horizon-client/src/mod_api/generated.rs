@@ -2461,6 +2461,21 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// NeoForge's `ArrowLooseEvent`: the player releases a bow `stack` with
+    /// `has_ammo` and `charge` ticks held. Change `charge` or set `canceled`
+    /// to prevent the shot; negative charge also prevents it. Unlike
+    /// `native_living_entity_use_item_stop`, this does not skip the whole item
+    /// release; `native_entity_shoot_bow` reports a spawned arrow afterward
+    /// with read-only force. Fires on the Game running the bow release, including
+    /// LAN guests; a remote client's own release path is not covered. Crossbows
+    /// and `ArrowNockEvent` are not covered. @API:arrow_loose@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn arrow_loose(&self, host: &mut dyn Host, event: &mut ArrowLooseEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// A beacon at `pos` activated or deactivated after its beam was checked.
     /// `active` says whether it now has a complete pyramid. Server-side.
     /// @API:beacon_state_change@.
@@ -8507,6 +8522,37 @@ pub fn dispatch_anvil_damaged(
     for mod_hook in mods {
         mod_hook.anvil_damaged(host, &mut event);
     }
+}
+/// What [`Hooks::arrow_loose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ArrowLooseEvent<'a> {
+    pub stack: &'a ItemStack,
+    pub has_ammo: bool,
+    pub charge: i32,
+}
+pub fn dispatch_arrow_loose(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: &ItemStack,
+    has_ammo: bool,
+    charge: &mut i32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = ArrowLooseEvent {
+        stack,
+        has_ammo,
+        charge: *charge,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.arrow_loose(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+    *charge = event.charge;
 }
 /// What [`Hooks::beacon_state_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
