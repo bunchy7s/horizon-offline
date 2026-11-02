@@ -13,10 +13,53 @@ use super::{
 };
 use horizon_client::entities::{ArmorStand, ExperienceOrb, ItemEntity};
 use horizon_client::mobs::{Mob, Species};
-use horizon_client::projectiles::Projectile;
+use horizon_client::projectiles::{Projectile, ProjectileKind};
 use horizon_core::geometry::{Aabb, Direction, Vec3};
 use horizon_core::position::BlockPos;
 use horizon_world::{level::data::PushReaction, piston_push};
+
+/// What a burst of wind asks of a kind: the two flags `ServerExplosion` hands
+/// `ignoreExplosion`.
+#[derive(Clone, Copy)]
+pub(super) struct Gust {
+    /// `shouldAffectBlocklikeEntities`: a mace's burst, never a charge's.
+    pub(super) blocklike: bool,
+    /// A mob's burst (a breeze's) with `mob_griefing` off.
+    pub(super) mob_blocked: bool,
+}
+
+/// How `Entity.pushFromExplosion` sees one entity: the box exposure is
+/// measured through, and the height its direction is taken from.
+pub(super) struct ExplosionTarget {
+    pub(super) min: [f64; 3],
+    pub(super) max: [f64; 3],
+    pub(super) eye_y: f64,
+}
+
+impl ExplosionTarget {
+    /// A box `width` wide and `height` tall on `feet`, eyes `eye` above them.
+    fn around(feet: Vec3, width: f64, height: f64, eye: f64) -> Self {
+        let half = width / 2.0;
+        Self {
+            min: [feet.x - half, feet.y, feet.z - half],
+            max: [feet.x + half, feet.y + height, feet.z + half],
+            eye_y: feet.y + eye,
+        }
+    }
+    fn with_eye_y(self, eye_y: f64) -> Self {
+        Self { eye_y, ..self }
+    }
+    /// `bounds`, with the eyes at 0.85 of its height unless `eye` says
+    /// otherwise.
+    fn of_bounds(feet: Vec3, bounds: Aabb, eye: Option<f64>) -> Self {
+        let (min, max) = (bounds.min_position(), bounds.max_position());
+        Self {
+            min: [min.x, min.y, min.z],
+            max: [max.x, max.y, max.z],
+            eye_y: feet.y + eye.unwrap_or_else(|| f64::from((max.y - min.y) as f32 * 0.85f32)),
+        }
+    }
+}
 
 pub(super) trait Entity {
     fn position(&self) -> Vec3;
@@ -56,6 +99,15 @@ pub(super) trait Entity {
     /// whose tick skips that step, says no.
     fn sweeps_blocks_inside(&self) -> bool {
         true
+    }
+    /// `Entity.ignoreExplosion`: whether a burst of wind passes it by.
+    fn ignores_explosion(&self, _burst: Gust) -> bool {
+        false
+    }
+    /// The box and eye height `Entity.pushFromExplosion` reads; vanilla's
+    /// default puts the eyes at 0.85 of the box.
+    fn explosion_target(&self) -> ExplosionTarget {
+        ExplosionTarget::of_bounds(self.position(), self.bounds(), None)
     }
     /// `Entity.isSupportedBy`.
     fn is_supported_by(&self, _pos: BlockPos) -> bool {
@@ -130,7 +182,22 @@ macro_rules! define_entity_handles {
             $($kind(usize),)*
         }
 
+        /// Every list moved out of `Game`, for [`for_each_entity_mut`]: the
+        /// world stays readable while the entities change.
+        pub(super) struct TakenEntities {
+            $(pub(super) $field: Vec<$ty>,)*
+        }
+
         impl Game<'_> {
+            /// Moves every list out; give it back with `restore_entities`.
+            pub(super) fn take_entities(&mut self) -> TakenEntities {
+                TakenEntities {
+                    $($field: std::mem::take(&mut self$(.$list)+),)*
+                }
+            }
+            pub(super) fn restore_entities(&mut self, taken: TakenEntities) {
+                $(self$(.$list)+ = taken.$field;)*
+            }
             /// Every entity's handle: lengths read now, nothing allocated, and
             /// no borrow of `Game` held, so the caller can change it mid-walk.
             pub(super) fn entity_handles(&self) -> impl Iterator<Item = EntityHandle> + use<> {
@@ -212,6 +279,22 @@ macro_rules! for_each_entity {
 }
 pub(super) use for_each_entity;
 
+macro_rules! walk_lists_mut {
+    (($lists:expr, $entity:ident, $body:block)
+     $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
+        $(for $entity in $lists.$field.iter_mut() $body)*
+    };
+}
+pub(crate) use walk_lists_mut;
+
+/// [`for_each_entity`] over [`TakenEntities`], with the entity mutable.
+macro_rules! for_each_entity_mut {
+    ($lists:expr, $entity:ident => $body:block) => {
+        $crate::game::entity::entity_lists!(walk_lists_mut, $lists, $entity, $body)
+    };
+}
+pub(super) use for_each_entity_mut;
+
 /// [`with_entity`], with the entity mutable.
 macro_rules! with_entity_mut {
     ($game:expr, $handle:expr, $entity:ident => $body:expr) => {
@@ -222,6 +305,14 @@ pub(super) use with_entity_mut;
 
 impl Entity for Mob {
     stored_motion!();
+    fn ignores_explosion(&self, _burst: Gust) -> bool {
+        !self.alive()
+    }
+    fn explosion_target(&self) -> ExplosionTarget {
+        let feet = self.position;
+        let (w, h) = (self.kind.width, f64::from(self.height()));
+        ExplosionTarget::around(feet, w, h, 0.0).with_eye_y(self.eye_y())
+    }
     fn bounds(&self) -> Aabb {
         Mob::bounds(self)
     }
@@ -251,6 +342,14 @@ impl Entity for Mob {
 
 impl Entity for ItemEntity {
     stored_motion!();
+    /// `ItemEntity.ignoreExplosion`: only a burst that affects block-like
+    /// entities.
+    fn ignores_explosion(&self, burst: Gust) -> bool {
+        !burst.blocklike
+    }
+    fn explosion_target(&self) -> ExplosionTarget {
+        ExplosionTarget::around(self.position, 0.25, 0.25, 0.2125)
+    }
     fn bounds(&self) -> Aabb {
         ItemEntity::bounds(self)
     }
@@ -271,6 +370,9 @@ impl Entity for ItemEntity {
 
 impl Entity for ExperienceOrb {
     stored_motion!();
+    fn explosion_target(&self) -> ExplosionTarget {
+        ExplosionTarget::around(self.position, 0.5, 0.5, f64::from(0.5f32 * 0.85f32))
+    }
     fn bounds(&self) -> Aabb {
         ExperienceOrb::bounds(self)
     }
@@ -291,6 +393,14 @@ impl Entity for ExperienceOrb {
 
 impl Entity for Boat {
     stored_motion!();
+    /// `VehicleEntity.ignoreExplosion`.
+    fn ignores_explosion(&self, burst: Gust) -> bool {
+        burst.mob_blocked
+    }
+    /// `EntityType.OAK_BOAT` & co: the eye height is the full 0.5625.
+    fn explosion_target(&self) -> ExplosionTarget {
+        ExplosionTarget::of_bounds(self.position, Boat::bounds(self), Some(0.5625))
+    }
     fn bounds(&self) -> Aabb {
         Boat::bounds(self)
     }
@@ -301,6 +411,10 @@ impl Entity for Boat {
 
 impl Entity for Minecart {
     stored_motion!();
+    /// `VehicleEntity.ignoreExplosion`.
+    fn ignores_explosion(&self, burst: Gust) -> bool {
+        burst.mob_blocked
+    }
     fn bounds(&self) -> Aabb {
         Minecart::bounds(self)
     }
@@ -315,6 +429,22 @@ impl Entity for Minecart {
 
 impl Entity for ArmorStand {
     stored_motion!();
+    /// `ArmorStand.ignoreExplosion`: a visible stand feels only a burst that
+    /// affects block-like entities.
+    fn ignores_explosion(&self, burst: Gust) -> bool {
+        self.invisible || !burst.blocklike
+    }
+    /// `EntityType.ARMOR_STAND`'s size, halved when small; a marker has none.
+    fn explosion_target(&self) -> ExplosionTarget {
+        let (w, h, eye) = if self.marker {
+            (0.0, 0.0, 0.0)
+        } else if self.small {
+            (0.25, f64::from(0.9875f32), f64::from(0.9875f32))
+        } else {
+            (0.5, f64::from(1.975f32), f64::from(1.7775f32))
+        };
+        ExplosionTarget::around(self.position, w, h, eye)
+    }
     fn bounds(&self) -> Aabb {
         ArmorStand::bounds(self)
     }
@@ -340,6 +470,9 @@ impl Entity for ArmorStand {
 
 impl Entity for PrimedTnt {
     stored_motion!();
+    fn explosion_target(&self) -> ExplosionTarget {
+        ExplosionTarget::around(self.position, 0.25, 0.25, 0.0)
+    }
     fn bounds(&self) -> Aabb {
         PrimedTnt::bounds(self)
     }
@@ -363,6 +496,17 @@ impl Entity for FallingBlock {
 
 impl Entity for Projectile {
     stored_motion!();
+    /// A stuck projectile, and the charges themselves, ignore a burst of wind.
+    fn ignores_explosion(&self, _burst: Gust) -> bool {
+        self.stuck
+            || matches!(
+                self.kind,
+                ProjectileKind::WindCharge | ProjectileKind::BreezeWindCharge
+            )
+    }
+    fn explosion_target(&self) -> ExplosionTarget {
+        ExplosionTarget::around(self.position, 0.25, 0.25, 0.0)
+    }
     fn bounds(&self) -> Aabb {
         Projectile::bounds(self)
     }
@@ -378,6 +522,10 @@ impl Entity for Projectile {
 
 impl Entity for Rocket {
     stored_motion!();
+    /// 0.25 wide, eyes at 0.85 of it.
+    fn explosion_target(&self) -> ExplosionTarget {
+        ExplosionTarget::around(self.position, 0.25, 0.25, 0.2125)
+    }
     fn bounds(&self) -> Aabb {
         Rocket::bounds(self)
     }
@@ -389,6 +537,13 @@ impl Entity for Rocket {
 
 impl Entity for ThrownTrident {
     stored_motion!();
+    /// An arrow stuck in the ground is not pushed.
+    fn ignores_explosion(&self, _burst: Gust) -> bool {
+        self.in_ground
+    }
+    fn explosion_target(&self) -> ExplosionTarget {
+        ExplosionTarget::around(self.position, 0.5, 0.5, f64::from(0.13_f32))
+    }
     fn bounds(&self) -> Aabb {
         let p = self.position;
         Aabb::new(
