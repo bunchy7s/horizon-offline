@@ -343,6 +343,26 @@ impl Game<'_> {
         }
         true
     }
+    /// Hides that player (a vanish) from the players below permission
+    /// `level`, or shows them again (None): from the next tick those players
+    /// lose them from the Tab list and the world (their client stops
+    /// tracking the player, as it does a spectator), and don't read their
+    /// joining or leaving; players of `level` or more still see them, and
+    /// a player made an operator meanwhile sees them again. By UUID: kept
+    /// for a player who is off (who joins hidden), until a mod sets it again
+    /// or the server stops. Works anywhere on a server, inside a player's
+    /// hook too; false on a client and in a world nobody else can join.
+    /// API @API:hide_player@.
+    pub(super) fn native_hide_player(&mut self, uuid: u128, level: Option<u8>) -> bool {
+        let Some(host) = &mut self.lan else {
+            return false;
+        };
+        match level {
+            Some(level) => host.hub.hidden.insert(uuid, level),
+            None => host.hub.hidden.remove(&uuid),
+        };
+        true
+    }
     /// Shows `nickname` in place of that player's name in chat (their
     /// messages, `/me`, `/msg`) and in the Tab list; None shows their name
     /// again. Hovering the shown name gives the real one, which stays in the
@@ -375,7 +395,12 @@ impl Game<'_> {
         )
     }
     /// A system line in every player's chat and the server's log.
-    pub(super) fn native_broadcast(&self, line: Text) {
+    pub(super) fn native_broadcast(&self, mut line: Text) {
+        let mut cancel = false;
+        self.native_broadcast_message(&mut line, &mut cancel);
+        if cancel {
+            return;
+        }
         let plain = line.plain();
         if self.options.dedicated.is_some() {
             super::dedicated::log("INFO", &plain);
@@ -395,6 +420,7 @@ impl Game<'_> {
     /// `[discord] events` lists `announce`: `name` and `uuid` say who it is
     /// about (empty and 0 for no one), `message` is the line (`§` codes colour it).
     /// Only on a dedicated server; false elsewhere and for an empty message.
+    /// API @API:server_event@.
     pub(super) fn native_server_event(&self, name: &str, uuid: u128, message: &str) -> bool {
         if self.options.dedicated.is_none() || message.trim().is_empty() {
             return false;
@@ -722,9 +748,8 @@ impl Game<'_> {
 
 /// An experience orb as a server mod reads it (`native_experience_orbs`).
 /// Read by mods only.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub(super) struct NativeExperienceOrb {
+pub struct NativeExperienceOrb {
     /// The entity's ID, as `native_entity_join_level` names it.
     pub id: u32,
     pub position: [f64; 3],
@@ -891,6 +916,49 @@ impl Game<'_> {
         }
         host.hub.set_mod_commands(0, tree);
         host.native_commands = Some(levels);
+    }
+
+    /// Asks the mods what root commands each player's tree keeps
+    /// (`native_player_commands_sent`) and stores the answer in the hub,
+    /// which sends the trees without what the mods took out: for `only`, or
+    /// for every placed player.
+    pub(super) fn native_filter_commands(&mut self, host: &mut LanHost, only: Option<u32>) {
+        let players: Vec<(u32, u128, String)> = host
+            .hub
+            .guests
+            .iter()
+            .filter(|g| only.map_or(g.placed, |conn| g.conn == conn))
+            .map(|g| (g.conn, g.uuid, g.name.clone()))
+            .collect();
+        for (conn, uuid, name) in players {
+            let names = host.hub.command_names(conn);
+            let mut kept = names.clone();
+            let placed = host.hub.guest(conn).is_some_and(|g| g.placed);
+            if !placed {
+                // A joining player has no world yet: nothing can be told them.
+                self.native_player_commands_sent(uuid, &name, &mut kept);
+            } else if self.lan_acting == Some(conn) {
+                self.native_player_commands_sent(uuid, &name, &mut kept);
+            } else {
+                self.as_guest(host, conn, |g| {
+                    g.native_player_commands_sent(uuid, &name, &mut kept);
+                });
+            }
+            if let Some(g) = host.hub.guest_mut(conn) {
+                g.hidden_commands = names.into_iter().filter(|n| !kept.contains(n)).collect();
+            }
+        }
+    }
+
+    /// `Hub::resend_commands` with the mods' say on each tree.
+    pub(super) fn resend_commands_filtered(&mut self) {
+        let Some(mut host) = self.lan.take() else {
+            return;
+        };
+        host.hub.refresh_permissions();
+        self.native_filter_commands(&mut host, None);
+        host.hub.resend_commands();
+        self.lan = Some(host);
     }
 
     /// The level a guest needs for a mod's command (`line`, without its

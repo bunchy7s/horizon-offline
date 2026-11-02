@@ -29,11 +29,18 @@ impl Game<'_> {
         if !m.alive() {
             return false;
         }
+        let entity_id = m.id;
+        let entity_name = name.clone();
         m.custom_name = Some(name);
         m.persistent = true;
         // itemStack.shrink(1), in creative too.
         self.consume_held();
         self.swing_arm();
+        if let (Some(player), Some(player_name)) =
+            (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            self.native_player_name_entity(player, &player_name, entity_id, &entity_name);
+        }
         true
     }
     /// `Entity.belowNameDisplay`: the score holder's score in the objective
@@ -54,17 +61,9 @@ impl Game<'_> {
         t.push(objective.display_text());
         Some(t)
     }
-    /// The other players' models and names: the guests on a LAN host, the
-    /// players a server sends on a client.
+    /// The other players' models and names: the players a server sends.
     fn other_players(&self) -> Vec<(&Mob, String)> {
         let mut out = Vec::new();
-        if let Some(host) = &self.lan {
-            for (conn, m) in &host.models {
-                if let Some(g) = host.hub.guest(*conn) {
-                    out.push((m, g.name.clone()));
-                }
-            }
-        }
         for (id, name) in self.remote_player_names() {
             if let Some(m) = self.mobs.iter().find(|m| m.id == id) {
                 out.push((m, name));

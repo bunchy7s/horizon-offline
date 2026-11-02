@@ -117,6 +117,21 @@ impl PotionCloud {
         ParticleOptions::colored(ParticleType::EntityEffect, [c(16), c(8), c(0), 1.0])
     }
 }
+/// `Projectile.getOwner` of a thrown potion: what its `indirectMagic` damage
+/// is named after and who it counts against. Nothing for a dispenser's or a
+/// summoned potion nobody owns, the potion itself then naming the death
+/// message.
+#[derive(Clone, Debug, Default)]
+pub(super) struct PotionOwner {
+    /// The thrower's name, when it has one.
+    name: Option<Text>,
+    /// The mob that threw it (a witch): the hurt is its kill credit, as
+    /// `indirectMagic(potion, owner)` gives it. A player's throw is the
+    /// potion's own and only `name`s the message.
+    attacker: Option<u32>,
+    /// A player threw it: the water damage `indirectMagic` deals is theirs.
+    player: bool,
+}
 /// A mob's effect ids carry the `minecraft:` namespace; a mod's has its own.
 pub(super) fn mob_effect_id(id: &str) -> Option<&'static str> {
     brewing::effect(id).map(|e| brewing::namespaced(e.id))
@@ -1165,7 +1180,17 @@ impl Game<'_> {
             };
             let thrower = owner.is_some().then_some(Who::Player);
             self.projectile_event("minecraft:projectile_land", thrower, heard);
-            self.splash(&stack, at, mob, block, age, owner);
+            let item = stack.item.to_string();
+            // A potion a dispenser threw has nobody to name.
+            let owner = PotionOwner {
+                player: owner.is_some(),
+                name: owner,
+                attacker: None,
+            };
+            self.splash(&stack, at, mob, block, age, &owner);
+            if item != "minecraft:experience_bottle" {
+                self.native_potion_splash(&item, [at.x, at.y, at.z]);
+            }
         }
     }
     /// `AreaEffectCloud.tick` for the lingering potions' clouds: the client
@@ -1301,6 +1326,12 @@ impl Game<'_> {
         at: [f64; 3],
         source: &Text,
     ) {
+        // `indirectMagic(cloud, owner)` names the cloud in the death message
+        // (it gives no kill credit).
+        let cloud_owner = PotionOwner {
+            name: Some(source.clone()),
+            ..Default::default()
+        };
         // MobEffectInstance.withScaledDuration: floor(duration * scale), at least 1; an infinite
         // effect stays infinite.
         let scaled = |duration: i32| {
@@ -1318,7 +1349,7 @@ impl Game<'_> {
                     };
                     if e.instant {
                         if let Some(a) = horizon_client::effects::instant(id, *amp, 0.5) {
-                            g.apply_indirect_effect_action(a, source);
+                            g.apply_indirect_effect_action(a, &cloud_owner);
                         }
                     } else {
                         let mut instance = EffectInstance::new(e.id, scaled(*duration), *amp);
@@ -1476,11 +1507,22 @@ impl Game<'_> {
         }
     }
     /// `HealOrHarmMobEffect.applyInstantaneousEffect` with a source (a
-    /// potion or a cloud): indirectMagic, not plain magic.
-    fn apply_indirect_effect_action(&mut self, a: EffectAction, source: &Text) {
+    /// potion or a cloud): indirectMagic, not plain magic, credited to the
+    /// mob that threw it when there is one.
+    fn apply_indirect_effect_action(&mut self, a: EffectAction, owner: &PotionOwner) {
         let a = match a {
             EffectAction::Hurt("minecraft:magic", amount) => {
-                self.note_direct_entity("minecraft:indirect_magic", source.clone());
+                match (owner.attacker, &owner.name) {
+                    (Some(id), Some(name)) => {
+                        self.note_named_attacker("minecraft:indirect_magic", id, name.clone())
+                    }
+                    _ => {
+                        let name = owner.name.clone().unwrap_or_else(|| {
+                            Text::translate("entity.minecraft.splash_potion", &[])
+                        });
+                        self.note_direct_entity("minecraft:indirect_magic", name);
+                    }
+                }
                 EffectAction::Hurt("minecraft:indirect_magic", amount)
             }
             a => a,
@@ -1493,7 +1535,7 @@ impl Game<'_> {
         effects: &'static [(&'static str, i32, i32)],
         at: Vec3,
         age: u32,
-        source: &Text,
+        owner: &PotionOwner,
     ) {
         if let Some(p) = self.player.as_ref() {
             let w = f64::from(p.dimensions.width) / 2.0;
@@ -1511,7 +1553,7 @@ impl Game<'_> {
                     let instant = brewing::effect(id).is_some_and(|e| e.instant);
                     if instant {
                         if let Some(a) = horizon_client::effects::instant(id, *amp, intensity) {
-                            self.apply_indirect_effect_action(a, source);
+                            self.apply_indirect_effect_action(a, owner);
                         }
                     } else {
                         let d = (intensity * f64::from(*duration) + 0.5) as i32;
@@ -1525,18 +1567,36 @@ impl Game<'_> {
             }
         }
     }
+    /// `Projectile.getOwner` of a thrown potion, as [`splash`](Self::splash)
+    /// names it: a player's, a mob's (a witch keeps the kill credit), or
+    /// nobody's (a dispenser's, a summoned potion's).
+    pub(super) fn potion_owner(&self, owner: Option<Who>) -> PotionOwner {
+        match owner {
+            Some(Who::Player) => PotionOwner {
+                name: Some(self.player_display_text()),
+                attacker: None,
+                player: true,
+            },
+            Some(Who::Mob(id)) => PotionOwner {
+                name: self.mob_display_name(id),
+                attacker: Some(id),
+                player: false,
+            },
+            None => PotionOwner::default(),
+        }
+    }
     /// `AbstractThrownPotion.onHit` with `ThrownSplashPotion.onHitAsPotion`, or
     /// `ThrownLingeringPotion.onHitAsPotion` for a lingering potion, read from
     /// the stack's `potion_contents`; `mob` is where it hit a mob, `hit` the
     /// block and face it hit, `age` its age.
-    fn splash(
+    pub(super) fn splash(
         &mut self,
         stack: &ItemStack,
         at: Vec3,
         mob: Option<Vec3>,
         hit: Option<([i32; 3], Direction)>,
         age: u32,
-        owner: Option<Text>,
+        owner: &PotionOwner,
     ) {
         let block = [at.x, at.y, at.z].map(|v| v.floor() as i32);
         if &*stack.item == "minecraft:experience_bottle" {
@@ -1547,6 +1607,7 @@ impl Game<'_> {
             let r = &mut self.world.random;
             let value = 3 + r.next_int_bound(5).unwrap_or(0) + r.next_int_bound(5).unwrap_or(0);
             self.spawn_orbs([at.x, at.y, at.z], value as u32);
+            self.native_exp_bottle([at.x, at.y, at.z], value as u32);
             return;
         }
         // Projectile.onHit calls onHitBlock first, then the potion's
@@ -1554,7 +1615,7 @@ impl Game<'_> {
         if let Some((cell, face)) = hit {
             self.potion_hit_block(stack, cell, face);
         }
-        self.affect_entities_around(stack, at, owner.is_some());
+        self.affect_entities_around(stack, at, owner.player);
         let lingering = &*stack.item == "minecraft:lingering_potion";
         // AbstractThrownPotion.onHit: level event 2007 and sound 1054 for a
         // potion with instant effects, 2002 and 1053 otherwise.
@@ -1618,7 +1679,7 @@ impl Game<'_> {
                         radius_per_tick: -3.0 / 600.0,
                         color,
                         victims: Vec::new(),
-                        source: owner.unwrap_or_else(|| {
+                        source: owner.name.clone().unwrap_or_else(|| {
                             Text::translate("entity.minecraft.area_effect_cloud", &[])
                         }),
                     }),
@@ -1628,11 +1689,7 @@ impl Game<'_> {
         }
         // Every player in range (`ThrownSplashPotion.applySplash` over
         // `LivingEntity`s, the players among them).
-        // Instant damage is indirectMagic(potion, owner), which the death
-        // message names by the owner, else by the potion.
-        let source =
-            owner.unwrap_or_else(|| Text::translate("entity.minecraft.splash_potion", &[]));
-        self.for_each_player(|g| g.splash_on_player(def.effects, at, age, &source));
+        self.for_each_player(|g| g.splash_on_player(def.effects, at, age, owner));
         // Mobs take the instant effects (undead invert healing and harming).
         let undead = &self.stations().enchantments.entity_tags;
         let mut hits = Vec::new();

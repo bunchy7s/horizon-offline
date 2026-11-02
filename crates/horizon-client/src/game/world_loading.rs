@@ -49,9 +49,10 @@ impl WorldRequest {
         settings: &Settings,
         upgrade: &horizon_world::datafix::progress::UpgradeProgress,
     ) -> Result<PreparedWorld> {
+        let _prepare_step = startup::step("world.prepare");
         // Before any chunk is read: a loaded container with a loot table is rolled as its chunk
         // is decoded (`save::roll_loaded_loot`), and the spawn chunks are read while the world
-        // opens. Every world opens here: in-frame, on the server thread, on a dedicated server.
+        // opens. Every world opens here: on the server thread, on a dedicated server.
         let loot = || {
             horizon_client::structure_blocks::loot_data(
                 &options.resources,
@@ -176,8 +177,6 @@ impl WorldRequest {
                 o.flat_settings(),
                 o.single_biome(),
             )?;
-            // WorldCreationUiState.getGameRules, written with the level.
-            level.game_rules = o.rules.by_name();
             // The DataPackConfig the screen chose: the picked packs on,
             // everything else disabled — the feature packs left out, and the
             // world packs the Data Packs screen held back (`install` copies
@@ -206,16 +205,13 @@ impl WorldRequest {
             // picked feature packs over vanilla's (`FeatureFlags.REGISTRY`'s
             // codec writes the whole set, `minecraft:vanilla` included, and
             // omits the tag when it is the default).
-            let mut flags = vec!["minecraft:vanilla".to_owned()];
-            flags.extend(
-                packs
-                    .iter()
-                    .filter(|p| o.data_packs.contains(&p.id))
-                    .flat_map(|p| p.features()),
-            );
-            flags.sort();
-            flags.dedup();
-            level.enabled_features = flags;
+            level.enabled_features = o.enabled_features(&options.resources);
+            // CreateWorldScreen copies the edited rules with the final flags,
+            // even when the player never opened the rules screen.
+            level.game_rules = o
+                .rules
+                .copy_with_features(&level.enabled_features)
+                .by_name();
         }
         // Worlds made without the Create New World screen (--world, the
         // control socket) take its default: commands on for Creative only.
@@ -229,6 +225,7 @@ impl WorldRequest {
         let dim = Dim::from_id(&level.dimension);
         let shapes = level_shapes(&save_root, res.biomes());
         let shape = shapes.get(dim.id());
+        let streaming_step = startup::step("world.make_streaming");
         let (mut streaming, save, locator) = make_streaming(
             res,
             pack,
@@ -240,6 +237,7 @@ impl WorldRequest {
             level.seed,
             &level.enabled_features,
         )?;
+        drop(streaming_step);
         streaming.radius = settings.render_distance;
         let mut world = World::new(res.facts().air, level.seed);
         world.attachments = save.load_attachments();
@@ -281,52 +279,29 @@ impl WorldRequest {
 }
 
 pub(super) struct WorldLoader {
-    pub cancelled: bool,
-    /// What the world's upgrade has done (`UpgradeProgress`), which
-    /// `FileFixerProgressScreen` shows while the file fixers run.
-    pub upgrade: Arc<horizon_world::datafix::progress::UpgradeProgress>,
     handle: JoinHandle<std::result::Result<PreparedWorld, String>>,
 }
 
 impl WorldLoader {
+    /// Prepare the world on its own thread. `upgrade` is what its upgrade has done
+    /// (`UpgradeProgress`), which the window's `FileFixerProgressScreen` shows while the
+    /// file fixers run, and where its Cancel stops them.
     pub fn start(
         request: WorldRequest,
         res: Arc<Resources>,
         pack: PackResources,
         options: Options,
         settings: Settings,
+        upgrade: Arc<horizon_world::datafix::progress::UpgradeProgress>,
     ) -> Result<Self> {
-        let upgrade = Arc::new(horizon_world::datafix::progress::UpgradeProgress::new());
-        let worker_upgrade = upgrade.clone();
         let handle = std::thread::Builder::new()
             .name("World initialization".into())
             .spawn(move || {
                 request
-                    .prepare(&res, &pack, &options, &settings, &worker_upgrade)
+                    .prepare(&res, &pack, &options, &settings, &upgrade)
                     .map_err(|e| e.to_string())
             })?;
-        Ok(Self {
-            cancelled: false,
-            upgrade,
-            handle,
-        })
-    }
-
-    // Wait for construction and disposal off the window thread. Keeping this
-    // handle prevents a queued reopen racing the old session lock.
-    pub fn cancel(self) -> Self {
-        Self {
-            cancelled: true,
-            upgrade: self.upgrade.clone(),
-            handle: std::thread::spawn(move || {
-                drop(self.finish());
-                Err("world initialization cancelled".into())
-            }),
-        }
-    }
-
-    pub fn ready(&self) -> bool {
-        self.handle.is_finished()
+        Ok(Self { handle })
     }
 
     pub fn finish(self) -> Result<PreparedWorld> {
@@ -379,6 +354,7 @@ pub(super) fn preload_world_data(
                 .name("World data preload".into())
                 .spawn(move || {
                     horizon_threads::behind_server();
+                    let sync = spawn_sync_preload(&resources, true);
                     // Errors are left for the world opening to report.
                     if let Ok(data) = horizon_client::vanillagen::shared_data(
                         &resources.join("worldgen"),
@@ -388,14 +364,17 @@ pub(super) fn preload_world_data(
                         // seed shares: about 140 ms off opening the world.
                         let _ = data.prepare_decoration("minecraft:normal", "minecraft:overworld");
                     }
+                    // The loot data's item tables and the server's data both
+                    // read the recipe folder: held here, it is read once.
+                    let _recipe_files =
+                        horizon_client::json_folder::read(&resources.join("data/minecraft/recipe"));
                     // The preload is the game's own data; the world's packs'
                     // tables are built when it opens (finish_open_world).
                     let _ = horizon_client::structure_blocks::loot_data(
                         &resources,
                         &horizon_world::loot::PackOverlay::NONE,
                     );
-                    let _ =
-                        super::lan::sync_data(&resources, &horizon_world::loot::PackOverlay::NONE);
+                    join_sync_preload(sync, &resources);
                 });
             match spawned {
                 Ok(thread) => *preload = Preload::Started { thread, left: None },
@@ -444,6 +423,7 @@ pub(super) fn preload_launch_world(
         .spawn(move || {
             // Not behind the server: the world's opening waits for it.
             let started = std::time::Instant::now();
+            let sync = spawn_sync_preload(&resources, false);
             // Errors are left for the world opening to report. The world's
             // flags from its level.dat: the feature packs a flag forces on.
             let enabled_features = horizon_client::save::Level::read(&world_root)
@@ -459,11 +439,15 @@ pub(super) fn preload_launch_world(
                 let preset = horizon_client::save::WorldGen::preset(&world_root);
                 let _ = data.prepare_decoration(preset, "minecraft:overworld");
             }
+            // As in `preload_world_data`: the loot data and the server's
+            // data share one read of the recipe folder.
+            let _recipe_files =
+                horizon_client::json_folder::read(&resources.join("data/minecraft/recipe"));
             let _ = horizon_client::structure_blocks::loot_data(
                 &resources,
                 &horizon_world::loot::PackOverlay::NONE,
             );
-            let _ = super::lan::sync_data(&resources, &horizon_world::loot::PackOverlay::NONE);
+            join_sync_preload(sync, &resources);
             log::info!(
                 "Horizon: world data preloaded for the launch's world in {} ms",
                 started.elapsed().as_millis()
@@ -472,6 +456,39 @@ pub(super) fn preload_launch_world(
     match spawned {
         Ok(thread) => *preload = Preload::Started { thread, left: None },
         Err(e) => log::warn!("Horizon: world data preload: {e}"),
+    }
+}
+
+/// The registries, tags, recipes and advancements the server sends
+/// (`lan::sync_data`), read on a thread of their own beside the worldgen and
+/// loot reads: they share nothing, and read after them they came too late
+/// for the server thread, which then read them a second time.
+fn spawn_sync_preload(
+    resources: &std::path::Path,
+    behind_server: bool,
+) -> Option<std::thread::JoinHandle<()>> {
+    let resources = resources.to_owned();
+    std::thread::Builder::new()
+        .name("Sync data preload".into())
+        .spawn(move || {
+            if behind_server {
+                horizon_threads::behind_server();
+            }
+            let _ = super::lan::sync_data(&resources, &horizon_world::loot::PackOverlay::NONE);
+        })
+        .ok()
+}
+
+/// Waits for [`spawn_sync_preload`]'s thread, so the preload is over when
+/// its own thread is; reads the data here if that thread did not start.
+fn join_sync_preload(sync: Option<std::thread::JoinHandle<()>>, resources: &std::path::Path) {
+    match sync {
+        Some(thread) => {
+            let _ = thread.join();
+        }
+        None => {
+            let _ = super::lan::sync_data(resources, &horizon_world::loot::PackOverlay::NONE);
+        }
     }
 }
 
@@ -704,7 +721,10 @@ pub(super) fn make_streaming(
             &settings,
             true,
         ) {
-            Ok(terrain) => Some(Arc::new(terrain)),
+            Ok(mut terrain) => {
+                terrain.add_mod_signs(res.facts());
+                Some(Arc::new(terrain))
+            }
             Err(e) => {
                 log::warn!("Horizon: the superflat structures are unavailable: {e}");
                 None
@@ -775,13 +795,15 @@ pub(super) fn make_streaming(
         let preset = horizon_client::save::WorldGen::preset(world_root);
         let overrides =
             world_worldgen_overrides(world_root, &options.resources, &biomes, enabled_features);
-        let inner = Arc::new(VanillaTerrain::for_world_with(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures).map_err(|e| {
+        let mut inner = VanillaTerrain::for_world_with(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures).map_err(|e| {
                 if overrides.is_empty() {
                     format!("{e}\nPrepare the worldgen bundle with the launcher, or: horizon-prepare --prepare")
                 } else {
                     format!("{e}\nThe world's data packs change its world generation: one of them may not be made for this version")
                 }
-            })?);
+            })?;
+        inner.add_mod_signs(res.facts());
+        let inner = Arc::new(inner);
         if dim == Dim::Overworld && structures {
             inner.search_rings_behind();
         }
@@ -838,50 +860,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn polling_does_not_wait_for_world_initialization() {
-        let (release, wait) = std::sync::mpsc::channel();
-        let loader = WorldLoader {
-            cancelled: false,
-            upgrade: Default::default(),
-            handle: std::thread::spawn(move || {
-                wait.recv().unwrap();
-                Err("test world failure".into())
-            }),
-        };
-        assert!(!loader.ready());
-        release.send(()).unwrap();
-        assert_eq!(
-            loader.finish().err().unwrap().to_string(),
-            "test world failure"
-        );
-    }
-
-    #[test]
-    fn cancellation_keeps_initialization_tracked_until_it_has_stopped() {
-        let (release, wait) = std::sync::mpsc::channel();
-        let loader = WorldLoader {
-            cancelled: false,
-            upgrade: Default::default(),
-            handle: std::thread::spawn(move || {
-                wait.recv().unwrap();
-                Err("cancelled test world".into())
-            }),
-        }
-        .cancel();
-        assert!(loader.cancelled);
-        assert!(!loader.ready());
-        release.send(()).unwrap();
-        assert_eq!(
-            loader.finish().err().unwrap().to_string(),
-            "world initialization cancelled"
-        );
-    }
-
-    #[test]
     fn worker_panics_reach_the_client() {
         let loader = WorldLoader {
-            cancelled: false,
-            upgrade: Default::default(),
             handle: std::thread::spawn(|| panic!("broken world initialization")),
         };
         assert_eq!(

@@ -17,7 +17,7 @@ use crate::projectiles::{Projectile, ProjectileKind};
 use horizon_core::{geometry::Vec3, random::RandomSource};
 
 /// `Enemy` monsters an iron golem goes after (never creepers).
-fn golem_prey(s: &super::Seen) -> bool {
+pub(super) fn golem_prey(s: &super::Seen) -> bool {
     s.hostile && s.species != Species::Creeper
 }
 /// `IronGolem.registerGoals`, without `ResetUniversalAngerTargetGoal` (that
@@ -540,6 +540,7 @@ pub fn snow_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         );
         if here.name.as_ref() == "minecraft:air" && below.full_collision && !ice {
             events.push(MobEvent::SetBlockName {
+                mob: Some(m.id),
                 pos: [xx, y, zz],
                 name: "minecraft:snow",
                 effect: false,

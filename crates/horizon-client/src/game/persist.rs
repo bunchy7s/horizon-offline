@@ -336,6 +336,7 @@ impl Game<'_> {
         let loaded = std::mem::take(&mut self.world.loaded_entities);
         let player_uuid = self.level.player_uuid;
         for (key, tags) in loaded {
+            let count = tags.len();
             for mut tag in tags {
                 // PersistentEntitySectionManager.addEntity's `loaded`.
                 let from_disk = !take_fresh(&mut tag);
@@ -494,16 +495,15 @@ impl Game<'_> {
                     "minecraft:trident" => {
                         if let Some(n) = entity_nbt::trident_from_nbt(&tag) {
                             let mut t = super::trident::ThrownTrident::from_nbt(n);
+                            t.id = self.take_entity_id();
                             // One that came through a portal keeps its cooldown.
-                            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
                             self.restore_portal_cooldown(t.id, &tag);
                             self.tridents.push(t);
                         }
                     }
                     "minecraft:firework_rocket" => {
                         if let Some(r) = entity_nbt::firework_rocket_from_nbt(&tag, player_uuid) {
-                            self.next_entity += 1;
-                            let id = self.next_entity;
+                            let id = self.take_entity_id();
                             let mut rocket = super::fireworks::Rocket::from_nbt(r);
                             rocket.id = id;
                             // One that came through a portal keeps its cooldown.
@@ -534,6 +534,9 @@ impl Game<'_> {
                                 on_ground: matches!(tag.get("OnGround"), Some(Tag::Byte(1))),
                                 owner: None,
                                 guest: None,
+                                // PrimedTnt.readAdditionalSaveData: 4 by default,
+                                // kept to 0..128.
+                                power: entity_nbt::tnt_power(&tag),
                             });
                             // `Entity.load`: the `PortalCooldown` of one that just came through.
                             self.remember(id, uuid, tag);
@@ -667,6 +670,7 @@ impl Game<'_> {
                     _ => self.persist.unknown.entry(key).or_default().push(tag),
                 }
             }
+            self.native_entities_load(self.dim.id(), [key.0, key.1], count);
         }
     }
     /// A saved mob and, under `Passengers`, the mobs riding it.
@@ -767,7 +771,7 @@ impl Game<'_> {
     }
     /// The mobs riding entity `id` under `tag`'s `Passengers`, after the
     /// passengers it kept from loading.
-    fn put_mob_passengers(&mut self, tag: &mut Tag, id: u32) {
+    pub(super) fn put_mob_passengers(&mut self, tag: &mut Tag, id: u32) {
         let riders: Vec<usize> = (0..self.mobs.len())
             .filter(|&j| self.mobs[j].extra.mount == Some(id) && self.mobs[j].alive())
             .collect();
@@ -1267,6 +1271,7 @@ impl Game<'_> {
                     t.velocity,
                     t.on_ground,
                     t.fuse,
+                    t.power,
                     uuid,
                     self.persist.raw.get(&id),
                 );
@@ -1502,6 +1507,7 @@ impl Game<'_> {
                 })
                 .map(|i| self.mobs[i].id)
                 .collect();
+            let mobs_before = self.mob_ids();
             self.mobs.retain(|m| {
                 let keep = !leaving.contains(&m.id);
                 if !keep {
@@ -1519,6 +1525,7 @@ impl Game<'_> {
             });
             self.orbs.retain(|o| !gone(o.position));
             // Unloaded with their chunk: PersistentEntitySectionManager.stopTracking.
+            self.native_mobs_left_since(&mobs_before);
             self.native_items_left_since(&items_before);
             self.native_orbs_left_since(&orbs_before);
             // the ones saved with the chunk go with it (a trident too, unsaved).
@@ -1609,17 +1616,16 @@ impl Game<'_> {
         self.spawn_loaded_entities();
         let keys: HashSet<(i32, i32)> = unloaded.iter().map(|c| (c.x, c.z)).collect();
         let chunks = self.entity_chunks(&keys, true);
+        let counts: Vec<_> = chunks
+            .iter()
+            .map(|(key, entities)| (*key, entities.len()))
+            .collect();
         if let Err(e) = self.save.save_entities_later(chunks) {
             log::warn!("Horizon: failed to save entities: {e}");
         }
-    }
-    /// Leaving a dimension: its entities are saved with it.
-    pub(super) fn save_dimension_entities(&mut self) -> Result<()> {
-        self.spawn_loaded_entities();
-        let keys: HashSet<(i32, i32)> = self.world.chunks.keys().copied().collect();
-        let chunks = self.entity_chunks(&keys, true);
-        self.persist = EntityMemory::default();
-        self.save.save_entities(chunks)
+        for (chunk, count) in counts {
+            self.native_entities_unload(self.dim.id(), [chunk.0, chunk.1], count);
+        }
     }
 }
 /// Only a mob is finalized; another entity drops the request.

@@ -1,8 +1,8 @@
-DedicatedServer.readCodeOfConducts	missing		player: with enable-code-of-conduct=true a joining player gets no code of conduct; the codeofconduct folder is never read
+DedicatedServer.readCodeOfConducts	port	crates/horizon-client/src/lan/code_of_conduct.rs::read	with enable-code-of-conduct the folder's files are read at startup (game/dedicated.rs::run_dedicated_inner) and handed to a joining player, whose client shows the prompt (game/code_of_conduct.rs)
 DedicatedServer.setEnforceWhitelist	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.setUsingWhitelist	port	crates/horizon-client/src/game/dedicated.rs::Game::console_whitelist	console whitelist on|off; store_property writes white-list back
 DedicatedServer.saveAllChunks	port	crates/horizon-client/src/game.rs::Game::save_game	gap: minor: no save notifications to the JSON-RPC management API
-DedicatedServer.sendLowDiskSpaceWarning	missing		minor: admin-level players get no low disk space warning; LOW_DISK_SPACE_WARNING exists only as a packet id in ids.rs
+DedicatedServer.sendLowDiskSpaceWarning	port	crates/horizon-client/src/lan/hub.rs::Hub::send_low_disk_space_warning	chunk_io reports the low disk space and the operators are told (game/dedicated.rs); a client shows the toast (game/remote.rs)
 DedicatedServer.setAllowFlight	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.setDifficulty	port	crates/horizon-client/src/game/commands.rs::Game::cmd_difficulty	the /difficulty command; gap: minor: the new value is not written back to server.properties
 DedicatedServer.setViewDistance	skip:server		JSON-RPC management API only; view-distance is read at start
@@ -23,7 +23,8 @@ DedicatedServer.convertOldUsers	skip:other		one-time import of pre-1.7 .txt user
 DedicatedServer.runCommand	port	crates/horizon-server/src/rcon.rs::run_on_game	gap: minor: runs as the console (`console <line>` on the control endpoint), not as an Rcon source
 DedicatedServer.setEntityBroadcastRangePercentage	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.createTextFilterForPlayer	skip:service		external chat filter service; Horizon has no text filter
-DedicatedServer.setForceGameMode	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.setForceGameMode	port	crates/horizon-client/src/game/dedicated/management.rs::Game::management	stores force-gamemode, updates the host and applies the default mode to online players
+MinecraftServerSettingsServiceImpl.setForceGameMode	port	crates/horizon-server/src/management_methods.rs::Game::force_game_mode	forwards the live setting to the game and persists it in server.toml
 DedicatedServer.setGameMode	port	crates/horizon-client/src/game/lan.rs::Game::set_default_game_mode	the /defaultgamemode command; gap: minor: the value is not written back to server.properties
 DedicatedServer.setAcceptsTransfers	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.setPauseWhenEmptySeconds	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
@@ -45,7 +46,7 @@ CommandTemplate.createAction	port	crates/horizon-client/src/dialog.rs::Action::c
 CustomAll.createAction	port	crates/horizon-client/src/dialog.rs::Action::click	the Custom arm: additions plus each input's tag
 ParsedTemplate.parse	inline	crates/horizon-client/src/dialog.rs::Action::parse	gap: minor: the dynamic/run_command template is kept without a StringTemplate syntax check
 DialogBodyTypes.bootstrap	skip:data		registers the item and plain_message body codecs; Body::parse dispatches them in dialog.rs
-NumberRangeInput.computeLabel	missing		unsure: label_format is parsed (dialog.rs) but no code formats it, so the slider value label may be missing
+NumberRangeInput.computeLabel	inline	crates/horizon-client/src/dialog.rs::Control::message	a slider's text is label_format with the label and the scaled value, as the cycle button's is options.generic_value
 NumberRangeInput.RangeInfo.isOutOfRange	inline	crates/horizon-client/src/dialog.rs::Control::scaled	the range test that keeps the snapped value inside the slider
 NumberRangeInput.RangeInfo.initialScaledValue	inline	crates/horizon-client/src/dialog.rs::Control::scaled	the first value (initial or the midpoint) used by the step snap
 MinecraftServerGui.showFrameFor	skip:server		server window (Swing); Horizon has no server GUI

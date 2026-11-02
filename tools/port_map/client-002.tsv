@@ -8,12 +8,12 @@ ClientPacketListener.handleTeleportEntity	inline	crates/horizon-client/src/game/
 ClientPacketListener.handleTickingState	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	TickingState arm: clock rate and frozen flag
 ClientPacketListener.handleTickingStep	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	TickingStep arm: frozen ticks to run
 ClientPacketListener.handleMoveEntity	port	crates/horizon-client/src/game/remote.rs::Game::move_entity	relative move and rotation from the Pos, PosRot and Rot packets
-ClientPacketListener.handleMinecartAlongTrack	missing		player: the server's rail steps for a minecart are dropped, so a cart on a dedicated server follows the client's own rail physics and can drift from where the server has it
+ClientPacketListener.handleMinecartAlongTrack	port	crates/horizon-client/src/game/remote.rs::Game::remote_move_minecart	the server's steps join the cart's own queue while it runs NewMinecartBehavior
 ClientPacketListener.handleRemoveEntities	port	crates/horizon-client/src/game/remote.rs::Game::remove_entity	gap: minor: a removed vehicle carrying the player is not remembered for a later teleport
 ClientPacketListener.setValuesFromPositionPacket	port	crates/horizon-client/src/game/remote.rs::Game::remote_teleport	gap: minor: the entity case (TeleportEntity) is in the handle_packet arm, not here
 ClientPacketListener.handleRotatePlayer	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	PlayerRotation arm; gap: minor: no ServerboundMovePlayerPacket.Rot reply is sent
 ClientPacketListener.handleChunkBlocksUpdate	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SectionBlocksUpdate arm: each change through the block update
-ClientPacketListener.handleChunksBiomes	missing		player: biome updates for loaded chunks are dropped, so grass, leaves and water keep the old biome colour
+ClientPacketListener.handleChunksBiomes	port	crates/horizon-client/src/game/remote_chunks.rs::Game::remote_chunks_biomes	each loaded column replaces its biomes, then its sections and its neighbours' are drawn again
 ClientPacketListener.enableChunkLight	inline	crates/horizon-client-render/src/streaming.rs::Streaming::insert_remote	gap: minor: the air-only section status is not set; every section of the 3x3 columns is marked dirty
 ClientPacketListener.handleForgetLevelChunk	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	ForgetLevelChunk arm: Streaming::forget, block entities and renderer columns dropped
 ClientPacketListener.queueLightRemoval	inline	crates/horizon-client-render/src/streaming.rs::Streaming::forget	gap: minor: the column's light state is dropped with the column; no per-section light clearing
@@ -26,10 +26,10 @@ ClientPacketListener.handleDeleteChat	port	crates/horizon-client/src/game/remote
 ClientPacketListener.handleAnimate	port	crates/horizon-client/src/game/remote.rs::Game::remote_animate	action 0 stops sleeping, 1 and 2 emit crit and enchanted hit particles
 ClientPacketListener.handleHurtAnimation	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	HurtAnimation arm: own player's hurt tilt, or a mob's hurt time
 ClientPacketListener.handleSetSpawn	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetDefaultSpawnPosition arm; gap: minor: only an overworld spawn is kept, other dimensions are dropped
-ClientPacketListener.handleAddTransientBlockPacket	missing		minor: the transient block shown while a falling block lands is not drawn; the block update still arrives
-ClientPacketListener.findTotem	missing		player: the totem of undying pop-up over the screen is not shown when death protection triggers; Horizon has no item activation
+ClientPacketListener.handleAddTransientBlockPacket	port	crates/horizon-client/src/game/transient_blocks.rs::Game::add_transient_block	the block is queued, shown for its time to live and dropped once its section is drawn again
+ClientPacketListener.findTotem	port	crates/horizon-client/src/game/totem.rs::Game::find_totem	the first hand's item with death_protection, else a new totem, then LocalPlayer.displayItemActivation
 ClientPacketListener.handleSetExperience	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetExperience arm
-ClientPacketListener.determineLevelLoadingReason	port	crates/horizon-client/src/game.rs::Game::loading_reason	gap: player: only the in-frame game picks a reason; a dedicated server join or dimension change shows no level loading screen
+ClientPacketListener.determineLevelLoadingReason	port	crates/horizon-client-render/src/level_loading.rs::reason_for_respawn	the reason of a Respawn packet: death, a Nether or an End crossing
 ClientPacketListener.handleOpenScreen	port	crates/horizon-client/src/game/remote.rs::Game::remote_open_screen	
 ClientPacketListener.handleSetCursorItem	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetCursorItem arm; gap: minor: sets the carried stack even while the creative screen is open
 ClientPacketListener.handleSetPlayerInventory	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetPlayerInventory arm: slots 0-35, armour 36-39, off hand 40
@@ -40,14 +40,14 @@ ClientPacketListener.handleContainerClose	port	crates/horizon-client/src/game/re
 ClientPacketListener.handleBlockEvent	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	BlockEvent arm: client block event, then the block entity event
 ClientPacketListener.handleGameEvent	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	GameEvent arm (weather, mode, credits, respawn, arrow hit, sting, limited crafting, chunks load start); gap: minor: demo mode (5) is not shown
 ClientPacketListener.openDemoIntroScreen	skip:other		demo mode only (GameEvent 5); Horizon has no demo mode
-ClientPacketListener.startWaitingForNewLevel	missing		player: no level loading screen after a dimension change or respawn on a dedicated server; a join shows only the 'Loading terrain' status text
+ClientPacketListener.startWaitingForNewLevel	inline	crates/horizon-client/src/game/remote.rs::Game::enter_remote_dimension	the tracker starts and the LevelLoadingScreen draws until the player's section is shown
 ClientPacketListener.handleMapItemData	port	crates/horizon-client/src/game/maps.rs::Game::remote_map_item_data	
 ClientPacketListener.handleUpdateAdvancementsPacket	port	crates/horizon-client/src/game/advancements.rs::Game::remote_advancements	UpdateAdvancements arm passes the added icons
 ClientPacketListener.handleSelectAdvancementsTab	missing		minor: the server's advancement tab choice is ignored
 ClientPacketListener.handleCommands	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	Commands arm: command tree from the packet, merged with Horizon's own
 ClientPacketListener.handleStopSoundEvent	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	StopSound arm: audio stop_sounds
 ClientPacketListener.handleUpdateRecipes	skip:data		Horizon reads recipes from its own tables; the server's list is not read
-ClientPacketListener.handleLookAt	missing		player: a server command that turns the camera (/faceplayer, /tp with facing) does not turn this player's view
+ClientPacketListener.handleLookAt	port	crates/horizon-client/src/game/remote.rs::Game::remote_look_at	the anchor's point, or the entity's, turns the player's view
 ClientPacketListener.handleTagQueryPacket	port	crates/horizon-client/src/game/debug_keys.rs::Game::answer_tag_query	reached from the TagQuery arm of remote.rs handle_packet
 ClientPacketListener.handleAwardStats	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	AwardStats arm: known stat keys into the stats values
 ClientPacketListener.handleRecipeBookAdd	port	crates/horizon-client/src/game/recipe_book.rs::Game::remote_recipe_book_add	
@@ -57,7 +57,7 @@ ClientPacketListener.refreshRecipeBook	inline	crates/horizon-client/src/game/rec
 ClientPacketListener.updateTags	skip:data		the server's tag payload is not read; tags come from Horizon's own data (net.rs configure ignores UpdateTags)
 ClientPacketListener.handleUpdateTags	skip:data		the server's tag payload is not read; tags come from Horizon's own data (net.rs configure ignores UpdateTags)
 ClientPacketListener.handleChangeDifficulty	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	ChangeDifficulty arm
-ClientPacketListener.handleSetCamera	missing		player: a spectator's view does not attach to the entity it spectates (for example /spectate)
+ClientPacketListener.handleSetCamera	port	crates/horizon-client/src/game/remote_camera.rs::Game::remote_set_camera	the view follows the entity; the player's own id gives it back
 ClientPacketListener.handleInitializeBorder	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	InitializeBorder arm: centre, size or lerp, absolute max, warnings
 ClientPacketListener.handleSetBorderCenter	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetBorderCenter arm
 ClientPacketListener.handleSetBorderLerpSize	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetBorderLerpSize arm
@@ -75,7 +75,7 @@ ClientPacketListener.handlePlayerInfoRemove	port	crates/horizon-client/src/game/
 ClientPacketListener.handlePlayerInfoUpdate	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	PlayerInfoUpdate arm: new entries, then listing, latency, name, hat, list order and game mode for tab players
 ClientPacketListener.applyPlayerInfoUpdate	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	gap: minor: the own player's game-mode update does not change the local mode; INITIALIZE_CHAT is ignored
 ClientPacketListener.initializeChatSession	port	crates/horizon-client/src/game/remote.rs::Remote::new_chat_validator	the session each INITIALIZE_CHAT entry carries is kept and checked against the services' profile-key keys when the player's chat is first read
-ClientPacketListener.enforcesSecureChat	missing		minor: the Login flag enforces_secure_chat is not read
+ClientPacketListener.enforcesSecureChat	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	the Login flag is kept as serverEnforcesSecureChat and the fallback message validator enforces it
 ClientPacketListener.handleGameRuleValues	port	crates/horizon-client/src/game/lan_screen.rs::Game::remote_world_options_rules	
 ClientPacketListener.handleSoundEntityEvent	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SoundEntity arm: the sound plays where the tracked entity is
 ClientPacketListener.handleAddObjective	port	crates/horizon-client/src/game/remote.rs::Game::remote_objective	add, remove and update of an objective
@@ -88,7 +88,7 @@ ClientPacketListener.handlePlaceRecipe	port	crates/horizon-client/src/game/recip
 ClientPacketListener.handleLightUpdatePacket	port	crates/horizon-client/src/game/remote_chunks.rs::Game::remote_light_update	
 ClientPacketListener.handleMerchantOffers	port	crates/horizon-client/src/game/remote.rs::Game::remote_merchant_offers	
 ClientPacketListener.handleSetChunkCacheRadius	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetChunkCacheRadius arm: streaming radius, columns out of range dropped
-ClientPacketListener.handleSetSimulationDistance	missing		minor: the server's simulation distance is not read
+ClientPacketListener.handleSetSimulationDistance	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetSimulationDistance arm: ClientLevel.serverSimulationDistance
 ClientPacketListener.handleSetChunkCacheCenter	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetChunkCacheCenter arm
 ClientPacketListener.handleBlockChangedAck	port	crates/horizon-client/src/game/remote.rs::Game::end_predictions	
 ClientPacketListener.handleBundlePacket	inline	crates/horizon-client/src/net.rs::receive_play	bundle delimiters are dropped; the packets inside arrive as a stream and are handled one by one, in order
@@ -108,7 +108,7 @@ ClientPacketListener.sendChatAcknowledgement	port	crates/horizon-client/src/game
 ClientPacketListener.sendCommand	port	crates/horizon-client/src/game/remote_chat.rs::Game::send_command	message arguments signed with a chat session; the unsigned packet otherwise
 ClientPacketListener.verifyCommand	port	crates/horizon-client/src/game/remote_chat.rs::verify_command	over the tree the server sent
 ClientPacketListener.isValidCommand	port	crates/horizon-command/src/lib.rs::ParseResults::is_valid	
-ClientPacketListener.openSendConfirmationWindow	port	crates/horizon-client/src/game/remote_chat.rs::Game::send_unattended_command	a clicked book or dialog is already closed: no answer returns to it
+ClientPacketListener.openSendConfirmationWindow	port	crates/horizon-client/src/game/remote_chat.rs::Game::send_unattended_command	no returns to the book or dialog the click left; the screen is drawn over the chat behind, not in its place
 ClientPacketListener.openCommandSendConfirmationWindow	port	crates/horizon-client/src/game/remote_chat.rs::Game::answer_command_prompt	Run Command sends it
 ClientPacketListener.openSignedCommandSendConfirmationWindow	port	crates/horizon-client/src/game/remote_chat.rs::Game::answer_command_prompt	into the chat box, or the clipboard over a screen; a kept chat draft is not put before it
 ClientPacketListener.broadcastClientInformation	port	crates/horizon-client/src/game/remote.rs::Game::tick_remote_level	gap: minor: only view distance and chat visibility are sent, and only when they change
@@ -117,7 +117,7 @@ ClientPacketListener.setKeyPair	port	crates/horizon-client/src/game/remote_chat.
 ClientRegistryLayer.createRegistryAccess	skip:data		registry layers come from Horizon's own tables
 ClientSuggestionProvider.getOnlinePlayerNames	port	crates/horizon-client/src/game/remote.rs::Game::remote_online_names	sorted names of the server's player list
 ClientSuggestionProvider.getCustomTabSuggestions	port	crates/horizon-client-core/src/registries.rs::Registries::custom_tab_suggestions	the player names and the server's custom completions, each once
-ClientSuggestionProvider.getSelectedEntities	missing		minor: no suggestion for the entity under the crosshair
+ClientSuggestionProvider.getSelectedEntities	port	crates/horizon-client/src/game/pick_entity.rs::Game::crosshair_entity_uuid	the UUID of the entity under the crosshair, before any block; the command suggestions add it
 ClientSuggestionProvider.suggestRegistryElements	port	crates/horizon-command/src/args.rs::suggest_resources	registry ids come from Horizon's registry tables
 ClientSuggestionProvider.getRelevantCoordinates	port	crates/horizon-command/src/args.rs::suggest_coordinates	the block under the crosshair for block positions
 ClientSuggestionProvider.getAbsoluteCoordinates	port	crates/horizon-command/src/args.rs::suggest_coordinates	gap: minor: the exact hit point is not offered; Vec3 arguments only get ~
@@ -129,7 +129,7 @@ LevelLoadTracker.startClientLoad	inline	crates/horizon-client/src/game/remote.rs
 LevelLoadTracker.isLevelReady	inline	crates/horizon-client/src/game/remote.rs::Game::tick_remote_level	gap: minor: readiness is the player's column being lit; vanilla's close delay is not kept
 LevelLoadTracker.getPlayerCompiledSectionCallback	inline	crates/horizon-client/src/game/remote.rs::Game::tick_remote_level	gap: minor: the gate is the column being lit, not the section being compiled
 LevelLoadTracker.WaitingForPlayerChunk.isReady	inline	crates/horizon-client/src/game/remote.rs::Game::tick_remote_level	gap: minor: no timeout and no spectator or dead exemption
-LevelLoadTracker.WaitingForServer.loadingPacketsReceived	missing		minor: the server's level-chunks-start event (GameEvent 13) is ignored
+LevelLoadTracker.WaitingForServer.loadingPacketsReceived	port	crates/horizon-client-render/src/level_loading.rs::LevelLoadTracker::loading_packets_received	GameEvent 13 (LEVEL_CHUNKS_LOAD_START) moves the wait on to the player's chunk
 MultiPlayerGameMode.startPrediction	port	crates/horizon-client/src/game/remote.rs::Game::next_sequence	gap: minor: only the sequence number; each caller builds and sends its own packet
 MultiPlayerGameMode.ensureHasSentCarriedItem	inline	crates/horizon-client/src/game/remote.rs::Game::remote_send_state	the SetCarriedItem check, made on every send
 MultiPlayerGameMode.performUseItemOn	port	crates/horizon-client/src/game/remote.rs::Game::remote_use_block	gap: minor: no world-border check, and UseItemOn always sends world_border false

@@ -197,6 +197,12 @@ fn climate(m: &Mob) -> &'static str {
 fn avatar(m: &Mob) -> bool {
     matches!(&*m.kind.id, "minecraft:player" | "minecraft:mannequin")
 }
+/// `AvatarRenderer.shouldRenderLayers`: a spectating player or mannequin
+/// draws no layers at all (armour, held items, head item, cape, wings,
+/// parrots, ears, stuck arrows), only its translucent head.
+pub fn layers_shown(m: &Mob) -> bool {
+    !(avatar(m) && m.extra.spectator)
+}
 /// The model layer key and texture for the mob's body.
 pub fn body(m: &Mob) -> (String, String) {
     use Species as S;
@@ -1328,9 +1334,10 @@ pub(super) fn posed(base: glam::Mat4, p: [f32; 9]) -> glam::Mat4 {
         ))
         * glam::Mat4::from_scale(glam::Vec3::new(p[6], p[7], p[8]))
 }
-/// `draw_scrolled` through the GPU path when the mob takes it (`skin`).
+/// `draw_scrolled` through the GPU path when the mob takes it (`skin`), on
+/// the CPU otherwise.
 #[allow(clippy::too_many_arguments)]
-fn put(
+pub fn put(
     skin: &mut Option<&mut super::skin::Skin>,
     part: &std::sync::Arc<Part>,
     base: glam::Mat4,
@@ -1795,6 +1802,8 @@ fn render_visible(
     out: &mut Vec<Vertex>,
     skin: Option<&mut super::skin::Skin>,
 ) {
+    // The armour is a layer: none for a spectator.
+    let extra = if layers_shown(m) { extra } else { &[] };
     let overlay = u32::from(red_overlay(m));
     let s = anim::state(m, alpha);
     let (model_key, texture) = body(m);
@@ -2046,6 +2055,12 @@ fn render_visible(
         if layer.full_bright && m.species() != Species::Warden {
             for vertex in &mut out[start..] {
                 vertex.normal = [0; 4];
+                vertex.layer |= u32::from(EYES_TIER) << 16;
+            }
+        }
+        // The warden's heart and spots shine too, by how far their layers have faded in.
+        if layer.full_bright && m.species() == Species::Warden {
+            for vertex in &mut out[start..] {
                 vertex.layer |= u32::from(EYES_TIER) << 16;
             }
         }

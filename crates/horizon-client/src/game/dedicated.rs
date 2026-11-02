@@ -637,6 +637,8 @@ struct ServerState {
     max_players: usize,
     /// The mutable `gamemode` server property (`DedicatedServer.gameMode`).
     game_mode: i32,
+    /// The mutable `force-gamemode` server property (`DedicatedServer.forceGameMode`).
+    force_game_mode: bool,
 }
 
 /// The dedicated-only commands' replies vanilla sends with `broadcast`
@@ -931,7 +933,6 @@ impl Game<'_> {
             levels: self.level_shapes,
             seed: self.level.seed,
             max_players: props.max_players.max(0) as usize,
-            dedicated: true,
             integrated: false,
         };
         let settings = LanSettings {
@@ -942,7 +943,7 @@ impl Game<'_> {
         if let Some(sync) = sync {
             sync.adopt(&self.pack_files());
         }
-        if let Err(e) = self.lan_host(settings, net, config, None) {
+        if let Err(e) = self.lan_host(settings, net, config) {
             log("WARN", "**** FAILED TO BIND TO PORT!");
             log("WARN", &format!("The exception was: {e}"));
             log("WARN", "Perhaps a server is already running on that port?");
@@ -1005,6 +1006,7 @@ impl Game<'_> {
             broadcast_rcon: props.broadcast_rcon_to_ops,
             op_level: props.op_permission_level,
             game_mode: props.game_mode,
+            force_game_mode: props.force_game_mode,
             report: None,
             view: (
                 props.view_distance.clamp(2, 32) as u32,
@@ -1236,7 +1238,7 @@ impl Game<'_> {
             .iter()
             .map(|e| (e.user.id, e.level as u8))
             .collect();
-        host.hub.resend_commands();
+        self.resend_commands_filtered();
     }
 
     /// A player on the server, by name.
@@ -1457,13 +1459,17 @@ impl Game<'_> {
             }
             "whitelist" => self.console_whitelist(state, &rest),
             // The chat filter's (game/chat_filter.rs), on servers that filter.
-            "unmute"
-                if rest.len() == 1 && self.lan.as_ref().is_some_and(|h| h.hub.chat_filter_on()) =>
+            command
+                if super::chat_filter::MUTE_COMMANDS.contains(&command)
+                    && self.lan.as_ref().is_some_and(|h| h.hub.chat_filter_on()) =>
             {
                 if let Some(mut host) = self.lan.take() {
-                    let reply = self.unmute(&mut host, rest[0], "Server");
+                    let words: Vec<&str> = [command].into_iter().chain(rest).collect();
+                    let replies = self.mute_command(&mut host, &words, "Server");
                     self.lan = Some(host);
-                    self.console_reply(lit(&reply));
+                    for reply in replies {
+                        self.console_reply(lit(&reply));
+                    }
                 }
             }
             "ban" if !rest.is_empty() => {
@@ -1685,7 +1691,7 @@ impl Game<'_> {
         match rest {
             ["on"] | ["off"] => {
                 let on = rest[0] == "on";
-                let mut l = state.lists.lock().unwrap();
+                let l = state.lists.lock().unwrap();
                 let turned_on = on && !l.use_whitelist;
                 let key = match (on, l.use_whitelist) {
                     (true, true) => "commands.whitelist.alreadyOn",
@@ -1693,9 +1699,8 @@ impl Game<'_> {
                     (false, false) => "commands.whitelist.alreadyOff",
                     (false, true) => "commands.whitelist.disabled",
                 };
-                l.use_whitelist = on;
                 drop(l);
-                self.store_property("white-list", on.to_string());
+                self.set_using_whitelist(&state.lists, on);
                 self.console_reply(Text::translate(key, &[]));
                 if turned_on {
                     let lists = state.lists.clone();
@@ -1763,8 +1768,16 @@ impl Game<'_> {
     /// `DedicatedServer.setUsingWhitelist`: the flag, and `white-list` in
     /// server.properties.
     pub(super) fn set_using_whitelist(&mut self, lists: &Arc<Mutex<Lists>>, on: bool) {
-        lists.lock().unwrap().use_whitelist = on;
+        let changed = {
+            let mut lists = lists.lock().unwrap();
+            let changed = lists.use_whitelist != on;
+            lists.use_whitelist = on;
+            changed
+        };
         self.store_property("white-list", on.to_string());
+        if changed {
+            self.native_whitelist_state_update(on);
+        }
     }
 
     /// DedicatedServerSettings.update: change one key and store the file.

@@ -214,7 +214,12 @@ impl Mesher {
                     Paint {
                         layer: face.layer,
                         light: span.light,
-                        color: channel(16) | channel(8) << 8 | channel(0) << 16 | 0xff000000,
+                        // The HDR tier, as the section mesher writes it, so a light source
+                        // keeps shining across the LOD boundary.
+                        color: crate::mesher::emitting(
+                            channel(16) | channel(8) << 8 | channel(0) << 16 | 0xff000000,
+                            context.tables.hdr_tier(span.state),
+                        ),
                         translucent: face.translucent,
                     }
                 })

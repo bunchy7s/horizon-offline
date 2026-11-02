@@ -150,8 +150,18 @@ impl Game<'_> {
         self.world
             .block_entities
             .put(key, BlockEntity::Beehive(hive));
-        if stored && let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
-            m.removed = true;
+        if stored {
+            let kind = self.mobs[i].kind.id.clone();
+            let block = self
+                .res
+                .facts()
+                .get(self.world.block(at[0], at[1], at[2]))
+                .name
+                .clone();
+            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
+                m.removed = true;
+            }
+            self.native_entity_enter_block(mob, &kind, at, &block);
         }
     }
     /// `BeehiveBlockEntity.emptyAllLivingFromHive` with no player about.

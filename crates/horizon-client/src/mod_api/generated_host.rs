@@ -237,6 +237,167 @@ pub trait Host {
         state: BlockStateId,
         flags: i32,
     ) -> bool;
+    /// For a server mod: the runs made at once, straight into the chunks of the authoritative level `dimension`
+    /// (the one being ticked, as for `native_set_block`), with what `fill ... strict` does for block entities (a
+    /// block replaced by another loses its block entity, and a new block gets the one `native_set_block` would
+    /// give it, a mod block's included); no neighbour is told, and the chunks changed go to the players whole.
+    /// Runs in chunks not loaded, and the parts of runs outside the column, are left out. The blocks changed, or
+    /// why the edit was left out, with nothing changed: another dimension, a client of a server, a palette entry
+    /// or filter that doesn't read or carries NBT (refused), a run naming a palette entry or filter past the end,
+    /// or more than 65536 filters. API 126.
+    fn edit_blocks(&mut self, dimension: &str, edit: &NativeBlockEdit) -> Result<u64, String>;
+    /// For a server mod: each column's height by `heightmap` in the authoritative level `dimension` (the one being
+    /// ticked), none for a column not loaded. `Err` says why nothing was read: another dimension or a client of a
+    /// server, or more than 65,536 columns (`MAX_COLUMNS`). API 127.
+    fn surface_heights(
+        &self,
+        dimension: &str,
+        columns: &[(i32, i32)],
+        heightmap: NativeHeightmap,
+    ) -> Result<Vec<Option<i32>>, String>;
+    /// For a server mod: `below` blocks under and `above` blocks from each column's height by `heightmap`, as a
+    /// palette and indexes, with the biome's grass, foliage and water tints (air outside the column and in columns
+    /// not loaded). The tints are the biome's at the column's top, not blended over the biome blend radius as the
+    /// game draws them: near a biome border they can differ from what players see. `Err` says why nothing was
+    /// read: another dimension or a client of a server, `below + above` of 0 or more than the level's height, or
+    /// a read of more than 1,048,576 blocks (`MAX_READ`; it runs on the server tick, so read big areas in pieces).
+    /// API 127.
+    fn read_columns(
+        &self,
+        dimension: &str,
+        columns: &[(i32, i32)],
+        heightmap: NativeHeightmap,
+        range: (u32, u32),
+    ) -> Result<NativeColumnBlocks, String>;
+    /// Asks `native_biome_colors` again for every biome and, when the colours
+    /// differ from those in use, rebuilds every loaded section and the far
+    /// terrain with them (`LevelRenderer.allChanged`, as changing Biome Blend
+    /// does). Call it when your colours change (a new season, a new day of a
+    /// slow fade) and once when the player joins, not every frame: a rebuild
+    /// takes the workers a few seconds. API 107.
+    fn refresh_biome_colors(&mut self);
+    /// The strongest redstone signal reaching the block at `pos` from its six
+    /// neighbours, 0 to 15 (`SignalGetter.getBestNeighborSignal`, what a
+    /// dispenser or a piston reads), in the level in place, `dimension`. 0 on
+    /// a client's copy of the world and for another dimension. A mod's
+    /// explosive, launcher or machine reads it in its block entity's tick to
+    /// go off or switch on. API 96.
+    fn neighbor_signal(&mut self, dimension: &str, pos: [i32; 3]) -> i32;
+    /// The light at `pos` in the world in place, as `(block, sky)`, each 0 to
+    /// 15 (`Level.getBrightness` for `LightLayer.BLOCK` and `LightLayer.SKY`).
+    /// A solar panel checks for full sky light above it, a lamp or a mob farm
+    /// for darkness. `(0, 0)` in a chunk that isn't loaded. Like the other
+    /// reads here it reads the world this game holds: the level in place on
+    /// a server, the server's copy on a client. API 97.
+    fn light(&self, pos: [i32; 3]) -> (u8, u8);
+    /// The rain and thunder levels of the world in place, each 0.0 to 1.0
+    /// (`Level.getRainLevel` and `Level.getThunderLevel`): what a solar panel
+    /// or a wind turbine reads. Both 0 in the Nether and the End, which have
+    /// no weather (`Level.canHaveWeather`). API 97.
+    fn weather(&self) -> (f32, f32);
+    /// The world's time of day in ticks (`Level.getOverworldClockTime`), the
+    /// same as `native_clock`'s `day_time`; it keeps counting past 24000, so
+    /// take it modulo 24000 for the hour. API 97.
+    fn day_time(&self) -> i64;
+    /// The lowest block y and the height of the world in place
+    /// (`LevelHeightAccessor.getMinY` and `getHeight`): how deep a quarry or a
+    /// miner may dig. API 97.
+    fn world_height(&self) -> (i32, i32);
+    /// The most of the item `item` one slot holds (`Item.getDefaultMaxStackSize`),
+    /// or `None` for an unknown item: for a mod's container that fills or
+    /// merges stacks itself. API 97.
+    fn max_stack_size(&self, item: &str) -> Option<u32>;
+    /// Item `item`'s icon drawn with model `model` (`minecraft:paper` as
+    /// `mymod:wheel_icon`, an `item_model` of a content mod's), as `native_item`
+    /// draws one; false for an unknown item. API 111.
+    fn item_model(
+        &self,
+        batch: &mut HudBatch,
+        item: &str,
+        model: &str,
+        at: [f32; 2],
+        size: f32,
+    ) -> bool;
+    /// A quad of corners `points` (in order round it) in GUI pixels, `argb`:
+    /// a wedge, a slanted bar, what `native_fill`'s rectangles can't draw.
+    /// API 111.
+    fn quad(&self, batch: &mut HudBatch, points: [[f32; 2]; 4], argb: u32);
+    /// Opens a screen of mod `mod_id`'s own over the world: the screen hooks
+    /// fire over it as over any other, so the mod draws it in
+    /// `native_screen_render_post` and takes its clicks, scroll, keys and
+    /// typing there; the mouse is freed, and Escape closes it. Every mod's own
+    /// screen has the `NativeScreenView.id` `mod`, so a mod's screen hooks
+    /// check `native_mod_screen()` is its own before drawing. It doesn't pause
+    /// a single-player game (as the inventory doesn't). True when it is open:
+    /// false while another screen is (or another mod's), over the title
+    /// screen, a book, a sign editor, a dialog or a prompt, while the world
+    /// loads, and anywhere but the window's own client (the server thread, a
+    /// dedicated server). A gamepad can close it (B, Start) but not click on
+    /// it: its clicks don't reach the mouse hooks. API 111.
+    fn mod_screen_open(&mut self, mod_id: &str) -> bool;
+    /// Closes mod `mod_id`'s own screen, if it is open. API 111.
+    fn mod_screen_close(&mut self, mod_id: &str);
+    /// The mod whose own screen is open, if one is (Escape, or another screen
+    /// replacing it, closes it). API 111.
+    fn mod_screen(&self) -> Option<&str>;
+    /// Writes the experience orb `id`'s `value` (the points a pickup gives), `count`
+    /// (orbs merged into it, each worth `value`) and `age` (ticks lived; an orb
+    /// despawns at 6000); a `None` is left as it is. API 128.
+    /// False, and nothing written, for an orb not in the server level `dimension`, a
+    /// `value` or `count` of 0, and on a client of a server.
+    fn set_experience_orb(
+        &mut self,
+        dimension: &str,
+        id: u32,
+        value: Option<u32>,
+        count: Option<u32>,
+        age: Option<u32>,
+    ) -> bool;
+    /// The experience orbs of the server level `dimension` whose box meets
+    /// the box `min`..`max`, in the level's order: what a mod reads before it
+    /// cancels an orb in `native_entity_join_level`, to give its points with
+    /// `native_give_experience`. Empty for a level not in place and on a
+    /// client of a server.
+    fn experience_orbs(
+        &self,
+        dimension: &str,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Vec<NativeExperienceOrb>;
+    /// The clock of the world this window shows, for client mods: its game
+    /// time and time of day as the server last sent them
+    /// (`ClientboundSetTimePacket`), advanced each tick between packets; none
+    /// on the title screen. API 92.
+    fn clock(&self) -> Option<NativeClock>;
+    /// Throws a falling block of `state` from `pos` (its bottom centre) at
+    /// `velocity` (blocks a tick) in the level in place, `dimension`: it
+    /// falls, lands and places itself as sand does, or drops as an item
+    /// where it can't. The block at `pos` is left as it is: take it away first
+    /// with `native_set_block` to make a block fall out of the world. False,
+    /// with nothing thrown, on a client's copy of the world, for another
+    /// dimension, an air or unknown state, a chunk that isn't loaded, a value
+    /// that isn't finite, or with 1024 falling blocks in the level already.
+    /// Each axis of `velocity` is cut to 3.9. API 81.
+    fn spawn_falling_block(
+        &mut self,
+        dimension: &str,
+        state: BlockStateId,
+        pos: [f64; 3],
+        velocity: [f64; 3],
+        falling: NativeFalling,
+    ) -> bool;
+    /// Property `key` of block state `state` (a machine's `facing`, from the
+    /// `state` `native_block_entity_submit` gets), if it has one: no lookup in
+    /// the world, so cheap each frame. API 91.
+    fn block_state_property(&self, state: BlockStateId, key: &str) -> Option<&str>;
+    /// The first block along the view within `distance` (at most 1024), past the loaded chunks over the distant terrain. API 116.
+    fn raycast(&self, distance: f32) -> Option<NativeHit>;
+    /// The first block along the view within `RAYCAST_MAX`, and its distance. API 116.
+    fn view_hit(&self) -> Option<(f32, NativeHit)>;
+    /// Right-clicks with these items (at most 64 ids) are mod `mod_id`'s; a later call replaces the list. API 116.
+    fn claim_items(&mut self, mod_id: &str, ids: &[String]);
+    /// Mod `mod_id`'s events since its last poll (at most 256 wait). API 116.
+    fn poll(&mut self, mod_id: &str) -> Vec<NativeModEvent>;
     /// Sets the stack of item entity `id` in the server level `dimension`, as
     /// a hopper's `addItem` leaves what it couldn't take (`ItemEntity.setItem`);
     /// an empty stack (count 0) removes the entity (`setItem(EMPTY)`, then
@@ -326,6 +487,45 @@ pub trait Host {
     /// (`native-data/<id>/` in the build's version folder); None when the game's own path is
     /// unknown. API 41.
     fn built_data(&self, mod_id: &str) -> Option<PathBuf>;
+    /// Whether the player left mod `mod_id` on in Options > Mods. A mod
+    /// turned off does nothing (check this first in each hook) until the
+    /// launcher's next build leaves it out.
+    fn on(&self, mod_id: &str) -> bool;
+    /// The key the player chose for a mod's key `name`, else `default`
+    /// (`key.keyboard.z`), as the WebAssembly mods' keys were kept
+    /// (`key.<mod id>.<name>` in `horizon-mods.txt`).
+    fn mod_key(&self, mod_id: &str, name: &str, default: &str) -> String;
+    /// A mod's setting `key` (one file per key in `native_data_dir`).
+    fn setting(&self, mod_id: &str, key: &str) -> Option<String>;
+    /// Keeps a mod's setting `key`.
+    fn set_setting(&self, mod_id: &str, key: &str, value: &str);
+    /// Sets property `key` of the block at `pos` to `value`, as a furnace's
+    /// tick sets its `lit` (`Level.setBlock` with `UPDATE_ALL`: neighbours
+    /// and clients are told); true when the block changed, false when the
+    /// block has no such property or value, or the property already has
+    /// `value` (as `Level.setBlock` for an unchanged state). The block
+    /// entity stays. API 18.
+    fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str) -> bool;
+    /// `native_set_block_property` with `Level.setBlock`'s `flags`, as a
+    /// brewing stand's tick sets its bottles with `flags::UPDATE_CLIENTS`.
+    /// Players get the write whatever the flags (`flags`); false when this
+    /// window isn't a server, and in each case `native_set_block_property`
+    /// returns false. API 33.
+    fn set_block_property_with(
+        &mut self,
+        pos: [i32; 3],
+        key: &str,
+        value: &str,
+        flags: i32,
+    ) -> bool;
+    /// The game's `config/` folder beside `options.txt`, shared by every mod
+    /// as on Fabric and NeoForge: a mod names its own files in it
+    /// (`config/<id>.json`, or a folder of its own). The same folder on the
+    /// window, its server thread and a LAN host; a dedicated server's is in
+    /// its own folder, beside `server.properties`. Made when missing. No
+    /// `self`, so a mixin helper calls `Game::native_config_dir()` and a trait
+    /// mod `Host::config_dir`. API 26.
+    fn config_dir(&self) -> Result<PathBuf, String>;
     /// Shows the panel beside container screens with these items (at most
     /// 8192), as the game's own slots in pages, with a search box; the
     /// player's clicks, searches and keys over items come back as
@@ -503,4 +703,20 @@ pub trait Host {
         item: Option<&str>,
         max: u32,
     ) -> u32;
+    /// Hides that player (a vanish) from the players below permission
+    /// `level`, or shows them again (None): from the next tick those players
+    /// lose them from the Tab list and the world (their client stops
+    /// tracking the player, as it does a spectator), and don't read their
+    /// joining or leaving; players of `level` or more still see them, and
+    /// a player made an operator meanwhile sees them again. By UUID: kept
+    /// for a player who is off (who joins hidden), until a mod sets it again
+    /// or the server stops. Works anywhere on a server, inside a player's
+    /// hook too; false on a client and in a world nobody else can join.
+    /// API @API:hide_player@.
+    fn hide_player(&mut self, uuid: u128, level: Option<u8>) -> bool;
+    /// Draw a stack and its slot decorations, except the count, at `at`,
+    /// `size` GUI pixels square. False when nothing was drawn: an unknown item
+    /// or an empty stack (air, or a count of 0, as `ItemStack.isEmpty`).
+    /// API @API:item_stack@.
+    fn item_stack(&self, batch: &mut HudBatch, stack: &ItemStack, at: [f32; 2], size: f32) -> bool;
 }

@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "arrow_loose",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_arrow_loose",
+      "neoforge": "ArrowLooseEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
+    }
+  ],
+  "rust_summary": "A player releases a bow with adjustable charge or cancellation (`native_arrow_loose`).",
+  "doc_summary": "A player releases a bow: `native_arrow_loose(stack, has_ammo, charge, canceled)` may change held-tick `charge` or cancel the shot; negative charge also prevents it. Unlike `native_living_entity_use_item_stop`, it does not skip the whole item release; `native_entity_shoot_bow` reports the spawned arrow afterward with read-only force. Fires on the Game running the bow release, including LAN guests; a remote client's own release path, crossbows, and ArrowNockEvent are not covered. Bundles need \"hooks\": @API:arrow_loose@."
+}

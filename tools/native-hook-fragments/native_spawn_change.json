@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "spawn_change",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_spawn_change",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "The world spawn point changes (`native_spawn_change`).",
+  "doc_summary": "`native_spawn_change(pos, angle)` is told after `/setworldspawn` moves the world's spawn point, with its block position and rotation. Bundles need \"hooks\": @API:native_spawn_change@."
+}

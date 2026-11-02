@@ -29,10 +29,14 @@ impl Game<'_> {
     /// count it, set health to 1, then clear and apply its effects. Returns
     /// the player's body, for entity event 35, which the caller broadcasts.
     pub(super) fn apply_totem(&mut self) -> Option<Body> {
-        let p = self.player.as_mut()?;
-        if !p.health.totem_used {
+        if !self.player.as_ref()?.health.totem_used {
             return None;
         }
+        // The mods hear a server player's totem before it is used up.
+        if let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_totem(uuid, &name);
+        }
+        let p = self.player.as_mut()?;
         p.health.totem_used = false;
         let _ = p.set_health(1.0, false);
         let body = Body {
@@ -82,10 +86,6 @@ impl Game<'_> {
         let Some(body) = self.apply_totem() else {
             return;
         };
-        if let Some(host) = &self.lan {
-            host.hub
-                .entity_event(host.host_entity, TOTEM_EVENT, body.at);
-        }
         self.totem_event(body, true);
     }
     /// Entity event 35 from a server, for this client's own player or an

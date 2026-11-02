@@ -184,6 +184,9 @@ pub struct Guest {
     /// It accepted a move since the last entity range checks
     /// (ServerChunkCache.move), which then check all of its pairs again.
     pub moved: bool,
+    /// The players a native mod hid from it (`Hub::hidden`) that its player
+    /// list no longer has.
+    pub tab_hidden: crate::fast_hash::FxHashSet<u128>,
     /// The client finished loading terrain (ServerboundPlayerLoadedPacket).
     pub loaded: bool,
     /// Since it joined or respawned, the client hasn't said it loaded the level
@@ -296,6 +299,9 @@ pub struct Guest {
     pub death_time: u32,
     /// The join packets were sent (PlayerList.placeNewPlayer ran).
     pub placed: bool,
+    /// Root command names the mods took out of this player's command tree
+    /// (`native_player_commands_sent`); their tree is sent without them.
+    pub hidden_commands: Vec<String>,
     /// `Abilities.flyingSpeed`: vanilla's 0.05, unless a server mod set
     /// another (`native_set_flying_speed`). Saved with the player.
     pub flying_speed: f32,
@@ -401,6 +407,7 @@ impl Guest {
             replay: None,
             changes: Default::default(),
             moved: false,
+            tab_hidden: Default::default(),
             loaded: false,
             loading: true,
             load_timeout: CLIENT_LOADED_TIMEOUT,
@@ -456,6 +463,7 @@ impl Guest {
             dead: false,
             death_time: 0,
             placed: false,
+            hidden_commands: Vec::new(),
             flying_speed: 0.05,
             dimension: "minecraft:overworld".into(),
             menu: None,

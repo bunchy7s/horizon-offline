@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_lectern_page_change",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_lectern_page_change",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A server player changed a lectern page (`native_player_lectern_page_change`).",
+  "doc_summary": "A server player changed a lectern page: `native_player_lectern_page_change(player, name, pos, page)` is heard after the page and redstone pulse changed. Bundles need \"hooks\": @API:native_player_lectern_page_change@."
+}

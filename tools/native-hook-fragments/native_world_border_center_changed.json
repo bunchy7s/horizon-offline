@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "world_border_center_changed",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_world_border_center_changed",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "World border center change (`native_world_border_center_changed`).",
+  "doc_summary": "`native_world_border_center_changed()` is told after `/worldborder center` moves the border center. It hears successful commands only. Bundles need \"hooks\": @API:native_world_border_center_changed@."
+}
