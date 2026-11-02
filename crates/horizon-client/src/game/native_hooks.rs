@@ -8548,7 +8548,7 @@ impl Game<'_> {
         };
         let items = self.items();
         let known: Vec<String> = Ingredient::parse(&json, items)?
-            .1
+            .order
             .into_iter()
             .filter(|item| items.get(item).is_some())
             .collect();
