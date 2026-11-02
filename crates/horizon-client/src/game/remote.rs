@@ -7369,6 +7369,23 @@ impl Game<'_> {
                 // and the click ends.
                 self.with_hand(hand, Game::swing_arm);
                 return true;
+            } else if let Some(stack) = held
+                .as_ref()
+                .filter(|s| s.item.ends_with("_spawn_egg"))
+                .filter(|_| {
+                    self.may_build()
+                        || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos))
+                })
+            {
+                // SpawnEggItem.useOn on a client level: FAIL for a mob that
+                // cannot spawn (the click ends, no swing), else SUCCESS (swing).
+                // Either way no UseItem follows, so the server does not spawn
+                // a second mob from the fluid ray (ItemStack.useOn passes in
+                // adventure mode off can_place_on, which the filter above keeps).
+                if self.spawn_egg_allowed(&stack.item) {
+                    self.with_hand(hand, Game::swing_arm);
+                }
+                return true;
             } else if let Some(stack) = held.as_ref()
                 && (self.predict_item_on_block(stack, &hit, hand)
                     || self.predict_map_on_banner(stack, &hit))
