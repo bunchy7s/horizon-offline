@@ -34,7 +34,7 @@ impl Game<'_> {
             loved = true;
         }
         if m.health < m.attrs.max_health {
-            m.health = (m.health + heal).min(m.attrs.max_health);
+            m.heal(heal);
             used = true;
         }
         let mut happy = false;

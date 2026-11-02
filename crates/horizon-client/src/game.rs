@@ -56,6 +56,7 @@ mod agent_settings;
 mod allays;
 mod armor_stands;
 mod atlas_slots;
+mod attachment_sync;
 mod banners;
 mod beacon;
 mod beds;
@@ -2012,7 +2013,10 @@ impl UiResources {
                     horizon_client::gfx::panorama::Faces::load(root, defaults)
                 })
             });
-            let atlas = startup::time("ui.atlas", || HudAtlas::build_over(root, defaults));
+            let mod_image = !horizon_client::mod_api::mods().is_empty();
+            let atlas = startup::time("ui.atlas", || {
+                HudAtlas::build_over_with_image(root, defaults, mod_image)
+            });
             let panorama = panorama
                 .join()
                 .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
@@ -4103,6 +4107,13 @@ impl Game<'_> {
                 if extra_life > 0 {
                     item.age = 6000 - extra_life.min(32766);
                     alive = true;
+                } else if self.serving.is_some() || self.options.dedicated.is_some() {
+                    self.native_item_despawn(
+                        item.id,
+                        &item.stack.item,
+                        item.stack.count as i32,
+                        [item.position.x, item.position.y, item.position.z],
+                    );
                 }
             }
             if !alive || removed[i] {
@@ -8096,6 +8107,10 @@ impl Game<'_> {
                     self.settings.file.bool("hideSplashTexts"),
                 );
             }
+            // ScreenEvent.Render.Post over the title's own screens: a mod draws
+            // over them here (a pack browser over Create New World, say), and the
+            // toasts still come after, as over any screen.
+            self.fire_title_screen_render_post(&mut batch);
             self.draw_toasts(&mut batch, false);
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
@@ -8441,6 +8456,21 @@ impl Game<'_> {
         let view = self.screen_view(batch, screen);
         self.native_screen_render_post(batch, &view);
     }
+    /// `native_screen_render_post` (`ScreenEvent.Render.Post`) for the title's
+    /// own screen (`title`, `world_select`, `world_create`, `multiplayer`…),
+    /// once a frame, after it has drawn and before the toasts. Not when a
+    /// screen of the game's own is over the title (Options draws and fires
+    /// its own), nor while a dialog, a prompt or a connect or load hides it.
+    /// Client only, read-only: what a mod draws is its own.
+    fn fire_title_screen_render_post(&self, batch: &mut HudBatch) {
+        if self.screen != Screen::Playing || self.screen_over_playing() || self.remote_loading() {
+            return;
+        }
+        let Some(view) = self.title_screen_view(batch) else {
+            return;
+        };
+        self.native_screen_render_post(batch, &view);
+    }
     /// `CreativeModeInventoryScreen.hasPermissions` (`canUseGameMasterBlocks`
     /// and the Operator Items Tab option) given to `tryRefreshInvalidatedTabs`,
     /// as the screen's constructor and `containerTick` do.
@@ -8755,9 +8785,15 @@ impl Game<'_> {
     /// (special ones never do).
     fn award_crafted(&mut self, crafts: &[(String, Vec<Option<ItemStack>>)]) {
         for (recipe, ingredients) in crafts {
-            self.trigger_recipe_crafted(recipe, ingredients);
+            // The whole id: the advancements' `recipe_crafted` criteria name
+            // `minecraft:x`, and the crafting copy names the recipe bare.
+            let recipe = horizon_client::crafting::qualified(recipe);
+            self.trigger_recipe_crafted(&recipe, ingredients);
         }
-        let recipes: Vec<String> = crafts.iter().map(|(r, _)| r.clone()).collect();
+        let recipes: Vec<String> = crafts
+            .iter()
+            .map(|(r, _)| horizon_client::crafting::qualified(r))
+            .collect();
         let index = &world_stations!(self).recipe_index;
         let (_, unlocked) = self.level.recipe_book.add_recipes(index, &recipes);
         self.recipe_unlocked(&unlocked);
@@ -13337,9 +13373,12 @@ impl Game<'_> {
     /// sound every fifth level (at most every 100 ticks).
     pub(super) fn give_orb_points(&mut self, gained: u32) {
         let at = self.eye_position();
+        let old_level = self.experience.level;
+        let gave = self.experience.give(gained as i32);
+        self.native_player_level_changed(old_level);
         // Player.giveExperienceLevels runs per level, so the first multiple of 5
         // crossed plays the sound (and starts the cooldown for the rest).
-        if let Some(level) = self.experience.give(gained as i32)
+        if let Some(level) = gave
             && self.ticks > self.last_level_up + 100
         {
             self.last_level_up = self.ticks;
@@ -16808,14 +16847,19 @@ impl Game<'_> {
         // the screen that is open then (`ScreenEvent.CharacterTyped.Pre`).
         // Options keeps its text on the key: its own key path routes a key's
         // text between its boxes and its key-bind capture, and no key that
-        // carries text closes that screen or moves its focus.
+        // carries text closes that screen or moves its focus. The title's
+        // screens keep theirs for the same reason: their key path types into
+        // the world name, the seed and a server's address.
         let mut typed: Option<String> = None;
         if let WindowEvent::KeyboardInput {
             event: key_event, ..
         } = &mut event
             && key_event.state == ElementState::Pressed
         {
-            if self.screen_hooks_open() && self.screen != Screen::Options {
+            if self.screen_hooks_open()
+                && self.screen != Screen::Options
+                && !control::title_owns_text(&self.screen, self.title.is_some())
+            {
                 typed = key_event.text.take().map(|text| text.to_string());
             }
             let canceled = match key_event.physical_key {

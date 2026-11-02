@@ -483,6 +483,12 @@ impl Host for super::Game<'_> {
     fn item_stack(&self, batch: &mut HudBatch, stack: &ItemStack, at: [f32; 2], size: f32) -> bool {
         self.native_item_stack(batch, stack, at, size)
     }
+    fn mod_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool {
+        self.native_mod_image(width, height, rgba)
+    }
+    fn instance_dir(&self) -> PathBuf {
+        self.native_instance_dir()
+    }
     fn block_sprites(&self, blocks: &[&str]) -> Vec<Option<BlockSprites>> {
         self.native_block_sprites(blocks)
     }

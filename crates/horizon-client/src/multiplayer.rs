@@ -138,6 +138,24 @@ pub enum Outcome {
     Back,
     Connect { address: String, lan: bool },
 }
+
+impl Screen {
+    /// The id native mods see for this screen (`NativeScreenView.id`, the
+    /// screen hooks): one per variant, a hook's contract, so it stays the
+    /// same from release to release. A new variant must add one.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::List { .. } => "multiplayer",
+            Self::Edit { index: None, .. } => "add_server",
+            Self::Edit { index: Some(_), .. } => "edit_server",
+            Self::Direct { .. } => "direct_connect",
+            Self::ConfirmDelete { .. } => "server_delete",
+            Self::Friend { .. } => "friends_join",
+            Self::Disconnected { .. } => "disconnected",
+        }
+    }
+}
+
 /// A button: x, y, width, label, enabled, id.
 pub type ButtonSpec = (f32, f32, f32, String, bool, u8);
 

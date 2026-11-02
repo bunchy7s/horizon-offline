@@ -979,6 +979,7 @@ impl Game<'_> {
     }
     /// `Player.giveExperienceLevels`.
     pub(super) fn give_levels(&mut self, levels: i32) {
+        let old_level = self.experience.level;
         let xp = &mut self.experience;
         xp.level = xp.level.saturating_add(levels);
         if xp.level < 0 {
@@ -986,6 +987,7 @@ impl Game<'_> {
             xp.progress = 0.0;
             xp.total = 0;
         }
+        self.native_player_level_changed(old_level);
     }
     /// Whether the result slot may be taken (`mayPickup`).
     fn may_take_result(&self) -> bool {
