@@ -478,12 +478,14 @@ fn rotate_toward_max(from: f32, to: f32, max: f32) -> f32 {
 #[cfg(test)]
 mod goat_head_tests {
     use super::*;
-    use glam::Vec3;
+    use horizon_core::geometry::Vec3;
     use std::sync::Arc;
 
     fn mob(species: Species) -> Mob {
         let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
         kind.species = species;
+        // Mob.getMaxHeadYRot: 15 for a goat (Goat.getMaxHeadYRot), 75 otherwise.
+        kind.max_head_y_rot = if species == Species::Goat { 15.0 } else { 75.0 };
         Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0)
     }
 
