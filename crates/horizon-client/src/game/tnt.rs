@@ -25,6 +25,9 @@ pub(super) struct PrimedTnt {
     pub guest: Option<u32>,
     /// `Entity.noGravity` (`NoGravity` in its save).
     pub no_gravity: bool,
+    /// `PrimedTnt.explosionPower`: 4 by default, saved as `explosion_power`
+    /// and clamped to 0..128 when read back.
+    pub power: f32,
 }
 impl PrimedTnt {
     pub(super) const SIZE: f64 = 0.98;
@@ -211,6 +214,8 @@ impl Game<'_> {
             on_ground: false,
             owner,
             guest,
+            // PrimedTnt's constructor: 4 when nothing sets it.
+            power: 4.0,
         });
     }
     /// `PrimedTnt.tick` for every primed TNT, in order; an expired fuse
@@ -244,7 +249,7 @@ impl Game<'_> {
                     t.position.z,
                 ];
                 let bounds = t.bounds();
-                let (owner, guest) = (t.owner, t.guest);
+                let (owner, guest, power) = (t.owner, t.guest, t.power);
                 let in_water = self.bounds_in_water(bounds);
                 self.tnts.remove(i);
                 count -= 1;
@@ -262,7 +267,7 @@ impl Game<'_> {
                     Some(Who::Mob(_)) | None => None,
                 };
                 let result = self.with_hive_emptying_blast(|g| {
-                    g.server_explode(center, 4.0, interaction, false)
+                    g.server_explode(center, power, interaction, false)
                 });
                 self.combat.blast_owner = None;
                 self.combat.blast_guest = None;
