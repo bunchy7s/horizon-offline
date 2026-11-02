@@ -138,6 +138,8 @@ mod tests {
                 }
                 _ => {}
             },
+            loot_function: |_, _, _, _| {},
+            loot_condition: |_, _, _, _| {},
         });
         let root = std::env::temp_dir().join(format!("horizon-mod-sizes-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
