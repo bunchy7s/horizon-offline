@@ -224,10 +224,10 @@ impl Game<'_> {
         let lifetime = 10 * (1 + i32::from(flight))
             + r.next_int_bound(6).unwrap_or(0)
             + r.next_int_bound(7).unwrap_or(0);
-        // An id from the entity counter at once, so a command can name it.
-        self.next_entity += 1;
+        // Entity.<init>: the id comes from the one counter at construction.
+        let id = self.take_entity_id();
         Rocket {
-            id: self.next_entity,
+            id,
             position: at,
             previous: at,
             velocity,

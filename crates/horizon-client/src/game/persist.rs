@@ -495,16 +495,15 @@ impl Game<'_> {
                     "minecraft:trident" => {
                         if let Some(n) = entity_nbt::trident_from_nbt(&tag) {
                             let mut t = super::trident::ThrownTrident::from_nbt(n);
+                            t.id = self.take_entity_id();
                             // One that came through a portal keeps its cooldown.
-                            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
                             self.restore_portal_cooldown(t.id, &tag);
                             self.tridents.push(t);
                         }
                     }
                     "minecraft:firework_rocket" => {
                         if let Some(r) = entity_nbt::firework_rocket_from_nbt(&tag, player_uuid) {
-                            self.next_entity += 1;
-                            let id = self.next_entity;
+                            let id = self.take_entity_id();
                             let mut rocket = super::fireworks::Rocket::from_nbt(r);
                             rocket.id = id;
                             // One that came through a portal keeps its cooldown.
