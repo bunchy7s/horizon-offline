@@ -146,10 +146,22 @@ impl Game<'_> {
             }
             ClickEvent::OpenUrl(url) => self.click_url(url),
             // closeContainerOnServer, then clickCommandAction with no screen
-            // after the command: the book closes and the command runs.
+            // after the command: the book closes and the command runs. A
+            // lectern's screen goes with its menu; a book is still the screen
+            // a confirmation returns to.
             ClickEvent::RunCommand(command) => {
+                let book = if lectern.is_none() {
+                    self.book.take()
+                } else {
+                    None
+                };
                 self.close_book();
                 self.click_command(&command);
+                if let Some(book) = book {
+                    self.command_prompt_returns_to(super::remote_chat::Behind::Book(Box::new(
+                        book,
+                    )));
+                }
             }
             // Screen.defaultHandleClickEvent: copied, the book stays open.
             ClickEvent::CopyToClipboard(value) => {

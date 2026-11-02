@@ -20,6 +20,7 @@ use crate::i18n::{tr, trf};
 use crate::instances::{self, Instance};
 use crate::rust_toolchain::{self, Toolchain};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -474,6 +475,81 @@ pub struct Bundle {
     pub api: Option<String>,
     /// True when the manifest has content for horizon-mixins.
     pub mixins_content: bool,
+    /// Its `[[injection]]` entries, for the build's warnings. Read leniently:
+    /// an entry the launcher cannot make sense of is left out, horizon-mixins
+    /// refuses it when it applies.
+    pub injections: Vec<Injection>,
+}
+
+/// One `[[injection]]` of a bundle's manifest, read for the build's
+/// warnings: where it sits and whether it can cancel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Injection {
+    pub id: String,
+    /// Where it injects: a native hook point by name, or a raw function path.
+    pub site: InjectionSite,
+    /// Its `kind` (`HEAD`, `RETURN`, …) as written.
+    pub kind: Option<String>,
+    /// Its `selector` and `ordinal`, which with the kind tell two interior
+    /// sites of one function apart.
+    pub selector: Option<String>,
+    pub ordinal: Option<i64>,
+    /// The `[mod]` `priority` unless the entry overrides it. horizon-mixins
+    /// defaults it to 0 (`#[serde(default)] priority: i32`).
+    pub priority: i64,
+    /// `cancellable = true` (a `HEAD`, `BEFORE_CALL`, `AFTER_CALL` or
+    /// `AFTER_ASSIGN` may carry it): a `Break` skips the later injections
+    /// at the site.
+    pub cancellable: bool,
+}
+
+/// An injection's site: `hook = "frame"` names a native hook point from the
+/// catalog, `target = "game::tick"` a raw function path.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum InjectionSite {
+    Hook(String),
+    Target(String),
+}
+
+impl InjectionSite {
+    fn as_text(&self) -> String {
+        match self {
+            Self::Hook(name) => format!("hook `{name}`"),
+            Self::Target(path) => format!("`{path}`"),
+        }
+    }
+}
+
+impl Injection {
+    /// The place it sits at, as the manifest tells it: the function, the
+    /// kind, and the selector and ordinal of interior hooks. horizon-mixins
+    /// resolves the same place against the source (`plan.rs` sorts by file,
+    /// node, call site, constant site, then priority descending, mod id
+    /// ascending, injection id ascending): same manifest place, and its
+    /// tie-break tail is the run order.
+    fn place(&self) -> (&InjectionSite, Option<&str>, Option<&str>, Option<i64>) {
+        (
+            &self.site,
+            self.kind.as_deref(),
+            self.selector.as_deref(),
+            self.ordinal,
+        )
+    }
+    /// The place as a message names it.
+    fn place_as_text(&self) -> String {
+        let mut text = self.site.as_text();
+        if let Some(kind) = &self.kind {
+            text.push(' ');
+            text.push_str(kind);
+        }
+        if let Some(selector) = &self.selector {
+            text.push_str(&format!(" selector `{selector}`"));
+        }
+        if let Some(ordinal) = self.ordinal {
+            text.push_str(&format!(" ordinal {ordinal}"));
+        }
+        text
+    }
 }
 
 /// The bundles in `folder`: the folder itself when it is one (a `horizon-mixin.toml`, or an
@@ -549,6 +625,43 @@ fn bundle(dir: &Path, mixins: Option<String>) -> Result<Bundle, String> {
     let need = |name: &str| {
         field("mod", name).ok_or_else(|| format!("{} has no [mod] {name}.", path.display()))
     };
+    // The `[mod]` `priority` the injections fall back to. horizon-mixins
+    // defaults it to 0 (`#[serde(default)] priority: i32`), not to a README
+    // example's 100.
+    let mod_priority = value
+        .get("mod")
+        .and_then(|m| m.get("priority"))
+        .and_then(|v| v.as_integer())
+        .unwrap_or(0);
+    // Read leniently: an entry without an id and a site (`hook` or `target`)
+    // is left out — horizon-mixins refuses it when it applies.
+    let injections = value
+        .get("injection")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let text = |name: &str| entry.get(name).and_then(|v| v.as_str()).map(str::to_owned);
+            let id = text("id")?;
+            let site = match (text("hook"), text("target")) {
+                (Some(hook), _) => InjectionSite::Hook(hook),
+                (None, Some(target)) => InjectionSite::Target(target),
+                (None, None) => return None,
+            };
+            Some(Injection {
+                id,
+                site,
+                kind: text("kind"),
+                selector: text("selector"),
+                ordinal: entry.get("ordinal").and_then(|v| v.as_integer()),
+                priority: entry
+                    .get("priority")
+                    .and_then(|v| v.as_integer())
+                    .unwrap_or(mod_priority),
+                cancellable: entry.get("cancellable").and_then(|v| v.as_bool()) == Some(true),
+            })
+        })
+        .collect();
     let api = value
         .get("api")
         .map(|table| api::folder(dir, table))
@@ -569,6 +682,7 @@ fn bundle(dir: &Path, mixins: Option<String>) -> Result<Bundle, String> {
         horizon: field("compatibility", "horizon_revision"),
         mixins,
         hooks: None,
+        injections,
         api,
         mixins_content,
     })
@@ -576,6 +690,122 @@ fn bundle(dir: &Path, mixins: Option<String>) -> Result<Bundle, String> {
 
 fn is_revision(text: &str) -> bool {
     text.len() == 40 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// The build's warnings about the mods' injections (#6490): two mods on one
+/// place, mods wrapping one function at its head and its return, and a
+/// cancelling injection on a native hook point. Neither stops the build —
+/// they say what the player and the author could not otherwise see. The
+/// places are the manifest's: whether two selectors pick the same call, or
+/// a raw `target` names a hook point's function, only horizon-mixins
+/// resolves, so the warnings stay to what the manifest says for sure.
+fn warn_conflicts(mods: &[Bundle]) -> Vec<String> {
+    let mut out = Vec::new();
+    // One place (the function, the kind, the selector, the ordinal), the
+    // injections of at least two mods on it, ordered as horizon-mixins runs
+    // same-place injections: priority descending, mod id ascending,
+    // injection id ascending — the tail of its own sort, which the place
+    // prefixes already fixed.
+    let mut places: BTreeMap<_, Vec<(&str, &Injection)>> = BTreeMap::new();
+    for b in mods {
+        for i in &b.injections {
+            places.entry(i.place()).or_default().push((&b.id, i));
+        }
+    }
+    for (_, list) in places {
+        let mut list = list;
+        list.sort_by_key(|(mod_id, i)| {
+            (
+                std::cmp::Reverse(i.priority),
+                (*mod_id).to_owned(),
+                i.id.clone(),
+            )
+        });
+        let mut names: Vec<&str> = Vec::new();
+        for (mod_id, _) in &list {
+            if !names.contains(mod_id) {
+                names.push(mod_id);
+            }
+        }
+        if names.len() < 2 {
+            continue;
+        }
+        let first = list[0].1;
+        let both = if names.len() == 2 { "both" } else { "all" };
+        out.push(format!(
+            "mods {} {both} inject at {}; {} runs first (priority descending, mod id ascending).",
+            names.join(", "),
+            first.place_as_text(),
+            names[0]
+        ));
+    }
+    // A function's head and its return: two mods wrapping the whole
+    // function, which run in that order whatever their priorities. Said
+    // without a "runs first".
+    let mut functions: BTreeMap<&InjectionSite, Vec<(&str, &Injection)>> = BTreeMap::new();
+    for b in mods {
+        for i in &b.injections {
+            if i.kind.as_deref() == Some("HEAD") || i.kind.as_deref() == Some("RETURN") {
+                functions.entry(&i.site).or_default().push((&b.id, i));
+            }
+        }
+    }
+    for (site, list) in functions {
+        let kinds: std::collections::BTreeSet<&str> =
+            list.iter().filter_map(|(_, i)| i.kind.as_deref()).collect();
+        let mut names: Vec<&str> = Vec::new();
+        for (mod_id, _) in &list {
+            if !names.contains(mod_id) {
+                names.push(mod_id);
+            }
+        }
+        // Both sides, and more than one mod on the function: a single mod
+        // wrapping its own function at both ends is no one's conflict.
+        if kinds.len() < 2 || names.len() < 2 {
+            continue;
+        }
+        let sides: Vec<String> = list
+            .iter()
+            .map(|(mod_id, i)| format!("{mod_id} ({})", i.kind.as_deref().unwrap_or("")))
+            .collect();
+        out.push(format!(
+            "mods {} inject into {}: HEAD runs on entry, RETURN on return, whatever their priorities.",
+            sides.join(", "),
+            site.as_text()
+        ));
+    }
+    // A cancelling `HEAD` on a hook point: a `Break` skips the later
+    // injections at the place and the function's body. A raw `target` is
+    // only known to be a hook point through the catalog, which the launcher
+    // does not read; a `hook` name is one by definition. Only `HEAD` is
+    // said: the interior kinds' cancellation skips less than the body.
+    for b in mods {
+        for i in &b.injections {
+            if i.cancellable
+                && i.kind.as_deref() == Some("HEAD")
+                && matches!(i.site, InjectionSite::Hook(_))
+            {
+                out.push(format!(
+                    "{}'s `{}` can cancel at {}: a Break skips the later injections and the function's body.",
+                    b.id,
+                    i.id,
+                    i.place_as_text()
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// Appends `text` to the build log, the way a compiler warning reads.
+fn log_warning(text: &str) {
+    if let Ok(mut log) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path())
+    {
+        let _ = writeln!(log, "warning: {text}");
+    }
 }
 
 /// The one value the bundles pin for `which` (each mod's `get`), else `fallback`; mods that pin
@@ -879,7 +1109,7 @@ fn about_in(dir: &Path) -> Option<About> {
 }
 
 /// The newest installed release or Nightly in `installed` (newest first).
-fn newest_installed(installed: &[String]) -> Option<&String> {
+pub(crate) fn newest_installed(installed: &[String]) -> Option<&String> {
     installed
         .iter()
         .find(|t| backend::is_game_tag(t) || t.starts_with("nightly-"))
@@ -888,8 +1118,10 @@ fn newest_installed(installed: &[String]) -> Option<&String> {
 /// The installed version a build for an instance that plays `current` starts from: `current`
 /// itself, so a rebuild stays on the Horizon it plays (a native build's own revision, [`about`]).
 /// With `update`, or when it plays nothing installed, the newest installed release or Nightly.
+/// An imported build is no commit to build on: its game files' version is.
 pub fn base_for(current: Option<&str>, installed: &[String], update: bool) -> Option<String> {
-    match current {
+    let imported = current.and_then(crate::build_import::about).map(|a| a.base);
+    match imported.as_deref().or(current) {
         Some(v) if !update && installed.iter().any(|t| t == v) => Some(v.to_owned()),
         _ => newest_installed(installed).cloned(),
     }
@@ -1520,6 +1752,11 @@ fn pipeline(
     let incoming = root().join("mods.incoming");
     let _ = fs::remove_dir_all(&incoming);
     let found = bundles(folder)?;
+    // #6490: said before anything runs, so a build that fails later still
+    // shows them.
+    for warning in warn_conflicts(&found) {
+        log_warning(&warning);
+    }
     // A native build starts from the release or Nightly it was made from, on its own revision.
     let built_on = about(base);
     let origin = built_on.as_ref().map_or(base, |a| a.base.as_str());
@@ -1978,21 +2215,7 @@ fn install(
     let partial = target.directory(&format!(".{version}.partial"));
     let _ = fs::remove_dir_all(&partial);
     fs::create_dir_all(&partial).map_err(|e| e.to_string())?;
-    for entry in fs::read_dir(&from).map_err(|e| e.to_string())?.flatten() {
-        let name = entry.file_name();
-        if !carried_over(&name, target) {
-            continue;
-        }
-        let to = partial.join(&name);
-        let copied = if entry.path().is_dir() {
-            backend::copy_dir(&entry.path(), &to)
-        } else {
-            // A clone is a new file: horizon-ctl and horizon-server keep their permissions.
-            horizon_prepare::clone_or_copy(&entry.path(), &to)
-                .and_then(|()| fs::set_permissions(&to, entry.metadata()?.permissions()))
-        };
-        copied.map_err(|e| format!("Could not copy {}: {e}", entry.path().display()))?;
-    }
+    copy_base(&from, &partial, target)?;
     let installed = partial.join(target.binary());
     fs::copy(binary, &installed).map_err(|e| format!("The built game: {e}"))?;
     fs::write(partial.join("native-mods.json"), about.to_string()).map_err(|e| e.to_string())?;
@@ -2004,6 +2227,27 @@ fn install(
         return Err(e);
     }
     fs::write(dir.join(".installed"), "").map_err(|e| e.to_string())
+}
+
+/// Copies version folder `from` into `to` but for what a new build of `target` makes its own
+/// ([`carried_over`]), cloned where the disk can. Also an imported build's start (`build_import`).
+pub(crate) fn copy_base(from: &Path, to: &Path, target: Target) -> Result<(), String> {
+    for entry in fs::read_dir(from).map_err(|e| e.to_string())?.flatten() {
+        let name = entry.file_name();
+        if !carried_over(&name, target) {
+            continue;
+        }
+        let to = to.join(&name);
+        let copied = if entry.path().is_dir() {
+            backend::copy_dir(&entry.path(), &to)
+        } else {
+            // A clone is a new file: horizon-ctl and horizon-server keep their permissions.
+            horizon_prepare::clone_or_copy(&entry.path(), &to)
+                .and_then(|()| fs::set_permissions(&to, entry.metadata()?.permissions()))
+        };
+        copied.map_err(|e| format!("Could not copy {}: {e}", entry.path().display()))?;
+    }
+    Ok(())
 }
 
 /// Whether a file of the version a build starts from goes into the new build. The game (the
@@ -2146,6 +2390,255 @@ mod tests {
                 "/out"
             ]
         );
+    }
+
+    /// A bundle whose manifest only needs to parse, with the injections of
+    /// `toml`'s `[[injection]]` list read as the build's warnings read them.
+    fn bundle_of(id: &str, toml: &str) -> Bundle {
+        // Each call its own folder: the tests run in parallel.
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let at = dir(&format!("warn-{id}-{n}"));
+        write_bundle(&at, id, "fn hook() {}");
+        // A fragment may carry its own `[mod]` (a priority, say).
+        let manifest = if toml.starts_with("[mod]") {
+            toml.to_owned()
+        } else {
+            format!("[mod]\nid = \"{id}\"\nversion = \"0.1.0\"\n{toml}")
+        };
+        fs::write(at.join(MANIFEST), manifest).unwrap();
+        bundles(&at).unwrap().remove(0)
+    }
+
+    #[test]
+    fn two_mods_on_one_hook_warn_in_run_order() {
+        let mods = [
+            bundle_of(
+                "alpha",
+                "[[injection]]\nid = \"a\"\nhook = \"frame\"\nkind = \"HEAD\"\n",
+            ),
+            bundle_of(
+                "beta",
+                "[mod]\nid = \"beta\"\nversion = \"0.1.0\"\npriority = 200\n\
+                 [[injection]]\nid = \"b\"\nhook = \"frame\"\nkind = \"HEAD\"\n",
+            ),
+        ];
+        assert_eq!(
+            warn_conflicts(&mods),
+            ["mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending)."]
+        );
+    }
+
+    /// horizon-mixins defaults a mod's priority to 0, not to the README
+    /// example's 100: a mod without one runs after `priority = 50`.
+    #[test]
+    fn the_default_priority_is_zero() {
+        let mods = [
+            bundle_of(
+                "alpha",
+                "[[injection]]\nid = \"a\"\nhook = \"frame\"\nkind = \"HEAD\"\n",
+            ),
+            bundle_of(
+                "beta",
+                "[[injection]]\nid = \"b\"\nhook = \"frame\"\nkind = \"HEAD\"\npriority = 50\n",
+            ),
+        ];
+        assert_eq!(
+            warn_conflicts(&mods),
+            ["mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending)."]
+        );
+    }
+
+    #[test]
+    fn a_priority_tie_orders_by_mod_id() {
+        let mods = [
+            bundle_of(
+                "beta",
+                "[[injection]]\nid = \"b\"\nhook = \"tick\"\nkind = \"HEAD\"\n",
+            ),
+            bundle_of(
+                "alpha",
+                "[[injection]]\nid = \"a\"\nhook = \"tick\"\nkind = \"HEAD\"\n",
+            ),
+        ];
+        assert_eq!(
+            warn_conflicts(&mods),
+            ["mods alpha, beta both inject at hook `tick` HEAD; alpha runs first (priority descending, mod id ascending)."]
+        );
+    }
+
+    #[test]
+    fn an_injections_priority_overrides_its_mods() {
+        let mods = [
+            bundle_of(
+                "alpha",
+                "[[injection]]\nid = \"a\"\nhook = \"tick\"\nkind = \"HEAD\"\npriority = 50\n",
+            ),
+            bundle_of(
+                "beta",
+                "[[injection]]\nid = \"b\"\nhook = \"tick\"\nkind = \"HEAD\"\n",
+            ),
+        ];
+        // beta's is 0 (the default), alpha's 50: alpha first.
+        assert_eq!(
+            warn_conflicts(&mods),
+            ["mods alpha, beta both inject at hook `tick` HEAD; alpha runs first (priority descending, mod id ascending)."]
+        );
+    }
+
+    #[test]
+    fn two_mods_on_one_raw_target_warn_too() {
+        let mods = [
+            bundle_of(
+                "alpha",
+                "[[injection]]\nid = \"a\"\ntarget = \"game::calls::compute\"\nkind = \"HEAD\"\n",
+            ),
+            bundle_of(
+                "beta",
+                "[[injection]]\nid = \"b\"\ntarget = \"game::calls::compute\"\nkind = \"HEAD\"\n",
+            ),
+        ];
+        assert_eq!(
+            warn_conflicts(&mods),
+            ["mods alpha, beta both inject at `game::calls::compute` HEAD; alpha runs first (priority descending, mod id ascending)."]
+        );
+    }
+
+    /// HEAD and RETURN wrap the whole function: HEAD runs on entry, RETURN
+    /// on return, whatever the priorities, so no "runs first".
+    #[test]
+    fn head_and_return_on_one_function_warn_without_a_runs_first() {
+        let mods = [
+            bundle_of(
+                "alpha",
+                "[[injection]]\nid = \"a\"\nhook = \"tick\"\nkind = \"HEAD\"\n",
+            ),
+            bundle_of(
+                "beta",
+                "[[injection]]\nid = \"b\"\nhook = \"tick\"\nkind = \"RETURN\"\n",
+            ),
+        ];
+        assert_eq!(
+            warn_conflicts(&mods),
+            ["mods alpha (HEAD), beta (RETURN) inject into hook `tick`: HEAD runs on entry, RETURN on return, whatever their priorities."]
+        );
+    }
+
+    /// Two interior injections of one function with different selectors are
+    /// different places: horizon-mixins resolves the selector against the
+    /// source, the launcher does not guess it.
+    #[test]
+    fn different_selectors_are_different_places() {
+        let mods = [
+            bundle_of(
+                "alpha",
+                "[[injection]]\nid = \"a\"\nhook = \"tick\"\nkind = \"BEFORE_CALL\"\n\
+                 selector = \"x\"\n",
+            ),
+            bundle_of(
+                "beta",
+                "[[injection]]\nid = \"b\"\nhook = \"tick\"\nkind = \"BEFORE_CALL\"\n\
+                 selector = \"y\"\n",
+            ),
+        ];
+        assert!(warn_conflicts(&mods).is_empty());
+    }
+
+    #[test]
+    fn same_selector_and_ordinal_is_one_place() {
+        let mods = [
+            bundle_of(
+                "alpha",
+                "[[injection]]\nid = \"a\"\nhook = \"tick\"\nkind = \"BEFORE_CALL\"\n\
+                 selector = \"x\"\nordinal = 1\n",
+            ),
+            bundle_of(
+                "beta",
+                "[[injection]]\nid = \"b\"\nhook = \"tick\"\nkind = \"BEFORE_CALL\"\n\
+                 selector = \"x\"\nordinal = 1\n",
+            ),
+        ];
+        assert_eq!(
+            warn_conflicts(&mods),
+            ["mods alpha, beta both inject at hook `tick` BEFORE_CALL selector `x` ordinal 1; alpha runs first (priority descending, mod id ascending)."]
+        );
+    }
+
+    #[test]
+    fn different_sites_stay_quiet() {
+        let mods = [
+            bundle_of(
+                "alpha",
+                "[[injection]]\nid = \"a\"\nhook = \"frame\"\nkind = \"HEAD\"\n",
+            ),
+            bundle_of(
+                "beta",
+                "[[injection]]\nid = \"b\"\nhook = \"tick\"\nkind = \"HEAD\"\n",
+            ),
+        ];
+        assert!(warn_conflicts(&mods).is_empty());
+    }
+
+    #[test]
+    fn a_cancelling_head_on_a_hook_point_warns() {
+        let mods = [bundle_of(
+            "alpha",
+            "[[injection]]\nid = \"stop\"\nhook = \"frame\"\nkind = \"HEAD\"\ncancellable = true\n",
+        )];
+        assert_eq!(
+            warn_conflicts(&mods),
+            ["alpha's `stop` can cancel at hook `frame` HEAD: a Break skips the later injections and the function's body."]
+        );
+    }
+
+    /// Cancellation is allowed on the interior kinds too, but what a Break
+    /// skips there is less than the body: only `HEAD` is said.
+    #[test]
+    fn a_cancelling_interior_kind_stays_quiet() {
+        let mods = [bundle_of(
+            "alpha",
+            "[[injection]]\nid = \"stop\"\nhook = \"tick\"\nkind = \"BEFORE_CALL\"\n\
+             cancellable = true\n",
+        )];
+        assert!(warn_conflicts(&mods).is_empty());
+    }
+
+    #[test]
+    fn a_cancelling_injection_on_a_raw_target_stays_quiet() {
+        // Whether a raw target fires a hook point only the catalog knows,
+        // which the launcher does not read.
+        let mods = [bundle_of(
+            "alpha",
+            "[[injection]]\nid = \"stop\"\ntarget = \"game::tick\"\nkind = \"HEAD\"\n\
+             cancellable = true\n",
+        )];
+        assert!(warn_conflicts(&mods).is_empty());
+    }
+
+    #[test]
+    fn one_mod_with_two_injections_on_one_site_stays_quiet() {
+        let mods = [bundle_of(
+            "alpha",
+            "[[injection]]\nid = \"first\"\nhook = \"frame\"\nkind = \"HEAD\"\n\
+             [[injection]]\nid = \"second\"\nhook = \"frame\"\nkind = \"HEAD\"\n",
+        )];
+        assert!(warn_conflicts(&mods).is_empty());
+    }
+
+    #[test]
+    fn a_manifest_without_injections_builds_an_empty_list() {
+        let mods = [bundle_of("alpha", "")];
+        assert!(mods[0].injections.is_empty());
+        assert!(warn_conflicts(&mods).is_empty());
+    }
+
+    #[test]
+    fn an_entry_without_a_site_is_left_out() {
+        let mods = [bundle_of(
+            "alpha",
+            "[[injection]]\nid = \"broken\"\nkind = \"HEAD\"\n",
+        )];
+        assert!(mods[0].injections.is_empty());
     }
 
     #[test]
@@ -2333,6 +2826,7 @@ mod tests {
             horizon: horizon.map(str::to_owned),
             mixins: None,
             hooks: None,
+            injections: Vec::new(),
             api: None,
             mixins_content: false,
         };
@@ -2367,6 +2861,7 @@ mod tests {
             horizon: horizon.map(str::to_owned),
             mixins: mixins.map(str::to_owned),
             hooks: None,
+            injections: Vec::new(),
             api: None,
             mixins_content: false,
         };
@@ -2472,6 +2967,7 @@ mod tests {
             horizon: Some(horizon.into()),
             mixins: None,
             hooks,
+            injections: Vec::new(),
             api: None,
             mixins_content: false,
         };
@@ -2530,6 +3026,7 @@ mod tests {
             horizon: Some(horizon.into()),
             mixins: None,
             hooks,
+            injections: Vec::new(),
             api: None,
             mixins_content: false,
         };

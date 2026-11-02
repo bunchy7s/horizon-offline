@@ -8,6 +8,8 @@ description = "Host a Horizon server: server.toml, the CLI and the supervisor th
 
 [dependencies]
 horizon-server-files = { path = "../horizon-server-files" }
+# `horizon-server mcp`: the Model Context Protocol, shared with horizon-ctl and the launcher.
+horizon-mcp = { path = "../horizon-mcp" }
 # server.toml's [anticheat], which the game reads: checked here before every start.
 horizon-anticheat = { path = "../horizon-anticheat" }
 # server.toml's [chat_filter], which the game reads too: checked here before every start.

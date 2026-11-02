@@ -43,20 +43,74 @@ pub struct SplitUi {
     pub main: String,
     pub names: Vec<String>,
     pub apply: Option<Draft>,
+    /// Identify pressed: every view says which window it is in.
+    pub identify: bool,
+    /// Names: the names in the views' corners are shown (the game sets it), and pressed.
+    pub names_shown: bool,
+    pub toggle_names: bool,
     edit: Option<Draft>,
     selected: Option<usize>,
+    /// A tile held by the mouse: whose, and where the pointer is (`None` until it moves).
+    drag: Option<(usize, Option<(f32, f32)>)>,
+    /// The screen's size at the last press: where a drag's release lands.
+    size: (f32, f32),
 }
 
-#[derive(Clone)]
+/// Where a dragged player goes: a place (`Spot`), or a place among a window's players.
+#[derive(Clone, Debug, PartialEq)]
+enum Drop {
+    At(Spot),
+    /// Place `k` among the players of a window (before its `k`th; past the last: after them).
+    Place(u8, usize),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 enum Target {
     Player(usize),
     Move(Spot),
+    Two,
+    Three,
+    Identify,
+    /// The players' names in their views' corners, on or off.
+    Names,
     Revert,
     Apply,
     Done,
     Switch,
 }
 type Button = ([f32; 4], String, Target, bool);
+
+/// How a layout's square button is drawn.
+enum Glyph {
+    Auto,
+    /// The panes in a 14 x 10 window, 1 px apart.
+    Panes(&'static [[f32; 4]]),
+}
+
+/// The glyph for a layout: 2 sharing (`splitscreen_two`: Auto, side by side, top and bottom) or
+/// 3 (`splitscreen_three`: one wide on top, one tall on the left, side by side).
+fn layout_glyph(three: bool, layout: u8) -> Glyph {
+    match (three, layout) {
+        (false, 0) => Glyph::Auto,
+        (false, 1) => Glyph::Panes(&[[0.0, 0.0, 6.5, 10.0], [7.5, 0.0, 6.5, 10.0]]),
+        (false, _) => Glyph::Panes(&[[0.0, 0.0, 14.0, 4.5], [0.0, 5.5, 14.0, 4.5]]),
+        (true, 0) => Glyph::Panes(&[
+            [0.0, 0.0, 14.0, 4.5],
+            [0.0, 5.5, 6.5, 4.5],
+            [7.5, 5.5, 6.5, 4.5],
+        ]),
+        (true, 1) => Glyph::Panes(&[
+            [0.0, 0.0, 6.5, 10.0],
+            [7.5, 0.0, 6.5, 4.5],
+            [7.5, 5.5, 6.5, 4.5],
+        ]),
+        (true, _) => Glyph::Panes(&[
+            [0.0, 0.0, 4.0, 10.0],
+            [5.0, 0.0, 4.0, 10.0],
+            [10.0, 0.0, 4.0, 10.0],
+        ]),
+    }
+}
 pub enum Click {
     Nothing,
     Pressed,
@@ -69,6 +123,7 @@ impl SplitUi {
         self.edit = None;
         self.selected = None;
         self.apply = None;
+        self.drag = None;
     }
     fn draft(&self) -> Option<&Draft> {
         self.edit.as_ref().or(self.live.as_ref())
@@ -77,9 +132,12 @@ impl SplitUi {
         if self.idle {
             return Default::default();
         }
-        self.draft().map_or_else(Default::default, |draft| {
-            split_map::project(draft, &self.monitors, &self.main, w, h)
-        })
+        self.draft()
+            .map_or_else(Default::default, |draft| self.map_of(draft, w, h))
+    }
+    /// `draft` on the map (the one shown, or one a drag would make).
+    fn map_of(&self, draft: &Draft, w: f32, h: f32) -> split_map::Map {
+        split_map::project(draft, &self.monitors, &self.main, w, h)
     }
     fn editing(&mut self) -> Option<&mut Draft> {
         if self.edit.is_none() {
@@ -123,6 +181,66 @@ impl SplitUi {
         spots
     }
 
+    /// Where player `i` can be dropped: each place among the players of each window ("Window 1
+    /// (2 of 3)"), a window of its own, a new window, a monitor no window fills. Never into
+    /// another player's place: it joins them.
+    fn stops(&self, i: usize) -> Vec<(String, Drop)> {
+        let Some(draft) = self.draft() else {
+            return Vec::new();
+        };
+        let mut stops = Vec::new();
+        for w in &draft.windows {
+            let others = draft.sharing(i, w.number).len();
+            if others == 0 {
+                stops.push((tr("window", &[&w.number]), Drop::At(Spot::Window(w.number))));
+            }
+            for k in (0..=others).filter(|_| others > 0) {
+                let label = tr("window_place", &[&w.number, &(k + 1), &(others + 1)]);
+                stops.push((label, Drop::Place(w.number, k)));
+            }
+        }
+        stops.push((tr("new_window", &[]), Drop::At(Spot::New)));
+        for m in &self.monitors {
+            let filled = draft
+                .windows
+                .iter()
+                .any(|w| w.placement == Placement::Fill(m.name.clone()));
+            if m.name != self.main && !filled {
+                let label = tr("fill_monitor", &[&self.monitor_name(&m.name)]);
+                stops.push((label, Drop::At(Spot::Fill(m.name.clone()))));
+            }
+        }
+        stops
+    }
+
+    /// Where a tile dropped at `(x, y)` goes: the window on top there, else the monitor's (a new
+    /// window on Window 1's monitor, the one filling another or a new one filling it).
+    fn drop_spot(&self, (x, y): (f32, f32), w: f32, h: f32) -> Option<Spot> {
+        let draft = self.draft()?;
+        let (monitors, windows, _) = self.map(w, h);
+        let inside = |[rx, ry, rw, rh]: [f32; 4]| x >= rx && x < rx + rw && y >= ry && y < ry + rh;
+        if let Some((n, _)) = windows.iter().rev().find(|(_, r)| inside(*r)) {
+            return Some(Spot::Window(*n));
+        }
+        let m = &self.monitors[monitors.iter().position(|r| inside(*r))?];
+        if m.name == self.main {
+            return Some(Spot::New);
+        }
+        Some(
+            match draft
+                .windows
+                .iter()
+                .find(|w| w.placement == Placement::Fill(m.name.clone()))
+            {
+                Some(win) => Spot::Window(win.number),
+                None => Spot::Fill(m.name.clone()),
+            },
+        )
+    }
+
+    /// Every button: the players' tiles (window by window, as they stack), the move row, the
+    /// switch, Names and the layouts, and Identify, Revert, Apply and Done. Splitscreen off or
+    /// idle: the switch and Done.
     fn buttons(&self, w: f32, h: f32) -> Vec<Button> {
         let row = |out: &mut Vec<Button>, y: f32, items: Vec<(f32, String, Target, bool)>| {
             let total: f32 = items.iter().map(|i| i.0 + 4.0).sum::<f32>() - 4.0;
@@ -197,16 +315,68 @@ impl SplitUi {
                 .collect();
             row(&mut out, h - BOTTOM + 4.0, items);
         }
-        out.push(switch);
+        // Names, top left: each player's name in the corner of their view.
+        let names = (
+            [6.0, 6.0, 80.0, 20.0],
+            tr(
+                "switch",
+                &[
+                    &tr("names", &[]),
+                    &tr(if self.names_shown { "on" } else { "off" }, &[]),
+                ],
+            ),
+            Target::Names,
+            true,
+        );
+        out.extend([switch, names]);
+        // A square for how 2 (or 3) players share a window, while a window has that many (drawn
+        // as the layout; the label is for the control socket and the tests).
         let mut footer = Vec::new();
+        if let Some(draft) = self.draft() {
+            let sharing = |k: usize| {
+                draft
+                    .windows
+                    .iter()
+                    .any(|win| draft.players.iter().filter(|&&n| n == win.number).count() == k)
+            };
+            if sharing(2) {
+                let two = tr(&format!("layout.two.{}", draft.two.min(2)), &[]);
+                footer.push((20.0, tr("layout.two", &[&two]), Target::Two, true));
+            }
+            if sharing(3) {
+                let three = tr(&format!("layout.three.{}", draft.three.min(2)), &[]);
+                footer.push((20.0, tr("layout.three", &[&three]), Target::Three, true));
+            }
+        }
+        // Narrow enough for two squares in the narrowest view (320 GUI pixels).
         let editing = self.changed();
         footer.extend([
+            (64.0, tr("identify", &[]), Target::Identify, true),
             (64.0, tr("revert", &[]), Target::Revert, editing),
             (64.0, tr("apply", &[]), Target::Apply, editing),
             done,
         ]);
         row(&mut out, h - 27.0, footer);
         out
+    }
+
+    /// What a button does, for the tooltip while the pointer is on it; for one that can't be
+    /// pressed, why not.
+    fn help(&self, (_, label, target, active): &Button) -> Option<String> {
+        let auto = self.draft().is_some_and(|d| d.two == 0);
+        Some(match target {
+            Target::Player(_) => tr("help.player", &[label]),
+            Target::Move(_) | Target::Done => return None,
+            Target::Two if auto => tr("help.layout_auto", &[label]),
+            Target::Two | Target::Three => tr("help.layout", &[label]),
+            Target::Switch if !*active => tr("switch_disabled", &[]),
+            Target::Switch => tr("help.switch", &[]),
+            Target::Identify => tr("help.identify", &[]),
+            Target::Names => tr("help.names", &[]),
+            Target::Revert if *active => tr("help.revert", &[]),
+            Target::Apply if *active => tr("help.apply", &[]),
+            Target::Revert | Target::Apply => tr("help.unchanged", &[]),
+        })
     }
 
     fn warnings(&self) -> Vec<String> {
@@ -339,6 +509,23 @@ impl SplitUi {
         for b in buttons.iter().filter(|b| !matches!(b.2, Target::Player(_))) {
             self.draw_button(batch, atlas, cursor, b);
         }
+        // The tile being dragged, under the pointer.
+        if let Some((i, Some((x, y)))) = self.drag
+            && let Some(name) = self.names.get(i)
+        {
+            let label = Text::colored(name.as_str(), crate::text::YELLOW);
+            ui::button(
+                batch,
+                atlas,
+                x - 30.0,
+                y - 10.0,
+                60.0,
+                20.0,
+                &label,
+                true,
+                true,
+            );
+        }
         // The monitors' names under them, where no window covers them.
         for (n, [x, y, _, mh]) in monitors.into_iter().enumerate() {
             let label = Text::literal(tr("monitor", &[&(n + 1)]));
@@ -360,8 +547,15 @@ impl SplitUi {
         if matches!(target, Target::Player(_)) {
             (x, y, bw, bh) = (x + 1.0, y + 1.0, (bw - 2.0).max(4.0), (bh - 2.0).max(4.0));
         }
+        let glyph = self.draft().and_then(|d| match target {
+            Target::Two => Some(layout_glyph(false, d.two)),
+            Target::Three => Some(layout_glyph(true, d.three)),
+            _ => None,
+        });
         // The selected player's name in yellow: picked, not just under the pointer.
-        let text = if selected {
+        let text = if glyph.is_some() {
+            Text::literal("")
+        } else if selected {
             Text::colored(label.as_str(), crate::text::YELLOW)
         } else {
             Text::literal(label.as_str())
@@ -377,6 +571,27 @@ impl SplitUi {
             *active,
             hover || selected,
         );
+        // A layout's square: its panes, in a 14 x 10 window; Auto a letter. Its name for the
+        // control socket, which lists widgets by what they say.
+        if glyph.is_some() {
+            crate::widgets::record(label, [x, y, bw, bh], *active);
+        }
+        let (gx, gy) = (
+            (x + (bw - 14.0) / 2.0).floor(),
+            (y + (bh - 10.0) / 2.0).floor(),
+        );
+        match glyph {
+            Some(Glyph::Auto) => {
+                let a = Text::literal("A");
+                ui::centered_text(batch, atlas, &a, x, y + 6.0, bw, rgba(255, 255, 255, 255));
+            }
+            Some(Glyph::Panes(panes)) => {
+                for &[px, py, pw, ph] in panes {
+                    batch.fill(atlas, gx + px, gy + py, pw, ph, rgba(230, 230, 230, 255));
+                }
+            }
+            None => {}
+        }
     }
     fn draw_notes(
         &self,
@@ -417,22 +632,29 @@ impl SplitUi {
                 color,
             );
         }
-        if buttons.iter().any(|(r, _, t, active)| {
-            !active && matches!(t, Target::Switch) && ui::hovered(cursor, r[0], r[1], r[2], r[3])
-        }) {
+        // What the pointer's button does (disabled ones too, to say why), as the options screens
+        // show theirs. Not the selected player's tile: the pointer is still on it after the click.
+        let help = buttons
+            .iter()
+            .filter(|b| ui::hovered(cursor, b.0[0], b.0[1], b.0[2], b.0[3]))
+            .filter(|b| !matches!(b.2, Target::Player(i) if Some(i) == self.selected))
+            .find_map(|b| self.help(b));
+        if let Some(help) = help {
             ui::tooltip(
                 batch,
                 atlas,
-                &atlas
-                    .font
-                    .split(&Text::literal(tr("switch_disabled", &[])), 170.0),
+                &atlas.font.split(&Text::literal(help), 170.0),
                 cursor,
             );
         }
     }
     /// A press at `(x, y)` on a screen `w` x `h`, or the mouse moving with it held (`drag`).
     pub fn click(&mut self, (x, y): (f32, f32), (w, h): (f32, f32), drag: bool) -> Click {
+        self.size = (w, h);
         if drag {
+            if let Some((_, at)) = &mut self.drag {
+                *at = Some((x, y));
+            }
             return Click::Nothing;
         }
         // The topmost: the last drawn.
@@ -449,12 +671,25 @@ impl SplitUi {
         match target {
             Target::Player(i) => {
                 self.selected = Some(i);
+                self.drag = Some((i, None));
             }
             Target::Move(spot) => {
                 if let Some(i) = self.selected {
                     self.place(i, spot);
                 }
             }
+            Target::Two => {
+                if let Some(draft) = self.editing() {
+                    draft.two = (draft.two + 1) % 3;
+                }
+            }
+            Target::Three => {
+                if let Some(draft) = self.editing() {
+                    draft.three = (draft.three + 1) % 3;
+                }
+            }
+            Target::Identify => self.identify = true,
+            Target::Names => self.toggle_names = true,
             Target::Revert => self.edit = None,
             Target::Apply => {
                 // Windows emptied in the draft close now, not as players moved.
@@ -473,6 +708,73 @@ impl SplitUi {
             }
         }
         Click::Pressed
+    }
+
+    /// The mouse let go: a tile dragged somewhere goes there (a draft). True when it moved.
+    pub fn release(&mut self) -> bool {
+        let (w, h) = self.size;
+        let Some((i, Some(at))) = self.drag.take() else {
+            return false;
+        };
+        let before = self.draft().cloned();
+        match self.drag_target(i, at, w, h) {
+            Some(Drop::At(spot)) => self.place(i, spot),
+            Some(Drop::Place(n, k)) => self.place_at(i, n, k),
+            None => return false,
+        }
+        self.draft().cloned() != before
+    }
+
+    /// Where player `i` dropped at `at` goes, as the map shows it: the window drawn on top under
+    /// the pointer, and in it the place (among its players) that puts the player's view under the
+    /// pointer, else the nearest. Dropped back where its view was, it goes back there: a move and
+    /// its reverse cancel out. Outside every window: `drop_spot` (a new window, a monitor).
+    fn drag_target(&self, i: usize, at: (f32, f32), w: f32, h: f32) -> Option<Drop> {
+        let base = self.edit.as_ref().or(self.live.as_ref())?;
+        let open = self.open_now();
+        let inside = |[x, y, rw, rh]: [f32; 4]| ui::hovered(at, x, y, rw, rh);
+        let (_, windows, tiles) = self.map_of(base, w, h);
+        // Where it is now: no move.
+        if tiles.get(i).is_some_and(|t| inside(t.1)) {
+            return None;
+        }
+        let Some(&(n, _)) = windows.iter().rev().find(|(_, r)| inside(*r)) else {
+            let spot = self.drop_spot(at, w, h)?;
+            let here = base.players.get(i).copied();
+            return (!matches!(spot, Spot::Window(n) if Some(n) == here)).then_some(Drop::At(spot));
+        };
+        // Each place in that window, by how far its view would be from the pointer (0 inside).
+        let distance = |[x, y, rw, rh]: [f32; 4]| {
+            let dx = (x - at.0).max(at.0 - x - rw).max(0.0);
+            let dy = (y - at.1).max(at.1 - y - rh).max(0.0);
+            dx * dx + dy * dy
+        };
+        self.stops(i)
+            .into_iter()
+            .filter(|(_, drop)| matches!(drop, Drop::Place(m, _) | Drop::At(Spot::Window(m)) if *m == n))
+            .filter_map(|(_, drop)| {
+                let mut draft = base.clone();
+                match &drop {
+                    Drop::At(spot) => draft.place_player(i, spot.clone()),
+                    Drop::Place(m, k) => {
+                        draft.place_player(i, Spot::Window(*m));
+                        draft.put_at(i, *k);
+                    }
+                }
+                draft.drop_empty(&open);
+                let view = self.map_of(&draft, w, h).2.get(i)?.1;
+                Some((distance(view), drop))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, drop)| drop)
+    }
+
+    /// Player `i` to place `k` among the players of window `n` in the draft.
+    fn place_at(&mut self, i: usize, n: u8, k: usize) {
+        self.place(i, Spot::Window(n));
+        if let Some(draft) = self.editing() {
+            draft.put_at(i, k);
+        }
     }
 
     fn changed(&self) -> bool {
@@ -618,6 +920,323 @@ mod tests {
         press(&mut ui, "Done");
         assert_eq!(ui.selected, None);
     }
+
+    #[test]
+    fn tiles_split_the_window_on_the_map() {
+        let ui = screen(2);
+        let (monitors, windows, tiles) = ui.map(SIZE.0, SIZE.1);
+        assert_eq!(monitors.len(), 2);
+        assert_eq!(windows.len(), 1);
+        // Two halves of Window 1, side by side.
+        let (a, b) = (tiles[0].1, tiles[1].1);
+        assert!((a[2] - b[2]).abs() < 0.01);
+        assert!((a[0] + a[2] - b[0]).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_window_over_another_takes_the_click() {
+        let mut ui = screen(2);
+        // P2 in a new window, opened over Window 1's corner.
+        press(&mut ui, "P2");
+        press(&mut ui, "New window");
+        press(&mut ui, "Apply");
+        ui.live = ui.apply.take();
+        press(&mut ui, "P2");
+        assert_eq!(ui.selected, Some(1));
+    }
+
+    #[test]
+    fn one_window_button_cycles_through_the_windows() {
+        let mut ui = screen(4);
+        // P2, P3, P4 each in a new window: Windows 2, 3, 4.
+        for p in ["P2", "P3", "P4"] {
+            press(&mut ui, p);
+            press(&mut ui, "New window");
+        }
+        press(&mut ui, "P2");
+        let windows = |ui: &SplitUi| -> Vec<String> {
+            labels(ui)
+                .into_iter()
+                .filter(|l| l.starts_with("Window "))
+                .collect()
+        };
+        assert_eq!(windows(&ui), ["Window 3"]);
+        press(&mut ui, "Window 3");
+        assert_eq!(windows(&ui), ["Window 4"]);
+        press(&mut ui, "Window 4");
+        // Past the last: back to Window 1, then on.
+        assert_eq!(windows(&ui), ["Window 1"]);
+        press(&mut ui, "Window 1");
+        assert_eq!(ui.edit.as_ref().unwrap().players[1], 1);
+        assert!(labels(&ui).contains(&"New window".to_owned()));
+    }
+
+    #[test]
+    fn windows_hold_still_until_apply() {
+        let mut ui = screen(3);
+        // Playing now: P2 in Window 2, P3 in Window 3.
+        let live = ui.live.as_mut().unwrap();
+        live.place_player(1, Spot::New);
+        live.place_player(2, Spot::New);
+        let numbers = |ui: &SplitUi| -> Vec<u8> {
+            ui.draft()
+                .unwrap()
+                .windows
+                .iter()
+                .map(|w| w.number)
+                .collect()
+        };
+        let next = |ui: &SplitUi| {
+            labels(ui)
+                .into_iter()
+                .find(|l| l.starts_with("Window "))
+                .unwrap()
+        };
+        // P2 into Window 1: Window 2 is open now, so it stays (empty) until Apply, and the
+        // window button's list holds still: from Window 1 on to 2, then 3.
+        press(&mut ui, "P2");
+        let to = next(&ui);
+        press(&mut ui, &to);
+        assert_eq!(ui.edit.as_ref().unwrap().players[1], 3);
+        press(&mut ui, "Window 1");
+        assert_eq!(
+            (numbers(&ui), next(&ui)),
+            (vec![1, 2, 3], "Window 2".to_owned())
+        );
+        // A window the draft adds goes as soon as nobody is in it: never open, nothing to close.
+        press(&mut ui, "New window");
+        assert_eq!(numbers(&ui), [1, 2, 3, 4]);
+        let to = next(&ui); // Window 1
+        press(&mut ui, &to);
+        assert_eq!(numbers(&ui), [1, 2, 3]);
+        // Apply closes the emptied one.
+        press(&mut ui, "Apply");
+        let applied = ui.apply.as_ref().unwrap();
+        assert_eq!(
+            applied.windows.iter().map(|w| w.number).collect::<Vec<_>>(),
+            [1, 3]
+        );
+    }
+
+    #[test]
+    fn names_says_what_the_game_shows_and_asks_it_to_change() {
+        let mut ui = screen(2);
+        ui.names_shown = true;
+        assert!(labels(&ui).contains(&"Names: On".to_owned()));
+        press(&mut ui, "Names: On");
+        assert!(ui.toggle_names);
+        // Nothing else changes: no draft.
+        assert_eq!(ui.edit, None);
+    }
+
+    #[test]
+    fn dropped_on_a_player_in_another_window_it_joins_that_window() {
+        // Adam (P1) in Window 1, Sam (P2) in Window 2: Sam dropped on Adam joins Window 1;
+        // Adam stays there too (they used to swap).
+        let mut ui = screen(2);
+        ui.live.as_mut().unwrap().place_player(1, Spot::New);
+        let (p2, p1) = (rect(&ui, "P2"), rect(&ui, "P1"));
+        ui.click((p2[0] + 2.0, p2[1] + 2.0), SIZE, false);
+        ui.click((p1[0] + 2.0, p1[1] + 2.0), SIZE, true);
+        assert!(ui.release());
+        let draft = ui.edit.as_ref().unwrap();
+        assert_eq!(draft.players, [1, 1]);
+        // Its first half: before Adam.
+        assert_eq!(ordered(&draft.order, 2), [1, 0]);
+    }
+
+    #[test]
+    fn any_move_and_its_reverse_leave_nothing_to_apply() {
+        // A fixed pseudo-random walk: layouts of 2 to 5 players over up to 3 windows, then one
+        // player moved anywhere (another window, a place among its players, a new window) and
+        // moved back to its window and its place there.
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |n: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as usize
+        };
+        for case in 0..2000 {
+            let players = 2 + next(4);
+            let mut ui = screen(players);
+            let live = ui.live.as_mut().unwrap();
+            for i in 1..players {
+                match next(3) {
+                    0 => live.place_player(i, Spot::New),
+                    1 => {
+                        let n = live.windows[next(live.windows.len())].number;
+                        live.place_player(i, Spot::Window(n));
+                    }
+                    _ => {}
+                }
+                let n = live.players[i];
+                let k = next(live.sharing(i, n).len() + 1);
+                live.put_at(i, k);
+            }
+            let i = next(players);
+            let live = ui.live.clone().unwrap();
+            let home = live.players[i];
+            // Its place: how many of its window's players come before it.
+            let place = ordered(&live.order, players)
+                .into_iter()
+                .filter(|&p| live.players[p] == home)
+                .position(|p| p == i)
+                .unwrap();
+            let to = match next(3) {
+                0 => Drop::At(Spot::New),
+                1 => {
+                    let n = live.windows[next(live.windows.len())].number;
+                    let k = next(live.sharing(i, n).len() + 1);
+                    Drop::Place(n, k)
+                }
+                _ => Drop::At(Spot::Window(live.windows[next(live.windows.len())].number)),
+            };
+            match to.clone() {
+                Drop::At(spot) => ui.place(i, spot),
+                Drop::Place(n, k) => ui.place_at(i, n, k),
+            }
+            ui.place_at(i, home, place);
+            assert!(
+                !ui.changed(),
+                "case {case}: {players} players, P{} to {to:?} and back\nlive {live:?}\nedit {:?}",
+                i + 1,
+                ui.edit
+            );
+        }
+    }
+
+    #[test]
+    fn the_switch_turns_off_only_once_p1_plays_alone() {
+        let mut ui = screen(2);
+        ui.on = true;
+        let switch = |ui: &SplitUi| {
+            ui.buttons(SIZE.0, SIZE.1)
+                .into_iter()
+                .find(|b| b.2 == Target::Switch)
+                .unwrap()
+                .3
+        };
+        assert!(!switch(&ui), "two players: off is greyed");
+        ui.names.truncate(1);
+        assert!(switch(&ui));
+    }
+
+    #[test]
+    fn three_in_a_window_dragged_and_back_nothing_changed() {
+        let mut ui = screen(3);
+        let centre = |r: [f32; 4]| (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+        // Pressed, P3 is selected and the map makes room for the move row: measure after.
+        ui.click(centre(rect(&ui, "P3")), SIZE, false);
+        let (p3, p1) = (rect(&ui, "P3"), rect(&ui, "P1"));
+        // P3 to where P1's view is: it takes that place.
+        ui.click(centre(p1), SIZE, true);
+        assert!(ui.release());
+        assert_eq!(ordered(&ui.edit.as_ref().unwrap().order, 3)[0], 2);
+        assert!(rect(&ui, "P3") != p3, "it moved on the map");
+        // Back to where its view was: as it was.
+        let now = rect(&ui, "P3");
+        ui.click(centre(now), SIZE, false);
+        ui.click(centre(p3), SIZE, true);
+        assert!(ui.release());
+        assert!(!ui.changed(), "{:?}", ui.edit);
+    }
+
+    #[test]
+    fn dragged_back_where_it_was_nothing_changed() {
+        let mut ui = screen(2);
+        ui.live.as_mut().unwrap().place_player(1, Spot::New);
+        let window2 = ui
+            .map(SIZE.0, SIZE.1)
+            .1
+            .iter()
+            .find(|(n, _)| *n == 2)
+            .unwrap()
+            .1;
+        let (p2, p1) = (rect(&ui, "P2"), rect(&ui, "P1"));
+        ui.click((p2[0] + 2.0, p2[1] + 2.0), SIZE, false);
+        ui.click((p1[0] + 2.0, p1[1] + 2.0), SIZE, true);
+        assert!(ui.release());
+        // Back into Window 2, emptied in the draft: where it was, so nothing to apply.
+        let p2 = rect(&ui, "P2");
+        ui.click((p2[0] + 2.0, p2[1] + 2.0), SIZE, false);
+        ui.click(
+            (window2[0] + window2[2] / 2.0, window2[1] + window2[3] / 2.0),
+            SIZE,
+            true,
+        );
+        assert!(ui.release(), "dropped into Window 2");
+        assert_eq!(ui.draft().unwrap().players, [1, 2]);
+        assert!(!ui.changed());
+    }
+
+    #[test]
+    fn a_tile_under_a_window_is_pressed_where_it_shows() {
+        // The left half of a tile hidden: its right half is left.
+        let r = uncovered([0.0, 0.0, 10.0, 4.0], [[-5.0, -1.0, 10.0, 9.0]].into_iter());
+        assert_eq!(r, [5.0, 0.0, 5.0, 4.0]);
+        // All of it hidden: nothing to press.
+        let r = uncovered([0.0, 0.0, 10.0, 4.0], [[-1.0, -1.0, 20.0, 9.0]].into_iter());
+        assert_eq!(r[2] * r[3], 0.0);
+        // P3 in a new window over the middle of Window 1: P2's tile, partly under it, still
+        // answers at the middle of what shows of it.
+        let mut ui = screen(3);
+        press(&mut ui, "P3");
+        press(&mut ui, "New window");
+        press(&mut ui, "Apply");
+        ui.live = ui.apply.take();
+        let [x, y, w, h] = rect(&ui, "P2");
+        ui.click((x + w / 2.0, y + h / 2.0), SIZE, false);
+        assert_eq!(ui.selected, Some(1));
+    }
+
+    #[test]
+    fn drag_a_player_onto_a_monitor() {
+        let mut ui = screen(3);
+        let (monitors, _, _) = ui.map(SIZE.0, SIZE.1);
+        let tv = monitors[1];
+        let p3 = rect(&ui, "P3");
+        ui.click((p3[0] + 2.0, p3[1] + 2.0), SIZE, false);
+        ui.click((tv[0] + 5.0, tv[1] + 5.0), SIZE, true);
+        assert!(ui.release());
+        assert_eq!(ui.edit.as_ref().unwrap().players, [1, 1, 2]);
+        // P2 dropped on P3 (its tile fills that window): it joins P3 there, nobody swaps.
+        let p2 = rect(&ui, "P2");
+        ui.click((p2[0] + 2.0, p2[1] + 2.0), SIZE, false);
+        ui.click((tv[0] + 5.0, tv[1] + 5.0), SIZE, true);
+        assert!(ui.release());
+        assert_eq!(ui.edit.as_ref().unwrap().players, [1, 2, 2]);
+        // A click without moving only selects.
+        let p1 = rect(&ui, "P1");
+        ui.click((p1[0] + 2.0, p1[1] + 2.0), SIZE, false);
+        assert!(!ui.release());
+    }
+
+    #[test]
+    fn layout_squares_show_while_a_window_has_that_many() {
+        let labels = |ui: &SplitUi| labels(ui).into_iter().filter(|l| l.contains("sharing"));
+        // Three in Window 1: only the 3's square, drawn as its panes.
+        let mut ui = screen(3);
+        assert_eq!(
+            labels(&ui).collect::<Vec<_>>(),
+            ["3 sharing: One wide on top"]
+        );
+        press(&mut ui, "3 sharing: One wide on top");
+        assert_eq!(ui.edit.as_ref().unwrap().three, 1);
+        assert!(matches!(layout_glyph(true, 1), Glyph::Panes(p) if p.len() == 3));
+        // Two: only the 2's, Auto a letter, explained under the pointer.
+        let ui = screen(2);
+        assert_eq!(labels(&ui).collect::<Vec<_>>(), ["2 sharing: Auto"]);
+        assert!(matches!(layout_glyph(false, 0), Glyph::Auto));
+        let buttons = ui.buttons(SIZE.0, SIZE.1);
+        let two = buttons.iter().find(|b| b.2 == Target::Two).unwrap();
+        assert_eq!(
+            ui.help(two).as_deref(),
+            Some("2 sharing: Auto (side by side when the window is wide). Press to change.")
+        );
+        // Alone: neither.
+        assert_eq!(labels(&screen(1)).count(), 0);
+    }
     #[test]
     fn locale_switch_and_pack_overrides_keep_the_same_draft() {
         // The language table is process-wide. Run this test alone in a child so
@@ -672,6 +1291,8 @@ mod tests {
         lang::set(lang::Language::load(&[], "fr_fr"));
         assert!(labels(&ui).contains(&"Nouvelle fenêtre".to_owned()));
         assert!(labels(&ui).contains(&"Appliquer".to_owned()));
+        assert!(labels(&ui).contains(&"Noms : Désactivé".to_owned()));
+        assert!(labels(&ui).contains(&"2 par fenêtre : Auto".to_owned()));
         assert!(
             labels(&ui).contains(&"Élodie %s".to_owned()),
             "player names remain literal"

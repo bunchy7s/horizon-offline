@@ -1199,11 +1199,12 @@ pub trait Hooks: Send + Sync {
     /// with those of `horizon-client/src/game/native_hooks.rs`): `components` holds
     /// `item`'s default components in `items.json`'s form (`"minecraft:max_stack_size": 16`,
     /// `"minecraft:food": {"nutrition": 4, "saturation": 2.4}`); insert or replace one to
-    /// set it, remove it to take it away (a stack size outside 1 to 99 is brought back
-    /// into it). Asked for every item each time the game reads
-    /// the defaults, from any thread, several times as resources load and again when a
-    /// world's data packs load: answer the same each time. Client and server each ask
-    /// their own mods, as NeoForge does, so both sides need the mod.
+    /// set it, remove it to take it away (a stack size outside 1 to `i32::MAX` is
+    /// brought back into it, and one that is not a number leaves the data pack's
+    /// own). Asked for every item each time the game reads the defaults, from any
+    /// thread, several times as resources load and again when a world's data packs
+    /// load: answer the same each time. Client and server each ask their own mods,
+    /// as NeoForge does, so both sides need the mod.
     /// 79.
     ///
     /// Every mod gets `event.components` in order and may add, change or remove components.
@@ -2953,6 +2954,26 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Item `item` (`mod_id:name`) holds energy (`Capabilities.Energy.ITEM`):
+    /// set `buffer` when the item is yours, as `SimpleEnergyHandler` is built:
+    /// its capacity and the most one insert and one extract move. A capacity
+    /// under 1 leaves the buffer out, and the limits are clamped to
+    /// 0..=capacity; vanilla's items have none. Asked at each call of the item
+    /// energy helpers (`native_item_energy`, `native_item_energy_insert`,
+    /// `native_item_energy_extract`, in `native_item_energy.rs`). The amount
+    /// is kept in the stack's `minecraft:custom_data`, as the int
+    /// `horizon_energy`. API @API:item_energy_buffer@.
+    ///
+    /// Return `Some` to set `buffer`; the first mod returning `Some` wins.
+    fn item_energy_buffer(
+        &self,
+        host: &dyn Host,
+        event: &mut ItemEnergyBufferEvent<'_>,
+    ) -> Option<ItemEnergyBuffer> {
+        let _ = host;
+        let _ = event;
+        None
+    }
     /// A dropped item entity was successfully added to the server level.
     /// @API:native_item_spawn@.
     fn item_spawn(&self, host: &mut dyn Host, event: &mut ItemSpawnEvent<'_>) {
@@ -3931,6 +3952,24 @@ pub trait Hooks: Send + Sync {
     /// The catalyst block state has changed. Server-side.
     /// @API:native_sculk_bloom@.
     fn sculk_bloom(&self, host: &mut dyn Host, event: &mut SculkBloomEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Enough players have slept through the night in level `dimension`
+    /// and the clock is about to move to the morning (NeoForge's
+    /// `SleepFinishedTimeEvent`, vanilla's `ServerLevel.tick` when it moves
+    /// the clock to `wake_up_from_sleep`): `new_time` comes in as the next
+    /// morning's day time and may be changed to wake everyone at another
+    /// time. A time before `current` (the day time now) is refused, as
+    /// `setTimeAddition` refuses one, and the morning stays. Unlike
+    /// NeoForge, which refuses a bad value as it is set, the check runs once
+    /// after every mod, so a later mod sees the value an earlier one left.
+    /// On the server, only when the `advance_time` rule is on;
+    /// `native_time_skip` then hears the jump to the time chosen here and
+    /// may still cancel it. The players wake and the weather resets as
+    /// usual either way.
+    /// API @API:sleep_finished_time@.
+    fn sleep_finished_time(&self, host: &mut dyn Host, event: &mut SleepFinishedTimeEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -9773,6 +9812,28 @@ pub fn dispatch_item_crafted(
         mod_hook.item_crafted(host, &mut event);
     }
 }
+/// What [`Hooks::item_energy_buffer`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemEnergyBufferEvent<'a> {
+    pub item: &'a str,
+}
+pub fn dispatch_item_energy_buffer(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    item: &str,
+    buffer: &mut Option<ItemEnergyBuffer>,
+) {
+    if buffer.is_some() {
+        return;
+    }
+    let mut event = ItemEnergyBufferEvent { item };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.item_energy_buffer(host, &mut event) {
+            *buffer = Some(replacement);
+            break;
+        }
+    }
+}
 /// What [`Hooks::item_spawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ItemSpawnEvent<'a> {
@@ -11895,6 +11956,30 @@ pub fn dispatch_sculk_bloom(
     for mod_hook in mods {
         mod_hook.sculk_bloom(host, &mut event);
     }
+}
+/// What [`Hooks::sleep_finished_time`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct SleepFinishedTimeEvent<'a> {
+    pub dimension: &'a str,
+    pub current: i64,
+    pub new_time: i64,
+}
+pub fn dispatch_sleep_finished_time(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    current: i64,
+    new_time: &mut i64,
+) {
+    let mut event = SleepFinishedTimeEvent {
+        dimension,
+        current,
+        new_time: *new_time,
+    };
+    for mod_hook in mods {
+        mod_hook.sleep_finished_time(host, &mut event);
+    }
+    *new_time = event.new_time;
 }
 /// What [`Hooks::sponge_absorb`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

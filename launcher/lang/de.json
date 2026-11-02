@@ -795,5 +795,15 @@
   "{path} is not a folder to build into.": "{path} ist kein Ordner, in den gebaut wird.",
   "Could not copy the build: {error}": "Build konnte nicht kopiert werden: {error}",
   "Could not move the build to {path}: {error}": "Build konnte nicht nach {path} verschoben werden: {error}",
-  "Native mods can use your microphone for voice chat when you enable it.": "Native Mods können dein Mikrofon für Sprachchat verwenden, wenn du es aktivierst."
+  "Native mods can use your microphone for voice chat when you enable it.": "Native Mods können dein Mikrofon für Sprachchat verwenden, wenn du es aktivierst.",
+  "Import a game build…": "Spiel-Build importieren…",
+  "Importing…": "Wird importiert…",
+  "Imported builds": "Importierte Builds",
+  "Unsigned: you picked these programs yourself, and Horizon can't check where they came from. Updates never replace them.": "Unsigniert: Du hast diese Programme selbst ausgewählt, und Horizon kann nicht prüfen, woher sie stammen. Updates ersetzen sie nie.",
+  "Game files from {base}": "Spieldateien von {base}",
+  "Imported · {date}": "Importiert · {date}",
+  "{file} is not a Horizon game for this computer.": "{file} ist kein Horizon-Spiel für diesen Computer.",
+  "Install a release or Nightly first: an imported build plays with its game files.": "Installiere zuerst ein Release oder eine Nightly: Ein importierter Build nutzt deren Spieldateien.",
+  "{file} holds no {program}.": "{file} enthält kein {program}.",
+  "Could not import the build: {error}": "Der Build konnte nicht importiert werden: {error}"
 }
