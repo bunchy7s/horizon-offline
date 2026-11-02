@@ -182,7 +182,8 @@ impl Game<'_> {
             | Target::Tnt(id)
             | Target::Falling(id)
             | Target::Rocket(id)
-            | Target::Other(id) => Some(uuid_text(self.uuid_for(id))),
+            | Target::Other(id)
+            | Target::Cloud(id) => Some(uuid_text(self.uuid_for(id))),
             // It keeps its UUID with itself.
             Target::Spawner(id) => self
                 .ominous_spawners
@@ -226,7 +227,8 @@ impl Game<'_> {
             | Target::Crystal(id)
             | Target::Dragon(id)
             | Target::Rocket(id)
-            | Target::Other(id) => self.persist.raw.get(&id),
+            | Target::Other(id)
+            | Target::Cloud(id) => self.persist.raw.get(&id),
             Target::Player => self.level.player_extra.as_ref(),
             // A server's player: the saved compound the guest's file is written from.
             Target::Guest(conn) => self.command_guest(conn).and_then(|g| g.saved.as_ref()),
