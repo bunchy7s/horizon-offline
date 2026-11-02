@@ -2352,6 +2352,60 @@ mod tests {
         assert_eq!(variant_index(Species::Mooshroom, "minecraft:temperate"), 0);
         assert_eq!(variant_name(Species::Mooshroom, 2), "red");
     }
+    /// `Horse.get(DataComponents.HORSE_VARIANT)` and
+    /// `Llama.get(DataComponents.LLAMA_VARIANT)`: the coat colour a horse or a
+    /// llama reports, and the names a `.../variant` component carries.
+    #[test]
+    fn a_horse_and_a_llama_report_their_variant_component() {
+        for (species, component, names) in [
+            (
+                Species::Horse,
+                "minecraft:horse/variant",
+                &crate::mobs::equine::VARIANT_NAMES[..],
+            ),
+            (
+                Species::Llama,
+                "minecraft:llama/variant",
+                &crate::mobs::llama::VARIANTS[..],
+            ),
+            (
+                Species::TraderLlama,
+                "minecraft:llama/variant",
+                &crate::mobs::llama::VARIANTS[..],
+            ),
+        ] {
+            for (index, name) in names.iter().enumerate() {
+                let index = index as u8;
+                let name = format!("minecraft:{name}");
+                assert_eq!(
+                    species_variant_component(species, index),
+                    Some((component, name.clone())),
+                    "{species:?} {index}"
+                );
+                assert_eq!(variant_index(species, &name), index, "{name}");
+                assert_eq!(format!("minecraft:{}", variant_name(species, index)), name);
+            }
+        }
+        // Horse.Variant.WHITE and Llama.Variant.CREAMY are the defaults.
+        assert_eq!(variant_index(Species::Horse, "minecraft:temperate"), 0);
+        assert_eq!(variant_index(Species::Llama, "minecraft:temperate"), 0);
+        assert_eq!(variant_name(Species::Horse, 7), "white");
+        assert_eq!(variant_name(Species::TraderLlama, 4), "creamy");
+        // Only `VariantUtils.writeVariant` species save the name; a horse and
+        // a llama save a packed `Variant` int, a fox and a mooshroom `Type`.
+        for species in [Species::Wolf, Species::Cat, Species::Chicken, Species::Pig] {
+            assert!(saves_variant_name(species), "{species:?}");
+        }
+        for species in [
+            Species::Horse,
+            Species::Llama,
+            Species::TraderLlama,
+            Species::Fox,
+            Species::Mooshroom,
+        ] {
+            assert!(!saves_variant_name(species), "{species:?}");
+        }
+    }
     /// #2269: the offspring of a spawn egg used on a mob is a baby of that
     /// kind (`SpawnEggItem.spawnOffspringFromSpawnEgg`), and only the mob's
     /// own kind takes the egg.

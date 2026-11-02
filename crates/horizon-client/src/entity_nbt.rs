@@ -4767,6 +4767,69 @@ mod item_component_tests {
         assert_eq!(fox.extra.variant, 0, "unknown names read as red");
     }
 
+    /// `Horse.applyImplicitComponent` and `Llama.applyImplicitComponent`: the
+    /// `.../variant` component sets the coat colour. A horse's markings are
+    /// the other half of the packed variant its spawn picked and stay.
+    #[test]
+    fn a_horse_or_llama_spawn_egg_picks_its_variant_component() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return;
+        }
+        let data = crate::mobs::MobTypes::load(&root).unwrap();
+        let spawn = |kind: &str, id: u32| {
+            Mob::new(
+                id,
+                Arc::new(data.types[kind].clone()),
+                Vec3::new(0.0, 4.0, 0.0),
+                0.0,
+            )
+        };
+        // A black horse (Horse.Variant.BLACK, 4) with a white field (markings
+        // 2), as a spawn in a plains leaves it.
+        let mut horse = spawn("minecraft:horse", 1);
+        (horse.extra.variant, horse.extra.variant2) = (4, 2);
+        let mut egg = crate::items::ItemStack::new("minecraft:horse_spawn_egg", 1);
+        egg.data_mut().set_other(
+            "minecraft:horse/variant",
+            Some(string("minecraft:dark_brown")),
+        );
+        apply_item_components(&mut horse, &egg);
+        assert_eq!(horse.extra.variant, 6, "Horse.Variant.DARK_BROWN");
+        assert_eq!(
+            horse.extra.variant2, 2,
+            "the markings the spawn picked stay"
+        );
+        // `Horse.get(DataComponents.HORSE_VARIANT)` reports it back.
+        let (id, variant) = crate::mobs::finalize::variant_component(&horse).unwrap();
+        assert_eq!(
+            (id, variant.as_str()),
+            ("minecraft:horse/variant", "minecraft:dark_brown")
+        );
+        // The save keeps the packed `Variant` int and gains no `variant` name,
+        // which only `VariantUtils.writeVariant` species store.
+        let tag = mob_to_nbt(&horse, [1, 2, 3, 4], None, None);
+        assert_eq!(tag.get("variant"), None);
+        assert!(
+            matches!(tag.get("Variant"), Some(Tag::Int(v)) if *v == 6 | 2 << 8),
+            "colour 6 and markings 2 packed"
+        );
+        // A llama, as a spawn in a plains leaves it: creamy.
+        let mut egg = crate::items::ItemStack::new("minecraft:llama_spawn_egg", 1);
+        egg.data_mut()
+            .set_other("minecraft:llama/variant", Some(string("minecraft:gray")));
+        let mut llama = spawn("minecraft:llama", 2);
+        assert_eq!(llama.extra.variant, 0);
+        apply_item_components(&mut llama, &egg);
+        assert_eq!(llama.extra.variant, 3, "Llama.Variant.GRAY");
+        // TraderLlama inherits the llama's arm.
+        let mut trader = spawn("minecraft:trader_llama", 3);
+        apply_item_components(&mut trader, &egg);
+        assert_eq!(trader.extra.variant, 3, "the trader llama reads it too");
+    }
+
     /// `EntityType.updateCustomEntityTag`: the egg's `entity_data` on the mob it
     /// spawned, when the type is its own — the mob's compound, the data merged
     /// over it and loaded back, as the spawn egg site does it.
