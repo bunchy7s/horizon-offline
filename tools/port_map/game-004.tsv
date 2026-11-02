@@ -23,7 +23,7 @@ MobEffectInstance.onMobHurt	inline	crates/horizon-client/src/game/potions.rs::Ga
 MobEffectInstance.toString	skip:debug		debug string
 MobEffectInstance.equals	skip:java		value equality
 MobEffectInstance.hashCode	skip:java		value hash
-MobEffectInstance.BlendState.setImmediate	missing		minor: skipBlending is never used, so nausea and darkness restored on login or a dimension change fade in from 0 instead of starting full
+MobEffectInstance.BlendState.setImmediate	port	crates/horizon-world/src/status_effect.rs::EffectInstance::skip_blending	factor and previous frame jump to 1 or 0 at once; the restore on login or a dimension change never calls it, so a restored nausea or darkness still fades in from 0
 MobEffectInstance.BlendState.getFactor	port	crates/horizon-client/src/game/fov.rs::Game::nausea_blend	lerp of the previous and current factor; darkness has its own in sculk.rs::Game::darkness_blend
 MobEffectInstance.Details.create	skip:java		record constructor for the codec
 MobEffectUtil.hasDigSpeed	inline	crates/horizon-client-render/src/effects.rs::PlayerEffects::mining_speed_factor	haste or conduit power, also read for the arm swing duration in first_person.rs
@@ -70,7 +70,7 @@ Display.createTransformation	port	crates/horizon-client/src/text_display.rs::Tex
 Display.tick	port	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::tick	start tick, interpolation duration and render state refresh; text displays only
 Display.defineSynchedData	port	crates/horizon-client/src/text_display.rs::TextDisplayData::default	the defaults of entries 8 to 22
 Display.readAdditionalSaveData	port	crates/horizon-client/src/text_display.rs::display_data	the synched data entries (ids 8 to 22) of a saved display, matrix transformation included
-Display.setTransformation	missing		minor: server side setter; there is no local display entity
+Display.setTransformation	port	crates/horizon-client/src/game/native_entities.rs::Game::native_set_display	a display Horizon keeps as a saved tag (block_display, item_display, text_display) eases from what it showed: the transformation and its interpolation and teleport durations, written for the mod API (native_set_display); nothing writes the brightness, billboard or shadow values back
 Display.addAdditionalSaveData	missing		minor: no local display entity to save
 Display.getInterpolatedBoundingBox	port	crates/horizon-client/src/text_display.rs::culling_box	width-centred XZ box from y to y+height at the interpolated origin; used by Game::display_in_view
 Display.setBrightnessOverride	missing		minor: server side setter; there is no local display entity
@@ -85,7 +85,7 @@ Display.BlockDisplay	home	crates/horizon-client/src/game/text_displays.rs	a bloc
 Display.ItemDisplay	home	crates/horizon-client/src/game/text_displays.rs	an item display submits its item model with the display context (Game::block_item_display_geometry)
 Display.TextDisplay.defineSynchedData	port	crates/horizon-client/src/text_display.rs::TextDisplayData::default	text, line width 200, background 0x40000000, opacity -1, flags 0
 Display.TextDisplay.onSyncedDataUpdated	port	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::metadata	the text render state ids mark the render state dirty
-Display.TextDisplay.loadFlag	missing		minor: reads the NBT booleans into the style flags; no local display entity
+Display.TextDisplay.loadFlag	inline	crates/horizon-client/src/text_display.rs::text_display_data	each NBT boolean (shadow, see_through, default_background) ORs its bit into the flags, then the alignment
 Display.TextDisplay.readAdditionalSaveData	port	crates/horizon-client/src/text_display.rs::text_display_data	a saved text display's synched data (ids 23 to 27) is read back from its compound and re-sent
 Display.TextDisplay.storeFlag	missing		minor: writes the style flags to NBT; no local display entity
 Display.TextDisplay.addAdditionalSaveData	missing		minor: no local display entity to save
