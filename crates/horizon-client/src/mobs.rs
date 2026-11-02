@@ -2825,6 +2825,12 @@ impl Mob {
         if !ai::accepts_damage(self, &source, amount) {
             return false;
         }
+        // LivingEntity.hurtServer refuses fire before hooks and damage processing.
+        if source.is_fire() && self.has_effect("minecraft:fire_resistance") {
+            // Ghast.hurtServer reports success for a reflected fireball even
+            // when LivingEntity refuses its health damage.
+            return reflected;
+        }
         // IronGolem.hurtServer: the crack level before the damage, compared after.
         let crackiness = (self.species() == Species::IronGolem).then(|| golem::crackiness(self));
         let mut amount = if reflected { 1000.0 } else { amount };
@@ -4326,6 +4332,101 @@ mod held_stack_tests {
         extra.take_main_hand();
         assert!(extra.main_hand.is_none());
         assert!(extra.main_hand_stack().is_none());
+    }
+}
+
+#[cfg(test)]
+mod fire_resistance_damage_tests {
+    use super::*;
+
+    fn pig() -> Mob {
+        let mut kind = super::sensor_scan_tests::kind();
+        let def = Arc::make_mut(&mut kind);
+        def.id = "minecraft:pig".into();
+        def.species = Species::Pig;
+        Mob::new(1, kind, Vec3::ZERO, 0.0)
+    }
+
+    #[test]
+    fn fire_resistance_rejects_fire_before_health_and_hurt_cooldown() {
+        for kind in [
+            DamageKind::Campfire,
+            DamageKind::Fireball,
+            DamageKind::HotFloor,
+            DamageKind::InFire,
+            DamageKind::Lava,
+            DamageKind::OnFire,
+            DamageKind::SulfurCubeHot,
+        ] {
+            let mut mob = pig();
+            mob.add_effect("minecraft:fire_resistance", -1, 0);
+            assert!(!mob.damage(1.0, Damage::of(kind)), "{kind:?}");
+            assert_eq!(mob.health, 10.0, "{kind:?}");
+            assert_eq!(
+                (mob.hurt_time, mob.invulnerable, mob.last_hurt),
+                (0, 0, 0.0)
+            );
+            assert!(mob.last_damage.is_none());
+            assert!(mob.outbox.is_empty());
+            // A refused fire hit must not prevent the next ordinary hit.
+            assert!(mob.damage(1.0, Damage::of(DamageKind::Cactus)));
+            assert_eq!(mob.health, 9.0);
+
+            let mut bare = pig();
+            assert!(bare.damage(1.0, Damage::of(kind)));
+            assert_eq!(bare.health, 9.0);
+            assert!(
+                !bare.damage(1.0, Damage::of(kind)),
+                "equal hit during cooldown"
+            );
+            assert!(
+                bare.damage(2.0, Damage::of(kind)),
+                "stronger hit during cooldown"
+            );
+            assert_eq!(bare.health, 8.0);
+
+            let mut resistant = pig();
+            resistant.add_effect("minecraft:resistance", -1, 0);
+            assert!(resistant.damage(1.0, Damage::of(kind)));
+            assert_eq!(resistant.health, 9.2);
+
+            let mut invulnerable = pig();
+            invulnerable.invulnerable_flag = true;
+            assert!(!invulnerable.damage(1.0, Damage::of(kind)));
+            assert_eq!(invulnerable.health, 10.0);
+        }
+    }
+
+    #[test]
+    fn species_hurt_callbacks_still_run_before_the_living_fire_guard() {
+        let mut mob = pig();
+        let kind = Arc::make_mut(&mut mob.kind);
+        kind.id = "minecraft:bat".into();
+        kind.species = Species::Bat;
+        bat::set_resting(&mut mob, true);
+        mob.add_effect("minecraft:fire_resistance", -1, 0);
+        assert!(!mob.damage(1.0, Damage::of(DamageKind::InFire)));
+        assert!(!bat::resting(&mob));
+        assert_eq!(mob.health, 10.0);
+        assert_eq!(mob.invulnerable, 0);
+    }
+
+    #[test]
+    fn reflected_ghast_fireball_still_reports_success_when_fire_resistance_refuses_health_damage() {
+        let mut mob = pig();
+        let kind = Arc::make_mut(&mut mob.kind);
+        kind.id = "minecraft:ghast".into();
+        kind.species = Species::Ghast;
+        kind.flags.fire_immune = true;
+        mob.add_effect("minecraft:fire_resistance", -1, 0);
+        let source = Damage {
+            kind: DamageKind::Fireball,
+            attacker: Some(Who::Player),
+            from: None,
+        };
+        assert!(mob.damage(1.0, source));
+        assert_eq!(mob.health, 10.0);
+        assert_eq!(mob.invulnerable, 0);
     }
 }
 

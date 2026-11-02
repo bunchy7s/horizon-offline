@@ -1718,6 +1718,32 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def mob_fire_resistance_damage():
+    ops = setup('/forceload add 0 0')
+    case = 0
+    fire_types = ('campfire', 'fireball', 'hot_floor', 'in_fire', 'lava',
+                  'on_fire', 'sulfur_cube_hot', 'unattributed_fireball')
+    cases = [(damage, variant) for damage in fire_types
+             for variant in ('normal', 'fire_resistance', 'resistance', 'invulnerable')]
+    cases += [('cactus', 'fire_resistance'), ('generic', 'fire_resistance')]
+    for damage, variant in cases:
+        case += 1
+        # Killed entities remain registered until removal: never reuse a UUID.
+        target = f'00000000-0000-0000-0000-002c{case:08x}'
+        invulnerable = ',Invulnerable:1b' if variant == 'invulnerable' else ''
+        ops += setup(f'/summon pig 4.5 220 4.5 {{UUID:[I;0,0,44,{case}],'
+                     f'NoAI:1b,NoGravity:1b,PersistenceRequired:1b{invulnerable}}}')
+        if variant in ('fire_resistance', 'resistance'):
+            ops.append(cmd(f'/effect give {target} minecraft:{variant} infinite 0 true'))
+        ops.append(cmd(f'/data get entity {target} Health 1000'))
+        for amount in (1, 1, 2):
+            ops.append(cmd(f'/damage {target} {amount} minecraft:{damage}'))
+            ops.append(cmd(f'/data get entity {target} Health 1000'))
+        ops += setup(f'/kill {target}')
+    ops.append({'op': 'tick', 'n': 25})
+    return ops + setup('/forceload remove 0 0')
+
+
 def groups():
     return [
         ('setup', group_setup()),
@@ -1727,6 +1753,7 @@ def groups():
         ('player state', player_state()),
         ('blocks and border', world_blocks()),
         ('entities', entities()),
+        ('mob fire resistance damage', mob_fire_resistance_damage()),
         ('wither spawn', wither_spawn()),
         ('riding teleport', riding_teleport()),
         ('mob riding', mob_riding()),
