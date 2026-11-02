@@ -3142,7 +3142,9 @@ mod tests {
             .to_vec();
         assert_eq!(
             named,
-            ["mainhand", "offhand", "head", "chest", "legs", "feet", "body", "saddle"]
+            [
+                "mainhand", "offhand", "head", "chest", "legs", "feet", "body", "saddle"
+            ]
         );
     }
 }
