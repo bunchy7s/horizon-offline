@@ -335,6 +335,15 @@ pub trait LevelAccess {
     fn allow_bell_ring(&self, _pos: BlockPos) -> bool {
         true
     }
+    fn allow_cauldron_level_change(
+        &self,
+        _pos: BlockPos,
+        _from: i32,
+        _to: i32,
+        _reason: &'static str,
+    ) -> bool {
+        true
+    }
     /// Whether the piston at `piston` may push the blocks `push` one step
     /// `direction` and destroy `destroy` (`PistonBaseBlock.moveBlocks`, once
     /// the structure resolved). Refused, it moves nothing, as a structure

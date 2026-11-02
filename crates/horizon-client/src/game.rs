@@ -1194,6 +1194,27 @@ impl LevelAccess for GameLevel<'_> {
         }
         !cancel
     }
+    fn allow_cauldron_level_change(
+        &self,
+        pos: BlockPos,
+        from: i32,
+        to: i32,
+        reason: &'static str,
+    ) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_cauldron_level_changed(
+                self.dimension,
+                None,
+                pos,
+                from,
+                to,
+                reason,
+                &mut cancel,
+            );
+        }
+        !cancel
+    }
     fn allow_piston_move(
         &self,
         piston: BlockPos,

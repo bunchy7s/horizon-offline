@@ -1456,6 +1456,22 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             };
             if data.is(Class::Cauldron) {
                 if self.random().next_float() < chance {
+                    let to = if info.kind == PrecipitationKind::Rain {
+                        1
+                    } else {
+                        3
+                    };
+                    let reason = if info.kind == PrecipitationKind::Rain {
+                        "rain"
+                    } else {
+                        "snow"
+                    };
+                    if !self
+                        .level
+                        .allow_cauldron_level_change(below_pos, 0, to, reason)
+                    {
+                        return;
+                    }
                     let next = if info.kind == PrecipitationKind::Rain {
                         b.named.water_cauldron
                     } else {
@@ -1470,6 +1486,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     || (info.kind == PrecipitationKind::Snow
                         && b.is_block(below_state, b.named.powder_snow_cauldron));
                 if b.table.int(below_state, p.level) != 3 && matches {
+                    let level = b.table.int(below_state, p.level);
+                    let reason = if info.kind == PrecipitationKind::Rain {
+                        "rain"
+                    } else {
+                        "snow"
+                    };
+                    if !self
+                        .level
+                        .allow_cauldron_level_change(below_pos, level, level + 1, reason)
+                    {
+                        return;
+                    }
                     self.set_block_and_update(below_pos, b.table.cycle(below_state, p.level));
                     self.game_event(below_pos, "minecraft:block_change");
                 }

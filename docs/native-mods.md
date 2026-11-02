@@ -1329,6 +1329,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   sound when punched, used, or powered. Set `cancel` to silence it; when used to tune it, the note remains unchanged.
 - **`native_bell_ring(dimension, player, pos, cancel)`** (on `GameLevel`): a bell is about to ring. Set `cancel` to
   stop the ring and its raider reveal.
+- **`native_cauldron_level_changed(dimension, player, pos, from_level, to_level, reason, cancel)`** (on `GameLevel`):
+  precipitation or dripstone is about to change a cauldron's level. Set `cancel` to leave it as it was.
 - **`native_random_tick(ticks, dimension, pos, state, handled)`** (API 33, on `GameLevel`): a block `tickChunk`
   random-ticks, before its own `randomTick`. Change the block with the level's `native_set_block_property(ticks, pos,
   key, value, flags)`; set `handled` to skip the block's own random tick.
