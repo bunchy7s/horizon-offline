@@ -531,6 +531,17 @@ impl Creative {
     /// the name tree, both over vanilla's suffix arrays (substring matches,
     /// results in the tab's order).
     pub fn search_results(&self, term: &str, names: &Names) -> Vec<usize> {
+        let english =
+            names.display_get("itemGroup.search").as_deref() == names.get("itemGroup.search");
+        self.search_results_in(term, names, &|k| names.display_get(k), english)
+    }
+    fn search_results_in(
+        &self,
+        term: &str,
+        names: &Names,
+        translate: &dyn Fn(&str) -> Option<String>,
+        english: bool,
+    ) -> Vec<usize> {
         let all = 0..self.search_index.len();
         if term.is_empty() {
             return all.collect();
@@ -552,17 +563,18 @@ impl Creative {
                 })
                 .collect();
         }
-        // FullTextSearchTree: tooltip lines, and the item id after a colon.
-        // The export's lines are English (they come from the vanilla jars);
-        // the hover name in the selected language is matched too, so a
-        // localized search finds the item. It is the whole name (a tipped
-        // arrow's potion, the ominous banner), as the first line is.
+        // FullTextSearchTree: the creative tooltip lines in the selected
+        // language, and the item id after a colon. The export's lines are
+        // English (they come from the vanilla jars), so they stand in only
+        // while the language is English; otherwise every line (name, lore,
+        // effects, ...) is rebuilt through the language, as vanilla's
+        // getTooltipLines does.
         let text = java_lower(term);
-        let localized = |i: usize| {
-            java_lower(&crate::item_tooltip::name_line(
-                &self.search_items[i],
-                &|k| names.display_get(k),
-            ))
+        let localized = |i: usize| -> Vec<String> {
+            crate::item_tooltip::lines(&self.search_items[i], None, translate)
+                .iter()
+                .map(|l| java_lower(l))
+                .collect()
         };
         all.filter(|&i| {
             let e = &self.search_index[i];
@@ -573,16 +585,17 @@ impl Creative {
             } else {
                 &e.lines
             };
+            let exported = english || e.lines.is_empty();
+            let local = localized(i);
+            let hit = |t: &str| {
+                (exported && any(lines.iter().map(String::as_str), t))
+                    || any(local.iter().map(String::as_str), t)
+            };
             match text.split_once(':') {
-                None => {
-                    any(lines.iter().map(String::as_str), &text) || localized(i).contains(&text)
-                }
+                None => hit(&text),
                 Some((ns, path)) => {
                     let (ns, path) = (java_trim(ns), java_trim(path));
-                    e.namespace.contains(ns)
-                        && (e.path.contains(path)
-                            || any(lines.iter().map(String::as_str), path)
-                            || localized(i).contains(path))
+                    e.namespace.contains(ns) && (e.path.contains(path) || hit(path))
                 }
             }
         })
@@ -1403,6 +1416,20 @@ mod tests {
         assert_eq!(q("anvil"), [0]);
         // A colon's path searches the display name too.
         assert_eq!(q("minecraft:铁砧"), [0]);
+    }
+
+    #[test]
+    fn search_matches_every_localized_tooltip_line() {
+        // Vanilla's FullTextSearchTree indexes the selected language's
+        // tooltip lines; the export's English lines do not apply.
+        let c = creative(0);
+        let names = Names::default();
+        let ru: HashMap<&str, &str> = HashMap::from([("item.minecraft.anvil", "Наковальня")]);
+        let tr = |k: &str| ru.get(k).map(|v| (*v).to_owned());
+        let q = |s: &str, english| c.search_results_in(s, &names, &tr, english);
+        assert_eq!(q("наков", false), [0]);
+        assert!(q("anvil", false).is_empty());
+        assert_eq!(q("anvil", true), [0]);
     }
 
     #[test]
