@@ -1043,6 +1043,9 @@ mod tests {
     use std::time::Duration;
 
     struct ItemStack;
+    struct StackView {
+        count: i32,
+    }
     struct BlockEntityDraw(Vec<u32>);
     #[allow(dead_code)]
     mod stubs {
@@ -1782,6 +1785,59 @@ mod tests {
         let present: syn::ImplItemFn = syn::parse_quote! { fn native_zoom(&self) { horizon_client::mod_api::dispatch_zoom(); } };
         assert!(!super::has_call(&missing.block, "dispatch_zoom"));
         assert!(super::has_call(&present.block, "dispatch_zoom"));
+    }
+
+    #[test]
+    fn item_model_property_dispatches_borrowed_stack_and_preserves_unhandled_answers() {
+        struct Property;
+        impl Hooks for Property {
+            fn item_model_property(
+                &self,
+                _: &dyn Host,
+                property: &str,
+                stack: &StackView,
+                value: &mut bool,
+            ) {
+                if property == "example:charged" {
+                    *value = stack.count > 1;
+                }
+            }
+        }
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Property)];
+        let host = TestHost;
+        let mut value = false;
+        dispatch_item_model_property(
+            &host,
+            &mods,
+            "example:charged",
+            &StackView { count: 2 },
+            &mut value,
+        );
+        assert!(value);
+        dispatch_item_model_property(
+            &host,
+            &mods,
+            "other:property",
+            &StackView { count: 1 },
+            &mut value,
+        );
+        assert!(value);
+        dispatch_item_model_property(
+            &host,
+            &mods,
+            "example:charged",
+            &StackView { count: 1 },
+            &mut value,
+        );
+        assert!(!value);
+        dispatch_item_model_property(
+            &host,
+            &[],
+            "example:charged",
+            &StackView { count: 2 },
+            &mut value,
+        );
+        assert!(!value);
     }
 
     #[test]

@@ -2028,6 +2028,17 @@ impl Game<'_> {
     pub(super) fn native_frame(&mut self, elapsed: Duration) {
         mod_api::dispatch_frame(self, mod_api::mods(), elapsed);
     }
+    /// Client-side evaluation of a mod's namespaced conditional item model property.
+    /// Set value only for a property your mod owns; unhandled properties stay false.
+    /// The borrowed stack is the one being resolved, including nested bundle items.
+    pub(super) fn native_item_model_property(
+        &self,
+        property: &str,
+        stack: &mod_api::StackView,
+        value: &mut bool,
+    ) {
+        mod_api::dispatch_item_model_property(self, mod_api::mods(), property, stack, value);
+    }
     /// The frame rate this window is about to be held to: Max Framerate after the
     /// inactivity throttle and Battery Mode (260 is unlimited). `focused` is whether the
     /// window has focus, `minimized` whether it is minimised and `in_world` whether a world
