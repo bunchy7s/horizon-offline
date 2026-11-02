@@ -11,7 +11,7 @@ Identifier.withPath	port	crates/horizon-world/src/identifier.rs::Identifier::fro
 Identifier.equals	skip:java		derived PartialEq on namespace and path
 Identifier.compareTo	port	crates/horizon-world/src/identifier.rs::Identifier::cmp	path first, then namespace
 Identifier.resolveAgainst	missing		unsure: no identifier-to-file-path guard found; callers join paths directly
-Identifier.toLanguageKey	skip:other		string helper; translation keys are built where a Text is made
+Identifier.toLanguageKey	inline	crates/horizon-client/src/title/buffet.rs::display_name	spelled out behind a 'biome.' prefix there (toLanguageKey("biome")); the namespace and path are joined by hand, and '/' is turned into '.' as well
 Identifier.toShortLanguageKey	skip:other		string helper; translation keys are built where a Text is made
 Identifier.toShortString	skip:other		string helper; the minecraft: prefix is stripped at each display site
 Identifier.readGreedy	port	crates/horizon-command/src/args.rs::read_identifier	reads id characters while they are allowed
@@ -44,7 +44,7 @@ RegistryOps.HolderLookupAdapter.lookup	skip:data		registry lookup adapter for da
 RegistryOps.HolderLookupAdapter.equals	skip:data		registry lookup adapter for data decoding
 ResourceKey.create	skip:java		interned key; Horizon uses plain identifiers
 ResourceKey.dependent	skip:data		derived registry key; the ids come from Horizon's tables
-ResourceManagerRegistryLoadTask.load	skip:data		registry loading from the resource manager
+ResourceManagerRegistryLoadTask.load	inline	crates/horizon-client/src/lan/data.rs::file_order	the registry's files are read from the prepared folder (walk) with a world's pack files over them (pack_entries), registered in the file order listMatchingResources keys them by (file_order); the element codec read is a serde_json parse
 Bootstrap.bootStrap	skip:data		startup bootstrap of the registries and data
 Bootstrap.checkTranslations	skip:debug		IDE-only translation check
 Bootstrap.checkGameruleTranslations	skip:debug		IDE-only game rule translation check
