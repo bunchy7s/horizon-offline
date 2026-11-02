@@ -5228,9 +5228,11 @@ impl Renderer {
             .map(pack_timing::PassTiming::medians)
             .unwrap_or_default()
     }
-    /// The macros of the GL extensions this device gives shader packs: subgroups, when it
-    /// has them.
+    /// The macros this renderer gives shader packs: the GL extensions this device has
+    /// (subgroups, when it has them), and the vendor, renderer and mipmap levels
+    /// (`Macros::define_renderer`).
     pub fn define_pack_macros(&self, macros: &mut horizon_shaders::Macros) {
+        macros.define_renderer(self.mipmaps);
         if self.device.features().contains(wgpu::Features::SUBGROUP) {
             for ext in [
                 "basic",
