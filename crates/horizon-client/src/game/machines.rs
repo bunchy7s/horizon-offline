@@ -867,6 +867,11 @@ impl Game<'_> {
         let front = offset(pos, facing);
         let face = facing.opposite();
         if let Some(target) = c.view(front, false) {
+            self.native_hopper_inventory_search(
+                [pos.0, pos.1, pos.2],
+                Some([front.0, front.1, front.2]),
+                None,
+            );
             return self.eject_into(pos, hopper, &target, face);
         }
         let Some(id) = self.entity_container_at([
@@ -876,6 +881,7 @@ impl Game<'_> {
         ]) else {
             return false;
         };
+        self.native_hopper_inventory_search([pos.0, pos.1, pos.2], None, Some(id));
         self.with_entity_container(id, |g, target| g.eject_into(pos, hopper, target, face))
             .unwrap_or(false)
     }
@@ -961,9 +967,27 @@ impl Game<'_> {
         let c = self.containers();
         let Some(source) = c.view(above, false) else {
             let id = self.entity_container_at(at)?;
+            self.native_hopper_inventory_search(
+                [
+                    hopper.parts[0].0.0,
+                    hopper.parts[0].0.1,
+                    hopper.parts[0].0.2,
+                ],
+                None,
+                Some(id),
+            );
             return self
                 .with_entity_container(id, |g, source| g.suck_from_slots(None, source, hopper));
         };
+        self.native_hopper_inventory_search(
+            [
+                hopper.parts[0].0.0,
+                hopper.parts[0].0.1,
+                hopper.parts[0].0.2,
+            ],
+            Some([above.0, above.1, above.2]),
+            None,
+        );
         if let Kind::Composter(level) = source.kind {
             if level != 8 {
                 return Some(false);

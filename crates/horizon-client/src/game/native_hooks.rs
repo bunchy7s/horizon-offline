@@ -4686,6 +4686,17 @@ impl Game<'_> {
     ) {
         let _ = (source, destination, item, cancel);
     }
+    /// A hopper selected a container while searching for items to push or
+    /// pull. Exactly one of `container` and `entity` identifies the target.
+    /// @API:native_hopper_inventory_search@.
+    pub(super) fn native_hopper_inventory_search(
+        &self,
+        hopper: [i32; 3],
+        container: Option<[i32; 3]>,
+        entity: Option<u32>,
+    ) {
+        let _ = (hopper, container, entity);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
