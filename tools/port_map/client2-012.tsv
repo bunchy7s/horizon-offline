@@ -44,13 +44,13 @@ TabNavigationBar.Builder.build	skip:java		builder
 AdvancementToast.update	port	crates/horizon-client/src/game/advancements.rs::Toast::wants_show	5 s visible, scaled by the notification time option
 AdvancementToast.isChallengeAdvancement	inline	crates/horizon-client/src/game/advancements.rs::Game::draw_toasts	challenge check for the sound when a toast enters a slot
 AdvancementToast.extractRenderState	port	crates/horizon-client/src/game/advancements.rs::Game::draw_toast	gap: player: a long title is one line; vanilla wraps it and fades the frame label into it over 1.5 s
-FriendToast.update	skip:service		friend toasts: social, Horizon has no friends system
-FriendToast.extractRenderState	skip:service		friend toasts: social, Horizon has no friends system
-FriendToast.add	skip:service		friend toasts: social, Horizon has no friends system
-FriendToast.showFriendRequestSent	skip:service		friend toasts: social, Horizon has no friends system
-FriendToast.showFriendRequestReceived	skip:service		friend toasts: social, Horizon has no friends system
-FriendToast.showFriendRequestAccepted	skip:service		friend toasts: social, Horizon has no friends system
-FriendToast.showFriendAdded	skip:service		friend toasts: social, Horizon has no friends system
+FriendToast.update	skip:service		friend toasts belong to the friend-request service; Horizon's friends are an invite code for the open world (horizon-friends), with no requests and no toasts
+FriendToast.extractRenderState	skip:service		no friend toast is drawn: Horizon's friends are an invite code for the open world (horizon-friends)
+FriendToast.add	skip:service		nothing adds a friend toast: no request service, no toast queue entry
+FriendToast.showFriendRequestSent	skip:service		no request is sent: the friends screen copies an invite code instead, so no toast
+FriendToast.showFriendRequestReceived	skip:service		no request arrives: a friend joins the open world with the invite code
+FriendToast.showFriendRequestAccepted	skip:service		no request is accepted: the invite code is the whole invitation
+FriendToast.showFriendAdded	skip:service		no friend list is added to: horizon-friends shares one world by code
 NowPlayingToast.extractToast	port	crates/horizon-client/src/toasts.rs::draw_now_playing	the background, the music notes and the song's name on the top row
 NowPlayingToast.tickMusicNotes	port	crates/horizon-client/src/toasts.rs::MusicNotes::tick	the notes change colour every 25 ms while a song plays
 NowPlayingToast.showToast	port	crates/horizon-client/src/toasts.rs::NowPlayingToast::show	slide in and count down over 5000 ms times the notification time
