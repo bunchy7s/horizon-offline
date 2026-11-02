@@ -528,7 +528,7 @@ impl Game<'_> {
             && !host.hub.guests[gi].spectator()
             && self.lan_table_valid(&host.hub.guests[gi], pos)
         {
-            let changed = self.guest_menu_op(host, gi, &mut menu, |menu, env| {
+            let mut changed = self.guest_menu_op(host, gi, &mut menu, |menu, env| {
                 let before: Vec<_> = (0..menu.slot_count())
                     .map(|s| menu.slot(s).cloned())
                     .collect();
@@ -540,7 +540,11 @@ impl Game<'_> {
             let guest = &host.hub.guests[gi];
             let (uuid, name) = (guest.uuid, guest.name.clone());
             let mut result = menu.slot(0).cloned();
+            let vanilla = result.clone();
             self.native_prepare_item_craft(uuid, &name, Some(pos), &mut result);
+            if result != vanilla && !changed.contains(&0) {
+                changed.push(0);
+            }
             let env = self.menu_env();
             menu.set_slot(&env, 0, result);
             agreed = p.state == state

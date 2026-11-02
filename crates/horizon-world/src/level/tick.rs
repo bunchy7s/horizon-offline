@@ -1488,11 +1488,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             };
             if data.is(Class::Cauldron) {
                 if self.random().next_float() < chance {
-                    let to = if info.kind == PrecipitationKind::Rain {
-                        1
-                    } else {
-                        3
-                    };
+                    // Both place the cauldron's default state, level 1
+                    // (CauldronBlock.handlePrecipitation).
+                    let to = 1;
                     let reason = if info.kind == PrecipitationKind::Rain {
                         "rain"
                     } else {

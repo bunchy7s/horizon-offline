@@ -125,8 +125,26 @@ impl Game<'_> {
         if let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn)
             && !host.hub.guests[gi].spectator()
         {
+            // createResult runs when the inputs change (or a rename): a click
+            // elsewhere must not hand the hooks their own result again.
+            let result_slot = match gs.kind {
+                StationKind::Anvil | StationKind::Grindstone => Some(2),
+                StationKind::Smithing => Some(3),
+                _ => None,
+            };
+            let before = result_slot.map(|r| {
+                let slots: Vec<_> = (0..=r).map(|s| gs.menu.slot(s).cloned()).collect();
+                (slots, gs.menu.data[0])
+            });
             self.guest_menu_op(host, gi, &mut gs.menu, op);
-            if gs.kind == StationKind::Anvil {
+            let recomputed = before.is_some_and(|(slots, cost)| {
+                cost != gs.menu.data[0]
+                    || slots
+                        .iter()
+                        .enumerate()
+                        .any(|(s, b)| gs.menu.slot(s) != b.as_ref())
+            });
+            if recomputed && gs.kind == StationKind::Anvil {
                 let guest = &host.hub.guests[gi];
                 let (uuid, name) = (guest.uuid, guest.name.clone());
                 let mut result = gs.menu.slot(2).cloned();
@@ -134,7 +152,7 @@ impl Game<'_> {
                 let env = self.menu_env();
                 gs.menu.set_slot(&env, 2, result);
             }
-            if gs.kind == StationKind::Grindstone {
+            if recomputed && gs.kind == StationKind::Grindstone {
                 let guest = &host.hub.guests[gi];
                 let (uuid, name) = (guest.uuid, guest.name.clone());
                 let mut result = gs.menu.slot(2).cloned();
@@ -142,7 +160,7 @@ impl Game<'_> {
                 let env = self.menu_env();
                 gs.menu.set_slot(&env, 2, result);
             }
-            if gs.kind == StationKind::Smithing {
+            if recomputed && gs.kind == StationKind::Smithing {
                 let guest = &host.hub.guests[gi];
                 let (uuid, name) = (guest.uuid, guest.name.clone());
                 let mut result = gs.menu.slot(3).cloned();
@@ -320,9 +338,25 @@ impl Game<'_> {
         let guest = &host.hub.guests[gi];
         let mut costs = offers.costs;
         self.native_prepare_item_enchant(guest.uuid, &guest.name, gs.pos, &mut costs);
+        let mut clues = offers.clues;
+        for i in 0..3 {
+            // A cost a mod changed shows the clue of the list it will give.
+            if costs[i] != offers.costs[i]
+                && let Some(stack) = gs.menu.slot(0)
+            {
+                clues[i] = horizon_client::stations::enchant_clue(
+                    &self.stations().enchantments,
+                    self.items(),
+                    seed,
+                    i,
+                    costs[i],
+                    stack,
+                );
+            }
+        }
         for i in 0..3 {
             gs.menu.data[i] = costs[i];
-            let clue = offers.clues[i].as_ref();
+            let clue = clues[i].as_ref();
             gs.menu.data[4 + i] = clue
                 .and_then(|(e, _)| host.hub.registry_id("minecraft:enchantment", e))
                 .unwrap_or(-1);

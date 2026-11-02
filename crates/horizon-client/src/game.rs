@@ -6116,6 +6116,9 @@ impl Game<'_> {
         }
         if !cancel {
             self.add_cooldown(group, component.ticks());
+        } else if self.lan_acting.is_some() {
+            // The guest's client started the cooldown itself; 0 ends it there.
+            self.guest_cooldowns.push((group, 0));
         }
     }
     /// `ItemCooldowns.addCooldown` (a guest also gets the packet).

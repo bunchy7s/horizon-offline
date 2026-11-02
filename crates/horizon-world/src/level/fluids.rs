@@ -617,11 +617,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if !fluid.is_source() {
             let new_fluid = self.new_liquid(kind, pos, state);
             let delay = self.spread_delay(kind, pos, fluid, new_fluid);
-            if new_fluid.kind() == FluidKind::Empty {
-                fluid = new_fluid;
-                state = self.b.air();
-                self.set_block_and_update(pos, state);
-            } else if new_fluid != fluid {
+            if new_fluid != fluid {
                 let name = match kind {
                     FluidKind::Water | FluidKind::FlowingWater => "water",
                     FluidKind::Lava | FluidKind::FlowingLava => "lava",
@@ -635,6 +631,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 ) {
                     return;
                 }
+            }
+            if new_fluid.kind() == FluidKind::Empty {
+                fluid = new_fluid;
+                state = self.b.air();
+                self.set_block_and_update(pos, state);
+            } else if new_fluid != fluid {
                 fluid = new_fluid;
                 state = self.b.legacy_block(fluid);
                 self.set_block_and_update(pos, state);

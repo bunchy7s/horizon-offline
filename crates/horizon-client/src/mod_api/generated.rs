@@ -3915,8 +3915,8 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
-    /// A raid wave is about to be spawned at `pos`; `wave` is its one-based
-    /// wave number and `raiders` is the count Horizon will spawn. @API:native_raid_spawn_wave@.
+    /// A raid wave has been spawned at `pos`; `wave` is its one-based wave
+    /// number and `raiders` counts the raiders, not the mobs they ride. @API:native_raid_spawn_wave@.
     fn raid_spawn_wave(&self, host: &mut dyn Host, event: &mut RaidSpawnWaveEvent) {
         let _ = host;
         let _ = event;

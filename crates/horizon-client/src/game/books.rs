@@ -334,7 +334,12 @@ impl Game<'_> {
         {
             return;
         }
-        self.as_guest(host, conn, |g| {
+        let menu_slot = if p.slot == super::shield::OFFHAND_SLOT as i32 {
+            45
+        } else {
+            36 + p.slot as usize
+        };
+        let cancelled = self.as_guest(host, conn, |g| {
             let mut cancel = false;
             let writable = g
                 .stack_in(p.slot as usize)
@@ -351,10 +356,18 @@ impl Game<'_> {
                 );
             }
             if cancel {
-                return;
+                return true;
             }
-            g.write_book(p.slot as usize, p.pages, p.title)
+            g.write_book(p.slot as usize, p.pages, p.title);
+            false
         });
+        // A cancelled edit leaves the client's own copy of the book: forget
+        // what was sent so the next broadcast resends the server's stack.
+        if cancelled == Some(true)
+            && let Some(g) = host.hub.guests.iter_mut().find(|g| g.conn == conn)
+        {
+            g.menu_sent[menu_slot] = None;
+        }
     }
     pub(super) fn book_key(&mut self, event: &KeyEvent) {
         if event.state != ElementState::Pressed {

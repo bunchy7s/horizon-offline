@@ -4439,8 +4439,8 @@ impl Game<'_> {
         mod_api::dispatch_portal_create(self, mod_api::mods(), dimension, pos);
     }
 
-    /// A raid wave is about to be spawned at `pos`; `wave` is its one-based
-    /// wave number and `raiders` is the count Horizon will spawn. @API:native_raid_spawn_wave@.
+    /// A raid wave has been spawned at `pos`; `wave` is its one-based wave
+    /// number and `raiders` counts the raiders, not the mobs they ride. @API:native_raid_spawn_wave@.
     pub(super) fn native_raid_spawn_wave(
         &mut self,
         raid: i32,
