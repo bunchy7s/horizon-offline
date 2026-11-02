@@ -5554,6 +5554,18 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_item_picked_up(self, mod_api::mods(), player, item, count, canceled);
     }
+    /// A dropped item reaches its lifetime on the server (`ItemEntity.tick`,
+    /// NeoForge's `ItemExpireEvent`). Set or add to `extra_life` to keep it
+    /// for more ticks; zero or less lets it expire. Because Horizon stores age
+    /// unsigned, extensions are capped at the current age. @API:item_expire@.
+    pub(super) fn native_item_expire(
+        &mut self,
+        entity: u32,
+        stack: &ItemStack,
+        extra_life: &mut i32,
+    ) {
+        let _ = (entity, stack, extra_life);
+    }
     /// A player took a crafting grid's result (`ResultSlot.onTake`, NeoForge's
     /// `PlayerEvent.ItemCraftedEvent`): `player` is the player's uuid, `recipe`
     /// the recipe the grid matched (`minecraft:oak_planks`) and `stack` the
