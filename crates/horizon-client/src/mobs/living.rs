@@ -501,7 +501,11 @@ impl Mob {
         }
         // `EntityDimensions.scale(getScale())`: width and height by the scale,
         // the eye height by its height factor (the same one).
-        (f64::from(w * scale), f64::from(h * scale), f64::from(e * scale))
+        (
+            f64::from(w * scale),
+            f64::from(h * scale),
+            f64::from(e * scale),
+        )
     }
     pub fn eye_height(&self) -> f64 {
         self.dims().2
@@ -2106,7 +2110,10 @@ mod tests {
         villager.extra.model_scale = 4.0;
         let (w, h, e) = villager.dims();
         let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
-        assert!(close(w, 0.2) && close(h, 0.2) && close(e, 0.2), "asleep: {w}x{h}x{e}");
+        assert!(
+            close(w, 0.2) && close(h, 0.2) && close(e, 0.2),
+            "asleep: {w}x{h}x{e}"
+        );
     }
     /// `LivingEntity.sanitizeScale`: a shulker takes at most 3 and a happy
     /// ghast at most 1, and the box takes the capped value (`EntityType.SHULKER`
@@ -2126,7 +2133,10 @@ mod tests {
         assert_eq!(shulker.model_scale(), 3.0);
         let (w, h, e) = shulker.dims();
         let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
-        assert!(close(w, 3.0) && close(h, 3.0) && close(e, 1.5), "shulker: {w}x{h}x{e}");
+        assert!(
+            close(w, 3.0) && close(h, 3.0) && close(e, 1.5),
+            "shulker: {w}x{h}x{e}"
+        );
         let mut ghast = mob("minecraft:happy_ghast", Species::HappyGhast);
         ghast.extra.model_scale = 2.0;
         assert_eq!(ghast.model_scale(), 1.0);
