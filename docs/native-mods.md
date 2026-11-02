@@ -1741,15 +1741,18 @@ targets and the `hooks` metadata continue to work as before.
 
 ### Knockback hook versions
 
-The pending `living_knockback_v2` hook keeps `living_knockback` version 1 unchanged,
-as `menu_button_v2` does for its older hook. Both receive raw strength before knockback
-resistance. V2 runs after v1 on its existing paths, and additionally covers armor-stand
-sweeps; cancellation from either prevents motion. Its `attacker` is the attacker's network
-entity id, falling back to a known last hurt-by mob, or 0 when unknown. The synchronous
-damage code has no world handle to resolve held-item snapshots. Mob melee, player hits,
-sweeps and spears use the shared knockback path; direct velocity pushes (explosions,
-Punch arrows, hoglin throws) are not `LivingEntity.knockback` and do not fire it.
-The fragment assigns the new API number when stamped; the existing hook stays version 1.
+`living_knockback_v2` keeps `living_knockback` version 1 unchanged, as `menu_button_v2` does for
+its older hook: v1's function signature is a target mixin mods attach to, so it cannot gain
+arguments. Both already receive the raw strength before knockback resistance (v1 did before
+v2 existed). V2 adds three things: the attacker's network entity id (falling back to a known
+last hurt-by mob, or 0 when unknown), what the attacker holds (`attacker_main` and
+`attacker_off`: a player's selected and off-hand stacks, a mob's main hand; none when unknown,
+recorded only while a native mod is loaded), and armor-stand sweeps. V2 runs after v1 on
+their shared paths; cancellation from either prevents motion, so a trait mod that listens to
+both sees each hit twice and should pick one. Mob melee, player hits, sweeps and spears use the
+shared knockback path; direct velocity pushes (explosions, Punch arrows, hoglin throws) are not
+`LivingEntity.knockback` and do not fire it. The fragment assigns the new API number when
+stamped; the existing hook stays version 1.
 
 ### Reading server blocks (draft)
 
