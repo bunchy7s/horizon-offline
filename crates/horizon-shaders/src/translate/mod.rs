@@ -1916,6 +1916,25 @@ mod tests {
         .unwrap_or_else(|e| panic!("{e:?}"));
     }
 
+    /// A vertex stage that redeclares `gl_PerVertex` and whose block instance shares its name
+    /// with a function's parameter: it still writes the position, and the
+    /// block still reaches the fragment stage.
+    #[test]
+    fn a_per_vertex_redeclaration_and_a_parameter_named_like_the_instance() {
+        let vsh = "#version 460\nout gl_PerVertex { vec4 gl_Position; };\n\
+                   float luma(vec3 v) { return dot(v, vec3(0.3, 0.6, 0.1)); }\n\
+                   out VertexData {\n    layout(location = 1, component = 0) vec2 coord;\n} v;\n\
+                   void main() { v.coord = vec2(luma(vec3(1.0))); gl_Position = vec4(0.0, 0.0, 0.5, 1.0); }\n";
+        let fsh = "#version 460\nin VertexData {\n    layout(location = 1, component = 0) vec2 coord;\n} v;\n\
+                   /* RENDERTARGETS: 0 */\nlayout(location = 0) out vec4 c;\n\
+                   void main() { c = vec4(v.coord, 0.0, 1.0); }\n";
+        program(
+            &[("composite.vsh", vsh), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
     /// Interface blocks between the stages may give members their own interpolation (GLSL 4.60,
     /// 4.3.9; Shrimple's gbuffers programs): a `flat` member arrives flat.
     #[test]
