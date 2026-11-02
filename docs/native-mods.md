@@ -1234,6 +1234,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   in, so `native_tell` and the other helpers reach them. Set `cancel` to refuse it: the player keeps the state they
   had and gets their abilities back, so the client lands or flies again. Only what a client asks for is heard: not the
   flight a game-mode change starts or ends, and not a LAN host's own player.
+- **`native_player_item_held(player, name, from_slot, to_slot, cancel)`**: a server player selected a different
+  hotbar slot, after the slot range check and before it changes. The player's state is not swapped in, so helpers
+  that look them up through `self.lan` may find nothing while a guest packet is being handled. Set `cancel` to
+  keep the old slot; the client is sent that slot again.
 - **`native_sign_changed(player, name, dimension, pos, front, lines, cancel)`**: a player finished a sign they were
   editing, heard once every check has passed (editing that sign, in reach, not waxed, the chat filter) and right before
   the text goes on it. `lines` holds the four lines as written, formatting codes still in; rewrite them and that is
