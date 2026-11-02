@@ -114,6 +114,9 @@ audio = ["horizon-client-render/audio", "horizon-client-lib/audio"]
 controllers = ["horizon-client-lib/controllers", "dep:gilrs", "dep:horizon-dualsense", "horizon-client-input/controllers"]
 # Records the call sites of mob random draws (`mob_ai_probe` traces).
 rng-trace = ["horizon-core/rng-trace", "horizon-client-lib/rng-trace"]
+# Rust's allocations go to the system heap instead of mimalloc, where heap profilers that replace
+# malloc (heaptrack, valgrind's massif) see them. For profiling only: mimalloc is faster.
+system-allocator = []
 # Compatibility with earlier experiment commands: main already uses mimalloc.
 windows-mimalloc = []
 # Opt-in Windows heap experiment; see docs/windows-allocators.md.

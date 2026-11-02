@@ -826,6 +826,57 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A recipe filter's `replace_input` (#5910) reaches the book swapped:
+    /// the book writes from the network copy, so the swap must have run
+    /// there, once, before the ingredient normalization. A world's pack
+    /// carries the filter (the way the game reads them).
+    #[test]
+    fn a_recipe_filters_swapped_input_shows_swapped_in_the_book() {
+        let root = resources(
+            "filter_swap",
+            &[(
+                "copper_ingot_from_smelting_raw_copper",
+                r#"{"type":"minecraft:smelting","cookingtime":200,"experience":0.7,
+                    "ingredient":"minecraft:raw_copper",
+                    "result":{"id":"minecraft:copper_ingot"}}"#,
+            )],
+        );
+        let packs = vec![(
+            "recipe_filter/minecraft:swap".to_owned(),
+            vec![
+                br#"{"filters":[{"id":"minecraft:copper_ingot_from_smelting_raw_copper",
+                "replace_input":{"from":"minecraft:raw_copper","to":"minecraft:redstone"}}]}"#
+                    .to_vec(),
+            ],
+        )];
+        let overlay = horizon_world::loot::PackOverlay { files: &packs };
+        let sync = SyncData::load(&root, &overlay).unwrap();
+        let entries = sync.advancements.book_entries(
+            "minecraft:copper_ingot_from_smelting_raw_copper",
+            &sync,
+            NOTIFY_AND_HIGHLIGHT,
+        );
+        assert_eq!(entries.len(), 1, "the recipe has one display");
+        let mut r = Reader::new(&entries[0]);
+        let e = RecipeBookEntry::read(&mut r).unwrap();
+        assert_eq!(r.remaining(), 0, "the entry ends with its flags");
+        let item = |n: &str| sync.id("minecraft:item", n).unwrap();
+        assert_eq!(
+            e.requirements,
+            Some(vec![HolderSet::Items(vec![item("minecraft:redstone")])]),
+            "the filter's swapped input, not the file's"
+        );
+        let RecipeDisplay::Furnace { ingredient, .. } = e.display else {
+            panic!("a smelting recipe shows a furnace display");
+        };
+        assert_eq!(
+            ingredient,
+            SlotDisplay::Tag(HolderSet::Items(vec![item("minecraft:redstone")])),
+            "the display shows the swapped input too"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn blasting_reaches_the_blast_furnace_book() {
         let root = resources(

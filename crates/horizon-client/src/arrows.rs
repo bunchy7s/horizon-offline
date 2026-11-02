@@ -404,6 +404,18 @@ pub fn clip_block_stop(
     from: Vec3,
     movement: Vec3,
 ) -> Option<(Vec3, BlockPos, [i32; 3])> {
+    let (location, block, normal) = clip_block_hit(world, facts, collision, from, movement)?;
+    Some((back_off(location, movement), block, normal))
+}
+/// The clip of `clip_block_stop` before the back-off: the hit location (what a
+/// `BlockHitResult` carries), the block and the normal of the face.
+pub fn clip_block_hit(
+    world: &World,
+    facts: &BlockFacts,
+    collision: &BlockCollisionRegistry<'_>,
+    from: Vec3,
+    movement: Vec3,
+) -> Option<(Vec3, BlockPos, [i32; 3])> {
     let to = Vec3::new(
         from.x + movement.x,
         from.y + movement.y,
@@ -426,11 +438,7 @@ pub fn clip_block_stop(
     })
     .ok()
     .flatten()?;
-    Some((
-        back_off(hit.location, movement),
-        hit.block,
-        hit.direction.normal(),
-    ))
+    Some((hit.location, hit.block, hit.direction.normal()))
 }
 /// `AbstractArrow.onHitBlock`'s back-off: vanilla scales `(double) 0.05f` by
 /// `Math.signum` per axis, whose value at zero is zero (not Rust's -1.0).

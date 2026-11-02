@@ -61,17 +61,17 @@ CreateWorldScreen.createLevelSettings	port	crates/horizon-client/src/game/world_
 CreateWorldScreen.keyPressed	port	crates/horizon-client/src/title.rs::confirm_key_size	player: Enter with no button focused creates the world (Screenless Create mode falls through to create_action), as the screen does after its widgets decline the key
 CreateWorldScreen.extractRenderState	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	draws the footer separator
 CreateWorldScreen.extractMenuBackground	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	draws the tab header strip and menu background
-CreateWorldScreen.getOrCreateTempDataPackDir	missing		minor: temp folder for datapacks chosen at creation; Horizon has no create-time datapack picker
+CreateWorldScreen.getOrCreateTempDataPackDir	port	crates/horizon-client/src/title.rs:971 -> crate::datapack::temp_folder	the Create screen's chosen packs live in a temp folder under options.pack_dir
 CreateWorldScreen.openExperimentsScreen	missing		minor: Experiments screen, only in non-stable builds; Horizon's button is disabled and has no screen
-CreateWorldScreen.openDataPackSelectionScreen	missing		player: the Data Packs button is disabled on the More tab, so the datapack picker never opens
-CreateWorldScreen.tryApplyNewDataPacks	missing		player: part of the greyed-out Data Packs picker; picked packs never reach the new world
-CreateWorldScreen.applyNewPackConfig	missing		player: part of the greyed-out Data Packs picker; validates and applies the picked packs
+CreateWorldScreen.openDataPackSelectionScreen	port	crates/horizon-client/src/title.rs::Mode::DataPacks	the More tab's Data Packs button opens the pack selection screen, and Back reopens it (reopen_data_packs)
+CreateWorldScreen.tryApplyNewDataPacks	port	crates/horizon-client/src/title.rs::creation_packs + preparing	the chosen pack_dir and data_packs feed the worldgen read before the world is created
+CreateWorldScreen.applyNewPackConfig	inline	crates/horizon-client/src/title.rs::creation_packs	the selected ids are applied at creation rather than validated into a separate config object
 CreateWorldScreen.createDefaultLoadConfig	skip:data		builds the datapack load config; Horizon loads no datapack set at creation
-CreateWorldScreen.removeTempDataPackDir	missing		minor: cleanup of the temp datapack folder; no such folder in Horizon
-CreateWorldScreen.copyBetweenDirs	missing		minor: copies datapack files into the temp folder; not in Horizon
+CreateWorldScreen.removeTempDataPackDir	inline	crates/horizon-client/src/title.rs:831	the temp folder's cleanup on leaving the create screen
+CreateWorldScreen.copyBetweenDirs	port	crates/horizon-client-render/src/datapack.rs::copy_pack	a dropped pack is copied into the temp folder
 CreateWorldScreen.createNewWorldDirectory	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	makes the world folder and writes level.dat; gap: minor: datapack files not copied in
-CreateWorldScreen.createTempDataPackDirFromExistingWorld	missing		minor: Re-Create copies the old world's datapacks to a temp folder; Horizon's Re-Create does not
-CreateWorldScreen.getDataPackSelectionSettings	missing		minor: temp datapack repository for the picker; no picker in Horizon
+CreateWorldScreen.createTempDataPackDirFromExistingWorld	port	crates/horizon-client/src/title.rs:3644	Re-Create reopens the world's own data pack selection
+CreateWorldScreen.getDataPackSelectionSettings	inline	crates/horizon-client/src/title.rs::Mode::Create { options }	options.pack_dir and options.data_packs are the selection settings
 CreateWorldScreen.GameTab.<init>	port	crates/horizon-client/src/title/create_world.rs::buttons	Game tab: name box, game mode, difficulty, allow cheats; gap: minor: vanilla's Experiments button sits on this tab in non-stable builds
 CreateWorldScreen.MoreTab.openGameRulesScreen	port	crates/horizon-client/src/title.rs::Title::click_action	Game Rules button (arm 29) over a copy of the rules, via RulesScreen::for_creation
 CreateWorldScreen.WorldTab.<init>	port	crates/horizon-client/src/title/create_world.rs::buttons	World tab: world type, customize, seed box (field 1), structures and bonus chest; gap: player: only Default and Superflat are offered, vanilla also offers Amplified and other presets

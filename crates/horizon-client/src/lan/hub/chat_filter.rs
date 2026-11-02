@@ -3,7 +3,7 @@
 //! sender is told in private, and the game logs it and bans when the escalation says so
 //! (`HostEvent::ChatFiltered`).
 use super::{HostEvent, Hub, chat::now_millis};
-use horizon_chat_filter::{Action, Guard};
+use horizon_chat_filter::{Action, Guard, Mute, duration_text};
 use horizon_protocol::{
     packets::play::{self, Clientbound as C},
     text::literal,
@@ -38,27 +38,42 @@ impl Place {
     }
 }
 
-/// What the sender reads when their text was refused (`hit` false: refused because they are muted).
-pub fn notice(place: Place, hit: bool, action: Action, now: i64) -> String {
-    let minutes = |until: i64| (until - now + 59_999) / 60_000;
+/// What the sender reads when their text held a slur.
+pub fn notice(place: Place, action: Action, now: i64) -> String {
     let refused = match place {
         Place::Chat | Place::Command => "That message wasn't sent",
         Place::Sign => "That sign wasn't changed",
         Place::Anvil => "That name wasn't used",
         Place::Book => "That book wasn't signed",
     };
-    match (hit, action) {
-        (false, Action::Muted { until }) => {
-            format!(
-                "You're muted for {} more minutes: slurs aren't allowed here.",
-                minutes(until)
-            )
-        }
-        (_, Action::Muted { until }) => format!(
-            "{refused}: slurs aren't allowed here. You're muted for {} minutes.",
-            minutes(until)
+    match action {
+        Action::Muted { until } => format!(
+            "{refused}: slurs aren't allowed here. You're muted for {}.",
+            duration_text(until - now)
         ),
         _ => format!("{refused}: slurs aren't allowed here."),
+    }
+}
+
+/// What a muted player reads: when they try to chat, and when an operator mutes them.
+pub fn muted_notice(mute: &Mute, now: i64) -> String {
+    let time = match mute.until {
+        // "2 more minutes".
+        Some(until) => format!(
+            "for {}",
+            duration_text(until - now).replacen(' ', " more ", 1)
+        ),
+        None => "until an operator unmutes you".into(),
+    };
+    let why = match (&mute.by, &mute.reason) {
+        (None, _) => "slurs aren't allowed here",
+        (Some(_), Some(reason)) => reason,
+        (Some(_), None) => "",
+    };
+    if why.is_empty() {
+        format!("You're muted {time}.")
+    } else {
+        format!("You're muted {time}: {why}.")
     }
 }
 
@@ -98,15 +113,12 @@ impl Hub {
         };
         let (uuid, now) = (self.guests[i].uuid, now_millis());
         let hit = texts.iter().any(|t| guard.filter.matches(t));
-        let muted = place
-            .is_chat()
-            .then(|| guard.muted_until(uuid, now))
-            .flatten();
+        let muted = place.is_chat().then(|| guard.muted(uuid, now)).flatten();
         if !hit {
-            let Some(until) = muted else {
+            let Some(mute) = muted else {
                 return true;
             };
-            let text = notice(place, false, Action::Muted { until }, now);
+            let text = muted_notice(mute, now);
             self.guests[i].send(&C::SystemChat(play::SystemChat {
                 content: red(&text),
                 overlay: false,
@@ -116,7 +128,7 @@ impl Hub {
         // An anvil renames at every key typed: refused quietly, on the action bar, with no hit.
         if place == Place::Anvil {
             self.guests[i].send(&C::SystemChat(play::SystemChat {
-                content: red(&notice(place, true, Action::Refused, now)),
+                content: red(&notice(place, Action::Refused, now)),
                 overlay: true,
             }));
             return false;
@@ -125,7 +137,7 @@ impl Hub {
         let (count, action) = guard.strike(uuid, &name, now);
         if !matches!(action, Action::Banned { .. }) {
             self.guests[i].send(&C::SystemChat(play::SystemChat {
-                content: red(&notice(place, true, action, now)),
+                content: red(&notice(place, action, now)),
                 overlay: false,
             }));
         }
@@ -138,6 +150,38 @@ impl Hub {
             action,
         });
         false
+    }
+
+    /// An operator's `/mute` or `/tempmute`; the player is told if they are here.
+    pub fn mute(
+        &mut self,
+        uuid: u128,
+        name: &str,
+        until: Option<i64>,
+        by: &str,
+        reason: Option<String>,
+    ) {
+        let Some(guard) = self.chat_filter.as_deref_mut() else {
+            return;
+        };
+        let now = now_millis();
+        guard.mute(uuid, name, until, by, reason);
+        let Some(text) = guard.muted(uuid, now).map(|m| muted_notice(m, now)) else {
+            return;
+        };
+        for g in self.guests.iter().filter(|g| g.uuid == uuid) {
+            g.send(&C::SystemChat(play::SystemChat {
+                content: red(&text),
+                overlay: false,
+            }));
+        }
+    }
+
+    /// The mutes in force, by name.
+    pub fn mutes(&self) -> Vec<Mute> {
+        self.chat_filter.as_deref().map_or_else(Vec::new, |g| {
+            g.mutes(now_millis()).into_iter().cloned().collect()
+        })
     }
 
     /// `/unmute <player>`: the name as it was muted, if they were.
@@ -162,13 +206,12 @@ mod tests {
     fn the_sender_is_told_why() {
         let now = 1_000_000;
         assert_eq!(
-            notice(Place::Chat, true, Action::Refused, now),
+            notice(Place::Chat, Action::Refused, now),
             "That message wasn't sent: slurs aren't allowed here."
         );
         assert_eq!(
             notice(
                 Place::Command,
-                true,
                 Action::Muted {
                     until: now + 600_000
                 },
@@ -176,19 +219,27 @@ mod tests {
             ),
             "That message wasn't sent: slurs aren't allowed here. You're muted for 10 minutes."
         );
+        let mute = |until, by: Option<&str>, reason: Option<&str>| Mute {
+            uuid: String::new(),
+            name: "Ann".into(),
+            until,
+            by: by.map(Into::into),
+            reason: reason.map(Into::into),
+        };
         assert_eq!(
-            notice(
-                Place::Chat,
-                false,
-                Action::Muted {
-                    until: now + 61_000
-                },
-                now
-            ),
+            muted_notice(&mute(Some(now + 61_000), None, None), now),
             "You're muted for 2 more minutes: slurs aren't allowed here."
         );
         assert_eq!(
-            notice(Place::Sign, true, Action::Refused, now),
+            muted_notice(&mute(None, Some("Op"), Some("spam")), now),
+            "You're muted until an operator unmutes you: spam."
+        );
+        assert_eq!(
+            muted_notice(&mute(Some(now + 7_200_000), Some("Op"), None), now),
+            "You're muted for 2 more hours."
+        );
+        assert_eq!(
+            notice(Place::Sign, Action::Refused, now),
             "That sign wasn't changed: slurs aren't allowed here."
         );
         assert!(Place::Chat.is_chat() && Place::Command.is_chat() && !Place::Sign.is_chat());
