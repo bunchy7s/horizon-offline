@@ -15176,7 +15176,9 @@ impl Game<'_> {
         }
         self.save_level(wait)?;
         self.save_parked_levels(wait)?;
-        self.save_game_metadata()
+        self.save_game_metadata()?;
+        self.native_world_saved(wait);
+        Ok(())
     }
     fn save_game_metadata(&mut self) -> Result<()> {
         self.save_maps();
