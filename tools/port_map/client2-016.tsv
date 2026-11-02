@@ -76,4 +76,4 @@ TestBlockEditScreen	home	crates/horizon-client/src/game/block_editor.rs
 TestInstanceBlockEditScreen	home	crates/horizon-client/src/game/block_editor.rs	
 BelowOrAboveWidgetTooltipPositioner.positionTooltip	port	crates/horizon-client-render/src/ui.rs::menu_tooltip_position	the tooltip under the widget, over it when it does not fit, with vanilla's margins and overlaps
 ClientActivePlayersTooltip.getWidth	port	crates/horizon-client/src/multiplayer.rs::player_list	the sample's names are the tooltip's lines; its width comes from them (the status tooltip's own sizing)
-ClientActivePlayersTooltip.extractImage	port	crates/horizon-client/src/multiplayer.rs::player_list	each sample name styled by its § codes, then and_more for the players the sample leaves out
+ClientActivePlayersTooltip.extractImage	inline	crates/horizon-client/src/multiplayer.rs::player_list	the sample names, styled by their § codes, become the tooltip's text lines, then and_more for the players the sample leaves out; gap: player: no player face is drawn beside each name (vanilla draws a 10x10 face per entry through PlayerFaceExtractor), so the tooltip is text only
