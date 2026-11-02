@@ -180,7 +180,7 @@ CollectingNeighborUpdater.addAndRun	port	crates/horizon-world/src/level/update.r
 CollectingNeighborUpdater.neighborChanged	port	crates/horizon-world/src/level/update.rs::Sim::neighbor_changed_at	Simple update
 CollectingNeighborUpdater.runUpdates	port	crates/horizon-world/src/level/update.rs::Sim::run_updates	
 CollectingNeighborUpdater.shapeUpdate	port	crates/horizon-world/src/level/update.rs::Sim::neighbor_shape_changed	
-CollectingNeighborUpdater.updateNeighborsAtExceptFromFacing	port	crates/horizon-world/src/level/update.rs::Sim::update_neighbors_at_except	
+CollectingNeighborUpdater.updateNeighborsAtExceptFromFacing	port	crates/horizon-world/src/level/update.rs::Sim::update_neighbors_at_except_oriented	the Multi update with one side skipped; the orientation is threaded through here (callers pass the one they have)
 CollectingNeighborUpdater.FullNeighborUpdate.runNext	port	crates/horizon-world/src/level/update.rs::Update::next	Full arm
 CollectingNeighborUpdater.MultiNeighborUpdate.forEachUpdatedPos	inline	crates/horizon-world/src/level/update.rs::Update::next	Multi arm steps the index and skips the facing side
 CollectingNeighborUpdater.MultiNeighborUpdate.runNext	port	crates/horizon-world/src/level/update.rs::Update::next	Multi arm

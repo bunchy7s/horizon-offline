@@ -890,6 +890,9 @@ impl Game<'_> {
         self.settle_spawn()?;
         let gate_lists = lists.clone();
         let gate: LoginGate = Arc::new(move |address, uuid, name| {
+            // `ServerActivityMonitor.reportLoginActivity`: a login attempt, however it ends. The management
+            // protocol's `server/activity` notification is rate limited from these.
+            events::record_server("login_activity", serde_json::json!({}));
             let user = NameAndId {
                 id: uuid,
                 name: name.to_owned(),
@@ -1829,6 +1832,16 @@ impl Game<'_> {
         if changed {
             self.native_whitelist_state_update(on);
         }
+    }
+
+    /// `DedicatedServer.setMaxPlayers`: the live login limit, and `max-players` in
+    /// server.properties.
+    fn set_max_players(&mut self, state: &mut ServerState, max_players: usize) {
+        state.max_players = max_players;
+        if let Some(lan) = &self.lan {
+            lan.hub.lan.shared.set_max_players(max_players);
+        }
+        self.store_property("max-players", max_players.to_string());
     }
 
     /// `DedicatedServer.setEnforceWhitelist`: the flag, and `enforce-whitelist` in

@@ -116,7 +116,7 @@ impl Launcher {
         self.native_update = None;
         self.settings.instance =
             (instance.kind != InstanceKind::Default).then(|| instance.id.clone());
-        self.settings.save();
+        self.save_settings();
     }
 
     /// A texture from the selected version's prepared files, its first frame, drawn as pixels.
@@ -849,13 +849,16 @@ impl Launcher {
         if self.client.is_some() || self.starting_client.is_some() {
             return;
         }
-        match instances::delete(id) {
-            Ok(_) => {
+        match instances::delete_with_selection(id) {
+            Ok((_, saved)) => {
                 self.instances.confirm_delete = None;
+                self.instances.delete_error = None;
                 // Play starts Horizon again; the window's copy of the settings says so too.
                 if self.settings.instance.as_deref() == Some(id) {
                     self.settings.instance = None;
-                    self.settings.save();
+                    self.save_settings();
+                } else if let Err(error) = saved {
+                    self.settings_save_error = Some(error);
                 }
                 self.reload_instances();
             }

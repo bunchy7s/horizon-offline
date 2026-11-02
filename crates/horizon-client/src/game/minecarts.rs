@@ -1875,6 +1875,13 @@ impl Game<'_> {
             .modified
             .insert((hit.pos[0] >> 4, hit.pos[2] >> 4));
         self.carts.push(cart);
+        if self.serving.is_some() || self.options.dedicated.is_some() {
+            let cart = self.carts.last().unwrap();
+            self.native_vehicle_create(
+                cart.kind.id(),
+                [cart.position.x, cart.position.y, cart.position.z],
+            );
+        }
         if !self.creative {
             self.consume_held();
         }
@@ -2134,7 +2141,13 @@ impl Game<'_> {
     /// `VehicleEntity.hurtServer`: shake, add the damage, break past 40 (at
     /// once for creative players); TNT minecarts prime instead when moving
     /// or hurt by fire or an explosion (`damageSourceIgnitesTnt`).
-    pub(super) fn hurt_cart(&mut self, i: usize, damage: f32, creative: bool, fire: bool) {
+    pub(super) fn hurt_cart(&mut self, i: usize, mut damage: f32, creative: bool, fire: bool) {
+        let kind = self.carts[i].kind.id();
+        let mut cancel = false;
+        self.native_vehicle_damage(kind, &mut damage, &mut cancel);
+        if cancel {
+            return;
+        }
         let destroyed = {
             let c = &mut self.carts[i];
             c.hurt_dir = -c.hurt_dir;
@@ -2153,6 +2166,14 @@ impl Game<'_> {
             let id = self.carts[i].id;
             if !tnt_prime {
                 self.release_vehicle_container(id);
+            }
+            if !tnt_prime {
+                let at = [
+                    self.carts[i].position.x,
+                    self.carts[i].position.y,
+                    self.carts[i].position.z,
+                ];
+                self.native_vehicle_destroy(self.carts[i].kind.id(), at);
             }
             let mut c = self.carts.remove(i);
             if c.kind == CartKind::Tnt && (fire || speed >= f64::from(0.01f32)) {

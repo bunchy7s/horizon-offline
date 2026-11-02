@@ -146,6 +146,7 @@ impl Game<'_> {
         }) else {
             return;
         };
+        self.native_entity_unleash(id, &kind);
         if used
             && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
         {

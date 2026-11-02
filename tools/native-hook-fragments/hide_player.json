@@ -1,9 +1,0 @@
-{
-  "hooks": [],
-  "helpers": [
-    {"name": "hide_player", "target": "horizon_client::game::native_server::Game<'_>::native_hide_player"}
-  ],
-  "rust_summary": "hiding a player from the players below a permission level (`native_hide_player`).",
-  "doc_summary": "hiding a player (a vanish): `native_hide_player(uuid, level)` hides that player, from the next tick, from the players below permission `level` (None shows them again): they leave those players' Tab list and world (their clients stop tracking them, as they do a spectator) and those players don't read them joining or leaving. Players of `level` or more still see them; a player made an operator sees them again. It is kept by UUID, for a player who is off too, until a mod sets it again or the server stops. Server only; false on a client. Bundles need \"hooks\": @API:hide_player@.",
-  "comments": ["crates/horizon-client/src/game/native_server.rs"]
-}
