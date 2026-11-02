@@ -709,6 +709,8 @@ impl Mob {
             state,
             at: [at.x, at.y, at.z],
             count,
+            // `sendParticles(..., 0.15)`: the crumbs fly up a little.
+            speed: f64::from(0.15_f32),
         });
     }
     /// Entity.updateFluidInteraction: the fluid state, then touching water

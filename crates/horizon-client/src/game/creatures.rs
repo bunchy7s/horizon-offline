@@ -1789,13 +1789,12 @@ impl Game<'_> {
                 MobEvent::BubbleColumnParticles { pos } => {
                     self.bubble_column_particles(BlockPos::new(pos[0], pos[1], pos[2]))
                 }
-                MobEvent::LandingDust { state, at, count } => self.landing_dust(
-                    None,
+                MobEvent::LandingDust {
                     state,
-                    Vec3::new(at[0], at[1], at[2]),
+                    at,
                     count,
-                    f64::from(0.15_f32),
-                ),
+                    speed,
+                } => self.landing_dust(None, state, Vec3::new(at[0], at[1], at[2]), count, speed),
                 MobEvent::SquidCycle { mob, at } => self.lan_entity_event(mob as i32, 19, at),
                 MobEvent::RabbitHop { mob, at } => self.lan_entity_event(mob as i32, 1, at),
                 MobEvent::Drown { mob, at } => {

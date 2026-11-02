@@ -212,13 +212,12 @@ pub(super) fn optimal_jump_vector(m: &mut Mob, target: Vec3) -> Option<Vec3> {
 pub fn discards_friction(m: &Mob) -> bool {
     m.species() == Species::Breeze && pose(m) == LONG_JUMPING
 }
-/// The random draws of `Breeze.tick` before `super.tick()`: the ground
-/// particle count (standing, shooting or inhaling) and the whirl sound clock
-/// (`playWhirlSound` is a local sound, heard on the client only).
-pub fn tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
-    if matches!(pose(m), SHOOTING | INHALING | STANDING) {
-        // emitGroundParticles(1 + random.nextInt(1))
-        let _ = m.random.next_int_bound(1);
+/// `Breeze.tick` before `super.tick()`: the ground particles the pose asks
+/// for, then the whirl sound clock (`playWhirlSound` is a local sound, heard on
+/// the client only).
+pub fn tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+    if let Some(count) = ground_particle_count(m) {
+        emit_ground_particles(m, w, count, events);
     }
     if m.extra.vector[2] == 0.0 {
         m.extra.vector[2] = f64::from(m.random.next_int_between_inclusive(1, 80).unwrap_or(1));
@@ -235,6 +234,46 @@ pub fn tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
             pitch,
         ));
     }
+}
+/// The crumbs `Breeze.tick`'s pose arm asks `emitGroundParticles` for: inhaling
+/// twenty, standing, shooting and sliding `1 + random.nextInt(1)`, and none for
+/// the long jump (which draws its own trail). The draw is made even when there
+/// is no block to crumble, so it is part of the tick's random.
+pub fn ground_particle_count(m: &mut Mob) -> Option<u32> {
+    match pose(m) {
+        INHALING => Some(20),
+        STANDING | SHOOTING | SLIDING => Some(1 + m.random.next_int_bound(1).unwrap_or(0) as u32),
+        _ => None,
+    }
+}
+/// `Breeze.emitGroundParticles(count)`: `count` crumbs of the block the breeze
+/// stands in (else the one it stands on), drawn at rest at the centre of its
+/// box and the height of its feet.
+pub fn emit_ground_particles(m: &Mob, w: &MobWorld, count: u32, events: &mut Vec<MobEvent>) {
+    if m.extra.passenger {
+        return;
+    }
+    let p = m.position;
+    // `getInBlockState`, else `getBlockStateOn`.
+    let cell = [p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32];
+    let in_block = w.world.block(cell[0], cell[1], cell[2]);
+    let state = if w.facts.is_air(in_block) {
+        let on = m.block_on_legacy(w);
+        w.world.block(on[0], on[1], on[2])
+    } else {
+        in_block
+    };
+    if w.facts.get(state).render_shape == crate::blocks::RenderShape::Invisible {
+        return;
+    }
+    events.push(MobEvent::LandingDust {
+        state,
+        // `getBoundingBox().getCenter()` on x and z, `position().y` for it.
+        at: [p.x, p.y, p.z],
+        count: count as i32,
+        // `addParticle(..., 0.0, 0.0, 0.0)`: no speed to the crumbs.
+        speed: 0.0,
+    });
 }
 /// The client's pose-driven animation states (`onSyncedDataUpdated` and
 /// `Breeze.tick`).
