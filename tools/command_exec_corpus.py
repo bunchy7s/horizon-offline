@@ -1718,6 +1718,39 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def armor_stand_climbing():
+    ops = setup('/gamerule random_tick_speed 0', '/forceload add 0 0 31 31',
+                '/fill 0 198 0 31 199 31 stone',
+                '/fill 0 200 0 31 214 31 air', '/fill 10 200 9 10 212 11 stone')
+    for block, below in [
+            ('air', False), ('ladder[facing=west]', False),
+            ('vine[east=true]', False), ('twisting_vines_plant', False),
+            ('weeping_vines_plant', False),
+            ('oak_trapdoor[open=true,facing=west]', True),
+            ('oak_trapdoor[open=true,facing=east]', True)]:
+        ops += setup('/fill 9 200 10 9 213 10 air',
+                     f'/fill 9 200 10 9 210 10 {block}')
+        if block == 'weeping_vines_plant':
+            ops += setup('/fill 9 200 10 9 212 10 weeping_vines_plant',
+                         '/setblock 9 213 10 stone')
+        if below:
+            ops += setup('/setblock 9 209 10 ladder[facing=west]')
+        for x, motion in [(9.5, '[0.0d,0.0d,0.0d]'), (8.5, '[1.0d,0.0d,0.0d]'),
+                          (8.5, '[2.0d,0.0d,0.0d]')]:
+            y = 210 if x == 9.5 else 200
+            ops += setup(f'/summon armor_stand {x} {y} 10.5 {{Silent:1b,Tags:["climb"],Motion:{motion}}}')
+            previous = 0
+            for tick in (1, 2, 3, 5, 10, 20, 30, 40):
+                ops.append({'op': 'tick', 'n': tick - previous})
+                previous = tick
+                for path in ('Pos', 'Motion', 'OnGround', 'Health'):
+                    ops.append(cmd(f'/data get entity @e[tag=climb,limit=1] {path}'))
+            ops += setup('/kill @e[tag=climb]')
+    ops += setup('/fill 0 198 0 31 214 31 air', '/forceload remove 0 0 31 31',
+                 '/gamerule random_tick_speed 3')
+    return ops
+
+
 def groups():
     return [
         ('setup', group_setup()),
@@ -1727,6 +1760,7 @@ def groups():
         ('player state', player_state()),
         ('blocks and border', world_blocks()),
         ('entities', entities()),
+        ('armor stand climbing', armor_stand_climbing()),
         ('wither spawn', wither_spawn()),
         ('riding teleport', riding_teleport()),
         ('mob riding', mob_riding()),

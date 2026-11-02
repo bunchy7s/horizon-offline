@@ -380,7 +380,18 @@ mod tests {
             binding: &collision,
             subject: None,
         };
-        still.tick(&mut scene, &facts, in_water, &mut |_, _| {}, None);
+        let empty = Default::default();
+        let climbing =
+            horizon_world::climbing::ClimbingRegistry::new(assets.registry, &empty, &empty, &empty)
+                .unwrap();
+        still.tick(
+            &mut scene,
+            &facts,
+            &climbing,
+            in_water,
+            &mut |_, _| {},
+            None,
+        );
         assert_eq!(still.position.x, at.x);
         assert_eq!(still.velocity.x, 0.0);
 
@@ -394,7 +405,14 @@ mod tests {
             binding: &collision,
             subject: None,
         };
-        marker.tick(&mut scene, &facts, in_water, &mut |_, _| {}, None);
+        marker.tick(
+            &mut scene,
+            &facts,
+            &climbing,
+            in_water,
+            &mut |_, _| {},
+            None,
+        );
         assert_eq!(marker.position, at);
         assert_eq!(marker.velocity, Vec3::ZERO);
 
@@ -406,7 +424,14 @@ mod tests {
             binding: &collision,
             subject: None,
         };
-        carried.tick(&mut scene, &facts, in_water, &mut |_, _| {}, None);
+        carried.tick(
+            &mut scene,
+            &facts,
+            &climbing,
+            in_water,
+            &mut |_, _| {},
+            None,
+        );
         assert!((carried.position.x - (at.x + 0.014)).abs() < 1e-12);
         assert!((carried.velocity.x - 0.014 * f64::from(0.8f32)).abs() < 1e-12);
         for _ in 0..20 {
@@ -416,7 +441,14 @@ mod tests {
                 binding: &collision,
                 subject: None,
             };
-            carried.tick(&mut scene, &facts, in_water, &mut |_, _| {}, None);
+            carried.tick(
+                &mut scene,
+                &facts,
+                &climbing,
+                in_water,
+                &mut |_, _| {},
+                None,
+            );
         }
         assert!(carried.position.x > at.x + 0.5);
     }

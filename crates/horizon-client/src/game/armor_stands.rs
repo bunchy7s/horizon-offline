@@ -813,6 +813,7 @@ impl Game<'_> {
             a.tick(
                 &mut scene,
                 facts,
+                &self.res.motion().climbing,
                 in_water,
                 &mut |bounds, velocity| {
                     horizon_client::motion::bubble_column_push_over(
