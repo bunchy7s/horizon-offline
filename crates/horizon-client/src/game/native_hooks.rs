@@ -3048,6 +3048,10 @@ impl Game<'_> {
     pub(super) fn native_brewing_start(&self, pos: [i32; 3], ingredient: &str) {
         let _ = (pos, ingredient);
     }
+    /// An item was placed on a campfire at `pos` and began cooking. @API:campfire_start@.
+    pub(super) fn native_campfire_start(&self, pos: [i32; 3], item: &str) {
+        let _ = (pos, item);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

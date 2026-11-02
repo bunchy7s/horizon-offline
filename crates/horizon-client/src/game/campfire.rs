@@ -48,6 +48,7 @@ impl Game<'_> {
             _ => false,
         };
         if placed {
+            self.native_campfire_start(pos, &held.item);
             // ItemStack.consumeAndReturn: creative keeps the item.
             self.consume_held();
             self.stats.custom("interact_with_campfire", 1);
