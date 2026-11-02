@@ -9,6 +9,7 @@
 //! path ends in `.json`, the game listens on a random localhost TCP port and
 //! writes `{"transport":"tcp","port":N,"token":"..."}` to the path, readable
 //! only by its user; a client's first line must then be `auth TOKEN`.
+use crate::block_entity_render::StaticCacheFrameStats;
 use std::{
     io::{self, BufRead, BufReader, Read, Write},
     net::{Ipv4Addr, TcpListener, TcpStream},
@@ -411,6 +412,30 @@ mod tests {
         assert_eq!(random_token().len(), 32);
         assert!(same_token("abc", "abc") && !same_token("abc", "abd") && !same_token("a", "ab"));
     }
+
+    #[test]
+    fn frame_summary_reports_block_entity_cache_work() {
+        let mut stats = FrameStats::default();
+        stats.record(10.0);
+        stats.record_cpu(5.0);
+        stats.record_block_entities(StaticCacheFrameStats {
+            snapshot_rebuilds: 2,
+            snapshot_bytes_built: 128,
+            static_bytes_uploaded: 96,
+            static_entities_drawn: 4,
+            dynamic_entities_drawn: 3,
+            ..Default::default()
+        });
+
+        let summary = stats.summary();
+        assert_eq!(summary["static_snapshot_rebuilds"], 2);
+        assert_eq!(summary["static_snapshot_bytes_built"], 128);
+        assert_eq!(summary["static_bytes_uploaded"], 96);
+        assert_eq!(summary["static_entities_drawn"], 4);
+        assert_eq!(summary["dynamic_entities_drawn"], 3);
+        assert_eq!(summary["static_entities_drawn_avg_per_frame"], 4.0);
+        assert_eq!(summary["dynamic_entities_drawn_avg_per_frame"], 3.0);
+    }
 }
 
 /// Frame durations since the last reset, summarized like the Java recorder,
@@ -422,6 +447,11 @@ pub struct FrameStats {
     gpu: Vec<f32>,
     /// Milliseconds per frame phase (`PHASES`), one entry per rendered frame.
     phases: Vec<[f32; PHASES.len()]>,
+    static_snapshot_rebuilds: u64,
+    static_snapshot_bytes_built: u64,
+    static_bytes_uploaded: u64,
+    static_entities_drawn: u64,
+    dynamic_entities_drawn: u64,
 }
 
 /// The parts of a frame's CPU time: world streaming and uploads, game ticks,
@@ -490,6 +520,14 @@ impl FrameStats {
             self.gpu.extend_from_slice(millis);
         }
     }
+    /// Block-entity cache counters for the frame just rendered.
+    pub fn record_block_entities(&mut self, stats: StaticCacheFrameStats) {
+        self.static_snapshot_rebuilds += stats.snapshot_rebuilds;
+        self.static_snapshot_bytes_built += stats.snapshot_bytes_built;
+        self.static_bytes_uploaded += stats.static_bytes_uploaded;
+        self.static_entities_drawn += stats.static_entities_drawn;
+        self.dynamic_entities_drawn += stats.dynamic_entities_drawn;
+    }
     /// Every recorded frame time, in milliseconds, in order.
     pub fn frame_millis(&self) -> &[f32] {
         &self.millis
@@ -507,6 +545,11 @@ impl FrameStats {
         self.cpu.clear();
         self.gpu.clear();
         self.phases.clear();
+        self.static_snapshot_rebuilds = 0;
+        self.static_snapshot_bytes_built = 0;
+        self.static_bytes_uploaded = 0;
+        self.static_entities_drawn = 0;
+        self.dynamic_entities_drawn = 0;
     }
     pub fn summary(&self) -> serde_json::Value {
         let mut sorted = self.millis.clone();
@@ -550,6 +593,13 @@ impl FrameStats {
             "gpu": percentiles(&self.gpu),
             "phases_avg_ms": self.phase_average(0.0),
             "slow_phases_avg_ms": slow_phases,
+            "static_snapshot_rebuilds": self.static_snapshot_rebuilds,
+            "static_snapshot_bytes_built": self.static_snapshot_bytes_built,
+            "static_bytes_uploaded": self.static_bytes_uploaded,
+            "static_entities_drawn": self.static_entities_drawn,
+            "dynamic_entities_drawn": self.dynamic_entities_drawn,
+            "static_entities_drawn_avg_per_frame": self.static_entities_drawn as f64 / n as f64,
+            "dynamic_entities_drawn_avg_per_frame": self.dynamic_entities_drawn as f64 / n as f64,
         })
     }
 }
