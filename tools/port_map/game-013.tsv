@@ -58,6 +58,7 @@ Parrot.createAttributes	skip:data		attributes (health 6, flying speed 0.4) come 
 Parrot.createNavigation	port	crates/horizon-client/src/mobs/parrot.rs::register	flying navigation and a flying move control, no doors, floats
 Parrot.calculateFlapping	port	crates/horizon-client/src/mobs/parrot.rs::calculate_flapping	
 Parrot.checkParrotSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Parrot arm: parrots_spawnable_on below and bright enough
+Parrot.isFlapping	port	crates/horizon-client/src/mobs/parrot.rs::process_flapping	strict flyDist > nextFlap, used by air movement and live Game flap dispatch
 Parrot.onFlap	port	crates/horizon-client/src/mobs/parrot.rs::process_flapping	the wing-beat sound at 0.15 and nextFlap
 Parrot.hurtServer	port	crates/horizon-client/src/mobs/tame.rs::stand_when_hurt	
 Parrot.get	skip:other		reads the variant as a data component for predicates; Horizon has no entity component view
