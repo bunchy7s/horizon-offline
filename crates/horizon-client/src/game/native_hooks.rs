@@ -7486,14 +7486,14 @@ impl Game<'_> {
     /// The IDs of the level's item entities, for `native_items_left_since`
     /// (none on a client of a server, which tells nothing).
     pub(super) fn dropped_ids(&self) -> Vec<u32> {
-        if self.remote.is_some() {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
             return Vec::new();
         }
         self.dropped.iter().map(|e| e.id).collect()
     }
     /// The IDs of the level's experience orbs, for `native_orbs_left_since`.
     pub(super) fn orb_ids(&self) -> Vec<u32> {
-        if self.remote.is_some() {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
             return Vec::new();
         }
         self.orbs.iter().map(|o| o.id).collect()
@@ -7501,7 +7501,7 @@ impl Game<'_> {
     /// The (id, kind) of the level's mobs, for `native_mobs_left_since` (none
     /// on a client of a server, which tells nothing).
     pub(super) fn mob_ids(&self) -> Vec<(u32, String)> {
-        if self.remote.is_some() {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
             return Vec::new();
         }
         self.mobs.iter().map(|m| (m.id, mob_kind(m))).collect()
@@ -7509,6 +7509,10 @@ impl Game<'_> {
     /// The mobs of `before` gone since have left the level (died, despawned,
     /// entered a hive, unloaded). Mobs spawned meanwhile are not counted.
     pub(super) fn native_mobs_left_since(&mut self, before: &[(u32, String)]) {
+        // Nothing was taken: no mod listens, or a client of a server.
+        if before.is_empty() {
+            return;
+        }
         let now: std::collections::HashSet<u32> = self.mobs.iter().map(|m| m.id).collect();
         for (kind, ids) in vanished_by_kind(before, &now) {
             self.native_entities_left(&kind, &ids);
@@ -7516,6 +7520,10 @@ impl Game<'_> {
     }
     /// The item entities of `before` gone since have left the level.
     pub(super) fn native_items_left_since(&mut self, before: &[u32]) {
+        // Nothing was taken: no mod listens, or a client of a server.
+        if before.is_empty() {
+            return;
+        }
         let now: std::collections::HashSet<u32> = self.dropped.iter().map(|e| e.id).collect();
         let gone: Vec<u32> = before
             .iter()
@@ -7526,6 +7534,10 @@ impl Game<'_> {
     }
     /// The experience orbs of `before` gone since have left the level.
     pub(super) fn native_orbs_left_since(&mut self, before: &[u32]) {
+        // Nothing was taken: no mod listens, or a client of a server.
+        if before.is_empty() {
+            return;
+        }
         let now: std::collections::HashSet<u32> = self.orbs.iter().map(|o| o.id).collect();
         let gone: Vec<u32> = before
             .iter()
