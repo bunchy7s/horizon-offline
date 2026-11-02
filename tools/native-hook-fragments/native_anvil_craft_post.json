@@ -3,7 +3,7 @@
     {
       "name": "anvil_craft_post",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_anvil_craft_post",
-      "side": "both",
+      "side": "server",
       "neoforge": "AnvilCraftEvent.Post",
       "mod_api": {
         "contract": "listen"

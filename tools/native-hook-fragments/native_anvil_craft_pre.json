@@ -3,7 +3,7 @@
     {
       "name": "anvil_craft_pre",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_anvil_craft_pre",
-      "side": "both",
+      "side": "server",
       "cancellable": true,
       "neoforge": "AnvilCraftEvent.Pre",
       "mod_api": {

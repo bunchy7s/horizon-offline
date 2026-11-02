@@ -906,19 +906,15 @@ impl Game<'_> {
             s.anvil.result = s.result.clone();
         }
         self.station_after_input();
-        if !menu.combined {
+        if !menu.combined || predicting {
             return;
         }
         if kind == Kind::Smithing {
-            if !predicting {
-                self.level_event_at(1044, pos, 0);
-            }
+            self.level_event_at(1044, pos, 0);
             return;
         }
-        let broke = !predicting && {
-            self.give_levels(menu.level_change);
-            self.anvil_used(pos, self.creative)
-        };
+        self.give_levels(menu.level_change);
+        let broke = self.anvil_used(pos, self.creative);
         // AnvilCraftEvent.Post: after the wear, so a broken anvil is air.
         if let Some(craft) = craft {
             let player = self.native_acting_id();
