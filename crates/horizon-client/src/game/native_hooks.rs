@@ -3529,6 +3529,19 @@ impl Game<'_> {
     pub(super) fn native_player_map_filled(&mut self, player: u128, name: &str, map_id: i32) {
         let _ = (player, name, map_id);
     }
+    /// A server player is about to travel through an End gateway at `gateway`.
+    /// Set `cancel` to leave them at the entrance; the gateway is not consumed
+    /// and its cooldown does not start. Helpers may find no guest through
+    /// `self.lan` during its packet. Server-side. @API:native_player_teleport_end_gateway@.
+    pub(super) fn native_player_teleport_end_gateway(
+        &mut self,
+        player: u128,
+        name: &str,
+        gateway: [i32; 3],
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, gateway, cancel);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

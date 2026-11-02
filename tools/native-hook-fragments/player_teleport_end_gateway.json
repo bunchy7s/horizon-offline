@@ -1,0 +1,12 @@
+{
+  "hooks": [
+    {
+      "name": "player_teleport_end_gateway",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_teleport_end_gateway",
+      "side": "server",
+      "cancellable": true
+    }
+  ],
+  "rust_summary": "Player about to travel through an End gateway, cancellable (`native_player_teleport_end_gateway`).",
+  "doc_summary": "A player is about to travel through an End gateway (`native_player_teleport_end_gateway(player, name, gateway, cancel)`). Set `cancel` to leave them at the entrance without starting the gateway cooldown. Bundles need \"hooks\": @API:player_teleport_end_gateway@."
+}
