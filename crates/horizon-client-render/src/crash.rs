@@ -20,6 +20,53 @@ thread_local! {
     static CONTAINED: Cell<u32> = const { Cell::new(0) };
     /// The message of the last panic `contain` caught on this thread, from the hook.
     static CAUGHT: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The native mod hook this thread is inside, for the panic hook to name.
+    static IN_NATIVE_MOD: Cell<Option<NativeModCall>> = const { Cell::new(None) };
+}
+
+/// A call into one hook of a native mod.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeModCall {
+    /// The mod's `[mod] id`, None in a build that didn't name its mods.
+    pub id: Option<&'static str>,
+    /// Its place in dispatch order, which names it then.
+    pub index: usize,
+    pub hook: &'static str,
+}
+
+/// Marks this thread as inside `call` until the guard drops, which also happens while a panic
+/// unwinds. A hook called from a hook is named by the inner call.
+pub fn enter_native_mod(call: NativeModCall) -> NativeModGuard {
+    NativeModGuard {
+        outer: IN_NATIVE_MOD.with(|c| c.replace(Some(call))),
+    }
+}
+
+/// Puts back the call that `enter_native_mod` found.
+#[must_use]
+pub struct NativeModGuard {
+    outer: Option<NativeModCall>,
+}
+
+impl Drop for NativeModGuard {
+    fn drop(&mut self) {
+        IN_NATIVE_MOD.with(|c| c.set(self.outer));
+    }
+}
+
+/// `message`, with the native mod hook this thread is inside, if any.
+fn attributed(message: String) -> String {
+    match IN_NATIVE_MOD.with(Cell::get) {
+        Some(NativeModCall {
+            id: Some(id), hook, ..
+        }) => format!("{message}\nin native mod {id}, hook {hook}"),
+        Some(NativeModCall {
+            id: None,
+            index,
+            hook,
+        }) => format!("{message}\nin native mod #{index}, hook {hook}"),
+        None => message,
+    }
 }
 
 /// Runs `f`, and returns a panic in it as an error with the panic's message instead of letting
@@ -418,10 +465,10 @@ fn payload_text(payload: &(dyn std::any::Any + Send)) -> String {
 
 fn panic_message(info: &std::panic::PanicHookInfo) -> String {
     let text = payload_text(info.payload());
-    match info.location() {
+    attributed(match info.location() {
         Some(at) => format!("panicked at {at}:\n{text}"),
         None => format!("panicked:\n{text}"),
-    }
+    })
 }
 
 /// A `std::backtrace` as one line a frame, `function (file:line:col)`. Captured in a panic hook
@@ -537,7 +584,8 @@ pub fn worker_panic_report(info: &std::panic::PanicHookInfo, side: &'static str)
 /// Reports panics: on the main thread a crash report (the panic then ends the game, exit code
 /// 101); on a worker thread (`Util.onThreadException`) a crash report too, and the game ends
 /// with it; on other threads the error goes to the log, as vanilla's uncaught exception handler
-/// does. The default hook still prints the panic. A panic inside `contain` is only logged.
+/// does. The default hook still prints the panic. A panic inside `contain` is only logged. A
+/// panic inside a native mod's hook names the mod and the hook.
 pub fn install(home: PathBuf, side: &'static str) {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -676,6 +724,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_panic_in_a_native_mods_hook_names_it() {
+        let outer = enter_native_mod(NativeModCall {
+            id: None,
+            index: 1,
+            hook: "render",
+        });
+        let inner = enter_native_mod(NativeModCall {
+            id: Some("b"),
+            index: 0,
+            hook: "tick",
+        });
+        assert!(attributed("boom".into()).ends_with("\nin native mod b, hook tick"));
+        drop(inner);
+        assert!(attributed("boom".into()).ends_with("\nin native mod #1, hook render"));
+        drop(outer);
+        assert_eq!(attributed("boom".into()), "boom");
+    }
+
     fn report() -> Report {
         Report {
             time: chrono::TimeZone::with_ymd_and_hms(&Local, 2026, 10, 14, 9, 5, 7).unwrap(),
@@ -787,17 +854,37 @@ mod tests {
     #[test]
     fn a_panic_becomes_a_report() {
         // A real panic through a hook, as the game's would be.
-        let caught = std::sync::Arc::new(Mutex::new(None));
+        let caught = std::sync::Arc::new(Mutex::new(Vec::new()));
         let sink = caught.clone();
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             if panic_message(info).contains("the test crash") {
-                *sink.lock().unwrap() = Some(panic_report(info, "client"));
+                sink.lock().unwrap().push(panic_report(info, "client"));
             }
         }));
         let _ = std::panic::catch_unwind(|| panic!("the test crash"));
+        // The same panic inside a native mod's hook, which the hook sees before the unwind.
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = enter_native_mod(NativeModCall {
+                id: Some("a"),
+                index: 0,
+                hook: "tick",
+            });
+            panic!("the test crash")
+        });
         std::panic::set_hook(previous);
-        let report = caught.lock().unwrap().take().expect("the hook ran");
+        // A caught panic leaves the thread as it found it.
+        assert_eq!(attributed("boom".into()), "boom");
+        let mut reports = std::mem::take(&mut *caught.lock().unwrap());
+        assert_eq!(reports.len(), 2, "the hook ran for both panics");
+        let in_mod = reports.pop().unwrap();
+        assert!(
+            in_mod.error.ends_with("\nin native mod a, hook tick"),
+            "{}",
+            in_mod.error
+        );
+        let report = reports.pop().unwrap();
+        assert!(!report.error.contains("native mod"));
         assert!(report.error.contains("the test crash"));
         assert!(report.error.contains("crash.rs"));
         // The first frame is the test's own code, not the panic machinery.
