@@ -1027,8 +1027,9 @@ mod tests {
         let w = Empty(vec![]);
         p.tick(&w);
         // ThrowableProjectile: gravity before inertia, then move.
+        // `getAirDrag` is 0.99F, widened to double: 0.9900000095367432.
         assert!((p.velocity.y - (-0.03 * 0.99)).abs() < 1e-9);
-        assert!((p.position.x - 0.99).abs() < 1e-9);
+        assert!((p.position.x - f64::from(0.99_f32)).abs() < 1e-9);
     }
     /// A wall of blocks across x = 1.
     struct Wall(Vec<(Who, Aabb)>);
@@ -1102,7 +1103,7 @@ mod tests {
         let (keep, none) = through.tick_through(&world);
         assert!(keep && none == Hit::None);
         // Gravity and drag of the tick, then the whole of its motion.
-        assert!((through.position.x - 1.5 * 0.99).abs() < 1e-9);
+        assert!((through.position.x - 1.5 * f64::from(0.99_f32)).abs() < 1e-9);
     }
     #[test]
     fn a_snowball_with_no_gravity_stays_where_it_was_summoned() {
