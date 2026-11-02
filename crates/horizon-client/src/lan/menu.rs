@@ -17,6 +17,11 @@ pub trait Rules {
     fn max_stack(&self, item: &str) -> u32;
     /// The armor slot (0 head .. 3 feet) an item can be worn in.
     fn armor_index(&self, item: &str) -> Option<usize>;
+    /// `ItemStack.getEquipmentSlot`: the `minecraft:equippable` component's
+    /// slot ("head", "chest", "legs", "feet", "mainhand", "offhand").
+    fn equip_slot(&self, item: &str) -> Option<&str> {
+        self.items().get(item)?.equip_slot.as_deref()
+    }
 }
 
 /// An open block container.
@@ -346,6 +351,23 @@ fn quick_move(view: &mut View, i: usize, rules: &dyn Rules) {
             let mut rest = stack.clone();
             rest.count -= 1;
             (rest.count > 0).then_some(rest)
+        } else if rules.equip_slot(&stack.item) == Some("offhand") && view.get(45).is_none() {
+            // A shield or a totem goes to the empty off hand before the
+            // hotbar (InventoryMenu.quickMoveStack's OFFHAND branch).
+            let max = view.slot_max(45, &stack, rules);
+            let moved = stack.count.min(max);
+            view.set(
+                45,
+                Some(ItemStack {
+                    count: moved,
+                    ..stack.clone()
+                }),
+            );
+            let rest = stack.count - moved;
+            (rest > 0).then_some(ItemStack {
+                count: rest,
+                ..stack.clone()
+            })
         } else if hotbar.contains(&i) {
             move_to(view, stack, main, false, rules)
         } else {
@@ -1041,5 +1063,64 @@ mod tests {
             click(&mut view, &mut drag, 9, 0, input::PICKUP, &rules);
             assert!(view.get(9).is_some());
         }
+    }
+
+    struct EquipRules;
+    impl Rules for EquipRules {
+        fn items(&self) -> &Items {
+            unreachable!("a quick move reads no item catalog");
+        }
+        fn max_stack(&self, _: &str) -> u32 {
+            64
+        }
+        fn armor_index(&self, _: &str) -> Option<usize> {
+            None
+        }
+        fn equip_slot(&self, item: &str) -> Option<&str> {
+            (item == "minecraft:shield").then_some("offhand")
+        }
+    }
+
+    /// A shift-click in the inventory menu puts a shield in the empty off-hand
+    /// slot: `InventoryMenu.quickMoveStack` asks `getEquipmentSlotForItem` for
+    /// `EquipmentSlot.OFFHAND` and moves it to slot 45 before it tries the
+    /// hotbar. A full off hand, or an item with no `equippable` slot, still
+    /// goes to the hotbar.
+    #[test]
+    fn inventory_quick_move_equips_an_off_hand_item() {
+        let rules = EquipRules;
+        let mut g = guest();
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: None,
+            shulker: false,
+            hidden: &[],
+        };
+        // Menu slot 9 is the first main-inventory slot, 45 the off hand.
+        view.guest.inventory[9] = Some(ItemStack::new("minecraft:shield", 1));
+        click(&mut view, &mut drag, 9, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(
+            view.get(45).as_ref().map(|s| &*s.item),
+            Some("minecraft:shield")
+        );
+        assert!(view.get(9).is_none());
+        assert!(view.get(36).is_none());
+        // The off hand is taken: the next shield goes to the hotbar instead.
+        view.guest.inventory[9] = Some(ItemStack::new("minecraft:shield", 1));
+        click(&mut view, &mut drag, 9, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(
+            view.get(36).as_ref().map(|s| &*s.item),
+            Some("minecraft:shield")
+        );
+        assert!(view.get(9).is_none());
+        // An item that equips nowhere is untouched by the off-hand branch.
+        view.guest.inventory[10] = Some(ItemStack::new("minecraft:diamond", 3));
+        click(&mut view, &mut drag, 10, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(37).as_ref().map(|s| s.count), Some(3));
+        assert_eq!(
+            view.get(45).as_ref().map(|s| &*s.item),
+            Some("minecraft:shield")
+        );
     }
 }

@@ -9,7 +9,8 @@
 //!   reported once.
 //! - OQ-26: `smooth` runs per frame with the frame time; its fade times are seconds (1 by
 //!   default) to cover half of the remaining distance, `fadeIn` while rising, `fadeOut` while
-//!   falling. Each call keeps its own state, so the optional id is not needed.
+//!   falling. Each call keeps its own state, so the optional id is not needed. As in Iris
+//!   1.11.7, the first argument is that id when it is written as a number and more follow.
 
 use std::collections::{HashMap, HashSet};
 
@@ -318,12 +319,14 @@ impl Custom {
                         a.last().copied().unwrap_or(Val::scalar(0.0))
                     }
                     "smooth" => {
-                        let (val, fade_in, fade_out) = match a.len() {
-                            4 => (arg(1).x(), arg(2).x(), arg(3).x()),
-                            3 => (x, arg(1).x(), arg(2).x()),
-                            2 => (x, arg(1).x(), arg(1).x()),
-                            _ => (x, 1.0, 1.0),
-                        };
+                        // A first argument written as a number names the call when more
+                        // follow (`smooth(1, x, 2)`); any other is the value (`smooth(x, 2)`).
+                        let named = a.len() > 1 && matches!(args[0], Expr::Num(_));
+                        let rest = &a[usize::from(named)..];
+                        let at = |i: usize| rest.get(i).map(Val::x);
+                        let val = at(0).unwrap_or(0.0);
+                        let fade_in = at(1).unwrap_or(1.0);
+                        let fade_out = at(2).unwrap_or(fade_in);
                         let state = self.smooth.entry(*site).or_insert(val);
                         let fade = if val > *state { fade_in } else { fade_out };
                         if fade > 0.0 {
@@ -503,6 +506,9 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+            if t == "smooth" {
+                smooth_arguments(&args)?;
+            }
             *self.calls += 1;
             return Ok(Expr::Call(t, args, *self.calls));
         }
@@ -527,6 +533,26 @@ impl<'a> Parser<'a> {
             None
         };
         Ok(Expr::Name(t, component))
+    }
+}
+
+/// The `smooth` calls Iris 1.11.7 resolves: `smooth(val)`, `smooth(val, fade)`,
+/// `smooth(val, fadeIn, fadeOut)`, and the same with a number written first as the call's id
+/// (`smooth(1, val, fadeIn, fadeOut)`). It drops a uniform with any other, which then reads 0.
+fn smooth_arguments(args: &[Expr]) -> Result<(), String> {
+    let named = args.len() > 1 && matches!(args[0], Expr::Num(_));
+    if (1..=3).contains(&(args.len() - usize::from(named))) {
+        Ok(())
+    } else {
+        Err(format!(
+            "`smooth` with {} arguments{} (Iris reads it as 0)",
+            args.len(),
+            if named {
+                ""
+            } else {
+                ", the first not a number"
+            }
+        ))
     }
 }
 
@@ -648,6 +674,41 @@ mod tests {
         assert!(eval(&mut c, 0.6) < 0.01, "the fade holds the old value");
         c.restart_smoothing();
         assert_eq!(eval(&mut c, 0.6), 0.6);
+    }
+
+    /// Iris 1.11.7, with a probe pack of our own: a first argument written as a number is the
+    /// call's id when more follow (`smooth(1, 5, f)` reads 5, `smooth(5, f)` reads f); any
+    /// other first argument is the value (`smooth(1.5 * 2, 6.5)` reads 3).
+    #[test]
+    fn smooth_reads_a_leading_number_as_its_id() {
+        let mut c = custom(
+            "uniform.float.a = smooth(1, 5, 0.0001)\n\
+             uniform.float.b = smooth(5, 0.0001)\n\
+             uniform.float.c = smooth(2.5, 6, 0.0001)\n\
+             uniform.float.d = smooth((2), 6, 0.0001)\n\
+             uniform.float.e = smooth(y, 5, 0.0001)\n\
+             uniform.float.f = smooth(1.5 * 2, 6.5)\n\
+             uniform.float.g = smooth(-3, 6, 0.0001)\n\
+             uniform.float.h = smooth(7, y)\n\
+             uniform.float.i = smooth(4)\n",
+        );
+        assert!(c.notes.is_empty(), "{:?}", c.notes);
+        let v = c.eval(0.016, &|n: &str| (n == "y").then(|| Val::scalar(6.96)));
+        let x: Vec<f64> = v.iter().map(|v| v.v[0]).collect();
+        assert_eq!(x, [5.0, 0.0001, 6.0, 6.0, 6.96, 3.0, -3.0, 6.96, 4.0]);
+    }
+
+    /// Iris 1.11.7 drops a uniform whose `smooth` has four arguments and no number first, or
+    /// five: it reads 0 there, as a uniform Horizon leaves out does.
+    #[test]
+    fn smooth_calls_iris_does_not_resolve_are_left_out() {
+        let c = custom(
+            "uniform.float.a = smooth(y, 5, 0.0001, 0.0001)\n\
+             uniform.float.b = smooth(3, 6.5, 0.0001, 0.0001, 9)\n\
+             uniform.float.c = smooth(3, 6.5, 0.0001, 0.0001)\n",
+        );
+        assert_eq!(c.uniforms().map(|u| u.0).collect::<Vec<_>>(), ["c"]);
+        assert_eq!(c.notes.len(), 2, "{:?}", c.notes);
     }
 
     #[test]
