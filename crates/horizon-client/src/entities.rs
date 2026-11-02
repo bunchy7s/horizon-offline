@@ -1847,7 +1847,8 @@ mod honey_slide_tests {
         let mut item = falling_item(at.x, at.y, at.z, 0.0, 0.0, 0.0);
         item.on_ground = true;
         item.age = 0;
-        item.id = 1;
+        item.ticks = 0;
+        item.id = 0;
         let mut ys = Vec::new();
         for _ in 0..8 {
             item.tick(
