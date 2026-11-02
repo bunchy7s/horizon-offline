@@ -200,13 +200,10 @@ impl Game<'_> {
                     Ok(pack) => {
                         let mut macros = Macros::standard();
                         renderer.define_pack_macros(&mut macros);
-                        let text = pack.read_text("shaders.properties").unwrap_or_default();
                         // Its conditionals test the pack's options too.
-                        let properties = Properties::parse(
-                            &text,
-                            &horizon_shaders::with_options(&pack, &macros),
-                        );
-                        for note in macros.define_features(&properties) {
+                        let (properties, notes) =
+                            horizon_shaders::read_properties(&pack, &mut macros);
+                        for note in notes {
                             log::warn!("shader pack {name}: {note}");
                         }
                         for note in &properties.notes {
