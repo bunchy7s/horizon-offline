@@ -2220,7 +2220,7 @@ anything else a mod may change, a game struct or a list, is a `&mut` field. A ca
 the return value; a collection hook's list is a field (`event.lines`). One event goes through every mod, so each
 sees the changes before it. Because no mod can build or match the whole
 struct, a later version can add a field without breaking any mod, as NeoForge's event objects do; the cost is that
-a mod's own tests can't build an event yet.
+a mod's own tests drive a hook through its dispatch function ([Testing a trait mod](#testing-a-trait-mod)).
 
 Hook methods take `&self` and require `Send + Sync`. The process-wide mod list is installed once, like mixin module statics. One mod instance serves both
 the window's game and the server-thread game. A hook can also fire again inside
@@ -2310,6 +2310,29 @@ hooks (trait methods, or injections by `hook`) and `Host` can set `"hooks"` in i
 `NATIVE_HOOKS_API` it was made on.
 A raw `target` like `tick_mobs` is not a hook point and may change in any commit: such a mod pins `horizon_revision` and
 leaves `hooks` out.
+
+### Testing a trait mod
+
+Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements
+only what its hook calls, and an unexpected call fails loudly. Drive the hook through
+`horizon_client::mod_api::dispatch_<hook>(&mut host, &mods, args…)`, which builds the event as the game does.
+If a `Host` method returns a game value a test can't build, a double can return `None` instead, as with
+`acting_player() -> Option<NativeServerPlayer>`. If the dispatch function itself takes an unconstructible value,
+such as `dispatch_perform_command`'s `&NativeServerPlayer`, test the logic beneath the hook instead. The level
+hosts are small enough to implement whole. NeoForge's GameTest is the in-game counterpart.
+
+```rust
+struct Stone;
+impl Host for Stone {
+    fn block(&self, _pos: [i32; 3]) -> String {
+        "minecraft:stone".to_string()
+    }
+}
+let mods = [Box::new(MyMod) as Box<dyn Hooks>];
+let mut claimed = false;
+dispatch_use_item_on(&mut Stone, &mods, &stack, [0, 64, 0], [0, 1, 0], &mut claimed);
+assert!(claimed);
+```
 
 ### Adding a hook
 

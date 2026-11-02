@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "item_expire",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_expire",
+      "neoforge": "ItemExpireEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a dropped item reaching its lifetime (`native_item_expire`).",
+  "doc_summary": "`native_item_expire(entity, stack, extra_life)`, a dropped item reaching its lifetime on the server (NeoForge's `ItemExpireEvent`, vanilla `ItemEntity.tick`): every mod may set or add to `extra_life`, in ticks from zero; a positive total keeps the item that much longer, zero or less lets it expire. Extensions are capped at 32766 ticks. Bundles need \"hooks\": @API:item_expire@."
+}

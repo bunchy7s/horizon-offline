@@ -3,6 +3,7 @@ use super::*;
 use std::path::PathBuf;
 use std::sync::Arc;
 /// Services supplied by the game to trait mods.
+/// Each method's default panics with its name, so a test double implements only what its test calls; the game implements every one.
 pub trait Host {
     /// Draws a quad with `corners` in blocks under `draw`'s pose, in a model
     /// face's order (top left, bottom left, bottom right, top right as seen
@@ -17,7 +18,14 @@ pub trait Host {
         corners: [[f32; 3]; 4],
         uv: [f32; 4],
         tint: u32,
-    ) -> bool;
+    ) -> bool {
+        let _ = draw;
+        let _ = sprite;
+        let _ = corners;
+        let _ = uv;
+        let _ = tint;
+        unimplemented!("Host::draw_quad")
+    }
     /// Draws a box from `from` to `to` (texels of 16 per block, as a block
     /// model's element) under `draw`'s pose, with the faces given, by
     /// `Direction` (down, up, north, south, west, east), baked as a model
@@ -31,7 +39,14 @@ pub trait Host {
         to: [f32; 3],
         faces: [Option<CubeFace<'_>>; 6],
         tint: u32,
-    ) -> bool;
+    ) -> bool {
+        let _ = draw;
+        let _ = from;
+        let _ = to;
+        let _ = faces;
+        let _ = tint;
+        unimplemented!("Host::draw_cube")
+    }
     /// Draws block `block`'s model (`mymod:cog`, any block with a model) in
     /// the state with `properties` (`[("axis", "x")]`, the rest default)
     /// under `draw`'s pose, as vanilla's `submitBlockModel` draws a block in
@@ -43,7 +58,12 @@ pub trait Host {
         draw: &mut BlockEntityDraw,
         block: &str,
         properties: &[(&str, &str)],
-    ) -> bool;
+    ) -> bool {
+        let _ = draw;
+        let _ = block;
+        let _ = properties;
+        unimplemented!("Host::draw_block")
+    }
     /// Draws `stack` under `draw`'s pose as an item is drawn in the world
     /// (`ItemModelResolver.updateForTopItem` and `ItemStackRenderState.submit`), centred on the
     /// pose's origin, in its model's `display` transform: `Fixed` as a
@@ -65,26 +85,59 @@ pub trait Host {
         display: DisplayContext,
         owner_yaw: Option<f32>,
         seed: i32,
-    ) -> bool;
+    ) -> bool {
+        let _ = draw;
+        let _ = stack;
+        let _ = display;
+        let _ = owner_yaw;
+        let _ = seed;
+        unimplemented!("Host::draw_item")
+    }
     /// Access a server-owned holder's attachment map.
-    fn attachments(&mut self, holder: Holder) -> AttachmentResult<&mut Attachments>;
+    fn attachments(&mut self, holder: Holder) -> AttachmentResult<&mut Attachments> {
+        let _ = holder;
+        unimplemented!("Host::attachments")
+    }
     /// Moves mob `id` to `pos` at once, as `/tp` does: it dismounts, drops its
     /// path and resets its fall. False for no such mob, another dimension or a
     /// position outside `/summon`'s bounds. API 37.
-    fn teleport_mob(&mut self, dimension: &str, id: u32, pos: [f64; 3]) -> bool;
+    fn teleport_mob(&mut self, dimension: &str, id: u32, pos: [f64; 3]) -> bool {
+        let _ = dimension;
+        let _ = id;
+        let _ = pos;
+        unimplemented!("Host::teleport_mob")
+    }
     /// Adds `velocity` to mob `id`'s: false for no such mob, another dimension
     /// or a velocity that isn't finite. API 37.
-    fn push_mob(&mut self, dimension: &str, id: u32, velocity: [f64; 3]) -> bool;
+    fn push_mob(&mut self, dimension: &str, id: u32, velocity: [f64; 3]) -> bool {
+        let _ = dimension;
+        let _ = id;
+        let _ = velocity;
+        unimplemented!("Host::push_mob")
+    }
     /// Sets the living mob `id`'s health, cut to its maximum: false for no such
     /// mob, another dimension or a health that isn't above 0 (`native_kill_mob`
     /// kills). API 37.
-    fn set_mob_health(&mut self, dimension: &str, id: u32, health: f32) -> bool;
+    fn set_mob_health(&mut self, dimension: &str, id: u32, health: f32) -> bool {
+        let _ = dimension;
+        let _ = id;
+        let _ = health;
+        unimplemented!("Host::set_mob_health")
+    }
     /// Kills mob `id` as `/kill` does: it falls and drops its loot. False for
     /// no such living mob or another dimension. API 37.
-    fn kill_mob(&mut self, dimension: &str, id: u32) -> bool;
+    fn kill_mob(&mut self, dimension: &str, id: u32) -> bool {
+        let _ = dimension;
+        let _ = id;
+        unimplemented!("Host::kill_mob")
+    }
     /// Takes mob `id` out of the world with no death and no loot: false for no
     /// such mob or another dimension. API 37.
-    fn remove_mob(&mut self, dimension: &str, id: u32) -> bool;
+    fn remove_mob(&mut self, dimension: &str, id: u32) -> bool {
+        let _ = dimension;
+        let _ = id;
+        unimplemented!("Host::remove_mob")
+    }
     /// Spawns an entity of `kind` (`minecraft:item_display`) at `pos` in the
     /// level in place, `dimension`, from `nbt` (its compound, as `/summon
     /// <kind> <pos> <nbt>` takes it; passengers included): its id. None on a
@@ -92,7 +145,13 @@ pub trait Host {
     /// `/summon`'s bounds, a chunk that isn't loaded, a kind Horizon can't
     /// load, or one a mod kept out (`native_entity_join_level`). API
     /// 59.
-    fn summon(&mut self, dimension: &str, kind: &str, pos: [f64; 3], nbt: Compound) -> Option<u32>;
+    fn summon(&mut self, dimension: &str, kind: &str, pos: [f64; 3], nbt: Compound) -> Option<u32> {
+        let _ = dimension;
+        let _ = kind;
+        let _ = pos;
+        let _ = nbt;
+        unimplemented!("Host::summon")
+    }
     /// Moves entity `id`, one Horizon keeps without simulating (a display, a
     /// marker, an interaction), to `pos` facing `yaw` and `pitch` in degrees;
     /// a display eases there over its `teleport` ticks. False for no such
@@ -105,37 +164,69 @@ pub trait Host {
         pos: [f64; 3],
         yaw: f32,
         pitch: f32,
-    ) -> bool;
+    ) -> bool {
+        let _ = dimension;
+        let _ = id;
+        let _ = pos;
+        let _ = yaw;
+        let _ = pitch;
+        unimplemented!("Host::move_entity")
+    }
     /// Removes entity `id`, one Horizon keeps without simulating, as `/kill`
     /// does (it drops nothing and isn't saved). False for no such entity or
     /// another dimension. Mobs go with `native_remove_mob`. API
     /// 59.
-    fn remove_entity(&mut self, dimension: &str, id: u32) -> bool;
+    fn remove_entity(&mut self, dimension: &str, id: u32) -> bool {
+        let _ = dimension;
+        let _ = id;
+        unimplemented!("Host::remove_entity")
+    }
     /// The players on this server, in the order they joined. Empty on a
     /// client and in a world nobody else can join.
-    fn server_players(&self) -> Vec<NativeServerPlayer>;
+    fn server_players(&self) -> Vec<NativeServerPlayer> {
+        unimplemented!("Host::server_players")
+    }
     /// A system line in that player's chat, also inside a player's hook for
     /// the acting player; false when they aren't on.
-    fn tell(&mut self, uuid: u128, line: Text) -> bool;
+    fn tell(&mut self, uuid: u128, line: Text) -> bool {
+        let _ = uuid;
+        let _ = line;
+        unimplemented!("Host::tell")
+    }
     /// A line over that player's hotbar (the action bar), also inside a
     /// player's hook for the acting player; false when they aren't on. API 21.
-    fn action_bar(&mut self, uuid: u128, line: Text) -> bool;
+    fn action_bar(&mut self, uuid: u128, line: Text) -> bool {
+        let _ = uuid;
+        let _ = line;
+        unimplemented!("Host::action_bar")
+    }
     /// The lines over and under that player's list of players (Tab):
     /// `ClientboundTabListPacket`, an empty text for none. False when they
     /// aren't on. API 49.
-    fn tab_list(&mut self, uuid: u128, header: &Text, footer: &Text) -> bool;
+    fn tab_list(&mut self, uuid: u128, header: &Text, footer: &Text) -> bool {
+        let _ = uuid;
+        let _ = header;
+        let _ = footer;
+        unimplemented!("Host::tab_list")
+    }
     /// The server's tick rate (20 unless `/tick rate` changed it) and the
     /// milliseconds its ticks took on average lately, as `/tick query`
     /// reports them. The ticks a second it keeps up is the rate, or
     /// 1000 / milliseconds when that is lower. API 49.
-    fn tick_stats(&self) -> (f32, f64);
+    fn tick_stats(&self) -> (f32, f64) {
+        unimplemented!("Host::tick_stats")
+    }
     /// Whether that player counts for `players_sleeping_percentage`: an
     /// ignored player who isn't in bed is left out of the players the night
     /// needs asleep, as a spectator is (an away-from-keyboard mod). Kept
     /// until a mod sets it back or the server stops, also if they leave and
     /// come back. Only where no player's state is swapped in, as
     /// `native_run_command`; false there and when they aren't on. API 49.
-    fn sleep_ignored(&mut self, uuid: u128, ignored: bool) -> bool;
+    fn sleep_ignored(&mut self, uuid: u128, ignored: bool) -> bool {
+        let _ = uuid;
+        let _ = ignored;
+        unimplemented!("Host::sleep_ignored")
+    }
     /// Shows `nickname` in place of that player's name in chat (their
     /// messages, `/me`, `/msg`) and in the Tab list; None shows their name
     /// again. Hovering the shown name gives the real one, which stays in the
@@ -145,22 +236,37 @@ pub trait Host {
     /// other players' names). Only where no player's state is swapped in,
     /// as `native_run_command`; false there and when they aren't on. API
     /// 62.
-    fn set_nickname(&mut self, uuid: u128, nickname: Option<&str>) -> bool;
+    fn set_nickname(&mut self, uuid: u128, nickname: Option<&str>) -> bool {
+        let _ = uuid;
+        let _ = nickname;
+        unimplemented!("Host::set_nickname")
+    }
     /// Whether the server's chat filter (`server.toml` `[chat_filter]`)
     /// lets `text` through: true without a filter, None inside a player's
     /// hook (where the server is out of reach). API 62.
-    fn text_allowed(&self, text: &str) -> Option<bool>;
+    fn text_allowed(&self, text: &str) -> Option<bool> {
+        let _ = text;
+        unimplemented!("Host::text_allowed")
+    }
     /// A system line in every player's chat and the server's log.
-    fn broadcast(&self, line: Text);
+    fn broadcast(&self, line: Text) {
+        let _ = line;
+        unimplemented!("Host::broadcast")
+    }
     /// A line of the command's answer, inside `native_perform_command`:
     /// sent to the player whose command it is after the call, as vanilla
     /// commands' feedback is.
-    fn feedback(&mut self, line: Text);
+    fn feedback(&mut self, line: Text) {
+        let _ = line;
+        unimplemented!("Host::feedback")
+    }
     /// The player whose action or command a hook hears, as their state is
     /// swapped in (`native_perform_command`, `native_right_click_block`,
     /// `native_use_item_on`, `native_destroy_block`...): None outside such a
     /// hook. API 21.
-    fn acting_player(&self) -> Option<NativeServerPlayer>;
+    fn acting_player(&self) -> Option<NativeServerPlayer> {
+        unimplemented!("Host::acting_player")
+    }
     /// Runs `line` (no slash) as the server's console does: permission
     /// level 4, from the overworld's spawn, with no output. A teleport to
     /// another level (`execute in minecraft:the_nether run tp Alex 0 70 0`)
@@ -168,25 +274,48 @@ pub trait Host {
     /// without failing. Only where no player's state is swapped in
     /// (`native_tick`, `native_menu_clicked`): false inside a player's hook,
     /// where the other players are out of reach. API 21.
-    fn run_command(&mut self, line: &str) -> bool;
+    fn run_command(&mut self, line: &str) -> bool {
+        let _ = line;
+        unimplemented!("Host::run_command")
+    }
     /// The open world's folder (`world/`, beside its `level.dat`): a server
     /// mod keeps its data in a folder of its own there, so the world's
     /// backups carry it. None when no world is open.
-    fn world_dir(&self) -> Option<PathBuf>;
+    fn world_dir(&self) -> Option<PathBuf> {
+        unimplemented!("Host::world_dir")
+    }
     /// The main hand's stack: its item, count, and whether it is plain. On a
     /// client, the player's own.
-    fn held(&self) -> Option<(String, u32, bool)>;
+    fn held(&self) -> Option<(String, u32, bool)> {
+        unimplemented!("Host::held")
+    }
     /// How many of plain `item` (`minecraft:diamond`) the player carries.
-    fn count_items(&mut self, item: &str) -> u32;
+    fn count_items(&mut self, item: &str) -> u32 {
+        let _ = item;
+        unimplemented!("Host::count_items")
+    }
     /// Every plain item the player carries, with how many, by id.
-    fn carried_items(&self) -> Vec<(String, u32)>;
+    fn carried_items(&self) -> Vec<(String, u32)> {
+        unimplemented!("Host::carried_items")
+    }
     /// Takes up to `count` plain `item`, the main hand first; what it took.
-    fn take_items(&mut self, item: &str, count: u32) -> u32;
+    fn take_items(&mut self, item: &str, count: u32) -> u32 {
+        let _ = item;
+        let _ = count;
+        unimplemented!("Host::take_items")
+    }
     /// How many plain `item` still fit; 0 for an unknown item.
-    fn room_for(&mut self, item: &str) -> u32;
+    fn room_for(&mut self, item: &str) -> u32 {
+        let _ = item;
+        unimplemented!("Host::room_for")
+    }
     /// Gives up to `count` plain `item` where they fit, as `Inventory.add`
     /// places them; what it gave (nothing is dropped). 0 for an unknown item.
-    fn give_items(&mut self, item: &str, count: u32) -> u32;
+    fn give_items(&mut self, item: &str, count: u32) -> u32 {
+        let _ = item;
+        let _ = count;
+        unimplemented!("Host::give_items")
+    }
     /// Gives `stack` whole (its damage, name, enchantments... kept) to the
     /// player `uuid`, as `Inventory.add` places it: onto equal stacks first,
     /// then into empty inventory slots, never the armour or an empty off
@@ -196,7 +325,11 @@ pub trait Host {
     /// The player's screen follows as for any change to their inventory.
     /// What an auto-pickup or a machine's output to a player needs, from any
     /// server hook. API 98.
-    fn give_stack(&mut self, uuid: u128, stack: ItemStack) -> Option<ItemStack>;
+    fn give_stack(&mut self, uuid: u128, stack: ItemStack) -> Option<ItemStack> {
+        let _ = uuid;
+        let _ = stack;
+        unimplemented!("Host::give_stack")
+    }
     /// Gives `points` of experience to the player `uuid` as an orb they touch
     /// does (`ExperienceOrb.playerTouch`): Mending repairs their damaged items
     /// with it first (`repairPlayerItems`), then the rest goes to their
@@ -207,24 +340,42 @@ pub trait Host {
     /// reached), and while the server's player list is busy elsewhere in the
     /// tick: give first, and cancel an orb only when this returned true.
     /// Their bar follows as for any change to their experience.
-    fn give_experience(&mut self, uuid: u128, points: u32) -> bool;
+    fn give_experience(&mut self, uuid: u128, points: u32) -> bool {
+        let _ = uuid;
+        let _ = points;
+        unimplemented!("Host::give_experience")
+    }
     /// Adds `levels` to the player `uuid`'s level, or takes them off when
     /// negative (`Player.giveExperienceLevels`): what the anvil and the
     /// enchanting table charge with, and a mod can charge or reward with.
     /// Below level 0 the level and the points are 0. The progress toward the
     /// next level is kept. False, and nothing changed, as for
     /// `native_give_experience`.
-    fn give_levels(&mut self, uuid: u128, levels: i32) -> bool;
+    fn give_levels(&mut self, uuid: u128, levels: i32) -> bool {
+        let _ = uuid;
+        let _ = levels;
+        unimplemented!("Host::give_levels")
+    }
     /// Read a loaded, light-emitting block. No implicit chunk loading.
-    fn lit_block_name(&self, pos: [i32; 3]) -> Option<&str>;
+    fn lit_block_name(&self, pos: [i32; 3]) -> Option<&str> {
+        let _ = pos;
+        unimplemented!("Host::lit_block_name")
+    }
     /// A small local vanilla particle; caller should rate-limit emission.
-    fn flame_particle(&mut self, at: [f64; 3], soul: bool);
+    fn flame_particle(&mut self, at: [f64; 3], soul: bool) {
+        let _ = at;
+        let _ = soul;
+        unimplemented!("Host::flame_particle")
+    }
     /// The stack the acting player carries in `slot`, by
     /// `native_inventory_tick`'s numbers: none for an empty slot or another
     /// number. Change it as you like: a count of 0 empties the slot at the end
     /// of `native_inventory_tick`, and the player's client gets the change.
     /// API 39.
-    fn carried_stack(&mut self, slot: i32) -> Option<&mut ItemStack>;
+    fn carried_stack(&mut self, slot: i32) -> Option<&mut ItemStack> {
+        let _ = slot;
+        unimplemented!("Host::carried_stack")
+    }
     /// Sets a block in the current authoritative level through `Level.setBlock`.
     /// Returns false for another dimension, an invalid state, or no change.
     /// `flags` selects vanilla's neighbour and shape updates; Horizon sends
@@ -236,7 +387,13 @@ pub trait Host {
         pos: [i32; 3],
         state: BlockStateId,
         flags: i32,
-    ) -> bool;
+    ) -> bool {
+        let _ = dimension;
+        let _ = pos;
+        let _ = state;
+        let _ = flags;
+        unimplemented!("Host::set_block")
+    }
     /// For a server mod: the runs made at once, straight into the chunks of the authoritative level `dimension`
     /// (the one being ticked, as for `native_set_block`), with what `fill ... strict` does for block entities (a
     /// block replaced by another loses its block entity, and a new block gets the one `native_set_block` would
@@ -245,7 +402,11 @@ pub trait Host {
     /// why the edit was left out, with nothing changed: another dimension, a client of a server, a palette entry
     /// or filter that doesn't read or carries NBT (refused), a run naming a palette entry or filter past the end,
     /// or more than 65536 filters. API 126.
-    fn edit_blocks(&mut self, dimension: &str, edit: &NativeBlockEdit) -> Result<u64, String>;
+    fn edit_blocks(&mut self, dimension: &str, edit: &NativeBlockEdit) -> Result<u64, String> {
+        let _ = dimension;
+        let _ = edit;
+        unimplemented!("Host::edit_blocks")
+    }
     /// For a server mod: each column's height by `heightmap` in the authoritative level `dimension` (the one being
     /// ticked), none for a column not loaded. `Err` says why nothing was read: another dimension or a client of a
     /// server, or more than 65,536 columns (`MAX_COLUMNS`). API 127.
@@ -254,7 +415,12 @@ pub trait Host {
         dimension: &str,
         columns: &[(i32, i32)],
         heightmap: NativeHeightmap,
-    ) -> Result<Vec<Option<i32>>, String>;
+    ) -> Result<Vec<Option<i32>>, String> {
+        let _ = dimension;
+        let _ = columns;
+        let _ = heightmap;
+        unimplemented!("Host::surface_heights")
+    }
     /// For a server mod: `below` blocks under and `above` blocks from each column's height by `heightmap`, as a
     /// palette and indexes, with the biome's grass, foliage and water tints (air outside the column and in columns
     /// not loaded). The tints are the biome's at the column's top, not blended over the biome blend radius as the
@@ -268,45 +434,69 @@ pub trait Host {
         columns: &[(i32, i32)],
         heightmap: NativeHeightmap,
         range: (u32, u32),
-    ) -> Result<NativeColumnBlocks, String>;
+    ) -> Result<NativeColumnBlocks, String> {
+        let _ = dimension;
+        let _ = columns;
+        let _ = heightmap;
+        let _ = range;
+        unimplemented!("Host::read_columns")
+    }
     /// Asks `native_biome_colors` again for every biome and, when the colours
     /// differ from those in use, rebuilds every loaded section and the far
     /// terrain with them (`LevelRenderer.allChanged`, as changing Biome Blend
     /// does). Call it when your colours change (a new season, a new day of a
     /// slow fade) and once when the player joins, not every frame: a rebuild
     /// takes the workers a few seconds. API 107.
-    fn refresh_biome_colors(&mut self);
+    fn refresh_biome_colors(&mut self) {
+        unimplemented!("Host::refresh_biome_colors")
+    }
     /// The strongest redstone signal reaching the block at `pos` from its six
     /// neighbours, 0 to 15 (`SignalGetter.getBestNeighborSignal`, what a
     /// dispenser or a piston reads), in the level in place, `dimension`. 0 on
     /// a client's copy of the world and for another dimension. A mod's
     /// explosive, launcher or machine reads it in its block entity's tick to
     /// go off or switch on. API 96.
-    fn neighbor_signal(&mut self, dimension: &str, pos: [i32; 3]) -> i32;
+    fn neighbor_signal(&mut self, dimension: &str, pos: [i32; 3]) -> i32 {
+        let _ = dimension;
+        let _ = pos;
+        unimplemented!("Host::neighbor_signal")
+    }
     /// The light at `pos` in the world in place, as `(block, sky)`, each 0 to
     /// 15 (`Level.getBrightness` for `LightLayer.BLOCK` and `LightLayer.SKY`).
     /// A solar panel checks for full sky light above it, a lamp or a mob farm
     /// for darkness. `(0, 0)` in a chunk that isn't loaded. Like the other
     /// reads here it reads the world this game holds: the level in place on
     /// a server, the server's copy on a client. API 97.
-    fn light(&self, pos: [i32; 3]) -> (u8, u8);
+    fn light(&self, pos: [i32; 3]) -> (u8, u8) {
+        let _ = pos;
+        unimplemented!("Host::light")
+    }
     /// The rain and thunder levels of the world in place, each 0.0 to 1.0
     /// (`Level.getRainLevel` and `Level.getThunderLevel`): what a solar panel
     /// or a wind turbine reads. Both 0 in the Nether and the End, which have
     /// no weather (`Level.canHaveWeather`). API 97.
-    fn weather(&self) -> (f32, f32);
+    fn weather(&self) -> (f32, f32) {
+        unimplemented!("Host::weather")
+    }
     /// The world's time of day in ticks (`Level.getOverworldClockTime`), the
     /// same as `native_clock`'s `day_time`; it keeps counting past 24000, so
     /// take it modulo 24000 for the hour. API 97.
-    fn day_time(&self) -> i64;
+    fn day_time(&self) -> i64 {
+        unimplemented!("Host::day_time")
+    }
     /// The lowest block y and the height of the world in place
     /// (`LevelHeightAccessor.getMinY` and `getHeight`): how deep a quarry or a
     /// miner may dig. API 97.
-    fn world_height(&self) -> (i32, i32);
+    fn world_height(&self) -> (i32, i32) {
+        unimplemented!("Host::world_height")
+    }
     /// The most of the item `item` one slot holds (`Item.getDefaultMaxStackSize`),
     /// or `None` for an unknown item: for a mod's container that fills or
     /// merges stacks itself. API 97.
-    fn max_stack_size(&self, item: &str) -> Option<u32>;
+    fn max_stack_size(&self, item: &str) -> Option<u32> {
+        let _ = item;
+        unimplemented!("Host::max_stack_size")
+    }
     /// Item `item`'s icon drawn with model `model` (`minecraft:paper` as
     /// `mymod:wheel_icon`, an `item_model` of a content mod's), as `native_item`
     /// draws one; false for an unknown item. API 111.
@@ -317,11 +507,23 @@ pub trait Host {
         model: &str,
         at: [f32; 2],
         size: f32,
-    ) -> bool;
+    ) -> bool {
+        let _ = batch;
+        let _ = item;
+        let _ = model;
+        let _ = at;
+        let _ = size;
+        unimplemented!("Host::item_model")
+    }
     /// A quad of corners `points` (in order round it) in GUI pixels, `argb`:
     /// a wedge, a slanted bar, what `native_fill`'s rectangles can't draw.
     /// API 111.
-    fn quad(&self, batch: &mut HudBatch, points: [[f32; 2]; 4], argb: u32);
+    fn quad(&self, batch: &mut HudBatch, points: [[f32; 2]; 4], argb: u32) {
+        let _ = batch;
+        let _ = points;
+        let _ = argb;
+        unimplemented!("Host::quad")
+    }
     /// Opens a screen of mod `mod_id`'s own over the world: the screen hooks
     /// fire over it as over any other, so the mod draws it in
     /// `native_screen_render_post` and takes its clicks, scroll, keys and
@@ -334,12 +536,20 @@ pub trait Host {
     /// loads, and anywhere but the window's own client (the server thread, a
     /// dedicated server). A gamepad can close it (B, Start) but not click on
     /// it: its clicks don't reach the mouse hooks. API 111.
-    fn mod_screen_open(&mut self, mod_id: &str) -> bool;
+    fn mod_screen_open(&mut self, mod_id: &str) -> bool {
+        let _ = mod_id;
+        unimplemented!("Host::mod_screen_open")
+    }
     /// Closes mod `mod_id`'s own screen, if it is open. API 111.
-    fn mod_screen_close(&mut self, mod_id: &str);
+    fn mod_screen_close(&mut self, mod_id: &str) {
+        let _ = mod_id;
+        unimplemented!("Host::mod_screen_close")
+    }
     /// The mod whose own screen is open, if one is (Escape, or another screen
     /// replacing it, closes it). API 111.
-    fn mod_screen(&self) -> Option<&str>;
+    fn mod_screen(&self) -> Option<&str> {
+        unimplemented!("Host::mod_screen")
+    }
     /// Writes the experience orb `id`'s `value` (the points a pickup gives), `count`
     /// (orbs merged into it, each worth `value`) and `age` (ticks lived; an orb
     /// despawns at 6000); a `None` is left as it is. API 128.
@@ -352,7 +562,14 @@ pub trait Host {
         value: Option<u32>,
         count: Option<u32>,
         age: Option<u32>,
-    ) -> bool;
+    ) -> bool {
+        let _ = dimension;
+        let _ = id;
+        let _ = value;
+        let _ = count;
+        let _ = age;
+        unimplemented!("Host::set_experience_orb")
+    }
     /// The experience orbs of the server level `dimension` whose box meets
     /// the box `min`..`max`, in the level's order: what a mod reads before it
     /// cancels an orb in `native_entity_join_level`, to give its points with
@@ -363,12 +580,19 @@ pub trait Host {
         dimension: &str,
         min: [f64; 3],
         max: [f64; 3],
-    ) -> Vec<NativeExperienceOrb>;
+    ) -> Vec<NativeExperienceOrb> {
+        let _ = dimension;
+        let _ = min;
+        let _ = max;
+        unimplemented!("Host::experience_orbs")
+    }
     /// The clock of the world this window shows, for client mods: its game
     /// time and time of day as the server last sent them
     /// (`ClientboundSetTimePacket`), advanced each tick between packets; none
     /// on the title screen. API 92.
-    fn clock(&self) -> Option<NativeClock>;
+    fn clock(&self) -> Option<NativeClock> {
+        unimplemented!("Host::clock")
+    }
     /// Throws a falling block of `state` from `pos` (its bottom centre) at
     /// `velocity` (blocks a tick) in the level in place, `dimension`: it
     /// falls, lands and places itself as sand does, or drops as an item
@@ -385,39 +609,75 @@ pub trait Host {
         pos: [f64; 3],
         velocity: [f64; 3],
         falling: NativeFalling,
-    ) -> bool;
+    ) -> bool {
+        let _ = dimension;
+        let _ = state;
+        let _ = pos;
+        let _ = velocity;
+        let _ = falling;
+        unimplemented!("Host::spawn_falling_block")
+    }
     /// Property `key` of block state `state` (a machine's `facing`, from the
     /// `state` `native_block_entity_submit` gets), if it has one: no lookup in
     /// the world, so cheap each frame. API 91.
-    fn block_state_property(&self, state: BlockStateId, key: &str) -> Option<&str>;
+    fn block_state_property(&self, state: BlockStateId, key: &str) -> Option<&str> {
+        let _ = state;
+        let _ = key;
+        unimplemented!("Host::block_state_property")
+    }
     /// The first block along the view within `distance` (at most 1024), past the loaded chunks over the distant terrain. API 116.
-    fn raycast(&self, distance: f32) -> Option<NativeHit>;
+    fn raycast(&self, distance: f32) -> Option<NativeHit> {
+        let _ = distance;
+        unimplemented!("Host::raycast")
+    }
     /// The first block along the view within `RAYCAST_MAX`, and its distance. API 116.
-    fn view_hit(&self) -> Option<(f32, NativeHit)>;
+    fn view_hit(&self) -> Option<(f32, NativeHit)> {
+        unimplemented!("Host::view_hit")
+    }
     /// Right-clicks with these items (at most 64 ids) are mod `mod_id`'s; a later call replaces the list. API 116.
-    fn claim_items(&mut self, mod_id: &str, ids: &[String]);
+    fn claim_items(&mut self, mod_id: &str, ids: &[String]) {
+        let _ = mod_id;
+        let _ = ids;
+        unimplemented!("Host::claim_items")
+    }
     /// Mod `mod_id`'s events since its last poll (at most 256 wait). API 116.
-    fn poll(&mut self, mod_id: &str) -> Vec<NativeModEvent>;
+    fn poll(&mut self, mod_id: &str) -> Vec<NativeModEvent> {
+        let _ = mod_id;
+        unimplemented!("Host::poll")
+    }
     /// Sets the stack of item entity `id` in the server level `dimension`, as
     /// a hopper's `addItem` leaves what it couldn't take (`ItemEntity.setItem`);
     /// an empty stack (count 0) removes the entity (`setItem(EMPTY)`, then
     /// `discard`). Players see it on their next tracker update. False when the
     /// level in place has no such item entity, or on a client. API 42.
-    fn set_item_entity(&mut self, dimension: &str, id: u32, stack: ItemStack) -> bool;
+    fn set_item_entity(&mut self, dimension: &str, id: u32, stack: ItemStack) -> bool {
+        let _ = dimension;
+        let _ = id;
+        let _ = stack;
+        unimplemented!("Host::set_item_entity")
+    }
     /// The block at `pos` changed its comparator output
     /// (`native_analog_output`) without changing its state: the comparators
     /// beside it, or behind a conductor there, read it again
     /// (`Level.updateNeighbourForOutputSignal`). Acts on the level in place:
     /// false (and nothing happens) when `dimension` is another, or this
     /// window isn't a server. API 64.
-    fn update_output_neighbors(&mut self, dimension: &str, pos: [i32; 3]) -> bool;
+    fn update_output_neighbors(&mut self, dimension: &str, pos: [i32; 3]) -> bool {
+        let _ = dimension;
+        let _ = pos;
+        unimplemented!("Host::update_output_neighbors")
+    }
     /// The block at `pos` changed the signal it gives: its neighbours, and
     /// theirs (a block it powers passes the signal on), read it again, as
     /// around a lever (`Level.updateNeighborsAt`). Call it when the answer
     /// changes and once the block is placed. Acts on the level in place:
     /// false (and nothing happens) when `dimension` is another, or this
     /// window isn't a server. API 38.
-    fn update_signal_neighbors(&mut self, dimension: &str, pos: [i32; 3]) -> bool;
+    fn update_signal_neighbors(&mut self, dimension: &str, pos: [i32; 3]) -> bool {
+        let _ = dimension;
+        let _ = pos;
+        unimplemented!("Host::update_signal_neighbors")
+    }
     /// Sends clients the block at `pos` and its block entity's update tag
     /// (`native_block_entity_update_tag`) again, as `Level.sendBlockUpdated`
     /// does: with the level's other block changes, to the players who see its
@@ -427,7 +687,10 @@ pub trait Host {
     /// entities). Call it when what clients show changed (a machine started),
     /// not for every tick's progress: a menu's data slots carry that. Nothing
     /// happens for an unloaded block. API 52.
-    fn block_entity_sync(&mut self, pos: [i32; 3]);
+    fn block_entity_sync(&mut self, pos: [i32; 3]) {
+        let _ = pos;
+        unimplemented!("Host::block_entity_sync")
+    }
     /// Plays sound event `sound` (`minecraft:entity.generic.explode`, or a
     /// mod's own from its `assets/<id>/sounds.json`) at `at` for this
     /// player only, `delay` ticks from now (0 to 1200, a minute): a client
@@ -444,31 +707,67 @@ pub trait Host {
         volume: f32,
         pitch: f32,
         delay: i32,
-    ) -> bool;
+    ) -> bool {
+        let _ = sound;
+        let _ = at;
+        let _ = volume;
+        let _ = pitch;
+        let _ = delay;
+        unimplemented!("Host::play_local_sound")
+    }
     /// A rectangle in GUI pixels, `argb` (0x78000000 is the extras' box).
-    fn fill(&self, batch: &mut HudBatch, rect: [f32; 4], argb: u32);
+    fn fill(&self, batch: &mut HudBatch, rect: [f32; 4], argb: u32) {
+        let _ = batch;
+        let _ = rect;
+        let _ = argb;
+        unimplemented!("Host::fill")
+    }
     /// Part `src` (`[x, y, w, h]` in the sprite's own pixels) of sprite
     /// `name` (vanilla's `gui/...`, or a content mod's GUI texture
     /// `mymod:gui/...`), drawn stretched into `dst` (`[x, y, w, h]` in GUI
     /// pixels). False when there is no such sprite. API 19.
-    fn sprite(&self, batch: &mut HudBatch, name: &str, src: [f32; 4], dst: [f32; 4]) -> bool;
+    fn sprite(&self, batch: &mut HudBatch, name: &str, src: [f32; 4], dst: [f32; 4]) -> bool {
+        let _ = batch;
+        let _ = name;
+        let _ = src;
+        let _ = dst;
+        unimplemented!("Host::sprite")
+    }
     /// Item `item`'s icon (`mymod:machine`) with its top left at `at`,
     /// `size` GUI pixels square (16 in a slot); false for an unknown item.
     /// API 20.
-    fn item(&self, batch: &mut HudBatch, item: &str, at: [f32; 2], size: f32) -> bool;
+    fn item(&self, batch: &mut HudBatch, item: &str, at: [f32; 2], size: f32) -> bool {
+        let _ = batch;
+        let _ = item;
+        let _ = at;
+        let _ = size;
+        unimplemented!("Host::item")
+    }
     /// The open menu's title (the block's name, or the one it was given),
     /// as plain text. API 20.
-    fn screen_title(&self) -> Option<String>;
+    fn screen_title(&self) -> Option<String> {
+        unimplemented!("Host::screen_title")
+    }
     /// A data file of the game's resources, content mods' included
     /// (`data/mymod/machines.json`), when there is one: what a mod's content
     /// says, read at runtime. Only relative paths of plain names. API 20.
-    fn data(&self, path: &str) -> Option<Vec<u8>>;
+    fn data(&self, path: &str) -> Option<Vec<u8>> {
+        let _ = path;
+        unimplemented!("Host::data")
+    }
     /// The block at `pos` (`mymod:cable`; air where nothing is loaded).
     /// API 20.
-    fn block(&self, pos: [i32; 3]) -> String;
+    fn block(&self, pos: [i32; 3]) -> String {
+        let _ = pos;
+        unimplemented!("Host::block")
+    }
     /// Property `key` of the block at `pos` (a machine's `facing`), if it
     /// has one. API 20.
-    fn block_property(&self, pos: [i32; 3], key: &str) -> Option<String>;
+    fn block_property(&self, pos: [i32; 3], key: &str) -> Option<String> {
+        let _ = pos;
+        let _ = key;
+        unimplemented!("Host::block_property")
+    }
     /// Puts `stack` into the container at `pos` (a chest, a furnace, a mod
     /// container) through its side `face`, as a hopper would, one by one, and
     /// returns what did not fit: a machine's auto-output. A composter takes
@@ -478,34 +777,73 @@ pub trait Host {
         pos: [i32; 3],
         face: Direction,
         stack: ItemStack,
-    ) -> Option<ItemStack>;
+    ) -> Option<ItemStack> {
+        let _ = pos;
+        let _ = face;
+        let _ = stack;
+        unimplemented!("Host::insert_item")
+    }
     /// Where the mouse is, in GUI pixels. API 20.
-    fn cursor(&self) -> [f32; 2];
+    fn cursor(&self) -> [f32; 2] {
+        unimplemented!("Host::cursor")
+    }
     /// A line of text at `(x, y)` in GUI pixels, opaque `rgb`.
-    fn text(&self, batch: &mut HudBatch, text: &str, at: [f32; 2], rgb: u32, shadow: bool);
+    fn text(&self, batch: &mut HudBatch, text: &str, at: [f32; 2], rgb: u32, shadow: bool) {
+        let _ = batch;
+        let _ = text;
+        let _ = at;
+        let _ = rgb;
+        let _ = shadow;
+        unimplemented!("Host::text")
+    }
     /// The folder mod `mod_id`'s post-build step wrote into when the launcher built the game
     /// (`native-data/<id>/` in the build's version folder); None when the game's own path is
     /// unknown. API 41.
-    fn built_data(&self, mod_id: &str) -> Option<PathBuf>;
+    fn built_data(&self, mod_id: &str) -> Option<PathBuf> {
+        let _ = mod_id;
+        unimplemented!("Host::built_data")
+    }
     /// Whether the player left mod `mod_id` on in Options > Mods. A mod
     /// turned off does nothing (check this first in each hook) until the
     /// launcher's next build leaves it out.
-    fn on(&self, mod_id: &str) -> bool;
+    fn on(&self, mod_id: &str) -> bool {
+        let _ = mod_id;
+        unimplemented!("Host::on")
+    }
     /// The key the player chose for a mod's key `name`, else `default`
     /// (`key.keyboard.z`), as the WebAssembly mods' keys were kept
     /// (`key.<mod id>.<name>` in `horizon-mods.txt`).
-    fn mod_key(&self, mod_id: &str, name: &str, default: &str) -> String;
+    fn mod_key(&self, mod_id: &str, name: &str, default: &str) -> String {
+        let _ = mod_id;
+        let _ = name;
+        let _ = default;
+        unimplemented!("Host::mod_key")
+    }
     /// A mod's setting `key` (one file per key in `native_data_dir`).
-    fn setting(&self, mod_id: &str, key: &str) -> Option<String>;
+    fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
+        let _ = mod_id;
+        let _ = key;
+        unimplemented!("Host::setting")
+    }
     /// Keeps a mod's setting `key`.
-    fn set_setting(&self, mod_id: &str, key: &str, value: &str);
+    fn set_setting(&self, mod_id: &str, key: &str, value: &str) {
+        let _ = mod_id;
+        let _ = key;
+        let _ = value;
+        unimplemented!("Host::set_setting")
+    }
     /// Sets property `key` of the block at `pos` to `value`, as a furnace's
     /// tick sets its `lit` (`Level.setBlock` with `UPDATE_ALL`: neighbours
     /// and clients are told); true when the block changed, false when the
     /// block has no such property or value, or the property already has
     /// `value` (as `Level.setBlock` for an unchanged state). The block
     /// entity stays. API 18.
-    fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str) -> bool;
+    fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str) -> bool {
+        let _ = pos;
+        let _ = key;
+        let _ = value;
+        unimplemented!("Host::set_block_property")
+    }
     /// `native_set_block_property` with `Level.setBlock`'s `flags`, as a
     /// brewing stand's tick sets its bottles with `flags::UPDATE_CLIENTS`.
     /// Players get the write whatever the flags (`flags`); false when this
@@ -517,7 +855,13 @@ pub trait Host {
         key: &str,
         value: &str,
         flags: i32,
-    ) -> bool;
+    ) -> bool {
+        let _ = pos;
+        let _ = key;
+        let _ = value;
+        let _ = flags;
+        unimplemented!("Host::set_block_property_with")
+    }
     /// The game's `config/` folder beside `options.txt`, shared by every mod
     /// as on Fabric and NeoForge: a mod names its own files in it
     /// (`config/<id>.json`, or a folder of its own). The same folder on the
@@ -525,13 +869,19 @@ pub trait Host {
     /// its own folder, beside `server.properties`. Made when missing. No
     /// `self`, so a mixin helper calls `Game::native_config_dir()` and a trait
     /// mod `Host::config_dir`. API 26.
-    fn config_dir(&self) -> Result<PathBuf, String>;
+    fn config_dir(&self) -> Result<PathBuf, String> {
+        unimplemented!("Host::config_dir")
+    }
     /// Shows the panel beside container screens with these items (at most
     /// 8192), as the game's own slots in pages, with a search box; the
     /// player's clicks, searches and keys over items come back as
     /// `native_panel_event`. The panel is the last mod's to show one; empty
     /// items and no recipe page take yours away.
-    fn panel_items(&mut self, mod_id: &str, items: Vec<NativeStack>);
+    fn panel_items(&mut self, mod_id: &str, items: Vec<NativeStack>) {
+        let _ = mod_id;
+        let _ = items;
+        unimplemented!("Host::panel_items")
+    }
     /// The recipes of type `kind` (`mymod:crusher`), a type outside `minecraft`,
     /// from `data/<namespace>/recipe/*.json` of the content mods (`.hmod`) and
     /// the world's data packs, in file order: each one's id and its file as
@@ -542,42 +892,68 @@ pub trait Host {
     /// single-player window included, sees only the content mods' recipes, not
     /// the world's data packs', unless a mod had the server send it the type
     /// (`native_datapack_sync`). API 36.
-    fn recipes_of_type(&self, kind: &str) -> &[CustomRecipe];
+    fn recipes_of_type(&self, kind: &str) -> &[CustomRecipe] {
+        let _ = kind;
+        unimplemented!("Host::recipes_of_type")
+    }
     /// An ingredient as a recipe's JSON names it: an item, a `#tag`, or a list
     /// of them, a bare id as `minecraft:` (as vanilla reads it); `test` says
     /// whether a stack fits. Items the game doesn't know are left out; None
     /// when nothing is left (an unknown or empty tag, for one) and outside a
     /// world. API 36.
-    fn recipe_ingredient(&self, json: &serde_json::Value) -> Option<Ingredient>;
+    fn recipe_ingredient(&self, json: &serde_json::Value) -> Option<Ingredient> {
+        let _ = json;
+        unimplemented!("Host::recipe_ingredient")
+    }
     /// A stack as a recipe's `result` names it: `id` (a bare one as
     /// `minecraft:`), `count` (1 by default, up to 99) and `components`. None
     /// without an `id`, for an item the game doesn't know or a count outside
     /// that, and outside a world. API 36.
-    fn recipe_result(&self, json: &serde_json::Value) -> Option<ItemStack>;
+    fn recipe_result(&self, json: &serde_json::Value) -> Option<ItemStack> {
+        let _ = json;
+        unimplemented!("Host::recipe_result")
+    }
     /// The `book_id`s of the recipes the player's recipe book holds now
     /// (the server's book on a server); empty outside a world.
-    fn known_recipes(&mut self) -> Arc<[i32]>;
+    fn known_recipes(&mut self) -> Arc<[i32]> {
+        unimplemented!("Host::known_recipes")
+    }
     /// Places a recipe in the open screen's grid as a click in the recipe
     /// book does (`ServerboundPlaceRecipePacket`): the inventory's grid or a
     /// crafting table's. `all` places as many as the items allow, as with
     /// Shift. Refused while no such screen is open and for a recipe the
     /// player's book doesn't hold; one missing items shows as a ghost.
-    fn place_recipe(&mut self, book_id: i32, all: bool) -> Result<(), String>;
+    fn place_recipe(&mut self, book_id: i32, all: bool) -> Result<(), String> {
+        let _ = book_id;
+        let _ = all;
+        unimplemented!("Host::place_recipe")
+    }
     /// Creative mode only: gives the player `count` of `item`
     /// (`minecraft:diamond`) as taking it from the creative inventory does
     /// (`ServerboundSetCreativeModeSlot`): the selected slot first, then the
     /// hotbar, then the inventory. The count is cut to one stack.
-    fn give(&mut self, item: &str, count: u32) -> Result<(), String>;
+    fn give(&mut self, item: &str, count: u32) -> Result<(), String> {
+        let _ = item;
+        let _ = count;
+        unimplemented!("Host::give")
+    }
     /// For a client mod: a push added to the local player's velocity, in blocks a tick, as an
     /// explosion's knockback is (the window's player moves itself, as vanilla's client does). Each component is
     /// clamped to -4..4; a spectator, or a value that is not a number, is left alone. API 105.
-    fn push_player(&mut self, kick: [f32; 3]);
+    fn push_player(&mut self, kick: [f32; 3]) {
+        let _ = kick;
+        unimplemented!("Host::push_player")
+    }
     /// For a server mod: `player`'s creative flying speed (vanilla's 0.05 when none, at most `FLYING_MAX`), kept on
     /// the server's player and sent to their client. A respawn or a game mode change keeps it, and it is saved
     /// with the player (`abilities.flySpeed`, as vanilla saves it). False for a player not here or a client of a
     /// server, and inside a player's hook, where the server's player list is busy: call it from a tick hook.
     /// API 105.
-    fn set_flying_speed(&mut self, player: u128, speed: Option<f32>) -> bool;
+    fn set_flying_speed(&mut self, player: u128, speed: Option<f32>) -> bool {
+        let _ = player;
+        let _ = speed;
+        unimplemented!("Host::set_flying_speed")
+    }
     /// Sends `data` on `channel` (`mod_id:name`, at most 30 000 bytes, at
     /// most 32 a player a tick) to `player`'s client, at the tick's end, from
     /// any server hook. Ok means accepted: a player who left or isn't on a
@@ -587,12 +963,21 @@ pub trait Host {
         player: u128,
         channel: &str,
         data: &[u8],
-    ) -> Result<(), String>;
+    ) -> Result<(), String> {
+        let _ = player;
+        let _ = channel;
+        let _ = data;
+        unimplemented!("Host::net_send_to_player")
+    }
     /// The client half: sends `data` on `channel` to the server (the same
     /// caps, 32 a tick). An error when the server doesn't carry mod messages
     /// (a vanilla server), and until the player has joined: a server says it
     /// carries them during configuration, before it can take one. API 40.
-    fn net_send_to_server(&mut self, channel: &str, data: &[u8]) -> Result<(), String>;
+    fn net_send_to_server(&mut self, channel: &str, data: &[u8]) -> Result<(), String> {
+        let _ = channel;
+        let _ = data;
+        unimplemented!("Host::net_send_to_server")
+    }
     /// Drop one item as DefaultDispenseItemBehavior does. For a dispenser hook:
     /// return this remainder in its answer with `CLICK`; the caller plays the
     /// answer's event and smoke once. A client, another dimension or an unloaded
@@ -603,7 +988,13 @@ pub trait Host {
         pos: [i32; 3],
         facing: Direction,
         stack: ItemStack,
-    ) -> Option<ItemStack>;
+    ) -> Option<ItemStack> {
+        let _ = dimension;
+        let _ = pos;
+        let _ = facing;
+        let _ = stack;
+        unimplemented!("Host::dispense_default")
+    }
     /// Opens a chest menu of `rows` rows (1 to 6) titled `title` for the
     /// player, showing `items` (by slot, padded with empty ones), in place of
     /// the menu they had open: its window id.
@@ -613,15 +1004,31 @@ pub trait Host {
         rows: u8,
         title: Text,
         items: Vec<Option<ItemStack>>,
-    ) -> Option<i32>;
+    ) -> Option<i32> {
+        let _ = uuid;
+        let _ = rows;
+        let _ = title;
+        let _ = items;
+        unimplemented!("Host::open_menu")
+    }
     /// Replaces what the player's open native menu shows; sent with the
     /// tick's container sync.
-    fn set_menu_items(&mut self, uuid: u128, items: Vec<Option<ItemStack>>);
+    fn set_menu_items(&mut self, uuid: u128, items: Vec<Option<ItemStack>>) {
+        let _ = uuid;
+        let _ = items;
+        unimplemented!("Host::set_menu_items")
+    }
     /// Closes the player's native menu (a `native_menu_closed` follows).
-    fn close_menu(&mut self, uuid: u128);
+    fn close_menu(&mut self, uuid: u128) {
+        let _ = uuid;
+        unimplemented!("Host::close_menu")
+    }
     /// The player's 36 inventory slots (0..9 the hotbar), to show or offer
     /// them; None for a player not here, dead, or whose state is swapped in.
-    fn player_stacks(&self, uuid: u128) -> Option<Vec<Option<ItemStack>>>;
+    fn player_stacks(&self, uuid: u128) -> Option<Vec<Option<ItemStack>>> {
+        let _ = uuid;
+        unimplemented!("Host::player_stacks")
+    }
     /// Swaps two players' offers (inventory slots, each with the stack it
     /// must still hold, exactly) in one step: the stacks leave their slots
     /// and go to the other player where they fit whole, or nothing moves and
@@ -633,14 +1040,26 @@ pub trait Host {
         a_offer: &[(usize, ItemStack)],
         b: u128,
         b_offer: &[(usize, ItemStack)],
-    ) -> Result<(), String>;
+    ) -> Result<(), String> {
+        let _ = a;
+        let _ = a_offer;
+        let _ = b;
+        let _ = b_offer;
+        unimplemented!("Host::exchange_items")
+    }
     /// `native_fluid_insert`: up to `amount` millibuckets of `fluid`
     /// (`minecraft:water`, `minecraft:lava`) into the block at `pos`, through
     /// its side `face`, in the level in place: a mod block's tanks first
     /// those with the same fluid, then empty ones, by the sides and tanks its
     /// table gave; a cauldron by thirds of a bucket, a lava one only whole.
     /// What did not fit. API 54.
-    fn fluid_insert(&mut self, pos: [i32; 3], face: Direction, fluid: &str, amount: i32) -> i32;
+    fn fluid_insert(&mut self, pos: [i32; 3], face: Direction, fluid: &str, amount: i32) -> i32 {
+        let _ = pos;
+        let _ = face;
+        let _ = fluid;
+        let _ = amount;
+        unimplemented!("Host::fluid_insert")
+    }
     /// Takes up to `amount` millibuckets out of the block at `pos` in the
     /// level in place, `dimension`, through its side `face`: a mod block's
     /// drainable tanks, one fluid only (the first that's there), or a
@@ -653,7 +1072,13 @@ pub trait Host {
         pos: [i32; 3],
         face: Direction,
         amount: i32,
-    ) -> Option<(String, i32)>;
+    ) -> Option<(String, i32)> {
+        let _ = dimension;
+        let _ = pos;
+        let _ = face;
+        let _ = amount;
+        unimplemented!("Host::fluid_extract")
+    }
     /// Moves up to `max` millibuckets from the block at `from`, through its
     /// side `from_face`, into the one at `to`, through its side `to_face`, as
     /// `native_move_items` moves items: what the target won't take goes back
@@ -670,10 +1095,20 @@ pub trait Host {
         to: [i32; 3],
         to_face: Direction,
         max: i32,
-    ) -> Option<(String, i32)>;
+    ) -> Option<(String, i32)> {
+        let _ = dimension;
+        let _ = from;
+        let _ = from_face;
+        let _ = to;
+        let _ = to_face;
+        let _ = max;
+        unimplemented!("Host::move_fluids")
+    }
     /// The level in place (`minecraft:overworld`), for a hook that isn't told
     /// which it runs in. API 48.
-    fn dimension(&self) -> &'static str;
+    fn dimension(&self) -> &'static str {
+        unimplemented!("Host::dimension")
+    }
     /// Takes up to `count` items out of slot `slot` of the container at `pos`,
     /// through its side `face`; they're the mod's to place then, as a hopper's
     /// are: to hand them on without losing any, use `native_move_items`. None
@@ -685,7 +1120,14 @@ pub trait Host {
         face: Direction,
         slot: usize,
         count: u32,
-    ) -> Option<ItemStack>;
+    ) -> Option<ItemStack> {
+        let _ = dimension;
+        let _ = pos;
+        let _ = face;
+        let _ = slot;
+        let _ = count;
+        unimplemented!("Host::extract_item")
+    }
     /// Moves up to `max` items from the container at `from`, through its side
     /// `from_face`, into the one at `to`, through its side `to_face`, one by
     /// one as a hopper does: an item the target refuses stays in its slot, so
@@ -702,7 +1144,16 @@ pub trait Host {
         to_face: Direction,
         item: Option<&str>,
         max: u32,
-    ) -> u32;
+    ) -> u32 {
+        let _ = dimension;
+        let _ = from;
+        let _ = from_face;
+        let _ = to;
+        let _ = to_face;
+        let _ = item;
+        let _ = max;
+        unimplemented!("Host::move_items")
+    }
     /// Hides that player (a vanish) from the players below permission
     /// `level`, or shows them again (None): from the next tick those players
     /// lose them from the Tab list and the world (their client stops
@@ -713,10 +1164,20 @@ pub trait Host {
     /// or the server stops. Works anywhere on a server, inside a player's
     /// hook too; false on a client and in a world nobody else can join.
     /// API @API:hide_player@.
-    fn hide_player(&mut self, uuid: u128, level: Option<u8>) -> bool;
+    fn hide_player(&mut self, uuid: u128, level: Option<u8>) -> bool {
+        let _ = uuid;
+        let _ = level;
+        unimplemented!("Host::hide_player")
+    }
     /// Draw a stack and its slot decorations, except the count, at `at`,
     /// `size` GUI pixels square. False when nothing was drawn: an unknown item
     /// or an empty stack (air, or a count of 0, as `ItemStack.isEmpty`).
     /// API @API:item_stack@.
-    fn item_stack(&self, batch: &mut HudBatch, stack: &ItemStack, at: [f32; 2], size: f32) -> bool;
+    fn item_stack(&self, batch: &mut HudBatch, stack: &ItemStack, at: [f32; 2], size: f32) -> bool {
+        let _ = batch;
+        let _ = stack;
+        let _ = at;
+        let _ = size;
+        unimplemented!("Host::item_stack")
+    }
 }
