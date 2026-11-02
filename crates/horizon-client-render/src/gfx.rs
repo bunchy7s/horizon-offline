@@ -4817,11 +4817,13 @@ impl Renderer {
     ) -> impl Iterator<Item = (&'a ([i32; 3], u32), bool)> + 'a {
         let fade = fade_millis(fade_seconds);
         let now = Instant::now();
+        // No section uploaded within the fade: all are whole, none is looked up.
+        let all = !self.sections_fading_in(fade, now);
         let min_y = self.layout.min_y();
         self.block_entities
             .iter()
             .filter(move |(key, _)| {
-                chunk_visibility(self.section_elapsed_ms(**key, now), fade)
+                all || chunk_visibility(self.section_elapsed_ms(**key, now), fade)
                     >= CHUNK_VISIBILITY_THRESHOLD
             })
             .filter_map(move |(key, blocks)| {
