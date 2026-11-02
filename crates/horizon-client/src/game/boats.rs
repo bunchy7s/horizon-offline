@@ -1154,6 +1154,16 @@ impl Game<'_> {
         );
         self.world.modified.insert(key);
         self.boats.push(boat);
+        if self.serving.is_some() || self.options.dedicated.is_some() {
+            self.native_vehicle_create(
+                self.boats.last().unwrap().entity_type().as_str(),
+                [
+                    self.boats.last().unwrap().position.x,
+                    self.boats.last().unwrap().position.y,
+                    self.boats.last().unwrap().position.z,
+                ],
+            );
+        }
         if !self.creative {
             self.consume_held();
         }

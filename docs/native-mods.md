@@ -1614,6 +1614,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   minecart type. Server-side.
 - **`native_vehicle_destroy(kind, pos)`**: a boat or minecart is about to be destroyed at `pos`. TNT minecarts that
   prime instead of breaking are not heard. Server-side.
+- **`native_vehicle_create(kind, pos)`**: a boat or minecart joined the level at `pos`, after being placed by a
+  player or dispenser. Server-side.
 - **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and
   their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
   player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a

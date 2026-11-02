@@ -4871,6 +4871,11 @@ impl Game<'_> {
     ) {
         let _ = (kind, damage, cancel);
     }
+    /// A boat or minecart was created at `pos`, after it joined the level.
+    /// `kind` is the vehicle type. Server-side. @API:native_vehicle_create@.
+    pub(super) fn native_vehicle_create(&mut self, kind: &str, pos: [f64; 3]) {
+        let _ = (kind, pos);
+    }
     /// A boat or minecart is about to be destroyed at `pos`. TNT minecarts
     /// that prime instead of breaking are not heard. Server-side.
     /// @API:native_vehicle_destroy@.

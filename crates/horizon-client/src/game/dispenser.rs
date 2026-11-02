@@ -1216,6 +1216,13 @@ impl Game<'_> {
         }
         self.world.modified.insert((front.0 >> 4, front.2 >> 4));
         self.boats.push(boat);
+        if self.serving.is_some() || self.options.dedicated.is_some() {
+            let boat = self.boats.last().unwrap();
+            self.native_vehicle_create(
+                boat.entity_type().as_str(),
+                [boat.position.x, boat.position.y, boat.position.z],
+            );
+        }
         (shrink(stack), CLICK)
     }
     /// `MinecartDispenseItemBehavior`.
@@ -1255,6 +1262,13 @@ impl Game<'_> {
         );
         self.world.modified.insert((front.0 >> 4, front.2 >> 4));
         self.carts.push(cart);
+        if self.serving.is_some() || self.options.dedicated.is_some() {
+            let cart = self.carts.last().unwrap();
+            self.native_vehicle_create(
+                cart.kind.id(),
+                [cart.position.x, cart.position.y, cart.position.z],
+            );
+        }
         (shrink(stack), CLICK)
     }
 
