@@ -239,11 +239,13 @@ impl ItemEntity {
         if self.health > 0 {
             return None;
         }
-        // `ItemStack.onDestroyed` runs the item's own arm. A bundle's
-        // (`BundleItem.onDestroyed`) empties its `bundle_contents` and hands
-        // them back; only a bundle holds that component, so the component is
-        // the dispatch (a mod's own bundle carries one too).
-        Some(crate::bundle::destroyed(&mut self.stack))
+        // `ItemStack.onDestroyed` runs the item's own arm, and the component
+        // the stack holds is the dispatch: a bundle's (`BundleItem.onDestroyed`)
+        // `bundle_contents` and a container item's (`BlockItem.onDestroyed`)
+        // `container`, which a mod's own item carries in the same way.
+        let mut spilled = crate::bundle::destroyed(&mut self.stack);
+        spilled.extend(crate::item_data::destroyed_container(&mut self.stack));
+        Some(spilled)
     }
     /// `ItemEntity.tick` on a server: an item whose box is inside a block
     /// (one placed where it lay) has no physics this tick
