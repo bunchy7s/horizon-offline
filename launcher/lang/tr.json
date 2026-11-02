@@ -874,5 +874,13 @@
   "No servers saved in this instance.": "Bu kurulumda kayıtlı sunucu yok.",
   "1 server in {name}": "{name} içinde 1 sunucu",
   "{count} servers in {name}": "{name} içinde {count} sunucu",
-  "Click again to remove": "Kaldırmak için tekrar tıklayın"
+  "Click again to remove": "Kaldırmak için tekrar tıklayın",
+  "Could not reach Horizon's cosmetics service. Check your internet connection.": "Horizon'un kozmetik hizmetine ulaşılamadı. İnternet bağlantını kontrol et.",
+  "Your Wardrobe session ended. Open the Wardrobe again.": "Gardırop oturumun sona erdi. Gardırobu yeniden aç.",
+  "The early-player set can't be claimed right now.": "İlk oyuncu seti şu anda alınamıyor.",
+  "That item isn't in your Wardrobe.": "Bu eşya gardırobunda yok.",
+  "Horizon's cosmetics service had a problem. Try again later.": "Horizon'un kozmetik hizmetinde bir sorun oluştu. Daha sonra tekrar dene.",
+  "Mojang could not confirm your account. Sign in again and retry.": "Mojang hesabını doğrulayamadı. Yeniden giriş yapıp tekrar dene.",
+  "Sign in with a Minecraft account first.": "Önce bir Minecraft hesabıyla giriş yap.",
+  "Mojang's session server is not answering. Try again later.": "Mojang'ın oturum sunucusu yanıt vermiyor. Daha sonra tekrar dene."
 }

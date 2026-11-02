@@ -111,3 +111,18 @@ The launcher shows items on the player's own skin without the game: `preview::re
 player model at rest (vanilla's `PlayerModel` boxes on a 64×64 skin, wide or slim arms, the outer
 layers included) and each item on its bone on the CPU, with a depth buffer and cutout alpha, seen
 from any angle.
+
+## The Wardrobe's account check (`launcher/src/wardrobe.rs`)
+
+The launcher talks to the same service for the player's own items: the catalogue, what the account
+owns, claiming the early-player set while its window is open, and what each slot wears.
+
+- **Who the player is**: the service hands out a one-time server id (`POST /v1/auth/start`), the
+  launcher tells Mojang's session server that the account joins it
+  (`account::session::join_server`, the call a client makes before joining an online-mode server),
+  and the service asks Mojang (`hasJoined`) before it answers `POST /v1/auth/finish` with a
+  session of its own. The Minecraft token goes to Mojang only; the service never sees it.
+- **Then**: `GET /v1/me`, `POST /v1/claim`, `PUT /v1/equipped {"slot", "item"}` with that session
+  (`Authorization: Bearer`), kept in memory for the time the service gave, less a minute.
+- **The early-player set** is free and can be claimed only between the window's start and end;
+  outside it the service refuses and the launcher says so.

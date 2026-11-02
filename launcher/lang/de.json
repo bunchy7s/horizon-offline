@@ -874,5 +874,13 @@
   "No servers saved in this instance.": "In dieser Instanz sind keine Server gespeichert.",
   "1 server in {name}": "1 Server in {name}",
   "{count} servers in {name}": "{count} Server in {name}",
-  "Click again to remove": "Zum Entfernen erneut klicken"
+  "Click again to remove": "Zum Entfernen erneut klicken",
+  "Could not reach Horizon's cosmetics service. Check your internet connection.": "Horizons Kosmetikdienst ist nicht erreichbar. Prüfe deine Internetverbindung.",
+  "Your Wardrobe session ended. Open the Wardrobe again.": "Deine Garderoben-Sitzung ist abgelaufen. Öffne die Garderobe erneut.",
+  "The early-player set can't be claimed right now.": "Das Set für frühe Spieler kann gerade nicht beansprucht werden.",
+  "That item isn't in your Wardrobe.": "Dieser Gegenstand ist nicht in deiner Garderobe.",
+  "Horizon's cosmetics service had a problem. Try again later.": "Horizons Kosmetikdienst hatte ein Problem. Versuche es später erneut.",
+  "Mojang could not confirm your account. Sign in again and retry.": "Mojang konnte dein Konto nicht bestätigen. Melde dich erneut an und versuche es noch einmal.",
+  "Sign in with a Minecraft account first.": "Melde dich zuerst mit einem Minecraft-Konto an.",
+  "Mojang's session server is not answering. Try again later.": "Mojangs Sitzungsserver antwortet nicht. Versuche es später erneut."
 }
