@@ -7358,6 +7358,23 @@ impl Game<'_> {
                 // and the click ends.
                 self.with_hand(hand, Game::swing_arm);
                 return true;
+            } else if let Some(stack) = held
+                .as_ref()
+                .filter(|s| s.item.ends_with("_spawn_egg"))
+                .filter(|_| {
+                    self.may_build()
+                        || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos))
+                })
+            {
+                // SpawnEggItem.useOn on a client level: FAIL for a mob that
+                // cannot spawn (the click ends, no swing), else SUCCESS (swing).
+                // Either way no UseItem follows, so the server does not spawn
+                // a second mob from the fluid ray (ItemStack.useOn passes in
+                // adventure mode off can_place_on, which the filter above keeps).
+                if spawn_egg_use_on_swings(self.spawn_egg_allowed(&stack.item)) {
+                    self.with_hand(hand, Game::swing_arm);
+                }
+                return true;
             } else if let Some(stack) = held.as_ref()
                 && (self.predict_item_on_block(stack, &hit, hand)
                     || self.predict_map_on_banner(stack, &hit))
@@ -9971,6 +9988,12 @@ fn keep_client_state(old: Option<&BlockEntity>, new: &mut BlockEntity) {
     }
 }
 
+/// `SpawnEggItem.useOn` on a client level: FAIL (no swing) when the mob cannot
+/// spawn, SUCCESS (swing) otherwise. Neither lets `UseItem` follow.
+fn spawn_egg_use_on_swings(can_spawn: bool) -> bool {
+    can_spawn
+}
+
 /// `LocalPlayer.onSyncedDataUpdated(DATA_LIVING_ENTITY_FLAGS)`: the server's
 /// flags (1 using, 2 the off hand) start a use the client is not running
 /// (`startUsingItem`, which needs an item in that hand), and stop one it is
@@ -10222,7 +10245,7 @@ fn client_millis() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{keep_client_state, remote_use_swings, synced_local_use};
+    use super::{keep_client_state, remote_use_swings, spawn_egg_use_on_swings, synced_local_use};
     use horizon_client::{
         containers::{Beacon, BlockEntity},
         items::ItemStack,
@@ -10265,6 +10288,14 @@ mod tests {
         assert!(!remote_use_swings(&stack("minecraft:iron_spear"), false));
         // A consumable (food, a drink) starts its use without a swing.
         assert!(!remote_use_swings(&stack("minecraft:apple"), true));
+    }
+
+    /// A spawn egg used on a block ends the click: swinging when the mob can
+    /// spawn (SUCCESS), silent when it cannot (FAIL).
+    #[test]
+    fn a_spawn_egg_on_a_block_swings_only_for_a_mob_that_can_spawn() {
+        assert!(spawn_egg_use_on_swings(true));
+        assert!(!spawn_egg_use_on_swings(false));
     }
 
     #[test]
