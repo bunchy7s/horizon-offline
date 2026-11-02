@@ -2157,6 +2157,11 @@ the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot sh
 
 ## Trait mods (draft)
 
+`cargo horizon-mod new <path> --template native --horizon <commit>` writes a trait mod to start from: the bundle's
+`horizon-mixin.toml`, pinned to that Horizon commit, and an `[api]` crate whose `hooks()` greets each player who
+joins. Its files are what a bundle may carry ([api/mod-files.md](api/mod-files.md)), so the launcher builds the folder
+as it is (`native-build <path>`) and packs it into a `.hnmod`.
+
 A bundle declares its trait mod package by its path inside the bundle:
 
 ```toml
