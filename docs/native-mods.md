@@ -537,8 +537,10 @@ API 47 adds `native_entity_join_level(dimension, entity, kind, pos, loaded_from_
 server level (NeoForge's `EntityJoinLevelEvent`, vanilla's `PersistentEntitySectionManager.addEntity`):
 `loaded_from_disk` is true when it comes back with its chunk, false for a fresh add (a drop, an orb, `/summon`, an
 arrival through a portal into another level). The entity is already in the level's lists when the hook runs; `canceled` takes it back
-out, and a `/summon` of it fails with vanilla's "duplicate UUIDs" message. It tells item entities and experience
-orbs so far; later APIs add other kinds, so check `kind`. Bundles that use it need `"hooks": 47`.
+out, and a `/summon` of it fails with vanilla's "duplicate UUIDs" message. It tells every kind in the game's entity
+lists (items, orbs, mobs, boats, minecarts, armor stands, primed TNT, falling blocks, projectiles, rockets, tridents),
+once each, in creation order, so check `kind`. A drop, an orb, a mob, a `/summon` and a chunk's entities are told at
+once; other gameplay spawns when the next tick starts, and a cancelled one is removed then. Bundles that use it need `"hooks": 47`.
 
 API 48 adds [a block's items](#a-blocks-items) for server mods, what a pipe or a machine needs to pull from other blocks: `native_container_slots`, `native_extract_item`
 and `native_move_items`, and `native_dimension` for a machine's tick to name its level. `native_insert_item` now goes one item at a time, so it no longer overfills a slot,
