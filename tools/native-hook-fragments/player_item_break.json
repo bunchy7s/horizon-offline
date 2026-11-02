@@ -1,0 +1,12 @@
+{
+  "hooks": [
+    {
+      "name": "player_item_break",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_item_break",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerItemBreak)",
+      "side": "server"
+    }
+  ],
+  "rust_summary": "A server player broke the item held in their hand (`native_player_item_break`).",
+  "doc_summary": "A server player broke the item held in their hand when durability damage removed it: `native_player_item_break(player, name, item)`. Bundles need \"hooks\": @API:player_item_break@."
+}

@@ -13183,6 +13183,11 @@ impl Game<'_> {
                     horizon_world::player_inventory::EquipmentSlot::MainHand,
                     &gone,
                 );
+                if let (Some(player), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    self.native_player_item_break(player, &name, &broken);
+                }
             }
         }
     }

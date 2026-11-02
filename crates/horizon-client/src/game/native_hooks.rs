@@ -4631,6 +4631,11 @@ impl Game<'_> {
     ) {
         let _ = (player, name, book, open, filtering);
     }
+    /// A server player broke the item they were holding after durability
+    /// damage removed it from the hand. @API:native_player_item_break@.
+    pub(super) fn native_player_item_break(&mut self, player: u128, name: &str, item: &str) {
+        let _ = (player, name, item);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
