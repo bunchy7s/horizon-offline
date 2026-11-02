@@ -130,7 +130,7 @@ ServerPlayer.getIpAddress	skip:server		for ban-ip and the dedicated server log
 ServerPlayer.updateOptions	port	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	the ClientInformation arm: view distance, main hand, model parts and chat visibility are kept
 ServerPlayer.clientInformation	skip:java		getter
 ServerPlayer.sendServerStatus	port	crates/horizon-client/src/lan/hub.rs::Hub::place_new_player	ServerData with the motd and icon at join
-ServerPlayer.updateInvisibilityStatus	inline	crates/horizon-client/src/game/lan.rs::Game::lan_host_state	
+ServerPlayer.updateInvisibilityStatus	inline	crates/horizon-client/src/lan/hub.rs::guest_body	a spectator is always invisible, else the invisibility effect decides; guest_body feeds the shared flags sent by ServerEntity.sendDirtyEntityData (shared_flags)
 ServerPlayer.drop	port	crates/horizon-client/src/game.rs::Game::player_drop	item_dropped and drop statistics, thrower set
 ServerPlayer.calculateGameModeForNewPlayer	port	crates/horizon-client/src/game/lan.rs::Game::lan_guest_joined	default or forced game mode for a new or force-gamemode guest
 ServerPlayer.storeGameTypes	port	crates/horizon-client/src/save.rs::Level::player_tag	both are saved: playerGameType, and previousPlayerGameType (absent when unset, as storeNullable is), read back into previous_game_mode

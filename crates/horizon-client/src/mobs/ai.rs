@@ -636,6 +636,7 @@ pub fn tick(
         if m.species() == Species::Endermite {
             endermite_lifetime(m);
         }
+        ageable_step(m, w, level_random, events);
         // AbstractHorse.tick runs the stand counter down with or without AI.
         if super::equine::is_equine(m.species())
             && !super::camel::is_camel(m.species())
@@ -1263,6 +1264,68 @@ fn play_ambient(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
 fn turtle_ambient_silent(m: &Mob) -> bool {
     m.fluids.in_water || !m.on_ground || m.is_baby()
 }
+/// `AgeableMob.aiStep` runs even when `Mob.serverAiStep` is disabled.
+fn ageable_step(
+    m: &mut Mob,
+    w: &MobWorld,
+    level_random: &mut LegacyRandom,
+    events: &mut Vec<MobEvent>,
+) {
+    // AgeableMob.aiStep: a forced age-up's particles (`sendParticles`, so the
+    // players are sent them), then the age.
+    if m.extra.forced_age_timer > 0 {
+        if m.extra.forced_age_timer % 4 == 0 {
+            let (w, h) = (f64::from(m.width()), f64::from(m.height()));
+            let r = &mut m.random;
+            let x = m.position.x + w * (2.0 * r.next_double() - 1.0);
+            let y = m.position.y + h * r.next_double() + 0.5;
+            let z = m.position.z + w * (2.0 * r.next_double() - 1.0);
+            // sendParticles(HAPPY_VILLAGER, x, y, z, 1, 0, 0, 0, 0): exactly there, at rest.
+            events.push(MobEvent::LevelParticles {
+                kind: "happy_villager",
+                at: [x, y, z],
+                spread: [0.0; 3],
+                speed: 0.0,
+                count: 1,
+            });
+        }
+        m.extra.forced_age_timer -= 1;
+    }
+    // AgeableMob.aiStep: an age counts only for its subclasses (a tadpole
+    // counts its own age up, a zombie's baby age never moves). `canAgeUp`:
+    // a baby grows unless an age lock holds it; a breeding pause counts down.
+    if m.alive() && super::finalize::ageable(m.species()) {
+        if can_age_up(m) {
+            let (bw, bh, _) = m.dims();
+            // AgeableMob.setAge(getAge() + 1): the crossing is where a species'
+            // ageBoundaryReached runs (a goat's and a hoglin's attack damage, a
+            // sulfur cube's size), which the age write used to skip.
+            let next = m.extra.age + 1;
+            super::finalize::set_age(m, next);
+            // setAge at the age boundary: refreshDimensions.
+            if m.extra.age >= 0 {
+                m.fudge_position_after_size_change(w, bw, bh);
+                if m.species() == Species::Villager {
+                    super::villager_brain::age_boundary_reached(m, w, level_random, events);
+                }
+                // Turtle.ageBoundaryReached: a grown turtle drops a scute.
+                if m.species() == Species::Turtle {
+                    events.push(MobEvent::GiftLoot {
+                        mob: m.id,
+                        table: "minecraft:gameplay/turtle_grow",
+                        at: [m.position.x, m.position.y, m.position.z],
+                    });
+                }
+            }
+        } else if m.extra.age > 0 {
+            m.extra.age -= 1;
+        }
+    }
+    if super::finalize::ageable(m.species()) {
+        make_age_locked_particle(m, events);
+    }
+}
+
 /// LivingEntity.aiStep (and Mob/AgeableMob/Animal additions).
 fn ai_step(m: &mut Mob, w: &MobWorld, level_random: &mut LegacyRandom, events: &mut Vec<MobEvent>) {
     if m.species() == Species::Parrot {
@@ -1337,59 +1400,7 @@ fn ai_step(m: &mut Mob, w: &MobWorld, level_random: &mut LegacyRandom, events: &
     if m.kind.flags.climber {
         m.climbing = m.horizontal_collision;
     }
-    // AgeableMob.aiStep: a forced age-up's particles (`sendParticles`, so the
-    // players are sent them), then the age.
-    if m.extra.forced_age_timer > 0 {
-        if m.extra.forced_age_timer % 4 == 0 {
-            let (w, h) = (f64::from(m.width()), f64::from(m.height()));
-            let r = &mut m.random;
-            let x = m.position.x + w * (2.0 * r.next_double() - 1.0);
-            let y = m.position.y + h * r.next_double() + 0.5;
-            let z = m.position.z + w * (2.0 * r.next_double() - 1.0);
-            // sendParticles(HAPPY_VILLAGER, x, y, z, 1, 0, 0, 0, 0): exactly there, at rest.
-            events.push(MobEvent::LevelParticles {
-                kind: "happy_villager",
-                at: [x, y, z],
-                spread: [0.0; 3],
-                speed: 0.0,
-                count: 1,
-            });
-        }
-        m.extra.forced_age_timer -= 1;
-    }
-    // AgeableMob.aiStep: an age counts only for its subclasses (a tadpole
-    // counts its own age up, a zombie's baby age never moves). `canAgeUp`:
-    // a baby grows unless an age lock holds it; a breeding pause counts down.
-    if m.alive() && super::finalize::ageable(m.species()) {
-        if can_age_up(m) {
-            let (bw, bh, _) = m.dims();
-            // AgeableMob.setAge(getAge() + 1): the crossing is where a species'
-            // ageBoundaryReached runs (a goat's and a hoglin's attack damage, a
-            // sulfur cube's size), which the age write used to skip.
-            let next = m.extra.age + 1;
-            super::finalize::set_age(m, next);
-            // setAge at the age boundary: refreshDimensions.
-            if m.extra.age >= 0 {
-                m.fudge_position_after_size_change(w, bw, bh);
-                if m.species() == Species::Villager {
-                    super::villager_brain::age_boundary_reached(m, w, level_random, events);
-                }
-                // Turtle.ageBoundaryReached: a grown turtle drops a scute.
-                if m.species() == Species::Turtle {
-                    events.push(MobEvent::GiftLoot {
-                        mob: m.id,
-                        table: "minecraft:gameplay/turtle_grow",
-                        at: [m.position.x, m.position.y, m.position.z],
-                    });
-                }
-            }
-        } else if m.extra.age > 0 {
-            m.extra.age -= 1;
-        }
-    }
-    if super::finalize::ageable(m.species()) {
-        make_age_locked_particle(m, events);
-    }
+    ageable_step(m, w, level_random, events);
     if m.alive() {
         // Animal.aiStep
         if m.extra.age != 0 {
@@ -3430,6 +3441,75 @@ mod fox_screech_tests {
 mod age_up_tests {
     use super::*;
     use std::sync::Arc;
+
+    /// Official Java 26.3: NoAI leaves both age clocks running. AgeLocked
+    /// holds a baby's age, but a positive breeding cooldown still expires.
+    #[test]
+    fn age_clocks_tick_with_no_ai_and_respect_baby_age_lock() {
+        let ran = crate::mobs::world::with_test_world(&[], |w, types| {
+            for species in ["pig", "cow", "horse", "turtle"] {
+                for no_ai in [true, false] {
+                    for locked in [false, true] {
+                        for age in [-2, 2] {
+                            let kind =
+                                Arc::new(types.types[&format!("minecraft:{species}")].clone());
+                            let mut m = Mob::new(1, kind, Vec3::new(4.0, 220.0, 4.0), 0.0);
+                            m.no_ai = no_ai;
+                            m.no_gravity = true;
+                            m.persistent = true;
+                            m.extra.age_locked = locked;
+                            super::super::finalize::set_age(&mut m, age);
+                            let (mut random, mut events) = (LegacyRandom::new(0), Vec::new());
+                            let expected = if age > 0 {
+                                [1, 0, 0, 0]
+                            } else if locked {
+                                [-2, -2, -2, -2]
+                            } else {
+                                [-1, 0, 0, 0]
+                            };
+                            for (elapsed, expected_age) in expected.into_iter().enumerate() {
+                                let previous_age = m.extra.age;
+                                let previous_position = m.position;
+                                tick(&mut m, w, &mut random, &mut events);
+                                assert_eq!(
+                                    m.extra.age,
+                                    expected_age,
+                                    "{species}: NoAI={no_ai}, AgeLocked={locked}, initial Age={age}, tick={}",
+                                    elapsed + 1
+                                );
+                                if no_ai {
+                                    assert_eq!(m.velocity, Vec3::ZERO);
+                                    // Growing dimensions can reposition the mob at adulthood.
+                                    if previous_age != -1 || expected_age != 0 {
+                                        assert_eq!(m.position, previous_position);
+                                    }
+                                }
+                            }
+                            if species == "turtle" && age < 0 && !locked {
+                                assert_eq!(
+                                    events
+                                        .iter()
+                                        .filter(|event| matches!(
+                                            event,
+                                            MobEvent::GiftLoot {
+                                                table: "minecraft:gameplay/turtle_grow",
+                                                ..
+                                            }
+                                        ))
+                                        .count(),
+                                    1,
+                                    "growing up drops one scute"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        if !ran {
+            eprintln!("age clock regression needs prepared vanilla resources");
+        }
+    }
 
     /// A baby goat `age` ticks from adulthood, from no vanilla data.
     fn baby_goat(age: i32) -> Mob {
