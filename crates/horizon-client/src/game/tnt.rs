@@ -25,6 +25,9 @@ pub(super) struct PrimedTnt {
     pub guest: Option<u32>,
     /// `Entity.noGravity` (`NoGravity` in its save).
     pub no_gravity: bool,
+    /// `PrimedTnt.explosionPower`: 4 by default, saved as `explosion_power`
+    /// and clamped to 0..128 when read back.
+    pub power: f32,
 }
 impl PrimedTnt {
     pub(super) const SIZE: f64 = 0.98;
@@ -59,11 +62,13 @@ impl PrimedTnt {
         let moved = scene
             .resolve(self.bounds(), wanted, 0.0, self.on_ground)
             .unwrap_or(Vec3::ZERO);
-        self.position = Vec3::new(
-            self.position.x + moved.x,
-            self.position.y + moved.y,
-            self.position.z + moved.z,
-        );
+        if horizon_client::entities::move_applies(wanted, moved) {
+            self.position = Vec3::new(
+                self.position.x + moved.x,
+                self.position.y + moved.y,
+                self.position.z + moved.z,
+            );
+        }
         self.on_ground = wanted.y < 0.0 && moved.y != wanted.y;
         if moved.x != wanted.x {
             self.velocity.x = 0.0;
@@ -72,7 +77,19 @@ impl PrimedTnt {
             self.velocity.z = 0.0;
         }
         if moved.y != wanted.y {
-            self.velocity.y = 0.0;
+            // Entity.restituteMovementAfterCollisions: slime bounces it.
+            let below = world.block(
+                self.position.x.floor() as i32,
+                (self.position.y - f64::from(1.0e-5_f32)).floor() as i32,
+                self.position.z.floor() as i32,
+            );
+            self.velocity.y = horizon_client::entities::vertical_collision_velocity(
+                wanted.y,
+                moved.y,
+                0.04,
+                wanted.y < 0.0,
+                &*facts.get(below).name == "minecraft:slime_block",
+            );
         }
         // Entity.applyEffectsFromBlocks: a bubble column lifts or drags it, and the
         // columns it is at the top of send their surface particles.
@@ -86,6 +103,20 @@ impl PrimedTnt {
             &mut self.velocity,
             |pos| tops.push(pos),
         );
+        if self.on_ground {
+            // Entity.applyEffectsFromBlocks -> SlimeBlock.stepOn.
+            let under = world.block(
+                self.position.x.floor() as i32,
+                (self.position.y - f64::from(0.2_f32)).floor() as i32,
+                self.position.z.floor() as i32,
+            );
+            if &*facts.get(under).name == "minecraft:slime_block"
+                && let Some(scale) = horizon_client::entities::slime_step_on_scale(self.velocity.y)
+            {
+                self.velocity.x *= scale;
+                self.velocity.z *= scale;
+            }
+        }
         self.velocity = Vec3::new(
             self.velocity.x * 0.98,
             self.velocity.y * 0.98,
@@ -211,6 +242,8 @@ impl Game<'_> {
             on_ground: false,
             owner,
             guest,
+            // PrimedTnt's constructor: 4 when nothing sets it.
+            power: 4.0,
         });
     }
     /// `PrimedTnt.tick` for every primed TNT, in order; an expired fuse
@@ -244,7 +277,7 @@ impl Game<'_> {
                     t.position.z,
                 ];
                 let bounds = t.bounds();
-                let (owner, guest) = (t.owner, t.guest);
+                let (owner, guest, power) = (t.owner, t.guest, t.power);
                 let in_water = self.bounds_in_water(bounds);
                 self.tnts.remove(i);
                 count -= 1;
@@ -264,7 +297,7 @@ impl Game<'_> {
                     |id| self.mob_display_name(id),
                 );
                 let result = self.with_hive_emptying_blast(|g| {
-                    g.server_explode(center, 4.0, interaction, false)
+                    g.server_explode(center, power, interaction, false)
                 });
                 self.combat.blast_owner = None;
                 self.combat.blast_guest = None;
@@ -661,6 +694,7 @@ mod tests {
             on_ground: true,
             owner: None,
             guest: None,
+            power: 4.0,
         };
         tnt.velocity = bounce_velocity(Direction::Up, tnt.velocity);
         tnt.on_ground = false;
@@ -704,6 +738,7 @@ mod tests {
             on_ground: false,
             owner: None,
             guest: None,
+            power: 4.0,
         };
         tnt.tick(&world, &collision, &assets, &facts).unwrap();
         assert_eq!(
@@ -799,6 +834,7 @@ mod tests {
             on_ground: false,
             owner: None,
             guest: None,
+            power: 4.0,
         };
         for _ in 0..10 {
             tnt.tick(&world, &collision, &assets, &facts).unwrap();
@@ -873,6 +909,7 @@ mod tests {
             on_ground: false,
             owner: None,
             guest: None,
+            power: 4.0,
         };
         let mut tops = Vec::new();
         let mut tnt = primed();

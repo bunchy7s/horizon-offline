@@ -391,11 +391,6 @@ impl Game<'_> {
             .get(self.world.block(x, y, z))
             .full_collision
     }
-    /// Whether the cart's box touches water where it is now
-    /// (`EntityFluidInteraction.update`).
-    fn touches_water(&self, c: &Minecart) -> bool {
-        self.bounds_in_water(c.bounds())
-    }
     /// `OldMinecartBehavior.getPos`: the point on the rail under (x, y, z).
     fn rail_pos(&self, x: f64, y: f64, z: f64) -> Option<[f64; 3]> {
         let [xt, yt, zt] = self.rail_block(Vec3::new(x, y, z));
@@ -544,6 +539,9 @@ impl Game<'_> {
                 c.fall_distance = 0.0;
             }
         }
+        // Entity.move ends with applyEffectsFromBlocks: a bubble column lifts
+        // or drags the cart (tick_cart runs it a second time, like vanilla).
+        self.cart_block_effects(c);
     }
     fn max_speed(&self, c: &Minecart) -> f64 {
         let base = if c.in_water { 0.2 } else { 0.4 };
@@ -962,6 +960,33 @@ impl Game<'_> {
             );
         }
     }
+    /// `applyEffectsFromBlocks` for a cart: a bubble column lifts or drags it,
+    /// and `onInsideBubbleColumn` resets the fall distance.
+    fn cart_block_effects(&self, c: &mut Minecart) {
+        if horizon_client::motion::bubble_column_push(
+            &self.world,
+            self.pack.assets.registry,
+            self.res.facts(),
+            self.collision,
+            c.bounds(),
+            &mut c.velocity,
+        ) {
+            c.fall_distance = 0.0;
+        }
+    }
+    /// Runs `push_from_cart` for the cart being ticked (`c` is a copy of the
+    /// stored one): the stored cart is replaced by `c` for the push and `c`
+    /// takes back what the push changed.
+    fn push_from_ticked_cart(&mut self, c: &mut Minecart) {
+        let Some(i) = self.carts.iter().position(|x| x.id == c.id) else {
+            return;
+        };
+        self.carts[i] = c.clone();
+        self.push_from_cart(i);
+        if let Some(i) = self.carts.iter().position(|x| x.id == c.id) {
+            *c = self.carts[i].clone();
+        }
+    }
     /// `AbstractMinecart.tick` for one cart; returns false once it is gone.
     fn tick_cart(&mut self, c: &mut Minecart, intent: [f64; 2]) -> bool {
         c.first_tick = false;
@@ -1001,8 +1026,25 @@ impl Game<'_> {
             c.flipped = !c.flipped;
         }
         c.yaw %= 360.0;
-        // updateFluidInteraction, after the move.
-        c.in_water = self.touches_water(c);
+        // applyEffectsFromBlocks: a bubble column lifts or drags the cart.
+        self.cart_block_effects(c);
+        // OldMinecartBehavior.tick ends with pushAndPickupEntities, before
+        // AbstractMinecart.tick's updateFluidInteraction.
+        self.push_from_ticked_cart(c);
+        // AbstractMinecart.tick: updateFluidInteraction, a stream pushes the cart.
+        c.in_water = horizon_client::entities::update_entity_fluids(
+            c.bounds(),
+            c.position,
+            c.bounds().max_position().y,
+            &mut c.velocity,
+            &self.world,
+            &self.res.motion().fluids,
+        )
+        .0 > 0.0;
+        // updateFluidInteraction: being in water resets the fall distance.
+        if c.in_water {
+            c.fall_distance = 0.0;
+        }
         // Variants.
         match c.kind {
             CartKind::Furnace => {
@@ -1428,7 +1470,6 @@ impl Game<'_> {
             if alive {
                 let due = std::mem::take(&mut c.command_due);
                 self.carts[i] = c;
-                self.push_from_cart(i);
                 if due {
                     self.perform_cart_command(id);
                 }
@@ -1542,7 +1583,6 @@ impl Game<'_> {
         };
         if alive {
             self.carts[i] = c;
-            self.push_from_cart(i);
         } else {
             self.eject_cart_mobs(i);
             self.release_vehicle_container(c.id);

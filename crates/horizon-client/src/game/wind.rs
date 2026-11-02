@@ -2,7 +2,7 @@
 //! breezes shoot, and the burst they make (`ServerExplosion` with
 //! `TRIGGER_BLOCK`: no damage, only knockback and the blocks that react).
 use super::Game;
-use super::entity::{Entity as _, Gust, for_each_entity_mut};
+use super::entity::{Blast, Entity as _, for_each_entity_mut};
 use horizon_client::advancements::EntityView;
 use horizon_client::{
     Result,
@@ -274,13 +274,14 @@ impl Game<'_> {
         // distance is from its feet, its direction from its eyes. A kind sits
         // out where its `ignoreExplosion` says (items and visible stands for a
         // charge, vehicles for a mob's burst with mob griefing off).
-        let burst = Gust {
-            blocklike,
-            mob_blocked: breeze && !self.ui.rules.bool("mob_griefing"),
+        let burst = Blast {
+            vehicles_ignore: breeze && !self.ui.rules.bool("mob_griefing"),
+            items_ignore: !blocklike,
+            spared: None,
         };
         let mut entities = self.take_entities();
         for_each_entity_mut!(entities, entity => {
-            if entity.ignores_explosion(burst) {
+            if entity.ignores_explosion(&burst) || !entity.pushed_by_wind() {
                 continue;
             }
             let feet = entity.position();
@@ -289,16 +290,12 @@ impl Game<'_> {
             if dist > 1.0 {
                 continue;
             }
-            let target = entity.explosion_target();
-            let exposure = self.seen_percent(center, target.min, target.max);
+            let b = entity.explosion_box();
+            let (lo, hi) = (b.min_position(), b.max_position());
+            let exposure = self.seen_percent(center, [lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
             let power = (1.0 - dist) * f64::from(exposure) * multiplier;
-            let dir = direction([feet[0], target.eye_y, feet[2]]);
-            let v = entity.velocity_mut();
-            *v = Vec3::new(
-                v.x + dir[0] * power,
-                v.y + dir[1] * power,
-                v.z + dir[2] * power,
-            );
+            let dir = direction([feet[0], feet[1] + entity.explosion_eye_height(), feet[2]]);
+            entity.push_from_explosion(Vec3::new(dir[0] * power, dir[1] * power, dir[2] * power));
         });
         self.restore_entities(entities);
         pushed

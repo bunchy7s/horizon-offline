@@ -779,8 +779,7 @@ impl Game<'_> {
         let p = BlockPos::new(key.0, key.1, key.2);
         let state = self.world.block(key.0, key.1, key.2);
         self.with_level(|b, level, ticks| {
-            let block = b.block(state);
-            b.update_neighbors_at(level, ticks, BlockPos::new(p.x, p.y - 1, p.z), block);
+            b.lectern_update_below(level, ticks, p, state);
         });
     }
     fn set_lectern_property(&mut self, key: (i32, i32, i32), name: &str, value: bool) {

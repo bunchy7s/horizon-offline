@@ -39,6 +39,8 @@ pub enum Pick {
     /// `ctm_compact`: a tile per quarter of the sprite (top-left, top-right, bottom-left,
     /// bottom-right).
     Quarters([TileLayer; 4]),
+    /// Nothing but its overlays: a Fusion face whose tile is empty, or of the overlay layout.
+    Nothing,
 }
 
 /// A tile drawn over a face, after its own (`overlay*` methods).
