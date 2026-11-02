@@ -24,6 +24,42 @@ use horizon_core::{
 use horizon_protocol::entity_data::Value;
 use horizon_world::nbt::Tag;
 
+/// `HealOrHarmMobEffect.applyInstantaneousEffect` at an `AreaEffectCloud`'s
+/// 0.5 scale: `(int) (scale * (6 << amplifier) + 0.5)`.
+fn harm_amount(amplifier: u32) -> f32 {
+    (0.5 * f64::from(6u32 << amplifier) + 0.5) as i32 as f32
+}
+
+/// Whether a cloud at `at` (its floor) reaches a living entity: its box is
+/// `radius * 2` wide and 0.5 tall, and the entity's position must lie within
+/// the radius horizontally.
+fn cloud_hits(at: [f64; 3], radius: f32, bounds: Aabb, pos: Vec3) -> bool {
+    let r = f64::from(radius);
+    let area = Aabb::new(
+        Vec3::new(at[0] - r, at[1], at[2] - r),
+        Vec3::new(at[0] + r, at[1] + 0.5, at[2] + r),
+    );
+    let (dx, dz) = (pos.x - at[0], pos.z - at[2]);
+    bounds.intersects(area) && dx * dx + dz * dz <= f64::from(radius * radius)
+}
+
+/// `DragonFireball.onHit`: the cloud moves to the first living entity in the
+/// fireball's box inflated by (4, 2, 4) that is within 4 blocks of it.
+/// `feet` is the fireball's position (the bottom of its 1x1x1 box).
+fn fireball_cloud_origin(feet: [f64; 3], targets: &[(Aabb, Vec3)]) -> [f64; 3] {
+    let area = Aabb::new(
+        Vec3::new(feet[0] - 4.5, feet[1] - 2.0, feet[2] - 4.5),
+        Vec3::new(feet[0] + 4.5, feet[1] + 3.0, feet[2] + 4.5),
+    );
+    for (bounds, pos) in targets {
+        let (dx, dy, dz) = (pos.x - feet[0], pos.y - feet[1], pos.z - feet[2]);
+        if bounds.intersects(area) && dx * dx + dy * dy + dz * dz < 16.0 {
+            return [pos.x, pos.y, pos.z];
+        }
+    }
+    feet
+}
+
 /// Mob ids from here on are dragon parts (`SPECIAL + part`) and crystals
 /// (`SPECIAL + 16 + crystal`), so projectiles can target them.
 pub(super) const SPECIAL: u32 = u32::MAX - 4096;
@@ -2312,6 +2348,13 @@ impl Game<'_> {
             .filter(|p| p.alive && !p.spectator)
             .map(|p| p.bounds)
             .collect();
+        // DragonFireball.onHit snaps to any living entity (mobs not ported here).
+        let snap_targets: Vec<(Aabb, Vec3)> = self
+            .fight_players()
+            .iter()
+            .filter(|p| p.alive)
+            .map(|p| (p.bounds, p.position))
+            .collect();
         balls.retain_mut(|b| {
             b.previous = b.position;
             b.age += 1;
@@ -2341,9 +2384,13 @@ impl Game<'_> {
             });
             if hit_block || hit_player || b.age > 600 {
                 let id = self.take_entity_id();
+                // The cloud starts at the fireball's feet; DragonFireball.onHit
+                // then moves it to the first living entity within 4 blocks.
+                let feet = [next.x, next.y - 0.5, next.z];
+                let at = fireball_cloud_origin(feet, &snap_targets);
                 self.breath_clouds.push(Breath {
                     id,
-                    at: [next.x, next.y, next.z],
+                    at,
                     radius: 3.0,
                     age: 0,
                     duration: 600,
@@ -2425,13 +2472,11 @@ impl Game<'_> {
             }
             // AreaEffectCloud: after its 20-tick wait, every 20 ticks per entity.
             if c.age >= 20 && c.age % 20 == 0 {
-                // Instant damage: I (6) from the breath, II (12) from a fireball.
-                let amount = if c.from_dragon { 6.0 } else { 12.0 };
+                // Instant damage I from the flame cloud, II from a fireball's,
+                // both at the cloud's 0.5 scale.
+                let amount = harm_amount(u32::from(!c.from_dragon));
                 for p in &players {
-                    let pp = p.position;
-                    if (pp.x - c.at[0]).hypot(pp.z - c.at[2]) <= f64::from(r)
-                        && (pp.y - c.at[1]).abs() < 1.0
-                    {
+                    if cloud_hits(c.at, r, p.bounds, p.position) {
                         harmed.push((p.who, amount));
                     }
                 }
@@ -3974,6 +4019,53 @@ fn push_seen_with_hurt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn player_box(feet: [f64; 3]) -> (Aabb, Vec3) {
+        (
+            Aabb::new(
+                Vec3::new(feet[0] - 0.3, feet[1], feet[2] - 0.3),
+                Vec3::new(feet[0] + 0.3, feet[1] + 1.8, feet[2] + 0.3),
+            ),
+            Vec3::new(feet[0], feet[1], feet[2]),
+        )
+    }
+
+    #[test]
+    fn instant_damage_at_cloud_scale() {
+        assert_eq!(harm_amount(0), 3.0);
+        assert_eq!(harm_amount(1), 6.0);
+    }
+
+    #[test]
+    fn cloud_box_is_half_a_block_tall_from_its_floor() {
+        let at = [0.0, 64.0, 0.0];
+        let hit = |feet: [f64; 3], r: f32| {
+            let (b, p) = player_box(feet);
+            cloud_hits(at, r, b, p)
+        };
+        assert!(hit([0.0, 64.0, 0.0], 3.0));
+        // Feet above the 0.5 box: the old |dy| < 1 test hit here.
+        assert!(!hit([0.0, 64.6, 0.0], 3.0));
+        // Feet below, head reaching into the box.
+        assert!(hit([0.0, 63.0, 0.0], 3.0));
+        // Box overlaps but the centre is outside the radius.
+        assert!(!hit([3.2, 64.0, 0.0], 3.0));
+        assert!(hit([3.0, 64.0, 0.0], 3.0));
+    }
+
+    #[test]
+    fn fireball_cloud_snaps_to_a_player_within_four() {
+        let (b, p) = player_box([2.0, 70.0, 1.0]);
+        assert_eq!(
+            fireball_cloud_origin([0.0, 70.0, 0.0], &[(b, p)]),
+            [2.0, 70.0, 1.0]
+        );
+        let (b, p) = player_box([4.5, 70.0, 0.0]);
+        assert_eq!(
+            fireball_cloud_origin([0.0, 70.0, 0.0], &[(b, p)]),
+            [0.0, 70.0, 0.0]
+        );
+    }
 
     #[test]
     fn dying_dragons_keep_their_flight_pose_between_frames() {
