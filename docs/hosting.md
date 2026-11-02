@@ -268,6 +268,11 @@ horizon-server report [SECONDS]          record a performance report (below)
 horizon-server op|deop NAME
 horizon-server whitelist on|off|list
 horizon-server whitelist add|remove NAME
+horizon-server players [--json]          who is online, the operators, the whitelist and the bans
+horizon-server kick|ban NAME [REASON]    on the running server
+horizon-server pardon NAME
+horizon-server ban-ip ADDRESS|NAME [REASON]
+horizon-server pardon-ip ADDRESS
 horizon-server backup [NAME]             back up now
 horizon-server backups [--json]          list the backups
 horizon-server restore BACKUP [--yes]
@@ -281,7 +286,9 @@ horizon-server rollback                  back to the release before
 ```
 
 While the server runs, `op`, `whitelist` and `cmd` go to the game's console, so they act exactly as vanilla's
-console commands do. While it's stopped, they edit vanilla's files directly. Any console command works through
+console commands do. While it's stopped, they edit vanilla's files directly. `kick`, `ban`, `pardon`, `ban-ip`
+and `pardon-ip` run the vanilla command on the running server, through its control API; `players` reads the
+lists from the files when the server is stopped. Any console command works through
 `cmd`: `horizon-server cmd ban Griefer`, `horizon-server cmd say Restarting in 5 minutes`.
 To generate the world around spawn ahead of the players, Horizon has its own `pregen` command, off until
 `server.toml` has `horizon-pregen = true` under `[properties]`: `horizon-server cmd pregen start 2500`
@@ -339,9 +346,6 @@ archive you have, such as your own build. A server still on a release from befor
 that 0.2 comes after the dated releases and says it is up to date: run `horizon-server update --version v0.2.0`
 once ([versioning](versioning.md)). A stopped server is switched and starts on the new release next
 time. Set `HORIZON_NO_UPDATE_CHECK=1` in the server's environment to turn the check off.
-
-Coming: `console` (attach to a server running in the background), `ban` and `pardon` as their own
-commands, and `mcp` (an MCP server so an AI assistant can run the server).
 
 ## 6. Web panel
 
