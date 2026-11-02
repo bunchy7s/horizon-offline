@@ -73,6 +73,8 @@ pub static KNOCKBACK: OnceLock<fn(Hurting<'_>, &mut Knock) -> bool> = OnceLock::
 
 thread_local! {
     static KNOCKBACK_ATTACKER: Cell<i32> = const { Cell::new(0) };
+    static KNOCKBACK_HELD: std::cell::RefCell<[Option<crate::items::ItemStack>; 2]> =
+        const { std::cell::RefCell::new([None, None]) };
 }
 
 /// The entity behind the synchronous attack, or 0 outside an attack scope.
@@ -80,15 +82,31 @@ pub fn knockback_attacker() -> i32 {
     KNOCKBACK_ATTACKER.get()
 }
 
+/// What the attacker holds in the main and off hand, or none when it is not known (or no
+/// native mod listens: the game only records it then).
+pub fn knockback_held() -> [Option<crate::items::ItemStack>; 2] {
+    KNOCKBACK_HELD.with(|held| held.borrow().clone())
+}
+
 /// Restore the previous attacker on return or unwind, including nested guest actions.
 pub fn knockback_from(entity: i32) -> impl Drop {
-    struct Restore(i32);
+    knockback_from_holding(entity, [None, None])
+}
+
+/// [`knockback_from`] that also records the attacker's held stacks (main hand, off hand).
+pub fn knockback_from_holding(
+    entity: i32,
+    held: [Option<crate::items::ItemStack>; 2],
+) -> impl Drop {
+    struct Restore(i32, [Option<crate::items::ItemStack>; 2]);
     impl Drop for Restore {
         fn drop(&mut self) {
             KNOCKBACK_ATTACKER.set(self.0);
+            KNOCKBACK_HELD.with(|held| *held.borrow_mut() = std::mem::take(&mut self.1));
         }
     }
-    Restore(KNOCKBACK_ATTACKER.replace(entity))
+    let held = KNOCKBACK_HELD.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), held));
+    Restore(KNOCKBACK_ATTACKER.replace(entity), held)
 }
 /// Whether [`KNOCKBACK`] canceled the knockback (never while it is unset). A
 /// value it leaves that is not a finite number is put back as it was.

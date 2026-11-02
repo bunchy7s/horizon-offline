@@ -4520,7 +4520,8 @@ pub trait Hooks: Send + Sync {
     }
     /// LivingEntity.knockback before resistance and motion, after the unchanged v1 hook.
     /// Cancellation from either hook wins. Attacker is the attacking entity's network id,
-    /// falling back to the victim's last hurt-by mob, or 0 when unknown. Player attackers
+    /// falling back to the victim's last hurt-by mob, or 0 when unknown; `attacker_main` and
+    /// `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand), none when unknown. Player attackers
     /// include the guest whose action runs. Includes mob melee and armor-stand sweeps, not
     /// direct velocity pushes (explosions, Punch arrows, hoglin throws). Non-finite changes
     /// are restored before resistance. Server-side, without self: damage borrows the victim.
@@ -13893,6 +13894,8 @@ pub struct LivingKnockbackV2Event<'a> {
     pub entity: i32,
     pub kind: &'a str,
     pub attacker: i32,
+    pub attacker_main: Option<&'a ItemStack>,
+    pub attacker_off: Option<&'a ItemStack>,
     pub strength: f64,
     pub x: f64,
     pub z: f64,
@@ -13902,6 +13905,8 @@ pub fn dispatch_living_knockback_v2(
     entity: i32,
     kind: &str,
     attacker: i32,
+    attacker_main: Option<&ItemStack>,
+    attacker_off: Option<&ItemStack>,
     strength: &mut f64,
     x: &mut f64,
     z: &mut f64,
@@ -13914,6 +13919,8 @@ pub fn dispatch_living_knockback_v2(
         entity,
         kind,
         attacker,
+        attacker_main,
+        attacker_off,
         strength: *strength,
         x: *x,
         z: *z,

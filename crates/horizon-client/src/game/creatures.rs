@@ -1962,11 +1962,10 @@ impl Game<'_> {
                 } => match target {
                     // A player's source names no melee attacker, as its damage's doesn't.
                     Who::Player => {
-                        let _attacker =
-                            horizon_client::health::knockback_from(match source.attacker {
-                                Some(Who::Mob(id)) => id as i32,
-                                _ => 0,
-                            });
+                        let _attacker = self.knockback_scope(match source.attacker {
+                            Some(Who::Mob(id)) => id as i32,
+                            _ => 0,
+                        });
                         let source = HurtSource {
                             damage_type: source_damage_type(source),
                             causing: 0,
@@ -3371,7 +3370,7 @@ impl Game<'_> {
         };
         // The causing entity for the death message.
         let owner = self.combat.projectile_owner.take();
-        let _attacker = horizon_client::health::knockback_from(
+        let _attacker = self.knockback_scope(
             attacker
                 .or(owner)
                 .map_or_else(horizon_client::health::knockback_attacker, |id| id as i32),
@@ -3507,12 +3506,10 @@ impl Game<'_> {
             Some((Who::Mob(id), _)) => id as i32,
             _ => 0,
         };
-        let _attacker = horizon_client::health::knockback_from(
-            match horizon_client::health::knockback_attacker() {
-                0 => credit,
-                attacker => attacker,
-            },
-        );
+        let _attacker = self.knockback_scope(match horizon_client::health::knockback_attacker() {
+            0 => credit,
+            attacker => attacker,
+        });
         if let Some(p) = self.player.as_mut() {
             knock_back(p, &mut self.world.random, power, (xd, zd), source);
         }
@@ -4197,7 +4194,7 @@ impl Game<'_> {
         }
     }
     pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
-        let _attacker = horizon_client::health::knockback_from(if p.owner == Some(Who::Player) {
+        let _attacker = self.knockback_scope(if p.owner == Some(Who::Player) {
             self.player.as_ref().map_or(0, |p| p.entity_id)
         } else {
             0

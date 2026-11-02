@@ -182,8 +182,7 @@ impl Game<'_> {
     /// `LivingEntity.hurtServer` of the mob at `index` by the player's hit:
     /// the weapon's `armor_effectiveness` enchantments (Breach) thin its armor.
     pub(super) fn hurt_by_player(&mut self, index: usize, amount: f32, source: Damage) -> bool {
-        let _attacker =
-            horizon_client::health::knockback_from(self.player.as_ref().map_or(0, |p| p.entity_id));
+        let _attacker = self.knockback_scope(self.player.as_ref().map_or(0, |p| p.entity_id));
         let held = self.held().cloned();
         let aim = self.attacker_aim(source.attacker);
         let kind = self.mobs[index].kind.id.clone();
@@ -463,7 +462,7 @@ impl Game<'_> {
         let Some(player) = self.player.as_ref() else {
             return;
         };
-        let _attacker = horizon_client::health::knockback_from(player.entity_id);
+        let _attacker = self.knockback_scope(player.entity_id);
         let from = [player.position.x, player.position.y, player.position.z];
         let area = target.inflate(Vec3::new(1.0, 0.25, 1.0));
         let near = |at: Vec3| {

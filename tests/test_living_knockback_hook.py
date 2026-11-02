@@ -23,6 +23,8 @@ class LivingKnockbackHookTests(unittest.TestCase):
         validation = function(health, "knockback_canceled")
         fixture = r"""
 use std::cell::{Cell, RefCell};
+mod items { #[derive(Clone, Debug, PartialEq)] pub struct ItemStack(pub &'static str); }
+use items::ItemStack;
 #[derive(Clone, Copy)]
 enum Who { Player, Mob(u32) }
 struct Damage { attacker: Option<Who> }
@@ -51,6 +53,7 @@ thread_local! {
     static CANCEL_V2: Cell<bool> = const { Cell::new(false) };
     static NONFINITE: Cell<bool> = const { Cell::new(false) };
     static CALLS: RefCell<Vec<(u8, i32, f64)>> = const { RefCell::new(Vec::new()) };
+    static HELD: RefCell<Vec<(Option<ItemStack>, Option<ItemStack>)>> = const { RefCell::new(Vec::new()) };
 }
 mod mod_api {
     pub fn mods() -> &'static [()] { if super::ENABLED.get() { &[()] } else { &[] } }
@@ -63,9 +66,11 @@ impl Game {
         *strength *= 2.0;
         *canceled = CANCEL_V1.get();
     }
-    fn native_living_knockback_v2(_: i32, _: &str, attacker: i32, strength: &mut f64,
+    fn native_living_knockback_v2(_: i32, _: &str, attacker: i32, main: Option<&ItemStack>,
+                                 off: Option<&ItemStack>, strength: &mut f64,
                                  x: &mut f64, _: &mut f64, canceled: &mut bool) {
         CALLS.with_borrow_mut(|calls| calls.push((2, attacker, *strength)));
+        HELD.with_borrow_mut(|held| held.push((main.cloned(), off.cloned())));
         *x = -*x;
         if NONFINITE.get() { *strength = f64::NAN; }
         *canceled = CANCEL_V2.get();
@@ -79,7 +84,7 @@ ARGUMENTS
 BRIDGE
 #[test]
 fn bridge_preserves_v1_and_names_player_mob_and_stand_attackers() {
-    use horizon_client::health::{knockback_from, knockback_canceled, install};
+    use horizon_client::health::{knockback_from, knockback_from_holding, knockback_canceled, install};
     install();
     let mob = Mob { id: 12, kind: Kind { id: "minecraft:zombie".into() },
                     ai: Ai { last_hurt_by: Some(Who::Mob(99)) } };
@@ -93,6 +98,18 @@ fn bridge_preserves_v1_and_names_player_mob_and_stand_attackers() {
         assert_eq!(knock, Knock { strength: 0.8, x: -1.0, z: 0.0 });
         assert_eq!(CALLS.take(), [(1, 0, 0.4), (2, 7, 0.8)]);
     }
+    HELD.take();
+    {
+        let _held = knockback_from_holding(7, [Some(ItemStack("sword")), None]);
+        let mut knock = original;
+        knockback_canceled(Hurting::Player(12, source), &mut knock);
+        CALLS.take();
+        assert_eq!(HELD.take(), [(Some(ItemStack("sword")), None)]);
+    }
+    let mut knock = original;
+    knockback_canceled(Hurting::Player(12, source), &mut knock);
+    CALLS.take();
+    assert_eq!(HELD.take(), [(None, None)]);
     for attacker in [Some(Who::Mob(3)), None] {
         let damage = Damage { attacker };
         let mut knock = original;
