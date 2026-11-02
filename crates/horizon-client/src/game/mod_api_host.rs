@@ -233,7 +233,8 @@ impl horizon_client::mod_api::LevelWriteHost for LevelTicks<'_, &mut super::Game
         volume: f32,
         pitch: f32,
     ) -> bool {
-        self.level.native_play_sound(sound, at, source, volume, pitch)
+        self.level
+            .native_play_sound(sound, at, source, volume, pitch)
     }
 
     fn send_particles(
