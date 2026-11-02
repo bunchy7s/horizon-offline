@@ -110,7 +110,7 @@ Raid.getBannerComponentPatch	port	crates/horizon-client/src/mobs/raider.rs::omin
 Raid.getDefaultNumSpawns	port	crates/horizon-client/src/raid.rs::Raid::wave_count	gap: minor: the base count is in the same fn as the bonus and extra rolls
 Raid.getPotentialBonusSpawns	port	crates/horizon-client/src/raid.rs::Raid::wave_count	extra roll per type and difficulty: vindicators and pillagers, witches after wave 2, ravagers on the bonus wave
 Raider.hasRaid	port	crates/horizon-client/src/mobs/raider.rs::in_raid	gap: minor: checks only the raid id the raider holds; vanilla also looks for a raid at its position
-Raider.readAdditionalSaveData	missing		minor: Wave, CanJoinRaid and RaidId are not read back from a save, so a loaded raider loses its wave and raid link
+Raider.readAdditionalSaveData	port	crates/horizon-client/src/mobs/raider.rs::read_nbt	PatrolLeader, Patrolling, Wave, CanJoinRaid and RaidId, the same fields write_nbt saves
 Raider.pickUpItem	inline	crates/horizon-client/src/game/raids.rs::Game::sync_raiders	the banner pickup branch makes the raider the wave leader; gap: minor: the item already worn in the head slot is not dropped first
 Raider.ObtainRaidLeaderBannerGoal.cannotPickUpBanner	port	crates/horizon-client/src/mobs/raider.rs::ObtainBanner::can_use	gap: minor: checks only a known, reachable banner; the raid-over, can-be-leader and head-slot rules are not repeated here
 Raider.RaiderMoveThroughVillageGoal.isValidRaid	inline	crates/horizon-client/src/mobs/raider.rs::MoveThroughVillage::can_use	active raid and not over, checked first
