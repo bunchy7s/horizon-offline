@@ -109,6 +109,9 @@ pub fn main_with(mods: crate::mod_api::Mods) {
                 max_stack,
             );
         },
+        living_heal: |entity, amount, cancel| {
+            crate::mod_api::dispatch_living_heal(crate::mod_api::mods(), entity, amount, cancel);
+        },
         living_breathe: |entity, kind, can_breathe, consume, refill| {
             crate::mod_api::dispatch_living_breathe(
                 crate::mod_api::mods(),

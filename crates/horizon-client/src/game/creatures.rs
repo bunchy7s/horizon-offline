@@ -4701,7 +4701,7 @@ impl Game<'_> {
                         let scale = 1.0 - d2.sqrt() / 4.0;
                         if *effect == "minecraft:instant_health" {
                             let heal = (4 << *amplifier) as f64 * scale;
-                            m.health = (m.health + heal as f32).min(m.attrs.max_health);
+                            m.heal(heal as f32);
                         } else {
                             let t = (f64::from(*ticks) * scale + 0.5) as i32;
                             if t > 20 {
@@ -5276,7 +5276,7 @@ impl Game<'_> {
                     .map_or(2.0, |f| f.0 as f32 * 2.0);
                 // TamableAnimal.feed(.., 2.0F, 2.0F): heals twice the nutrition,
                 // then playEatingSound, which wolves leave empty.
-                m.health = (m.health + heal).min(m.attrs.max_health);
+                m.heal(heal);
                 consume = true;
             }
             // Wolf.mobInteract: the owner puts wolf armor on a tamed adult.
@@ -5414,7 +5414,7 @@ impl Game<'_> {
                     .and_then(|i| i.food.as_ref())
                     .map_or(1.0, |f| f.0 as f32);
                 // TamableAnimal.feed.
-                m.health = (m.health + heal).min(m.attrs.max_health);
+                m.heal(heal);
                 consume = true;
                 eat = eating_sound(m, &mut self.world.random);
             }
@@ -5470,7 +5470,7 @@ impl Game<'_> {
             Species::IronGolem
                 if item == "minecraft:iron_ingot" && m.health < m.attrs.max_health =>
             {
-                m.health = (m.health + 25.0).min(m.attrs.max_health);
+                m.heal(25.0);
                 consume = true;
                 sound = Some("entity.iron_golem.repair");
             }

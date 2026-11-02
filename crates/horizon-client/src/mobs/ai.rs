@@ -2584,7 +2584,7 @@ fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
             "minecraft:regeneration"
                 if count % interval(50) == 0 && !m.kind.flags.undead && m.alive() =>
             {
-                m.health = (m.health + 1.0).min(m.attrs.max_health);
+                m.heal(1.0);
             }
             id if horizon_client_core::potions::is_mod_effect(id) => {
                 // tickServer: one with no ticks left goes unasked.

@@ -251,7 +251,7 @@ impl Game<'_> {
                 if self.mobs.iter().any(|m| m.id == id && m.alive()) {
                     let mut amount = 5.0;
                     let mut cancel = false;
-                    self.native_living_heal(Some(id), &mut amount, &mut cancel);
+                    horizon_client::hunger::native_living_heal(Some(id), &mut amount, &mut cancel);
                     if !cancel
                         && let Some(w) = self.mobs.iter_mut().find(|m| m.id == id && m.alive())
                     {
