@@ -1420,6 +1420,20 @@ pub fn mob_from_nbt(
                     crate::mobs::finalize::Attr::MovementSpeed,
                     v,
                 ),
+                // A saved base other than the type's default is the
+                // attribute's base, which `/attribute ... base get` reads.
+                "minecraft:max_health"
+                    if crate::mobs::finalize::default_value(
+                        &m,
+                        crate::mobs::finalize::Attr::MaxHealth,
+                    ) != Some(v) =>
+                {
+                    crate::mobs::finalize::set_base(
+                        &mut m,
+                        crate::mobs::finalize::Attr::MaxHealth,
+                        v,
+                    )
+                }
                 "minecraft:max_health" => m.attrs.max_health = v as f32,
                 "minecraft:movement_speed" => m.attrs.speed = v,
                 "minecraft:attack_damage" => m.attrs.attack_damage = v as f32,

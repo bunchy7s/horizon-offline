@@ -133,7 +133,7 @@ WardenSpawnTracker.copyData	inline	crates/horizon-client-render/src/sculk.rs::Wa
 Drowned.checkDrownedSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	water below, spawner or deep enough, dark enough, frequency roll
 Drowned.isDeepEnoughToSpawn	inline	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	below sea level minus 5
 Drowned.populateDefaultEquipmentSlots	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::populate	10 percent chance of a trident (10 in 16) or fishing rod
-Drowned.canReplaceCurrentItem	missing		no mob item pickup, so the nautilus shell guard never applies
+Drowned.canReplaceCurrentItem	port	crates/horizon-client/src/game/mob_looting.rs::Game::can_replace	the mob pickup compare (armour, toughness, attack damage) with the drowned's nautilus shell guard; called before a mob swaps what it holds
 Drowned.rangedAttackUncertainty	port	crates/horizon-client/src/mobs/undead.rs::drowned_throw	gap: minor: fixed uncertainty 6 (normal difficulty), not 14 minus 4 times the difficulty
 Drowned.rideTick	port	crates/horizon-client/src/game/passengers.rs::position_riders	a rider takes its vehicle's body yaw every tick
 Drowned.wantsToPickUp	port	crates/horizon-client/src/mobs/equip.rs::wants_to_pick_up	spears are refused, then the zombie checks

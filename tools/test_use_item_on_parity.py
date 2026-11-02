@@ -331,6 +331,37 @@ def jukebox_case(rng, states, case):
                         'creative': True, 'sneaking': False, 'food': 20}
 
 
+# A block placed from an item carrying `minecraft:block_state`: the block and the properties the
+# component sets, none of them the ones the click would have chosen. The last two name a property the
+# block has no such thing as, and no property at all, which `BlockItemStateProperties.apply` skips.
+STATED = [('oak_stairs', '{half:"top",facing:"east",shape:"outer_right"}'),
+          ('oak_slab', '{type:"top"}'),
+          ('oak_log', '{axis:"x"}'),
+          ('oak_trapdoor', '{half:"top",open:"true"}'),
+          ('hopper', '{enabled:"false"}'),
+          ('repeater', '{delay:"4",facing:"west",locked:"true"}'),
+          ('comparator', '{mode:"subtract",powered:"true"}'),
+          ('beehive', '{honey_level:"5"}'),
+          ('chest', '{facing:"east"}'),
+          ('composter', '{level:"6"}'),
+          ('oak_fence_gate', '{in_wall:"true",open:"true"}'),
+          ('oak_stairs', '{half:"sideways"}'),
+          ('stone', '{facing:"east"}'),
+          ('oak_stairs', '{}')]
+
+
+def block_state_case(rng, states, case):
+    """A block placed from an item that carries a `minecraft:block_state` component (Ctrl + Pick Block
+    of a turned stair, a half slab, a disabled hopper): `BlockItem.updateBlockStateFromTag` sets those
+    properties on the state `getStateForPlacement` chose, so the block ends up in the state the item
+    names. Ignoring the component leaves the state the click alone would have placed."""
+    case['cells'] = [[0, 0, 0, states.get(rng.choice(['stone', 'dirt', 'grass_block']))]]
+    block, props = rng.choice(STATED)
+    case['use_item'] = {'item': '{id:"minecraft:%s",count:1,components:{"minecraft:block_state":%s}}'
+                                % (block, props),
+                        'creative': rng.random() < 0.7, 'sneaking': rng.random() < 0.2, 'food': 20}
+
+
 def cases(facts, count, seed):
     rng = random.Random(seed)
     states = d.States(facts)
@@ -388,6 +419,12 @@ def cases(facts, count, seed):
             continue
         if rng.random() < 0.08:
             jukebox_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
+        if rng.random() < 0.06:
+            block_state_case(rng, states, case)
             case['items'] = []
             case['mode'] = 'dispense'
             yield case
