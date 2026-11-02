@@ -2321,8 +2321,8 @@ impl Game<'_> {
             state,
         )
     }
-    /// `BlockInput.place` / `overwriteWithDefinedProperties`: normalize the
-    /// surrounding shape, then restore properties explicitly set by the command.
+    /// `BlockInput.overwriteWithDefinedProperties`: restore explicit command
+    /// properties after normalizing the state against neighbouring blocks.
     fn block_input_state(
         &mut self,
         pos: [i32; 3],
