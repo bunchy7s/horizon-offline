@@ -90,9 +90,9 @@ MinecraftServer.sendDifficultyUpdate	inline	crates/horizon-client/src/lan/hub.rs
 MinecraftServer.enforceGameTypeForPlayers	inline	crates/horizon-client/src/game/lan.rs::enforce_guest_game_mode	applies the default mode to online players when force game mode is enabled
 MinecraftServer.executeIfPossible	skip:java		rejects tasks during shutdown
 MinecraftServer.reloadResources	port	crates/horizon-client/src/game/functions.rs::Game::cmd_reload	gap: minor: data packs only, via reload_datapacks
-MinecraftServer.configurePackRepository	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: picks the enabled packs and adds new ones; no feature-flag check and no safe mode
-MinecraftServer.configureRepositoryWithSelection	inline	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: sets the enabled list only; no forced features
-MinecraftServer.enableForcedFeaturePacks	missing		minor: Horizon's datapacks have no feature flags; a pack for a required feature is never forced on
+MinecraftServer.configurePackRepository	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: the enabled packs are picked and new ones added through datapack::enabled_ids, feature flags and all; no safe mode
+MinecraftServer.configureRepositoryWithSelection	inline	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: sets the enabled list only; the forced feature packs come from datapack::enabled_ids
+MinecraftServer.enableForcedFeaturePacks	inline	crates/horizon-client-render/src/datapack.rs::enabled_ids	the last loop forces on every feature pack whose flags the world enables, whatever the world's selection says; a pack's flags are its pack.mcmeta features.enabled
 MinecraftServer.getSelectedPacks	port	crates/horizon-client/src/game/functions.rs::Game::save_datapack_settings	gap: minor: writes the enabled and disabled lists; no feature check
 MinecraftServer.findRespawnDimension	inline	crates/horizon-client/src/game/server_travel.rs::Game::world_spawn_trip	gap: minor: always the Overworld; /setworldspawn keeps no dimension
 MinecraftServer.setRespawnData	port	crates/horizon-client/src/game/commands.rs::Game::cmd_setworldspawn	gap: minor: the new spawn is not sent to guests here; they get it on join
