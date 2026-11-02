@@ -31,16 +31,12 @@ impl PaintingVariants {
     pub fn load(root: &std::path::Path) -> Self {
         let data = root.join("data/minecraft");
         let mut all = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(data.join("painting_variant")) {
-            for e in entries.flatten() {
-                let path = e.path();
-                let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
-                    continue;
-                };
-                let Ok(bytes) = std::fs::read(&path) else {
-                    continue;
-                };
-                let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        if let Ok(folder) = horizon_world::json_folder::read(&data.join("painting_variant")) {
+            for file in &folder.files {
+                let name = file.name.as_str();
+                let Ok(v) =
+                    serde_json::from_slice::<serde_json::Value>(file.bytes().unwrap_or_default())
+                else {
                     continue;
                 };
                 all.push(Variant {
@@ -57,14 +53,15 @@ impl PaintingVariants {
                 });
             }
         }
-        let placeable = std::fs::read(data.join("tags/painting_variant/placeable.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .and_then(|v| v["values"].as_array().cloned())
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|v| v.as_str().map(Arc::from))
-            .collect();
+        let placeable =
+            horizon_core::prepared_files::read(&data.join("tags/painting_variant/placeable.json"))
+                .ok()
+                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+                .and_then(|v| v["values"].as_array().cloned())
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|v| v.as_str().map(Arc::from))
+                .collect();
         Self { all, placeable }
     }
     pub fn get(&self, id: &str) -> Option<&Variant> {

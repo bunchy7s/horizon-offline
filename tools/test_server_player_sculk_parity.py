@@ -2,8 +2,8 @@
 """Both players' ordinary walking activates a sculk sensor on the server.
 
 Exercise Entity.move movement emission through real client input, alongside
-sculk's deterministic vanilla oracle. Check the integrated-server and in-frame
-hosts: the guest always uses the server-player path.
+sculk's deterministic vanilla oracle. The host's world runs on its server
+thread; the guest uses the same server-player path.
 """
 import json
 import math
@@ -84,16 +84,12 @@ def main():
     # Use the runner's current display (xvfb on Linux), with fresh isolated homes.
     lan.game_env = lambda _screen, home: lab.game_env(
         HORIZON_HOME=home, HORIZON_TELEMETRY_URL='off')
-    reports = {}
-    for threaded in (True, False):
-        lan.SERVER_THREAD = threaded
-        mode = 'server-thread' if threaded else 'in-frame'
-        out = lab.LOCAL / 'server-player-sculk-parity' / mode
-        out.mkdir(parents=True, exist_ok=True)
-        # lan.Game launches each client with lab.game_env and private scratch homes.
-        reports[mode] = lan.run(ctl, out, lab.RESOURCES.resolve(), checks)
-    lab.write_json(lab.LOCAL / 'server-player-sculk-parity' / 'report.json', reports)
-    assert all(r['pass'] for mode in reports.values() for r in mode.values()), reports
+    out = lab.LOCAL / 'server-player-sculk-parity'
+    out.mkdir(parents=True, exist_ok=True)
+    # lan.Game launches each client with lab.game_env and private scratch homes.
+    report = lan.run(ctl, out, lab.RESOURCES.resolve(), checks)
+    lab.write_json(out / 'report.json', report)
+    assert all(r['pass'] for r in report.values()), report
 
 
 if __name__ == '__main__':

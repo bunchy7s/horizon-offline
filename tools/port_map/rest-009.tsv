@@ -30,13 +30,13 @@ RegistryFixedCodec.decode	skip:java		codec decode of fixed registry references
 CircleGizmo.emit	missing		minor: debug circle gizmo (F3 debug renderers only); gizmos.rs has no circle primitive
 GizmoStyle.hasStroke	skip:other		style predicate; Horizon debug lines always carry one width (gizmos.rs::Line), so there is no stroke to test
 Gizmos.addGizmo	skip:other		registration into vanilla's thread-local collector; Horizon's gizmos.rs::Gizmos holds the lines directly
-Gizmos.rect	missing		minor: debug rectangles (F3 debug renderers only); gizmos.rs draws cuboid edges only, no faces
+Gizmos.rect	inline	crates/horizon-client/src/game/debug_renderers.rs::Game::solid_face_shapes	the box-and-direction fill overload `SolidFaceRenderer` uses: one cuboid face's four corners from gizmos.rs::cuboid_fill_quads, filled with a plain colour; the four-corner overload has no caller
 Gizmos.billboardTextOverBlock	missing		minor: debug text above a block (debug renderers only); gizmos.rs has no billboard text
 Gizmos.billboardTextOverMob	missing		minor: debug text above a mob (debug renderers only); gizmos.rs has no billboard text
 Gizmos.TemporaryCollection.close	skip:other		restores vanilla's thread-local gizmo collector; Horizon has no collector stack
 LineGizmo.emit	port	crates/horizon-client/src/gizmos.rs::Gizmos::line	gap: minor: no alpha multiplier, so debug lines do not fade
 PointGizmo.emit	missing		minor: debug point gizmo (F3 debug renderers only); gizmos.rs has no point primitive
-RectGizmo.fromCuboidFace	missing		minor: face rectangle for debug rects (F3 debug renderers only); not ported
+RectGizmo.fromCuboidFace	inline	crates/horizon-client/src/game/debug_renderers.rs::Game::solid_face_shapes	the four corners of one cuboid face, in gizmos.rs::cuboid_fill_quads' order (+X, -X, -Z, +Z, +Y, -Y), for the sturdy sides
 RectGizmo.emit	missing		minor: filled and outlined debug quads (F3 debug renderers only); gizmos.rs has no quad primitive
 SimpleGizmoCollector.add	skip:other		adds to vanilla's per-frame gizmo collector; Horizon has no collector object, gizmos.rs::Gizmos holds the lines
 SimpleGizmoCollector.drainGizmos	skip:other		per-frame hand-off and expiry of vanilla's collector; Horizon's debug gizmos have no expiry

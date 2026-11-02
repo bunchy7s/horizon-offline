@@ -556,3 +556,38 @@ mod item_tests {
         assert!(m.extra.main_hand.is_none(), "the mouth is empty");
     }
 }
+
+#[cfg(test)]
+mod target_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+    use crate::mobs::{Species, sensor_scan_tests::kind};
+    use horizon_core::geometry::Vec3;
+
+    fn dolphin(baby: bool) -> Mob {
+        let mut kind = kind();
+        let k = std::sync::Arc::make_mut(&mut kind);
+        k.id = "minecraft:dolphin".into();
+        k.species = Species::Dolphin;
+        let mut m = Mob::new(1, kind, Vec3::ZERO, 0.0);
+        m.extra.age = if baby { -24000 } else { 0 };
+        m
+    }
+
+    /// `Dolphin.canAttack`: a baby takes nobody as its target, so a hit on it
+    /// is not answered; an adult does take the one that hurt it.
+    #[test]
+    fn a_baby_dolphin_spares_whatever_hurt_it() {
+        let ran = with_test_world(&[], |w, _| {
+            assert!(
+                dolphin(true).spares_target(w, Who::Mob(7)),
+                "a baby dolphin fights nobody"
+            );
+            assert!(
+                !dolphin(false).spares_target(w, Who::Mob(7)),
+                "an adult dolphin takes its attacker"
+            );
+        });
+        let _ = ran;
+    }
+}

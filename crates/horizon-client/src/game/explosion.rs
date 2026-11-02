@@ -1362,4 +1362,38 @@ mod tests {
         add_or_append_stack(&mut stacks, pick(5), [0, 0, 0], &max);
         assert_eq!(stacks.len(), 2);
     }
+
+    /// A blast and a burst of wind cast their rays at, and push from the eyes of,
+    /// the mob as it stands: a baby's and a size-4 slime's own box and eye
+    /// height, not the adult kind's (`Entity.getBoundingBox`, `getEyeHeight`).
+    #[test]
+    fn a_scaled_mob_is_blasted_by_its_own_box_and_eye_height() {
+        use crate::game::entity::Entity;
+        use horizon_client::mobs::{Mob, Species};
+        let mob = |species| {
+            let mut kind = (*zombie_type()).clone();
+            kind.species = species;
+            Mob::new(1, std::sync::Arc::new(kind), Vec3::ZERO, 0.0)
+        };
+        let adult = mob(Species::Zombie);
+        assert_eq!(adult.explosion_box(), adult.bounds());
+        let mut baby = mob(Species::Zombie);
+        baby.extra.age = -24000;
+        let mut slime = mob(Species::Slime);
+        slime.extra.size = 4;
+        for m in [&baby, &slime] {
+            let b = Entity::explosion_box(m);
+            assert_eq!(b, m.bounds());
+            assert_eq!(Entity::explosion_eye_height(m), m.eye_height());
+            assert_ne!(
+                f64::from(m.height()),
+                f64::from(adult.height()),
+                "the case must scale the box"
+            );
+            assert_eq!(
+                b.max_position().y - b.min_position().y,
+                f64::from(m.height())
+            );
+        }
+    }
 }

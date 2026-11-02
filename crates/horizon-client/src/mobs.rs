@@ -99,7 +99,8 @@ pub mod warden_brain;
 pub mod witch;
 pub mod wither;
 mod world;
-pub use world::visual_clip;
+pub use world::{TargetInfo, visual_clip};
+pub mod dragon_contacts;
 pub mod zombie_villager;
 
 use crate::{blocks::BlockFacts, mesher::Vertex, world::World};
@@ -1211,6 +1212,11 @@ pub struct Mob {
     /// The packs' random texture variants it wears (`random_textures::choose`).
     pub random_textures: random_textures::Choice,
 }
+impl crate::entity_rules::EntityRules for Mob {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+}
 /// A mannequin's `description` and `hide_description` (`Mannequin.updateDescription`):
 /// the default `entity.minecraft.mannequin.label`, none at all, or a component.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1283,11 +1289,27 @@ pub enum MobEvent {
         speed: f64,
         count: u32,
     },
+    /// `ServerLevel.sendParticles` of an `ItemParticleOption`: `count` crumbs of
+    /// `item`, drawn in this window.
+    ItemParticles {
+        item: &'static str,
+        at: [f64; 3],
+        spread: [f64; 3],
+        speed: f64,
+        count: u32,
+    },
     Sound(&'static str, [f64; 3], f32, f32),
     /// `Entity.sendBubbleColumnParticles`: a mob at the top of the bubble column
     /// block at `pos` (the splash and bubble particles over it).
     BubbleColumnParticles {
         pos: [i32; 3],
+    },
+    /// `LivingEntity.checkFallDamage`: `count` crumbs of the block `state` a mob
+    /// landed on, thrown up at `at`.
+    LandingDust {
+        state: horizon_world::registry::BlockStateId,
+        at: [f64; 3],
+        count: i32,
     },
     /// `UseBonemeal`: the villager's bone meal grows the crop at `pos`
     /// (`BoneMealItem.growCrop`, then level event 1505).
@@ -2433,6 +2455,8 @@ pub struct MobWorld<'a> {
     /// player in the level stands, alive or not (the despawn distance).
     pub nearest_player: Option<Vec3>,
     pub others: &'a [Seen],
+    /// The separately simulated dragon, visible to revenge and melee goals.
+    pub dragon: Option<(u32, TargetInfo)>,
     /// The boats and rafts a lead can hang on (`Holder::Boat`): id and state.
     pub leash_boats: &'a [(u32, leash::HolderState)],
     /// `others` by position, when the caller keeps one (the mob ticks).
@@ -2478,6 +2502,9 @@ pub struct MobWorld<'a> {
     pub lid_openers: &'a HashMap<(i32, i32, i32), i32>,
     /// What a content mod's effects do, on a server (None on a client).
     pub mod_effects: Option<&'a dyn ModEffectTicks>,
+    /// The level's world border, whose walls stop a mob's moves
+    /// (`Entity.collectColliders`); None: nothing stops them there.
+    pub border: Option<&'a horizon_core::geometry::border::BorderGeometry>,
 }
 /// `MobEffectInstance.tickServer` for a content mod's effect: its
 /// `shouldApplyEffectTickThisTick` and `applyEffectTick`, which the game's
@@ -3038,6 +3065,14 @@ impl Mob {
             if crack(before) != crack(after) {
                 self.outbox
                     .push(MobEvent::Sound("item.wolf_armor.crack", at, 1.0, 1.0));
+                // Twenty scutes fly off, a block above the wolf's feet.
+                self.outbox.push(MobEvent::ItemParticles {
+                    item: "minecraft:armadillo_scute",
+                    at: [at[0], at[1] + 1.0, at[2]],
+                    spread: [0.2, 0.1, 0.2],
+                    speed: 0.1,
+                    count: 20,
+                });
             }
         }
     }

@@ -172,8 +172,7 @@ impl Game<'_> {
                 }
                 "tps" => self.debug_tps_line(d),
                 // DebugEntryChunkGeneration, where the world is generated
-                // here: the window's server thread publishes its generators;
-                // the deprecated in-frame path is not extended.
+                // here: the window's server thread publishes its generators.
                 "chunk_generation_stats" => {
                     if let Some(p) = self.player.as_ref() {
                         let terrain = self
@@ -520,10 +519,6 @@ impl Game<'_> {
         offer(
             self.dragon_hit()
                 .map(|(_, d)| (d, "minecraft:ender_dragon".to_owned())),
-        );
-        offer(
-            self.guest_hit()
-                .map(|(_, d)| (d, "minecraft:player".to_owned())),
         );
         best.map(|b| b.1)
     }

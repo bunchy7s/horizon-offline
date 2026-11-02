@@ -101,6 +101,62 @@ pub fn load_textures(pack: &Pack, properties: &Properties) -> (Vec<CustomTexture
     (textures, notes)
 }
 
+/// Decodes the custom textures that name one of the game's textures by its resource location
+/// (`customTexture.clouds = minecraft:textures/environment/clouds.png`; Iris reads these from the
+/// game's resources, like a PNG of the pack). `read` gives a resource's bytes by namespace and
+/// path (resource packs over the game's own). The game's generated textures
+/// (`minecraft:dynamic/lightmap_1`, the atlases) stay for the renderer; one that can't be read
+/// or decoded is dropped, with a note.
+pub fn resolve_resources(
+    textures: &mut Vec<CustomTexture>,
+    read: &dyn Fn(&str, &str) -> Option<Vec<u8>>,
+) -> Vec<String> {
+    let mut notes = Vec::new();
+    textures.retain_mut(|t| {
+        let TextureSource::Resource(location) = &t.source else {
+            return true;
+        };
+        let (namespace, path) = location.split_once(':').unwrap_or(("minecraft", location));
+        if path.starts_with("dynamic/") || path.starts_with("textures/atlas/") {
+            return true;
+        }
+        let key = match t.stage.as_str() {
+            EVERY_STAGE => format!("customTexture.{}", t.name),
+            stage => format!("texture.{stage}.{}", t.name),
+        };
+        // A resource location's characters (`ResourceLocation`): nothing reaches outside the
+        // game's resources.
+        let valid = |s: &str, slash: bool| {
+            !s.is_empty()
+                && s.bytes().all(|b| {
+                    b.is_ascii_lowercase()
+                        || b.is_ascii_digit()
+                        || b"_-.".contains(&b)
+                        || (slash && b == b'/')
+                })
+                && s.split('/').all(|part| part != ".." && part != ".")
+        };
+        if !valid(namespace, false) || !valid(path, true) {
+            notes.push(format!("`{key}`: `{location}` is not a resource location"));
+            return false;
+        }
+        let Some(bytes) = read(namespace, path) else {
+            notes.push(format!("`{key}`: the game has no `{location}`"));
+            return false;
+        };
+        let Some(mut texture) = decode_png(&bytes) else {
+            notes.push(format!("`{key}`: `{location}` is not a PNG"));
+            return false;
+        };
+        let meta = read(namespace, &format!("{path}.mcmeta"));
+        let text = meta.as_deref().map(String::from_utf8_lossy);
+        (texture.blur, texture.clamp) = mcmeta(text.as_deref());
+        t.source = TextureSource::Image(texture);
+        true
+    });
+    notes
+}
+
 fn strip_suffix(name: &str) -> &str {
     match name.rsplit_once('.') {
         Some((base, n)) if n.len() == 1 && n.as_bytes()[0].is_ascii_digit() => base,
@@ -463,6 +519,60 @@ mod tests {
         assert_eq!(sky.texels, Texels::Float(vec![1.0, 0.0, 0.2, 1.0]));
         assert!(
             matches!(&textures[4].source, TextureSource::Resource(r) if r == "minecraft:dynamic/lightmap_1")
+        );
+    }
+
+    /// A texture may name one of the game's (`minecraft:textures/environment/clouds.png`): it is
+    /// read from the game's resources with its `.mcmeta`. The generated lightmap stays for the
+    /// renderer; a missing one, or a location reaching outside the resources, is dropped.
+    #[test]
+    fn game_textures_come_from_the_game_resources() {
+        let mut png = Vec::new();
+        {
+            let mut e = png::Encoder::new(&mut png, 2, 1);
+            e.set_color(png::ColorType::Rgba);
+            e.set_depth(png::BitDepth::Eight);
+            e.write_header()
+                .unwrap()
+                .write_image_data(&[255, 0, 0, 255, 0, 0, 255, 128])
+                .unwrap();
+        }
+        let properties = "customTexture.clouds = minecraft:textures/environment/clouds.png\n\
+                          texture.composite.gaux2 = minecraft:textures/block/stone.png\n\
+                          texture.composite.colortex3 = minecraft:dynamic/lightmap_1\n\
+                          customTexture.gone = minecraft:textures/none.png\n\
+                          customTexture.escape = minecraft:../../secret.png\n";
+        let pack = Pack::from_zip_bytes("P.zip", zip(&[("shaders/final.fsh", "")])).unwrap();
+        let (mut textures, notes) =
+            load_textures(&pack, &Properties::parse(properties, &Macros::standard()));
+        assert!(notes.is_empty(), "{notes:?}");
+        let read = |namespace: &str, path: &str| match (namespace, path) {
+            ("minecraft", "textures/environment/clouds.png" | "textures/block/stone.png") => {
+                Some(png.clone())
+            }
+            ("minecraft", "textures/block/stone.png.mcmeta") => {
+                Some(b"{\"texture\": {\"blur\": true}}".to_vec())
+            }
+            ("minecraft", p) if p.contains("secret") => Some(png.clone()),
+            _ => None,
+        };
+        let notes = resolve_resources(&mut textures, &read);
+        let names: Vec<&str> = textures.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["clouds", "gaux2", "colortex3"], "{notes:?}");
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        for (t, blur) in [(&textures[0], false), (&textures[1], true)] {
+            let TextureSource::Image(image) = &t.source else {
+                panic!("{} was not read", t.name);
+            };
+            assert_eq!(image.size, [2, 1, 1]);
+            assert_eq!(
+                image.texels,
+                Texels::Float(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 128.0 / 255.0])
+            );
+            assert_eq!((image.blur, image.clamp), (blur, false), "{}", t.name);
+        }
+        assert!(
+            matches!(&textures[2].source, TextureSource::Resource(r) if r == "minecraft:dynamic/lightmap_1")
         );
     }
 }

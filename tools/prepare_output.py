@@ -18,7 +18,9 @@ It only grows: the last line is the current version, and a change to the output 
 The digest covers every file of the preparation, canonicalised where the preparer is not deterministic between
 runs (verified across the CI runners): JSON is compared as data (key order, the order of each `tags` list of
 creative-inventory.json, and the addresses in `$$Lambda/0x...` class names don't count); logs, compiled classes,
-the sounds (copied from the player's launcher by another step), the stamp naming the OUTPUT_VERSION
+the sounds, the languages but the JAR's and the asset index (copied from the player's launcher by another step; CI
+clones the languages into a preparation after the fact), the game's run-time caches (horizon-sprites.cache,
+horizon-data.bin), the stamp naming the OUTPUT_VERSION
 (horizon-prepare.json), the lock file (.horizon-prepare.lock) and the manifest's file hashes (raw bytes) don't count. The manifest's own scalar fields (schema, data version, jar hashes, file count) do.
 """
 
@@ -41,6 +43,12 @@ MANIFEST = 'horizon-resources.json'
 STAMP = 'horizon-prepare.json'
 # The empty file a preparation locks while it writes (crates/horizon-prepare/src/lib.rs, LOCK).
 LOCK = '.horizon-prepare.lock'
+# Written into a preparation by something other than the preparer's export: the sounds and languages step
+# (crates/horizon-prepare/src/sounds.rs) and, at run time, the game's caches (horizon-client-render's sprite_cache.rs,
+# horizon-core's prepared_files.rs). Whether a harness ran the game before the check must not change the digest.
+DATA_FILE = 'horizon-data.bin'
+FROM_ELSEWHERE = ('assets/minecraft/sounds.json', 'assets/pack.mcmeta', 'asset-index.json', 'horizon-sprites.cache',
+                  DATA_FILE, STAMP, LOCK)
 LAMBDA = re.compile(r'\$\$Lambda/0x[0-9a-fA-F]+')
 CONSTANT = re.compile(r'^pub const OUTPUT_VERSION: u32 = (\d+);', re.M)
 
@@ -74,8 +82,11 @@ def canonical(rel: str, data: bytes) -> bytes:
 
 def skipped(rel: str) -> bool:
     parts = rel.split('/')
-    return rel.endswith(('.log', '.class')) or parts[:3] == ['assets', 'minecraft', 'sounds'] \
-        or rel in ('assets/minecraft/sounds.json', STAMP, LOCK)
+    # The languages but the client JAR's own come from the launcher's asset store like the sounds; CI clones them
+    # into a preparation after the fact (tools/ci/vanilla-data.sh).
+    languages = parts[:3] == ['assets', 'minecraft', 'lang'] and parts[3:] not in (['en_us.json'], ['deprecated.json'])
+    return rel.endswith(('.log', '.class')) or parts[:3] == ['assets', 'minecraft', 'sounds'] or languages \
+        or rel in FROM_ELSEWHERE or rel.startswith(f'{DATA_FILE}.')
 
 
 def digest(resources: Path) -> tuple[str, int]:

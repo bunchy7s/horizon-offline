@@ -66,8 +66,8 @@ Llama.LlamaHurtByTargetGoal.canContinueToUse	port	crates/horizon-client/src/mobs
 Mule.playChestEquipsSound	inline	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	gap: minor: a mule uses the donkey's chest sound (entity.donkey.chest) instead of entity.mule.chest
 SkeletonHorse.checkSkeletonHorseSpawnRules	inline	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	spawner reasons need light or a light ignoring reason, otherwise the animal rules
 SkeletonHorse.randomizeAttributes	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::horse	jump strength only
-SkeletonHorse.getSwimSound	missing		minor: a skeleton horse in water uses the generic swim sound, no skeleton_horse.swim, step_water or gallop_water
-SkeletonHorse.playSwimSound	missing		minor: the swim volume rules for a skeleton horse are not applied
+SkeletonHorse.getSwimSound	port	crates/horizon-client/src/mobs/equine.rs::skeleton_horse_swim_sound	swim in the water; on the ground step_water unridden, and a ridden one counts on gallopSoundCounter: step_water five times, gallop_water every third, swim in between
+SkeletonHorse.playSwimSound	port	crates/horizon-client/src/mobs/equine.rs::swim_volume	0.3 on the ground, min(0.1, f * 25.0) in the water
 SkeletonHorse.playJumpSound	inline	crates/horizon-client/src/game/mounts.rs::Game::tick_mount_riding	the jump sound: skeleton_horse.jump_water in water, the horse jump otherwise
 SkeletonHorse.aiStep	inline	crates/horizon-client/src/game/passengers.rs::Game::tick_skeleton_traps	a trap horse that is not persistent is removed after 18000 ticks
 SkeletonHorse.addAdditionalSaveData	port	crates/horizon-client/src/mobs/riders.rs::write_nbt	SkeletonTrap and SkeletonTrapTime

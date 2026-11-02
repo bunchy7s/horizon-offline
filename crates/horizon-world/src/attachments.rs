@@ -65,13 +65,30 @@ pub struct AttachmentType<T: 'static> {
 }
 
 impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
-    /// Read a value, inserting its default if absent.
+    /// Read a value, inserting its default if absent; see `get_existing`.
     pub fn get<H: AttachmentHost + ?Sized>(
         &self,
         host: &mut H,
         holder: Holder,
     ) -> Result<T, AttachmentError> {
         host.attachments(holder)?.get(self)
+    }
+    /// Whether a holder carries a value, like NeoForge's `hasData`; never inserts the default.
+    /// API @API:attachment_existing@.
+    pub fn has<H: AttachmentHost + ?Sized>(
+        &self,
+        host: &mut H,
+        holder: Holder,
+    ) -> Result<bool, AttachmentError> {
+        Ok(host.attachments(holder)?.has(self))
+    }
+    /// Read a value only if present, like `getExistingData`. API @API:attachment_existing@.
+    pub fn get_existing<H: AttachmentHost + ?Sized>(
+        &self,
+        host: &mut H,
+        holder: Holder,
+    ) -> Result<Option<T>, AttachmentError> {
+        host.attachments(holder)?.get_existing(self)
     }
     /// Replace a value on an existing holder.
     pub fn set<H: AttachmentHost + ?Sized>(
@@ -227,11 +244,16 @@ impl Attachments {
         }
         Ok(copy)
     }
-    /// Get an existing value or insert its default; saved values decode lazily.
-    pub fn get<T: Clone + Send + Sync + 'static>(
+    /// Whether a value is stored, saved or set, without decoding or inserting it.
+    pub fn has<T: Clone + Send + Sync + 'static>(&self, ty: &AttachmentType<T>) -> bool {
+        self.entries
+            .contains_key(&(ty.namespace.into(), ty.name.into()))
+    }
+    /// Get a stored value without inserting the default; saved values decode lazily.
+    pub fn get_existing<T: Clone + Send + Sync + 'static>(
         &mut self,
         ty: &AttachmentType<T>,
-    ) -> Result<T, AttachmentError> {
+    ) -> Result<Option<T>, AttachmentError> {
         if ty.copy_on_death && ty.codec.is_none() {
             return Err(AttachmentError::InvalidCopyPolicy);
         }
@@ -242,8 +264,7 @@ impl Attachments {
         {
             return Err(AttachmentError::InvalidNamespace);
         }
-        let key = (ty.namespace.into(), ty.name.into());
-        let value = match self.entries.get(&key) {
+        let value = match self.entries.get(&(ty.namespace.into(), ty.name.into())) {
             Some(Entry::Raw(raw)) => {
                 let Some(Tag::Compound(value)) = raw.get(&"value".into()) else {
                     return Err(AttachmentError::Decode);
@@ -255,23 +276,24 @@ impl Attachments {
                     .as_any()
                     .downcast_ref::<T>()
                     .cloned()
+                    .map(Some)
                     .ok_or(AttachmentError::TypeMismatch);
             }
-            None => (ty.default)(),
+            None => return Ok(None),
         };
-        let encoded = ty
-            .codec
-            .as_ref()
-            .map(|codec| (codec.encode)(&value))
-            .transpose()?;
-        self.entries.insert(
-            key,
-            Entry::Decoded(Box::new(TypedValue {
-                value: value.clone(),
-                encoded,
-                copy_on_death: ty.copy_on_death,
-            })),
-        );
+        self.insert_decoded(ty, value.clone())?;
+        Ok(Some(value))
+    }
+    /// Get an existing value or insert its default; saved values decode lazily.
+    pub fn get<T: Clone + Send + Sync + 'static>(
+        &mut self,
+        ty: &AttachmentType<T>,
+    ) -> Result<T, AttachmentError> {
+        if let Some(value) = self.get_existing(ty)? {
+            return Ok(value);
+        }
+        let value = (ty.default)();
+        self.insert_decoded(ty, value.clone())?;
         Ok(value)
     }
     /// Replace a value. A key already decoded as a different type is rejected.
@@ -290,25 +312,12 @@ impl Attachments {
         {
             return Err(AttachmentError::InvalidNamespace);
         }
-        let key = (ty.namespace.into(), ty.name.into());
-        if let Some(Entry::Decoded(old)) = self.entries.get(&key)
+        if let Some(Entry::Decoded(old)) = self.entries.get(&(ty.namespace.into(), ty.name.into()))
             && !old.as_any().is::<T>()
         {
             return Err(AttachmentError::TypeMismatch);
         }
-        let encoded = ty
-            .codec
-            .as_ref()
-            .map(|codec| (codec.encode)(&value))
-            .transpose()?;
-        self.entries.insert(
-            key,
-            Entry::Decoded(Box::new(TypedValue {
-                value,
-                encoded,
-                copy_on_death: ty.copy_on_death,
-            })),
-        );
+        self.insert_decoded(ty, value)?;
         if let Some(Tag::Compound(names)) = self.raw.get_mut(&ty.namespace.into()) {
             names.remove(&ty.name.into());
         }
@@ -320,16 +329,35 @@ impl Attachments {
         &mut self,
         ty: &AttachmentType<T>,
     ) -> Result<Option<T>, AttachmentError> {
-        let key = (ty.namespace.into(), ty.name.into());
-        if !self.entries.contains_key(&key) {
+        if !self.has(ty) {
             return Ok(None);
         }
-        let value = self.get(ty);
-        self.entries.remove(&key);
+        let value = self.get_existing(ty);
+        self.entries.remove(&(ty.namespace.into(), ty.name.into()));
         if let Some(Tag::Compound(names)) = self.raw.get_mut(&ty.namespace.into()) {
             names.remove(&ty.name.into());
         }
-        value.map(Some)
+        value
+    }
+    fn insert_decoded<T: Clone + Send + Sync + 'static>(
+        &mut self,
+        ty: &AttachmentType<T>,
+        value: T,
+    ) -> Result<(), AttachmentError> {
+        let encoded = ty
+            .codec
+            .as_ref()
+            .map(|codec| (codec.encode)(&value))
+            .transpose()?;
+        self.entries.insert(
+            (ty.namespace.into(), ty.name.into()),
+            Entry::Decoded(Box::new(TypedValue {
+                value,
+                encoded,
+                copy_on_death: ty.copy_on_death,
+            })),
+        );
+        Ok(())
     }
 }
 
@@ -390,6 +418,32 @@ mod tests {
         assert_eq!(respawned.get(&COUNTER), Ok(0));
     }
     #[test]
+    fn existing_reads_leave_an_absent_value_absent() {
+        let mut map = Attachments::default();
+        assert!(!map.has(&COUNTER));
+        assert_eq!(map.get_existing(&COUNTER), Ok(None));
+        assert!(!map.has(&COUNTER));
+        assert_eq!(map.to_nbt(), Compound::new());
+        assert_eq!(map.get(&COUNTER), Ok(0));
+        assert!(map.has(&COUNTER));
+        assert_ne!(map.to_nbt(), Compound::new());
+        map.set(&COUNTER, 5).unwrap();
+        assert_eq!(map.get_existing(&COUNTER), Ok(Some(5)));
+    }
+    #[test]
+    fn existing_read_decodes_a_saved_value_without_changing_it() {
+        let mut map = Attachments::default();
+        map.set(&COUNTER, 42).unwrap();
+        map.set(&MEMORY, 8).unwrap();
+        let saved = map.to_nbt();
+        let mut loaded = Attachments::from_nbt(saved.clone());
+        assert!(loaded.has(&COUNTER));
+        assert_eq!(loaded.get_existing(&COUNTER), Ok(Some(42)));
+        assert_eq!(loaded.to_nbt(), saved);
+        assert!(!loaded.has(&MEMORY));
+        assert_eq!(loaded.get_existing(&MEMORY), Ok(None));
+    }
+    #[test]
     fn unknown_and_invalid_values_survive_a_failed_decode() {
         let saved: Compound = [(
             JavaString::from("test"),
@@ -408,6 +462,8 @@ mod tests {
         )]
         .into();
         let mut map = Attachments::from_nbt(saved.clone());
+        assert!(map.has(&COUNTER));
+        assert_eq!(map.get_existing(&COUNTER), Err(AttachmentError::Decode));
         assert_eq!(map.get(&COUNTER), Err(AttachmentError::Decode));
         assert_eq!(map.to_nbt(), saved);
         assert_eq!(map.remove(&COUNTER), Err(AttachmentError::Decode));

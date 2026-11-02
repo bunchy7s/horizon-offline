@@ -38,7 +38,7 @@ use horizon_protocol::{
     text::translatable,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     io,
     net::{IpAddr, SocketAddr, TcpListener, TcpStream},
     sync::{
@@ -338,8 +338,6 @@ pub struct Shared {
     max_players: AtomicUsize,
     /// PlayerList.players in join order: profile id and name.
     online: Mutex<Vec<(u128, String)>>,
-    /// Profiles held by the host (the LAN host's own name).
-    reserved: Mutex<HashSet<u128>>,
     next: AtomicU32,
     stop: AtomicBool,
     random: Mutex<u64>,
@@ -381,13 +379,10 @@ impl Shared {
         {
             return Some(reason);
         }
-        if self.reserved.lock().unwrap().contains(&uuid) {
-            return Some(translatable("multiplayer.disconnect.duplicate_login", &[]));
-        }
         {
             let online = self.online.lock().unwrap();
             let bypass = self.config.bypasses_limit.as_ref().is_some_and(|b| b(uuid));
-            let taken = online.len() + self.reserved.lock().unwrap().len();
+            let taken = online.len();
             if taken >= self.max_players() && !bypass {
                 return Some(translatable("multiplayer.disconnect.server_full", &[]));
             }
@@ -421,7 +416,7 @@ impl Shared {
         self.online.lock().unwrap().retain(|(u, _)| *u != uuid);
     }
     pub fn online(&self) -> usize {
-        self.online.lock().unwrap().len() + self.reserved.lock().unwrap().len()
+        self.online.lock().unwrap().len()
     }
     fn next_random(&self, bound: usize) -> usize {
         let mut r = self.random.lock().unwrap();
@@ -553,7 +548,6 @@ impl Lan {
             motd: Mutex::new(config.motd.clone()),
             max_players: AtomicUsize::new(config.max_players),
             online: Mutex::new(Vec::new()),
-            reserved: Mutex::new(HashSet::new()),
             next: AtomicU32::new(1),
             stop: AtomicBool::new(false),
             connections: AtomicUsize::new(0),
@@ -656,10 +650,6 @@ impl Lan {
     /// Everything the connection threads reported since the last call.
     pub fn poll(&self) -> Vec<NetEvent> {
         self.events.try_iter().collect()
-    }
-    /// Reserve a uuid for the host so a guest cannot take the name.
-    pub fn reserve(&self, uuid: u128) {
-        self.shared.reserved.lock().unwrap().insert(uuid);
     }
     pub fn stop(&mut self) {
         self.shared.stop.store(true, Ordering::Relaxed);

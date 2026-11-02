@@ -125,19 +125,51 @@ pub const RULES: &[Rule] = &[
     b("universal_anger", "mobs", false),
     b("water_source_conversion", "updates", true),
 ];
+/// GameRules.MAX_MINECART_SPEED (26.3), available with minecart improvements.
+pub const MAX_MINECART_SPEED: Rule = i("max_minecart_speed", "misc", 8, 1, 1000);
+pub const MINECART_IMPROVEMENTS: &str = "minecraft:minecart_improvements";
+
+pub fn available_rules(minecart_improvements: bool) -> impl Iterator<Item = &'static Rule> {
+    RULES
+        .iter()
+        .chain(minecart_improvements.then_some(&MAX_MINECART_SPEED))
+}
+
 pub fn rule(name: &str) -> Option<&'static Rule> {
     let name = name.strip_prefix("minecraft:").unwrap_or(name);
-    RULES.iter().find(|r| r.name == name)
+    available_rules(true).find(|r| r.name == name)
 }
 
 /// Current values (defaults unless set).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GameRules {
     values: BTreeMap<&'static str, Value>,
+    minecart_improvements: bool,
 }
 impl GameRules {
+    pub fn with_features(features: &[String]) -> Self {
+        Self {
+            minecart_improvements: features.iter().any(|f| f == MINECART_IMPROVEMENTS),
+            ..Self::default()
+        }
+    }
+    /// GameRules.copy(enabledFeatures): keep available values, add defaults for
+    /// newly enabled rules and discard rules absent from the target feature set.
+    pub fn copy_with_features(&self, features: &[String]) -> Self {
+        let mut rules = Self::with_features(features);
+        for (&name, &value) in &self.values {
+            rules.set(name, value);
+        }
+        rules
+    }
+    pub fn available_rules(&self) -> impl Iterator<Item = &'static Rule> + use<> {
+        available_rules(self.minecart_improvements)
+    }
     pub fn get(&self, name: &str) -> Option<Value> {
         let r = rule(name)?;
+        if r.name == MAX_MINECART_SPEED.name && !self.minecart_improvements {
+            return None;
+        }
         Some(self.values.get(r.name).copied().unwrap_or(r.default))
     }
     pub fn bool(&self, name: &str) -> bool {
@@ -160,7 +192,9 @@ impl GameRules {
     }
     /// Set a rule; false if the name or value type is wrong.
     pub fn set(&mut self, name: &str, value: Value) -> bool {
-        let Some(r) = rule(name) else { return false };
+        let Some(r) = rule(name).filter(|r| self.get(r.name).is_some()) else {
+            return false;
+        };
         let ok = match (r.default, value) {
             (Value::Bool(_), Value::Bool(_)) => true,
             (Value::Int(_), Value::Int(v)) => (r.min..=r.max).contains(&v),
@@ -176,8 +210,7 @@ impl GameRules {
     /// Every rule's value by name without namespace, as `save::Level` holds
     /// them (booleans as 0 or 1).
     pub fn by_name(&self) -> BTreeMap<String, i32> {
-        RULES
-            .iter()
+        self.available_rules()
             .map(|r| {
                 let v = match self.values.get(r.name).copied().unwrap_or(r.default) {
                     Value::Bool(b) => i32::from(b),
@@ -189,8 +222,8 @@ impl GameRules {
     }
     /// GameRuleMap codec: `{data: {"minecraft:<rule>": value...}, DataVersion}`.
     pub fn to_nbt(&self) -> NamedTag {
-        let data: Vec<(horizon_world::nbt::JavaString, Tag)> = RULES
-            .iter()
+        let data: Vec<(horizon_world::nbt::JavaString, Tag)> = self
+            .available_rules()
             .map(|r| {
                 let v = self.values.get(r.name).copied().unwrap_or(r.default);
                 let tag = match v {
@@ -212,11 +245,14 @@ impl GameRules {
         }
     }
     pub fn from_nbt(root: &Tag) -> Self {
-        let mut rules = Self::default();
+        Self::from_nbt_with_features(root, &[])
+    }
+    pub fn from_nbt_with_features(root: &Tag, features: &[String]) -> Self {
+        let mut rules = Self::with_features(features);
         let Some(data) = root.get("data") else {
             return rules;
         };
-        for r in RULES {
+        for r in rules.available_rules() {
             let key = format!("minecraft:{}", r.name);
             let value = data.get(&key).or_else(|| data.get(r.name));
             match (r.default, value) {
@@ -232,15 +268,18 @@ impl GameRules {
         rules
     }
     pub fn load(world: &Path) -> Self {
+        Self::load_with_features(world, &[])
+    }
+    pub fn load_with_features(world: &Path, features: &[String]) -> Self {
         let Ok(bytes) = fs::read(world.join("data/minecraft/game_rules.dat")) else {
-            return Self::default();
+            return Self::with_features(features);
         };
         let Ok(raw) = Compression::Gzip.decode(&bytes, 16 << 20) else {
-            return Self::default();
+            return Self::with_features(features);
         };
         match nbt::read_named(&raw, Limits::default()) {
-            Ok((root, _)) => Self::from_nbt(&root.tag),
-            Err(_) => Self::default(),
+            Ok((root, _)) => Self::from_nbt_with_features(&root.tag, features),
+            Err(_) => Self::with_features(features),
         }
     }
     pub fn save(&self, world: &Path) -> crate::Result<()> {

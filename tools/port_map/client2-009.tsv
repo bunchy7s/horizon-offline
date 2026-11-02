@@ -25,7 +25,7 @@ Font.PreparedTextBuilder.visit	skip:other		visitor over prepared glyphs for draw
 Font.PreparedTextBuilder.getTextColor	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	style colour with the base colour's alpha
 Font.PreparedTextBuilder.getShadowColor	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	gap: minor: style shadow colour is ignored; shadow is always 0.25 of the text colour
 Font.PreparedTextBuilder.bounds	skip:other		bounds of prepared text for vanilla hit tests; Horizon hit-tests by advance
-Gui.update	skip:other		narrator-only update (handleDelayedNarration); Horizon has no narrator
+Gui.update	inline	crates/horizon-client/src/game/narrator.rs::Game::narrate_screen	once a turn after the frame's widgets were read: ScreenNarrator::frame runs the narration handleDelayedNarration makes due and a new screen's
 Gui.isPausing	port	crates/horizon-client/src/game.rs::Game::pauses_game	gap: minor: checks the open screen only, not the overlay part
 Gui.addSocialInteractionsToast	skip:service		social interactions are not offered by Horizon
 Gui.handleKeybinds	port	crates/horizon-client/src/game.rs::Game::key_pressed	gap: minor: the social interactions key has no port (see addSocialInteractionsToast)
@@ -36,7 +36,7 @@ Gui.addInitialScreens	port	crates/horizon-client-render/src/ban_notice.rs::initi
 Gui.canInterruptScreen	missing		minor: unsure: no check that stops a server-opened screen from replacing an open one was found
 Gui.renderActiveTextDebug	skip:debug		debug overlay of text bounds
 GuiGraphicsExtractor.enableScissor	port	crates/horizon-client-render/src/screen_draw.rs::paint	gap: minor: callers push a rectangle; there is no stack, so enclosing rectangles are not intersected
-GuiGraphicsExtractor.outline	missing		minor: unsure: no one-pixel outline draw was found in Horizon's UI
+GuiGraphicsExtractor.outline	port	crates/horizon-client/src/game/key_focus.rs::draw_outline	gap: minor: the one-pixel outline is drawn only as the keyboard focus ring, in white; no other screen outlines a rectangle
 GuiGraphicsExtractor.innerFill	port	crates/horizon-client-render/src/hud.rs::HudBatch::fill	gap: minor: one colour only; a second gradient colour (color2) is not drawn
 GuiGraphicsExtractor.textWithWordWrap	port	crates/horizon-client-render/src/screen_draw.rs::Measure::split	gap: minor: only the wrap; the caller draws each line at y+9
 GuiGraphicsExtractor.blitSprite	port	crates/horizon-client-render/src/hud.rs::HudBatch::sprite_scaled	gap: minor: tile and nine-slice scaling is in ui.rs (tiled, draw_nine_slice)
@@ -51,7 +51,7 @@ GuiGraphicsExtractor.itemCount	inline	crates/horizon-client-render/src/hud_overl
 GuiGraphicsExtractor.map	port	crates/horizon-client/src/game/cartography.rs::Game::draw_cartography	
 GuiGraphicsExtractor.entity	port	crates/horizon-client/src/game/perspective.rs::Game::draw_player_preview	gap: player: only the local player is previewed; the smithing armour-stand preview has no port
 GuiGraphicsExtractor.skin	missing		minor: no skin customisation preview was found; the inventory preview is draw_player_preview
-GuiGraphicsExtractor.book	missing		player: the enchanting table screen does not draw its open book; Horizon's book drawing is for written books only
+GuiGraphicsExtractor.book	port	crates/horizon-client/src/item_render/gui.rs::draw_enchanting_book	the enchanting table's open book, from the book's open amount and page flip (Game::tick_enchanting_book drives it)
 GuiGraphicsExtractor.profilerChart	skip:debug		F3 profiler pie chart; Horizon's debug_chart.rs covers its own charts
 GuiGraphicsExtractor.setTooltipForNextFrame	inline	crates/horizon-client-render/src/screen_draw.rs::tooltip	the overloads route to the tooltip draw
 GuiGraphicsExtractor.setComponentTooltipForNextFrame	port	crates/horizon-client-render/src/screen_draw.rs::tooltip	gap: minor: tooltip images (TooltipComponent) are not drawn
@@ -113,8 +113,8 @@ AbstractSelectionList.nextEntry	port	crates/horizon-client/src/game/key_focus.rs
 AbstractSelectionList.extractListItems	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	rows culled to the visible band
 AbstractSelectionList.extractItem	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	selection outline and row content
 AbstractSelectionList.extractSelection	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	two fills: outline colour and black inner
-AbstractSelectionList.getRowBottom	skip:other		only the LAN-found narration uses it; Horizon has no narrator
-AbstractSelectionList.narrationPriority	skip:other		screen-reader priority; Horizon has no narrator
+AbstractSelectionList.getRowBottom	inline	crates/horizon-client/src/multiplayer.rs::Multiplayer::lan_found_narrations	ServerSelectionList.updateNetworkServers is its only caller, testing whether a LAN world found since the last call has its row in view; that test computes the row's top and bottom here (row_top + ROW_HEIGHT)
+AbstractSelectionList.narrationPriority	inline	crates/horizon-client/src/screen_narrator.rs::Ctx::priority	focused, else hovered (a list's is a row under the mouse), else none; a container list is focused with one of its widgets
 AbstractSelectionList.removeEntry	skip:other		rows are rebuilt from the model when they change (update_list, server list), so there is no single-row removal
 AbstractSelectionList.narrateListElementPosition	skip:other		narration only
 AbstractSelectionList.TrackedList.set	skip:java		delegate list wrapper
