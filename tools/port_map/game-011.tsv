@@ -129,7 +129,7 @@ AbstractSchoolingFish.addFollowers	inline	crates/horizon-client/src/mobs/aquatic
 AbstractSchoolingFish.finalizeSpawn	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	the group shares a leader id and variant, and FollowFlockLeader (crates/horizon-client/src/mobs/aquatic.rs) paths a follower to the leader every 10 ticks
 Pufferfish.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	`getIntOr("PuffState", 0)` at most 2; mob_to_nbt writes it, and a reload test covers it
 Pufferfish.registerGoals	port	crates/horizon-client/src/mobs/aquatic.rs::register	the puff goal at priority 1
-Pufferfish.touch	missing		minor: only the player is stung (inside ai_step); other mobs touching a puffed fish are not hurt or poisoned
+Pufferfish.touch	inline	crates/horizon-client/src/mobs/aquatic.rs::ai_step	sting_touching_mobs: alive mobs outside #not_scary_for_pufferfish whose box meets the fish's inflated by 0.3, when teams allow damage, take a mobAttack hit for puff state + 1, then, once it lands, POISON for 60 * puff state and the sting sound (game/creatures.rs PufferfishSting)
 Salmon.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	size entry, small 0 to large 2
 Salmon.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::read_variant	the type tag, medium by default
 Salmon.get	inline	crates/horizon-client/src/entity_nbt.rs::bucket_components	the size component goes onto the bucket
