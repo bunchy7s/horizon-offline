@@ -2565,7 +2565,7 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         let (x, y, w, h) =
             Self::tooltip_geometry(atlas, &lines, (x, y), (batch.width, batch.height), [0.0; 2]);
-        Self::tooltip_box(batch, atlas, x, y, w, h);
+        self.tooltip_box(batch, None, x, y, w, h);
         Self::tooltip_text(batch, atlas, &lines, x, y);
     }
     /// A tooltip's lines with their legacy codes resolved and their colours.
@@ -2605,47 +2605,43 @@ impl Game<'_> {
     }
     /// The box and its frame sprites.
     pub(super) fn tooltip_box(
+        &self,
         batch: &mut HudBatch,
-        atlas: &horizon_client::hud::HudAtlas,
+        stack: Option<&ItemStack>,
         x: f32,
         y: f32,
         w: f32,
         h: f32,
     ) {
-        batch.fill(atlas, x - 3.0, y - 4.0, w + 6.0, 1.0, rgba(16, 0, 16, 240));
-        batch.fill(
-            atlas,
-            x - 3.0,
-            y + h + 3.0,
-            w + 6.0,
-            1.0,
-            rgba(16, 0, 16, 240),
+        let (mut background, mut border_top, mut border_bottom) =
+            (0xf0100010, 0x505000ff, 0x5028007f);
+        self.native_tooltip_color(stack, &mut background, &mut border_top, &mut border_bottom);
+        let convert = |color: u32| {
+            let [a, r, g, b] = color.to_be_bytes();
+            rgba(r, g, b, a)
+        };
+        let (background, border_top, border_bottom) = (
+            convert(background),
+            convert(border_top),
+            convert(border_bottom),
         );
-        batch.fill(
+        let atlas = &self.gui.atlas;
+        batch.fill(atlas, x - 3.0, y - 4.0, w + 6.0, 1.0, background);
+        batch.fill(atlas, x - 3.0, y + h + 3.0, w + 6.0, 1.0, background);
+        batch.fill(atlas, x - 4.0, y - 3.0, w + 8.0, h + 6.0, background);
+        batch.fill(atlas, x - 3.0, y - 3.0, w + 6.0, 1.0, border_top);
+        batch.fill(atlas, x - 3.0, y + h + 2.0, w + 6.0, 1.0, border_bottom);
+        batch.fill_gradient(
             atlas,
-            x - 4.0,
-            y - 3.0,
-            w + 8.0,
-            h + 6.0,
-            rgba(16, 0, 16, 240),
+            (x - 3.0, y - 2.0, 1.0, h + 4.0),
+            border_top,
+            border_bottom,
         );
-        batch.fill(atlas, x - 3.0, y - 3.0, w + 6.0, 1.0, rgba(80, 0, 255, 80));
-        batch.fill(
+        batch.fill_gradient(
             atlas,
-            x - 3.0,
-            y + h + 2.0,
-            w + 6.0,
-            1.0,
-            rgba(40, 0, 127, 80),
-        );
-        batch.fill(atlas, x - 3.0, y - 2.0, 1.0, h + 4.0, rgba(60, 0, 190, 80));
-        batch.fill(
-            atlas,
-            x + w + 2.0,
-            y - 2.0,
-            1.0,
-            h + 4.0,
-            rgba(60, 0, 190, 80),
+            (x + w + 2.0, y - 2.0, 1.0, h + 4.0),
+            border_top,
+            border_bottom,
         );
     }
     pub(super) fn tooltip_text(
@@ -2709,7 +2705,7 @@ impl Game<'_> {
             (batch.width, batch.height),
             [min_width, extra],
         );
-        Self::tooltip_box(batch, atlas, x, y, w, h);
+        self.tooltip_box(batch, Some(stack), x, y, w, h);
         let text_h = h - extra;
         Self::tooltip_text(batch, atlas, &lines, x, y);
         if let Some(layout) =
@@ -2756,7 +2752,7 @@ impl Game<'_> {
         if py + 8.0 + 3.0 > batch.height {
             py = batch.height - 8.0 - 3.0;
         }
-        Self::tooltip_box(batch, atlas, px, py, tw, 8.0);
+        self.tooltip_box(batch, Some(stack), px, py, tw, 8.0);
         Self::tooltip_text(batch, atlas, &lines, px, py);
     }
     /// `ClientBundleTooltip.extractImage`: the slots, the count past them and

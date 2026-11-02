@@ -115,7 +115,7 @@ HappyGhast.setServerStillTimeout	inline	crates/horizon-client/src/mobs/happy_gha
 HappyGhast.registerGoals	port	crates/horizon-client/src/mobs/happy_ghast.rs::setup	adult goals: float, tempt (harness and food for a bare adult, food otherwise), float around within 16
 HappyGhast.adultGhastSetup	port	crates/horizon-client/src/mobs/happy_ghast.rs::setup	adult half: ghast move control, happy ghast look control, goals, brain stopped
 HappyGhast.babyGhastSetup	port	crates/horizon-client/src/mobs/happy_ghast.rs::setup	baby half: flying move control, baby flying navigation, no goals, timeout cleared
-HappyGhast.ageBoundaryReached	port	crates/horizon-client/src/mobs/happy_ghast.rs::ensure_setup	reruns setup when the age sign changes
+HappyGhast.ageBoundaryReached	port	crates/horizon-client/src/mobs/finalize.rs::age_boundary_reached	reruns the setup (happy_ghast::ensure_setup) when the age sign changes, so a hatched ghastling flies its own goals before its first tick
 HappyGhast.createAttributes	skip:data		attributes come from entity-types.json
 HappyGhast.getAmbientSoundInterval	port	crates/horizon-client/src/mobs.rs::Mob::ambient_interval	six times as long while it carries a rider
 HappyGhast.canUseSlot	inline	crates/horizon-client/src/game/ghasts.rs::Game::interact_happy_ghast	a harness goes only on a living adult without one; shears take it off
@@ -127,5 +127,6 @@ HappyGhast.checkRestriction	inline	crates/horizon-client/src/mobs/happy_ghast.rs
 HappyGhast.continuousHeal	inline	crates/horizon-client/src/mobs/happy_ghast.rs::ai_step	gap: minor: one point every 600 ticks, every 20 in precipitation; the in-clouds fast heal is missing
 HappyGhast.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	gap: minor: STAYS_STILL is synced; IS_LEASH_HOLDER is not tracked (no leashHolderTime), so the harness rope layer is never drawn
 HappyGhast.syncStayStillFlag	port	crates/horizon-client/src/game/lan.rs::mob_meta	STAYS_STILL shown while the timeout is above zero (on_still_timeout)
+HappyGhast.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	Vec3.ZERO, the rope at the ghast's feet rather than an eye height up
 HappyGhastAi.initCoreActivity	port	crates/horizon-client/src/mobs/animal_brain.rs::ghastling_package	swim, flying panic 2.0, look sink, move sink and the tempt cooldown countdown
 HappyGhastAi.initIdleActivity	port	crates/horizon-client/src/mobs/animal_brain.rs::ghastling_package	tempt with look in the eyes, follow a player, follow an adult, then fly stroll or walk to the look target

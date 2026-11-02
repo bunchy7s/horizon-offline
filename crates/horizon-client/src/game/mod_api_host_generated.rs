@@ -495,4 +495,46 @@ impl Host for super::Game<'_> {
     fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
         self.native_block_collision(pos)
     }
+    fn entity(&self, id: u32) -> Option<EntityRef> {
+        self.native_entity(id)
+    }
+    fn level(&self, dimension: &str) -> Option<LevelRef> {
+        self.native_level(dimension)
+    }
+    fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        self.native_entity_position(entity)
+    }
+    fn entity_block_position(&self, entity: EntityRef) -> Option<[i32; 3]> {
+        self.native_entity_block_position(entity)
+    }
+    fn entity_rotation(&self, entity: EntityRef) -> Option<[f32; 2]> {
+        self.native_entity_rotation(entity)
+    }
+    fn entity_kind(&self, entity: EntityRef) -> Option<String> {
+        self.native_entity_kind(entity)
+    }
+    fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
+        self.native_entity_uuid(entity)
+    }
+    fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
+        self.native_entity_level(entity)
+    }
+    fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
+        self.native_item_container_slots(stack)
+    }
+    fn item_container_insert(
+        &self,
+        stack: &ItemStack,
+        item: &ItemStack,
+    ) -> Option<(u32, ItemStack)> {
+        self.native_item_container_insert(stack, item)
+    }
+    fn item_container_extract(
+        &self,
+        stack: &ItemStack,
+        slot: usize,
+        max: u32,
+    ) -> Option<(Option<ItemStack>, ItemStack)> {
+        self.native_item_container_extract(stack, slot, max)
+    }
 }

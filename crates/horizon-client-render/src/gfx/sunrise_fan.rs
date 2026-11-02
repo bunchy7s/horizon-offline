@@ -15,6 +15,11 @@ use glam::Vec3;
 
 pub const TRIANGLES: usize = 16;
 
+/// One vertex per triangle corner, each as `(position, weight)`: the apex
+/// weighs 1, the rim 0, so the rasterizer interpolates the barycentric apex
+/// weight the shader used to compute per pixel.
+pub const VERTICES: usize = TRIANGLES * 3;
+
 /// Per triangle: xyz `r0 × r1` (its dot with a ray is the apex's weight
 /// times S), w `[A, r0, r1]` (its sign is S's where the hit lies ahead).
 /// Then per rim vertex: xyz `r × A`.
@@ -25,6 +30,19 @@ pub fn normals(alpha: f32, sun: Vec3) -> [[f32; 4]; 2 * TRIANGLES] {
         let (r0, r1) = (rim[i], rim[(i + 1) % TRIANGLES]);
         out[i] = r0.cross(r1).extend(apex.dot(r0.cross(r1))).to_array();
         out[TRIANGLES + i] = r0.cross(apex).extend(0.0).to_array();
+    }
+    out
+}
+
+/// The fan as triangle-list vertices in camera space, with the apex at
+/// weight 1 and each rim vertex at 0 (`VERTICES`).
+pub fn mesh(alpha: f32, sun: Vec3) -> [[f32; 4]; VERTICES] {
+    let (apex, rim) = vertices(alpha, sun);
+    let mut out = [[0.0; 4]; VERTICES];
+    for i in 0..TRIANGLES {
+        out[i * 3] = apex.extend(1.0).to_array();
+        out[i * 3 + 1] = rim[i].extend(0.0).to_array();
+        out[i * 3 + 2] = rim[(i + 1) % TRIANGLES].extend(0.0).to_array();
     }
     out
 }
@@ -206,6 +224,21 @@ mod tests {
             }
         }
         best
+    }
+
+    #[test]
+    fn mesh_puts_the_apex_weight_on_the_apex_of_every_triangle() {
+        let (apex, rim) = vertices(0.7, Vec3::new(0.0, 0.6, -0.8));
+        let mesh = mesh(0.7, Vec3::new(0.0, 0.6, -0.8));
+        assert_eq!(mesh.len(), VERTICES);
+        for i in 0..TRIANGLES {
+            assert_eq!(&mesh[i * 3][..3], apex.to_array());
+            assert_eq!(mesh[i * 3][3], 1.0);
+            assert_eq!(&mesh[i * 3 + 1][..3], rim[i].to_array());
+            assert_eq!(mesh[i * 3 + 1][3], 0.0);
+            assert_eq!(&mesh[i * 3 + 2][..3], rim[(i + 1) % TRIANGLES].to_array());
+            assert_eq!(mesh[i * 3 + 2][3], 0.0);
+        }
     }
 
     #[test]
