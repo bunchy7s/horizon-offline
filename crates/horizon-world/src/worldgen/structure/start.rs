@@ -290,6 +290,27 @@ fn pair(value: Option<&Value>, a: &str, b: &str, default: i32, missing_b: i32) -
         _ => [default; 2],
     }
 }
+/// `JigsawStructure`'s `size` (its depth) and `max_distance_from_center`.
+fn jigsaw_depth_and_reach(v: &Value) -> (i32, [i32; 2]) {
+    (
+        v["size"].as_i64().unwrap_or(0) as i32,
+        pair(
+            v.get("max_distance_from_center"),
+            "horizontal",
+            "vertical",
+            80,
+            // DimensionType.Y_SIZE.
+            4064,
+        ),
+    )
+}
+/// The bounds `JigsawStructure`'s codec puts on those two: `size` is
+/// `Codec.intRange(0, 20)` and `MaxDistance` is `horizontal`
+/// `Codec.intRange(1, 128)` beside `vertical`
+/// `ExtraCodecs.intRange(1, DimensionType.Y_SIZE)`.
+fn jigsaw_reach_in_range(depth: i32, [horizontal, vertical]: [i32; 2]) -> bool {
+    (0..=20).contains(&depth) && (1..=128).contains(&horizontal) && (1..=4064).contains(&vertical)
+}
 
 /// All structures and structure sets of a resource bundle, in registry
 /// (identifier) order.
@@ -314,30 +335,38 @@ impl StructureRegistry {
                 _ => super::jigsaw::Draws::Vanilla,
             };
             let kind = match v["type"].as_str().unwrap_or_default() {
-                "minecraft:jigsaw" | "yungsapi:yung_jigsaw" => StructureKind::Jigsaw(JigsawDef {
-                    draws,
-                    start_pool: v["start_pool"].as_str().unwrap_or_default().to_owned(),
-                    start_jigsaw: v["start_jigsaw_name"].as_str().map(str::to_owned),
-                    max_depth: v["size"].as_i64().unwrap_or(0) as i32,
-                    start_height: HeightProvider::from_json(&v["start_height"].to_string())?,
-                    use_expansion_hack: v["use_expansion_hack"].as_bool().unwrap_or(false),
-                    project_to: v["project_start_to_heightmap"].as_str().and_then(heightmap),
-                    max_distance: pair(
-                        v.get("max_distance_from_center"),
-                        "horizontal",
-                        "vertical",
-                        80,
-                        // DimensionType.Y_SIZE.
-                        4064,
-                    ),
-                    aliases: v["pool_aliases"].as_array().cloned().unwrap_or_default(),
-                    padding: pair(v.get("dimension_padding"), "bottom", "top", 0, 0),
-                    waterlogging: v["liquid_settings"].as_str() != Some("ignore_waterlogging"),
-                    checks: super::start_checks::StartChecks::decode(v.get("horizon:start_checks")),
-                    piece_limited: v
-                        .get("horizon:piece_limited")
-                        .map(super::piece_limited::Config::decode),
-                }),
+                "minecraft:jigsaw" | "yungsapi:yung_jigsaw" => {
+                    let (depth, max_distance) = jigsaw_depth_and_reach(&v);
+                    let def = JigsawDef {
+                        draws,
+                        start_pool: v["start_pool"].as_str().unwrap_or_default().to_owned(),
+                        start_jigsaw: v["start_jigsaw_name"].as_str().map(str::to_owned),
+                        max_depth: depth,
+                        start_height: HeightProvider::from_json(&v["start_height"].to_string())?,
+                        use_expansion_hack: v["use_expansion_hack"].as_bool().unwrap_or(false),
+                        project_to: v["project_start_to_heightmap"].as_str().and_then(heightmap),
+                        max_distance,
+                        aliases: v["pool_aliases"].as_array().cloned().unwrap_or_default(),
+                        padding: pair(v.get("dimension_padding"), "bottom", "top", 0, 0),
+                        waterlogging: v["liquid_settings"].as_str() != Some("ignore_waterlogging"),
+                        checks: super::start_checks::StartChecks::decode(
+                            v.get("horizon:start_checks"),
+                        ),
+                        piece_limited: v
+                            .get("horizon:piece_limited")
+                            .map(super::piece_limited::Config::decode),
+                    };
+                    // JigsawStructure's codec bounds `size` and
+                    // `max_distance_from_center`: vanilla registers no
+                    // structure carrying others, so one that does places
+                    // nothing here either rather than reaching past what the
+                    // generator allows.
+                    if jigsaw_reach_in_range(depth, max_distance) {
+                        StructureKind::Jigsaw(def)
+                    } else {
+                        StructureKind::Unsupported("minecraft:jigsaw".into())
+                    }
+                }
                 "minecraft:buried_treasure" => StructureKind::BuriedTreasure,
                 "minecraft:igloo" => StructureKind::Igloo,
                 "minecraft:swamp_hut" => StructureKind::SwampHut,
