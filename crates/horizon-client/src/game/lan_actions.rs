@@ -4514,7 +4514,7 @@ impl Game<'_> {
     /// (`handleTakeItemEntity`).
     fn guest_arrows(&mut self, host: &mut LanHost, gi: usize) {
         use horizon_client::arrows::Touch;
-        let (conn, id, at, creative, unable, dims) = {
+        let (conn, id, at, creative, unable, dims, player, name) = {
             let g = &host.hub.guests[gi];
             (
                 g.conn,
@@ -4523,6 +4523,8 @@ impl Game<'_> {
                 g.creative(),
                 g.spectator() || g.dead || g.health <= 0.0,
                 g.dimensions(),
+                g.uuid,
+                g.name.clone(),
             )
         };
         if unable || self.creatures.projectiles.is_empty() {
@@ -4566,6 +4568,9 @@ impl Game<'_> {
         });
         self.creatures.projectiles = projectiles;
         for shot in picked {
+            if let Some(arrow) = shot.arrow.as_ref() {
+                self.native_player_pickup_arrow(player, &name, shot.id, &arrow.pickup_item.item);
+            }
             host.hub.take_item(shot.id as i32, id, 1, at);
             if let Some(target) = super::pickups::guest_target(host, id as u32) {
                 self.add_pickup_toward(

@@ -3448,6 +3448,19 @@ impl Game<'_> {
     ) {
         let _ = (player, name, pos, front);
     }
+    /// A server player picked up an arrow after it was removed and its pickup
+    /// was applied. `item` is the arrow's pickup item id. Guest lookup helpers
+    /// may find nothing during packet handling. Server-side.
+    /// @API:player_pickup_arrow@.
+    pub(super) fn native_player_pickup_arrow(
+        &mut self,
+        player: u128,
+        name: &str,
+        entity_id: u32,
+        item: &str,
+    ) {
+        let _ = (player, name, entity_id, item);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
