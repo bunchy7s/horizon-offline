@@ -15,7 +15,7 @@ ChatTypeDecoration.decorate	port	crates/horizon-client/src/game/remote.rs::chat_
 ChatTypeDecoration.resolveParameters	port	crates/horizon-client/src/game/remote.rs::chat_type_decorate	the parameter list (sender, target, content) built in format_chat
 ClickEvent.Action.filterForSerialization	port	crates/horizon-client-core/src/component.rs::object_style	gap: minor: a disallowed action (open_file) is dropped; vanilla refuses the whole component
 CommonComponents.optionStatus	port	crates/horizon-client-render/src/options_ui.rs::on_off	options.on / options.off text
-CommonComponents.joinForNarration	skip:other		screen-reader narration text; Horizon has no narrator output (the narrator option is only stored)
+CommonComponents.joinForNarration	port	crates/horizon-client-render/src/widgets.rs::join_for_narration	the parts joined with ". " (NARRATION_SEPARATOR), as vanilla; every narrated title-and-message screen goes through it
 Component.tryCollapseToString	skip:java		JSON shape only: Text always writes the object form, which reads the same
 Component.copy	skip:java		clone; Text is Clone
 Component.visit	port	crates/horizon-client-core/src/text.rs::Text::chars	gap: minor: no early exit on the first consumer result; the styled characters are the same

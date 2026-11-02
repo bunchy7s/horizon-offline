@@ -95,6 +95,7 @@ Optional Windows allocator build features are documented in
 | E | Inventory and 2x2 crafting (shift-click to quick-move or craft all) |
 | Q / Ctrl+Q | Drop one / drop stack |
 | F3 | Debug overlay (position, chunk, light, biome, FPS) |
+| F3 + S | Dump the texture atlas to `screenshots/debug/`: `minecraft_textures_atlas_gui.png` with `minecraft_textures_atlas_gui.txt` beside it, every sprite's rect in texels (vanilla's `TextureManager.dumpAllSheets`) |
 | Esc | Pause menu (Save and Quit) |
 
 Worlds autosave every 6000 ticks (5 minutes), when chunks unload and on quit.

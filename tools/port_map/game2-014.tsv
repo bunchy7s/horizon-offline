@@ -76,8 +76,8 @@ LiquidBlock.neighborChanged	port	crates/horizon-world/src/level/fluids.rs::Sim::
 LiquidBlock.pickupBlock	port	crates/horizon-world/src/level/fluids.rs::Sim::pickup_block	source blocks only, leaves air and yields the bucket
 LoomBlock.useWithoutItem	port	crates/horizon-client/src/game/stations.rs::Game::open_station	opens the loom station
 LoomBlock.getMenuProvider	port	crates/horizon-client/src/game/stations.rs::Game::open_station	the loom menu over the block position
-Mirror.mirror	missing	-	minor: unsure: integer rotation mirror for 16-step rotations (banners, heads) not found; template transform works on positions only
-Mirror.getRotation	missing	-	minor: unsure: the 180 degree turn that a mirror implies is not found; template transform applies mirror to positions only
+Mirror.mirror	inline	crates/horizon-world/src/worldgen/structure/processor.rs::turn_facing	a hanging entity's Facing takes the same axis flips (LEFT_RIGHT swaps north and south, FRONT_BACK west and east) before the rotation; a block state's mirrored result is the exported per-state table (StateTransforms::mirror)
+Mirror.getRotation	inline	crates/horizon-world/src/worldgen/structure/processor.rs::turn_facing	the 180 degree turn an axis-flipped facing implies is the swap turn_facing makes; for a block state it is already in the exported mirror table
 MossyCarpetBlock.makeShapes	skip:data	-	collision and outline shapes are precomputed from the data
 MossyCarpetBlock.getCollisionShape	skip:data	-	collision shape per state comes from the data table
 MossyCarpetBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	base needs a non-air block below; a topper needs a moss carpet below
@@ -117,7 +117,7 @@ MushroomBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::mushr
 MushroomBlock.canSpread	inline	crates/horizon-world/src/level/tick.rs::Sim::mushroom_random_tick	at most four of the same mushroom in the 9x3x9 box, counted in the tick
 MushroomBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	mushroom arm
 NetherPortalBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	portal breaks when the frame is incomplete
-NetherPortalBlock.getPortalTransitionTime	port	crates/horizon-client/src/game/nether_portal.rs::Game::tick_nether_portal	gap: minor: creative and default delay rules by invulnerability; the delay counter is in the same fn
+NetherPortalBlock.getPortalTransitionTime	port	crates/horizon-client/src/game/server_travel.rs::Game::handle_server_portal	creative and default delay game rules by invulnerability; the delay counter is in the same fn
 NetherPortalBlock.getExitPortal	port	crates/horizon-client/src/game/nether_portal.rs::Game::nether_exit_portal	gap: minor: the Nether exit only; the End variant is Game::end_portal_exit
 NetherPortalBlock.getDimensionTransitionFromExit	port	crates/horizon-client/src/game/nether_portal.rs::Game::portal_plan	
 NetherPortalBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	portal ambient sound and particles

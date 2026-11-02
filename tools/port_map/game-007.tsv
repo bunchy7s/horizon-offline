@@ -96,7 +96,7 @@ AnimalPanic.checkExtraStartConditions	inline	crates/horizon-client/src/mobs/anim
 AnimalPanic.start	port	crates/horizon-client/src/mobs/animal_brain.rs::try_start	panic memory set, walk target cleared, navigation stopped
 AnimalPanic.lookForWater	missing		minor: a burning brain animal (sniffer, ghastling) does not run for nearby water; goal-driven animals do (goals.rs Panic)
 BabyFollowAdult.create	port	crates/horizon-client/src/mobs/animal_brain.rs::trigger	B::FollowAdult for the ghastling; goat, camel, armadillo, axolotl and hoglin babies use the FollowParent goal
-BackUpIfTooClose.create	inline	crates/horizon-client/src/mobs/piglin.rs::BackUpIfTooClose	goal stand-in for the piglin brain (no tick parity: the probe has no piglin brain); only a crossbow piglin
+BackUpIfTooClose.create	inline	crates/horizon-client/src/mobs/piglin.rs::too_close	goal stand-in for the piglin brain (no tick parity: the probe has no piglin brain); only a crossbow piglin, and the backward strafe is BackUpIfTooClose's Goal::tick
 BecomePassiveIfMemoryPresent.create	port	crates/horizon-client/src/mobs/piglin.rs::hoglin_repellent	a hoglin near a repellent is pacified for 200 ticks and drops its target
 Behavior.hasRequiredMemories	inline	crates/horizon-client/src/mobs/villager_brain.rs::try_start	each behaviour tests its memories at the top of its try_start arm
 BehaviorUtils.entityIsVisible	port	crates/horizon-client/src/mobs/villager_brain.rs::visible_contains	also copied in the animal, warden and monster brains
@@ -119,8 +119,8 @@ CountDownCooldownTicks.canStillUse	inline	crates/horizon-client/src/mobs/animal_
 CrossbowAttack.checkExtraStartConditions	port	crates/horizon-client/src/mobs/illager.rs::can_use	gap: minor: the piglin uses RangedCrossbowAttackGoal's check (holding a crossbow, live target), with no line of sight or attack range test
 CrossbowAttack.canStillUse	port	crates/horizon-client/src/mobs/illager.rs::can_continue	
 CrossbowAttack.crossbowAttack	port	crates/horizon-client/src/mobs/illager.rs::tick	gap: minor: the goal's state machine; piglins also walk to within 8 blocks and move at half speed while charged, the brain behaviour stands and shoots
-DismountOrSkipMounting.create	missing		minor: piglins never ride; baby piglins do not climb on baby hoglins
-DismountOrSkipMounting.isVehicleValid	missing		minor: same, no piglin riding
+DismountOrSkipMounting.create	port	crates/horizon-client/src/mobs/piglin.rs::dismount_or_skip_mounting	run in the ride activity: the vehicle or ride target stays while it is alive, closer than 8 blocks and not wanted off, else the piglin gets off and forgets the ride target; a vehicle gone from the level counts as dead
+DismountOrSkipMounting.isVehicleValid	inline	crates/horizon-client/src/mobs/piglin.rs::dismount_or_skip_mounting	the alive, closerThan(8) and wantsToStopRiding test the same fn makes
 DoNothing.tryStart	port	crates/horizon-client/src/mobs/warden_brain.rs::try_start	B::DoNothing starts a random timer
 DoNothing.tickOrStop	port	crates/horizon-client/src/mobs/warden_brain.rs::tick_or_stop	stops when the timer ends
 EntityTracker.currentPosition	port	crates/horizon-client/src/mobs/villager_brain.rs::position	Tracker::position, eyes or feet

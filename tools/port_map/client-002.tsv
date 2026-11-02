@@ -29,7 +29,7 @@ ClientPacketListener.handleSetSpawn	port	crates/horizon-client/src/game/remote.r
 ClientPacketListener.handleAddTransientBlockPacket	missing		minor: the transient block shown while a falling block lands is not drawn; the block update still arrives
 ClientPacketListener.findTotem	missing		player: the totem of undying pop-up over the screen is not shown when death protection triggers; Horizon has no item activation
 ClientPacketListener.handleSetExperience	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetExperience arm
-ClientPacketListener.determineLevelLoadingReason	port	crates/horizon-client/src/game.rs::Game::loading_reason	gap: player: only the in-frame game picks a reason; a dedicated server join or dimension change shows no level loading screen
+ClientPacketListener.determineLevelLoadingReason	port	crates/horizon-client-render/src/level_loading.rs::reason_for_respawn	the reason of a Respawn packet: death, a Nether or an End crossing
 ClientPacketListener.handleOpenScreen	port	crates/horizon-client/src/game/remote.rs::Game::remote_open_screen	
 ClientPacketListener.handleSetCursorItem	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetCursorItem arm; gap: minor: sets the carried stack even while the creative screen is open
 ClientPacketListener.handleSetPlayerInventory	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	SetPlayerInventory arm: slots 0-35, armour 36-39, off hand 40
