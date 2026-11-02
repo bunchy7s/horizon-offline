@@ -10,6 +10,7 @@ struct Hud {
 // enchanted_glint_item on its own repeating texture (vanilla's GlintSampler).
 @group(0) @binding(3) var glint_tex: texture_2d<f32>;
 @group(0) @binding(4) var glint_sampler: sampler;
+@group(0) @binding(5) var linear_sampler: sampler;
 struct Out {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -74,6 +75,12 @@ struct CitSlots {
     let c = textureSample(atlas, atlas_sampler, in.uv) * in.color;
     if c.a == 0.0 { discard; }
     return c;
+}
+// RenderPipelines.VIGNETTE (WinScreen's credits vignette): bilinear sample of
+// credits_vignette.png (which has blur: true in its .mcmeta and a wrapped border in the atlas).
+@fragment fn fs_vignette(in: Out) -> @location(0) vec4<f32> {
+    let c = textureSample(atlas, linear_sampler, in.uv) * in.color;
+    return vec4(c.rgb, 1.0);
 }
 // rendertype_end_portal.fsh (entity.wgsl has the same for portal blocks).
 const PORTAL_COLORS = array<vec3<f32>, 16>(

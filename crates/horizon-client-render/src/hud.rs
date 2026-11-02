@@ -1956,6 +1956,12 @@ impl HudRenderer {
             label: Some("HUD"),
             ..Default::default()
         });
+        let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("HUD linear"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("HUD size"),
             contents: bytemuck::bytes_of(&HudUniform::new([1.0; 4], EndPortalFill::default())),
@@ -2006,6 +2012,12 @@ impl HudRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2031,6 +2043,10 @@ impl HudRenderer {
                 wgpu::BindGroupEntry {
                     binding: 4,
                     resource: wgpu::BindingResource::Sampler(glint_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&linear_sampler),
                 },
             ],
         });
@@ -2134,7 +2150,7 @@ impl HudRenderer {
                     operation: wgpu::BlendOperation::Add,
                 },
             },
-            "fs_main",
+            "fs_vignette",
             false,
         );
         // RenderPipelines.END_PORTAL: opaque.
