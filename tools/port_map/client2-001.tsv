@@ -137,8 +137,8 @@ PlayerSkinRenderCache.RenderInfo.hashCode	skip:java		hash for a cache key
 PostChain.load	port	crates/horizon-client-render/src/post_chain.rs::PostEffects::load	reads the chain's JSON, refuses a target other than the frame ("Referenced external targets are not available in this context"), builds its internal targets and passes; None when the file is absent
 PostChain.getReferencedExternalTargets	inline	crates/horizon-client-render/src/post_chain.rs::PostEffects::load	the external targets a chain names, checked against the frame the only external target Horizon has
 PostChain.createPass	port	crates/horizon-client-render/src/post_chain.rs::PostEffects::translated_pass	the pass's GLSL translated, its targets and images bound, its uniforms packed, and a pass reading the target it writes refused
-PostChain.addToFrame	port	crates/horizon-client-render/src/gfx/entity_outline.rs::EntityOutline::draw	gap: minor: runs the entity outline chain only; other chains are not built
-PostChain.process	port	crates/horizon-client-render/src/menu_blur.rs::MenuBlur::apply	gap: minor: runs the menu blur only; other chains are not run
+PostChain.addToFrame	port	crates/horizon-client-render/src/gfx/entity_outline.rs::EntityOutline::draw	gap: minor: this is the silhouette pass; a chain's own passes run in post_chain.rs::PostEffects::apply, which builds whatever chain id the frame's request names
+PostChain.process	port	crates/horizon-client-render/src/menu_blur.rs::MenuBlur::apply	gap: minor: this is the menu's own two-pass blur; the chain runner is post_chain.rs::PostEffects::apply
 PostChain.getOrCreatePersistentTarget	skip:other		GPU persistent target cache
 PostChain.close	skip:other		GPU resource teardown
 PostChain.TargetBundle.getOrThrow	skip:other		frame-graph target lookup; Horizon has no frame graph
