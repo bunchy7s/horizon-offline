@@ -108,6 +108,10 @@ pub(super) struct Minecart {
     /// velocity), so a cart that ran into a block still counts as moving.
     collision_speed: f64,
     fall_distance: f64,
+    /// The squared speed `MinecartTNT.causeFallDamage` blows up with, set by
+    /// a landing of three blocks or more and taken by the cart's next tick
+    /// step (vanilla explodes inside the move itself).
+    fall_blast: Option<f64>,
     pub hurt_time: i32,
     pub hurt_dir: i32,
     pub damage: f32,
@@ -265,6 +269,7 @@ impl Minecart {
             horizontal_collision: false,
             collision_speed: 0.0,
             fall_distance: 0.0,
+            fall_blast: None,
             hurt_time: 0,
             hurt_dir: 1,
             damage: 0.0,
@@ -506,10 +511,20 @@ impl Game<'_> {
             if (moved.y - delta.y).abs() > 1.0e-7 {
                 c.velocity.y = 0.0;
             }
-            if c.on_ground || moved.y >= 0.0 {
+            // Entity.checkFallDamage: the move's drop counts (not in water),
+            // and a landing hands the whole fall to causeFallDamage, which
+            // sets a TNT minecart off at (fall / 10) squared.
+            if moved.y < 0.0 && !self.cart_in_water(c) {
+                c.fall_distance -= f64::from(moved.y as f32);
+            }
+            if c.on_ground {
+                if c.kind == CartKind::Tnt && c.fall_distance >= 3.0 {
+                    let power = c.fall_distance / 10.0;
+                    c.fall_blast = Some(power * power);
+                }
                 c.fall_distance = 0.0;
-            } else {
-                c.fall_distance -= moved.y;
+            } else if moved.y >= 0.0 {
+                c.fall_distance = 0.0;
             }
         }
     }
@@ -912,7 +927,6 @@ impl Game<'_> {
             c.velocity = Vec3::new(c.velocity.x * 0.5, c.velocity.y * 0.5, c.velocity.z * 0.5);
         }
         let v = c.velocity;
-        let fall = c.fall_distance;
         self.move_cart(c, v);
         // `comeOffTrack` moves the cart and keeps the delta the move resolved
         // (then scales it by the air drag), so a cart an obstacle stopped here
@@ -925,10 +939,6 @@ impl Game<'_> {
                 c.velocity.y * 0.95,
                 c.velocity.z * 0.95,
             );
-        } else if c.kind == CartKind::Tnt && fall >= 3.0 {
-            // MinecartTNT.causeFallDamage
-            c.fuse = 0;
-            c.velocity = Vec3::new(c.velocity.x, fall / 10.0, c.velocity.z);
         }
     }
     /// `AbstractMinecart.tick` for one cart; returns false once it is gone.
@@ -989,6 +999,11 @@ impl Game<'_> {
                 }
             }
             CartKind::Tnt => {
+                // MinecartTNT.causeFallDamage ran inside the move.
+                if let Some(speed_sqr) = c.fall_blast.take() {
+                    self.explode_cart(c, speed_sqr);
+                    return false;
+                }
                 // MinecartTNT.tick: the fuse and the collision check are separate.
                 if c.fuse > 0 {
                     c.fuse -= 1;
