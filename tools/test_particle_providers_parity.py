@@ -243,7 +243,9 @@ def main():
                'stone floor and, for the bubbles, still water: construction (provider, level, SpellParticle and particle-local random draws), per-tick '
                'position, previous position, motion, age, lifetime, removal, onGround, quad size at partial 0 and 0.5, '
                'colour, alpha, roll, sprite, UVs and light at partial 0.5 (unloaded chunk), and the particles and sounds '
-               'requested from the level. Flowing fluids, block light, render layers/facing and the ParticleEngine group limits '
+               'requested from the level. The geyser eruption throws its base, plume and poof from the water column it '
+               'carries and the plume rises that many blocks; the noxious gas cloud asks the still water for each gas it '
+               'spawns. Flowing fluids, block light, render layers/facing and the ParticleEngine group limits '
                'are not exercised.')))
     print(f'{units:,} particle cases match the pinned client ({matched:,} output lines, {tolerance} within '
           f'the libm tolerance): {report}', flush=True)
