@@ -27,7 +27,7 @@ fn string(s: &str) -> Tag {
 }
 /// Entity type ID (`id`).
 pub fn kind(tag: &Tag) -> Option<String> {
-    text(tag.get("id"))
+    horizon_client_core::identifier::normalize_id(&text(tag.get("id"))?)
 }
 pub fn position(tag: &Tag) -> Option<Vec3> {
     read_doubles::<3>(tag.get("Pos")).map(|p| Vec3::new(p[0], p[1], p[2]))
@@ -3310,6 +3310,31 @@ mod tnt_power_tests {
 mod tests {
     use super::*;
     use crate::items::ItemStack;
+
+    #[test]
+    fn mob_loading_accepts_default_namespace_and_preserves_custom_namespaces() {
+        let cow = crate::mobs::sensor_scan_tests::kind();
+        let types = [
+            ("minecraft:cow".into(), cow.clone()),
+            ("test:cow".into(), cow),
+        ]
+        .into();
+        let pos = || {
+            Tag::List(
+                [4.5_f64, 220.0, 6.5]
+                    .map(|v| Tag::Double(v.to_bits()))
+                    .to_vec(),
+            )
+        };
+        for id in ["cow", ":cow", "minecraft:cow", "test:cow"] {
+            let tag = Tag::compound([("id", string(id)), ("Pos", pos()), ("NoAI", Tag::Byte(1))]);
+            let mob = mob_from_nbt(&tag, &types, 7, None).expect(id);
+            assert_eq!(mob.position, Vec3::new(4.5, 220.0, 6.5));
+            assert!(mob.no_ai);
+        }
+        let unknown = Tag::compound([("id", string("other:cow")), ("Pos", pos())]);
+        assert!(mob_from_nbt(&unknown, &types, 8, None).is_none());
+    }
 
     /// A saved rocket and trident come back with their own Life, LifeTime,
     /// flags and position (the keys vanilla's addAdditionalSaveData writes).
