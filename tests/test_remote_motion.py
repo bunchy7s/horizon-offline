@@ -32,9 +32,17 @@ impl Potions { fn remote_thrown_motion(&mut self, _id: u32, _v: Vec3) -> bool { 
 #[derive(Default)]
 struct End;
 impl End { fn remote_eye_motion(&mut self, _id: u32, _v: [f64; 3]) {} }
+// game/mob_index.rs: the same answers as a linear search.
+#[derive(Default)]
+struct MobIndex;
+impl MobIndex {
+    fn get_mut<'a>(&mut self, mobs: &'a mut [Entity], id: u32) -> Option<&'a mut Entity> {
+        mobs.iter_mut().find(|m| m.id == id)
+    }
+}
 #[derive(Default)]
 struct Game {
-    mobs: Vec<Entity>, dropped: Vec<Entity>, falling: Vec<Entity>, tnts: Vec<Entity>, orbs: Vec<Entity>,
+    mobs: Vec<Entity>, mob_index: MobIndex, dropped: Vec<Entity>, falling: Vec<Entity>, tnts: Vec<Entity>, orbs: Vec<Entity>,
     creatures: Creatures, dragon_fireballs: Vec<Entity>, tridents: Vec<Entity>,
     rockets: Vec<Entity>, remote: Option<Remote>,
     potions: Potions, end: End,

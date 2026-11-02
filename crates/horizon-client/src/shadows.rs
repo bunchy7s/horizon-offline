@@ -370,6 +370,14 @@ mod tests {
         goat.extra.age = -24000;
         // Goat.getAgeScale: 0.55.
         assert_eq!(mob_shadow_radius(&goat), 0.7 * 0.55);
+        let mut strider = mob("minecraft:strider", S::Strider);
+        strider.extra.age = -24000;
+        // StriderRenderer halves AgeableMobRenderer's 0.5 * 0.5 again.
+        assert_eq!(mob_shadow_radius(&strider), 0.125);
+        let mut turtle = mob("minecraft:turtle", S::Turtle);
+        turtle.extra.age = -24000;
+        // TurtleRenderer takes 0.83 of the 0.7 * 0.3 age-scaled radius.
+        assert!((mob_shadow_radius(&turtle) - 0.7 * 0.3 * 0.83).abs() < 1e-6);
     }
     #[test]
     fn scaled_players_cast_a_scaled_shadow() {

@@ -285,18 +285,120 @@ fn forget_shared() {
         *shared = None;
     }
 }
-/// Packed light per block: sky light in the high nibble, block light in the low one.
+/// Packed light per block: sky light in the high nibble, block light in the
+/// low one. A section keeps only the kind of light that varies in it
+/// (`Light::packed`): most sections have no block light and only sky light
+/// that changes, or the reverse below ground.
 #[derive(Clone)]
 pub enum Light {
     Uniform(u8),
+    /// Sky light per block, as nibbles (block `i` in byte `i / 2`, the even
+    /// one in the low nibble, as a vanilla DataLayer), and one block light.
+    Sky(Box<[u8; 2048]>, u8),
+    /// Block light per block, as nibbles, and one sky light.
+    Block(Box<[u8; 2048]>, u8),
     Full(Box<[u8; 4096]>),
+}
+#[inline]
+fn nibble(layer: &[u8; 2048], i: usize) -> u8 {
+    layer[i >> 1] >> ((i & 1) << 2) & 15
 }
 impl Light {
     #[inline]
     pub fn get(&self, i: usize) -> u8 {
         match self {
             Self::Uniform(v) => *v,
+            Self::Sky(layer, block) => nibble(layer, i) << 4 | block,
+            Self::Block(layer, sky) => sky << 4 | nibble(layer, i),
             Self::Full(a) => a[i],
+        }
+    }
+    /// The smallest form of packed light per block.
+    pub fn packed(light: Box<[u8; 4096]>) -> Self {
+        let first = light[0];
+        let (mut sky_varies, mut block_varies) = (false, false);
+        for &v in light.iter() {
+            let d = v ^ first;
+            sky_varies |= d & 0xF0 != 0;
+            block_varies |= d & 15 != 0;
+        }
+        let layer = |shift: u32| {
+            let mut layer = Box::new([0u8; 2048]);
+            for (out, pair) in layer.iter_mut().zip(light.as_chunks::<2>().0) {
+                *out = (pair[0] >> shift & 15) | (pair[1] >> shift & 15) << 4;
+            }
+            layer
+        };
+        match (sky_varies, block_varies) {
+            (false, false) => Self::Uniform(first),
+            (true, false) => Self::Sky(layer(4), first & 15),
+            (false, true) => Self::Block(layer(0), first >> 4),
+            (true, true) => Self::Full(light),
+        }
+    }
+    /// The packed light of blocks `at..at + out.len()`, into `out`.
+    #[inline]
+    pub fn copy_run(&self, at: usize, out: &mut [u8]) {
+        match self {
+            Self::Uniform(v) => out.fill(*v),
+            Self::Full(a) => out.copy_from_slice(&a[at..at + out.len()]),
+            Self::Sky(layer, block) => {
+                for (k, o) in out.iter_mut().enumerate() {
+                    *o = nibble(layer, at + k) << 4 | block;
+                }
+            }
+            Self::Block(layer, sky) => {
+                for (k, o) in out.iter_mut().enumerate() {
+                    *o = sky << 4 | nibble(layer, at + k);
+                }
+            }
+        }
+    }
+    /// The packed light of every block, in index order.
+    pub fn to_array(&self) -> Box<[u8; 4096]> {
+        match self {
+            Self::Full(a) => a.clone(),
+            Self::Uniform(v) => Box::new([*v; 4096]),
+            _ => Box::new(std::array::from_fn(|i| self.get(i))),
+        }
+    }
+    /// Whether any block's packed light has a bit of `mask` set.
+    pub fn any(&self, mask: u8) -> bool {
+        let layer_any = |layer: &[u8; 2048]| layer.iter().any(|&v| v != 0);
+        match self {
+            Self::Uniform(v) => v & mask != 0,
+            Self::Sky(layer, block) => block & mask != 0 || (mask & 0xF0 != 0 && layer_any(layer)),
+            Self::Block(layer, sky) => {
+                (sky << 4) & mask != 0 || (mask & 15 != 0 && layer_any(layer))
+            }
+            Self::Full(a) => a.iter().any(|v| v & mask != 0),
+        }
+    }
+    /// Whether any block's packed light differs from `v` in the bits of `mask`.
+    pub fn any_not(&self, mask: u8, v: u8) -> bool {
+        match self {
+            Self::Uniform(u) => (u ^ v) & mask != 0,
+            Self::Full(a) => a.iter().any(|u| (u ^ v) & mask != 0),
+            _ => (0..4096).any(|i| (self.get(i) ^ v) & mask != 0),
+        }
+    }
+    /// Heap bytes it holds.
+    pub fn heap_bytes(&self) -> usize {
+        match self {
+            Self::Uniform(_) => 0,
+            Self::Sky(..) | Self::Block(..) => 2048,
+            Self::Full(_) => 4096,
+        }
+    }
+    /// Whether every block's light is the same as in `other`.
+    pub fn same_as(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Uniform(a), Self::Uniform(b)) => a == b,
+            (Self::Full(a), Self::Full(b)) => a == b,
+            (Self::Sky(a, x), Self::Sky(b, y)) | (Self::Block(a, x), Self::Block(b, y)) => {
+                x == y && a == b
+            }
+            _ => (0..4096).all(|i| self.get(i) == other.get(i)),
         }
     }
 }
@@ -347,14 +449,15 @@ impl Section {
     pub fn is_uniform(&self, v: u32) -> bool {
         self.blocks.is_uniform(v)
     }
+    /// Whether every block, biome and light value is the same as `other`'s.
+    pub fn same_as(&self, other: &Self) -> bool {
+        self.blocks == other.blocks
+            && self.biomes == other.biomes
+            && self.light.same_as(&other.light)
+    }
     /// Heap bytes held by the block, biome and light storage (benchmark accounting).
     pub fn heap_bytes(&self) -> usize {
-        self.blocks.heap_bytes()
-            + self.biomes.heap_bytes()
-            + match &self.light {
-                Light::Uniform(_) => 0,
-                Light::Full(_) => 4096,
-            }
+        self.blocks.heap_bytes() + self.biomes.heap_bytes() + self.light.heap_bytes()
     }
     /// Collapse storage that became uniform, and drop palette entries no
     /// block uses any more.
@@ -366,11 +469,45 @@ impl Section {
                 *container = PalettedContainer::new(container.strategy(), v);
             }
         }
-        if let Light::Full(a) = &self.light
-            && a.iter().all(|&b| b == a[0])
-        {
-            self.light = Light::Uniform(a[0]);
+        // Only the kind of light that varies is kept.
+        if matches!(self.light, Light::Full(_)) {
+            let Light::Full(a) = std::mem::replace(&mut self.light, Light::Uniform(0)) else {
+                unreachable!()
+            };
+            self.light = Light::packed(a);
         }
+    }
+}
+/// The heap bytes of a set of columns by what holds them (`Chunk::census`,
+/// `horizon-ctl memory`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ColumnCensus {
+    pub columns: usize,
+    /// Section slots of every column, shared ones included.
+    pub sections: usize,
+    /// Distinct section allocations.
+    pub unique_sections: usize,
+    /// Distinct sections of a single block state (no data array).
+    pub uniform_block_sections: usize,
+    /// Distinct sections with light per block (not one value).
+    pub light_arrays: usize,
+    pub block_bytes: usize,
+    pub biome_bytes: usize,
+    pub light_bytes: usize,
+    pub heightmap_bytes: usize,
+    /// The section records themselves (`Arc<Section>`).
+    pub section_record_bytes: usize,
+    /// The column records and their lists of sections.
+    pub column_bytes: usize,
+}
+impl ColumnCensus {
+    pub fn total_bytes(&self) -> usize {
+        self.block_bytes
+            + self.biome_bytes
+            + self.light_bytes
+            + self.heightmap_bytes
+            + self.section_record_bytes
+            + self.column_bytes
     }
 }
 #[derive(Clone)]
@@ -564,18 +701,60 @@ impl Chunk {
     }
     #[inline]
     pub fn light(&self, x: i32, y: i32, z: i32) -> u8 {
-        let s = (y - self.min_y) >> 4;
-        if s < 0 {
-            return 0;
+        match self.section_at(y) {
+            Ok(section) => section.light(index(x, y, z)),
+            Err(light) => light,
         }
-        if s >= self.sections.len() as i32 {
-            return 0xF0;
+    }
+    /// The section holding block height `y`, or the light of the air outside the
+    /// column's sections there: none below them, full sky above.
+    #[inline]
+    pub fn section_at(&self, y: i32) -> Result<&Section, u8> {
+        match self.section_index(y) {
+            Some(s) => Ok(&self.sections[s]),
+            None if y < self.min_y => Err(0),
+            None => Err(0xF0),
         }
-        self.sections[s as usize].light(index(x, y, z))
     }
     /// Heap bytes held by the sections (benchmark accounting).
     pub fn heap_bytes(&self) -> usize {
         self.sections.iter().map(|s| s.heap_bytes()).sum::<usize>()
+    }
+    /// Adds this column's heap bytes to `census` by what holds them. A
+    /// section shared with another column (`share_uniform`, or a copy not yet
+    /// written to) counts once: `seen` holds the sections counted so far.
+    pub fn census(
+        &self,
+        census: &mut ColumnCensus,
+        seen: &mut crate::fast_hash::FxHashSet<*const Section>,
+    ) {
+        census.columns += 1;
+        census.sections += self.sections.len();
+        census.column_bytes += std::mem::size_of::<Self>()
+            + self.sections.capacity() * std::mem::size_of::<Arc<Section>>();
+        census.heightmap_bytes += [&self.surface, &self.motion_blocking]
+            .iter()
+            .filter(|map| map.get().is_some())
+            .count()
+            * std::mem::size_of::<[i16; 256]>();
+        for section in &self.sections {
+            if !seen.insert(Arc::as_ptr(section)) {
+                continue;
+            }
+            census.unique_sections += 1;
+            // The `Arc`'s two counts and the section record.
+            census.section_record_bytes +=
+                2 * std::mem::size_of::<usize>() + std::mem::size_of::<Section>();
+            if section.blocks.bits() == 0 {
+                census.uniform_block_sections += 1;
+            }
+            census.block_bytes += section.blocks.heap_bytes();
+            census.biome_bytes += section.biomes.heap_bytes();
+            if section.light.heap_bytes() != 0 {
+                census.light_arrays += 1;
+                census.light_bytes += section.light.heap_bytes();
+            }
+        }
     }
     /// Biome table index at a block position (`ChunkAccess.getNoiseBiome` with
     /// the quart y clamped to the column).
@@ -673,6 +852,33 @@ pub struct ChunkExtras {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn each_light_form_keeps_every_value_and_run() {
+        // Sky varies alone, block varies alone, both, neither.
+        let cases: [(fn(usize) -> u8, &str); 4] = [
+            (|i| ((i % 16) as u8) << 4 | 3, "sky"),
+            (|i| 0xA0 | (i / 256) as u8, "block"),
+            (|i| (i % 251) as u8, "full"),
+            (|_| 0x7C, "uniform"),
+        ];
+        for (value, name) in cases {
+            let light = Light::packed(Box::new(std::array::from_fn(value)));
+            let form = match light {
+                Light::Sky(..) => "sky",
+                Light::Block(..) => "block",
+                Light::Full(_) => "full",
+                Light::Uniform(_) => "uniform",
+            };
+            assert_eq!(form, name);
+            for at in [0, 17, 1000, 4078] {
+                let mut run = [0u8; 18];
+                light.copy_run(at, &mut run);
+                let expected: Vec<u8> = (at..at + 18).map(value).collect();
+                assert_eq!(run.as_slice(), expected, "{name} at {at}");
+                assert_eq!(light.get(at + 5), value(at + 5), "{name}");
+            }
+        }
+    }
     #[test]
     fn highest_skips_only_sections_that_cannot_match() {
         let (air, cave_air, stone) = (0, 7, 1);
