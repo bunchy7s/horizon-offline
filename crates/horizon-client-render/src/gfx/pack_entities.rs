@@ -319,6 +319,7 @@ impl PackEntities {
         entities: &[Vertex],
         spans: &[EntitySpan],
         drawn: [bool; PROGRAMS],
+        crack: ([f32; 4], [u32; 2]),
         shadow: Casters,
         rest: &mut Vec<Vertex>,
     ) {
@@ -330,7 +331,9 @@ impl PackEntities {
         rest.extend_from_slice(&entities[..first.min(entities.len())]);
         for (span, range) in runs(entities.len(), spans) {
             let run = &entities[range];
-            let program = program_of(&span).filter(|_| plain(run));
+            let program = program_of(&span).filter(|&p| {
+                plain(run) || (p == DESTROY && run.iter().all(|v| matches!(v.layer, 11 | 12)))
+            });
             let pack = program.is_some_and(|p| drawn[p]) && !span.hidden;
             let casts = program.is_some_and(|p| shadow.cast(&span, p));
             if !pack && !span.hidden {
@@ -341,6 +344,9 @@ impl PackEntities {
             };
             let start = self.scratch.len() as u32;
             self.scratch.extend_from_slice(run);
+            if program == DESTROY {
+                project_cracks(&mut self.scratch[start as usize..], crack.0, crack.1);
+            }
             let (entity_id, block_id) = match program {
                 BLOCK => (0, span.id),
                 _ => (span.id, 0),
@@ -419,7 +425,8 @@ pub const ENTITY: usize = 0;
 pub const BLOCK: usize = 1;
 pub const TRANSLUCENT: usize = 2;
 pub const PARTICLE: usize = 3;
-pub const PROGRAMS: usize = 4;
+pub const DESTROY: usize = 4;
+pub const PROGRAMS: usize = 5;
 
 /// Which program draws `span`'s run, given which of them (or their fallbacks) the pack has;
 /// `None`: Horizon draws it.
@@ -440,6 +447,8 @@ pub fn program_of(span: &EntitySpan) -> Option<usize> {
         BLOCK
     } else if span.stage == render_stage("PARTICLES") {
         PARTICLE
+    } else if span.stage == render_stage("DESTROY") {
+        DESTROY
     } else {
         return None;
     })
@@ -460,6 +469,16 @@ pub fn runs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn destroy_stage_uses_the_pack_only_when_a_program_is_available() {
+        let destroy = EntitySpan {
+            stage: render_stage("DESTROY"),
+            ..Default::default()
+        };
+        assert!(drawn_by_pack(&destroy, [true; PROGRAMS]).is_some());
+        assert_eq!(drawn_by_pack(&destroy, [false; PROGRAMS]), None);
+    }
 
     #[test]
     fn runs_split_the_list_between_pack_and_horizon() {
@@ -483,15 +502,21 @@ mod tests {
         let all = [true; PROGRAMS];
         assert_eq!(drawn_by_pack(&spans[0], all), Some(ENTITY));
         assert_eq!(drawn_by_pack(&spans[1], all), Some(PARTICLE));
-        assert_eq!(drawn_by_pack(&spans[1], [true, true, true, false]), None);
-        assert_eq!(drawn_by_pack(&spans[2], [true, false, true, true]), None);
+        assert_eq!(
+            drawn_by_pack(&spans[1], [true, true, true, false, true]),
+            None
+        );
+        assert_eq!(
+            drawn_by_pack(&spans[2], [true, false, true, true, true]),
+            None
+        );
         assert_eq!(drawn_by_pack(&spans[2], all), Some(BLOCK));
         let shadow = EntitySpan {
             translucent: true,
             ..spans[0]
         };
         assert_eq!(drawn_by_pack(&shadow, all), Some(TRANSLUCENT));
-        assert_eq!(drawn_by_pack(&span(0, "DESTROY", 0), all), None);
+        assert_eq!(drawn_by_pack(&span(0, "DESTROY", 0), all), Some(DESTROY));
         // A beacon beam's quads stay Horizon's.
         assert!(plain(&[v(0), v(0), v(0), v(0), v(1)]));
         assert!(!plain(&[v(0), v(0), v(0), v(0), v(6)]));
@@ -521,5 +546,55 @@ mod tests {
         };
         assert!(!some.cast(&spans[0], ENTITY) && some.cast(&player, ENTITY));
         assert!(!some.cast(&spans[2], BLOCK) && some.cast(&lit, BLOCK));
+    }
+}
+
+/// Decode the destroy-stage origin stored in the light bytes and project one continuous
+/// sprite over each model face. Pack geometry uses ordinary atlas UVs, not Horizon's overlay codes.
+fn project_cracks(vertices: &mut [Vertex], sprite: [f32; 4], atlas: [u32; 2]) {
+    let dims = [atlas[0].max(1) as f32, atlas[1].max(1) as f32];
+    for quad in vertices.as_chunks_mut::<4>().0 {
+        let origin = [
+            (quad[0].light & 65535) as f32 / 65535.0,
+            (quad[0].light >> 16) as f32 / 65535.0,
+        ];
+        let origin = [0, 1].map(|i| (origin[i] * dims[i]).round() / dims[i]);
+        let min = [0, 1]
+            .map(|i| (quad.iter().map(|v| v.uv[i]).fold(f32::INFINITY, f32::min) + 0.0001).floor());
+        for v in quad {
+            v.uv =
+                [0, 1].map(|i| origin[i] + (v.uv[i] - min[i]).clamp(0.001, 0.999) * sprite[i + 2]);
+            v.layer = 0;
+            v.light = 0x0000_f0f0;
+        }
+    }
+}
+
+#[cfg(test)]
+mod crack_projection_tests {
+    use super::*;
+    #[test]
+    fn crack_uvs_keep_a_full_sprite_and_decode_each_stage() {
+        let mut vertices: Vec<Vertex> = [[-1.0, -1.0], [-1.0, 0.0], [0.0, 0.0], [0.0, -1.0]]
+            .into_iter()
+            .map(|uv| Vertex {
+                uv,
+                layer: 11,
+                light: crate::breaking::stage_light([0.25, 0.5]),
+                ..bytemuck::Zeroable::zeroed()
+            })
+            .collect();
+        project_cracks(
+            &mut vertices,
+            [0.0, 0.0, 16.0 / 4096.0, 16.0 / 9216.0],
+            [4096, 9216],
+        );
+        assert!(
+            vertices
+                .iter()
+                .all(|v| v.layer == 0 && v.uv[0] >= 0.25 && v.uv[0] < 0.25 + 16.0 / 4096.0)
+        );
+        assert!((vertices[2].uv[0] - vertices[0].uv[0]) > 15.0 / 4096.0);
+        assert!((vertices[1].uv[1] - vertices[0].uv[1]) > 15.0 / 9216.0);
     }
 }

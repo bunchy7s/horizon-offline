@@ -17,6 +17,7 @@ use super::{
     world_loading::{WorldLoader, WorldRequest},
 };
 use horizon_client::level_loading::{STATUS_RADIUS, Stage};
+use horizon_client::spans::startup;
 use horizon_client::{
     Result,
     audio::Audio,
@@ -31,11 +32,18 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU32, Ordering},
-        mpsc::{Receiver, Sender, channel, sync_channel},
+        mpsc::{Receiver, RecvTimeoutError, Sender, channel, sync_channel},
     },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
+
+/// How long the window waits for the server thread to answer a `call`.
+const CALL_TIMEOUT: Duration = Duration::from_secs(10);
+/// The error of a `call` without an answer: the server stopped, or it was
+/// busy past `CALL_TIMEOUT` (the log says which).
+pub(super) const NO_ANSWER: &str =
+    "the integrated server stopped or did not answer within 10 s (the game log says which)";
 
 /// `LevelLoadProgressTracker.EXPECTED_PLAYER_CHUNKS`: the 7x7 chunks around the spawn.
 const PLAYER_CHUNKS: usize = 49;
@@ -176,7 +184,9 @@ impl Integrated {
         Some(self.flags.published.load(Ordering::Relaxed)).filter(|&p| p != 0)
     }
     /// `executeBlocking`: run `f` on the server thread between two ticks and
-    /// wait for its answer; `None` once the server has stopped.
+    /// wait for its answer; `None` once the server has stopped, or when it has
+    /// not answered within `CALL_TIMEOUT` (`f` still runs there later). The log
+    /// tells the two apart.
     pub fn call<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Game<'_>) -> T + Send + 'static,
@@ -187,7 +197,21 @@ impl Integrated {
                 let _ = tx.send(f(g));
             }))
             .ok()?;
-        rx.recv_timeout(Duration::from_secs(10)).ok()
+        match rx.recv_timeout(CALL_TIMEOUT) {
+            Ok(answer) => Some(answer),
+            Err(RecvTimeoutError::Timeout) => {
+                log::warn!(
+                    "Horizon: the server thread did not answer within {} s (running: {}, \
+                     autosaving: {}, smoothed tick {:.1} ms)",
+                    CALL_TIMEOUT.as_secs(),
+                    !self.stopped(),
+                    self.is_saving(),
+                    self.smoothed_tick_ms()
+                );
+                None
+            }
+            Err(RecvTimeoutError::Disconnected) => None,
+        }
     }
     /// `IntegratedServer.halt(true)`: returns once the world is saved and let go.
     pub fn stop(mut self) -> Result<()> {
@@ -685,9 +709,11 @@ impl Game<'_> {
         self.native_server_about_to_start(false);
         self.native_lifecycle_open_started();
         // `load_world`, with the world `serve` started preparing.
-        self.join_world_rest()?;
+        startup::time("server.wait_rest", || self.join_world_rest())?;
         self.perf.world_opening();
+        let open_step = startup::step("server.open_world");
         self.finish_open_world(opening.world?.finish()?)?;
+        drop(open_step);
         if let Some(sync) = opening.sync {
             sync.adopt(&self.pack_files());
         }
@@ -751,7 +777,9 @@ impl Game<'_> {
             guest_commands: false,
             force_game_mode: false,
         };
-        self.lan_host(settings, net, config, None)?;
+        startup::time("server.lan_host", || {
+            self.lan_host(settings, net, config, None)
+        })?;
         let commands = self.allow_commands();
         let pipe = {
             let host = self
@@ -781,7 +809,7 @@ impl Game<'_> {
         view.start(Stage::LoadInitialChunks, 0);
         view.finish(Stage::LoadInitialChunks);
         let _ = ready.send(Ok((pipe, self.level.name.clone())));
-        self.settle_spawn()
+        startup::time("server.settle_spawn", || self.settle_spawn())
     }
 
     /// `MinecraftServer.stopServer`: the players are saved and sent away,
@@ -1141,7 +1169,9 @@ fn serve(
         world,
         sync: preload_sync_data(&options.resources),
     };
-    let mut server = match server_game(res, pack, options, settings) {
+    let mut server = match startup::time("server.game_new", || {
+        server_game(res, pack, options, settings)
+    }) {
         Ok(server) => server,
         Err(e) => {
             // The world's session lock is let go before the failure is told.

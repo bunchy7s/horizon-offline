@@ -2684,6 +2684,7 @@ dependencies = [
  "horizon-bench",
  "horizon-core",
  "horizon-friends",
+ "horizon-mcp",
  "horizon-mods",
  "horizon-port-pack",
  "horizon-prepare",
@@ -2699,8 +2700,10 @@ dependencies = [
  "oo7",
  "proc-macro2",
  "pulldown-cmark",
+ "quote",
  "raw-window-handle",
  "security-framework 3.7.0",
+ "semver",
  "serde",
  "serde_json",
  "sha1",
@@ -2714,6 +2717,13 @@ dependencies = [
  "windows-sys 0.61.2",
  "winresource",
  "zip",
+]
+
+[[package]]
+name = "horizon-mcp"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
@@ -2815,6 +2825,7 @@ dependencies = [
  "flate2",
  "horizon-core",
  "libm",
+ "log",
  "lz4_flex",
  "postcard",
  "serde",

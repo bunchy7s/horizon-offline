@@ -536,6 +536,9 @@ pub fn main() -> Result<()> {
                     let flying = op["value"].as_bool().unwrap();
                     world.player.may_fly = op["may_fly"].as_bool().unwrap_or(flying);
                     world.player.flying = flying;
+                    if let Some(speed) = op.get("speed") {
+                        world.player.flying_speed = single(speed);
+                    }
                 }
                 "trigger" => world.player.jump_trigger_time = op["value"].as_i64().unwrap() as i32,
                 "delay" => world.player.no_jump_delay = op["value"].as_i64().unwrap() as i32,

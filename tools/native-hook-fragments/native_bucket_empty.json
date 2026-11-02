@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "bucket_empty",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_bucket_empty",
+      "neoforge": "none (vanilla BucketItem.emptyContents; NeoForge has no matching event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a server player emptying a bucket, cancellable (`native_bucket_empty`).",
+  "doc_summary": "a server player emptying a bucket: `native_bucket_empty(player, name, pos, fluid, cancel)` is heard right before the fluid is placed, once the player may build there. A mod sets `cancel` and nothing is poured. The player's state is swapped in, so the helpers reach them. `native_fill_bucket` hears the same click without the player and the fluid; dispensers and cauldrons are not heard. Bundles that use it need `\"hooks\": @API:native_bucket_empty@`."
+}

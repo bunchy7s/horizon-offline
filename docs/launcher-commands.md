@@ -44,6 +44,17 @@ Remove an installed version.
 
 MCP: `remove`, needs `confirm: true`.
 
+## `horizon-launcher import-build`
+
+Install a game program you have, such as a horizon-client built on your fork's Actions, as its own version on an installed release or Nightly's game files, and select it. Nothing signed it: it runs with your rights, and updates never replace it.
+
+    horizon-launcher import-build <PATH>
+
+- `PATH`: The program (horizon-client, horizon-client.exe on Windows), or a zip holding it
+- `--trust-unsigned`: You picked this build yourself and trust it with full access to this computer
+
+MCP: none: the player's switch.
+
 ## `horizon-launcher prepare`
 
 Prepare a version's resources from your own Minecraft install, or from Mojang.
@@ -94,7 +105,7 @@ Native mods (docs/native-mods.md): compile mixin bundles on the Horizon revision
 - `--update`: Move to the newest installed release or Nightly instead of the Horizon the instance plays (a full rebuild)
 - `--trust-native-code`: You read the mods' source and trust it with full access to this computer
 - `--allow-version-mismatch`: Build mods made for different Horizon versions together anyway, on the newest of them
-- `--profile` (fast, release): The Cargo profile: fast (the default: incremental, quick to rebuild) or release (thin LTO: slower to build, slightly faster game). Default: the native-profile setting
+- `--profile` (performance, dev, release): The build profile: performance (the default: incremental, quick to rebuild), dev (quickest to rebuild a mod, slow game) or release (thin LTO: slowest to build, slightly faster game). Default: the native-profile setting
 
 MCP: none: the player's switch.
 
@@ -211,7 +222,7 @@ MCP: `account_skin`.
 
 ## `horizon-launcher settings`
 
-Show the launcher's settings, or set one (the Settings page): selected-version TAG, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink, background PATH (a picture behind Home; "default" shows Horizon's landscape), native-profile fast|release (the Cargo profile native mods build with: fast is incremental, release is slower to build and slightly faster to play).
+Show the launcher's settings, or set one (the Settings page): selected-version TAG, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink, background PATH (a picture behind Home; "default" shows Horizon's landscape), native-profile performance|dev|release (the profile native mods build with: performance is incremental, dev rebuilds a mod quickest for a slow game, release is slowest to build and slightly faster to play).
 
     horizon-launcher settings [KEY] [VALUE]
 
