@@ -2827,6 +2827,18 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_item_energy_buffer(self, mod_api::mods(), item, buffer);
     }
+    /// Item `item` (`mod_id:name`) holds items (`Capabilities.Item.ITEM`): set
+    /// `slots` when the item is yours, for a backpack, a storage cell or a
+    /// toolbox. Clamped to 1..=256, `ItemContainerContents`' limit; 0 leaves
+    /// the item without slots, and vanilla's items have none. Asked at each
+    /// call of the item container helpers (`native_item_container_slots`,
+    /// `native_item_container_insert`, `native_item_container_extract`, in
+    /// `native_item_container.rs`). The contents are kept in the stack's
+    /// `minecraft:container`, as a shulker box item keeps them.
+    /// API @API:item_container@.
+    pub(super) fn native_item_container(&self, item: &str, slots: &mut Option<u32>) {
+        mod_api::dispatch_item_container(self, mod_api::mods(), item, slots);
+    }
     /// A server tick of the block entity at `pos`, in vanilla's order among
     /// the others (`Level.tickBlockEntities`), when its `id` is yours: read
     /// and change its saved compound `nbt`, its item slots `items` (keep
