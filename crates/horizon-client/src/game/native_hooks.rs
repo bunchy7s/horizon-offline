@@ -4899,6 +4899,10 @@ impl Game<'_> {
     pub(super) fn native_player_jump(&mut self, player: u128, name: &str) {
         let _ = (player, name);
     }
+    /// A guest was disconnected by a server kick, after the hub recorded the rendered `reason`. @API:player_kicked@.
+    pub(super) fn native_player_kicked(&mut self, player: u128, name: &str, reason: &str) {
+        let _ = (player, name, reason);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

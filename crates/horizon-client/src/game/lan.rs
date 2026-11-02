@@ -2027,6 +2027,16 @@ impl Game<'_> {
                         });
                     }
                 }
+                HostEvent::Kicked {
+                    conn,
+                    player,
+                    name,
+                    reason,
+                } => {
+                    self.as_guest(&mut host, conn, |game| {
+                        game.native_player_kicked(player, &name, &reason);
+                    });
+                }
                 HostEvent::Input { conn, flags } => {
                     if let Some(g) = host.hub.guest(conn) {
                         let (uuid, name) = (g.uuid, g.name.clone());

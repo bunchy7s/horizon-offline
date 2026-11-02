@@ -187,6 +187,13 @@ pub enum HostEvent {
         conn: u32,
         flags: i32,
     },
+    /// A guest was kicked, with the reason rendered by the hub.
+    Kicked {
+        conn: u32,
+        player: u128,
+        name: String,
+        reason: String,
+    },
     /// A guest's client started (`flying`) or stopped flying (their abilities packet), applied to
     /// the guest already: the game tells the mods, which may refuse it.
     Flight {
@@ -250,6 +257,8 @@ fn take_tracking(g: &mut Guest, out: &mut Vec<TrackingBatch>) {
 pub struct Hub {
     /// Clicks on and closings of native mods' menus, for the game.
     pub native_menu_events: Vec<super::menu::NativeMenuEvent>,
+    /// Kicks waiting for the game thread to notify native mods.
+    pending_kicks: Vec<HostEvent>,
     /// The entities players started and stopped tracking, collected by
     /// `collect_tracking`, for the game to tell the mods.
     pub native_tracking: Vec<TrackingBatch>,
@@ -594,6 +603,7 @@ impl Hub {
             entity_gone: Vec::new(),
             mod_commands: (serde_json::Value::Null, None),
             native_menu_events: Vec::new(),
+            pending_kicks: Vec::new(),
             native_tracking: Vec::new(),
             teams: Vec::new(),
             nicknames: std::collections::HashMap::new(),
@@ -860,8 +870,15 @@ impl Hub {
         // The log's "lost connection" line gives the reason, as vanilla's.
         let text = self.english(&reason);
         if let Some(g) = self.guest_mut(conn) {
-            g.left_reason = text;
+            g.left_reason = text.clone();
+            let (player, name) = (g.uuid, g.name.clone());
             g.sender.disconnect(reason);
+            self.pending_kicks.push(HostEvent::Kicked {
+                conn,
+                player,
+                name,
+                reason: text,
+            });
         }
     }
 
@@ -1479,7 +1496,7 @@ impl Hub {
     pub fn poll(&mut self, ctx: &mut TickCtx) -> Vec<HostEvent> {
         self.ticks += 1;
         self.anticheat_tick(ctx.tick_rate);
-        let mut events = Vec::new();
+        let mut events = std::mem::take(&mut self.pending_kicks);
         for event in self.lan.poll() {
             match event {
                 NetEvent::Joined(j) => {
