@@ -91,6 +91,12 @@ pub struct ItemEntity {
     pub stuck: Vec3,
     /// `Entity.noGravity` (`NoGravity` in its save): `applyGravity` does nothing.
     pub no_gravity: bool,
+    /// `Entity.verticalCollision`: the last move was stopped vertically.
+    /// `ServerEntity.isFullPrecisionEncodingRequired` reads it for items, whose
+    /// resting position is exact while a 1/4096 delta is not.
+    pub vertical_collision: bool,
+    /// `Entity.horizontalCollision`: the last move was stopped on x or z.
+    pub horizontal_collision: bool,
 }
 /// Environment results needed by the entity owner, including lethal lava damage.
 #[derive(Debug)]
@@ -280,6 +286,13 @@ impl ItemEntity {
             if !no_physics {
                 self.on_ground = wanted.y < 0.0 && moved.y != wanted.y;
             }
+            // Entity.move: what the move was stopped on. They outlive the
+            // tick, as vanilla's fields do, for the tracker that sends the
+            // position at the type's update interval.
+            self.vertical_collision = moved.y != wanted.y;
+            // `Mth.equal` on x and z (1e-5 as a float), exact on y.
+            let differs = |a: f64, b: f64| (b - a).abs() >= 9.999_999_747_378_752e-6;
+            self.horizontal_collision = differs(moved.x, wanted.x) || differs(moved.z, wanted.z);
             if moved.x != wanted.x {
                 self.velocity.x = 0.0;
             }
@@ -1504,6 +1517,8 @@ mod fire_environment_tests {
             previous: at,
             velocity: Vec3::ZERO,
             on_ground: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 0,
             pickup_delay: 0,
             bob_offset: 0.0,
@@ -1651,6 +1666,8 @@ mod merge_tests {
             previous: at,
             velocity: Vec3::ZERO,
             on_ground: true,
+            vertical_collision: false,
+            horizontal_collision: false,
             age,
             pickup_delay: 0,
             bob_offset: 0.0,
@@ -1990,6 +2007,8 @@ mod honey_slide_tests {
             previous: at,
             velocity: Vec3::new(vx, vy, vz),
             on_ground: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 10,
             pickup_delay: 0,
             bob_offset: 0.0,
@@ -2120,6 +2139,8 @@ mod slime_bounce_tests {
             previous: at,
             velocity: Vec3::ZERO,
             on_ground: true,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 10,
             pickup_delay: 0,
             bob_offset: 0.0,

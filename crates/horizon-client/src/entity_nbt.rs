@@ -2094,6 +2094,8 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
         previous: position,
         velocity: motion(tag),
         on_ground: flag(tag, "OnGround"),
+        vertical_collision: false,
+        horizontal_collision: false,
         // Age -32768 marks items that never despawn; Horizon counts upwards.
         age: number(tag.get("Age")).unwrap_or(0).max(0) as u32,
         pickup_delay: number(tag.get("PickupDelay")).unwrap_or(0).clamp(0, 32767) as u32,
@@ -3391,6 +3393,8 @@ mod tests {
             previous: Vec3::ZERO,
             velocity: Vec3::new(0.0, -0.04, 0.0),
             on_ground: true,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 120,
             pickup_delay: 10,
             ticks: 0,
