@@ -80,6 +80,7 @@ pub(super) fn content_root(
     paths.extend(dev.iter().cloned());
     let mut known = None;
     let mut mods: Vec<ContentMod> = Vec::new();
+    let mut announced = Vec::new();
     for path in &paths {
         let Ok(package) = Package::read(path) else {
             continue;
@@ -121,8 +122,9 @@ pub(super) fn content_root(
             id: m.id.clone(),
             content,
         };
-        if let Err(e) = mod_content::accept_mod(&mut mods, candidate, known) {
-            log::warn!("Horizon: mod {} content not loaded: {e}", m.id);
+        match mod_content::accept_mod(&mut mods, candidate, known) {
+            Ok(_) => announced.push(announced_entry(m, path)),
+            Err(e) => log::warn!("Horizon: mod {} content not loaded: {e}", m.id),
         }
     }
     let (blocks, items) = native_declared();
@@ -146,6 +148,7 @@ pub(super) fn content_root(
     }
     match mod_content::resource_root(root, &mods, &here.join(".horizon-cache")) {
         Ok(out) => {
+            horizon_protocol::mod_list::set_local(announced);
             if out != root {
                 log::info!(
                     "Horizon: content from {} mod(s) in {}",
@@ -165,6 +168,34 @@ pub(super) fn content_root(
             register_menu_types(&[]);
             root.to_owned()
         }
+    }
+}
+
+/// A loaded mod as a server tells joining clients (`horizon_protocol::mod_list`): its manifest's
+/// id, version and side, and the SHA-256 of its `.hmod` (none for a folder).
+fn announced_entry(
+    m: &horizon_mods::Manifest,
+    path: &std::path::Path,
+) -> horizon_protocol::mod_list::Entry {
+    use horizon_mods::Side;
+    use horizon_protocol::mod_list;
+    use sha2::{Digest, Sha256};
+    let sha256 = if path.is_file() {
+        std::fs::read(path)
+            .ok()
+            .map(|bytes| Sha256::digest(bytes).into())
+    } else {
+        None
+    };
+    mod_list::Entry {
+        id: m.id.clone(),
+        version: m.version.clone(),
+        sha256,
+        side: match m.side {
+            Side::Both => mod_list::Side::Both,
+            Side::Server => mod_list::Side::Server,
+            Side::Client => mod_list::Side::Client,
+        },
     }
 }
 
