@@ -19,7 +19,7 @@ StringTagVisitor.visitIntArray	inline	crates/horizon-client-core/src/snbt.rs::vi
 StringTagVisitor.visitLongArray	inline	crates/horizon-client-core/src/snbt.rs::visit	compact [L;..L] form
 StringTagVisitor.visitList	inline	crates/horizon-client-core/src/snbt.rs::visit	compact list form
 StringTagVisitor.visitCompound	inline	crates/horizon-client-core/src/snbt.rs::visit	compact form; keys sorted
-StringTagVisitor.handleKeyEscape	port	crates/horizon-client-core/src/snbt.rs::unquoted_key	decides bare or quoted key; quote_and_escape does the quoting
+StringTagVisitor.handleKeyEscape	inline	crates/horizon-client-core/src/snbt.rs::Pretty::compound	decides bare or quoted key; quote_and_escape does the quoting
 Tag.acceptAsRoot	skip:java		streaming visitor entry point; Horizon reads whole trees
 Tag.asBoolean	port	crates/horizon-world/src/datafix/dynamic.rs::as_bool_opt	non-zero number is true
 TagParser.castToCompoundOrThrow	inline	crates/horizon-command/src/snbt.rs::parse_compound_argument	expected-compound error
@@ -108,10 +108,10 @@ FriendlyByteBuf.readFixedSizeLongArray	port	crates/horizon-protocol/src/buf.rs::
 FriendlyByteBuf.writeBlockPos	port	crates/horizon-protocol/src/buf.rs::Pos::write	packed x, z, y in one long
 FriendlyByteBuf.writeChunkPos	port	crates/horizon-protocol/src/buf.rs::ChunkPos::write	packed x and z in one long
 FriendlyByteBuf.readGlobalPos	port	crates/horizon-protocol/src/buf.rs::Pos::read	gap: minor: reads only the block position; the dimension is read by the GlobalPos packet! struct in play.rs
-FriendlyByteBuf.readVector3f	missing		player: item, block and text displays get no server-set scale or translation; Horizon reads no display transforms (no Vector3f codec)
-FriendlyByteBuf.writeVector3f	missing		player: item, block and text displays get no server-set scale or translation; Horizon reads no display transforms (no Vector3f codec)
-FriendlyByteBuf.readQuaternion	missing		player: display entities get no server-set rotation; Horizon has no Quaternion codec
-FriendlyByteBuf.writeQuaternion	missing		player: display entities get no server-set rotation; Horizon has no Quaternion codec
+FriendlyByteBuf.readVector3f	inline	crates/horizon-protocol/src/entity_data.rs::read_value	the VECTOR3 arm reads three big-endian floats; text_display.rs::TextDisplayData::apply takes ids 11 and 12 (translation, scale) from it
+FriendlyByteBuf.writeVector3f	inline	crates/horizon-protocol/src/entity_data.rs::write_value	the `Value::Floats` arm writes each float; the display data's ids 11 and 12 (translation, scale) go back out that way
+FriendlyByteBuf.readQuaternion	inline	crates/horizon-protocol/src/entity_data.rs::read_value	the QUATERNION arm reads four floats; text_display.rs::TextDisplayData::apply takes ids 13 and 14 (left and right rotation) from it
+FriendlyByteBuf.writeQuaternion	inline	crates/horizon-protocol/src/entity_data.rs::write_value	four floats through the `Value::Floats` arm; ids 13 and 14 (left and right rotation) go back out that way
 FriendlyByteBuf.writeUUID	port	crates/horizon-protocol/src/buf.rs::Writer::uuid	two longs
 FriendlyByteBuf.readUUID	port	crates/horizon-protocol/src/buf.rs::Reader::uuid	two longs
 FriendlyByteBuf.writeNbt	port	crates/horizon-protocol/src/buf.rs::Writer::nbt	null is written as End
