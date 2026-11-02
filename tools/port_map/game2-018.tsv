@@ -90,7 +90,7 @@ TreeGrower.getSurroundingBlockStates	inline	crates/horizon-world/src/level/growt
 TreeGrower.removeSaplings	inline	crates/horizon-world/src/level/growth.rs::Sim::grow_tree	the mega branch clears the four sapling blocks before placing
 TreeGrower.resetSaplings	inline	crates/horizon-world/src/level/growth.rs::Sim::grow_tree	restores the four blocks after a failed placement
 TreeGrower.isTwoByTwoSapling	inline	crates/horizon-world/src/level/growth.rs::Sim::two_by_two	all four blocks must be the sapling's own block
-MovingPistonBlock.destroy	missing		minor: breaking a moving piston does not remove the extended base piston next to it
+MovingPistonBlock.destroy	port	crates/horizon-world/src/level/update.rs::Sim::destroy_moving_piston_base	a removed moving piston removes the extended base behind it, and leaves an unextended one
 MovingPistonBlock.useWithoutItem	missing		minor: a right click on a moving piston with no block entity does not remove it
 MovingPistonBlock.getDrops	port	crates/horizon-world/src/level/pistons.rs::dropped_state	the block the moving piston carries, or None (vanilla's empty list) when its block entity is gone; drop_resources calls it
 MovingPistonBlock.getBlockEntity	port	crates/horizon-world/src/level/pistons.rs::Sim::moving_piston	
