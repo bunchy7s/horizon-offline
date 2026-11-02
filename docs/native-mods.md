@@ -1416,6 +1416,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   about to decay. Set `cancel` to keep it.
 - **`native_inventory_block_start(player, name, pos, cancel)`**: a guest is about to open an inventory supplied by a
   block at `pos`. Set `cancel` to leave it closed. The guest's state is not swapped in.
+- **`native_moisture_change(dimension, pos, from, to, cancel)`** (on `GameLevel`): farmland at `pos` is about to
+  change moisture. Set `cancel` to keep its old moisture.
 - **`native_note_play(dimension, player, pos, instrument, note, cancel)`** (on `GameLevel`): a note block is about to
   sound when punched, used, or powered. Set `cancel` to silence it; when used to tune it, the note remains unchanged.
 - **`native_bell_ring(dimension, player, pos, cancel)`** (on `GameLevel`): a bell is about to ring. Set `cancel` to

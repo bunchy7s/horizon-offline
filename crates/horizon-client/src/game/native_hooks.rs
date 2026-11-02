@@ -588,6 +588,21 @@ impl GameLevel<'_> {
         let _ = (dimension, pos, cancel);
     }
 
+    /// Farmland at `pos` is about to change moisture from `from` to `to`.
+    /// Set `cancel` to keep its old moisture. Server-side.
+    /// @API:native_moisture_change@.
+    #[inline(always)]
+    pub(super) fn native_moisture_change(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        from: i32,
+        to: i32,
+        cancel: &mut bool,
+    ) {
+        let _ = (dimension, pos, from, to, cancel);
+    }
+
     /// The Ender Dragon fight is about to place its first dragon egg at `pos`.
     /// Set `cancel` to leave the block unchanged. Server-side. @API:native_dragon_egg_form@.
     #[inline(always)]
