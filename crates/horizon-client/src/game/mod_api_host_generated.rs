@@ -486,4 +486,7 @@ impl Host for super::Game<'_> {
     fn mod_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool {
         self.native_mod_image(width, height, rgba)
     }
+    fn instance_dir(&self) -> PathBuf {
+        self.native_instance_dir()
+    }
 }

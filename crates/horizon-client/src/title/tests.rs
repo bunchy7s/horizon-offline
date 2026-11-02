@@ -2278,3 +2278,76 @@ fn a_create_world_tab_label_wider_than_its_tab_stays_inside_it() {
         );
     }
 }
+
+/// The ids native mods see for the title's screens (`Mode::id`, the screen
+/// hooks' `NativeScreenView.id`): one per screen, stable across releases.
+#[test]
+fn the_title_screens_have_their_own_ids() {
+    let mut f = Fixture::new();
+    assert_eq!(f.title.mode.id(), "title");
+    // An empty list opens Create New World (an empty list is why vanilla
+    // starts one), a world in it opens the list.
+    f.title.enter_singleplayer();
+    assert!(matches!(f.title.mode, Mode::Create { .. }));
+    assert_eq!(f.title.mode.id(), "world_create");
+    f.title.escape();
+    assert_eq!(f.title.mode.id(), "title");
+    f.world("World", "World");
+    f.select();
+    assert_eq!(f.title.mode.id(), "world_select");
+    f.click("Edit");
+    assert_eq!(f.title.mode.id(), "world_edit");
+}
+
+/// The multiplayer screens' ids, the ones the title's `Multiplayer` mode
+/// passes through.
+#[test]
+fn the_multiplayer_screens_have_their_own_ids() {
+    use crate::multiplayer::Screen as M;
+    assert_eq!(
+        M::Direct {
+            address: String::new()
+        }
+        .id(),
+        "direct_connect"
+    );
+    assert_eq!(
+        M::Edit {
+            index: None,
+            name: String::new(),
+            address: String::new(),
+            focus: 0,
+            packs: None,
+        }
+        .id(),
+        "add_server"
+    );
+    assert_eq!(
+        M::Edit {
+            index: Some(0),
+            name: String::new(),
+            address: String::new(),
+            focus: 0,
+            packs: None,
+        }
+        .id(),
+        "edit_server"
+    );
+    assert_eq!(
+        M::Friend {
+            code: String::new(),
+            relay: String::new(),
+            focus: 0,
+        }
+        .id(),
+        "friends_join"
+    );
+    assert_eq!(
+        M::Disconnected {
+            reason: String::new(),
+            retry: None,
+        }
+        .id(),
+        "disconnected"
+    );
+}
