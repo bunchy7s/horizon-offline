@@ -71,7 +71,7 @@ ClientDebugSubscriber.ValueMap.forEach	skip:java		iteration helper
 ClientDebugSubscriber.ValueMaps.purgeExpired	missing		minor: expiry of server debug values; none are received
 ClientDebugSubscriber.ValueMaps.dropChunkAndBlocks	missing		minor: drops server debug values per chunk; none are received
 ClientDebugSubscriber.ValueWrapper.hasExpired	skip:java		timestamp check on a debug value wrapper
-ClientExplosionTracker.track	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::explosion	gap: minor: the debris is thrown at once instead of queued for later ticks
+ClientExplosionTracker.track	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::track_explosion	gap: minor: queues explosions for debris generation during ClientExplosionTracker.tick
 ClientExplosionTracker.addParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::explosion_blocks	gap: minor: always the default poof and smoke list; the explode packet's own block particle list is not read
 ClientHandshakePacketListenerImpl.switchState	inline	crates/horizon-client/src/net.rs::run	login steps run in packet order in run(); no state machine
 ClientHandshakePacketListenerImpl.handleHello	port	crates/horizon-client/src/net.rs::run	gap: minor: the session join and server check are in auth.rs (join_server); the encryption setup is in run

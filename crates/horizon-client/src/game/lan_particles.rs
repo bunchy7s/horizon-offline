@@ -465,13 +465,8 @@ impl Game<'_> {
         }
         // A wind charge's burst throws none.
         if !p.block_particles.is_empty() {
-            let (world, facts) = (&self.world, self.res.facts());
-            self.particles.explosion_blocks(
-                p.center,
-                p.radius,
-                p.block_count.max(0) as usize,
-                &|b| facts.is_air(world.block(b[0], b[1], b[2])),
-            );
+            self.particles
+                .track_explosion(p.center, p.radius, p.block_count.max(0) as usize);
         }
         // Entity.pushFromExplosion.
         if let (Some(push), Some(player)) = (p.knockback, self.player.as_mut()) {
@@ -670,8 +665,7 @@ impl Game<'_> {
     }
 
     /// `ClientboundExplodePacket` without a push, or None while not serving.
-    /// The sound is the level's, which the players hear already, so it isn't
-    /// played from the packet.
+    /// The client plays the explosion sound and tracks explosion debris.
     fn explosion_packet(
         &self,
         center: [f64; 3],
@@ -714,7 +708,7 @@ impl Game<'_> {
                 None => (-1, Some((sound.into(), None))),
             },
             block_particles,
-            play_sound: false,
+            play_sound: true,
         })
     }
 

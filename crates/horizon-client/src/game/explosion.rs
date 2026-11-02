@@ -18,6 +18,7 @@ use horizon_world::{
     collision_context::{CollisionContext, CollisionEntity, CollisionItem},
     entity_obstruction::EntityIdentity,
     java_hash_map::{JavaHashMap, JavaKey},
+    level::flags as level_flags,
     registry::BlockStateId,
     world_ray::{RayBlockMode, RayFluidMode, RayWorld, clip_world},
 };
@@ -886,6 +887,14 @@ impl Game<'_> {
             for (pos, stack) in stacks {
                 self.pop_resource(pos, stack);
             }
+            let air = self.world.air;
+            for &pos in &targets {
+                let p = BlockPos::new(pos[0], pos[1], pos[2]);
+                self.with_level(|b, level, ticks| {
+                    b.update_neighbors_at(level, ticks, p, b.block(air));
+                });
+            }
+            self.process_level_events()?;
         }
         if fire {
             for &pos in &targets {
@@ -909,18 +918,19 @@ impl Game<'_> {
                 }
             }
         }
-        let pitch = (1.0 + (client_float() - client_float()) * 0.2) * 0.7;
-        self.audio
-            .play("minecraft:entity.generic.explode", Some(center), 4.0, pitch);
-        // ServerLevel.explode sends toBlow.size() whatever the interaction, and
-        // `ServerExplosion.isSmall` also covers an explosion that keeps blocks.
         let block_count = targets.len();
         let small = radius < 2.0 || interaction == BlockInteraction::Keep;
-        let (world, facts) = (&self.world, self.res.facts());
-        self.particles
-            .explosion(center, small, block_count, radius, &|b| {
-                facts.is_air(world.block(b[0], b[1], b[2]))
-            });
+        let is_server = self.serving.is_some() || self.options.dedicated.is_some();
+        if !is_server {
+            let pitch = (1.0 + (client_float() - client_float()) * 0.2) * 0.7;
+            self.audio
+                .play("minecraft:entity.generic.explode", Some(center), 4.0, pitch);
+            let (world, facts) = (&self.world, self.res.facts());
+            self.particles
+                .explosion(center, small, block_count, radius, &|b| {
+                    facts.is_air(world.block(b[0], b[1], b[2]))
+                });
+        }
         self.lan_explode(center, small, radius, block_count, pushed);
         Ok(())
     }
@@ -1003,7 +1013,16 @@ impl Game<'_> {
             }
         }
         self.pending.clear(pos);
-        self.level_set(pos, self.world.air)?;
+        let air = self.world.air;
+        self.with_level(|b, level, ticks| {
+            b.set_block(
+                level,
+                ticks,
+                BlockPos::new(pos[0], pos[1], pos[2]),
+                air,
+                level_flags::UPDATE_CLIENTS,
+            );
+        });
         // BeehiveBlock.onExplosionHit: the bees about turn on the player.
         if is_hive {
             self.anger_nearby_bees(pos);
