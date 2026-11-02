@@ -512,7 +512,7 @@ pub fn mob_to_nbt(
     }
     // Animal.addAdditionalSaveData: the love ticks left, whatever the save had.
     if is_animal(id) {
-        map.insert("InLove".into(), Tag::Int(m.extra.in_love.max(0)));
+        map.insert("InLove".into(), Tag::Int(m.extra.in_love));
         // Animal.addAdditionalSaveData: the player who fed it.
         if let Some(cause) = m.extra.love_cause {
             map.insert("LoveCause".into(), Tag::IntArray(cause.to_vec()));
@@ -3638,6 +3638,50 @@ mod tests {
         let cleared = item_entity_to_nbt(&cleared, [1, 2, 3, 4], Some(&tag));
         assert!(cleared.get("Thrower").is_none());
     }
+    #[test]
+    fn animal_nbt_preserves_signed_integer_in_love_and_defaults_after_removal() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let def = Arc::make_mut(&mut kind);
+        def.id = "minecraft:pig".into();
+        def.species = crate::mobs::Species::Pig;
+        let types = [("minecraft:pig".into(), kind)].into();
+        for (input, expected) in [
+            (Tag::Int(-32769), -32769),
+            (Tag::Int(-32768), -32768),
+            (Tag::Int(-129), -129),
+            (Tag::Int(-128), -128),
+            (Tag::Int(-1), -1),
+            (Tag::Byte(-1), -1),
+            (Tag::Byte(-128), -128),
+            (Tag::Int(0), 0),
+            (Tag::Int(1), 1),
+            (Tag::Int(37), 37),
+        ] {
+            let raw = Tag::compound([
+                ("id", string("minecraft:pig")),
+                ("Pos", doubles(&[4.0, 200.0, 4.0])),
+                ("NoAI", Tag::Byte(1)),
+                ("NoGravity", Tag::Byte(1)),
+                ("InLove", input),
+            ]);
+            let mob = mob_from_nbt(&raw, &types, 1, None).unwrap();
+            assert_eq!(mob.extra.in_love, expected);
+            // Query snapshots and saves both write the live field as an int,
+            // regardless of whether there is an old compound to preserve.
+            for old in [None, Some(&raw)] {
+                let mut saved = mob_to_nbt(&mob, [0, 0, 0, 1], old, None);
+                assert_eq!(saved.get("InLove"), Some(&Tag::Int(expected)));
+                if let Tag::Compound(map) = &mut saved {
+                    map.remove(&"InLove".into());
+                }
+                let cleared = mob_from_nbt(&saved, &types, 2, None).unwrap();
+                assert_eq!(cleared.extra.in_love, 0);
+                let saved = mob_to_nbt(&cleared, [0, 0, 0, 1], Some(&saved), None);
+                assert_eq!(saved.get("InLove"), Some(&Tag::Int(0)));
+            }
+        }
+    }
+
     #[test]
     fn unknown_fields_survive() {
         let raw = Tag::compound([
