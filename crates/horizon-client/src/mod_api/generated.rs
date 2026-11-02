@@ -3173,6 +3173,11 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// Local player movement input, after reading it and before applying it.
+    fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
+        let _ = host;
+        let _ = event;
+    }
     /// A player took an anvil's result at `pos` and the levels, inputs and anvil wear are done (`AnvilCraftEvent.Post`); a broken anvil is already air. `craft` holds the inputs and the result as they were before. Not called when `native_anvil_craft_pre` cancelled. @API:native_anvil_craft_post@.
     fn anvil_craft_post(&self, host: &mut dyn Host, event: &mut AnvilCraftPostEvent<'_>) {
         let _ = host;
@@ -10763,6 +10768,36 @@ pub fn dispatch_moisture_change(
         }
     }
 }
+/// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MovementInputEvent {
+    pub forward: f32,
+    pub strafe: f32,
+    pub jump: bool,
+    pub sneak: bool,
+}
+pub fn dispatch_movement_input(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    forward: &mut f32,
+    strafe: &mut f32,
+    jump: &mut bool,
+    sneak: &mut bool,
+) {
+    let mut event = MovementInputEvent {
+        forward: *forward,
+        strafe: *strafe,
+        jump: *jump,
+        sneak: *sneak,
+    };
+    for mod_hook in super::entered(mods, "movement_input") {
+        mod_hook.movement_input(host, &mut event);
+    }
+    *forward = event.forward;
+    *strafe = event.strafe;
+    *jump = event.jump;
+    *sneak = event.sneak;
+}
 /// What [`Hooks::anvil_craft_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct AnvilCraftPostEvent<'a> {
@@ -11115,7 +11150,7 @@ pub fn dispatch_living_drown(
         damage_amount: *damage_amount,
         bubble_count,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_drown") {
         if matches!(mod_hook.living_drown(&mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11149,7 +11184,7 @@ pub fn dispatch_living_fall(
         distance: *distance,
         multiplier: *multiplier,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_fall") {
         if matches!(mod_hook.living_fall(&mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11177,7 +11212,7 @@ pub fn dispatch_living_heal(
         entity,
         amount: *amount,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_heal") {
         if matches!(mod_hook.living_heal(&mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11193,7 +11228,7 @@ pub struct LivingJumpEvent<'a> {
 }
 pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
     let mut event = LivingJumpEvent { entity, kind };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_jump") {
         mod_hook.living_jump(&mut event);
     }
 }
