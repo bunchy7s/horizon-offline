@@ -159,6 +159,115 @@ impl Host for super::Game<'_> {
     ) -> bool {
         self.native_set_block(dimension, pos, state, flags)
     }
+    fn edit_blocks(&mut self, dimension: &str, edit: &NativeBlockEdit) -> Result<u64, String> {
+        self.native_edit_blocks(dimension, edit)
+    }
+    fn surface_heights(
+        &self,
+        dimension: &str,
+        columns: &[(i32, i32)],
+        heightmap: NativeHeightmap,
+    ) -> Result<Vec<Option<i32>>, String> {
+        self.native_surface_heights(dimension, columns, heightmap)
+    }
+    fn read_columns(
+        &self,
+        dimension: &str,
+        columns: &[(i32, i32)],
+        heightmap: NativeHeightmap,
+        range: (u32, u32),
+    ) -> Result<NativeColumnBlocks, String> {
+        self.native_read_columns(dimension, columns, heightmap, range)
+    }
+    fn refresh_biome_colors(&mut self) {
+        self.native_refresh_biome_colors()
+    }
+    fn neighbor_signal(&mut self, dimension: &str, pos: [i32; 3]) -> i32 {
+        self.native_neighbor_signal(dimension, pos)
+    }
+    fn light(&self, pos: [i32; 3]) -> (u8, u8) {
+        self.native_light(pos)
+    }
+    fn weather(&self) -> (f32, f32) {
+        self.native_weather()
+    }
+    fn day_time(&self) -> i64 {
+        self.native_day_time()
+    }
+    fn world_height(&self) -> (i32, i32) {
+        self.native_world_height()
+    }
+    fn max_stack_size(&self, item: &str) -> Option<u32> {
+        self.native_max_stack_size(item)
+    }
+    fn item_model(
+        &self,
+        batch: &mut HudBatch,
+        item: &str,
+        model: &str,
+        at: [f32; 2],
+        size: f32,
+    ) -> bool {
+        self.native_item_model(batch, item, model, at, size)
+    }
+    fn quad(&self, batch: &mut HudBatch, points: [[f32; 2]; 4], argb: u32) {
+        self.native_quad(batch, points, argb)
+    }
+    fn mod_screen_open(&mut self, mod_id: &str) -> bool {
+        self.native_mod_screen_open(mod_id)
+    }
+    fn mod_screen_close(&mut self, mod_id: &str) {
+        self.native_mod_screen_close(mod_id)
+    }
+    fn mod_screen(&self) -> Option<&str> {
+        self.native_mod_screen()
+    }
+    fn set_experience_orb(
+        &mut self,
+        dimension: &str,
+        id: u32,
+        value: Option<u32>,
+        count: Option<u32>,
+        age: Option<u32>,
+    ) -> bool {
+        self.native_set_experience_orb(dimension, id, value, count, age)
+    }
+    fn experience_orbs(
+        &self,
+        dimension: &str,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Vec<NativeExperienceOrb> {
+        self.native_experience_orbs(dimension, min, max)
+    }
+    fn clock(&self) -> Option<NativeClock> {
+        self.native_clock()
+    }
+    fn spawn_falling_block(
+        &mut self,
+        dimension: &str,
+        state: BlockStateId,
+        pos: [f64; 3],
+        velocity: [f64; 3],
+        falling: NativeFalling,
+    ) -> bool {
+        self.native_spawn_falling_block(dimension, state, pos, velocity, falling)
+    }
+    fn block_state_property(&self, state: BlockStateId, key: &str) -> Option<&str> {
+        self.native_block_state_property(state, key)
+    }
+    fn raycast(&self, distance: f32) -> Option<NativeHit> {
+        self.native_raycast(distance)
+    }
+    fn view_hit(&self) -> Option<(f32, NativeHit)> {
+        self.native_view_hit()
+    }
+    fn claim_items(&mut self, mod_id: &str, ids: &[String]) {
+        self.native_claim_items(mod_id, ids)
+    }
+    fn poll(&mut self, mod_id: &str) -> Vec<NativeModEvent> {
+        self.native_poll(mod_id)
+    }
     fn set_item_entity(&mut self, dimension: &str, id: u32, stack: ItemStack) -> bool {
         self.native_set_item_entity(dimension, id, stack)
     }

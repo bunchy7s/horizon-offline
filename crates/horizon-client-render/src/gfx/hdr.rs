@@ -149,6 +149,9 @@ pub struct Hdr {
     pub ui: f32,
     /// Which pixels of a light source shine (`Masks`).
     pub masks: Masks,
+    /// HDR lighting: off while a shader pack's post or material stage runs, the pack's own, and
+    /// with `HORIZON_HDR_LIGHTING=0`, to compare.
+    pub lighting: bool,
     /// Calibration's test picture while it runs.
     pub calibration: Option<Calibration>,
 }
@@ -293,6 +296,7 @@ impl Hdr {
             tiers: TIERS,
             ui: 1.0,
             masks: MASKS,
+            lighting: true,
             calibration: None,
         }
     }
@@ -539,6 +543,11 @@ impl Hdr {
         ]);
         params[5] = self.black.clamp(0.0, paper);
         params[6] = self.ui.clamp(0.25, 1.0);
+        params[7] = if self.lighting {
+            scene_gain(self.peak, self.paper_white)
+        } else {
+            1.0
+        };
         for (i, t) in self.tiers.iter().enumerate() {
             params[8 + i] = t.share;
         }
@@ -618,6 +627,12 @@ fn logo_mask(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::TextureView {
         .create_view(&Default::default())
 }
 
+/// What the strongest light multiplies a surface by, in HDR lighting: 4, which looked right
+/// across biomes; less only where there is little headroom to ease into (`hdr.wgsl`).
+fn scene_gain(peak: f32, paper_white: f32) -> f32 {
+    (peak / paper_white.max(1.0) * 1.75).clamp(1.0, 4.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Output, pick};
@@ -668,5 +683,20 @@ mod tests {
         assert_eq!(pick(&scrgb, None), Some(Output::ScRgb));
         assert_eq!(pick(&scrgb, Some("pq")), None);
         assert_eq!(pick(&caps(&[(F::Bgra8UnormSrgb, S::SRGB)]), None), None);
+    }
+}
+
+#[cfg(test)]
+mod lighting_tests {
+    use super::scene_gain;
+
+    #[test]
+    fn the_lighting_scales_with_the_headroom() {
+        // Enough headroom: the full strength, whatever the paper white.
+        assert_eq!(scene_gain(1000.0, 430.0), 4.0);
+        assert_eq!(scene_gain(1060.0, 203.0), 4.0);
+        // Little headroom, and none.
+        assert_eq!(scene_gain(600.0, 400.0), 2.625);
+        assert_eq!(scene_gain(200.0, 480.0), 1.0);
     }
 }

@@ -2074,3 +2074,148 @@ fn labels_at(f: &Fixture) -> (f32, f32, (f32, f32)) {
         (customize.x + 10.0, customize.y + 10.0),
     )
 }
+
+/// A button with an icon at its right end (`SpriteIconButton.TextAndIcon`, the
+/// Music & Sounds button of the Accessibility screen): `extractContents` gives
+/// the label `left = x + 2` and `right = x + width - spriteWidth - 4`.
+mod text_and_icon {
+    use super::*;
+
+    fn atlas() -> HudAtlas {
+        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+    }
+    fn button(label: &str, icon: Option<(&'static str, f32)>) -> Button {
+        Button {
+            x: 30.0,
+            y: 40.0,
+            w: 150.0,
+            label: label.into(),
+            enabled: true,
+            id: 0,
+            icon: None,
+            trailing: icon,
+        }
+    }
+    /// The x of every vertex of the label's text.
+    fn xs(batch: &HudBatch) -> Vec<f32> {
+        batch
+            .vertices
+            .iter()
+            .filter(|v| v.text == 1)
+            .map(|v| v.pos[0])
+            .collect()
+    }
+    /// The first `n` letters of a text with no repeating pattern.
+    fn label(n: usize) -> String {
+        "Bezpostrzydnie połōnczynie Direct Connection Join Server"
+            .chars()
+            .take(n)
+            .collect()
+    }
+    fn width(atlas: &HudAtlas, label: &str) -> i32 {
+        HudBatch::text_width(atlas, label).ceil() as i32
+    }
+
+    /// A label that fits beside the icon but, centred on the button, would end
+    /// under it (`Settings sa Aksesibilidad...` in `fil_ph`, and about 40 other
+    /// languages) is moved left until it ends where the icon's room begins:
+    /// `Mth.clamp(centerX, left + lineWidth / 2, right - lineWidth / 2)` in
+    /// `defaultScrollingHelper`. It does not scroll. The same label in a plain
+    /// button stays centred.
+    #[test]
+    fn a_label_that_fits_beside_the_icon_is_moved_clear_of_it() {
+        let atlas = atlas();
+        // A 16 px icon: `left = x + 2`, `right = x + 130`, `centerX = x + 75`.
+        let (left, right, center) = (32, 30 + 130, 30 + 75);
+        // The widest label that fits; `right - width / 2 < centerX` by most.
+        let text = (1..60)
+            .map(label)
+            .rfind(|t| width(&atlas, t) <= right - left)
+            .expect("a label that fits");
+        let half = width(&atlas, &text) / 2;
+        assert!(right - half < center, "{text}: {}", width(&atlas, &text));
+        let drawn_from = |from: i32| {
+            let mut batch = HudBatch::new([640, 480]);
+            batch.text(&atlas, &text, from as f32, 46.0, u32::MAX, true);
+            xs(&batch)
+        };
+        let draw = |b: &Button, now_ms: i64| {
+            let mut batch = HudBatch::new([640, 480]);
+            b.draw_label_at(&mut batch, &atlas, u32::MAX, now_ms);
+            xs(&batch)
+        };
+        let b = button(&text, Some(("icon/music_notes", 16.0)));
+        // Vanilla: `textX = right - width / 2`, drawn from `textX - width / 2`.
+        assert!(draw(&b, 0) == drawn_from(right - half - half), "{text}");
+        for now_ms in [700, 1500, 31_337] {
+            assert!(draw(&b, now_ms) == draw(&b, 0), "it scrolls at {now_ms}");
+        }
+        let plain = button(&text, None);
+        assert!(draw(&plain, 0) == drawn_from(center - half), "plain {text}");
+    }
+
+    /// A label wider than the room beside the icon scrolls inside
+    /// `x + 2 ..= x + width - spriteWidth - 4`, never under the icon.
+    #[test]
+    fn a_label_wider_than_the_room_beside_the_icon_scrolls_clear_of_it() {
+        let atlas = atlas();
+        let text = label(40);
+        let b = button(&text, Some(("icon/music_notes", 16.0)));
+        assert!(width(&atlas, &text) > 130 - 2);
+        let mut seen = std::collections::BTreeSet::new();
+        for now_ms in (0..40_000).step_by(250) {
+            let mut batch = HudBatch::new([640, 480]);
+            b.draw_label_at(&mut batch, &atlas, u32::MAX, now_ms);
+            let xs = xs(&batch);
+            assert!(!xs.is_empty());
+            for x in &xs {
+                assert!(
+                    (32.0..=30.0 + 150.0 - 16.0 - 4.0).contains(x),
+                    "{x} at {now_ms} ms"
+                );
+            }
+            seen.insert(xs.iter().map(|x| x.to_bits()).collect::<Vec<_>>());
+        }
+        assert!(seen.len() > 3, "the label hardly moves");
+    }
+}
+
+/// `MenuTabBar.MenuTabButton.renderLabel`: a tab's label slides inside the
+/// tab's box with a 1 px margin when it is wider than the tab (here a window
+/// too narrow for the English labels), instead of running into the next tab.
+#[test]
+fn a_create_world_tab_label_wider_than_its_tab_stays_inside_it() {
+    let mut f = Fixture::new();
+    f.click("Singleplayer");
+    let atlas = HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    // 90 px wide: three 20 px tabs from x = 14, too narrow for "Game".
+    let mut batch = HudBatch::new([90, 262]);
+    f.title.draw(&atlas, &mut batch, (0.0, 100.0), true);
+    let labels: Vec<f32> = batch
+        .vertices
+        .iter()
+        .filter(|v| v.text == 1 && v.pos[1] < 24.0)
+        .map(|v| v.pos[0])
+        .collect();
+    assert!(!labels.is_empty());
+    let boxes: Vec<(f32, f32)> = (0..3)
+        .map(|tab| {
+            (
+                14.0 + 20.0 * tab as f32 + 1.0,
+                14.0 + 20.0 * (tab + 1) as f32 - 1.0,
+            )
+        })
+        .collect();
+    for x in &labels {
+        assert!(
+            boxes.iter().any(|(lo, hi)| (*lo..=*hi).contains(x)),
+            "label vertex at {x} is outside every tab's box"
+        );
+    }
+    for (tab, (lo, hi)) in boxes.iter().enumerate() {
+        assert!(
+            labels.iter().any(|x| (*lo..=*hi).contains(x)),
+            "tab {tab} draws no label"
+        );
+    }
+}
