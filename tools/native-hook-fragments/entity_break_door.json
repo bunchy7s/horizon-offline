@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "entity_break_door",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_break_door",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A mob broke a door (`native_entity_break_door`).",
+  "doc_summary": "A zombie or raider finished breaking the door at `pos`; the mob id and entity type are reported after the door is removed. Bundles need \"hooks\": @API:entity_break_door@."
+}

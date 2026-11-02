@@ -647,3 +647,18 @@ fn materials_name_blocks_and_move_sprites_to_the_translucent_pass() {
     );
     assert!(m.translucent_layers(&[(0, 9)], 4).is_empty());
 }
+
+#[test]
+fn reads_particle_lights_and_refuses_bad_ones() {
+    let entry = |rest: &str| {
+        format!(
+            "{}[[particle_lights]]\nparticles = [\"firefly\"]\n{rest}\n",
+            sample_text()
+        )
+    };
+    let m = Manifest::parse(&entry("color = [0.3, 0.35, 0.2]\nreach = 4.0")).unwrap();
+    assert_eq!(m.particle_lights[0].particles, ["firefly"]);
+    assert_eq!(m.particle_lights[0].reach, 4.0);
+    assert!(refused(&entry("color = [2.0, 0.0, 0.0]\nreach = 4.0")).contains("0..=1"));
+    assert!(refused(&entry("color = [1.0, 1.0, 1.0]\nreach = 40.0")).contains("reach"));
+}

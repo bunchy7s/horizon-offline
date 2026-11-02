@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_elytra_boost",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_elytra_boost",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A server player used a firework rocket to boost while gliding (`native_player_elytra_boost`).",
+  "doc_summary": "A server player used a firework rocket to boost while gliding, after the rocket was launched and consumed. Bundles need \"hooks\": @API:player_elytra_boost@."
+}

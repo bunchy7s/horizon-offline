@@ -105,6 +105,33 @@ fn searches_by_kind_and_words() {
     let first = search(&counted, &Query::new("", Kind::Mod));
     let order: Vec<(&str, u64)> = first.iter().map(|p| (p.id.as_str(), p.downloads)).collect();
     assert_eq!(order, [("zoom", 12_345), ("coords_hud", 80)]);
+    // Newest orders by the day a project's first version came out, Updated by its latest.
+    let mut dated = counted.clone();
+    let base = dated.projects[0].versions[0].clone();
+    let version_on = |day: &str| index::Version {
+        published: day.into(),
+        ..base.clone()
+    };
+    dated.projects[0].versions = vec![version_on("2026-09-01"), version_on("2026-01-01")];
+    let zoom = dated.projects.iter().position(|p| p.id == "zoom").unwrap();
+    dated.projects[zoom].versions = vec![version_on("2026-05-01")];
+    let sorted = |sort| -> Vec<String> {
+        let mut q = Query::new("", Kind::Mod);
+        q.filters.sort = Some(sort);
+        search(&dated, &q).into_iter().map(|p| p.id).collect()
+    };
+    assert_eq!(
+        sorted(super::super::details::Sort::Newest),
+        ["zoom", "coords_hud"]
+    );
+    assert_eq!(
+        sorted(super::super::details::Sort::Updated),
+        ["coords_hud", "zoom"]
+    );
+    assert_eq!(
+        sorted(super::super::details::Sort::Downloads),
+        ["zoom", "coords_hud"]
+    );
     let p = hud(&index);
     assert_eq!(p.support(), super::super::Support::Works);
     assert_eq!(p.page, "https://playhorizon.dev/mods/coords_hud");

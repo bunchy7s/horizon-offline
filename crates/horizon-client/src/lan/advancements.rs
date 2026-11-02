@@ -19,10 +19,12 @@ pub struct ServerAdvancements {
     tree: std::sync::Arc<Tree>,
     kids: Vec<Vec<usize>>,
     layout: Vec<Option<(i32, f32)>>,
-    /// Recipe files by id, as compact JSON text: a book entry parses its
-    /// recipe when a player gets it (a few µs), and the ~1,400 parsed files
-    /// would keep about 5 MB alive for the server's whole run.
-    recipes: BTreeMap<String, Box<str>>,
+    /// Recipe files by id, as compact JSON text with their ingredient
+    /// objects already resolved to flat item lists (`network_recipes`): a
+    /// book entry parses its recipe when a player gets it (a few µs), and
+    /// the ~1,400 parsed files would keep about 5 MB alive for the server's
+    /// whole run.
+    pub(super) recipes: BTreeMap<String, Box<str>>,
     displays: RecipeIndex,
     /// RecipeManager.unpackRecipeInfo's group numbers.
     groups: HashMap<String, i32>,
@@ -36,24 +38,15 @@ pub struct FirstTick {
 }
 
 impl ServerAdvancements {
-    pub fn load(resources: &Path, overlay: &horizon_world::loot::PackOverlay) -> Self {
+    pub fn load(
+        resources: &Path,
+        overlay: &horizon_world::loot::PackOverlay,
+        recipes: BTreeMap<String, Box<str>>,
+        groups: HashMap<String, i32>,
+    ) -> Self {
         let tree = Tree::shared(&resources.join("data"), overlay);
         let kids = tree.children();
         let layout = tree.layout();
-        let mut recipes = BTreeMap::new();
-        super::recipes::recipes(&resources.join("data/minecraft/recipe"), "", &mut recipes);
-        super::recipes::overlay_recipes(overlay, &mut recipes);
-        let mut groups = HashMap::new();
-        for r in recipes.values() {
-            if let Some(g) = r["group"].as_str().filter(|g| !g.is_empty()) {
-                let next = groups.len() as i32;
-                groups.entry(g.to_owned()).or_insert(next);
-            }
-        }
-        let recipes = recipes
-            .into_iter()
-            .map(|(id, r)| (id, r.to_string().into_boxed_str()))
-            .collect();
         Self {
             tree,
             kids,
@@ -371,7 +364,7 @@ impl ServerAdvancements {
         };
         let r = &r;
         let kind = r["type"].as_str().unwrap_or("");
-        let item = |n: &str| sync.id("minecraft:item", n).unwrap_or(0);
+        let item = |n: &str| sync.id("minecraft:item", n);
         let slot = |n: &str| sync.id("minecraft:slot_display", n).unwrap_or(0);
         let mut w = Writer::new();
         w.varint(ids.start);
@@ -391,16 +384,19 @@ impl ServerAdvancements {
         // The result as its ItemStackSlotDisplay, the station as its item.
         let result = |w: &mut Writer| {
             w.varint(slot("minecraft:item_stack"));
-            w.varint(item(
-                horizon_world::loot::recipe_result_id(&r["result"]).unwrap_or("minecraft:air"),
-            ));
+            w.varint(
+                item(
+                    horizon_world::loot::recipe_result_id(&r["result"]).unwrap_or("minecraft:air"),
+                )
+                .unwrap_or(0),
+            );
             w.varint(r["result"]["count"].as_i64().unwrap_or(1) as i32);
             w.varint(0);
             w.varint(0);
         };
         let station = |w: &mut Writer, name: &str| {
             w.varint(slot("minecraft:item"));
-            w.varint(item(name));
+            w.varint(item(name).unwrap_or(0));
         };
         // The display, then the ingredients the craftable filter checks and
         // the category of the tab that lists it.
@@ -551,20 +547,25 @@ fn shrink(rows: &[Value]) -> Vec<Vec<char>> {
 }
 
 /// ByteBufCodecs.holderSet for an ingredient: a tag by name, or the items.
-fn holder_set(w: &mut Writer, v: &Value, item: &dyn Fn(&str) -> i32) {
+/// An item the registries do not know is left out, not sent as id 0.
+fn holder_set(w: &mut Writer, v: &Value, item: &dyn Fn(&str) -> Option<i32>) {
     match v {
         Value::String(s) if s.starts_with('#') => {
             w.varint(0);
             w.string(&s[1..]);
         }
-        Value::String(s) => {
-            w.varint(2);
-            w.varint(item(s));
-        }
+        Value::String(s) => match item(s) {
+            Some(id) => {
+                w.varint(2);
+                w.varint(id);
+            }
+            None => w.varint(1),
+        },
         Value::Array(a) => {
-            w.varint(a.len() as i32 + 1);
-            for s in a {
-                w.varint(item(s.as_str().unwrap_or("")));
+            let ids: Vec<i32> = a.iter().filter_map(|s| item(s.as_str()?)).collect();
+            w.varint(ids.len() as i32 + 1);
+            for id in ids {
+                w.varint(id);
             }
         }
         _ => w.varint(1),
@@ -637,6 +638,7 @@ mod tests {
         let dir = root.join("data/minecraft/recipe");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(root.join("registries.json"), REGISTRIES).unwrap();
+        std::fs::write(root.join("items.json"), "{}").unwrap();
         for (id, json) in recipes {
             std::fs::write(dir.join(format!("{id}.json")), json).unwrap();
         }
@@ -655,6 +657,121 @@ mod tests {
         let entry = RecipeBookEntry::read(&mut r).unwrap();
         assert_eq!(r.remaining(), 0, "the entry ends with its flags");
         (sync, entry)
+    }
+
+    /// A shaped recipe whose key uses one of NeoForge's ingredient shapes
+    /// reaches the client with the shape's items, not an empty list.
+    #[test]
+    fn a_neoforge_ingredient_in_the_key_reaches_the_client_with_items() {
+        let root = resources(
+            "compound_key",
+            &[(
+                "compound_key",
+                r#"{"type":"minecraft:crafting_shaped",
+                "pattern":["X"],
+                "key":{"X":{"type":"neoforge:compound","children":["minecraft:raw_copper","minecraft:redstone"]}},
+                "result":{"id":"minecraft:copper_ingot"}}"#,
+            )],
+        );
+        let (sync, e) = entry(&root, "minecraft:compound_key");
+        let item = |n: &str| sync.id("minecraft:item", n).unwrap();
+        let raw = item("minecraft:raw_copper");
+        let redstone = item("minecraft:redstone");
+        let req = e.requirements.as_ref().unwrap();
+        assert_eq!(req.len(), 1, "one cell: {req:?}");
+        match &req[0] {
+            HolderSet::Items(items) => {
+                assert!(
+                    items.contains(&raw) && items.contains(&redstone),
+                    "the compound's items: {items:?}"
+                );
+            }
+            other => panic!("not an item list: {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A recipe whose ingredient kind no loader knows stays out of the book:
+    /// the server does not load it, and an empty ingredient slot in its
+    /// place would mislead the client.
+    #[test]
+    fn a_recipe_with_an_unknown_ingredient_kind_stays_out_of_the_book() {
+        let root = resources(
+            "mymod_kind",
+            &[(
+                "mymod_kind",
+                r#"{"type":"minecraft:crafting_shaped",
+                "pattern":["X"],
+                "key":{"X":{"type":"mymod:x"}},
+                "result":{"id":"minecraft:copper_ingot"}}"#,
+            )],
+        );
+        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        assert!(
+            !sync
+                .advancements
+                .recipes
+                .contains_key("minecraft:mymod_kind"),
+            "the network copy drops the recipe"
+        );
+        assert!(
+            sync.advancements
+                .book_entries("minecraft:mymod_kind", &sync, NOTIFY_AND_HIGHLIGHT)
+                .is_empty()
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The property sets and the stonecutter read a NeoForge shape's items
+    /// too, not an empty slot: UpdateRecipes carries them.
+    #[test]
+    fn update_recipes_sends_a_neoforge_shapes_items() {
+        let root = resources(
+            "compound_sets",
+            &[
+                (
+                    "compound_smelting",
+                    r#"{"type":"minecraft:smelting",
+                    "ingredient":{"type":"neoforge:compound","children":["minecraft:raw_copper","minecraft:redstone"]},
+                    "result":{"id":"minecraft:copper_ingot"}}"#,
+                ),
+                (
+                    "compound_stonecutting",
+                    r#"{"type":"minecraft:stonecutting",
+                    "ingredient":{"type":"neoforge:compound","children":["minecraft:raw_copper"]},
+                    "result":{"id":"minecraft:copper_ingot"}}"#,
+                ),
+            ],
+        );
+        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        let item = |n: &str| sync.id("minecraft:item", n).unwrap();
+        let raw = item("minecraft:raw_copper");
+        let redstone = item("minecraft:redstone");
+        let mut r = Reader::new(&sync.recipes);
+        // The property sets, then the stonecutter's recipes.
+        let mut furnace_input = None;
+        for _ in 0..r.varint().unwrap() {
+            let key = r.string(64).unwrap();
+            let ids: Vec<i32> = (0..r.varint().unwrap())
+                .filter_map(|_| r.varint().ok())
+                .collect();
+            if key == "minecraft:furnace_input" {
+                furnace_input = Some(ids);
+            }
+        }
+        let ids = furnace_input.expect("furnace_input set present");
+        assert!(
+            ids.contains(&raw) && ids.contains(&redstone),
+            "the compound's items in furnace_input: {ids:?}"
+        );
+        // The stonecutter's entry: the compound's items, then the result.
+        let stone = r.varint().unwrap();
+        assert_eq!(stone, 1, "one stonecutting recipe");
+        let len = r.varint().unwrap();
+        assert!(len >= 2, "an item list, not empty ({len}) nor a tag");
+        assert_eq!(len - 1, 1, "the compound's one item");
+        assert_eq!(r.varint().unwrap(), raw);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -706,6 +823,57 @@ mod tests {
         assert_eq!(station, SlotDisplay::Item(item("minecraft:furnace")));
         assert_eq!(duration, 200);
         assert_eq!(experience, 0.7);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A recipe filter's `replace_input` (#5910) reaches the book swapped:
+    /// the book writes from the network copy, so the swap must have run
+    /// there, once, before the ingredient normalization. A world's pack
+    /// carries the filter (the way the game reads them).
+    #[test]
+    fn a_recipe_filters_swapped_input_shows_swapped_in_the_book() {
+        let root = resources(
+            "filter_swap",
+            &[(
+                "copper_ingot_from_smelting_raw_copper",
+                r#"{"type":"minecraft:smelting","cookingtime":200,"experience":0.7,
+                    "ingredient":"minecraft:raw_copper",
+                    "result":{"id":"minecraft:copper_ingot"}}"#,
+            )],
+        );
+        let packs = vec![(
+            "recipe_filter/minecraft:swap".to_owned(),
+            vec![
+                br#"{"filters":[{"id":"minecraft:copper_ingot_from_smelting_raw_copper",
+                "replace_input":{"from":"minecraft:raw_copper","to":"minecraft:redstone"}}]}"#
+                    .to_vec(),
+            ],
+        )];
+        let overlay = horizon_world::loot::PackOverlay { files: &packs };
+        let sync = SyncData::load(&root, &overlay).unwrap();
+        let entries = sync.advancements.book_entries(
+            "minecraft:copper_ingot_from_smelting_raw_copper",
+            &sync,
+            NOTIFY_AND_HIGHLIGHT,
+        );
+        assert_eq!(entries.len(), 1, "the recipe has one display");
+        let mut r = Reader::new(&entries[0]);
+        let e = RecipeBookEntry::read(&mut r).unwrap();
+        assert_eq!(r.remaining(), 0, "the entry ends with its flags");
+        let item = |n: &str| sync.id("minecraft:item", n).unwrap();
+        assert_eq!(
+            e.requirements,
+            Some(vec![HolderSet::Items(vec![item("minecraft:redstone")])]),
+            "the filter's swapped input, not the file's"
+        );
+        let RecipeDisplay::Furnace { ingredient, .. } = e.display else {
+            panic!("a smelting recipe shows a furnace display");
+        };
+        assert_eq!(
+            ingredient,
+            SlotDisplay::Tag(HolderSet::Items(vec![item("minecraft:redstone")])),
+            "the display shows the swapped input too"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

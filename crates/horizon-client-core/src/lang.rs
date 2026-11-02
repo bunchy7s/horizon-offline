@@ -3,6 +3,7 @@
 //! from `pack.mcmeta` `language` sections, and a process-wide current
 //! language used by every screen.
 use std::{
+    cell::RefCell,
     collections::{BTreeMap, HashMap},
     sync::{
         Arc, RwLock,
@@ -34,6 +35,15 @@ pub struct Language {
 pub const DEFAULT: &str = "en_us";
 
 static CURRENT: RwLock<Option<Arc<Language>>> = RwLock::new(None);
+/// A language that only the calling thread sees, and the keys it was asked for and did not have
+/// (`scoped`).
+struct Scope {
+    language: Arc<Language>,
+    missed: Vec<String>,
+}
+thread_local! {
+    static SCOPE: RefCell<Option<Scope>> = const { RefCell::new(None) };
+}
 /// The current language's `bidirectional`, read for every drawn string.
 static BIDIRECTIONAL: AtomicBool = AtomicBool::new(false);
 
@@ -254,7 +264,49 @@ pub fn set(language: Language) {
     *CURRENT.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(language));
 }
 pub fn current() -> Option<Arc<Language>> {
+    if let Some(language) = SCOPE.with(|s| s.borrow().as_ref().map(|s| s.language.clone())) {
+        return Some(language);
+    }
     CURRENT.read().unwrap_or_else(|e| e.into_inner()).clone()
+}
+/// Runs `f` with `language` as the current language of this thread only, and returns what it
+/// returned with the keys `get` and `get_or` looked up and `language` did not have, in the order
+/// asked and without repeats. Nothing is set process-wide, so a test can draw a screen in another
+/// language while the tests beside it read theirs. Scopes nest: the inner one wins, and the outer
+/// one's misses do not include the inner one's. For tests: `bidirectional` stays the process-wide
+/// language's.
+pub fn scoped<R>(language: Language, f: impl FnOnce() -> R) -> (R, Vec<String>) {
+    /// Puts the outer scope back, also when `f` panics.
+    struct Restore(Option<Scope>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            SCOPE.with(|s| *s.borrow_mut() = self.0.take());
+        }
+    }
+    let outer = SCOPE.with(|s| {
+        s.borrow_mut().replace(Scope {
+            language: Arc::new(language),
+            missed: Vec::new(),
+        })
+    });
+    let _restore = Restore(outer);
+    let result = f();
+    let missed = SCOPE.with(|s| {
+        s.borrow_mut()
+            .as_mut()
+            .map(|s| std::mem::take(&mut s.missed))
+    });
+    (result, missed.unwrap_or_default())
+}
+/// `key` was asked for in a `scoped` language that has no text for it.
+fn missed(key: &str) {
+    SCOPE.with(|s| {
+        if let Some(scope) = s.borrow_mut().as_mut()
+            && !scope.missed.iter().any(|m| m == key)
+        {
+            scope.missed.push(key.to_owned());
+        }
+    });
 }
 /// `ClientLanguage.defaultRightToLeft` of the current language.
 pub fn bidirectional() -> bool {
@@ -267,13 +319,19 @@ pub fn code() -> String {
 pub fn get(key: &str) -> String {
     current()
         .and_then(|l| l.get(key).map(str::to_owned))
-        .unwrap_or_else(|| key.to_owned())
+        .unwrap_or_else(|| {
+            missed(key);
+            key.to_owned()
+        })
 }
 /// The translation, or `fallback` when the key is missing.
 pub fn get_or(key: &str, fallback: &str) -> String {
     current()
         .and_then(|l| l.get(key).map(str::to_owned))
-        .unwrap_or_else(|| fallback.to_owned())
+        .unwrap_or_else(|| {
+            missed(key);
+            fallback.to_owned()
+        })
 }
 pub fn has(key: &str) -> bool {
     current().is_some_and(|l| l.get(key).is_some())
@@ -348,6 +406,52 @@ mod tests {
             es_ve.get("horizon.options.on_screen_keyboard"),
             Some("Teclado en pantalla")
         );
+    }
+
+    #[test]
+    fn a_scoped_language_is_the_calling_threads_and_reports_what_it_lacks() {
+        let empty = Mem(HashMap::new());
+        let outside = code();
+        let ((german, english_only, fallback, elsewhere), missed) =
+            scoped(Language::load(&[&empty], "de_de"), || {
+                (
+                    get("horizon.osk.close"),
+                    get("horizon.no_such_key"),
+                    get_or("horizon.no_fallback", "English"),
+                    // Another thread keeps the process-wide language.
+                    std::thread::spawn(code).join().unwrap(),
+                )
+            });
+        assert_eq!(german, "Schließen");
+        assert_eq!(english_only, "horizon.no_such_key");
+        assert_eq!(fallback, "English");
+        assert_eq!(elsewhere, outside);
+        assert_eq!(missed, ["horizon.no_such_key", "horizon.no_fallback"]);
+        // The scope ends with its closure.
+        assert_eq!(code(), outside);
+    }
+
+    #[test]
+    fn scopes_nest_and_end_when_their_closure_panics() {
+        let empty = Mem(HashMap::new());
+        let outside = code();
+        let (inner, missed) = scoped(Language::load(&[&empty], "fr_fr"), || {
+            let (inner, inner_missed) = scoped(Language::load(&[&empty], "pl_pl"), || {
+                (code(), get("horizon.inner_miss"))
+            });
+            assert_eq!(inner_missed, ["horizon.inner_miss"]);
+            assert_eq!(code(), "fr_fr");
+            inner.0
+        });
+        assert_eq!(inner, "pl_pl");
+        assert!(missed.is_empty());
+        let panicked = std::panic::catch_unwind(|| {
+            scoped(Language::load(&[&Mem(HashMap::new())], "de_de"), || {
+                panic!("a test failed inside a scope")
+            })
+        });
+        assert!(panicked.is_err());
+        assert_eq!(code(), outside);
     }
 
     /// `crates/horizon-client/assets/horizon/lang`, where Horizon's own strings live.

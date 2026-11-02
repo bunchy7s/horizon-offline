@@ -3,8 +3,18 @@ use crate::{crash, game, logging, ram_limit};
 
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
 pub fn main() {
+    main_with(Default::default());
+}
+
+/// Start the game with trait mods in dispatch order.
+pub fn main_with(mods: crate::mod_api::Mods) {
+    // First: a trait injection into anything below (logging, the crash handler) calls its mod.
+    if crate::mod_api::MODS.set(mods).is_err() {
+        log::warn!("Trait mods already installed; ignoring the second list");
+    }
     horizon_threads::configure_allocator();
     horizon_client::telemetry::mark_start();
+    horizon_client::spans::startup::init(std::time::Instant::now());
     let args: Vec<String> = std::env::args().skip(1).collect();
     let game_args = args.iter().take_while(|a| *a != "--dedicated");
     let help = game_args
@@ -45,8 +55,80 @@ pub fn main() {
         crash::install(home.clone(), side);
         ram_limit::start(&home, side);
     }
+    let renderers = crate::mod_api::mods()
+        .iter()
+        .filter_map(|m| m.render())
+        .collect();
+    if crate::gfx::native_render::install(renderers).is_err() {
+        log::warn!("Trait renderers already installed; keeping the first list");
+    }
+    if horizon_world::native_load_hooks::install(
+        horizon_world::native_load_hooks::NativeLoadHooks {
+            loot_table_load: |id, table| {
+                crate::mod_api::dispatch_loot_table_load(crate::mod_api::mods(), id, table);
+            },
+            modify_default_components: |item, components| {
+                crate::mod_api::dispatch_modify_default_components(
+                    crate::mod_api::mods(),
+                    item,
+                    components,
+                );
+            },
+            loot_function: |kind, data, ctx, stack| {
+                crate::mod_api::dispatch_loot_function(
+                    crate::mod_api::mods(),
+                    kind,
+                    data,
+                    ctx,
+                    stack,
+                );
+            },
+            loot_condition: |kind, data, ctx, holds| {
+                crate::mod_api::dispatch_loot_condition(
+                    crate::mod_api::mods(),
+                    kind,
+                    data,
+                    ctx,
+                    holds,
+                );
+            },
+        },
+    )
+    .is_err()
+    {
+        log::warn!("Native data-load hooks already installed; keeping the first callbacks");
+    }
+    if crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
+        menu_slot_rules: |menu, slot, stack, may_place, max_stack| {
+            crate::mod_api::dispatch_menu_slot_rules(
+                crate::mod_api::mods(),
+                menu,
+                slot,
+                stack,
+                may_place,
+                max_stack,
+            );
+        },
+        living_breathe: |entity, kind, can_breathe, consume, refill| {
+            crate::mod_api::dispatch_living_breathe(
+                crate::mod_api::mods(),
+                entity,
+                kind,
+                can_breathe,
+                consume,
+                refill,
+            );
+        },
+        ingredient: |kind, data, items| {
+            crate::mod_api::dispatch_ingredient(crate::mod_api::mods(), kind, data, items);
+        },
+    })
+    .is_err()
+    {
+        log::warn!("Native client hooks already installed; keeping the first callbacks");
+    }
     raise_open_file_limit();
-    if let Err(error) = game::run() {
+    if let Err(error) = game::run_with() {
         // A bad command line is the caller's mistake, not a crash: no report.
         let usage = error.is::<game::UsageError>();
         log::error!("Horizon: {error}");
