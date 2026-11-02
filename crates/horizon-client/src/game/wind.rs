@@ -305,10 +305,9 @@ impl Game<'_> {
         self.restore_entities(entities);
         pushed
     }
-    /// `ServerExplosion.hurtEntities` for the player (not a spectator, nor a
-    /// creative player flying, though mods hear their push): the push, less
-    /// with explosion knockback resistance, and `ServerPlayer.onExplosionHit`.
-    /// Returns the push.
+    /// `ServerExplosion.hurtEntities` for the player: the push, less
+    /// explosion knockback resistance, and `ServerPlayer.onExplosionHit`.
+    /// Returns the push for players eligible for the explosion packet.
     fn wind_push_player(
         &mut self,
         center: [f64; 3],
@@ -358,9 +357,6 @@ impl Game<'_> {
             eye.map(|d| d / l * power)
         };
         self.native_explosion_knockback(self.dim.id(), center, blocks, None, &mut push);
-        if flying {
-            return None;
-        }
         let p = self.player.as_mut()?;
         p.velocity = Vec3::new(
             p.velocity.x + push[0],
@@ -386,7 +382,7 @@ impl Game<'_> {
             ..EntityView::default()
         });
         self.adv.marks.blast = Some(([at.x, at.y, at.z], cause));
-        Some(push)
+        (!flying).then_some(push)
     }
     /// The burst: knockback, the blocks that react, the gust and the sound.
     pub(super) fn wind_burst(

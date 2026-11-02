@@ -483,15 +483,15 @@ impl Game<'_> {
         if !spectator {
             let mut push = [dir[0] * power, dir[1] * power, dir[2] * power];
             self.native_explosion_knockback(self.dim.id(), center, blocks, None, &mut push);
-            if !(creative && flying)
-                && let Some(p) = self.player.as_mut()
-            {
+            if let Some(p) = self.player.as_mut() {
                 p.velocity = Vec3::new(
                     p.velocity.x + push[0],
                     p.velocity.y + push[1],
                     p.velocity.z + push[2],
                 );
-                pushed = (!p.health.sync_velocity).then_some(push);
+                if !(creative && flying) {
+                    pushed = (!p.health.sync_velocity).then_some(push);
+                }
             }
         }
         self.combat.forget_noted(outcome.canceled);

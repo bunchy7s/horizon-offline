@@ -3277,7 +3277,6 @@ impl Game<'_> {
         let Some((id, mut push)) = self
             .dragon
             .as_ref()
-            .filter(|d| d.alive())
             .and_then(|d| Some((d.id, d.explosion_knockback(center, radius, exposure)?)))
         else {
             return;
