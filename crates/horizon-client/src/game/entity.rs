@@ -324,16 +324,11 @@ impl Entity for Mob {
             || (self.species() == Species::Warden
                 && horizon_client::mobs::warden::digging_or_emerging(self))
     }
-    /// The kind's own box, not the baby's or the slime's.
-    fn explosion_box(&self) -> Aabb {
-        let (feet, half) = (self.position, self.kind.width / 2.0);
-        Aabb::new(
-            Vec3::new(feet.x - half, feet.y, feet.z - half),
-            Vec3::new(feet.x + half, feet.y + self.kind.height, feet.z + half),
-        )
-    }
+    /// `getEyeHeight` of the mob as it stands: a baby's, a slime's or a
+    /// phantom's own scaled eye height, not the adult kind's. The blast's box
+    /// is its real `bounds`, so it needs no override.
     fn explosion_eye_height(&self) -> f64 {
-        self.kind.eye_height
+        self.eye_height()
     }
     /// `Entity.push` sets `needsSync`.
     fn push_from_explosion(&mut self, push: Vec3) {
