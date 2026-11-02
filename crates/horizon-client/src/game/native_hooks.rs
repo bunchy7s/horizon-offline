@@ -3446,7 +3446,15 @@ impl Game<'_> {
         criterion: &str,
         granted: bool,
     ) {
-        let _ = (player, name, advancement, criterion, granted);
+        mod_api::dispatch_player_advancement_progress(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            advancement,
+            criterion,
+            granted,
+        );
     }
     /// A statistic is about to be awarded to a server player, before its count
     /// and scoreboard criteria change. `stat_type` and `stat` are ids such as
@@ -3463,7 +3471,16 @@ impl Game<'_> {
         value: i32,
         cancel: &mut bool,
     ) {
-        let _ = (player, name, stat_type, stat, value, cancel);
+        mod_api::dispatch_player_stat_award(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            stat_type,
+            stat,
+            value,
+            cancel,
+        );
     }
     /// A server player's experience points are about to increase from an orb pickup,
     /// after mending has taken its share. Change `amount` to change the points
