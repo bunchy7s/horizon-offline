@@ -14,7 +14,7 @@ const THUMB_H: f32 = THUMB_W * 9. / 16.;
 #[derive(Default)]
 pub(super) struct Screenshots {
     home: Option<PathBuf>,
-    list: Vec<Shot>,
+    pub(super) list: Vec<Shot>,
     fresh: bool,
     all: bool,
     /// The picture open in the viewer, by its place in `list`.
