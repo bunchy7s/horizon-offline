@@ -18,6 +18,17 @@ use horizon_core::geometry::{Aabb, Direction, Vec3};
 use horizon_core::position::BlockPos;
 use horizon_world::{level::data::PushReaction, piston_push};
 
+/// What a blast knows about itself, for the entities in its reach to answer.
+#[derive(Clone, Copy)]
+pub(super) struct Blast {
+    /// `VehicleEntity.ignoreExplosion`: a mob's blast, with mob griefing off.
+    pub(super) vehicles_ignore: bool,
+    /// `ItemEntity.ignoreExplosion` (`shouldAffectBlocklikeEntities`).
+    pub(super) items_ignore: bool,
+    /// The exploding mob, which `getEntities(source, box)` leaves out.
+    pub(super) spared: Option<u32>,
+}
+
 pub(super) trait Entity {
     fn position(&self) -> Vec3;
     fn position_mut(&mut self) -> &mut Vec3;
@@ -56,6 +67,32 @@ pub(super) trait Entity {
     /// whose tick skips that step, says no.
     fn sweeps_blocks_inside(&self) -> bool {
         true
+    }
+    /// `Entity.ignoreExplosion`: the blast neither hurts nor pushes it. Also
+    /// answers for what `getEntities(source, box)` never lists: the exploding
+    /// mob, and the dead.
+    fn ignores_explosion(&self, _blast: &Blast) -> bool {
+        false
+    }
+    /// Whether `Entity.push` moves it. An arrow in the ground, a wind charge and
+    /// an armour stand (`explosion_breaks_decorations` takes those) stay put.
+    fn pushed_by_explosion(&self) -> bool {
+        true
+    }
+    /// The box the blast casts its rays at: `getSeenPercent`.
+    fn explosion_box(&self) -> Aabb {
+        self.bounds()
+    }
+    /// How far above its feet `pushFromExplosion` aims: `getEyeHeight`, which
+    /// defaults to 0.85 of the box.
+    fn explosion_eye_height(&self) -> f64 {
+        let b = self.explosion_box();
+        f64::from((b.max_position().y - b.min_position().y) as f32 * 0.85f32)
+    }
+    /// `Entity.push` with the explosion's knockback.
+    fn push_from_explosion(&mut self, push: Vec3) {
+        let v = self.velocity_mut();
+        *v = Vec3::new(v.x + push.x, v.y + push.y, v.z + push.z);
     }
     /// `Entity.isSupportedBy`.
     fn is_supported_by(&self, _pos: BlockPos) -> bool {
@@ -244,6 +281,33 @@ impl Entity for Mob {
     fn is_ignoring_block_triggers(&self) -> bool {
         self.species() == Species::Bat
     }
+    /// `Warden.ignoreExplosion`: while it digs or emerges.
+    fn ignores_explosion(&self, blast: &Blast) -> bool {
+        !self.alive()
+            || blast.spared == Some(self.id)
+            || (self.species() == Species::Warden
+                && horizon_client::mobs::warden::digging_or_emerging(self))
+    }
+    /// The kind's own box, not the baby's or the slime's.
+    fn explosion_box(&self) -> Aabb {
+        let (feet, half) = (self.position, self.kind.width / 2.0);
+        Aabb::new(
+            Vec3::new(feet.x - half, feet.y, feet.z - half),
+            Vec3::new(feet.x + half, feet.y + self.kind.height, feet.z + half),
+        )
+    }
+    fn explosion_eye_height(&self) -> f64 {
+        self.kind.eye_height
+    }
+    /// `Entity.push` sets `needsSync`.
+    fn push_from_explosion(&mut self, push: Vec3) {
+        self.velocity = Vec3::new(
+            self.velocity.x + push.x,
+            self.velocity.y + push.y,
+            self.velocity.z + push.z,
+        );
+        self.needs_sync = true;
+    }
     fn is_supported_by(&self, pos: BlockPos) -> bool {
         self.supporting == Some([pos.x, pos.y, pos.z])
     }
@@ -251,6 +315,12 @@ impl Entity for Mob {
 
 impl Entity for ItemEntity {
     stored_motion!();
+    fn ignores_explosion(&self, blast: &Blast) -> bool {
+        blast.items_ignore
+    }
+    fn explosion_eye_height(&self) -> f64 {
+        0.2125
+    }
     fn bounds(&self) -> Aabb {
         ItemEntity::bounds(self)
     }
@@ -271,6 +341,9 @@ impl Entity for ItemEntity {
 
 impl Entity for ExperienceOrb {
     stored_motion!();
+    fn explosion_eye_height(&self) -> f64 {
+        f64::from(0.5f32 * 0.85f32)
+    }
     fn bounds(&self) -> Aabb {
         ExperienceOrb::bounds(self)
     }
@@ -291,6 +364,13 @@ impl Entity for ExperienceOrb {
 
 impl Entity for Boat {
     stored_motion!();
+    fn ignores_explosion(&self, blast: &Blast) -> bool {
+        blast.vehicles_ignore
+    }
+    /// `EntityType.OAK_BOAT & co`: the full 0.5625.
+    fn explosion_eye_height(&self) -> f64 {
+        0.5625
+    }
     fn bounds(&self) -> Aabb {
         Boat::bounds(self)
     }
@@ -301,6 +381,9 @@ impl Entity for Boat {
 
 impl Entity for Minecart {
     stored_motion!();
+    fn ignores_explosion(&self, blast: &Blast) -> bool {
+        blast.vehicles_ignore
+    }
     fn bounds(&self) -> Aabb {
         Minecart::bounds(self)
     }
@@ -328,6 +411,9 @@ impl Entity for ArmorStand {
     fn is_ignoring_block_triggers(&self) -> bool {
         self.marker
     }
+    fn pushed_by_explosion(&self) -> bool {
+        false
+    }
     /// `ArmorStand.getPistonPushReaction`: a marker is ignored.
     fn get_piston_push_reaction(&self) -> PushReaction {
         if self.marker {
@@ -340,6 +426,10 @@ impl Entity for ArmorStand {
 
 impl Entity for PrimedTnt {
     stored_motion!();
+    /// Pushed from its position, not its eyes.
+    fn explosion_eye_height(&self) -> f64 {
+        0.0
+    }
     fn bounds(&self) -> Aabb {
         PrimedTnt::bounds(self)
     }
@@ -363,6 +453,22 @@ impl Entity for FallingBlock {
 
 impl Entity for Projectile {
     stored_motion!();
+    /// `AbstractArrow.push` does nothing in the ground; a wind charge's motion
+    /// stays 0.
+    fn pushed_by_explosion(&self) -> bool {
+        !self.stuck && !self.kind.ignores_blast()
+    }
+    fn explosion_eye_height(&self) -> f64 {
+        self.kind.eye_height()
+    }
+    fn push_from_explosion(&mut self, push: Vec3) {
+        self.velocity = Vec3::new(
+            self.velocity.x + push.x,
+            self.velocity.y + push.y,
+            self.velocity.z + push.z,
+        );
+        self.needs_sync = true;
+    }
     fn bounds(&self) -> Aabb {
         Projectile::bounds(self)
     }
@@ -378,6 +484,10 @@ impl Entity for Projectile {
 
 impl Entity for Rocket {
     stored_motion!();
+    /// 0.25 wide, so 0.2125 to the eyes.
+    fn explosion_eye_height(&self) -> f64 {
+        0.2125
+    }
     fn bounds(&self) -> Aabb {
         Rocket::bounds(self)
     }
@@ -389,6 +499,14 @@ impl Entity for Rocket {
 
 impl Entity for ThrownTrident {
     stored_motion!();
+    /// Like any arrow (`AbstractArrow.push`) not pushed while in the ground.
+    fn pushed_by_explosion(&self) -> bool {
+        !self.in_ground
+    }
+    /// `EntityType.TRIDENT`: eyes at 0.13.
+    fn explosion_eye_height(&self) -> f64 {
+        f64::from(0.13_f32)
+    }
     fn bounds(&self) -> Aabb {
         let p = self.position;
         Aabb::new(
