@@ -115,7 +115,7 @@ HappyGhast.setServerStillTimeout	inline	crates/horizon-client/src/mobs/happy_gha
 HappyGhast.registerGoals	port	crates/horizon-client/src/mobs/happy_ghast.rs::setup	adult goals: float, tempt (harness and food for a bare adult, food otherwise), float around within 16
 HappyGhast.adultGhastSetup	port	crates/horizon-client/src/mobs/happy_ghast.rs::setup	adult half: ghast move control, happy ghast look control, goals, brain stopped
 HappyGhast.babyGhastSetup	port	crates/horizon-client/src/mobs/happy_ghast.rs::setup	baby half: flying move control, baby flying navigation, no goals, timeout cleared
-HappyGhast.ageBoundaryReached	port	crates/horizon-client/src/mobs/happy_ghast.rs::ensure_setup	reruns setup when the age sign changes
+HappyGhast.ageBoundaryReached	port	crates/horizon-client/src/mobs/finalize.rs::age_boundary_reached	reruns the setup (happy_ghast::ensure_setup) when the age sign changes, so a hatched ghastling flies its own goals before its first tick
 HappyGhast.createAttributes	skip:data		attributes come from entity-types.json
 HappyGhast.getAmbientSoundInterval	port	crates/horizon-client/src/mobs.rs::Mob::ambient_interval	six times as long while it carries a rider
 HappyGhast.canUseSlot	inline	crates/horizon-client/src/game/ghasts.rs::Game::interact_happy_ghast	a harness goes only on a living adult without one; shears take it off
