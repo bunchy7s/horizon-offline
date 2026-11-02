@@ -1662,7 +1662,7 @@ mod merge_tests {
             age,
             pickup_delay: 0,
             bob_offset: 0.0,
-            ticks: age,
+            ticks: age.max(0) as u32,
             needs_sync: false,
             stuck: Vec3::ZERO,
         }
