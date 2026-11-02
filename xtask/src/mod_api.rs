@@ -1793,6 +1793,7 @@ mod tests {
                     (event.entity, event.kind, event.attacker),
                     (12, "minecraft:armor_stand", 7)
                 );
+                assert!(event.attacker_main.is_none() && event.attacker_off.is_none());
                 assert_eq!(event.strength, 0.4);
                 event.strength *= 2.0;
                 event.x = -event.x;
@@ -1806,6 +1807,8 @@ mod tests {
             12,
             "minecraft:armor_stand",
             7,
+            None,
+            None,
             &mut strength,
             &mut x,
             &mut z,
