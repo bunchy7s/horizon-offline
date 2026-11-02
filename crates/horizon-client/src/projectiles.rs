@@ -232,6 +232,9 @@ pub struct Projectile {
     pub touching_water: bool,
     /// `Entity.noGravity` (`NoGravity` in its save): `getGravity` is 0.
     pub no_gravity: bool,
+    /// `Entity.remainingFireTicks`: a thrown projectile that flew through a
+    /// fire block burns for 160 ticks, with the flame drawn over it.
+    pub fire_ticks: i32,
 }
 /// What a projectile struck this tick.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -263,6 +266,12 @@ pub trait ProjectileWorld {
     }
     /// `loadedAndEntityCanStandOn`: a sturdy top face.
     fn solid(&self, _p: [i32; 3]) -> bool {
+        false
+    }
+    /// The block at `p` is a `BaseFireBlock` (fire, soul fire) whose
+    /// `entityInside` ignites an entity in it for 160 ticks
+    /// (`BaseFireBlock.fireIgnite`).
+    fn ignites(&self, _p: [i32; 3]) -> bool {
         false
     }
 }
@@ -375,6 +384,7 @@ impl Projectile {
             needs_sync: false,
             touching_water: false,
             no_gravity: false,
+            fire_ticks: 0,
             arrow: kind_is_arrow.then(|| {
                 // Entity.random: seeded unpredictably, the position stands in.
                 Box::new(crate::arrows::ArrowState::new(
@@ -462,6 +472,70 @@ impl Projectile {
     }
     pub fn is_arrow(&self) -> bool {
         matches!(self.kind, ProjectileKind::Arrow { .. })
+    }
+    /// A `ThrowableProjectile`: snowballs, eggs, ender pearls, potions, a
+    /// content mod's thrown item and a llama's spit. They are the projectiles
+    /// that apply the effects of the blocks they fly through
+    /// (`ThrowableProjectile.tick` calls `applyEffectsFromBlocks`), which an
+    /// `AbstractHurtingProjectile` — a fireball, a wind charge, a skull — does
+    /// not.
+    pub fn is_thrown(&self) -> bool {
+        matches!(
+            self.kind,
+            ProjectileKind::Snowball
+                | ProjectileKind::Egg
+                | ProjectileKind::EnderPearl
+                | ProjectileKind::LlamaSpit
+                | ProjectileKind::Potion(..)
+                | ProjectileKind::Thrown(_)
+        )
+    }
+    /// `Entity.isOnFire`.
+    pub fn on_fire(&self) -> bool {
+        self.fire_ticks > 0
+    }
+    /// `Entity.igniteForTicks`: the longer fire wins.
+    pub fn ignite_for_ticks(&mut self, ticks: i32) {
+        if self.fire_ticks < ticks {
+            self.fire_ticks = ticks;
+        }
+    }
+    /// `Entity.clearFire`: it counts from below zero, which `on_fire` reads as out.
+    pub fn clear_fire(&mut self) {
+        self.fire_ticks = self.fire_ticks.min(0);
+    }
+    /// `ThrowableProjectile.tick`'s `applyEffectsFromBlocks` and the fire phase
+    /// of `Entity.baseTick`: a fire block the box is in ignites the projectile
+    /// for 160 ticks (`BaseFireBlock.fireIgnite`), water puts it out, and one
+    /// tick is counted down every tick.
+    fn fire_tick(&mut self, w: &impl ProjectileWorld) {
+        if !self.is_thrown() {
+            return;
+        }
+        if self.in_fire(w) {
+            self.ignite_for_ticks(160);
+        }
+        if w.in_water(self.bounds()) {
+            self.clear_fire();
+        } else if self.fire_ticks > 0 {
+            self.fire_ticks -= 1;
+        }
+    }
+    /// `Entity.checkInsideBlocks`: the blocks under the box, deflated by 1e-7
+    /// so a box sitting exactly on a block boundary is not inside it.
+    fn in_fire(&self, w: &impl ProjectileWorld) -> bool {
+        let b = self.bounds().deflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
+        let (lo, hi) = (b.min_position(), b.max_position());
+        for x in (lo.x).floor() as i32..=(hi.x).floor() as i32 {
+            for y in (lo.y).floor() as i32..=(hi.y).floor() as i32 {
+                for z in (lo.z).floor() as i32..=(hi.z).floor() as i32 {
+                    if w.ignites([x, y, z]) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
     /// Whether it is a `SpectralArrow` (its own entity type): a spectral
     /// arrow's pickup item, or the glowing effect a dispenser shoots with.
@@ -869,6 +943,7 @@ impl Projectile {
             self.position,
             self.bounds(),
         );
+        self.fire_tick(w);
         result
     }
     fn tick_inner(&mut self, w: &impl ProjectileWorld, impact: bool) -> (bool, Hit) {
