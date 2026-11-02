@@ -517,6 +517,78 @@ use std::{
 };
 use winit::{event::MouseButton, keyboard::KeyCode};
 
+pub(super) struct ObservedScreen {
+    id: &'static str,
+    menu: Option<String>,
+    title: Option<Text>,
+    rect: [f32; 4],
+    slots: usize,
+    mouse: [f32; 2],
+    partial_tick: f32,
+}
+
+impl ObservedScreen {
+    fn view(&self) -> NativeScreenView<'_> {
+        NativeScreenView {
+            id: self.id,
+            menu: self.menu.as_deref(),
+            title: self.title.as_ref(),
+            rect: self.rect,
+            slots: self.slots,
+            mouse: self.mouse,
+            partial_tick: self.partial_tick,
+        }
+    }
+}
+
+impl Game<'_> {
+    pub(super) fn observe_screen(&mut self) {
+        let current = self.screen_view_now().map(|view| ObservedScreen {
+            id: view.id,
+            menu: view.menu.map(str::to_owned),
+            title: view.title.cloned(),
+            rect: view.rect,
+            slots: view.slots,
+            mouse: view.mouse,
+            partial_tick: view.partial_tick,
+        });
+        let changed = match (&self.observed_screen, &current) {
+            (Some(old), Some(new)) => old.id != new.id || old.menu != new.menu,
+            (None, None) => false,
+            _ => true,
+        };
+        if changed {
+            if let Some(old) = &self.observed_screen {
+                self.native_screen_closing(&old.view());
+            }
+            if let Some(new) = &current {
+                self.native_screen_opening(&new.view());
+                self.native_screen_init_post(&new.view());
+            }
+        } else if let (Some(old), Some(new)) = (&self.observed_screen, &current)
+            && old.rect != new.rect
+        {
+            self.native_screen_init_post(&new.view());
+        }
+        self.observed_screen = current;
+    }
+
+    /// A screen was observed opening, at most once per frame.
+    pub(super) fn native_screen_opening(&self, screen: &NativeScreenView<'_>) {
+        mod_api::dispatch_screen_opening(self, mod_api::mods(), screen);
+    }
+
+    /// A screen was observed opening or changing rectangle, at most once per frame.
+    pub(super) fn native_screen_init_post(&self, screen: &NativeScreenView<'_>) {
+        mod_api::dispatch_screen_init_post(self, mod_api::mods(), screen);
+    }
+
+    /// A screen was observed closing, at most once per frame.
+    pub(super) fn native_screen_closing(&self, screen: &NativeScreenView<'_>) {
+        mod_api::dispatch_screen_closing(self, mod_api::mods(), screen);
+    }
+}
+
 /// `Level.setBlock`'s flags, for the `native_set_block_property` helpers:
 /// `flags::UPDATE_CLIENTS` as a vanilla crop grows, `flags::UPDATE_ALL` as a
 /// furnace sets its `lit`. Horizon sends every write to players, so

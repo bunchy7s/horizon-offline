@@ -4382,6 +4382,21 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A screen was observed closing, at most once per frame.
+    fn screen_closing(&self, host: &dyn Host, event: &mut ScreenClosingEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A screen was observed opening or changing rectangle, at most once per frame.
+    fn screen_init_post(&self, host: &dyn Host, event: &mut ScreenInitPostEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A screen was observed opening, at most once per frame.
+    fn screen_opening(&self, host: &dyn Host, event: &mut ScreenOpeningEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A sculk catalyst at `pos` has begun blooming after taking experience.
     /// The catalyst block state has changed. Server-side.
     /// @API:sculk_bloom@.
@@ -11115,7 +11130,7 @@ pub fn dispatch_living_drown(
         damage_amount: *damage_amount,
         bubble_count,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_drown") {
         if matches!(mod_hook.living_drown(&mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11149,7 +11164,7 @@ pub fn dispatch_living_fall(
         distance: *distance,
         multiplier: *multiplier,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_fall") {
         if matches!(mod_hook.living_fall(&mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11177,7 +11192,7 @@ pub fn dispatch_living_heal(
         entity,
         amount: *amount,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_heal") {
         if matches!(mod_hook.living_heal(&mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11193,7 +11208,7 @@ pub struct LivingJumpEvent<'a> {
 }
 pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
     let mut event = LivingJumpEvent { entity, kind };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_jump") {
         mod_hook.living_jump(&mut event);
     }
 }
@@ -13474,6 +13489,51 @@ pub fn dispatch_raid_state_change(
     let mut event = RaidStateChangeEvent { raid, pos, state };
     for mod_hook in super::entered(mods, "raid_state_change") {
         mod_hook.raid_state_change(host, &mut event);
+    }
+}
+/// What [`Hooks::screen_closing`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenClosingEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+}
+pub fn dispatch_screen_closing(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+) {
+    let mut event = ScreenClosingEvent { screen };
+    for mod_hook in super::entered(mods, "screen_closing") {
+        mod_hook.screen_closing(host, &mut event);
+    }
+}
+/// What [`Hooks::screen_init_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenInitPostEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+}
+pub fn dispatch_screen_init_post(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+) {
+    let mut event = ScreenInitPostEvent { screen };
+    for mod_hook in super::entered(mods, "screen_init_post") {
+        mod_hook.screen_init_post(host, &mut event);
+    }
+}
+/// What [`Hooks::screen_opening`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenOpeningEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+}
+pub fn dispatch_screen_opening(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+) {
+    let mut event = ScreenOpeningEvent { screen };
+    for mod_hook in super::entered(mods, "screen_opening") {
+        mod_hook.screen_opening(host, &mut event);
     }
 }
 /// What [`Hooks::sculk_bloom`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
