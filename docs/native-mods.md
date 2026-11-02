@@ -1583,10 +1583,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   every mod, so a later mod sees the value an earlier one set. It runs before `native_time_skip`, which hears the jump
   to the time chosen here and may still cancel it; the players wake either way. Bundles need
   `"hooks": @API:sleep_finished_time@`.
-- **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": @API:world_border_bounds_changed@`.
-- **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": @API:world_border_center_changed@`.
-- **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": @API:world_game_rule_change@`.
-- **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied. Bundles need `"hooks": @API:spawn_change@`.
+- **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": @API:native_world_border_bounds_changed@`.
+- **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": @API:native_world_border_center_changed@`.
+- **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": @API:native_world_game_rule_change@`.
+- **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied. Bundles need `"hooks": @API:native_spawn_change@`.
 - **`native_portal_create(dimension, pos)`**: a Nether portal built for dimension travel or the End arrival platform was completed in `dimension`; `pos` is its lower corner or platform origin. Bundles need `"hooks": @API:portal_create@`.
 - **`native_raid_spawn_wave(raid, pos, wave, raiders)`**: a raid wave is about to be spawned at `pos`; `raiders` is the count Horizon will spawn.
 - **`native_raid_state_change(raid, pos, state)`**: a raid at `pos` was triggered or changed to `victory`, `loss`, or `stopped`.
@@ -2124,7 +2124,7 @@ another mod's hook object is not exposed.
 
 Trait dispatch follows dependency order, with ties kept in bundle order. Mixin injection order remains
 horizon-mixins' priority, mod ID, then injection ID; dependency order does not change injection order.
-A bundle with an `[api]` package may declare its own HEAD injection in the trait:
+A bundle with an `[api]` package may declare its own injection in the trait:
 
 ```toml
 [[injection]]
@@ -2139,10 +2139,36 @@ The generated trait method is `inject_<mod_id>_<trait_method>` (hyphens in the m
 underscores). Its event, as a catalog hook's, is that name in CamelCase plus `Event`
 (`InjectExampleBeforeTickEvent`), with the bindings as fields under the same rules. Implement it on the object
 returned by that bundle's `hooks()`; it is called only for that bundle's object. Types must be
-public and available from both the target and `horizon_client::mod_api`. Only HEAD listen is
-supported, or HEAD with `cancellable = true` for a unit-returning target: that method returns
-`Flow`, and `Flow::Cancel` returns early from the target. Do not specify `helper` on these entries.
-Other injection kinds are rejected. Trait injections can target only functions in `horizon-client`;
+public and available from both the target and `horizon_client::mod_api`. The kinds are HEAD listen,
+or HEAD with `cancellable = true` for a unit-returning target (that method returns `Flow`, and
+`Flow::Cancel` returns early from the target), and RETURN, MODIFY_ARG and MODIFY_EXPRESSION_VALUE.
+For those three, the binding whose `value` is `$value` (its type is the returned, argument or
+expression type, as horizon-mixins requires) becomes a plain event field. The method changes it in
+place and returns nothing; the changed value is what the target returns, passes or uses. The selector,
+`require`, `ordinal` and `argument` are horizon-mixins' own fields. Before the mods are installed, the
+value passes through unchanged. A borrowed `$value` works only where Rust's elision ties the result to
+one input. `cancellable` is HEAD-only. Other kinds are rejected. Do not specify `helper` on these entries.
+
+```toml
+[[injection]]
+id = "points"
+target = "horizon_client::game::example"
+kind = "MODIFY_ARG"
+selector = "self.give_points"
+require = 1
+ordinal = 0
+argument = 0
+trait_method = "points"
+bindings = [{ name = "points", ty = "i32", value = "$value" }]
+```
+
+```rust
+fn inject_example_points(&self, event: &mut InjectExamplePointsEvent) {
+    event.points *= 2;
+}
+```
+
+Trait injections can target only functions in `horizon-client`;
 ordinary mixin helpers in other crates continue to work as before. The generated helper has the same priority and ordering as an
 ordinary helper of that mod: priority descending, mod id then injection id. It is not automatically
 ordered after other mixins. Catalog hooks retain the mixin-before-trait order below.
@@ -2184,7 +2210,8 @@ Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `state_with_property`. `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
-`LevelWriteHost` adds random access and `native_set_block_property`. Whole-block writes wait for a
+`LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and
+`native_send_particles`. Whole-block writes wait for a
 later slice that creates block entities, as vanilla's `setBlock` does. The game owns
 the tick queue; mods do not pass it back to these helpers.
 For frame hooks, implement `RenderHooks` and return it from `Hooks::render`. The ordered
@@ -2209,10 +2236,14 @@ injections go at the head of the body, before the dispatch, so they still run fi
 
 ### Server attachments
 
-A mod can declare an `AttachmentType<T>` once and call its `get`, `set` and `remove`
-methods with the hook's host and a `Holder`. `T` is `Clone + Send + Sync + 'static`;
-`get` returns a clone and inserts the default on first access. `set` runs the optional
-codec before changing the value, returning an `AttachmentError` if it cannot encode.
+A mod can declare an `AttachmentType<T>` once and call its `get`, `set`, `remove`,
+`has` and `get_existing` methods with the hook's host and a `Holder`. `T` is
+`Clone + Send + Sync + 'static`; `get` returns a clone and inserts the default on
+first access. `has` and `get_existing` read without inserting (NeoForge's `hasData`
+and `getExistingData`): `has` says whether a value is stored, saved or set, even
+before it decodes, and `get_existing` returns `None` instead of the default. Neither
+adds anything to the holder's saved data. `set` runs the optional codec before
+changing the value, returning an `AttachmentError` if it cannot encode.
 Keys are the pair `(namespace, name)`; a key already decoded as another Rust type is
 an error. A missing or non-server holder is an error, not a new phantom holder.
 `AttachmentError` distinguishes `MissingHolder`, `TypeMismatch`, `Decode`, `Encode`,
@@ -2233,6 +2264,7 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
     copy_on_death: false,
 };
 // Inside a server hook with `host: &mut dyn Host`:
+if !COUNTER.has(host, Holder::Chunk([0, 0]))? { /* chunk carries no counter yet */ }
 let old = COUNTER.get(host, Holder::Chunk([0, 0]))?;
 COUNTER.set(host, Holder::Chunk([0, 0]), old + 1)?;
 Ok::<(), AttachmentError>(())
@@ -2255,13 +2287,14 @@ file, not `level.dat`.
 `copy_on_death` requires a codec. Player respawn copies opted-in entries via their
 encoded representation, including raw entries of an absent mod; other entries are
 removed. Living-entity conversion is not supported. This follows the default supplier,
-optional server-side persistence and player-respawn option of NeoForge 26.3's public
-`AttachmentType.Builder` contract, but not its holder-aware supplier, custom copy
-handler, conditional serialization or sync APIs.
+persistence and respawn option of NeoForge 26.3's public `AttachmentType.Builder`
+contract and `IAttachmentHolder`'s `hasData`/`getExistingData`, but not its
+holder-aware supplier, custom copy handler, conditional serialization or sync APIs.
 
 `Host` exposes the documented `Game` helpers listed under `helpers` in
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's
-receiver and documentation. Level services stay on the level hosts above.
+receiver and documentation; a helper without `self` (`config_dir`) takes
+`&self` in `Host`. Level services stay on the level hosts above.
 The following documented `Game` helpers are not in the trait yet:
 
 - `spawn_mob`, `mob`, `mobs`, `block_in_tag`, `item_in_tag`,

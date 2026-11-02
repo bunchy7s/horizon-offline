@@ -49,6 +49,7 @@ use winit::{
     window::WindowId,
 };
 
+mod frames;
 mod hud;
 mod pads;
 mod players;
@@ -144,9 +145,17 @@ pub(super) struct Split<'a> {
     /// Whose game runs now (0 = P1), and P1's buttons while another's does.
     turn: usize,
     host_widgets: widgets::Saved,
+    /// `HORIZON_SPLIT_STATS`: when the frame times were last printed.
+    stats: Option<Instant>,
+    /// For the readout: where a frame's wall time goes (the turns with their renders, presents,
+    /// the GPU wait, outside `about_to_wait`), summed since the last print, and when this frame
+    /// started.
+    spent: [Duration; 4],
+    spent_frames: u32,
+    frame_started: Option<Instant>,
     /// The controllers while several play (`pads`), and P1's.
     pads: PadRouter,
-    p1_pad: Option<PadId>,
+    p1_pad: pads::P1Pad<PadId>,
     /// Pads whose buttons still count as the press that gave them: released first.
     fresh: Vec<PadId>,
     /// Controllers offered to join, each since when: several may join at once.
@@ -191,8 +200,12 @@ impl<'a> Split<'a> {
             res: None,
             turn: 0,
             host_widgets: Default::default(),
+            stats: std::env::var_os("HORIZON_SPLIT_STATS").map(|_| Instant::now()),
+            spent: Default::default(),
+            spent_frames: 0,
+            frame_started: None,
             pads: Default::default(),
-            p1_pad: None,
+            p1_pad: Default::default(),
             fresh: Vec::new(),
             offers: Vec::new(),
             lost: Vec::new(),
@@ -505,7 +518,10 @@ impl<'a> Split<'a> {
         for pad in pad_joins {
             match self.join(Some(pad), None) {
                 Ok(()) => changed = true,
-                Err(e) => log::warn!("Horizon: splitscreen: a player could not join: {e}"),
+                Err(e) => {
+                    self.restore_given_up_pad(pad);
+                    log::warn!("Horizon: splitscreen: a player could not join: {e}");
+                }
             }
         }
         if self.in_world() && self.test_players > 0 {
@@ -530,7 +546,8 @@ impl<'a> Split<'a> {
 
     /// Each window shows its players' frames, then the GPU wait, once, for all of them. Only
     /// the game's window waits for the display (vsync): windows each waiting would divide the rate.
-    fn present(&mut self) {
+    /// When the windows had presented (before the GPU wait), for the frame-time readout.
+    fn present(&mut self) -> Instant {
         let views = self.views();
         let renderers: Vec<_> = std::iter::once(&self.host.renderer)
             .chain(self.guests.iter().map(|g| &g.game.renderer))
@@ -547,6 +564,7 @@ impl<'a> Split<'a> {
             surface.compositor.set_vsync(vsync && k == paced);
             surface.compositor.present(&frames);
         }
+        let presented = Instant::now();
         // One player's CPU work overlapped the GPU drawing another's.
         let renderers = std::iter::once(&mut self.host.renderer)
             .chain(self.guests.iter_mut().map(|g| &mut g.game.renderer));
@@ -554,6 +572,7 @@ impl<'a> Split<'a> {
             renderer.paced_elsewhere = true;
             renderer.wait_in_flight();
         }
+        presented
     }
 }
 
@@ -722,17 +741,22 @@ impl ApplicationHandler for Split<'_> {
             // output (rumble, triggers) through the split's reader for P1's turn.
             let pad_joins = self.route_pads(true);
             self.turn(0);
-            if let Some(id) = self.p1_pad {
+            if let Some(id) = self.p1_pad.owner {
                 self.pads.lend_output(&mut self.host.pad, id);
             }
             self.host.about_to_wait(event_loop);
-            if self.p1_pad.is_some() {
+            if self.p1_pad.owner.is_some() {
                 self.pads.reclaim_output(&mut self.host.pad);
             }
             if self.admit(event_loop, pad_joins) {
                 self.relayout(event_loop);
             }
             return;
+        }
+        let started = Instant::now();
+        if let Some(previous) = self.frame_started.replace(started) {
+            // What the last frame left after its own work: events, the limiter, the OS.
+            self.spent[3] += started.saturating_duration_since(previous);
         }
         let pad_joins = self.route_pads(false);
         self.turn(0);
@@ -786,7 +810,19 @@ impl ApplicationHandler for Split<'_> {
             }
         }
         self.turn(0);
-        self.present();
+        let rendered = Instant::now();
+        let presented = self.present();
+        let waited = Instant::now();
+        for (k, d) in [rendered - started, presented - rendered, waited - presented]
+            .into_iter()
+            .enumerate()
+        {
+            self.spent[k] += d;
+        }
+        // The rest of the frame (the limiter, the OS) counts as outside, from `waited` on.
+        self.spent[3] = self.spent[3].saturating_sub(waited - started);
+        self.spent_frames += 1;
+        self.print_stats();
         // One pace for all: the fastest any player wants, so an idle one (vanilla's AFK limit)
         // can't slow the others. With vsync the display paces anything at or above its refresh
         // rate; the limiter on top would miss refreshes.

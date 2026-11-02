@@ -44,7 +44,7 @@ impl ParsedModels {
             }
         }
         let parsed = crate::par::par_map(&files, |(_, path)| {
-            let text = fs::read_to_string(path).ok()?;
+            let text = horizon_core::prepared_files::read_to_string(path).ok()?;
             CuboidModel::from_json(&text).ok().map(Arc::new)
         });
         let models = files
@@ -89,8 +89,8 @@ impl ParsedModels {
                     let read = || -> Result<CuboidModel> {
                         let (namespace, path) =
                             name.split_once(':').ok_or("invalid model identifier")?;
-                        let text = fs::read_to_string(
-                            root.join(format!("assets/{namespace}/models/{path}.json")),
+                        let text = horizon_core::prepared_files::read_to_string(
+                            &root.join(format!("assets/{namespace}/models/{path}.json")),
                         )?;
                         Ok(CuboidModel::from_json(&text)?)
                     };

@@ -223,6 +223,15 @@ impl Game<'_> {
                         let folder = dimension_folder(&pack, dimension);
                         let inputs = renderer.pack_inputs();
                         let mut post = load_post(&pack, &folder, &properties, &macros, &inputs);
+                        // Textures that name one of the game's: from the resource packs over
+                        // the game's own resources.
+                        let resources = self.options.resources.clone();
+                        let read = |namespace: &str, path: &str| {
+                            std::fs::read(resources.join("assets").join(namespace).join(path)).ok()
+                        };
+                        for note in horizon_shaders::resolve_resources(&mut post.textures, &read) {
+                            log::warn!("shader pack {name}: {note}");
+                        }
                         let biomes = world_biomes!(self);
                         let names: Vec<&str> =
                             biomes.list.iter().map(|b| b.name.as_str()).collect();
