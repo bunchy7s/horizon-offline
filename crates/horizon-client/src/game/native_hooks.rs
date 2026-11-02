@@ -3670,6 +3670,17 @@ impl Game<'_> {
         let _ = (entity, kind, owner);
     }
 
+    /// Two mobs completed a breeding action. `child` is absent when vanilla
+    /// lays an egg instead of creating a baby. @API:native_entity_breed@.
+    pub(super) fn native_entity_breed(
+        &mut self,
+        parent: u32,
+        partner: u32,
+        child: Option<u32>,
+    ) {
+        let _ = (parent, partner, child);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

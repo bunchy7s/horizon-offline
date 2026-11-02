@@ -2576,7 +2576,12 @@ impl Game<'_> {
                     parent,
                     partner,
                     llama,
-                } => self.breed(parent, partner, llama),
+                } => {
+                    let mob_count = self.mobs.len();
+                    self.breed(parent, partner, llama);
+                    let child = self.mobs.get(mob_count).map(|m| m.id);
+                    self.native_entity_breed(parent, partner, child);
+                }
                 MobEvent::LockGaze { mob, partner } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                         horizon_client::mobs::animal_brain::lock_gaze(m, partner);
