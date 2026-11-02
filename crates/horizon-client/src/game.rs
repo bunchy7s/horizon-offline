@@ -1187,6 +1187,13 @@ impl LevelAccess for GameLevel<'_> {
         }
         !cancel
     }
+    fn allow_bell_ring(&self, pos: BlockPos) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_bell_ring(self.dimension, None, pos, &mut cancel);
+        }
+        !cancel
+    }
     fn allow_piston_move(
         &self,
         piston: BlockPos,

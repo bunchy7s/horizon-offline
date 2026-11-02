@@ -1352,6 +1352,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// `BellBlock.attemptToRing`: `BellBlockEntity.onHit` queues block event 1
     /// with the struck direction, then the sound and game event.
     pub(crate) fn bell_ring(&mut self, pos: BlockPos, state: BlockStateId, direction: Direction) {
+        if !self.level.allow_bell_ring(pos) {
+            return;
+        }
         self.block_event(pos, self.b.block(state), 1, direction as i32);
         self.emit(LevelEvent::Sound {
             pos,
