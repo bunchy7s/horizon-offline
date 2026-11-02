@@ -126,7 +126,7 @@ FireBlock.setFlammable	skip:data		flammability odds are data (burn odds table re
 FireBlock.bootStrap	skip:data		registry bootstrap of the flammable blocks; Horizon reads the odds from data tables
 FlowerPotBlock.useItemOn	port	crates/horizon-world/src/level/interact.rs::Behaviours::use_item_on	a plant on an empty flower pot pots it, awarding pot_flower and consuming 1 plant; non-empty pot with a plant CONSUMEs
 FlowerPotBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	FlowerPot arm: non-empty pot gives the plant back and resets to flower_pot; empty pot CONSUMEs
-FlowerPotBlock.getCloneItemStack	port	crates/horizon-client/src/game/block_items.rs::Game::clone_item_stack	potted plant picks as the plant item, empty pot as flower_pot
+FlowerPotBlock.getCloneItemStack	port	crates/horizon-client/src/game/block_items.rs::Game::picked_stack	potted plant picks as the plant item, empty pot as flower_pot
 FlowerPotBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	FlowerPot arm: breaks when the block under it stops supporting it
 GrassBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	grass arm: air above and inside build height
 GrassBlock.stopBonemealSpread	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::grass_bonemeal	the per-step stop test (grass below, full collision at the spot) is inline in the attempt loop
