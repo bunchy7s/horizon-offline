@@ -1030,6 +1030,7 @@ fn guests_see_each_other_and_the_world_entities() {
         head_yaw: 0.0,
         on_ground: true,
         velocity: [0.0; 3],
+        minecart_steps: None,
         data: 0,
         meta: Vec::new(),
         defaults: Vec::new(),

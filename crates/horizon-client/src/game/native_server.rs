@@ -420,6 +420,7 @@ impl Game<'_> {
     /// `[discord] events` lists `announce`: `name` and `uuid` say who it is
     /// about (empty and 0 for no one), `message` is the line (`§` codes colour it).
     /// Only on a dedicated server; false elsewhere and for an empty message.
+    /// API @API:server_event@.
     pub(super) fn native_server_event(&self, name: &str, uuid: u128, message: &str) -> bool {
         if self.options.dedicated.is_none() || message.trim().is_empty() {
             return false;
