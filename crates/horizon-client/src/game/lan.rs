@@ -1419,6 +1419,11 @@ impl Game<'_> {
     ) {
         self.guest_attachments_into(guest);
         if guest.placed {
+            // Serialize logout with queued autosaves before writing the newer state.
+            // Continue attempting the logout save even if an autosave failed.
+            if let Err(error) = self.finish_player_autosaves(true) {
+                log::warn!("Horizon: player autosave failed before logout: {error}");
+            }
             if host.owner.as_ref().is_some_and(|o| o.uuid == guest.uuid) {
                 playerdata::save_owner(guest, &mut self.level, &self.world_root);
             } else {

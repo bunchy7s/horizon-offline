@@ -2465,6 +2465,7 @@ struct Game<'a> {
     message: Option<(String, Instant)>,
     save: Arc<SaveDir>,
     level: Level,
+    player_autosaves: horizon_client::lan::playerdata::Autosaves,
     session_lock: Option<horizon_client::save::SessionLock>,
     audio: Audio,
     music: horizon_client::music::MusicManager,
@@ -7260,6 +7261,7 @@ impl Game<'_> {
         }
         // MinecraftServer.tickServer's countdown, then autoSave: three
         // hundred seconds of ticks at the rate the server runs at now.
+        self.finish_player_autosaves(false)?;
         self.ticks_until_autosave -= 1;
         self.autosaving = self.ticks_until_autosave <= 0;
         if let Some(serving) = &self.serving {
@@ -14926,11 +14928,18 @@ impl Game<'_> {
         self.save_level(wait)?;
         self.save_parked_levels(wait)?;
         self.save_game_metadata()?;
+        self.finish_player_autosaves(wait)?;
         self.native_world_saved(wait);
         if dedicated {
             dedicated::events::record_server("saved", serde_json::json!({}));
         }
         Ok(())
+    }
+    fn finish_player_autosaves(&mut self, wait: bool) -> Result<bool> {
+        for player in self.player_autosaves.completed(wait) {
+            self.native_player_save_to_file(player.uuid, &player.name, &player.directory);
+        }
+        self.player_autosaves.writes_finished()
     }
     fn save_game_metadata(&mut self) -> Result<()> {
         self.save_maps();
@@ -14967,13 +14976,15 @@ impl Game<'_> {
             // The vehicle tree goes into a player's file when they leave
             // (`take_parent_vehicle`); here it stays in the chunk saves.
             let mut host = host;
-            let directory = horizon_client::lan::playerdata::directory(&self.world_root);
-            for g in host.hub.guests.iter_mut().filter(|g| g.placed) {
-                self.guest_attachments_into(g);
-                horizon_client::lan::playerdata::save(g, &self.world_root);
-                self.native_player_save_to_file(g.uuid, &g.name, &directory);
-            }
+            let result = (|| -> Result<()> {
+                for g in host.hub.guests.iter_mut().filter(|g| g.placed) {
+                    self.guest_attachments_into(g);
+                    self.player_autosaves.enqueue(g, &self.world_root)?;
+                }
+                Ok(())
+            })();
             self.lan = Some(host);
+            result?;
         }
         self.save_world_state();
         self.message = Some(("Saved the game".into(), Instant::now()));
@@ -18416,6 +18427,7 @@ impl<'a> Game<'a> {
             message: None,
             save,
             level,
+            player_autosaves: Default::default(),
             session_lock: None,
             audio,
             music: {
