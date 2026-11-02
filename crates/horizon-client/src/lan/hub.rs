@@ -164,6 +164,8 @@ pub enum HostEvent {
     /// A guest left (state to save, entities to drop).
     Left(Box<Guest>),
     Packet(u32, Box<S>),
+    /// A guest changed the dominant hand in their client options.
+    MainHandChanged(u32, bool),
     /// A guest's client started (`flying`) or stopped flying (their abilities packet), applied to
     /// the guest already: the game tells the mods, which may refuse it.
     Flight {
@@ -2939,11 +2941,15 @@ impl Hub {
                 }
                 S::ClientInformation(info) => {
                     let g = &mut self.guests[i];
+                    let old_main_hand = g.info.main_hand;
                     // PlayerModelPart.HAT (bit 6): the tab list shows the hat layer.
                     let was_hat = g.info.model_customisation & 0x40 != 0;
                     g.view_distance =
                         i32::from(info.view_distance).clamp(2, self.config.view_distance);
                     g.info = info;
+                    if g.info.main_hand != old_main_hand {
+                        events.push(HostEvent::MainHandChanged(conn, g.info.main_hand == 0));
+                    }
                     g.center = None;
                     let hat = g.info.model_customisation & 0x40 != 0;
                     let uuid = g.uuid;

@@ -3294,6 +3294,13 @@ impl Game<'_> {
     pub(super) fn native_player_deep_sleep(&mut self, player: u128, name: &str) {
         let _ = (player, name);
     }
+    /// A server player changed their client option for the dominant hand. `left` is true for
+    /// left-handed. Their state is not swapped in, and helpers looking them up through `self.lan`
+    /// may find nothing during guest packet handling. Server-side.
+    /// @API:native_player_change_main_hand@.
+    pub(super) fn native_player_change_main_hand(&mut self, player: u128, name: &str, left: bool) {
+        let _ = (player, name, left);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

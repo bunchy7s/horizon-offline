@@ -1357,6 +1357,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_bucket_entity(player, name, entity_id, entity)`**: a server player caught a bucketable mob after the mob was removed and the filled bucket was put in the player's hand or inventory. `entity` is the mob species id.
 - **`native_player_change_beacon_effect(player, name, pos, primary, secondary)`**: a server player's beacon selection was stored. Effect values are ids, empty when none is selected.
 - **`native_player_deep_sleep(player, name)`**: a server player reached 100 ticks asleep in a bed and now counts as deeply asleep for the night-skip check. Helpers looking up the guest through `self.lan` may find nothing during its tick.
+- **`native_player_change_main_hand(player, name, left)`**: a server player's client options changed their dominant hand; `left` is true for left-handed. Helpers looking up the guest through `self.lan` may find nothing during packet handling.
 - **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and
   their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
   player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a
