@@ -934,13 +934,13 @@ API 142 adds an energy buffer on a mod block's block entity (`Capabilities.Energ
 
 API 143 adds data maps (`RegisterDataMapTypesEvent`). `native_data_map_types(types)` pushes the types a mod registers: an `id` (`mod_id:name`, not in `minecraft`) for a `registry`, `minecraft:item` or `minecraft:block` so far; asked once per load of the server's data (a world's first open and every `/reload`). The values come from `data/<mod_id>/data_maps/<registry path>/<name>.json` in the world's data packs and from files a mod pushes through `native_data_pack_files` under the key `data_maps/<mod_id>:<registry path>/<name>`: `{"replace": false, "values": {"minecraft:coal": ..., "#minecraft:logs": ...}, "remove": [...]}`, an entry's value being the data itself or `{"value": ..., "replace": false}`; `replace` clears what earlier files set, a tag gives every entry in it the value, `remove` applies after the file's own values, and a newer value overrides an older one. `native_data_map(registry, type, entry)` reads an entry's value (the JSON the file held) and `native_data_map_entries(registry, type)` lists them. Server side only and not synced to clients; mergers, conditions, other registries and mod datapack registries are not here yet. Bundles need "hooks": 143.
 
-`native_living_fall(entity, kind, distance, multiplier, cancel)` corresponds to NeoForge's `LivingFallEvent` at `LivingEntity.causeFallDamage`. Mods may change the distance and damage multiplier or cancel fall handling; cancellation does not reverse physical movement. This free function receives the entity ID and type and cannot call game helpers. Player landings, mounted player falls and non-equine mob falls are wired. Equines use their own fall-damage override rather than `LivingEntity.causeFallDamage`. Bundles need `"hooks": @API:native_living_fall@`.
+`native_living_fall(entity, kind, distance, multiplier, cancel)` corresponds to NeoForge's `LivingFallEvent` at `LivingEntity.causeFallDamage`. Mods may change the distance and damage multiplier or cancel fall handling; cancellation does not reverse physical movement. This free function receives the entity ID and type and cannot call game helpers. Player landings, mounted player falls and non-equine mob falls are wired. Equines use their own fall-damage override rather than `LivingEntity.causeFallDamage`. Bundles need `"hooks": 357`.
 
-`native_living_jump(entity, kind)` listens for NeoForge's `LivingEvent.LivingJumpEvent` after a living entity jumps. It receives the entity ID and type, and cannot cancel or change the jump. The player motion and mob ground-jump paths, including cubes and ridden horses and camels, are wired; whether every client-side prediction path reaches them remains unverified. Bundles need `"hooks": @API:native_living_jump@`.
+`native_living_jump(entity, kind)` listens for NeoForge's `LivingEvent.LivingJumpEvent` after a living entity jumps. It receives the entity ID and type, and cannot cancel or change the jump. The player motion and mob ground-jump paths, including cubes and ridden horses and camels, are wired; whether every client-side prediction path reaches them remains unverified. Bundles need `"hooks": 359`.
 
-`native_living_heal(entity, amount, cancel)` corresponds to NeoForge's `LivingHealEvent` at `LivingEntity.heal`. The amount can be changed and cancellation prevents the heal. It covers player effect, food and peaceful regeneration healing and the wired mob healing paths. Other healing paths and client-side coverage remain unverified. `entity` is the affected player or mob ID. Bundles need `"hooks": @API:native_living_heal@`.
+`native_living_heal(entity, amount, cancel)` corresponds to NeoForge's `LivingHealEvent` at `LivingEntity.heal`. The amount can be changed and cancellation prevents the heal. It covers player effect, food and peaceful regeneration healing and the wired mob healing paths. Other healing paths and client-side coverage remain unverified. `entity` is the affected player or mob ID. Bundles need `"hooks": 358`.
 
-`native_living_drown(entity, kind, is_drowning, damage_amount, bubble_count, cancel)` asks on the server when a player or generic-air mob cannot breathe and has no air (NeoForge's `LivingDrownEvent`, `LivingEntity.baseTick`). Mods may change the drowning decision, damage and bubble count, or cancel. Damage at or below zero does not hurt. The normal eight bubbles use the entity event; other positive counts are sent in a particle packet, and nonpositive counts suppress bubbles. Bundles need "hooks": @API:native_living_drown@.
+`native_living_drown(entity, kind, is_drowning, damage_amount, bubble_count, cancel)` asks on the server when a player or generic-air mob cannot breathe and has no air (NeoForge's `LivingDrownEvent`, `LivingEntity.baseTick`). Mods may change the drowning decision, damage and bubble count, or cancel. Damage at or below zero does not hurt. The normal eight bubbles use the entity event; other positive counts are sent in a particle packet, and nonpositive counts suppress bubbles. Bundles need "hooks": 356.
 
 API 144 adds a player's or mob's breathing, on the single player server thread and on a dedicated server: `native_living_breathe(entity, kind, can_breathe, consume, refill)` every tick for a player and for a mob with the generic air logic (NeoForge's `LivingBreatheEvent`, vanilla's `LivingEntity.baseTick`), with Horizon's answers as the defaults: set `can_breathe` and how much air `consume` takes or `refill` gives (up to 300); at -20 the entity is set to 0 air and takes 2 drowning damage. It is a free function in `horizon_client::breathing`, so it answers and cannot call helpers. Axolotls and `WaterAnimal`s keep their own air logic. Bundles that use it need "hooks": 144.
 
@@ -962,9 +962,433 @@ API 152 adds a player opening and closing any menu on a server, on the single pl
 
 API 153 adds a player starting or stopping flight: `native_player_toggle_flight(player, name, flying, cancel)` is heard once for each change a player's client makes to its flying (vanilla honours it only for a player who may fly), on a server, with the player's state swapped in. A mod sets `cancel` to refuse it: the player keeps the state they had and the server sends their abilities back, so the client lands or flies again. Only what a client asks for is heard, not the flight a game-mode change starts or ends, and not a LAN host's own player. Bundles that use it need `"hooks": 153`.
 
-API @API:physical_window_size@ adds `native_physical_window_size()`, the window's width and height in physical pixels, independent of GUI scale. It returns no size on a server or when no window exists. Bundles that use it need `"hooks": @API:physical_window_size@`.
+API 165 adds `native_physical_window_size()`, the window's width and height in physical pixels, independent of GUI scale. It returns no size on a server or when no window exists. Bundles that use it need `"hooks": 165`.
 
-API @API:mod_image@ adds `Game::native_mod_image(width, height, rgba)`: a mod's own RGBA image, uploaded into the HUD atlas slot `horizon/modimage` (1024 by 1024) and drawn with `native_sprite`, whose source rectangle crops and stretches it, so a map or a schematic view needs no texture of its own. The slot is reserved only while a native mod is loaded, so a game without mods pays none of its 4 MiB. False for an image that is not `width * height` pixels of four bytes, is larger than the slot, or when there is no slot. Each upload is a texture patch of the image, so send one when the image changed, not every frame.
+
+API 154 adds a player changing dimension: `native_player_changed_dimension(player, name, from, to)` is heard once per move of a server's player into another level, when the move has ended (a portal's exit found and the player standing there, a command's teleport landed, a respawn in another level placed for good), with `from` and `to` as dimension ids (`minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`) and the player's state swapped in so that `native_tell` and the other helpers reach them. A move within a level is not heard. Bundles that use it need `"hooks": 154`.
+
+API 155 adds A mod that hears `native_experience_orb_pickup` sets `listened` in `native_experience_orb_pickup_listened` (a HEAD injection); `native_experience_orb_pickup(player, dimension, orb, value, count, canceled)` then runs before a server player takes an orb. Canceling leaves the orb and the pickup delay unchanged; otherwise the value is clamped to 1..=2,147,483,647 and the count to at least one, then one count is taken. `native_mending_repair(player, stack, experience, repair)` sees the damaged Mending item picked at random and can change the durability repair proposed for it, which is capped at its current damage. Turning a positive proposal into zero leaves the experience unspent (a zero vanilla proposal keeps vanilla's behaviour); if the picked stack is removed, changed except for its damage, or no longer eligible, the repair is skipped and the experience remains. The repair also decides how much experience is left for further repairs. It runs for `native_give_experience` too. Both run on the integrated and the dedicated server, guests included. Bundles need "hooks": 155.
+
+API 156 adds where a loot roll happens, for a mod's own loot kinds: `ctx.place` in `native_loot_function` and
+`native_loot_condition` brings `LootContextParams.ORIGIN` (a broken block's centre, a dead mob's position), `BLOCK_ENTITY` (the broken
+block's entity as it was, saved with its id, position and `Items`) and the level (its dimension, game time, time of day, rain and
+thunder), on a block broken by a player or an explosion and on a mob's death loot; None on the other rolls. The game sets it
+around a roll with `with_native_loot_place`. Bundles that use it need `"hooks": 156`.
+
+API 157 adds how a mod block burns, and whether it makes a campfire over it a signal fire, on an authoritative server. `native_fire_odds(dimension, state, odds)` answers
+`FireBlock`'s flammability table (`FireBlock.setFlammable(block, igniteOdds, burnOdds)`) before vanilla's table: put
+`(ignite, burn)` in `odds` for your own blocks. Ignite odds above zero let fire stand beside the block and spread
+to the air around it (planks 5, wool 30); burn odds are how fast fire destroys it (planks 20, wool 60); `(0, 0)` never
+burns; keep both within vanilla's 0 to 100. A waterlogged state never burns and isn't asked. It runs hundreds of times per fire tick: keep it short.
+`native_smoke_source(dimension, state, smoke)` answers `CampfireBlock.isSmokeSource` for the block under a campfire,
+as the campfire is placed or that block changes: `Some(true)` makes the campfire a signal fire, as a hay bale does.
+Answer only for your own blocks and leave the answer empty otherwise; the level is read-only. The deprecated in-frame
+path fires neither. Bundles that use them need `"hooks": 157`.
+
+API 158 adds a server player's game mode about to change: `native_player_game_mode_changed(player, name, from, to, cancel)` is heard before the change (NeoForge's `PlayerChangeGameModeEvent`) for the `/gamemode` command, the F3+F4 switcher and a hardcore world's respawn into spectator, once for each change to a different mode (0 survival, 1 creative, 2 adventure, 3 spectator), on a server; not for the default mode a player joins with. A mod sets `cancel` to keep the old mode. Bundles that use it need `"hooks": 158`.
+
+API 159 adds the server's difficulty changed, from one of `peaceful`, `easy`, `normal`, `hard` to another, through `native_difficulty_changed` (NeoForge's `DifficultyChangeEvent`). It is vanilla's `MinecraftServer.setDifficulty`, which `/difficulty`, a dedicated server's management and a test environment's difficulty all go through, and it is told only when the difficulty is another one. It only hears: the change has already happened. Bundles that use it need "hooks": 159.
+
+API 160 adds a player's fishing rod: `native_player_fish(player, name, state, cancel)` is heard for the cast (`state` 0), a fish biting (1), the reel-in with a catch (2), the reel-in with nothing on the line (3) and the reel-in of a bobber hooked to an entity or item (4), for a player of a server (Bukkit's `PlayerFishEvent`; NeoForge's `ItemFishedEvent` fires later, once the loot is rolled). A mod sets `cancel` to stop a cast, make the fish get away, or leave the bobber out on a reel-in. The player's state is swapped in. Bundles that use it need `"hooks": 160`.
+
+API 161 adds a player took a crafting grid's result, through `native_item_crafted` (NeoForge's `PlayerEvent.ItemCraftedEvent`): the player's uuid, the recipe the grid matched (`minecraft:oak_planks`) and the result stack it took, with its components. It only hears; the take has already happened. It fires for the crafting grid of an inventory or a crafting table, on the integrated server and on a dedicated server, guests included, and not for a stonecutter's, a smithing table's or a furnace's result. Bundles that use it need "hooks": 161.
+
+API 162 adds a player's item losing durability: `native_item_damaged(player, name, item, amount, cancel)` is heard where `ItemStack.hurtAndBreak` wears the item of a player of a server (Bukkit's `PlayerItemDamageEvent`), after Unbreaking, with the points about to be lost. A mod changes `amount` or sets `cancel` for no wear. The player's state is swapped in. Bundles that use it need `"hooks": 162`.
+
+API 163 adds `native_server_event(name, uuid, message)` posts an `announce` event to a dedicated server's event stream (`GET /api/v1/events`); horizon-server's Discord bridge relays it, in gold, when `[discord] events` lists `announce` (off by default). False elsewhere and for an empty message. Bundles that use it need "hooks": 163.
+
+API 164 adds `native_state_block(state)` names the block a state belongs to (`BlockState.getBlock()`), on a server hook's level and on the game: `native_state_for_placement` is asked for every block placed, so a mod compares it with its own block to answer only for it. Bundles that use it need "hooks": 164.
+
+API 165 adds the helper `native_physical_window_size()`, which returns the window's width and height in physical pixels, independent of GUI scale. It returns no size on a server or when no window exists. Bundles that use it need `"hooks": 165`.
+
+API 166 adds a recipe ingredient of a mod's own kind. The ingredient entry that names a type in a namespace outside minecraft: reaches native_ingredient(kind, data, items) at load time. Fill items with the item ids the ingredient matches (item ids only: components are not checked; a match-time hook follows separately). Duplicates are removed keeping first-seen order. An unclaimed kind leaves the list empty and the recipe fails. The hook may be called more than once per recipe; the answer must be the same. Bundles that use it need "hooks": 166.
+
+API 167 adds lowering the frame rate limit: `native_framerate_limit(focused, minimized, in_world, limit)` is asked each frame with the limit Horizon is about to use (Max Framerate after the inactivity throttle and Battery Mode, 260 for unlimited), whether the window has focus, whether it is minimised and whether a world is open. A mod may lower `limit`, for example to throttle a window in the background as Dynamic FPS does; Horizon keeps the lower of its own limit and the mod's and ignores values below 1. Bundles that use it need `"hooks": 167`.
+
+API 168 adds a player swapping their main and off hand items: `native_player_swap_hands(player, name, cancel)` is heard before the swap (Bukkit's `PlayerSwapHandItemsEvent`; a swap from an open inventory is not heard), for a player of a server who is not a spectator, with their state swapped in. A mod sets `cancel` to keep the items where they are; the player's client gets its slots back. Bundles that use it need `"hooks": 168`.
+
+API 169 adds a player's food level changing: `native_food_level_changed(player, name, from, to, cancel)` is heard for a player of a server when a turn of theirs changed it (eating, hunger and saturation effects, exhaustion, starving; Bukkit's `FoodLevelChangeEvent`), before the new level reaches them. A mod changes `to` or sets `cancel` to leave the level at `from`. Bundles that use it need `"hooks": 169`.
+
+API 170 adds a server player teleported: `native_player_teleported(player, name, from, to, dimension)` is heard after `/tp` or `/teleport` has moved a player inside their level or into another one (NeoForge's `EntityTeleportEvent`), with their state swapped in. `from` and `to` are their feet before and after, `dimension` the level they are in now. It cannot stop the move; ender pearls, chorus fruit and a spectator's teleport menu are not heard yet, portals and respawns are not teleports here. Bundles that use it need `"hooks": 170`.
+
+API 171 adds the command tree a server sends a player: `native_player_commands_sent(player, name, names)` is heard when a player joins and when their permission level changes, with the root command names their client would get. For a player already on their state is swapped in. A mod removes names and that client's tree is sent without them (its chat box neither completes nor colours them); a typed command still runs, `native_player_command` stops it. Bundles that use it need `"hooks": 171`.
+
+API 172 adds a joining player the mods may refuse: `native_player_login(player, name, cancel, reason)` is heard once for each player a server has accepted (name, whitelist, bans and player limit checked), before their saved state is loaded and before they are placed in a level (NeoForge's `PlayerNegotiationEvent`). A mod sets `cancel` to disconnect them with `reason` ("Disconnected" when it stays unset); no join message and no `native_player_logged_in` follow. Bundles that use it need `"hooks": 172`.
+
+API 173 adds a server player's sprint: `native_player_sprint(player, name, sprinting)` is heard once each time a player's client starts or stops sprinting (the sprint key, a double tap forward, letting go) and the server's player has taken it, with their state swapped in. It only hears what the client asks: a sprint that ends by itself (knockback, hunger, a wall) is not reported. Bundles that use it need `"hooks": 173`.
+
+API 174 adds a resource pack answer: `native_resource_pack_status(player, name, status)` is heard when a server player's client answers a resource pack in play (`status` is `ServerboundResourcePackPacket.Action`'s number: 0 loaded, 1 declined, 2 failed download, 3 accepted, 4 downloaded, 5 invalid URL, 6 failed reload, 7 discarded), with their state swapped in. The pack offered during the configuration is answered before the player has joined and is not heard. Bundles that use it need `"hooks": 174`.
+
+API 175 adds a player taking an item from or putting one on an armor stand: `native_armor_stand_manipulate(player, name, stand_id, slot, cancel)` is heard after the stand's disabled-slot checks and before anything moves, with the stand's entity id and the slot the click reached (`mainhand`, `offhand`, `feet`, `legs`, `chest`, `head`), on a server, with the player's state swapped in. A mod sets `cancel` and neither the stand nor the player's hand changes. Bundles that use it need `"hooks": 175.
+
+API 176 adds a player opening one of the game's own menus: `native_container_opened(player, name, kind, pos, cancel)` is heard when a chest, furnace, crafting table, villager, anvil, lectern, horse inventory... is about to open (the job of NeoForge's `PlayerContainerEvent.Open`, but before the menu opens), after the checks that refuse it, with the menu type and the block's position, on a server, with the player's state swapped in. A mod sets `cancel` and nothing opens. Menus a mod opens (`native_open_menu`) are not heard. Bundles that use it need `"hooks": 176`.
+
+API 177 adds a creative player setting a slot: `native_creative_slot(player, name, slot, item, count, cancel)` is heard when the creative screen sets an inventory slot, or throws a stack out (a slot below 0), after the packet passed vanilla's checks and before the slot changes, on a server, with the player's state swapped in. A mod sets `cancel` and the packet is ignored. Bundles that use it need `"hooks": 177`.
+
+API 178 adds a boat or minecart moving: `native_vehicle_moved(player, kind, from, to)` is heard once a tick for each boat or minecart that carries a server player (and for one a server player left, for ten seconds after it stood still), with the vehicle's type and its position before and after (`VehicleMoveEvent`), on a server, with the rider's state swapped in. `player` is the rider's UUID, none for a vehicle that carries nobody now. It only hears. Bundles that use it need `"hooks": 178`.
+
+API 179 adds a server player emptying a bucket: `native_bucket_empty(player, name, pos, fluid, cancel)` is heard right before the fluid is placed, once the player may build there. A mod sets `cancel` and nothing is poured. The player's state is swapped in, so the helpers reach them. `native_fill_bucket` hears the same click without the player and the fluid; dispensers and cauldrons are not heard. Bundles that use it need `"hooks": 179`.
+
+API 180 adds a server player placing a hanging entity: `native_hanging_place(player, name, kind, pos, cancel)` is heard for an item frame, a glow item frame, a painting and a leash knot (a lead tied to a fence that has none), once it fits and before it is placed or the item used. A mod sets `cancel` and nothing is placed. The player's state is swapped in, so `native_tell` answers them. Bundles that use it need `"hooks": 180`.
+
+API 181 adds TNT about to be primed: `native_tnt_primed(player, pos, cancel)` is heard before a flint and steel, a fire charge, fire, a redstone signal, an arrow or a dispenser lights the TNT at `pos`, with the player whose click lit it (None when no player did). A mod sets `cancel` and it is not primed: the block stays, or is put back when fire or a signal had already taken it out. The clicking player's state is swapped in. TNT set off by a blast, a TNT minecart and a sulfur cube are not asked. Bundles that use it need `"hooks": 181`.
+
+API 182 adds a totem saving a player: `native_player_totem(player, name)` is heard for a server player whose hurt would have killed them and whose totem fired (`LivingEntity.checkTotemDeathProtection`, Bukkit's `EntityResurrectEvent`), just before the totem is used up. Listen only. The player's state is swapped in. Bundles that use it need `"hooks": 182`.
+
+API 183 adds `native_anvil_damaged(dimension, pos, from, to)` runs after an anvil at `pos` changes from `from` to `to`; `to` is air when it broke. Bundles need "hooks": 183.
+
+API 184 adds `native_beacon_state_change(dimension, pos, active)` is called after the beacon at `pos` gains or loses its complete beam pyramid; `active` says whether it is active now. Bundles need "hooks": 184.
+
+API 185 adds A bell is about to ring: `native_bell_ring(dimension, player, pos, cancel)` is asked before the bell event and sound. Set `cancel` to stop the ring and its raider reveal. `player` is the acting server player when available. Bundles need "hooks": 185.
+
+API 186 adds `native_block_break_progress_update(player, name, pos, progress)` is called when a guest's crack animation at `pos` reaches a new stage from 0 through 9. Bundles need "hooks": 186.
+
+API 187 adds Fire about to burn a block: `native_block_burn(dimension, pos, cancel)` is heard when fire's burnout check is about to remove the block at `pos`. Set `cancel` to keep it. Bundles need "hooks": 187.
+
+API 188 adds A campfire finishes cooking `item` into `result` at `pos`, before dropping the result. Bundles need "hooks": 188.
+
+API 189 adds A dispenser equips `item` on the first eligible player, mob or armor stand in front of its block at `pos`, after the item is consumed and the equip sound and game event are applied. `target` identifies the kind of entity equipped. Bundles need "hooks": 189.
+
+API 190 adds A block with a vanilla experience drop is about to award its points at `pos`; `block` is its identifier. Change `experience` to adjust the amount before the orbs are awarded. Bundles need "hooks": 190.
+
+API 191 adds `native_block_fade(dimension, pos, from, to, cancel)` runs when ice or snow melts, or coral dies. `from` and `to` are block state IDs. Set `cancel` to keep the old block. Bundles need "hooks": 191.
+
+API 192 adds `native_block_failed_dispense(dimension, pos, item)` is called when a dispenser at `pos` fails to dispense `item`. Bundles need "hooks": 192.
+
+API 193 adds `native_block_form(dimension, pos, from, to, cancel)` runs when precipitation is about to place ice or snow, or add a snow layer at `pos`. `from` and `to` are block state IDs. Set `cancel` to keep the old state. Bundles need "hooks": 193.
+
+API 194 adds Fire about to be placed: `native_block_ignite(dimension, player, pos, cause, cancel)` is heard for fire spread, lava, lightning and dispenser flint-and-steel. Set `cancel` to leave the position unchanged. Direct player flint-and-steel/fire-charge placement is not covered. Bundles need "hooks": 194.
+
+API 195 adds `native_block_lock_check(player, name, pos, locked)` runs when a guest checks the container at `pos`; `locked` starts with vanilla's result and may be changed. The guest's state is not swapped in. Bundles need "hooks": 195.
+
+API 196 adds A sculk sensor, calibrated sensor or shrieker received vibration event `event` at `pos`; `block` is its identifier. Set `cancel` to suppress the block's response. Bundles need "hooks": 196.
+
+API 197 adds A dispenser sheared entity `entity` of kind `kind` at the block in front of the dispenser at `pos`, after the shearing effects. Bundles need "hooks": 197.
+
+API 198 adds A brewing stand finished brewing: `native_brewing_complete(pos)` is heard after the bottles at `pos` received their brewed contents. Server-side. Bundles need "hooks": 198.
+
+API 199 adds A brewing stand consumed fuel: `native_brewing_fuel(pos, fuel)` is heard after the stand at `pos` consumed the item `fuel` and gained brewing fuel. Server-side. Bundles need "hooks": 199.
+
+API 200 adds A brewing stand starts brewing after it consumes fuel and sets its timer. Bundles need "hooks": 200.
+
+API 201 adds A system broadcast line is about to be logged and sent to every player: `native_broadcast_message(line, cancel)` lets a mod rewrite it or set `cancel` to drop it. Bundles need "hooks": 201.
+
+API 202 adds An item was placed on a campfire and began cooking. Bundles need "hooks": 202.
+
+API 203 adds A cauldron's fill level is about to change: `native_cauldron_level_changed(dimension, player, pos, from_level, to_level, reason, cancel)` is asked for rain, snow, dripstone and extinguishing. Set `cancel` to leave it as it was. `from_level` and `to_level` use 0 for empty and 1 to 3 for filled levels. `player` is the acting server player when available. Bucket, bottle and dyeing interactions are not covered yet. Bundles need "hooks": 203.
+
+API 204 adds A player adds a compostable item to a composter at `pos`; the layer has been applied. Bundles need "hooks": 204.
+
+API 205 adds A crafter at `pos` completed `recipe`; item consumption and output handling have finished. Bundles need "hooks": 205.
+
+API 206 adds A player used an item in `minecraft:creeper_igniters` on a creeper, after it entered its ignited state. Bundles need "hooks": 206.
+
+API 207 adds Lightning struck a creeper and set its charged state; the hook reports the creeper id and strike position. Bundles need "hooks": 207.
+
+API 208 adds The first Ender Dragon fight is about to place its egg at `pos`: `native_dragon_egg_form(dimension, pos, cancel)` runs on `GameLevel`. Set `cancel` to leave the block unchanged. Bundles need "hooks": 208.
+
+API 209 adds A player applied an enchantment: `native_enchant_item(player, name, pos, item, levels)` is heard after the player at `pos` applied it, with the finished `item` and levels charged. The guest's state is not swapped in. Bundles need "hooks": 209.
+
+API 210 adds Saved entity records for a chunk finished loading into the server world: `native_entities_load(dimension, chunk, count)` reports the dimension, chunk coordinates and number of records read. Bundles need "hooks": 210.
+
+API 211 adds Entities in a chunk left the active world and were queued for saving: `native_entities_unload(dimension, chunk, count)` reports the dimension, chunk coordinates and number of records. Bundles need "hooks": 211.
+
+API 212 adds A zombie or raider finished breaking the door at `pos`; the mob id and entity type are reported after the door is removed. Bundles need "hooks": 212.
+
+API 213 adds Two mobs completed a breeding action: `native_entity_breed(parent, partner, child)` reports both parents and the baby id when one was created; egg laying has no child id. Bundles need "hooks": 213.
+
+API 214 adds A mob changed the block at `pos`; the hook reports the mob id and kind, and the old and new block names after the new state was applied. Bundles need "hooks": 214.
+
+API 215 adds A bee was stored in a beehive or bee nest at `pos`; the hook reports the bee id and kind and the block name, after the bee was removed from the level. Bundles need "hooks": 215.
+
+API 216 adds A mob entered love mode after a player interaction; the hook reports its entity id, kind and feeder UUID when known. Bundles need "hooks": 216.
+
+API 217 adds A server entity finished its portal wait and is beginning to leave through the portal block at `pos`: `native_entity_portal(dimension, entity, pos)` reports the entity's network id, source dimension and entry block. The transfer destination follows the existing portal rules. Bundles need "hooks": 217.
+
+API 218 adds A guest player's synchronized pose changed: `native_entity_pose_change(player, name, from, to)` reports the old and new pose names. Bundles need "hooks": 218.
+
+API 219 adds A player fired an arrow from a bow or crossbow: `native_entity_shoot_bow(player, name, projectile, force)` reports the arrow id and shooting power after the completed shot. Bundles need "hooks": 219.
+
+API 220 adds A mob became tamed after its owner and persistence were set: `native_entity_tame(entity, kind, owner)` reports the entity type and owner UUID when known. Bundles need "hooks": 220.
+
+API 221 adds A server entity completed a same-level teleport command: `native_entity_teleport(dimension, entity, from, to)` reports its network id and the coordinates before and after the move. Bundles need "hooks": 221.
+
+API 222 adds A guest player's fall flying state changed after the server accepted or ended a glide: `native_entity_toggle_glide(player, name, gliding)`. Bundles need "hooks": 222.
+
+API 223 adds A mob conversion completed through Horizon’s shared `Mob.convertTo` path; the hook reports the removed entity and its replacement ids and kinds. Bundles need "hooks": 223.
+
+API 224 adds An experience bottle broke, after its water splash and experience orbs were created; the hook reports the impact position and awarded experience. Bundles need "hooks": 224.
+
+API 225 adds A firework rocket completed its damage, particles and explosion effects; the hook reports its entity id, position and number of burst shapes. Bundles need "hooks": 225.
+
+API 226 adds `native_fluid_level_change(dimension, pos, fluid, from, to, cancel)` is called when flowing water or lava at `pos` is about to change level; levels run from 0 through 8. Set `cancel` to keep the old level. Bundles need "hooks": 226.
+
+API 227 adds A furnace consumes `fuel` and begins burning at `pos` (`native_furnace_burn`). Bundles need "hooks": 227.
+
+API 228 adds A server player takes `count` items of `item` from a furnace at `pos` (`native_furnace_extract`). Bundles need "hooks": 228.
+
+API 229 adds A furnace finishes smelting `item` into `result` at `pos` (`native_furnace_smelt`). Bundles need "hooks": 229.
+
+API 230 adds A furnace begins cooking `item` at `pos` when its cooking timer first advances (`native_furnace_start_smelt`). Bundles need "hooks": 230.
+
+API 231 adds A generic world game event fired at `pos`: `native_game_event(event, pos)` reports its registered event id and position, whether or not vibration listeners are nearby. Bundles need "hooks": 231.
+
+API 232 adds A hopper is about to pick up a dropped stack: `native_hopper_pickup_item(dimension, pos, item, count, cancel)` names its position and stack. Set `cancel` to leave the item in the world. Bundles need "hooks": 232.
+
+API 233 adds `native_inventory_block_start(player, name, pos, cancel)` runs before a guest opens an inventory supplied by a block at `pos`. Set `cancel` to leave it closed; the guest's state is not swapped in. Bundles need "hooks": 233.
+
+API 234 adds A dropped item entity was successfully added to the server level: `native_item_spawn(entity, item, count, pos)` reports its entity id, item type, stack count and spawn position. Bundles need "hooks": 234.
+
+API 235 adds `native_leaves_decay(dimension, pos, cancel)` is called when a non-persistent leaf block at distance 7 is about to decay. Set `cancel` to keep it. Bundles need "hooks": 235.
+
+API 236 adds A weather, Channeling-trident or `/summon` lightning bolt is about to be created: `native_lightning_strike(player, pos, cause, cancel)`. Set `cancel` to prevent the bolt and its effects. Bundles need "hooks": 236.
+
+API 237 adds `native_moisture_change(dimension, pos, from, to, cancel)` runs when farmland at `pos` is about to change moisture from `from` to `to`. Set `cancel` to keep the old moisture. Bundles need "hooks": 237.
+
+API 238 adds A server player put a plant into a flower pot: `native_player_flower_pot_manipulate(player, name, pos, plant)` is heard after the potted state is stored and the item consumed. Bundles need "hooks": 238.
+
+API 239 adds A server player inserted a book into a lectern: `native_player_insert_lectern_book(player, name, pos, book)` is heard after the block entity and inventory changed. Bundles need "hooks": 239.
+
+API 240 adds A server player changed an item frame: `native_player_item_frame_change(player, name, entity_id, action, item, rotation)` is heard after its contents and comparator output changed. Bundles need "hooks": 240.
+
+API 241 adds An orb repaired an item through Mending: `native_player_item_mend(player, name, item, repair, experience)` is heard after its damage changed. Bundles need "hooks": 241.
+
+API 242 adds A server player changed a lectern page: `native_player_lectern_page_change(player, name, pos, page)` is heard after the page and redstone pulse changed. Bundles need "hooks": 242.
+
+API 243 adds A server player took a book from a lectern: `native_player_take_lectern_book(player, name, pos, book)` is heard after its block entity changed. Bundles need "hooks": 243.
+
+API 244 adds `native_spawn_change(pos, angle)` is told after `/setworldspawn` moves the world's spawn point, with its block position and rotation. Bundles need "hooks": 244.
+
+API 245 adds `native_world_border_bounds_changed()` is told after `/worldborder set` or `/worldborder add` changes the border size or starts its timed size change. It hears successful commands only. Bundles need "hooks": 245.
+
+API 246 adds `native_world_border_center_changed()` is told after `/worldborder center` moves the border center. It hears successful commands only. Bundles need "hooks": 246.
+
+API 247 adds `native_world_game_rule_change(player, name, rule, value)` is told after an operator changes a world game rule through the server's game rule screen, with its final value. Bundles need "hooks": 247.
+
+API 248 adds A note block is about to sound: `native_note_play(dimension, player, pos, instrument, note, cancel)` is asked when punched, used or powered. Set `cancel` to silence it; a canceled tuning interaction leaves the note unchanged. `player` is the acting server player when available. Bundles need "hooks": 248.
+
+API 249 adds A server player completed an advancement after progress was recorded; `advancement` is its identifier, such as `minecraft:story/mine_stone`. Helpers looking up the guest through `self.lan` may find nothing during packet handling. Bundles need "hooks": 249.
+
+API 250 adds A server player's main-hand punch swing and attack-strength reset have happened: `native_player_attack_cooldown_reset(player, name)`. Helpers looking up the player through `self.lan` may find nothing during a guest packet. Bundles need "hooks": 250.
+
+API 251 adds A server player about to enter a bed after its sleep checks pass: `native_player_bed_enter(player, name, pos, cancel)` hears the bed head position. Set `cancel` to keep the player out. The player's state is swapped in, though helpers that look them up through `self.lan` may find nothing during a guest packet. Bundles need "hooks": 251.
+
+API 252 adds A server player woke or stood up from the bed at `pos`, after their sleeping state changed. Helpers looking up the guest through `self.lan` may find nothing during packet handling. Bundles need "hooks": 252.
+
+API 253 adds A server player caught a bucketable mob: `native_player_bucket_entity(player, name, entity_id, entity)` runs after the mob was removed and the filled bucket was put in the player's hand or inventory. `entity` is the mob species id. Bundles need "hooks": 253.
+
+API 254 adds A server player's selected beacon effects were stored: `native_player_change_beacon_effect(player, name, pos, primary, secondary)`. Empty effect ids mean none is selected. Bundles need "hooks": 254.
+
+API 255 adds A server player's client option changed their dominant hand; `native_player_change_main_hand(player, name, left)` reports whether the left hand is dominant. Bundles need "hooks": 255.
+
+API 256 adds A server player counts as deeply asleep after 100 ticks in a bed: `native_player_deep_sleep(player, name)` fires once at that point. Helpers looking the guest up through `self.lan` may find nothing during its tick. Bundles need "hooks": 256.
+
+API 257 adds A server player book-and-quill packet is about to be applied. `pages` is its page count and `signing` says it has a title; set `cancel` to drop it. Helpers looking up the guest through `self.lan` may find nothing during packet handling. Bundles need "hooks": 257.
+
+API 258 adds A server player threw an egg after its projectile was launched and its use applied. Bundles need "hooks": 258.
+
+API 259 adds A server player used a firework rocket to boost while gliding, after the rocket was launched and consumed. Bundles need "hooks": 259.
+
+API 260 adds A server player's experience points from an orb pickup: `native_player_exp_change(player, name, amount)` is called after mending has taken its share and before the remaining points are added. Change `amount` to change the points added; negative values become zero. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled. Command experience changes use another path and are not heard. Bundles need "hooks": 260.
+
+API 261 adds A server player's XP orb pickup cooldown changed, after its new value is stored (`native_player_exp_cooldown_change(player, name, ticks)`). Bundles need "hooks": 261.
+
+API 262 adds An item cooldown about to start for a server player: `native_player_item_cooldown(player, name, item, ticks, cancel)` is called for use cooldowns and for a shield disabled by a hit. `item` is the item id and `ticks` its duration. Set `cancel` to skip the cooldown; shield disable still stops the use and plays its configured sound. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled. Bundles need "hooks": 262.
+
+API 263 adds A server player selected a different hotbar slot: `native_player_item_held(player, name, from_slot, to_slot, cancel)` is called after the slot range check and before the selected slot changes. Set `cancel` to keep the old slot; the client is sent that slot again. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled. Bundles need "hooks": 263.
+
+API 264 adds A server player changed their client language option (`native_player_locale_change(player, name, locale)`), after the new locale is stored. Bundles need "hooks": 264.
+
+API 265 adds A server player selected loom pattern button `pattern`, after the menu accepted it: `native_player_loom_pattern_select(player, name, pattern)`. Bundles need "hooks": 265.
+
+API 266 adds A server player filled an empty map: `native_player_map_filled(player, name, map_id)` fires after the filled map and its saved map data were created. Guest lookup helpers may find nothing during packet handling. Bundles need "hooks": 266.
+
+API 267 adds A server player named a mob with a name tag, after its name and persistence changed: `native_player_name_entity(player, name, entity_id, entity_name)`. Bundles need "hooks": 267.
+
+API 268 adds A server player opened a sign editor at `pos`, for the front or back side, after the editor state was made: `native_player_open_sign(player, name, pos, front)`. Bundles need "hooks": 268.
+
+API 269 adds A server player's middle-click pick resolved a block or entity's pick stack and is about to put it in the hotbar: `native_player_pick_item(player, name, from_entity, pos, entity_id, cancel)` receives block coordinates and entity_id zero for a block, or zero coordinates and the entity network id for an entity. A pick with no result is not heard. Set `cancel` to leave the inventory and client unchanged. The player's state is swapped in, though helpers that look them up through `self.lan` may find nothing while a guest packet is handled. Bundles need "hooks": 269.
+
+API 270 adds A server player picked up an arrow after it was removed and its pickup was applied: `native_player_pickup_arrow(player, name, entity_id, item)` gives the pickup item id. Bundles need "hooks": 270.
+
+API 271 adds A server player about to travel through a Nether portal, End portal or End gateway: `native_player_portal(player, name, from_dimension, to_dimension, cause, cancel)` supplies the source and target dimension ids; `cause` is `nether_portal`, `end_portal` or `end_gateway`. Set `cancel` to leave the player where they are. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest tick is handled. Bundles need "hooks": 271.
+
+API 272 adds A server player requests a known recipe be placed in their crafting grid through the recipe book (`native_player_recipe_book_click(player, name, recipe, all)`). Bundles need "hooks": 272.
+
+API 273 adds A recipe about to become known to a server player: `native_player_recipe_discovered(player, name, recipe, cancel)` is heard for advancement rewards, knowledge books and `/recipe give`. Set `cancel` to keep it locked; the client is sent the matching removal. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled. Bundles need "hooks": 273.
+
+API 274 adds A server player launches with a riptide trident: `native_player_riptide(player, name)` fires after the velocity and spin are applied. The player's state is swapped in; helpers that look them up through `self.lan` may find nothing during a guest packet. Bundles need "hooks": 274.
+
+API 275 adds A server player about to shear a sheep, mooshroom, snow golem or bogged. `off_hand` says which hand holds the shears; set `cancel` to leave the mob and tool unchanged. Bundles need "hooks": 275.
+
+API 276 adds A server player's shield was disabled by a blocked melee hit: `native_player_shield_disable(player, name, ticks)` fires immediately before the shield cooldown is set. Bundles need "hooks": 276.
+
+API 277 adds A server player's respawn point about to change: `native_player_spawn_point_set(player, name, dimension, pos, cause, cancel)` is heard for `bed`, `respawn_anchor`, `command` and `death_reset`; `pos` is the block position. Set `cancel` to keep the old point. A canceled `death_reset` keeps the old point even if its bed or anchor is gone. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled. Bundles need "hooks": 277.
+
+API 278 adds A server player selected stonecutter recipe button `recipe`, after the menu accepted it: `native_player_stonecutter_recipe_select(player, name, recipe)`. Bundles need "hooks": 278.
+
+API 279 adds A spectator's camera returned to their own player after they stopped watching an entity: `native_player_stop_spectating_entity(player, name, entity_id)` gives the former target. Bundles need "hooks": 279.
+
+API 280 adds A server player swapped their main hand with an equipment slot: `native_player_swap_with_equipment_slot(player, name, slot)` fires after both hands changed; `slot` is currently `offhand`. Guest lookup helpers may find nothing during packet handling. Bundles need "hooks": 280.
+
+API 281 adds A player is about to travel through an End gateway (`native_player_teleport_end_gateway(player, name, gateway, cancel)`). Set `cancel` to leave them at the entrance without starting the gateway cooldown. Bundles need "hooks": 281.
+
+API 282 adds A server player used a golden dandelion on an ageable mob: `native_player_toggle_entity_age_lock(player, name, entity_id, locked)` fires after the lock and item use changed. Bundles need "hooks": 282.
+
+API 283 adds A server player completed a villager or wandering trader trade, after the merchant menu applied the trade: `native_player_trade(player, name, entity_id)` gives the merchant's network id. Bundles need "hooks": 283.
+
+API 284 adds A server player's action removed an entity's leash: `native_player_unleash_entity(player, name, entity_id)` fires after the leash state is cleared. Bundles need "hooks": 284.
+
+API 285 adds The server synced changed motion to a player: `native_player_velocity(player, name, velocity)` fires with velocity in blocks per tick. Guest lookup helpers may find nothing during packet handling. Bundles need "hooks": 285.
+
+API 286 adds `native_portal_create(dimension, pos)` is told after a Nether portal for dimension travel or the End arrival platform has been built, with its dimension and lower corner or platform origin. Bundles need "hooks": 286.
+
+API 287 adds A thrown splash or lingering potion finished applying its hit effects; the hook reports the potion item and impact position. Experience bottles are excluded. Bundles need "hooks": 287.
+
+API 288 adds An anvil result was prepared: `native_prepare_anvil(player, name, pos, result, cost)` is called for a server player at `pos`; change the result or level cost before it is sent to the menu. Guest state is not swapped in. Bundles need "hooks": 288.
+
+API 289 adds A grindstone result was prepared: `native_prepare_grindstone(player, name, pos, result)` is called for a server player at `pos`; change the result before it is sent to the menu. Guest state is not swapped in. Bundles need "hooks": 289.
+
+API 290 adds A crafting-grid result was prepared: `native_prepare_item_craft(player, name, pos, result)` is called for the inventory grid (None) or a table at `pos`; change the result before it is sent to the menu. Guest state is not swapped in. Bundles need "hooks": 290.
+
+API 291 adds Enchanting offers were calculated: `native_prepare_item_enchant(player, name, pos, costs)` is called for a server player at `pos`; change the three costs before they are sent to the menu. Guest state is not swapped in. Bundles need "hooks": 291.
+
+API 292 adds A smithing result was prepared: `native_prepare_smithing(player, name, pos, result)` is called for a server player at `pos`; change the result before it is sent to the menu. Guest state is not swapped in. Bundles need "hooks": 292.
+
+API 293 adds A projectile was added to the server level: `native_projectile_launch(player, name, entity, kind)` reports the entity id and type, plus the player launcher when there is one. Bundles need "hooks": 293.
+
+API 294 adds A raid wave has spawned at its position, with its raid id, wave number and raider count (riders' mounts not counted). Bundles need "hooks": 294.
+
+API 295 adds A raid is triggered or reaches `victory`, `loss` or `stopped`: `native_raid_state_change(raid, pos, state)` reports its id, center and new state. Bundles need "hooks": 295.
+
+API 296 adds `native_sculk_bloom(dimension, pos)` is called after a sculk catalyst at `pos` takes experience and enters the blooming state. Bundles need "hooks": 296.
+
+API 297 adds `native_sponge_absorb(dimension, pos)` is called after a sponge at `pos` has absorbed water and become wet. Bundles need "hooks": 297.
+
+API 298 adds A guest's server command completion request was evaluated: `native_tab_complete(player, name, command, range, suggestions)` lets a mod add or filter the suggestions; `range` is the replaced byte range. The guest's state is not swapped in, so helpers that look through `self.lan` may find nothing while its packet is handled. Bundles need "hooks": 298.
+
+API 299 adds `native_target_hit(dimension, pos, strength)` is called after a projectile hits the target block at `pos` and it takes the reported redstone output strength. Bundles need "hooks": 299.
+
+API 300 adds The server's `/weather` command is about to change thunder: `native_thunder_change(dimension, thundering, cancel)`. Set `cancel` and the previous thunder state and timer remain. Bundles need "hooks": 300.
+
+API 301 adds The overworld clock is about to jump after sleep or a `/time` command: `native_time_skip(dimension, from, to, cause, cancel)`. Set `cancel` to keep the old time. Bundles need "hooks": 301.
+
+API 302 adds A player selected a trade: `native_trade_select(player, name, villager, index)` is heard after the trading menu updates; `villager` is the entity id when known. The player's state is not swapped in. Bundles need "hooks": 302.
+
+API 303 adds `native_vault_change_state(dimension, pos, state)` is called after a vault at `pos` changes to `state` (`inactive`, `active`, `unlocking`, or `ejecting`). Bundles need "hooks": 303.
+
+API 304 adds The server's `/weather` command is about to change its rain and thunder parameters: `native_weather_change(dimension, raining, thundering, cancel)`. Set `cancel` and the prior weather and timers remain. Bundles need "hooks": 304.
+
+API 305 adds The dedicated server's whitelist changed state: `native_whitelist_state_update(enabled)` reports its final on/off state, after `/whitelist on` or `/whitelist off` from a player or console. Bundles need "hooks": 305.
+
+API 306 adds The server completed a world save cycle: `native_world_saved(wait)` reports whether chunk writes were flushed before returning. Bundles need "hooks": 306.
+
+API 307 adds energy held by items (`Capabilities.Energy.ITEM`). `native_item_energy_buffer(item, buffer)` gives a mod item a buffer as `SimpleEnergyHandler` is built: its capacity and the most one insert and one extract move (a capacity under 1 leaves it out; the limits are clamped to 0..=capacity). The amount lives in the stack's `minecraft:custom_data` as the int `horizon_energy`, so it is saved and sent with the stack; an empty item carries nothing, so it stacks with a new one. `native_item_energy(stack)` reads one item of a stack (amount, capacity, limits); `native_item_energy_insert(stack, amount)` and `native_item_energy_extract(stack, amount)` answer the amount one item takes or gives and the single item it becomes, as `EnergyHandler.insert`/`extract` through an `ItemAccess`; the stack given is not changed, so the caller shrinks it by one and hands out the result, or leaves the result unused to simulate. They work on any side. Bundles need "hooks": 307.
+
+API 308 adds the time players wake at after sleeping, as NeoForge's `SleepFinishedTimeEvent`: `native_sleep_finished_time(dimension, current, new_time)` runs on the server once enough players have slept and the `advance_time` rule is on, before the clock moves. `new_time` comes in as the next morning and a mod may change it; a time before `current` is refused. `native_time_skip` then hears the jump to the chosen time. Bundles need "hooks": 308.
+
+API 309 adds a shift-click in a mod container's menu routed by the mod, `AbstractContainerMenu.quickMoveStack`: `native_menu_quick_move(pos, entity, container_slots, slot, stack, handled)` runs on the server before the game's own routing, for a mod container on a vanilla menu type or its own menu type. The mod takes what it moves out of `stack` and sets `handled`; the slot keeps the rest and the client gets the menu again. Bundles need "hooks": 309.
+
+API 310 adds a server player's trade with a villager or a wandering trader, as NeoForge's `TradeWithVillagerEvent`: `native_trade_with_villager(merchant, kind, offer)` is heard once per trade made, after its statistic and `villager_trade` trigger, with the trader's entity id and type and the `MerchantOffer` as it is after the trade. Listen only; the player's state is swapped in. Bundles need "hooks": 310.
+
+API 311 adds a server player's `teleport_randomly` consume effect (chorus fruit) is about to try a spot: `native_chorus_fruit_teleport(player, name, from, target, cancel)`, once per attempt (up to 16). A mod may move `target`; the game still looks down from it for ground to land on. `cancel` ends the effect with no teleport and no more attempts. Foxes are not heard. Bundles need "hooks": 311.
+
+API 312 adds a server player's ender pearl landed: `native_ender_pearl_teleport(player, name, pearl, from, target, damage, cancel)` runs before the endermite roll and the teleport. A mod may move `target` or change the fall `damage` (5; 0 or less is none); `cancel` keeps the player where they are, without the endermite roll, damage or sound, and the pearl is used up either way. Bundles need "hooks": 312.
+
+API 313 adds drawing an item stack on a screen: `native_item_stack(batch, stack, at, size)` draws its model, glint, damage bar, cooldown and mod decorations, but not its count. It draws nothing and returns false for an unknown item or an empty stack (air, or a count of 0). Bundles need "hooks": 313.
+
+API 314 adds hiding a player (a vanish): `native_hide_player(uuid, level)` hides that player, from the next tick, from the players below permission `level` (None shows them again): they leave those players' Tab list and world (their clients stop tracking them, as they do a spectator) and those players don't read them joining or leaving. Players of `level` or more still see them; a player made an operator sees them again. It is kept by UUID, for a player who is off too, until a mod sets it again or the server stops. Server only; false on a client. Bundles need "hooks": 314.
+
+API 315 adds a player's item breaking: `native_player_destroy_item(player, name, item, slot)` is heard for a server player whose tool, shield, rod or armour piece ran out of durability (`LivingEntity.onEquippedItemBroken`, Bukkit's `PlayerItemBreakEvent`), with the item that broke and the slot it was in (`mainhand`, `offhand`, `head`, `chest`, `legs`, `feet`, `body`, `saddle`); armour has a slot rather than a hand. `native_item_damaged` is the wear, this is only the break. Listen only. The player's state is swapped in. Not heard for a creative player or for the host of a LAN world. Bundles that use it need `"hooks": 315`.
+
+API 316 adds A player's damaging melee hit on a living target: `native_critical_hit(target_kind, vanilla_critical, critical, damage_multiplier)` may force or deny the critical hit and change its multiplier (1.5 for a vanilla crit, else 1.0); the sweep, sound and particles follow the decided result. Not fired for a dragon part or a hit that does no damage. Bundles need "hooks": 316.
+
+API 317 adds attachment reads that never insert the default: `AttachmentType::has` says whether a holder carries a value, saved or set,
+even before it decodes (NeoForge's `hasData`), and `AttachmentType::get_existing` returns `None` instead of the default
+(NeoForge's `getExistingData`). Neither adds anything to the holder's saved data. Bundles that use them need `"hooks": 317`.
+
+API 318 adds A player releases a bow: `native_arrow_loose(stack, has_ammo, charge, canceled)` may change held-tick `charge` or cancel the shot; negative charge also prevents it. Unlike `native_living_entity_use_item_stop`, it does not skip the whole item release; `native_entity_shoot_bow` reports the spawned arrow afterward with read-only force. Fires on the Game running the bow release, including LAN guests; a remote client's own release path, crossbows, and ArrowNockEvent are not covered. Bundles need "hooks": 318.
+
+API 319 adds an item frame or painting about to break: `native_hanging_break(player, kind, pos, cancel)` is heard before a server player's hit, a blast or the loss of its wall breaks an item frame, a glow item frame or a painting, with the hitting player (None for a blast or a lost wall). A mod sets `cancel` and it stays. The hitting player's state is swapped in. A hit that only takes a frame's item out, the game's own player and `/kill` are not asked. Bundles that use it need `"hooks": 319`.
+
+API 320 adds A criterion of a server player's advancement was granted or revoked after its progress changed and before any completion rewards, except the `minecraft:tick` criteria granted on a network player's first tick or a reload, which are heard after that tick's rewards and packets; `advancement` is its identifier, such as `minecraft:story/mine_stone`, `criterion` the criterion name and `granted` is false for a revoke. A grant or revoke that changes nothing is not heard. Helpers looking up the guest through `self.lan` may find nothing during packet handling. Bundles need "hooks": 320.
+
+API 321 adds A statistic about to be awarded to a server player: `native_player_stat_award(player, name, stat_type, stat, value, cancel)`, with `stat_type` such as `minecraft:mined` or `minecraft:custom`, `stat` such as `minecraft:stone` or `minecraft:walk_one_cm`, and `value` the amount added. Set `cancel` to award nothing: the count and its scoreboard criteria stay as they were. Helpers looking up the guest through `self.lan` may find nothing during packet handling. Bundles need "hooks": 321.
+
+API 322 adds a player's data copied to their new player: `native_player_clone(player, name, was_death)` is heard from `ServerPlayer.restoreFrom` once for each death respawn (`was_death` true) and for each exit from the End after the credits (`was_death` false), after the retained data is copied and before the new player is placed (NeoForge's `PlayerEvent.Clone`). The uuid stays the same, so `player` names both the old and the new player. It cannot change or stop anything; no player's state is swapped in. Bundles that use it need `"hooks": 322`.
+
+API 323 adds a player loaded from the world's save: `native_player_load_from_file(player, name, directory)` is heard once for each join (the owner of an integrated server too), after the player's `.dat` is read and applied and before they are placed in a level (NeoForge's `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`). `directory` is the world's player directory (`players/data`); a mod reads its own file there, named `<uuid>.<suffix>`. It cannot change or stop anything; no player's state is swapped in. Bundles that use it need `"hooks": 323`.
+
+API 324 adds a player saved to the world's store: `native_player_save_to_file(player, name, directory)` is heard once for each save of a placed player (when they leave or the world closes, when the dedicated server saves everyone, and for an integrated server's owner when the world saves them; LAN guests are not heard on integrated autosaves) after their data is written (NeoForge's `PlayerEvent.SaveToFile`, `PlayerList.save`). `directory` is the world's player directory (`players/data`); write your own file there, named `<uuid>.<suffix>`, never the player's `.dat`. The player may be leaving, so no player's state is swapped in. It cannot change or stop anything. Bundles that use it need `"hooks": 324`.
+
+API 325 adds `native_item_expire(entity, stack, extra_life)`, a dropped item reaching its lifetime on the server (NeoForge's `ItemExpireEvent`, vanilla `ItemEntity.tick`): every mod may set or add to `extra_life`, in ticks from zero; a positive total keeps the item that much longer, zero or less lets it expire. Extensions are capped at 32766 ticks. Bundles need "hooks": 325.
+
+API 326 adds the title's own screens to the screen hooks. `NativeScreenView.id` gains one id per title state (`title`, `world_select`, `world_create`, `world_create_flat`, `world_create_buffet`, `world_edit`, `world_backup`, `world_backup_confirm`, `world_optimize_confirm`, `world_optimize`, `low_disk_space`, `world_delete`, `world_recover`, `world_recovered`, `error`, `multiplayer`, `add_server`, `edit_server`, `direct_connect`, `server_delete`, `friends_join`, `disconnected`, `multiplayer_warning`, `onboarding`, `ban_notice`), with no `menu`, no `title` and no `slots`, and the whole window as `rect`. `native_screen_render_post` fires after the title draws its screen (before its toasts), and the `_pre` input hooks — mouse buttons, drag, wheel, key press and release, character typed — fire on it and can cancel it as on any screen, so a mod draws its own button or browser over Create New World and takes the clicks. A dialog, a prompt or a server's pack prompt over the title keeps them away, and typing still goes to the title's own boxes (the key's text stays on the key there, as on Options, so `native_screen_char_typed_pre` does not fire from the keyboard on the title's own screens; the control socket's `type` now types into them too). `native_instance_dir()` is the instance folder, where `options.txt`, `saves/`, `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are; a world's `datapacks/` is in that world's folder. Bundles that use them need `"hooks": 326`.
+
+API 327 adds A player took an anvil's result: `native_anvil_craft_post(player, name, pos, craft)` (NeoForge's `AnvilCraftEvent.Post`) is heard after the levels, the inputs and the anvil wear are done, so a broken anvil is already air. `craft` holds the inputs and the result as they were before. Not heard when `native_anvil_craft_pre` cancelled. Bundles need "hooks": 327.
+
+API 328 adds A player took an anvil's result: `native_anvil_craft_pre(player, name, pos, craft, cancel)` (NeoForge's `AnvilCraftEvent.Pre`) runs before the levels are charged, the inputs used up and the anvil worn. `craft` holds the left and right inputs and the result as they were before. Set `cancel` to refuse the take and skip the matching `native_anvil_craft_post`: the result stays in its slot and the inputs, levels, inventory and cursor are as before the click. Bundles need "hooks": 328.
+
+API 329 adds A server player stopped digging `pos` before the block broke: `native_block_damage_abort(player, name, pos)` is heard after the server clears the dig and sends the block state back to the client. The player's state is not swapped in. Bundles need "hooks": 329.
+
+API 330 adds A mob is about to drop `count` of `item` at `pos`: `native_entity_drop_item(entity, item, count, pos)`. Bundles need "hooks": 330.
+
+API 331 adds A mob's leash was removed, before any lead drop is handled: `native_entity_unleash(entity, kind)`. Bundles need "hooks": 331.
+
+API 332 adds A server explosion is about to begin at `center` with `radius` (`native_explosion_prime`); the hook is listen-only and the explosion proceeds as usual. Bundles need "hooks": 332.
+
+API 333 adds A hopper selects a container while searching for items: `native_hopper_inventory_search(hopper, container, entity)` identifies the hopper and the selected block container or container entity. Bundles need "hooks": 333.
+
+API 334 adds A hopper is about to move one item between containers: `native_inventory_move_item(source, destination, item, cancel)` runs before the source slot is changed, a composter's bone meal included; a chest boat or minecart is reported at the block it is in. Set `cancel` to keep the item in its source slot. Bundles need "hooks": 334.
+
+API 335 adds A dropped item entity reached its 6000-tick lifetime and is about to be removed: `native_item_despawn(entity, item, count, pos)`. Bundles need "hooks": 335.
+
+API 336 adds A boat or minecart joined the level at `pos`, after a player or dispenser placed it: `native_vehicle_create(kind, pos)` is listen-only. Bundles need "hooks": 336.
+
+API 337 adds A player is about to damage a boat or minecart: `native_vehicle_damage(kind, damage, cancel)` may change the damage or cancel it before the vehicle's damage and wobble change; the attack still completes. Bundles need "hooks": 337.
+
+API 338 adds A boat or minecart is about to be destroyed at `pos`: `native_vehicle_destroy(kind, pos)` is heard just before it is removed; TNT minecarts that prime instead are not heard. Bundles need "hooks": 338.
+
+API 339 adds A server player earned one criterion of an advancement, after its progress was recorded: `native_player_advancement_criterion_grant(player, name, advancement, criterion)`. Bundles need "hooks": 339.
+
+API 340 adds A guest's arm swing: `native_player_arm_swing(player, name, hand)` is called after the server handles the guest's `Punch` packet and resets attack strength. The current packet swings `mainhand`; the guest's state is swapped in. Bundles need "hooks": 340.
+
+API 341 adds A server player selected the item at `index` in a bundle in menu `slot`: `native_player_bundle_item_select(player, name, slot, index)`. Bundles need "hooks": 341.
+
+API 342 adds A server player's client finished loading the level around them after joining, respawning or changing dimension: `native_player_client_loaded_world(player, name)`. Bundles need "hooks": 342.
+
+API 343 adds A guest's player input flags: `native_player_input(player, name, flags)` is called after a loaded guest's `PlayerInput` packet is applied to the hub. `flags` is the packet's bit field; the guest's state is swapped in. Bundles need "hooks": 343.
+
+API 344 adds A guest jumped: `native_player_jump(player, name)` is called after accepted movement made the server player jump from the ground, once the guest's movement simulation finished. The guest's state is swapped in. Bundles need "hooks": 344.
+
+API 345 adds A guest was kicked from the server: `native_player_kicked(player, name, reason)` is called after the hub records the rendered reason and sends the disconnect. The guest's state is swapped in. Bundles need "hooks": 345.
+
+API 346 adds A LAN guest launched a snowball, egg, ender pearl, potion or trident: `native_player_launch_projectile(player, name, item)` runs after the projectile is created. Bundles need "hooks": 346.
+
+API 347 adds A server player's experience level changed: `native_player_level_change(player, name, from, to)` is called after experience points or levels change their level, including orb points. The player's state is swapped in when they are a guest. Bundles need "hooks": 347.
+
+API 348 adds A server player released a drawn bow with `native_player_ready_arrow(player, name, arrow)`: the name of the selected projectile item. Bundles need "hooks": 348.
+
+API 349 adds A server player's recipe book open or filter setting changed: `native_player_recipe_book_settings_change(player, name, book, open, filtering)`, where `book` is its protocol id. Bundles need "hooks": 349.
+
+API 350 adds A server player released the use-item key before the item finished being used: `native_player_stop_using_item(player, name)`. Bundles need "hooks": 350.
+
+API 351 adds A guest's player input changed sneaking: `native_player_toggle_sneak(player, name, sneaking)` is called after the hub applies the new state, only when it changes. The guest's state is swapped in. Bundles need "hooks": 351.
+
+API 352 adds A hopper begins a transfer attempt: `native_prepare_hopper_transfer(pos)` runs after its cooldown and enabled checks, before it pushes or pulls items. Bundles need "hooks": 352.
+
+API 353 adds A vault is about to eject a loot item: `native_vault_loot(pos, item)` supplies the vault position and item identifier before it spawns. Bundles need "hooks": 353.
+
+API 354 adds A timed world border size change finished: `native_world_border_bounds_change_finish()` fires after the border reaches its final size. Bundles need "hooks": 354.
+
+API 355 adds `Game::native_mod_image(width, height, rgba)`: a mod's own RGBA image, uploaded into the HUD atlas slot `horizon/modimage` (1024 by 1024) and drawn with `native_sprite`, whose source rectangle crops and stretches it, so a map or a schematic view needs no texture of its own. The slot is reserved only while a native mod is loaded, so a game without mods pays none of its 4 MiB. False for an image that is not `width * height` pixels of four bytes, is larger than the slot, or when there is no slot. Each upload is a texture patch of the image, so send one when the image changed, not every frame.
+API 356 adds a living entity drowning (`native_living_drown`), with changeable drowning and damage, a read-only bubble count and cancellation. Bundles need "hooks": 356.
+
+API 357 adds a living entity's fall (`native_living_fall`), with changeable distance and multiplier and cancellation. Bundles need "hooks": 357.
+
+API 358 adds a living entity healing (`native_living_heal`), with a changeable amount and cancellation. Bundles need "hooks": 358.
+
+API 359 adds a living entity jumping (`native_living_jump`). Bundles need "hooks": 359.
 
 ## What the launcher does
 
@@ -1456,14 +1880,14 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `pearl` is the pearl's entity id, `from` their feet, `target` where the pearl started its last tick and `damage` the
   fall damage they then take (5). A mod may move `target` or change `damage` (0 or less: none). Canceling keeps the
   player where they are: no endermite roll, no teleport, no damage, no sound; the pearl is used up either way. Mobs'
-  pearls are not heard. Bundles need `"hooks": @API:ender_pearl_teleport@`.
+  pearls are not heard. Bundles need `"hooks": 312`.
 - **`native_chorus_fruit_teleport(player, name, from, target, cancel)`**: a server player whose `teleport_randomly`
   consume effect (chorus fruit) is about to try a spot (NeoForge's `EntityTeleportEvent.ChorusFruit`,
   `TeleportRandomlyConsumeEffect.apply`): once per attempt, up to 16, after they stopped riding. A mod may move
   `target` (its y is kept inside the level's height); the game still looks down from it for ground to land on, inside
   the border. Canceling ends the effect: no
   teleport and no more attempts. Foxes eating chorus fruit are not heard. Bundles need
-  `"hooks": @API:chorus_fruit_teleport@`.
+  `"hooks": 311`.
 - **`native_player_clone(player, name, was_death)`**: a player's data was copied to their new player (NeoForge's
   `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): after a death respawn (`was_death` true) and when a player
   leaves the End after the credits (`was_death` false, vanilla's `keepAllPlayerData`). It is heard after the copy and
@@ -1632,12 +2056,12 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   set another to wake everyone then. A time before `current` is refused and the morning stays; the check runs once after
   every mod, so a later mod sees the value an earlier one set. It runs before `native_time_skip`, which hears the jump
   to the time chosen here and may still cancel it; the players wake either way. Bundles need
-  `"hooks": @API:sleep_finished_time@`.
-- **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": @API:native_world_border_bounds_changed@`.
-- **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": @API:native_world_border_center_changed@`.
-- **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": @API:native_world_game_rule_change@`.
-- **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied. Bundles need `"hooks": @API:native_spawn_change@`.
-- **`native_portal_create(dimension, pos)`**: a Nether portal built for dimension travel or the End arrival platform was completed in `dimension`; `pos` is its lower corner or platform origin. Bundles need `"hooks": @API:portal_create@`.
+  `"hooks": 308`.
+- **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": 245`.
+- **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": 246`.
+- **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": 247`.
+- **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied. Bundles need `"hooks": 244`.
+- **`native_portal_create(dimension, pos)`**: a Nether portal built for dimension travel or the End arrival platform was completed in `dimension`; `pos` is its lower corner or platform origin. Bundles need `"hooks": 286`.
 - **`native_raid_spawn_wave(raid, pos, wave, raiders)`**: a raid wave is about to be spawned at `pos`; `raiders` is the count Horizon will spawn.
 - **`native_raid_state_change(raid, pos, state)`**: a raid at `pos` was triggered or changed to `victory`, `loss`, or `stopped`.
 - **`native_world_saved(wait)`**: the server completed its world save cycle; `wait` is true when chunk writes were flushed before returning.

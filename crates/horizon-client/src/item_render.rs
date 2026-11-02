@@ -343,7 +343,7 @@ impl ItemRenderState {
                     rect: [r.u0, r.v0, r.u1, r.v1],
                     light,
                     overlay: u32::from(tier) << 16,
-                    item: 1,
+                    mode: SkinJob::ITEM,
                     ..Default::default()
                 });
                 frame.parts.push(SkinPart::item(m, colors));
