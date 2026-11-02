@@ -12316,28 +12316,37 @@ impl Game<'_> {
             .in_tag(source, "minecraft:is_fire");
         let mut broke = false;
         let mut broken_items = Vec::new();
-        let losses: Vec<u32> = (0..4)
-            .map(|i| match self.armor[i].clone() {
-                Some(s)
-                    if self
-                        .res
-                        .items()
-                        .get(&s.item)
-                        .is_some_and(|info| info.equip_damage_on_hurt)
-                        && !(fire && world_items!(self).resists_fire(&s, &name)) =>
+        let losses: Vec<Option<(u32, u32)>> = (0..4)
+            .map(|i| {
+                let stack = self.armor[i].clone()?;
+                let info = world_items!(self).get(&stack.item)?;
+                let component = |id| stack.data().and_then(|data| data.other(id));
+                // ItemStack.isDamageableItem: component removal and
+                // unbreakable are checked before enchantment RNG or hooks.
+                if stack.count == 0
+                    || !info.equip_damage_on_hurt
+                    || component("minecraft:unbreakable").is_some()
+                    || component("!minecraft:max_damage").is_some()
+                    || component("!minecraft:damage").is_some()
+                    || (fire && world_items!(self).resists_fire(&stack, &name))
                 {
-                    self.wear(&s, amount)
+                    return None;
                 }
-                _ => 0,
+                let max = match component("minecraft:max_damage") {
+                    Some(horizon_world::nbt::Tag::Int(value)) => u32::try_from(*value).ok()?,
+                    _ => info.max_damage,
+                };
+                if max == 0 {
+                    return None;
+                }
+                let loss = self.wear(&stack, amount);
+                (loss > 0).then_some((loss, max))
             })
             .collect();
-        for (index, (slot, amount)) in self.armor.iter_mut().zip(losses).enumerate() {
-            if let Some(stack) = slot.as_mut()
-                && let Some(info) = world_items!(self).get(&stack.item)
-                && info.max_damage > 0
-            {
-                stack.damage += amount;
-                if stack.damage >= info.max_damage {
+        for (index, (slot, loss)) in self.armor.iter_mut().zip(losses).enumerate() {
+            if let (Some(stack), Some((amount, max))) = (slot.as_mut(), loss) {
+                stack.damage = stack.damage.saturating_add(amount).min(max);
+                if stack.damage >= max {
                     broken_items.push((stack.clone(), index));
                     *slot = None;
                     broke = true;
