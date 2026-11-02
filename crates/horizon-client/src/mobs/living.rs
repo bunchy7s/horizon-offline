@@ -986,6 +986,8 @@ impl Mob {
         // AbstractHorse.causeFallDamage hurts the horse first and passes the fall
         // on to its riders only when it was hurt.
         let horse = super::equine::is_equine(self.species());
+        // `Block.fallOn` is told the fall as it was before the mods' changes.
+        let landed = distance;
         let mut distance = distance;
         let mut modifier = modifier;
         if !horse {
@@ -998,13 +1000,14 @@ impl Mob {
                 &mut cancel,
             );
             if cancel {
+                self.mod_block_fall(contact, landed, 0.0);
                 return false;
             }
         }
         // Entity.causeFallDamage: nothing happens to a fall immune entity, nor
         // to those on it.
         if self.kind.flags.fall_immune {
-            self.mod_block_fall(contact, distance, 0.0);
+            self.mod_block_fall(contact, landed, 0.0);
             return false;
         }
         let power = distance + 1.0e-6 - self.kind.safe_fall_distance;
@@ -1016,7 +1019,7 @@ impl Mob {
             super::Species::Goat => damage -= 10.0,
             _ => {}
         }
-        let damage = f64::from(self.mod_block_fall(contact, distance, damage as f32));
+        let damage = f64::from(self.mod_block_fall(contact, landed, damage as f32));
         // LivingEntity.causeFallDamage lets the riders fall first.
         if !horse {
             self.fall_to_passengers(distance, modifier, events);

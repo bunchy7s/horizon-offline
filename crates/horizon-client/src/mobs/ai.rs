@@ -12,7 +12,7 @@ use super::{
     undead,
 };
 use crate::blocks::Fluid;
-use crate::breathing::{Breath, apply, breathe, native_living_drown};
+use crate::breathing::{Breath, breathe, drown};
 use horizon_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
@@ -1040,32 +1040,15 @@ fn base_tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                 refill: if drowns { 0 } else { 4 },
             };
             let breath = breathe(m.id, &m.kind.id, vanilla);
-            let (air, drowned) = apply(m.air, 300, breath);
-            m.air = if drowned { m.air - breath.consume } else { air };
-            let mut is_drowning = drowned;
-            let mut damage_amount = 2.0;
-            let mut bubble_count = 8;
-            let mut cancel = false;
-            if !breath.can_breathe && m.air <= 0 {
-                native_living_drown(
-                    m.id,
-                    &m.kind.id,
-                    &mut is_drowning,
-                    &mut damage_amount,
-                    &mut bubble_count,
-                    &mut cancel,
-                );
-            }
-            if !cancel && is_drowning {
-                m.air = 0;
-                if bubble_count > 0 {
+            if let Some(drowning) = drown(m.id, &m.kind.id, &mut m.air, breath, true) {
+                if drowning.bubbles {
                     events.push(MobEvent::Drown {
                         mob: m.id,
                         at: [m.position.x, m.position.y, m.position.z],
                     });
                 }
-                if damage_amount > 0.0 {
-                    m.damage(damage_amount, Damage::of(DamageKind::Drown));
+                if let Some(damage) = drowning.damage {
+                    m.damage(damage, Damage::of(DamageKind::Drown));
                 }
             }
         }

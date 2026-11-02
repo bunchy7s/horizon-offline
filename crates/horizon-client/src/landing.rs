@@ -314,7 +314,11 @@ impl MotionWorld<'_, '_, '_> {
             &mut multiplier,
             &mut cancel,
         );
+        // A canceled fall still lands on the block (`Block.fallOn`).
         if cancel {
+            if let Some((state, position, original_distance)) = contact {
+                self.mod_block_fall(state, position, original_distance, 0.0);
+            }
             return Ok(false);
         }
         living_fall::cause_living_fall_damage(

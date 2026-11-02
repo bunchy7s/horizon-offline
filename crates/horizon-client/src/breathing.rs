@@ -56,7 +56,10 @@ pub fn breathe(entity: u32, kind: &str, vanilla: Breath) -> Breath {
     }
 }
 
-/// A drowning decision on the server, with mutable vanilla defaults.
+/// An entity that can't breathe and has no air (`LivingDrownEvent`, posted
+/// from `LivingEntity.baseTick`), with vanilla's answers as the defaults: it
+/// drowns at -20 air, for 2 damage and 8 bubbles. Asked on servers, for the
+/// entities `native_living_breathe` is. API @API:native_living_drown@.
 #[inline(never)]
 pub fn native_living_drown(
     entity: u32,
@@ -67,8 +70,53 @@ pub fn native_living_drown(
     cancel: &mut bool,
 ) {
     crate::native_client_hooks::living_drown(
-        entity, kind, is_drowning, damage_amount, bubble_count, cancel,
+        entity,
+        kind,
+        is_drowning,
+        damage_amount,
+        bubble_count,
+        cancel,
     );
+}
+
+/// A drowning tick as the mods left it: the damage, if any, and whether
+/// bubbles show.
+pub struct Drowning {
+    pub damage: Option<f32>,
+    pub bubbles: bool,
+}
+
+/// `breath` applied to `air` (`apply`), then `LivingEntity.baseTick`'s
+/// drowning, which the mods may change when `server` (`native_living_drown`).
+/// An entity that drowns is set to 0 air.
+pub fn drown(
+    entity: u32,
+    kind: &str,
+    air: &mut i32,
+    breath: Breath,
+    server: bool,
+) -> Option<Drowning> {
+    let (next, drowned) = apply(*air, 300, breath);
+    *air = if drowned { *air - breath.consume } else { next };
+    let (mut drowning, mut damage, mut bubbles, mut cancel) = (drowned, 2.0, 8, false);
+    if server && !breath.can_breathe && *air <= 0 {
+        native_living_drown(
+            entity,
+            kind,
+            &mut drowning,
+            &mut damage,
+            &mut bubbles,
+            &mut cancel,
+        );
+    }
+    if cancel || !drowning {
+        return None;
+    }
+    *air = 0;
+    Some(Drowning {
+        damage: (damage > 0.0).then_some(damage),
+        bubbles: bubbles > 0,
+    })
 }
 
 /// The air supply after `breath`: raised up to `max` when it can breathe,

@@ -1,6 +1,6 @@
 //! Player liquid travel and environmental damage over the shared fluid state.
 use super::*;
-use crate::breathing::{Breath, apply, breathe, native_living_drown};
+use crate::breathing::{Breath, breathe, drown};
 use horizon_core::random::RandomSource;
 use horizon_world::{
     fluid::FluidKind,
@@ -98,32 +98,22 @@ impl MotionWorld<'_, '_, '_> {
         } else {
             breathe(self.player.entity_id as u32, "minecraft:player", vanilla)
         };
-        let (air, drowned) = apply(self.player.air, 300, breath);
-        self.player.air = if drowned { self.player.air - breath.consume } else { air };
-        let mut is_drowning = drowned;
-        let mut damage_amount = 2.0;
-        let mut bubble_count = 8;
-        let mut cancel = false;
-        if !self.player.client_side && !breath.can_breathe && self.player.air <= 0 {
-            native_living_drown(
-                self.player.entity_id as u32,
-                "minecraft:player",
-                &mut is_drowning,
-                &mut damage_amount,
-                &mut bubble_count,
-                &mut cancel,
-            );
-        }
-        if !cancel && is_drowning {
-            self.player.air = 0;
-            if bubble_count > 0 {
+        // LivingDrownEvent, likewise.
+        if let Some(drowning) = drown(
+            self.player.entity_id as u32,
+            "minecraft:player",
+            &mut self.player.air,
+            breath,
+            !self.player.client_side,
+        ) {
+            if drowning.bubbles {
                 self.player.events.push(MotionEvent::Drown);
             }
-            if damage_amount > 0.0 {
+            if let Some(damage) = drowning.damage {
                 self.player.events.push(MotionEvent::Health(
-                    crate::health::HealthEvent::DrownDamage(damage_amount),
+                    crate::health::HealthEvent::DrownDamage(damage),
                 ));
-                self.environment_hurt("minecraft:drown", damage_amount)?;
+                self.environment_hurt("minecraft:drown", damage)?;
             }
         }
         if self.player.is_in_lava() {

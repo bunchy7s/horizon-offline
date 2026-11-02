@@ -12,5 +12,6 @@
     }
   ],
   "rust_summary": "a living entity drowning, with changeable drowning, damage and bubbles (`native_living_drown`).",
-  "doc_summary": "a living entity drowning (`native_living_drown`), with changeable drowning, damage and bubbles and cancellation. Bundles need \"hooks\": @API:native_living_drown@."
+  "doc_summary": "a living entity drowning (`native_living_drown`), with changeable drowning, damage and bubbles and cancellation. Bundles need \"hooks\": @API:native_living_drown@.",
+  "comments": ["crates/horizon-client/src/breathing.rs"]
 }

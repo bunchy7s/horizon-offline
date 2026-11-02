@@ -53,7 +53,14 @@ pub(crate) fn living_drown(
     cancel: &mut bool,
 ) {
     if let Some(hooks) = HOOKS.get() {
-        (hooks.living_drown)(entity, kind, is_drowning, damage_amount, bubble_count, cancel);
+        (hooks.living_drown)(
+            entity,
+            kind,
+            is_drowning,
+            damage_amount,
+            bubble_count,
+            cancel,
+        );
     }
 }
 
