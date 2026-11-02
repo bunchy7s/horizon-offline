@@ -239,6 +239,7 @@
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge) o una instancia de Prism, MultiMC o CurseForge. Horizon porta lo que puede en este equipo, a partir de tus propias descargas, y ejecuta el paquete como un perfil propio. No se sube ni se comparte nada.",
   "The build compiles the game: 20 to 30 minutes and a few GB of disk the first time (it downloads Rust), a few minutes after that.": "La compilación construye el juego: de 20 a 30 minutos y unos pocos GB de disco la primera vez (descarga Rust), y unos minutos después.",
   "Applying the mixins": "Aplicando los mixins",
+  "Reusing patched game source": "Reutilizando el código fuente modificado del juego",
   "Empty": "Vacía",
   "Loader": "Cargador",
   "Categories": "Categorías",

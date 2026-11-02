@@ -1,0 +1,12 @@
+{
+  "hooks": [
+    {
+      "name": "item_damaged",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_damaged",
+      "neoforge": "none (vanilla: ItemStack.hurtAndBreak; PlayerDestroyItemEvent is only the break)",
+      "side": "server"
+    }
+  ],
+  "rust_summary": "a player's item losing durability, changeable and cancellable (`native_item_damaged`).",
+  "doc_summary": "a player's item losing durability: `native_item_damaged(player, name, item, amount, cancel)` is heard where `ItemStack.hurtAndBreak` wears the item of a player of a server (Bukkit's `PlayerItemDamageEvent`), after Unbreaking, with the points about to be lost. A mod changes `amount` or sets `cancel` for no wear. The player's state is swapped in. Bundles that use it need `\"hooks\": @API:native_item_damaged@`."
+}

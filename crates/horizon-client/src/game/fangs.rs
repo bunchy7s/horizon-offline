@@ -28,11 +28,7 @@ impl Game<'_> {
 
     pub(super) fn insert_fangs(&mut self, id: u32, at: [f64; 3], yaw: f32, delay: i32, owner: u32) {
         if self.fangs.model.is_none() {
-            self.fangs.model = horizon_client::mobs::load_model(
-                &self.options.resources,
-                "minecraft:evoker_fangs#main",
-            )
-            .map(Arc::new);
+            self.fangs.model = self.entity_models.evoker_fangs.clone();
         }
         self.fangs.list.push(Fangs {
             id,

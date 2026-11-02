@@ -227,8 +227,9 @@ impl Game<'_> {
         let seed = r.next_long();
         let flashes = r.next_int_bound(3).unwrap_or(0) + 1;
         self.lightning_seen[0] += 1;
+        let id = self.take_entity_id();
         self.bolts.push(Bolt {
-            id: 0,
+            id,
             at,
             life: 2,
             flashes,
@@ -476,12 +477,6 @@ impl Game<'_> {
                 Vec3::new(p[0] + w, p[1] + h, p[2] + w),
             ))
         };
-        let inside = move |p: [f64; 3]| {
-            (p[0] - at[0]).abs() <= 3.0
-                && (p[2] - at[2]).abs() <= 3.0
-                && p[1] >= at[1] - 3.0
-                && p[1] <= at[1] + 9.0
-        };
         let struck: Vec<(u32, EntityView)> = self
             .mobs
             .iter()
@@ -574,12 +569,15 @@ impl Game<'_> {
         if !events.is_empty() {
             let _ = self.handle_mob_events(events);
         }
-        // Cushion.thunderHit: a cushion in the box breaks and drops its item
+        // Cushion.thunderHit: a cushion whose box meets the strike box breaks and drops its item
         // (the bolt is no player, so no creative spare). Last first, since
         // break_cushion removes the entry.
         for i in (0..self.cushions.len()).rev() {
-            let p = self.cushions[i].position;
-            if inside([p.x, p.y, p.z]) {
+            let (lo, hi) = self.cushions[i].bounds();
+            if strike.intersects(Aabb::new(
+                Vec3::new(lo[0], lo[1], lo[2]),
+                Vec3::new(hi[0], hi[1], hi[2]),
+            )) {
                 let before = self.dropped.len();
                 self.break_cushion(i, false);
                 b.spared.extend(self.dropped[before..].iter().map(|e| e.id));

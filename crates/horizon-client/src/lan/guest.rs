@@ -304,6 +304,8 @@ pub struct Guest {
     pub drag: Option<(u8, Vec<usize>)>,
     /// The compound this player was loaded from, for fields Horizon does not model.
     pub saved: Option<horizon_world::nbt::Tag>,
+    /// Server-owned attachment data for this player.
+    pub attachments: horizon_world::attachments::Attachments,
     /// `ServerPlayer.seenCredits`: the end poem has been shown.
     pub seen_credits: bool,
     /// `ServerPlayer.postEffects` and `postEffectsDirty`.
@@ -454,6 +456,7 @@ impl Guest {
             next_window: 0,
             drag: None,
             saved: None,
+            attachments: Default::default(),
             seen_credits: false,
             post_effects: Vec::new(),
             post_effects_dirty: true,

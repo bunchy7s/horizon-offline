@@ -242,6 +242,7 @@ impl WorldRequest {
         )?;
         streaming.radius = settings.render_distance;
         let mut world = World::new(res.facts().air, level.seed);
+        world.attachments = save.load_attachments();
         world.shape = shape;
         world.fast_lava = dim == Dim::Nether;
         world.game_time = level.time;

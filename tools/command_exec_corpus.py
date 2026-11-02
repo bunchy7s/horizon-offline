@@ -363,6 +363,16 @@ def entities():
         cmd('/tp @e[type=minecraft:falling_block] 4.5 215 8.5'),
         cmd('/kill @e[type=minecraft:falling_block]'),
         cmd('/execute if entity @e[type=minecraft:falling_block]'),
+        # A firework rocket, with what `addAdditionalSaveData` writes.
+        cmd('/summon minecraft:firework_rocket 4.5 210 8.5 {LifeTime:2000,NoGravity:1b,Tags:["r"]}'),
+        cmd('/execute if entity @e[type=minecraft:firework_rocket,tag=r]'),
+        cmd('/tag @e[type=minecraft:firework_rocket,limit=1] list'),
+        cmd('/data get entity @e[type=minecraft:firework_rocket,limit=1] LifeTime'),
+        cmd('/data get entity @e[type=minecraft:firework_rocket,limit=1] FireworksItem.id'),
+        cmd('/data get entity @e[type=minecraft:firework_rocket,limit=1] ShotAtAngle'),
+        cmd('/tp @e[type=minecraft:firework_rocket] 4.5 215 8.5'),
+        cmd('/kill @e[type=minecraft:firework_rocket]'),
+        cmd('/execute if entity @e[type=minecraft:firework_rocket]'),
         # An ominous item spawner, with an item or empty (`ItemStack.EMPTY`,
         # which saves no `item` and spawns nothing when its time comes).
         cmd('/summon minecraft:ominous_item_spawner 4.5 210 8.5 {spawn_item_after_ticks:2000L,item:{id:"minecraft:diamond",count:2},Tags:["o"]}'),

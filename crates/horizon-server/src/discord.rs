@@ -20,7 +20,7 @@ const BATCH: Duration = Duration::from_secs(2);
 const GAP: Duration = Duration::from_secs(2);
 /// Lines in one picture; more in a burst are counted and skipped.
 const MAX_LINES: usize = 20;
-const EVENTS: [&str; 5] = ["chat", "join", "leave", "death", "kick"];
+const EVENTS: [&str; 6] = ["chat", "join", "leave", "death", "kick", "announce"];
 /// Zero-width joiner: after an `@` or a `<`, Discord no longer reads a mention.
 const ZWJ: char = '\u{200D}';
 
@@ -159,6 +159,7 @@ struct Run {
 const WHITE: u32 = 0xFFFFFF;
 const YELLOW: u32 = 0xFFFF55;
 const GRAY: u32 = 0xAAAAAA;
+const GOLD: u32 = 0xFFAA00;
 /// ChatFormatting's colours, by their code `0`-`f`.
 const PALETTE: [u32; 16] = [
     0x000000, 0x0000AA, 0x00AA00, 0x00AAAA, 0xAA0000, 0xAA00AA, 0xFFAA00, 0xAAAAAA, 0x555555,
@@ -176,6 +177,8 @@ impl Line {
             "join" => vec![Run::plain(&format!("{name} joined the game"), YELLOW)],
             "leave" => vec![Run::plain(&format!("{name} left the game"), YELLOW)],
             "kick" => vec![Run::plain(&format!("{name} was kicked"), YELLOW)],
+            // A line a native server mod posts (`native_server_event`), drawn like a broadcast.
+            "announce" => legacy(text("message"), GOLD),
             // The game writes this message itself: should a nickname stand for the player there, the real name
             // follows it. Lines say who someone is only by `name` (their account), never by a nickname.
             "death" if !text("message").contains(name.as_str()) => {
@@ -537,6 +540,25 @@ mod tests {
             assert!(p.contains(r#""allowed_mentions":{"parse":[]}"#), "{p}");
             assert!(!p.contains("@everyone") && p.contains("Kim0"), "{p}");
         }
+    }
+
+    #[test]
+    fn an_announcement_is_its_message_in_gold_and_cannot_ping() {
+        let line = Line::from_event(
+            &json!({"type": "announce", "name": "", "message": "Jackpot! @everyone"}),
+        )
+        .unwrap();
+        assert_eq!(line.plain(), "Jackpot! @everyone");
+        assert!(line.runs.iter().all(|r| r.color == GOLD));
+        assert!(!defuse(&line.plain(), false).contains("@everyone"));
+        assert!(
+            Settings {
+                events: vec!["announce".into()],
+                ..Settings::default()
+            }
+            .check()
+            .is_ok()
+        );
     }
 
     #[test]

@@ -5,6 +5,8 @@
 //! - `GET /v1/aggregate?days=30`: the anonymous totals the website reads, cached.
 //! - `GET /v1/benchmarks/summary`: players' benchmark results grouped by GPU and CPU, groups of at
 //!   least 3 installs only (`summary`), cached; the website's Benchmarks page reads it.
+//! - `GET /v1/export/benchmarks` and `/v1/export/hardware`: raw benchmark reports and per-machine
+//!   totals for the perf work, behind a bearer token (`export`); off without one.
 //! - `POST /v1/live`: a game's anonymous "I'm playing" ping (`live`, in memory only).
 //! - `GET /v1/live`: how many play now, exactly, cached briefly.
 //! - `GET /v1/live/history?range=24h|7d|30d|all&series=players|official`: that count, or the
@@ -32,6 +34,7 @@ use axum::routing::{delete, get, post};
 use horizon_telemetry::batch;
 
 pub mod classes;
+pub mod export;
 pub mod github;
 pub mod history;
 pub mod hub;
@@ -81,6 +84,8 @@ pub struct Config {
     pub hub_reports_per_day: u32,
     /// Days reports are kept (opened as issues long before).
     pub hub_keep_days: u32,
+    /// The bearer token the protected export (`export`) wants; unset, it answers 404.
+    pub export_token: Option<String>,
     /// Opens the website's bug reports as issues; unset, `POST /hub/report` answers 503.
     pub github_token: Option<String>,
     /// Where those issues go, `owner/name`.
@@ -106,6 +111,7 @@ impl Default for Config {
             hub_posts_per_hour: 20.0,
             hub_reports_per_day: 30,
             hub_keep_days: 90,
+            export_token: None,
             github_token: None,
             github_repo: "horizon-rust/horizon".into(),
         }
@@ -118,7 +124,8 @@ impl Config {
     /// `…_LIVE_PER_HOUR`, `…_LIVE_WINDOW_SECONDS`, `…_LIVE_MAX_SESSIONS`, `…_LIVE_MINUTE_DAYS`,
     /// `…_LIVE_HOUR_DAYS`, `…_OFFICIAL_SERVER` (`off` for none), `…_HUB_PER_HOUR`,
     /// `…_HUB_POSTS_PER_HOUR`, `…_HUB_REPORTS_PER_DAY`, `…_HUB_KEEP_DAYS`, `…_GITHUB_TOKEN` and
-    /// `…_GITHUB_REPO`. An empty token counts as unset.
+    /// `…_GITHUB_REPO`, plus `TELEMETRY_EXPORT_TOKEN` (or `HORIZON_TELEMETRY_EXPORT_TOKEN`) for the
+    /// protected export. An empty token counts as unset.
     pub fn from_env() -> Self {
         let var = |k: &str| std::env::var(format!("HORIZON_TELEMETRY_{k}")).ok();
         let secret = |k: &str| {
@@ -174,6 +181,11 @@ impl Config {
             hub_keep_days: var("HUB_KEEP_DAYS")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(d.hub_keep_days),
+            export_token: std::env::var("TELEMETRY_EXPORT_TOKEN")
+                .ok()
+                .map(|v| v.trim().to_owned())
+                .filter(|v| !v.is_empty())
+                .or_else(|| secret("EXPORT_TOKEN")),
             github_token: secret("GITHUB_TOKEN"),
             github_repo: var("GITHUB_REPO").unwrap_or(d.github_repo),
         }
@@ -718,6 +730,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/v1/installs/{id}", delete(forget))
         .route("/v1/aggregate", get(aggregate))
         .route("/v1/benchmarks/summary", get(benchmarks))
+        .route("/v1/export/benchmarks", get(export::benchmarks))
+        .route("/v1/export/hardware", get(export::hardware))
         .route("/hub/vote", post(hub::vote).options(hub::preflight))
         .route("/hub/votes", get(hub::votes))
         .route("/hub/report", post(intake::report).options(hub::preflight))

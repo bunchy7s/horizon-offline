@@ -6,7 +6,10 @@ use crate::{
     save::{Level, put, read_dat, uuid_from_tag, write_dat},
 };
 use horizon_protocol::crypto::uuid_string;
-use horizon_world::nbt::Tag;
+use horizon_world::{
+    attachments::{ATTACHMENTS_KEY, attachment_compound},
+    nbt::Tag,
+};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -126,6 +129,15 @@ pub fn apply(guest: &mut Guest, level: &Level) {
         .map(|s| [s[0] + 0.5, s[1], s[2] + 0.5]);
     guest.respawn_elsewhere = level.respawn_elsewhere.clone();
     guest.saved = level.player_extra.clone();
+    guest.attachments = match attachment_compound(
+        guest
+            .saved
+            .as_ref()
+            .and_then(|tag| tag.get(ATTACHMENTS_KEY)),
+    ) {
+        Ok(Some(data)) => horizon_world::attachments::Attachments::from_nbt(data.clone()),
+        _ => Default::default(),
+    };
     guest.seen_credits = level.seen_credits;
     guest.post_effects.clone_from(&level.post_effects);
     guest.last_death = level.last_death.clone();
@@ -220,6 +232,19 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
     level.post_effects.clone_from(&guest.post_effects);
     level.last_death = guest.last_death.clone();
     level.player_extra = guest.saved.clone();
+    let extra = level
+        .player_extra
+        .get_or_insert_with(|| Tag::Compound(Default::default()));
+    if let Tag::Compound(map) = extra
+        && attachment_compound(map.get(&ATTACHMENTS_KEY.into())).is_ok()
+    {
+        let data = guest.attachments.to_nbt();
+        if data.is_empty() {
+            map.remove(&ATTACHMENTS_KEY.into());
+        } else {
+            map.insert(ATTACHMENTS_KEY.into(), Tag::Compound(data));
+        }
+    }
     // The vehicle the player rides (`ServerPlayer.saveParentVehicle`), or
     // the one its file names that has not come back yet (kept in `saved`).
     level.root_vehicle = guest.saved_vehicle;
@@ -369,6 +394,34 @@ mod tests {
         assert!(load_owner(&mut g, &dir, Some(&saved)));
         assert_eq!(first_item(&g), Some(("minecraft:diamond", 5)));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn player_attachments_survive_playerdata_and_respawn() {
+        use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
+        let keep = AttachmentType {
+            namespace: "test",
+            name: "keep",
+            default: || 0,
+            codec: Some(AttachmentCodec {
+                encode: |n: &i32| Ok([("count".into(), Tag::Int(*n))].into()),
+                decode: |c| match c.get(&"count".into()) {
+                    Some(Tag::Int(n)) => Ok(*n),
+                    _ => Err(AttachmentError::Decode),
+                },
+            }),
+            copy_on_death: true,
+        };
+        let dir = world("attachments");
+        let mut original = guest();
+        original.attachments.set(&keep, 31).unwrap();
+        save(&original, &dir);
+        let mut loaded = guest();
+        loaded.uuid = original.uuid;
+        assert!(load(&mut loaded, &dir));
+        loaded.attachments = loaded.attachments.copy_on_death().unwrap();
+        assert_eq!(loaded.attachments.get(&keep), Ok(31));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

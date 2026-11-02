@@ -476,6 +476,7 @@
   "Building horizon-mixins (once)": "horizon-mixins をビルド中（初回のみ）",
   "Downloading Horizon's source at {revision}": "Horizon のソース（{revision}）をダウンロード中",
   "Applying the mixins": "ミックスインを適用中",
+  "Reusing patched game source": "変更済みゲームソースを再利用中",
   "Checking the mods' crates against Horizon's Cargo.lock": "MODのクレートを Horizon の Cargo.lock と照合中",
   "Building {name}'s post-build step": "{name} のビルド後ステップをビルド中",
   "Running {name}'s post-build step": "{name} のビルド後ステップを実行中",

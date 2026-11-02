@@ -171,7 +171,7 @@ impl Game<'_> {
 
     /// `Containers.dropItemStack(level, x, y, z, stack)` at the block's
     /// integer position.
-    fn campfire_drop(&mut self, pos: Pos, stack: ItemStack) {
+    pub(super) fn campfire_drop(&mut self, pos: Pos, stack: ItemStack) {
         let at = BlockPos::new(pos.0, pos.1, pos.2);
         for piece in
             horizon_world::level::removal::drop_item_stack(&mut self.world.random, at, stack.count)

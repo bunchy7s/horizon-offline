@@ -1152,6 +1152,53 @@ fn world_fields_edit_at_their_cursor() {
     assert_eq!(f.title.search, "world");
 }
 
+/// `ManageServerScreen`'s focus order: the name, the address, the Server
+/// Resource Packs button, Done, Cancel, then the name again.
+#[test]
+fn tab_walks_the_edit_server_screen_through_its_buttons() {
+    use crate::multiplayer::Screen;
+    let size = (854.0, 480.0);
+    let mut f = Fixture::new();
+    f.title.mode = Mode::Multiplayer(Screen::Edit {
+        index: None,
+        name: "Minecraft Server".into(),
+        address: "localhost".into(),
+        focus: 0,
+        packs: None,
+    });
+    let focus = |f: &Fixture| match &f.title.mode {
+        Mode::Multiplayer(Screen::Edit { focus, .. }) => (*focus, f.title.focused_button),
+        _ => panic!("edit"),
+    };
+    let mut seen = Vec::new();
+    for _ in 0..5 {
+        f.title.tab_dir(false, size);
+        seen.push(focus(&f));
+    }
+    // Address, then packs (60), Done (50), Cancel (51), and round to the name.
+    assert_eq!(
+        seen,
+        [
+            (1, None),
+            (2, Some(60)),
+            (2, Some(50)),
+            (2, Some(51)),
+            (0, None)
+        ]
+    );
+    // A button has the focus: typing goes nowhere.
+    f.title.tab_dir(true, size);
+    assert_eq!(focus(&f), (2, Some(51)));
+    f.title.type_text("x");
+    let Mode::Multiplayer(Screen::Edit { name, address, .. }) = &f.title.mode else {
+        panic!("edit");
+    };
+    assert_eq!(
+        (name.as_str(), address.as_str()),
+        ("Minecraft Server", "localhost")
+    );
+}
+
 #[test]
 fn server_fields_edit_at_their_cursor() {
     use winit::keyboard::KeyCode;
@@ -1179,8 +1226,8 @@ fn server_fields_edit_at_their_cursor() {
         panic!("add server");
     };
     assert_eq!(address, "Yhost");
-    // Tab moves to the name, which edits at its own cursor.
-    f.title.tab();
+    // Shift+Tab moves back to the name, which edits at its own cursor.
+    f.title.tab_dir(true, (854.0, 480.0));
     f.title.field_key(KeyCode::ArrowLeft, false, false);
     f.title.type_text("X");
     let Mode::Multiplayer(crate::multiplayer::Screen::Edit { name, .. }) = &f.title.mode else {

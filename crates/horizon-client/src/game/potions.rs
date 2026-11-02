@@ -327,8 +327,9 @@ impl Game<'_> {
         velocity: Vec3,
         owner: Option<Text>,
     ) {
+        let id = self.take_entity_id();
         self.potions.thrown.push(ThrownPotion {
-            id: 0,
+            id,
             stack,
             previous: position,
             position,
@@ -1270,8 +1271,9 @@ impl Game<'_> {
         ambient: Vec<&'static str>,
         color: u32,
     ) {
+        let id = self.take_entity_id();
         self.breath_clouds.push(Breath {
-            id: 0,
+            id,
             at,
             radius: 2.5,
             age: 0,
@@ -1601,8 +1603,9 @@ impl Game<'_> {
             // potion with no effects leaves none.
             if !def.effects.is_empty() {
                 let at = mob.unwrap_or(at);
+                let id = self.take_entity_id();
                 self.breath_clouds.push(Breath {
-                    id: 0,
+                    id,
                     at: [at.x, at.y, at.z],
                     radius: 3.0,
                     age: 0,

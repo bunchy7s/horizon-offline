@@ -1824,8 +1824,9 @@ impl Game<'_> {
                     {
                         y -= 1.0;
                     }
+                    let id = self.take_entity_id();
                     self.breath_clouds.push(Breath {
-                        id: 0,
+                        id,
                         at: [x, y.floor() + 1.0, z],
                         radius: 5.0,
                         age: 0,
@@ -2301,8 +2302,9 @@ impl Game<'_> {
         );
         // assignDirectionalMovement: the direction times the acceleration power 0.1.
         let velocity = Vec3::new(v.x * 0.1, v.y * 0.1, v.z * 0.1);
+        let id = self.take_entity_id();
         self.dragon_fireballs.push(DragonFireball {
-            id: 0,
+            id,
             position: at,
             previous: at,
             velocity,
@@ -2348,8 +2350,9 @@ impl Game<'_> {
                 ))
             });
             if hit_block || hit_player || b.age > 600 {
+                let id = self.take_entity_id();
                 self.breath_clouds.push(Breath {
-                    id: 0,
+                    id,
                     at: [next.x, next.y, next.z],
                     radius: 3.0,
                     age: 0,

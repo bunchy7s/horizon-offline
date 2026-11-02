@@ -12,6 +12,7 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 | `wait-ready [SECONDS]` | `wait_ready` | Wait until the player has spawned and no chunks are pending | `seconds` (number): how long to wait (default 120) |
 | `logs [--lines N] [--crash]` | `logs` | The end of the game's log, or its newest crash report | `--lines` (integer): how many lines of latest.log (default 100)<br>`--crash` (boolean): the newest crash report instead |
 | `status` | `status` | Game, renderer and streaming state (the scripting socket's original summary) | none |
+| `hello` | `hello` | The control protocol's version, the game's release and the command groups it serves | none |
 | `worlds` | `worlds` | The saved worlds, newest first: folder, name, mode, last played, version | none |
 | `world-rename FOLDER NAME` | `world_rename` | Rename a world, as Edit World does (its folder stays) | `folder` (string, required): world folder from worlds<br>`name` (text, required): the new name |
 | `world-backup FOLDER` | `world_backup` | Zip a world into backups/, as Edit World's Make Backup does | `folder` (string, required): world folder from worlds |
@@ -137,6 +138,6 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 | `sleep SECONDS` | CLI only | Wait (in scripts) | none |
 | `mcp` | CLI only | Serve the Model Context Protocol on stdin/stdout, one tool per command | none |
 | `bench SECONDS` | `bench` | Reset frame stats, wait, reply with the summary | `seconds` (number, required): how long to measure |
-| `stats [reset]` | `stats` | Frame-time summary since the last reset | `reset` (boolean): start counting again |
+| `stats [reset] [raw]` | `stats` | Frame-time summary since the last reset | `reset` (boolean): start counting again<br>`raw` (boolean): every frame time too (frame_ms, cpu_ms, gpu_ms) |
 | `gpu-passes [on\|off]` | CLI only | Time Horizon's own render passes on the GPU, shown in F3 and in stats and bench | `mode` (on, off): on or off; without it, only reports |
 | `fly X1 Y1 Z1 X2 Y2 Z2 SECONDS [PITCH [raw]]` | CLI only | Fly the camera along a line, then reply with the frame summary | none |

@@ -12,6 +12,15 @@ FRAGMENTS = Path("tools/native-hook-fragments")
 SOURCE = Path("crates/horizon-client/src/game/native_hooks.rs")
 DOCS = Path("docs/native-mods.md")
 CATALOG = Path("native-hooks.json")
+# The mod API's types and the files `cargo run -p xtask -- mod-api` generates: they copy hook and
+# helper comments, markers included, so every marker is stamped in them too and `--check` holds.
+MOD_API = (
+    Path("crates/horizon-client/src/mod_api.rs"),
+    Path("crates/horizon-client/src/mod_api/generated.rs"),
+    Path("crates/horizon-client/src/mod_api/generated_host.rs"),
+    Path("crates/horizon-client/src/game/mod_api_host_generated.rs"),
+    Path("crates/horizon-client-render/src/gfx/native_render/generated.rs"),
+)
 
 
 def stamp(check):
@@ -52,7 +61,7 @@ def stamp(check):
             names.add(hook["name"])
             entry = {"name": hook["name"], "version": 1, "target": hook["target"]}
             # The catalog's optional facts about a hook travel with it.
-            entry.update({k: hook[k] for k in ("neoforge", "side", "cancellable") if k in hook})
+            entry.update({k: hook[k] for k in ("neoforge", "side", "cancellable", "mod_api") if k in hook})
             catalog["hooks"].append(entry)
         rust_summary = fragment["rust_summary"].replace(marker, str(version))
         doc_summary = fragment["doc_summary"].replace(marker, str(version))
@@ -68,7 +77,7 @@ def stamp(check):
         docs = docs.replace(docs_marker, f"\nAPI {version} adds {doc_summary}\n" + docs_marker, 1)
         for filename in fragment.get("comments", []):
             file = Path(filename)
-            if file.is_absolute() or ".." in file.parts or file in (SOURCE, DOCS, CATALOG):
+            if file.is_absolute() or ".." in file.parts or file in (SOURCE, DOCS, CATALOG, *MOD_API):
                 raise ValueError(f"invalid comment path: {filename}")
             text = extra.get(file, (ROOT / file).read_text())
             if marker not in text:
@@ -76,6 +85,10 @@ def stamp(check):
             extra[file] = text.replace(marker, str(version))
         # Most hook comments live in the source itself.
         source = source.replace(marker, str(version))
+        for file in MOD_API:
+            if (ROOT / file).exists():
+                text = extra.get(file, (ROOT / file).read_text())
+                extra[file] = text.replace(marker, str(version))
 
     source = re.sub(
         r"^(pub\(crate\) const NATIVE_HOOKS_API: u32 = )\d+;$",

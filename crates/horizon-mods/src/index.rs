@@ -41,9 +41,10 @@ pub struct Index {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub enum Kind {
-    /// A `.hmod`.
+    /// A `.hmod` of content only.
     Mod,
-    /// A source-only native mixin bundle, compiled into an isolated game build.
+    /// A source-only native mixin bundle, compiled into an isolated game build. Published as an
+    /// `.hnmod` until launchers and the game read native `.hmod`s (#5865, docs/api/mod-files.md).
     NativeMod,
     /// A `.hpack`: registry mods played together as a profile.
     Modpack,
@@ -557,8 +558,22 @@ impl Facts {
 /// this build doesn't know are refused: their checks come with their formats.
 pub fn inspect(kind: &Kind, path: &Path) -> Result<Facts, String> {
     match kind {
-        Kind::NativeMod => Ok(native::Bundle::read(path)?.manifest.facts()),
+        Kind::NativeMod => {
+            let facts = native::Bundle::read(path)?.manifest.facts();
+            // A `.hmod` with content too: checked as the game reads it.
+            if Package::has_manifest(path) {
+                let m = Package::read(path)?.manifest;
+                crate::Content::read(path, &m)?;
+            }
+            Ok(facts)
+        }
         Kind::Mod => {
+            if native::holds(path) {
+                return Err(format!(
+                    "it has native code ({}): it is a native-mod",
+                    native::MANIFEST
+                ));
+            }
             let Package { manifest: m, wasm } = Package::read(path)?;
             crate::Content::read(path, &m)?;
             let api_level = match wasm {

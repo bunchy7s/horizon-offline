@@ -694,12 +694,9 @@ impl Game<'_> {
         partial: f32,
         out: &mut Vec<horizon_client::mesher::Vertex>,
     ) {
-        static MODEL: std::sync::OnceLock<Option<horizon_client::mobs::Part>> =
-            std::sync::OnceLock::new();
-        let model = MODEL.get_or_init(|| {
-            horizon_client::mobs::load_model(&self.options.resources, "minecraft:wind_charge#main")
-        });
-        let Some(model) = model else { return };
+        let Some(model) = self.entity_models.wind_charge.as_ref() else {
+            return;
+        };
         let Some(r) = self
             .gui
             .atlas

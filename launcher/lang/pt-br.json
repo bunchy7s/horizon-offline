@@ -476,6 +476,7 @@
   "Building horizon-mixins (once)": "Compilando horizon-mixins (uma vez)",
   "Downloading Horizon's source at {revision}": "Baixando o código do Horizon em {revision}",
   "Applying the mixins": "Aplicando os mixins",
+  "Reusing patched game source": "Reutilizando o código-fonte modificado do jogo",
   "Checking the mods' crates against Horizon's Cargo.lock": "Conferindo as crates dos mods com o Cargo.lock do Horizon",
   "Building {name}'s post-build step": "Compilando a etapa pós-compilação de {name}",
   "Running {name}'s post-build step": "Executando a etapa pós-compilação de {name}",

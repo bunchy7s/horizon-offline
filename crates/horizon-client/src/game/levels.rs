@@ -175,6 +175,7 @@ impl Game<'_> {
             &self.level.enabled_features,
         )?;
         let mut world = World::new(self.res.facts().air, self.level.seed);
+        world.attachments = save.load_attachments();
         world.shape = self.level_shapes.get(dim.id());
         world.fast_lava = dim == Dim::Nether;
         Ok(Parked {
@@ -637,6 +638,10 @@ impl Game<'_> {
             let chunks: Vec<_> = self.world.chunks.values().cloned().collect();
             self.native_chunks_changed(&chunks);
             self.save_level(true)?;
+            // Its entities' attachments are saved with them; they leave memory too.
+            for uuid in self.persist.uuids.values() {
+                self.entity_attachments.remove(uuid);
+            }
             self.enter_level(None, back)?;
             self.levels.parked.remove(&dim);
             self.native_level_closed(dim);

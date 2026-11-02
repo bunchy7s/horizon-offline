@@ -283,7 +283,7 @@ impl SectionMesh {
     pub const BOUNDS_PAD: f32 = 0.5;
 
     /// Retain geometry capacity after an upload, but none of its old contents.
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.solid.clear();
         self.translucent.clear();
         self.block_entities.clear();
@@ -889,7 +889,7 @@ impl Padded {
 /// geometry still owned by the renderer, and total about 150 KiB per worker
 /// (the leaf mask adds 8,000 cells, depths and a queue).
 #[derive(Default)]
-pub(crate) struct MeshScratch {
+pub struct MeshScratch {
     padded: Padded,
     own: Option<Box<[u32; 4096]>>,
     visibility: Vec<usize>,
@@ -1144,7 +1144,9 @@ impl Mesher<'_> {
             &mut MeshScratch::default(),
         )
     }
-    pub(crate) fn mesh_reusing(
+    /// The meshing workers' path: `out`'s buffers and `scratch` are reused
+    /// rather than allocated per section.
+    pub fn mesh_reusing(
         &mut self,
         region: &[[Option<&Chunk>; 3]; 3],
         sy: i32,

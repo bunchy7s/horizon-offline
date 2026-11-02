@@ -70,15 +70,16 @@ harness named checks that loader against vanilla).
 | Sky: sun, moon phases, stars, end sky, clouds, rain and snow | `atlases/celestials.json`, `textures/environment/` | works | `test_environment_render_parity`, `test_cloud_render_parity`, `test_weather_render_parity` |
 | Title panorama | `textures/gui/title/background/` | works | `gfx/panorama.rs` loads it from the overlay |
 | Screen overlays: vignette, pumpkin, powder snow, nausea, underwater, world border | `textures/misc/` | works | `test_world_border_render_parity`, `test_hud_parity`; loaded from the overlay |
-| Enchantment glint | `textures/misc/enchanted_glint_*` | works | `item_render/gui.rs`, `entity.wgsl` |
+| Enchantment glint | `textures/misc/enchanted_glint_*` | works | `item_render/gui.rs`, `hud/cit_glint.rs`, `entity.wgsl` |
 | Maps: background, decorations | `textures/map/`, `atlases/map_decorations.json` | works | loaded from the overlay |
 | Paintings, mob effect icons | `atlases/paintings.json`, `textures/mob_effect/` | works | loaded from the overlay |
 | Locator bar styles | `waypoint_style/` | **no** | the locator bar isn't drawn yet |
 | Post effects (spectating a creeper, spider or enderman; glowing outlines) | `post_effect/`, `shaders/post/` | **no** | Horizon's effects are WGSL; a pack's GLSL post chain isn't run |
 | Core shaders | `shaders/core/`, `shaders/include/` | partly | `core/text` draws the GUI's text (HUDs moved by its vertex shader, text effects), translated by naga (`horizon-shaders` `core_shader.rs`, `hud/pack_text.rs`); the other core shaders aren't run |
+| OptiFine / CIT Resewn custom item textures (`type=item`: `texture`, `model`, `texture.<name>`, `model.<name>`; `type=armor`: `texture`, `texture.<layer>` with the pre-1.21.2 layer names such as `diamond_layer_1`, `leather_layer_2_overlay`; `type=elytra`: `texture`; `type=enchantment` layers on GUI items; `useGlint=false` in `cit.properties`, which removes vanilla's glint from items) | `optifine/cit/`, `mcpatcher/cit/`, `citresewn/cit/` | partly | `item_render/cit.rs`, `cit_armor.rs`, `cit_glint.rs` and `hud/cit_glint.rs` tests; enchantment layers on held, dropped, framed and worn items, and `anim/` glints, come later; special renderers (heads, shields, banners) keep their vanilla look; only players and armour stands wear CIT armour and elytra, other mobs keep vanilla's; worn trims are unchanged; armour textures above 1024x512 (16 times vanilla's 64x32) draw vanilla |
 | GPU warn list, regional compliance | `gpu_warnlist.json`, `regional_compliancies.json` | n/a | OpenGL driver warnings and play-time notices for some regions; not used |
 
-Summary: 45 rows; 32 work, 4 partly, 7 don't (interpolated animation, TrueType fonts, credits and end poem,
+Summary: 46 rows; 32 work, 5 partly, 7 don't (interpolated animation, TrueType fonts, credits and end poem,
 villager hats, trims on worn armour, locator bar styles, post effects), 2 don't apply. Except the
 shaders, the missing pieces are missing vanilla features too, and each vanilla parity fix covers the pack case as well.
 

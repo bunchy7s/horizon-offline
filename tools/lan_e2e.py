@@ -10989,6 +10989,22 @@ CHECKS += ['pet_death']
 CHECK_FNS['pet_death'] = check_pet_death
 
 
+def check_data_uuid(host, guest, out):
+    """EntityDataAccessor: `/data get entity @s UUID` prints the player who runs it, their own
+    offline UUID, for the guest and for the host (a server player too), not the world owner's."""
+    seen = {}
+    for game, name in ((guest, GUEST_NAME), (host, host.player)):
+        reply = server_reply(game, 'data get entity @s UUID', '[I;')
+        seen[name] = ','.join(re.findall(r'-?\d+', reply.partition('[I;')[2].partition(']')[0]))
+    for name, ints in seen.items():
+        assert ints == offline_uuid_ints(name), f"{name}'s UUID is not their own: {seen}"
+    return seen
+
+
+CHECKS += ['data_uuid']
+CHECK_FNS['data_uuid'] = check_data_uuid
+
+
 def check_arrow_pickup(host, guest, out):
     """ClientPacketListener.handleTakeItemEntity (#4486): an arrow a player picks up
     (AbstractArrow.playerTouch, once in the ground) flies into them on every client, the

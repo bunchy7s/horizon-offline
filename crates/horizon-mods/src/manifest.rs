@@ -362,6 +362,17 @@ impl Package {
         }
         Ok(Package { manifest, wasm })
     }
+    /// Whether the mod at `path` (a `.hmod` or a folder) has a [`MANIFEST`]: content, or a legacy
+    /// WebAssembly mod. A `.hmod` holding only native code has none.
+    pub fn has_manifest(path: &Path) -> bool {
+        if path.is_dir() {
+            return path.join(MANIFEST).is_file();
+        }
+        std::fs::File::open(path)
+            .ok()
+            .and_then(|f| zip::ZipArchive::new(f).ok())
+            .is_some_and(|mut zip| zip.by_name(MANIFEST).is_ok())
+    }
     /// The `.hmod` bytes for `manifest_text` and a component.
     pub fn write(manifest_text: &str, wasm: &[u8]) -> Result<Vec<u8>, String> {
         Self::write_files(manifest_text, Some(wasm), &[])

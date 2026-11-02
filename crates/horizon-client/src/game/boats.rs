@@ -738,84 +738,90 @@ impl Game<'_> {
         // A server player's boat is driven by its client (lan_vehicles.rs).
         let driven = self.guest_vehicles();
         // EntityTickEvent.Post comes once AbstractBoat.tick is over, after the
-        // passes below (lava, ejection, bubbles, contacts): the ticked boats,
-        // in order, kept only while a mod listens (no list without mods).
-        let mut ticked = Vec::new();
-        for i in 0..self.boats.len() {
-            // A mod's hook may have removed boats.
-            if i >= self.boats.len() {
-                break;
-            }
-            let p = self.boats[i].position;
-            if Some(self.boats[i].id) == self.riding
-                || driven.contains(&self.boats[i].id)
-                || !ticking(p.x.floor() as i32, p.z.floor() as i32)
-            {
-                // Its rider's client moves it, but the lead still ticks.
-                if ticking(p.x.floor() as i32, p.z.floor() as i32) && self.remote.is_none() {
-                    let mut b = self.boats[i].clone();
-                    self.tick_boat_leash(&mut b);
-                    self.boats[i] = b;
-                }
-                continue;
-            }
-            let id = self.boats[i].id;
-            let kind = if round.listening() {
-                self.boats[i].entity_type()
-            } else {
-                String::new()
-            };
-            if !self.native_tick_pre_one(&mut round, id, &kind) {
-                continue;
-            }
-            // The hook may have removed boats.
-            let Some(i) = Some(i)
-                .filter(|&i| self.boats.get(i).is_some_and(|b| b.id == id))
-                .or_else(|| self.boats.iter().position(|b| b.id == id))
-            else {
-                continue;
-            };
-            let b = self.boats[i].clone();
-            self.boats[i] = self.tick_boat(b, false);
-            if round.listening() {
-                ticked.push((id, kind));
-            }
-        }
-        // AbstractBoat.tick's applyEffectsFromBlocks, on the server for every
-        // boat, the client-driven ones too.
+        // passes of `boat_server_passes` (lava, ejection, bubbles, contacts),
+        // and before the next boat ticks, as `ServerLevel.tickNonPassenger`.
+        // A pass (lava breaks a boat) or a mod's hook may remove boats: the next one is found
+        // after this one by its id, so none is skipped or ticked twice.
         let mut i = 0;
         while i < self.boats.len() {
-            let p = self.boats[i].position;
-            let skip = Some(self.boats[i].id) == self.riding
-                || round.canceled(self.boats[i].id)
-                || !ticking(p.x.floor() as i32, p.z.floor() as i32);
-            if skip || !self.boat_lava_tick(i) {
-                i += 1;
+            let id = self.boats[i].id;
+            'boat: {
+                let p = self.boats[i].position;
+                if Some(id) == self.riding
+                    || driven.contains(&id)
+                    || !ticking(p.x.floor() as i32, p.z.floor() as i32)
+                {
+                    // Its rider's client moves it, but the lead still ticks.
+                    if ticking(p.x.floor() as i32, p.z.floor() as i32) && self.remote.is_none() {
+                        let mut b = self.boats[i].clone();
+                        self.tick_boat_leash(&mut b);
+                        self.boats[i] = b;
+                    }
+                    self.boat_server_passes(id, &driven, &ticking, &round);
+                    break 'boat;
+                }
+                let kind = if round.listening() {
+                    self.boats[i].entity_type()
+                } else {
+                    String::new()
+                };
+                if !self.native_tick_pre_one(&mut round, id, &kind) {
+                    self.boat_server_passes(id, &driven, &ticking, &round);
+                    break 'boat;
+                }
+                // The hook may have removed boats.
+                let Some(i) = Some(i)
+                    .filter(|&i| self.boats.get(i).is_some_and(|b| b.id == id))
+                    .or_else(|| self.boats.iter().position(|b| b.id == id))
+                else {
+                    break 'boat;
+                };
+                let b = self.boats[i].clone();
+                self.boats[i] = self.tick_boat(b, false);
+                self.boat_server_passes(id, &driven, &ticking, &round);
+                self.native_tick_post_one(&round, id, &kind);
             }
+            i = match self.boats.get(i) {
+                Some(b) if b.id == id => i + 1,
+                _ => self
+                    .boats
+                    .iter()
+                    .position(|b| b.id == id)
+                    .map_or(i, |k| k + 1),
+            };
         }
-        // The rest of AbstractBoat.tick on the server, for every boat: the
-        // passengers of one under water too long get out, and it picks up or
-        // pushes what it touches.
-        for i in 0..self.boats.len() {
-            let p = self.boats[i].position;
-            if !ticking(p.x.floor() as i32, p.z.floor() as i32) || round.canceled(self.boats[i].id)
-            {
-                continue;
-            }
-            // `AbstractBoat.tick` counts submersion on the server even when
-            // its controlling client owns the boat's movement.
-            if driven.contains(&self.boats[i].id) {
-                self.refresh_boat_status(i);
-            }
-            if self.boats[i].out_of_control >= 60.0 {
-                self.eject_boat_riders(i);
-            }
-            self.boat_bubble_tick(i);
-            self.boat_contacts(i);
+    }
+    /// The rest of `AbstractBoat.tick` on the server, for every boat, the
+    /// client-driven ones too: `applyEffectsFromBlocks` (lava breaks a boat
+    /// at once), the passengers of one under water too long get out, and it
+    /// picks up or pushes what it touches.
+    fn boat_server_passes(
+        &mut self,
+        id: u32,
+        driven: &[u32],
+        ticking: &impl Fn(i32, i32) -> bool,
+        round: &super::native_ticks::TickRound,
+    ) {
+        let Some(i) = self.boats.iter().position(|b| b.id == id) else {
+            return;
+        };
+        let p = self.boats[i].position;
+        if !ticking(p.x.floor() as i32, p.z.floor() as i32) || round.canceled(id) {
+            return;
         }
-        for (id, kind) in ticked {
-            self.native_tick_post_one(&round, id, &kind);
+        if Some(id) != self.riding && self.boat_lava_tick(i) {
+            return;
         }
+        // `AbstractBoat.tick` counts submersion on the server even when
+        // its controlling client owns the boat's movement.
+        if driven.contains(&id) {
+            self.refresh_boat_status(i);
+        }
+        if self.boats[i].out_of_control >= 60.0 {
+            self.eject_boat_riders(i);
+        }
+        self.boat_bubble_tick(i);
+        self.boat_contacts(i);
     }
     /// `Entity.canSimulateMovement`: for a boat (`AUTHORITATIVE_SIDE`) a
     /// server leaves the boat its player drives to that player's client, and a

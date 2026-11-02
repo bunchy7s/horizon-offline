@@ -606,24 +606,21 @@ impl H {
             H::HdrPaperWhite => match g.hdr_paper_white {
                 0 => labelled(
                     "Paper White",
-                    lang::tr("Auto (%s nits)", &[&g.paper_white_nits()]),
+                    lang::tr("Auto (%s)", &[&g.paper_white_nits()]),
                 ),
-                n => labelled("Paper White", lang::tr("%s nits", &[&n])),
+                n => labelled("Paper White", n.to_string()),
             },
             H::HdrPeak => match g.hdr_peak {
-                0 => labelled(
-                    "Peak Brightness",
-                    lang::tr("Auto (%s nits)", &[&g.peak_nits()]),
-                ),
-                n => labelled("Peak Brightness", lang::tr("%s nits", &[&n])),
+                0 => labelled("Peak Brightness", lang::tr("Auto (%s)", &[&g.peak_nits()])),
+                n => labelled("Peak Brightness", n.to_string()),
             },
-            H::HdrBlackLevel => labelled(
-                "Black Level",
-                lang::tr(
-                    "%s nits",
-                    &[&format!("{:.2}", g.hdr_black_level as f32 / 100.0)],
+            H::HdrBlackLevel => match g.hdr_black_level {
+                0 => labelled(
+                    "Black Level",
+                    lang::tr("Auto (%s)", &[&format!("{:.2}", g.black_level_nits())]),
                 ),
-            ),
+                n => labelled("Black Level", format!("{:.2}", n as f32 / 100.0)),
+            },
             H::HdrUiBrightness => labelled("UI Brightness", format!("{}%", g.hdr_ui_brightness)),
             H::HdrKey => {
                 Text::translate("Shortcut: %s", &[crate::keybinds::display_name(&g.hdr_key)])

@@ -385,7 +385,7 @@ Integrations → Webhooks → New Webhook → Copy Webhook URL, then:
 ```toml
 [discord]
 webhook = "https://discord.com/api/webhooks/..."   # a secret: whoever has it can post in the channel
-events = ["chat", "join", "leave", "death"]        # and "kick"
+events = ["chat", "join", "leave", "death"]        # and "kick", "announce" (lines native mods post)
 enabled = true                                     # false pauses it and keeps the webhook
 ```
 

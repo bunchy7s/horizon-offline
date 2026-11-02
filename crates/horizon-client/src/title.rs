@@ -3239,6 +3239,14 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             .map(|b| b.id);
         if hit.is_some() {
             self.focused_button = hit;
+        } else if matches!(
+            self.mode,
+            Mode::Multiplayer(
+                crate::multiplayer::Screen::Edit { .. } | crate::multiplayer::Screen::Friend { .. }
+            )
+        ) {
+            // A press on a text field takes the focus from the button.
+            self.focused_button = None;
         }
         if matches!(self.mode, Mode::CreateBuffet { .. }) {
             self.buffet_click(x, y, (w, h), hit);
@@ -3857,8 +3865,17 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         if self.rules.get_mut().is_some() {
             return;
         }
-        if let Mode::Multiplayer(screen) = &mut self.mode {
-            screen.tab();
+        if matches!(self.mode, Mode::Multiplayer(_)) {
+            let (w, h) = size;
+            let enabled: Vec<u8> = self
+                .buttons(w, h)
+                .iter()
+                .filter(|b| b.enabled)
+                .map(|b| b.id)
+                .collect();
+            if let Mode::Multiplayer(screen) = &mut self.mode {
+                screen.tab_dir(reverse, &enabled, &mut self.focused_button);
+            }
             return;
         }
         let (w, h) = size;
@@ -3991,12 +4008,19 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         }
     }
     /// 2D spatial arrow key navigation across enabled buttons.
-    pub fn arrow_key(&mut self, key: winit::keyboard::KeyCode, size: (f32, f32)) {
+    pub fn arrow_key(&mut self, key: winit::keyboard::KeyCode, size: (f32, f32), shift: bool) {
         use winit::keyboard::KeyCode;
         if self.rules.get_mut().is_some() {
             return;
         }
         if self.has_caret_field() {
+            return;
+        }
+        if self.focused_button.is_none()
+            && let Mode::Multiplayer(screen) = &mut self.mode
+            && matches!(key, KeyCode::ArrowUp | KeyCode::ArrowDown)
+            && screen.arrow(key == KeyCode::ArrowUp, shift, size, &self.saves)
+        {
             return;
         }
         if self.list_focused()

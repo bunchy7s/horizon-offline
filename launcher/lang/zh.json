@@ -239,6 +239,7 @@
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.",
   "The build compiles the game: 20 to 30 minutes and a few GB of disk the first time (it downloads Rust), a few minutes after that.": "构建时会编译游戏：首次需要 20 到 30 分钟及几 GB 磁盘空间（会下载 Rust），之后只需几分钟。",
   "Applying the mixins": "正在应用 mixin",
+  "Reusing patched game source": "正在复用已修改的游戏源代码",
   "Empty": "空白",
   "Loader": "加载器",
   "Categories": "分类",

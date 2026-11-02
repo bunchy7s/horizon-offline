@@ -412,6 +412,10 @@ impl Game<'_> {
             host.play.insert(conn, play);
             return None;
         };
+        std::mem::swap(
+            &mut self.player_attachments,
+            self.guest_attachments.entry(g.uuid).or_default(),
+        );
         self.sculk.swap_player(&mut play.sculk);
         // The guest's own CombatTracker: damage to them is not the host's.
         // A new body starts with no record of the last one.
@@ -834,6 +838,10 @@ impl Game<'_> {
                 host.hub.seat_order
             });
         let g = &mut host.hub.guests[i];
+        std::mem::swap(
+            &mut self.player_attachments,
+            self.guest_attachments.entry(g.uuid).or_default(),
+        );
         let left_vehicle = g.vehicle.filter(|_| guest_vehicle.is_none());
         if guest_vehicle.is_none() {
             g.vehicle_good = None;
@@ -3175,6 +3183,13 @@ impl Game<'_> {
             .unwrap_or([0.5, 80.0, 0.5]);
         if !host.hub.guests[i].dead {
             return;
+        }
+        // PlayerList.respawn replaces the player, retaining only opted-in data.
+        let uuid = host.hub.guests[i].uuid;
+        if let Some(attachments) = self.guest_attachments.get_mut(&uuid)
+            && let Ok(copy) = attachments.copy_on_death()
+        {
+            *attachments = copy;
         }
         // PlayerList.respawn removes the dead player (Player.remove).
         self.guest_drop_carried(host, i);
