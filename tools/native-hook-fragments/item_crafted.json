@@ -4,7 +4,10 @@
       "name": "item_crafted",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_item_crafted",
       "neoforge": "PlayerEvent.ItemCraftedEvent",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "a player taking a crafting grid's result (`native_item_crafted`).",

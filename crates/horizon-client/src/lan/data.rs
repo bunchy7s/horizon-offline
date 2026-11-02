@@ -209,6 +209,11 @@ impl SyncData {
         overlay: &horizon_world::loot::PackOverlay,
     ) -> Result<Self, String> {
         use crate::spans::startup;
+        // The recipe book, the recipe sync and the advancements read the
+        // recipe folder: held here, they share one read of it.
+        let _recipe_files = startup::time("sync.recipe_folder", || {
+            horizon_world::json_folder::read(&resources.join("data/minecraft/recipe"))
+        });
         let registries_step = startup::step("sync.registries");
         let builtin = Builtin::find(resources)
             .and_then(|p| Builtin::load(&p).ok())
@@ -290,7 +295,7 @@ impl SyncData {
             },
         };
         sync.recipes = startup::time("sync.update_recipes", || {
-            super::recipes::update_recipes(&sync.advancements.recipes, resources, &sync, overlay)
+            super::recipes::update_recipes(&sync.advancements.recipes, &sync)
         });
         Ok(sync)
     }

@@ -224,10 +224,10 @@ impl Game<'_> {
         let lifetime = 10 * (1 + i32::from(flight))
             + r.next_int_bound(6).unwrap_or(0)
             + r.next_int_bound(7).unwrap_or(0);
-        // An id from the entity counter at once, so a command can name it.
-        self.next_entity += 1;
+        // Entity.<init>: the id comes from the one counter at construction.
+        let id = self.take_entity_id();
         Rocket {
-            id: self.next_entity,
+            id,
             position: at,
             previous: at,
             velocity,
@@ -345,6 +345,9 @@ impl Game<'_> {
             self.consume_held();
         }
         self.swing_arm();
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_elytra_boost(player, &name);
+        }
         true
     }
     pub(super) fn tick_rockets(&mut self) {
@@ -517,6 +520,7 @@ impl Game<'_> {
         let v = [r.velocity.x, r.velocity.y, r.velocity.z];
         self.particles
             .fireworks(at, v, r.explosions.clone(), camera);
+        self.native_firework_explode(r.id, at, r.explosions.len());
     }
     fn rocket_hurt_mobs(&mut self, hits: &[(u32, f32)], attacker: Option<Who>, at: [f64; 3]) {
         for &(id, amount) in hits {

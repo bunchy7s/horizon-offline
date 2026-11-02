@@ -16,6 +16,8 @@ address. The script then checks, from both sides, what a guest's game used to ge
              dimension change, a death and respawn); the inventory opens as its own menu, items kept;
 - crafting:  the guest crafts planks in the inventory's 2x2 grid and opens a crafting table, which
              leaves the host's screen and mouse look alone;
+- datapack-recipe: (--server-thread) a crafting recipe from the world's data pack shows its result in the
+             table of the host's window and of a guest, and taking it crafts (#6733);
 - spawned:   the host and a guest new to the world join on different spots (PlayerSpawnFinder), and the
              guest opens a crafting table, a chest, a furnace and a stonecutter where it joined;
 - sign:      a sign the guest places doesn't open a sign editor on the host;
@@ -7517,6 +7519,42 @@ CHECKS += ['fishing']
 CHECK_FNS.update(fishing=check_fishing)
 
 
+def check_fishing_tnt(host, guest, out):
+    """A fishing hook cast at a primed TNT hooks it (Projectile.canHitEntity: PrimedTnt.isPickable),
+    and reeling in pulls the TNT toward the player (#6601)."""
+    apart(host, guest)
+    hx, hy, hz = (int(v // 1) for v in pos_of(host))
+    host('command', command='weather clear')
+    x, z = hx, hz + 5
+    host('command', command=f'fill {x - 1} {hy - 1} {z - 1} {x + 14} {hy - 1} {z + 1} minecraft:stone')
+    host('command', command=f'fill {x - 1} {hy} {z - 1} {x + 14} {hy + 4} {z + 1} minecraft:air')
+    host('command', command='gamemode survival')
+    host('command', command='clear @s')
+    host('command', command='item replace entity @s weapon.mainhand with minecraft:fishing_rod')
+    host('command', command=f'tp @s {x + 0.5} {hy} {z + 0.5} -90 0')
+    try:
+        host('command', command=f'summon minecraft:tnt {x + 4.5} {hy} {z + 0.5} {{fuse:2000s}}')
+        host.wait(20)
+        host.raw('look-at', f'{x + 4.5:.2f}', f'{hy + 0.5:.2f}', f'{z + 0.5:.2f}')
+        host.raw('use-item')
+        host.wait(60)
+        host.shot(out, 'fishing-tnt')
+        host.raw('use-item')
+        motion = server_reply(host, 'data get entity @e[type=minecraft:tnt,limit=1] Motion')
+    finally:
+        host('command', command='kill @e[type=minecraft:tnt]')
+        host('command', command='clear @s')
+    # FishingHook.pullEntity pushes 0.1 of the way to the owner, 4 blocks west (-0.4); ground friction
+    # eats most of it before the read, but an unhooked TNT's x motion stays 0.
+    pulled = float(re.search(r'\[(-?[0-9.eE-]+)d', motion).group(1))
+    assert pulled < 0, f'reeling in did not pull the hooked primed TNT toward the player: {motion}'
+    return {'motion': motion}
+
+
+CHECKS += ['fishing-tnt']
+CHECK_FNS['fishing-tnt'] = check_fishing_tnt
+
+
 def check_maps(host, guest, out):
     """MapItem.update for each player, on the server: a map the player makes and holds reveals the
     terrain around them and shows their marker, which reach their client in
@@ -11654,6 +11692,54 @@ def check_blast_bystanders(host, guest, out):
 
 CHECKS += ['blast-bystanders']
 CHECK_FNS['blast-bystanders'] = check_blast_bystanders
+def check_wind_remaining(host, guest, out):
+    """A wind burst pushes a firework rocket and a thrown trident (ServerExplosion.hurtEntities ->
+    Entity.pushFromExplosion; neither overrides ignoreExplosion). Real 26.3 server, wind charge into the floor,
+    tick freeze, tick step 1 after the burst: the rocket's Motion x -0.3174, -0.3650, -0.4197 and y 0.5971, 0.6371,
+    0.6771 on the next three ticks (it starts at (0, 0.08, 0), 0.8 west of the burst, 1.0 above the floor); a
+    trident 0.8 east gets (+0.446, +0.490) on the first tick when NoGravity holds. A summoned trident here
+    ignores NoGravity and falls first, so only its direction is asserted."""
+    hx, hy, hz = (int(v // 1) for v in pos_of(host))
+    x, y, z = hx + 6, hy, hz
+    host('command', command='gamemode spectator')
+
+    def read():
+        found = {}
+        for p in host.raw('simulation')['projectiles']:
+            if p['kind'] in ('minecraft:trident', 'minecraft:firework_rocket') and abs(p['position'][0] - x) < 4:
+                found[p['kind'].split(':')[1]] = p['velocity']
+        return found
+    detail = {}
+    try:
+        host('command', command='tick unfreeze')
+        for c in (f'fill {x - 8} {y - 1} {z - 8} {x + 8} {y - 1} {z + 8} minecraft:bedrock',
+                  f'fill {x - 8} {y} {z - 8} {x + 8} {y + 5} {z + 8} minecraft:air', 'kill @e[type=!player]', 'tick freeze',
+                  f'summon minecraft:trident {x + 1.3} {y + 1.0} {z + 0.5} {{NoGravity:1b}}',
+                  f'summon minecraft:firework_rocket {x - 0.3} {y + 1.0} {z + 0.5} {{LifeTime:200}}', 'tick step 2'):
+            host('command', command=c)
+        host.wait(8)
+        detail['before'] = read()
+        host('command', command=f'summon minecraft:wind_charge {x + 0.5} {y + 0.6} {z + 0.5} {{Motion:[0.0,-1.0,0.0]}}')
+        detail['ticks'] = []
+        for _ in range(3):
+            host('command', command='tick step 1')
+            host.wait(4)
+            detail['ticks'].append(read())
+    finally:
+        host('command', command='tick unfreeze')
+        host('command', command='kill @e[type=!player]')
+        host('command', command='gamemode creative')
+    first = detail['ticks'][0]
+    assert 'firework_rocket' in first and 'trident' in first, f'no rocket listed: {detail}'
+    rocket = first['firework_rocket']
+    assert abs(rocket[0] + 0.3174) < 0.01 and abs(rocket[1] - 0.5971) < 0.01, f'the rocket was not pushed like vanilla: {detail}'
+    trident = first['trident']
+    assert trident[0] > 0.2 and trident[1] > 0.1, f'the trident was not pushed away: {detail}'
+    return detail
+
+
+CHECKS += ['wind-remaining']
+CHECK_FNS['wind-remaining'] = check_wind_remaining
 
 
 def check_selector_tags(host, guest, out):
@@ -11761,6 +11847,127 @@ def check_mining_drop_latency(host, guest, out):
 
 CHECKS += ['mining-drop-latency']
 CHECK_FNS['mining-drop-latency'] = check_mining_drop_latency
+
+
+def check_scale_body(host, guest, out):
+    """#3684: a player's `minecraft:scale` is the same entity's attribute through a change of level and
+    a death. ServerPlayer.teleport keeps the player; ServerPlayer.restoreFrom copies the base values to
+    the body after a death (assignBaseValues), then sets its health to the max they give. The eye the
+    client sees stays at 0.162 (1.62 * 0.1), not back at 1.62, and a max health base of 40 respawns the
+    player with 40."""
+    seen = {}
+
+    def scale_of(player):
+        # The eye height the player's client has: the server's scale reaches it as an attribute update.
+        state = player('state')['player']
+        return round(state['eye'][1] - state['position'][1], 3)
+
+    for label, player in (('host', host), ('guest', guest)):
+        s = seen[label] = {}
+        player('command', command='gamemode creative')
+        player('command', command='attribute @s minecraft:scale base set 0.1')
+        player('command', command='attribute @s minecraft:max_health base set 40')
+        player.wait(20)
+        s['set'] = scale_of(player)
+        x, z = (int(v // 1) for v in pos_of(player)[::2])
+        into_level(player, NETHER, x, 100, z)
+        s['nether'] = scale_of(player)
+        player('command', command=f'execute in {OVERWORLD} run tp @s {x + 0.5} 200 {z + 0.5}')
+        wait_dimension(player, OVERWORLD, 400)
+        player.wait(40)
+        s['overworld'] = scale_of(player)
+        player('command', command='kill @s')
+        player.wait(30)
+        player.raw('respawn')
+        player.wait(60)
+        back_to_game(player)
+        s['respawned'] = scale_of(player)
+        s['health'] = player('state')['player']['health']
+        player('command', command='attribute @s minecraft:scale base set 1')
+        player('command', command='attribute @s minecraft:max_health base set 20')
+        player.wait(20)
+        s['reset'] = scale_of(player)
+    for label, s in seen.items():
+        for step in ('set', 'nether', 'overworld', 'respawned'):
+            assert s[step] == 0.162, f'{label} after {step}: {s}'
+        assert s['reset'] == 1.62, f'{label} reset: {s}'
+        assert s['health'] == 40, f'{label} respawned health: {s}'
+    return seen
+
+
+CHECKS += ['scale-body']
+CHECK_FNS['scale-body'] = check_scale_body
+
+
+def check_datapack_recipe(host, guest, out):
+    """A crafting recipe from the world's data pack shows its result in the crafting table of the
+    host's window and of a guest (#6733). Vanilla's CraftingMenu.slotChangedCraftingGrid sets the
+    result on the server and ClientboundContainerSetSlotPacket sends slot 0: the window shows the
+    server's, not a result of its own recipes. The world reopens to load the pack."""
+    if not SERVER_THREAD:
+        return {'skipped': "the reopen is the server thread's"}
+    pack = host.work / 'saves' / 'Lan' / 'datapacks' / 'repro'
+    (pack / 'data/repro/recipe').mkdir(parents=True, exist_ok=True)
+    (pack / 'pack.mcmeta').write_text('{"pack":{"description":"repro","min_format":[121,0],"max_format":[121,0]}}')
+    (pack / 'data/repro/recipe/dirt_to_diamond.json').write_text(
+        '{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:dirt"],"result":{"id":"minecraft:diamond"}}')
+    seen = {}
+    try:
+        host.raw('disconnect')
+        for attempt in range(60):
+            time.sleep(1)
+            try:
+                host.raw('open', 'Lan')
+                break
+            except Failed:
+                if attempt == 59:
+                    raise
+        host('wait_ready', seconds=400)
+        port = host.raw('lan', 'open', 0, 'commands')['port']
+        back_to_game(guest)
+        guest.raw('connect', f'127.0.0.1:{port}', GUEST_NAME)
+        guest.raw('wait-for', 'loaded', '--timeout', 300)
+        guest.wait(20)
+        for game in (host, guest):
+            game('command', command='gamemode survival')
+            game('command', command='clear @s')
+            game('command', command='give @s minecraft:dirt 4')
+            x, y, z = (int(v // 1) for v in pos_of(game))
+            table = (x, y, z + 2)
+            game('command', command=f'setblock {table[0]} {table[1]} {table[2]} minecraft:crafting_table')
+            game.wait(10)
+            grab(game)
+            game.raw('interact', *table)
+            game.raw('wait-for', 'screen', 'inventory', '--timeout', 10)
+            game.wait(5)
+            slot = next(s['slot'] for s in game('inventory')['hotbar'] if s and s.get('item') == 'minecraft:dirt')
+            game.raw('click-slot', slot)
+            game.raw('click-slot', 100, 'right')
+            game.raw('click-slot', slot)
+            game.wait(10)
+            case = {'result': result_of(game)}
+            game.shot(out, f'datapack-recipe-{game.name}')
+            game.raw('click-slot', 200)
+            game.wait(10)
+            case['carried'] = held(game)
+            case['emptied'] = result_of(game)
+            game.raw('key', 'esc', 'tap')
+            game.wait(5)
+            game('command', command=f'setblock {table[0]} {table[1]} {table[2]} minecraft:air')
+            seen[game.name] = case
+    finally:
+        back_to_game(host)
+        back_to_game(guest)
+        shutil.rmtree(pack, ignore_errors=True)
+    for name, case in seen.items():
+        assert case['result'] == ('minecraft:diamond', 1), f'{name}: the pack recipe shows {case}'
+        assert case['carried'] == ('minecraft:diamond', 1), f'{name}: taking the result gave {case}'
+        assert case['emptied'] == (None, None), f'{name}: the result stays after the grid is used up: {case}'
+    return seen
+
+
+CHECKS += ['datapack-recipe']
+CHECK_FNS['datapack-recipe'] = check_datapack_recipe
 
 
 if __name__ == '__main__':

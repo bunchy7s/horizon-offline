@@ -23,9 +23,9 @@ MultiPartModel.Unbaked.resolveDependencies	inline	crates/horizon-client-render/s
 MultiPartModel.Unbaked.bake	inline	crates/horizon-client-render/src/models/catalog.rs::StateModels::load	shared bake per definition; per-state selection stored in states
 Selector.instantiate	port	crates/horizon-assets/src/blockstate/bind.rs::BlockStateDefinition::bind	a selector without a condition applies to every state
 BlockStateModelWrapper.update	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	gap: player: no tint layers, so carried or cart blocks with tint sources (grass, leaves) are drawn untinted
-BlockStateModelWrapper.updateTints	missing		player: carried and cart blocks with tint sources (grass, leaves, water) show untinted; Horizon's block_model_vertices has no tint step
+BlockStateModelWrapper.updateTints	port	crates/horizon-client/src/game/minecarts.rs::Game::block_model_vertices	each face's tint index is multiplied by its default tint, then drawn by tinted_block_model_vertices
 BlockStateModelWrapper.Unbaked.bake	skip:java		builds the wrapper object; Horizon passes the transform straight to block_model_vertices
-CompositeBlockModel.update	missing		player: only block display entities reach this and Horizon draws none, so a special block (chest and similar) shown that way never appears
+CompositeBlockModel.update	port	crates/horizon-client/src/game/minecarts.rs::Game::special_block_model	the special model of a chest, head, banner and the like comes on top of the block model
 CompositeBlockModel.Unbaked.bake	skip:java		builds the composite object; no separate step in Horizon
 ConditionalBlockModel.update	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	Christmas chest texture chosen in the chest branch by extended_christmas()
 ConditionalBlockModel.Unbaked.bake	skip:java		builds the conditional object; the chest branch picks the texture when drawing
@@ -54,13 +54,13 @@ BlockEntityRenderDispatcher.onResourceManagerReload	missing		minor: block entity
 BlockEntityRenderers.createEntityRenderers	skip:data		renderer registration table; Horizon's classify table replaces it
 BlockEntityWithBoundingBoxRenderer.extractRenderState	missing		player: game-master players (creative or op) see no structure box, invisible-block or structure-void markers
 BlockEntityWithBoundingBoxRenderer.extract	missing		player: game-master players (creative or op) see no structure box, invisible-block or structure-void markers
-BlockEntityWithBoundingBoxRenderer.submit	missing		player: game-master players (creative or op) see no structure box, invisible-block or structure-void markers
-BlockEntityWithBoundingBoxRenderer.renderInvisibleBlocks	missing		player: game-master players (creative or op) see no barrier, light or air block markers
+BlockEntityWithBoundingBoxRenderer.submit	port	crates/horizon-client/src/gizmos.rs::Gizmos::bounding_box	the box on top and the invisible-block markers, indexed by position
+BlockEntityWithBoundingBoxRenderer.renderInvisibleBlocks	inline	crates/horizon-client/src/gizmos.rs::Gizmos::bounding_box	barrier, light, air and structure void markers with their own colours
 BlockEntityWithBoundingBoxRenderer.renderStructureVoids	missing		player: game-master players (creative or op) see no structure void markers
 BrightnessCombiner.acceptDouble	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	brighter of the two chest halves per channel, in the chest branch
-BrushableBlockRenderer.extractRenderState	missing		player: brushing a suspicious block shows no item on its face; the hit side and dust stage are not read
-BrushableBlockRenderer.submit	missing		player: the brushed item never slides out of the block while it is brushed
-BrushableBlockRenderer.translations	missing		player: the per-side slide offset for each dust stage is not computed
+BrushableBlockRenderer.extractRenderState	inline	crates/horizon-client/src/game/brush.rs::Game::brushable_geometry	the item and hit direction are read from the block entity
+BrushableBlockRenderer.submit	port	crates/horizon-client/src/game/brush.rs::Game::brushable_geometry	the item drawn on the brushed face, sliding out with the dust stage
+BrushableBlockRenderer.translations	inline	crates/horizon-client/src/game/brush.rs::Game::brushable_geometry	the per-face offset, 0.075 per dust stage
 CampfireRenderer.extractRenderState	inline	crates/horizon-client/src/game/campfire.rs::Game::campfire_geometry	facing and per-slot item seed read there
 CampfireRenderer.submit	port	crates/horizon-client/src/game/campfire.rs::Game::campfire_geometry	items on the four sides, drawn within 64 blocks
 ChestRenderer.createModelTransformation	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	chest turn about its centre in the chest branch
@@ -82,9 +82,9 @@ LecternRenderer.extractRenderState	inline	crates/horizon-client-render/src/block
 LecternRenderer.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on the lectern book (render_breaking draws only banners and chests)
 PistonHeadRenderer.submit	port	crates/horizon-client/src/game/moving_pistons.rs::Game::moving_piston_geometry	head and base blocks drawn at their offsets
 PistonHeadRenderer.createMovingBlock	port	crates/horizon-client/src/game/moving_pistons.rs::Game::moving_block_vertices	gap: minor: the tint is the particle sprite colour, not the block's tint sources
-ShelfRenderer.extractRenderState	missing		player: items placed on shelf blocks are not kept for drawing; only the comparator signal is handled (game/machines.rs::shelf_signal)
-ShelfRenderer.submit	missing		player: items on shelves are invisible
-ShelfRenderer.submitItem	missing		player: shelf item slots, offsets and scale are not drawn
+ShelfRenderer.extractRenderState	inline	crates/horizon-client/src/game/shelf.rs::Game::shelf_geometry	the three items, the facing and align-to-bottom are read from the block entity
+ShelfRenderer.submit	port	crates/horizon-client/src/game/shelf.rs::Game::shelf_geometry	three items drawn facing out, 0.3125 apart and 0.25 down
+ShelfRenderer.submitItem	inline	crates/horizon-client/src/game/shelf.rs::Game::shelf_geometry	the slot offset and quarter scale, aligned to the bottom or centred
 ShulkerBoxRenderer.extractRenderState	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	facing, colour texture and lid progress read in the shulker branch
 ShulkerBoxRenderer.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: player: no crack overlay on shulker boxes (render_breaking draws only banners and chests)
 ShulkerBoxRenderer.createModelTransform	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	facing transform in the shulker branch
@@ -102,7 +102,7 @@ StandingSignRenderer.extractRenderState	inline	crates/horizon-client-render/src/
 StandingSignRenderer.createTransformations	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	front and back text transforms per attachment
 TestInstanceRenderer.extractRenderState	missing		player: creative players placing a test instance block see no beacon beam, box or error markers
 TestInstanceRenderer.submit	missing		player: creative players placing a test instance block see no beacon beam or box
-TestInstanceRenderer.submitErrorMarker	missing		player: red error markers and their text are not drawn
+TestInstanceRenderer.submitErrorMarker	port	crates/horizon-client/src/gizmos.rs::error_marker_shape	the red box and its text, drawn by Game::test_instance_marker_geometry
 TestInstanceRenderer.shouldRenderOffScreen	missing		minor: culling policy of a renderer Horizon lacks
 TestInstanceRenderer.shouldRender	missing		minor: culling policy of a renderer Horizon lacks
 TheEndGatewayRenderer.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	beam and visible cube faces in the end gateway branch
