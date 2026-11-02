@@ -170,6 +170,12 @@ impl Game<'_> {
             }
             // defaultHandleGameClickEvent: the dialog opens over the book.
             ClickEvent::ShowDialog(dialog) => self.show_dialog_ref(&dialog),
+            // Screen.defaultHandleGameClickEvent: custom actions retain the book.
+            ClickEvent::Custom { id, payload } => {
+                if let Some(remote) = &self.remote {
+                    remote.session.send_custom_click(&id, payload);
+                }
+            }
             // SuggestCommand's insertText does nothing on a book; a server's
             // text never opens a file.
             ClickEvent::SuggestCommand(_) | ClickEvent::OpenFile(_) => {}
