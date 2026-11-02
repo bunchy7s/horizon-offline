@@ -1507,6 +1507,7 @@ impl Game<'_> {
                 })
                 .map(|i| self.mobs[i].id)
                 .collect();
+            let mobs_before = self.mob_ids();
             self.mobs.retain(|m| {
                 let keep = !leaving.contains(&m.id);
                 if !keep {
@@ -1524,6 +1525,7 @@ impl Game<'_> {
             });
             self.orbs.retain(|o| !gone(o.position));
             // Unloaded with their chunk: PersistentEntitySectionManager.stopTracking.
+            self.native_mobs_left_since(&mobs_before);
             self.native_items_left_since(&items_before);
             self.native_orbs_left_since(&orbs_before);
             // the ones saved with the chunk go with it (a trident too, unsaved).
@@ -1624,14 +1626,6 @@ impl Game<'_> {
         for (chunk, count) in counts {
             self.native_entities_unload(self.dim.id(), [chunk.0, chunk.1], count);
         }
-    }
-    /// Leaving a dimension: its entities are saved with it.
-    pub(super) fn save_dimension_entities(&mut self) -> Result<()> {
-        self.spawn_loaded_entities();
-        let keys: HashSet<(i32, i32)> = self.world.chunks.keys().copied().collect();
-        let chunks = self.entity_chunks(&keys, true);
-        self.persist = EntityMemory::default();
-        self.save.save_entities(chunks)
     }
 }
 /// Only a mob is finalized; another entity drops the request.

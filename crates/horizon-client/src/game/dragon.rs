@@ -866,15 +866,15 @@ impl Game<'_> {
         (-2..=1).all(|cz| (-2..=1).all(|cx| self.streaming.is_lit(cx, cz)))
     }
     /// A player's entity id: the acting player's body has it, another
-    /// player's comes from the LAN host (0 when it is out on a guest's turn,
-    /// and for an in-frame host with none).
+    /// player's comes from the hub (0 when it is out on a guest's turn, and
+    /// for no player).
     fn fight_entity(&self, who: FightWho) -> i32 {
         if who == self.acting_player() {
             return self.player.as_ref().map_or(0, |p| p.entity_id);
         }
         let host = self.lan.as_ref();
         match who {
-            FightWho::Host => host.map_or(0, |h| h.host_entity),
+            FightWho::Host => 0,
             FightWho::Guest(conn) => host
                 .and_then(|h| h.hub.guest(conn))
                 .map_or(0, |g| g.entity_id),
@@ -950,9 +950,6 @@ impl Game<'_> {
     /// `EnderDragonFight.tick` and the fight's entities, while the End is
     /// ticked (in place for its player, or on a server with players in it).
     pub(super) fn tick_fight(&mut self) {
-        if self.travelling.is_some() {
-            return;
-        }
         // A dragon outside the End (`/summon`) has no fight: `ServerLevel.getDragonFight` is
         // null there, but `EnderDragon.aiStep` still flies it.
         if self.dim != Dim::End {
@@ -1389,7 +1386,7 @@ impl Game<'_> {
         let hurt = self.hit_special(id, amount, true, DamageKind::PlayerAttack, None);
         // The sweep and the sounds read the charge, which the hit then spends.
         if let (Some(area), Hurt::Landed { .. }) = (area, hurt) {
-            self.attack_effects(area, None, super::mace::Spared::Nothing, None);
+            self.attack_effects(area, None, false, super::mace::Spared::Nothing, None);
         }
         self.attack_ticks = 0;
         true
@@ -2188,6 +2185,27 @@ impl Game<'_> {
             set(d, 3 + i, x, y, z);
         }
     }
+    /// `Level.getEntity`: revenge goals must resolve the dragon too.
+    pub(super) fn dragon_target(&self) -> Option<(u32, horizon_client::mobs::TargetInfo)> {
+        let d = self.dragon.as_ref().filter(|d| d.alive())?;
+        let p = d.position;
+        Some((
+            d.id,
+            horizon_client::mobs::TargetInfo {
+                position: p,
+                eye_y: p.y + 6.8,
+                bounds: Aabb::new(
+                    Vec3::new(p.x - 8.0, p.y, p.z - 8.0),
+                    Vec3::new(p.x + 8.0, p.y + 8.0, p.z + 8.0),
+                ),
+                alive: true,
+                can_be_seen_as_enemy: true,
+                is_player: false,
+                creative: false,
+                passenger: false,
+            },
+        ))
+    }
     /// Wing knockback, head and neck damage, and breaking blocks in the way.
     fn dragon_contacts(&mut self) {
         let Some(d) = self.dragon.as_ref() else {
@@ -2230,6 +2248,35 @@ impl Game<'_> {
                         });
                     }
                 }
+            }
+        }
+        // EnderDragon.aiStep queries living entities, not only players.
+        if let Some(d) = self.dragon.as_ref() {
+            let frame = horizon_client::mobs::dragon_contacts::Frame {
+                dragon_id: d.id,
+                origin: d.position,
+                center: (bc, bz),
+                wings: wings.map(|w| {
+                    w.inflate(Vec3::new(4.0, 2.0, 4.0))
+                        .move_by(Vec3::new(0.0, -2.0, 0.0))
+                }),
+                heads: heads.map(|h| h.inflate(Vec3::new(1.0, 1.0, 1.0))),
+                sitting,
+                recently_hurt,
+            };
+            // Keep team lookup in Game (including tamed pets' owner teams).
+            let allowed: Vec<bool> = self
+                .mobs
+                .iter()
+                .map(|m| {
+                    horizon_client::scoreboard::teams_allow_damage(
+                        self.mob_team(d.id),
+                        self.mob_team_of(m),
+                    )
+                })
+                .collect();
+            for (mob, allowed) in self.mobs.iter_mut().zip(allowed) {
+                horizon_client::mobs::dragon_contacts::contact(mob, &frame, allowed);
             }
         }
         // checkWalls over head, neck and body.
@@ -3254,6 +3301,7 @@ impl Game<'_> {
             head_yaw: d.yaw,
             on_ground: false,
             velocity: [d.velocity.x, d.velocity.y, d.velocity.z],
+            minecart_steps: None,
             data: 0,
             meta,
             defaults: Vec::new(),
@@ -3266,6 +3314,7 @@ impl Game<'_> {
             leash: None,
             spectator: false,
             watching: false,
+            hidden: None,
         })
     }
 }

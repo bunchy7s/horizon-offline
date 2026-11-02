@@ -81,6 +81,9 @@ impl Game<'_> {
                     _ => 20.0,
                 };
                 self.clock.set_rate(rate);
+                // MinecraftServer.setTickRate: the autosave wait already
+                // running is shortened when the new rate asks for less.
+                self.on_tick_rate_changed();
                 self.feedback(t(
                     "commands.tick.rate.success",
                     &[lit(format_fixed(f64::from(rate), 1))],

@@ -101,7 +101,7 @@ owner's body and dimension. The script owns the clock: each `tick` calls `tick_s
 while login and portal arrival pump connection-only passes. The client acknowledges
 terrain and teleports without predicting movement, matching the command oracle's stationary
 player. Script and save errors return through server shutdown; output keeps the existing
-styled messages and `CommandResultCallback` schema. `--in-frame` is not needed.
+styled messages and `CommandResultCallback` schema.
 
 `HORIZON_DISPENSE_FIXTURE` and `HORIZON_SCULK_FIXTURE` are component probes. They construct
 a server `Game` on a server thread and retain the oracles' synthetic levels, seeded random
@@ -114,7 +114,7 @@ coverage alongside the components:
 python3 tools/test_command_exec_parity.py
 python3 tools/test_dispenser_parity.py
 python3 tools/test_sculk_parity.py
-python3 tools/lan_e2e.py --server-thread --check machines --check fireball --check sculk_container
+python3 tools/lan_e2e.py --check machines --check fireball --check sculk_container
 ```
 
 The LAN checks open and fill machines through the guest's inventory packets, observe a
@@ -131,8 +131,7 @@ Besides the Vineflower sources in `.local/minecraft/<version>/sources/`, `tools/
 the same path as normal single player. `python3 tools/test_friends.py --client
 target/fast/horizon-client --relay target/fast/horizon-relay --baseline` covers
 plain LAN, direct invitations, a local relay and ended invitations in that mode.
-`lan_e2e.py` still accepts `--in-frame`, which is deprecated (never use it, it will be removed
-soon), and `--server-thread` for existing callers. Run Linux games under `xvfb-run -a` when no display is available. Each
+Run Linux games under `xvfb-run -a` when no display is available. Each
 process gets scratch game, launcher, XDG data and config homes; telemetry, audio
 and launcher self-update are disabled.
 

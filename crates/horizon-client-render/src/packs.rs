@@ -746,7 +746,8 @@ fn build_overlay_uncached(
         }
         for name in names {
             let child = format!("{prefix}{name}");
-            if hidden.contains(&child) {
+            // Vanilla's files in one file: it describes vanilla's root, not this mirror.
+            if hidden.contains(&child) || child == horizon_core::prepared_files::FILE_NAME {
                 continue;
             }
             if let Some(bytes) = merged.get(&child) {

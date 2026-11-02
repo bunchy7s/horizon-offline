@@ -227,8 +227,8 @@ impl StateModels {
             // gets no model, and the other blocks still load. A file several
             // packs provide binds each pack's definition on its own, bottom
             // first (`loadBlockStateDefinitionStack`).
-            let layers = match fs::read_to_string(
-                root.join(format!("assets/{namespace}/blockstates/{path}.json")),
+            let layers = match horizon_core::prepared_files::read_to_string(
+                &root.join(format!("assets/{namespace}/blockstates/{path}.json")),
             )
             .map_err(|e| e.to_string())
             .and_then(|text| definition_layers(&text))

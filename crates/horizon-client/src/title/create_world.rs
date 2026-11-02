@@ -88,11 +88,73 @@ impl WorldOptions {
                 .flatten(),
             structures: generation.structures,
             bonus_chest: generation.bonus_chest,
-            rules: crate::gamerules::GameRules::load(dir),
+            rules: crate::gamerules::GameRules::load_with_features(dir, &level.enabled_features),
             data_packs,
             pack_dir,
             ..Self::default()
         }
+    }
+    /// Re-Create's repository enables the original world's feature packs.
+    pub(super) fn restore_feature_packs(
+        &mut self,
+        resources: &std::path::Path,
+        level: &crate::save::Level,
+    ) {
+        let packs = self.available_packs(resources);
+        if let Some((enabled, disabled)) = &level.data_packs {
+            let mut selected: Vec<_> = enabled
+                .iter()
+                .filter(|id| id.as_str() == "vanilla" || packs.iter().any(|p| &p.id == *id))
+                .cloned()
+                .collect();
+            for id in &self.data_packs {
+                if !selected.contains(id) && !disabled.contains(id) {
+                    selected.push(id.clone());
+                }
+            }
+            self.data_packs = selected;
+        }
+        let provided: Vec<_> = packs
+            .iter()
+            .filter(|p| self.data_packs.contains(&p.id))
+            .flat_map(|p| p.features())
+            .collect();
+        let mut missing: Vec<_> = level
+            .enabled_features
+            .iter()
+            .filter(|f| f.as_str() != "minecraft:vanilla" && !provided.contains(f))
+            .cloned()
+            .collect();
+        for pack in packs.iter().filter(|p| !p.id.starts_with("file/")) {
+            let required = pack.features();
+            if required.iter().any(|f| missing.contains(f))
+                && required.iter().all(|f| level.enabled_features.contains(f))
+                && !self.data_packs.contains(&pack.id)
+            {
+                self.data_packs.push(pack.id.clone());
+                missing.retain(|f| !required.contains(f));
+            }
+        }
+    }
+    fn available_packs(&self, resources: &std::path::Path) -> Vec<crate::datapack::DataPack> {
+        let mut packs = crate::datapack::feature_packs(resources);
+        if let Some(dir) = &self.pack_dir {
+            packs.extend(crate::datapack::discover_folder(dir));
+        }
+        packs
+    }
+    /// WorldDataConfiguration's selected feature packs over vanilla's flags.
+    pub fn enabled_features(&self, resources: &std::path::Path) -> Vec<String> {
+        let mut features = vec!["minecraft:vanilla".to_owned()];
+        features.extend(
+            self.available_packs(resources)
+                .iter()
+                .filter(|pack| self.data_packs.contains(&pack.id))
+                .flat_map(|pack| pack.features()),
+        );
+        features.sort();
+        features.dedup();
+        features
     }
     /// `getDifficulty`: Hardcore is always Hard.
     pub fn difficulty(&self) -> usize {

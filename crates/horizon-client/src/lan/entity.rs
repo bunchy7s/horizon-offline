@@ -47,6 +47,9 @@ pub struct EntityState {
     pub head_yaw: f32,
     pub on_ground: bool,
     pub velocity: [f64; 3],
+    /// NewMinecartBehavior steps drained from the simulation since its last
+    /// export. None selects the ordinary entity movement packets.
+    pub minecart_steps: Option<Vec<play::MinecartStep>>,
     /// ClientboundAddEntityPacket.data (item frame direction, block state ...).
     pub data: i32,
     /// SynchedEntityData entries that differ from the defaults.
@@ -80,6 +83,9 @@ pub struct EntityState {
     /// `ServerPlayer.getCamera() != this`: a spectator watching through
     /// another entity is shown to nobody (`ServerPlayer.broadcastToPlayer`).
     pub watching: bool,
+    /// A player a native mod hid (`native_hide_player`): only clients whose
+    /// player has at least this permission level track it.
+    pub hidden: Option<u8>,
 }
 
 impl EntityState {
@@ -95,6 +101,7 @@ impl EntityState {
         (self.yaw, self.pitch, self.head_yaw) = (0.0, 0.0, 0.0);
         self.on_ground = false;
         self.velocity = [0.0; 3];
+        self.minecart_steps = None;
         self.data = 0;
         self.meta.clear();
         self.defaults.clear();
@@ -107,6 +114,7 @@ impl EntityState {
         self.leash = None;
         self.spectator = false;
         self.watching = false;
+        self.hidden = None;
     }
 }
 
@@ -232,6 +240,8 @@ struct ServerEntity {
     head: i8,
     /// lastSentMovement.
     velocity: [f64; 3],
+    /// NewMinecartBehavior.lerpSteps accumulated across tracking intervals.
+    minecart_steps: Vec<play::MinecartStep>,
     /// trackedDataValues: the entity data the clients hold.
     meta: Vec<(u8, i32, Value)>,
     equipment: Vec<(u8, Option<Stack>)>,
@@ -259,6 +269,8 @@ struct ServerEntity {
     spectator: bool,
     /// Likewise for a spectator who watches through a camera.
     watching: bool,
+    /// Likewise for a player a native mod hid.
+    hidden: Option<u8>,
 }
 
 /// SectionPos.of(entity).
@@ -307,6 +319,7 @@ impl ServerEntity {
             rotation: (pack_degrees(e.pitch), pack_degrees(e.yaw)),
             head: pack_degrees(e.head_yaw),
             velocity: e.velocity,
+            minecart_steps: e.minecart_steps.clone().unwrap_or_default(),
             meta: e.meta.clone(),
             equipment: e.equipment.clone(),
             attributes: e.attributes.clone(),
@@ -322,6 +335,7 @@ impl ServerEntity {
             section: section_of(e.position),
             spectator: e.spectator,
             watching: e.watching,
+            hidden: e.hidden,
         }
     }
 
@@ -384,6 +398,11 @@ impl ServerEntity {
     /// full position sync every 400 or when the entity lands or leaves the
     /// ground), velocity for types that track it, changed data at once.
     fn send_changes(&mut self, e: &EntityState, riding: &Riding, out: &mut Vec<play::Clientbound>) {
+        if let Some(steps) = &e.minecart_steps {
+            self.minecart_steps.extend_from_slice(steps);
+        } else {
+            self.minecart_steps.clear();
+        }
         let passengers = riding.passengers(e.id);
         if passengers != self.passengers.as_slice() {
             out.push(riding.set_passengers(e.id));
@@ -423,6 +442,14 @@ impl ServerEntity {
                 self.base = e.position;
                 self.was_riding = true;
                 self.send_dirty(e, dirty, out);
+                self.send_head(e, out);
+                self.tick += 1;
+                self.send_equipment(e, out);
+                return;
+            }
+            if e.minecart_steps.is_some() {
+                self.send_dirty(e, dirty, out);
+                self.send_minecart(e, rotation, rotate, out);
                 self.send_head(e, out);
                 self.tick += 1;
                 self.send_equipment(e, out);
@@ -525,6 +552,49 @@ impl ServerEntity {
         }
         self.tick += 1;
         self.send_equipment(e, out);
+    }
+
+    /// ServerEntity.handleMinecartPosRot: send every recorded substep in order.
+    /// Only an empty queue uses the fallback endpoint (e.g. a stationary cart
+    /// teleported by a command); this never replaces a curved track's steps.
+    fn send_minecart(
+        &mut self,
+        e: &EntityState,
+        rotation: (i8, i8),
+        rotate: bool,
+        out: &mut Vec<play::Clientbound>,
+    ) {
+        if self.minecart_steps.is_empty() {
+            let distance: f64 = (0..3).map(|k| (e.position[k] - self.base[k]).powi(2)).sum();
+            let motion: f64 = (0..3)
+                .map(|k| (e.velocity[k] - self.velocity[k]).powi(2))
+                .sum();
+            if distance >= 7.629_394_531_25e-6
+                || self.tick.is_multiple_of(60)
+                || rotate
+                || motion > 1.0e-7
+            {
+                self.minecart_steps.push(play::MinecartStep {
+                    position: e.position,
+                    movement: e.velocity,
+                    yaw: rotation.1,
+                    pitch: rotation.0,
+                    weight: 1.0,
+                });
+            }
+        }
+        if !self.minecart_steps.is_empty() {
+            out.push(play::Clientbound::MoveMinecartAlongTrack(
+                play::MoveMinecartAlongTrack {
+                    id: e.id,
+                    steps: std::mem::take(&mut self.minecart_steps),
+                },
+            ));
+        }
+        // Vanilla updates these even when no packet was needed; its
+        // lastSentMovement is deliberately unchanged in this branch.
+        self.rotation = rotation;
+        self.base = e.position;
     }
 
     /// ServerEntity.sendDirtyEntityData: the changed entity data, then the
@@ -691,6 +761,9 @@ pub struct Viewer<'a> {
     pub entity_id: i32,
     /// Its player is in spectator mode: it tracks the other spectators too.
     pub spectator: bool,
+    /// Its player's permission level: players a native mod hid from lower
+    /// levels are not tracked by it.
+    pub permission: u8,
     /// It accepted a move since the last tick (ChunkMap.move): every pair
     /// of it is checked again.
     pub moved: bool,
@@ -717,17 +790,20 @@ struct Probe {
     chunk: u32,
     spectator: bool,
     watching: bool,
+    hidden: Option<u8>,
 }
 
 /// `ServerPlayer.broadcastToPlayer` (`Entity`'s is `true`): to a spectator,
 /// a player is shown only while its camera is itself; to anyone else, a
-/// spectator is hidden.
-fn broadcast_to_player(viewer_spectator: bool, p: &Probe) -> bool {
-    if viewer_spectator {
+/// spectator is hidden. A player a native mod hid is shown only to players
+/// of at least its level.
+fn broadcast_to_player(v: &Viewer, p: &Probe) -> bool {
+    let shown = if v.spectator {
         !p.watching
     } else {
         !p.spectator
-    }
+    };
+    shown && p.hidden.is_none_or(|level| v.permission >= level)
 }
 
 /// TrackedEntity.updatePlayer: within the type's range (capped by the view
@@ -740,7 +816,7 @@ fn broadcast_to_player(viewer_spectator: bool, p: &Probe) -> bool {
 fn sees(v: &Viewer, p: &Probe, chunks: &[(i32, i32)], held: &mut [u8]) -> bool {
     let range = f64::from(p.range.min(v.view_distance * 16));
     let (dx, dz) = (v.position[0] - p.x, v.position[2] - p.z);
-    dx * dx + dz * dz <= range * range && broadcast_to_player(v.spectator, p) && {
+    dx * dx + dz * dz <= range * range && broadcast_to_player(v, p) && {
         let held = &mut held[p.chunk as usize];
         if *held == 0 {
             *held = 1 + u8::from(v.chunks.contains(&chunks[p.chunk as usize]));
@@ -840,10 +916,12 @@ impl Entities {
                 || section != s.section
                 || e.spectator != s.spectator
                 || e.watching != s.watching
+                || e.hidden != s.hidden
             {
                 s.section = section;
                 s.spectator = e.spectator;
                 s.watching = e.watching;
+                s.hidden = e.hidden;
                 self.moved.push(index);
                 self.is_moved[index] = true;
             }
@@ -870,6 +948,7 @@ impl Entities {
                 chunk,
                 spectator: e.spectator,
                 watching: e.watching,
+                hidden: e.hidden,
             });
         }
         // TrackedEntity.getEffectiveRange: a vehicle is tracked as far as its
@@ -1077,6 +1156,7 @@ mod tests {
             head_yaw: 0.0,
             on_ground: true,
             velocity: [0.0; 3],
+            minecart_steps: None,
             data: 0,
             meta: Vec::new(),
             defaults: Vec::new(),
@@ -1089,6 +1169,7 @@ mod tests {
             leash: None,
             spectator: false,
             watching: false,
+            hidden: None,
         }
     }
 
@@ -1531,6 +1612,7 @@ mod tests {
         positions: [[f64; 3]; 2],
         moved: [bool; 2],
         spectators: [bool; 2],
+        permissions: [u8; 2],
         /// The first client's entities gone, where they were last sent.
         gone: Vec<[f64; 3]>,
     }
@@ -1544,6 +1626,7 @@ mod tests {
                 positions: [[0.0, 64.0, 0.0]; 2],
                 moved: [false; 2],
                 spectators: [false; 2],
+                permissions: [0; 2],
                 gone: Vec::new(),
             }
         }
@@ -1557,6 +1640,7 @@ mod tests {
                 Viewer {
                     entity_id: 1,
                     spectator: self.spectators[0],
+                    permission: self.permissions[0],
                     moved: self.moved[0],
                     position: self.positions[0],
                     view_distance: 10,
@@ -1568,6 +1652,7 @@ mod tests {
                 Viewer {
                     entity_id: 2,
                     spectator: self.spectators[1],
+                    permission: self.permissions[1],
                     moved: self.moved[1],
                     position: self.positions[1],
                     view_distance: 10,
@@ -1780,6 +1865,37 @@ mod tests {
         two.watching = false;
         c.tick(&mut level, &[&one, &two]);
         assert!(c.trackers[0].is_tracking(2));
+    }
+
+    /// A player a native mod hid is tracked only by clients whose player has
+    /// at least its level, and by everyone again once shown.
+    #[test]
+    fn a_hidden_player_is_tracked_only_from_its_level_up() {
+        let mut level = Entities::default();
+        let mut c = Clients::new();
+        c.permissions = [0, 3];
+        let mut op = state(0.0);
+        (op.id, op.uuid, op.kind) = (9, 9, "minecraft:player".into());
+        op.hidden = Some(3);
+        c.tick(&mut level, &[&op]);
+        c.tick(&mut level, &[&op]);
+        assert!(
+            !c.trackers[0].is_tracking(9),
+            "a player of level 0 doesn't see it"
+        );
+        assert!(c.trackers[1].is_tracking(9), "an operator of level 3 does");
+        // Hidden after it was seen: the client below the level loses it.
+        op.hidden = None;
+        c.tick(&mut level, &[&op]);
+        assert!(c.trackers[0].is_tracking(9));
+        op.hidden = Some(4);
+        c.tick(&mut level, &[&op]);
+        assert!(!c.trackers[0].is_tracking(9) && !c.trackers[1].is_tracking(9));
+        // A client whose player was made an operator (its pairs checked again).
+        c.permissions = [4, 3];
+        c.moved = [true, false];
+        c.tick(&mut level, &[&op]);
+        assert!(c.trackers[0].is_tracking(9) && !c.trackers[1].is_tracking(9));
     }
 
     #[test]

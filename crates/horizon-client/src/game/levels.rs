@@ -5,8 +5,7 @@
 //! A server (the dedicated server and single player's server thread) keeps
 //! the other dimensions' levels here and ticks each one with players or forced
 //! chunks by swapping it into place (`enter_level`), the way `as_guest` swaps a player
-//! in, so the tick code runs unchanged, one level at a time. The in-frame
-//! game holds one level, which follows its player (`enter_dimension`).
+//! in, so the tick code runs unchanged, one level at a time.
 //!
 //! Shared by every level, as vanilla's derived levels share the
 //! Overworld's level data: the game time, the day time and the weather, the
@@ -309,7 +308,7 @@ impl Game<'_> {
         mut host: Option<&mut LanHost>,
         target: Dim,
     ) -> Result<()> {
-        // The in-frame game keeps its one level (`enter_dimension`).
+        // A client holds no levels.
         if self.options.execution_role.is_client() {
             return Ok(());
         }
