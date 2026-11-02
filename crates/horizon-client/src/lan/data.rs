@@ -208,6 +208,10 @@ impl SyncData {
         resources: &Path,
         overlay: &horizon_world::loot::PackOverlay,
     ) -> Result<Self, String> {
+        // The recipe book, the recipe sync and the advancements read the
+        // recipe folder: held here, they share one read of it.
+        let _recipe_files =
+            horizon_world::json_folder::read(&resources.join("data/minecraft/recipe"));
         let builtin = Builtin::find(resources)
             .and_then(|p| Builtin::load(&p).ok())
             .ok_or("registries.json not found next to the resources")?;

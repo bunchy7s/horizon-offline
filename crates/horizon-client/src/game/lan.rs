@@ -1133,7 +1133,7 @@ impl Game<'_> {
             // The hub is the server thread's.
             let status = server
                 .call(|g| g.lan_status())
-                .ok_or("the integrated server stopped")?;
+                .ok_or(super::integrated::NO_ANSWER)?;
             return Ok(Some(status));
         }
         match words.get(1).copied() {
@@ -1225,7 +1225,7 @@ impl Game<'_> {
             // ShareToLanScreen: IntegratedServer.publishServer.
             server
                 .call(move |g| g.publish(settings))
-                .ok_or("the integrated server stopped")??
+                .ok_or(super::integrated::NO_ANSWER)??
         } else if self.serving() {
             return self.publish(settings).map(drop).map_err(Into::into);
         } else {
