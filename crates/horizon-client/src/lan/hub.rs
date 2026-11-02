@@ -285,12 +285,12 @@ pub struct Hub {
     entity_types: std::collections::HashMap<String, i32>,
     /// Each level's tracked entities, by dimension.
     entities: std::collections::HashMap<String, Entities>,
-    /// Each level's entities that joined it after its last tracking pass, as
-    /// they were then (`note_joined`): their pairing starts from it.
-    joined: std::collections::HashMap<String, Vec<EntityState>>,
-    /// The last entity id taken before the level's ChunkMap.tick point of
-    /// this tick (`Entities::synced_through`).
-    pub synced_through: i32,
+    /// Each level's entities that joined it after its tracking pass, as they
+    /// were then, and the server tick they were noted in (`note_joined`).
+    joined: std::collections::HashMap<String, (u64, Vec<EntityState>)>,
+    /// The ranges of entity ids taken this tick in the phases vanilla runs
+    /// before the level's ChunkMap.tick (`Entities::synced`).
+    pub synced: Vec<(i32, i32)>,
     /// What one tick of entity tracking sends each guest, kept between ticks.
     entity_out: Vec<Vec<Vec<u8>>>,
     /// Each placed guest's entities gone this tick, where they were last sent (only while the
@@ -559,7 +559,7 @@ impl Hub {
             entity_types: Default::default(),
             entities: Default::default(),
             joined: Default::default(),
-            synced_through: 0,
+            synced: Vec::new(),
             entity_out: Vec::new(),
             entity_gone: Vec::new(),
             mod_commands: (serde_json::Value::Null, None),
@@ -2438,26 +2438,23 @@ impl Hub {
         out
     }
 
-    /// All entities as one client sees them: the world's and the other players.
     /// The entities of this level its tracking has not met yet, as they are at
     /// the end of the tick that added them (after the tick's tracking pass:
     /// falling blocks, primed TNT and block entities tick after it). The next
-    /// pass pairs them as they were, as ChunkMap.addEntity would have.
+    /// tick's pass pairs them as they were, as ChunkMap.addEntity would have;
+    /// a later one ignores them.
     pub fn note_joined(&mut self, entities: &[EntityState]) {
         let level = self.entities.get(&self.config.dimension);
-        let joined = self
-            .joined
-            .entry(self.config.dimension.clone())
-            .or_default();
-        joined.clear();
-        joined.extend(
-            entities
-                .iter()
-                .filter(|e| level.is_none_or(|l| !l.tracks(e.id)))
-                .cloned(),
-        );
+        let joined = entities
+            .iter()
+            .filter(|e| level.is_none_or(|l| !l.tracks(e.id)))
+            .cloned()
+            .collect();
+        self.joined
+            .insert(self.config.dimension.clone(), (self.ticks, joined));
     }
 
+    /// All entities as one client sees them: the world's and the other players.
     fn track_entities(&mut self, ctx: &mut TickCtx) {
         let mut all: Vec<EntityState> = Vec::with_capacity(ctx.entities.len() + self.guests.len());
         let placed: Vec<usize> = (0..self.guests.len())
@@ -2511,12 +2508,12 @@ impl Hub {
             .entities
             .remove(&self.config.dimension)
             .unwrap_or_default();
-        let joined = self
-            .joined
-            .remove(&self.config.dimension)
-            .unwrap_or_default();
-        level.starting_from(&mut entities, &joined);
-        level.synced_through = self.synced_through;
+        let joined = level.joined_states(
+            &entities,
+            noted_last_tick(self.joined.remove(&self.config.dimension), self.ticks),
+        );
+        Entities::starting_from(&mut entities, &joined);
+        level.synced.clone_from(&self.synced);
         let mut outs = std::mem::take(&mut self.entity_out);
         let dimension = &self.config.dimension;
         let here = |g: &Guest| g.placed && g.dimension == *dimension;
@@ -3961,6 +3958,16 @@ fn raw(id: i32, payload: Vec<u8>) -> C {
     C::Unknown(id, payload)
 }
 
+/// The joined states `Hub::note_joined` kept, if it kept them in the last
+/// server tick: a level nobody tracked since (its guests gone, or none in it)
+/// would otherwise pair its entities from states long past.
+fn noted_last_tick(noted: Option<(u64, Vec<EntityState>)>, ticks: u64) -> Vec<EntityState> {
+    match noted {
+        Some((tick, joined)) if tick + 1 == ticks => joined,
+        _ => Vec::new(),
+    }
+}
+
 /// ClientboundTickingStatePacket: the tick rate and whether the game is frozen.
 fn ticking_state(rate: f32, frozen: bool) -> C {
     let mut w = horizon_protocol::buf::Writer::new();
@@ -4046,6 +4053,20 @@ mod tests {
                 (13, serializer::INT, Value::Int(0))
             ]
         );
+    }
+
+    /// Joined states are used in the server tick after the one that noted
+    /// them, never later.
+    #[test]
+    fn joined_states_last_only_into_the_next_tick() {
+        let joined = vec![EntityState {
+            id: 7,
+            ..EntityState::default()
+        }];
+        assert_eq!(noted_last_tick(Some((5, joined.clone())), 6), joined);
+        assert!(noted_last_tick(Some((5, joined.clone())), 5).is_empty());
+        assert!(noted_last_tick(Some((5, joined)), 9).is_empty());
+        assert!(noted_last_tick(None, 6).is_empty());
     }
 
     /// `getMaximumFlyingTicks`: 80 ticks at normal gravity, ceil(80 * 0.08 /

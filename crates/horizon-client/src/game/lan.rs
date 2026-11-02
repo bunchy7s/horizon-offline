@@ -2052,22 +2052,44 @@ impl Game<'_> {
         self.lan = Some(host);
     }
 
-    /// Run the hub for this tick and apply what the guests did. While the
-    /// single player game is `paused` only the connections run
-    /// (`IntegratedServer.tickPaused`): `ServerGamePacketListenerImpl.tick`
-    /// skips `tickPlayer`, so no player's air, hunger or damage moves on.
+    /// The entity id counter, once the entities Horizon keeps without one
+    /// have theirs, while guests track the level (None otherwise).
+    fn lan_ids_so_far(&mut self) -> Option<i32> {
+        if self.lan.as_ref().is_none_or(|h| h.hub.guests.is_empty()) {
+            return None;
+        }
+        self.lan_assign_ids();
+        Some(self.next_entity as i32)
+    }
+
     /// ServerLevel.tick's ChunkMap.tick point, after the block ticks and
     /// before the entities': what joined the level up to here (a falling
     /// block, a dispensed arrow, the last tick's late joins) is paired and
-    /// first updated in this tick's pass (`Entities::synced_through`).
-    pub(super) fn lan_mark_synced_through(&mut self) {
-        if self.lan.as_ref().is_none_or(|h| h.hub.guests.is_empty()) {
-            return;
+    /// first updated in this tick's pass (`Entities::synced`).
+    pub(super) fn lan_mark_synced(&mut self) {
+        if let Some(next) = self.lan_ids_so_far()
+            && let Some(host) = self.lan.as_mut()
+        {
+            host.hub.synced = vec![(i32::MIN, next)];
         }
-        self.lan_assign_ids();
-        let next = self.next_entity as i32;
-        if let Some(host) = self.lan.as_mut() {
-            host.hub.synced_through = next;
+    }
+
+    /// The start of a phase vanilla runs before ChunkMap.tick and Horizon
+    /// among the entities' ticks (ServerChunkCache.tickChunks' spawning and
+    /// thunder, the raids): the counter to give `lan_synced_since`.
+    pub(super) fn lan_synced_from(&mut self) -> Option<i32> {
+        self.lan_ids_so_far()
+    }
+
+    /// The end of such a phase: what joined during it is first updated in
+    /// this tick's pass too.
+    pub(super) fn lan_synced_since(&mut self, from: Option<i32>) {
+        if let Some(from) = from
+            && let Some(next) = self.lan_ids_so_far()
+            && next > from
+            && let Some(host) = self.lan.as_mut()
+        {
+            host.hub.synced.push((from, next));
         }
     }
 
@@ -2075,12 +2097,14 @@ impl Game<'_> {
     /// taken for the guests (a falling block's drop, a spawner's mob, the
     /// host's snowball) are noted as they joined, for the next tick's
     /// tracking to pair them from (`Hub::note_joined`). Nothing is described
-    /// when the id counter has not moved.
+    /// when the id counter has not moved, or no guest is in the level.
     pub(super) fn lan_note_joined(&mut self) {
         let Some(mut host) = self.lan.take() else {
             return;
         };
-        if let Some(next) = host.states_next_entity.take() {
+        if let Some(next) = host.states_next_entity.take()
+            && host.hub.guests.iter().any(|g| host.hub.here(g))
+        {
             self.lan_assign_ids();
             if self.next_entity != next {
                 let mut states = States::default();
@@ -2093,6 +2117,10 @@ impl Game<'_> {
         self.lan = Some(host);
     }
 
+    /// Run the hub for this tick and apply what the guests did. While the
+    /// single player game is `paused` only the connections run
+    /// (`IntegratedServer.tickPaused`): `ServerGamePacketListenerImpl.tick`
+    /// skips `tickPlayer`, so no player's air, hunger or damage moves on.
     pub(super) fn tick_lan(&mut self, paused: bool) {
         // A frozen level does not reach tick_lan_packets through tick_world.
         // Apply its packets before taking the snapshot too.

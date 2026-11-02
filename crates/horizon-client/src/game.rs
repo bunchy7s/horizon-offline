@@ -7299,7 +7299,7 @@ impl Game<'_> {
         if running {
             horizon_client::spans::time("tick_lan_packets", || self.tick_lan_packets());
             horizon_client::spans::time("tick_blocks", || self.tick_blocks())?;
-            self.lan_mark_synced_through();
+            self.lan_mark_synced();
         }
         if running {
             horizon_client::spans::time("tick_paintings", || self.tick_paintings());
@@ -7314,7 +7314,9 @@ impl Game<'_> {
             horizon_client::spans::time("tick_boats", || self.tick_boats());
             horizon_client::spans::time("tick_carts", || self.tick_carts());
             self.tick_vehicle_watch();
+            let from = self.lan_synced_from();
             horizon_client::spans::time("tick_thunder", || self.tick_thunder());
+            self.lan_synced_since(from);
             horizon_client::spans::time("tick_lecterns", || self.tick_lecterns());
             horizon_client::spans::time("tick_maps", || self.tick_maps());
             self.tick_lodestone_compasses();
