@@ -6552,6 +6552,49 @@ mod tests {
         );
     }
 
+    /// `LanguageSelectionList.Entry.keyPressed`: the selection key picks the
+    /// row's language and finishes the screen in one press (`onDone`), so the
+    /// page is gone after Enter and the language is already applied.
+    #[test]
+    fn the_selection_key_picks_a_language_and_finishes_the_page() {
+        use winit::keyboard::KeyCode;
+        let atlas = atlas();
+        let rows = languages();
+        let code = {
+            let s = Settings::default();
+            let mut ui = OptionsUi {
+                languages: rows.clone(),
+                ..Default::default()
+            };
+            ui.size = (480.0, 320.0);
+            ui.show(Page::Language);
+            let (widgets, ..) = ui.layout(&s, 480.0, 320.0);
+            widgets
+                .iter()
+                .find_map(|wd| match &wd.kind {
+                    WKind::LanguageRow { code, .. } => Some(code.clone()),
+                    _ => None,
+                })
+                .expect("a language row")
+        };
+        for key in [KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::Space] {
+            let mut s = Settings::default();
+            assert_ne!(s.language, code, "the row starts unchosen");
+            let mut ui = OptionsUi {
+                languages: rows.clone(),
+                ..Default::default()
+            };
+            ui.size = (480.0, 320.0);
+            ui.show(Page::Language);
+            ui.focus = Some(FocusId::Lang(code.clone()));
+            ui.focus_from_keyboard = true;
+            let events = ui.key(&mut s, &atlas, key, None);
+            assert_eq!(s.language, code, "{key:?} applies the row's language");
+            assert!(events.contains(&Event::Language(code.clone())), "{key:?}");
+            assert_eq!(ui.page(), Page::Main, "{key:?} finishes the language page");
+        }
+    }
+
     #[test]
     fn language_search_hint_does_not_overlap_the_focused_caret() {
         let atlas = atlas();
