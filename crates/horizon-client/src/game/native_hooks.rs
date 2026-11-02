@@ -3473,6 +3473,17 @@ impl Game<'_> {
     ) {
         let _ = (player, name, recipe);
     }
+    /// A server player toggled an ageable mob's age lock with a golden
+    /// dandelion, after the lock and item use changed. @API:player_toggle_entity_age_lock@.
+    pub(super) fn native_player_toggle_entity_age_lock(
+        &mut self,
+        player: u128,
+        name: &str,
+        entity_id: u32,
+        locked: bool,
+    ) {
+        let _ = (player, name, entity_id, locked);
+    }
     /// A server player swapped their main and off hands, after both inventory
     /// slots changed. Guest lookup helpers may find nothing during packet
     /// handling. Server-side. @API:player_swap_with_equipment_slot@.

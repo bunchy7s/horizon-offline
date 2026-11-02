@@ -4951,7 +4951,17 @@ impl Game<'_> {
         // AgeableMob.mobInteract: a golden dandelion on a baby freezes its
         // growth, or lets it grow again.
         if self.mobs[index].alive() && self.age_lock_takes(&self.mobs[index], &item) {
+            let entity_id = self.mobs[index].id as u32;
             self.set_age_locked(index);
+            if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+            {
+                self.native_player_toggle_entity_age_lock(
+                    player,
+                    &name,
+                    entity_id,
+                    self.mobs[index].extra.age_locked,
+                );
+            }
             if let Some(stack) = &held {
                 let target = self.mob_entity(&self.mobs[index]);
                 self.trigger_item_entity("minecraft:player_interacted_with_entity", stack, &target);
