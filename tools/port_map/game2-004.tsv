@@ -39,7 +39,7 @@ Piglin.hurtServer	inline	crates/horizon-client/src/mobs/piglin.rs::celebrate	gap
 Piglin.canUseNonMeleeWeapon	port	crates/horizon-client/src/game/piglins.rs::Game::piglin_wanted	gap: minor: checks the preferred-weapons tag only, not the usable-crossbow tag or the kinetic weapon component
 Piglin.holdInOffHand	port	crates/horizon-client/src/game/piglins.rs::Game::start_admiring	gap: minor: does not drop an item already in the off hand and does not set persistence
 Piglin.wantsToPickUp	port	crates/horizon-client/src/game/piglins.rs::Game::piglin_wants	gap: minor: does not check the admiring-disabled wait after a hit by a player
-Piglin.startRiding	missing		minor: baby piglins never mount a baby hoglin (see PiglinAi.babySometimesRideBabyHoglin)
+Piglin.startRiding	port	crates/horizon-client/src/mobs/riders.rs::start_riding	the boarding tests (not the vehicle it is on, not one it carries, the boarding cooldown, a free vehicle) plus the `Piglin` case: a baby piglin on a hoglin goes on top of the up-to-three piglins already there
 Piglin.getTopPassenger	port	crates/horizon-client/src/mobs/riders.rs::top_passenger	the top of the passenger chain, capped at four passengers on a hoglin
 Piglin.getAmbientSound	port	crates/horizon-client/src/mobs/piglin.rs::piglin_ambient	the sound of the activity: angry, retreat, admiring, celebrate, jealous, or the plain grunt
 PiglinAi.initCoreActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_piglin	gap: minor: no babyAvoidNemesis (babies do not flee a nemesis); avoidZombified and admiring stop are covered by goals
