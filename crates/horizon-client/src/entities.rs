@@ -2716,6 +2716,52 @@ mod armor_stand_motion_tests {
         stand.tick(&mut scene, facts, false, &mut |_, _| {}, None);
     }
 
+    /// `Entity.collectColliders` (#7080): the world border's wall stops an
+    /// armor stand as it stops the player. A border of size 10 around
+    /// (20, 20) has its east wall at x = 25; the stand starts at x = 24 on the
+    /// test scene's flat ground, moving 1.5 east.
+    #[test]
+    fn the_world_border_stops_an_armor_stand() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = BlockFacts::load(&root, assets.registry).unwrap();
+        let collision = crate::collisions::load(&root, assets.registry).unwrap();
+        let world = World::test_scene(&assets, &render, 3).unwrap();
+        let border = BorderGeometry::new([20.0, 20.0], 10.0, 29_999_984).unwrap();
+        for bordered in [false, true] {
+            let mut stand = ArmorStand::new(1, Vec3::new(24.0, 4.0, 20.5), 0.0);
+            stand.on_ground = true;
+            stand.velocity = Vec3::new(1.5, 0.0, 0.0);
+            let mut scene = SceneCollisions {
+                world: &world,
+                binding: &collision,
+                subject: None,
+            };
+            stand.tick(
+                &mut scene,
+                &facts,
+                false,
+                &mut |_, _| {},
+                bordered.then_some(&border),
+            );
+            let east = stand.bounds().max_position().x;
+            if bordered {
+                assert!(
+                    (east - 25.0).abs() < 1.0e-7,
+                    "stops on the wall, got {east}"
+                );
+            } else {
+                assert!(east > 25.0, "no border: goes on, got {east}");
+            }
+        }
+    }
+
     #[test]
     fn a_tick_keeps_the_previous_position_for_interpolation() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
