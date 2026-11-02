@@ -31,6 +31,8 @@ pub enum Language {
     Polish,
     #[serde(rename = "pt-br")]
     PortugueseBrazil,
+    #[serde(rename = "pt")]
+    Portuguese,
     #[serde(rename = "ja")]
     Japanese,
     #[serde(rename = "tr")]
@@ -38,7 +40,7 @@ pub enum Language {
 }
 
 impl Language {
-    pub const ALL: [Language; 11] = [
+    pub const ALL: [Language; 12] = [
         Self::English,
         Self::French,
         Self::Russian,
@@ -48,6 +50,7 @@ impl Language {
         Self::Ukrainian,
         Self::Polish,
         Self::PortugueseBrazil,
+        Self::Portuguese,
         Self::Japanese,
         Self::Turkish,
     ];
@@ -64,6 +67,7 @@ impl Language {
             Self::Ukrainian => "uk",
             Self::Polish => "pl",
             Self::PortugueseBrazil => "pt-br",
+            Self::Portuguese => "pt",
             Self::Japanese => "ja",
             Self::Turkish => "tr",
         }
@@ -81,6 +85,7 @@ impl Language {
             Self::Ukrainian => "Українська",
             Self::Polish => "Polski",
             Self::PortugueseBrazil => "Português (Brasil)",
+            Self::Portuguese => "Português (Portugal)",
             Self::Japanese => "日本語",
             Self::Turkish => "Türkçe",
         }
@@ -135,6 +140,7 @@ impl Language {
             Self::Ukrainian => include_str!("../lang/uk.json"),
             Self::Polish => include_str!("../lang/pl.json"),
             Self::PortugueseBrazil => include_str!("../lang/pt-br.json"),
+            Self::Portuguese => include_str!("../lang/pt.json"),
             Self::Japanese => include_str!("../lang/ja.json"),
             Self::Turkish => include_str!("../lang/tr.json"),
         }
