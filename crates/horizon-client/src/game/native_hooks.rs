@@ -2906,6 +2906,19 @@ impl Game<'_> {
     ) {
         let _ = (player, name, advancement);
     }
+    /// A server player's experience points are about to increase from an orb pickup,
+    /// after mending has taken its share. Change `amount` to change the points
+    /// added. The player's state is not swapped in, so helpers that look them up
+    /// through `self.lan` may find nothing while a guest packet is handled.
+    /// Server-side. @API:native_player_exp_change@.
+    pub(super) fn native_player_exp_change(
+        &mut self,
+        player: u128,
+        name: &str,
+        amount: &mut i32,
+    ) {
+        let _ = (player, name, amount);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

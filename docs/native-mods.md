@@ -1238,6 +1238,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   hotbar slot, after the slot range check and before it changes. The player's state is not swapped in, so helpers
   that look them up through `self.lan` may find nothing while a guest packet is being handled. Set `cancel` to
   keep the old slot; the client is sent that slot again.
+- **`native_player_exp_change(player, name, amount)`**: a server player's experience points from an orb pickup are
+  about to be added, after mending has taken its share. Change `amount` to change the points added; negative values
+  become zero. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing
+  while a guest packet is being handled. Command experience changes use another path and are not heard.
 - **`native_player_pick_item(player, name, from_entity, pos, entity_id, cancel)`**: a server player's middle-click
   pick resolved a block or entity's pick stack and is about to put it in the hotbar. For a block, `pos` is its
   position and `entity_id` is zero; for an entity, `from_entity` is true, `pos` is `[0, 0, 0]` and `entity_id`
