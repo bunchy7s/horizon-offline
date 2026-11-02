@@ -104,6 +104,15 @@ impl CompilerContainer {
         }
     }
 
+    /// Which compiler made a shader, for [`super::disk_cache`]'s keys.
+    pub(super) fn cache_name(&self) -> &'static str {
+        match self {
+            CompilerContainer::Fxc(_) => "fxc",
+            CompilerContainer::DynamicDxc(_) => "dxc",
+            CompilerContainer::StaticDxc(_) => "static-dxc",
+        }
+    }
+
     pub(super) fn compile(
         &self,
         device: &super::Device,

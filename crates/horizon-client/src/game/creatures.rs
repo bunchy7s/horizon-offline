@@ -263,6 +263,10 @@ pub(super) fn named_mob_pickable(
     alive && Some(id) != riding && Some(id) != camera
 }
 
+/// What an entity drew on the GPU path: the skin frame's mark before its draws, and their
+/// camera-relative bounds (`cull_skinned`).
+pub(super) type Skinned = Option<((usize, usize, u32), Option<(glam::Vec3, glam::Vec3)>)>;
+
 impl Game<'_> {
     pub(super) fn player_view(&self) -> Option<PlayerView> {
         let p = self.player.as_ref()?;
@@ -427,6 +431,9 @@ impl Game<'_> {
         let id = mob.id;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
+        if !self.mobs.iter().any(|m| m.id == id) {
+            return None;
+        }
         self.enchant_spawn_equipment(id);
         self.halloween_spawn_head(id);
         if !persistent && !scripted {
@@ -6312,7 +6319,7 @@ impl Game<'_> {
         &self,
         out: &mut Vec<Vertex>,
         entity_start: usize,
-        skinned: Option<((usize, usize, u32), Option<(glam::Vec3, glam::Vec3)>)>,
+        skinned: Skinned,
     ) {
         let corners = skinned.and_then(|(_, bounds)| bounds);
         if let Some((lo, hi)) = corners {
@@ -6564,7 +6571,9 @@ impl Game<'_> {
             }
             // CustomHeadLayer (a pumpkin, skull or head item) included.
             if layers {
-                self.mob_block_geometry(mob, camera, alpha, packed, out);
+                // Held items join the GPU path's draws unless an outline reads their vertices.
+                let skin = (skinning && outline.is_none()).then_some(&mut skinned);
+                self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
                 // `native_mob_layer`: a native mod's layer, over the vanilla ones.
                 self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
             }

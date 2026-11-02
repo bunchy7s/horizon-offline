@@ -1191,8 +1191,21 @@ def compute():
     ]
 
 
+def scoreboard_remainder_boundaries():
+    operations = setup('/scoreboard objectives add boundary dummy')
+    for dividend, divisor in [(2147483646, 2147483647), (7, -3), (-2147483648, -1)]:
+        operations += setup(f'/scoreboard players set left boundary {dividend}',
+                            f'/scoreboard players set right boundary {divisor}')
+        operations += [cmd('/scoreboard players operation left boundary %= right boundary'),
+                       cmd('/scoreboard players get left boundary'),
+                       cmd('/scoreboard players get right boundary')]
+    operations += setup('/scoreboard objectives remove boundary')
+    return operations
+
+
 def social():
     return [
+        *scoreboard_remainder_boundaries(),
         *setup('/scoreboard objectives add trig trigger', '/scoreboard objectives add plain dummy'),
         cmd('/trigger trig'),
         cmd('/scoreboard players enable @s trig'),
