@@ -66,14 +66,27 @@ fn base_attachment(v: &Mob) -> [f64; 3] {
 }
 /// The rider's own `VEHICLE` attachment height (`ridingOffset`): how far
 /// below the vehicle's attachment point its feet hang, in its scale.
-pub fn vehicle_attachment(r: &Mob) -> f64 {
-    unscaled_vehicle_attachment(r) * scale(r)
+/// `vehicle_width` is the vehicle's `getBbWidth`, which a spider's own rule
+/// reads.
+pub fn vehicle_attachment(r: &Mob, vehicle_width: f32) -> f64 {
+    unscaled_vehicle_attachment(r, vehicle_width) * scale(r)
 }
-fn unscaled_vehicle_attachment(r: &Mob) -> f64 {
+fn unscaled_vehicle_attachment(r: &Mob, vehicle_width: f32) -> f64 {
     use Species as S;
     // Avatar.DEFAULT_VEHICLE_ATTACHMENT.
     if avatar(r) {
         return 0.6;
+    }
+    // `Spider.getVehicleAttachmentPoint` and `CaveSpider.getVehicleAttachmentPoint`:
+    // a vehicle no wider than the rider takes the spider's fixed seat, and a
+    // wider one the type's default. A cave spider's super call reaches the
+    // spider's rule, which then sees the same width and takes the default too.
+    if vehicle_width <= r.width() {
+        match r.species() {
+            S::CaveSpider => return 0.21875,
+            S::Spider => return 0.3125,
+            _ => {}
+        }
     }
     match r.species() {
         S::Zombie | S::Husk | S::Drowned if r.is_baby() => 0.1875,
@@ -368,13 +381,13 @@ mod tests {
         let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
         assert!(close(passenger_attachment(&npc(0.0))[1], 1.8));
         assert!(close(passenger_attachment(&npc(1.5))[1], 2.7));
-        assert!(close(vehicle_attachment(&npc(0.0)), 0.6));
-        assert!(close(vehicle_attachment(&npc(1.5)), 0.9));
+        assert!(close(vehicle_attachment(&npc(0.0), 1.375), 0.6));
+        assert!(close(vehicle_attachment(&npc(1.5), 1.375), 0.9));
         // On a seat at y 55 (a text display, whose attachment is its feet):
         // a 1.5 NPC's feet at 54.1, where the server puts it.
         let seat = seat(
             [0.0; 3],
-            vehicle_attachment(&npc(1.5)),
+            vehicle_attachment(&npc(1.5), 1.375),
             Vec3::new(0.0, 55.0, 0.0),
             0.0,
         );
