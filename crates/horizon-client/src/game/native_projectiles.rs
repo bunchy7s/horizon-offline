@@ -227,7 +227,11 @@ impl Game<'_> {
             if present.is_none() && listed[impact.index] {
                 continue;
             }
-            let (p, keep, events) = self.native_projectile_through(impact.before);
+            let mut before = impact.before;
+            // Replaying a canceled impact must not repeat the first-tick event
+            // already queued by the original tick.
+            before.has_been_shot = hits[impact.hit_slot].0.has_been_shot;
+            let (p, keep, events) = self.native_projectile_through(before);
             flown.extend(events);
             match (present, keep) {
                 (Some(i), true) => projectiles[i] = p,
