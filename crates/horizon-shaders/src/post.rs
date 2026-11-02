@@ -124,6 +124,9 @@ const TERRAIN: [&str; 4] = [
     "gbuffers_basic",
 ];
 
+/// `gbuffers_line` and its fallback, as in Iris: lines such as the block outline.
+const LINES: [&str; 2] = ["gbuffers_line", "gbuffers_basic"];
+
 /// `gbuffers_skybasic` and its fallback (2.3).
 const SKY: [&str; 2] = ["gbuffers_skybasic", "gbuffers_basic"];
 
@@ -396,6 +399,8 @@ pub struct Post {
     pub damaged_block: Option<PostProgram>,
     /// What draws the game's clouds.
     pub clouds: Option<PostProgram>,
+    /// What draws lines (the block outline), with the pack's own transform and look.
+    pub lines: Option<PostProgram>,
     /// What draws rain and snow, after deferred.
     pub weather: Option<PostProgram>,
     /// What draws the first-person hand and held items.
@@ -514,6 +519,8 @@ pub struct GameInputs {
     pub clouds: Option<GbuffersInputs>,
     /// Rain and snow.
     pub weather: Option<GbuffersInputs>,
+    /// Lines: the block outline.
+    pub lines: Option<GbuffersInputs>,
     /// The first-person hand and held items.
     pub hand: Option<GbuffersInputs>,
     /// Terrain read vertex by vertex, for a shadow program with a geometry stage.
@@ -544,6 +551,7 @@ pub fn load_post(
         particles: None,
         damaged_block: None,
         clouds: None,
+        lines: None,
         weather: None,
         hand: None,
         shadow_pass: false,
@@ -712,6 +720,15 @@ pub fn load_post(
         p.blend = blend(properties, &p.name).unwrap_or(Some(TRANSLUCENT_BLEND));
         p
     });
+    // The block outline blends, as vanilla's does.
+    let lines = inputs
+        .lines
+        .as_ref()
+        .and_then(|i| gbuffers_dyn(&LINES, i))
+        .map(|mut p| {
+            p.blend = blend(properties, &p.name).unwrap_or(Some(TRANSLUCENT_BLEND));
+            p
+        });
     // Rain and snow draw after deferred and blend, as vanilla's do (OQ-23).
     let weather = inputs
         .weather
@@ -758,6 +775,7 @@ pub fn load_post(
     loader.post.particles = particles;
     loader.post.damaged_block = damaged_block;
     loader.post.clouds = clouds;
+    loader.post.lines = lines;
     loader.post.weather = weather;
     loader.post.hand = hand;
     let flag = |key: &str| properties.get(key).map(|v| v.trim() == "true");
@@ -1669,6 +1687,7 @@ mod tests {
             entities: Some(inputs.clone()),
             clouds: Some(inputs.clone()),
             weather: Some(inputs.clone()),
+            lines: Some(inputs.clone()),
             hand: Some(inputs),
             terrain_geometry: None,
         };
