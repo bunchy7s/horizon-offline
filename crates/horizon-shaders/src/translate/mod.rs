@@ -1774,6 +1774,20 @@ mod tests {
         .unwrap_or_else(|e| panic!("{e:?}"));
     }
 
+    /// A non-void function whose only `return` has unreachable code after it and no trailing
+    /// return at the end of the block (which naga would otherwise end with `return;` without a value).
+    #[test]
+    fn early_return_without_trailing_return_translates() {
+        let fsh = "#version 120\n\
+                   vec3 exposure(vec3 color) {\n    return color * 3.5;\n    int x = 1;\n}\n\
+                   void main() { gl_FragColor = vec4(exposure(vec3(1.0)), 1.0); }\n";
+        program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
     /// GLSL's `dot` and `normalize` take a `float` too (genType); naga's take vectors only. A
     /// pack's own `dot` is kept.
     #[test]
