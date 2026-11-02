@@ -1492,60 +1492,6 @@ impl ParticleEngine {
             );
         }
     }
-    /// `ClientExplosionTracker` with `Level.DEFAULT_EXPLOSION_BLOCK_PARTICLES`.
-    pub fn explosion_blocks(
-        &mut self,
-        center: [f64; 3],
-        radius: f32,
-        block_count: usize,
-        is_air: &dyn Fn([i32; 3]) -> bool,
-    ) {
-        // ClientExplosionTracker.tick: only the All option throws the debris.
-        if self.particle_level != 0 {
-            return;
-        }
-        for _ in 0..block_count.min(512) {
-            let r = &mut self.random;
-            let d = Vec3::new(
-                f64::from(r.next_float() * 2.0 - 1.0),
-                f64::from(r.next_float() * 2.0 - 1.0),
-                f64::from(r.next_float() * 2.0 - 1.0),
-            )
-            .normalize();
-            let distance = r.next_float().cbrt() * radius;
-            let local = [
-                d.x * f64::from(distance),
-                d.y * f64::from(distance),
-                d.z * f64::from(distance),
-            ];
-            let at = [
-                center[0] + local[0],
-                center[1] + local[1],
-                center[2] + local[2],
-            ];
-            if !is_air(ParticleLevel::block_at(at)) {
-                continue;
-            }
-            let speed = 0.5 / (distance / radius + 0.1) * r.next_float() * r.next_float() + 0.3;
-            // Level.DEFAULT_EXPLOSION_BLOCK_PARTICLES: poof (scaling 0.5) or smoke, equally weighted.
-            let (ty, scaling) = if r.next_int_bound(2).unwrap_or(0) == 0 {
-                (ParticleType::Poof, 0.5)
-            } else {
-                (ParticleType::Smoke, 1.0)
-            };
-            let p = [
-                center[0] + local[0] * scaling,
-                center[1] + local[1] * scaling,
-                center[2] + local[2] * scaling,
-            ];
-            let v = [
-                d.x * f64::from(speed),
-                d.y * f64::from(speed),
-                d.z * f64::from(speed),
-            ];
-            self.add(&ParticleOptions::simple(ty), p, v);
-        }
-    }
     /// `ParticleEngine.createTrackingEmitter` (crits): 16 tries per tick for
     /// three ticks inside a quarter of the entity's box, ticked once at creation.
     pub fn tracking_emitter(
@@ -3429,21 +3375,17 @@ impl ParticleEngine {
         }
         let total_particles = total_blocks.min(512);
         for _ in 0..total_particles {
-            let explosion = if explosions.len() == 1 {
-                &explosions[0]
-            } else {
-                let mut pick =
-                    self.random.next_int_bound(total_blocks as i32).unwrap_or(0) as usize;
-                let mut chosen = &explosions[0];
-                for exp in &explosions {
-                    if pick < exp.block_count {
-                        chosen = exp;
-                        break;
-                    }
-                    pick -= exp.block_count;
+            // `WeightedRandom.getRandomItem` draws its `nextInt(totalWeight)`
+            // even when one explosion is tracked.
+            let mut pick = self.random.next_int_bound(total_blocks as i32).unwrap_or(0) as usize;
+            let mut explosion = &explosions[0];
+            for exp in &explosions {
+                if pick < exp.block_count {
+                    explosion = exp;
+                    break;
                 }
-                chosen
-            };
+                pick -= exp.block_count;
+            }
             let r = &mut self.random;
             let d = Vec3::new(
                 f64::from(r.next_float() * 2.0 - 1.0),
@@ -3462,11 +3404,7 @@ impl ParticleEngine {
                 explosion.center[1] + local[1],
                 explosion.center[2] + local[2],
             ];
-            if !is_air([
-                at[0].floor() as i32,
-                at[1].floor() as i32,
-                at[2].floor() as i32,
-            ]) {
+            if !is_air(ParticleLevel::block_at(at)) {
                 continue;
             }
             let speed =
