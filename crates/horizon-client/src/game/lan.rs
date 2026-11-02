@@ -1697,15 +1697,17 @@ impl Game<'_> {
 
     /// The entities guests track: mobs, items and the rest (game/lan_entities.rs).
     /// `mob_players` is the guest each mob sees as its player (game/lan_mobs.rs).
+    /// Only the entities whose id is above `after` (0: all of them).
     fn lan_entities(
         &mut self,
         mob_players: &horizon_client::fast_hash::FxHashMap<u32, u32>,
         hub: &mut Hub,
         out: &mut States,
         drain_minecart_steps: bool,
+        after: u32,
     ) {
         out.clear();
-        for m in self.mobs.iter().filter(|m| !m.removed) {
+        for m in self.mobs.iter().filter(|m| !m.removed && m.id > after) {
             // The lead's holder: the player the mob sees, another mob or a
             // fence knot (game/lan_entities.rs).
             let player_entity = mob_players
@@ -1739,7 +1741,7 @@ impl Game<'_> {
             self.mob_attributes(m, &mut e.attributes);
             e.leash = leash;
         }
-        for d in &self.dropped {
+        for d in self.dropped.iter().filter(|d| d.id > after) {
             let stack = hub.stack(&Some(d.stack.clone()));
             let e = out.add(d.id as i32, entity_uuid(d.id), "minecraft:item");
             e.position = [d.position.x, d.position.y, d.position.z];
@@ -1758,7 +1760,7 @@ impl Game<'_> {
             }
             e.meta.push((8, serializer::ITEM_STACK, Value::Item(stack)));
         }
-        for o in &self.orbs {
+        for o in self.orbs.iter().filter(|o| o.id > after) {
             let e = out.add(o.id as i32, entity_uuid(o.id), "minecraft:experience_orb");
             e.position = [o.position.x, o.position.y, o.position.z];
             e.on_ground = o.on_ground;
@@ -1767,7 +1769,7 @@ impl Game<'_> {
             e.meta
                 .push((8, serializer::INT, Value::Int(o.value as i32)));
         }
-        self.lan_object_states(hub, out, drain_minecart_steps);
+        self.lan_object_states(hub, out, drain_minecart_steps, after);
     }
 
     /// Apply gameplay events produced while the hub handles guest packets.
@@ -2096,8 +2098,9 @@ impl Game<'_> {
     /// The end of the level's tick: the entities added since its states were
     /// taken for the guests (a falling block's drop, a spawner's mob, the
     /// host's snowball) are noted as they joined, for the next tick's
-    /// tracking to pair them from (`Hub::note_joined`). Nothing is described
-    /// when the id counter has not moved, or no guest is in the level.
+    /// tracking to pair them from (`Hub::note_joined`). Only they are
+    /// described (their ids are above the counter the states were taken at),
+    /// and nothing when the counter has not moved or no guest is in the level.
     pub(super) fn lan_note_joined(&mut self) {
         let Some(mut host) = self.lan.take() else {
             return;
@@ -2108,7 +2111,7 @@ impl Game<'_> {
             self.lan_assign_ids();
             if self.next_entity != next {
                 let mut states = States::default();
-                self.lan_entities(&host.mob_players, &mut host.hub, &mut states, false);
+                self.lan_entities(&host.mob_players, &mut host.hub, &mut states, false, next);
                 self.lan_hook_states(&host.play, &host.hub, &mut states);
                 self.lan_entity_uuids(&mut states);
                 host.hub.note_joined(states.as_slice());
@@ -2174,7 +2177,7 @@ impl Game<'_> {
                     .filter_map(|g| Some((g.vehicle?, g.entity_id)))
                     .collect();
                 self.lan_riding(&guests, &mut host.hub.riding);
-                self.lan_entities(&host.mob_players, &mut host.hub, &mut states, true);
+                self.lan_entities(&host.mob_players, &mut host.hub, &mut states, true, 0);
                 self.lan_hook_states(&host.play, &host.hub, &mut states);
                 self.lan_entity_uuids(&mut states);
                 host.states_next_entity = Some(self.next_entity);
@@ -2418,7 +2421,7 @@ impl Game<'_> {
                 return;
             }
             // A dedicated server has no host player.
-            self.lan_entities(&host.mob_players, &mut host.hub, &mut theirs, false);
+            self.lan_entities(&host.mob_players, &mut host.hub, &mut theirs, false, 0);
             self.lan_hook_states(&host.play, &host.hub, &mut theirs);
             self.lan_entity_uuids(&mut theirs);
             theirs.as_slice()

@@ -7412,7 +7412,7 @@ impl Game<'_> {
             self.use_delay = 4;
         }
         if running {
-            self.lan_note_joined();
+            horizon_client::spans::time("lan_note_joined", || self.lan_note_joined());
         }
         Ok(())
     }
