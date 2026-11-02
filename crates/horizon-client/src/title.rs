@@ -3275,6 +3275,30 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         let next = create_world::next_tab_index(options.tab, key, shift)?;
         Some(self.select_create_tab(next.min(create_world::tab_count() - 1)))
     }
+    /// `AbstractSelectionList.mouseClicked`: the row under the pointer takes
+    /// a click of any button (`ObjectSelectionList.Entry.mouseClicked` accepts
+    /// them all), so a middle click selects a world and its Play, Edit and
+    /// Delete buttons hear of it (`WorldSelectionList.setSelected`), without
+    /// opening it. Only the left button joins, through [`Self::click`].
+    pub fn select_world_at(&mut self, x: f32, y: f32, size: (f32, f32)) -> bool {
+        let index = {
+            let Mode::Select { worlds, .. } = &self.mode else {
+                return false;
+            };
+            let Some((row, _)) = self.world_row_at(worlds, (x, y), size) else {
+                return false;
+            };
+            let Some((index, _)) = self.visible_worlds(worlds).nth(row) else {
+                return false;
+            };
+            index
+        };
+        if let Mode::Select { selected, .. } = &mut self.mode {
+            *selected = Some(index);
+        }
+        true
+    }
+
     /// The action and whether to play `AbstractWidget.playButtonClickSound`.
     /// Navigation buttons can return `Action::None` while still sounding.
     pub fn click(&mut self, x: f32, y: f32, size: (f32, f32)) -> (Action, bool) {
