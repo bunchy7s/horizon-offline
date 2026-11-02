@@ -14,6 +14,15 @@ Apache-2.0; both licenses are in that folder (`LICENSE.MIT`, `LICENSE.APACHE`).
 fixes to its GLSL frontend that shader packs need, each applied in the commit that needed it. It is licensed under MIT or Apache-2.0; both licenses
 are in that folder (`LICENSE.MIT`, `LICENSE.APACHE`).
 
+## libmimalloc-sys and mimalloc
+
+`third_party/libmimalloc-sys` is [libmimalloc-sys](https://github.com/purpleprotocol/mimalloc_rust)
+0.1.49 by Octavian Oncescu, with the [mimalloc](https://github.com/microsoft/mimalloc) v3 sources it
+bundles (Copyright (c) 2018-2025 Microsoft Corporation, Daan Leijen), both under the MIT license
+(`LICENSE.txt` and `c_src/mimalloc/v3/LICENSE` in that folder). It holds only the v3 sources. One
+change: `mi_popcount` in `include/mimalloc/bits.h` uses mimalloc's portable bit count on MSVC
+x86/x64 instead of the POPCNT instruction, which CPUs before Nehalem lack (#7264).
+
 ## Pixelify Sans
 
 `crates/horizon-theme/fonts/PixelifySans-*.ttf` is [Pixelify Sans](https://github.com/eifetx/Pixelify-Sans)
