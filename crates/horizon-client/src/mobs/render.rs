@@ -85,7 +85,7 @@ fn translucent_layer(m: &Mob, layer: &Layer) -> bool {
 /// normal, at `EYES_TIER`) on a mob whose other draws are plain: spiders',
 /// endermen's, phantoms', the creaking's and the copper golem's. The GPU path
 /// poses them as [`super::skin::Skin`] `FLAT` draws when improved transparency
-/// is off ([`super::skin::SkinModels::eyes`]).
+/// is off ([`super::skin::SkinModels::tagged`]).
 fn eyes_layer(m: &Mob, layer: &Layer) -> bool {
     layer.full_bright
         && layer.scroll == 0.0
@@ -1986,9 +1986,9 @@ fn render_visible(
         }
     }
     // The GPU path takes the whole mob or none of it, so its draws keep their
-    // order: only plain opaque and cutout draws of models it can pose (no
-    // custom models, translucency, eyes or energy swirl, which the CPU path
-    // changes after drawing).
+    // order: only plain draws of models it can pose (no custom models,
+    // translucent body or energy swirl, which the CPU path changes after
+    // drawing), and with improved transparency off the tagged layers too.
     let mut skin = skin;
     let posable = match skin.as_deref_mut() {
         Some(skin) => {
@@ -1999,7 +1999,9 @@ fn render_visible(
                 && energy_swirl(m, s.age).is_none()
                 && skin.supports(&model)
                 && all_layers.iter().all(|layer| {
-                    (skin.models.eyes && eyes_layer(m, layer)
+                    // With improved transparency off, a translucent layer's tag
+                    // is the only difference from a plain draw.
+                    (skin.models.tagged && (eyes_layer(m, layer) || !layer.full_bright)
                         || !layer.full_bright && !translucent_layer(m, layer))
                         && cem.layer(&layer.model).is_none()
                         && m.kind

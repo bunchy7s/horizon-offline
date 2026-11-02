@@ -6313,7 +6313,7 @@ impl Game<'_> {
             Some(stored) => {
                 let mut models = self.skin_models.borrow_mut();
                 models.begin(&mut self.skin_frame.borrow_mut(), stored);
-                models.eyes = renderer.is_some_and(|r| r.skins_eyes());
+                models.tagged = renderer.is_some_and(|r| r.skins_tagged());
             }
             None => self.skin_frame.borrow_mut().clear_draws(),
         }
