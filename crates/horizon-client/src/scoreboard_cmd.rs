@@ -797,7 +797,14 @@ pub fn apply_operation(op: &str, a: i32, b: i32) -> CmdResult<(i32, i32)> {
             if b == 0 {
                 return Err(div0());
             }
-            (a.wrapping_rem(b).wrapping_add(b).wrapping_rem(b), b)
+            let remainder = a.wrapping_rem(b);
+            // Floor remainder has the divisor's sign; only correct opposite signs.
+            let remainder = if remainder != 0 && ((remainder < 0) != (b < 0)) {
+                remainder + b
+            } else {
+                remainder
+            };
+            (remainder, b)
         }
         "<" => (a.min(b), b),
         ">" => (a.max(b), b),
