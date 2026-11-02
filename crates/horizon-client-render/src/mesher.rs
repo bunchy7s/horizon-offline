@@ -73,6 +73,15 @@ pub struct TerrainVertex {
     /// RGBA8: tint multiplied by directional shade and ambient occlusion.
     pub color: u32,
 }
+/// `v.round().clamp(0.0, 65535.0) as u16`, without the `roundf` call x86-64's
+/// baseline instruction set makes of `f32::round`: clamped first (the same
+/// result), the fraction is exact below 2^23, and every float above is whole.
+#[inline]
+fn round_to_u16(v: f32) -> u16 {
+    let v = v.clamp(0.0, f32::from(u16::MAX));
+    let whole = v as u32;
+    (whole + u32::from(v - whole as f32 >= 0.5)) as u16
+}
 /// Fixed-point steps per unit of `TerrainVertex` UVs, which span `[0, 2)`.
 pub const UV_STEPS: f32 = 32768.0;
 /// Fixed-point steps per block of distant-terrain UVs (`TerrainVertex::tiled`),
@@ -82,7 +91,7 @@ impl TerrainVertex {
     pub fn new(pos: [f32; 3], uv: [f32; 2], layer: u16, color: u32, light: u16) -> Self {
         Self {
             pos,
-            uv: uv.map(|v| (v * UV_STEPS).round().clamp(0.0, f32::from(u16::MAX)) as u16),
+            uv: uv.map(|v| round_to_u16(v * UV_STEPS)),
             layer,
             light,
             color,
@@ -93,7 +102,7 @@ impl TerrainVertex {
     pub fn tiled(pos: [f32; 3], uv: [f32; 2], layer: u16, color: u32, light: u16) -> Self {
         Self {
             pos,
-            uv: uv.map(|v| (v * TILED_UV_STEPS).round().clamp(0.0, f32::from(u16::MAX)) as u16),
+            uv: uv.map(|v| round_to_u16(v * TILED_UV_STEPS)),
             layer,
             light,
             color,
@@ -113,6 +122,30 @@ mod vertex_tests {
             let u = i as f32 / 32.0;
             let v = TerrainVertex::new([0.0; 3], [u, 1.0 - u], 0, 0, 0);
             assert_eq!(v.uv(), [u, 1.0 - u]);
+        }
+    }
+    #[test]
+    fn uv_rounding_matches_f32_round() {
+        let reference = |v: f32| v.round().clamp(0.0, f32::from(u16::MAX)) as u16;
+        let mut values = vec![
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            -0.0,
+            0.5,
+            1.5,
+            65534.5,
+            1e9,
+        ];
+        for bits in (0..u32::MAX).step_by(9973) {
+            values.push(f32::from_bits(bits));
+        }
+        for i in 0..=140_000 {
+            values.push(i as f32 * 0.5 - 2.0);
+            values.push(i as f32 * 0.5 - 2.0 + f32::EPSILON);
+        }
+        for v in values {
+            assert_eq!(super::round_to_u16(v), reference(v), "{v:e}");
         }
     }
     #[test]
@@ -333,94 +366,112 @@ pub const ALL_VISIBLE: u64 = (1 << 36) - 1;
 /// VisGraph.resolve: flood fill non-opaque cells and connect the faces each region touches.
 #[cfg(test)]
 fn visibility(pad: &Padded, info: &[Info]) -> u64 {
-    visibility_reusing(pad, info, &mut Vec::new())
+    let solid: Vec<bool> = info.iter().map(|i| i.solid).collect();
+    let mut rows = Vec::new();
+    opaque_rows(pad, &solid, &mut rows);
+    visibility_rows(&open_rows(&rows))
 }
-fn visibility_reusing(pad: &Padded, info: &[Info], stack: &mut Vec<usize>) -> u64 {
-    // The all-visible shortcut can leave a partially filled stack behind.
-    stack.clear();
-    // Opaque cells are already visited: resolve each state's opacity once,
-    // then reuse this map for the flood fill and the uniform-section shortcuts.
-    let mut seen = [false; 4096];
-    let mut opaque_count = 0;
-    for y in 0..16 {
-        for z in 0..16 {
-            let row = pi(0, y, z);
-            for x in 0..16 {
-                let opaque = info[pad.blocks[row + x] as usize].solid;
-                seen[(y as usize) << 8 | (z as usize) << 4 | x] = opaque;
-                opaque_count += usize::from(opaque);
-            }
-        }
+/// The section's non-opaque cells by row (`y << 4 | z`, bit x) from the padded
+/// opacity rows (`MeshScratch::opaque`).
+fn open_rows(opaque: &[u32]) -> [u16; 256] {
+    std::array::from_fn(|r| {
+        let (y, z) = ((r >> 4) as i32, (r & 15) as i32);
+        !(opaque[((y + B) as usize) * P + (z + B) as usize] >> B) as u16
+    })
+}
+/// The cells of `open` connected to `seeds` (a subset) within the row: an
+/// occluded fill each way, doubling its reach at each step.
+#[inline]
+fn fill_row(seeds: u16, open: u16) -> u16 {
+    let (mut up, mut through_up) = (seeds, open);
+    let (mut down, mut through_down) = (seeds, open);
+    for step in [1, 2, 4, 8] {
+        up |= through_up & up << step;
+        through_up &= through_up << step;
+        down |= through_down & down >> step;
+        through_down &= through_down >> step;
     }
-    if opaque_count == 0 {
+    up | down
+}
+/// `visibility` on bit rows, one region at a time: a region grows a row at
+/// a time (each row filled along its open runs at once) by sweeps over the
+/// rows it can reach, until a sweep adds nothing.
+fn visibility_rows(open: &[u16; 256]) -> u64 {
+    let open_count: u32 = open.iter().map(|r| r.count_ones()).sum();
+    if open_count == 4096 {
         return ALL_VISIBLE;
     }
-    if opaque_count == 4096 {
+    if open_count == 0 {
         return 0;
     }
+    let mut unvisited = *open;
+    let mut region = [0u16; 256];
     let mut result = 0u64;
-    for start in 0..4096usize {
-        if seen[start] {
-            continue;
-        }
-        let mut faces = 0u8;
-        seen[start] = true;
-        stack.push(start);
-        while let Some(c) = stack.pop() {
-            let (x, y, z) = ((c & 15) as i32, (c >> 8) as i32, ((c >> 4) & 15) as i32);
-            if y == 0 {
-                faces |= 1 << 0;
+    for start in 0..256 {
+        while unvisited[start] != 0 {
+            let seed = unvisited[start] & unvisited[start].wrapping_neg();
+            region[start] = fill_row(seed, unvisited[start]);
+            let (mut lo, mut hi) = (start, start);
+            loop {
+                let mut grown = false;
+                let (first, last) = (lo.saturating_sub(16), (hi + 16).min(255));
+                for r in (first..=last).chain((first..=last).rev()) {
+                    let mut near = region[r];
+                    if r >= 16 {
+                        near |= region[r - 16];
+                    }
+                    if r + 16 < 256 {
+                        near |= region[r + 16];
+                    }
+                    if r & 15 != 0 {
+                        near |= region[r - 1];
+                    }
+                    if r & 15 != 15 {
+                        near |= region[r + 1];
+                    }
+                    let reached = near & unvisited[r];
+                    if reached & !region[r] != 0 {
+                        region[r] = fill_row(reached, unvisited[r]);
+                        (lo, hi) = (lo.min(r), hi.max(r));
+                        grown = true;
+                    }
+                }
+                if !grown {
+                    break;
+                }
             }
-            if y == 15 {
-                faces |= 1 << 1;
-            }
-            if z == 0 {
-                faces |= 1 << 2;
-            }
-            if z == 15 {
-                faces |= 1 << 3;
-            }
-            if x == 0 {
-                faces |= 1 << 4;
-            }
-            if x == 15 {
-                faces |= 1 << 5;
+            let mut faces = 0u8;
+            for r in lo..=hi {
+                let row = std::mem::take(&mut region[r]);
+                if row == 0 {
+                    continue;
+                }
+                unvisited[r] &= !row;
+                let (y, z) = (r >> 4, r & 15);
+                faces |= u8::from(y == 0)
+                    | u8::from(y == 15) << 1
+                    | u8::from(z == 0) << 2
+                    | u8::from(z == 15) << 3
+                    | u8::from(row & 1 != 0) << 4
+                    | u8::from(row & 0x8000 != 0) << 5;
             }
             // A single connected region touching all six faces sets every
             // pair (including the diagonal); unvisited cavities cannot add more.
             if faces == 0b11_1111 {
                 return ALL_VISIBLE;
             }
-            for (dx, dy, dz) in [
-                (1, 0, 0),
-                (-1, 0, 0),
-                (0, 1, 0),
-                (0, -1, 0),
-                (0, 0, 1),
-                (0, 0, -1),
-            ] {
-                let (nx, ny, nz) = (x + dx, y + dy, z + dz);
-                if !(0..16).contains(&nx) || !(0..16).contains(&ny) || !(0..16).contains(&nz) {
-                    continue;
-                }
-                let n = (ny << 8 | nz << 4 | nx) as usize;
-                if !seen[n] {
-                    seen[n] = true;
-                    stack.push(n);
-                }
-            }
-        }
-        for a in 0..6 {
-            if faces & (1 << a) != 0 {
-                for b in 0..6 {
-                    if faces & (1 << b) != 0 {
-                        result |= 1 << (a * 6 + b);
+            for a in 0..6 {
+                if faces & (1 << a) != 0 {
+                    for b in 0..6 {
+                        if faces & (1 << b) != 0 {
+                            result |= 1 << (a * 6 + b);
+                        }
                     }
                 }
             }
-        }
-        if result == ALL_VISIBLE {
-            return result;
+            if result == ALL_VISIBLE {
+                return result;
+            }
         }
     }
     result
@@ -509,6 +560,9 @@ pub struct MeshTables {
     /// reads 8,000 states, and a few bytes each stay in cache where `Info`
     /// does not.
     solid: Vec<bool>,
+    /// By state, bit `d` set where its occlusion face toward direction `d` is the
+    /// full block (`Info::face` 1): a face looking at it never shows.
+    full_faces: Vec<u8>,
     pub visibility: FaceVisibility,
     water_still: u16,
     water_flow: u16,
@@ -678,6 +732,10 @@ impl MeshTables {
         }
         Ok(Self {
             solid: info.iter().map(|i| i.solid).collect(),
+            full_faces: info
+                .iter()
+                .map(|i| (0..6).fold(0, |bits, d| bits | u8::from(i.face[d] == 1) << d))
+                .collect(),
             info,
             visibility,
             water_still: layer("minecraft:block/water_still")?,
@@ -851,66 +909,101 @@ impl Padded {
         let (blocks, light) = (&mut self.blocks, &mut self.light);
         let base_y = region[1][1].map_or(MIN_Y, Chunk::min_y) + sy * 16;
         // The section itself is unpacked in one pass and copied row by row;
-        // the border cells of the neighbouring sections are read one by one,
-        // each run of them from a section found once.
+        // the border cells of the neighbouring sections are read in runs, from
+        // sections found once per layer.
         own.fill(0);
-        let center = region[1][1].map(|c| &c.sections[sy as usize]);
-        if let Some(section) = center {
-            section.unpack(own);
+        let center = region[1][1];
+        if let Some(c) = center {
+            c.sections[sy as usize].unpack(own);
         }
-        // The x runs of a padded row by the chunk column they fall in.
-        const RUNS: [(usize, i32, i32); 3] = [(0, -B, 0), (1, 0, 16), (2, 16, 16 + B)];
         for y in -B..16 + B {
             let wy = base_y + y;
+            // Where each chunk column's cells of this layer come from, found once.
+            let sources: [[Source; 3]; 3] = std::array::from_fn(|rz| {
+                std::array::from_fn(|rx| match region[rz][rx] {
+                    None => Source::Missing,
+                    // `Chunk::get` and `Chunk::light` outside the column's sections.
+                    Some(c) => {
+                        let s = (wy - c.min_y()) >> 4;
+                        match c.sections.get(s as usize).filter(|_| s >= 0) {
+                            Some(section) => Source::Section(section),
+                            None => Source::Outside(if s < 0 { 0 } else { 0xF0 }),
+                        }
+                    }
+                })
+            });
             for z in -B..16 + B {
                 let row = pi(-B, y, z);
                 let rz = ((z + 16) >> 4) as usize;
-                for (rx, x0, x1) in RUNS {
-                    let (start, end) = (row + (x0 + B) as usize, row + (x1 + B) as usize);
-                    let (blocks, light) = (&mut blocks[start..end], &mut light[start..end]);
-                    let Some(c) = region[rz][rx] else {
-                        match region[1][1] {
-                            // A neighbour not loaded continues this chunk's edge
-                            // column. As lit air, the outermost chunks' water drew
-                            // a wall toward it (fluids show both sides), a light
-                            // sheet in the water where far terrain carries on.
-                            // Vanilla draws no chunk without its neighbours.
-                            Some(c) => {
-                                let ez = z.clamp(0, 15);
-                                for (k, x) in (x0..x1).enumerate() {
-                                    let ex = x.clamp(0, 15);
-                                    blocks[k] = c.get(ex, wy, ez);
-                                    light[k] = c.light(ex, wy, ez);
-                                }
-                            }
-                            None => {
-                                blocks.fill(0);
-                                light.fill(0xF0);
-                            }
-                        }
-                        continue;
-                    };
-                    // `Chunk::get` and `Chunk::light` with the section found once.
-                    let s = (wy - c.min_y()) >> 4;
-                    let Some(section) = c.sections.get(s as usize).filter(|_| s >= 0) else {
-                        blocks.fill(0);
-                        light.fill(if s < 0 { 0 } else { 0xF0 });
-                        continue;
-                    };
-                    let at = crate::chunk::index(x0, wy, z);
-                    if rx == 1 && rz == 1 && (0..16).contains(&y) {
-                        let own_row = (y << 8 | z << 4) as usize;
-                        blocks.copy_from_slice(&own[own_row..own_row + 16]);
-                    } else {
-                        section.blocks.get_run(at, blocks);
-                    }
-                    match &section.light {
-                        Light::Uniform(v) => light.fill(*v),
-                        Light::Full(all) => light.copy_from_slice(&all[at..at + light.len()]),
-                    }
-                }
+                let (west, rest) = blocks[row..row + P].split_at_mut(B as usize);
+                let (middle, east) = rest.split_at_mut(16);
+                let (west_light, rest) = light[row..row + P].split_at_mut(B as usize);
+                let (middle_light, east_light) = rest.split_at_mut(16);
+                let own_row = (rz == 1 && (0..16).contains(&y))
+                    .then(|| &own[(y << 8 | z << 4) as usize..][..16]);
+                let at = |x: i32| crate::chunk::index(x, wy, z);
+                let [w, m, e] = &sources[rz];
+                let edge = (center, wy, z);
+                fill_run(west, west_light, w, None, at(-B), -B, edge);
+                fill_run(middle, middle_light, m, own_row, at(0), 0, edge);
+                fill_run(east, east_light, e, None, at(16), 16, edge);
             }
         }
+    }
+}
+/// Where the cells of one chunk column at one height come from (`Padded::fill`).
+enum Source<'a> {
+    /// A neighbour not loaded.
+    Missing,
+    /// Above or below the column's sections: air with this light.
+    Outside(u8),
+    Section(&'a crate::chunk::Section),
+}
+/// Fills one run of a padded row, `blocks.len()` cells from x = `x0`, starting
+/// at section index `at`; `own` is the centre section's row, already unpacked.
+#[inline(always)]
+fn fill_run(
+    blocks: &mut [u32],
+    light: &mut [u8],
+    source: &Source,
+    own: Option<&[u32]>,
+    at: usize,
+    x0: i32,
+    (center, wy, z): (Option<&Chunk>, i32, i32),
+) {
+    match source {
+        Source::Section(section) => {
+            match own {
+                Some(own) => blocks.copy_from_slice(own),
+                None => section.blocks.get_run(at, blocks),
+            }
+            match &section.light {
+                Light::Uniform(v) => light.fill(*v),
+                Light::Full(all) => light.copy_from_slice(&all[at..at + light.len()]),
+            }
+        }
+        Source::Outside(v) => {
+            blocks.fill(0);
+            light.fill(*v);
+        }
+        // A neighbour not loaded continues this chunk's edge column. As lit
+        // air, the outermost chunks' water drew a wall toward it (fluids show
+        // both sides), a light sheet in the water where far terrain carries
+        // on. Vanilla draws no chunk without its neighbours.
+        Source::Missing => match center {
+            Some(c) => {
+                let ez = z.clamp(0, 15);
+                for (k, (block, light)) in blocks.iter_mut().zip(light.iter_mut()).enumerate() {
+                    let ex = (x0 + k as i32).clamp(0, 15);
+                    *block = c.get(ex, wy, ez);
+                    *light = c.light(ex, wy, ez);
+                }
+            }
+            None => {
+                blocks.fill(0);
+                light.fill(0xF0);
+            }
+        },
     }
 }
 /// Per-worker temporary arrays. They never hold resource-pack references or
@@ -920,7 +1013,6 @@ impl Padded {
 pub struct MeshScratch {
     padded: Padded,
     own: Option<Box<[u32; 4096]>>,
-    visibility: Vec<usize>,
     leaf: leaf_culling::LeafMask,
     /// Per padded row (`pi(-B, y, z) / P`), bit `x + B` set where the block
     /// is `isSolidRender`.
@@ -1255,9 +1347,9 @@ impl Mesher<'_> {
         let own = scratch.own.get_or_insert_with(|| Box::new([0; 4096]));
         scratch.padded.fill(region, sy, own);
         let pad = &scratch.padded;
-        out.visibility = visibility_reusing(pad, &self.tables.info, &mut scratch.visibility);
         opaque_rows(pad, &self.tables.solid, &mut scratch.opaque);
         let opaque = &scratch.opaque;
+        out.visibility = visibility_rows(&open_rows(opaque));
         let base_y = center.min_y() + sy * 16;
         if self.leaf_culling.is_interior() {
             scratch
@@ -1272,6 +1364,7 @@ impl Mesher<'_> {
             [center.x, center.z, base_y],
         );
         let info = &self.tables.info;
+        let full_faces = &self.tables.full_faces;
         let catalog = &self.render.model_catalog;
         let mut models = Vec::new();
         for y in 0..16 {
@@ -1329,6 +1422,11 @@ impl Mesher<'_> {
                     for d in Direction::ALL {
                         let [dx, dy, dz] = d.normal();
                         let neighbor = pad.blocks[pi(x + dx, y + dy, z + dz)];
+                        // `should_render_face`'s first test, without its lookups: a
+                        // full occlusion face toward this block hides the face.
+                        if full_faces[neighbor as usize] >> d.opposite() as u8 & 1 != 0 {
+                            continue;
+                        }
                         let other = &info[neighbor as usize];
                         // LeavesBlock.skipRendering with opaque leaves.
                         let opaque_leaves = !self.cutout_leaves && state.leaves && other.leaves;
