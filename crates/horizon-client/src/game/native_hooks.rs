@@ -3035,7 +3035,7 @@ impl Game<'_> {
         pos: [i32; 3],
         cancel: &mut bool,
     ) {
-        let _ = (player, name, kind, pos, cancel);
+        mod_api::dispatch_hanging_place(self, mod_api::mods(), player, name, kind, pos, cancel);
     }
     /// A server player empties a bucket at `pos` (`fluid`: `minecraft:water`,
     /// `minecraft:lava`, `minecraft:powder_snow`; a fish or axolotl bucket
@@ -3055,7 +3055,7 @@ impl Game<'_> {
         fluid: &str,
         cancel: &mut bool,
     ) {
-        let _ = (player, name, pos, fluid, cancel);
+        mod_api::dispatch_bucket_empty(self, mod_api::mods(), player, name, pos, fluid, cancel);
     }
     /// A server player's fishing rod, with `state`: 0 the cast
     /// (`FishingRodItem.use` throwing the bobber), 1 a fish biting

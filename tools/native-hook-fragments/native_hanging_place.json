@@ -4,7 +4,11 @@
       "name": "hanging_place",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_hanging_place",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ],
   "rust_summary": "a server player placing an item frame, painting or leash knot, cancellable (`native_hanging_place`).",
