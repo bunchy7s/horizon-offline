@@ -2109,6 +2109,28 @@ sees the changes before it. Because no mod can build or match the whole
 struct, a later version can add a field without breaking any mod, as NeoForge's event objects do; the cost is that
 a mod's own tests can't build an event yet.
 
+#### Testing a trait mod
+
+Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements
+only what its hook calls, and an unexpected call fails loudly. Drive the hook through
+`horizon_client::mod_api::dispatch_<hook>(&mut host, &mods, args…)`, which builds the event as the game does. Game
+values that are `#[non_exhaustive]`, `NativeServerPlayer` and the events, can't be built outside horizon-client:
+return `None` for them, or test the logic beneath the hook. The level hosts are small enough to implement whole.
+NeoForge's GameTest is the in-game counterpart.
+
+```rust
+struct Stone;
+impl Host for Stone {
+    fn block(&self, _pos: [i32; 3]) -> String {
+        "minecraft:stone".to_string()
+    }
+}
+let mods = [Box::new(MyMod) as Box<dyn Hooks>];
+let mut claimed = false;
+dispatch_use_item_on(&mut Stone, &mods, &stack, [0, 64, 0], [0, 1, 0], &mut claimed);
+assert!(claimed);
+```
+
 Hook methods take `&self` and require `Send + Sync`. The process-wide mod list is installed once, like mixin module statics. One mod instance serves both
 the window's game and the server-thread game. A hook can also fire again inside
 the same mod: for example, `set_block` fires `block_changed`. Mods keep mutable
