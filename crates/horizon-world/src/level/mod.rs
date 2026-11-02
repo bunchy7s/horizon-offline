@@ -329,6 +329,9 @@ pub trait LevelAccess {
     fn allow_block_burn(&self, _pos: BlockPos) -> bool {
         true
     }
+    fn allow_note_play(&self, _pos: BlockPos, _instrument: &str, _note: i32) -> bool {
+        true
+    }
     /// Whether the piston at `piston` may push the blocks `push` one step
     /// `direction` and destroy `destroy` (`PistonBaseBlock.moveBlocks`, once
     /// the structure resolved). Refused, it moves nothing, as a structure

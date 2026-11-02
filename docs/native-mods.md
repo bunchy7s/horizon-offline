@@ -1325,6 +1325,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   from another fire block. Set `cancel` to leave the position unchanged. Other fire sources are not covered yet.
 - **`native_block_burn(dimension, pos, cancel)`** (on `GameLevel`): fire's burnout check is about to remove the block at
   `pos`. Set `cancel` to keep it.
+- **`native_note_play(dimension, player, pos, instrument, note, cancel)`** (on `GameLevel`): a note block is about to
+  sound when punched, used, or powered. Set `cancel` to silence it; when used to tune it, the note remains unchanged.
 - **`native_random_tick(ticks, dimension, pos, state, handled)`** (API 33, on `GameLevel`): a block `tickChunk`
   random-ticks, before its own `randomTick`. Change the block with the level's `native_set_block_property(ticks, pos,
   key, value, flags)`; set `handled` to skip the block's own random tick.

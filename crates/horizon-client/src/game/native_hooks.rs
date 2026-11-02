@@ -589,6 +589,22 @@ impl GameLevel<'_> {
         let _ = (dimension, pos, cancel);
     }
 
+    /// On an authoritative server, a note block at `pos` is about to sound.
+    /// `player` is None for world simulation. Set `cancel` to silence it.
+    /// @API:native_note_play@.
+    #[inline(always)]
+    pub(super) fn native_note_play(
+        &self,
+        dimension: LevelDimension,
+        player: Option<u128>,
+        pos: BlockPos,
+        instrument: &str,
+        note: i32,
+        cancel: &mut bool,
+    ) {
+        let _ = (dimension, player, pos, instrument, note, cancel);
+    }
+
     /// On an authoritative server, the piston at `piston` is about to push
     /// the blocks at `push` one step `direction` (`[0, 1, 0]` is up; pulling
     /// when it retracts) and destroy those at `destroy`:

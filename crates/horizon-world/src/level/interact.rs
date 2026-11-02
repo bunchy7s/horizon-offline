@@ -235,6 +235,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 Class::Note => {
                     let next = table.cycle(state, p.note);
+                    if !self.level.allow_note_play(
+                        pos,
+                        table.text(next, p.instrument),
+                        table.int(next, p.note),
+                    ) {
+                        return Success;
+                    }
                     self.set_block_and_update(pos, next);
                     self.note_play(pos, next);
                     Success

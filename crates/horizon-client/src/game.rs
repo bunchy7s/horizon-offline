@@ -1180,6 +1180,13 @@ impl LevelAccess for GameLevel<'_> {
         }
         !cancel
     }
+    fn allow_note_play(&self, pos: BlockPos, instrument: &str, note: i32) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_note_play(self.dimension, None, pos, instrument, note, &mut cancel);
+        }
+        !cancel
+    }
     fn allow_piston_move(
         &self,
         piston: BlockPos,

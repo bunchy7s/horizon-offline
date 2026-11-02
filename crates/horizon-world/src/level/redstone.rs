@@ -1214,6 +1214,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     pub(crate) fn note_play(&mut self, pos: BlockPos, state: BlockStateId) {
         let b = self.b;
         let instrument = b.table.text(state, b.props.instrument);
+        let note = b.table.int(state, b.props.note);
+        if !self.level.allow_note_play(pos, instrument, note) {
+            return;
+        }
         let mob_head = super::data::INSTRUMENTS
             .iter()
             .position(|n| *n == instrument)
