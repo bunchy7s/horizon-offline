@@ -1210,6 +1210,11 @@ pub struct Mob {
     /// The packs' random texture variants it wears (`random_textures::choose`).
     pub random_textures: random_textures::Choice,
 }
+impl crate::entity_rules::EntityRules for Mob {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+}
 /// A mannequin's `description` and `hide_description` (`Mannequin.updateDescription`):
 /// the default `entity.minecraft.mannequin.label`, none at all, or a component.
 #[derive(Clone, Debug, Default, PartialEq)]

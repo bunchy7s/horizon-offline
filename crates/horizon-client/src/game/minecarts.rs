@@ -4,7 +4,8 @@
 //! `MinecartItem` placement, `VehicleEntity` breaking, the chest, hopper,
 //! furnace and TNT variants, saving, and `AbstractMinecartRenderer`'s old
 //! rail-following render with the display block.
-use super::{Game, Hit, InteractTarget, Keys};
+use super::{Game, Hit, InteractTarget, Keys, entity::Entity};
+use horizon_client::entity_rules::EntityRules;
 use horizon_client::{
     blocks::Fluid,
     collisions::SceneCollisions,
@@ -948,9 +949,7 @@ impl Game<'_> {
         c.hurt_time = (c.hurt_time - 1).max(0);
         c.damage = (c.damage - 1.0).max(0.0);
         // applyGravity
-        if !c.no_gravity {
-            c.velocity.y -= if self.cart_in_water(c) { 0.005 } else { 0.04 };
-        }
+        c.velocity.y -= c.get_gravity();
         let pos = self.rail_block(c.position);
         if let Some(rail) = self.rail(pos[0], pos[1], pos[2]) {
             if self.minecart_improvements() {
@@ -979,24 +978,14 @@ impl Game<'_> {
         }
         c.yaw %= 360.0;
         // applyEffectsFromBlocks: a bubble column lifts or drags the cart.
-        horizon_client::motion::bubble_column_push(
+        c.push_by_bubble_column(
             &self.world,
             self.pack.assets.registry,
             self.res.facts(),
             self.collision,
-            c.bounds(),
-            &mut c.velocity,
         );
         // AbstractMinecart.tick: updateFluidInteraction, a stream pushes the cart.
-        c.in_water = horizon_client::entities::update_entity_fluids(
-            c.bounds(),
-            c.position,
-            c.bounds().max_position().y,
-            &mut c.velocity,
-            &self.world,
-            &self.res.motion().fluids,
-        )
-        .0 > 0.0;
+        c.in_water = c.push_by_fluid(&self.world, &self.res.motion().fluids).0 > 0.0;
         // Variants.
         match c.kind {
             CartKind::Furnace => {

@@ -4,6 +4,7 @@
 //! piston that is carrying slime), water buoyancy, pickup delay, 6000-tick despawn,
 //! `HoneyBlock.entityInside` when falling against a honey block's side, and
 //! `BubbleColumnBlock.entityInside` (lift / drag, including the surface jump).
+use crate::entity_rules::EntityRules;
 use crate::{
     blocks::{BlockFacts, Fluid},
     collisions::SceneCollisions,
@@ -103,6 +104,26 @@ impl ItemEnvironmentTick {
         self.lava_hurt && (!self.alive || tick.is_multiple_of(10))
     }
 }
+impl crate::entity_rules::EntityRules for ItemEntity {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `ItemEntity.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
+    }
+}
+impl crate::entity_rules::EntityRules for ExperienceOrb {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `ExperienceOrb.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.03
+    }
+}
+/// An armor stand keeps no `NoGravity` flag yet, so it takes the defaults.
+impl crate::entity_rules::EntityRules for ArmorStand {}
 impl ItemEntity {
     pub const WIDTH: f64 = 0.25;
     pub fn bounds(&self) -> Aabb {
@@ -231,9 +252,7 @@ impl ItemEntity {
                 self.velocity.z * 0.95,
             );
         } else {
-            if !self.no_gravity {
-                self.velocity.y -= 0.04;
-            }
+            self.velocity.y -= self.get_gravity();
         }
         let horizontal = self.velocity.x * self.velocity.x + self.velocity.z * self.velocity.z;
         // ItemEntity.tick: skip move 3 of 4 ticks while grounded with no
@@ -781,8 +800,8 @@ impl ExperienceOrb {
                 (self.velocity.y + 5.0e-4).min(0.06),
                 self.velocity.z * 0.99,
             );
-        } else if !colliding && !self.no_gravity {
-            self.velocity.y -= 0.03;
+        } else if !colliding {
+            self.velocity.y -= self.get_gravity();
         }
         if facts.get(block).fluid == Fluid::Lava {
             // ExperienceOrb.tick: lava throws the orb back out.

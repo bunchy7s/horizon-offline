@@ -610,15 +610,16 @@ impl Game<'_> {
         // fuse down (the swell and flash follow it) between the server's
         // updates (every 10 ticks), and a client discards it when the fuse
         // runs out; only the server explodes it.
-        let (world, collision, assets, facts) = (
+        let (world, collision, assets, facts, fluids) = (
             &self.world,
             self.collision,
             &self.pack.assets,
             self.res.facts(),
+            &self.res.motion().fluids,
         );
         self.tnts.retain_mut(|t| {
             // A fluid lookup that fails leaves it where its move put it.
-            let _ = t.tick(world, collision, assets, facts);
+            let _ = t.tick(world, collision, assets, facts, fluids);
             t.fuse > 0
         });
         // FallingBlockEntity.tick runs on a client too: the block falls by

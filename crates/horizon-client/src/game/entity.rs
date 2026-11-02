@@ -12,13 +12,14 @@ use super::{
     boats::Boat, fireworks::Rocket, minecarts::Minecart, tnt::PrimedTnt, trident::ThrownTrident,
 };
 use horizon_client::entities::{ArmorStand, ExperienceOrb, ItemEntity};
+use horizon_client::entity_rules::EntityRules;
 use horizon_client::mobs::{Mob, Species};
 use horizon_client::projectiles::Projectile;
 use horizon_core::geometry::{Aabb, Direction, Vec3};
 use horizon_core::position::BlockPos;
 use horizon_world::{level::data::PushReaction, piston_push};
 
-pub(super) trait Entity {
+pub(super) trait Entity: EntityRules {
     fn position(&self) -> Vec3;
     fn position_mut(&mut self) -> &mut Vec3;
     fn velocity_mut(&mut self) -> &mut Vec3;
@@ -60,6 +61,51 @@ pub(super) trait Entity {
     /// `Entity.isSupportedBy`.
     fn is_supported_by(&self, _pos: BlockPos) -> bool {
         false
+    }
+    /// `Entity.getEyeY`, where `updateFluidHeightAndDoFluidPushing` reads the
+    /// eye's fluid; the top of the box unless a kind sets it.
+    fn fluid_eye_y(&self) -> f64 {
+        self.bounds().max_position().y
+    }
+    /// `Entity.updateFluidHeightAndDoFluidPushing`: its water and lava heights
+    /// (`(0, 0)` for a kind that is not pushed by fluid), and the current of
+    /// each fluid added to its velocity. One body for every kind.
+    fn push_by_fluid(
+        &mut self,
+        world: &horizon_client::world::World,
+        fluids: &horizon_client::motion::FluidResources,
+    ) -> (f64, f64) {
+        if !self.is_pushed_by_fluid() {
+            return (0.0, 0.0);
+        }
+        let (bounds, at, eye) = (self.bounds(), self.position(), self.fluid_eye_y());
+        horizon_client::entities::update_entity_fluids(
+            bounds,
+            at,
+            eye,
+            self.velocity_mut(),
+            world,
+            fluids,
+        )
+    }
+    /// `BubbleColumnBlock.entityInside` through `applyEffectsFromBlocks`: a
+    /// column lifts or drags every kind alike.
+    fn push_by_bubble_column(
+        &mut self,
+        world: &horizon_client::world::World,
+        registry: &horizon_world::registry::BlockRegistry,
+        facts: &horizon_client::blocks::BlockFacts,
+        collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
+    ) {
+        let bounds = self.bounds();
+        horizon_client::motion::bubble_column_push(
+            world,
+            registry,
+            facts,
+            collision,
+            bounds,
+            self.velocity_mut(),
+        );
     }
     /// `Entity.getPistonPushReaction`.
     fn get_piston_push_reaction(&self) -> PushReaction {
@@ -291,6 +337,10 @@ impl Entity for ExperienceOrb {
 
 impl Entity for Boat {
     stored_motion!();
+    /// `Boat.getEyeY`: the top of the 0.5625 box.
+    fn fluid_eye_y(&self) -> f64 {
+        self.position.y + super::boats::HEIGHT
+    }
     fn bounds(&self) -> Aabb {
         Boat::bounds(self)
     }
@@ -340,6 +390,10 @@ impl Entity for ArmorStand {
 
 impl Entity for PrimedTnt {
     stored_motion!();
+    /// `PrimedTnt` eye height: `0.98 * 0.85`.
+    fn fluid_eye_y(&self) -> f64 {
+        self.position.y + f64::from(0.98f32 * 0.85f32)
+    }
     fn bounds(&self) -> Aabb {
         PrimedTnt::bounds(self)
     }
@@ -399,5 +453,44 @@ impl Entity for ThrownTrident {
     /// `GameLevel::tick_blocks` sweeps tridents itself.
     fn sweeps_blocks_inside(&self) -> bool {
         false
+    }
+}
+
+impl EntityRules for Rocket {}
+impl EntityRules for ThrownTrident {}
+impl EntityRules for Boat {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `AbstractBoat.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
+    }
+}
+impl EntityRules for Minecart {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `AbstractMinecart.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        if self.in_water { 0.005 } else { 0.04 }
+    }
+}
+impl EntityRules for PrimedTnt {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `PrimedTnt.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
+    }
+}
+impl EntityRules for FallingBlock {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `FallingBlockEntity.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
     }
 }

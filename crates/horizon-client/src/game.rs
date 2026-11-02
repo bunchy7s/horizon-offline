@@ -5336,9 +5336,7 @@ impl Game<'_> {
     fn fall_step(&mut self, f: &mut FallingBlock, entity_drops: bool) -> Result<FallStep> {
         f.previous = f.position;
         f.age = f.age.wrapping_add(1);
-        if !f.no_gravity {
-            f.velocity.y -= 0.04;
-        }
+        f.velocity.y -= horizon_client::entity_rules::EntityRules::get_gravity(f);
         let mut wanted = f.velocity;
         // Entity.move: a cobweb it was in scales this move, which then
         // starts from rest.

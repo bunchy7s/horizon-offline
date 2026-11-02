@@ -2,7 +2,8 @@
 //! paddling controls, collisions, riding (`positionRider`, `clampRotation`,
 //! dismounting), `BoatItem` placement, `VehicleEntity.hurtServer` breaking,
 //! saving and `AbstractBoatRenderer` with animated paddles.
-use super::{Game, InteractTarget, Keys, entity_culling::at, view_vector};
+use super::{Game, InteractTarget, Keys, entity::Entity, entity_culling::at, view_vector};
+use horizon_client::entity_rules::EntityRules;
 use horizon_client::{
     blocks::Fluid,
     collisions::{EntityCollisions, SceneCollisions},
@@ -586,17 +587,10 @@ impl Game<'_> {
         }
         // `Entity.baseTick`: the boat is immersed and pushed by the current it
         // sits in (`isPushedByFluid`), before `floatBoat` scales the velocity.
-        let _ = horizon_client::entities::update_entity_fluids(
-            b.bounds(),
-            b.position,
-            b.position.y + HEIGHT,
-            &mut b.velocity,
-            &self.world,
-            &self.res.motion().fluids,
-        );
+        let _ = b.push_by_fluid(&self.world, &self.res.motion().fluids);
         // floatBoat
         // `-getGravity()`: none with NoGravity.
-        let mut vspeed = if b.no_gravity { 0.0 } else { -0.04 };
+        let mut vspeed = 0.0 - b.get_gravity();
         let mut buoyancy = 0.0;
         let inv_friction: f32;
         let obstacles = self.boat_move_obstacles(&b);
