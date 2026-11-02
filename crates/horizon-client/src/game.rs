@@ -4009,9 +4009,6 @@ impl Game<'_> {
         let ticking = self.entity_ticking_area();
         let mut removed = vec![false; items.len()];
         let mut cells = horizon_client::entities::ItemCells::new(&items);
-        let catalog = world_items!(self);
-        let max_stack =
-            |stack: &ItemStack| catalog.get(&stack.item).map_or(64, |i| i.max_stack).max(1);
         // A LAN or server guest only shows the host's items.
         let merging = self.remote.is_none();
         let obstacles = horizon_client::entities::ObstacleGrid::new(self.item_entity_collisions());
@@ -4086,6 +4083,9 @@ impl Game<'_> {
                 && (alive || item.age == 6000 && item.position.y > -128.0)
                 && item.ticks.is_multiple_of(rate)
             {
+                let catalog = world_items!(self);
+                let max_stack =
+                    |stack: &ItemStack| catalog.get(&stack.item).map_or(64, |i| i.max_stack).max(1);
                 horizon_client::entities::merge_with_neighbours(
                     &mut items,
                     &mut removed,
@@ -4095,6 +4095,15 @@ impl Game<'_> {
                 );
             }
             let item = &mut items[i];
+            let mut alive = alive || (item.age < 6000 && item.position.y > -128.0);
+            if merging && !removed[i] && item.age >= 6000 && item.position.y > -128.0 {
+                let mut extra_life = 0;
+                self.native_item_expire(item.id, &item.stack, &mut extra_life);
+                if extra_life > 0 {
+                    item.age = 6000 - extra_life.min(32766);
+                    alive = true;
+                }
+            }
             if !alive || removed[i] {
                 removed[i] = true;
                 cells.remove(i, item.position);
@@ -4106,8 +4115,7 @@ impl Game<'_> {
                 self.pack.assets.registry,
                 world_items!(self),
             );
-            // shortcut: age is the fresh-drop clock; use entity ticks for saved/frozen-age phase parity.
-            if environment.should_play_lava_hurt_sound(item.age) {
+            if environment.should_play_lava_hurt_sound(item.ticks) {
                 let pitch = 2.0 + self.world.random.next_float() * 0.4;
                 self.audio.play(
                     "minecraft:entity.generic.burn",
@@ -8087,6 +8095,10 @@ impl Game<'_> {
                     self.settings.file.bool("hideSplashTexts"),
                 );
             }
+            // ScreenEvent.Render.Post over the title's own screens: a mod draws
+            // over them here (a pack browser over Create New World, say), and the
+            // toasts still come after, as over any screen.
+            self.fire_title_screen_render_post(&mut batch);
             self.draw_toasts(&mut batch, false);
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
@@ -8430,6 +8442,21 @@ impl Game<'_> {
         // slot_count mirrors slots() without allocating; keep them in step.
         debug_assert_eq!(self.slot_count(), self.slots().len());
         let view = self.screen_view(batch, screen);
+        self.native_screen_render_post(batch, &view);
+    }
+    /// `native_screen_render_post` (`ScreenEvent.Render.Post`) for the title's
+    /// own screen (`title`, `world_select`, `world_create`, `multiplayer`…),
+    /// once a frame, after it has drawn and before the toasts. Not when a
+    /// screen of the game's own is over the title (Options draws and fires
+    /// its own), nor while a dialog, a prompt or a connect or load hides it.
+    /// Client only, read-only: what a mod draws is its own.
+    fn fire_title_screen_render_post(&self, batch: &mut HudBatch) {
+        if self.screen != Screen::Playing || self.screen_over_playing() || self.remote_loading() {
+            return;
+        }
+        let Some(view) = self.title_screen_view(batch) else {
+            return;
+        };
         self.native_screen_render_post(batch, &view);
     }
     /// `CreativeModeInventoryScreen.hasPermissions` (`canUseGameMasterBlocks`
@@ -14818,14 +14845,14 @@ impl Game<'_> {
         // it ends without failing, for every save: the command, the autosave, the pause.
         let dedicated = self.options.dedicated.is_some();
         if dedicated {
-            dedicated::events::record_server("saving");
+            dedicated::events::record_server("saving", serde_json::json!({}));
         }
         self.save_level(wait)?;
         self.save_parked_levels(wait)?;
         self.save_game_metadata()?;
         self.native_world_saved(wait);
         if dedicated {
-            dedicated::events::record_server("saved");
+            dedicated::events::record_server("saved", serde_json::json!({}));
         }
         Ok(())
     }
@@ -16799,14 +16826,19 @@ impl Game<'_> {
         // the screen that is open then (`ScreenEvent.CharacterTyped.Pre`).
         // Options keeps its text on the key: its own key path routes a key's
         // text between its boxes and its key-bind capture, and no key that
-        // carries text closes that screen or moves its focus.
+        // carries text closes that screen or moves its focus. The title's
+        // screens keep theirs for the same reason: their key path types into
+        // the world name, the seed and a server's address.
         let mut typed: Option<String> = None;
         if let WindowEvent::KeyboardInput {
             event: key_event, ..
         } = &mut event
             && key_event.state == ElementState::Pressed
         {
-            if self.screen_hooks_open() && self.screen != Screen::Options {
+            if self.screen_hooks_open()
+                && self.screen != Screen::Options
+                && !control::title_owns_text(&self.screen, self.title.is_some())
+            {
                 typed = key_event.text.take().map(|text| text.to_string());
             }
             let canceled = match key_event.physical_key {
@@ -17784,12 +17816,19 @@ impl Game<'_> {
                         result => result?,
                     };
                     self.apply_cursor_icon();
+                    // The frame's spans, taken every frame they are recorded so they never
+                    // pile up: the slow-frame line's, and the session's (`perf.frame`).
+                    let frame_spans = if horizon_client::spans::recording_here() {
+                        horizon_client::spans::take_raw()
+                    } else {
+                        Vec::new()
+                    };
                     if let Some(threshold) = self.options.spikes
                         && let Some(r) = self.renderer.as_ref()
                     {
                         let cpu = now.elapsed().saturating_sub(r.last_wait).as_secs_f32() * 1000.0;
                         // Spans timed between frames (`idle`) come first.
-                        let spans = horizon_client::spans::take();
+                        let spans = horizon_client::spans::merge(&frame_spans);
                         let between = between.as_secs_f32() * 1000.0;
                         if cpu > threshold || between > threshold {
                             // The render thread's own CPU time in the frame:
@@ -17893,7 +17932,8 @@ impl Game<'_> {
                         if self.title.is_some() {
                             self.perf.title_shown();
                         } else if self.screen == Screen::Playing && self.player.is_some() {
-                            self.perf.frame(elapsed.as_secs_f32() * 1000.0);
+                            self.perf
+                                .frame(elapsed.as_secs_f32() * 1000.0, &frame_spans);
                             if startup::filling() {
                                 let mut fill: Vec<(&'static str, usize)> =
                                     self.streaming.stages().to_vec();
@@ -20727,6 +20767,14 @@ pub fn run_with() -> Result<()> {
         options.spikes = Some(dedicated::SLOW_TICK_MS);
     }
     horizon_client::spans::enable(options.spikes.is_some());
+    // A player who allows performance statistics also says what their slow frames spent their
+    // time in: this thread, which draws the frames, times its steps (wall time only).
+    if options.execution_role.is_client()
+        && horizon_telemetry::Consent::load(&horizon_client::logging::game_home())
+            .allows(horizon_telemetry::Kind::Perf)
+    {
+        horizon_client::spans::record_here(true);
+    }
     let vanilla_root = options.resources.clone();
     if let Some(error) = missing_resources(&vanilla_root) {
         // The game build started by hand (the release's zip), not by the

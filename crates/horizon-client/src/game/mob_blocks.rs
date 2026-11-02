@@ -187,10 +187,11 @@ impl Game<'_> {
         camera: glam::DVec3,
         alpha: f64,
         light: u32,
+        skin: Option<&mut super::creatures::Skinned>,
         out: &mut Vec<Vertex>,
     ) {
         self.captain_banner_geometry(mob, camera, alpha, light, out);
-        self.held_item_geometry(mob, camera, alpha, light, true, out);
+        self.held_item_geometry(mob, camera, alpha, light, true, skin, out);
         self.worn_block_geometry(mob, camera, alpha, light, out);
         self.head_item_geometry(mob, camera, alpha, light, true, out);
         self.golem_flower_geometry(mob, camera, alpha, light, out);
@@ -376,6 +377,7 @@ impl Game<'_> {
     /// `ItemInHandLayer`: both hands through the item model pipeline; `lit`
     /// applies the level's diffuse lighting (off for GUI previews, which
     /// light the projected quads themselves).
+    /// `skin`: the mob's GPU path draws, which a lit item joins when it can.
     pub(super) fn held_item_geometry(
         &self,
         mob: &Mob,
@@ -383,6 +385,7 @@ impl Game<'_> {
         alpha: f64,
         light: u32,
         lit: bool,
+        mut skin: Option<&mut super::creatures::Skinned>,
         out: &mut Vec<Vertex>,
     ) {
         // ItemInHandLayer submits with OverlayTexture.NO_OVERLAY: no hurt tint.
@@ -483,6 +486,12 @@ impl Game<'_> {
                 horizon_client::cit::Hand::Main
             };
             let state = self.resolve_item_in_hand(&stack, context, Some(&owner), seed, hand);
+            if lit
+                && let Some(skinned) = skin.as_deref_mut()
+                && self.skin_item_into(&state, t, light, skinned)
+            {
+                continue;
+            }
             if lit {
                 self.submit_item_world(&state, t, light, out);
             } else {

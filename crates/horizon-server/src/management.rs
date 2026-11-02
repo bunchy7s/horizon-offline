@@ -73,8 +73,9 @@ pub fn started(shared: &Shared) {
 }
 
 /// The notification a typed event of the game is, if vanilla sends one for it: a player who joined or left
-/// (`playerJoined`, `playerLeft`, with the player as a `PlayerDto`), and a world save that began or ended
-/// (`serverSaveStarted`, `serverSaveCompleted`).
+/// (`playerJoined`, `playerLeft`, with the player as a `PlayerDto`), a world save that began or ended
+/// (`serverSaveStarted`, `serverSaveCompleted`), and a change of the operators, the allowlist, the bans or the
+/// IP bans.
 pub fn game_event(shared: &Shared, kind: &str, event: &Value) {
     let player = || Some(json!({ "id": event["uuid"], "name": event["name"] }));
     let (method, params) = match kind {
@@ -82,7 +83,11 @@ pub fn game_event(shared: &Shared, kind: &str, event: &Value) {
         "leave" => ("notification/players/left", player()),
         "saving" => ("notification/server/saving", None),
         "saved" => ("notification/server/saved", None),
-        _ => return,
+        // A change of a list, whoever made it: the console, a command in the game, the protocol's own methods.
+        _ => match crate::management_methods::list_notification(kind, event) {
+            Some((method, params)) => (method, Some(params)),
+            None => return,
+        },
     };
     notify(shared, method, params);
 }
@@ -891,6 +896,18 @@ mod tests {
                 r#"{{"jsonrpc":"2.0","method":"minecraft:notification/players/left","params":{player}}}"#
             )
         );
+        // A change of a list reaches the client with its one parameter (the player, for an allowlist).
+        game_event(
+            &shared,
+            "allowlist_removed",
+            &json!({ "name": "Kim0", "uuid": id }),
+        );
+        assert_eq!(
+            next_text(&mut client),
+            format!(
+                r#"{{"jsonrpc":"2.0","method":"minecraft:notification/allowlist/removed","params":{player}}}"#
+            )
+        );
     }
 
     #[test]
@@ -909,6 +926,14 @@ mod tests {
             "notification/server/saved",
             "notification/players/joined",
             "notification/players/left",
+            "notification/operators/added",
+            "notification/operators/removed",
+            "notification/allowlist/added",
+            "notification/allowlist/removed",
+            "notification/bans/added",
+            "notification/bans/removed",
+            "notification/ip_bans/added",
+            "notification/ip_bans/removed",
         ] {
             assert!(
                 names.contains(&format!("minecraft:{sent}").as_str()),

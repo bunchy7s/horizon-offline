@@ -26,9 +26,10 @@ pub(in crate::game) fn record(kind: &str, name: &str, uuid: u128, mut fields: Va
     push(kind, fields);
 }
 
-/// Records an event of the server itself, with no player (`saving` and `saved`, around a world save).
-pub(in crate::game) fn record_server(kind: &str) {
-    push(kind, json!({}));
+/// Records an event of the server itself, with no player (`saving` and `saved`, around a world save; an IP
+/// ban), and what else it says.
+pub(in crate::game) fn record_server(kind: &str, fields: Value) {
+    push(kind, fields);
 }
 
 fn push(kind: &str, mut fields: Value) {
@@ -76,7 +77,7 @@ mod tests {
         assert_eq!(events[1]["uuid"], "00000000-0000-0000-0000-000000000001");
         assert_eq!(since(first + 1)["events"].as_array().unwrap().len(), 1);
         // An event of the server itself (a world save) carries no player.
-        record_server("saving");
+        record_server("saving", json!({}));
         let event = &since(first + 2)["events"][0];
         assert_eq!(event["type"], "saving");
         assert_eq!(event["seq"].as_u64(), Some(first + 3));

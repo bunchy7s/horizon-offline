@@ -1187,13 +1187,15 @@ pub trait Hooks: Send + Sync {
     /// it is. Once a frame on the window, never while playing with no screen;
     /// `&self`, so it reads and draws only. The Win and Options screens call
     /// it on their own path, after their drawing.
-    /// It does not fire on the title screen, which returns before its point,
-    /// nor for the screens drawn over gameplay after it (a server dialog, the
-    /// server pack, link and code-of-conduct prompts, a book, a sign editor):
-    /// those keep `Screen::Playing`, which it skips (the server pack prompt
-    /// hides an open screen too, and that screen does not fire under it),
-    /// and draw over what it drew, while vanilla's `ScreenEvent.Render.Post`
-    /// fires for them.
+    /// It does not fire for the screens drawn over gameplay after it (a
+    /// server dialog, the server pack, link and code-of-conduct prompts, a
+    /// book, a sign editor): those keep `Screen::Playing`, which it skips (the
+    /// server pack prompt hides an open screen too, and that screen does not
+    /// fire under it), and draw over what it drew, while vanilla's
+    /// `ScreenEvent.Render.Post` fires for them. The title's own screens
+    /// (`title`, `world_select`, `world_create`, `multiplayer`…) fire it too,
+    /// their `screen.id` from the title state machine and the whole window
+    /// their `rect` (API @API:native_instance_dir@), and no dialog or prompt over them.
     /// API 78.
     fn screen_render_post(&self, host: &dyn Host, event: &mut ScreenRenderPostEvent<'_>) {
         let _ = host;
@@ -1225,10 +1227,11 @@ pub trait Hooks: Send + Sync {
     /// alt 4, super 8). Set `canceled` and the press goes no further: no slot,
     /// no screen button, no drag, no hotbar key, no sort or header button.
     /// It fires before anything the screen does with the press, on the window
-    /// only, and only while a screen of the game's is open (Options and the
-    /// pack list opened from the title screen count, with no player and no
-    /// `menu`). It does not fire on the title screen itself, the connect and
-    /// loading screens, nor for a server
+    /// only, and while a screen of the game's or the title's is open (Options
+    /// and the pack list opened from the title screen count, with no player
+    /// and no `menu`; the title's own screens since API @API:native_instance_dir@, their
+    /// `screen.id` from the title state machine). It does not fire on the
+    /// connect and loading screens, nor for a server
     /// dialog, the server pack, link and code-of-conduct prompts, a book or a
     /// sign editor drawn over gameplay, nor while a world loads or saves: the
     /// click there stays the game's own. A gamepad click or a click the
@@ -1418,9 +1421,10 @@ pub trait Hooks: Send + Sync {
     /// changes either.
     /// It fires before the screen scrolls anything, for the window's wheel
     /// (horizon-ctl's `scroll-at` sends it through the window too), and
-    /// only while a screen of the game's is open (Options and the pack list
-    /// opened from the title screen count, with no player and no `menu`). It
-    /// does not fire on the title screen itself, the connect and loading
+    /// while a screen of the game's or the title's is open (Options and the
+    /// pack list opened from the title screen count, with no player and no
+    /// `menu`; the title's own since API @API:native_instance_dir@). It
+    /// does not fire on the connect and loading
     /// screens, nor for a server dialog, the server pack, link and
     /// code-of-conduct prompts, a book or a sign editor drawn over gameplay,
     /// nor while a world loads or saves: the scroll there stays the game's
@@ -1488,10 +1492,10 @@ pub trait Hooks: Send + Sync {
     /// It fires for the window's presses and their repeats, and for the
     /// control socket's `key` (a release fires nothing), after the window's
     /// own shortcuts have run — the fullscreen and screenshot keys, the debug
-    /// keys and the narrator — and only while a screen of the game's is open
-    /// (Options and the pack list opened from the title screen count, with no
-    /// player and no `menu`). It does not fire on the title screen itself, the
-    /// connect and loading screens, nor for a server dialog, the server pack,
+    /// keys and the narrator — and while a screen of the game's or the title's
+    /// is open (Options and the pack list opened from the title screen count,
+    /// with no player and no `menu`; the title's own since API @API:native_instance_dir@). It does
+    /// not fire on the connect and loading screens, nor for a server dialog, the server pack,
     /// link and code-of-conduct prompts, a book or a sign editor drawn over
     /// gameplay, nor while a world loads or saves: the key there stays the
     /// game's own. A cancelled press's release still runs, so a `native_key`
@@ -3045,6 +3049,15 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         None
+    }
+    /// A dropped item reaches its lifetime on the server (`ItemEntity.tick`,
+    /// NeoForge's `ItemExpireEvent`). Every mod may set or add to `extra_life`,
+    /// in ticks, which starts at zero; a positive total keeps the item that much
+    /// longer, zero or less lets it expire. Extensions are capped at 32766
+    /// ticks. @API:item_expire@.
+    fn item_expire(&self, host: &mut dyn Host, event: &mut ItemExpireEvent<'_>) {
+        let _ = host;
+        let _ = event;
     }
     /// A dropped item entity was successfully added to the server level.
     /// @API:item_spawn@.
@@ -10178,6 +10191,30 @@ pub fn dispatch_item_energy_buffer(
             break;
         }
     }
+}
+/// What [`Hooks::item_expire`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemExpireEvent<'a> {
+    pub entity: u32,
+    pub stack: &'a ItemStack,
+    pub extra_life: i32,
+}
+pub fn dispatch_item_expire(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    stack: &ItemStack,
+    extra_life: &mut i32,
+) {
+    let mut event = ItemExpireEvent {
+        entity,
+        stack,
+        extra_life: *extra_life,
+    };
+    for mod_hook in mods {
+        mod_hook.item_expire(host, &mut event);
+    }
+    *extra_life = event.extra_life;
 }
 /// What [`Hooks::item_spawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
