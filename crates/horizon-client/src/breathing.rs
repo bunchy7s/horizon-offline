@@ -69,14 +69,7 @@ pub fn native_living_drown(
     bubble_count: &mut i32,
     cancel: &mut bool,
 ) {
-    crate::native_client_hooks::living_drown(
-        entity,
-        kind,
-        is_drowning,
-        damage_amount,
-        bubble_count,
-        cancel,
-    );
+    let _ = (entity, kind, is_drowning, damage_amount, bubble_count, cancel);
 }
 
 /// A drowning tick as the mods left it: the damage and bubble count.

@@ -17,7 +17,7 @@ use horizon_world::{
 /// `entity` identifies the affected entity. @API:native_living_heal@.
 #[inline(never)]
 pub fn native_living_heal(entity: Option<u32>, amount: &mut f32, cancel: &mut bool) {
-    crate::native_client_hooks::living_heal(entity, amount, cancel);
+    let _ = (entity, amount, cancel);
 }
 
 impl PlayerMotion {
