@@ -4289,22 +4289,12 @@ impl Game<'_> {
                 }
                 // LivingEntity.baseTick's entity event 67, to every client
                 // around, the guest's own included; this window draws it too.
-                MotionEvent::Drown(bubbles) => {
-                    if bubbles == 8 {
-                        if let Some(g) = host.hub.guest(conn) {
-                            host.hub
-                                .entity_event(g.entity_id, super::combat::DROWN_EVENT, at);
-                        }
-                    } else {
-                        super::combat::send_drown_particles(
-                            host,
-                            at,
-                            [0.0; 3],
-                            bubbles,
-                            &mut self.world.random,
-                        );
+                MotionEvent::Drown(_) => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        host.hub
+                            .entity_event(g.entity_id, super::combat::DROWN_EVENT, at);
                     }
-                    self.drown_particles(at, [0.0; 3], bubbles);
+                    self.drown_particles(at, [0.0; 3]);
                 }
                 // HoneyBlock.maybeDoSlideEffects: the sound reaches the
                 // others (Player.playSound excludes the player, whose client

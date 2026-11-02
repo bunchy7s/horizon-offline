@@ -174,50 +174,12 @@ impl CombatTracker {
         }
     }
 }
-/// Send a mod-adjusted bubble count using the vanilla particle packet, since
-/// entity event 67 always renders exactly eight bubbles on the client.
-pub(super) fn send_drown_particles(
-    host: &super::lan::LanHost,
-    at: [f64; 3],
-    velocity: [f64; 3],
-    count: i32,
-    random: &mut horizon_core::random::LegacyRandom,
-) {
-    use horizon_core::random::RandomSource;
-    use horizon_protocol::{
-        entity_data::Particle,
-        packets::play::{self, Clientbound},
-    };
-    let Some(id) = host
-        .hub
-        .registry_id("minecraft:particle_type", "minecraft:bubble")
-    else {
-        return;
-    };
-    for _ in 0..count {
-        let pos = at.map(|v| v + random.next_double() - random.next_double());
-        let packet = Clientbound::LevelParticles(play::LevelParticles {
-            particle: Particle { id, data: None },
-            override_limiter: false,
-            always_show: false,
-            pos,
-            dist: velocity.map(|v| v as f32),
-            max_speed: [1.0; 3],
-            count: 0,
-            randomization: 0,
-        });
-        for guest in host.hub.guests.iter().filter(|g| host.hub.here(g)) {
-            guest.send(&packet);
-        }
-    }
-}
-
 impl Game<'_> {
-    /// `LivingEntity.makeDrownParticles`: bubbles around the entity,
+    /// `LivingEntity.makeDrownParticles`: eight bubbles around the entity,
     /// moving with it.
-    pub(super) fn drown_particles(&mut self, at: [f64; 3], velocity: [f64; 3], count: i32) {
+    pub(super) fn drown_particles(&mut self, at: [f64; 3], velocity: [f64; 3]) {
         let bubble = ParticleOptions::simple(ParticleType::Bubble);
-        for _ in 0..count {
+        for _ in 0..8 {
             let mut triangle = || {
                 let r = self.particles.random();
                 r.next_double() - r.next_double()
@@ -242,7 +204,7 @@ impl Game<'_> {
             })
         };
         if let Some((at, v)) = body {
-            self.drown_particles(at, v, 8);
+            self.drown_particles(at, v);
         }
     }
     /// The display name of a mob: its custom name or its type's name.

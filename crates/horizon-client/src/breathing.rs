@@ -58,15 +58,16 @@ pub fn breathe(entity: u32, kind: &str, vanilla: Breath) -> Breath {
 
 /// An entity that can't breathe and has no air (`LivingDrownEvent`, posted
 /// from `LivingEntity.baseTick`), with vanilla's answers as the defaults: it
-/// drowns at -20 air, for 2 damage and 8 bubbles. Asked on servers, for the
-/// entities `native_living_breathe` is. API @API:native_living_drown@.
+/// drowns at -20 air, for 2 damage and 8 bubbles. Bubble count is read-only;
+/// changes to the event field do not affect the vanilla entity event. Asked on
+/// servers, for the entities `native_living_breathe` is. API @API:native_living_drown@.
 #[inline(never)]
 pub fn native_living_drown(
     entity: u32,
     kind: &str,
     is_drowning: &mut bool,
     damage_amount: &mut f32,
-    bubble_count: &mut i32,
+    bubble_count: i32,
     cancel: &mut bool,
 ) {
     crate::native_client_hooks::living_drown(
@@ -97,16 +98,9 @@ pub fn drown(
 ) -> Option<Drowning> {
     let (next, drowned) = apply(*air, 300, breath);
     *air = if drowned { *air - breath.consume } else { next };
-    let (mut drowning, mut damage, mut bubbles, mut cancel) = (drowned, 2.0, 8, false);
+    let (mut drowning, mut damage, mut cancel) = (drowned, 2.0, false);
     if server && !breath.can_breathe && *air <= 0 {
-        native_living_drown(
-            entity,
-            kind,
-            &mut drowning,
-            &mut damage,
-            &mut bubbles,
-            &mut cancel,
-        );
+        native_living_drown(entity, kind, &mut drowning, &mut damage, 8, &mut cancel);
     }
     if cancel || !drowning {
         return None;
@@ -114,7 +108,7 @@ pub fn drown(
     *air = 0;
     Some(Drowning {
         damage: (damage > 0.0).then_some(damage),
-        bubbles: bubbles.max(0),
+        bubbles: 8,
     })
 }
 

@@ -3134,8 +3134,9 @@ pub trait Hooks: Send + Sync {
     }
     /// An entity that can't breathe and has no air (`LivingDrownEvent`, posted
     /// from `LivingEntity.baseTick`), with vanilla's answers as the defaults: it
-    /// drowns at -20 air, for 2 damage and 8 bubbles. Asked on servers, for the
-    /// entities `native_living_breathe` is. API @API:native_living_drown@.
+    /// drowns at -20 air, for 2 damage and 8 bubbles. Bubble count is read-only;
+    /// changes to the event field do not affect the vanilla entity event. Asked on
+    /// servers, for the entities `native_living_breathe` is. API @API:native_living_drown@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn living_drown(&self, event: &mut LivingDrownEvent<'_>) -> Flow {
@@ -10167,7 +10168,7 @@ pub fn dispatch_living_drown(
     kind: &str,
     is_drowning: &mut bool,
     damage_amount: &mut f32,
-    bubble_count: &mut i32,
+    bubble_count: i32,
     cancel: &mut bool,
 ) {
     if *cancel {
@@ -10178,7 +10179,7 @@ pub fn dispatch_living_drown(
         kind,
         is_drowning: *is_drowning,
         damage_amount: *damage_amount,
-        bubble_count: *bubble_count,
+        bubble_count,
     };
     for mod_hook in mods {
         if matches!(mod_hook.living_drown(&mut event), Flow::Cancel) {
@@ -10188,7 +10189,6 @@ pub fn dispatch_living_drown(
     }
     *is_drowning = event.is_drowning;
     *damage_amount = event.damage_amount;
-    *bubble_count = event.bubble_count;
 }
 /// What [`Hooks::living_fall`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

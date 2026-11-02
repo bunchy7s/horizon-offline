@@ -8,7 +8,7 @@ pub struct NativeClientHooks {
     pub menu_slot_rules: fn(&str, usize, &ItemStack, &mut bool, &mut u32),
     pub living_heal: fn(u32, &mut f32, &mut bool),
     pub living_breathe: fn(u32, &str, &mut bool, &mut i32, &mut i32),
-    pub living_drown: fn(u32, &str, &mut bool, &mut f32, &mut i32, &mut bool),
+    pub living_drown: fn(u32, &str, &mut bool, &mut f32, i32, &mut bool),
     pub living_fall: fn(u32, &str, &mut f64, &mut f32, &mut bool),
     pub living_jump: fn(u32, &str),
     pub ingredient: fn(&str, &Map<String, Value>, &mut Vec<String>),
@@ -56,7 +56,7 @@ pub(crate) fn living_drown(
     kind: &str,
     is_drowning: &mut bool,
     damage_amount: &mut f32,
-    bubble_count: &mut i32,
+    bubble_count: i32,
     cancel: &mut bool,
 ) {
     if let Some(hooks) = HOOKS.get() {
