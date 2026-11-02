@@ -13,10 +13,10 @@ Fox.addTrustedEntity	port	crates/horizon-client/src/mobs/fox.rs::add_trusted_ent
 Fox.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	Type, Trusted (clearTrusted then addTrustedEntity per UUID), Sleeping, Sitting and Crouching
 Fox.clearTrusted	port	crates/horizon-client/src/mobs/fox.rs::clear_trusted	both trusted slots emptied, before a load reads Trusted
 Fox.getFlag	port	crates/horizon-client/src/mobs/fox.rs::flag	flags byte in extra.ints[0]
-Fox.canHoldItem	missing		player: part of the missing item pickup (a fox never reaches the point of choosing what to hold)
-Fox.spitOutItem	missing		minor: the old item is never spat out with entity.fox.spit because pickup is missing
-Fox.dropItemStack	missing		minor: the rest of a stack is never dropped by a fox because pickup is missing
-Fox.pickUpItem	missing		player: foxes never pick up dropped items (food, emeralds, anything): the loot pickup of Mob.aiStep exists only for pandas (game/pandas.rs) and the fox search-for-items goal is absent
+Fox.canHoldItem	port	crates/horizon-client/src/mobs/fox.rs::can_hold_item	an empty mouth, or consumable food when the mouth holds something that is not
+Fox.spitOutItem	inline	crates/horizon-client/src/game/foxes.rs::fox_pick_up	the old mouthful is thrown out at eye level plus the look direction, pickup delay 40, entity.fox.spit
+Fox.dropItemStack	inline	crates/horizon-client/src/game/foxes.rs::fox_pick_up	the rest of the stack is dropped at the fox's feet with the default pickup delay
+Fox.pickUpItem	port	crates/horizon-client/src/game/foxes.rs::fox_pick_up	the game's pickup loop takes one item of the stack and marks the mouth as full
 Fox.getHeadRollAngle	port	crates/horizon-client/src/mobs/fox.rs::pose	head_roll_angle from the interested angle at the partial tick
 Fox.setTarget	missing		minor: only clears the defending flag, which is never set
 Fox.playAmbientSound	port	crates/horizon-client/src/mobs/ai.rs::play_ambient	ticked in #3512; `Fox.playAmbientSound` is cited at crates/horizon-client/src/mobs/ai.rs:1095 (in a comment, so `where` names the enclosing fn)
@@ -49,10 +49,10 @@ Frog.FrogPathNavigation.createPathFinder	port	crates/horizon-client/src/mobs/fro
 FrogAi.initCoreActivity	inline	crates/horizon-client/src/mobs/frog.rs::register	gap: minor: Panic runs at 1.25 where AnimalPanic uses 2.0; look and move sinks are the controls
 FrogAi.initIdleActivity	inline	crates/horizon-client/src/mobs/frog.rs::register	gap: player: Croak, stroll and look at player (6 blocks) are there; no slimeball tempt, no mate search and no TryFindLand
 FrogAi.initSwimActivity	inline	crates/horizon-client/src/mobs/frog.rs::register	gap: minor: no separate swim activity: Float and the land stroll stand in, no random swim at 0.75 or find-land
-FrogAi.initLaySpawnActivity	missing		player: pregnant frogs never walk to water and lay frogspawn (no pregnancy, no TryLaySpawnOnFluidNearLand)
-FrogAi.initJumpActivity	missing		player: frogs never long jump (no leap onto lily pads or big dripleaf)
+FrogAi.initLaySpawnActivity	port	crates/horizon-client/src/mobs/frog.rs::register	the LaySpawn goal, added in place of the activity
+FrogAi.initJumpActivity	port	crates/horizon-client/src/mobs/frog.rs::register	the LongJump goal, added in place of the activity
 FrogAi.initTongueActivity	inline	crates/horizon-client/src/mobs/frog.rs::register	ShootTongue goal at priority 2 with the attack-target checks inside it
-FrogAi.isAcceptableLandingSpot	missing		minor: landing test of the missing frog long jump
+FrogAi.isAcceptableLandingSpot	port	crates/horizon-client/src/mobs/frog.rs::acceptable_landing	land on `frog_prefer_jump_to`, a trapdoor, or next to water
 FrogVariants.bootstrap	skip:data		variant registry; the biome to variant choice is BiomeFacts.frog
 FrogVariants.register	skip:data		registry registration
 ShootTongue.checkExtraStartConditions	inline	crates/horizon-client/src/mobs/frog.rs::ShootTongue::can_use	path check with the unreachable memory, not croaking; the sensor only offers edible targets
@@ -64,7 +64,7 @@ Tadpole.customServerAiStep	inline	crates/horizon-client/src/mobs/aquatic.rs::reg
 Tadpole.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	Age and AgeLocked
 Tadpole.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	Age and AgeLocked
 Tadpole.saveToBucketTag	port	crates/horizon-client/src/entity_nbt.rs::bucket_data	Age and AgeLocked for axolotls and tadpoles
-Tadpole.loadFromBucketTag	port	crates/horizon-client/src/entity_nbt.rs::load_bucket_data	Age and AgeLocked
+Tadpole.loadFromBucketTag	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	Age and AgeLocked from `minecraft:bucket_entity_data`
 Tadpole.ageUp	inline	crates/horizon-client/src/mobs/aquatic.rs::ai_step	gap: player: at 24000 the frog is spawned fresh with yaw and persistence only (SpawnSetup), so a named, silenced or glowing tadpole turns into a plain frog; the grow-up sound is 1.0 loud, not 0.15
 TadpoleAi.initCoreActivity	inline	crates/horizon-client/src/mobs/aquatic.rs::register	panic at 2.0 as a goal
 TadpoleAi.initIdleActivity	inline	crates/horizon-client/src/mobs/aquatic.rs::register	gap: player: swims around with speed 1.0 every 40 ticks (vanilla 0.5); no look at player, no slimeball tempt
