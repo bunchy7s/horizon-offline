@@ -3933,6 +3933,19 @@ impl Game<'_> {
         let _ = (event, pos);
     }
 
+    /// A guest asked to complete `command`; `suggestions` may be added to or
+    /// filtered. `range` is the replaced byte range. @API:native_tab_complete@.
+    pub(super) fn native_tab_complete(
+        &mut self,
+        player: u128,
+        name: &str,
+        command: &str,
+        range: [usize; 2],
+        suggestions: &mut Vec<horizon_command::Suggestion>,
+    ) {
+        let _ = (player, name, command, range, suggestions);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

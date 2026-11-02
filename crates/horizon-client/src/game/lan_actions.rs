@@ -3161,6 +3161,11 @@ impl Game<'_> {
         let Some(permission) = host.hub.guest(conn).map(|g| g.permission) else {
             return;
         };
+        let Some((player_uuid, player_name)) =
+            host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
+        else {
+            return;
+        };
         let skip = usize::from(text.starts_with('/'));
         let command = &text[skip..];
         let d = vanilla::game_dispatcher();
@@ -3207,6 +3212,13 @@ impl Game<'_> {
         let parse = d.parse(command, &self.ui.registries);
         let ((start, end), mut suggestions) =
             d.suggestions(&parse, command.len(), &self.ui.registries);
+        self.native_tab_complete(
+            player_uuid,
+            &player_name,
+            command,
+            [start, end],
+            &mut suggestions,
+        );
         let reg = &mut self.ui.registries;
         reg.permission = level;
         reg.players = own_players;
