@@ -412,6 +412,10 @@ impl Shared {
     pub fn max_players(&self) -> usize {
         self.max_players.load(Ordering::Relaxed)
     }
+    /// `PlayerList.setMaxPlayers`: change the limit used by new logins and status responses.
+    pub fn set_max_players(&self, max_players: usize) {
+        self.max_players.store(max_players, Ordering::Relaxed);
+    }
     pub fn release(&self, uuid: u128) {
         self.online.lock().unwrap().retain(|(u, _)| *u != uuid);
     }

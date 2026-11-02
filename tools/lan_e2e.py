@@ -283,6 +283,8 @@ address. The script then checks, from both sides, what a guest's game used to ge
 - fishing:   the host and the guest each cast a fishing rod: the hook stays out on the server and
              both sides draw it and it reels back in from the ground, and in open water a fish
              bites and reeling in catches it (#1348).
+- fishing-item: reeling in an item hooked by a fishing rod moves it smoothly on both clients
+             instead of leaving it still until a later position update.
 - maps:      the host and the guest each make a map and hold it: their client draws the terrain
              around them and their marker, from the server's map data (#1382).
 - body:      the host and the guest each walk while drawing a bow (slowed), stand on powder snow
@@ -7490,6 +7492,110 @@ def check_fishing_tnt(host, guest, out):
 
 CHECKS += ['fishing-tnt']
 CHECK_FNS['fishing-tnt'] = check_fishing_tnt
+
+
+def check_fishing_item(host, guest, out):
+    """Reeling an item sends its velocity to both clients immediately; they move it smoothly."""
+    spots = apart(host, guest)
+    x, y, z = spots['host']
+    item_x, item_z = x + 4.5, z + 0.5
+    item_id = None
+
+    def item_position(game):
+        items = game.raw('entities', 16, 'item')['entities']
+        found = [item for item in items if item['id'] == item_id]
+        assert len(found) == 1, f'{game.name} does not see hooked item {item_id}: {items}'
+        return found[0]['pos']
+
+    try:
+        host('command', command='kill @e[type=minecraft:item]')
+        host('command', command='gamemode survival')
+        host('command', command='clear @s')
+        host('command', command='item replace entity @s weapon.mainhand with minecraft:fishing_rod')
+        host.raw('look-at', f'{item_x:.2f}', f'{y + 1.5:.2f}', f'{item_z:.2f}')
+        host.raw('use-item')
+        for _ in range(10):
+            status = host('status')
+            bobbers = [
+                projectile for projectile in status.get('projectiles', [])
+                if projectile.get('kind') == 'minecraft:fishing_bobber'
+            ]
+            if bobbers:
+                break
+            host.wait(1)
+        else:
+            raise AssertionError(f'fishing bobber did not spawn: {status}')
+
+        # Spawn on the moving bobber so the test covers hooking/reeling and
+        # client motion sync, not the rod's ballistic aim or item fall timing.
+        hook_x, hook_y, hook_z = bobbers[0]['position']
+        host('command', command=f'summon minecraft:item {hook_x:.4f} {hook_y:.4f} {hook_z:.4f} '
+                                '{Item:{id:"minecraft:stone",count:1},PickupDelay:32767}')
+        host.wait(1)
+        guest.wait(1)
+        items = host.raw('entities', 16, 'item')['entities']
+        target = next(item for item in items
+                      if item['item']['item'] == 'minecraft:stone'
+                      and math.dist(item['pos'], [hook_x, hook_y, hook_z]) < 1)
+        item_id = target['id']
+        for _ in range(10):
+            host_items = host.raw('entities', 16, 'item')['entities']
+            guest_items = guest.raw('entities', 16, 'item')['entities']
+            if (any(item['id'] == item_id for item in host_items)
+                    and any(item['id'] == item_id for item in guest_items)):
+                break
+            host.wait(1)
+            guest.wait(1)
+        start = item_position(host)
+        guest_start = item_position(guest)
+        assert math.dist(guest_start, start) < 0.5, \
+            f'clients disagree before reeling: {start}, {guest_start}'
+        hook_path = []
+        for _ in range(80):
+            status = host('status')
+            fishing = status.get('fishing')
+            if _ % 10 == 0:
+                hook_path.append([
+                    projectile for projectile in status.get('projectiles', [])
+                    if projectile.get('kind') == 'minecraft:fishing_bobber'
+                ])
+            if fishing and fishing['state'] == f'Hooked({item_id})':
+                break
+            host.wait(1)
+        else:
+            raise AssertionError(
+                f'fishing hook did not catch item {item_id}: {fishing}; '
+                f'item={item_position(host)} player={host("state")["player"]} '
+                f'aim=({item_x}, {item_y}, {item_z}) path={hook_path}'
+            )
+
+        host.raw('use-item')
+        samples = {'host': [item_position(host)], 'guest': [item_position(guest)]}
+        for _ in range(5):
+            host.wait(1)
+            samples['host'].append(item_position(host))
+            samples['guest'].append(item_position(guest))
+        host.shot(out, 'fishing-item-pull')
+        guest.shot(out, 'fishing-item-pull')
+
+        progress = {}
+        for name, positions in samples.items():
+            path = [start if name == 'host' else guest_start, *positions]
+            steps = [path[i][0] - path[i + 1][0] for i in range(len(path) - 1)]
+            moved = path[0][0] - path[-1][0]
+            progress[name] = {'x': [p[0] for p in path], 'moved_toward_player': moved}
+            assert moved >= 0.5, f'{name} client did not receive item motion promptly: {progress[name]}'
+            assert all(-0.02 <= step < 1.0 for step in steps), \
+                f'{name} client saw a teleport or reversed movement: {progress[name]}'
+        return progress
+    finally:
+        host('command', command='kill @e[type=minecraft:item]')
+        host('command', command='clear @s')
+        face_each_other(host, guest)
+
+
+CHECKS += ['fishing-item']
+CHECK_FNS['fishing-item'] = check_fishing_item
 
 
 def check_maps(host, guest, out):

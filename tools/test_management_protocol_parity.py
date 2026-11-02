@@ -18,7 +18,8 @@ sent the same things over TLS, and every answer is compared exactly:
   `clear`; with no profile service, players named resolve to offline players on both), the live server
   message, difficulty, default and forced game mode read and changed (including saved properties), autosave
   read and changed (including its reset after restart), allowlist use and enforcement read and changed
-  (including saved properties and restart), and
+  (including saved properties and restart), max players read and changed (including saved
+  properties and restart), and
   `server/stop`;
 - the TLS version each server agrees on.
 
@@ -177,6 +178,15 @@ MESSAGES = [
     '{"jsonrpc":"2.0","id":90,"method":"minecraft:serversettings/enforce_allowlist"}',
     '{"jsonrpc":"2.0","id":91,"method":"minecraft:serversettings/enforce_allowlist/set","params":[true]}',
     '{"jsonrpc":"2.0","id":92,"method":"minecraft:serversettings/enforce_allowlist"}',
+    '{"jsonrpc":"2.0","id":100,"method":"minecraft:serversettings/max_players"}',
+    '{"jsonrpc":"2.0","id":101,"method":"minecraft:serversettings/max_players/set","params":[10]}',
+    '{"jsonrpc":"2.0","id":102,"method":"minecraft:serversettings/max_players"}',
+    '{"jsonrpc":"2.0","id":103,"method":"minecraft:serversettings/max_players/set","params":[30]}',
+    '{"jsonrpc":"2.0","id":104,"method":"minecraft:serversettings/max_players"}',
+    '{"jsonrpc":"2.0","id":105,"method":"minecraft:serversettings/max_players/set","params":["yes"]}',
+    '{"jsonrpc":"2.0","id":106,"method":"minecraft:serversettings/max_players"}',
+    '{"jsonrpc":"2.0","id":107,"method":"minecraft:serversettings/max_players/set","params":[30]}',
+    '{"jsonrpc":"2.0","id":108,"method":"minecraft:serversettings/max_players"}',
 ]
 
 
@@ -408,6 +418,9 @@ def main():
                 sides[side]['saved_enforce_allowlist'] = next(
                     (line.partition('=')[2] for line in properties.splitlines()
                      if line.startswith('enforce-whitelist=')), None)
+                sides[side]['saved_max_players'] = next(
+                    (line.partition('=')[2] for line in properties.splitlines()
+                     if line.startswith('max-players=')), None)
                 if side == 'horizon':
                     world = (folder / 'server.toml').read_text().partition('[world]')[2].split('\n[', 1)[0]
                     sides[side]['saved_config_difficulty'] = 'difficulty = "peaceful"' in world
@@ -417,6 +430,8 @@ def main():
                     sides[side]['saved_config_use_allowlist'] = 'whitelist = true' in (
                         folder / 'server.toml').read_text()
                     sides[side]['saved_config_enforce_allowlist'] = 'enforce_whitelist = true' in (
+                        folder / 'server.toml').read_text()
+                    sides[side]['saved_config_max_players'] = 'max_players = 30' in (
                         folder / 'server.toml').read_text()
             finally:
                 server.stop()
@@ -449,6 +464,12 @@ def main():
                         if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
                             break
                     sides[side]['restarted_enforce_allowlist'] = reply
+                    ws.send('{"jsonrpc":"2.0","id":109,"method":"minecraft:serversettings/max_players"}')
+                    while True:
+                        reply = normal(ws.receive(timeout=60))
+                        if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
+                            break
+                    sides[side]['restarted_max_players'] = reply
                 finally:
                     ws.sock.close()
             finally:
@@ -493,6 +514,13 @@ def main():
         if vanilla['restarted_enforce_allowlist'] != horizon['restarted_enforce_allowlist'] or \
                 vanilla['restarted_enforce_allowlist'] != {'jsonrpc': '2.0', 'id': 94, 'result': True}:
             failures.append(f"restarted allowlist enforcement: vanilla {vanilla['restarted_enforce_allowlist']!r}, Horizon {horizon['restarted_enforce_allowlist']!r}")
+        if vanilla['saved_max_players'] != horizon['saved_max_players'] or vanilla['saved_max_players'] != '30':
+            failures.append(f"saved max players: vanilla {vanilla['saved_max_players']!r}, Horizon {horizon['saved_max_players']!r}")
+        if not horizon['saved_config_max_players']:
+            failures.append('Horizon did not save max players in server.toml')
+        if vanilla['restarted_max_players'] != horizon['restarted_max_players'] or \
+                vanilla['restarted_max_players'] != {'jsonrpc': '2.0', 'id': 109, 'result': 30}:
+            failures.append(f"restarted max players: vanilla {vanilla['restarted_max_players']!r}, Horizon {horizon['restarted_max_players']!r}")
         (build / 'report.json').write_text(json.dumps(sides, indent=1))
         if failures:
             sys.exit(f'{NAME}: {len(failures)} differences (logs in {build}):\n' + '\n'.join(failures))
