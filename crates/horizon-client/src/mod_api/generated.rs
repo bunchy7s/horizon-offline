@@ -4523,6 +4523,13 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Additional first-person hand and item pose, including empty arms and maps.
+    /// Add offsets in blocks and pitch, yaw and roll in degrees; multiply scale.
+    /// API @API:render_hand_pose@.
+    fn render_hand_pose(&self, host: &dyn Host, event: &mut RenderHandPoseEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// Before a visible item frame's item or map is drawn. Cancel hides the item, not the frame.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
@@ -13896,6 +13903,63 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
+}
+/// What [`Hooks::render_hand_pose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RenderHandPoseEvent<'a> {
+    pub hand: horizon_client::first_person::Hand,
+    pub stack: Option<&'a ItemStack>,
+    pub partial: f32,
+    pub swing: f32,
+    pub equip: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub pitch: f32,
+    pub yaw: f32,
+    pub roll: f32,
+    pub scale: f32,
+}
+pub fn dispatch_render_hand_pose(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    hand: horizon_client::first_person::Hand,
+    stack: Option<&ItemStack>,
+    partial: f32,
+    swing: f32,
+    equip: f32,
+    x: &mut f32,
+    y: &mut f32,
+    z: &mut f32,
+    pitch: &mut f32,
+    yaw: &mut f32,
+    roll: &mut f32,
+    scale: &mut f32,
+) {
+    let mut event = RenderHandPoseEvent {
+        hand,
+        stack,
+        partial,
+        swing,
+        equip,
+        x: *x,
+        y: *y,
+        z: *z,
+        pitch: *pitch,
+        yaw: *yaw,
+        roll: *roll,
+        scale: *scale,
+    };
+    for mod_hook in super::entered(mods, "render_hand_pose") {
+        mod_hook.render_hand_pose(host, &mut event);
+    }
+    *x = event.x;
+    *y = event.y;
+    *z = event.z;
+    *pitch = event.pitch;
+    *yaw = event.yaw;
+    *roll = event.roll;
+    *scale = event.scale;
 }
 /// What [`Hooks::render_item_in_frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
