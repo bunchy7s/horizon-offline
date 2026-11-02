@@ -103,6 +103,10 @@ python3 tools/agent_control_e2e.py         # horizon-ctl / MCP end to end
   + a Rust probe: `crates/<crate>/examples/<name>_{probe,fixture}.rs` (horizon-world 175, horizon-client 104),
   or the game binary with a fixture env var (`game/dispense_fixture.rs`, `game/sculk_fixture.rs`,
   `game/command_harness.rs`, `game/net_harness.rs`). Copy a nearby harness for a new one.
+- Developing a native mod? Run `horizon-launcher settings native-profile dev` once. `dev` builds the game crate
+  unoptimized: a mod edit rebuilds about 6× faster than with `performance`, while game logic runs up to about twice as
+  slow. Use it while developing, not for playing; `performance` stays the default for players and releases
+  ([docs/native-mods.md](docs/native-mods.md)).
 - Probes build into `.local/parity-target/`; harnesses find binaries via `lab.cargo_target()`, never `target/`.
 - Harness selection uses Cargo dep-info and reachable-code narrowing (`tools/parity_reach.py`).
   `horizon-client-lib` builds the control tool and client probes without gameplay; their dep-info

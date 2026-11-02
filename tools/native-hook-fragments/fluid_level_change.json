@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "fluid_level_change",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_fluid_level_change",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A flowing fluid changing level (`native_fluid_level_change`).",
+  "doc_summary": "`native_fluid_level_change(dimension, pos, fluid, from, to, cancel)` is called when flowing water or lava at `pos` is about to change level; levels run from 0 through 8. Set `cancel` to keep the old level. Bundles need \"hooks\": @API:fluid_level_change@."
+}

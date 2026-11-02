@@ -314,13 +314,26 @@ fn usage(name: &str) -> String {
     commands::find(name).map_or_else(|| name.to_owned(), |c| format!("horizon-ctl {}", c.usage))
 }
 
-/// Screenshot paths are written by the game process: make them absolute here.
+/// Paths are written by the game process: make them absolute here.
 fn absolute_paths(words: &mut [String]) {
-    if words.first().map(String::as_str) == Some("screenshot")
-        && let Some(path) = words.get_mut(1)
-        && let Ok(cwd) = std::env::current_dir()
-    {
-        *path = cwd.join(&*path).display().to_string();
+    let Ok(cwd) = std::env::current_dir() else {
+        return;
+    };
+    match words.first().map(String::as_str) {
+        Some("screenshot") => {
+            if let Some(path) = words.get_mut(1) {
+                *path = cwd.join(&*path).display().to_string();
+            }
+        }
+        // `repro-export [NAME] [PATH]`: the second positional is the zip.
+        Some("repro-export") => {
+            if let Some(path) = words.get_mut(2)
+                && (path.contains('/') || path.ends_with(".zip"))
+            {
+                *path = cwd.join(&*path).display().to_string();
+            }
+        }
+        _ => {}
     }
 }
 

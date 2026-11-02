@@ -2,7 +2,7 @@ ItemFrame.defineSynchedData	skip:other		entity data defaults; ItemFrame starts w
 ItemFrame.setDirection	inline	crates/horizon-client/src/game/frames.rs::Game::frame_geometry	facing sets the pose in frame_geometry; the box comes from ItemFrame::bounds
 ItemFrame.recalculateBoundingBox	inline	crates/horizon-client/src/entities.rs::ItemFrame::bounds	boxes are computed on demand; the position sync codec is network-only
 ItemFrame.shouldDamageDropItem	inline	crates/horizon-client/src/game/explosion.rs::Game::explosion_hurt_entities	a blast breaks a frame in reach and drops its item (`explosion_breaks_frames`)
-ItemFrame.canHurtWhenFixed	missing		minor: creative players cannot break a fixed frame (vanilla lets them); attack_frame returns early for fixed frames
+ItemFrame.canHurtWhenFixed	port	crates/horizon-client/src/game/frames.rs::attack_frame	a fixed frame refuses a non-creative hit (attack_ticks reset, no break) and lets a creative player break it
 ItemFrame.hurtClient	inline	crates/horizon-client/src/game/frames.rs::Game::attack_frame	gap: minor: no separate client-side fixed-frame gate; the creative exception is missing
 ItemFrame.removeFramedMap	inline	crates/horizon-client/src/game/maps.rs::Game::lan_map_updates	frame map markers come from item_frames each tick, so a removed frame needs no step
 ItemFrame.getSlot	missing		minor: no slot 0 access for item frames in the item command path
@@ -41,7 +41,7 @@ ItemEntity.getVisualRotationYInDegrees	inline	crates/horizon-client/src/game/ite
 ItemEntity.getSlot	missing		unsure: no slot 0 access for dropped items found in commands.rs
 PrimedTnt.defineSynchedData	skip:other		fuse and block state are struct fields; spawn sets fuse 80; the block is always TNT
 PrimedTnt.explode	inline	crates/horizon-client/src/game/tnt.rs::Game::tick_tnt	gap: minor: power fixed at 4; no explosion_power and no used-portal damage calculator
-PrimedTnt.addAdditionalSaveData	missing		minor: primed TNT is not written to saves, so a lit TNT is lost on save and reload
+PrimedTnt.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::tnt_to_nbt	the fuse and the block state are saved
 PrimedTnt.restoreFrom	missing		minor: PrimedTnt has no owner field, so the igniter is not kept through portal moves
 PrimedTnt.teleport	missing		unsure: no used-portal flag on PrimedTnt; the portal damage calculator is not applied
 Blaze.registerGoals	port	crates/horizon-client/src/mobs/nether.rs::register_blaze	gap: minor: MoveTowardsRestriction goal (priority 5) is not registered
@@ -49,7 +49,7 @@ Blaze.createAttributes	skip:data		attribute defaults come from data tables
 Blaze.isCharged	inline	crates/horizon-client/src/mobs/nether.rs::BlazeAttack::tick	the charged state is m.extra.flag, set in the attack goal tick
 Blaze.setCharged	inline	crates/horizon-client/src/mobs/nether.rs::BlazeAttack::tick	same flag, set when a charge starts and ends
 Creeper.registerGoals	port	crates/horizon-client/src/mobs/hostile.rs::register	
-Creeper.getMaxFallDistance	missing		minor: the creeper's own comfortable fall distance is not used; nav uses the generic mob value
+Creeper.getMaxFallDistance	port	crates/horizon-client/src/mobs/nav.rs::comfortable_fall_distance	the creeper's own override, comfortable_fall_distance(health - 1.0)
 Creeper.defineSynchedData	skip:other		swell, powered and ignited are Mob fields
 Creeper.addAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	gap: minor: Fuse and ExplosionRadius are written as constants 30 and 3, not the creeper's values
 Creeper.thunderHit	port	crates/horizon-client/src/game/lightning.rs::Game::thunder_hit	
@@ -61,8 +61,8 @@ Enderman.setTarget	inline	crates/horizon-client/src/mobs/enderman.rs::custom_ser
 Enderman.defineSynchedData	skip:other		carried block, creepy and stared-at state are Mob extra fields
 Enderman.playStareSound	inline	crates/horizon-client/src/mobs/enderman.rs::LookForPlayer::tick	gap: minor: the 400-tick throttle of the stare sound is not seen
 Enderman.onSyncedDataUpdated	skip:other		client sync hook; the stare sound is played server-side from LookForPlayer
-Enderman.addAdditionalSaveData	missing		minor: the carried block is not written to saves
-Enderman.readAdditionalSaveData	missing		minor: the carried block is not read from saves
+Enderman.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs:976-985	the carried block is written as carriedBlockState and removed when there is none
+Enderman.readAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs	the same state round-trips through the registry
 Enderman.canRandomlyTeleportTo	port	crates/horizon-client/src/mobs/enderman.rs::teleport_to	the water check on the ground block
 Enderman.repeatedlyTryToTeleport	port	crates/horizon-client/src/mobs/enderman.rs::ai_step	pending teleports retry up to 64 times
 Enderman.dropCustomDeathLoot	port	crates/horizon-client/src/mobs/enderman.rs::carried_block_drops	the carried block's drops with a silk-touch diamond axe (carried_block_tool), drawn from the block table's random sequence (game/creatures.rs, the death handling)
@@ -87,7 +87,7 @@ Guardian.getActiveAttackTarget	inline	crates/horizon-client/src/mobs/guardian.rs
 Guardian.checkGuardianSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	the Guardian and ElderGuardian arm
 Guardian.GuardianAttackGoal.canContinueToUse	port	crates/horizon-client/src/mobs/guardian.rs::GuardianAttack::can_continue	
 Guardian.GuardianAttackSelector.test	inline	crates/horizon-client/src/mobs/guardian.rs::register	the selector is the player, squid and axolotl beyond 9 filters in register
-Monster.updateNoActionTime	missing		minor: noActionTime is not kept, so the light-driven idle timer that feeds despawn is absent
+Monster.updateNoActionTime	port	crates/horizon-client/src/mobs/ai.rs: no_action_time += 1 at 1556, reset at 1842/2258	the idle counter is kept and read by the despawn path in raids.rs
 Monster.getProjectile	missing		unsure: no held-ammo choice for mobs found in mobs/*.rs
 PatrollingMonster.addAdditionalSaveData	port	crates/horizon-client/src/mobs/raider.rs::write_nbt	
 PatrollingMonster.readAdditionalSaveData	port	crates/horizon-client/src/mobs/raider.rs::read_nbt	

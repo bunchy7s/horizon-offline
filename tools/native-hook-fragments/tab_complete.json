@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "tab_complete",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_tab_complete",
+      "neoforge": "none (NeoForge has no generic tab completion event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "collect",
+        "out": "suggestions"
+      }
+    }
+  ],
+  "rust_summary": "A guest asked the server to complete a command (`native_tab_complete`).",
+  "doc_summary": "A guest's server command completion request was evaluated: `native_tab_complete(player, name, command, range, suggestions)` lets a mod add or filter the suggestions; `range` is the replaced byte range. The guest's state is not swapped in, so helpers that look through `self.lan` may find nothing while its packet is handled. Bundles need \"hooks\": @API:tab_complete@."
+}

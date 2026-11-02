@@ -2,6 +2,7 @@
 //! (quadrupeds, humanoids, creepers, spiders, chickens...) applied to a map of
 //! part poses before the model is drawn.
 use super::{Mob, Part, keyframes::AnimationState, living::wrap};
+use crate::fast_hash::{FxHashMap, FxHashSet};
 use horizon_core::geometry::trig::Mth;
 use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_6, PI};
@@ -101,15 +102,27 @@ impl AnimState {
     }
     pub fn end_tick(&mut self, _swinging: bool) {}
 }
+/// A part name as `Poses` keys it: its Fx hash, so filling a pose map allocates
+/// nothing (a mob farm resets one per layer per mob each frame). Names are short
+/// and few per model; `no_two_part_names_share_a_key` checks every vanilla model.
+#[inline]
+pub(crate) fn key(name: &str) -> u64 {
+    use std::hash::Hasher;
+    let mut h = crate::fast_hash::FxHasher::default();
+    h.write(name.as_bytes());
+    // The length too, so "a" and "a\0" differ (str's own Hash adds a terminator).
+    h.write_usize(name.len());
+    h.finish()
+}
 /// Part poses for one draw, keyed by part name.
 #[derive(Clone, Default)]
 pub struct Poses {
-    map: HashMap<String, [f32; 9]>,
+    map: FxHashMap<u64, [f32; 9]>,
     dummy: [f32; 9],
     /// Parts with `skipDraw` set: their own cubes are not drawn, children are.
-    skipped: std::collections::HashSet<String>,
+    skipped: FxHashSet<u64>,
     /// Parts with `visible` cleared: neither they nor their children draw.
-    hidden: std::collections::HashSet<String>,
+    hidden: FxHashSet<u64>,
 }
 impl Poses {
     pub fn new(model: &Part) -> Self {
@@ -120,9 +133,9 @@ impl Poses {
     /// Refills this for another model, keeping the map and the sets' capacity:
     /// a mob draws its body and every equipment layer each frame.
     pub fn reset(&mut self, model: &Part) {
-        fn walk(p: &Part, map: &mut HashMap<String, [f32; 9]>) {
+        fn walk(p: &Part, map: &mut FxHashMap<u64, [f32; 9]>) {
             // ModelPart.createPartLookup fills its map with putIfAbsent: the first part keeps a name.
-            map.entry(p.name.clone()).or_insert(p.pose);
+            map.entry(key(&p.name)).or_insert(p.pose);
             for c in &p.children {
                 walk(c, map);
             }
@@ -134,26 +147,26 @@ impl Poses {
         walk(model, &mut self.map);
     }
     pub fn get(&mut self, name: &str) -> &mut [f32; 9] {
-        match self.map.get_mut(name) {
+        match self.map.get_mut(&key(name)) {
             Some(p) => p,
             None => &mut self.dummy,
         }
     }
     pub fn pose(&self, part: &Part) -> [f32; 9] {
-        self.map.get(&part.name).copied().unwrap_or(part.pose)
+        self.map.get(&key(&part.name)).copied().unwrap_or(part.pose)
     }
     pub fn skip_draw(&mut self, name: &str) {
-        self.skipped.insert(name.to_owned());
+        self.skipped.insert(key(name));
     }
     pub fn skips(&self, part: &Part) -> bool {
         self.skips_named(&part.name)
     }
     /// `skips` by the part's name.
     pub fn skips_named(&self, name: &str) -> bool {
-        self.skipped.contains(name)
+        !self.skipped.is_empty() && self.skipped.contains(&key(name))
     }
     pub fn has(&self, name: &str) -> bool {
-        self.map.contains_key(name)
+        self.map.contains_key(&key(name))
     }
     pub fn xrot(&mut self, n: &str, v: f32) {
         self.get(n)[3] = v;
@@ -167,9 +180,9 @@ impl Poses {
     /// `ModelPart.visible = v`; a hidden part and its children do not draw.
     pub fn visible(&mut self, n: &str, v: bool) {
         if v {
-            self.hidden.remove(n);
-        } else if self.map.contains_key(n) {
-            self.hidden.insert(n.to_owned());
+            self.hidden.remove(&key(n));
+        } else if self.map.contains_key(&key(n)) {
+            self.hidden.insert(key(n));
         }
     }
     pub fn is_hidden(&self, part: &Part) -> bool {
@@ -177,7 +190,7 @@ impl Poses {
     }
     /// `is_hidden` by the part's name.
     pub fn is_hidden_named(&self, name: &str) -> bool {
-        self.hidden.contains(name)
+        !self.hidden.is_empty() && self.hidden.contains(&key(name))
     }
 }
 /// The LivingEntityRenderState values setupAnim reads.
@@ -1003,7 +1016,7 @@ mod flight_pose_tests {
                 "left_leg",
             ]
             .into_iter()
-            .map(|n| (n.to_string(), [0.0; 9]))
+            .map(|n| (key(n), [0.0; 9]))
             .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),
@@ -1011,13 +1024,13 @@ mod flight_pose_tests {
         };
         player_model_visibility(&mut p, 0, true);
         for part in ["body", "right_arm", "left_arm", "right_leg", "left_leg"] {
-            assert!(p.hidden.contains(part), "{part}");
+            assert!(p.hidden.contains(&key(part)), "{part}");
         }
-        assert!(!p.hidden.contains("head") && !p.hidden.contains("hat"));
+        assert!(!p.hidden.contains(&key("head")) && !p.hidden.contains(&key("hat")));
         // Back in another mode they all show, but for the layers the player hid.
         player_model_visibility(&mut p, 1 << 6, false);
-        assert!(!p.hidden.contains("body") && !p.hidden.contains("left_leg"));
-        assert!(p.hidden.contains("hat"));
+        assert!(!p.hidden.contains(&key("body")) && !p.hidden.contains(&key("left_leg")));
+        assert!(p.hidden.contains(&key("hat")));
     }
     #[test]
     fn blocking_arm_follows_the_head_with_limits_in_both_hands() {
@@ -1030,7 +1043,7 @@ mod flight_pose_tests {
                 let mut p = Poses {
                     map: ["head", "right_arm", "left_arm"]
                         .into_iter()
-                        .map(|n| (n.to_string(), [0.0; 9]))
+                        .map(|n| (key(n), [0.0; 9]))
                         .collect(),
                     dummy: [0.0; 9],
                     skipped: Default::default(),
@@ -1087,7 +1100,7 @@ mod flight_pose_tests {
                 "left_leg",
             ]
             .into_iter()
-            .map(|n| (n.to_string(), [0.0; 9]))
+            .map(|n| (key(n), [0.0; 9]))
             .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),
@@ -1142,7 +1155,7 @@ mod flight_pose_tests {
                 "body",
             ]
             .into_iter()
-            .map(|n| (n.to_string(), [0.0; 9]))
+            .map(|n| (key(n), [0.0; 9]))
             .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),
@@ -1183,7 +1196,7 @@ mod flight_pose_tests {
         let make = || Poses {
             map: ["head", "right_arm", "left_arm", "right_leg", "left_leg"]
                 .into_iter()
-                .map(|n| (n.to_string(), [0.0; 9]))
+                .map(|n| (key(n), [0.0; 9]))
                 .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),
@@ -1289,7 +1302,7 @@ mod flight_pose_tests {
         let mut p = Poses {
             map: ["head", "right_arm", "left_arm"]
                 .into_iter()
-                .map(|n| (n.to_string(), [0.0; 9]))
+                .map(|n| (key(n), [0.0; 9]))
                 .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),
@@ -1310,7 +1323,7 @@ mod flight_pose_tests {
         let mut p = Poses {
             map: ["head", "right_arm", "left_arm"]
                 .into_iter()
-                .map(|n| (n.to_string(), [0.0; 9]))
+                .map(|n| (key(n), [0.0; 9]))
                 .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),
@@ -1338,7 +1351,7 @@ mod flight_pose_tests {
         let make = || Poses {
             map: ["head", "right_arm", "left_arm"]
                 .into_iter()
-                .map(|n| (n.to_string(), [0.0; 9]))
+                .map(|n| (key(n), [0.0; 9]))
                 .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),

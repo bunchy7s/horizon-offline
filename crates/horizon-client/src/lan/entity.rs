@@ -64,6 +64,12 @@ pub struct EntityState {
     /// `Entity.getRequiresPrecisePosition` (primed TNT and falling blocks
     /// touching a block): moves are sent as full position syncs.
     pub precise: bool,
+    /// `Entity.verticalCollision` and `Entity.horizontalCollision`: the last
+    /// move's stops. An item that stopped on a block gets a full position
+    /// sync rather than a 1/4096 delta whose decoded point is not the one it
+    /// came to rest at (`ServerEntity.isFullPrecisionEncodingRequired`).
+    pub vertical_collision: bool,
+    pub horizontal_collision: bool,
     /// `Entity.needsSync`: send its changes this tick, due or not.
     pub needs_sync: bool,
     /// `Leashable.getLeashHolder`: the entity holding its lead.
@@ -95,6 +101,8 @@ impl EntityState {
         self.equipment.clear();
         self.attributes.clear();
         self.precise = false;
+        self.vertical_collision = false;
+        self.horizontal_collision = false;
         self.needs_sync = false;
         self.leash = None;
         self.spectator = false;
@@ -263,6 +271,23 @@ fn encode(v: f64) -> i64 {
     (v * 4096.0).round() as i64
 }
 
+/// `ServerEntity.isFullPrecisionEncodingRequired`: an item whose last move was
+/// stopped by a block rests where the collision solver left it, which is not on
+/// the 1/4096 grid a delta decodes to; vanilla sends its exact position instead.
+/// The axis pairs are vanilla's own: a vertical stop looks at x and z, a
+/// horizontal one at z and x.
+fn full_precision_required(e: &EntityState, delta: [i64; 3]) -> bool {
+    if e.kind != "minecraft:item" {
+        return false;
+    }
+    let loss = |v: f64| encode(v) as f64 / 4096.0 - v;
+    let vertical =
+        delta[0] != 0 && loss(e.position[0]) != 0.0 || delta[2] != 0 && loss(e.position[2]) != 0.0;
+    let horizontal =
+        delta[0] != 0 && loss(e.position[2]) != 0.0 || delta[2] != 0 && loss(e.position[0]) != 0.0;
+    e.vertical_collision && vertical || e.horizontal_collision && horizontal
+}
+
 impl ServerEntity {
     /// `new ServerEntity`: the entity as it is when it joins the level.
     fn new(e: &EntityState, kind: Option<i32>, riding: &Riding) -> Self {
@@ -425,7 +450,9 @@ impl ServerEntity {
                 Some(play::Clientbound::EntityPositionSync(sync))
             } else if send_position {
                 let delta = [0, 1, 2].map(|k| encode(e.position[k]) - encode(self.base[k]));
-                if delta.iter().any(|v| i16::try_from(*v).is_err()) {
+                if delta.iter().any(|v| i16::try_from(*v).is_err())
+                    || full_precision_required(e, delta)
+                {
                     Some(play::Clientbound::EntityPositionSync(sync))
                 } else {
                     let m = MoveEntity {
@@ -1056,6 +1083,8 @@ mod tests {
             equipment: Vec::new(),
             attributes: Vec::new(),
             precise: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             needs_sync: false,
             leash: None,
             spectator: false,
@@ -1204,6 +1233,59 @@ mod tests {
             changes(&mut s, &e)[..],
             [play::Clientbound::MoveEntityPosRot(_)]
         ));
+    }
+
+    /// `ServerEntity.isFullPrecisionEncodingRequired`: an item that came to
+    /// rest against a block gets its exact position, because a delta decodes
+    /// to the 1/4096 grid. Vanilla's axis pairs cross over, and another kind
+    /// of entity that collided is not an item.
+    #[test]
+    fn an_item_stopped_by_a_block_needs_full_precision() {
+        let mut item = state(0.0);
+        item.kind = "minecraft:item".into();
+        item.position = [0.3, 64.0, 0.3];
+        assert!(!full_precision_required(&item, [1, 0, 0]));
+        item.vertical_collision = true;
+        assert!(full_precision_required(&item, [1, 0, 0]));
+        item.vertical_collision = false;
+        item.horizontal_collision = true;
+        // A horizontal stop pairs an x delta with z, exactly as vanilla does.
+        assert!(full_precision_required(&item, [1, 0, 0]));
+        item.position[2] = 0.5;
+        assert!(!full_precision_required(&item, [1, 0, 0]));
+        // A drop that only moved in y says nothing about x and z.
+        item.position[2] = 0.3;
+        assert!(!full_precision_required(&item, [0, 9, 0]));
+        item.kind = "minecraft:zombie".into();
+        assert!(!full_precision_required(&item, [1, 0, 0]));
+    }
+
+    /// The same through `send_changes`: a slow item stopped by a wall would
+    /// have its resting point rounded to the delta grid, so at its next update
+    /// (an item's is every 20 ticks) it goes out as a position sync carrying
+    /// the exact point; one that hit nothing keeps the quantised delta.
+    #[test]
+    fn a_slow_item_stopped_by_a_wall_syncs_its_exact_position() {
+        let stop = |collision: bool| {
+            let mut e = state(0.0);
+            e.kind = "minecraft:item".into();
+            let mut s = added(&e);
+            changes(&mut s, &e);
+            e.position = [0.3, 64.0, 0.3];
+            e.horizontal_collision = collision;
+            for _ in 0..19 {
+                assert!(changes(&mut s, &e).is_empty());
+            }
+            changes(&mut s, &e)
+        };
+        let out = stop(true);
+        assert!(
+            matches!(&out[..], [play::Clientbound::EntityPositionSync(p)]
+                if p.path.end() == [0.3, 64.0, 0.3]),
+            "{out:?}"
+        );
+        let out = stop(false);
+        assert!(matches!(&out[..], [play::Clientbound::MoveEntityPos(_)]));
     }
 
     #[test]
