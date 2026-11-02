@@ -734,6 +734,7 @@ fn parse_coord_double(reader: &mut Reader, center: bool) -> CmdResult<Coord> {
     }
     Ok(Coord { relative, value })
 }
+/// LocalCoordinates.parse / readDouble.
 fn parse_local(reader: &mut Reader) -> CmdResult<Coordinates> {
     let start = reader.cursor;
     let mut v = [0.0; 3];
