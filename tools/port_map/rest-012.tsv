@@ -27,10 +27,10 @@ ClientboundAnimatePacket.write	port	crates/horizon-protocol/src/buf.rs::write	pa
 ClientboundBlockDestructionPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! BlockDestruction {id, pos, progress}
 ClientboundBlockEntityDataPacket.create	missing		player: block entity changes after load (sign text, banner, chest name) are not sent to other players; the LAN host has no BlockEntityData sender
 ClientboundBlockEventPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! BlockEvent {pos, b0, b1, block}
-ClientboundBossEventPacket.createUpdateProgressPacket	missing		player: boss bar progress is never sent to other players; the LAN host has no BossEvent sender
-ClientboundBossEventPacket.createUpdateNamePacket	missing		player: boss bar name changes are never sent to other players; the LAN host has no BossEvent sender
-ClientboundBossEventPacket.createUpdateStylePacket	missing		player: boss bar colour and overlay changes are never sent to other players; the LAN host has no BossEvent sender
-ClientboundBossEventPacket.createUpdatePropertiesPacket	missing		player: boss bar fog, music and darkening flags are never sent to other players; the LAN host has no BossEvent sender
+ClientboundBossEventPacket.createUpdateProgressPacket	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	UpdateProgress goes out to every viewer of the bar (a guest by connection, the host's own overlay in place)
+ClientboundBossEventPacket.createUpdateNamePacket	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	UpdateName when the bar's name differs from what that viewer was sent
+ClientboundBossEventPacket.createUpdateStylePacket	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	UpdateStyle when the colour or the overlay differ
+ClientboundBossEventPacket.createUpdatePropertiesPacket	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	UpdateProperties when darken, boss music or fog differ
 ClientboundBossEventPacket.encodeProperties	port	crates/horizon-protocol/src/packets/play.rs::boss_flags	the three flag bits (darken, music, fog)
 ClientboundBossEventPacket.AddOperation.dispatch	port	crates/horizon-client/src/boss_overlay.rs::BossOverlay::apply	
 ClientboundChunksBiomesPacket.ChunkBiomeData.calculateChunkSize	missing		minor: biome-only chunk updates are never sent; no ChunksBiomes packet in ids.rs
@@ -70,9 +70,9 @@ ClientboundPlayerInfoUpdatePacket.createPlayerInitializing	port	crates/horizon-c
 ClientboundPlayerInfoUpdatePacket.entryCodec	port	crates/horizon-protocol/src/packets/play.rs::PlayerInfoUpdate::write	per-entry write in action order
 ClientboundPlayerInfoUpdatePacket.toString	skip:debug		debug string
 ClientboundPlayerInfoUpdatePacket.EntryBuilder.build	inline	crates/horizon-protocol/src/packets/play.rs::PlayerInfoUpdate::read	entry fields read in action order
-ClientboundPlayerLookAtPacket.<init>	missing		player: a server's facing command (e.g. teleport facing an entity) does not turn the client's view
-ClientboundPlayerLookAtPacket.write	missing		player: same as the constructor; the view is never turned by the server
-ClientboundPlayerLookAtPacket.getPosition	missing		player: same as the constructor; the view is never turned by the server
+ClientboundPlayerLookAtPacket.<init>	port	crates/horizon-client/src/game/commands.rs::Game::send_player_look_at	every target of /tp ... facing and /rotate ... facing gets the packet, a guest over its connection
+ClientboundPlayerLookAtPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! PlayerLookAt {from, target, entity LookAtEntity {id, anchor}}
+ClientboundPlayerLookAtPacket.getPosition	inline	crates/horizon-client/src/game/remote.rs::Game::remote_look_at	the point is read off the packet, unless the named entity is tracked, then its feet or eyes
 ClientboundRotateHeadPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! RotateHead {id VarInt, head_yaw Byte}
 ClientboundSectionBlocksUpdatePacket.<init>	port	crates/horizon-client/src/lan/hub.rs::Hub::broadcast_block_changes	builds the section's change list from the changed blocks
 ClientboundSectionBlocksUpdatePacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SectionBlocksUpdate (play.rs) with SectionPos and VarLong changes
