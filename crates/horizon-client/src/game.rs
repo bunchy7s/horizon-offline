@@ -17784,12 +17784,19 @@ impl Game<'_> {
                         result => result?,
                     };
                     self.apply_cursor_icon();
+                    // The frame's spans, taken every frame they are recorded so they never
+                    // pile up: the slow-frame line's, and the session's (`perf.frame`).
+                    let frame_spans = if horizon_client::spans::recording_here() {
+                        horizon_client::spans::take_raw()
+                    } else {
+                        Vec::new()
+                    };
                     if let Some(threshold) = self.options.spikes
                         && let Some(r) = self.renderer.as_ref()
                     {
                         let cpu = now.elapsed().saturating_sub(r.last_wait).as_secs_f32() * 1000.0;
                         // Spans timed between frames (`idle`) come first.
-                        let spans = horizon_client::spans::take();
+                        let spans = horizon_client::spans::merge(&frame_spans);
                         let between = between.as_secs_f32() * 1000.0;
                         if cpu > threshold || between > threshold {
                             // The render thread's own CPU time in the frame:
@@ -17893,7 +17900,8 @@ impl Game<'_> {
                         if self.title.is_some() {
                             self.perf.title_shown();
                         } else if self.screen == Screen::Playing && self.player.is_some() {
-                            self.perf.frame(elapsed.as_secs_f32() * 1000.0);
+                            self.perf
+                                .frame(elapsed.as_secs_f32() * 1000.0, &frame_spans);
                             if startup::filling() {
                                 let mut fill: Vec<(&'static str, usize)> =
                                     self.streaming.stages().to_vec();
@@ -20727,6 +20735,14 @@ pub fn run_with() -> Result<()> {
         options.spikes = Some(dedicated::SLOW_TICK_MS);
     }
     horizon_client::spans::enable(options.spikes.is_some());
+    // A player who allows performance statistics also says what their slow frames spent their
+    // time in: this thread, which draws the frames, times its steps (wall time only).
+    if options.execution_role.is_client()
+        && horizon_telemetry::Consent::load(&horizon_client::logging::game_home())
+            .allows(horizon_telemetry::Kind::Perf)
+    {
+        horizon_client::spans::record_here(true);
+    }
     let vanilla_root = options.resources.clone();
     if let Some(error) = missing_resources(&vanilla_root) {
         // The game build started by hand (the release's zip), not by the
