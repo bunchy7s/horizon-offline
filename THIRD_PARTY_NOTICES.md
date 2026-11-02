@@ -43,6 +43,10 @@ the same grid.
 the MIT license (`crates/horizon-theme/icons/glass/LICENSE-hugeicons.txt`), exported with a 1.6
 stroke in `currentColor`.
 
+`crates/horizon-theme/icons/glass/discord.svg` is Discord's logo as drawn by
+[Simple Icons](https://github.com/simple-icons/simple-icons) 13.21.0 (CC0 1.0). The logo is Discord's
+trademark, used only on the button that opens Horizon's Discord server.
+
 ## AMD FidelityFX SDK (FSR 3.1 frame generation)
 
 `crates/horizon-client-render/src/gfx/frame_gen/optical_flow.wgsl` and `interpolation.wgsl` are

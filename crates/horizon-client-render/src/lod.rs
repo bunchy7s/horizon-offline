@@ -278,10 +278,18 @@ impl Column {
     /// The water is one span again.
     fn light_open_water(&mut self, kinds: &[u8]) {
         // Water; lava glows.
-        let water = |span: &Span| {
-            let kind = kinds.get(span.state.0 as usize).copied().unwrap_or(0);
+        self.light_open_water_where(|state| {
+            let kind = kinds.get(state.0 as usize).copied().unwrap_or(0);
             kind & FLUID != 0 && kind >> 4 == 0
-        };
+        });
+    }
+    /// [`Column::light_open_water`] for a caller that knows which states are
+    /// water without `BlockFacts`: the save decoder, whose palette already
+    /// names water apart from lava. Saved columns skipping this lit their
+    /// water a level darker per block, which drew a band through the sea
+    /// where they met the generator's columns.
+    pub fn light_open_water_where(&mut self, is_water: impl Fn(BlockStateId) -> bool) {
+        let water = |span: &Span| is_water(span.state);
         if !self.spans.last().is_some_and(water) {
             return;
         }
