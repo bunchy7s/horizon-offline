@@ -929,6 +929,11 @@ API @API:physical_window_size@ adds `native_physical_window_size()`, the window'
 
 ## What the launcher does
 
+**Developing a mod?** Run `horizon-launcher settings native-profile dev` once, or pick "Dev build" in the Mods page's
+"Native build" row. `dev` builds the game crate unoptimized: a mod edit rebuilds about 6× faster than with
+`performance`, while game logic runs up to about twice as slow. Use it while developing, not for playing;
+`performance` stays the default for players and releases (step 5 below).
+
 In the window: install a native mod from the Mods page, into the instance picked on the left ("Installs into
 {instance}", shown even with one instance). The first one shows a trust notice once (native mods aren't sandboxed; the
 first build downloads Rust and can take 20 to 30 minutes; later builds are faster); `mods install` prints it too. Each
@@ -977,15 +982,31 @@ trusting native code is the player's decision, never an agent's.
    folder meanwhile. `horizon-mixins apply` stages the modded source; the launcher copies only the files that
    changed into `native/stage/`, so Cargo, which goes by file times, recompiles only the crates the mods touch.
    With mods' crates, their dependencies are checked against Horizon's `Cargo.lock` ("The mod's crate").
-5. **Compile**: `cargo build --locked --profile fast [--features horizon-client/mods] -p horizon-client`, into
-   `native/target/`. `fast` is the workspace's own profile: the release's optimizations without its link-time
-   ones (`lto = false`, `codegen-units = 16`, incremental), so a rebuild recompiles and links only what changed.
-   A revision whose `Cargo.toml` has no `fast` builds with `release`, the release's own command (game-build.yml);
-   `native-mods.json` says which (`profile`). The Mods page's "Native build" row → "Release build: slower to build,
-   slightly faster game", `horizon-launcher settings native-profile release` or `native-build --profile release`
-   compile the release's own profile instead (thin LTO). The profile is in the build's key and each has its own
-   folder (`native/target/fast/`, `native/target/release/`), so the two never mix and may both stay. The mods feature
-   is passed while the revision still has it. Cargo downloads the locked crates from crates.io (Horizon has no git
+5. **Compile**: `cargo build --locked --profile <fast|release> [--config ...] [--features horizon-client/mods] -p
+   horizon-client`, into `native/target/`, with one of three build profiles:
+
+   | Profile | Cargo profile | Use |
+   |---|---|---|
+   | `performance` (the default) | `fast`, the workspace's own: `codegen-units = 16`, incremental, and `lto = false`, Cargo's default, which is thin-local LTO across one crate's codegen units, none across crates | The everyday build for playing with mods: a rebuild recompiles and links only what changed |
+   | `dev` | `fast` with `horizon-client` at opt-level 0 (`--config profile.fast.package.horizon-client.opt-level=0`) | Developing a mod: the quickest rebuild after an edit, but the game runs about twice as slow, so iterate with it rather than play |
+   | `release` | `release`, the release's own (game-build.yml: thin LTO, one codegen unit) | Slowest to build, slightly faster game |
+
+   With `dev`, an edit to a function the machine sample's mixin injects into `game/native_hooks.rs` compiled
+   about 6× faster than with `performance`, and a tick took up to about twice as long. `dev` lowers only `horizon-client`, so an edit in another workspace
+   crate (`horizon-client-lib`, `-render`, `-world`) still compiles at opt-level 3, as with `performance`. The
+   launcher sets it with `--config` (`native_mods::Profile`), so the workspace's own `[profile.fast]` builds stay
+   as they are. The Mods page's "Native build" row, `horizon-launcher settings native-profile performance|dev|release`
+   or `native-build --profile ...` pick one (the setting's older value `fast` still means `performance`, and an older
+   settings file's "Release build" switch still picks `release`).
+
+   A revision whose `Cargo.toml` has no `fast` builds with `release`; `native-mods.json` says which (`profile`).
+   Each profile is in the build's key, so their builds never mix and may all stay. `performance` and `dev` share
+   `native/target/fast/`: every crate but `horizon-client` is built with the same settings, so switching between
+   them recompiles only `horizon-client`, and Cargo keeps both builds of it, so switching back finds the other
+   still there. `release` has its own folder (`native/target/release/`). The first build in a folder builds every
+   crate once (1½ to 3½ minutes measured through the launcher, depending on the machine); later builds reuse them.
+   Post-build steps build with the same
+   profile, reusing its crates. The mods feature is passed while the revision still has it. Cargo downloads the locked crates from crates.io (Horizon has no git
    dependencies). The compiler and the horizon-mixins build run at the lowest priority (`rust_toolchain::low_priority`:
    nice 19 and the idle I/O class on Linux, nice 19 on macOS, below-normal priority on Windows), so the desktop and a
    game in play stay smooth; on an otherwise idle computer they still use every core. The log is `native/build.log`;
@@ -1066,7 +1087,7 @@ The key hashes the commit, the horizon-mixins commit, Rust's version, the profil
 every bundle. The same set on the same commit is never built twice. A change gives a new build, and
 `native/target/` stays, so a rebuild compiles only `horizon-client` and what the mods touched.
 
-**Incremental rebuilds.** With `fast`, Cargo recompiles only the changed parts of `horizon-client`, not the whole
+**Incremental rebuilds.** With `performance` and `dev`, Cargo recompiles only the changed parts of `horizon-client`, not the whole
 crate with LTO. Patched source is cached separately by its mixin inputs and pins (the three most
 recent snapshots are kept), so editing only a trait crate skips the mixins pass. This holds because
 the stage (`native/stage/`) is one folder for every build and the launcher writes
@@ -1075,9 +1096,9 @@ only the files whose content changed (Cargo goes by file times), switching mods 
 environment. `release` has no incremental compilation (the release profile's own).
 
 **Build status.** Before it starts, the build says which case it is, with the profile: "Up to date (no build needed)",
-"Incremental rebuild: mods X, Y" (or "Horizon commit a to b", "horizon-mixins"; compared with the last build of that
-profile, kept in `native/built.json`) or "First build: the whole game (several minutes)". While compiling it shows the
-crate, crates done of the total (Cargo's own progress), and the time taken; afterwards "Built in 42 s (fast,
+"Incremental rebuild: mods X, Y" (or "Horizon commit a to b", "horizon-mixins"; compared with the last build in that
+profile's folder, kept in `native/built.json`) or "First build: the whole game (several minutes)". While compiling it shows the
+crate, crates done of the total (Cargo's own progress), and the time taken; afterwards "Built in 42 s (performance,
 incremental)". The window shows it in the Native mods row, `native-build` prints each step with its time on standard
 error; `native/build.log` keeps Cargo's output as before (without the progress bar).
 
@@ -1170,7 +1191,7 @@ each was built or last used): switching a mod off and on again plays the kept bu
 
 ### Standalone server export
 
-`horizon-launcher native-build FOLDER --server-output DIR --version TAG --trust-native-code [--profile fast|release] [--allow-version-mismatch]`
+`horizon-launcher native-build FOLDER --server-output DIR --version TAG --trust-native-code [--profile PROFILE] [--allow-version-mismatch]`
 
 Builds a standalone dedicated-server engine into `DIR`, which must not exist yet. `FOLDER` (a mod folder or a
 folder of them) is required; no instance is read, selected, edited or played, and no launcher config is written.

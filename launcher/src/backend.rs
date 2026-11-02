@@ -3316,8 +3316,11 @@ pub struct Settings {
     /// Native mods are always on: an older file's `native_mods` switch is ignored.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub native_mods_noticed: bool,
-    /// Native builds compile with the release profile (`native_mods::Profile`) instead of `fast`:
-    /// slower to build, slightly faster game.
+    /// The profile native builds compile with (`native_mods::Profile::chosen`); none is the
+    /// default, or the release's own while `native_release` is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_profile: Option<crate::native_mods::Profile>,
+    /// An older file's switch for the release profile, read when `native_profile` is unset.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub native_release: bool,
     /// Developer options (hidden: seven clicks on the sidebar's launcher version reveal them):
