@@ -2061,7 +2061,7 @@ another mod's hook object is not exposed.
 
 Trait dispatch follows dependency order, with ties kept in bundle order. Mixin injection order remains
 horizon-mixins' priority, mod ID, then injection ID; dependency order does not change injection order.
-A bundle with an `[api]` package may declare its own HEAD injection in the trait:
+A bundle with an `[api]` package may declare its own injection in the trait:
 
 ```toml
 [[injection]]
@@ -2076,10 +2076,36 @@ The generated trait method is `inject_<mod_id>_<trait_method>` (hyphens in the m
 underscores). Its event, as a catalog hook's, is that name in CamelCase plus `Event`
 (`InjectExampleBeforeTickEvent`), with the bindings as fields under the same rules. Implement it on the object
 returned by that bundle's `hooks()`; it is called only for that bundle's object. Types must be
-public and available from both the target and `horizon_client::mod_api`. Only HEAD listen is
-supported, or HEAD with `cancellable = true` for a unit-returning target: that method returns
-`Flow`, and `Flow::Cancel` returns early from the target. Do not specify `helper` on these entries.
-Other injection kinds are rejected. Trait injections can target only functions in `horizon-client`;
+public and available from both the target and `horizon_client::mod_api`. The kinds are HEAD listen,
+or HEAD with `cancellable = true` for a unit-returning target (that method returns `Flow`, and
+`Flow::Cancel` returns early from the target), and RETURN, MODIFY_ARG and MODIFY_EXPRESSION_VALUE.
+For those three, the binding whose `value` is `$value` (its type is the returned, argument or
+expression type, as horizon-mixins requires) becomes a plain event field. The method changes it in
+place and returns nothing; the changed value is what the target returns, passes or uses. The selector,
+`require`, `ordinal` and `argument` are horizon-mixins' own fields. Before the mods are installed, the
+value passes through unchanged. A borrowed `$value` works only where Rust's elision ties the result to
+one input. `cancellable` is HEAD-only. Other kinds are rejected. Do not specify `helper` on these entries.
+
+```toml
+[[injection]]
+id = "points"
+target = "horizon_client::game::example"
+kind = "MODIFY_ARG"
+selector = "self.give_points"
+require = 1
+ordinal = 0
+argument = 0
+trait_method = "points"
+bindings = [{ name = "points", ty = "i32", value = "$value" }]
+```
+
+```rust
+fn inject_example_points(&self, event: &mut InjectExamplePointsEvent) {
+    event.points *= 2;
+}
+```
+
+Trait injections can target only functions in `horizon-client`;
 ordinary mixin helpers in other crates continue to work as before. The generated helper has the same priority and ordering as an
 ordinary helper of that mod: priority descending, mod id then injection id. It is not automatically
 ordered after other mixins. Catalog hooks retain the mixin-before-trait order below.
