@@ -143,6 +143,12 @@ impl ServerAdvancements {
         }
     }
 
+    /// `RecipeManager.getRecipeFromDisplay`: the recipe a display id names,
+    /// for `ServerRecipeBook.removeHighlight`.
+    pub fn recipe_of_display(&self, display: i32) -> Option<&str> {
+        self.displays.recipe_of_display(display)
+    }
+
     /// `PlayerAdvancements.reload` (`PlayerList.reloadResources`): the
     /// progress is read again against the new tree (`applyFrom` ignores an
     /// advancement that no longer exists and `AdvancementProgress.update`
