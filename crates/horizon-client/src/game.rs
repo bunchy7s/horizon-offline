@@ -5669,12 +5669,9 @@ impl Game<'_> {
         // Entity.spawnAtLocation: an item entity where the block was.
         let item = self.res.facts().get(state).item.clone();
         if &*item != "minecraft:air" {
-            let r = &mut self.world.random;
-            let v = [
-                r.next_double() * 0.2 - 0.1,
-                0.2,
-                r.next_double() * 0.2 - 0.1,
-            ];
+            // new ItemEntity(level, x, y, z, stack): the motion is from the
+            // item's own random, not the level's.
+            let v = dispenser::new_item_motion();
             let stack = ItemStack {
                 item,
                 count: 1,
