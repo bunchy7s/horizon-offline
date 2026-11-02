@@ -2054,4 +2054,85 @@ mod tests {
         let straddling = landing_dust_at(Vec3::new(5.1, 65.0, 7.5), [4, 64, 7]);
         assert_eq!(straddling, Vec3::new(5.0, 65.0, 7.5));
     }
+    /// `LivingEntity.getDimensions` is `getDefaultDimensions(pose).scale(
+    /// getScale())` on every living entity, not only on a player or mannequin
+    /// whose pose sets the box (`Avatar.POSES`): a cow's `EntityType.COW` box
+    /// (0.9 x 1.4, its eyes at 1.3) at `minecraft:scale` 2 is 1.8 x 2.8 with
+    /// the eyes at 2.6, and the box `Mob.bounds` hands the hitbox raycast, the
+    /// attack range and the leash pins grows with it.
+    #[test]
+    fn a_scale_attribute_grows_every_living_entitys_box() {
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        let mut cow = Mob::new(1, crate::mobs::sensor_scan_tests::kind(), Vec3::ZERO, 0.0);
+        let (w, h, e) = cow.dims();
+        assert!(
+            close(w, 0.9) && close(h, 1.4) && close(e, 1.3),
+            "no scale: {w}x{h}x{e}"
+        );
+        cow.extra.model_scale = 2.0;
+        let (w, h, e) = cow.dims();
+        assert!(
+            close(w, 1.8) && close(h, 2.8) && close(e, 2.6),
+            "scale 2: {w}x{h}x{e}"
+        );
+        let b = cow.bounds();
+        assert!(
+            close(b.min_position().x, -0.9)
+                && close(b.max_position().x, 0.9)
+                && close(b.max_position().y, 2.8),
+            "scale 2 box: {b:?}"
+        );
+        // `RangedAttribute("attribute.name.scale", 1.0, 0.0625, 16.0)`: its
+        // floor shrinks the cow to 0.05625 x 0.0875, eyes at 0.08125.
+        cow.extra.model_scale = 0.0625;
+        let (w, h, e) = cow.dims();
+        assert!(
+            close(w, 0.05625) && close(h, 0.0875) && close(e, 0.08125),
+            "scale 0.0625: {w}x{h}x{e}"
+        );
+    }
+    /// `LivingEntity.getDimensions` answers a sleeping entity with
+    /// `SLEEPING_DIMENSIONS` before it ever reaches `getScale`: a sleeper's
+    /// 0.2 box and eye height stay 0.2 whatever its `minecraft:scale`.
+    #[test]
+    fn a_sleeping_mob_keeps_its_bed_box_unscaled() {
+        use crate::mobs::Species;
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.id = "minecraft:villager".into();
+        kind.species = Species::Villager;
+        let mut villager = Mob::new(1, std::sync::Arc::new(kind), Vec3::ZERO, 0.0);
+        // Villager.sleeping: the bed's facing code, not 0.
+        villager.extra.ints[1] = 1;
+        villager.extra.model_scale = 4.0;
+        let (w, h, e) = villager.dims();
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        assert!(close(w, 0.2) && close(h, 0.2) && close(e, 0.2), "asleep: {w}x{h}x{e}");
+    }
+    /// `LivingEntity.sanitizeScale`: a shulker takes at most 3 and a happy
+    /// ghast at most 1, and the box takes the capped value (`EntityType.SHULKER`
+    /// is 1 x 1 with its eyes at 0.5).
+    #[test]
+    fn a_species_caps_the_scale_it_takes() {
+        use crate::mobs::Species;
+        let mob = |id: &str, species: Species| {
+            let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+            kind.id = id.into();
+            kind.species = species;
+            (kind.width, kind.height, kind.eye_height) = (1.0, 1.0, 0.5);
+            Mob::new(1, std::sync::Arc::new(kind), Vec3::ZERO, 0.0)
+        };
+        let mut shulker = mob("minecraft:shulker", Species::Shulker);
+        shulker.extra.model_scale = 4.0;
+        assert_eq!(shulker.model_scale(), 3.0);
+        let (w, h, e) = shulker.dims();
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        assert!(close(w, 3.0) && close(h, 3.0) && close(e, 1.5), "shulker: {w}x{h}x{e}");
+        let mut ghast = mob("minecraft:happy_ghast", Species::HappyGhast);
+        ghast.extra.model_scale = 2.0;
+        assert_eq!(ghast.model_scale(), 1.0);
+        // Every other species takes the attribute as it came.
+        let mut cow = mob("minecraft:cow", Species::Cow);
+        cow.extra.model_scale = 4.0;
+        assert_eq!(cow.model_scale(), 4.0);
+    }
 }
