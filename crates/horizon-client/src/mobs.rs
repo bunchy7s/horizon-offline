@@ -117,6 +117,8 @@ use std::{collections::HashMap, fs, path::Path, sync::Arc};
 pub struct Polygon {
     pub normal: [f32; 3],
     pub vertices: [[f32; 5]; 4],
+    /// The model's render type culls back faces (`entityCutoutCull`: the bat).
+    pub cull_back: bool,
 }
 impl Polygon {
     fn vertex_normal(&self, pose: ModelNormals) -> [i8; 4] {
@@ -127,7 +129,12 @@ impl Polygon {
             n.normalize_or_zero()
         };
         let packed = n.to_array().map(|v| (v.clamp(-1.0, 1.0) * 127.0) as i8);
-        [packed[0], packed[1], packed[2], -127]
+        let w = if self.cull_back {
+            crate::mesher::SHADED_CULL_W
+        } else {
+            -127
+        };
+        [packed[0], packed[1], packed[2], w]
     }
 }
 
@@ -225,6 +232,15 @@ pub struct Part {
     pub children: Vec<Part>,
 }
 impl Part {
+    /// Marks every polygon as drawn by a back-face-culling render type.
+    fn set_cull_back(&mut self) {
+        for poly in &mut self.polygons {
+            poly.cull_back = true;
+        }
+        for child in &mut self.children {
+            child.set_cull_back();
+        }
+    }
     fn parse(name: &str, v: &Value) -> Self {
         let pose: Vec<f32> = v["pose"]
             .as_array()
@@ -271,6 +287,7 @@ impl Part {
                         |n| std::array::from_fn(|i| n[i].as_f64().unwrap_or(0.0) as f32),
                     ),
                     vertices: [verts[0], verts[1], verts[2], verts[3]],
+                    cull_back: false,
                 })
             })
             .collect();
@@ -494,7 +511,14 @@ impl MobTypes {
                     max_head_y_rot: def.max_head_y_rot(),
                     ambient_interval: def.ambient_interval(),
                     flags,
-                    model: Arc::new(Part::parse("root", model)),
+                    model: Arc::new({
+                        let mut part = Part::parse("root", model);
+                        // BatModel: `RenderTypes::entityCutoutCull`.
+                        if def.name == "bat" {
+                            part.set_cull_back();
+                        }
+                        part
+                    }),
                     layers,
                     texture: def.texture.to_owned(),
                     brain: def.brain(),
@@ -1606,6 +1630,7 @@ pub enum MobEvent {
         params: conversion::Params,
     },
     DropItem {
+        mob: u32,
         item: Arc<str>,
         count: u32,
         at: [f64; 3],

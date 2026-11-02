@@ -180,6 +180,16 @@ pub fn list_textures(root: &Path) -> Vec<String> {
     for ns in namespaces.flatten() {
         let namespace = ns.file_name().to_string_lossy().into_owned();
         let base = ns.path().join("textures");
+        // A prepared root's: from its data file, without listing the disk.
+        if let Some(files) = horizon_core::prepared_files::files_under(&base) {
+            out.extend(
+                files
+                    .iter()
+                    .filter_map(|file| file.strip_suffix(".png"))
+                    .map(|rel| format!("{namespace}:{rel}")),
+            );
+            continue;
+        }
         let mut stack = vec![base.clone()];
         while let Some(dir) = stack.pop() {
             let Ok(entries) = fs::read_dir(&dir) else {

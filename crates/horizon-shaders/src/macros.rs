@@ -3,11 +3,15 @@
 
 use std::collections::BTreeMap;
 
-/// The Iris feature flags (`iris.features.*`) Horizon has.
-const FEATURES: [&str; 4] = [
+/// The Iris feature flags (`iris.features.*`) Horizon has. `SEPARATE_HARDWARE_SAMPLERS`
+/// (ShaderDoc, "Separate Hardware Shadow Samplers"): `shadowtex0`/`shadowtex1` stay plain depth
+/// samplers when hardware filtering is on, `shadowtex0HW`/`shadowtex1HW` compare; Horizon picks
+/// a comparison sampler by the declared type (`sampler2DShadow`), so they always are.
+const FEATURES: [&str; 5] = [
     "COMPUTE_SHADERS",
     "CUSTOM_IMAGES",
     "ENTITY_TRANSLUCENT",
+    "SEPARATE_HARDWARE_SAMPLERS",
     "SSBO",
 ];
 
@@ -413,13 +417,14 @@ mod tests {
     #[test]
     fn iris_features_are_defined_or_noted() {
         let properties = crate::Properties::parse(
-            "iris.features.optional = COMPUTE_SHADERS NOT_A_FEATURE\n\
-             iris.features.required = ENTITY_TRANSLUCENT NOT_A_FEATURE\n",
+            "iris.features.optional = COMPUTE_SHADERS SEPARATE_HARDWARE_SAMPLERS NOT_A_FEATURE\n\
+             iris.features.required = ENTITY_TRANSLUCENT SEPARATE_HARDWARE_SAMPLERS NOT_A_FEATURE\n",
             &Macros::standard(),
         );
         let mut m = Macros::standard();
         let notes = m.define_features(&properties);
         assert!(m.is_defined("IRIS_FEATURE_COMPUTE_SHADERS"));
+        assert!(m.is_defined("IRIS_FEATURE_SEPARATE_HARDWARE_SAMPLERS"));
         assert!(!m.is_defined("IRIS_FEATURE_NOT_A_FEATURE"));
         assert_eq!(
             notes,

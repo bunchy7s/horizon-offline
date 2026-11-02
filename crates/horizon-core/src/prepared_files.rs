@@ -32,10 +32,12 @@ use std::{
 pub const FILE_NAME: &str = "horizon-data.bin";
 /// The file it checks its preparation against.
 const SOURCE: &str = "horizon-resources.json";
-/// The folders it holds, with their subfolders.
-const FOLDERS: [&str; 2] = ["data", "assets"];
+/// The folders it holds, with their subfolders: the resources, and the
+/// structure templates world generation loads one by one.
+const FOLDERS: [&str; 3] = ["data", "assets", "worldgen/structure"];
 const MAGIC: [u8; 8] = *b"HZDATA\0\0";
-const VERSION: u32 = 1;
+/// 2: `worldgen/structure` joined the folders (a version 1 file lacks it).
+const VERSION: u32 = 2;
 const HEADER: usize = 40;
 const ENTRY: usize = 24;
 
@@ -224,6 +226,21 @@ pub fn read(path: &Path) -> io::Result<Vec<u8>> {
     }
 }
 
+/// The files under `dir` (a folder of a prepared root) and its subfolders, as
+/// `/`-separated paths from `dir` in name order, from the root's data file
+/// without listing the disk: empty when it holds none there. `None` when no
+/// data file holds `dir` (walk the folder).
+pub fn files_under(dir: &Path) -> Option<Vec<String>> {
+    let (files, rel) = find(dir)?;
+    let names = files.list(&rel).unwrap_or_default();
+    Some(
+        names
+            .into_iter()
+            .map(|name| name[rel.len() + 1..].to_owned())
+            .collect(),
+    )
+}
+
 /// At most the first `max` bytes of `path`, from where [`read`] takes them:
 /// a header, without reading the whole file.
 pub fn read_head(path: &Path, max: u64) -> io::Result<Vec<u8>> {
@@ -392,6 +409,11 @@ mod tests {
             ("data/minecraft/tags/item/logs.json", b"[1,2,3]"),
             ("assets/minecraft/textures/block/stone.png", b"\x89PNG..."),
             ("assets/minecraft/sounds/ambient/cave1.ogg", b"OggS"),
+            (
+                "worldgen/structure/minecraft/fossil/spine_1.nbt",
+                b"\x1f\x8b",
+            ),
+            ("worldgen/biomes.json", b"{}"),
             ("facts.json", b"{}"),
         ] {
             let path = root.join(name);
@@ -425,6 +447,14 @@ mod tests {
                 .is_none()
         );
         assert!(files.read("facts.json").is_none());
+        assert!(files.read("worldgen/biomes.json").is_none());
+        assert_eq!(
+            files
+                .read("worldgen/structure/minecraft/fossil/spine_1.nbt")
+                .unwrap()
+                .unwrap(),
+            b"\x1f\x8b"
+        );
         assert!(files.read("data/minecraft/recipe/missing.json").is_none());
         assert_eq!(
             files.list("data/minecraft/recipe").unwrap(),
@@ -483,6 +513,31 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// A folder's files come from the file, without the disk: one added since
+    /// isn't listed (as `read` doesn't find it), and a folder it holds nothing
+    /// in is empty. Outside its folders, the disk is walked.
+    #[test]
+    fn files_under_lists_a_folder_from_the_file() {
+        let root = root("under");
+        write(&root).unwrap();
+        fs::write(root.join("assets/minecraft/textures/block/added.png"), b"x").unwrap();
+        assert_eq!(
+            files_under(&root.join("assets/minecraft/textures")).unwrap(),
+            ["block/stone.png"]
+        );
+        assert_eq!(
+            files_under(&root.join("worldgen/structure")).unwrap(),
+            ["minecraft/fossil/spine_1.nbt"]
+        );
+        assert!(
+            files_under(&root.join("assets/minecraft/textures/entity"))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(files_under(&root.join("worldgen")), None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
     /// `find` gives the file and the path from its root for a folder under a
     /// root that has one, and nothing elsewhere.
     #[test]
@@ -491,7 +546,11 @@ mod tests {
         write(&root).unwrap();
         let (_, rel) = find(&root.join("data/minecraft/recipe")).unwrap();
         assert_eq!(rel, "data/minecraft/recipe");
-        assert!(find(&root.join("worldgen/structure")).is_none());
+        let (_, rel) = find(&root.join("worldgen/structure/minecraft")).unwrap();
+        assert_eq!(rel, "worldgen/structure/minecraft");
+        // The top-level tables beside the structures stay on the disk.
+        assert!(find(&root.join("worldgen")).is_none());
+        assert!(find(&root.join("worldgen/biomes.json")).is_none());
         let _ = fs::remove_dir_all(&root);
     }
 

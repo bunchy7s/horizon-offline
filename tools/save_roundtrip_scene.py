@@ -130,4 +130,10 @@ ENTITIES = [
     ('ghast', ''), ('piglin', ''), ('hoglin', ''), ('strider', 'Saddle:1b'), ('warden', ''),
     ('trader_llama', ''), ('mooshroom', 'Type:"brown"'), ('panda', 'MainGene:"lazy"'),
     ('copper_golem', ''), ('creaking', ''),
+    # Riders (an entity saves inside its vehicle). The riders
+    # have their own UUIDs, so a dropped or reordered one shows in the vehicle's Passengers diff.
+    ('pig', 'Passengers:[{id:"minecraft:zombie",UUID:[I;28673,0,0,1],NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b}]'),
+    ('oak_boat', 'Passengers:[{id:"minecraft:pig",UUID:[I;28673,0,0,2],NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b},{id:"minecraft:chicken",UUID:[I;28673,0,0,3],NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b}]'),
+    ('minecart', 'Passengers:[{id:"minecraft:cow",UUID:[I;28673,0,0,4],NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b}]'),
+    ('horse', 'Tame:1b,Passengers:[{id:"minecraft:skeleton",UUID:[I;28673,0,0,5],NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b,Passengers:[{id:"minecraft:bat",UUID:[I;28673,0,0,6],NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b}]}]'),
 ]
