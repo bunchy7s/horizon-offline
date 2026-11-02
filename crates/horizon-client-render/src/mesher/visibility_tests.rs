@@ -190,18 +190,72 @@ fn visibility_matches_reference() {
 }
 
 #[test]
-fn visibility_scratch_reuse_keeps_shortcuts_and_subsequent_fills_exact() {
-    let info = [info(false), info(true), info(false), info(true)];
-    let mut stack = vec![usize::MAX];
-    for _ in 0..3 {
-        for (name, pad) in cases() {
-            assert_eq!(
-                visibility_reusing(&pad, &info, &mut stack),
-                reference(&pad, &info),
-                "{name}"
-            );
+fn row_fill_matches_a_cell_by_cell_fill() {
+    let naive = |seeds: u16, open: u16| {
+        let mut fill = seeds;
+        loop {
+            let next = (fill | fill << 1 | fill >> 1) & open;
+            if next == fill {
+                return fill;
+            }
+            fill = next;
+        }
+    };
+    let mut state = 0x9E37_79B9u32;
+    for _ in 0..200_000 {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        let open = state as u16;
+        let seeds = (state >> 16) as u16 & open;
+        assert_eq!(
+            fill_row(seeds, open),
+            naive(seeds, open),
+            "{open:016b} {seeds:016b}"
+        );
+    }
+    // Several seeds in one run, the case a carry-based fill gets wrong.
+    assert_eq!(fill_row(0b0110, 0b1111), 0b1111);
+    assert_eq!(fill_row(0xC000, 0xF000), 0xF000);
+}
+
+#[test]
+fn row_fill_follows_open_runs() {
+    for open in [0u16, 0xFFFF, 0b0111_0110, 0x8001, 0xF0F0, 0x5555] {
+        for bit in 0..16 {
+            let seed = 1u16 << bit;
+            if open & seed == 0 {
+                continue;
+            }
+            let mut expected = seed;
+            for x in (0..bit).rev().take_while(|&x| open & 1 << x != 0) {
+                expected |= 1 << x;
+            }
+            for x in (bit + 1..16).take_while(|&x| open & 1 << x != 0) {
+                expected |= 1 << x;
+            }
+            assert_eq!(fill_row(seed, open), expected, "{open:016b} from {bit}");
         }
     }
+}
+
+/// Mazes: one long winding cavity, and many small ones, where the row
+/// sweeps are slowest.
+#[test]
+fn winding_and_scattered_cavities_match_reference() {
+    let info = [info(false), info(true), info(false), info(true)];
+    let serpentine = fixture(|x, y, z| {
+        let lane = z % 4 == 0 && y % 4 == 0;
+        let turn = (x == 0 && z % 8 == 4) || (x == 15 && z % 8 == 0);
+        let climb = x == 0 && z == 0 && y % 4 != 0;
+        !(lane || (turn && y % 4 == 0) || climb)
+    });
+    assert_eq!(
+        visibility(&serpentine, &info),
+        reference(&serpentine, &info)
+    );
+    let pockets = fixture(|x, y, z| !(x % 3 == 1 && y % 3 == 1 && z % 3 == 1));
+    assert_eq!(visibility(&pockets, &info), reference(&pockets, &info));
 }
 
 #[test]
