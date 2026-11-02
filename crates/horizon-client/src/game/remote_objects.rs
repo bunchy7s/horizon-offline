@@ -20,9 +20,10 @@ impl Game<'_> {
         id: i32,
         kind: &str,
         position: [f64; 3],
-        yaw: f32,
+        rotation: (f32, f32),
         data: i32,
     ) -> bool {
+        let (yaw, pitch) = rotation;
         let id = id as u32;
         let at = Vec3::new(position[0], position[1], position[2]);
         let block = position.map(|v| v.floor() as i32);
@@ -64,6 +65,8 @@ impl Game<'_> {
             let mut c = super::minecarts::Minecart::new(id, cart, at);
             c.yaw = yaw;
             c.previous_yaw = yaw;
+            c.pitch = pitch;
+            c.previous_pitch = pitch;
             self.carts.push(c);
         } else if let Some((wood, chest)) = super::boats::any_boat_wood(kind)
             && self.boat_models.has(wood, chest)
@@ -322,9 +325,11 @@ impl Game<'_> {
         for c in &mut self.carts {
             c.previous = c.position;
             c.previous_yaw = c.yaw;
+            c.previous_pitch = c.pitch;
             if !lerp_cart(c) {
                 c.position = step(c.id, c.position);
             }
+            c.accumulate_rotation();
             if c.kind == super::minecarts::CartKind::Furnace
                 && c.fuel > 0
                 && self.world.random.next_int_bound(4).unwrap_or(1) == 0

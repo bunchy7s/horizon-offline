@@ -81,6 +81,7 @@ pub(super) fn reload_sync_data(
     let packs = !overlay.files.is_empty() || kept.has_pack_entries();
     let sync = SyncData::load(root, overlay).map(|mut sync| {
         sync.keep_registries(root, kept);
+        sync.features.clone_from(&kept.features);
         Arc::new(sync)
     });
     *SYNC.lock().unwrap_or_else(|e| e.into_inner()) = Some((packs, sync.clone()));
@@ -1286,7 +1287,21 @@ impl Game<'_> {
         config: HubConfig,
         host: Option<u128>,
     ) -> Result<()> {
-        let sync = sync_data(&self.options.resources, &self.pack_files())?;
+        let mut sync = sync_data(&self.options.resources, &self.pack_files())?;
+        let features = if self.level.enabled_features.is_empty() {
+            vec!["minecraft:vanilla".to_owned()]
+        } else {
+            self.level.enabled_features.clone()
+        };
+        if sync.features.iter().any(|f| !features.contains(f))
+            || features.iter().any(|f| !sync.features.contains(f))
+        {
+            // The shared resource preload has vanilla flags. Feature flags belong
+            // to this world, not to the cached resources or the next world opened.
+            let mut world_sync = SyncData::load(&self.options.resources, &self.pack_files())?;
+            world_sync.features = features;
+            sync = Arc::new(world_sync);
+        }
         self.sync_dialog_ids(&sync);
         // The table the world plays with (`world_biomes!`): a world with
         // biome data packs sends their ids past the built-in list, as the
@@ -1773,11 +1788,12 @@ impl Game<'_> {
     /// The entities guests track: mobs, items and the rest (game/lan_entities.rs).
     /// `mob_players` is the guest each mob sees as its player (game/lan_mobs.rs).
     fn lan_entities(
-        &self,
+        &mut self,
         host_entity: Option<i32>,
         mob_players: &horizon_client::fast_hash::FxHashMap<u32, u32>,
         hub: &mut Hub,
         out: &mut States,
+        drain_minecart_steps: bool,
     ) {
         out.clear();
         for m in self.mobs.iter().filter(|m| !m.removed) {
@@ -1843,7 +1859,7 @@ impl Game<'_> {
             e.meta
                 .push((8, serializer::INT, Value::Int(o.value as i32)));
         }
-        self.lan_object_states(host_entity, hub, out);
+        self.lan_object_states(host_entity, hub, out, drain_minecart_steps);
     }
 
     /// Apply gameplay events produced while the hub handles guest packets.
@@ -2191,11 +2207,22 @@ impl Game<'_> {
                     .filter_map(|g| Some((g.vehicle?, g.entity_id)))
                     .collect();
                 self.lan_riding(host_entity, &guests, &mut host.hub.riding);
-                self.lan_entities(host_entity, &host.mob_players, &mut host.hub, &mut states);
+                self.lan_entities(
+                    host_entity,
+                    &host.mob_players,
+                    &mut host.hub,
+                    &mut states,
+                    true,
+                );
                 self.lan_hook_states(host_entity, &host.play, &host.hub, &mut states);
                 self.lan_entity_uuids(&mut states);
             } else {
                 states.clear();
+                // Nobody can receive past movement. A returning viewer pairs
+                // from the cart's current position/rotation, as AddEntity does.
+                for cart in &mut self.carts {
+                    cart.lerp_steps.clear();
+                }
             }
             // ServerEntity.sendChanges clears needsSync once it has looked.
             for m in &mut self.mobs {
@@ -2430,7 +2457,7 @@ impl Game<'_> {
                 return;
             }
             // A dedicated server has no host player.
-            self.lan_entities(None, &host.mob_players, &mut host.hub, &mut theirs);
+            self.lan_entities(None, &host.mob_players, &mut host.hub, &mut theirs, false);
             self.lan_hook_states(None, &host.play, &host.hub, &mut theirs);
             self.lan_entity_uuids(&mut theirs);
             theirs.as_slice()
