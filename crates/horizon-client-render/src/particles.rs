@@ -200,6 +200,10 @@ enum Light {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Behaviour {
     Base,
+    Mod {
+        size: [f32; 2],
+        alpha: [f32; 2],
+    },
     /// BaseAshSmokeParticle / Explode / Dust / Snowflake / EmissiveRising: base tick, sprite from age.
     Animated,
     Lava,
@@ -337,6 +341,71 @@ enum DripStage {
     Fall,
     FallAndLand,
     Land,
+}
+
+#[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ModBehaviour {
+    velocity: Option<[f64; 3]>,
+    gravity: Option<f32>,
+    friction: Option<f32>,
+    lifetime: Option<i32>,
+    size: Option<[f32; 2]>,
+    alpha: Option<[f32; 2]>,
+}
+impl ModBehaviour {
+    fn parse(json: &serde_json::Value) -> Option<Self> {
+        let behaviour: Self = serde_json::from_value(json.clone()).ok()?;
+        if behaviour
+            .velocity
+            .is_some_and(|v| v.iter().any(|c| !c.is_finite() || c.abs() > 16.0))
+            || behaviour
+                .gravity
+                .is_some_and(|v| !v.is_finite() || v.abs() > 100.0)
+            || behaviour
+                .friction
+                .is_some_and(|v| !(0.0..=1.0).contains(&v))
+            || behaviour
+                .lifetime
+                .is_some_and(|v| !(1..=12000).contains(&v))
+            || behaviour
+                .size
+                .is_some_and(|v| v.iter().any(|c| !(0.0..=16.0).contains(c)))
+            || behaviour
+                .alpha
+                .is_some_and(|v| v.iter().any(|c| !(0.0..=1.0).contains(c)))
+        {
+            return None;
+        }
+        Some(behaviour)
+    }
+
+    fn apply(self, particle: &mut Particle) {
+        if let Some(velocity) = self.velocity {
+            particle.velocity = velocity;
+        }
+        if let Some(gravity) = self.gravity {
+            particle.gravity = gravity;
+        }
+        if let Some(friction) = self.friction {
+            particle.friction = friction;
+        }
+        if let Some(lifetime) = self.lifetime {
+            particle.lifetime = lifetime;
+        }
+        if self.size.is_some() || self.alpha.is_some() {
+            let size = self.size.unwrap_or([particle.size; 2]);
+            let alpha = self.alpha.unwrap_or([particle.rgba[3]; 2]);
+            particle.size = size[0];
+            particle.rgba[3] = alpha[0];
+            particle.behaviour = Behaviour::Mod { size, alpha };
+        }
+    }
+}
+
+fn mod_curve([start, end]: [f32; 2], age: i32, lifetime: i32) -> f32 {
+    let progress = (age as f32 / lifetime.max(1) as f32).clamp(0.0, 1.0);
+    start + (end - start) * progress
 }
 
 /// One live particle (`Particle` + `SingleQuadParticle` state).
@@ -1075,7 +1144,7 @@ pub struct ParticleEngine {
     atlas: HashMap<String, (Rect, bool)>,
     sets: HashMap<ParticleType, u32>,
     /// A native mod's sprite sets, by namespaced particle name.
-    mod_sets: HashMap<String, u32>,
+    mod_sets: HashMap<String, (u32, Option<ModBehaviour>)>,
     set_sprites: Vec<Vec<u32>>,
     /// `TrackingEmitter`s: particle type, entity feet position, width, height, ticks left.
     emitters: Vec<(ParticleOptions, [f64; 3], f64, f64, u32)>,
@@ -1251,6 +1320,13 @@ impl ParticleEngine {
             let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
                 continue;
             };
+            let behaviour = json.get("horizon:behaviour").and_then(|value| {
+                let behaviour = ModBehaviour::parse(value);
+                if behaviour.is_none() {
+                    log::warn!("Invalid particle behaviour in {}", path.display());
+                }
+                behaviour
+            });
             let sprites: Vec<u32> = json["textures"]
                 .as_array()
                 .map(|a| {
@@ -1272,7 +1348,8 @@ impl ParticleEngine {
                 })
                 .unwrap_or_default();
             if !sprites.is_empty() {
-                self.mod_sets.insert(key, self.set_sprites.len() as u32);
+                self.mod_sets
+                    .insert(key, (self.set_sprites.len() as u32, behaviour));
                 self.set_sprites.push(sprites);
             }
         }
@@ -1752,7 +1829,7 @@ impl ParticleEngine {
         // A native mod's SimpleParticleType: vanilla's TextureSheetParticle with
         // the sprite set its particles/<name>.json names, no tint, 20..40 ticks.
         if let Some(name) = &o.mod_particle {
-            let set = *self.mod_sets.get(name)?;
+            let (set, behaviour) = *self.mod_sets.get(name)?;
             let mut r = LegacyRandom::new(seed);
             let mut q = Particle::moving(&mut r, ParticleType::Smoke, p, v);
             q.ty = ParticleType::Smoke;
@@ -1764,6 +1841,9 @@ impl ParticleEngine {
             q.sprite = Sprite::Index(
                 sprites[r.next_int_bound(sprites.len() as i32).unwrap_or(0) as usize],
             );
+            if let Some(behaviour) = behaviour {
+                behaviour.apply(&mut q);
+            }
             return Some(q);
         }
         let set = self.set_of(ty);
@@ -3392,6 +3472,11 @@ impl ParticleEngine {
     fn tick_particle(&mut self, p: &mut Particle, level: &ParticleLevel) {
         match p.behaviour {
             Behaviour::Base => p.base_tick(level),
+            Behaviour::Mod { size, alpha } => {
+                p.base_tick(level);
+                p.size = mod_curve(size, p.age, p.lifetime);
+                p.rgba[3] = mod_curve(alpha, p.age, p.lifetime);
+            }
             Behaviour::Animated => {
                 p.base_tick(level);
                 self.sprite_from_age(p);
@@ -4211,7 +4296,8 @@ impl ParticleEngine {
             let (rect, layer) = match &p.sprite {
                 Sprite::Index(i) => (
                     self.rects.get(*i as usize).copied().flatten(),
-                    p.ty.translucent_layer(),
+                    p.ty.translucent_layer()
+                        || matches!(p.behaviour, Behaviour::Mod { alpha, .. } if alpha != [1.0; 2]),
                 ),
                 Sprite::Named(name) => match self.atlas.get(name) {
                     Some(&(rect, translucent)) => (Some(rect), translucent),
@@ -4436,7 +4522,7 @@ mod tests {
         .unwrap();
         assert!(particles.join("spark.json").exists());
         let mut engine = ParticleEngine::new(&dir, &HashMap::new(), &HashSet::new());
-        let set = *engine
+        let (set, _) = *engine
             .mod_sets
             .get("mymod:spark")
             .expect("the set is loaded");
@@ -4462,7 +4548,206 @@ mod tests {
                 )
                 .is_none()
         );
+        std::fs::write(
+            particles.join("spark.json"),
+            br#"{"textures":["mymod:spark/1"],"horizon:behaviour":{
+                "velocity":[0,0.5,0],"gravity":-1,"friction":0.5,
+                "lifetime":4,"size":[0.25,0.5],"alpha":[0.75,0]
+            }}"#,
+        )
+        .unwrap();
+        engine.reload(&dir, &HashMap::new(), &HashSet::new());
+        let custom = engine
+            .make(
+                &ParticleOptions::named("mymod:spark"),
+                [0.0; 3],
+                [0.0; 3],
+                7,
+            )
+            .unwrap();
+        assert_eq!(custom.velocity, [0.0, 0.5, 0.0]);
+        assert_eq!(custom.gravity, -1.0);
+        assert_eq!(custom.friction, 0.5);
+        assert_eq!(custom.lifetime, 4);
+        assert_eq!(custom.size, 0.25);
+        assert_eq!(custom.rgba[3], 0.75);
+        for suffix in [r#", "horizon:behaviour": {"lifetime":0}"#, ""] {
+            std::fs::write(
+                particles.join("spark.json"),
+                format!(r#"{{"textures":["mymod:spark/1","mymod:spark/2"]{suffix}}}"#,),
+            )
+            .unwrap();
+            engine.reload(&dir, &HashMap::new(), &HashSet::new());
+            let fallback = engine
+                .make(
+                    &ParticleOptions::named("mymod:spark"),
+                    [0.0; 3],
+                    [0.0; 3],
+                    7,
+                )
+                .unwrap();
+            assert_eq!(fallback.velocity, made.velocity);
+            assert_eq!(fallback.gravity, made.gravity);
+            assert_eq!(fallback.friction, made.friction);
+            assert_eq!(fallback.size, made.size);
+            assert_eq!(fallback.rgba, made.rgba);
+            assert_eq!(fallback.lifetime, made.lifetime);
+            assert_eq!(fallback.behaviour, made.behaviour);
+        }
+        assert_eq!(custom.lifetime, 4);
+        assert_eq!(custom.size, 0.25);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mod_behaviour_validates_declarations() {
+        use serde_json::json;
+        for invalid in [
+            json!({"velocity": [0, 0]}),
+            json!({"velocity": [17, 0, 0]}),
+            json!({"gravity": 101}),
+            json!({"gravity": 1e100}),
+            json!({"friction": -0.1}),
+            json!({"friction": 1.1}),
+            json!({"lifetime": 0}),
+            json!({"lifetime": 12001}),
+            json!({"lifetime": 2.5}),
+            json!({"size": [-1, 1]}),
+            json!({"size": [0, 17]}),
+            json!({"alpha": [0, 1.1]}),
+            json!({"alpha": [-0.1, 1]}),
+            json!({"fricton": 0.9}),
+            json!(null),
+        ] {
+            assert!(ModBehaviour::parse(&invalid).is_none(), "{invalid}");
+        }
+        assert!(
+            ModBehaviour::parse(&json!({
+                "velocity": [-16, 0, 16], "gravity": -100, "friction": 0,
+                "lifetime": 12000, "size": [0, 16], "alpha": [0, 1]
+            }))
+            .is_some()
+        );
+        let mut particle = Particle::moving(
+            &mut LegacyRandom::new(7),
+            ParticleType::Smoke,
+            [0.0; 3],
+            [0.0; 3],
+        );
+        let original = particle.clone();
+        ModBehaviour::parse(&json!({}))
+            .unwrap()
+            .apply(&mut particle);
+        assert_eq!(particle.velocity, original.velocity);
+        assert_eq!(particle.lifetime, original.lifetime);
+        assert_eq!(particle.gravity, original.gravity);
+        assert_eq!(particle.friction, original.friction);
+        assert_eq!(particle.size, original.size);
+        assert_eq!(particle.rgba, original.rgba);
+        assert_eq!(particle.behaviour, original.behaviour);
+    }
+
+    #[test]
+    fn mod_curves_clamp_and_interpolate_over_lifetime() {
+        assert_eq!(mod_curve([0.0, 2.0], -1, 4), 0.0);
+        assert_eq!(mod_curve([0.0, 2.0], 0, 4), 0.0);
+        assert_eq!(mod_curve([0.0, 2.0], 1, 4), 0.5);
+        assert_eq!(mod_curve([0.0, 2.0], 4, 4), 2.0);
+        assert_eq!(mod_curve([0.0, 2.0], 5, 4), 2.0);
+        assert_eq!(mod_curve([1.0, 0.0], 1, 4), 0.75);
+        assert_eq!(mod_curve([0.5, 0.5], 2, 4), 0.5);
+        assert_eq!(mod_curve([0.0, 1.0], 1, 1), 1.0);
+    }
+
+    #[test]
+    fn mod_particle_ticks_motion_curves_and_removal() {
+        use horizon_world::{
+            DATA_VERSION,
+            collision::CachedCollisionRegistry,
+            nbt::Tag,
+            registry::{BlockRegistry, BlockStateId},
+        };
+        let registry = BlockRegistry::from_nbt(&Tag::compound([
+            ("DataVersion", Tag::Int(DATA_VERSION)),
+            ("states", Tag::List(vec![])),
+            ("defaults", Tag::compound([] as [(&str, Tag); 0])),
+        ]))
+        .unwrap();
+        let cached = CachedCollisionRegistry::from_nbt(
+            &Tag::compound([
+                ("DataVersion", Tag::Int(DATA_VERSION)),
+                ("states", Tag::List(vec![])),
+                ("shapes", Tag::List(vec![])),
+                ("cached_shapes", Tag::IntArray(vec![])),
+            ]),
+            &registry,
+        )
+        .unwrap();
+        let collision = BlockCollisionRegistry::new(std::sync::Arc::new(cached)).unwrap();
+        let facts = BlockFacts {
+            states: vec![],
+            air: BlockStateId(0),
+            woods: HashMap::new(),
+        };
+        let world = World::new(BlockStateId(0), 0);
+        let level = ParticleLevel {
+            world: &world,
+            facts: &facts,
+            collision: &collision,
+            player: None,
+        };
+        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut particle = Particle::blank(ParticleType::Smoke, [0.0; 3]);
+        particle.has_physics = false;
+        ModBehaviour::parse(&serde_json::json!({
+            "velocity": [1, 2, -1], "gravity": 1, "friction": 0.5,
+            "lifetime": 2, "size": [0.25, 0.75], "alpha": [1, 0]
+        }))
+        .unwrap()
+        .apply(&mut particle);
+        assert_eq!(particle.size, 0.25);
+        assert_eq!(particle.rgba[3], 1.0);
+        engine.tick_particle(&mut particle, &level);
+        assert_eq!(particle.age, 1);
+        assert_eq!(particle.previous, [0.0; 3]);
+        assert_eq!(particle.position, [1.0, 1.96, -1.0]);
+        assert_eq!(particle.velocity, [0.5, 0.98, -0.5]);
+        assert_eq!(particle.size, 0.5);
+        assert_eq!(particle.rgba[3], 0.5);
+        engine.tick_particle(&mut particle, &level);
+        assert_eq!(particle.position, [1.5, 2.9, -1.5]);
+        assert_eq!(particle.velocity, [0.25, 0.47, -0.25]);
+        assert_eq!(particle.size, 0.75);
+        assert_eq!(particle.rgba[3], 0.0);
+        assert!(!particle.removed);
+        engine.tick_particle(&mut particle, &level);
+        assert!(particle.removed);
+        assert_eq!(particle.position, [1.5, 2.9, -1.5]);
+    }
+
+    #[test]
+    fn fading_mod_particles_use_the_blended_layer() {
+        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        engine.rects.push(Some(Rect {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 1.0,
+            v1: 1.0,
+            w: 16,
+            h: 16,
+        }));
+        let mut particle = Particle::blank(ParticleType::Smoke, [0.0; 3]);
+        ModBehaviour::parse(&serde_json::json!({"alpha": [0.5, 0]}))
+            .unwrap()
+            .apply(&mut particle);
+        particle.sprite = Sprite::Index(0);
+        engine.particles.push(particle);
+        let mut vertices = Vec::new();
+        engine.render(DVec3::ZERO, 0.0, 0.0, 0.0, &|_| 0, &mut vertices);
+        assert_eq!(vertices.len(), 4);
+        assert!(vertices.iter().all(
+            |v| v.color >> 24 == 127 && v.layer & crate::gfx::TRANSLUCENT_PARTICLE_OVERLAY != 0
+        ));
     }
 
     #[test]
