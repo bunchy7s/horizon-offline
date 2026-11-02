@@ -243,6 +243,18 @@ pub fn end_frame(
     }
 }
 
+/// [`end_frame`] on a fixed grid of frame slots ([`FramerateLimiter::limit_on_grid`]):
+/// Horizon's Efficient pacing.
+pub fn end_frame_on_grid(
+    limiter: &mut FramerateLimiter,
+    framerate_limit: i32,
+    clock: &mut impl LimiterClock,
+) {
+    if framerate_limit < 260 {
+        limiter.limit_on_grid(framerate_limit, clock);
+    }
+}
+
 impl FramerateLimiter {
     pub fn new(now_ns: i64) -> Self {
         Self::with_state(now_ns, 0, 0)
@@ -273,6 +285,37 @@ impl FramerateLimiter {
             self.average_overshoot_ns = 0;
             self.last_framerate_limit = framerate_limit;
         }
+        self.wait_until(target_time_ns, clock);
+        self.last_frame_time = clock.nanos();
+    }
+    /// Horizon's Efficient pacing: [`Self::limit_display_fps`]'s wait, but each frame's
+    /// slot starts where the last one's ended (its deadline), not when the thread woke
+    /// up. Vanilla's way adds every late wake-up to the frame (on the Mac, 50 us sleeps
+    /// running 0.2 ms late made a 144 FPS cap 139); on a fixed grid the cap holds on
+    /// average. A frame that ends past its slot, or wakes up more than half a frame
+    /// late, starts the grid again from now: no frame is rushed out to catch up.
+    pub fn limit_on_grid(&mut self, framerate_limit: i32, clock: &mut impl LimiterClock) {
+        let period = 1_000_000_000 / i64::from(framerate_limit);
+        if framerate_limit != self.last_framerate_limit {
+            self.average_overshoot_ns = 0;
+            self.last_framerate_limit = framerate_limit;
+        }
+        let deadline = self.last_frame_time + period;
+        if clock.nanos() >= deadline {
+            self.last_frame_time = clock.nanos();
+            return;
+        }
+        self.wait_until(deadline, clock);
+        let woke = clock.nanos();
+        self.last_frame_time = if woke - deadline > period / 2 {
+            woke
+        } else {
+            deadline
+        };
+    }
+    /// `limitDisplayFPS`'s wait: sleep to within the learned overshoot and half a
+    /// millisecond of `target_time_ns`, then spin.
+    fn wait_until(&mut self, target_time_ns: i64, clock: &mut impl LimiterClock) {
         loop {
             let remaining = target_time_ns - clock.nanos();
             if remaining <= 0 {
@@ -296,7 +339,6 @@ impl FramerateLimiter {
                 clock.spin();
             }
         }
-        self.last_frame_time = clock.nanos();
     }
     pub fn last_frame_time(&self) -> i64 {
         self.last_frame_time
@@ -742,6 +784,98 @@ mod tests {
             assert!(
                 (16_666_666..16_666_666 + 100_000).contains(&period),
                 "frame {frame}: {period} ns"
+            );
+        }
+    }
+    /// A clock whose sleeps and spins each run up to `late` ns late (a different
+    /// share each time), as a loaded machine's do.
+    struct Late {
+        now: i64,
+        late: i64,
+        seed: u64,
+    }
+    impl Late {
+        fn new(late: i64) -> Self {
+            Self {
+                now: 0,
+                late,
+                seed: 0x9e37_79b9_7f4a_7c15,
+            }
+        }
+        fn lateness(&mut self) -> i64 {
+            self.seed ^= self.seed << 13;
+            self.seed ^= self.seed >> 7;
+            self.seed ^= self.seed << 17;
+            (self.seed % 1000) as i64 * self.late / 1000
+        }
+    }
+    impl LimiterClock for Late {
+        fn nanos(&mut self) -> i64 {
+            self.now
+        }
+        fn park(&mut self, nanos: i64) {
+            self.now += nanos + self.lateness();
+        }
+        fn spin(&mut self) {
+            self.now += 50_000 + self.lateness();
+        }
+    }
+    /// Frame periods of 144 FPS frames whose work takes `work(frame)` ns.
+    fn grid_periods(late: i64, work: impl Fn(usize) -> i64) -> Vec<i64> {
+        let mut clock = Late::new(late);
+        let mut limiter = FramerateLimiter::new(0);
+        let mut ends = Vec::new();
+        for frame in 0..300 {
+            clock.now += work(frame);
+            limiter.limit_on_grid(144, &mut clock);
+            ends.push(clock.now);
+        }
+        ends.windows(2).map(|w| w[1] - w[0]).collect()
+    }
+    #[test]
+    fn the_grid_holds_the_cap_when_wake_ups_run_late() {
+        let period = 1_000_000_000 / 144;
+        for late in [0, 50_000, 200_000, 1_000_000] {
+            let periods = grid_periods(late, |_| 2_000_000);
+            let mean = periods[10..].iter().sum::<i64>() / (periods.len() - 10) as i64;
+            assert!(
+                (mean - period).abs() < 10_000,
+                "{late} ns late: mean period {mean} ns"
+            );
+            // Each slot waits at least half a frame: the grid never rushes one out.
+            assert!(
+                periods.iter().all(|&p| p > period / 2),
+                "{late} ns late: {periods:?}"
+            );
+        }
+        // Vanilla's way adds the lateness to the frames: the cap isn't held.
+        let mut clock = Late::new(400_000);
+        let mut limiter = FramerateLimiter::new(0);
+        for _ in 0..300 {
+            clock.now += 2_000_000;
+            limiter.limit_display_fps(144, &mut clock);
+        }
+        assert!(
+            clock.now / 300 > period + 50_000,
+            "vanilla: {} ns",
+            clock.now / 300
+        );
+    }
+    #[test]
+    fn a_long_frame_starts_the_grid_again_without_a_burst() {
+        let period = 1_000_000_000 / 144;
+        // Frame 100 works 30 ms: four slots go by.
+        let periods = grid_periods(
+            50_000,
+            |frame| if frame == 100 { 30_000_000 } else { 2_000_000 },
+        );
+        assert!(periods[99] >= 30_000_000);
+        for (i, &p) in periods.iter().enumerate().skip(100) {
+            // On the grid a slot is a late wake-up (50 us at most) short or long.
+            assert!(
+                (period - 100_000..period + 100_000).contains(&p),
+                "frame {}: {p} ns",
+                i + 1
             );
         }
     }
