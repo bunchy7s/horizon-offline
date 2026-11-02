@@ -106,9 +106,9 @@ BiasedToBottomInt.sample	port	crates/horizon-world/src/worldgen/value_provider.r
 ClampedNormalFloat.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::FloatProvider::sample	ClampedNormal arm
 ClampedNormalInt.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::IntProvider::sample	ClampedNormal arm
 ConstantFloat.of	port	crates/horizon-world/src/worldgen/value_provider.rs::FloatProvider::from_json	Constant arm normalises -0.0 to 0.0 as vanilla's ZERO does
-FloatProviders.codec	missing		minor: unsure: min/max range check is per caller in Horizon (carver.rs:80-89 checks a few bounds); no generic check
-IntProviders.validateCodec	missing		minor: unsure: min/max range check is per caller in Horizon; no generic check
-IntProviders.validate	missing		minor: unsure: min/max range check is per caller in Horizon; no generic check
+FloatProviders.codec	missing		no codec wrapper to carry a field's range: a float provider is read without one, and the sites that need a bound check it themselves (worldgen/carver.rs:89-95 rejects a floor_level outside -1..1)
+IntProviders.validateCodec	missing		no codec wrapper to carry a field's range: the reading sites check what they need instead (worldgen/carver.rs:79-82 rejects a negative count)
+IntProviders.validate	missing		no provider-level check: vanilla rejects minInclusive < minValue or maxInclusive > maxValue against the range each field's codec names, and here only the few sites that care check (worldgen/carver.rs:79-82)
 MultipliedFloats.sample	missing		minor: unsure: SoundManager multiplies a wrapped sound's volume and pitch by the outer sound's; no nested product found in Horizon
 TrapezoidFloat.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::FloatProvider::sample	Trapezoid arm
 TrapezoidInt.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::IntProvider::sample	Trapezoid arm
