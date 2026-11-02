@@ -15,7 +15,7 @@ ClassTreeIdRegistry.define	skip:java		synched entity data slot allocator by clas
 CommonLinks.extendRealms	skip:service		Realms upgrade link
 CompilableString.codec	skip:java		codec
 CompilableString.equals	skip:java		value equality on the source string
-CompilableString.CommandParserHelper.apply	missing		player: a selector, score or NBT text component is not compiled (Horizon has no SelectorContents), so this parse and its trailing-data error are missing
+CompilableString.CommandParserHelper.apply	inline	crates/horizon-client/src/game/commands/text_commands.rs::invalid_selector	a selector and an nbt component's entity are parsed when the component is decoded, and text after them is command.trailing_data, as the codec does through the selector
 CrudeIncrementalIntIdentityHashBiMap.byId	skip:java		identity bimap over registry ids; Horizon uses its own id tables
 CrudeIncrementalIntIdentityHashBiMap.contains	skip:java		identity bimap over registry ids; Horizon uses its own id tables
 CrudeIncrementalIntIdentityHashBiMap.nextId	skip:java		identity bimap over registry ids; Horizon uses its own id tables
@@ -62,7 +62,7 @@ DependencySorter.isCyclic	port	crates/horizon-world/src/worldgen/tags.rs::reache
 DependencySorter.addDependencyIfNotCyclic	inline	crates/horizon-world/src/worldgen/tags.rs::TagDefinitions::build	adds the edge only when reaches is false
 DependencySorter.orderByDependencies	inline	crates/horizon-world/src/worldgen/tags.rs::TagDefinitions::build	required edges first, then optional ones, then the visit order
 DirectoryLock.create	port	crates/horizon-client/src/save.rs::SessionLock::acquire	exclusive file lock on session.lock with the two-byte snowman content
-DirectoryLock.isLocked	missing		player: a world another copy has open is listed as an ordinary world; vanilla flags it as locked in the list (LevelStorageSource.loadLevelSummaries), Horizon has no such check in title.rs list_worlds
+DirectoryLock.isLocked	port	crates/horizon-client/src/save.rs::SessionLock::is_locked	trying for the world's session.lock tells a locked world; title.rs uses it to flag the entry
 Ease.inBack	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
 Ease.inElastic	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
 Ease.inExpo	missing		minor: named easing reached only through the EasingType registry; vanilla timeline data uses cubic_bezier and constant only
