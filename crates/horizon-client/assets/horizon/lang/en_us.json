@@ -212,8 +212,6 @@
   "Mesh data sent to the GPU per frame. Lower is smoother while loading.": "Mesh data sent to the GPU per frame. Lower is smoother while loading.",
   "Frame rate and frame times over the game, with a graph.": "Frame rate and frame times over the game, with a graph.",
   "horizon.multiplayer.finding_friend": "Finding your friend's world...",
-  "horizon.loading.opening_world": "Opening world",
-  "horizon.loading.cancelling_world": "Cancelling world",
   "horizon.multiplayer.not_signed_in": "This server is in online mode. Sign in with your Microsoft account in the Horizon launcher to join it.",
   "horizon.multiplayer.invalid_address": "Invalid server address: %s",
   "horizon.multiplayer.connected_friend_direct": "Connected straight to your friend...",

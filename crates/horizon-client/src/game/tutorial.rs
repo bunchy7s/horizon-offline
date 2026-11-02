@@ -204,9 +204,8 @@ impl super::Game<'_> {
     }
 
     pub(super) fn tutorial_get_item(&mut self, stack: Option<&horizon_client::items::ItemStack>) {
-        // The server thread's settings are a stale copy of the window's, and an
-        // in-frame host acting for a guest is not its own player: a guest's
-        // tutorial is their own client's to record.
+        // The server thread's settings are a stale copy of the window's: a
+        // guest's tutorial is their own client's to record.
         if self.options.dedicated.is_some()
             || self.serving.is_some()
             || self.lan_acting.is_some()
@@ -230,9 +229,8 @@ impl super::Game<'_> {
         state: horizon_world::registry::BlockStateId,
         progress: f32,
     ) {
-        // The server thread's settings are a stale copy of the window's, and an
-        // in-frame host acting for a guest is not its own player: a guest's
-        // tutorial is their own client's to record.
+        // The server thread's settings are a stale copy of the window's: a
+        // guest's tutorial is their own client's to record.
         if self.options.dedicated.is_some()
             || self.serving.is_some()
             || self.lan_acting.is_some()
