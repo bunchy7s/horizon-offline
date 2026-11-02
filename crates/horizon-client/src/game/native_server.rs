@@ -375,7 +375,12 @@ impl Game<'_> {
         )
     }
     /// A system line in every player's chat and the server's log.
-    pub(super) fn native_broadcast(&self, line: Text) {
+    pub(super) fn native_broadcast(&self, mut line: Text) {
+        let mut cancel = false;
+        self.native_broadcast_message(&mut line, &mut cancel);
+        if cancel {
+            return;
+        }
         let plain = line.plain();
         if self.options.dedicated.is_some() {
             super::dedicated::log("INFO", &plain);

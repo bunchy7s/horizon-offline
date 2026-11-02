@@ -3946,6 +3946,12 @@ impl Game<'_> {
         let _ = (player, name, command, range, suggestions);
     }
 
+    /// A server broadcast line is about to be logged and sent. Change `line`
+    /// or set `cancel` to drop it. @API:native_broadcast_message@.
+    pub(super) fn native_broadcast_message(&self, line: &mut Text, cancel: &mut bool) {
+        let _ = (line, cancel);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
