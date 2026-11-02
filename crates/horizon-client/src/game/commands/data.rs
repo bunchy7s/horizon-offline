@@ -266,6 +266,7 @@ impl Game<'_> {
                     // Runtime-only state (AI, animation) carries over.
                     let old = std::mem::replace(slot, new);
                     slot.ai = old.ai;
+                    slot.extra.armor_attributes = old.extra.armor_attributes;
                     slot.age = old.age;
                     slot.previous = slot.position;
                 }

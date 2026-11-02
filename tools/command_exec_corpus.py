@@ -1718,6 +1718,30 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def mob_armor_damage():
+    """Attribute commands must change runtime mob damage, not only getters (#7494)."""
+    cases = [(armor, toughness, amount, 'cactus')
+             for armor in (0, 0.5, 1, 20) for toughness in (0, 8) for amount in (0.25, 4, 100)]
+    cases += [(20, 8, 4, kind) for kind in ('arrow', 'generic', 'falling_anvil', 'sonic_boom')]
+    ops = []
+    for index, (armor, toughness, amount, kind) in enumerate(cases):
+        tag = f'audit_armor_{index}'
+        target = f'@e[tag={tag},limit=1]'
+        ops += setup('/summon minecraft:pig 4.5 220 4.5 '
+                     f'{{NoAI:1b,NoGravity:1b,Tags:["{tag}"]}}',
+                     f'/attribute {target} minecraft:max_health base set 1000',
+                     f'/data merge entity {target} {{Health:1000f}}',
+                     f'/attribute {target} minecraft:armor base set {armor}',
+                     f'/attribute {target} minecraft:armor_toughness base set {toughness}')
+        ops += [cmd(f'/attribute {target} minecraft:armor get 1000'),
+                cmd(f'/attribute {target} minecraft:armor_toughness get 1000'),
+                cmd(f'/data get entity {target} Health 1000'),
+                cmd(f'/damage {target} {amount} minecraft:{kind}'),
+                cmd(f'/data get entity {target} Health 1000'),
+                *setup(f'/kill {target}')]
+    return ops + [{'op': 'tick', 'n': 25}]
+
+
 def groups():
     return [
         ('setup', group_setup()),
@@ -1727,6 +1751,7 @@ def groups():
         ('player state', player_state()),
         ('blocks and border', world_blocks()),
         ('entities', entities()),
+        ('mob armor damage', mob_armor_damage()),
         ('wither spawn', wither_spawn()),
         ('riding teleport', riding_teleport()),
         ('mob riding', mob_riding()),
