@@ -4,16 +4,16 @@ LinkFileSystem	skip:other		link filesystem and its getPath; Horizon builds overl
 LinkFileSystem.Builder	skip:other		builder of the link filesystem tree; no equivalent, see packs.rs::build_overlay
 PackFormat.fullCodec	skip:java		codec for supported_formats; packs.rs::compatible reads the same array
 PackFormat.validateHolderList	inline	crates/horizon-client-render/src/packs.rs::overlays_of	gap: minor: a broken overlay entry is dropped alone; vanilla rejects the whole overlays list
-PackFormat.lastPreMinorVersion	missing		minor: the 64 and 81 cut-offs feed only the format validators, which Horizon lacks
+PackFormat.lastPreMinorVersion	inline	crates/horizon-client-render/src/packs.rs	the cut-off the old-format validator compares against
 PackFormat.packCodec	skip:java		codec wiring; the validation it runs is missing (IntermediaryFormat.validate)
 PackFormat.of	skip:java		constructor; Horizon keeps (major, minor) tuples (packs.rs::RESOURCE_FORMAT)
 PackFormat.compareTo	skip:java		ordering; Horizon compares the (major, minor) tuples directly (packs.rs::compatibility)
 PackFormat.toString	skip:debug		text form of a format, used in validation messages only
 PackFormat.IntermediaryFormat.fromRange	skip:java		encoder back to pack.mcmeta; Horizon never writes pack.mcmeta
-PackFormat.IntermediaryFormat.effectiveMinMajorVersion	missing		minor: only the overlay validator uses it
-PackFormat.IntermediaryFormat.validate	missing		player: vanilla refuses a pack.mcmeta with incomplete format fields (min_format without max_format, or pack_format outside the range); Horizon takes the ranges as written
-PackFormat.IntermediaryFormat.validateNewFormat	missing		player: vanilla refuses min_format above max_format and a missing supported_formats or pack_format where an older game needs them; Horizon does not check
-PackFormat.IntermediaryFormat.validateOldFormat	missing		player: vanilla refuses a supported_formats range above the last pre-minor version, or one without pack_format; Horizon does not check
+PackFormat.IntermediaryFormat.effectiveMinMajorVersion	inline	crates/horizon-client-render/src/packs.rs::validate_pack_format_for_range	feeds the range check
+PackFormat.IntermediaryFormat.validate	port	crates/horizon-client-render/src/packs.rs::validate_pack_range	pack.mcmeta format fields are checked against the supported range
+PackFormat.IntermediaryFormat.validateNewFormat	port	crates/horizon-client-render/src/packs.rs::validate_new_format	min above max and a missing supported_formats / pack_format are refused
+PackFormat.IntermediaryFormat.validateOldFormat	port	crates/horizon-client-render/src/packs.rs::validate_old_format	an old range above the last pre-minor version is refused
 PackFormat.IntermediaryFormat.validatePackFormatForRange	missing		player: vanilla refuses a pack_format outside its min to max range, or a multi-version pack below format 15; Horizon does not check
 PackMetadataSection.codecForPackType	skip:java		codec for the pack section; packs.rs::pack reads the same fields
 PackMetadataSection.forPackType	skip:java		picks the section type per pack type; Horizon reads one pack section
