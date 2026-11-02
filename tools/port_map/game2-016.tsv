@@ -31,7 +31,7 @@ StairBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.rs::Regist
 StrawBedBlock.getShape	port	crates/horizon-world/src/interaction_shapes.rs::InteractionShapes::shape	head and foot shapes per state from the table
 StrawBedBlock.getSleepHeight	missing		minor: sleep height is not computed per bed. tick_sleep (game.rs) puts every sleeper at head y + 0.5625; vanilla uses the bed shape top plus 0.125.
 StructureBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	a game master's click opens the editor
-StructureBlock.setPlacedBy	missing		minor: the placer is not stored as the structure block's author.
+StructureBlock.setPlacedBy	port	crates/horizon-client/src/game/structure_blocks.rs::structure_block_placed	the placing player becomes the block entity's author (the acting guest's name on a LAN world), as setPlacedBy writes it
 StructureBlock.neighborChanged	port	crates/horizon-client/src/game/structure_blocks.rs::Game::structure_block_neighbor_changed	a rising signal triggers the block once
 StructureBlock.trigger	port	crates/horizon-client/src/game/structure_blocks.rs::Game::trigger_structure_block	a pulse in LOAD mode loads its structure
 SweetBerryBushBlock.getShape	port	crates/horizon-world/src/interaction_shapes.rs::InteractionShapes::shape	shape per age from the table
