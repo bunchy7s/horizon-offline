@@ -3021,30 +3021,33 @@ impl Game<'_> {
                 ),
                 out,
             );
-            self.player_elytra_geometry(
-                m,
-                m.extra.chest.as_deref(),
-                camera,
-                alpha as f32,
-                packed,
-                out,
-            );
-            if let Some(g) = host.hub.guest(*conn) {
-                self.player_ears_geometry(m, &g.name, camera, alpha as f32, packed, out);
+            // AvatarRenderer.shouldRenderLayers: a spectator draws no layers.
+            if horizon_client::mobs::render::layers_shown(m) {
+                self.player_elytra_geometry(
+                    m,
+                    m.extra.chest.as_deref(),
+                    camera,
+                    alpha as f32,
+                    packed,
+                    out,
+                );
+                if let Some(g) = host.hub.guest(*conn) {
+                    self.player_ears_geometry(m, &g.name, camera, alpha as f32, packed, out);
+                }
+                self.spin_attack_geometry(m, camera, alpha as f32, packed, out);
+                if let Some(g) = host.hub.guest(*conn) {
+                    self.stuck_in_body_geometry(m, g.entity_id, camera, alpha as f32, packed, out);
+                }
+                self.held_item_geometry(m, camera, alpha, packed, true, out);
+                self.player_pumpkin_geometry(
+                    m,
+                    host.hub.guest(*conn).and_then(|g| g.armor[0].as_ref()),
+                    camera,
+                    alpha,
+                    packed,
+                    out,
+                );
             }
-            self.spin_attack_geometry(m, camera, alpha as f32, packed, out);
-            if let Some(g) = host.hub.guest(*conn) {
-                self.stuck_in_body_geometry(m, g.entity_id, camera, alpha as f32, packed, out);
-            }
-            self.held_item_geometry(m, camera, alpha, packed, true, out);
-            self.player_pumpkin_geometry(
-                m,
-                host.hub.guest(*conn).and_then(|g| g.armor[0].as_ref()),
-                camera,
-                alpha,
-                packed,
-                out,
-            );
             // LivingEntity.isCurrentlyGlowing: the guest's Glowing effect.
             let guest = host.hub.guest(*conn);
             if m.glowing || guest.is_some_and(|g| g.effects.get("glowing").is_some()) {

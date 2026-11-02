@@ -1974,6 +1974,11 @@ impl Overlay<'_> {
         };
         for entry in read.flatten() {
             let rel = rel.join(entry.file_name());
+            // The base's files in one file: it describes the base, not this root (and
+            // would be copied where links are not made).
+            if rel == Path::new(horizon_core::prepared_files::FILE_NAME) {
+                continue;
+            }
             link(&self.base.join(&rel), &self.out.join(&rel))?;
         }
         Ok(())

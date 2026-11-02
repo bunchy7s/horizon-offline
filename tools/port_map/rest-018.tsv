@@ -17,10 +17,10 @@ ServerGamePacketListenerImpl.handleSetGameRule	port	crates/horizon-client/src/ga
 ServerGamePacketListenerImpl.setGameRuleValue	inline	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	the rule set and the op broadcast are in the SetGameRule arm
 ServerGamePacketListenerImpl.broadcastGameRuleChangeToOperators	inline	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	the operator message is sent in the SetGameRule arm to guests with permission 2 or more
 ServerGamePacketListenerImpl.handleSetStructureBlock	port	crates/horizon-client/src/game/structure_blocks.rs::Game::lan_set_structure_block	SET_STRUCTURE_BLOCK from a guest writes the block's settings
-ServerGamePacketListenerImpl.handleSetTestBlock	missing		player: test block edits do not save; SET_TEST_BLOCK has no handler
+ServerGamePacketListenerImpl.handleSetTestBlock	port	crates/horizon-client/src/game/test_blocks.rs::Game::lan_set_test_block	the block's mode and message are written for a creative player with game master commands, as the block's own use would
 ServerGamePacketListenerImpl.handleTestInstanceBlockAction	port	crates/horizon-client/src/game/test_instances.rs::Game::lan_test_instance_action	TEST_INSTANCE_BLOCK_ACTION from a guest runs the action on the block
-ServerGamePacketListenerImpl.handleSetJigsawBlock	missing		player: jigsaw block edits do not save; SET_JIGSAW_BLOCK has no handler
-ServerGamePacketListenerImpl.handleJigsawGenerate	missing		player: the jigsaw block's Generate does nothing; JIGSAW_GENERATE has no handler
+ServerGamePacketListenerImpl.handleSetJigsawBlock	port	crates/horizon-client/src/game/jigsaw_blocks.rs::Game::lan_set_jigsaw_block	the six fields go into the block entity for a creative player with game master commands, then the block entity data reaches the guests
+ServerGamePacketListenerImpl.handleJigsawGenerate	port	crates/horizon-client/src/game/jigsaw_blocks.rs::Game::lan_jigsaw_generate	the piece structure is generated around the block for a creative player with game master commands, keeping the levels it writes
 ServerGamePacketListenerImpl.handleSelectTrade	port	crates/horizon-client/src/game/lan_trading.rs::Game::lan_select_trade	
 ServerGamePacketListenerImpl.updateBookContents	port	crates/horizon-client/src/game/books.rs::Game::write_book	writes the pages into the writable book in the slot
 ServerGamePacketListenerImpl.filterableFromOutgoing	skip:service		text filter pass-through: with no filter on the LAN host the page is the raw text

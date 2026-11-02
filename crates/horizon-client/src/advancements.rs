@@ -104,22 +104,20 @@ impl Tree {
         let Ok(namespaces) = std::fs::read_dir(data) else {
             return tree;
         };
-        let mut files = Vec::new();
-        for ns in namespaces.flatten() {
-            let root = ns.path().join("advancement");
-            collect(&root, &root, &ns.file_name().to_string_lossy(), &mut files);
-        }
-        // One JSON per id, the packs' over the game's own.
+        // One JSON per id, the packs' over the game's own. Through `json_folder`: from
+        // the prepared data file, and read once while a load holds the folder.
         let mut json: BTreeMap<String, Value> = BTreeMap::new();
-        files.sort();
-        for (id, path) in files {
-            let Ok(text) = std::fs::read_to_string(&path) else {
+        for ns in namespaces.flatten() {
+            let Ok(folder) = horizon_world::json_folder::read(&ns.path().join("advancement"))
+            else {
                 continue;
             };
-            let Ok(v) = serde_json::from_str::<Value>(&text) else {
-                continue;
-            };
-            json.insert(id, v);
+            let ns = ns.file_name().to_string_lossy().into_owned();
+            for file in &folder.files {
+                if let Ok(v) = serde_json::from_slice::<Value>(file.bytes().unwrap_or_default()) {
+                    json.insert(format!("{ns}:{}", file.name), v);
+                }
+            }
         }
         for (id, files) in overlay.kind("advancement") {
             match serde_json::from_slice::<Value>(horizon_world::loot::PackOverlay::top(files)) {
@@ -247,21 +245,6 @@ impl InventoryIndex {
         out.sort_unstable();
         out.dedup();
         out
-    }
-}
-fn collect(root: &Path, dir: &Path, ns: &str, out: &mut Vec<(String, std::path::PathBuf)>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for e in entries.flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            collect(root, &p, ns, out);
-        } else if p.extension().is_some_and(|x| x == "json") {
-            let rel = p.strip_prefix(root).unwrap_or(&p).with_extension("");
-            let rel = rel.to_string_lossy().replace('\\', "/");
-            out.push((format!("{ns}:{rel}"), p));
-        }
     }
 }
 fn parse(id: &str, v: &Value) -> Option<Advancement> {
