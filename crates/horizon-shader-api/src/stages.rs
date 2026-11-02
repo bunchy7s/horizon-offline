@@ -423,7 +423,7 @@ struct HorizonMaterialIn {
     let normal = horizon_material_normal(in.world);
     let tangent = horizon_material_tangent(in.world, in.uv, normal);
     let input = MaterialInput(in.albedo, in.tint, in.light, in.lightmap, in.world, in.uv, in.translucent != 0u, in.tags, in.material,
-        in.position.xy / frame.resolution, in.face, fluid, in.emission, normal, tangent);
+        in.position.xy / frame.resolution, in.face, fluid, in.emission, normal, tangent, vec3<f32>(0.0));
     return material(input).color;
 }
 ",

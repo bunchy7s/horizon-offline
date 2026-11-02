@@ -4009,6 +4009,10 @@ impl Renderer {
     pub fn section_count(&self) -> usize {
         self.sections.len()
     }
+    /// The running native pack's `[[particle_lights]]`.
+    pub fn particle_lights(&self) -> Option<&[horizon_shader_api::manifest::ParticleLight]> {
+        self.native.as_ref().map(|n| n.particle_lights.as_slice())
+    }
     /// Whether one of Horizon's own packs with `[shadow]` draws, whose shadow pass takes the
     /// frame's `shadow_only` quads.
     pub fn native_shadow(&self) -> bool {

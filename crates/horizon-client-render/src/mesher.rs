@@ -20,7 +20,7 @@ use horizon_assets::model::Direction as ModelDirection;
 use horizon_core::{
     biome::BiomeZoom, geometry::Direction, position::BlockPos, random::position_seed,
 };
-use horizon_optifine::ctm::connect::Face as CtmFace;
+use horizon_optifine::ctm::connect::{Axes as CtmAxes, Face as CtmFace};
 use horizon_world::{
     block_render::FaceVisibility,
     fluid::{FluidKind, FluidState},
@@ -1379,6 +1379,14 @@ impl Mesher<'_> {
                 [world.x, world.y, world.z],
                 |[dx, dy, dz]| pad.blocks[pi(pos[0] + dx, pos[1] + dy, pos[2] + dz)],
                 || Some(tints.biome(pos[0], pos[1], pos[2])),
+                // A pane's tiles are drawn with the cube's UVs (below), so that is its texture.
+                || {
+                    if state.pane {
+                        Some(CtmAxes::cube(CtmFace::ALL[q.facing as usize]))
+                    } else {
+                        CtmAxes::texture(&q.positions, &q.uv)
+                    }
+                },
                 |overlay| {
                     if let Some(slot) = overlays.get_mut(count) {
                         *slot = Some(overlay);

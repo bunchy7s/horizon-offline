@@ -1085,11 +1085,17 @@ impl Game<'_> {
     }
     /// An entity Horizon keeps no compound for (orbs, projectiles, the
     /// crystals and the dragon) still keeps its `Tags`, by entity id, so
-    /// `@e[tag=]`, `/tag` and `/data get` see them.
+    /// `@e[tag=]`, `/tag` and `/data get` see them, and the `Item` a
+    /// fireball or a thrown item projectile was loaded with.
     pub(super) fn remember_tags(&mut self, id: u32, tag: &Tag) {
+        let mut map = horizon_world::nbt::Compound::new();
         if let Some(tags @ Tag::List(_)) = tag.get("Tags") {
-            let mut map = horizon_world::nbt::Compound::new();
             map.insert("Tags".into(), tags.clone());
+        }
+        if let Some(item @ Tag::Compound(_)) = tag.get("Item") {
+            map.insert("Item".into(), item.clone());
+        }
+        if !map.is_empty() {
             self.persist.raw.insert(id, Tag::Compound(map));
         }
     }
