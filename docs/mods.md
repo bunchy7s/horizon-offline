@@ -78,11 +78,13 @@ them. LAN and dedicated server players play with them when they run the same mod
 content is refused when it joins, with the reason.
 
 A server that has content mods on also checks them one by one (`horizon_protocol::mod_list`, channel
-`horizon:mod_list`): in the configuration phase it sends each mod's id, version, `side` and the SHA-256 of its `.hmod`,
-the client answers with its own, and a client that differs is refused with the mods named: missing, not on this
-server, or another version or file. Only `side = "both"` mods count; a `client` mod (a HUD, a minimap) never blocks a
-join. A mod run from a folder (`--dev-mod`) has no file hash and matches by version. Native mods are not in the list
-yet: their manifest has no side.
+`horizon:mod_list`): in the configuration phase it sends the id, version and SHA-256 of each `.hmod` with
+`side = "both"`, the client answers with its own, and a client that differs is refused with the mods named: missing,
+not on this server, or another version or file. Only `side = "both"` mods are compared and sent: a `client` mod (a
+HUD, a minimap) never blocks a join and is never told to a server, and a `server` mod stays private to it. A manifest
+with no `side` line is `client`, so a content mod meant for both halves must say `side = "both"`, or this check
+ignores it. A mod run from a folder (`--dev-mod`) has no file hash and matches by version. Native mods are not in the
+list yet: their manifest has no side.
 
 A block names its template and what differs from it:
 
