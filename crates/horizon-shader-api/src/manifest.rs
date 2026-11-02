@@ -24,6 +24,8 @@ pub const MAX_TEXTURES: usize = 8;
 pub const MAX_TEXTURE_SIZE: u32 = 2048;
 /// `[[lights]]` entries a manifest may declare.
 pub const MAX_LIGHTS: usize = 256;
+/// `[[particle_lights]]` entries a manifest may declare.
+pub const MAX_PARTICLE_LIGHTS: usize = 32;
 /// Sprite tags a pack may declare: the bits of `MaterialInput.tags`.
 pub const MAX_TAGS: usize = 32;
 
@@ -62,6 +64,9 @@ pub struct Manifest {
     /// The colour of block light by the block giving it off: the first entry with a matching
     /// pattern wins (`Manifest::light_of`).
     pub lights: Vec<LightColor>,
+    /// Particles that join the frame's coloured lights (`MaterialInput.colored_light`): the first
+    /// entry naming a particle wins.
+    pub particle_lights: Vec<ParticleLight>,
     pub budget: Budget,
     /// When the material stage's water mirror (`reflection`) is drawn.
     pub reflection: Option<Reflection>,
@@ -121,6 +126,16 @@ pub struct PackTexture {
     pub linear: bool,
     /// Coordinates outside 0..1 repeat the image (else they clamp to its edges).
     pub repeat: bool,
+}
+
+/// `[[particle_lights]]`: `particles` (names, as `firefly` or `minecraft:firefly`) light what's
+/// within `reach` blocks in `color`, as strongly as they are opaque.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParticleLight {
+    pub particles: Vec<String>,
+    pub color: [f32; 3],
+    pub reach: f32,
 }
 
 /// `[[lights]]`: the colour of the block light from some blocks, as the material stage reads
@@ -343,6 +358,8 @@ struct Raw {
     textures: Vec<RawTexture>,
     #[serde(default)]
     lights: Vec<LightColor>,
+    #[serde(default)]
+    particle_lights: Vec<ParticleLight>,
     #[serde(default)]
     budget: RawBudget,
     reflection: Option<Reflection>,
@@ -650,6 +667,34 @@ impl Manifest {
                 "lights are read by the material stage: give it a [material]".into(),
             ));
         }
+        if !raw.particle_lights.is_empty() && raw.material.is_none() {
+            return Err(err(
+                "particle lights are read by the material stage: give it a [material]".into(),
+            ));
+        }
+        if raw.particle_lights.len() > MAX_PARTICLE_LIGHTS {
+            return Err(err(format!(
+                "{} [[particle_lights]]; a pack may declare {MAX_PARTICLE_LIGHTS}",
+                raw.particle_lights.len()
+            )));
+        }
+        for l in &raw.particle_lights {
+            if l.particles.is_empty() {
+                return Err(err("a [[particle_lights]] entry needs particles".into()));
+            }
+            if l.color.iter().any(|c| !(0.0..=1.0).contains(c)) {
+                return Err(err(format!(
+                    "particle light color {:?} is not in 0..=1 per channel",
+                    l.color
+                )));
+            }
+            if !(0.25..=16.0).contains(&l.reach) {
+                return Err(err(format!(
+                    "particle light reach {} is not in 0.25..=16",
+                    l.reach
+                )));
+            }
+        }
         if raw.lights.len() > MAX_LIGHTS {
             return Err(err(format!(
                 "{} [[lights]]; a pack may declare {MAX_LIGHTS}",
@@ -728,6 +773,7 @@ impl Manifest {
             materials: raw.materials,
             textures,
             lights: raw.lights,
+            particle_lights: raw.particle_lights,
             budget: Budget { gpu_ms },
             reflection: raw.reflection,
             shadow: raw.shadow,

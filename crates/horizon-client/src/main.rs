@@ -1,6 +1,7 @@
 //! Horizon: native Rust client for Minecraft Java Edition 26.3 gameplay.
 #![forbid(unsafe_code)]
 
+#[cfg(not(feature = "system-allocator"))]
 #[global_allocator]
 static ALLOCATOR: horizon_threads::Allocator = horizon_threads::Allocator;
 

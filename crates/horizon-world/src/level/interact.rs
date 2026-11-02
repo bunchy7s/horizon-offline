@@ -235,8 +235,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 Class::Note => {
                     let next = table.cycle(state, p.note);
+                    if !self.note_play_allowed(pos, next) {
+                        return Success;
+                    }
                     self.set_block_and_update(pos, next);
-                    self.note_play(pos, next);
+                    self.note_play_unchecked(pos, next);
                     Success
                 }
                 Class::RedstoneWire => self.wire_use(pos, state, player),

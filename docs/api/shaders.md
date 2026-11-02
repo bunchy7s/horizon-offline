@@ -114,6 +114,11 @@ wrap = "repeat"            # optional: repeat (default) or clamp
 color = [0.3, 0.7, 1.0]    # each channel 0 to 4
 blocks = ["soul_*"]        # block names, any number of * each
 
+[[particle_lights]]        # 32 at most: these particles join the frame's coloured lights
+particles = ["firefly"]    # names, `firefly` or `minecraft:firefly`; the first entry naming one wins
+color = [0.8, 0.9, 0.4]    # each channel 0 to 1; the particle's alpha is its intensity
+reach = 4.0                # blocks, 0.25 to 16; the 16 nearest lights shine, read by MaterialInput.colored_light
+
 [[tags]]                   # 32 at most: bit i of MaterialInput.tags is the i-th tag
 id = "glass"
 sprites = ["block/glass", "block/*_stained_glass"]   # sprite names, at most one * each
@@ -149,6 +154,7 @@ stages.
 
 ## Changelog
 
+- 2026-11-02: API 0.1 (additions): `[[particle_lights]]` and `MaterialInput.colored_light`.
 - 2026-11-01: API 0.1 (additions): `[[materials]]` and `MaterialInput.material`, an id by sprite,
   and `[shadow] solid_materials`.
 - 2026-11-01: API 0.1 (additions): entities cast into `shadow_map`, the player's own model in first person too, and the round
