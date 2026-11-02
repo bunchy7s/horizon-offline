@@ -357,8 +357,8 @@ catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`,
 It receives a mutable `Host`, attacker/victim network ids, damage type, optional source position, victim position
 and current view vector, and an optional weapon snapshot. `weapon.enchantments()` exposes enchantment ids and
 levels. Change `amount` or return `Flow::Cancel`; the host can read the world and play sounds through its helpers.
-It currently fires for player-to-mob melee, sweep and spear hits (including LAN guests), before the victim's
-immunity guards and v1. Unless canceled, v1 receives the modified amount. It is not a replacement for v1 on
+It currently fires for player-to-mob melee, sweep and spear hits (including LAN guests), after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before
+v1. Unless canceled, v1 receives the modified amount. It is not a replacement for v1 on
 projectiles, player victims, dragons, mob attacks or environmental damage. There is no extra per-hit allocation
 without loaded mods. The fragment `living_incoming_damage_v2.json` receives its API number at merge.
 

@@ -186,7 +186,8 @@ impl Game<'_> {
         let aim = self.attacker_aim(source.attacker);
         let kind = self.mobs[index].kind.id.clone();
         let mut amount = amount;
-        if !crate::mod_api::mods().is_empty() {
+        // After the invulnerability guard, as `LivingIncomingDamageEvent` fires.
+        if !crate::mod_api::mods().is_empty() && !self.mobs[index].refuses_damage(&source) {
             let victim = &self.mobs[index];
             let position = victim.position;
             let view = super::view_vector(victim.head_yaw, victim.head_pitch);
