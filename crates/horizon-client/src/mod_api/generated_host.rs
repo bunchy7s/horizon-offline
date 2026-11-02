@@ -1180,4 +1180,25 @@ pub trait Host {
         let _ = size;
         unimplemented!("Host::item_stack")
     }
+    /// For a client mod: what each block (`minecraft:grass_block`, `oak_log[axis=x]`; properties left out take the
+    /// block's default) draws on each of its six sides, as the mesher bakes its model: each face's sprite (array and
+    /// layer, as `WorldDrawn::block_sprites` cuts them), where it lies on the side, how its texture runs across it,
+    /// its tint source and whether it is cut out, translucent or animated; its particle sprite; whether it is a plain
+    /// cube. None for a block the game does not know. The model is the state's first random variant. API
+    /// @API:native_block_sprites@.
+    fn block_sprites(&self, blocks: &[&str]) -> Vec<Option<BlockSprites>> {
+        let _ = blocks;
+        unimplemented!("Host::block_sprites")
+    }
+    /// For a client mod: each texture's sprite by name (`minecraft:block/stone`, `block/stone`), none for one no
+    /// model uses. API @API:native_block_sprites@.
+    fn texture_sprites(&self, textures: &[&str]) -> Vec<Option<SpriteRef>> {
+        let _ = textures;
+        unimplemented!("Host::texture_sprites")
+    }
+    /// For a client mod: changes each time the resources load (a resource pack turned on or off can move every
+    /// sprite): ask `native_block_sprites` again then. API @API:native_block_sprites@.
+    fn block_sprites_version(&self) -> u64 {
+        unimplemented!("Host::block_sprites_version")
+    }
 }

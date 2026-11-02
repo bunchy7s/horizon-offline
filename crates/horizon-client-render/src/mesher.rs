@@ -483,6 +483,17 @@ fn visibility_rows(open: &[u16; 256]) -> u64 {
 mod particle_tests;
 #[cfg(test)]
 mod visibility_tests;
+/// A face's tint source as the game colours it (`BlockColors.createDefault`), for drawing a block
+/// elsewhere ([`crate::block_sprites`]): the biome's grass, foliage, dry foliage or water colour
+/// where the block is, or a fixed colour (0xRRGGBB).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TintSource {
+    Grass,
+    Foliage,
+    DryFoliage,
+    Water,
+    Fixed(u32),
+}
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tint {
     None,
@@ -799,6 +810,29 @@ impl MeshTables {
             Tint::Constant(c) => c,
             Tint::Redstone(p) => redstone_color(p),
             Tint::Stem(age) => stem_color(age),
+        })
+    }
+    /// What tint source `index` (a face's `tintindex`) of `state` colours a face with in the
+    /// world, for drawing the block elsewhere ([`crate::block_sprites`]): `None` for an untinted
+    /// face. Grass blocks, tall grass and sugar cane are `Grass`; redstone and stems are their
+    /// colour at the state's power and age.
+    pub fn tint_source(&self, state: BlockStateId, index: i32) -> Option<TintSource> {
+        let info = self.info.get(state.0 as usize)?;
+        if index < 0 || index >= i32::from(info.tint_count) {
+            return None;
+        }
+        Some(match info.tints[index as usize] {
+            Tint::None => return None,
+            Tint::Grass | Tint::GrassBlock | Tint::TallGrassUpper | Tint::SugarCane => {
+                TintSource::Grass
+            }
+            Tint::Foliage => TintSource::Foliage,
+            Tint::DryFoliage => TintSource::DryFoliage,
+            Tint::Water => TintSource::Water,
+            Tint::LilyPad => TintSource::Fixed(0x20_8030),
+            Tint::Constant(c) => TintSource::Fixed(c),
+            Tint::Redstone(p) => TintSource::Fixed(redstone_color(p)),
+            Tint::Stem(age) => TintSource::Fixed(stem_color(age)),
         })
     }
     /// `TerrainParticle`'s colour: tint source 0's `colorAsTerrainParticle`,
