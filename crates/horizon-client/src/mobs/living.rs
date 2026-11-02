@@ -407,6 +407,24 @@ impl Mob {
     pub fn eye_y(&self) -> f64 {
         self.position.y + self.eye_height()
     }
+    /// `LivingEntity.getScale`: the `minecraft:scale` the server sent on this
+    /// living entity (`extra.model_scale`, 0 when none came), through the
+    /// species' `sanitizeScale` override. Every box, eye height, seat and
+    /// shadow radius takes it.
+    pub fn model_scale(&self) -> f32 {
+        let scale = if self.extra.model_scale > 0.0 {
+            self.extra.model_scale
+        } else {
+            1.0
+        };
+        match self.species() {
+            // HappyGhast.sanitizeScale: min(scale, 1), it never grows.
+            super::Species::HappyGhast => scale.min(1.0),
+            // Shulker.sanitizeScale: min(scale, 3).
+            super::Species::Shulker => scale.min(3.0),
+            _ => scale,
+        }
+    }
     /// Entity dimensions: the type's, a class's BABY_DIMENSIONS, or the
     /// slime size scaling.
     /// `EntityDimensions` (float width, height and eye height) widened to double.
@@ -427,15 +445,12 @@ impl Mob {
     /// `Pose.LONG_JUMPING` (what `LongJumpUtil` checks an arc with).
     pub fn awake_dims_in(&self, long_jumping: bool) -> (f64, f64, f64) {
         let k = &self.kind;
-        // Avatar.POSES: a player's or mannequin's box follows its pose, and
-        // LivingEntity.getDimensions scales it by `minecraft:scale`
-        // (`getScale`): a fake player's giant NPC is clickable on its body.
+        // `LivingEntity.getDimensions` is `getDefaultDimensions(pose).scale(
+        // getScale())` on every living entity: the species' box (a player's or
+        // mannequin's follows its pose, Avatar.POSES) times its
+        // `minecraft:scale` (`getScale`), width, height and eye height alike.
+        let scale = self.model_scale();
         if matches!(&*k.id, "minecraft:player" | "minecraft:mannequin") {
-            let scale = if self.extra.model_scale > 0.0 {
-                self.extra.model_scale
-            } else {
-                1.0
-            };
             let d = self.extra.avatar_pose.dimensions(scale);
             return (
                 f64::from(d.width),
@@ -484,7 +499,9 @@ impl Mob {
             let s = self.extra.size as f32;
             (w, h, e) = (w * s, h * s, e * s);
         }
-        (f64::from(w), f64::from(h), f64::from(e))
+        // `EntityDimensions.scale(getScale())`: width and height by the scale,
+        // the eye height by its height factor (the same one).
+        (f64::from(w * scale), f64::from(h * scale), f64::from(e * scale))
     }
     pub fn eye_height(&self) -> f64 {
         self.dims().2
