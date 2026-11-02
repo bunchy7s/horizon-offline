@@ -1729,11 +1729,19 @@ impl Game<'_> {
             let splash_options = ParticleOptions::simple(ParticleType::Splash);
             self.particles
                 .send_particles(&splash_options, splash, [0.0; 3], 1.0, 1);
-            self.lan_level_particles(&splash_options, splash, [0.0; 3], 1.0, 1, None);
+            self.lan_level_particles(None, &splash_options, splash, [0.0; 3], 1.0, 1, None);
             let bubble_options = ParticleOptions::simple(ParticleType::Bubble);
             self.particles
                 .send_particles(&bubble_options, bubble, [0.0, 0.01, 0.0], 0.2, 1);
-            self.lan_level_particles(&bubble_options, bubble, [0.0, 0.01, 0.0], 0.2, 1, None);
+            self.lan_level_particles(
+                None,
+                &bubble_options,
+                bubble,
+                [0.0, 0.01, 0.0],
+                0.2,
+                1,
+                None,
+            );
         }
     }
     pub(super) fn handle_mob_events(&mut self, events: Vec<MobEvent>) -> Result<()> {
@@ -1769,7 +1777,7 @@ impl Game<'_> {
                         let options = horizon_client::particles::ParticleOptions::simple(ty);
                         self.particles
                             .send_particles(&options, at, spread, speed, count);
-                        self.lan_level_particles(&options, at, spread, speed, count, None);
+                        self.lan_level_particles(None, &options, at, spread, speed, count, None);
                     }
                 }
                 // The LAN packet has no item for a particle yet: the host's window only.
