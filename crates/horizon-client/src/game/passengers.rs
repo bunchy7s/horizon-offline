@@ -34,7 +34,8 @@ struct MountRolls {
 
 /// `ZombieHorse.finalizeSpawn` (NATURAL only), `Husk.finalizeSpawn`
 /// (`triedToSpawnCamelHusk = reason != NATURAL`) and `Drowned.finalizeSpawn`
-/// (NATURAL, or STRUCTURE from worldgen; never a baby).
+/// (never a baby; vanilla also allows STRUCTURE, which comes from worldgen and
+/// never reaches `spawn_jockeys`, so only `natural` is modelled here).
 fn mount_rolls(species: Species, baby: bool, natural: bool) -> MountRolls {
     MountRolls {
         zombie_horse_rider: natural && species == Species::ZombieHorse,
