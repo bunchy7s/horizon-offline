@@ -864,5 +864,10 @@
   "You haven't played this one yet. Press Play to start.": "Bunu henüz oynamadın. Başlamak için Oyna'ya bas.",
   "You've played for {time}! Last played {when}.": "{time} oynadın! Son oynama: {when}.",
   "Rust Edition": "Rust Edition",
-  "Java Edition": "Java Edition"
+  "Java Edition": "Java Edition",
+  "All notes": "Tüm notlar",
+  "No notes yet": "Henüz not yok",
+  "No screenshots yet. Press F2 in the game.": "Henüz ekran görüntüsü yok. Oyunda F2'ye bas.",
+  "Patch log": "Değişiklik günlüğü",
+  "See all": "Tümünü gör"
 }

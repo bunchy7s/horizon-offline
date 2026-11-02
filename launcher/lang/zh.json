@@ -864,5 +864,10 @@
   "You haven't played this one yet. Press Play to start.": "你还没玩过这个。按“开始游戏”开始。",
   "You've played for {time}! Last played {when}.": "你已游玩 {time}！上次游玩：{when}。",
   "Rust Edition": "Rust Edition",
-  "Java Edition": "Java Edition"
+  "Java Edition": "Java Edition",
+  "All notes": "全部说明",
+  "No notes yet": "暂无说明",
+  "No screenshots yet. Press F2 in the game.": "还没有截图。在游戏中按 F2。",
+  "Patch log": "更新日志",
+  "See all": "查看全部"
 }

@@ -864,5 +864,10 @@
   "You haven't played this one yet. Press Play to start.": "Ви ще не грали в цей екземпляр. Натисніть «Грати», щоб почати.",
   "You've played for {time}! Last played {when}.": "Ви зіграли {time}! Востаннє: {when}.",
   "Rust Edition": "Rust Edition",
-  "Java Edition": "Java Edition"
+  "Java Edition": "Java Edition",
+  "All notes": "Усі нотатки",
+  "No notes yet": "Нотаток поки немає",
+  "No screenshots yet. Press F2 in the game.": "Знімків екрана поки немає. Натисніть F2 у грі.",
+  "Patch log": "Журнал змін",
+  "See all": "Переглянути всі"
 }

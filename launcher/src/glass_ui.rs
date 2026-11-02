@@ -210,7 +210,26 @@ pub fn tab(
         d.text_color(white(ink::BODY))
             .hover(|s| s.text_color(white(ink::FULL)))
     };
-    keyboard(track_hover(d.child(label.into()), id), t)
+    let label: SharedString = label.into();
+    let d = d.when(!label.is_empty(), |d| d.child(label));
+    keyboard(track_hover(d, id), t)
+}
+
+/// A tab with an icon and a count (`Tabs`, size `md`): as [`tab`], the icon 16 px before the
+/// label, the count after it in white at 45 %.
+pub fn count_tab(
+    id: impl Into<SharedString>,
+    icon_name: Option<&'static str>,
+    label: impl Into<SharedString>,
+    count: Option<usize>,
+    open: bool,
+    t: &Theme,
+) -> Stateful<Div> {
+    let colour = white(if open { ink::FULL } else { ink::BODY });
+    tab(id, "", open, t)
+        .children(icon_name.map(|n| icon(n, 16., colour)))
+        .child(label.into())
+        .children(count.map(|n| div().text_color(white(ink::DIM)).child(n.to_string())))
 }
 
 /// A popover's row (`MENU_ROW`): 40 px, 14 px text after a 17 px icon at 60 %, white at 7 %

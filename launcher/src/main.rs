@@ -20,6 +20,7 @@ mod game_tools;
 mod github_mods_page;
 mod glass;
 mod glass_home;
+mod glass_home_tabs;
 mod glass_ui;
 mod home;
 mod home_tabs;
@@ -345,6 +346,9 @@ struct Launcher {
     home_menu: glass_home::HomeMenu,
     /// Whether the pointer is over Home's folder button, which then shows its ⋯.
     folder_hovered: bool,
+    /// The size of Home's tab strip, measured as it is laid out: the glass panel's plate cuts
+    /// its corner around it.
+    home_strip: std::rc::Rc<std::cell::Cell<Option<gpui::Size<Pixels>>>>,
     /// When the running game was first seen running, for Home's "Playing for…".
     client_since: Option<Instant>,
     /// The selected instance's mods, for Home's Mods tab (`instance_mods.rs`).
@@ -585,6 +589,7 @@ impl Launcher {
             home_tab: home_tabs::HomeTab::from_env(),
             home_menu: Default::default(),
             folder_hovered: false,
+            home_strip: Default::default(),
             client_since: None,
             instance_mods: Default::default(),
             project_icons: Default::default(),
@@ -3054,7 +3059,8 @@ impl Launcher {
         let mut rows = div()
             .flex()
             .flex_col()
-            .children(self.instance_row(1, cx))
+            // The glass look's sidebar ⋮ menu holds what the Instance row offers.
+            .children((!t.dark).then(|| self.instance_row(1, cx)).flatten())
             .children(self.export_panel(cx))
             .children(self.launch_panel(cx))
             .children(self.memory_row(cx));
@@ -3226,7 +3232,11 @@ impl Launcher {
         if let Some(e) = self.prepare_error.clone() {
             page = page.child(notice(e, &t));
         }
-        page = page.child(self.home_tabs(rows, cx));
+        page = page.child(if t.dark {
+            self.glass_home_tabs(rows, cx)
+        } else {
+            self.home_tabs(rows, cx)
+        });
         if let Some(e) = self.client_error.clone() {
             page = page.child(notice(e, &t));
         }
