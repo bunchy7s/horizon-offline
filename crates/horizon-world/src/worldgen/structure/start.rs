@@ -401,12 +401,34 @@ impl StructureRegistry {
         for (name, json) in sets {
             let v: Value = serde_json::from_str(json)?;
             let p = &v["placement"];
+            // AbstractSpreadingStructurePlacement's codec: `frequency` is a
+            // floatRange(0.0F, 1.0F) and the salt any int.
+            let frequency = p["frequency"].as_f64().unwrap_or(1.);
+            if !(0. ..=1.).contains(&frequency) {
+                return Err(DecodeError::Field("structure set frequency"));
+            }
             let placement = match p["type"].as_str().unwrap_or_default() {
-                "minecraft:random_spread" => Placement::RandomSpread {
-                    spacing: p["spacing"].as_i64().unwrap_or(1) as i32,
-                    separation: p["separation"].as_i64().unwrap_or(0) as i32,
-                    triangular: p["spread_type"].as_str() == Some("triangular"),
-                },
+                "minecraft:random_spread" => {
+                    // The codec's intRange(0, 4096) and
+                    // RandomSpreadStructurePlacement.validate: a spread whose
+                    // separation reaches its spacing is refused, not clamped
+                    // to the grid corners.
+                    let spacing = p["spacing"].as_i64().unwrap_or(1);
+                    let separation = p["separation"].as_i64().unwrap_or(0);
+                    if !(0..=4096).contains(&spacing) || !(0..=4096).contains(&separation) {
+                        return Err(DecodeError::Field("random spread spacing range"));
+                    }
+                    if spacing <= separation {
+                        return Err(DecodeError::Field(
+                            "random spread spacing not larger than separation",
+                        ));
+                    }
+                    Placement::RandomSpread {
+                        spacing: spacing as i32,
+                        separation: separation as i32,
+                        triangular: p["spread_type"].as_str() == Some("triangular"),
+                    }
+                }
                 "minecraft:concentric_rings" => Placement::ConcentricRings {
                     distance: p["distance"].as_i64().unwrap_or(0) as i32,
                     spread: p["spread"].as_i64().unwrap_or(0) as i32,
@@ -430,7 +452,7 @@ impl StructureRegistry {
                     .collect(),
                 placement,
                 salt: p["salt"].as_i64().unwrap_or(0) as i32,
-                frequency: p["frequency"].as_f64().unwrap_or(1.) as f32,
+                frequency: frequency as f32,
                 locate_offset: {
                     let at = |i: usize| p["locate_offset"][i].as_i64().unwrap_or(0) as i32;
                     [at(0), at(1), at(2)]
