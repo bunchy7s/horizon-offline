@@ -400,6 +400,8 @@ pub struct Post {
     pub weather: Option<PostProgram>,
     /// What draws the first-person hand and held items.
     pub hand: Option<PostProgram>,
+    /// `clouds=off`: no clouds at all, neither the game's nor the pack's program for them.
+    pub clouds_off: bool,
     /// Some program reads a shadow buffer, or `shadow.enabled=true`: the shadow pass runs (2.5).
     pub shadow_pass: bool,
     /// When it runs: what draws solid and cutout terrain from the light (`shadow`), and
@@ -546,6 +548,7 @@ pub fn load_post(
         clouds: None,
         weather: None,
         hand: None,
+        clouds_off: false,
         shadow_pass: false,
         shadow: None,
         shadow_water: None,
@@ -757,7 +760,8 @@ pub fn load_post(
     loader.post.entities_translucent = entities_translucent;
     loader.post.particles = particles;
     loader.post.damaged_block = damaged_block;
-    loader.post.clouds = clouds;
+    loader.post.clouds_off = properties.get("clouds").is_some_and(|v| v.trim() == "off");
+    loader.post.clouds = clouds.filter(|_| !loader.post.clouds_off);
     loader.post.weather = weather;
     loader.post.hand = hand;
     let flag = |key: &str| properties.get(key).map(|v| v.trim() == "true");
@@ -1652,6 +1656,35 @@ mod tests {
 
     /// Water falls back to the terrain chain and blends by default, as the sky does; entities
     /// and block entities fall back along theirs; `blend.*` overrides.
+    /// `clouds=off` hides the game's clouds and drops the pack's own cloud program.
+    #[test]
+    fn clouds_off_draws_no_clouds() {
+        let vsh = "#version 120\nvoid main() { gl_Position = ftransform(); }\n";
+        let fsh = "#version 120\nvoid main() { gl_FragColor = vec4(1.0); }\n";
+        let pack = Pack::from_zip_bytes(
+            "clouds.zip",
+            crate::pack::tests::zip(&[
+                ("shaders/gbuffers_clouds.vsh", vsh),
+                ("shaders/gbuffers_clouds.fsh", fsh),
+            ]),
+        )
+        .unwrap();
+        let macros = Macros::standard();
+        let inputs = GameInputs {
+            clouds: Some(crate::GbuffersInputs {
+                declarations: "layout(location = 0) in vec3 hz_v_pos;".into(),
+                body: "    hz_Vertex = vec4(hz_v_pos, 1.0);\n".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let on = load_post(&pack, "", &Properties::default(), &macros, &inputs);
+        assert!(on.clouds.is_some() && !on.clouds_off);
+        let off = Properties::parse("clouds = off\n", &macros);
+        let off = load_post(&pack, "", &off, &macros, &inputs);
+        assert!(off.clouds.is_none() && off.clouds_off);
+    }
+
     #[test]
     fn water_falls_back_to_terrain_and_blends() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/packs/terrain-test");
