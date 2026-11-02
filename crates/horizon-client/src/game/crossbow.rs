@@ -119,17 +119,11 @@ impl Game<'_> {
         };
         let mut projectile = vanilla.clone();
         // A client predicting its own use has the profile it logged in with.
-        let own = self
-            .remote
-            .as_ref()
-            .filter(|_| self.lan_acting_uuid.is_none())
-            .map(|r| (r.profile, r.profile_name.clone()));
-        let (player, name) = own.unwrap_or_else(|| {
-            (
-                horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()),
-                self.acting_player_name().to_owned(),
-            )
-        });
+        let player = match self.remote.as_ref().filter(|_| self.lan_acting_uuid.is_none()) {
+            Some(r) => r.profile(),
+            None => horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()),
+        };
+        let name = self.own_profile_name();
         self.native_living_get_projectile(
             Some(player),
             &name,
@@ -188,10 +182,11 @@ impl Game<'_> {
     }
     /// `CrossbowItem.onUseTick`'s `getProjectile` for a mob that finished
     /// charging `weapon` (pillagers and piglins: `Monster.getProjectile`). The
-    /// replaced ammunition is what the crossbow holds; none leaves it uncharged.
-    pub(super) fn mob_crossbow_ammo(&mut self, mob: u32, weapon: &ItemStack) {
+    /// replaced ammunition is what the crossbow holds; none leaves it uncharged
+    /// and returns false (`tryLoadProjectiles`).
+    pub(super) fn mob_crossbow_ammo(&mut self, mob: u32, weapon: &ItemStack) -> bool {
         let Some(shooter) = self.mobs.iter().find(|m| m.id == mob) else {
-            return;
+            return false;
         };
         let kind = shooter.kind.id.clone();
         let mut projectile = Some(Self::mob_vanilla_ammo(&shooter.extra, weapon));
@@ -199,17 +194,19 @@ impl Game<'_> {
         // A crossbow takes arrows and firework rockets only.
         let projectile = projectile.filter(|ammo| is_arrow(ammo) || &*ammo.item == FIREWORK_ROCKET);
         let Some(shooter) = self.mobs.iter_mut().find(|m| m.id == mob) else {
-            return;
+            return false;
         };
         let Some(mut crossbow) = shooter.extra.main_hand_stack().cloned() else {
-            return;
+            return false;
         };
+        let loaded = projectile.is_some();
         crossbow.data_mut().charged = projectile
             .iter()
             .map(|ammo| horizon_client::arrows::drawn_ammo(ammo, false))
             .collect();
         crossbow.tidy();
         shooter.extra.set_main_hand_stack(Some(crossbow));
+        loaded
     }
     /// `CrossbowItem.use`: shoot when charged, else start charging.
     pub(super) fn use_crossbow(&mut self, stack: &ItemStack) -> bool {

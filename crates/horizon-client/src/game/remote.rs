@@ -586,7 +586,7 @@ pub(super) struct Remote {
     /// `Player.DATA_SHOULDER_PARROT_LEFT` and `_RIGHT` of the own player.
     pub(super) own_shoulders: [Option<i32>; 2],
     /// The local player's profile UUID (always in the level).
-    pub(super) profile: u128,
+    profile: u128,
     /// The local player's profile name: its score holder and team member.
     pub(super) profile_name: String,
     /// `MultiPlayerGameMode.destroyBlockPos`, `.destroyProgress` and the face last sent: the block

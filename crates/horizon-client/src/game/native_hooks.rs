@@ -4225,7 +4225,8 @@ impl Game<'_> {
 
     /// `LivingEntity.getProjectile(weapon)` (NeoForge's
     /// `LivingGetProjectileEvent`) for a player (`player` and `name`) or a
-    /// skeleton or illusioner (`entity`, `kind`). `projectile` is the vanilla
+    /// mob (`entity`, `kind`): a skeleton or illusioner's shot, or the crossbow
+    /// load of a pillager or piglin. `projectile` is the vanilla
     /// ammunition; replace it to choose another. A replaced stack is not taken
     /// from the inventory. @API:native_living_get_projectile@.
     pub(super) fn native_living_get_projectile(

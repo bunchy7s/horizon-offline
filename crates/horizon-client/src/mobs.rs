@@ -1561,10 +1561,13 @@ pub enum MobEvent {
         arrow: crate::projectiles::Projectile,
     },
     /// `mob` finished charging `weapon` (`CrossbowItem.onUseTick`): the game
-    /// asks for the ammunition (`getProjectile`).
+    /// asks for the ammunition (`getProjectile`), and plays the end sound
+    /// at `at` only when the crossbow loaded.
     CrossbowLoad {
         mob: u32,
         weapon: crate::items::ItemStack,
+        at: [f64; 3],
+        pitch: f32,
     },
     /// `arrow` shot from the `ammo` a mob's crossbow was charged with.
     CrossbowShot {

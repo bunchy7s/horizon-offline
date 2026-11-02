@@ -2205,7 +2205,17 @@ impl Game<'_> {
                         self.launch_mob_projectile(arrow);
                     }
                 }
-                MobEvent::CrossbowLoad { mob, weapon } => self.mob_crossbow_ammo(mob, &weapon),
+                MobEvent::CrossbowLoad {
+                    mob,
+                    weapon,
+                    at,
+                    pitch,
+                } => {
+                    if self.mob_crossbow_ammo(mob, &weapon) {
+                        self.audio
+                            .play("minecraft:item.crossbow.loading_end", Some(at), 1.0, pitch);
+                    }
+                }
                 MobEvent::Spawn(mut m) => {
                     self.next_entity += 1;
                     m.id = self.next_entity;
