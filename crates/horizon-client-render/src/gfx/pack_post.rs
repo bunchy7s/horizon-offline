@@ -895,6 +895,14 @@ fn target(format: wgpu::TextureFormat) -> Option<wgpu::ColorTargetState> {
     })
 }
 
+/// Color-attachment cost includes component alignment, not only the copied texel size.
+fn attachment_bytes(bytes: u32, format: wgpu::TextureFormat) -> u32 {
+    let alignment = format
+        .target_component_alignment()
+        .expect("color attachment");
+    bytes.next_multiple_of(alignment) + format.target_pixel_byte_cost().expect("color attachment")
+}
+
 /// The viewport of `scale.<program>` (scale, offset x, offset y) on buffers of `size`, in whole
 /// pixels, at least one and inside them. Buffer rows are GL's, so the offsets count from GL's
 /// bottom-left corner as they are.
@@ -2196,8 +2204,8 @@ impl PackPost {
             ));
             t
         });
-        // A clear only matters when a program reads the buffer before one writes all of it
-        // (composite passes cover their whole target, terrain does not); the others are skipped.
+        // Any program can leave pixels untouched. Composite-style passes also write the
+        // alternate image, so their first write does not replace the main image's clear.
         let mut cleared = Vec::new();
         for b in 1..BUFFERS {
             let bit = 1u16 << b;
@@ -2214,10 +2222,7 @@ impl PackPost {
                 .chain(hand.iter().map(|h| &h.0))
                 .find(touched)
                 .map(|_| true)
-                .or_else(|| {
-                    let p = passes.iter().find(touched)?;
-                    Some(p.reads & bit != 0 || p.written & bit == 0)
-                });
+                .or_else(|| passes.iter().find(touched).map(|_| true));
             if clears[b].is_some() && first == Some(true) {
                 cleared.push(b);
             }
@@ -2238,8 +2243,22 @@ impl PackPost {
         // Buffers of a size of their own clear apart from the blit, which writes colortex0.
         let (mut cleared, mut other_clears): (Vec<usize>, Vec<usize>) =
             cleared.into_iter().partition(|&b| sizes[b].is_none());
-        let room = 8 - 1;
-        other_clears.extend(cleared.split_off(room.min(cleared.len())));
+        let limits = device.limits();
+        let max_attachments = (limits.max_color_attachments as usize).min(8);
+        let mut bytes = attachment_bytes(0, formats[0]);
+        let mut attachments = 1;
+        cleared.retain(|&b| {
+            let next = attachment_bytes(bytes, formats[b]);
+            if attachments < max_attachments && next <= limits.max_color_attachment_bytes_per_sample
+            {
+                attachments += 1;
+                bytes = next;
+                true
+            } else {
+                other_clears.push(b);
+                false
+            }
+        });
         let float = wgpu::TextureSampleType::Float { filterable: true };
         let blit_targets = std::iter::once(target(formats[0]));
         // Cleared by the pass's load operation; the shader writes nothing there.
@@ -3624,9 +3643,9 @@ impl PackPost {
                 if attachments.len() <= l {
                     attachments.resize(l + 1, None);
                 }
-                // Overwritten whole.
+                // A shadowcomp shader can leave part of its destination untouched.
                 let ops = wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 };
                 attachments[l] = t.color(buffer, true).and_then(|v| attach(v, ops));
@@ -3865,11 +3884,21 @@ impl PackPost {
             load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
             store: wgpu::StoreOp::Store,
         };
-        // Attachments of a pass share a size.
+        // Attachments share a size and stay within the device's count and byte limits.
+        let limits = device.limits();
+        let max_attachments = (limits.max_color_attachments as usize).min(8);
         let mut by_size: Vec<([u32; 2], Vec<usize>)> = Vec::new();
         for &b in &self.other_clears {
             let at = targets.sizes[b];
-            match by_size.iter_mut().find(|(s, l)| *s == at && l.len() < 8) {
+            match by_size.iter_mut().find(|(s, buffers)| {
+                let bytes = buffers
+                    .iter()
+                    .fold(0, |bytes, &b| attachment_bytes(bytes, self.formats[b]));
+                *s == at
+                    && buffers.len() < max_attachments
+                    && attachment_bytes(bytes, self.formats[b])
+                        <= limits.max_color_attachment_bytes_per_sample
+            }) {
                 Some((_, l)) => l.push(b),
                 None => by_size.push((at, vec![b])),
             }
@@ -4009,8 +4038,9 @@ impl PackPost {
                     .map(|t| &t[usize::from(self.main & 1 << i == 0)])
             };
             let mut attachments: Vec<Option<wgpu::RenderPassColorAttachment>> = Vec::new();
-            // A scaled pass keeps what its buffers hold outside its viewport.
-            let ops = if pass.viewport.is_some() {
+            // Vertex coverage and fragment discard can leave alternate pixels untouched.
+            // The unused sink can still skip loading its old contents.
+            let ops = if !pass.sink || pass.viewport.is_some() {
                 wgpu::Operations {
                     load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
@@ -4383,3 +4413,6 @@ mod tests {
         assert!(source("shadowtex1HW", false, true, false) == Source::ShadowDepth(1, true));
     }
 }
+
+#[cfg(test)]
+mod destination_tests;
