@@ -851,7 +851,9 @@ mod tests {
     /// `bbWidth / 2` in front.
     #[test]
     fn a_sulfur_cube_is_leashed_by_its_block_and_hangs_at_its_middle() {
-        let ran = crate::mobs::world::with_test_world(&[], |_, types| {
+        // `with_test_world` answers false when the prepared data is absent, and
+        // the edits are inside the closure, so a skip needs no early return.
+        let _ = crate::mobs::world::with_test_world(&[], |_, types| {
             let new = || {
                 Mob::new(
                     1,
