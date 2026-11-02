@@ -3,7 +3,8 @@ SetWritableBookPagesFunction	missing		`horizon-world/src/loot.rs::modify` has no
 SetWrittenBookPagesFunction	missing		no `set_written_book_pages` arm in `loot.rs::modify` (the arms run from `sequence` and `set_count` through `set_potion` to `set_stew_effect`); no vanilla loot table asks for one
 SmeltItemFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	furnace_smelt arm: smelting recipe, use_input_count and stack cap
 SmeltItemFunction.smelted	skip:java		static builder factory
-ToggleTooltips	home	crates/horizon-client/src/game/commands/items.rs	the `/item modify` arm toggle_tooltips writes the tooltip_display component's hide_tooltip and hidden_components as run does; the loot run has no arm, and no vanilla loot table uses it
+ToggleTooltips	home	crates/horizon-client/src/game/commands/items.rs	the `/item modify` arm of cmd_item_modify writes the tooltip_display component's hide_tooltip and hidden_components as run does; the loot run has no arm, and no vanilla loot table uses it
+ToggleTooltips.run	inline	crates/horizon-client/src/game/commands/items.rs::Game::cmd_item_modify	the `minecraft:toggle_tooltips` arm of the `/item modify` command adds each false toggle to `tooltip_display`'s hidden_components and keeps hide_tooltip; the loot run has no arm, so a loot table's toggle_tooltips is ignored (no vanilla loot table uses one)
 LootContextParamSets	skip:data		loot parameter set registry and validation; Horizon reads its loot tables
 AllOfCondition.allOf	skip:java		static builder
 AllOfCondition.combine	inline	crates/horizon-items/src/items.rs::LootContext::condition	all_of arm: every term must hold

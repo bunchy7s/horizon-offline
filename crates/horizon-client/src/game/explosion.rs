@@ -623,7 +623,6 @@ impl Game<'_> {
             items_ignore: items_ignore_explosion(self.ui.rules.bool("mob_griefing"), interaction),
             spared: exploding.filter(|_| self.combat.explosion_source_named),
         };
-        let (items_before, orbs_before) = (self.dropped_ids(), self.orb_ids());
         let (items_len, orbs_len) = (self.dropped.len(), self.orbs.len());
         let (mut items_kept, mut orbs_kept) = (0, 0);
         let (mut boats_gone, mut carts_gone) = (0, 0);
@@ -723,8 +722,7 @@ impl Game<'_> {
         }
         self.dropped.drain(items_kept..items_len);
         self.orbs.drain(orbs_kept..orbs_len);
-        self.native_items_left_since(&items_before);
-        self.native_orbs_left_since(&orbs_before);
+        self.native_leaves_flush();
         // Frames, paintings, cushions and armour stands last: vanilla lists
         // the entities in reach before hurting any, so the items they drop
         // here are neither destroyed nor pushed by the same blast.
