@@ -5,11 +5,7 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_bucket_empty",
       "neoforge": "none (vanilla BucketItem.emptyContents; NeoForge has no matching event)",
       "side": "server",
-      "cancellable": true,
-      "mod_api": {
-        "contract": "cancel",
-        "out": "cancel"
-      }
+      "cancellable": true
     }
   ],
   "rust_summary": "a server player emptying a bucket, cancellable (`native_bucket_empty`).",
