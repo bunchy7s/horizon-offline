@@ -196,6 +196,11 @@ pub(super) trait Entity: EntityRules {
     fn can_use_portal(&self, _game: &Game<'_>) -> bool {
         true
     }
+    /// A boat or minecart: the kinds whose portal pass opens the tick, before
+    /// they move (`AbstractMinecart.tick` handles its portal first).
+    fn is_vehicle(&self) -> bool {
+        false
+    }
     /// Where it stood at the start of its tick, for the kinds that store it
     /// (None: `portals.before` has it).
     fn portal_from(&self) -> Option<Vec3> {
@@ -546,6 +551,9 @@ impl Entity for ExperienceOrb {
 
 impl Entity for Boat {
     stored_motion!();
+    fn is_vehicle(&self) -> bool {
+        true
+    }
     /// `Boat.getEyeY`: the top of the 0.5625 box.
     fn fluid_eye_y(&self) -> f64 {
         self.position.y + super::boats::HEIGHT
@@ -579,6 +587,9 @@ impl Entity for Boat {
 
 impl Entity for Minecart {
     stored_motion!();
+    fn is_vehicle(&self) -> bool {
+        true
+    }
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((
             super::minecarts::WIDTH as f32,
