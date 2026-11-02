@@ -248,8 +248,15 @@ impl Game<'_> {
     fn heal_skull_owner(&mut self, p: &Projectile, owner: Option<Who>) {
         match owner {
             Some(Who::Mob(id)) => {
-                if let Some(w) = self.mobs.iter_mut().find(|m| m.id == id && m.alive()) {
-                    w.health = (w.health + 5.0).min(w.attrs.max_health);
+                if self.mobs.iter().any(|m| m.id == id && m.alive()) {
+                    let mut amount = 5.0;
+                    let mut cancel = false;
+                    self.native_living_heal(Some(id), &mut amount, &mut cancel);
+                    if !cancel
+                        && let Some(w) = self.mobs.iter_mut().find(|m| m.id == id && m.alive())
+                    {
+                        w.health = (w.health + amount).min(w.attrs.max_health);
+                    }
                 }
             }
             // The player (or the guest acting now) who owns the skull.
