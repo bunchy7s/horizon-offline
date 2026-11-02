@@ -805,5 +805,6 @@
   "{file} is not a Horizon game for this computer.": "{file} はこのコンピューター用の Horizon のゲームではありません。",
   "Install a release or Nightly first: an imported build plays with its game files.": "先にリリースか Nightly をインストールしてください。インポートしたビルドはそのゲームファイルを使います。",
   "{file} holds no {program}.": "{file} に {program} がありません。",
-  "Could not import the build: {error}": "ビルドをインポートできませんでした: {error}"
+  "Could not import the build: {error}": "ビルドをインポートできませんでした: {error}",
+  "Sort by: {order}": "並び替え: {order}"
 }
