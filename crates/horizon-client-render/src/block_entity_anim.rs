@@ -383,7 +383,7 @@ impl Shulker {
         out
     }
     /// `ShulkerBoxBlock.canOpen`: a closed box only opens when its lid has room
-    /// (`level.noCollision` of the half-block lid box, deflated by 1e-6).
+    /// (`level.noCollision` of the lid box at half progress, deflated by 1e-6).
     pub fn lid_box(pos: [i32; 3], facing: u8) -> [f64; 6] {
         let bottom = [
             f64::from(pos[0]) + 0.5,

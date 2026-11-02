@@ -1,0 +1,9 @@
+# {name}: a native trait mod (docs/native-mods.md, "Trait mods"). Build it with
+# `horizon-launcher native-build <this folder> --instance <instance> --trust-native-code`.
+[mod]
+id = "{id}"
+version = "0.1.0"
+
+{compatibility}
+[api]
+path = "api"
