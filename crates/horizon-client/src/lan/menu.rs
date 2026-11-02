@@ -832,16 +832,20 @@ mod tests {
             shulker: false,
             hidden: &[],
         };
+        // `doClick` only starts the collect when the carried stack is not
+        // empty and the clicked slot has no item or may not be taken
+        // (`!carried.isEmpty() && (!slot.hasItem() || !slot.mayPickup(player))`),
+        // so the click lands on an empty slot and the sweep picks the side.
         // One stone short of a full stack: the right double-click takes it
         // from the last matching slot.
         view.guest.carried = Some(ItemStack::new("minecraft:stone", 63));
-        click(&mut view, &mut drag, 0, 1, input::PICKUP_ALL, &rules);
+        click(&mut view, &mut drag, 2, 1, input::PICKUP_ALL, &rules);
         assert_eq!(view.get(0).map(|s| s.count), Some(5));
         assert_eq!(view.get(1).map(|s| s.count), Some(4));
         assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
         // The left one takes it from the first.
         view.guest.carried = Some(ItemStack::new("minecraft:stone", 63));
-        click(&mut view, &mut drag, 0, 0, input::PICKUP_ALL, &rules);
+        click(&mut view, &mut drag, 2, 0, input::PICKUP_ALL, &rules);
         assert_eq!(view.get(0).map(|s| s.count), Some(4));
         assert_eq!(view.get(1).map(|s| s.count), Some(4));
         assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
