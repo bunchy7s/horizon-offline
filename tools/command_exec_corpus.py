@@ -1739,6 +1739,9 @@ def trial_spawner_passengers():
             cmd(f'/data get entity @e[tag={parent},limit=1] Passengers[0].Tags'),
             *setup(f'/kill @e[tag={parent}]', f'/kill @e[tag={rider}]',
                    '/setblock 4 220 4 air'),
+            # The killed pair lies dying for 20 ticks, and a dying mob still
+            # obstructs the next spawn (`Mob.checkSpawnObstruction`).
+            {'op': 'tick', 'n': 25},
         ]
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
