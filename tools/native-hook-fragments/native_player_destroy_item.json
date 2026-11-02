@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_destroy_item",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_destroy_item",
+      "neoforge": "none (NeoForge's PlayerDestroyItemEvent carries the original stack and a hand, which armour has not; this hook only listens and names the slot instead. Bukkit's PlayerItemBreakEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a player's item breaking (`native_player_destroy_item`).",
+  "doc_summary": "a player's item breaking: `native_player_destroy_item(player, name, item, slot)` is heard for a server player whose tool, shield, rod or armour piece ran out of durability (`LivingEntity.onEquippedItemBroken`, Bukkit's `PlayerItemBreakEvent`), with the item that broke and the slot it was in (`mainhand`, `offhand`, `head`, `chest`, `legs`, `feet`, `body`, `saddle`); armour has a slot rather than a hand. `native_item_damaged` is the wear, this is only the break. Listen only. The player's state is swapped in. Not heard for a creative player or for the host of a LAN world. Bundles that use it need `\"hooks\": @API:native_player_destroy_item@`."
+}

@@ -57,7 +57,7 @@ pub use properties::{Entry, Note, Properties};
 pub use screens::{Item as ScreenItem, Screens};
 pub use textures::{
     CustomTexture, Dim as TextureDim, EVERY_STAGE, Texels, Texture, TextureSource, decode_png,
-    load_textures,
+    load_textures, resolve_resources,
 };
 pub use translate::{
     AlphaTest, ComputeProgram, DRAW_UNIFORMS, Error, GbuffersInputs, GeometryInputs, Image,
