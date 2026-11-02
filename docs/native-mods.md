@@ -1351,6 +1351,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_brewing_start(pos, ingredient)`**: a brewing stand at `pos` starts its timer for `ingredient`, after it consumes fuel. Server-side.
 - **`native_campfire_start(pos, item)`**: `item` was placed on the campfire at `pos` and began cooking. Server-side.
 - **`native_block_cook(pos, item, result)`**: a campfire finishes cooking `item` into `result` at `pos`, before the result is dropped. Server-side.
+- **`native_compost_item(pos, item)`**: a player adds a compostable item to the composter at `pos`, after its layer is applied. Server-side.
 - **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and
   their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
   player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a
