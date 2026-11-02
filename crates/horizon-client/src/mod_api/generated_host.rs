@@ -872,15 +872,6 @@ pub trait Host {
     fn config_dir(&self) -> Result<PathBuf, String> {
         unimplemented!("Host::config_dir")
     }
-    /// The instance (game) folder, which its players share: `saves/`,
-    /// `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are in it, and the
-    /// title's screens create worlds and read packs there. A world's own
-    /// `datapacks/` is in that world's folder (`saves/<world>/datapacks`).
-    /// The folder the game runs in (`--player-dir` moves a player's options
-    /// and servers only, not the instance). Nothing is created. API 154.
-    fn instance_dir(&self) -> PathBuf {
-        unimplemented!("Host::instance_dir")
-    }
     /// Shows the panel beside container screens with these items (at most
     /// 8192), as the game's own slots in pages, with a search box; the
     /// player's clicks, searches and keys over items come back as
@@ -1188,5 +1179,14 @@ pub trait Host {
         let _ = at;
         let _ = size;
         unimplemented!("Host::item_stack")
+    }
+    /// The instance (game) folder, which its players share: `saves/`,
+    /// `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are in it, and the
+    /// title's screens create worlds and read packs there. A world's own
+    /// `datapacks/` is in that world's folder (`saves/<world>/datapacks`).
+    /// The folder the game runs in (`--player-dir` moves a player's options
+    /// and servers only, not the instance). Nothing is created. API @API:native_instance_dir@.
+    fn instance_dir(&self) -> PathBuf {
+        unimplemented!("Host::instance_dir")
     }
 }

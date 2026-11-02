@@ -345,10 +345,6 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_config_dir"
     },
     {
-      "name": "instance_dir",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_instance_dir"
-    },
-    {
       "name": "panel_items",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_panel_items"
     },

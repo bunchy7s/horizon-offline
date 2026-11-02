@@ -16835,7 +16835,10 @@ impl Game<'_> {
         } = &mut event
             && key_event.state == ElementState::Pressed
         {
-            if self.screen_hooks_open() && self.screen != Screen::Options && self.title.is_none() {
+            if self.screen_hooks_open()
+                && self.screen != Screen::Options
+                && !control::title_owns_text(&self.screen, self.title.is_some())
+            {
                 typed = key_event.text.take().map(|text| text.to_string());
             }
             let canceled = match key_event.physical_key {

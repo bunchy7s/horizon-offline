@@ -355,9 +355,6 @@ impl Host for super::Game<'_> {
     fn config_dir(&self) -> Result<PathBuf, String> {
         Self::native_config_dir()
     }
-    fn instance_dir(&self) -> PathBuf {
-        self.native_instance_dir()
-    }
     fn panel_items(&mut self, mod_id: &str, items: Vec<NativeStack>) {
         self.native_panel_items(mod_id, items)
     }
@@ -485,5 +482,8 @@ impl Host for super::Game<'_> {
     }
     fn item_stack(&self, batch: &mut HudBatch, stack: &ItemStack, at: [f32; 2], size: f32) -> bool {
         self.native_item_stack(batch, stack, at, size)
+    }
+    fn instance_dir(&self) -> PathBuf {
+        self.native_instance_dir()
     }
 }

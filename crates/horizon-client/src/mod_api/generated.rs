@@ -1195,7 +1195,7 @@ pub trait Hooks: Send + Sync {
     /// `ScreenEvent.Render.Post` fires for them. The title's own screens
     /// (`title`, `world_select`, `world_create`, `multiplayer`…) fire it too,
     /// their `screen.id` from the title state machine and the whole window
-    /// their `rect` (API 154), and no dialog or prompt over them.
+    /// their `rect` (API @API:native_instance_dir@), and no dialog or prompt over them.
     /// API 78.
     fn screen_render_post(&self, host: &dyn Host, event: &mut ScreenRenderPostEvent<'_>) {
         let _ = host;
@@ -1229,7 +1229,7 @@ pub trait Hooks: Send + Sync {
     /// It fires before anything the screen does with the press, on the window
     /// only, and while a screen of the game's or the title's is open (Options
     /// and the pack list opened from the title screen count, with no player
-    /// and no `menu`; the title's own screens since API 154, their
+    /// and no `menu`; the title's own screens since API @API:native_instance_dir@, their
     /// `screen.id` from the title state machine). It does not fire on the
     /// connect and loading screens, nor for a server
     /// dialog, the server pack, link and code-of-conduct prompts, a book or a
@@ -1423,7 +1423,7 @@ pub trait Hooks: Send + Sync {
     /// (horizon-ctl's `scroll-at` sends it through the window too), and
     /// while a screen of the game's or the title's is open (Options and the
     /// pack list opened from the title screen count, with no player and no
-    /// `menu`; the title's own since API 154). It
+    /// `menu`; the title's own since API @API:native_instance_dir@). It
     /// does not fire on the connect and loading
     /// screens, nor for a server dialog, the server pack, link and
     /// code-of-conduct prompts, a book or a sign editor drawn over gameplay,
@@ -1494,7 +1494,7 @@ pub trait Hooks: Send + Sync {
     /// own shortcuts have run — the fullscreen and screenshot keys, the debug
     /// keys and the narrator — and while a screen of the game's or the title's
     /// is open (Options and the pack list opened from the title screen count,
-    /// with no player and no `menu`; the title's own since API 154). It does
+    /// with no player and no `menu`; the title's own since API @API:native_instance_dir@). It does
     /// not fire on the connect and loading screens, nor for a server dialog, the server pack,
     /// link and code-of-conduct prompts, a book or a sign editor drawn over
     /// gameplay, nor while a world loads or saves: the key there stays the

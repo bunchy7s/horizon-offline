@@ -234,7 +234,10 @@ impl Game<'_> {
             return Ok(());
         }
         // The title's screens: the world name, the seed, a server's address.
-        if let Some(title) = &mut self.title {
+        // A screen opened over the title (Options, say) keeps its own text.
+        if title_owns_text(&self.screen, self.title.is_some())
+            && let Some(title) = &mut self.title
+        {
             title.type_text(text);
             return Ok(());
         }
@@ -1464,9 +1467,23 @@ fn key_code(name: &str) -> Option<KeyCode> {
     })
 }
 
+/// The title's own screens (not one opened over it, as Options is) take the
+/// text: the world name, the seed, a server's address.
+pub(super) fn title_owns_text(screen: &Screen, title_up: bool) -> bool {
+    title_up && *screen == Screen::Playing
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_title_takes_text_only_on_its_own_screens() {
+        assert!(title_owns_text(&Screen::Playing, true));
+        assert!(!title_owns_text(&Screen::Playing, false));
+        assert!(!title_owns_text(&Screen::Options, true));
+        assert!(!title_owns_text(&Screen::Chat, true));
+    }
 
     #[test]
     fn hello_names_the_protocol_the_release_and_the_command_groups() {

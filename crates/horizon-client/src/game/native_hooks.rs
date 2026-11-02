@@ -6,12 +6,6 @@
 //! Horizon's own HUD extras do, and keep a mod's settings where the
 //! WebAssembly mod of the same id kept them.
 //!
-//! API 154 adds the title's own screens to the screen hooks: `native_screen_render_post` and the
-//! mouse, wheel, key and drag `_pre` hooks fire on Title, Select World, Create New World, the
-//! multiplayer screens and the rest, with their ids (`title`, `world_select`, `world_create`,
-//! `multiplayer`…), so a mod draws and takes clicks there; and the instance folder
-//! (`native_instance_dir`), beside which `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are.
-//!
 //! API 153 adds a player starting or stopping flight, cancellable (`native_player_toggle_flight`).
 //!
 //! API 152 adds a player opening and closing a menu (`native_player_container_open`, `native_player_container_close`).
@@ -533,7 +527,7 @@ pub(super) use horizon_world::level::flags;
 /// The hook points' API version. The launcher reads this line from the
 /// source it builds; keep its form.
 #[allow(dead_code)]
-pub(crate) const NATIVE_HOOKS_API: u32 = 154;
+pub(crate) const NATIVE_HOOKS_API: u32 = 153;
 
 impl GameLevel<'_> {
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side. @API:hopper_pickup_item@.
@@ -2433,7 +2427,7 @@ impl Game<'_> {
     /// `ScreenEvent.Render.Post` fires for them. The title's own screens
     /// (`title`, `world_select`, `world_create`, `multiplayer`…) fire it too,
     /// their `screen.id` from the title state machine and the whole window
-    /// their `rect` (API 154), and no dialog or prompt over them.
+    /// their `rect` (API @API:native_instance_dir@), and no dialog or prompt over them.
     /// API 78.
     pub(super) fn native_screen_render_post(
         &self,
@@ -2455,7 +2449,7 @@ impl Game<'_> {
     /// It fires before anything the screen does with the press, on the window
     /// only, and while a screen of the game's or the title's is open (Options
     /// and the pack list opened from the title screen count, with no player
-    /// and no `menu`; the title's own screens since API 154, their
+    /// and no `menu`; the title's own screens since API @API:native_instance_dir@, their
     /// `screen.id` from the title state machine). It does not fire on the
     /// connect and loading screens, nor for a server
     /// dialog, the server pack, link and code-of-conduct prompts, a book or a
@@ -2546,7 +2540,7 @@ impl Game<'_> {
     /// (horizon-ctl's `scroll-at` sends it through the window too), and
     /// while a screen of the game's or the title's is open (Options and the
     /// pack list opened from the title screen count, with no player and no
-    /// `menu`; the title's own since API 154). It
+    /// `menu`; the title's own since API @API:native_instance_dir@). It
     /// does not fire on the connect and loading
     /// screens, nor for a server dialog, the server pack, link and
     /// code-of-conduct prompts, a book or a sign editor drawn over gameplay,
@@ -2585,7 +2579,7 @@ impl Game<'_> {
     /// own shortcuts have run — the fullscreen and screenshot keys, the debug
     /// keys and the narrator — and while a screen of the game's or the title's
     /// is open (Options and the pack list opened from the title screen count,
-    /// with no player and no `menu`; the title's own since API 154). It does
+    /// with no player and no `menu`; the title's own since API @API:native_instance_dir@). It does
     /// not fire on the connect and loading screens, nor for a server dialog, the server pack,
     /// link and code-of-conduct prompts, a book or a sign editor drawn over
     /// gameplay, nor while a world loads or saves: the key there stays the
@@ -2689,7 +2683,7 @@ impl Game<'_> {
     /// its id from the title state machine (`title`, `world_select`,
     /// `world_create`, `multiplayer`, `add_server`…), no menu and no menu
     /// title, the whole window as its rectangle and no slots (no menu is
-    /// open). None while no title screen is up. API 154.
+    /// open). None while no title screen is up. API @API:native_instance_dir@.
     pub(super) fn title_screen_view(&self, batch: &HudBatch) -> Option<NativeScreenView<'_>> {
         let title = self.title.as_ref()?;
         Some(NativeScreenView {
@@ -7404,7 +7398,7 @@ impl Game<'_> {
     /// title's screens create worlds and read packs there. A world's own
     /// `datapacks/` is in that world's folder (`saves/<world>/datapacks`).
     /// The folder the game runs in (`--player-dir` moves a player's options
-    /// and servers only, not the instance). Nothing is created. API 154.
+    /// and servers only, not the instance). Nothing is created. API @API:native_instance_dir@.
     pub(super) fn native_instance_dir(&self) -> PathBuf {
         Self::game_dir()
     }
