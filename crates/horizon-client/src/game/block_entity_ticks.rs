@@ -215,6 +215,10 @@ impl Game<'_> {
     /// `AbstractFurnaceBlockEntity.serverTick` of the furnace at `pos`, and
     /// its block's `lit` following it.
     fn tick_furnace(&mut self, pos: Pos) -> Result<()> {
+        let before = match self.world.block_entities.get(&pos) {
+            Some(BlockEntity::Furnace(f)) => (f.lit_remaining, f.items[1].clone()),
+            _ => return Ok(()),
+        };
         let Some(BlockEntity::Furnace(f)) = self.world.block_entities.get_mut(&pos) else {
             return Ok(());
         };
@@ -225,6 +229,12 @@ impl Game<'_> {
             self.res.providers(),
             &mut drops,
         );
+        if before.0 == 0
+            && f.lit_remaining > 0
+            && let Some(fuel) = before.1
+        {
+            self.native_furnace_burn([pos.0, pos.1, pos.2], &fuel.item);
+        }
         for stack in drops {
             self.campfire_drop(pos, stack);
         }

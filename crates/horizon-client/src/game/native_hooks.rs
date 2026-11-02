@@ -3681,6 +3681,12 @@ impl Game<'_> {
         let _ = (parent, partner, child);
     }
 
+    /// A furnace at `pos` consumed fuel and began or resumed burning it.
+    /// `fuel` is the item consumed from its fuel slot. Server-side.
+    /// @API:furnace_burn@.
+    pub(super) fn native_furnace_burn(&self, pos: [i32; 3], fuel: &str) {
+        let _ = (pos, fuel);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
