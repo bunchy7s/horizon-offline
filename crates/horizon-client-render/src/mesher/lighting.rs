@@ -83,9 +83,17 @@ fn weighted_blend(c: [u32; 4], w: [f32; 4]) -> u32 {
     };
     channel(0) | channel(16) << 16
 }
-/// `ARGB.gray` channel: `Mth.floor(brightness * 255)`.
+/// `ARGB.gray` channel: `Mth.floor(brightness * 255)`. Without the `floorf`
+/// call x86-64's baseline instruction set makes of `f32::floor`: truncation,
+/// one lower where that rounded a negative value up (saturating as `as` does).
 pub(super) fn gray(brightness: f32) -> i32 {
-    (brightness * 255.0).floor() as i32
+    let v = brightness * 255.0;
+    let whole = v as i32;
+    if whole as f32 > v {
+        whole.saturating_sub(1)
+    } else {
+        whole
+    }
 }
 /// One channel of `ARGB.scaleRGB(color, float)`.
 pub(super) fn scale(channel: i32, by: f32) -> i32 {
@@ -404,6 +412,28 @@ mod tests {
             weighted_blend([packed(1, 0); 4], [-0.25; 4]) & 0xFF,
             (-16i32 as u32) & 0xFF
         );
+    }
+    #[test]
+    fn gray_floors_like_f32_floor() {
+        let mut values = vec![
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            -0.0,
+            1.0,
+            -1.0,
+            1e10,
+            -1e10,
+        ];
+        for bits in (0..u32::MAX).step_by(7919) {
+            values.push(f32::from_bits(bits));
+        }
+        for i in -3000..3000 {
+            values.push(i as f32 / 1024.0);
+        }
+        for v in values {
+            assert_eq!(gray(v), (v * 255.0).floor() as i32, "{v:e}");
+        }
     }
     #[test]
     fn colour_arithmetic_matches_argb_helpers() {

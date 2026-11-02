@@ -86,7 +86,7 @@ fn columns_loaded_past_the_render_distance_mesh_when_they_come_in_range() {
             // and nothing comes back (`pending` empties).
             streaming.free(uploads);
             thread::sleep(Duration::from_millis(5));
-            let idle = streaming.pending() == 0 && before == (world.chunks.len(), meshed.len());
+            let idle = !streaming.busy() && before == (world.chunks.len(), meshed.len());
             quiet = if idle { quiet + 1 } else { 0 };
         }
     };
@@ -181,7 +181,7 @@ fn relit_columns_keep_every_mesh_current() {
         while quiet < 40 {
             assert!(Instant::now() < deadline, "streaming never settled");
             let (uploads, _) = streaming.update(world);
-            let idle = uploads.is_empty() && streaming.pending() == 0;
+            let idle = uploads.is_empty() && !streaming.busy();
             meshes.extend(uploads);
             thread::sleep(Duration::from_millis(5));
             quiet = if idle { quiet + 1 } else { 0 };

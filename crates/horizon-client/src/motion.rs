@@ -432,6 +432,16 @@ fn attribute_error(error: impl std::fmt::Debug) -> io::Error {
     io::Error::other(format!("movement attribute: {error:?}"))
 }
 impl PlayerMotion {
+    /// `ServerGamePacketListenerImpl.handleMovePlayer`: the movement the client
+    /// sent is the server copy's own delta movement. A glide's wall hit reads it
+    /// as the speed the glide had (`LivingEntity.handleFallFlyingCollisions`'s
+    /// moveHorLength); a copy whose travels start from its own last velocity
+    /// otherwise keeps a few hundredths there, and no hit reaches the damage.
+    pub fn carry_client_movement(&mut self, movement: Vec3) {
+        if self.fall_flying {
+            self.velocity = movement;
+        }
+    }
     /// `Player.isSweepAttack`, using the resident player's known horizontal velocity.
     pub fn is_sweep_attack(&self, strength: f32, critical: bool, sword: bool) -> bool {
         let movement = self.velocity;
@@ -3445,6 +3455,60 @@ mod tests {
         assert_eq!(player.health.health(), health);
         assert_eq!(player.fall_distance, 10.0);
         assert!(player.events.is_empty());
+    }
+
+    /// `LivingEntity.handleFallFlyingCollisions`: a glide that meets a wall loses
+    /// the horizontal speed it had, and the server's copy hurts by that loss,
+    /// `(moveHorLength - newMoveHorLength) * 10 - 3`, as `minecraft:fly_into_wall`.
+    /// The speed it starts the tick with is the client's own movement
+    /// (`handleMovePlayer` gives the server copy its delta movement), so the
+    /// loss is the speed the glide actually flew at.
+    #[test]
+    fn a_glide_into_a_wall_hurts_by_the_speed_it_lost() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 1).unwrap();
+        // A wall in the way of a glide along +x, at feet height.
+        let stone = assets.registry.default_state("minecraft:stone").unwrap();
+        for y in 4..=5 {
+            for z in 19..=21 {
+                scene.set(23, y, z, stone).unwrap();
+            }
+        }
+        let mut player = PlayerMotion::new(&resources, Vec3::new(22.0, 4.0, 20.5)).unwrap();
+        player.fall_flying = true;
+        // Looking along +x (the `getLookAngle` of a flat -90 yaw) keeps the
+        // glide on its course through `updateFallFlyingMovement`'s pull.
+        player.yaw = -90.0;
+        player.pitch = 0.0;
+        player.carry_client_movement(Vec3::new(1.2, 0.0, 0.0));
+        MotionWorld {
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets: &assets,
+            collision_binding: &binding,
+            resources: &resources,
+        }
+        .server_travel()
+        .unwrap();
+        assert!(
+            player
+                .hurt_log
+                .last()
+                .is_some_and(|hurt| hurt.source == "minecraft:fly_into_wall"),
+            "{:?}",
+            player.hurt_log
+        );
+        assert!(player.health.health() < 20.0, "{}", player.health.health());
     }
 
     #[test]

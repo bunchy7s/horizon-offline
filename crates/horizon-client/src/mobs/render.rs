@@ -1278,15 +1278,7 @@ fn draw_normals(
     out: &mut Vec<Vertex>,
 ) {
     let p = poses.pose(part);
-    let m = base
-        * glam::Mat4::from_translation(glam::Vec3::new(p[0], p[1], p[2]) / 16.0)
-        * glam::Mat4::from_quat(glam::Quat::from_euler(
-            glam::EulerRot::ZYX,
-            p[5],
-            p[4],
-            p[3],
-        ))
-        * glam::Mat4::from_scale(glam::Vec3::new(p[6], p[7], p[8]));
+    let m = posed(base, p);
     if poses.is_hidden(part) || p[6] == 0.0 && p[7] == 0.0 && p[8] == 0.0 {
         return;
     }
@@ -1324,6 +1316,46 @@ fn draw_normals(
         draw_normals(c, m, normals, poses, uv, scroll, color, light, overlay, out);
     }
 }
+/// A part's matrix under `base` for its pose (`ModelPart.translateAndRotate`
+/// and its scale), as `draw` and the GPU path (`super::skin`) both use it.
+pub(super) fn posed(base: glam::Mat4, p: [f32; 9]) -> glam::Mat4 {
+    base * glam::Mat4::from_translation(glam::Vec3::new(p[0], p[1], p[2]) / 16.0)
+        * glam::Mat4::from_quat(glam::Quat::from_euler(
+            glam::EulerRot::ZYX,
+            p[5],
+            p[4],
+            p[3],
+        ))
+        * glam::Mat4::from_scale(glam::Vec3::new(p[6], p[7], p[8]))
+}
+/// `draw_scrolled` through the GPU path when the mob takes it (`skin`).
+#[allow(clippy::too_many_arguments)]
+fn put(
+    skin: &mut Option<&mut super::skin::Skin>,
+    part: &std::sync::Arc<Part>,
+    base: glam::Mat4,
+    poses: &Poses,
+    uv: [f32; 4],
+    scroll: f32,
+    color: u32,
+    light: u32,
+    overlay: u32,
+    out: &mut Vec<Vertex>,
+) {
+    let paint = super::skin::Paint {
+        uv,
+        scroll,
+        color,
+        light,
+        overlay,
+    };
+    if let Some(skin) = skin
+        && skin.draw(part, base, poses, paint)
+    {
+        return;
+    }
+    draw_scrolled(part, base, poses, uv, scroll, color, light, overlay, out);
+}
 /// Render a mob with its variant model, texture and layers.
 pub fn render(
     m: &Mob,
@@ -1360,7 +1392,7 @@ pub fn render_with(
                 let shifted =
                     camera - glam::DVec3::new(off[0] + w[0], off[1] + w[1], off[2] + w[2]);
                 let base = base_transform(m, alpha, shifted);
-                render_visible(m, alpha, base, atlas, light, data, extra, true, out);
+                render_visible(m, alpha, base, atlas, light, data, extra, true, out, None);
             }
         }
         return;
@@ -1375,6 +1407,37 @@ pub fn render_with(
         extra,
         true,
         out,
+        None,
+    );
+}
+/// `render` with the model's ordinary draws posed on the GPU when the mob
+/// allows it (`super::skin`): the same picture, no vertices on the CPU.
+#[allow(clippy::too_many_arguments)]
+pub fn render_skinned(
+    m: &Mob,
+    alpha: f32,
+    camera: glam::DVec3,
+    atlas: Atlas,
+    light: u32,
+    data: &MobData,
+    out: &mut Vec<Vertex>,
+    skin: &mut super::skin::Skin,
+) {
+    if super::trader::is_invisible(m) {
+        render_with(m, alpha, camera, atlas, light, data, &[], out);
+        return;
+    }
+    render_visible(
+        m,
+        alpha,
+        base_transform(m, alpha, camera),
+        atlas,
+        light,
+        data,
+        &[],
+        true,
+        out,
+        Some(skin),
     );
 }
 /// `CapeLayer.submit` with `PlayerCapeModel`: the player model's body posed
@@ -1632,7 +1695,7 @@ pub fn render_layers(
     out: &mut Vec<Vertex>,
 ) {
     let base = base_transform(m, alpha, camera);
-    render_visible(m, alpha, base, atlas, light, data, extra, false, out);
+    render_visible(m, alpha, base, atlas, light, data, extra, false, out, None);
 }
 /// A mob drawn under `origin` instead of at its position (the spinning mob
 /// of `SpawnerRenderer.submitEntityInSpawner`).
@@ -1646,7 +1709,7 @@ pub fn render_posed(
     out: &mut Vec<Vertex>,
 ) {
     let base = base_transform_at(m, alpha, origin);
-    render_visible(m, alpha, base, atlas, light, data, &[], true, out);
+    render_visible(m, alpha, base, atlas, light, data, &[], true, out, None);
 }
 /// The custom model's key of a body model: `main` is the wide player model, `kind.model`.
 fn cem_key(model_key: &str) -> &str {
@@ -1730,6 +1793,7 @@ fn render_visible(
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
     body_visible: bool,
     out: &mut Vec<Vertex>,
+    skin: Option<&mut super::skin::Skin>,
 ) {
     let overlay = u32::from(red_overlay(m));
     let s = anim::state(m, alpha);
@@ -1799,56 +1863,6 @@ fn render_visible(
     if let Some(animation) = body_animation {
         animation.run(m, &s, &mut poses);
     }
-    let draw_body = |out: &mut Vec<Vertex>| {
-        // A player or mannequin whose skin has no atlas sprite (an evicted or
-        // never stored download) draws with its default skin, not invisibly.
-        let drawn = sprite(texture).or_else(|| Some((texture, atlas(texture)?)));
-        let uv = drawn.map(|(_, uv)| uv).or_else(|| {
-            if avatar(m) {
-                atlas(&m.kind.texture)
-            } else {
-                None
-            }
-        });
-        if body_visible && let Some(uv) = uv {
-            let start = out.len();
-            draw(
-                &model,
-                base,
-                &poses,
-                uv,
-                body_color(m, alpha),
-                light,
-                body_overlay(m, alpha),
-                out,
-            );
-            if let Some(glow) = drawn.and_then(|(name, _)| emissive_uv(name)) {
-                draw(
-                    &model,
-                    base,
-                    &poses,
-                    glow,
-                    body_color(m, alpha),
-                    FULL_BRIGHT,
-                    0,
-                    out,
-                );
-            }
-            if translucent_body(m) {
-                mark_oit(&mut out[start..]);
-            }
-        }
-    };
-    // The translucent shell writes depth: draw the opaque core before it.
-    let shell_last = m.species() == Species::SulfurCube;
-    if !shell_last {
-        draw_body(out);
-    }
-    // The worn armour's layers (and their emissive overlays, full bright).
-    for (part, uv, color, layer_overlay, glows) in extra {
-        let light = if *glows { FULL_BRIGHT } else { light };
-        draw(part, base, &poses, *uv, *color, light, *layer_overlay, out);
-    }
     let mut all_layers = layers(m, s.age);
     // WardenRenderer: the translucent emissive layers fade with the animations.
     if m.species() == Species::Warden {
@@ -1863,6 +1877,87 @@ fn render_visible(
                 });
             }
         }
+    }
+    // The GPU path takes the whole mob or none of it, so its draws keep their
+    // order: only plain opaque and cutout draws of models it can pose (no
+    // custom models, translucency, eyes or energy swirl, which the CPU path
+    // changes after drawing).
+    let mut skin = skin;
+    let posable = match skin.as_deref_mut() {
+        Some(skin) => {
+            custom_body.is_none()
+                && extra.is_empty()
+                && m.species() != Species::SulfurCube
+                && !translucent_body(m)
+                && energy_swirl(m, s.age).is_none()
+                && skin.supports(&model)
+                && all_layers.iter().all(|layer| {
+                    !layer.full_bright
+                        && !translucent_layer(m, layer)
+                        && cem.layer(&layer.model).is_none()
+                        && m.kind
+                            .layer(&layer.model)
+                            .is_none_or(|part| skin.supports(part))
+                })
+        }
+        None => false,
+    };
+    if !posable {
+        skin = None;
+    }
+    let draw_body = |out: &mut Vec<Vertex>, skin: &mut Option<&mut super::skin::Skin>| {
+        // A player or mannequin whose skin has no atlas sprite (an evicted or
+        // never stored download) draws with its default skin, not invisibly.
+        let drawn = sprite(texture).or_else(|| Some((texture, atlas(texture)?)));
+        let uv = drawn.map(|(_, uv)| uv).or_else(|| {
+            if avatar(m) {
+                atlas(&m.kind.texture)
+            } else {
+                None
+            }
+        });
+        if body_visible && let Some(uv) = uv {
+            let start = out.len();
+            put(
+                skin,
+                &model,
+                base,
+                &poses,
+                uv,
+                0.0,
+                body_color(m, alpha),
+                light,
+                body_overlay(m, alpha),
+                out,
+            );
+            if let Some(glow) = drawn.and_then(|(name, _)| emissive_uv(name)) {
+                put(
+                    skin,
+                    &model,
+                    base,
+                    &poses,
+                    glow,
+                    0.0,
+                    body_color(m, alpha),
+                    FULL_BRIGHT,
+                    0,
+                    out,
+                );
+            }
+            if translucent_body(m) {
+                mark_oit(&mut out[start..]);
+            }
+        }
+    };
+    // The translucent shell writes depth: draw the opaque core before it.
+    let shell_last = m.species() == Species::SulfurCube;
+    if !shell_last {
+        draw_body(out, &mut skin);
+    }
+    // The worn armour's layers (and their emissive overlays, full bright).
+    for (part, uv, color, layer_overlay, glows) in extra {
+        let light = if *glows { FULL_BRIGHT } else { light };
+        draw(part, base, &poses, *uv, *color, light, *layer_overlay, out);
     }
     // One Poses refilled for every layer (armour draws up to seven): it keeps
     // its maps' capacity.
@@ -1917,7 +2012,8 @@ fn render_visible(
             None => overlay,
         };
         let start = out.len();
-        draw_scrolled(
+        put(
+            &mut skin,
             &part,
             base,
             &layer_poses,
@@ -1929,7 +2025,8 @@ fn render_visible(
             out,
         );
         if let Some(glow) = emissive_uv(drawn) {
-            draw_scrolled(
+            put(
+                &mut skin,
                 &part,
                 base,
                 &layer_poses,
@@ -1979,7 +2076,7 @@ fn render_visible(
         }
     }
     if shell_last {
-        draw_body(out);
+        draw_body(out, &mut skin);
     }
 }
 /// `EnergySwirlLayer`'s model, texture and `xOffset(t)` for a charged creeper
@@ -3082,6 +3179,170 @@ mod scroll_tests {
                 layer("sheep#wool_undercoat", "entity/sheep/sheep_wool_undercoat"),
                 layer("sheep#wool", "entity/sheep/sheep_wool")
             ]
+        );
+    }
+
+    /// `anim::Poses` keys parts by a hash of their name: within any vanilla model, two
+    /// different names never share one (they would share a pose).
+    #[test]
+    fn no_two_part_names_share_a_key() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            return;
+        }
+        fn names<'a>(p: &'a Part, out: &mut Vec<&'a str>) {
+            out.push(&p.name);
+            for c in &p.children {
+                names(c, out);
+            }
+        }
+        let types = super::super::MobTypes::load(&root).unwrap();
+        let mut models = 0;
+        for kind in types.types.values() {
+            for model in std::iter::once(&kind.model).chain(kind.layers.values()) {
+                let mut all = Vec::new();
+                names(model, &mut all);
+                let mut keys = std::collections::HashMap::new();
+                for name in all {
+                    let other = *keys.entry(super::super::anim::key(name)).or_insert(name);
+                    assert_eq!(other, name, "{} shares a key", kind.id);
+                }
+                models += 1;
+            }
+        }
+        assert!(models > 100);
+    }
+
+    /// The CPU cost of posing a mob farm (tools/stress_scenes.py `stress_mobs`): 1000 mobs of
+    /// 8 kinds through `render_with`, as `mob_geometry` draws them each frame. Prints the median
+    /// thread CPU time per frame (busy machines stretch wall time), the vertices and a hash of them (the same hash before and after a speed-up
+    /// means the same picture). `cargo test --profile fast -p horizon-client --lib
+    /// benchmark_mob_farm_geometry -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "manual benchmark; needs the prepared resources"]
+    fn benchmark_mob_farm_geometry() {
+        use std::{hash::Hasher, hint::black_box, time::Instant};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            return;
+        }
+        let types = super::super::MobTypes::load(&root).unwrap();
+        let kinds = [
+            "husk", "creeper", "cow", "pig", "sheep", "chicken", "villager", "spider",
+        ]
+        .map(|k| std::sync::Arc::new(types.types[&format!("minecraft:{k}")].clone()));
+        let mobs: Vec<Mob> = (0..1000u32)
+            .map(|i| {
+                let (layer, row, col) = (i / 200, i / 20 % 10, i % 20);
+                let at = horizon_core::geometry::Vec3::new(
+                    -14.25 + 1.5 * f64::from(col),
+                    1.0 + 2.5 * f64::from(layer),
+                    8.0 + 2.0 * f64::from(row),
+                );
+                let mut m = Mob::new(i + 1, kinds[i as usize % 8].clone(), at, 180.0);
+                m.previous = at;
+                m.age = i;
+                m
+            })
+            .collect();
+        let data = MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: Default::default(),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            villager_hats: Default::default(),
+            cem: Default::default(),
+            random_textures: Default::default(),
+            emissive: Default::default(),
+            blinks: Default::default(),
+            pois: Default::default(),
+            species_placements: Default::default(),
+        };
+        let atlas = |name: &str| {
+            let h = name.len() as f32 / 64.0;
+            Some([h, h, h + 0.25, h + 0.25])
+        };
+        let camera = glam::DVec3::new(0.5, 9.6, 0.5);
+        let mut out = Vec::new();
+        let frame = |out: &mut Vec<Vertex>| {
+            out.clear();
+            for m in &mobs {
+                render_with(m, 0.5, camera, &atlas, 0xf0f0, &data, &[], out);
+            }
+        };
+        frame(&mut out);
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        hash.write(bytemuck::cast_slice(&out));
+        // The thread's own CPU time where the platform gives it, else wall time.
+        let timed = |f: &mut dyn FnMut()| {
+            let (wall, cpu) = (Instant::now(), horizon_client_render::spans::thread_cpu());
+            f();
+            match (horizon_client_render::spans::thread_cpu(), cpu) {
+                (Some(end), Some(start)) => (end - start).as_secs_f64() * 1000.0,
+                _ => wall.elapsed().as_secs_f64() * 1000.0,
+            }
+        };
+        let mut times = Vec::new();
+        for _ in 0..30 {
+            times.push(timed(&mut || frame(black_box(&mut out))));
+        }
+        times.sort_by(f64::total_cmp);
+        println!(
+            "mob farm: 1000 mobs, {} vertices, {:.3} ms/frame (median of 30, min {:.3}), hash {:016x}",
+            out.len(),
+            times[15],
+            times[0],
+            hash.finish()
+        );
+        // Where it goes: the body's poses alone (state, pose map, setupAnim), then the
+        // body's vertices alone from those poses.
+        let median = |mut f: Box<dyn FnMut() + '_>| {
+            let mut t: Vec<f64> = (0..30).map(|_| timed(&mut f)).collect();
+            t.sort_by(f64::total_cmp);
+            t[15]
+        };
+        let posed: Vec<(std::sync::Arc<Part>, Poses)> = mobs
+            .iter()
+            .map(|m| {
+                let model = m.kind.model.clone();
+                let mut poses = Poses::new(&model);
+                anim::setup(m, &anim::state(m, 0.5), &mut poses, &data.animations);
+                (model, poses)
+            })
+            .collect();
+        let poses_ms = median(Box::new(|| {
+            for m in &mobs {
+                let model = m.kind.model.clone();
+                let mut poses = Poses::new(&model);
+                anim::setup(m, &anim::state(m, 0.5), &mut poses, &data.animations);
+                black_box(&poses);
+            }
+        }));
+        let mut body = Vec::new();
+        let draw_ms = median(Box::new(|| {
+            body.clear();
+            for (m, (model, poses)) in mobs.iter().zip(&posed) {
+                let base = base_transform(m, 0.5, camera);
+                draw(
+                    model,
+                    base,
+                    poses,
+                    [0.0, 0.0, 0.25, 0.25],
+                    u32::MAX,
+                    0xf0f0,
+                    0,
+                    &mut body,
+                );
+            }
+            black_box(&body);
+        }));
+        println!(
+            "  body poses only {poses_ms:.3} ms; body vertices only {draw_ms:.3} ms ({} vertices)",
+            body.len()
         );
     }
 }
