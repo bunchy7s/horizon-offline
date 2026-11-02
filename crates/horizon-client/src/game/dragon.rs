@@ -1908,28 +1908,6 @@ impl Game<'_> {
             [look[0] / norm, look[1] / norm, look[2] / norm]
         }
     }
-    /// `EnderDragon.tick` runs the current phase's `doClientTick` on a client,
-    /// and the host's own fight is its own client: the landing and flaming
-    /// phases breathe their fan of dragon breath from the head here. A server's
-    /// client does the same in `remote_dragon_phase_tick`. The jitter comes from
-    /// the world's random: the dragon's own stream is the fight's (`Mob.baseTick`'s
-    /// ambient roll, the crystal scan, its growls), and vanilla's client copy
-    /// never draws on the server copy's.
-    fn host_dragon_breath_puffs(&mut self) {
-        let look = self.dragon_look_normalised();
-        let Some(d) = self.dragon.as_ref() else {
-            return;
-        };
-        let head = d.parts[0].0;
-        let head = [head.x, head.y + PART_SIZES[0].1 * 0.5, head.z];
-        let motion = [d.velocity.x, d.velocity.y, d.velocity.z];
-        let phase = d.phase.clone();
-        let puffs = breath_puffs(&phase, look, head, motion, &mut self.world.random);
-        let breath = ParticleOptions::simple(ParticleType::DragonBreath);
-        for (p, v) in puffs {
-            self.particles.add(&breath, p, v);
-        }
-    }
     /// `EnderDragon.aiStep` (and `tickDeath`) for the dragon.
     fn tick_dragon(&mut self) {
         let Some(d) = self.dragon.as_mut() else {
@@ -2069,7 +2047,6 @@ impl Game<'_> {
             );
         }
         self.place_dragon_parts();
-        self.host_dragon_breath_puffs();
         self.dragon_contacts();
         // The chunks the dragon passes through re-save their entity lists.
         if let Some(d) = &self.dragon {
