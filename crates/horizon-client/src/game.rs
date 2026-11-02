@@ -19731,14 +19731,22 @@ fn load_world_rest(
     };
     let load_mobs = || -> Result<_> {
         let _step = startup::step("rest.mobs");
-        let mob_types: HashMap<_, _> = MobTypes::load(root)?
-            .types
-            .into_iter()
-            .map(|(k, v)| (k, Arc::new(v)))
-            .collect();
+        let mob_types: HashMap<_, _> = if draws {
+            MobTypes::load(root)?
+        } else {
+            MobTypes::load_for_server(root)?
+        }
+        .types
+        .into_iter()
+        .map(|(k, v)| (k, Arc::new(v)))
+        .collect();
         let mut mob_data = horizon_client::mobs::MobData::load(root, facts);
         mob_data.cem = std::sync::RwLock::new(Arc::new(
-            horizon_client::mobs::cem::CemModels::load(root, &mob_types),
+            if draws {
+                horizon_client::mobs::cem::CemModels::load(root, &mob_types)
+            } else {
+                horizon_client::mobs::cem::CemModels::default()
+            },
         ));
         horizon_client::mobs::trial_spawner::load_registry(root);
         Ok((mob_types, mob_data))

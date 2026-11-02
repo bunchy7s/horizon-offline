@@ -434,10 +434,28 @@ pub struct MobTypes {
 }
 impl MobTypes {
     pub fn load(root: &Path) -> crate::Result<Self> {
+        Self::load_with_models(root, true)
+    }
+
+    /// The dedicated server needs entity facts and AI, but never their render
+    /// geometry. Keep one empty part for the fields shared with the client
+    /// rather than parsing and retaining every entity-model layer.
+    pub fn load_for_server(root: &Path) -> crate::Result<Self> {
+        Self::load_with_models(root, false)
+    }
+
+    fn load_with_models(root: &Path, models_needed: bool) -> crate::Result<Self> {
         let bytes = fs::read(root.join("entity-types.json"))?;
         let types: Value = serde_json::from_slice(&bytes)?;
         let exact = exact_attributes(&bytes);
-        let models: Value = serde_json::from_slice(&fs::read(root.join("entity-models.json"))?)?;
+        let models = models_needed
+            .then(|| -> crate::Result<Value> {
+                Ok(serde_json::from_slice(&fs::read(
+                    root.join("entity-models.json"),
+                )?)?)
+            })
+            .transpose()?;
+        let empty_model = Arc::new(Part::parse("root", &Value::Null));
         let item_tags =
             crate::items::load_tags(root, "item", &horizon_world::loot::PackOverlay::NONE)
                 .unwrap_or_default();
@@ -460,13 +478,14 @@ impl MobTypes {
                 continue;
             }
             let model_key = format!("minecraft:{}", def.model);
-            let Some(model) = models.get(&model_key) else {
+            let model = models.as_ref().and_then(|models| models.get(&model_key));
+            if models_needed && model.is_none() {
                 continue;
-            };
+            }
             let defaults = exact.get(&id).cloned().unwrap_or_default();
             let attr = |k: &str| defaults.get(&format!("minecraft:{k}")).copied();
             let mut layers = HashMap::new();
-            if let Some(all) = models.as_object() {
+            if let Some(all) = models.as_ref().and_then(Value::as_object) {
                 for prefix in def.layer_prefixes() {
                     let start = format!("minecraft:{prefix}#");
                     for (k, v) in all.iter().filter(|(k, _)| k.starts_with(&start)) {
@@ -511,14 +530,19 @@ impl MobTypes {
                     max_head_y_rot: def.max_head_y_rot(),
                     ambient_interval: def.ambient_interval(),
                     flags,
-                    model: Arc::new({
-                        let mut part = Part::parse("root", model);
-                        // BatModel: `RenderTypes::entityCutoutCull`.
-                        if def.name == "bat" {
-                            part.set_cull_back();
-                        }
-                        part
-                    }),
+                    model: model.map_or_else(
+                        || empty_model.clone(),
+                        |model| {
+                            Arc::new({
+                                let mut part = Part::parse("root", model);
+                                // BatModel: `RenderTypes::entityCutoutCull`.
+                                if def.name == "bat" {
+                                    part.set_cull_back();
+                                }
+                                part
+                            })
+                        },
+                    ),
                     layers,
                     texture: def.texture.to_owned(),
                     brain: def.brain(),
