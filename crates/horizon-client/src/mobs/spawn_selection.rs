@@ -667,9 +667,21 @@ pub fn fortress_enemies() -> &'static [SpawnEntry] {
 
 /// `NaturalSpawner.mobsAt`: the fortress bounds on nether bricks, then
 /// `ChunkGenerator.getMobsAt` (the first referenced structure whose override
-/// for the category holds the position), else the biome's list. Borrowed from
-/// the level: a spawn attempt looks it up up to twice.
+/// for the category holds the position), else the biome's list. A spawn
+/// attempt looks it up up to twice, allowing mods to change each result.
 pub fn mobs_at<L: NaturalLevel>(
+    l: &L,
+    category: Category,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> Vec<SpawnEntry> {
+    let mut entries = vanilla_mobs_at(l, category, x, y, z).to_vec();
+    l.potential_spawns(category, [x, y, z], &mut entries);
+    entries
+}
+
+fn vanilla_mobs_at<L: NaturalLevel>(
     l: &L,
     category: Category,
     x: i32,
@@ -1035,8 +1047,8 @@ pub fn spawn_category_for_position<L: NaturalLevel, R: RandomSource>(
     let mut nearest = Nearest::new(start);
     for _ in 0..3 {
         let (mut x, mut z) = (x0, z0);
-        // The group's entry, its type and where it was picked.
-        let mut current: Option<(SpawnEntry, Option<MobType>, [i32; 3])> = None;
+        // The group's entry and its type.
+        let mut current: Option<(SpawnEntry, Option<MobType>)> = None;
         let mut group_index = 0u32;
         let mut max = (random.next_float() * 4.0).ceil() as i32;
         let mut ll = 0;
@@ -1059,27 +1071,22 @@ pub fn spawn_category_for_position<L: NaturalLevel, R: RandomSource>(
                 {
                     None
                 } else {
-                    let mut entries = mobs_at(l, category, x, y, z).to_vec();
-                    l.potential_spawns(category, [x, y, z], &mut entries);
-                    weighted_pick(&entries, random)
+                    weighted_pick(&mobs_at(l, category, x, y, z), random)
                 };
                 let Some(entry) = list else {
                     break;
                 };
                 max = sample_count(&entry, random) as i32;
                 let kind = l.mob_type(&entry.entity);
-                current = Some((entry, kind, [x, y, z]));
+                current = Some((entry, kind));
             }
-            let (entry, kind, picked_at) = current.as_ref().unwrap_or_else(|| unreachable!());
-            // The list the entry was picked from holds it where it was picked.
-            let listed = *picked_at == [x, y, z];
+            let (entry, kind) = current.as_ref().unwrap_or_else(|| unreachable!());
             let valid = valid_position_for_type(
                 l,
                 random,
                 category,
                 entry,
                 *kind,
-                listed,
                 [x, y, z],
                 distance,
             );
@@ -1198,15 +1205,12 @@ fn right_distance<L: NaturalLevel>(l: &L, chunk: (i32, i32), pos: [i32; 3], dist
     (cx, cz) == chunk || l.can_spawn_in_chunk(cx, cz)
 }
 /// `isValidSpawnPostitionForType`, for the entry's type (`mob_type`).
-/// `listed`: the position is where the entry was picked from `mobsAt`.
-#[allow(clippy::too_many_arguments)]
 fn valid_position_for_type<L: NaturalLevel, R: RandomSource>(
     l: &L,
     random: &mut R,
     category: Category,
     entry: &SpawnEntry,
     kind: Option<MobType>,
-    listed: bool,
     pos: [i32; 3],
     distance: f64,
 ) -> bool {
@@ -1221,18 +1225,13 @@ fn valid_position_for_type<L: NaturalLevel, R: RandomSource>(
         return false;
     }
     let [x, y, z] = pos;
-    // `canSpawnMobAt` comes first in vanilla, but it and `isSpawnPositionOk`
-    // only read the level, so their order cannot change the answer: the few
-    // block reads of the placement turn most positions away before the spawn
-    // list (structures, biome) is looked up again.
-    if !spawn_rules::is_spawn_position_ok(species, l, x, y, z) {
+    if !mobs_at(l, category, x, y, z)
+        .iter()
+        .any(|e| same_spawner(e, entry))
+    {
         return false;
     }
-    if !listed
-        && !mobs_at(l, category, x, y, z)
-            .iter()
-            .any(|e| same_spawner(e, entry))
-    {
+    if !spawn_rules::is_spawn_position_ok(species, l, x, y, z) {
         return false;
     }
     if !spawn_rules::check_spawn_rules(species, l, Reason::Natural, random, x, y, z) {
