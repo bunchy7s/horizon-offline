@@ -182,10 +182,35 @@ impl LimiterClock for SystemClock {
         i64::try_from(self.origin.elapsed().as_nanos()).unwrap_or(i64::MAX)
     }
     fn park(&mut self, nanos: i64) {
-        std::thread::sleep(std::time::Duration::from_nanos(nanos.max(0) as u64));
+        let end = self.nanos().saturating_add(nanos);
+        park_in_steps(
+            end,
+            || self.nanos(),
+            |step| {
+                std::thread::sleep(std::time::Duration::from_nanos(step as u64));
+            },
+        );
     }
     fn spin(&mut self) {
         std::hint::spin_loop();
+    }
+}
+
+/// The longest single sleep of [`SystemClock::park`].
+const PARK_STEP_NS: i64 = 1_000_000;
+
+/// Sleeps until `now()` reaches `end`, at most [`PARK_STEP_NS`] at a time. macOS lets
+/// a sleep run late by a share of its length (timer coalescing: 1.8-3.5 ms on a 14 ms
+/// sleep, 0.25 ms on 1 ms), more than the limiter's overshoot margin can learn (capped
+/// at 2 ms): a 60 FPS cap gave frames of 17-20 ms. Short steps keep the lateness to
+/// the last step's.
+fn park_in_steps(end: i64, mut now: impl FnMut() -> i64, mut sleep: impl FnMut(i64)) {
+    loop {
+        let left = end - now();
+        if left <= 0 {
+            return;
+        }
+        sleep(left.min(PARK_STEP_NS));
     }
 }
 
@@ -677,6 +702,48 @@ mod tests {
         assert_eq!(calculate_scale([1920, 1080], 3, false), 3);
         assert_eq!(calculate_scale([1920, 1080], 3, true), 4);
         assert_eq!(gui_scaled_size([1921, 1081], 4), [481, 271]);
+    }
+    /// A clock whose sleeps run late by a quarter of their length, as macOS's do,
+    /// sleeping as [`SystemClock::park`] does.
+    struct Coalescing {
+        now: std::cell::Cell<i64>,
+    }
+    impl LimiterClock for Coalescing {
+        fn nanos(&mut self) -> i64 {
+            self.now.get()
+        }
+        fn park(&mut self, nanos: i64) {
+            let now = &self.now;
+            park_in_steps(
+                now.get() + nanos,
+                || now.get(),
+                |step| {
+                    now.set(now.get() + step + step / 4);
+                },
+            );
+        }
+        fn spin(&mut self) {
+            self.now.set(self.now.get() + 1000);
+        }
+    }
+    #[test]
+    fn a_frame_cap_holds_when_sleeps_run_late() {
+        let mut clock = Coalescing {
+            now: std::cell::Cell::new(0),
+        };
+        let mut limiter = FramerateLimiter::new(0);
+        let mut last = 0;
+        for frame in 0..120 {
+            // The frame's own work.
+            clock.now.set(clock.now.get() + 2_000_000);
+            limiter.limit_display_fps(60, &mut clock);
+            let period = clock.now.get() - last;
+            last = clock.now.get();
+            assert!(
+                (16_666_666..16_666_666 + 100_000).contains(&period),
+                "frame {frame}: {period} ns"
+            );
+        }
     }
     #[test]
     fn limiter_paces_frames_at_the_target() {
