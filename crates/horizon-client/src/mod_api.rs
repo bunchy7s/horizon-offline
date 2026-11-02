@@ -468,7 +468,6 @@ level_attachment_host!(LevelRandomHost, LevelWriteHost);
 
 mod generated;
 pub use generated::Hooks;
-#[doc(hidden)]
 pub use generated::*;
 
 #[cfg(test)]

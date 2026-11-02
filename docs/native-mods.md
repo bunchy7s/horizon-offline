@@ -2107,7 +2107,7 @@ anything else a mod may change, a game struct or a list, is a `&mut` field. A ca
 the return value; a collection hook's list is a field (`event.lines`). One event goes through every mod, so each
 sees the changes before it. Because no mod can build or match the whole
 struct, a later version can add a field without breaking any mod, as NeoForge's event objects do; the cost is that
-a mod's own tests can't build an event yet.
+a mod's own tests drive a hook through its dispatch function ([Testing a trait mod](#testing-a-trait-mod)).
 
 Hook methods take `&self` and require `Send + Sync`. The process-wide mod list is installed once, like mixin module statics. One mod instance serves both
 the window's game and the server-thread game. A hook can also fire again inside
@@ -2134,17 +2134,10 @@ The renderer module re-exports the game's wgpu types.
 
 Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements
 only what its hook calls, and an unexpected call fails loudly. Drive the hook through
-`horizon_client::mod_api::dispatch_<hook>(&mut host, &mods, args…)`, which builds the event as the game does. The
-events and these values can't be built outside horizon-client: `NativeScreenView` (`dispatch_screen_render_post`
-and the `dispatch_screen_*_pre` input hooks; `dispatch_screen`, `dispatch_screen_draw`, `dispatch_screen_click` and
-`dispatch_screen_tooltip` take plain values and can be driven), `BlockEntityDraw` (`dispatch_block_entity_submit`,
-`dispatch_mob_submit`, `dispatch_mob_layer`, `dispatch_player_submit`), `winit::event::KeyEvent`
-(`dispatch_input_key`), `NativeLifecycleContext` (`dispatch_world_lifecycle`, `dispatch_server_tick`),
-`NativeLootDrops` (`dispatch_loot_drops`) and `NativeServerPlayer` (`dispatch_perform_command` takes one as an
-argument). A test outside can't call those dispatches, and a `Host` answer doesn't help; test the logic beneath the
-hook instead. `NativeServerPlayer` is also returned by `Host::server_players` and `Host::acting_player`, which a test
-double can answer with an empty list or `None`. The level hosts are small enough to implement whole.
-NeoForge's GameTest is the in-game counterpart.
+`horizon_client::mod_api::dispatch_<hook>(&mut host, &mods, args…)`, which builds the event as the game does. A
+hook that takes a `#[non_exhaustive]` game value a test can't build, such as `NativeServerPlayer`, can't be driven
+this way; return `None` from the `Host` method that supplies it, or test the logic beneath the hook. The level hosts
+are small enough to implement whole. NeoForge's GameTest is the in-game counterpart.
 
 ```rust
 struct Stone;
