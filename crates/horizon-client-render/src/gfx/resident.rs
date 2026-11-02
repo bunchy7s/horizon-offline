@@ -519,7 +519,8 @@ mod tests {
             );
             if (seed >> 12).is_multiple_of(97) {
                 // Whole columns at once: the column of `key` and the next one along x.
-                let gone: FxHashSet<(i32, i32)> = [(key.0, key.2), (key.0 + 1, key.2)].into();
+                let gone: FxHashSet<(i32, i32)> =
+                    [(key.0, key.2), (key.0 + 1, key.2)].into_iter().collect();
                 let mut removed = r.remove_columns(&gone);
                 let mut expected: Vec<u32> = model
                     .extract_if(|k: &SectionKey, _| gone.contains(&(k.0, k.2)))
