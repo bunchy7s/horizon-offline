@@ -3997,6 +3997,11 @@ impl Game<'_> {
         let _ = (pos, experience);
     }
 
+    /// A player ignited a creeper with an item. @API:native_creeper_ignite@.
+    pub(super) fn native_creeper_ignite(&mut self, entity: u32, player: u128, item: &str) {
+        let _ = (entity, player, item);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
