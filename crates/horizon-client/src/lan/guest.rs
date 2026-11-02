@@ -1105,27 +1105,10 @@ fn network_stack(
     if let Some(lore_tag) = s.data().and_then(|d| d.other("minecraft:lore")) {
         let lines = match lore_tag {
             horizon_world::nbt::Tag::List(lines) => Some(lines.clone()),
-            horizon_world::nbt::Tag::String(s) => {
-                let trimmed = s.to_string_lossy();
-                let trimmed_str = trimmed.trim();
-                if trimmed_str.starts_with('[') {
-                    if let Ok(serde_json::Value::Array(items)) =
-                        serde_json::from_str::<serde_json::Value>(trimmed_str)
-                    {
-                        Some(
-                            items
-                                .iter()
-                                .map(horizon_client_core::scoreboard::json_to_tag)
-                                .collect(),
-                        )
-                    } else {
-                        Some(vec![lore_tag.clone()])
-                    }
-                } else {
-                    Some(vec![lore_tag.clone()])
-                }
+            // A string is one literal line, as ComponentSerialization decodes a string tag.
+            horizon_world::nbt::Tag::Compound(_) | horizon_world::nbt::Tag::String(_) => {
+                Some(vec![lore_tag.clone()])
             }
-            horizon_world::nbt::Tag::Compound(_) => Some(vec![lore_tag.clone()]),
             _ => None,
         };
         if let Some(lines) = lines {
