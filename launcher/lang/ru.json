@@ -869,5 +869,10 @@
   "No notes yet": "Заметок пока нет",
   "No screenshots yet. Press F2 in the game.": "Скриншотов пока нет. Нажмите F2 в игре.",
   "Patch log": "Журнал изменений",
-  "See all": "Смотреть все"
+  "See all": "Смотреть все",
+  "No worlds yet. Make one in the game and it shows up here.": "Миров пока нет. Создайте мир в игре, и он появится здесь.",
+  "No servers saved in this instance.": "В этой сборке нет сохранённых серверов.",
+  "1 server in {name}": "1 сервер в {name}",
+  "{count} servers in {name}": "Серверов в {name}: {count}",
+  "Click again to remove": "Нажмите ещё раз, чтобы удалить"
 }

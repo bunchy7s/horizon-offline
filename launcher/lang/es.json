@@ -869,5 +869,10 @@
   "No notes yet": "Aún no hay notas",
   "No screenshots yet. Press F2 in the game.": "Aún no hay capturas. Pulsa F2 en el juego.",
   "Patch log": "Registro de cambios",
-  "See all": "Ver todo"
+  "See all": "Ver todo",
+  "No worlds yet. Make one in the game and it shows up here.": "Aún no hay mundos. Crea uno en el juego y aparecerá aquí.",
+  "No servers saved in this instance.": "No hay servidores guardados en esta instancia.",
+  "1 server in {name}": "1 servidor en {name}",
+  "{count} servers in {name}": "{count} servidores en {name}",
+  "Click again to remove": "Haz clic otra vez para quitar"
 }

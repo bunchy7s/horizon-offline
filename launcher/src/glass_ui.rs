@@ -1,9 +1,10 @@
 //! The glass look's controls ("Glass" in `docs/design-system.md`): the parts of the mockup's
 //! `components/launcher/launcher-ui.tsx` and its shell (`launcher-app.tsx`), at its sizes. White
 //! text and fills at a few opacities over [`glass`](crate::glass) plates; Geist throughout.
-use crate::{hover_fade, keyboard, theme::Theme, track_hover};
+use crate::{hover_fade, hover_is, keyboard, note_hover, theme::Theme, track_hover};
 use gpui::{
-    div, prelude::*, px, rgb, rgba, svg, Div, FontWeight, Hsla, SharedString, Stateful, Svg,
+    div, prelude::*, px, rgb, rgba, svg, App, Div, FontWeight, Hsla, SharedString, Stateful, Svg,
+    Window,
 };
 use horizon_theme::glass::{fill, ink, radius};
 
@@ -436,6 +437,17 @@ pub fn quiet(
     h: f32,
     t: &Theme,
 ) -> Stateful<Div> {
+    quiet_icon(id, None, label, h, t)
+}
+
+/// [`quiet`] with a 16 px icon before its label.
+pub fn quiet_icon(
+    id: impl Into<SharedString>,
+    name: Option<&'static str>,
+    label: impl Into<SharedString>,
+    h: f32,
+    t: &Theme,
+) -> Stateful<Div> {
     keyboard(
         div()
             .id(id.into())
@@ -454,7 +466,128 @@ pub fn quiet(
             .text_size(px(14.))
             .font_weight(FontWeight::MEDIUM)
             .text_color(white(ink::FULL))
+            .children(name.map(|n| icon(n, 16., white(ink::FULL))))
             .child(label.into()),
         t,
     )
+}
+
+/// A list row (`ROW`): `rounded-[12px] px-3 py-2.5`, white at 6 % under the pointer. `on_hover`
+/// hears the pointer come and go too, for rows that show their actions then. `held`: the row
+/// keeps its fill while the pointer is on one of its buttons or its menu is open, as CSS's
+/// `:hover` stays on a parent.
+pub fn list_row(
+    id: impl Into<SharedString>,
+    held: bool,
+    on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static,
+    t: &Theme,
+) -> Stateful<Div> {
+    let id = id.into();
+    let key = id.clone();
+    let fill = if held && !hover_is(&id) {
+        layer(radius::ROW)()
+            .bg(white(fill::ROW_HOVER))
+            .into_any_element()
+    } else {
+        hover_fill(&id, radius::ROW, 0., fill::ROW_HOVER)
+    };
+    let d = div()
+        .id(id.clone())
+        .relative()
+        .flex()
+        .items_center()
+        .gap(px(12.))
+        .w_full()
+        .px(px(12.))
+        .py(px(10.))
+        .rounded(px(radius::ROW))
+        .child(fill)
+        .on_hover(move |hovered, window, cx| {
+            note_hover(&key, *hovered, window);
+            on_hover(hovered, window, cx);
+        });
+    keyboard(d, t)
+}
+
+/// A list row's two lines: the name (14 px medium) and a note (13 px, white at 55 %).
+pub fn list_text(name: impl Into<SharedString>, note: impl Into<SharedString>) -> Div {
+    div()
+        .relative()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_w_0()
+        .child(
+            text(14., FontWeight::MEDIUM, ink::FULL)
+                .line_height(px(21.))
+                .truncate()
+                .child(name.into()),
+        )
+        .child(
+            text(13., FontWeight::NORMAL, ink::QUIET)
+                .line_height(px(19.5))
+                .truncate()
+                .child(note.into()),
+        )
+}
+
+/// A tab's line while it has nothing to list (`Empty`): 14 px, white at 60 %, `px-3 py-10`.
+pub fn empty() -> Div {
+    text(14., FontWeight::NORMAL, ink::NOTE)
+        .line_height(px(21.))
+        .px(px(12.))
+        .py(px(40.))
+}
+
+/// The line over a tab's list (`px-3 pb-2`): its note at 13 px, white at 60 %, then buttons.
+pub fn list_head(note: impl Into<SharedString>) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(12.))
+        .px(px(12.))
+        .pb(px(8.))
+        .child(
+            text(13., FontWeight::NORMAL, ink::NOTE)
+                .line_height(px(19.5))
+                .min_w_0()
+                .truncate()
+                .child(note.into()),
+        )
+}
+
+/// A link in a line of text (`font-medium text-white underline-offset-4 hover:underline`).
+pub fn link(id: impl Into<SharedString>, label: impl Into<SharedString>) -> Stateful<Div> {
+    div()
+        .id(id.into())
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(white(ink::FULL))
+        .cursor_pointer()
+        .hover(|s| s.underline())
+        .child(label.into())
+}
+
+/// A field (`WIDE_FIELD`): 44 px, round at 12, white at 7 %, 11 % with the focus, 14 px. Red at
+/// 12 % while what it holds is refused.
+pub fn field(focused: bool, invalid: bool) -> Div {
+    let bg: Hsla = if invalid {
+        rgba(horizon_theme::glass::DANGER_HOVER << 8 | 0x1f).into()
+    } else {
+        white(if focused {
+            fill::FIELD_FOCUS
+        } else {
+            fill::FIELD
+        })
+    };
+    div()
+        .flex()
+        .items_center()
+        .h(px(44.))
+        .px(px(16.))
+        .overflow_hidden()
+        .rounded(px(radius::ROW))
+        .bg(bg)
+        .font_family(horizon_theme::glass::FONT)
+        .text_size(px(14.))
 }

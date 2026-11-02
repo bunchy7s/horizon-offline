@@ -869,5 +869,10 @@
   "No notes yet": "まだノートはありません",
   "No screenshots yet. Press F2 in the game.": "まだスクリーンショットはありません。ゲーム内で F2 を押してください。",
   "Patch log": "変更履歴",
-  "See all": "すべて表示"
+  "See all": "すべて表示",
+  "No worlds yet. Make one in the game and it shows up here.": "まだワールドがありません。ゲーム内で作成するとここに表示されます。",
+  "No servers saved in this instance.": "このインスタンスに保存されたサーバーはありません。",
+  "1 server in {name}": "{name} のサーバー 1 件",
+  "{count} servers in {name}": "{name} のサーバー {count} 件",
+  "Click again to remove": "もう一度クリックして削除"
 }

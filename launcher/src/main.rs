@@ -20,6 +20,7 @@ mod game_tools;
 mod github_mods_page;
 mod glass;
 mod glass_home;
+mod glass_home_lists;
 mod glass_home_tabs;
 mod glass_ui;
 mod home;
@@ -346,6 +347,11 @@ struct Launcher {
     home_menu: glass_home::HomeMenu,
     /// Whether the pointer is over Home's folder button, which then shows its ⋯.
     folder_hovered: bool,
+    /// The list row under the pointer in Home's glass tabs (a world, a server): it shows its
+    /// actions then.
+    list_hover: Option<SharedString>,
+    /// A Home list row's ⋯ menu, while open, and whether its Delete… was clicked once.
+    list_menu: Option<(SharedString, bool)>,
     /// The size of Home's tab strip, measured as it is laid out: the glass panel's plate cuts
     /// its corner around it.
     home_strip: std::rc::Rc<std::cell::Cell<Option<gpui::Size<Pixels>>>>,
@@ -589,6 +595,8 @@ impl Launcher {
             home_tab: home_tabs::HomeTab::from_env(),
             home_menu: Default::default(),
             folder_hovered: false,
+            list_hover: None,
+            list_menu: None,
             home_strip: Default::default(),
             client_since: None,
             instance_mods: Default::default(),
@@ -1759,18 +1767,32 @@ static HOVER: Mutex<HoverState> = Mutex::new(HoverState {
 });
 
 fn track_hover(el: Stateful<Div>, id: SharedString) -> Stateful<Div> {
-    el.on_hover(move |hovered, window, _| {
-        let mut state = HOVER.lock().unwrap();
-        let is_on = state.on.as_ref().is_some_and(|(h, _)| *h == id);
-        if *hovered && !is_on {
-            state.off = state.on.take();
-            state.on = Some((id.clone(), Instant::now()));
-        } else if !*hovered && is_on {
-            state.off = Some((id.clone(), Instant::now()));
-            state.on = None;
-        }
-        window.refresh();
-    })
+    el.on_hover(move |hovered, window, _| note_hover(&id, *hovered, window))
+}
+
+/// Whether `id` is the element [`hover_fade`] shows hovered now.
+fn hover_is(id: &SharedString) -> bool {
+    HOVER
+        .lock()
+        .unwrap()
+        .on
+        .as_ref()
+        .is_some_and(|(h, _)| h == id)
+}
+
+/// Records that `id` is now hovered or not, for [`hover_fade`]: an element whose own hover
+/// listener does more calls it.
+fn note_hover(id: &SharedString, hovered: bool, window: &mut Window) {
+    let mut state = HOVER.lock().unwrap();
+    let is_on = state.on.as_ref().is_some_and(|(h, _)| h == id);
+    if hovered && !is_on {
+        state.off = state.on.take();
+        state.on = Some((id.clone(), Instant::now()));
+    } else if !hovered && is_on {
+        state.off = Some((id.clone(), Instant::now()));
+        state.on = None;
+    }
+    window.refresh();
 }
 
 /// A layer under an element's content that fades `color` in while it is hovered. `bleed` lets
