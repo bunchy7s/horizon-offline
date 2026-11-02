@@ -13,6 +13,7 @@
 //! frame has (vanilla's partial update), so what it opens shows at once; what
 //! it closes goes at the next full search.
 use super::SectionKey;
+use crate::fast_hash::FxHashSet;
 use crate::mesher::ALL_VISIBLE;
 use glam::DVec3;
 use std::collections::{HashMap, VecDeque};
@@ -587,6 +588,19 @@ impl Occlusion {
             if vis != ALL_VISIBLE {
                 self.changed((x, y as i32, z), ALL_VISIBLE);
             }
+        }
+    }
+    /// `remove_column` for each of `gone`. When they are every column it holds (a
+    /// teleport drops the whole view), the old graph says nothing about what arrives
+    /// next: it starts over as `clear` does instead of seeing through each removed
+    /// section one edit at a time (some 90 000 at render distance 32).
+    pub fn remove_columns(&mut self, gone: &FxHashSet<(i32, i32)>) {
+        if self.columns.map.keys().all(|column| gone.contains(column)) {
+            self.clear();
+            return;
+        }
+        for &(x, z) in gone {
+            self.remove_column(x, z);
         }
     }
     pub fn clear(&mut self) {
@@ -1311,6 +1325,46 @@ mod tests {
             .filter(|&&d| d & REACHED != 0)
             .count();
         println!("search_cost: best {best:.2} ms over 12, {reached} reached");
+    }
+
+    /// Removed columns see through every face: the graph is the one of a world that
+    /// never had them, whether some columns go or all of them (a teleport).
+    #[test]
+    fn removed_columns_leave_the_graph_of_a_world_without_them() {
+        fn without(o: &Occlusion, gone: &FxHashSet<(i32, i32)>) -> Occlusion {
+            let mut fresh = Occlusion::new(0, 6);
+            for (&(x, z), column) in &o.columns.map {
+                if !gone.contains(&(x, z)) {
+                    for (y, &vis) in column.iter().enumerate() {
+                        fresh.set((x, y as i32, z), vis);
+                    }
+                }
+            }
+            fresh
+        }
+        let camera = at((0, 2, 0));
+        let mut o = Occlusion::new(0, 6);
+        random_world(&mut o, 0x51ed_2701, 900, 6);
+        o.settle(camera, 6);
+        let some: FxHashSet<(i32, i32)> = (-6..=6)
+            .flat_map(|x| (-1..=1).map(move |z| (x, z)))
+            .collect();
+        let mut expected = without(&o, &some);
+        o.remove_columns(&some);
+        o.settle(camera, 6);
+        expected.settle(camera, 6);
+        let graph = |o: &Occlusion| o.graph.as_ref().expect("searched").directions.clone();
+        assert_eq!(graph(&o), graph(&expected));
+
+        let all: FxHashSet<(i32, i32)> = o.columns.map.keys().copied().collect();
+        o.remove_columns(&all);
+        assert!(o.contains((40, 3, 40)), "no graph from the old view culls");
+        random_world(&mut o, 0x2545_f491, 900, 6);
+        let mut arrived = Occlusion::new(0, 6);
+        random_world(&mut arrived, 0x2545_f491, 900, 6);
+        o.settle(camera, 6);
+        arrived.settle(camera, 6);
+        assert_eq!(graph(&o), graph(&arrived));
     }
 
     /// The worker's graph is the one the render thread would compute.
