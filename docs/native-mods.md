@@ -351,6 +351,17 @@ a version. Helpers (`native_text`, `native_player`…) have no hook entry; the c
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
 
+### Host-aware weapon damage (API next)
+
+`living_incoming_damage_v2` is an additive hook, like `menu_button_v2`; v1 keeps its signature and firing point.
+It receives a mutable `Host`, attacker/victim network ids, damage type, optional source position, victim position
+and current view vector, and an optional weapon snapshot. `weapon.enchantments()` exposes enchantment ids and
+levels. Change `amount` or return `Flow::Cancel`; the host can read the world and play sounds through its helpers.
+It currently fires for player-to-mob melee, sweep and spear hits (including LAN guests), before the victim's
+immunity guards and v1. Unless canceled, v1 receives the modified amount. It is not a replacement for v1 on
+projectiles, player victims, dragons, mob attacks or environmental damage. There is no extra per-hit allocation
+without loaded mods. The fragment `living_incoming_damage_v2.json` receives its API number at merge.
+
 ### The build's warnings
 
 Before it builds, the launcher reads the mods' `[[injection]]` lists and says three things in `native/build.log` that

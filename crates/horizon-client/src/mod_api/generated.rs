@@ -4518,6 +4518,24 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A player's weapon hit on a mob, before `Mob::damage_with` borrows the
+    /// victim: melee, sweep and spear hits, including LAN guests. Unlike v1,
+    /// this has a host and snapshots of the weapon, victim position/view and
+    /// DamageSource position. The acting player's network id is `causing`
+    /// (also the direct entity). Weapon enchantments include their levels.
+    /// Runs before the victim's immunity guards and v1; cancellation refuses
+    /// delivery. Other damage routes still only fire v1. API next.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn living_incoming_damage_v2(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingIncomingDamageV2Event<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
         let _ = host;
@@ -13873,6 +13891,58 @@ pub fn dispatch_compute_fov_modifier(
         mod_hook.compute_fov_modifier(host, &mut event);
     }
     *modifier = event.modifier;
+}
+/// What [`Hooks::living_incoming_damage_v2`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingIncomingDamageV2Event<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub damage_type: &'a str,
+    pub causing: i32,
+    pub source_position: Option<[f64; 3]>,
+    pub victim_position: [f64; 3],
+    pub victim_view: [f64; 3],
+    pub weapon: Option<&'a ItemStack>,
+    pub amount: f32,
+}
+pub fn dispatch_living_incoming_damage_v2(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: i32,
+    kind: &str,
+    damage_type: &str,
+    causing: i32,
+    source_position: Option<[f64; 3]>,
+    victim_position: [f64; 3],
+    victim_view: [f64; 3],
+    weapon: Option<&ItemStack>,
+    amount: &mut f32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = LivingIncomingDamageV2Event {
+        entity,
+        kind,
+        damage_type,
+        causing,
+        source_position,
+        victim_position,
+        victim_view,
+        weapon,
+        amount: *amount,
+    };
+    for mod_hook in super::entered(mods, "living_incoming_damage_v2") {
+        if matches!(
+            mod_hook.living_incoming_damage_v2(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+    *amount = event.amount;
 }
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
