@@ -4891,6 +4891,10 @@ impl Game<'_> {
     pub(super) fn native_player_input(&mut self, player: u128, name: &str, flags: i32) {
         let _ = (player, name, flags);
     }
+    /// A guest's arm swing was handled by the server. `hand` is `mainhand`. Server-side. @API:player_arm_swing@.
+    pub(super) fn native_player_arm_swing(&mut self, player: u128, name: &str, hand: &str) {
+        let _ = (player, name, hand);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

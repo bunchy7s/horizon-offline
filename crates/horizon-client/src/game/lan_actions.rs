@@ -1985,6 +1985,7 @@ impl Game<'_> {
                     g.reset_attack_strength();
                 });
                 self.native_player_attack_cooldown_reset(player, &name);
+                self.native_player_arm_swing(player, &name, "mainhand");
             }
             S::UseItemOn(p) => {
                 host.hub.ack(conn, p.sequence);
