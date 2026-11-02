@@ -10,8 +10,8 @@ description = "Downloads, prepares and starts Horizon builds"
 [dependencies]
 # GPUI Fast (longbridge/gpui-fast): Zed's GPUI with retained views and cached scroll layers, under
 # its own name. wgpu renders on Linux, not blade (#3812).
-gpui = { package = "gpui-fast", version = "0.1.12" }
-gpui_platform = { package = "gpui-fast-platform", version = "0.1.12", features = ["wayland", "x11", "font-kit"] }
+gpui = { package = "gpui-fast", version = "0.1.13" }
+gpui_platform = { package = "gpui-fast-platform", version = "0.1.13", features = ["wayland", "x11", "font-kit"] }
 ureq = { version = "2", features = ["json", "tls"], default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

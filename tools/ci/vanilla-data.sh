@@ -106,14 +106,22 @@ if [ -f "$shared/sounds/$version/sounds.json" ] && [ -d "$assets" ]; then
 fi
 # The languages (horizon-prepare languages copies them from the official launcher's asset store, which no runner
 # has) depend only on the Minecraft version too: kept once in $shared/languages/<version>/ (assets/pack.mcmeta, the
-# language list, and assets/minecraft/lang/) and cloned into each preparation that lacks them. Without them a
+# language list, and assets/minecraft/lang/) and cloned into each preparation to fill missing files. Without them a
 # preparation has en_us alone, and pack_screen's harness, which draws ten languages, fails.
 languages="$shared/languages/$version/assets"
-if [ -d "$languages/minecraft/lang" ] && [ -d "$assets" ] && [ ! -e "$prepared/horizon-client/$version/assets/pack.mcmeta" ]; then
+if [ -d "$languages/minecraft/lang" ] && [ -d "$assets" ]; then
+  mkdir -p "$assets/lang"
   if [ "$(uname)" = Darwin ]; then
-    cp -cR "$languages/minecraft/lang/." "$assets/lang/" && cp -c "$languages/pack.mcmeta" "$assets/../"
+    cp -cRn "$languages/minecraft/lang/." "$assets/lang/"
   else
-    cp -R --reflink=auto "$languages/minecraft/lang/." "$assets/lang/" && cp --reflink=auto "$languages/pack.mcmeta" "$assets/../"
+    cp -R --reflink=auto -n "$languages/minecraft/lang/." "$assets/lang/"
+  fi
+  if [ ! -e "$assets/../pack.mcmeta" ]; then
+    if [ "$(uname)" = Darwin ]; then
+      cp -c "$languages/pack.mcmeta" "$assets/../"
+    else
+      cp --reflink=auto "$languages/pack.mcmeta" "$assets/../"
+    fi
   fi
 fi
 touch "$prepared"
