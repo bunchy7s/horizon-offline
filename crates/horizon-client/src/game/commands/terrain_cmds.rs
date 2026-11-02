@@ -776,3 +776,16 @@ impl Game<'_> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    /// `WorldBorderCommand.ERROR_TOO_BIG` is built with the double
+    /// `5.9999968E7`, the same value `setSize` compares `distance` against, and
+    /// the `%s` substitution of a translatable renders a double with
+    /// `Double.toString`: the message names `5.9999968E7`, not a rounded
+    /// `5.999997E7`.
+    #[test]
+    fn the_too_big_message_names_the_limit_as_vanilla_prints_it() {
+        assert_eq!(super::MAX_SIZE, 5.9999968E7);
+        assert_eq!(super::size_limit_text(), "5.9999968E7");
+    }
+}
