@@ -13,6 +13,8 @@ class StartupTraceTests(unittest.TestCase):
             '{"pid":1,"tid":2,"ph":"X","name":"ui.load","ts":5000,"dur":400000}',
             '{"pid":1,"tid":1,"ph":"i","s":"g","name":"title.shown","ts":450000}',
             '{"pid":1,"tid":1,"ph":"i","s":"g","name":"title.shown","ts":900000}',
+            # A counter track (the world's fill) is Perfetto's, not a step.
+            '{"pid":1,"tid":1,"ph":"C","name":"world.fill","ts":950000,"args":{"resident":9}}',
             '{"pid":1,"tid":1,"ph":"X","name":"torn',
         ]
         with tempfile.TemporaryDirectory() as d:
