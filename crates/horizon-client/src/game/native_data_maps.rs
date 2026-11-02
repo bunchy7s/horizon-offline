@@ -15,12 +15,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// A data map type a mod registers (`RegisterDataMapTypesEvent`).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct NativeDataMapType {
+pub struct NativeDataMapType {
     /// `mod_id:name`: not in the `minecraft` namespace. Its files are
     /// `data/<mod_id>/data_maps/<registry path>/<name>.json`.
-    pub(crate) id: String,
+    pub id: String,
     /// The registry it is for: `minecraft:item` or `minecraft:block`.
-    pub(crate) registry: String,
+    pub registry: String,
 }
 
 /// The registries data maps can be attached to so far, with their folder

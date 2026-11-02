@@ -236,6 +236,10 @@ class PortabilityTests(unittest.TestCase):
         self.assertEqual(r["metrics"]["fps.village.avg_fps"]["mean"], 200.0)
         self.assertEqual(pb.report(args, 8, [dict(run, load_before=1.25)], {})["conditions"]["load_avg_1m"], 1.25)
         self.assertTrue(r["hardware"]["os"] and r["hardware"]["cpu_threads"])
+        self.assertNotIn("server", r["conditions"])
+        # A run on a dedicated server only compares with runs on the same kind of server.
+        on_server = argparse.Namespace(offscreen=False, settle=2.0, label="x", server="vanilla")
+        self.assertEqual(pb.report(on_server, 8, [run], {})["conditions"]["server"], "vanilla")
 
     def test_nvidia_memory_not_available(self):
         from unittest import mock
@@ -328,3 +332,66 @@ class PortabilityTests(unittest.TestCase):
             "-Djava.library.path=${natives_directory}/java", "-cp", "${classpath}"]}}
         self.assertEqual(manifest_jvm_flags(manifest), ["-XX:StackShadowPages=32"])
         self.assertEqual(manifest_jvm_flags({}), [])
+
+
+class StressSceneTests(unittest.TestCase):
+    def test_stress_selects_every_stress_scene_after_the_flights(self):
+        import argparse
+        from tools import stress_scenes
+        from tools.perf_bench import scene_list
+        names = [s[0] for s in scene_list(argparse.Namespace(scenes="ocean,stress"))]
+        self.assertEqual(names, ["ocean"] + stress_scenes.NAMES)
+        self.assertEqual([s[0] for s in scene_list(argparse.Namespace(scenes="stress_mobs"))], ["stress_mobs"])
+
+    def test_scenes_have_their_entity_counts(self):
+        from tools import stress_scenes
+        summons = lambda name, kind: sum(c.startswith(f"summon {kind} ") for c in stress_scenes.setup(name))
+        self.assertEqual(sum(summons("stress_mobs", k) for k in stress_scenes.MOBS), 1000)
+        self.assertEqual(summons("stress_items", "item"), 2000)
+        self.assertEqual(summons("stress_frames", "item_frame"), 512)
+        self.assertEqual(summons("stress_armor_stands", "armor_stand"), 500)
+        self.assertEqual(stress_scenes.setup("stress_empty"), stress_scenes.SETTINGS + stress_scenes.floor(
+            *stress_scenes.origin("stress_empty")))
+        # Only the run's first stress scene sets the game rules.
+        self.assertEqual(stress_scenes.setup("stress_empty", first=False),
+                         stress_scenes.floor(*stress_scenes.origin("stress_empty")))
+
+    def test_every_entity_is_near_enough_to_be_drawn_at_rd16(self):
+        # Entity.shouldRenderAtSqrDistance with viewScale 2: a dropped item (0.25) within 32 blocks.
+        from tools import stress_scenes
+        for name in ("stress_mobs", "stress_items", "stress_frames", "stress_armor_stands"):
+            _, at, _, _ = stress_scenes.scene(name)
+            eye = (at[0], at[1] + 1.62, at[2])
+            for line in stress_scenes.setup(name):
+                if line.startswith("summon "):
+                    x, y, z = map(float, line.split()[2:5])
+                    distance = sum((a - b) ** 2 for a, b in zip((x, y, z), eye)) ** 0.5
+                    self.assertLess(distance, 32.0, (name, line))
+                    self.assertGreater(z, eye[2], (name, line))
+
+    def test_commands_are_single_lines_inside_the_world(self):
+        from tools import stress_scenes
+        for name in stress_scenes.NAMES:
+            for line in stress_scenes.setup(name):
+                self.assertNotIn("\n", line)
+                self.assertLess(len(line), 1024)
+            self.assertTrue(all(len(c) < 1024 for c in stress_scenes.cleanup(name)))
+
+    def test_cleanup_covers_every_block_a_scene_places(self):
+        from tools import stress_scenes
+        slabs = [list(map(int, c.split()[1:7])) for c in stress_scenes.cleanup("stress_mobs") if c.startswith("fill")]
+        for slab in slabs:
+            dx, dy, dz = (abs(slab[i + 3] - slab[i]) + 1 for i in range(3))
+            self.assertLessEqual(dx * dy * dz, 32768)  # vanilla's fill limit
+        covered = lambda x, y, z: any(s[0] <= x <= s[3] and s[1] <= y <= s[4] and s[2] <= z <= s[5] for s in slabs)
+        for name in stress_scenes.NAMES:
+            for line in stress_scenes.setup(name):
+                words = line.split()
+                if words[0] == "fill":
+                    a, b = list(map(int, words[1:4])), list(map(int, words[4:7]))
+                    for x in (a[0], b[0]):
+                        for y in (a[1], b[1]):
+                            for z in (a[2], b[2]):
+                                self.assertTrue(covered(x, y, z), (name, line))
+                elif words[0] == "setblock":
+                    self.assertTrue(covered(*map(int, words[1:4])), (name, line))
