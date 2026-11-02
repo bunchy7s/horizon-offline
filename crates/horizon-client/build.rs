@@ -24,7 +24,15 @@ fn main() {
             resource.set_manifest_file(&manifest);
         }
         if let Err(e) = resource.compile() {
-            panic!("embedding Windows resources: {e}");
+            // The GNU toolchain's `windres` (the launcher's mod builds use it) can't take a path
+            // with a space, and a Windows user name often has one: such a build goes on without
+            // the icon. Release builds run in CI, where the icon stays required.
+            if std::env::var_os("CI").is_some() {
+                panic!("embedding Windows resources: {e}");
+            }
+            println!(
+                "cargo:warning=building without Horizon's icon: embedding Windows resources failed: {e}"
+            );
         }
     }
 }

@@ -37,7 +37,8 @@ pub(super) fn key(
         "trait-injection-v2",
         revision,
         mixins,
-        profile.name(),
+        // The Cargo profile: `Performance` and `Dev` stage the same source.
+        profile.cargo().0,
         FEATURES,
         super::rust_toolchain::VERSION,
     ] {

@@ -337,6 +337,9 @@ impl Game<'_> {
         self.keys.clear();
         self.right = false;
         self.capture(false);
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_open_sign(player, &name, [pos.0, pos.1, pos.2], front);
+        }
     }
     /// `AbstractSignEditScreen.tick`: the editor closes (and `removed` sends
     /// the text) once its sign is removed or the player's eyes are further
