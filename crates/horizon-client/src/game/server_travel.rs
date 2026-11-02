@@ -466,6 +466,22 @@ impl Game<'_> {
                 Some((at, yaw))
             }
             Ok(None) | Err(_) => {
+                let mut cancel = false;
+                if let (Some(player), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    self.native_player_spawn_point_set(
+                        player,
+                        &name,
+                        config.dim.id(),
+                        config.pos,
+                        "death_reset",
+                        &mut cancel,
+                    );
+                }
+                if cancel {
+                    return None;
+                }
                 self.respawn_config = None;
                 None
             }
