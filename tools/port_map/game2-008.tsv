@@ -34,7 +34,7 @@ StonecutterMenu.removed	port	crates/horizon-client/src/game/stations.rs::Game::c
 ArrowItem.asProjectile	port	crates/horizon-client/src/game/dispenser.rs::Game::shoot_projectile_item	dispensed arrows are built in the arrow arm of the item shot
 BlockItem.updateBlockEntityComponents	port	crates/horizon-client/src/block_entity_item.rs::place	the placed block entity takes the item's components
 BlockItem.canPlace	port	crates/horizon-world/src/level/place.rs::Sim::place	the placement checks, including the survive check, run in Sim::place
-BlockItem.onDestroyed	missing		unsure: a container item whose item entity is destroyed should spill its contents; no Horizon code does this
+BlockItem.onDestroyed	missing		no `onDestroyed` on any item: an item entity of a shulker box or a bundle destroyed by fire or lava spills nothing
 BoatItem.getBoat	port	crates/horizon-client/src/game/boats.rs::Game::place_boat	boat placed at the hit point with the item's stack config
 BucketItem.playEmptySound	port	crates/horizon-world/src/level/buckets.rs::Sim::empty_sound	
 BundleItem.getWeightSafe	port	crates/horizon-items/src/bundle.rs::Contents::weight_fraction	float fraction; vanilla compares an exact Fraction
@@ -42,7 +42,7 @@ BundleItem.getBarWidth	port	crates/horizon-items/src/bundle.rs::Contents::bar
 BundleItem.getBarColor	port	crates/horizon-items/src/bundle.rs::Contents::bar	
 BundleItem.removeOneItemFromBundle	port	crates/horizon-items/src/bundle.rs::Contents::remove_one	
 BundleItem.getTooltipImage	port	crates/horizon-items/src/bundle.rs::tooltip_layout	gap: minor: the tooltip_display rule that hides the bundle contents is not checked here
-BundleItem.onDestroyed	missing		unsure: a bundle whose item entity is destroyed should spill its contents; no Horizon code does this
+BundleItem.onDestroyed	missing		same as `BlockItem.onDestroyed`: nothing spills a destroyed item entity's contents
 BundleItem.playRemoveOneSound	port	crates/horizon-client/src/game.rs::Game::drop_bundle_content	the menu queues the same sound in menu/bundle.rs
 BundleItem.playInsertSound	port	crates/horizon-client/src/menu/bundle.rs::Menu::carried_bundle_click	queues the insert or insert-fail sound
 BundleItem.playDropContentsSound	port	crates/horizon-client/src/game.rs::Game::drop_bundle_content	
@@ -84,7 +84,7 @@ Item.Properties.horseArmor	skip:data		registration builder
 Item.Properties.nautilusArmor	skip:data		registration builder
 Item.Properties.requiredFeatures	skip:data		registration builder
 Item.Properties.delayedHolderComponent	skip:data		registration builder
-Item.Properties.loweredMobVisibility	missing		unsure: the mob_visibility component is not read by Horizon's mob targeting
+Item.Properties.loweredMobVisibility	missing		the `mob_visibility` component is parsed (it is in `item_model.rs`'s component table and the protocol's item hash), but no mob targeting reads it
 Item.Properties.finalizeInitializer	skip:data		registration builder
 Item.TooltipContext.of	skip:java		tooltip context factory; Horizon passes the level and player to the tooltip functions
 ItemStack.validateStrict	skip:java		codec-side validation of components and stack size
@@ -97,7 +97,7 @@ ItemStack.isBroken	inline	crates/horizon-client/src/game.rs::Game::damage_held	t
 ItemStack.nextDamageWillBreak	inline	crates/horizon-client/src/game/trident.rs::Game::use_trident	gap: minor: only the trident's check is ported here
 ItemStack.processDurabilityChange	port	crates/horizon-client/src/game/enchant_effects.rs::Game::durability_loss	the Unbreaking-adjusted loss
 ItemStack.applyDamage	port	crates/horizon-client/src/game.rs::Game::damage_held	gap: minor: no item durability advancement trigger fires
-ItemStack.hurtAndConvertOnBreak	missing		unsure: a carrot or fungus on a stick that breaks should become a fishing rod; no conversion was found
+ItemStack.hurtAndConvertOnBreak	missing		nothing converts a broken carrot on a stick or fungus on a stick into a fishing rod
 ItemStack.hurtEnemy	port	crates/horizon-client/src/game/mace.rs::Game::weapon_wear	the per-hit durability loss of a weapon
 ItemStack.interactLivingEntity	port	crates/horizon-client/src/game.rs::Game::interact_entity	equip-on-interact is in the mob paths (nautili.rs, ghasts.rs)
 ItemStack.copy	skip:java		value copy
@@ -111,17 +111,17 @@ ItemStack.hashStackList	skip:java		hash for collections
 ItemStack.onCraftedBy	inline	crates/horizon-client/src/game.rs::Game::click_inventory	gap: minor: the crafted statistic is added only on the inventory grid craft path here
 ItemStack.set	skip:other		component write; Horizon stores component data in typed fields
 ItemStack.update	skip:java		functional update helper
-ItemStack.applyComponentsAndValidate	missing		unsure: a validated component patch has no single Horizon counterpart; /item modify is a separate path
+ItemStack.applyComponentsAndValidate	missing		a validated component patch has no single counterpart: `/item modify` goes through its own path
 ItemStack.getStyledHoverName	port	crates/horizon-client/src/game/stations.rs::Game::stack_hover_name	gap: minor: plain text; the rarity colour and italic style are not applied here
 ItemStack.addToTooltip	port	crates/horizon-client/src/item_tooltip.rs::lines	
 ItemStack.addUnitComponentToTooltip	inline	crates/horizon-client/src/game/stations.rs::Game::stack_tooltip_lines	unit lines such as unbreakable, gated by the tooltip display
 ItemStack.canPlaceOnBlockInAdventureMode	port	crates/horizon-client/src/game/game_mode.rs::Game::can_place_on_in_adventure	the can_place_on predicates gate a placement in adventure mode
 ItemStack.canBreakBlockInAdventureMode	port	crates/horizon-client/src/game/game_mode.rs::Game::adventure_predicate	the main-hand stack's `can_break` predicate against the block at the position (one predicate or a list, block ids or tags, exact or ranged state properties; a predicate with `nbt` or `components` never matches), read by `game_mode.rs:200`; the same fn answers `can_place_on`
-ItemStack.getDamageSource	missing		unsure: a stack's damage_type component is not read when a weapon hits; no Horizon reader found
+ItemStack.getDamageSource	missing		a stack's `damage_type` component is not read when a weapon hits: the attack builds its damage from the mob's own sources (`mobs::Damage`), and `damage_type` is only used for the enchantment damage tags
 ItemStackTemplate.fromNonEmptyStack	port	crates/horizon-items/src/item_data.rs::template_tag	stack to template tag
 ItemStackTemplate.withCount	skip:java		record copy with a new count
 ItemStackTemplate.apply	port	crates/horizon-assets/src/item_model.rs::stack_from_template	
-ItemUtils.onContainerDestroyed	missing		unsure: destroyed container items do not spill their contents; see BlockItem.onDestroyed
+ItemUtils.onContainerDestroyed	missing		the shared spill of a destroyed container item has no counterpart; see `BlockItem.onDestroyed`
 Items.registerBlock	skip:data		item registry bootstrap
 Items.registerItem	skip:data		item registry bootstrap
 JukeboxSong.hasFinished	port	crates/horizon-items/src/items.rs::Song::finished	
