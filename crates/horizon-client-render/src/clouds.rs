@@ -154,10 +154,16 @@ pub(crate) struct Uniform {
     colors: [[f32; 4]; 4],
 }
 
+/// How far the clouds have drifted, in ticks: the game time within one trip across the cloud
+/// texture (`width` cells of 400 ticks), plus the partial tick (`CloudRenderer.prepare`).
+pub fn drift(time: i64, partial_tick: f64, width: u32) -> f64 {
+    time.rem_euclid(i64::from(width) * 400) as f64 + partial_tick
+}
+
 impl Input<'_> {
     fn state(&self) -> (MeshKey, Uniform) {
         let (w, h, _) = self.texture;
-        let offset = self.time.rem_euclid(i64::from(*w) * 400) as f64 + self.partial_tick;
+        let offset = drift(self.time, self.partial_tick, *w);
         let mut x = self.camera.x + offset * 0.030_000_001;
         let mut z = self.camera.z + 3.96;
         let (tw, th) = (f64::from(*w) * 12.0, f64::from(*h) * 12.0);

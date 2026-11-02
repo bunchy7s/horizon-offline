@@ -14,7 +14,7 @@ use horizon_world::{
 };
 
 /// A living entity is about to heal. Mods may change the amount or cancel.
-/// `entity` identifies the affected entity. @API:native_living_heal@.
+/// `entity` identifies the affected entity. 358.
 #[inline(never)]
 pub fn native_living_heal(entity: u32, amount: &mut f32, cancel: &mut bool) {
     crate::native_client_hooks::living_heal(entity, amount, cancel);
