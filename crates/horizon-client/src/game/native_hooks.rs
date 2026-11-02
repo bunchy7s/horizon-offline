@@ -3573,6 +3573,21 @@ impl Game<'_> {
     pub(super) fn native_player_locale_change(&mut self, player: u128, name: &str, locale: &str) {
         let _ = (player, name, locale);
     }
+    /// A server entity was moved by a same-level teleport command, after its
+    /// position changed. `entity` is its network id; `from` and `to` are
+    /// coordinates in `dimension`. This hook reports command teleports that
+    /// use Horizon's same-level target path; it does not change vanilla's
+    /// movement. @API:native_entity_teleport@.
+    pub(super) fn native_entity_teleport(
+        &mut self,
+        dimension: &str,
+        entity: u32,
+        from: [f64; 3],
+        to: [f64; 3],
+    ) {
+        let _ = (dimension, entity, from, to);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

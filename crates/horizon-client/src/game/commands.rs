@@ -1469,6 +1469,7 @@ impl Game<'_> {
         let _ = self.in_target_level(t, |g| g.teleport_to_in_level(t, pos, rotation));
     }
     fn teleport_to_in_level(&mut self, t: Target, pos: [f64; 3], rotation: Option<[f32; 2]>) {
+        let from = self.target_position(t);
         let v = Vec3::new(pos[0], pos[1], pos[2]);
         match t {
             Target::Guest(_) => {
@@ -1601,6 +1602,12 @@ impl Game<'_> {
             }
             // Wall-mounted entities do not move.
             Target::Frame(_) | Target::Painting(_) => {}
+        }
+        if self.options.dedicated.is_some()
+            && let (Some(entity), Some(from), Some(to)) =
+                (self.network_entity_id(t), from, self.target_position(t))
+        {
+            self.native_entity_teleport(self.dim.id(), entity as u32, from, to);
         }
     }
     /// Teleport the local player into the command source's dimension. Unlike
