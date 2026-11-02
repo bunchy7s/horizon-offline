@@ -105,6 +105,46 @@ impl Game<'_> {
                 self.set_force_game_mode(force);
                 return json!({ "value": state.force_game_mode });
             }
+            "serversettings/use_allowlist" => {
+                return json!({
+                    "value": lists.lock().unwrap().use_whitelist
+                });
+            }
+            "serversettings/use_allowlist/set" => {
+                let Some(use_allowlist) = body["value"].as_bool() else {
+                    return json!({ "error": "using allowlist must be a boolean" });
+                };
+                let current = lists.lock().unwrap().use_whitelist;
+                rpc(format!(
+                    "Update using allowlist from {} to {}",
+                    current, use_allowlist
+                ));
+                self.set_using_whitelist(&lists, use_allowlist);
+                self.kick_unlisted_players(&lists);
+                return json!({
+                    "value": lists.lock().unwrap().use_whitelist
+                });
+            }
+            "serversettings/enforce_allowlist" => {
+                return json!({
+                    "value": lists.lock().unwrap().enforce_whitelist
+                });
+            }
+            "serversettings/enforce_allowlist/set" => {
+                let Some(enforce) = body["value"].as_bool() else {
+                    return json!({ "error": "enforce allowlist must be a boolean" });
+                };
+                let current = lists.lock().unwrap().enforce_whitelist;
+                rpc(format!(
+                    "Update enforce allowlist from {} to {}",
+                    current, enforce
+                ));
+                self.set_enforce_whitelist(&lists, enforce);
+                self.kick_unlisted_players(&lists);
+                return json!({
+                    "value": lists.lock().unwrap().enforce_whitelist
+                });
+            }
             "serversettings/difficulty" => {
                 return json!({ "value": DIFFICULTIES[self.level.difficulty_id() as usize] });
             }

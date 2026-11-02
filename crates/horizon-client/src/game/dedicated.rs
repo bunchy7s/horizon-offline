@@ -1780,6 +1780,13 @@ impl Game<'_> {
         }
     }
 
+    /// `DedicatedServer.setEnforceWhitelist`: the flag, and `enforce-whitelist` in
+    /// server.properties.
+    pub(super) fn set_enforce_whitelist(&mut self, lists: &Arc<Mutex<Lists>>, on: bool) {
+        lists.lock().unwrap().enforce_whitelist = on;
+        self.store_property("enforce-whitelist", on.to_string());
+    }
+
     /// DedicatedServerSettings.update: change one key and store the file.
     pub(super) fn store_property(&mut self, key: &str, value: String) {
         let path = PathBuf::from("server.properties");
