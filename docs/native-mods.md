@@ -492,7 +492,7 @@ hooks version. Trait mods import `RecipeBookCategory` from `horizon_client::mod_
 and append declarations in `Hooks::recipe_book_categories`:
 
 ```rust,ignore
-categories.push(RecipeBookCategory {
+event.categories.push(RecipeBookCategory {
     id: "mymod:crushing".into(),
     recipe_type: "mymod:crusher".into(),
     icon: "mymod:crusher".into(),

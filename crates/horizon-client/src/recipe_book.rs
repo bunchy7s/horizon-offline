@@ -1046,10 +1046,8 @@ mod tests {
 
     #[test]
     fn mod_category_mapping_validates_ids_icons_and_conflicts() {
-        let root = std::env::temp_dir().join(format!(
-            "horizon-book-categories-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("horizon-book-categories-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join("items.json"),
@@ -1062,8 +1060,14 @@ mod tests {
             &items,
             &PackOverlay::NONE,
             vec![
-                ("mymod:crush".into(), serde_json::json!({"type":"mymod:crusher"})),
-                ("mymod:mix".into(), serde_json::json!({"type":"mymod:mixer"})),
+                (
+                    "mymod:crush".into(),
+                    serde_json::json!({"type":"mymod:crusher"}),
+                ),
+                (
+                    "mymod:mix".into(),
+                    serde_json::json!({"type":"mymod:mixer"}),
+                ),
             ],
         )
         .unwrap();
@@ -1090,7 +1094,11 @@ mod tests {
         assert_eq!(mapped.get("mymod:mixer"), Some(&mixer));
         assert!(!mapped.contains_key("minecraft:crafting"));
         for invalid in [
-            declare("minecraft:crafting_misc", "mymod:crusher", "minecraft:stone"),
+            declare(
+                "minecraft:crafting_misc",
+                "mymod:crusher",
+                "minecraft:stone",
+            ),
             declare("bare", "mymod:crusher", "minecraft:stone"),
             declare("mymod:", "mymod:crusher", "minecraft:stone"),
             declare(":category", "mymod:crusher", "minecraft:stone"),
