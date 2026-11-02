@@ -43,14 +43,14 @@ GsonHelper.sortByKeyIfNeeded	inline	crates/horizon-world/src/datafix/json.rs::to
 GsonHelper.encodesLongerThan	missing		minor: no 32767-character book page or component length check exists in crates; the limit is not enforced
 GsonHelper.CountedAppendable.accountChars	skip:java		character counter behind encodesLongerThan, which Horizon does not port
 GsonHelper.CountedAppendable.append	skip:java		character counter behind encodesLongerThan, which Horizon does not port
-HashOps.createNumeric	missing		minor: no component hashing; Hashed::of in crates/horizon-protocol/src/item.rs keeps item and count only
-HashOps.createString	missing		minor: no component hashing; Hashed::of in crates/horizon-protocol/src/item.rs keeps item and count only
-HashOps.hashMap	missing		minor: no component hashing; Hashed::of in crates/horizon-protocol/src/item.rs keeps item and count only
-HashOps.createMap	missing		minor: no component hashing; Hashed::of in crates/horizon-protocol/src/item.rs keeps item and count only
-HashOps.createList	missing		minor: no component hashing; Hashed::of in crates/horizon-protocol/src/item.rs keeps item and count only
-HashOps.createByteList	missing		minor: no component hashing; Hashed::of in crates/horizon-protocol/src/item.rs keeps item and count only
-HashOps.createIntList	missing		minor: no component hashing; Hashed::of in crates/horizon-protocol/src/item.rs keeps item and count only
-HashOps.createLongList	missing		minor: no component hashing; Hashed::of in crates/horizon-protocol/src/item.rs keeps item and count only
+HashOps.createNumeric	inline	crates/horizon-protocol/src/hash_ops.rs::HashOps::from_nbt	numeric component values hash through the create_byte/create_short/create_int/create_long/create_float/create_double call sites; from_nbt picks one by tag type
+HashOps.createString	port	crates/horizon-protocol/src/hash_ops.rs::HashOps::create_string	the length in UTF-16 units then each unit, tag 12
+HashOps.hashMap	inline	crates/horizon-protocol/src/hash_ops.rs::HashOps::from_nbt	the compound arm hashes each key with create_string and each value, then create_map sorts the pairs
+HashOps.createMap	port	crates/horizon-protocol/src/hash_ops.rs::HashOps::create_map	entries sorted by key then value hash, tags 2 and 3
+HashOps.createList	port	crates/horizon-protocol/src/hash_ops.rs::HashOps::create_list	values in order, tags 4 and 5
+HashOps.createByteList	port	crates/horizon-protocol/src/hash_ops.rs::HashOps::create_byte_list	tag 14, the bytes, tag 15
+HashOps.createIntList	port	crates/horizon-protocol/src/hash_ops.rs::HashOps::create_int_list	tag 16, little-endian ints, tag 17
+HashOps.createLongList	port	crates/horizon-protocol/src/hash_ops.rs::HashOps::create_long_list	tag 18, little-endian longs, tag 19
 HashOps.mergeToList	skip:java		DynamicOps merge into a hashed list; Horizon builds no hashed data incrementally
 HashOps.mergeToMap	skip:java		DynamicOps merge into a hashed map; Horizon builds no hashed data incrementally
 HashOps.ListHashBuilder.build	skip:java		DynamicOps builder for hashed lists; not needed without component hashing
@@ -101,8 +101,8 @@ Mth.rayIntersectsAABB	skip:other		minor: no caller in 26.3 (dead helper)
 Mth.fastInvCubeRoot	skip:other		minor: no caller in 26.3 (dead helper)
 Mth.murmurHash3Mixer	skip:java		JVM identity-hash bucketing in CrudeIncrementalIntIdentityHashBiMap; Horizon has no identity-hash maps
 Mth.sign	skip:java		pure math helper; sign is written inline at each use
-Mth.clampedMap	missing		unsure: no inverse-lerp helper or formula found by grep; vanilla has 13 callers and they may inline it
-Mth.map	missing		unsure: no inverse-lerp helper or formula found by grep; vanilla has 8 callers and they may inline it
+Mth.clampedMap	inline	crates/horizon-client/src/title/onboarding.rs::Onboarding::widget_alpha	the inverse lerp clamped to 0..1 then lerped to the new range, folded into the caller
+Mth.map	inline	crates/horizon-client/src/mobs/sulfur_cube.rs::vertical_hit_angle_power_transfer	(value - from) / (to - from) scaled into the new range, inlined at the call site
 Mth.wobble	skip:other		minor: no caller in 26.3 (dead helper)
 Mth.lengthSquared	skip:java		2-D squared length; Rust arithmetic at each use
 NativeModuleLister.listModules	skip:other		Windows module list for crash reports; Horizon has no such report
@@ -119,8 +119,8 @@ ParticleUtils.spawnParticleBelow	inline	crates/horizon-client/src/animate_tick.r
 PlaceholderLookupProvider.hasRegisteredPlaceholders	skip:data		datagen placeholder lookup for data-driven registries
 PlaceholderLookupProvider.UniversalLookup.get	skip:data		datagen placeholder lookup for data-driven registries
 PlaceholderLookupProvider.UniversalLookup.getOrCreate	skip:data		datagen placeholder lookup for data-driven registries
-PngInfo.fromStream	missing		minor: no PNG IHDR or signature check in crates (grep finds none); the image decoder rejects bad files
-PngInfo.validateHeader	missing		minor: no PNG IHDR or signature check in crates (grep finds none); the image decoder rejects bad files
+PngInfo.fromStream	inline	crates/horizon-client-render/src/hud.rs::png_size	the signature and IHDR type are checked and width/height read from the header, as the file-size probes do; bit depth and colour type are not read
+PngInfo.validateHeader	inline	crates/horizon-client-render/src/hud.rs::png_size	the eight signature bytes and the IHDR chunk type are checked; the IHDR length field is not
 PngInfo.validateBounds	missing		minor: no 16-bit buffer bound check in crates; the image decoder enforces its own limits
 ProblemReporter.Collector.hasFatalProblems	skip:other		log text for load problems; Horizon's loaders report errors through their own results
 ProblemReporter.Collector.forEach	skip:other		log text for load problems; Horizon's loaders report errors through their own results

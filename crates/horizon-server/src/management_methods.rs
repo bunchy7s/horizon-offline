@@ -59,6 +59,15 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
                     .ok_or_else(|| invalid_params("Not a string"))?,
             ),
         ),
+        "serversettings/force_game_mode" => game.force_game_mode(client, None),
+        "serversettings/force_game_mode/set" => game.force_game_mode(
+            client,
+            Some(
+                argument
+                    .as_bool()
+                    .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
+            ),
+        ),
         "allowlist" => Ok(lists.allowlist()),
         "bans" => Ok(lists.bans()),
         "ip_bans" => Ok(lists.ip_bans()),
@@ -290,6 +299,29 @@ struct Game<'a> {
 }
 
 impl Game<'_> {
+    /// `MinecraftServerSettingsServiceImpl.forceGameMode` and `setForceGameMode`.
+    fn force_game_mode(&self, client: u32, value: Option<bool>) -> Result<Value, Failure> {
+        let mut request = json!({ "method": "serversettings/force_game_mode" });
+        if let Some(value) = value {
+            request["method"] = json!("serversettings/force_game_mode/set");
+            request["value"] = json!(value);
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        if let Some(value) = value {
+            crate::config::update(
+                &self.shared.dir,
+                "properties",
+                "force-gamemode",
+                toml::Value::Boolean(value),
+            )
+            .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
+        }
+        Ok(reply["value"].clone())
+    }
+
     /// `MinecraftServerSettingsServiceImpl.getGameMode` and `setGameMode`.
     fn game_mode(&self, client: u32, value: Option<&str>) -> Result<Value, Failure> {
         let mut request = json!({ "method": "serversettings/game_mode" });

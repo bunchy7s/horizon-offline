@@ -1504,6 +1504,15 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         if m.species() == Species::Warden {
             super::warden::do_push(m, w, who, events);
         }
+        // IronGolem.doPush: a monster that is not a creeper becomes its target
+        // one time in 20, and the draw is made for those alone, then the push.
+        if m.species() == Species::IronGolem
+            && let Who::Mob(id) = who
+            && w.seen(id).is_some_and(super::golem::golem_prey)
+            && m.random.next_int_bound(20).unwrap_or(1) == 0
+        {
+            m.ai.target = Some(who);
+        }
         // Entity.push: passengers of the same vehicle (a rider and its mount
         // among them) never push each other.
         if same {
@@ -2743,8 +2752,12 @@ pub fn intern_sound(s: &std::sync::Arc<str>) -> &'static str {
     set.insert(leaked);
     leaked
 }
-/// `getSwimSound`.
-pub fn swim_sound(m: &Mob) -> &'static str {
+/// `getSwimSound`. A skeleton horse's own override counts the steps it takes
+/// through the water, so it needs the mob, not just its species.
+pub fn swim_sound(m: &mut Mob) -> &'static str {
+    if m.species() == Species::SkeletonHorse {
+        return super::equine::skeleton_horse_swim_sound(m);
+    }
     match m.species() {
         Species::Drowned => "entity.drowned.swim",
         Species::Axolotl => "entity.axolotl.swim",
@@ -3629,5 +3642,61 @@ mod silverfish_walk_target_tests {
             assert!(dirt < 10.0, "standing on dirt falls through, got {dirt}");
         });
         let _ = ran;
+    }
+}
+
+#[cfg(test)]
+mod iron_golem_push_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+    use std::sync::Arc;
+
+    fn mob(id: u32, species: Species, category: &str) -> Mob {
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = species;
+        kind.category = category.into();
+        Mob::new(id, Arc::new(kind), Vec3::ZERO, 0.0)
+    }
+
+    /// `IronGolem.doPush`: a monster that is not a creeper and bumps the golem
+    /// becomes its target one time in 20, and the draw is made for those alone,
+    /// so a creeper or an animal leaves the golem's random alone.
+    #[test]
+    fn an_iron_golem_targets_the_monster_that_bumps_it() {
+        // CI has no prepared 26.3 data, so a world that does not build skips
+        // the whole check rather than asserting the data exists.
+        let hits = |victim: Mob| -> Option<u32> {
+            let seen = victim.seen(None);
+            let mut hits = 0;
+            let ran = with_test_world(&[seen], |w, _| {
+                let mut golem = mob(1, Species::IronGolem, "monster");
+                for _ in 0..400 {
+                    let mut events = Vec::new();
+                    push_entities(&mut golem, w, &mut events);
+                    if golem.ai.target.is_some() {
+                        hits += 1;
+                        golem.ai.target = None;
+                    }
+                }
+            });
+            ran.then_some(hits)
+        };
+        let Some(zombie) = hits(mob(2, Species::Zombie, "monster")) else {
+            return;
+        };
+        assert!(
+            zombie > 0,
+            "a zombie that bumps the golem is taken as its target"
+        );
+        assert_eq!(
+            hits(mob(3, Species::Creeper, "monster")),
+            Some(0),
+            "IronGolem.doPush never targets a creeper"
+        );
+        assert_eq!(
+            hits(mob(4, Species::Cow, "creature")),
+            Some(0),
+            "a pushed animal is not an Enemy"
+        );
     }
 }

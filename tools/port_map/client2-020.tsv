@@ -15,8 +15,8 @@ WorldSelectionList.NoWorldsEntry.extractContent	skip:service		empty entry of the
 WorldSelectionList.WorldListEntry.<init>	port	crates/horizon-client/src/title.rs::Title::draw	gap: minor: no hover tooltip on overflowing name, folder or info text; the name, folder and date, and mode and version lines are drawn
 WorldSelectionList.WorldListEntry.validateIconFile	port	crates/horizon-client/src/title.rs::Title::icon	gap: minor: no symlink check; an icon that is not a decodable 64x64 image shows the unknown-server icon
 WorldSelectionList.WorldListEntry.getNarration	skip:ui		narration text only; Horizon has no narrator output
-WorldSelectionList.WorldListEntry.keyPressed	missing		player: Enter or Space on a selected world does nothing (title Enter only confirms a rename), so keyboard players cannot join from the list
-WorldSelectionList.WorldListEntry.canInteract	missing		player: vanilla greys out locked and incompatible worlds and will not open them; Horizon's list_worlds has no lock or compatibility check, so Play opens every listed world
+WorldSelectionList.WorldListEntry.keyPressed	port	crates/horizon-client/src/title.rs::Title::join_selected	the selection key joins the selected world as a click does; Enter and Space reach it when the list has focus
+WorldSelectionList.WorldListEntry.canInteract	port	crates/horizon-client/src/title.rs::WorldEntry::can_play	LevelSummary.primaryActionActive: a locked or incompatible world does not join from a click or a key, and its icon shows the error mark instead of the join arrow
 WorldSelectionList.WorldListEntry.joinWorld	port	crates/horizon-client/src/title.rs::Title::click_action	gap: minor: no warning for a symlinked world before it opens
 WorldSelectionList.WorldListEntry.deleteWorld	port	crates/horizon-client/src/title.rs::Title::click_action	gap: minor: no progress screen while the world is deleted
 WorldSelectionList.WorldListEntry.doDeleteWorld	port	crates/horizon-client/src/title.rs::Title::confirm_delete	gap: minor: a failed delete shows the error screen, not the world delete failure toast

@@ -28,7 +28,7 @@ Fox.FoxEatBerriesGoal.pickGlowBerry	port	crates/horizon-client/src/mobs/fox.rs::
 Fox.FoxEatBerriesGoal.pickSweetBerries	port	crates/horizon-client/src/mobs/fox.rs::EatBerries::pick	1 or 2 berries (+1 when fully grown), the first into the mouth when empty, age back to 1
 Fox.FoxFollowParentGoal.canContinueToUse	inline	crates/horizon-client/src/mobs/fox.rs::Wrap::can_continue	defending is never set, so only the follow-parent test remains
 Fox.FoxLookAtPlayerGoal.canContinueToUse	inline	crates/horizon-client/src/mobs/fox.rs::Wrap::can_continue	Wrap with the faceplanted or interested test on both can_use and can_continue
-Fox.FoxMeleeAttackGoal.checkAndPerformAttack	inline	crates/horizon-client/src/mobs/goals.rs::MeleeAttack::tick	gap: player: the generic melee strike runs; a fox bite plays no entity.fox.bite sound
+Fox.FoxMeleeAttackGoal.checkAndPerformAttack	inline	crates/horizon-client/src/mobs/goals.rs::MeleeAttack::tick	the generic melee strike, then the fox bite at entity.fox.bite 1.0/1.0 (MeleeAttack::bite, set in fox.rs::register)
 Fox.FoxPanicGoal.shouldPanic	inline	crates/horizon-client/src/mobs/fox.rs::register	Panic(2.2); the not-defending test is moot because defending is never set
 Fox.FoxPounceGoal.canContinueToUse	inline	crates/horizon-client/src/mobs/fox.rs::Pounce::can_continue	target alive, still in the air or tilted 15 degrees, not faceplanted
 Fox.FoxStrollThroughVillageGoal.canFoxMove	missing		minor: the stroll-through-village goal is not ported (foxes never follow village streets); fox.rs::can_move is Fox.canMove, a different test
@@ -38,7 +38,7 @@ Frog.get	port	crates/horizon-client/src/mobs/finalize.rs::species_variant_compon
 Frog.applyImplicitComponent	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	the `minecraft:frog/variant` name sets the variant (WARM over TEMPERATE)
 Frog.customServerAiStep	port	crates/horizon-client/src/mobs/frog.rs::server_ai_step	the attackables sensor and memory timers; the activities run as goals
 Frog.getBreedOffspring	port	crates/horizon-client/src/mobs/goals.rs::Breed::tick	the mother becomes pregnant with frogspawn instead of a baby
-Frog.spawnChildFromBreeding	missing		player: frogs never become pregnant (IS_PREGNANT) and so never lay frogspawn; no breed goal means this is never reached, and the generic baby spawn would be wrong for frogs anyway
+Frog.spawnChildFromBreeding	port	crates/horizon-client/src/mobs/goals.rs::Breed::tick	the mother takes IS_PREGNANT (frog.rs::set_pregnant) instead of a baby, and the LaySpawn goal then lays the frogspawn on the water
 Frog.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	variant by biome (live spawns set it in spawning.rs::finalize from biome.frog); the long jump cooldown it sets has no user
 Frog.createAttributes	skip:data		attributes come from entity-types.json
 Frog.checkFrogSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	frogs_spawnable_on below and bright enough
@@ -47,7 +47,7 @@ Frog.FrogNodeEvaluator.getPathType	missing		minor: blocks above #frog_prefer_jum
 Frog.FrogPathNavigation.canCutCorner	port	crates/horizon-client/src/mobs/nav.rs::Navigation::can_cut_corner	with the frog on the amphibious finder the corners it refuses are the generic set (fire, damage, walkable doors), which is the frog's own three
 Frog.FrogPathNavigation.createPathFinder	port	crates/horizon-client/src/mobs/frog.rs::register	amphibious navigation with the frog's prefersShallowSwimming (water below sea level - 10 costs more)
 FrogAi.initCoreActivity	inline	crates/horizon-client/src/mobs/frog.rs::register	gap: minor: Panic runs at 1.25 where AnimalPanic uses 2.0; look and move sinks are the controls
-FrogAi.initIdleActivity	inline	crates/horizon-client/src/mobs/frog.rs::register	gap: player: Croak, stroll and look at player (6 blocks) are there; no slimeball tempt, no mate search and no TryFindLand
+FrogAi.initIdleActivity	inline	crates/horizon-client/src/mobs/frog.rs::register	gap: minor: Croak, stroll and look at player (6 blocks), the 1.25 food tempt (unless pregnant) and the mate search; no TryFindLand
 FrogAi.initSwimActivity	inline	crates/horizon-client/src/mobs/frog.rs::register	gap: minor: no separate swim activity: Float and the land stroll stand in, no random swim at 0.75 or find-land
 FrogAi.initLaySpawnActivity	port	crates/horizon-client/src/mobs/frog.rs::register	the LaySpawn goal, added in place of the activity
 FrogAi.initJumpActivity	port	crates/horizon-client/src/mobs/frog.rs::register	the LongJump goal, added in place of the activity
@@ -60,20 +60,20 @@ ShootTongue.canStillUse	inline	crates/horizon-client/src/mobs/frog.rs::ShootTong
 ShootTongue.eatEntity	inline	crates/horizon-client/src/mobs/frog.rs::ShootTongue::tick	CatchAnimation arm: frog eat sound at 2.0, then the frog's attack on the target
 ShootTongue.canPathfindToTarget	inline	crates/horizon-client/src/mobs/frog.rs::ShootTongue::can_use	a path to the target that ends within 1.75 blocks
 ShootTongue.addUnreachableTargetToMemory	inline	crates/horizon-client/src/mobs/frog.rs::ShootTongue::can_use	up to 5 ids kept 100 ticks in Frog.State.unreachable
-Tadpole.customServerAiStep	inline	crates/horizon-client/src/mobs/aquatic.rs::register	gap: player: panic and swim-around goals stand in for the brain; tadpoles do not follow a player holding a slimeball and do not look at players
+Tadpole.customServerAiStep	port	crates/horizon-client/src/mobs/animal_brain.rs::tadpole_package	the tadpole brain package: panic 2.0 in the core activity, look at players, the food tempt and the stroll actions, run beside the AbstractFish goals aquatic.rs::register adds
 Tadpole.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	Age and AgeLocked
 Tadpole.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	Age and AgeLocked
 Tadpole.saveToBucketTag	port	crates/horizon-client/src/entity_nbt.rs::bucket_data	Age and AgeLocked for axolotls and tadpoles
 Tadpole.loadFromBucketTag	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	Age and AgeLocked from `minecraft:bucket_entity_data`
 Tadpole.ageUp	inline	crates/horizon-client/src/mobs/aquatic.rs::ai_step	gap: player: at 24000 the frog is spawned fresh with yaw and persistence only (SpawnSetup), so a named, silenced or glowing tadpole turns into a plain frog; the grow-up sound is 1.0 loud, not 0.15
 TadpoleAi.initCoreActivity	inline	crates/horizon-client/src/mobs/aquatic.rs::register	panic at 2.0 as a goal
-TadpoleAi.initIdleActivity	inline	crates/horizon-client/src/mobs/aquatic.rs::register	gap: player: swims around with speed 1.0 every 40 ticks (vanilla 0.5); no look at player, no slimeball tempt
+TadpoleAi.initIdleActivity	port	crates/horizon-client/src/mobs/animal_brain.rs::tadpole_package	the idle entries: the food tempt, look at players, then the swim stroll at speed 0.5, the walk-from-look and the stay-in-water actions
 Goat.createHorn	port	crates/horizon-client/src/mobs/goat.rs::Goal::create_horn	ticked in #3512; `Goat.createHorn` is cited at crates/horizon-client/src/mobs/goat.rs:512
 Goat.createAttributes	skip:data		attributes come from entity-types.json
 Goat.ageBoundaryReached	port	crates/horizon-client/src/mobs/finalize.rs::age_boundary_reached	attack damage 1 for a baby, 2 for an adult
 Goat.getBreedOffspring	port	crates/horizon-client/src/game/creatures.rs::breed	ticked in #3512; `Goat.getBreedOffspring` is cited at crates/horizon-client/src/game/creatures.rs:2605 (in a comment, so `where` names the enclosing fn)
 Goat.customServerAiStep	inline	crates/horizon-client/src/mobs/ai.rs::generic	goals stand in for the brain: Float, Panic 2.0, Breed, Tempt, FollowParent, stroll and look (ai.rs generic) and the ram goal (goat.rs); the ram cooldown counts down in goat.rs::tick
-Goat.setYHeadRot	missing		minor: the head is not clamped to 15 degrees of the body on every set; only walking and body turning limit it (control.rs)
+Goat.setYHeadRot	port	crates/horizon-client/src/mobs/control.rs::look_control_tick	the head is clamped to `getMaxHeadYRot` (15 degrees) from the body after every look update, walking or standing
 Goat.playEatingSound	port	crates/horizon-client/src/mobs/ai.rs::eating_sound	screaming or normal eat sound at 0.8 to 1.2 pitch
 Goat.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	gap: player: live spawns use spawning.rs::finalize, which has no goat arm: no screaming goats (2 percent), no one-horned goats (10 percent), and no starting ram cooldown, so a fresh goat can ram at once; Ctx::finalize only runs for structure mobs and the probe
 Goat.getDefaultDimensions	port	crates/horizon-client/src/mobs/living.rs::Mob::dims	baby box (0.45 x 0.65, eye 0.59375) from the species table; no long jump pose scale since there is no long jump
@@ -97,7 +97,7 @@ CopperGolemAi.getTargetReachedInteractions	inline	crates/horizon-client/src/mobs
 CopperGolemAi.onReachedTargetInteraction	inline	crates/horizon-client/src/mobs/transport_items.rs::Transport::on_reached	tick 1 opens the chest and sets the state, tick 9 plays the sound, tick 60 closes it
 IronGolem.registerGoals	port	crates/horizon-client/src/mobs/golem.rs::register_iron	gap: player: no MoveBackToVillageGoal and no village-bound stroll (plain stroll 0.6), so golems wander off from their village; no ResetUniversalAngerTargetGoal
 IronGolem.createAttributes	skip:data		attributes come from entity-types.json
-IronGolem.doPush	missing		minor: a hostile mob that bumps the golem is not picked as its target one time in 20 (the golem still finds enemies by its nearest-target goal)
+IronGolem.doPush	port	crates/horizon-client/src/mobs/ai.rs::push_entities	a monster that is not a creeper becomes the target one time in 20, drawn only for those, then the push
 IronGolem.canSpawnSprintParticle	port	crates/horizon-client/src/mobs/ai.rs::Mob::base_tick	ticked in #3512; `IronGolem.canSpawnSprintParticle` is cited at crates/horizon-client/src/mobs/ai.rs:862 (in a comment, so `where` names the enclosing fn)
 IronGolem.canAttack	port	crates/horizon-client/src/mobs/goals.rs::Mob::spares_players	the creator rule: player_created makes every player-target path skip players; gap: minor: the creeper refusal is only golem_prey's nearest-target filter, so HurtByTarget can still target a creeper that hits the golem
 IronGolem.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	PlayerCreated in the iron golem arm; persistent anger writes anger_end_time and angry_at
