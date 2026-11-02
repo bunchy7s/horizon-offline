@@ -4636,6 +4636,17 @@ impl Game<'_> {
     pub(super) fn native_player_item_break(&mut self, player: u128, name: &str, item: &str) {
         let _ = (player, name, item);
     }
+    /// A server player earned one criterion of an advancement, after the
+    /// progress was recorded. @API:native_player_advancement_criterion_grant@.
+    pub(super) fn native_player_advancement_criterion_grant(
+        &mut self,
+        player: u128,
+        name: &str,
+        advancement: &str,
+        criterion: &str,
+    ) {
+        let _ = (player, name, advancement, criterion);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

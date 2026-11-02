@@ -611,7 +611,13 @@ impl Game<'_> {
         for (ai, ci) in hits {
             let a = &tree.list[ai];
             let was = self.adv.progress.done(a);
-            self.adv.progress.grant(&a.id, &a.criteria[ci].name, &date);
+            let criterion = &a.criteria[ci].name;
+            if self.adv.progress.grant(&a.id, criterion, &date)
+                && let (Some(player), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+            {
+                self.native_player_advancement_criterion_grant(player, &name, &a.id, criterion);
+            }
             self.progress_changed(ai);
             if !was && self.adv.progress.done(a) {
                 self.award(ai);

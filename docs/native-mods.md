@@ -1363,6 +1363,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   book open or filter setting changed; `book` is the book type's protocol id. The player's state is not swapped in.
 - **`native_player_item_break(player, name, item)`**: a server player broke the item in their hand when its
   durability damage removed it.
+- **`native_player_advancement_criterion_grant(player, name, advancement, criterion)`**: a server player earned
+  one advancement criterion, after its progress was recorded.
 - **`native_player_command(player, name, command, canceled, replies)`**: any command a player typed (without the
   slash), vanilla's too and commands the player may not run, heard before anything looks at it, and each line of a
   quiet command batch. Set `canceled` and nothing runs; push lines to `replies` and the player gets them as system chat
