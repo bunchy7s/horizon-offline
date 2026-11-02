@@ -1746,6 +1746,27 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def experience_level_boundaries():
+    """Exact zero retains progress/total; a negative result resets all three (#7515)."""
+    def observe():
+        return [cmd('/experience query @s levels'),
+                cmd('/experience query @s points'),
+                cmd('/data get entity @s XpLevel'),
+                cmd('/data get entity @s XpP 1000000'),
+                cmd('/data get entity @s XpTotal')]
+    ops = []
+    for start, delta in [(1, -1), (1, -2), (2, -1), (0, -1)]:
+        ops += setup('/experience set @s 0 levels', '/experience set @s 0 points',
+                     '/experience add @s -2147483647 points', '/experience add @s 10 points',
+                     '/experience set @s 1 levels', '/experience set @s 3 points',
+                     f'/experience set @s {start} levels')
+        ops += observe()
+        ops.append(cmd(f'/experience add @s {delta} levels'))
+        ops += observe()
+    return ops + setup('/experience set @s 0 levels', '/experience set @s 0 points',
+                       '/experience add @s -2147483647 points')
+
+
 def mob_max_health_bounds():
     """Raw bases survive effective clamping without changing Health (#7413)."""
     pig = '00000000-0000-0000-0000-000000000001'
@@ -1818,6 +1839,7 @@ def groups():
         ('client commands', client_commands()),
         ('game state', game_state()),
         ('player state', player_state()),
+        ('experience level boundaries', experience_level_boundaries()),
         ('blocks and border', world_blocks()),
         ('forceload query order', forceload_query_order()),
         ('entities', entities()),
