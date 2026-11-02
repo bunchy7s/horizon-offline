@@ -9686,11 +9686,13 @@ impl Game<'_> {
     /// key over a slot swaps before the search box sees it.
     fn search_tab_hotbar_key(&mut self, code: KeyCode) -> bool {
         use horizon_client::creative::{Hover, search_key_swaps};
-        let hotbar_key = HOTBAR_DIGITS.contains(&code);
-        let numeric = hotbar_key || NUMERIC_KEYS.contains(&code);
+        let numeric = HOTBAR_DIGITS.contains(&code) || NUMERIC_KEYS.contains(&code);
         if !numeric {
             return false;
         }
+        let Some(key) = self.settings.keys.container_hotbar_key(code) else {
+            return false;
+        };
         let Some(size) = self
             .renderer
             .as_ref()
@@ -9712,8 +9714,7 @@ impl Game<'_> {
             }
             Some(_) => Hover::Slot,
         };
-        search_key_swaps(numeric, hotbar_key, hover, self.carried.is_some())
-            && self.inventory_hotkey(code)
+        search_key_swaps(numeric, true, hover, self.carried.is_some()) && self.inventory_hotkey(key)
     }
     /// Number keys, F and Q over a slot of the open menu: SWAP with a hotbar
     /// slot or the off hand, THROW one or the whole stack.
