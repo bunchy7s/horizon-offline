@@ -58,17 +58,17 @@ impl Music {
     pub fn game() -> Self {
         Self::new("minecraft:music.game", 12000, 24000, false)
     }
-    /// The built-in situations the Music page lists, in its order: the label
-    /// the page's group shows and the music that situation plays.
+    /// The built-in situations the Music page lists, in its order: the lang key
+    /// of the heading the page's group shows and the music that situation plays.
     pub fn builtin() -> [(&'static str, Music); 7] {
         [
-            ("Menu", Self::menu()),
-            ("Overworld", Self::game()),
-            ("Creative", Self::creative()),
-            ("Underwater", Self::under_water()),
-            ("The End", Self::end()),
-            ("Boss", Self::end_boss()),
-            ("Credits", Self::credits()),
+            ("horizon.pages.music.menu", Self::menu()),
+            ("horizon.pages.music.overworld", Self::game()),
+            ("horizon.pages.music.creative", Self::creative()),
+            ("horizon.pages.music.underwater", Self::under_water()),
+            ("horizon.pages.music.end", Self::end()),
+            ("horizon.pages.music.boss", Self::end_boss()),
+            ("horizon.pages.music.credits", Self::credits()),
         ]
     }
     /// `Music.CODEC`.
@@ -152,13 +152,13 @@ pub fn track_groups(registry: &SoundRegistry) -> Vec<MusicGroup> {
 fn biome_group(event: &str) -> (u8, &'static str) {
     let path = event.strip_prefix("minecraft:").unwrap_or(event);
     if path.starts_with("music.overworld.") {
-        (1, "Overworld biomes")
+        (1, "horizon.pages.music.overworld_biomes")
     } else if path.starts_with("music.nether.") {
-        (2, "Nether biomes")
+        (2, "horizon.pages.music.nether_biomes")
     } else if path.starts_with("music.end.") {
-        (3, "End biomes")
+        (3, "horizon.pages.music.end_biomes")
     } else {
-        (4, "Other music")
+        (4, "horizon.pages.music.other")
     }
 }
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -915,11 +915,14 @@ mod tests {
         assert_eq!(
             summary,
             [
-                ("Menu", vec!["one"]),
-                ("Overworld", vec!["shared", "second"]),
+                ("horizon.pages.music.menu", vec!["one"]),
+                ("horizon.pages.music.overworld", vec!["shared", "second"]),
                 // A biome pool's own track, from the pool that plays it.
-                ("Overworld biomes", vec!["bromeliad", "aerie"]),
-                ("Nether biomes", vec!["rubedo"]),
+                (
+                    "horizon.pages.music.overworld_biomes",
+                    vec!["bromeliad", "aerie"]
+                ),
+                ("horizon.pages.music.nether_biomes", vec!["rubedo"]),
             ]
         );
         // Each row plays from a pool that has the track; no track repeats.

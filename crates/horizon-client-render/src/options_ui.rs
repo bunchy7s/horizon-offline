@@ -1475,7 +1475,7 @@ pub struct MusicTrack {
 /// One group of rows on the Music page: a situation, or a dimension's biomes.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MusicGroup {
-    /// The heading the page shows ("Overworld", "Nether biomes").
+    /// The lang key of the heading the page shows (`horizon.pages.music.overworld`).
     pub label: String,
     /// The rows, in `sounds.json` order.
     pub tracks: Vec<MusicTrack>,
@@ -1820,7 +1820,7 @@ enum Row {
     Big(Opt),
     Pair(Opt, Option<Opt>),
     Header(&'static str),
-    /// A heading the page makes at run time (the Music page's groups).
+    /// A heading the page makes at run time, by lang key (the Music page's groups).
     Heading(String),
     /// A line of grey text (a path).
     Note(String),
@@ -3260,8 +3260,8 @@ impl OptionsUi {
                             let label = tr(key);
                             self.heading_row(&mut out, label, &mut y, w, top);
                         }
-                        Row::Heading(text) => {
-                            let label = Text::literal(text);
+                        Row::Heading(key) => {
+                            let label = tr(key);
                             self.heading_row(&mut out, label, &mut y, w, top);
                         }
                         Row::Note(text) => {
@@ -7648,7 +7648,7 @@ mod tests {
         let mut s = Settings::default();
         let mut ui = OptionsUi {
             music_groups: vec![MusicGroup {
-                label: "Overworld".into(),
+                label: "horizon.pages.music.overworld".into(),
                 tracks: vec![
                     MusicTrack {
                         event: "minecraft:music.game".into(),
