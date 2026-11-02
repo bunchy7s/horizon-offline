@@ -17,6 +17,7 @@ use horizon_client::{
     entities::{Experience, ExperienceOrb, ItemEntity},
     hud::HudBatch,
     items::ItemStack,
+    lan::data::{BIOME_REGISTRY, client_biomes},
     menu::Input,
     mobs::{Mob, MobType, Who},
     motion::{MotionWorld, PlayerMotion},
@@ -832,8 +833,12 @@ impl Game<'_> {
         self.reset_tutorial();
         self.perf.world_opening();
         // A server's own biomes come over the connection; the last local
-        // world's packed table must not name its ids.
-        self.world_biomes = None;
+        // world's packed table must not name its ids. The window's own
+        // server thread keeps the one it just set.
+        if local.is_none() {
+            self.world_biomes = None;
+            self.world_biomes_base = None;
+        }
         let root = self.options.resources.clone();
         let builtin = builtin_registries(&root).ok_or("Resources are incomplete: registries.json is missing or invalid. Click \"Prepare again\" in the launcher (or run horizon-prepare), then try again.")?;
         let lang = Arc::new(horizon_client::net::load_language(&root));
@@ -898,7 +903,7 @@ impl Game<'_> {
         let player_type = super::perspective::player_type(&root);
         let mut streaming = Streaming::new(
             Arc::new(NoTerrain),
-            self.pack.context.clone(),
+            self.worker_context(),
             self.res.threads(),
         );
         streaming.remote = true;
@@ -1163,7 +1168,7 @@ impl Game<'_> {
         self.adv = Default::default();
         self.stats = Default::default();
         self.score.board = Default::default();
-        self.streaming = Streaming::new(Arc::new(NoTerrain), self.pack.context.clone(), 1);
+        self.streaming = Streaming::new(Arc::new(NoTerrain), self.worker_context(), 1);
         self.streaming.paused = true;
         self.world = World::new(self.res.facts().air, 0);
         self.player = None;
@@ -2030,9 +2035,26 @@ impl Game<'_> {
         }
     }
     fn set_registries(&mut self, registries: Arc<Dynamic>) {
+        // The server's biomes the game lacks (a world data pack's) join the
+        // game's table, from the data it sent: colours, meshing and the
+        // chunk format all go through that table. The window's own server
+        // thread set the world's table already.
+        if self.integrated.is_none() {
+            let table = registries
+                .registries
+                .get(BIOME_REGISTRY)
+                .and_then(|list| client_biomes(self.res.biomes(), list))
+                .map(Arc::new);
+            if table.is_some() || self.world_biomes.is_some() {
+                self.world_biomes_base = table.clone();
+                self.world_biomes = table;
+                let context = self.worker_context();
+                self.streaming.reload_resources(&mut self.world, context);
+            }
+        }
         let biomes: Vec<u16> = registries
             .registries
-            .get("minecraft:worldgen/biome")
+            .get(BIOME_REGISTRY)
             .map(|list| {
                 list.iter()
                     .map(|(name, _)| world_biomes!(self).id(name))
@@ -2110,7 +2132,7 @@ impl Game<'_> {
             self.stop_sounds_for_new_level();
             let mut streaming = Streaming::new(
                 Arc::new(NoTerrain),
-                self.pack.context.clone(),
+                self.worker_context(),
                 self.res.threads(),
             );
             streaming.remote = true;
@@ -6374,7 +6396,12 @@ impl Game<'_> {
                         illager::cast_particles(m, &mut mob_fx);
                     }
                     S::Evoker => illager::cast_particles(m, &mut mob_fx),
-                    S::Wither => wither::client_smoke(m, &mut mob_fx),
+                    S::Wither => {
+                        wither::client_smoke(m, &mut mob_fx);
+                        // `getInvulnerableTicks() > 0`: the charge's cloud,
+                        // after the heads' smoke as in `aiStep`.
+                        wither::charging_particles(m, &mut mob_fx);
+                    }
                     _ => {}
                 }
             }
@@ -8097,14 +8124,14 @@ impl Game<'_> {
             // BundleItem.use: always starts; the server drops the contents.
             _ if bundle => true,
             // BowItem.use: with an arrow, or in creative.
-            "minecraft:bow" => self.creative || self.projectile_slot("minecraft:bow").is_some(),
+            "minecraft:bow" => self.get_projectile(held).is_some() || self.creative,
             // CrossbowItem.use: charging when not charged and with ammunition;
             // a charged one shoots on the server.
             "minecraft:crossbow" => {
                 if held.data().is_some_and(|d| !d.charged.is_empty()) {
                     return true;
                 }
-                self.creative || self.projectile_slot("minecraft:crossbow").is_some()
+                self.get_projectile(held).is_some()
             }
             // TridentItem.use: not about to break, Riptide only in water or rain.
             "minecraft:trident" => {

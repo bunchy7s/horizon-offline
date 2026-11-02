@@ -329,11 +329,8 @@ impl Game<'_> {
             if gpu {
                 let mut models = self.skin_models.borrow_mut();
                 let mut frame = self.skin_frame.borrow_mut();
-                let mut skin = horizon_client::mobs::skin::Skin {
-                    models: &mut models,
-                    frame: &mut frame,
-                    bounds,
-                };
+                let mut skin = horizon_client::mobs::skin::Skin::new(&mut models, &mut frame);
+                skin.bounds = bounds;
                 let paint = horizon_client::mobs::skin::Paint {
                     uv,
                     scroll: 0.0,
