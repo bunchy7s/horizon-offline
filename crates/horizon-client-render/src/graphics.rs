@@ -543,6 +543,9 @@ pub struct Graphics {
     pub lod_distance: u32,
     /// How finely far terrain is drawn; Full unless the player picks Reduced.
     pub far_detail: FarDetail,
+    /// Far terrain from servers' BlueMap web maps; no server has one unless
+    /// the player names it (`blueMap:` lines) or turns on auto-detect.
+    pub blue_map: crate::bluemap::Settings,
     /// Skip sections hidden behind closed ones (vanilla's occlusion graph).
     pub cave_culling: bool,
     /// Skip drawing entities hidden behind opaque terrain, synchronously or asynchronously.
@@ -641,6 +644,7 @@ impl Default for Graphics {
             preset: Preset::Custom,
             lod_distance: 0,
             far_detail: FarDetail::Full,
+            blue_map: crate::bluemap::Settings::default(),
             cave_culling: true,
             entity_culling: EntityCullingMode::Off,
             leaf_culling: LeafCullingMode::Off,
@@ -692,6 +696,14 @@ impl Graphics {
         let mut g: Self = fs::read_to_string(dir.join(FILE))
             .map(|t| Self::parse(&t))
             .unwrap_or_default();
+        g.blue_map.servers = match fs::read_to_string(dir.join(crate::bluemap::SERVERS_FILE)) {
+            Ok(text) => crate::bluemap::Settings::parse_servers(&text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => {
+                log::warn!("{}: {e}; no BlueMap is named", crate::bluemap::SERVERS_FILE);
+                Vec::new()
+            }
+        };
         if fs::remove_file(dir.join(HDR_MARKER)).is_ok() && g.hdr {
             g.hdr = false;
             g.save(dir);
@@ -720,6 +732,12 @@ impl Graphics {
                     g.lod_distance = number(g.lod_distance).min(crate::lod::MAX_CHUNKS)
                 }
                 "farDetail" => g.far_detail = FarDetail::parse(value),
+                "blueMapRadius" => {
+                    if let Some(radius) = crate::bluemap::Settings::parse_radius(value) {
+                        g.blue_map.radius = radius;
+                    }
+                }
+                "blueMapAutoDetect" => g.blue_map.auto_detect = flag(g.blue_map.auto_detect),
                 "caveCulling" => g.cave_culling = flag(g.cave_culling),
                 "entityCulling" => g.entity_culling = EntityCullingMode::parse(value),
                 "leafCulling" => g.leaf_culling = LeafCullingMode::parse(value),
@@ -811,7 +829,7 @@ impl Graphics {
         g
     }
     pub fn serialize(&self) -> String {
-        format!(
+        let mut text = format!(
             "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nleafCulling:{}\nblockEntityCacheShulkerBoxes:{}\nblockEntityCacheSigns:{}\nblockEntityCacheDecoratedPots:{}\nblockEntityCacheBells:{}\nblockEntityCacheChests:{}\nblockEntityCacheBanners:{}\nblockEntityCacheCopperGolemStatues:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiBrightness:{}\nhdrKey:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nbatchTranslucent:{}\n",
             self.preset.name(),
             self.lod_distance,
@@ -862,7 +880,9 @@ impl Graphics {
             self.api.name(),
             self.shader_pack,
             bool_text(self.translucent_batching),
-        )
+        );
+        text += &self.blue_map.serialize();
+        text
     }
     /// Binds Horizon's graphics key `name` (`HDR_KEY`); false for another name.
     pub fn set_key(&mut self, name: &str, value: String) -> bool {
@@ -989,6 +1009,12 @@ mod tests {
             preset: Preset::Balanced,
             lod_distance: 256,
             far_detail: FarDetail::Reduced,
+            blue_map: crate::bluemap::Settings {
+                radius: 40,
+                auto_detect: true,
+                // In their own file (`bluemap::SERVERS_FILE`).
+                servers: Vec::new(),
+            },
             cave_culling: false,
             entity_culling: EntityCullingMode::Synchronous,
             leaf_culling: LeafCullingMode::SolidAggressive,
@@ -1044,6 +1070,13 @@ mod tests {
         assert_eq!(
             Graphics::parse("entityCulling:false\n").entity_culling,
             EntityCullingMode::Off
+        );
+        // A map named here (a shared instance's, a pack's) is no map.
+        assert!(
+            Graphics::parse("blueMap:play.example.net https://map.example.net\n")
+                .blue_map
+                .servers
+                .is_empty()
         );
         assert_eq!(Graphics::parse(""), Graphics::default());
         // Translucent Batching is on, in files from before it too; only false turns it off,

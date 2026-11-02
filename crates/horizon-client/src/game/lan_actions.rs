@@ -309,13 +309,23 @@ impl Game<'_> {
         conn: u32,
         f: impl FnOnce(&mut Self) -> R,
     ) -> Option<R> {
+        self.as_guest_with_host(host, conn, |g, _| f(g))
+    }
+
+    /// `as_guest`, passing the active `&LanHost` to `f`.
+    pub(super) fn as_guest_with_host<R>(
+        &mut self,
+        host: &mut LanHost,
+        conn: u32,
+        f: impl FnOnce(&mut Self, &LanHost) -> R,
+    ) -> Option<R> {
         let swap = self.enter_guest(host, conn)?;
         super::dedicated::crash_fixture("guest", || {
             host.hub.guests.iter().any(|g| g.conn == conn && g.placed)
         });
         let dimension =
             (self.serving.is_some() || self.options.dedicated.is_some()).then_some(self.dim.id());
-        let result = horizon_client::block_contact::in_level(dimension, || f(self));
+        let result = horizon_client::block_contact::in_level(dimension, || f(self, host));
         self.leave_guest(host, swap);
         Some(result)
     }
@@ -2995,13 +3005,13 @@ impl Game<'_> {
             .iter()
             .position(|p| p.id != 0 && p.id as i32 == id && super::deflect::attackable(p))
         {
-            self.as_guest(host, conn, |g| {
+            self.as_guest_with_host(host, conn, |g, host| {
                 if g.within_interaction_range(i) {
                     if matches!(
                         g.creatures.projectiles[i].kind,
                         horizon_client::projectiles::ProjectileKind::ShulkerBullet { .. }
                     ) {
-                        g.hit_shulker_bullet(i);
+                        g.hit_shulker_bullet(Some(host), i);
                     } else {
                         g.deflect(i);
                     }

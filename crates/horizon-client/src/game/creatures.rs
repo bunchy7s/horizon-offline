@@ -753,6 +753,7 @@ impl Game<'_> {
             nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
             player,
             others,
+            dragon: self.dragon_target(),
             leash_boats: &self.leash_boats,
             others_grid: None,
             others_index: None,
@@ -1729,11 +1730,19 @@ impl Game<'_> {
             let splash_options = ParticleOptions::simple(ParticleType::Splash);
             self.particles
                 .send_particles(&splash_options, splash, [0.0; 3], 1.0, 1);
-            self.lan_level_particles(&splash_options, splash, [0.0; 3], 1.0, 1, None);
+            self.lan_level_particles(None, &splash_options, splash, [0.0; 3], 1.0, 1, None);
             let bubble_options = ParticleOptions::simple(ParticleType::Bubble);
             self.particles
                 .send_particles(&bubble_options, bubble, [0.0, 0.01, 0.0], 0.2, 1);
-            self.lan_level_particles(&bubble_options, bubble, [0.0, 0.01, 0.0], 0.2, 1, None);
+            self.lan_level_particles(
+                None,
+                &bubble_options,
+                bubble,
+                [0.0, 0.01, 0.0],
+                0.2,
+                1,
+                None,
+            );
         }
     }
     pub(super) fn handle_mob_events(&mut self, events: Vec<MobEvent>) -> Result<()> {
@@ -1742,6 +1751,13 @@ impl Game<'_> {
                 MobEvent::BubbleColumnParticles { pos } => {
                     self.bubble_column_particles(BlockPos::new(pos[0], pos[1], pos[2]))
                 }
+                MobEvent::LandingDust { state, at, count } => self.landing_dust(
+                    None,
+                    state,
+                    Vec3::new(at[0], at[1], at[2]),
+                    count,
+                    f64::from(0.15_f32),
+                ),
                 MobEvent::SquidCycle { mob, at } => self.lan_entity_event(mob as i32, 19, at),
                 MobEvent::RabbitHop { mob, at } => self.lan_entity_event(mob as i32, 1, at),
                 MobEvent::Drown { mob, at } => {
@@ -1769,8 +1785,21 @@ impl Game<'_> {
                         let options = horizon_client::particles::ParticleOptions::simple(ty);
                         self.particles
                             .send_particles(&options, at, spread, speed, count);
-                        self.lan_level_particles(&options, at, spread, speed, count, None);
+                        self.lan_level_particles(None, &options, at, spread, speed, count, None);
                     }
+                }
+                // The LAN packet has no item for a particle yet: the host's window only.
+                MobEvent::ItemParticles {
+                    item,
+                    at,
+                    spread,
+                    speed,
+                    count,
+                } => {
+                    let options =
+                        self.item_particle(&horizon_client::items::ItemStack::new(item, 1));
+                    self.particles
+                        .send_particles(&options, at, spread, speed, count);
                 }
                 MobEvent::Sound(name, at, volume, pitch)
                 | MobEvent::LocalSound(name, at, volume, pitch) => {
@@ -3504,6 +3533,7 @@ impl Game<'_> {
         let mut deflections: Vec<[f64; 3]> = Vec::new();
         let mut arrow_events = Vec::new();
         let mut trails = Vec::new();
+        let mut bubble_tops = Vec::new();
         let mut keep_flags = vec![true; projectiles.len()];
         // The impacts the mods may cancel (`native_projectile_impact`), on a server.
         let hear = self.native_hears_impacts();
@@ -3626,7 +3656,7 @@ impl Game<'_> {
                 // ThrownEnderpearl.onAboveBubbleColumn / onInsideBubbleColumn.
                 if keep && hit == Hit::None && matches!(p.kind, ProjectileKind::EnderPearl) {
                     let (at, h) = (p.position, 0.125);
-                    horizon_client::motion::bubble_column_push(
+                    horizon_client::motion::bubble_column_push_over(
                         w.world,
                         w.registry,
                         w.facts,
@@ -3636,6 +3666,7 @@ impl Game<'_> {
                             Vec3::new(at.x + h, at.y + 2.0 * h, at.z + h),
                         ),
                         &mut p.velocity,
+                        |pos| bubble_tops.push(pos),
                     );
                 }
                 let events_from = arrow_events.len();
@@ -3719,6 +3750,9 @@ impl Game<'_> {
             );
         }
         self.smoke_trails(trails);
+        for pos in bubble_tops {
+            self.bubble_column_particles(pos);
+        }
         for at in deflections {
             self.audio
                 .play("minecraft:entity.breeze.deflect", Some(at), 1.0, 1.0);
@@ -6444,7 +6478,9 @@ impl Game<'_> {
                     v.layer |= u32::from(tier) << 16;
                 }
             }
-            if is_player {
+            // AvatarRenderer.shouldRenderLayers: a spectator draws no layers.
+            let layers = horizon_client::mobs::render::layers_shown(mob);
+            if is_player && layers {
                 // PlayerRenderer's CapeLayer, WingsLayer, ParrotOnShoulderLayer
                 // and SpinAttackEffectLayer. Only the cape hides with the body;
                 // the others have no `isInvisible` check.
@@ -6465,9 +6501,11 @@ impl Game<'_> {
                 self.stuck_in_body_geometry(mob, mob.id as i32, camera, alpha as f32, packed, out);
             }
             // CustomHeadLayer (a pumpkin, skull or head item) included.
-            self.mob_block_geometry(mob, camera, alpha, packed, out);
-            // `native_mob_layer`: a native mod's layer, over the vanilla ones.
-            self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
+            if layers {
+                self.mob_block_geometry(mob, camera, alpha, packed, out);
+                // `native_mob_layer`: a native mod's layer, over the vanilla ones.
+                self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
+            }
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);
                 if mob.invisible {
@@ -7220,6 +7258,7 @@ mod pearl_tests {
             player: None,
             nearest_player: None,
             others: &[],
+            dragon: None,
             leash_boats: &[],
             others_grid: None,
             others_index: None,

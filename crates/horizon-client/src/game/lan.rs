@@ -2593,6 +2593,12 @@ impl Game<'_> {
             EquipmentSlot::Body => 65,
             EquipmentSlot::Saddle => 68,
         };
+        // The mods hear a server player's break (a creative player's gear takes no wear).
+        if !self.creative
+            && let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            self.native_player_destroy_item(uuid, &name, &stack.item, equipment_slot_name(slot));
+        }
         let Some(at) = self
             .player
             .as_ref()
@@ -3048,30 +3054,33 @@ impl Game<'_> {
                 ),
                 out,
             );
-            self.player_elytra_geometry(
-                m,
-                m.extra.chest.as_deref(),
-                camera,
-                alpha as f32,
-                packed,
-                out,
-            );
-            if let Some(g) = host.hub.guest(*conn) {
-                self.player_ears_geometry(m, &g.name, camera, alpha as f32, packed, out);
+            // AvatarRenderer.shouldRenderLayers: a spectator draws no layers.
+            if horizon_client::mobs::render::layers_shown(m) {
+                self.player_elytra_geometry(
+                    m,
+                    m.extra.chest.as_deref(),
+                    camera,
+                    alpha as f32,
+                    packed,
+                    out,
+                );
+                if let Some(g) = host.hub.guest(*conn) {
+                    self.player_ears_geometry(m, &g.name, camera, alpha as f32, packed, out);
+                }
+                self.spin_attack_geometry(m, camera, alpha as f32, packed, out);
+                if let Some(g) = host.hub.guest(*conn) {
+                    self.stuck_in_body_geometry(m, g.entity_id, camera, alpha as f32, packed, out);
+                }
+                self.held_item_geometry(m, camera, alpha, packed, true, out);
+                self.player_pumpkin_geometry(
+                    m,
+                    host.hub.guest(*conn).and_then(|g| g.armor[0].as_ref()),
+                    camera,
+                    alpha,
+                    packed,
+                    out,
+                );
             }
-            self.spin_attack_geometry(m, camera, alpha as f32, packed, out);
-            if let Some(g) = host.hub.guest(*conn) {
-                self.stuck_in_body_geometry(m, g.entity_id, camera, alpha as f32, packed, out);
-            }
-            self.held_item_geometry(m, camera, alpha, packed, true, out);
-            self.player_pumpkin_geometry(
-                m,
-                host.hub.guest(*conn).and_then(|g| g.armor[0].as_ref()),
-                camera,
-                alpha,
-                packed,
-                out,
-            );
             // LivingEntity.isCurrentlyGlowing: the guest's Glowing effect.
             let guest = host.hub.guest(*conn);
             if m.glowing || guest.is_some_and(|g| g.effects.get("glowing").is_some()) {
@@ -3124,9 +3133,25 @@ pub(super) fn living_flags(using: Option<(usize, u32)>) -> i8 {
     using.map_or(0, |(slot, _)| if slot == OFFHAND_SLOT { 3 } else { 1 })
 }
 
+/// The name a mod hears for an equipment slot (the armor stand hook's names, plus
+/// the two slots a mount's gear uses).
+fn equipment_slot_name(slot: horizon_world::player_inventory::EquipmentSlot) -> &'static str {
+    use horizon_world::player_inventory::EquipmentSlot;
+    match slot {
+        EquipmentSlot::MainHand => "mainhand",
+        EquipmentSlot::OffHand => "offhand",
+        EquipmentSlot::Head => "head",
+        EquipmentSlot::Chest => "chest",
+        EquipmentSlot::Legs => "legs",
+        EquipmentSlot::Feet => "feet",
+        EquipmentSlot::Body => "body",
+        EquipmentSlot::Saddle => "saddle",
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{OFFHAND_SLOT, living_flags};
+    use super::{OFFHAND_SLOT, equipment_slot_name, living_flags};
 
     /// `LivingEntity.startUsingItem` sets flag 1 for the use and flag 2 for
     /// the off hand, so an off-hand use is 3, not 2. A reader takes bit 0 as
@@ -3136,5 +3161,20 @@ mod tests {
         assert_eq!(living_flags(None), 0);
         assert_eq!(living_flags(Some((0, 12))), 1);
         assert_eq!(living_flags(Some((OFFHAND_SLOT, 12))), 3);
+    }
+
+    /// The names a mod matches on for a broken item's slot (a contract).
+    #[test]
+    fn a_broken_items_slot_is_named_for_mods() {
+        use horizon_world::player_inventory::EquipmentSlot::*;
+        let named: Vec<_> = [MainHand, OffHand, Head, Chest, Legs, Feet, Body, Saddle]
+            .map(equipment_slot_name)
+            .to_vec();
+        assert_eq!(
+            named,
+            [
+                "mainhand", "offhand", "head", "chest", "legs", "feet", "body", "saddle"
+            ]
+        );
     }
 }

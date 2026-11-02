@@ -326,6 +326,32 @@ fn ids_in(root: &Path, extension: &str, namespace: &str) -> Vec<String> {
 }
 
 impl Game<'_> {
+    /// The caches `build_registries` reads (`resource_ids`, `block_properties`,
+    /// `command_export`), filled on a helper thread while the title screen is up: the
+    /// first world opened or server joined built them in its frame (20 ms of the Join
+    /// click on an M4 Pro). Whoever needs one before it is done waits for it, as before.
+    pub(super) fn preload_registries(&self) {
+        if self.options.dedicated.is_some() {
+            return;
+        }
+        let dirs = [self.options.resources.clone(), self.ui.vanilla_root.clone()];
+        let registry = self.pack.assets.registry;
+        let spawned = std::thread::Builder::new()
+            .name("Registries preload".into())
+            .spawn(move || {
+                horizon_threads::behind_server();
+                resource_ids(&dirs[0]);
+                block_properties(registry);
+                for dir in &dirs {
+                    if command_export(dir, true).is_some() {
+                        break;
+                    }
+                }
+            });
+        if let Err(e) = spawned {
+            log::warn!("Horizon: registries preload: {e}");
+        }
+    }
     /// `PlayerList.isOp` for the single-player owner: the world's Allow Commands.
     pub(super) fn allow_commands(&self) -> bool {
         self.level.allow_commands == Some(true)
