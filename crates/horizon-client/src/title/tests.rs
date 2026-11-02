@@ -720,6 +720,40 @@ fn classic_world_selection_is_silent_until_the_entry_launches() {
 }
 
 #[test]
+fn middle_clicking_a_world_selects_it_without_joining() {
+    let mut f = Fixture::new();
+    f.world("World", "World");
+    f.title.enter_singleplayer();
+    let size = (480.0, 262.0);
+    let enabled = |f: &Fixture, label: &str| {
+        f.title
+            .buttons(size.0, size.1)
+            .into_iter()
+            .find(|b| b.label == label)
+            .unwrap()
+            .enabled
+    };
+    assert!(!enabled(&f, "Edit"), "nothing is selected yet");
+    assert!(f.title.select_world_at(240.0, 60.0, size));
+    assert!(matches!(
+        f.title.mode,
+        Mode::Select {
+            selected: Some(0),
+            ..
+        }
+    ));
+    assert!(
+        enabled(&f, "Edit"),
+        "the selection callback reaches the footer"
+    );
+    // Again on the selected row: still only a selection, not a join.
+    assert!(f.title.select_world_at(240.0, 60.0, size));
+    assert!(matches!(f.title.mode, Mode::Select { .. }));
+    // Outside the rows (the footer) nothing is selected.
+    assert!(!f.title.select_world_at(240.0, 250.0, size));
+}
+
+#[test]
 fn a_world_open_elsewhere_stays_closed_behind_a_toast() {
     let mut f = Fixture::new();
     f.world("World", "World");

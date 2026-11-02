@@ -63,6 +63,12 @@ impl NativeLifecycle {
                 .is_some_and(|a| a.session == OpenState::Ready && a.context() == *context)
     }
 
+    /// The epoch of the world open now, from the start of its open to the end
+    /// of its close: what a mod's entity and level handles carry.
+    pub(super) fn epoch(&self) -> Option<NativeWorldEpoch> {
+        self.attempt.map(|a| NativeWorldEpoch::new(a.epoch))
+    }
+
     /// The open starts: a fresh process-wide epoch, never reused.
     pub(super) fn begin_open(&mut self, authority: NativeAuthority) {
         let epoch = NEXT_EPOCH.fetch_add(1, Ordering::Relaxed);

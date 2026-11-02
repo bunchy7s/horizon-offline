@@ -25,6 +25,12 @@ use std::{
 };
 
 pub(super) type Starts = Arc<Vec<Arc<StructureStart>>>;
+impl StructureState {
+    /// [`StartCache::census`].
+    pub(super) fn start_census(&self) -> (usize, usize) {
+        self.starts.census()
+    }
+}
 pub(super) struct StructureState {
     pub(super) registry: StructureRegistry,
     pub(super) resources: Arc<StructureResources>,
@@ -155,6 +161,16 @@ impl StartCache {
             shard.clear();
         }
         shard.entry(key).or_insert(starts).clone()
+    }
+    /// Chunks cached, and how many of them hold a start.
+    fn census(&self) -> (usize, usize) {
+        let mut census = (0, 0);
+        for shard in &self.shards {
+            let shard = shard.read().unwrap();
+            census.0 += shard.len();
+            census.1 += shard.values().filter(|s| !s.is_empty()).count();
+        }
+        census
     }
     fn replace(&self, key: (i32, i32), starts: Starts) {
         self.shard(key).write().unwrap().insert(key, starts);
