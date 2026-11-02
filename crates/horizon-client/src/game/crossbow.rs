@@ -117,6 +117,9 @@ impl Game<'_> {
             Some(i) => self.stack_in(i).cloned(),
             None => self.creative.then(|| ItemStack::new(ARROW, 1)),
         };
+        if horizon_client::mod_api::mods().is_empty() {
+            return vanilla.map(|stack| Ammo { stack, slot });
+        }
         let mut projectile = vanilla.clone();
         // A client predicting its own use has the profile it logged in with.
         let player = match self
@@ -142,6 +145,9 @@ impl Game<'_> {
     /// `AbstractSkeleton.performRangedAttack`'s `getProjectile`: the arrow
     /// `mob` shot becomes the replaced ammunition's (`ProjectileUtil.getMobArrow`).
     pub(super) fn mob_bow_ammo(&mut self, mob: u32, weapon: &ItemStack, arrow: &mut Projectile) {
+        if horizon_client::mod_api::mods().is_empty() {
+            return;
+        }
         let Some(shooter) = self.mobs.iter().find(|m| m.id == mob) else {
             return;
         };
