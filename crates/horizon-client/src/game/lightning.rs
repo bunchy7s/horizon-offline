@@ -88,6 +88,9 @@ impl Game<'_> {
             let trap = self.ui.rules.bool("spawn_mobs")
                 && self.world.random.next_double() < difficulty * 0.01
                 && !below.ends_with("lightning_rod");
+            if !self.lightning_strike_allowed(None, pos, "weather") {
+                continue;
+            }
             if trap {
                 let at = [f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2])];
                 // ServerLevel.tickChunk: a trap horse waits for a player.
@@ -243,6 +246,16 @@ impl Game<'_> {
             cause: None,
         });
     }
+    pub(super) fn lightning_strike_allowed(
+        &mut self,
+        player: Option<u128>,
+        pos: [i32; 3],
+        cause: &str,
+    ) -> bool {
+        let mut cancel = false;
+        self.native_lightning_strike(player, pos, cause, &mut cancel);
+        !cancel
+    }
     /// `ClientLevel.addEntity` for a server's lightning bolt: on a client it
     /// only flashes, sounds and draws (`LightningBolt.tick` off the server).
     pub(super) fn spawn_remote_bolt(&mut self, id: u32, at: [f64; 3]) {
@@ -294,6 +307,9 @@ impl Game<'_> {
                 b.can_survive(level, ticks, at, fire).then_some(fire)
             });
             if let Some(fire) = fire {
+                if !self.native_block_ignite_allowed(at, "lightning") {
+                    continue;
+                }
                 let _ = self.level_set(p, fire);
                 set += 1;
             }
@@ -497,6 +513,7 @@ impl Game<'_> {
             from: Some(b.at),
         };
         let mut events = Vec::new();
+        let mut powered = Vec::new();
         let peaceful = self.ui.difficulty == 0;
         for m in self.mobs.iter_mut().filter(|m| m.alive()) {
             if !meets(
@@ -544,7 +561,10 @@ impl Game<'_> {
                     m.damage(f32::MAX, damage);
                     continue;
                 }
-                Species::Creeper => m.extra.charged = true,
+                Species::Creeper => {
+                    m.extra.charged = true;
+                    powered.push(m.id);
+                }
                 // CopperGolem.thunderHit (after Entity.thunderHit's fire and
                 // damage): once per bolt, an oxidized golem goes back one step
                 // and its weathering timer (or wax, -2) is reset to -1.
@@ -568,6 +588,9 @@ impl Game<'_> {
         }
         if !events.is_empty() {
             let _ = self.handle_mob_events(events);
+        }
+        for entity in powered {
+            self.native_creeper_power(entity, [at[0], at[1], at[2]]);
         }
         // Cushion.thunderHit: a cushion whose box meets the strike box breaks and drops its item
         // (the bolt is no player, so no creative spare). Last first, since

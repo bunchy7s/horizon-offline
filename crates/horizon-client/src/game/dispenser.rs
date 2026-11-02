@@ -634,6 +634,13 @@ impl Game<'_> {
             );
         }
         if let Some((left, event)) = mod_dispensed(answer) {
+            if event == FAIL {
+                self.native_block_failed_dispense(
+                    self.dim.id(),
+                    [pos.0, pos.1, pos.2],
+                    &stack.item,
+                );
+            }
             // DefaultDispenseItemBehavior.dispense: playSound, then playAnimation;
             // a NOOP behaviour (event 0) plays neither.
             if event != 0 {
@@ -690,6 +697,9 @@ impl Game<'_> {
             }
             _ => self.dispense_default_method(pos, facing, stack)?,
         };
+        if event == FAIL {
+            self.native_block_failed_dispense(self.dim.id(), [pos.0, pos.1, pos.2], &item);
+        }
         self.dispenser_event(event, pos, 0);
         self.dispenser_event(2000, pos, data_value(facing));
         Ok(left)
@@ -899,6 +909,12 @@ impl Game<'_> {
                 };
                 self.player_equipped(name, Some(&one));
                 self.apply_equipment();
+                self.native_block_dispense_armor(
+                    self.dim.id(),
+                    [pos.0, pos.1, pos.2],
+                    &stack.item,
+                    "player",
+                );
                 return true;
             }
             Target::Stand(i) => {
@@ -932,6 +948,16 @@ impl Game<'_> {
             let ctx = self.who_context(who, None);
             self.post_game_event("minecraft:equip", [at.x, at.y, at.z], ctx);
         }
+        self.native_block_dispense_armor(
+            self.dim.id(),
+            [pos.0, pos.1, pos.2],
+            &stack.item,
+            match target {
+                Target::Stand(_) => "armor_stand",
+                Target::Mob(_) => "mob",
+                Target::Player => "player",
+            },
+        );
         true
     }
     /// After `EntityType.spawn` / `MobBucketItem.spawn`: `mob.playAmbientSound()`.
@@ -1354,6 +1380,9 @@ impl Game<'_> {
         if self
             .with_level(|b, level, ticks| b.fire_can_be_placed_at(level, ticks, target_pos, facing))
         {
+            if !self.native_block_ignite_allowed(target_pos, "flint_and_steel") {
+                return Ok((Some(stack), CLICK));
+            }
             let fire =
                 self.with_level(|b, level, ticks| b.fire_state_for(level, ticks, target_pos));
             self.level_set([target.0, target.1, target.2], fire)?;
@@ -1822,6 +1851,8 @@ impl Game<'_> {
                 continue;
             }
             let at = m.position;
+            let entity_id = m.id;
+            let kind = m.kind.id.clone();
             let sound_at = Some([at.x, at.y, at.z]);
             match m.species() {
                 Species::SulfurCube if sulfur_cube::has_body(m) => {
@@ -1940,6 +1971,12 @@ impl Game<'_> {
                 }
                 _ => continue,
             }
+            self.native_block_shear_entity(
+                self.dim.id(),
+                [target.0, target.1, target.2],
+                entity_id,
+                &kind,
+            );
             self.post_block_game_event(
                 "minecraft:shear",
                 [target.0, target.1, target.2],

@@ -956,6 +956,7 @@ struct GameLevel<'w> {
     client_side: bool,
     /// Only the integrated or dedicated server dispatches native observations.
     native_authoritative: bool,
+    native_player: Option<u128>,
     /// `Level.isDebug`: `setBlock` changes nothing.
     debug: bool,
     native_sounds: &'w mut Vec<creatures::NativeSound>,
@@ -1163,6 +1164,13 @@ impl GameLevel<'_> {
     }
 }
 impl LevelAccess for GameLevel<'_> {
+    fn allow_hopper_pickup_item(&self, pos: BlockPos, item: &str, count: u32) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_hopper_pickup_item(self.dimension, pos, item, count, &mut cancel);
+        }
+        !cancel
+    }
     fn observe_block_changed(&self, pos: BlockPos, old: BlockStateId, new: BlockStateId) {
         if self.native_authoritative {
             self.native_block_changed(self.dimension, pos, old, new);
@@ -1194,6 +1202,108 @@ impl LevelAccess for GameLevel<'_> {
             self.native_block_spread(self.dimension, kind, from, to, &mut canceled);
         }
         !canceled
+    }
+    fn allow_fluid_level_change(
+        &self,
+        pos: BlockPos,
+        fluid: &'static str,
+        from: i32,
+        to: i32,
+    ) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_fluid_level_change(self.dimension, pos, fluid, from, to, &mut cancel);
+        }
+        !cancel
+    }
+    fn allow_block_ignite(&self, pos: BlockPos, cause: &'static str) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_block_ignite(self.dimension, self.native_player, pos, cause, &mut cancel);
+        }
+        !cancel
+    }
+    fn allow_block_burn(&self, pos: BlockPos) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_block_burn(self.dimension, pos, &mut cancel);
+        }
+        !cancel
+    }
+    fn allow_leaves_decay(&self, pos: BlockPos) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_leaves_decay(self.dimension, pos, &mut cancel);
+        }
+        !cancel
+    }
+    fn allow_moisture_change(&self, pos: BlockPos, from: i32, to: i32) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_moisture_change(self.dimension, pos, from, to, &mut cancel);
+        }
+        !cancel
+    }
+    fn observe_sponge_absorb(&self, pos: BlockPos) {
+        if self.native_authoritative {
+            self.native_sponge_absorb(self.dimension, pos);
+        }
+    }
+    fn allow_block_fade(&self, pos: BlockPos, from: BlockStateId, to: BlockStateId) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_block_fade(self.dimension, pos, from, to, &mut cancel);
+        }
+        !cancel
+    }
+    fn allow_block_form(&self, pos: BlockPos, from: BlockStateId, to: BlockStateId) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_block_form(self.dimension, pos, from, to, &mut cancel);
+        }
+        !cancel
+    }
+    fn allow_note_play(&self, pos: BlockPos, instrument: &str, note: i32) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_note_play(
+                self.dimension,
+                self.native_player,
+                pos,
+                instrument,
+                note,
+                &mut cancel,
+            );
+        }
+        !cancel
+    }
+    fn allow_bell_ring(&self, pos: BlockPos) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_bell_ring(self.dimension, self.native_player, pos, &mut cancel);
+        }
+        !cancel
+    }
+    fn allow_cauldron_level_change(
+        &self,
+        pos: BlockPos,
+        from: i32,
+        to: i32,
+        reason: &'static str,
+    ) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_cauldron_level_changed(
+                self.dimension,
+                self.native_player,
+                pos,
+                from,
+                to,
+                reason,
+                &mut cancel,
+            );
+        }
+        !cancel
     }
     fn allow_piston_move(
         &self,
@@ -3737,6 +3847,8 @@ impl Game<'_> {
         velocity: [f64; 3],
         pickup_delay: u32,
     ) {
+        let item = stack.item.clone();
+        let count = stack.count as i32;
         self.next_entity += 1;
         let p = Vec3::new(position[0], position[1], position[2]);
         // ItemEntity.bobOffs comes from the entity's own random, not the level's.
@@ -3763,6 +3875,8 @@ impl Game<'_> {
         // ServerLevel.addFreshEntity.
         if !self.native_entity_joins(self.next_entity, "minecraft:item", position, false) {
             self.dropped.pop();
+        } else {
+            self.native_item_spawn(self.next_entity, &item, count, position);
         }
     }
     /// The block entity at `pos` saved with its id and position
@@ -4308,6 +4422,7 @@ impl Game<'_> {
             lid_openers: &self.lid_openers,
             client_side: self.remote.is_some(),
             native_authoritative,
+            native_player: self.lan_acting_uuid,
             debug: self.world_debug,
             native_sounds: &mut self.creatures.lan_sounds,
             native_particles: &mut self.creatures.lan_particles,
@@ -4319,6 +4434,22 @@ impl Game<'_> {
             self.flush_native_sounds();
         }
         result
+    }
+    pub(super) fn native_block_ignite_allowed(
+        &mut self,
+        pos: BlockPos,
+        cause: &'static str,
+    ) -> bool {
+        self.with_level(|_, level, _| level.allow_block_ignite(pos, cause))
+    }
+    pub(super) fn native_cauldron_level_change_allowed(
+        &mut self,
+        pos: BlockPos,
+        from: i32,
+        to: i32,
+        reason: &'static str,
+    ) -> bool {
+        self.with_level(|_, level, _| level.allow_cauldron_level_change(pos, from, to, reason))
     }
     /// Level.setBlock(pos, state, UPDATE_ALL) with neighbour/shape updates.
     fn level_set(&mut self, pos: [i32; 3], state: BlockStateId) -> Result<()> {
@@ -5973,7 +6104,19 @@ impl Game<'_> {
             return;
         };
         let group = horizon_client::cooldowns::group(stack, default.as_ref());
-        self.add_cooldown(group, component.ticks());
+        let mut cancel = false;
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_item_cooldown(
+                player,
+                &name,
+                &stack.item,
+                component.ticks(),
+                &mut cancel,
+            );
+        }
+        if !cancel {
+            self.add_cooldown(group, component.ticks());
+        }
     }
     /// `ItemCooldowns.addCooldown` (a guest also gets the packet).
     pub(super) fn add_cooldown(&mut self, group: Arc<str>, ticks: i32) {
@@ -6144,6 +6287,13 @@ impl Game<'_> {
                     self.stats.add("used", &used.item, 1);
                     self.stats.custom("pot_flower", 1);
                     self.consume_held();
+                    if let (Some(player), Some(name)) =
+                        (self.lan_acting_uuid, self.lan_acting_name.clone())
+                    {
+                        self.native_player_flower_pot_manipulate(
+                            player, &name, hit.pos, &used.item,
+                        );
+                    }
                 }
                 // NoteBlock.useWithoutItem (tuned) and BellBlock.onHit (rung).
                 if result == horizon_world::level::InteractionResult::Success {
@@ -12968,6 +13118,30 @@ impl Game<'_> {
         let Ok(new) = registry.resolve(&horizon_client::cauldron::extinguished(&old)) else {
             return;
         };
+        let level = |state: &horizon_world::chunk::BlockState| {
+            if matches!(state.name.as_str(), "minecraft:cauldron") {
+                0
+            } else if state.name == "minecraft:lava_cauldron" {
+                3
+            } else {
+                state
+                    .properties
+                    .get("level")
+                    .and_then(|level| level.parse().ok())
+                    .unwrap_or(1)
+            }
+        };
+        let Some(new_state) = registry.state(new).cloned() else {
+            return;
+        };
+        if !self.native_cauldron_level_change_allowed(
+            pos,
+            level(&old),
+            level(&new_state),
+            "extinguishing",
+        ) {
+            return;
+        }
         if self.level_set(at, new).is_ok() {
             self.post_block_game_event("minecraft:block_change", at, None, Some(new));
         }
@@ -13673,6 +13847,12 @@ impl Game<'_> {
             on_ground,
         );
         self.add_projectile(arrow);
+        let (player, name, projectile) = (
+            horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()),
+            self.acting_player_name().to_owned(),
+            self.next_entity,
+        );
+        self.native_entity_shoot_bow(player, &name, projectile, power * 3.0);
         self.player_projectile_shot();
         let pitch = 1.0 / (self.world.random.next_float() * 0.4 + 1.2) + power * 0.5;
         self.audio
@@ -14294,22 +14474,38 @@ impl Game<'_> {
             let moved = self
                 .respawn_config
                 .is_none_or(|c| (c.dim, c.pos) != (config.dim, config.pos));
-            self.respawn_config = Some(config);
-            if moved {
-                self.tell_sleeper("block.minecraft.set_spawn", "Respawn point set", false);
+            let mut cancel = false;
+            if moved
+                && let (Some(player), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+            {
+                self.native_player_spawn_point_set(
+                    player,
+                    &name,
+                    self.dim.id(),
+                    head,
+                    "bed",
+                    &mut cancel,
+                );
             }
-            // The fallback becomes the world spawn: a guest's is none of its
-            // own, so it follows `setworldspawn`.
-            self.spawn = if self.lan_acting.is_some() {
-                None
-            } else {
-                self.level
-                    .world_spawn
-                    .map(|[x, y, z]| {
-                        Vec3::new(f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5)
-                    })
-                    .or(self.spawn)
-            };
+            if !cancel {
+                self.respawn_config = Some(config);
+                if moved {
+                    self.tell_sleeper("block.minecraft.set_spawn", "Respawn point set", false);
+                }
+                // The fallback becomes the world spawn: a guest's is none of its
+                // own, so it follows `setworldspawn`.
+                self.spawn = if self.lan_acting.is_some() {
+                    None
+                } else {
+                    self.level
+                        .world_spawn
+                        .map(|[x, y, z]| {
+                            Vec3::new(f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5)
+                        })
+                        .or(self.spawn)
+                };
+            }
         }
         if !(self.dim == Dim::Overworld && self.sky_darken() >= 4) {
             self.tell_sleeper(
@@ -14347,6 +14543,13 @@ impl Game<'_> {
                 "No amount of rest can pass this night",
                 true,
             );
+        }
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            let mut cancel = false;
+            self.native_player_bed_enter(player, &name, head, &mut cancel);
+            if cancel {
+                return;
+            }
         }
         self.stop_mining();
         self.left = false;
@@ -14403,6 +14606,9 @@ impl Game<'_> {
             self.pitch = 0.0;
             self.snap_player_model_pitch();
         }
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_bed_leave(player, &name, head);
+        }
     }
     fn tick_sleep(&mut self) {
         self.sleep_timer = tick_sleep_timer(self.sleep_timer, self.sleeping.is_some());
@@ -14443,7 +14649,12 @@ impl Game<'_> {
         if self.enough_slept() {
             if self.ui.rules.bool("advance_time") {
                 let t = self.world.day_time;
-                self.world.day_time = t + 24000 - t.rem_euclid(24000);
+                let target = t + 24000 - t.rem_euclid(24000);
+                let mut cancel = false;
+                self.native_time_skip(self.dim.id(), t, target, "sleep", &mut cancel);
+                if !cancel {
+                    self.world.day_time = target;
+                }
             }
             // Level.isRaining: the rain level is above 0.2.
             if self.ui.rules.bool("advance_weather") && self.world.weather.levels(1.0).0 > 0.2 {
@@ -15023,7 +15234,9 @@ impl Game<'_> {
         }
         self.save_level(wait)?;
         self.save_parked_levels(wait)?;
-        self.save_game_metadata()
+        self.save_game_metadata()?;
+        self.native_world_saved(wait);
+        Ok(())
     }
     fn save_game_metadata(&mut self) -> Result<()> {
         self.save_maps();

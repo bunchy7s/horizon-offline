@@ -345,6 +345,9 @@ impl Game<'_> {
             self.consume_held();
         }
         self.swing_arm();
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_elytra_boost(player, &name);
+        }
         true
     }
     pub(super) fn tick_rockets(&mut self) {
@@ -517,6 +520,7 @@ impl Game<'_> {
         let v = [r.velocity.x, r.velocity.y, r.velocity.z];
         self.particles
             .fireworks(at, v, r.explosions.clone(), camera);
+        self.native_firework_explode(r.id, at, r.explosions.len());
     }
     fn rocket_hurt_mobs(&mut self, hits: &[(u32, f32)], attacker: Option<Who>, at: [f64; 3]) {
         for &(id, amount) in hits {

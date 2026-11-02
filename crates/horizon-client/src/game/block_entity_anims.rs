@@ -714,6 +714,16 @@ impl Game<'_> {
     }
     /// `EndGatewayBlock.entityInside` on the server: whether the gateway at
     /// `pos` let the entity in (`triggerCooldown`, with its block event).
+    pub(super) fn gateway_available(&self, pos: [i32; 3]) -> bool {
+        self.be_anims
+            .gateway_servers
+            .get(&pos)
+            .copied()
+            .unwrap_or_else(|| self.gateway_loaded(pos))
+            .teleport_cooldown
+            <= 0
+    }
+
     pub(super) fn gateway_enter(&mut self, pos: [i32; 3]) -> bool {
         let initial = self.gateway_loaded(pos);
         let entered = self

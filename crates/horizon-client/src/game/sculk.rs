@@ -528,6 +528,7 @@ impl Game<'_> {
 
     /// `Level.gameEvent`: tell the listeners within reach.
     pub(super) fn post_game_event(&mut self, event: &'static str, pos: [f64; 3], ctx: Context) {
+        self.native_game_event(event, pos);
         super::dispense_fixture::record(|| {
             format!(
                 "G {},{},{} {event}",
@@ -869,6 +870,23 @@ impl Game<'_> {
         let (kind, radius) = (entity.kind, entity.listener_radius());
         let origin = block_of(info.pos);
         let distance = (dist_sqr(origin, key) as f64).sqrt() as f32;
+        let block = match kind {
+            SculkKind::Sensor => "minecraft:sculk_sensor",
+            SculkKind::Calibrated => "minecraft:calibrated_sculk_sensor",
+            SculkKind::Shrieker => "minecraft:sculk_shrieker",
+            SculkKind::Catalyst => "minecraft:sculk_catalyst",
+        };
+        let mut cancel = false;
+        self.native_block_receive_game(
+            self.dim.id(),
+            [key.0, key.1, key.2],
+            block,
+            info.event,
+            &mut cancel,
+        );
+        if cancel {
+            return Ok(());
+        }
         match kind {
             SculkKind::Sensor | SculkKind::Calibrated => {
                 let state = self.world.block(key.0, key.1, key.2);
@@ -1341,6 +1359,7 @@ impl Game<'_> {
     fn catalyst_bloom(&mut self, key: (i32, i32, i32)) {
         let pos = BlockPos::new(key.0, key.1, key.2);
         self.with_level(|b, level, ticks| b.sculk_catalyst_bloom(level, ticks, pos));
+        self.native_sculk_bloom(self.dim.id(), [key.0, key.1, key.2]);
         let _ = self.process_level_events();
         let c = center(key);
         let options = ParticleOptions::simple(ParticleType::SculkSoul);

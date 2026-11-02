@@ -2017,6 +2017,18 @@ impl Game<'_> {
                 HostEvent::Flight { conn, flying } => {
                     self.lan_flight_toggled(&mut host, conn, flying);
                 }
+                HostEvent::MainHandChanged(conn, left) => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.native_player_change_main_hand(uuid, &name, left);
+                    }
+                }
+                HostEvent::LocaleChanged(conn, locale) => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.native_player_locale_change(uuid, &name, &locale);
+                    }
+                }
                 HostEvent::Packet(conn, packet) => {
                     self.lan_guest_packet(&mut host, conn, *packet);
                     if !host.commands.is_empty() {
@@ -2880,7 +2892,12 @@ impl Game<'_> {
                 .map(|s| s.as_ref().map(|s| s.item.clone()));
             m.extra.armor = g.armor.clone();
             m.extra.crouching = g.sneaking;
-            m.extra.avatar_pose = g.pose();
+            let from_pose = m.extra.avatar_pose;
+            let to_pose = g.pose();
+            m.extra.avatar_pose = to_pose;
+            if from_pose != to_pose {
+                self.native_entity_pose_change(g.uuid, &g.name, from_pose.name(), to_pose.name());
+            }
             m.extra.sprinting = g.sprinting;
             // Entity.DATA_POSE and the shared and living flags the others
             // get (hub::guest_body): gliding, swimming, Riptide's spin.

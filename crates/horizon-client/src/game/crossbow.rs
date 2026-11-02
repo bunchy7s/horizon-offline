@@ -255,6 +255,12 @@ impl Game<'_> {
                 }
                 arrow.shoot(&mut self.world.random, dir.to_array(), power, 1.0);
                 self.add_projectile(arrow);
+                let (player, name, projectile) = (
+                    horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()),
+                    self.acting_player_name().to_owned(),
+                    self.next_entity,
+                );
+                self.native_entity_shoot_bow(player, &name, projectile, power as f32);
             }
             self.player_projectile_shot();
             let pitch = if index == 0 {
