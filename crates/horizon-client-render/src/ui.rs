@@ -5,7 +5,12 @@ use crate::{
     hud::{HudAtlas, HudBatch, Rect, rgba},
     text::Text,
 };
-use std::{collections::HashMap, path::Path, sync::RwLock, time::Instant};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::RwLock,
+    time::Instant,
+};
 
 /// `GuiSpriteScaling.NineSlice`: the sprite's size in GUI pixels, whatever
 /// its texture's resolution, its borders (left, top, right, bottom) in the
@@ -52,37 +57,53 @@ fn parse_nine_slice(v: &serde_json::Value) -> Option<NineSlice> {
 pub fn load_metadata(root: &Path) {
     let mut map = HashMap::new();
     let base = root.join("assets/minecraft/textures");
-    let mut stack = vec![base.join("gui/sprites")];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
+    let sprites = base.join("gui/sprites");
+    // A prepared root's: from its data file, without listing the disk.
+    let files: Vec<PathBuf> = match horizon_core::prepared_files::files_under(&sprites) {
+        Some(files) => files
+            .iter()
+            .filter(|file| file.ends_with(".png.mcmeta"))
+            .map(|file| sprites.join(file))
+            .collect(),
+        None => {
+            let mut files = Vec::new();
+            let mut stack = vec![sprites];
+            while let Some(dir) = stack.pop() {
+                let Ok(entries) = std::fs::read_dir(&dir) else {
+                    continue;
+                };
+                for e in entries.flatten() {
+                    let p = e.path();
+                    if p.is_dir() {
+                        stack.push(p);
+                    } else if p.to_string_lossy().ends_with(".png.mcmeta") {
+                        files.push(p);
+                    }
+                }
+            }
+            files
+        }
+    };
+    for p in files {
+        let name = p.to_string_lossy().into_owned();
+        let Some(stripped) = name.strip_suffix(".png.mcmeta") else {
             continue;
         };
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                stack.push(p);
-                continue;
-            }
-            let name = p.to_string_lossy().into_owned();
-            let Some(stripped) = name.strip_suffix(".png.mcmeta") else {
-                continue;
-            };
-            let Ok(text) = std::fs::read_to_string(&p) else {
-                continue;
-            };
-            let Some(nine_slice) = serde_json::from_str(&text)
-                .ok()
-                .as_ref()
-                .and_then(parse_nine_slice)
-            else {
-                continue;
-            };
-            let key = Path::new(stripped)
-                .strip_prefix(&base)
-                .map(|r| r.to_string_lossy().replace('\\', "/"))
-                .unwrap_or_default();
-            map.insert(key, nine_slice);
-        }
+        let Ok(text) = horizon_core::prepared_files::read_to_string(&p) else {
+            continue;
+        };
+        let Some(nine_slice) = serde_json::from_str(&text)
+            .ok()
+            .as_ref()
+            .and_then(parse_nine_slice)
+        else {
+            continue;
+        };
+        let key = Path::new(stripped)
+            .strip_prefix(&base)
+            .map(|r| r.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        map.insert(key, nine_slice);
     }
     *NINE_SLICE.write().unwrap_or_else(|e| e.into_inner()) = Some(map);
 }
