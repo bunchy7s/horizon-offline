@@ -618,26 +618,37 @@ impl Stage<'_> {
     }
 
     /// The element count of an unsized array whose `[]` ends at `close`: the arguments of the
-    /// constructor that follows (`[] = T[](...)` or `[](...)`).
+    /// following constructor, or the top-level elements of its brace initializer (GLSL 4.40,
+    /// 4.1.11). Nested aggregate elements and a trailing initializer comma do not add elements.
     pub(super) fn array_length(&self, close: usize) -> Option<usize> {
         let mut j = close + 1;
         let mut seen_eq = false;
-        while let Some(&t) = self.tokens.get(j) {
-            match t {
-                "(" => break,
+        let end = loop {
+            match self.tokens.get(j).copied()? {
+                "(" => break ")",
+                "{" if seen_eq => break "}",
                 "=" if !seen_eq => seen_eq = true,
                 ";" | "," | ")" | "{" => return None,
                 _ => {}
             }
             j += 1;
-        }
-        let (mut depth, mut args, mut any) = (0, 1, false);
+        };
+        let (mut depth, mut args, mut any) = (0, 0, false);
         for &t in &self.tokens[j + 1..] {
             match t {
-                "(" | "[" | "{" => depth += 1,
-                ")" if depth == 0 => return any.then_some(args),
+                "(" | "[" | "{" => {
+                    depth += 1;
+                    any = true;
+                }
+                t if t == end && depth == 0 => {
+                    let count = args + usize::from(any);
+                    return (count > 0).then_some(count);
+                }
                 ")" | "]" | "}" => depth -= 1,
-                "," if depth == 0 => args += 1,
+                "," if depth == 0 => {
+                    args += 1;
+                    any = false;
+                }
                 _ if significant(t) => any = true,
                 _ => {}
             }
