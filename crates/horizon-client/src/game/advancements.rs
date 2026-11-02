@@ -2003,18 +2003,25 @@ impl Game<'_> {
         let tree = self.adv.tree.clone();
         let a = &tree.list[index];
         self.progress_changed(index);
-        let names: Vec<&str> = match criterion {
-            Some(c) => vec![c],
-            None => a.criteria.iter().map(|c| c.name.as_str()).collect(),
-        };
-        let mut changed = false;
-        for c in names {
-            if self.adv.progress.revoke(&a.id, c) {
-                changed = true;
-                self.advancement_progress(&a.id, c, false);
+        match criterion {
+            Some(c) => self.revoke_criterion(&a.id, c),
+            None => {
+                let mut any = false;
+                for c in &a.criteria {
+                    any |= self.revoke_criterion(&a.id, &c.name);
+                }
+                any
             }
         }
-        changed
+    }
+    /// `PlayerAdvancements.revoke(holder, criterion)`: the progress change and
+    /// the hook for it.
+    fn revoke_criterion(&mut self, advancement: &str, criterion: &str) -> bool {
+        let revoked = self.adv.progress.revoke(advancement, criterion);
+        if revoked {
+            self.advancement_progress(advancement, criterion, false);
+        }
+        revoked
     }
 }
 impl Game<'_> {

@@ -197,7 +197,13 @@ impl Game<'_> {
     /// `ServerPlayer.awardStat`: `n` more of the statistic `ty` (a bare type
     /// such as `used`) and `key`, unless a native mod cancels the award.
     pub(super) fn award_stat(&mut self, ty: &str, key: &str, n: i32) {
-        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+        // No mod, no name copied: the per-tick counters come through here.
+        let acting = if horizon_client::mod_api::mods().is_empty() {
+            None
+        } else {
+            self.lan_acting_uuid.zip(self.lan_acting_name.clone())
+        };
+        if let Some((player, name)) = acting {
             let mut cancel = false;
             namespaced(ty, |stat_type| {
                 self.native_player_stat_award(player, &name, stat_type, key, n, &mut cancel)

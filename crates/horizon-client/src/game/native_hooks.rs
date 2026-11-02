@@ -3432,8 +3432,10 @@ impl Game<'_> {
         mod_api::dispatch_player_advancement_done(self, mod_api::mods(), player, name, advancement);
     }
     /// A criterion of a server player's advancement was granted or revoked,
-    /// after its progress changed and before any completion rewards. A grant
-    /// or revoke that changes nothing is not heard. `granted` is false for a
+    /// after its progress changed and before any completion rewards, except
+    /// the `minecraft:tick` criteria granted on a network player's first tick
+    /// or a reload, which are heard after that tick's rewards and packets. A
+    /// grant or revoke that changes nothing is not heard. `granted` is false for a
     /// revoke. Helpers looking up the guest through `self.lan` may find
     /// nothing during its packet. @API:player_advancement_progress@.
     pub(super) fn native_player_advancement_progress(

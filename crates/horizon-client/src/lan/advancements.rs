@@ -175,13 +175,14 @@ impl ServerAdvancements {
         for a in &self.tree.list {
             let was_done = progress.done(a);
             for c in &a.criteria {
-                if c.trigger == "minecraft:tick" && c.conditions.is_null() {
-                    if progress.grant(&a.id, &c.name, &date) {
-                        granted.push(CriterionGrant {
-                            advancement: a.id.clone(),
-                            criterion: c.name.clone(),
-                        });
-                    }
+                if c.trigger == "minecraft:tick"
+                    && c.conditions.is_null()
+                    && progress.grant(&a.id, &c.name, &date)
+                {
+                    granted.push(CriterionGrant {
+                        advancement: a.id.clone(),
+                        criterion: c.name.clone(),
+                    });
                 }
             }
             if !was_done && progress.done(a) {
