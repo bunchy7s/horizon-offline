@@ -189,3 +189,31 @@ struct Case { uv: vec2<f32>, stage: u32, extent: u32 }
         cases.len()
     );
 }
+
+/// `PreparedFrame.executeTranslucent` draws the entity shadows before the translucent
+/// items, and `ITEM_TRANSLUCENT` writes depth so the translucent terrain drawn after
+/// (ice, water) cannot blend over a dropped slime block or glass item (#7026, #7031).
+#[test]
+fn shadows_precede_translucent_items_which_write_depth() {
+    let source = include_str!("../gfx.rs");
+    let shadows = source
+        .find("set_pipeline(&self.shadow_blob_pipeline)")
+        .unwrap();
+    let items = source
+        .find("set_pipeline(&self.translucent_item_pipeline)")
+        .unwrap();
+    assert!(
+        shadows < items,
+        "shadows must be drawn before translucent items"
+    );
+    let pipeline = source
+        .split("let translucent_item_pipeline = entity_pipeline(")
+        .nth(1)
+        .unwrap();
+    let args: Vec<&str> = pipeline.lines().map(str::trim).take(4).collect();
+    assert_eq!(
+        args[3].trim_end_matches(','),
+        "true",
+        "depth writes on: {args:?}"
+    );
+}
