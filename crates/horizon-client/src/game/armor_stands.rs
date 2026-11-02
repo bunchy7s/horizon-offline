@@ -660,11 +660,12 @@ impl Game<'_> {
         if !self.before_block(d) || self.mob_hit().is_some_and(|m| m.1 < d) {
             return false;
         }
-        let (_, _, _, magic) = self.melee_damage("minecraft:armor_stand", true);
+        let (_, _, crit, magic) = self.melee_damage("minecraft:armor_stand", true);
         let hurt = self.hit_armor_stand(i, |g, area, id| {
             g.attack_effects(
                 area,
                 Some(id as i32),
+                crit,
                 super::mace::Spared::Stand(id),
                 magic.then_some(id as i32),
             );
