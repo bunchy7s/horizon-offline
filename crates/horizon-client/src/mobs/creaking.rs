@@ -426,10 +426,7 @@ mod tests {
         assert!(can_use_portal(&c), "a creaking with no heart travels");
         set_transient(&mut c, [0, 64, 0]);
         assert!(heart_bound(&c));
-        assert!(
-            !can_use_portal(&c),
-            "a creaking bound to its heart must not leave it behind"
-        );
+        assert!(!can_use_portal(&c), "a bound creaking must not leave its heart");
         let z = spawn(&types, "minecraft:zombie");
         assert!(can_use_portal(&z));
     }
