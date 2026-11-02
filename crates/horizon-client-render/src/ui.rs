@@ -50,6 +50,18 @@ fn parse_nine_slice(v: &serde_json::Value) -> Option<NineSlice> {
 }
 /// Read `gui.scaling` metadata for every GUI sprite under `root`.
 pub fn load_metadata(root: &Path) {
+    set_metadata(read_metadata(root));
+}
+/// The GUI sprites' nine-slice metadata of a resource root, read off the
+/// render thread by a pack reload ([`read_metadata`]) and put in use with
+/// [`set_metadata`].
+pub struct UiMetadata(HashMap<String, NineSlice>);
+/// Puts read metadata in use ([`load_metadata`] in two halves).
+pub fn set_metadata(metadata: UiMetadata) {
+    *NINE_SLICE.write().unwrap_or_else(|e| e.into_inner()) = Some(metadata.0);
+}
+/// Reads the metadata [`load_metadata`] puts in use, without putting it in use.
+pub fn read_metadata(root: &Path) -> UiMetadata {
     let mut map = HashMap::new();
     let base = root.join("assets/minecraft/textures");
     let mut stack = vec![base.join("gui/sprites")];
@@ -84,7 +96,7 @@ pub fn load_metadata(root: &Path) {
             map.insert(key, nine_slice);
         }
     }
-    *NINE_SLICE.write().unwrap_or_else(|e| e.into_inner()) = Some(map);
+    UiMetadata(map)
 }
 /// The sprite's nine-slice metadata, when its `.png.mcmeta` has any.
 fn nine_slice_metadata(sprite: &str) -> Option<NineSlice> {

@@ -280,7 +280,7 @@ impl Game<'_> {
                     .get("minecraft:fishes")
                     .is_some_and(|t| t.contains(stack.item.as_str()))
                 {
-                    self.stats.custom("fish_caught", 1);
+                    self.award_custom_stat("fish_caught", 1);
                 }
                 let mut item = ItemStack {
                     item: Arc::from(stack.item.as_str()),
