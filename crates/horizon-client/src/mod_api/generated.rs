@@ -2958,8 +2958,6 @@ pub trait Hooks: Send + Sync {
     /// in ticks, which starts at zero; a positive total keeps the item that much
     /// longer, zero or less lets it expire. Extensions are capped at 32766
     /// ticks. @API:item_expire@.
-    ///
-    /// Every mod gets `event.extra_life` in order and may add, change or remove extra_life.
     fn item_expire(&self, host: &mut dyn Host, event: &mut ItemExpireEvent<'_>) {
         let _ = host;
         let _ = event;

@@ -7,8 +7,7 @@
       "side": "server",
       "cancellable": false,
       "mod_api": {
-        "contract": "collect",
-        "out": "extra_life"
+        "contract": "listen"
       }
     }
   ],
