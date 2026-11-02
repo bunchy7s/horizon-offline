@@ -3015,6 +3015,7 @@ impl PackPost {
         spans: &[super::pack_draw::EntitySpan],
         crumbling: [f32; 4],
         rest: &mut Vec<super::Vertex>,
+        skin: Option<&super::entity_skin::SkinFrame>,
     ) {
         let shadow = self.shadow_casters();
         let Some(e) = &mut self.entities else {
@@ -3033,7 +3034,20 @@ impl PackPost {
             (crumbling, self.gui_size),
             shadow,
             rest,
+            skin,
         );
+    }
+
+    /// Every stage a posable subject can use must have a compiled fallback.
+    /// Special models, player and eye/tagged layers retain their CPU paths.
+    pub fn skins_entities(&self) -> bool {
+        self.entities
+            .as_ref()
+            .is_some_and(|e| e.passes[..3].iter().all(Option::is_some))
+    }
+
+    pub fn skin_target(&self) -> Option<&wgpu::Buffer> {
+        self.entities.as_ref().map(|e| e.geometry.skin_target())
     }
 
     /// Which entity runs the shadow pass draws: none without it.

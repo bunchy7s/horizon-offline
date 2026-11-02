@@ -6376,13 +6376,34 @@ impl Game<'_> {
             }));
         }
         let len = out.len();
-        self.cull_entity_vertices(out, entity_start);
+        let hidden = self.cull_entity_vertices(out, entity_start);
         if out.len() < len {
             if let Some((mark, _)) = skinned {
                 self.skin_frame.borrow_mut().truncate(mark);
             }
         } else if corners.is_some() {
+            if let Some((mark, _)) = skinned {
+                // Previous GPU-only entities can leave zero-length CPU spans at
+                // this same offset. Use this query's result, not their metadata.
+                if hidden {
+                    let mut skin = self.skin_frame.borrow_mut();
+                    let end = skin.vertices as usize;
+                    horizon_client::gfx::pack_draw::EntitySpan::hide(
+                        &mut skin.spans,
+                        mark.2 as usize,
+                        end,
+                    );
+                }
+            }
             out.truncate(len - 2);
+            // The temporary bounds are not real geometry. Keep the culling end marker
+            // at the true CPU end before the next entity appends a span there.
+            for span in self.entity_spans.borrow_mut().iter_mut().rev() {
+                if span.start as usize <= out.len() {
+                    break;
+                }
+                span.start = out.len() as u32;
+            }
         }
     }
 
