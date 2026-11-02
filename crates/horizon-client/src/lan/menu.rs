@@ -11,7 +11,7 @@ use crate::{
     world::World,
 };
 
-/// What the menus need to know about items.
+/// What the menus need to know about items and the slots' rules.
 pub trait Rules {
     fn items(&self) -> &Items;
     fn max_stack(&self, item: &str) -> u32;
@@ -21,6 +21,18 @@ pub trait Rules {
     /// slot ("head", "chest", "legs", "feet", "mainhand", "offhand").
     fn equip_slot(&self, item: &str) -> Option<&str> {
         self.items().get(item)?.equip_slot.as_deref()
+    }
+    /// `Slot.mayPickup`: whether the stack in menu slot `slot` may be taken
+    /// out. A block container's slots and the player's own allow it; a mod's
+    /// menu can refuse.
+    fn may_pickup(&self, _slot: usize, _stack: &ItemStack) -> bool {
+        true
+    }
+    /// `Player.canDropItems`: a client that drops items faster than its
+    /// throttle allows stops sending THROW clicks (`LocalPlayer.canDropItems`
+    /// is its `dropSpamThrottler`'s answer).
+    fn can_drop_items(&self) -> bool {
+        true
     }
 }
 
@@ -252,6 +264,23 @@ impl View<'_> {
         }
         rules.max_stack(&stack.item).max(1)
     }
+    /// `Slot.mayPickup`: whether menu slot `i` gives its stack up. The
+    /// armour slots refuse while a survival player wears a binding curse
+    /// (`ArmorSlot.mayPickup`: `PREVENT_ARMOR_CHANGE` and no creative); the
+    /// menu's rules answer for their own slots.
+    fn may_pickup(&self, i: usize, rules: &dyn Rules) -> bool {
+        let stack = self.get(i);
+        if self.container.is_none()
+            && (5..=8).contains(&i)
+            && !self.guest.creative()
+            && stack
+                .as_ref()
+                .is_some_and(|s| s.enchantment_level("minecraft:binding_curse") > 0)
+        {
+            return false;
+        }
+        stack.is_none_or(|s| rules.may_pickup(i, &s))
+    }
     /// The ranges quick move uses: (container start..end, main, hotbar).
     fn player_ranges(&self) -> (std::ops::Range<usize>, std::ops::Range<usize>) {
         match &self.container {
@@ -423,6 +452,7 @@ pub fn click(
             input::QUICK_MOVE => {
                 if let Ok(i) = usize::try_from(slot)
                     && i < view.len()
+                    && view.may_pickup(i, rules)
                 {
                     quick_move(view, i, rules);
                 }
@@ -442,7 +472,8 @@ pub fn click(
                 }
             }
             input::THROW => {
-                if view.guest.carried.is_none()
+                if rules.can_drop_items()
+                    && view.guest.carried.is_none()
                     && let Ok(i) = usize::try_from(slot)
                     && view.enabled(i)
                     && let Some(mut stack) = view.get(i)
@@ -498,6 +529,11 @@ fn pickup(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
             }
         }
         (Some(mut s), None) => {
+            // doClick's PICKUP arm takes from the slot only while
+            // `Slot.mayPickup` allows it.
+            if !view.may_pickup(i, rules) {
+                return;
+            }
             let take = if right { s.count.div_ceil(2) } else { s.count };
             let taken = ItemStack {
                 count: take,
@@ -508,6 +544,12 @@ fn pickup(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
             view.guest.carried = Some(taken);
         }
         (Some(mut s), Some(mut c)) => {
+            // Merging into, swapping with and topping the hand up from the
+            // slot are all takes (`allowModification`: mayPickup and
+            // mayPlace).
+            if !view.may_pickup(i, rules) {
+                return;
+            }
             if !view.may_place(i, &c, rules) {
                 // A slot that takes nothing gives onto the same carried item,
                 // as far as the hand holds (`tryRemove`).
@@ -660,10 +702,20 @@ fn swap(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
 }
 
 fn pickup_all(view: &mut View, slot: i32, rules: &dyn Rules) {
-    let _ = slot;
+    let Ok(i) = usize::try_from(slot) else {
+        return;
+    };
+    if i >= view.len() {
+        return;
+    }
     let Some(mut carried) = view.guest.carried.clone() else {
         return;
     };
+    // doClick returns when the clicked slot holds a stack it may pick up, so
+    // a double-click collects from an empty slot or one that refuses.
+    if view.get(i).is_some() && view.may_pickup(i, rules) {
+        return;
+    }
     let max = rules.max_stack(&carried.item).max(1);
     // Partial stacks first, then full ones.
     for full in [false, true] {
@@ -672,6 +724,10 @@ fn pickup_all(view: &mut View, slot: i32, rules: &dyn Rules) {
                 break;
             }
             if !view.enabled(i) || (view.container.is_none() && i == 0) {
+                continue;
+            }
+            // Each swept slot must give its stack up too.
+            if !view.may_pickup(i, rules) {
                 continue;
             }
             let Some(mut s) = view.get(i) else {
