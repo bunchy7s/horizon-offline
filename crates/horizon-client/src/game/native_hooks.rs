@@ -3473,6 +3473,17 @@ impl Game<'_> {
     ) {
         let _ = (player, name, recipe);
     }
+    /// A server player swapped their main and off hands, after both inventory
+    /// slots changed. Guest lookup helpers may find nothing during packet
+    /// handling. Server-side. @API:player_swap_with_equipment_slot@.
+    pub(super) fn native_player_swap_with_equipment_slot(
+        &mut self,
+        player: u128,
+        name: &str,
+        slot: &str,
+    ) {
+        let _ = (player, name, slot);
+    }
     /// A server player filled an empty map, after the filled map and its saved
     /// data were created. Guest lookup helpers may find nothing during packet
     /// handling. Server-side. @API:player_map_filled@.

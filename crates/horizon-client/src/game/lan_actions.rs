@@ -1806,6 +1806,8 @@ impl Game<'_> {
                         g.player_on_equip("offhand", main.as_ref(), offhand.as_ref());
                         g.player_on_equip("mainhand", offhand.as_ref(), main.as_ref());
                     });
+                    let guest = &host.hub.guests[gi];
+                    self.native_player_swap_with_equipment_slot(guest.uuid, &guest.name, "offhand");
                 }
                 // STAB: `PiercingWeapon.attack` of a left click with a spear.
                 8 if !spectator => self.guest_jab(host, conn),
