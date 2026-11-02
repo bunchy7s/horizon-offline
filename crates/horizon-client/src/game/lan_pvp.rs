@@ -285,6 +285,9 @@ impl Game<'_> {
                 .map(|a| (a.entity_id, self.player_text(&a.name, a.uuid)))
         });
         let land = |g: &mut Self| {
+            let _attacker = horizon_client::health::knockback_from(
+                attacker_note.as_ref().map_or(0, |(id, _)| *id),
+            );
             g.combat.player_attacker = Some((s.from, s.disable_blocking));
             if let Some((id, name)) = attacker_note.clone() {
                 g.note_player_attacker("minecraft:player_attack", id as u32, name, s.item.clone());
@@ -469,6 +472,9 @@ impl Game<'_> {
         let (xd, zd) = sweep.knockback;
         let attacker = self.player_attacker(host, sweep.attacker);
         let land = |g: &mut Self| {
+            let _attacker = horizon_client::health::knockback_from(
+                attacker.as_ref().map_or(0, |(id, _)| *id as i32),
+            );
             if let Some((id, name)) = &attacker {
                 g.note_named_attacker("minecraft:player_attack", *id, name.clone());
             }

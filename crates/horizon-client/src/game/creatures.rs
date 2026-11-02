@@ -1962,6 +1962,10 @@ impl Game<'_> {
                 } => match target {
                     // A player's source names no melee attacker, as its damage's doesn't.
                     Who::Player => {
+                        let _attacker = horizon_client::health::knockback_from(match source.attacker {
+                            Some(Who::Mob(id)) => id as i32,
+                            _ => 0,
+                        });
                         let source = HurtSource {
                             damage_type: source_damage_type(source),
                             causing: 0,
@@ -3366,6 +3370,9 @@ impl Game<'_> {
         };
         // The causing entity for the death message.
         let owner = self.combat.projectile_owner.take();
+        let _attacker = horizon_client::health::knockback_from(
+            attacker.or(owner).map_or_else(horizon_client::health::knockback_attacker, |id| id as i32),
+        );
         if let Some(a) = attacker.or(owner) {
             self.note_attacker(damage_type, a);
         }
@@ -4177,6 +4184,13 @@ impl Game<'_> {
         }
     }
     pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
+        let _attacker = horizon_client::health::knockback_from(
+            if p.owner == Some(Who::Player) {
+                self.player.as_ref().map_or(0, |p| p.entity_id)
+            } else {
+                0
+            },
+        );
         // Projectile.onHitBlock: BlockState.onProjectileHit, for every
         // projectile (a wind charge out of the world's top has no face).
         if let Hit::Block { pos, at, face } = hit

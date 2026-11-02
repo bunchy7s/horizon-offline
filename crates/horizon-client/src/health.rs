@@ -21,7 +21,7 @@ use horizon_world::{
     server_player_damage::ServerDamageEnvironment,
     synced_floats::{FloatValue, Observer, SyncedFloats},
 };
-use std::{fs, io, path::Path, sync::OnceLock};
+use std::{cell::Cell, fs, io, path::Path, sync::OnceLock};
 pub(crate) type Attributes = LiveAttributes<Box<dyn horizon_world::attributes::live::Identities>>;
 pub(crate) type State = HurtState<DamageTypeId>;
 
@@ -45,6 +45,7 @@ pub enum Hurting<'a> {
     Mob(&'a crate::mobs::Mob, &'a crate::mobs::Damage),
     /// The ender dragon, by its entity id.
     Dragon(i32, HurtSource<'a>),
+    ArmorStand(i32, HurtSource<'a>),
 }
 /// The game's native damage hook (`native_living_incoming_damage`), set once by the
 /// game: `LivingEntity.hurtServer` once its guards passed. It may change the
@@ -55,7 +56,7 @@ pub fn hurt_server_canceled(hurting: Hurting<'_>, amount: &mut f32) -> bool {
     HURT_SERVER.get().is_some_and(|hook| hook(hurting, amount))
 }
 /// A knockback's strength and direction, as `LivingEntity.knockback` has them
-/// once the knockback resistance is applied. The entity is pushed away from
+/// before knockback resistance is applied. The entity is pushed away from
 /// the direction (`x`, `z`), which vanilla points at the source of the hit.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Knock {
@@ -68,6 +69,24 @@ pub struct Knock {
 /// and before the knockback resistance and the motion change. It may change the [`Knock`]; true
 /// cancels it.
 pub static KNOCKBACK: OnceLock<fn(Hurting<'_>, &mut Knock) -> bool> = OnceLock::new();
+
+thread_local! {
+    static KNOCKBACK_ATTACKER: Cell<i32> = const { Cell::new(0) };
+}
+
+pub fn knockback_attacker() -> i32 {
+    KNOCKBACK_ATTACKER.get()
+}
+
+pub fn knockback_from(entity: i32) -> impl Drop {
+    struct Restore(i32);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            KNOCKBACK_ATTACKER.set(self.0);
+        }
+    }
+    Restore(KNOCKBACK_ATTACKER.replace(entity))
+}
 /// Whether [`KNOCKBACK`] canceled the knockback (never while it is unset). A
 /// value it leaves that is not a finite number is put back as it was.
 pub fn knockback_canceled(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
@@ -1064,7 +1083,7 @@ mod tests {
         use super::Hurting;
         fn hook(hurting: Hurting<'_>, amount: &mut f32) -> bool {
             let (entity, seen) = match hurting {
-                Hurting::Player(e, s) | Hurting::Dragon(e, s) => {
+                Hurting::Player(e, s) | Hurting::Dragon(e, s) | Hurting::ArmorStand(e, s) => {
                     (e, format!("{} {}", s.damage_type, s.causing))
                 }
                 Hurting::Mob(mob, source) => (mob.id as i32, format!("{:?}", source.kind)),
