@@ -235,12 +235,28 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         // The entity-effect particles roll the level random, not the wither's.
         let _ = powered;
     }
-    if m.extra.counter > 0 {
-        for _ in 0..3 {
-            m.random.next_gaussian();
-            m.random.next_float();
-            m.random.next_gaussian();
-        }
+    charging_particles(m, events);
+}
+/// `WitherBoss.aiStep`'s entity-effect particles while the wither is still
+/// charging (`getInvulnerableTicks() > 0`): three a tick in the
+/// (0.7, 0.7, 0.9) colour, a gaussian away from the body on x and z and up to
+/// `3.3 * getScale()` above its feet on y, all from the wither's own random.
+pub(crate) fn charging_particles(m: &mut Mob, events: &mut Vec<MobEvent>) {
+    if m.extra.counter <= 0 {
+        return;
+    }
+    let spread = 3.3 * super::riders::scale(m);
+    for _ in 0..3 {
+        // `this.random`: a gaussian for x, a float for y, a gaussian for z.
+        let at = [
+            m.position.x + m.random.next_gaussian(),
+            m.position.y + f64::from(m.random.next_float()) * spread,
+            m.position.z + m.random.next_gaussian(),
+        ];
+        events.push(MobEvent::ParticleColored {
+            at,
+            color: [0.7, 0.7, 0.9],
+        });
     }
 }
 /// `WitherBoss.customServerAiStep`: charging, then the side heads' targets
