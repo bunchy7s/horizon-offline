@@ -7347,7 +7347,7 @@ fn vanished_by_kind(
     for (id, kind) in before.iter().filter(|(id, _)| !now.contains(id)) {
         match out.iter_mut().find(|(k, _)| k == kind) {
             Some((_, ids)) => ids.push(*id),
-            None => out.push((kind.clone(), vec![*id])),
+            None => out.push((kind.clone(), Vec::from([*id]))),
         }
     }
     out
