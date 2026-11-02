@@ -746,8 +746,7 @@ impl Game<'_> {
                             if (effect == "instant_damage") != inverted {
                                 m.damage((6 << amp.min(30)) as f32, Damage::of(DamageKind::Magic));
                             } else {
-                                m.health =
-                                    (m.health + (4 << amp.min(30)) as f32).min(m.attrs.max_health);
+                                m.heal((4 << amp.min(30)) as f32);
                             }
                         }
                         _ => {
