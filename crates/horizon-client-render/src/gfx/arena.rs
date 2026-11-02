@@ -4,7 +4,7 @@
 //! with pages up to `LARGE_PAGE_BYTES`, and their sorted indices too
 //! (`Arena::translucent_indices`): their back-to-front list then stays in one
 //! page of each and draws in a few multi-draws.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 /// Ranges are rounded up to this many vertices to limit fragmentation, and
 /// start at multiples of it (`flat` names sections by these blocks).
@@ -545,14 +545,17 @@ impl Arena {
         old.free.give(previous, capacity - previous);
         true
     }
-    /// Reclaim after an upload batch, so replacing a section can reuse its range.
-    pub fn trim(&mut self) {
+    /// Reclaim after an upload batch, so replacing a section can reuse its range. Gives back
+    /// the buffers of the pages it emptied, for a [`Graveyard`].
+    pub fn trim(&mut self) -> Vec<wgpu::Buffer> {
+        let mut released = Vec::new();
         for page in &mut self.pages {
-            if let Some(p) = page
-                && p.free.0.len() == 1
-                && p.free.0.get(&0) == Some(&p.capacity)
+            if page
+                .as_ref()
+                .is_some_and(|p| p.free.0.len() == 1 && p.free.0.get(&0) == Some(&p.capacity))
+                && let Some(p) = page.take()
             {
-                *page = None;
+                released.push(p.buffer);
             }
         }
         if self.closing.is_some_and(|page| !self.has_page(page)) {
@@ -562,11 +565,65 @@ impl Arena {
         while self.pages.last().is_some_and(Option::is_none) {
             self.pages.pop();
         }
+        released
     }
-    pub fn clear(&mut self) {
-        self.pages.clear();
+    /// Drops every page; gives back their buffers, for a [`Graveyard`].
+    pub fn clear(&mut self) -> Vec<wgpu::Buffer> {
         self.closing = None;
+        self.pages.drain(..).flatten().map(|p| p.buffer).collect()
     }
+}
+
+/// Frames a released page waits before it is freed: by then the GPU is done with the frames that
+/// used it, and the bind groups naming it (flat draws' page tables) are gone, so the freeing
+/// thread holds its last reference.
+const GRAVE_FRAMES: usize = 4;
+
+/// Buffers of released pages, freed [`GRAVE_FRAMES`] frames later on a thread of their own
+/// ([`free_later`]): giving a page of up to 256 MB back to the driver on the render thread took
+/// that frame 8-14 ms of CPU (Mesa's lavapipe), when flight or a teleport emptied a page.
+pub struct Graveyard<T> {
+    graves: VecDeque<Vec<T>>,
+}
+
+impl<T> Default for Graveyard<T> {
+    fn default() -> Self {
+        Self {
+            graves: VecDeque::new(),
+        }
+    }
+}
+
+impl<T> Graveyard<T> {
+    /// Released this frame.
+    pub fn add(&mut self, items: impl IntoIterator<Item = T>) {
+        if self.graves.is_empty() {
+            self.graves.push_back(Vec::new());
+        }
+        if let Some(grave) = self.graves.back_mut() {
+            grave.extend(items);
+        }
+    }
+    /// A frame went by: what was released `GRAVE_FRAMES` frames ago, to free.
+    pub fn advance(&mut self) -> Vec<T> {
+        self.graves.push_back(Vec::new());
+        if self.graves.len() > GRAVE_FRAMES {
+            self.graves.pop_front().unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+/// Drops `items` on a short-lived thread of its own, as `chunk::free_columns` does for
+/// unloaded chunks; should the thread not start, they drop here.
+pub fn free_later<T: Send + 'static>(items: Vec<T>) {
+    if items.is_empty() {
+        return;
+    }
+    let _ = std::thread::Builder::new()
+        .name("Buffer freeing".into())
+        .spawn(move || drop(items));
 }
 
 /// `create_buffer` with an out-of-memory failure returned instead of raised
@@ -586,6 +643,24 @@ fn try_create(device: &wgpu::Device, size: u64, usage: wgpu::BufferUsages) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A released page is handed back for freeing `GRAVE_FRAMES` frames later, in order.
+    #[test]
+    fn graveyard_frees_after_its_frames() {
+        let mut graves = Graveyard::default();
+        graves.add([1, 2]);
+        let mut freed = Vec::new();
+        for frame in 0..GRAVE_FRAMES + 2 {
+            if frame == 1 {
+                graves.add([3]);
+            }
+            freed.push(graves.advance());
+        }
+        let mut expected = vec![Vec::new(); GRAVE_FRAMES + 2];
+        expected[GRAVE_FRAMES - 1] = vec![1, 2];
+        expected[GRAVE_FRAMES] = vec![3];
+        assert_eq!(freed, expected);
+    }
 
     fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
         device_with(wgpu::Features::empty())

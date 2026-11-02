@@ -45,6 +45,9 @@ pub(super) struct Pads {
     late_releases: Vec<Button>,
     /// The merged state of the last poll.
     pub(super) state: PadState,
+    /// The hardware's buttons at the last poll, for `input-log`'s `pad`
+    /// events: the merged state hides which source moved.
+    last_hardware: PadState,
     /// The pad drove the game last (the mouse and keyboard hand control back).
     pub(super) in_use: bool,
     pub(super) style: GlyphStyle,
@@ -125,6 +128,29 @@ mod hardware {
 }
 
 impl Pads {
+    /// The digital buttons the person's pad changed since the last poll.
+    pub(super) fn hardware_edges(&mut self, hardware: PadState) -> Vec<(Button, bool)> {
+        let edges = Button::ALL
+            .into_iter()
+            .filter_map(|button| {
+                let was = self.last_hardware.held(button);
+                let now = hardware.held(button);
+                (was != now).then_some((button, now))
+            })
+            .collect();
+        self.last_hardware = hardware;
+        edges
+    }
+
+    /// A replay's pad button, in place of `pad`'s line.
+    pub(super) fn inject_button(&mut self, button: Button, down: bool) {
+        self.injected.set(button, down);
+    }
+    /// A replay ended: let go of everything it held.
+    pub(super) fn clear_injected(&mut self) {
+        self.injected = PadState::default();
+    }
+
     /// Include releases delayed until the next simulation tick.
     pub(super) fn holds_action(&self, settings: &gamepad::PadSettings, action: &str) -> bool {
         settings.binding(action).is_some_and(|button| {
@@ -159,6 +185,18 @@ impl Game<'_> {
             Some(state) => state,
             None => self.pad.read(),
         };
+        // A person's pad, for `input-log` and the repro recording; the virtual
+        // pad is an agent's `pad` line and is recorded as that.
+        let hardware_edges = self.pad.hardware_edges(hardware);
+        for (button, down) in hardware_edges {
+            self.note_input(
+                super::input_trace::InputOrigin::User,
+                super::input_trace::TraceKind::Pad {
+                    button: button.name().to_owned(),
+                    action: if down { "down" } else { "up" }.to_owned(),
+                },
+            );
+        }
         self.ui.options.pad_style = self.settings.controller.glyphs.resolve(self.pad.style);
         let state = hardware.merge(&self.pad.injected);
         self.pad.virtual_input = self.pad.injected != PadState::default();

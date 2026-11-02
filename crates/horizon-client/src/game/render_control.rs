@@ -100,7 +100,8 @@ impl Game<'_> {
                     .get(self.world.block(key.0, key.1, key.2))
                     .name
                     .clone();
-                let entity = horizon_client::containers::BlockEntity::for_block(&name)
+                let entity = self
+                    .new_block_entity(&name)
                     .filter(|e| matches!(e, horizon_client::containers::BlockEntity::Sign(_)))
                     .ok_or("no sign there")?;
                 self.world.block_entities.get_or_insert_with(key, || entity);

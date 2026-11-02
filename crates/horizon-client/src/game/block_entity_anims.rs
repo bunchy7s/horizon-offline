@@ -146,9 +146,7 @@ impl Game<'_> {
         {
             let p = BlockPos::new(pos[0], pos[1], pos[2]);
             self.with_level(|b, level, ticks| {
-                let block = b.block(state);
-                b.update_neighbors_at(level, ticks, p, block);
-                b.update_neighbors_at(level, ticks, p.offset(0, -1, 0), block);
+                b.trapped_chest_update_neighbors(level, ticks, p, state);
             });
         }
         (before == 0) != (count == 0)
@@ -714,6 +712,16 @@ impl Game<'_> {
     }
     /// `EndGatewayBlock.entityInside` on the server: whether the gateway at
     /// `pos` let the entity in (`triggerCooldown`, with its block event).
+    pub(super) fn gateway_available(&self, pos: [i32; 3]) -> bool {
+        self.be_anims
+            .gateway_servers
+            .get(&pos)
+            .copied()
+            .unwrap_or_else(|| self.gateway_loaded(pos))
+            .teleport_cooldown
+            <= 0
+    }
+
     pub(super) fn gateway_enter(&mut self, pos: [i32; 3]) -> bool {
         let initial = self.gateway_loaded(pos);
         let entered = self
