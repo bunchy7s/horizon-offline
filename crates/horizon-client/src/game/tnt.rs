@@ -638,6 +638,7 @@ mod tests {
             on_ground: true,
             owner: None,
             guest: None,
+            power: 4.0,
         };
         tnt.velocity = bounce_velocity(Direction::Up, tnt.velocity);
         tnt.on_ground = false;
@@ -681,6 +682,7 @@ mod tests {
             on_ground: false,
             owner: None,
             guest: None,
+            power: 4.0,
         };
         tnt.tick(&world, &collision, &assets, &facts).unwrap();
         assert_eq!(
@@ -776,6 +778,7 @@ mod tests {
             on_ground: false,
             owner: None,
             guest: None,
+            power: 4.0,
         };
         for _ in 0..10 {
             tnt.tick(&world, &collision, &assets, &facts).unwrap();
@@ -850,6 +853,7 @@ mod tests {
             on_ground: false,
             owner: None,
             guest: None,
+            power: 4.0,
         };
         let mut tops = Vec::new();
         let mut tnt = primed();
