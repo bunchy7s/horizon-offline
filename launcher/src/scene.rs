@@ -8,6 +8,9 @@
 //! once per window size; what moves is a few hundred quads a frame: the stars, a meteor, the
 //! clouds and the sun in runs of one colour, and the fireflies. The scene is its own view, so a
 //! frame of it doesn't build the launcher's pages again: GPUI Fast draws them from the last frame.
+//!
+//! [`Backdrop`] is the same picture blurred, for the glass plates (`glass.rs`): GPUI has no
+//! backdrop filter, but the only thing under a plate is this scene.
 use crate::art;
 use crate::sky::{motion, Clock, Motion};
 use gpui::{
@@ -837,6 +840,7 @@ impl Render for Scene {
         let scale = window.scale_factor();
         if self.baked.as_ref().map(|b| b.key) != Some(key(width, height, scale)) {
             let baked = Baked::new(width, height, scale);
+            crate::glass::set_backdrop(&baked.model);
             if let Some(old) = self.baked.replace(baked) {
                 self.replaced.extend(old.images());
             }
@@ -926,7 +930,7 @@ impl Render for Scene {
             .left_0()
             .size_full()
             .overflow_hidden()
-            .bg(gpui::rgb(SKY[0]))
+            .bg(gpui::rgb(horizon_theme::glass::PAGE))
             .child(layer(baked.sky.clone(), None))
             .child(
                 div()
@@ -1053,6 +1057,132 @@ fn meteor(time: f64, width: f64, sky_height: f64) -> Vec<(Bounds<Pixels>, f32, H
             (rect(x - 0.75, y - 0.75, 1.5, 1.5), 0.75, c)
         })
         .collect()
+}
+
+/// The scene blurred as `.hzl-glass` and `.hzl-float` see it through their backdrop filters
+/// (blur, then `saturate(140%)`, and `brightness(0.62)` for the float): one colour per texel at
+/// the scene's first frame, without the stars (a 24 px blur leaves nothing of them).
+pub struct Backdrop {
+    pub w: usize,
+    pub h: usize,
+    /// Logical pixels per texel.
+    pub px: f64,
+    pub glass: Vec<[f32; 3]>,
+    pub float: Vec<[f32; 3]>,
+}
+
+impl Backdrop {
+    pub fn new(m: &Model, blur: f64) -> Backdrop {
+        let (w, h) = (m.w as usize, m.h as usize);
+        let mut base = vec![[0f64; 3]; w * h];
+        for (i, c) in base.iter_mut().enumerate() {
+            let (x, y) = (((i % w) as f64 + 0.5) * m.px, ((i / w) as f64 + 0.5) * m.px);
+            *c = over(m.sky_rgb(x, y), m.halo(x, y, 0.45));
+        }
+        let mut put = |x: i32, y: i32, c: u32| {
+            if x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h {
+                base[y as usize * w + x as usize] = rgb(c);
+            }
+        };
+        for (x, y, len, c) in m.runs(0., (0., 0.)) {
+            for dx in 0..len {
+                put(x + dx, y, c);
+            }
+        }
+        for n in 0..m.ridges.len() {
+            let (texels, cols, rows, top) = m.ridge_texels(n, 0);
+            for row in 0..rows {
+                for col in 0..cols {
+                    let [r, g, b, a] = texels[(row * cols + col) as usize];
+                    if a > 0 {
+                        put(
+                            col - MARGIN,
+                            top + row,
+                            (r as u32) << 16 | (g as u32) << 8 | b as u32,
+                        );
+                    }
+                }
+            }
+        }
+        let filtered = |sigma: f64, brightness: f64| -> Vec<[f32; 3]> {
+            blur_rgb(&base, w, h, sigma / m.px)
+                .into_iter()
+                .map(|c| {
+                    let s = saturate(c, 1.4);
+                    s.map(|v| (clamp(v, 0., 1.) * brightness) as f32)
+                })
+                .collect()
+        };
+        Backdrop {
+            w,
+            h,
+            px: m.px,
+            glass: filtered(blur, 1.),
+            float: filtered(blur + 24., 0.62),
+        }
+    }
+
+    /// The blurred colour at a point in logical pixels (bilinear between texel centres).
+    pub fn at(&self, float: bool, x: f64, y: f64) -> [f32; 3] {
+        let grid = if float { &self.float } else { &self.glass };
+        let fx = clamp(x / self.px - 0.5, 0., (self.w - 1) as f64);
+        let fy = clamp(y / self.px - 0.5, 0., (self.h - 1) as f64);
+        let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
+        let (x1, y1) = ((x0 + 1).min(self.w - 1), (y0 + 1).min(self.h - 1));
+        let (tx, ty) = ((fx - x0 as f64) as f32, (fy - y0 as f64) as f32);
+        let px = |x: usize, y: usize| grid[y * self.w + x];
+        let l = |a: [f32; 3], b: [f32; 3], t: f32| [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t);
+        l(
+            l(px(x0, y0), px(x1, y0), tx),
+            l(px(x0, y1), px(x1, y1), tx),
+            ty,
+        )
+    }
+}
+
+/// A Gaussian blur of standard deviation `sigma` texels, its edges held (CSS blurs a backdrop
+/// with its edge pixels repeated).
+fn blur_rgb(src: &[[f64; 3]], w: usize, h: usize, sigma: f64) -> Vec<[f64; 3]> {
+    if sigma <= 0. {
+        return src.to_vec();
+    }
+    let radius = (sigma * 3.).ceil() as i64;
+    let kernel: Vec<f64> = (-radius..=radius)
+        .map(|i| (-(i * i) as f64 / (2. * sigma * sigma)).exp())
+        .collect();
+    let sum: f64 = kernel.iter().sum();
+    let pass = |src: &[[f64; 3]], horizontal: bool| -> Vec<[f64; 3]> {
+        let mut out = vec![[0.; 3]; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = [0.; 3];
+                for (k, wgt) in kernel.iter().enumerate() {
+                    let d = k as i64 - radius;
+                    let (sx, sy) = if horizontal {
+                        ((x as i64 + d).clamp(0, w as i64 - 1) as usize, y)
+                    } else {
+                        (x, (y as i64 + d).clamp(0, h as i64 - 1) as usize)
+                    };
+                    let c = src[sy * w + sx];
+                    for i in 0..3 {
+                        acc[i] += c[i] * wgt;
+                    }
+                }
+                out[y * w + x] = acc.map(|v| v / sum);
+            }
+        }
+        out
+    };
+    pass(&pass(src, true), false)
+}
+
+/// CSS `saturate(s)` (Filter Effects' matrix).
+fn saturate([r, g, b]: [f64; 3], s: f64) -> [f64; 3] {
+    [
+        (0.213 + 0.787 * s) * r + (0.715 - 0.715 * s) * g + (0.072 - 0.072 * s) * b,
+        (0.213 - 0.213 * s) * r + (0.715 + 0.285 * s) * g + (0.072 - 0.072 * s) * b,
+        (0.213 - 0.213 * s) * r + (0.715 - 0.715 * s) * g + (0.072 + 0.928 * s) * b,
+    ]
 }
 
 #[cfg(test)]

@@ -1056,6 +1056,22 @@ impl Loading {
                     }
                 }
             }
+            // AbstractSelectionList.mouseClicked: a world row takes a click
+            // of any button, so the middle one selects it without joining.
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Middle,
+                ..
+            } => {
+                let batch = HudBatch::new(self.menu_size());
+                if let Some(title) = &mut self.menu.title {
+                    title.select_world_at(
+                        self.menu.cursor.0,
+                        self.menu.cursor.1,
+                        (batch.width, batch.height),
+                    );
+                }
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 let raw = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
