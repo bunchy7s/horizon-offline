@@ -4510,8 +4510,8 @@ pub trait Hooks: Send + Sync {
     }
     /// Possible natural spawns at a server position (NeoForge's
     /// `LevelEvent.PotentialSpawns`, `NaturalSpawner.mobsAt`). Mods may add or
-    /// remove entries, or cancel to make the list empty. Added entries must
-    /// be globally unique instances. @API:native_potential_spawns@.
+    /// remove entries, or cancel to make the list empty.
+    /// @API:native_potential_spawns@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn potential_spawns(&self, host: &dyn Host, event: &mut PotentialSpawnsEvent<'_>) -> Flow {

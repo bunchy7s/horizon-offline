@@ -5111,8 +5111,8 @@ impl Game<'_> {
 
     /// Possible natural spawns at a server position (NeoForge's
     /// `LevelEvent.PotentialSpawns`, `NaturalSpawner.mobsAt`). Mods may add or
-    /// remove entries, or cancel to make the list empty. Added entries must
-    /// be globally unique instances. @API:native_potential_spawns@.
+    /// remove entries, or cancel to make the list empty.
+    /// @API:native_potential_spawns@.
     pub(super) fn native_potential_spawns(
         &self,
         dimension: &str,
