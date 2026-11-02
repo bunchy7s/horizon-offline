@@ -11115,7 +11115,7 @@ pub fn dispatch_living_drown(
         damage_amount: *damage_amount,
         bubble_count,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_drown") {
         if matches!(mod_hook.living_drown(&mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11149,7 +11149,7 @@ pub fn dispatch_living_fall(
         distance: *distance,
         multiplier: *multiplier,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_fall") {
         if matches!(mod_hook.living_fall(&mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11177,7 +11177,7 @@ pub fn dispatch_living_heal(
         entity,
         amount: *amount,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_heal") {
         if matches!(mod_hook.living_heal(&mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11193,7 +11193,7 @@ pub struct LivingJumpEvent<'a> {
 }
 pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
     let mut event = LivingJumpEvent { entity, kind };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_jump") {
         mod_hook.living_jump(&mut event);
     }
 }

@@ -54,6 +54,24 @@ use std::time::Duration;
 /// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
 pub use winit;
 
+/// Camera values from the most recently extracted world frame.
+#[derive(Clone, Debug)]
+pub struct NativeCamera {
+    pub position: [f64; 3],
+    pub eye_height: f32,
+    pub partial_tick: f32,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub fov_degrees: f32,
+    pub near: f32,
+    pub far: f32,
+    /// Camera-relative view matrix in column-major order.
+    pub view: [f32; 16],
+    /// Reversed-Z projection matrix in column-major order.
+    pub projection: [f32; 16],
+    pub dimension: String,
+}
+
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
 pub type NativeDispensed = (Option<ItemStack>, i32);

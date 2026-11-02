@@ -462,7 +462,7 @@ use super::{
     native_panel_recipes::RecipePage,
 };
 use horizon_client::mod_api::{
-    self, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
+    self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
     ServerTickPhase, WorldPhase,
 };
 use horizon_client::mod_api::{AttachmentResult, Attachments, Holder, Suggestion};
@@ -7550,6 +7550,22 @@ impl Game<'_> {
     pub(super) fn native_block(&self, pos: [i32; 3]) -> String {
         let state = self.world.block(pos[0], pos[1], pos[2]);
         self.res.facts().get(state).name.to_string()
+    }
+    /// The most recently extracted world frame's camera, if one exists.
+    pub(super) fn native_camera(&self) -> Option<NativeCamera> {
+        self.native_camera_frame.clone()
+    }
+    /// Collision boxes in block-local coordinates with an empty collision context.
+    pub(super) fn native_block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
+        self.block_collision_shape(pos)
+            .boxes()
+            .iter()
+            .map(|bounds| {
+                let min = bounds.min_position();
+                let max = bounds.max_position();
+                [min.x, min.y, min.z, max.x, max.y, max.z]
+            })
+            .collect()
     }
     /// Property `key` of the block at `pos` (a machine's `facing`), if it
     /// has one. API 20.
