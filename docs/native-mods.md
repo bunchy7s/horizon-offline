@@ -2197,13 +2197,12 @@ players who track the holder: guests who were sent a chunk for a chunk or block 
 who track an entity for an entity, the player and those tracking them for a player, and
 everyone in the level for the level. A client also gets all of a holder's synced values
 when it starts seeing it: a chunk sent (with its block entities), a level joined or
-re-entered, an entity tracked, and its own player. Far columns get none. With no native
+re-entered, an entity tracked, and its own player. With no native
 mod loaded nothing is sent. The wire form is the codec's compound, so `sync` requires
 a codec.
 
-Only Horizon clients are sent values. A change whose namespace or name is over 256
-characters, whose value cannot be written or that alone takes a message past 1 MiB
-is not sent; the holder's others are, in more messages when they do not fit in one.
+Only Horizon clients are sent values. A message with a namespace or name over 256
+characters, a value that cannot be written or a payload past 1 MiB is not sent.
 
 On a client, `Host::attachments` returns a copy of what the server synced, which `get`
 decodes; `set` and `remove` change only that copy, which is dropped when the chunk,

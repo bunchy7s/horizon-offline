@@ -224,16 +224,12 @@ pub struct AttachmentSnapshot {
     pub holder: Holder,
 }
 
-/// Queues `holders` as snapshots for `player`; with no mod loaded there is
-/// nothing to sync, so none are queued.
+/// Queues `holders` as snapshots for `player`.
 fn queue_snapshots(
     snapshots: &mut Vec<AttachmentSnapshot>,
     player: u128,
     holders: impl IntoIterator<Item = Holder>,
 ) {
-    if crate::mod_api::mods().is_empty() {
-        return;
-    }
     snapshots.extend(
         holders
             .into_iter()
@@ -1900,17 +1896,16 @@ impl Hub {
                 .rev()
                 .map(|idx| g.chunk_queue.remove(idx))
                 .collect();
-            // Far columns are terrain only: no snapshot.
-            queue_snapshots(
-                &mut self.attachment_snapshots,
-                g.uuid,
-                seen.iter().map(|&(x, z)| Holder::Chunk([x, z])),
-            );
             // A far chunk the save doesn't have leaves the queue unsent.
             seen.extend(far.into_iter().rev().filter_map(|(idx, sent)| {
                 let key = g.far_queue.remove(idx);
                 sent.then_some(key)
             }));
+            queue_snapshots(
+                &mut self.attachment_snapshots,
+                g.uuid,
+                seen.iter().map(|&(x, z)| Holder::Chunk([x, z])),
+            );
             g.sent_chunks.extend(seen);
         }
     }

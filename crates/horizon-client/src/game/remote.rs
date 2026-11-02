@@ -3223,7 +3223,9 @@ impl Game<'_> {
             C::RemoveEntities(p) => {
                 for id in p.ids {
                     if let Some(r) = self.remote.as_mut() {
-                        r.level_players.remove(&id);
+                        if let Some(uuid) = r.level_players.remove(&id) {
+                            r.attachments.remove(&Holder::Player(uuid));
+                        }
                         r.level_player_names.remove(&id);
                         r.level_player_textures.remove(&id);
                         r.attachments.remove(&Holder::Entity(id as u32));

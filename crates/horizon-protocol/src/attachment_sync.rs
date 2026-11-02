@@ -36,7 +36,7 @@ pub struct Message {
 
 /// A message's payload; an error for a holder it cannot write, a name past
 /// [`MAX_NAME`], a value that is not an encodable compound, or a payload past
-/// [`MAX_PAYLOAD`] (the sender splits the changes and tries again).
+/// [`MAX_PAYLOAD`].
 pub fn encode(message: &Message) -> Result<Vec<u8>> {
     let mut w = Writer::new();
     match message.holder {

@@ -31,8 +31,8 @@ fn recipients(hub: &Hub, holder: Holder) -> impl Iterator<Item = &Guest> {
 
 impl Game<'_> {
     /// The messages that give a player `holder`'s synced attachments whole: its
-    /// own, and for a chunk those of its block entities; a holder with none
-    /// gives no message.
+    /// own, and for a chunk those of its block entities. A player holder with
+    /// none still gives one, to drop what the client holds.
     fn attachment_snapshot(&mut self, holder: Holder) -> Vec<Message> {
         let changes = match holder {
             // Read in place: a chunk lent to a mod is copied and saved.
@@ -67,7 +67,9 @@ impl Game<'_> {
         }
         holders
             .into_iter()
-            .filter(|(_, changes)| !changes.is_empty())
+            .filter(|(holder, changes)| {
+                !changes.is_empty() || matches!(holder, Holder::Player(_))
+            })
             .map(|(holder, changes)| Message {
                 holder,
                 replace: true,
@@ -82,6 +84,9 @@ impl Game<'_> {
     /// who see them.
     pub(super) fn flush_attachment_sync(&mut self, host: &mut LanHost) {
         let hub = &mut host.hub;
+        if crate::mod_api::mods().is_empty() {
+            hub.attachment_snapshots.clear();
+        }
         for snapshot in std::mem::take(&mut hub.attachment_snapshots) {
             let AttachmentSnapshot { player, holder } = snapshot;
             let Some(guest) = hub.guests.iter().find(|g| g.uuid == player) else {
