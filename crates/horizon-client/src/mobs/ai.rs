@@ -2743,8 +2743,12 @@ pub fn intern_sound(s: &std::sync::Arc<str>) -> &'static str {
     set.insert(leaked);
     leaked
 }
-/// `getSwimSound`.
-pub fn swim_sound(m: &Mob) -> &'static str {
+/// `getSwimSound`. A skeleton horse's own override counts the steps it takes
+/// through the water, so it needs the mob, not just its species.
+pub fn swim_sound(m: &mut Mob) -> &'static str {
+    if m.species() == Species::SkeletonHorse {
+        return super::equine::skeleton_horse_swim_sound(m);
+    }
     match m.species() {
         Species::Drowned => "entity.drowned.swim",
         Species::Axolotl => "entity.axolotl.swim",
