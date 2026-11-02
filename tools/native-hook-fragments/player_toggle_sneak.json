@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_toggle_sneak",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_toggle_sneak",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerToggleSneakEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A guest player changed sneaking (`native_player_toggle_sneak`).",
+  "doc_summary": "A guest's player input changed sneaking: `native_player_toggle_sneak(player, name, sneaking)` is called after the hub applies the new state, only when it changes. The guest's state is swapped in. Bundles need \"hooks\": @API:player_toggle_sneak@."
+}

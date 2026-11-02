@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "vehicle_create",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_vehicle_create",
+      "neoforge": "none (NeoForge has no such event; Bukkit's VehicleCreateEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a boat or minecart created (`native_vehicle_create`).",
+  "doc_summary": "A boat or minecart joined the level at `pos`, after a player or dispenser placed it: `native_vehicle_create(kind, pos)` is listen-only. Bundles need \"hooks\": @API:native_vehicle_create@."
+}
