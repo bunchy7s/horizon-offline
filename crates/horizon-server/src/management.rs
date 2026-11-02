@@ -21,7 +21,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 /// The connections that have upgraded, and the queue that carries notifications to them, which
@@ -34,7 +34,12 @@ pub struct Clients {
     /// `server/stopping` went out for this run of the game: a stop comes from the supervisor and from the
     /// game's own `stop`, and one run says it once.
     stopping_told: AtomicBool,
+    /// When `server/activity` last went out.
+    activity_told: Mutex<Option<Instant>>,
 }
+
+/// `MinecraftServer.SERVER_ACTIVITY_MONITOR_SECONDS_BETWEEN_NOTIFICATIONS`.
+const ACTIVITY_EVERY: Duration = Duration::from_secs(30);
 
 /// A connection in `Clients` for as long as this lives.
 struct Registered<'a>(&'a Shared, u32);
@@ -83,6 +88,13 @@ pub fn game_event(shared: &Shared, kind: &str, event: &Value) {
         "leave" => ("notification/players/left", player()),
         "saving" => ("notification/server/saving", None),
         "saved" => ("notification/server/saved", None),
+        // `ServerActivityMonitor.reportLoginActivity`: a login attempt, told at most once in thirty seconds.
+        "login_activity" => {
+            if activity_due(shared, Instant::now()) {
+                notify(shared, "notification/server/activity", None);
+            }
+            return;
+        }
         // A change of a list, whoever made it: the console, a command in the game, the protocol's own methods.
         _ => match crate::management_methods::list_notification(kind, event) {
             Some((method, params)) => (method, Some(params)),
@@ -90,6 +102,17 @@ pub fn game_event(shared: &Shared, kind: &str, event: &Value) {
         },
     };
     notify(shared, method, params);
+}
+
+/// `ServerActivityMonitor.processWithRateLimit`: an activity is told when thirty seconds have gone by since the
+/// last one told, and is lost otherwise (the monitor clears its flag whatever it did).
+fn activity_due(shared: &Shared, now: Instant) -> bool {
+    let mut told = shared.management.activity_told.lock().unwrap();
+    let due = told.is_none_or(|last| now.saturating_duration_since(last) >= ACTIVITY_EVERY);
+    if due {
+        *told = Some(now);
+    }
+    due
 }
 
 /// `NotificationService.serverShuttingDown`, which `DedicatedServer.stopServer` sends first of all.
@@ -911,6 +934,47 @@ mod tests {
     }
 
     #[test]
+    fn an_activity_is_told_once_in_thirty_seconds_and_otherwise_lost() {
+        let shared = shared();
+        let start = Instant::now();
+        assert!(activity_due(&shared, start));
+        assert!(!activity_due(&shared, start + Duration::from_secs(29)));
+        // The one lost at 29 s is not told later: the next login after thirty seconds is.
+        assert!(!activity_due(&shared, start + Duration::from_secs(29)));
+        assert!(activity_due(&shared, start + Duration::from_secs(30)));
+        assert!(!activity_due(&shared, start + Duration::from_secs(59)));
+        assert!(activity_due(&shared, start + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn a_login_is_an_activity_notification_and_a_second_one_inside_thirty_seconds_is_lost() {
+        let shared = shared();
+        let address = listen_on(shared.clone(), settings());
+        let mut client = upgrade(address);
+        registered(&shared, 1);
+        game_event(
+            &shared,
+            "login_activity",
+            &json!({ "type": "login_activity" }),
+        );
+        game_event(
+            &shared,
+            "login_activity",
+            &json!({ "type": "login_activity" }),
+        );
+        assert_eq!(
+            next_text(&mut client),
+            r#"{"jsonrpc":"2.0","method":"minecraft:notification/server/activity"}"#
+        );
+        // The second login came inside the thirty seconds, so the next frame is the one that follows it.
+        started(&shared);
+        assert_eq!(
+            next_text(&mut client),
+            r#"{"jsonrpc":"2.0","method":"minecraft:notification/server/started"}"#
+        );
+    }
+
+    #[test]
     fn every_notification_sent_is_one_discover_lists() {
         let listed = schema::discover();
         let names: Vec<&str> = listed["methods"]
@@ -934,6 +998,8 @@ mod tests {
             "notification/bans/removed",
             "notification/ip_bans/added",
             "notification/ip_bans/removed",
+            "notification/gamerules/updated",
+            "notification/server/activity",
         ] {
             assert!(
                 names.contains(&format!("minecraft:{sent}").as_str()),
