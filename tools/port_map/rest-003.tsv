@@ -64,8 +64,8 @@ KeyboardHandler.copyCreateBlockCommand	port	crates/horizon-client/src/game/debug
 KeyboardHandler.copyCreateEntityCommand	port	crates/horizon-client/src/game/debug_keys.rs::Game::copy_recreate_command	
 KeyboardHandler.charTyped	port	crates/horizon-client/src/game.rs::Game::window_event	typed text routed to the open screen
 KeyboardHandler.textInput	port	crates/horizon-client/src/game.rs::Game::window_event	typed text routed to the open screen
-KeyboardHandler.textEditing	missing		player: no IME composition; Japanese or Chinese text shows nothing until it is committed
-KeyboardHandler.submitPreeditEvent	missing		player: no IME preedit event reaches any screen
+KeyboardHandler.textEditing	port	crates/horizon-client/src/game.rs::ime_preedit	WindowEvent::Ime(Preedit) draws the composition in the focused field
+KeyboardHandler.submitPreeditEvent	inline	crates/horizon-client/src/game.rs: WindowEvent::Ime arm	the preedit reaches the screen's field directly, and Commit types the text
 Minecraft.<init>	inline	crates/horizon-client/src/game.rs::run_loading	gap: minor: no unclean-start recovery; startedCleanly is only a default in options_file.rs
 Minecraft.onGameLoadFinished	missing		minor: startedCleanly is never written after load
 Minecraft.createTitle	missing		minor: the window title is always Horizon (with_title in game.rs), no version or world type
@@ -117,10 +117,10 @@ Minecraft.updateReportEnvironment	skip:service		reporting context for chat repor
 Minecraft.getGameProfile	skip:service		Mojang profile fetch; Horizon's account is local (auth.rs)
 Minecraft.showOnlyReducedInfo	port	crates/horizon-client/src/game/debug_keys.rs::Game::reduced_debug_info	
 Minecraft.grabPanoramixScreenshot	skip:debug		only runs with SharedConstants.DEBUG_PANORAMA_SCREENSHOT
-Minecraft.onTextInputFocusChange	missing		minor: no IME, so nothing to re-submit on focus
+Minecraft.onTextInputFocusChange	inline	crates/horizon-client/src/game.rs::sync_ime	the IME is synced to the focused widget each frame
 Minecraft.getTickTargetMillis	port	crates/horizon-client/src/clock.rs::TickRateManager::milliseconds_per_tick	gap: minor: the max with the default tick time is not in this fn
 MouseHandler.fillMousePositionDetails	skip:debug		crash report mouse details
-MouseHandler.onDrop	missing		minor: dropping files on the window does nothing; no drop event is handled
+MouseHandler.onDrop	port	crates/horizon-client/src/game.rs:16709 -> title::drop_file	a file dropped on the window joins the create screen's data packs
 MouseHandler.getScaledYPos	port	crates/horizon-client-input/src/window.rs::scaled_pos	
 MouseHandler.resyncMousePosition	skip:other		winit reports the cursor position; no SDL global-state resync
 MouseHandler.releaseMouse	port	crates/horizon-client/src/game.rs::Game::capture	release path (capture false)
@@ -140,4 +140,4 @@ OptionInstance.OptionInstanceSliderButton.applyValue	port	crates/horizon-client-
 OptionInstance.OptionInstanceSliderButton.applyUnsavedValue	port	crates/horizon-client-render/src/options_ui.rs::set_slider	
 OptionInstance.OptionInstanceSliderButton.resetValue	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::slider_shown	
 OptionInstance.OptionInstanceSliderButton.extractWidgetRenderState	port	crates/horizon-client-render/src/options_ui.rs::slider_unsnapped	gap: minor: no deferred apply after 600 ms; only the handle display
-OptionInstance.OptionInstanceSliderButton.keyPressed	missing		unsure: no arrow-key slider control found in options_ui.rs or game.rs
+OptionInstance.OptionInstanceSliderButton.keyPressed	port	crates/horizon-client/src/game/key_focus.rs::slider_edit_on_focus	Tab focus on a slider starts its arrow-key editing
