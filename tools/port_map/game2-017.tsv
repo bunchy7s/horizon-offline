@@ -16,7 +16,7 @@ BrewingStandBlockEntity.getSlotsForFace	port	crates/horizon-client/src/game/mach
 BrushableBlockEntity.dropContent	port	crates/horizon-client/src/game/brush.rs::Game::brushing_completed	item drops from the hit face; loot is unpacked in unpack_brush_loot
 BrushableBlockEntity.tryLoadLootTable	port	crates/horizon-client/src/game/brush.rs::Game::unpack_brush_loot	reads LootTable and seed from the saved tag
 BrushableBlockEntity.trySaveLootTable	skip:other		no own code: the raw saved tag (spill::saved_entity) keeps LootTable
-BrushableBlockEntity.getUpdateTag	missing		minor: unsure: no client update tag carrying hit direction and item; no Horizon equivalent found
+BrushableBlockEntity.getUpdateTag	port	crates/horizon-client/src/lan/chunks.rs::entity_tag	the Brushable arm: hit_direction and the item on top of the base tag
 BrushableBlockEntity.loadAdditional	skip:other		no own code: the raw saved tag (spill::saved_entity) keeps item and LootTable
 BrushableBlockEntity.saveAdditional	skip:other		no own code: the raw saved tag (spill::saved_entity) keeps item and LootTable
 CalibratedSculkSensorBlockEntity.VibrationUser.canReceiveVibration	port	crates/horizon-client/src/game/sculk.rs::Game::sculk_listen	calibrated back-signal frequency filter
@@ -105,7 +105,7 @@ SculkShriekerBlockEntity.VibrationUser.canReceiveVibration	port	crates/horizon-c
 SculkShriekerBlockEntity.VibrationUser.onReceiveVibration	port	crates/horizon-client/src/game/sculk.rs::Game::try_shriek	
 ShelfBlockEntity.loadAdditional	skip:other		no own code: the raw saved tag keeps Items (shelf_signal reads it)
 ShelfBlockEntity.saveAdditional	skip:other		no own code: the raw saved tag keeps Items (shelf_signal reads it)
-ShelfBlockEntity.getUpdateTag	missing		minor: unsure: no client update tag for shelves
+ShelfBlockEntity.getUpdateTag	port	crates/horizon-client/src/lan/chunks.rs::entity_tag	the Shelf arm: Items and align_items_to_bottom
 ShelfBlockEntity.setChanged	inline	crates/horizon-client/src/game/machines.rs::Containers::container_changed	the shelf's own arm marks the block entity updated so clients see the swap
 ShelfBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	Items as container component
 ShelfBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	Items as container component
@@ -124,7 +124,7 @@ SignBlockEntity.updateMessages	missing		minor: unsure: sign text selectors are n
 SignBlockEntity.setText	port	crates/horizon-client/src/game/sign_edit.rs::Game::sign_write	
 SignBlockEntity.canExecuteClickCommands	port	crates/horizon-client/src/game/sign_edit.rs::Game::sign_can_execute_click_commands	ticked in #3516; `SignBlockEntity.canExecuteClickCommands` is cited at crates/horizon-client/src/game/sign_edit.rs:97
 SignBlockEntity.executeClickCommandsIfPresent	port	crates/horizon-client/src/game/sign_edit.rs::Game::execute_sign_click_commands	ticked in #3516; `SignBlockEntity.executeClickCommandsIfPresent` is cited at crates/horizon-client/src/game/sign_edit.rs:139
-SignBlockEntity.createCommandSourceStack	missing		minor: unsure: only used by click commands (see executeClickCommandsIfPresent)
+SignBlockEntity.createCommandSourceStack	port	crates/horizon-client/src/game/sign_edit.rs::Game::sign_command_source	the acting player at the sign's centre, rotation zero, game master level, silent; run_sign_command runs the click command from it
 SignBlockEntity.markUpdated	port	crates/horizon-client/src/game/trial_spawner.rs::Game::mark_block_entity_updated	
 SignBlockEntity.setWaxed	port	crates/horizon-client/src/game/sign_edit.rs::Game::use_sign_applicator	honeycomb wax
 SignBlockEntity.playerIsTooFarAwayToEdit	port	crates/horizon-client/src/game/sign_edit.rs::Game::lan_sign_update	reach check when a guest writes
