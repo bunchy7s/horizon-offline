@@ -3,7 +3,7 @@
 //! breeding, conversions, drops), projectiles, player interactions
 //! (feeding, shearing, milking, spawn eggs, throwing) and rendering.
 use super::{
-    Dim, Game, InteractTarget, dispenser, native_mob_draw::NativePlayerRender,
+    Dim, Game, Hand, InteractTarget, dispenser, native_mob_draw::NativePlayerRender,
     native_projectiles::Impact, view_vector,
 };
 use horizon_assets::item_model::DisplayContext;
@@ -618,6 +618,14 @@ impl Game<'_> {
         }
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
+        let transformed_kind = self
+            .mobs
+            .last()
+            .expect("converted mob was just inserted")
+            .kind
+            .id
+            .clone();
+        self.native_entity_transform(from.id, &from.kind.id, id, &transformed_kind);
         Some(id)
     }
     /// The `summon` command: spawn a mob in front of the player or at a position.
@@ -1691,7 +1699,16 @@ impl Game<'_> {
                 None => None,
             };
         }
+        let player = (p.owner == Some(Who::Player))
+            .then(|| horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()));
+        let name = if player.is_some() {
+            self.acting_player_name().to_owned()
+        } else {
+            String::new()
+        };
+        let (id, kind) = (p.id, p.kind.id());
         self.creatures.projectiles.push(p);
+        self.native_projectile_launch(player, &name, id, kind);
     }
     /// `Entity.sendBubbleColumnParticles` at the top of the column block `pos`: two
     /// splashes and two bubbles over it, which the level random places, shown here
@@ -2280,38 +2297,22 @@ impl Game<'_> {
                         self.level_event_at(2001, pos, old.0 as i32);
                     }
                 }
-                MobEvent::CrackTurtleEgg { pos } => {
-                    let state = self.world.block(pos[0], pos[1], pos[2]);
-                    let eggs = self
-                        .pack
-                        .assets
-                        .registry
-                        .state(state)
-                        .filter(|s| s.name == "minecraft:turtle_egg")
-                        .and_then(|s| s.properties.get("eggs"))
-                        .and_then(|e| e.parse::<i32>().ok());
-                    if let Some(eggs) = eggs {
-                        let at = BlockPos::new(pos[0], pos[1], pos[2]);
-                        // decreaseEggs: the break sound and the remaining
-                        // eggs (a stack of one is destroyed after it).
-                        self.with_level(|b, level, ticks| {
-                            b.turtle_egg_destroyed_by_player(level, ticks, at, state);
-                            if eggs <= 1 {
-                                b.destroy_block(level, ticks, at, false);
-                            }
-                        });
-                        self.process_level_events()?;
-                    }
-                }
+                MobEvent::CrackTurtleEgg { pos } => self.crack_turtle_egg(pos)?,
                 MobEvent::BedOccupied { pos, occupied } => self.set_bed_occupied(pos, occupied),
                 MobEvent::SetDoorOpen { pos, open } => {
                     let pos = BlockPos::new(pos[0], pos[1], pos[2]);
                     self.with_level(|b, level, ticks| b.set_door_open(level, ticks, pos, open));
                     self.process_level_events()?;
                 }
-                MobEvent::BreakDoor { pos } => {
+                MobEvent::BreakDoor { mob, pos } => {
                     // BreakDoorGoal.tick: removeBlock, then level events 1021
                     // and 2001 with the state that is there now.
+                    let kind = self
+                        .mobs
+                        .iter()
+                        .find(|m| m.id == mob)
+                        .map(super::native_hooks::mob_kind)
+                        .unwrap_or_default();
                     let air = self.world.air;
                     let at = BlockPos::new(pos[0], pos[1], pos[2]);
                     self.with_level(|b, level, ticks| b.set_block(level, ticks, at, air, 3));
@@ -2319,6 +2320,7 @@ impl Game<'_> {
                     self.level_event_at(1021, pos, 0);
                     let left = self.world.block(pos[0], pos[1], pos[2]);
                     self.level_event_at(2001, pos, left.0 as i32);
+                    self.native_entity_break_door(mob, &kind, pos);
                 }
                 MobEvent::DestroyProgress { mob, pos, progress } => {
                     self.destroy_block_progress(mob as i32, pos, progress);
@@ -2344,6 +2346,7 @@ impl Game<'_> {
                 }
                 MobEvent::LevelEvent { id, pos, data } => self.level_event_at(id, pos, data),
                 MobEvent::SetBlockName {
+                    mob,
                     pos,
                     name,
                     effect,
@@ -2363,7 +2366,19 @@ impl Game<'_> {
                         self.level_event_at(2001, pos, state.0 as i32);
                     }
                     if let Some(state) = self.pack.assets.registry.default_state(name) {
+                        let old_name = self
+                            .res
+                            .facts()
+                            .get(self.world.block(pos[0], pos[1], pos[2]))
+                            .name
+                            .clone();
                         self.level_set_with_flags(pos, state, flags)?;
+                        if let Some(mob) = mob
+                            && let Some(m) = self.mobs.iter().find(|m| m.id == mob)
+                        {
+                            let kind = m.kind.id.clone();
+                            self.native_entity_change_block(mob, &kind, pos, &old_name, name);
+                        }
                     }
                 }
                 MobEvent::Infest {
@@ -2566,7 +2581,12 @@ impl Game<'_> {
                     parent,
                     partner,
                     llama,
-                } => self.breed(parent, partner, llama),
+                } => {
+                    let mob_count = self.mobs.len();
+                    self.breed(parent, partner, llama);
+                    let child = self.mobs.get(mob_count).map(|m| m.id);
+                    self.native_entity_breed(parent, partner, child);
+                }
                 MobEvent::LockGaze { mob, partner } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                         horizon_client::mobs::animal_brain::lock_gaze(m, partner);
@@ -2679,6 +2699,31 @@ impl Game<'_> {
                     self.drop_gift_loot(mob, table, at);
                 }
             }
+        }
+        Ok(())
+    }
+    /// `TurtleEggBlock.decreaseEggs` after an entity's step or landing won its
+    /// roll (`destroyEgg`): the break sound and the remaining eggs (a stack of
+    /// one is destroyed after it).
+    pub(super) fn crack_turtle_egg(&mut self, pos: [i32; 3]) -> Result<()> {
+        let state = self.world.block(pos[0], pos[1], pos[2]);
+        let eggs = self
+            .pack
+            .assets
+            .registry
+            .state(state)
+            .filter(|s| s.name == "minecraft:turtle_egg")
+            .and_then(|s| s.properties.get("eggs"))
+            .and_then(|e| e.parse::<i32>().ok());
+        if let Some(eggs) = eggs {
+            let at = BlockPos::new(pos[0], pos[1], pos[2]);
+            self.with_level(|b, level, ticks| {
+                b.turtle_egg_destroyed_by_player(level, ticks, at, state);
+                if eggs <= 1 {
+                    b.destroy_block(level, ticks, at, false);
+                }
+            });
+            self.process_level_events()?;
         }
         Ok(())
     }
@@ -3895,11 +3940,18 @@ impl Game<'_> {
                     .play(name, Some([at.x, at.y, at.z]), volume, pitch);
             }
             ArrowEvent::BubbleColumnParticles { pos } => self.bubble_column_particles(pos),
-            ArrowEvent::Block { pos, reaction } => match reaction {
+            ArrowEvent::Block {
+                pos,
+                reaction,
+                owner,
+            } => match reaction {
                 BlockReaction::PrimeTnt => {
-                    self.spawn_primed_tnt(pos, false, None, None);
-                    self.with_level(|b, level, ticks| b.remove_block(level, ticks, pos, false));
-                    let _ = self.process_level_events();
+                    // `TntBlock.onProjectileHit`: the arrow's owner lights it.
+                    if self.tnt_prime_allowed(pos) {
+                        self.spawn_primed_tnt(pos, false, owner, None);
+                        self.with_level(|b, level, ticks| b.remove_block(level, ticks, pos, false));
+                        let _ = self.process_level_events();
+                    }
                 }
                 BlockReaction::Light(lit) => {
                     let _ = self.level_set([pos.x, pos.y, pos.z], lit);
@@ -3988,6 +4040,7 @@ impl Game<'_> {
         });
         if let Some(strength) = hit {
             let _ = self.process_level_events();
+            self.native_target_hit(self.dim.id(), pos, strength);
             if p.owner == Some(Who::Player) && (p.guest.is_none() || p.guest == self.lan_acting) {
                 self.stats.custom("target_hit", 1);
                 let kind = if p
@@ -4466,7 +4519,32 @@ impl Game<'_> {
                 {
                     m.damage_projectile(0.0, source, aim, [p.velocity.x, p.velocity.z]);
                 }
-                if p.owner == Some(Who::Player) && self.player.is_some() {
+                // To where the pearl started its last tick (oldPosition).
+                let mut to = p.previous;
+                let mut damage = 5.0;
+                let mut cancel = false;
+                // EntityTeleportEvent.EnderPearl: a server player's pearl.
+                if p.owner == Some(Who::Player)
+                    && let Some(from) = self.player.as_ref().map(|pl| pl.position)
+                    && let (Some(uuid), Some(name)) =
+                        (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    let mut target = [to.x, to.y, to.z];
+                    self.native_ender_pearl_teleport(
+                        uuid,
+                        &name,
+                        p.id,
+                        [from.x, from.y, from.z],
+                        &mut target,
+                        &mut damage,
+                        &mut cancel,
+                    );
+                    // A target that is not a number keeps the pearl's.
+                    if target.iter().all(|v| v.is_finite()) {
+                        to = Vec3::new(target[0], target[1], target[2]);
+                    }
+                }
+                if p.owner == Some(Who::Player) && self.player.is_some() && !cancel {
                     // ThrownEnderpearl: 5% endermite where the player was
                     // (when monsters spawn), teleport, 5 damage.
                     if self.world.random.next_float() < 0.05
@@ -4477,8 +4555,6 @@ impl Game<'_> {
                         let from = pl.position;
                         self.spawn_mob("minecraft:endermite", [from.x, from.y, from.z], false);
                     }
-                    // To where the pearl started its last tick (oldPosition).
-                    let to = p.previous;
                     if let Some(pl) = self.player.as_mut() {
                         pl.position = to;
                         pl.velocity = Vec3::ZERO;
@@ -4486,7 +4562,9 @@ impl Game<'_> {
                         pl.teleported = true;
                     }
                     self.previous_position = to;
-                    self.hurt_player_by("minecraft:ender_pearl", 5.0);
+                    if damage > 0.0 {
+                        self.hurt_player_by("minecraft:ender_pearl", damage);
+                    }
                     self.audio.play(
                         "minecraft:entity.player.teleport",
                         Some([to.x, to.y, to.z]),
@@ -4593,84 +4671,37 @@ impl Game<'_> {
                 self.combat.explosion_in_water = false;
                 result?;
             }
-            (
-                ProjectileKind::Potion {
-                    effect,
-                    ticks,
-                    amplifier,
-                    ..
-                },
-                _,
-            ) => {
-                // AbstractThrownPotion.applySplash: within 4 blocks, scaled by distance.
-                if let Some(pv) = self.player_view() {
-                    let d2 = (pv.position.x - at.x).powi(2)
-                        + (pv.position.y - at.y).powi(2)
-                        + (pv.position.z - at.z).powi(2);
-                    if d2 < 16.0 && !self.creative {
-                        let scale = 1.0 - d2.sqrt() / 4.0;
-                        let t = (f64::from(*ticks) * scale + 0.5) as i32;
-                        match *effect {
-                            "minecraft:instant_damage" => {
-                                // indirectMagic(potion, owner), built where the
-                                // hurt happens: the thrower, or the potion
-                                // itself when it has none. A status effect
-                                // deals no damage, so it records no source.
-                                let owner = self
-                                    .combat
-                                    .projectile_owner
-                                    .filter(|id| self.mob_display_name(*id).is_some());
-                                match owner {
-                                    Some(owner) => {
-                                        self.note_attacker("minecraft:indirect_magic", owner)
-                                    }
-                                    None => self.note_direct_entity(
-                                        "minecraft:indirect_magic",
-                                        Text::translate("entity.minecraft.splash_potion", &[]),
-                                    ),
-                                }
-                                self.hurt_player_by(
-                                    "minecraft:indirect_magic",
-                                    6.0 * (1 << *amplifier) as f32 * scale as f32,
-                                )
-                            }
-                            e if t > 20 => self.give_player_effect(e, t, *amplifier),
-                            _ => {}
-                        }
-                    }
+            // AbstractThrownPotion.onHit, then onHitAsPotion from the stack it
+            // flies as: the splash happens where the hit was, a lingering
+            // potion's cloud sits at the mob it hit (ThrownLingeringPotion),
+            // and the potion that lands names the hurt it deals.
+            (ProjectileKind::Potion(stack), hit) => {
+                let block = match hit {
+                    Hit::Block { pos, face, .. } => Some((
+                        pos,
+                        Direction::approximate_nearest(Vec3::new(
+                            f64::from(face[0]),
+                            f64::from(face[1]),
+                            f64::from(face[2]),
+                        )),
+                    )),
+                    _ => None,
+                };
+                let mob = match hit {
+                    Hit::Entity {
+                        who: Who::Player, ..
+                    } => self.player.as_ref().map(|pv| pv.position),
+                    Hit::Entity {
+                        who: Who::Mob(id), ..
+                    } => self.mobs.iter().find(|m| m.id == id).map(|m| m.position),
+                    _ => None,
+                };
+                let owner = self.potion_owner(p.owner);
+                self.splash(stack, at, mob, block, p.age, &owner);
+                if stack.item.as_ref() != "minecraft:experience_bottle" {
+                    let item = stack.item.to_string();
+                    self.native_potion_splash(&item, [at.x, at.y, at.z]);
                 }
-                // A witch's healing potions reach the raiders around the splash.
-                if matches!(
-                    *effect,
-                    "minecraft:instant_health" | "minecraft:regeneration"
-                ) {
-                    let center = at;
-                    for m in &mut self.mobs {
-                        let d2 = m.position.distance_squared(center);
-                        if !m.alive()
-                            || d2 >= 16.0
-                            || !horizon_client::mobs::raider::is_raider(m.species())
-                        {
-                            continue;
-                        }
-                        let scale = 1.0 - d2.sqrt() / 4.0;
-                        if *effect == "minecraft:instant_health" {
-                            let heal = (4 << *amplifier) as f64 * scale;
-                            m.health = (m.health + heal as f32).min(m.attrs.max_health);
-                        } else {
-                            let t = (f64::from(*ticks) * scale + 0.5) as i32;
-                            if t > 20 {
-                                m.add_effect(effect, t, *amplifier);
-                            }
-                        }
-                    }
-                }
-                self.audio.play(
-                    "minecraft:entity.splash_potion.break",
-                    Some(atp),
-                    1.0,
-                    self.world.random.next_float() * 0.1 + 0.9,
-                );
             }
             (ProjectileKind::LlamaSpit, Hit::Entity { who, .. }) => match who {
                 Who::Player => {
@@ -4862,6 +4893,34 @@ impl Game<'_> {
         if self.name_mob(index) {
             return Ok(true);
         }
+        if self
+            .held()
+            .is_some_and(|stack| &*stack.item == "minecraft:shears")
+        {
+            let mob = &self.mobs[index];
+            let shearable = match mob.species() {
+                Species::Sheep => !mob.extra.sheared && !mob.is_baby(),
+                Species::Mooshroom => !mob.is_baby(),
+                Species::SnowGolem | Species::Bogged => mob.alive() && !mob.extra.sheared,
+                _ => false,
+            };
+            if shearable
+                && let (Some(player), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+            {
+                let mut cancel = false;
+                self.native_player_shear_entity(
+                    player,
+                    &name,
+                    mob.id as i32,
+                    self.hand == Hand::Off,
+                    &mut cancel,
+                );
+                if cancel {
+                    return Ok(true);
+                }
+            }
+        }
         if self.spawn_egg_offspring(index) {
             self.swing_arm();
             return Ok(true);
@@ -4900,9 +4959,10 @@ impl Game<'_> {
             self.audio
                 .play(sound, Some(self.mobs[index].center()), 1.0, 1.0);
             self.trigger_item("minecraft:filled_bucket", &filled);
+            let species = bucket.trim_end_matches("_bucket").to_owned();
+            let id = self.mobs[index].id as i32;
             // Leashable.dropLeash, then discard.
-            let id = self.mobs[index].id;
-            self.break_leash(id, true, false);
+            self.break_leash(id as u32, true, false);
             self.mobs[index].removed = true;
             if self.creative {
                 if let Some(rest) = self.give(filled) {
@@ -4911,13 +4971,27 @@ impl Game<'_> {
             } else {
                 *self.held_mut() = Some(filled);
             }
+            if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+            {
+                self.native_player_bucket_entity(player, &name, id, &species);
+            }
             self.swing_arm();
             return Ok(true);
         }
         // AgeableMob.mobInteract: a golden dandelion on a baby freezes its
         // growth, or lets it grow again.
         if self.mobs[index].alive() && self.age_lock_takes(&self.mobs[index], &item) {
+            let entity_id = self.mobs[index].id;
             self.set_age_locked(index);
+            if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+            {
+                self.native_player_toggle_entity_age_lock(
+                    player,
+                    &name,
+                    entity_id,
+                    self.mobs[index].extra.age_locked,
+                );
+            }
             if let Some(stack) = &held {
                 let target = self.mob_entity(&self.mobs[index]);
                 self.trigger_item_entity("minecraft:player_interacted_with_entity", stack, &target);
@@ -5037,6 +5111,7 @@ impl Game<'_> {
         let mut eat: Option<(&'static str, f32, f32)> = None;
         let feet = [m.position.x, m.position.y, m.position.z];
         let mut handled = true;
+        let mut ignited_creeper = false;
         let mut drops: Vec<(String, u32)> = Vec::new();
         // The shearing table rolled, for the mods (none for a mooshroom).
         let mut drops_table = String::new();
@@ -5387,6 +5462,7 @@ impl Game<'_> {
             }
             Species::Creeper if creeper_igniter => {
                 m.extra.flag = true;
+                ignited_creeper = true;
                 // FIRECHARGE_USE for a fire charge, else FLINTANDSTEEL_USE,
                 // at the creeper's feet with a pitch from its own random.
                 let event = if item == "minecraft:fire_charge" {
@@ -5530,8 +5606,11 @@ impl Game<'_> {
                         // Animal.setInLove: entity event 18 (a baby that
                         // only grew is not in love).
                         if self.mobs[index].extra.in_love > 0 {
-                            self.love_cause.insert(self.mobs[index].id, self.lan_acting);
-                            self.mob_event_particles(self.mobs[index].id, 18);
+                            let id = self.mobs[index].id;
+                            self.love_cause.insert(id, self.lan_acting);
+                            let kind = self.mobs[index].kind.id.clone();
+                            self.native_entity_enter_love_mode(id, &kind, self.lan_acting_uuid);
+                            self.mob_event_particles(id, 18);
                         }
                     }
                     // Animal.mobInteract still consumes the client click when
@@ -5543,6 +5622,13 @@ impl Game<'_> {
         }
         if !handled {
             return Ok(false);
+        }
+        if ignited_creeper {
+            self.native_creeper_ignite(
+                self.mobs[index].id,
+                horizon_client::lan::playerdata::ints_uuid(acting),
+                &item,
+            );
         }
         if let Some(trusts) = ocelot_trust {
             // `spawnTrustingParticles` on the clients: entity event 41 (hearts) or 40 (smoke).
@@ -5837,6 +5923,11 @@ impl Game<'_> {
                 *self.held_mut() = None;
             }
         }
+        if kind == ProjectileKind::Egg
+            && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            self.native_player_egg_throw(player, &name);
+        }
         Ok(true)
     }
     /// `Mob.checkAndHandleImportantInteractions` with a spawn egg of mob
@@ -6093,11 +6184,64 @@ impl Game<'_> {
         }
     }
     /// Mob models and projectiles for the entity pass.
+    /// The renderer's models for the GPU path (`mobs::skin`) this frame, if it
+    /// poses entities: a new frame of draws, the store restarted when the
+    /// renderer's no longer matches. Once per frame, before any entity draws.
+    pub(super) fn begin_skinning(&self) {
+        let stored = self
+            .renderer
+            .as_ref()
+            .filter(|r| r.skins_entities())
+            .and_then(|r| r.skinned_models());
+        match stored {
+            Some(stored) => self
+                .skin_models
+                .borrow_mut()
+                .begin(&mut self.skin_frame.borrow_mut(), stored),
+            None => self.skin_frame.borrow_mut().clear_draws(),
+        }
+    }
+
+    /// Whether this frame's models can be posed on the GPU (`begin_skinning`).
+    pub(super) fn skinning(&self) -> bool {
+        self.renderer
+            .as_ref()
+            .is_some_and(|r| r.skins_entities() && r.skinned_models().is_some())
+    }
+
+    /// Culls one entity's vertices from `entity_start`, counting what it drew
+    /// on the GPU path by the corners of `skinned`'s bounds; a culled entity's
+    /// posed draws since `skinned`'s mark are taken back.
+    pub(super) fn cull_skinned(
+        &self,
+        out: &mut Vec<Vertex>,
+        entity_start: usize,
+        skinned: Option<((usize, usize, u32), Option<(glam::Vec3, glam::Vec3)>)>,
+    ) {
+        let corners = skinned.and_then(|(_, bounds)| bounds);
+        if let Some((lo, hi)) = corners {
+            out.extend([lo, hi].map(|pos| Vertex {
+                pos: pos.to_array(),
+                ..bytemuck::Zeroable::zeroed()
+            }));
+        }
+        let len = out.len();
+        self.cull_entity_vertices(out, entity_start);
+        if out.len() < len {
+            if let Some((mark, _)) = skinned {
+                self.skin_frame.borrow_mut().truncate(mark);
+            }
+        } else if corners.is_some() {
+            out.truncate(len - 2);
+        }
+    }
+
     pub(super) fn mob_geometry(&self, camera: glam::DVec3, alpha: f64, out: &mut Vec<Vertex>) {
         let atlas = &self.gui.atlas;
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let scale = self.view_scale();
         self.rendered_mobs.set(0);
+        let skinning = self.skinning();
         // What custom entity model animations read of the frame.
         horizon_client::mobs::cem_anim::set_frame(horizon_client::mobs::cem_anim::Frame {
             time: self.world.game_time as f64 + alpha,
@@ -6240,21 +6384,55 @@ impl Game<'_> {
                 Vec::new()
             };
             let body = out.len();
-            let render = if layers_only {
-                horizon_client::mobs::render::render_layers
+            // The GPU path: an ordinary mob, no outline, no layers the CPU path changes after
+            // drawing them (a player's, the HDR tiers below, the sulfur cube's shell).
+            let posable = skinning
+                && !is_player
+                && !layers_only
+                && outline.is_none()
+                && armor.is_empty()
+                && !matches!(
+                    mob.species(),
+                    Species::Blaze | Species::MagmaCube | Species::GlowSquid | Species::SulfurCube
+                );
+            let mut skinned = None;
+            if posable {
+                let mut models = self.skin_models.borrow_mut();
+                let mut frame = self.skin_frame.borrow_mut();
+                let mark = frame.mark();
+                let mut skin = horizon_client::mobs::skin::Skin {
+                    models: &mut models,
+                    frame: &mut frame,
+                    bounds: None,
+                };
+                horizon_client::mobs::render::render_skinned(
+                    mob,
+                    alpha as f32,
+                    camera,
+                    &lookup,
+                    packed,
+                    self.res.mob_data(),
+                    out,
+                    &mut skin,
+                );
+                skinned = Some((mark, skin.bounds));
             } else {
-                horizon_client::mobs::render::render_with
-            };
-            render(
-                mob,
-                alpha as f32,
-                camera,
-                &lookup,
-                packed,
-                self.res.mob_data(),
-                &armor,
-                out,
-            );
+                let render = if layers_only {
+                    horizon_client::mobs::render::render_layers
+                } else {
+                    horizon_client::mobs::render::render_with
+                };
+                render(
+                    mob,
+                    alpha as f32,
+                    camera,
+                    &lookup,
+                    packed,
+                    self.res.mob_data(),
+                    &armor,
+                    out,
+                );
+            }
             // HDR output: mobs that are light shine by their kind, as blocks do (entity.wgsl
             // fs_hdr_mark); a tier's window lifts only their bright texels.
             if let Some(tier) = match mob.species() {
@@ -6302,7 +6480,8 @@ impl Game<'_> {
             if outline.is_none()
                 && horizon_client::mobs::guardian::beam(mob, alpha as f32).is_none()
             {
-                self.cull_entity_vertices(out, entity_start);
+                // What the GPU draws of the mob counts by its bounds' corners.
+                self.cull_skinned(out, entity_start, skinned);
             }
             // GuardianRenderer: the laser to the locked target.
             if let Some((time, scale)) = horizon_client::mobs::guardian::beam(mob, alpha as f32)
@@ -6993,6 +7172,8 @@ mod pearl_tests {
     /// box (#3072), not the block at its feet.
     #[test]
     fn a_pearl_feels_the_water_its_box_touches() {
+        // The throwable air drag is the float 0.99 widened to a double.
+        let air = f64::from(0.99f32);
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -7080,7 +7261,7 @@ mod pearl_tests {
         assert!(p.position.y > 4.9, "the pearl dipped: {p:?}");
         p.tick(&pw);
         assert!(
-            (p.velocity.x - 0.3 * 0.99 * 0.99).abs() < 1e-9,
+            (p.velocity.x - 0.3 * air * air).abs() < 1e-9,
             "a pearl above the surface slowed as in water: {p:?}"
         );
         // At the pool's edge: its feet over the dry block at x = 19, a side
@@ -7089,12 +7270,12 @@ mod pearl_tests {
         let mut p = pearl(19.95, 4.3, Vec3::ZERO);
         p.tick(&pw);
         assert!(
-            (p.velocity.y - (-0.03 * 0.99)).abs() < 1e-9,
+            (p.velocity.y - (-0.03 * air)).abs() < 1e-9,
             "the first tick has the air drag: {p:?}"
         );
         p.tick(&pw);
         assert!(
-            (p.velocity.y - (-0.03 * 0.99 - 0.03) * 0.8).abs() < 1e-9,
+            (p.velocity.y - (-0.03 * air - 0.03) * 0.8).abs() < 1e-9,
             "a pearl whose box is in the water kept the air drag: {p:?}"
         );
         // Thrown under water, a pearl moves with the air drag on its first
@@ -7102,12 +7283,12 @@ mod pearl_tests {
         let mut p = pearl(30.5, 4.2, Vec3::ZERO);
         p.tick(&pw);
         assert!(
-            (p.velocity.y - (-0.03 * 0.99)).abs() < 1e-9,
+            (p.velocity.y - (-0.03 * air)).abs() < 1e-9,
             "the first tick under water has the air drag: {p:?}"
         );
         p.tick(&pw);
         assert!(
-            (p.velocity.y - (-0.03 * 0.99 - 0.03) * 0.8).abs() < 1e-9,
+            (p.velocity.y - (-0.03 * air - 0.03) * 0.8).abs() < 1e-9,
             "the second tick under water has the water drag: {p:?}"
         );
     }

@@ -57,6 +57,18 @@ python3 tools/perf_bench.py --table horizon-mine vanilla-mine mods-mine
 
 Options: `--distances 8,16`, `--sizes 1920x1080`, `--scenes village,ocean`, `--seconds 20`, `--repeats 5`, `--heap 4G` (vanilla), `--offscreen` (Horizon, for locked or headless sessions). Results go to `benchmarks/perf/<label>-rd<N>.json` at 1280x720 and `<label>-1080p-rd<N>.json` at 1920x1080 (other sizes `<label>-<W>x<H>-rd<N>.json`; `--table` takes those labels), one [benchmark report](benchmark-report.md) per window size and render distance (the same format the game's `--benchmark` and the launcher write), with the load average before each game; each game's log, and the vanilla driver's event log, stay in `.local/perf-bench/`. Keep the machine otherwise idle, plugged in, and the window on a screen.
 
+### Many-entity stress scenes
+
+`--scenes stress` (or some of `stress_empty`, `stress_mobs`, `stress_items`, `stress_frames`, `stress_armor_stands`, `stress_chests`, `stress_signs`, `stress_banners`, `stress_particles`) runs the scenes of `tools/stress_scenes.py` instead of flying: 1000 still mobs of 8 kinds, 2000 dropped items, 512 item frames, 500 armoured armor stands, 800 chests and shulker boxes, a wall of 687 written signs, 300 banners, and steady particles from repeating command blocks (flames, smoke, end rods, firework bursts, TNT in the air). Each is built high above the terrain by the same vanilla commands in every game (Horizon through `horizon-ctl command`, vanilla and vanilla-mods through the driver mod), settles 6 seconds and is held still for `--seconds`; `stress_empty` is the same camera and floor without them. Entities are drawn only within a distance that grows with the render distance up to 20 (`Entity.shouldRenderAtSqrDistance`), so run them at 16 or more:
+
+```sh
+python3 tools/perf_bench.py --game horizon --scenes stress --distances 16 --label stress-horizon
+python3 tools/perf_bench.py --game vanilla --scenes stress --distances 16 --label stress-vanilla
+python3 tools/perf_bench.py --table stress-horizon stress-vanilla
+```
+
+Besides the FPS table, `--table` then gives each scene's median frame CPU time (Horizon), client tick time and resident memory. Chests stay closed: opening them needs a player, which neither driver has. The stress scenes use 26.3's command syntax, so they are not for `--game neoforge`.
+
 On Windows, run `python tools\perf_bench.py ...` the same way. Horizon's control endpoint there is a localhost TCP port, which the game writes to a `.json` file in the temporary folder. `--build` can point at an installed release (`%APPDATA%\horizon-launcher\versions\vX.Y.Z`, with `--resources` its `.local\horizon-client\26.3`), and the report then gives that release's version.
 
 ## Frame pacing

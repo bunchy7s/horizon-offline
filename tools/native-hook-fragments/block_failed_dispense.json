@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "block_failed_dispense",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_failed_dispense",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A dispenser fails to dispense an item (`native_block_failed_dispense`).",
+  "doc_summary": "`native_block_failed_dispense(dimension, pos, item)` is called when a dispenser at `pos` fails to dispense `item`. Bundles need \"hooks\": @API:block_failed_dispense@."
+}

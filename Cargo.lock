@@ -1399,6 +1399,7 @@ dependencies = [
  "horizon-friends",
  "horizon-hdr",
  "horizon-items",
+ "horizon-mcp",
  "horizon-mods",
  "horizon-narrator",
  "horizon-optifine",
@@ -1461,6 +1462,7 @@ dependencies = [
  "horizon-threads",
  "horizon-world",
  "log",
+ "lz4_flex",
  "miniz_oxide 0.8.9",
  "naga",
  "png",
@@ -1539,6 +1541,13 @@ dependencies = [
  "horizon-world",
  "log",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "horizon-mcp"
+version = "0.1.0"
+dependencies = [
  "serde_json",
 ]
 
@@ -1646,6 +1655,7 @@ dependencies = [
  "horizon-bench",
  "horizon-chat-filter",
  "horizon-core",
+ "horizon-mcp",
  "horizon-release-sign",
  "horizon-server-files",
  "libc",
@@ -1733,6 +1743,7 @@ dependencies = [
  "flate2",
  "horizon-core",
  "libm",
+ "log",
  "lz4_flex",
  "postcard",
  "serde",

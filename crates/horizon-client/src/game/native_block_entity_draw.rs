@@ -43,7 +43,6 @@ fn in_frustum(frustum: Option<&impl Cull>, origin: Vec3, bounds: [f32; 6]) -> bo
 /// partial tick, game time and light, and the pose stack the helpers draw
 /// under (`native_draw_quad`, `native_draw_cube`, `native_draw_block`).
 // Native mods read and drive it; nothing in Horizon does.
-#[allow(dead_code)]
 pub struct BlockEntityDraw {
     /// The frame's partial tick, 0 to 1 (`BlockEntityRenderState`).
     pub partial: f32,
@@ -174,7 +173,6 @@ impl BlockEntityDraw {
 /// One face of a `native_draw_cube` box: its sprite (`mymod:entity/cog`,
 /// `mymod:block/casing`) and its UVs in texels of 16 per side, as a model
 /// face's `uv` (none takes the box's own, as a model's default).
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct CubeFace<'a> {
     pub sprite: &'a str,
@@ -298,7 +296,8 @@ impl Game<'_> {
     /// drawn by no vanilla renderer) whose block entity is a mod's, closer than
     /// `BlockEntityRenderer.getViewDistance` to the camera (`shouldRender`)
     /// and with its bounds (`native_block_entity_render_bounding_box`) in the
-    /// frustum.
+    /// frustum. Entity occlusion culling is for ordinary entities; block
+    /// entities use these renderer-provided bounds instead.
     pub(super) fn mod_block_entity_geometry<'a>(
         &self,
         blocks: impl Iterator<Item = &'a ([i32; 3], u32)>,
@@ -345,7 +344,6 @@ impl Game<'_> {
                         pos: (Vec3::from_array(v.pos) + origin).to_array(),
                         ..*v
                     }));
-                    self.cull_entity_vertices(&mut draw.vertices, start);
                 }
                 continue;
             }
@@ -381,7 +379,6 @@ impl Game<'_> {
             for v in &mut draw.vertices[start..] {
                 v.pos = (Vec3::from_array(v.pos) + origin).to_array();
             }
-            self.cull_entity_vertices(&mut draw.vertices, start);
         }
         *out = draw.vertices;
     }

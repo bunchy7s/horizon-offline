@@ -49,6 +49,7 @@ impl WorldRequest {
         settings: &Settings,
         upgrade: &horizon_world::datafix::progress::UpgradeProgress,
     ) -> Result<PreparedWorld> {
+        let _prepare_step = startup::step("world.prepare");
         // Before any chunk is read: a loaded container with a loot table is rolled as its chunk
         // is decoded (`save::roll_loaded_loot`), and the spawn chunks are read while the world
         // opens. Every world opens here: in-frame, on the server thread, on a dedicated server.
@@ -229,6 +230,7 @@ impl WorldRequest {
         let dim = Dim::from_id(&level.dimension);
         let shapes = level_shapes(&save_root, res.biomes());
         let shape = shapes.get(dim.id());
+        let streaming_step = startup::step("world.make_streaming");
         let (mut streaming, save, locator) = make_streaming(
             res,
             pack,
@@ -240,6 +242,7 @@ impl WorldRequest {
             level.seed,
             &level.enabled_features,
         )?;
+        drop(streaming_step);
         streaming.radius = settings.render_distance;
         let mut world = World::new(res.facts().air, level.seed);
         world.attachments = save.load_attachments();
@@ -379,6 +382,7 @@ pub(super) fn preload_world_data(
                 .name("World data preload".into())
                 .spawn(move || {
                     horizon_threads::behind_server();
+                    let sync = spawn_sync_preload(&resources, true);
                     // Errors are left for the world opening to report.
                     if let Ok(data) = horizon_client::vanillagen::shared_data(
                         &resources.join("worldgen"),
@@ -388,14 +392,17 @@ pub(super) fn preload_world_data(
                         // seed shares: about 140 ms off opening the world.
                         let _ = data.prepare_decoration("minecraft:normal", "minecraft:overworld");
                     }
+                    // The loot data's item tables and the server's data both
+                    // read the recipe folder: held here, it is read once.
+                    let _recipe_files =
+                        horizon_client::json_folder::read(&resources.join("data/minecraft/recipe"));
                     // The preload is the game's own data; the world's packs'
                     // tables are built when it opens (finish_open_world).
                     let _ = horizon_client::structure_blocks::loot_data(
                         &resources,
                         &horizon_world::loot::PackOverlay::NONE,
                     );
-                    let _ =
-                        super::lan::sync_data(&resources, &horizon_world::loot::PackOverlay::NONE);
+                    join_sync_preload(sync, &resources);
                 });
             match spawned {
                 Ok(thread) => *preload = Preload::Started { thread, left: None },
@@ -444,6 +451,7 @@ pub(super) fn preload_launch_world(
         .spawn(move || {
             // Not behind the server: the world's opening waits for it.
             let started = std::time::Instant::now();
+            let sync = spawn_sync_preload(&resources, false);
             // Errors are left for the world opening to report. The world's
             // flags from its level.dat: the feature packs a flag forces on.
             let enabled_features = horizon_client::save::Level::read(&world_root)
@@ -459,11 +467,15 @@ pub(super) fn preload_launch_world(
                 let preset = horizon_client::save::WorldGen::preset(&world_root);
                 let _ = data.prepare_decoration(preset, "minecraft:overworld");
             }
+            // As in `preload_world_data`: the loot data and the server's
+            // data share one read of the recipe folder.
+            let _recipe_files =
+                horizon_client::json_folder::read(&resources.join("data/minecraft/recipe"));
             let _ = horizon_client::structure_blocks::loot_data(
                 &resources,
                 &horizon_world::loot::PackOverlay::NONE,
             );
-            let _ = super::lan::sync_data(&resources, &horizon_world::loot::PackOverlay::NONE);
+            join_sync_preload(sync, &resources);
             log::info!(
                 "Horizon: world data preloaded for the launch's world in {} ms",
                 started.elapsed().as_millis()
@@ -472,6 +484,39 @@ pub(super) fn preload_launch_world(
     match spawned {
         Ok(thread) => *preload = Preload::Started { thread, left: None },
         Err(e) => log::warn!("Horizon: world data preload: {e}"),
+    }
+}
+
+/// The registries, tags, recipes and advancements the server sends
+/// (`lan::sync_data`), read on a thread of their own beside the worldgen and
+/// loot reads: they share nothing, and read after them they came too late
+/// for the server thread, which then read them a second time.
+fn spawn_sync_preload(
+    resources: &std::path::Path,
+    behind_server: bool,
+) -> Option<std::thread::JoinHandle<()>> {
+    let resources = resources.to_owned();
+    std::thread::Builder::new()
+        .name("Sync data preload".into())
+        .spawn(move || {
+            if behind_server {
+                horizon_threads::behind_server();
+            }
+            let _ = super::lan::sync_data(&resources, &horizon_world::loot::PackOverlay::NONE);
+        })
+        .ok()
+}
+
+/// Waits for [`spawn_sync_preload`]'s thread, so the preload is over when
+/// its own thread is; reads the data here if that thread did not start.
+fn join_sync_preload(sync: Option<std::thread::JoinHandle<()>>, resources: &std::path::Path) {
+    match sync {
+        Some(thread) => {
+            let _ = thread.join();
+        }
+        None => {
+            let _ = super::lan::sync_data(resources, &horizon_world::loot::PackOverlay::NONE);
+        }
     }
 }
 
@@ -704,7 +749,10 @@ pub(super) fn make_streaming(
             &settings,
             true,
         ) {
-            Ok(terrain) => Some(Arc::new(terrain)),
+            Ok(mut terrain) => {
+                terrain.add_mod_signs(res.facts());
+                Some(Arc::new(terrain))
+            }
             Err(e) => {
                 log::warn!("Horizon: the superflat structures are unavailable: {e}");
                 None
@@ -775,13 +823,15 @@ pub(super) fn make_streaming(
         let preset = horizon_client::save::WorldGen::preset(world_root);
         let overrides =
             world_worldgen_overrides(world_root, &options.resources, &biomes, enabled_features);
-        let inner = Arc::new(VanillaTerrain::for_world_with(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures).map_err(|e| {
+        let mut inner = VanillaTerrain::for_world_with(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures).map_err(|e| {
                 if overrides.is_empty() {
                     format!("{e}\nPrepare the worldgen bundle with the launcher, or: horizon-prepare --prepare")
                 } else {
                     format!("{e}\nThe world's data packs change its world generation: one of them may not be made for this version")
                 }
-            })?);
+            })?;
+        inner.add_mod_signs(res.facts());
+        let inner = Arc::new(inner);
         if dim == Dim::Overworld && structures {
             inner.search_rings_behind();
         }

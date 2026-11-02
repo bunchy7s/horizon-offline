@@ -101,9 +101,14 @@ fn java_float(v: f64) -> String {
         format!("{v}")
     }
 }
+/// String.format(Locale.ROOT, "%.<decimals>f"): Java rounds the shortest
+/// decimal text half-up, which `{:.N}` (exact value, half-even) does not.
+pub(super) fn percent_f(v: f64, decimals: usize) -> String {
+    horizon_client::java_text::format_fixed(v, decimals)
+}
 /// String.format(Locale.ROOT, "%f").
 fn format_double(v: f64) -> String {
-    format!("{v:.6}")
+    percent_f(v, 6)
 }
 /// `EntitySelectorParser.createRotationPredicate`: the wrapped angle lies in
 /// the wrapped range, which runs through 180 when its minimum is above its
@@ -1369,11 +1374,14 @@ impl Game<'_> {
         let count = Self::int(ctx, "count").unwrap_or(1);
         let targets = self.entities(ctx, "targets", true)?;
         let max_stack = self.items().get(&id).map_or(64, |i| i.max_stack) as i32;
-        if count > max_stack * 100 {
+        // A native mod's item can stack far past vanilla's 99: saturate rather
+        // than overflow on a size near i32::MAX.
+        let limit = max_stack.saturating_mul(100);
+        if count > limit {
             return Err(CommandError::new(Text::translate(
                 "commands.give.failed.toomanyitems",
                 &[
-                    Text::literal((max_stack * 100).to_string()),
+                    Text::literal(limit.to_string()),
                     self.item_display_name(&id),
                 ],
             )));
@@ -1469,6 +1477,7 @@ impl Game<'_> {
         let _ = self.in_target_level(t, |g| g.teleport_to_in_level(t, pos, rotation));
     }
     fn teleport_to_in_level(&mut self, t: Target, pos: [f64; 3], rotation: Option<[f32; 2]>) {
+        let from = self.target_position(t);
         let v = Vec3::new(pos[0], pos[1], pos[2]);
         match t {
             Target::Guest(_) => {
@@ -1483,6 +1492,10 @@ impl Game<'_> {
                 if let Some(conn) = self.lan_acting {
                     self.server_trips.retain(|trip| !trip.is(conn));
                 }
+                let from = self
+                    .player
+                    .as_ref()
+                    .map(|p| [p.position.x, p.position.y, p.position.z]);
                 if let Some(p) = self.player.as_mut() {
                     p.position = v;
                     p.velocity = Vec3::new(0.0, 0.0, 0.0);
@@ -1493,6 +1506,24 @@ impl Game<'_> {
                 if let Some([yaw, pitch]) = rotation {
                     self.yaw = yaw;
                     self.pitch = pitch.clamp(-90.0, 90.0);
+                }
+                // A server player's teleport is told to the mods once their
+                // move is in the hub (`leave_guest`).
+                if let (Some(conn), Some(uuid), Some(name), Some(from)) = (
+                    self.lan_acting,
+                    self.lan_acting_uuid,
+                    self.lan_acting_name.clone(),
+                    from,
+                ) {
+                    self.teleport_notes
+                        .push(super::server_travel::TeleportNote {
+                            conn,
+                            uuid,
+                            name,
+                            from,
+                            to: pos,
+                            dimension: self.dim.id().to_owned(),
+                        });
                 }
             }
             Target::Mob(id) => {
@@ -1601,6 +1632,12 @@ impl Game<'_> {
             }
             // Wall-mounted entities do not move.
             Target::Frame(_) | Target::Painting(_) => {}
+        }
+        if self.options.dedicated.is_some()
+            && let (Some(entity), Some(from), Some(to)) =
+                (self.network_entity_id(t), from, self.target_position(t))
+        {
+            self.native_entity_teleport(self.dim.id(), entity as u32, from, to);
         }
     }
     /// Teleport the local player into the command source's dimension. Unlike
@@ -1799,12 +1836,7 @@ impl Game<'_> {
             } else {
                 pos[1]
             };
-            let (dx, dy, dz) = (f[0] - pos[0], f[1] - eye, f[2] - pos[2]);
-            let horizontal = (dx * dx + dz * dz).sqrt();
-            Some([
-                ((dz.atan2(dx).to_degrees()) - 90.0) as f32,
-                (-(dy.atan2(horizontal).to_degrees())) as f32,
-            ])
+            Some(world_cmds::look_at([pos[0], eye, pos[2]], f))
         };
         // A server's player in another level than the source's (`execute
         // in`, the console's Overworld) moves there (ServerPlayer.teleport
@@ -1875,8 +1907,12 @@ impl Game<'_> {
                 if total == t {
                     return Err(err("commands.time.set.already_at_time", &[&clock, &t]));
                 }
-                self.world.day_time = t;
-                self.ui.clock.partial = 0.0;
+                let mut cancel = false;
+                self.native_time_skip(self.dim.id(), total, t, "command", &mut cancel);
+                if !cancel {
+                    self.world.day_time = t;
+                    self.ui.clock.partial = 0.0;
+                }
                 self.feedback(Text::tr("commands.time.set.absolute", &[&clock, &t]));
                 Ok(t as i32)
             }
@@ -1896,8 +1932,13 @@ impl Game<'_> {
                         &[&clock, &marker],
                     ));
                 }
-                self.world.day_time = m.resolve(total);
-                self.ui.clock.partial = 0.0;
+                let target = m.resolve(total);
+                let mut cancel = false;
+                self.native_time_skip(self.dim.id(), total, target, "command", &mut cancel);
+                if !cancel {
+                    self.world.day_time = target;
+                    self.ui.clock.partial = 0.0;
+                }
                 self.feedback(Text::tr(
                     "commands.time.set.time_marker",
                     &[&clock, &marker],
@@ -1906,7 +1947,12 @@ impl Game<'_> {
             }
             "time.add" => {
                 let t = i64::from(Self::int(ctx, "time").unwrap_or(0));
-                self.world.day_time = (total + t).max(0);
+                let target = (total + t).max(0);
+                let mut cancel = false;
+                self.native_time_skip(self.dim.id(), total, target, "command", &mut cancel);
+                if !cancel {
+                    self.world.day_time = target;
+                }
                 let now = self.world.day_time;
                 self.feedback(Text::tr("commands.time.set.absolute", &[&clock, &now]));
                 Ok((now % i64::from(i32::MAX)) as i32)
@@ -1990,12 +2036,10 @@ impl Game<'_> {
         let sample = |min: i32, max: i32, r: &mut horizon_core::random::LegacyRandom| {
             min + r.next_int_bound(max - min + 1).unwrap_or(0)
         };
-        let w = &mut self.world.weather;
-        let r = &mut self.world.random;
         let (key, clear, time, raining, thundering) = if ctx.has("clear") {
             (
                 "commands.weather.set.clear",
-                duration.unwrap_or_else(|| sample(12_000, 180_000, r)),
+                duration.unwrap_or_else(|| sample(12_000, 180_000, &mut self.world.random)),
                 0,
                 false,
                 false,
@@ -2004,7 +2048,7 @@ impl Game<'_> {
             (
                 "commands.weather.set.rain",
                 0,
-                duration.unwrap_or_else(|| sample(12_000, 24_000, r)),
+                duration.unwrap_or_else(|| sample(12_000, 24_000, &mut self.world.random)),
                 true,
                 false,
             )
@@ -2012,17 +2056,46 @@ impl Game<'_> {
             (
                 "commands.weather.set.thunder",
                 0,
-                duration.unwrap_or_else(|| sample(3_600, 15_600, r)),
+                duration.unwrap_or_else(|| sample(3_600, 15_600, &mut self.world.random)),
                 true,
                 true,
             )
         };
-        // ServerLevel.setWeatherParameters.
-        w.clear_time = clear;
-        w.rain_time = time;
-        w.thunder_time = time;
-        w.raining = raining;
-        w.thundering = thundering;
+        let previous = (
+            self.world.weather.clear_time,
+            self.world.weather.rain_time,
+            self.world.weather.thunder_time,
+            self.world.weather.raining,
+            self.world.weather.thundering,
+        );
+        let mut cancel = false;
+        self.native_weather_change(self.dim.id(), raining, thundering, &mut cancel);
+        let old_thundering = self.world.weather.thundering;
+        let old_thunder_time = self.world.weather.thunder_time;
+        let mut cancel_thunder = false;
+        self.native_thunder_change(self.dim.id(), thundering, &mut cancel_thunder);
+        if cancel {
+            let w = &mut self.world.weather;
+            (
+                w.clear_time,
+                w.rain_time,
+                w.thunder_time,
+                w.raining,
+                w.thundering,
+            ) = previous;
+        } else {
+            // ServerLevel.setWeatherParameters.
+            let w = &mut self.world.weather;
+            w.clear_time = clear;
+            w.rain_time = time;
+            w.thunder_time = time;
+            w.raining = raining;
+            w.thundering = thundering;
+            if cancel_thunder {
+                w.thunder_time = old_thunder_time;
+                w.thundering = old_thundering;
+            }
+        }
         self.feedback(Text::translate(key, &[]));
         Ok(duration.unwrap_or(-1))
     }
@@ -2222,6 +2295,14 @@ impl Game<'_> {
                     name = Text::translate("entity.minecraft.experience_orb", &[]);
                 }
                 "lightning_bolt" => {
+                    let block = [
+                        pos[0].floor() as i32,
+                        pos[1].floor() as i32,
+                        pos[2].floor() as i32,
+                    ];
+                    if !self.lightning_strike_allowed(self.lan_acting_uuid, block, "command") {
+                        return Err(err("commands.summon.failed", &[]));
+                    }
                     self.spawn_bolt(pos, false);
                     name = Text::translate("entity.minecraft.lightning_bolt", &[]);
                 }
@@ -3050,6 +3131,20 @@ impl Game<'_> {
         let level = self.dim;
         for &t in &targets {
             self.for_player(t, |g| {
+                let mut cancel = false;
+                if let (Some(player), Some(name)) = (g.lan_acting_uuid, g.lan_acting_name.clone()) {
+                    g.native_player_spawn_point_set(
+                        player,
+                        &name,
+                        level.id(),
+                        pos,
+                        "command",
+                        &mut cancel,
+                    );
+                }
+                if cancel {
+                    return;
+                }
                 if level == Dim::Overworld {
                     g.spawn = Some(Vec3::new(
                         f64::from(pos[0]) + 0.5,
@@ -3106,6 +3201,7 @@ impl Game<'_> {
         // LevelData.setRespawnData: the world's spawn (level.dat `spawn`).
         let old = self.level.world_spawn.replace(pos);
         self.level.world_spawn_angle = rot;
+        self.native_spawn_change(pos, rot);
         // A player whose fallback is the world spawn (no spawnpoint of its
         // own; a bed or an anchor that is gone falls back to it) respawns at
         // the new one.
@@ -3813,5 +3909,23 @@ mod look_at_tests {
         assert_eq!(non_player_entity_id(Target::Player), None);
         assert_eq!(non_player_entity_id(Target::Guest(3)), None);
         assert_eq!(non_player_entity_id(Target::Mob(u32::MAX - 4096)), None);
+    }
+}
+
+#[cfg(test)]
+mod percent_f_tests {
+    use super::percent_f;
+
+    #[test]
+    fn rounds_the_shortest_decimal_half_up_like_java() {
+        // WorldBorderCommand: "%.1f" distance, "%.2f" buffer, "%.0f" size.
+        assert_eq!(percent_f(10.35, 1), "10.4");
+        assert_eq!(percent_f(5.125, 2), "5.13");
+        assert_eq!(percent_f(10.5, 0), "11");
+        assert_eq!(percent_f(2.5, 0), "3");
+        // TeleportCommand.formatDouble: "%f".
+        assert_eq!(percent_f(0.1234565, 6), "0.123457");
+        assert_eq!(percent_f(-1.005, 2), "-1.01");
+        assert_eq!(percent_f(3.0, 2), "3.00");
     }
 }

@@ -526,7 +526,7 @@ mod tests {
             super::super::inject_cache::key(
                 "revision",
                 "mixins",
-                super::super::Profile::Fast,
+                super::super::Profile::Performance,
                 std::slice::from_ref(&bundle),
             )
             .unwrap()
@@ -546,7 +546,7 @@ mod tests {
             super::super::inject_cache::key(
                 "revision",
                 "mixins",
-                super::super::Profile::Fast,
+                super::super::Profile::Performance,
                 std::slice::from_ref(&bundle),
             )
             .unwrap()
@@ -564,7 +564,7 @@ mod tests {
             super::super::inject_cache::key(
                 "revision",
                 "mixins",
-                super::super::Profile::Fast,
+                super::super::Profile::Performance,
                 std::slice::from_ref(&bundle),
             )
             .unwrap()
@@ -583,7 +583,7 @@ mod tests {
         let a = super::super::version_for(
             "0123456789012345678901234567890123456789",
             "mixins",
-            super::super::Profile::Fast,
+            super::super::Profile::Performance,
             super::super::Target::Client,
             &[first.clone(), second.clone()],
         )
@@ -591,7 +591,7 @@ mod tests {
         let b = super::super::version_for(
             "0123456789012345678901234567890123456789",
             "mixins",
-            super::super::Profile::Fast,
+            super::super::Profile::Performance,
             super::super::Target::Client,
             &[second, first],
         )

@@ -56,10 +56,10 @@ AreaEffectCloud.applyImplicitComponents	inline	crates/horizon-client/src/game/po
 AreaEffectCloud.applyImplicitComponent	inline	crates/horizon-client/src/game/potions.rs::Game::splash	same: potion contents only
 Avatar.defineSynchedData	port	crates/horizon-client/src/lan/hub.rs::Hub::player_state	gap: minor: skin parts (entry 16) are sent, the main hand entry is not
 Avatar.isModelPartShown	port	crates/horizon-client/src/game/remote.rs::Game::update_remote_skins	the Skin Customization cape option reaches the drawn player
-Bucketable.loadDefaultDataFromBucketTag	port	crates/horizon-client/src/entity_nbt.rs::load_bucket_data	NoAI, Silent, NoGravity, Glowing, Invulnerable, PersistenceRequired and Health
+Bucketable.loadDefaultDataFromBucketTag	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	NoAI, Silent, NoGravity, Glowing, Invulnerable, PersistenceRequired and Health, read from the bucket's entity data
 ContainerUser.getLivingEntity	skip:java		interface cast; every container user here is the player
 ConversionTracker.addAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	gap: minor: DrownedConversionTime and InWaterTime are kept from the loaded NBT or written as -1; live progress is not saved, and skeletons write no FreezingTime or StrayConversionTime
-ConversionTracker.readAdditionalSaveData	missing		minor: saved conversion and affliction times are not read, a half converted zombie or skeleton starts over
+ConversionTracker.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	the affliction time (0 when absent) and a conversion started from the saved time, for drowned, stray, husk and zombie-villager mobs
 ConversionTracker.doConversion	inline	crates/horizon-client/src/mobs/undead.rs::custom_server_ai_step	gap: player: zombie to drowned, husk to zombie and skeleton to stray (and piglin to zombified piglin, hoglin to zoglin) spawn a fresh mob through SpawnKind, so the old one's armor, held items, name tag and effects are lost
 ConversionType.convertCommon	port	crates/horizon-client/src/game/zombie_villagers.rs::carry_over	gap: player: only villager and zombie villager conversions use it (dispenser.rs::Game::convert_mob copies the flags for shearing); drowned, stray, zombified piglin, zoglin, frog and witch conversions go through SpawnKind and carry only baby, yaw and persistence, so name tag, armor, held items and effects are lost; absorption and tags are never copied
 ConversionType.copyComponent	inline	crates/horizon-client/src/game/zombie_villagers.rs::carry_over	gap: minor: the custom name is kept by carry_over and convert_mob, custom data is not
@@ -81,8 +81,8 @@ Display.shouldRenderAtSqrDistance	inline	crates/horizon-client/src/game/text_dis
 Display.getTeamColor	missing		minor: glow_color_override is read but a glowing display gets no coloured outline
 Display.createFreshRenderState	inline	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::tick	the copy of the synced data when no interpolation runs
 Display.createInterpolatedRenderState	inline	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::tick	the new start state is the old one blended to the last drawn progress (TextDisplayData::blend)
-Display.BlockDisplay	port	crates/horizon-client/src/game/text_displays.rs::Game::block_item_display_geometry	a block display submits its block model under the display's transformation, lit and tracked like an entity
-Display.ItemDisplay	port	crates/horizon-client/src/game/text_displays.rs::Game::block_item_display_geometry	an item display submits its item model with the display context
+Display.BlockDisplay	home	crates/horizon-client/src/game/text_displays.rs	a block display submits its block model under the display's transformation, lit and tracked like an entity (Game::block_item_display_geometry)
+Display.ItemDisplay	home	crates/horizon-client/src/game/text_displays.rs	an item display submits its item model with the display context (Game::block_item_display_geometry)
 Display.TextDisplay.defineSynchedData	port	crates/horizon-client/src/text_display.rs::TextDisplayData::default	text, line width 200, background 0x40000000, opacity -1, flags 0
 Display.TextDisplay.onSyncedDataUpdated	port	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::metadata	the text render state ids mark the render state dirty
 Display.TextDisplay.loadFlag	missing		minor: reads the NBT booleans into the style flags; no local display entity
@@ -94,7 +94,7 @@ Display.TextDisplay.createFreshTextRenderState	inline	crates/horizon-client/src/
 Display.TextDisplay.createInterpolatedTextRenderState	port	crates/horizon-client/src/text_display.rs::TextDisplayData::blend	opacity and the four background channels interpolate linearly
 Display.TextDisplay.cacheDisplay	inline	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	the split lines and widths are cached in RemoteTextDisplay::lines until the render state changes
 Display.TransformationInterpolator.get	port	crates/horizon-client/src/text_display.rs::TextDisplayData::blend	translation and scale lerp, both rotations slerp
-DropChances.filterDefaultValues	missing		minor: drop_chances is neither read from nor written to a mob's NBT, so custom drop chances (guaranteed drops) are lost on save and reload
-DropChances.toEnumMap	missing		minor: the saved drop_chances map is not read back, a loaded mob uses the default 0.085 or species rule
+DropChances.filterDefaultValues	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	only the chances that are not the default 0.085 are written; an all-default set is dropped from the tage and reload
+DropChances.toEnumMap	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	the saved drop_chances compound read back by slot name, missing slots keeping the default
 DropChances.withEquipmentChance	port	crates/horizon-client/src/mobs/finalize.rs::set_drop_chance	stored per slot in extra.drop_chances
 ElytraAnimationState.tick	port	crates/horizon-client/src/mobs.rs::ElytraAnimation::tick	

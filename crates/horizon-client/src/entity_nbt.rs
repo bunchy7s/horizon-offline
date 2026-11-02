@@ -2053,12 +2053,23 @@ pub fn item_entity_to_nbt(e: &ItemEntity, uuid: [i32; 4], raw: Option<&Tag>) -> 
     }
     tag
 }
-/// `PrimedTnt.addAdditionalSaveData`: its `fuse`.
+/// `PrimedTnt.readAdditionalSaveData`: `explosion_power`, 4 by default and
+/// clamped to 0..128.
+pub fn tnt_power(tag: &Tag) -> f32 {
+    match tag.get("explosion_power") {
+        Some(Tag::Float(bits)) => f32::from_bits(*bits).clamp(0.0, 128.0),
+        _ => 4.0,
+    }
+}
+
+/// `PrimedTnt.addAdditionalSaveData`: its `fuse` and, when it is not the
+/// default, its `explosion_power`.
 pub fn tnt_to_nbt(
     position: Vec3,
     motion: Vec3,
     on_ground: bool,
     fuse: i32,
+    power: f32,
     uuid: [i32; 4],
     raw: Option<&Tag>,
 ) -> Tag {
@@ -2073,6 +2084,9 @@ pub fn tnt_to_nbt(
     }
     .tag(raw);
     put(&mut tag, "fuse", Tag::Short(fuse as i16));
+    if power != 4.0 {
+        put(&mut tag, "explosion_power", Tag::Float(power.to_bits()));
+    }
     // PrimedTnt writes its block state (a summoned `block_state` is kept).
     if tag.get("block_state").is_none() {
         put(&mut tag, "block_state", string("minecraft:tnt"));
@@ -2094,6 +2108,8 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
         previous: position,
         velocity: motion(tag),
         on_ground: flag(tag, "OnGround"),
+        vertical_collision: false,
+        horizontal_collision: false,
         // Age -32768 marks items that never despawn; Horizon counts upwards.
         age: number(tag.get("Age")).unwrap_or(0).max(0) as u32,
         pickup_delay: number(tag.get("PickupDelay")).unwrap_or(0).clamp(0, 32767) as u32,
@@ -2384,26 +2400,37 @@ fn put_projectile(tag: &mut Tag, p: &Projectile, owner: Option<[i32; 4]>) {
 
 /// The thrown item projectiles Horizon saves: each entity type's id is also
 /// the item it saves when none was loaded (`getDefaultItem`).
-const THROWABLES: [(ProjectileKind, &str); 3] = [
-    (ProjectileKind::Snowball, "minecraft:snowball"),
-    (ProjectileKind::Egg, "minecraft:egg"),
-    (ProjectileKind::EnderPearl, "minecraft:ender_pearl"),
+const THROWABLE_ITEMS: [&str; 5] = [
+    "minecraft:snowball",
+    "minecraft:egg",
+    "minecraft:ender_pearl",
+    "minecraft:splash_potion",
+    "minecraft:lingering_potion",
 ];
-fn throwable_item(kind: &ProjectileKind) -> Option<&'static str> {
-    if let ProjectileKind::Thrown(t) = kind {
-        return Some(t.item);
+/// The item a throwable flies as: its stack (a potion's), the mod type's
+/// item, or the item its entity type is named after.
+fn throwable_item(kind: &ProjectileKind) -> Option<&str> {
+    match kind {
+        ProjectileKind::Thrown(t) => Some(t.item),
+        ProjectileKind::Potion(stack) => Some(&stack.item),
+        _ => THROWABLE_ITEMS.iter().find(|id| **id == kind.id()).copied(),
     }
-    THROWABLES
-        .iter()
-        .find(|(k, _)| k == kind)
-        .map(|&(_, id)| id)
 }
 
 /// The thrown kind an entity id names: vanilla's, or a content mod's type.
+/// A potion flies as the item its entity type names, which is the item a
+/// summoned one has when it names none (`getDefaultItem`).
 pub fn throwable_kind(id: &str) -> Option<ProjectileKind> {
-    match THROWABLES.iter().find(|(_, i)| *i == id) {
-        Some((kind, _)) => Some(kind.clone()),
-        None => crate::projectiles::thrown_type(id).map(ProjectileKind::Thrown),
+    if !THROWABLE_ITEMS.contains(&id) {
+        return crate::projectiles::thrown_type(id).map(ProjectileKind::Thrown);
+    }
+    match id {
+        "minecraft:snowball" => Some(ProjectileKind::Snowball),
+        "minecraft:egg" => Some(ProjectileKind::Egg),
+        "minecraft:ender_pearl" => Some(ProjectileKind::EnderPearl),
+        _ => Some(ProjectileKind::Potion(Box::new(
+            crate::items::ItemStack::new(id, 1),
+        ))),
     }
 }
 
@@ -2441,13 +2468,14 @@ pub fn throwable_to_nbt(
     if p.no_gravity {
         put(&mut tag, "NoGravity", Tag::Byte(1));
     }
-    // the loaded item stays (a blue egg's, a renamed one's).
+    // the loaded item stays (a blue egg's, a renamed one's, a potion's
+    // effects); when there is none, `getItem`'s default is written.
     if tag.get("Item").is_none() {
-        put(
-            &mut tag,
-            "Item",
-            item_to_nbt(&crate::items::ItemStack::new(item, 1)),
-        );
+        let stack = match &p.kind {
+            ProjectileKind::Potion(stack) => (**stack).clone(),
+            _ => crate::items::ItemStack::new(item, 1),
+        };
+        put(&mut tag, "Item", item_to_nbt(&stack));
     }
     Some(tag)
 }
@@ -2455,7 +2483,14 @@ pub fn throwable_to_nbt(
 /// `ThrowableItemProjectile.readAdditionalSaveData` for the kinds
 /// [`throwable_to_nbt`] writes; the owner is the player when it is theirs.
 pub fn throwable_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<Projectile> {
-    let kind = throwable_kind(&kind(tag)?)?;
+    let mut kind = throwable_kind(&kind(tag)?)?;
+    // `readAdditionalSaveData` sets the `Item` it flies as, potion effects
+    // and all; a tag without one keeps `getItem`'s default.
+    if let ProjectileKind::Potion(stack) = &mut kind
+        && let Some(item) = tag.get("Item").and_then(item_from_nbt)
+    {
+        **stack = item;
+    }
     let owner = owner_uuid(tag);
     let from_player = player.is_some() && owner == player;
     let mut p = Projectile::new(kind, position(tag)?, from_player.then_some(Who::Player));
@@ -3206,6 +3241,35 @@ fn read_villager(m: &mut Mob, tag: &Tag) {
 }
 
 #[cfg(test)]
+mod tnt_power_tests {
+    use super::*;
+
+    /// `PrimedTnt.readAdditionalSaveData`: `explosion_power` defaults to 4 and
+    /// is clamped to 0..128 both ways, so a summoned `explosion_power:200` is
+    /// 128 and one that is absent is ordinary TNT.
+    #[test]
+    fn explosion_power_is_read_clamped_and_defaulted() {
+        let with = |power: Option<f32>| {
+            let mut map = std::collections::BTreeMap::new();
+            if let Some(p) = power {
+                map.insert("explosion_power".into(), Tag::Float(p.to_bits()));
+            }
+            Tag::Compound(map)
+        };
+        assert_eq!(tnt_power(&with(None)), 4.0);
+        assert_eq!(tnt_power(&with(Some(10.0))), 10.0);
+        assert_eq!(tnt_power(&with(Some(200.0))), 128.0);
+        assert_eq!(tnt_power(&with(Some(-3.0))), 0.0);
+        // And it round-trips through the save, which writes it only when it is
+        // not the default.
+        let saved = tnt_to_nbt(Vec3::ZERO, Vec3::ZERO, false, 20, 10.0, [1, 2, 3, 4], None);
+        assert_eq!(tnt_power(&saved), 10.0);
+        let plain = tnt_to_nbt(Vec3::ZERO, Vec3::ZERO, false, 20, 4.0, [1, 2, 3, 4], None);
+        assert!(plain.get("explosion_power").is_none());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::items::ItemStack;
@@ -3372,6 +3436,8 @@ mod tests {
             previous: Vec3::ZERO,
             velocity: Vec3::new(0.0, -0.04, 0.0),
             on_ground: true,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 120,
             pickup_delay: 10,
             ticks: 0,
@@ -3725,6 +3791,10 @@ pub fn apply_item_components(m: &mut Mob, stack: &crate::items::ItemStack) {
         ),
         // ZombieNautilus.applyImplicitComponents: the variant only.
         crate::mobs::Species::ZombieNautilus => (Some("minecraft:zombie_nautilus/variant"), None),
+        // Fox and Frog.applyImplicitComponent: `setVariant` from the component
+        // alone, so a spawn egg carrying one hatches that variant.
+        crate::mobs::Species::Fox => (Some("minecraft:fox/variant"), None),
+        crate::mobs::Species::Frog => (Some("minecraft:frog/variant"), None),
         _ => (None, None),
     };
     if let Some(name) = variant.and_then(|id| text(components.other(id))) {
@@ -4581,6 +4651,49 @@ mod item_component_tests {
         assert_eq!(nautilus.extra.variant, 1, "minecraft:warm, not temperate");
     }
 
+    /// `Fox.applyImplicitComponent` and `Frog.applyImplicitComponent`: the
+    /// variant component alone decides the mob, `setVariant` from the egg.
+    #[test]
+    fn a_fox_or_frog_spawn_egg_picks_its_variant_component() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return;
+        }
+        let data = crate::mobs::MobTypes::load(&root).unwrap();
+        let spawn = |kind: &str, id: u32| {
+            Mob::new(
+                id,
+                Arc::new(data.types[kind].clone()),
+                Vec3::new(0.0, 4.0, 0.0),
+                0.0,
+            )
+        };
+        // A red fox, as a spawn in a forest leaves it.
+        let mut fox = spawn("minecraft:fox", 1);
+        assert_eq!(fox.extra.variant, 0);
+        let mut egg = crate::items::ItemStack::new("minecraft:fox_spawn_egg", 1);
+        egg.data_mut()
+            .set_other("minecraft:fox/variant", Some(string("minecraft:snow")));
+        apply_item_components(&mut fox, &egg);
+        assert_eq!(fox.extra.variant, 1, "Fox.Variant.SNOW, not red");
+        // A temperate frog, as a swamp spawn leaves it.
+        let mut frog = spawn("minecraft:frog", 2);
+        assert_eq!(frog.extra.variant, 0);
+        let mut egg = crate::items::ItemStack::new("minecraft:frog_spawn_egg", 1);
+        egg.data_mut()
+            .set_other("minecraft:frog/variant", Some(string("minecraft:warm")));
+        apply_item_components(&mut frog, &egg);
+        assert_eq!(frog.extra.variant, 1, "minecraft:warm, not temperate");
+        // An unknown name falls back to the codec's default, red.
+        let mut egg = crate::items::ItemStack::new("minecraft:fox_spawn_egg", 1);
+        egg.data_mut()
+            .set_other("minecraft:fox/variant", Some(string("minecraft:temperate")));
+        apply_item_components(&mut fox, &egg);
+        assert_eq!(fox.extra.variant, 0, "unknown names read as red");
+    }
+
     /// `EntityType.updateCustomEntityTag`: the egg's `entity_data` on the mob it
     /// spawned, when the type is its own — the mob's compound, the data merged
     /// over it and loaded back, as the spawn egg site does it.
@@ -4740,6 +4853,66 @@ mod fireball_nbt_tests {
         let p = fireball_from_nbt(&wind, None).unwrap();
         let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&wind)).unwrap();
         assert!(back.get("Item").is_none());
+    }
+
+    #[test]
+    fn a_summoned_potion_flies_as_the_item_its_compound_names() {
+        // `ThrowableItemProjectile.getDefaultItem`: the item its entity type is
+        // named after, so a bare summon is a splash potion with no effects and
+        // the chunk saves it (ThrowableProjectile is not transient).
+        for id in ["minecraft:splash_potion", "minecraft:lingering_potion"] {
+            let bare = Tag::compound([
+                ("id", Tag::String(id.into())),
+                ("Pos", doubles(&[24.5, 216.0, 24.5])),
+            ]);
+            let p = throwable_from_nbt(&bare, None).unwrap();
+            assert_eq!(p.kind.id(), id);
+            assert_eq!(
+                p.kind,
+                ProjectileKind::Potion(Box::new(crate::items::ItemStack::new(id, 1)))
+            );
+            assert!(saved_with_chunk(&p));
+            let tag = throwable_to_nbt(&p, [1; 4], None, None).unwrap();
+            let item = tag.get("Item").and_then(item_from_nbt).unwrap();
+            assert_eq!((&*item.item, item.count), (id, 1));
+            assert_eq!(item.potion(), None);
+        }
+        // `readAdditionalSaveData`: the `Item` it flies as, `potion_contents`
+        // and all, so what it splashes is the potion's.
+        let harming = Tag::compound([
+            ("id", Tag::String("minecraft:splash_potion".into())),
+            ("Pos", doubles(&[24.5, 216.0, 24.5])),
+            (
+                "Item",
+                item_to_nbt(
+                    &crate::items::ItemStack::new("minecraft:splash_potion", 1)
+                        .with_potion("minecraft:harming"),
+                ),
+            ),
+        ]);
+        let p = throwable_from_nbt(&harming, None).unwrap();
+        let ProjectileKind::Potion(stack) = &p.kind else {
+            panic!("a potion");
+        };
+        assert_eq!(stack.potion(), Some("minecraft:harming"));
+        // The stack stays in the tag it was loaded from.
+        let tag = throwable_to_nbt(&p, [1; 4], None, Some(&harming)).unwrap();
+        let item = tag.get("Item").and_then(item_from_nbt).unwrap();
+        assert_eq!(item.potion(), Some("minecraft:harming"));
+        // A lingering potion is its own entity type.
+        let lingering = Tag::compound([
+            ("id", Tag::String("minecraft:lingering_potion".into())),
+            ("Pos", doubles(&[0.0, 64.0, 0.0])),
+            (
+                "Item",
+                item_to_nbt(
+                    &crate::items::ItemStack::new("minecraft:lingering_potion", 1)
+                        .with_potion("minecraft:poison"),
+                ),
+            ),
+        ]);
+        let p = throwable_from_nbt(&lingering, None).unwrap();
+        assert_eq!(p.kind.id(), "minecraft:lingering_potion");
     }
 
     #[test]

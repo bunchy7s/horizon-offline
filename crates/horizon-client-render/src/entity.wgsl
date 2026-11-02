@@ -351,7 +351,9 @@ fn shadow_color(in: Out) -> vec4<f32> {
     if in.tier == 0u {
         return vec4(0.0, 0.0, 0.0, hdr_scene_alpha(mix(in.scene, globals.hdr_light.y, fogged)));
     }
-    return vec4(0.0, 0.0, 0.0, hdr_mark(in.tier, brightness(texel.rgb * in.color.rgb) * (1.0 - fogged)));
+    // A layer that fades (the warden's) shines by what's left of it.
+    let y = brightness(texel.rgb * in.color.rgb) * in.color.a * (1.0 - fogged);
+    return vec4(0.0, 0.0, 0.0, hdr_mark(in.tier, y));
 }
 fn brightness(c: vec3<f32>) -> f32 {
     let l = pow(max(c, vec3(0.0)), vec3(2.2));
@@ -371,6 +373,14 @@ fn hdr_mark(tier: u32, y: f32) -> f32 {
 @fragment fn fs_hdr_hand_unmark(in: Out) -> @location(0) vec4<f32> {
     if textureSample(atlas, atlas_sampler, in.uv).a < 0.1 { discard; }
     return vec4(0.0, 0.0, 0.0, hdr_scene_alpha(in.scene));
+}
+
+// HDR lighting on clouds, drawn again after them with only alpha written: they're lit by the
+// sky, so they take its value, which their blending would otherwise cover.
+@fragment fn fs_hdr_cloud_mark(in: Out) -> @location(0) vec4<f32> {
+    let a = in.color.a * (1.0 - linear_fog(in.spherical, 0.0, globals.fog_ends.y));
+    if a < 0.1 { discard; }
+    return vec4(0.0, 0.0, 0.0, hdr_scene_alpha(globals.hdr_light.y));
 }
 
 fn celestial_color(in: Out) -> vec4<f32> {
