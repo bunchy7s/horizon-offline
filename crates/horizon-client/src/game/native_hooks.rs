@@ -3163,6 +3163,17 @@ impl Game<'_> {
         let _ = (dimension, pos, state);
     }
 
+    /// A dispenser at `pos` failed to dispense `item`. Server-side.
+    /// @API:native_block_failed_dispense@.
+    pub(super) fn native_block_failed_dispense(
+        &mut self,
+        dimension: &str,
+        pos: [i32; 3],
+        item: &str,
+    ) {
+        let _ = (dimension, pos, item);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

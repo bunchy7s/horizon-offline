@@ -634,6 +634,13 @@ impl Game<'_> {
             );
         }
         if let Some((left, event)) = mod_dispensed(answer) {
+            if event == FAIL {
+                self.native_block_failed_dispense(
+                    self.dim.id(),
+                    [pos.0, pos.1, pos.2],
+                    &stack.item,
+                );
+            }
             // DefaultDispenseItemBehavior.dispense: playSound, then playAnimation;
             // a NOOP behaviour (event 0) plays neither.
             if event != 0 {
@@ -690,6 +697,9 @@ impl Game<'_> {
             }
             _ => self.dispense_default_method(pos, facing, stack)?,
         };
+        if event == FAIL {
+            self.native_block_failed_dispense(self.dim.id(), [pos.0, pos.1, pos.2], &item);
+        }
         self.dispenser_event(event, pos, 0);
         self.dispenser_event(2000, pos, data_value(facing));
         Ok(left)
