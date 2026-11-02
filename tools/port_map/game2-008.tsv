@@ -42,7 +42,7 @@ BundleItem.getBarWidth	port	crates/horizon-items/src/bundle.rs::Contents::bar
 BundleItem.getBarColor	port	crates/horizon-items/src/bundle.rs::Contents::bar	
 BundleItem.removeOneItemFromBundle	port	crates/horizon-items/src/bundle.rs::Contents::remove_one	
 BundleItem.getTooltipImage	port	crates/horizon-items/src/bundle.rs::tooltip_layout	gap: minor: the tooltip_display rule that hides the bundle contents is not checked here
-BundleItem.onDestroyed	missing		same as `BlockItem.onDestroyed`: nothing spills a destroyed item entity's contents
+BundleItem.onDestroyed	port	crates/horizon-client/src/entities.rs::ItemEntity::hurt	the damage that empties an item's health makes the bundle's contents item entities where it lay (`bundle::destroyed`)
 BundleItem.playRemoveOneSound	port	crates/horizon-client/src/game.rs::Game::drop_bundle_content	the menu queues the same sound in menu/bundle.rs
 BundleItem.playInsertSound	port	crates/horizon-client/src/menu/bundle.rs::Menu::carried_bundle_click	queues the insert or insert-fail sound
 BundleItem.playDropContentsSound	port	crates/horizon-client/src/game.rs::Game::drop_bundle_content	
