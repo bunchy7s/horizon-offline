@@ -117,6 +117,8 @@ use std::{collections::HashMap, fs, path::Path, sync::Arc};
 pub struct Polygon {
     pub normal: [f32; 3],
     pub vertices: [[f32; 5]; 4],
+    /// The model's render type culls back faces (`entityCutoutCull`: the bat).
+    pub cull_back: bool,
 }
 impl Polygon {
     fn vertex_normal(&self, pose: ModelNormals) -> [i8; 4] {
@@ -127,7 +129,12 @@ impl Polygon {
             n.normalize_or_zero()
         };
         let packed = n.to_array().map(|v| (v.clamp(-1.0, 1.0) * 127.0) as i8);
-        [packed[0], packed[1], packed[2], -127]
+        let w = if self.cull_back {
+            crate::mesher::SHADED_CULL_W
+        } else {
+            -127
+        };
+        [packed[0], packed[1], packed[2], w]
     }
 }
 
@@ -225,6 +232,15 @@ pub struct Part {
     pub children: Vec<Part>,
 }
 impl Part {
+    /// Marks every polygon as drawn by a back-face-culling render type.
+    fn set_cull_back(&mut self) {
+        for poly in &mut self.polygons {
+            poly.cull_back = true;
+        }
+        for child in &mut self.children {
+            child.set_cull_back();
+        }
+    }
     fn parse(name: &str, v: &Value) -> Self {
         let pose: Vec<f32> = v["pose"]
             .as_array()
@@ -271,6 +287,7 @@ impl Part {
                         |n| std::array::from_fn(|i| n[i].as_f64().unwrap_or(0.0) as f32),
                     ),
                     vertices: [verts[0], verts[1], verts[2], verts[3]],
+                    cull_back: false,
                 })
             })
             .collect();
@@ -494,7 +511,14 @@ impl MobTypes {
                     max_head_y_rot: def.max_head_y_rot(),
                     ambient_interval: def.ambient_interval(),
                     flags,
-                    model: Arc::new(Part::parse("root", model)),
+                    model: Arc::new({
+                        let mut part = Part::parse("root", model);
+                        // BatModel: `RenderTypes::entityCutoutCull`.
+                        if def.name == "bat" {
+                            part.set_cull_back();
+                        }
+                        part
+                    }),
                     layers,
                     texture: def.texture.to_owned(),
                     brain: def.brain(),
@@ -957,6 +981,10 @@ pub struct Extra {
     pub swing_stab: bool,
     pub flag: bool,
     pub flag2: bool,
+    /// `AbstractHorse`'s `Bred` save flag: nothing sets it at runtime (no
+    /// vanilla code calls `setBred` outside `readAdditionalSaveData`), so only
+    /// a save or `/summon` gives it, and `followMommy` reads it.
+    pub bred: bool,
     /// `AbstractHorse.allowStandSliding`: the rider's jump sets it, and a
     /// horse still rearing then goes on with the rider's keys until the rear
     /// ends (`tick` clears it).
@@ -1534,6 +1562,16 @@ pub enum MobEvent {
         amount: f32,
         source: Damage,
     },
+    /// `Pufferfish.touch` on a mob (`Pufferfish.aiStep`): the hit, then, only
+    /// when `hurtServer` let it land, the fish's `entity.puffer_fish.sting`
+    /// and the poison it gives (`poison_ticks`, `60 * getPuffState()`).
+    PufferfishSting {
+        mob: u32,
+        target: u32,
+        amount: f32,
+        source: Damage,
+        poison_ticks: i32,
+    },
     /// `LivingEntity.stabAttack`'s `target.stopRiding()`: a spear knocks the
     /// target off its mount.
     StabDismount {
@@ -1944,6 +1982,8 @@ pub struct Seen {
     pub baby: bool,
     pub in_love: bool,
     pub tame: bool,
+    /// `AbstractHorse.isBred`: the `Bred` flag (`followMommy` reads it).
+    pub bred: bool,
     /// A tamed animal's owner (`getOwner`).
     pub owner: Option<[i32; 4]>,
     pub hostile: bool,
@@ -2145,6 +2185,7 @@ impl Mob {
                 m.extra.in_love > 0
             },
             tame: m.extra.tame,
+            bred: m.extra.bred,
             owner: m.extra.owner,
             hostile: m.hostile(),
             target: m.ai.target,

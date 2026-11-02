@@ -2602,6 +2602,7 @@ mod tests {
             .map(|_| super::super::Polygon {
                 normal: [0.0; 3],
                 vertices: [corner(min), corner(max), corner(min), corner(max)],
+                cull_back: false,
             })
             .collect()
     }
@@ -3380,6 +3381,7 @@ mod emissive_tests {
             pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
             polygons: vec![Polygon {
                 normal: [0.0, 0.0, -1.0],
+                cull_back: false,
                 vertices: [
                     [0.0, 0.0, 0.0, 0.0, 0.0],
                     [1.0, 0.0, 0.0, 1.0, 0.0],
@@ -3670,6 +3672,7 @@ mod random_texture_tests {
             pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
             polygons: vec![Polygon {
                 normal: [0.0, 0.0, -1.0],
+                cull_back: false,
                 vertices: [
                     [0.0, 0.0, 0.0, 0.0, 0.0],
                     [1.0, 0.0, 0.0, 1.0, 0.0],

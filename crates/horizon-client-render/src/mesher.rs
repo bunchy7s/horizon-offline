@@ -50,6 +50,9 @@ pub struct Vertex {
 /// `Vertex::normal` of a baked-colour quad of an `entitySolid` model: the render type culls
 /// back faces, which the entity pipelines here do not, so `entity.wgsl` discards them.
 pub const CULL_BACK: [i8; 4] = [0, 0, 0, 1];
+/// `Vertex::normal.w` of a shaded quad of an `entityCutoutCull` model (the bat): shaded by the
+/// normal like -127, and `entity.wgsl` also discards its back-facing pixels.
+pub const SHADED_CULL_W: i8 = -126;
 /// A section vertex: vanilla's `DefaultVertexFormat.BLOCK` (position, colour,
 /// UV0, UV2) with the sprite's array layer beside the light, in 24 bytes
 /// rather than vanilla's 28: the UV is fixed point, which holds model UVs
