@@ -1255,6 +1255,10 @@ pub struct ArmorStand {
     pub no_base_plate: bool,
     pub invisible: bool,
     pub marker: bool,
+    /// `Entity.isNoGravity` (`NoGravity` in the save). `ArmorStand.hasPhysics`
+    /// is false with it, as with `Marker`: `travel` does nothing, so the stand
+    /// never moves, and the blocks it stands in do not touch it.
+    pub no_gravity: bool,
     /// `CustomName`: the text of a hologram.
     pub custom_name: Option<crate::text::Text>,
     /// `CustomNameVisible`.
@@ -1344,6 +1348,7 @@ impl ArmorStand {
             no_base_plate: false,
             invisible: false,
             marker: false,
+            no_gravity: false,
             custom_name: None,
             name_visible: false,
             last_hit: i64::MIN / 2,
@@ -1429,7 +1434,9 @@ impl ArmorStand {
             self.fire_ticks = self.fire_ticks.max(300);
         }
         let fire = crate::motion::environment::fire_contact(world, registry, self.bounds()) > 0.0;
-        if fire && !self.invisible && !self.marker {
+        // The fire block reaches a stand through `applyEffectsFromBlocks`,
+        // which a NoGravity stand does not feel (measured beside the server).
+        if fire && !self.invisible && !self.marker && !self.no_gravity {
             if self.fire_ticks > 0 {
                 self.health -= 0.15;
             } else {
@@ -1486,6 +1493,10 @@ impl ArmorStand {
             if v.z.abs() < 0.003 { 0.0 } else { v.z },
         );
         self.velocity = wanted;
+        // ArmorStand.travel: no physics with NoGravity, the velocity stays.
+        if self.no_gravity {
+            return;
+        }
         // `travelInFluid` reads `isFalling` before the move and any push;
         // `travelInAir` reads ground friction before the move.
         let falling = wanted.y <= 0.0;
@@ -2716,6 +2727,36 @@ mod armor_stand_motion_tests {
             mid < start.y && mid > stand.position.y,
             "alpha 0.5 must sit between previous and current"
         );
+    }
+
+    #[test]
+    fn a_no_gravity_stand_stays_put() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let collision = crate::collisions::load(&root, assets.registry).unwrap();
+        let facts = BlockFacts::load(&root, assets.registry).unwrap();
+        let world = World::test_scene(&assets, &render, 3).unwrap();
+        let start = Vec3::new(20.5, 20.0, 20.5);
+        let mut stand = ArmorStand::new(1, start, 0.0);
+        stand.on_ground = false;
+        stand.no_gravity = true;
+        // ArmorStand.travel does nothing without physics: measured on the real
+        // server, Pos and Motion stay exactly as summoned for every tick.
+        for _ in 0..5 {
+            tick_stand(&mut stand, &world, &facts, &collision);
+            assert_eq!(stand.position, start);
+            assert_eq!(stand.velocity, Vec3::ZERO);
+        }
+        stand.no_gravity = false;
+        tick_stand(&mut stand, &world, &facts, &collision);
+        tick_stand(&mut stand, &world, &facts, &collision);
+        assert!(stand.position.y < start.y, "gravity again once cleared");
     }
 
     #[test]
