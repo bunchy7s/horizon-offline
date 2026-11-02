@@ -210,6 +210,8 @@ pub struct PostProgram {
     pub flips: Vec<(u32, bool)>,
     /// How a gbuffers program's output blends into its buffers; `None` writes them.
     pub blend: Option<Blend>,
+    /// Per-buffer blend overrides, keyed by colortex index (not output location).
+    pub buffer_blends: Vec<(u32, Option<Blend>)>,
     /// Bit n: `colortex<n>MipmapEnabled` in its fragment stage, so buffer n's mip chain is
     /// regenerated right before it (6.1.7; not for gbuffers programs).
     pub mipmaps: u16,
@@ -385,6 +387,7 @@ pub struct Post {
     pub entities_translucent: Option<PostProgram>,
     /// What draws particles.
     pub particles: Option<PostProgram>,
+    pub damaged_block: Option<PostProgram>,
     /// What draws the game's clouds.
     pub clouds: Option<PostProgram>,
     /// What draws rain and snow, after deferred.
@@ -482,6 +485,7 @@ pub fn load_post(
         block: None,
         entities_translucent: None,
         particles: None,
+        damaged_block: None,
         clouds: None,
         weather: None,
         hand: None,
@@ -609,6 +613,19 @@ pub fn load_post(
         ),
         None => (None, None),
     };
+    let damaged_block = inputs
+        .entities
+        .as_ref()
+        .and_then(|i| gbuffers(&["gbuffers_damagedblock"], Group::Gbuffers, i))
+        .map(|mut p| {
+            p.blend = blend(properties, &p.name).unwrap_or(Some([
+                Factor::DstColor,
+                Factor::SrcColor,
+                Factor::One,
+                Factor::Zero,
+            ]));
+            p
+        });
     // Translucent entities and particles blend (OQ-23). Particles keep vanilla's alpha cut at
     // 0.1; translucent entities lose only fully transparent texels (a shadow fades out).
     let translucent =
@@ -682,6 +699,7 @@ pub fn load_post(
     loader.post.block = block;
     loader.post.entities_translucent = entities_translucent;
     loader.post.particles = particles;
+    loader.post.damaged_block = damaged_block;
     loader.post.clouds = clouds;
     loader.post.weather = weather;
     loader.post.hand = hand;
@@ -723,6 +741,7 @@ fn load_shadow(
         &post.block,
         &post.entities_translucent,
         &post.particles,
+        &post.damaged_block,
         &post.clouds,
         &post.weather,
         &post.hand,
@@ -860,6 +879,7 @@ impl Loader<'_> {
             }
             let compute = self.compute(&name);
             return (!compute.is_empty()).then(|| PostProgram {
+                buffer_blends: buffer_blends(self.properties, &name),
                 flips: flips(self.properties, &name),
                 name,
                 group,
@@ -945,6 +965,7 @@ impl Loader<'_> {
             _ => Vec::new(),
         };
         Some(PostProgram {
+            buffer_blends: buffer_blends(self.properties, &name),
             flips: flips(self.properties, &name),
             name,
             group,
@@ -1043,6 +1064,7 @@ impl Loader<'_> {
             .unwrap_or(buffers.len());
         buffers.truncate(kept);
         Some(PostProgram {
+            buffer_blends: buffer_blends(self.properties, &name),
             flips: flips(self.properties, &name),
             name,
             group,
@@ -1165,6 +1187,23 @@ fn blend(properties: &Properties, program: &str) -> Option<Option<Blend>> {
         .map(Factor::parse)
         .collect::<Option<_>>()?;
     Some(Some(factors.try_into().ok()?))
+}
+
+/// Blend overrides apply to buffer names even when DRAWBUFFERS remaps locations.
+fn buffer_blends(properties: &Properties, program: &str) -> Vec<(u32, Option<Blend>)> {
+    let prefix = format!("blend.{program}.");
+    properties
+        .entries
+        .iter()
+        .filter_map(|e| {
+            let buffer = config::buffer_index(e.key.strip_prefix(&prefix)?)?;
+            let value = blend(
+                properties,
+                &format!("{program}.{}", e.key.strip_prefix(&prefix)?),
+            )?;
+            Some((buffer as u32, value))
+        })
+        .collect()
 }
 
 /// `flip.<program>.<buffer>=<bool>` keys of one program.
@@ -1638,6 +1677,35 @@ mod tests {
         assert_eq!(
             post.config.buffers[2].format,
             crate::Format::parse("RGBA16F").unwrap()
+        );
+    }
+}
+
+#[cfg(test)]
+mod buffer_blend_tests {
+    use super::*;
+    #[test]
+    fn buffer_blends_use_colortex_numbers_and_preserve_explicit_off() {
+        let props = Properties::parse(
+            "blend.gbuffers_water=off\nblend.gbuffers_water.colortex13=ONE ONE_MINUS_SRC_ALPHA ONE ONE_MINUS_SRC_ALPHA\nblend.gbuffers_water.colortex2=off\n",
+            &Macros::standard(),
+        );
+        let overrides = buffer_blends(&props, "gbuffers_water");
+        assert_eq!(blend(&props, "gbuffers_water"), Some(None));
+        assert_eq!(
+            overrides,
+            vec![
+                (
+                    13,
+                    Some([
+                        Factor::One,
+                        Factor::OneMinusSrcAlpha,
+                        Factor::One,
+                        Factor::OneMinusSrcAlpha
+                    ])
+                ),
+                (2, None)
+            ]
         );
     }
 }

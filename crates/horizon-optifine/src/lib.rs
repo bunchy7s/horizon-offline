@@ -5,17 +5,20 @@
 //! a module of their own, free of the game's types (`random`: random entity textures' rules;
 //! `random_textures`: where a pack keeps their variants; [`ctm`]: connected textures; `cit`:
 //! custom item textures, which the client matches against its stacks; `emissive`: emissive
-//! overlays; `blink`: ETF's blinking textures).
+//! overlays; `blink`: ETF's blinking textures; [`fusion`]: the Fusion mod's connected
+//! textures, whose layouts read [`ctm`]'s neighbour masks).
 //!
 //! Written from OptiFine's public documentation of the file formats (and ETF's, for its additions
 //! to random entities and emissive textures); `cit` also from CIT Resewn's wiki and the conditions of its MIT-licensed
-//! source (THIRD_PARTY_NOTICES.md). No OptiFine code was read.
+//! source (THIRD_PARTY_NOTICES.md); `fusion` from Fusion's wiki and FusionExamples' MIT-licensed
+//! layout templates (THIRD_PARTY_NOTICES.md). No OptiFine or Fusion code was read.
 
 pub mod blink;
 pub mod cem;
 pub mod cit;
 pub mod ctm;
 pub mod emissive;
+pub mod fusion;
 pub mod matchers;
 pub mod paths;
 pub mod properties;

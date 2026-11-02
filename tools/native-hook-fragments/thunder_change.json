@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "thunder_change",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_thunder_change",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "Server thunder state changing, cancellable (`native_thunder_change`).",
+  "doc_summary": "The server's `/weather` command is about to change thunder: `native_thunder_change(dimension, thundering, cancel)`. Set `cancel` and the previous thunder state and timer remain. Bundles need \"hooks\": @API:thunder_change@."
+}

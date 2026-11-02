@@ -175,7 +175,9 @@ impl Game<'_> {
     /// `ServerPlayer.setCamera`: the view moves to the new camera, which
     /// the client is told, or back to the player (`None`).
     pub(super) fn guest_set_camera(&mut self, host: &mut LanHost, gi: usize, camera: Option<i32>) {
-        let (conn, own) = (host.hub.guests[gi].conn, host.hub.guests[gi].entity_id);
+        let guest = &host.hub.guests[gi];
+        let (conn, own, uuid, name) = (guest.conn, guest.entity_id, guest.uuid, guest.name.clone());
+        let previous = self.cmds.guest_cameras.get(&conn).map(|c| c.id);
         let camera = camera.filter(|id| *id != own);
         if self.cmds.guest_cameras.get(&conn).map(|c| c.id) == camera {
             return;
@@ -207,6 +209,11 @@ impl Game<'_> {
         let teleports = host.hub.guests[gi].teleport_counter;
         if let Some(c) = self.cmds.guest_cameras.get_mut(&conn) {
             c.teleports = teleports;
+        }
+        if camera.is_none()
+            && let Some(entity_id) = previous
+        {
+            self.native_player_stop_spectating_entity(uuid, &name, entity_id);
         }
     }
 
