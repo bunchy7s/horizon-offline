@@ -618,6 +618,14 @@ impl Game<'_> {
         }
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
+        let transformed_kind = self
+            .mobs
+            .last()
+            .expect("converted mob was just inserted")
+            .kind
+            .id
+            .clone();
+        self.native_entity_transform(from.id, &from.kind.id, id, &transformed_kind);
         Some(id)
     }
     /// The `summon` command: spawn a mob in front of the player or at a position.

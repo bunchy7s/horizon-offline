@@ -1,0 +1,11 @@
+{
+  "hooks": [
+    {
+      "name": "entity_transform",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_transform",
+      "side": "server"
+    }
+  ],
+  "rust_summary": "A mob conversion completed (`native_entity_transform`).",
+  "doc_summary": "A mob conversion completed through Horizon\u2019s shared `Mob.convertTo` path; the hook reports the removed entity and its replacement ids and kinds. Bundles need \"hooks\": @API:entity_transform@."
+}
