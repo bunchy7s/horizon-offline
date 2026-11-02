@@ -4029,6 +4029,36 @@ mod tests {
             }
         }
     }
+    /// `Player.doWaterSplashEffect`: a spectator entering water makes no splash
+    /// sound, particles or game event; everyone else does.
+    #[test]
+    fn a_spectator_entering_water_makes_no_splash() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        for spectator in [false, true] {
+            let mut scene = World::test_scene(&assets, &render, 2).unwrap();
+            let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 20.0, 20.5)).unwrap();
+            player.spectator = spectator;
+            let mut w = MotionWorld {
+                entities: &[],
+                player: &mut player,
+                scene: &mut scene,
+                assets: &assets,
+                collision_binding: &binding,
+                resources: &resources,
+            };
+            horizon_world::entity_fluid_tick::EntityFluidTickWorld::water_splash(&mut w).unwrap();
+            assert_eq!(w.player.events.is_empty(), spectator);
+        }
+    }
     /// A client's own fall (multiplayer, a LAN guest, single player on its
     /// server thread) plays its landing but never hurts it: only the server
     /// does (`Entity.hurt` on a client), so a server that cancels fall damage
