@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_ready_arrow",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_ready_arrow",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerReadyArrow)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "The server player's selected bow projectile (`native_player_ready_arrow`).",
+  "doc_summary": "A server player released a drawn bow with `native_player_ready_arrow(player, name, arrow)`: the name of the selected projectile item. Bundles need \"hooks\": @API:player_ready_arrow@."
+}

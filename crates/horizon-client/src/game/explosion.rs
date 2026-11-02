@@ -856,6 +856,9 @@ impl Game<'_> {
         damage_type: &str,
         resists: Option<([i32; 3], f32)>,
     ) -> Result<()> {
+        if self.serving.is_some() || self.options.dedicated.is_some() {
+            self.native_explosion_prime(center, radius);
+        }
         if let Some(p) = &self.player {
             let d = [
                 p.position.x - center[0],

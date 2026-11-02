@@ -1987,6 +1987,14 @@ impl Streaming {
         if positions.is_empty() {
             return;
         }
+        let positions = if positions.len() > INLINE_RELIGHT_MAX {
+            self.relight_on_workers(world, positions)
+        } else {
+            positions
+        };
+        if positions.is_empty() {
+            return;
+        }
         let mut changed = LightChanges::default();
         crate::light::relight(
             &mut world.chunks,
@@ -2004,6 +2012,25 @@ impl Streaming {
                 self.light_log.push((self.light_edit_sequence, p));
             }
         }
+    }
+    /// Hands a big batch of edits (a `/fill` arriving block by block) to the
+    /// workers: the columns they touch and their neighbours get full light
+    /// jobs, as `World::edit_runs` does, instead of relighting every changed
+    /// cell in the frame (clearing a 64x64x16 volume in the air relit the
+    /// sky below it: 43 ms of one frame). The sections wait for those jobs
+    /// before they are meshed again. Returns the edits left to light in the
+    /// frame: those in columns that can't be lit whole yet (the edge of the
+    /// loaded area).
+    fn relight_on_workers(
+        &self,
+        world: &mut World,
+        positions: Vec<(i32, i32, i32)>,
+    ) -> Vec<(i32, i32, i32)> {
+        let (columns, inline) = whole_relight_columns(positions, |x, z| {
+            self.lit.contains(&(x, z)) && self.light_region_ready(world, x, z)
+        });
+        world.dirty_light.extend(columns);
+        inline
     }
     /// A light job computed from blocks older than some edits: redo those
     /// edits on top of its result.
@@ -2693,6 +2720,36 @@ fn same_values(
     x == y
 }
 
+/// The most changed blocks one frame relights itself (`Streaming::relight_edits`): a 16^3
+/// section's worth. Past it, the columns are lit again whole on the workers.
+const INLINE_RELIGHT_MAX: usize = 4096;
+
+/// Splits edits at `positions` into the columns to light again whole and the
+/// edits to relight in place. An edited column is lit whole with its
+/// neighbours (light reaches 15 blocks, never past the next column) when all
+/// nine are `ready` to be lit whole; otherwise its edits stay in place.
+fn whole_relight_columns(
+    positions: Vec<(i32, i32, i32)>,
+    ready: impl Fn(i32, i32) -> bool,
+) -> (FxHashSet<(i32, i32)>, Vec<(i32, i32, i32)>) {
+    let around =
+        |(x, z): (i32, i32)| (-1..=1).flat_map(move |dz| (-1..=1).map(move |dx| (x + dx, z + dz)));
+    let touched: FxHashSet<(i32, i32)> = positions
+        .iter()
+        .map(|&(x, _, z)| (x >> 4, z >> 4))
+        .collect();
+    let whole: FxHashSet<(i32, i32)> = touched
+        .into_iter()
+        .filter(|&column| around(column).all(|(x, z)| ready(x, z)))
+        .collect();
+    let columns = whole.iter().flat_map(|&column| around(column)).collect();
+    let inline = positions
+        .into_iter()
+        .filter(|&(x, _, z)| !whole.contains(&(x >> 4, z >> 4)))
+        .collect();
+    (columns, inline)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2838,6 +2895,31 @@ mod tests {
                 .is_none()
         );
         assert!(waiting.elapsed() >= std::time::Duration::from_millis(10));
+    }
+
+    /// Edits in two neighbouring columns light those and the ten around
+    /// them again; a column next to one that can't be lit whole keeps its
+    /// edits in the frame.
+    #[test]
+    fn whole_relights_cover_the_edited_columns_and_their_neighbours() {
+        // Blocks in columns (0, 0) and (1, 0).
+        let positions = vec![(3, 70, 4), (15, 64, 15), (16, 80, 0), (31, 64, 9)];
+        let (columns, inline) = whole_relight_columns(positions.clone(), |_, _| true);
+        let mut columns: Vec<_> = columns.into_iter().collect();
+        columns.sort();
+        let expected: Vec<(i32, i32)> = (-1..=2)
+            .flat_map(|x| (-1..=1).map(move |z| (x, z)))
+            .collect();
+        assert_eq!(columns, expected);
+        assert!(inline.is_empty());
+        // (2, 1) is next to (1, 0) only: (0, 0) is still lit whole.
+        let (columns, inline) = whole_relight_columns(positions, |x, z| (x, z) != (2, 1));
+        assert_eq!(inline, vec![(16, 80, 0), (31, 64, 9)]);
+        assert_eq!(columns.len(), 9);
+        assert!(columns.contains(&(-1, -1)) && columns.contains(&(1, 1)));
+        // Negative coordinates floor to their column.
+        let (west, _) = whole_relight_columns(vec![(-1, 64, -17)], |_, _| true);
+        assert!(west.contains(&(-2, -3)) && west.contains(&(0, -1)) && west.len() == 9);
     }
 
     #[test]

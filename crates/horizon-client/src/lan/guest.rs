@@ -1106,13 +1106,55 @@ fn network_stack(
     }
     // Lore lines as loaded or as a server mod wrote them (a list of text
     // components), so a server menu's items can say more than their name.
-    if let Some(horizon_world::nbt::Tag::List(lines)) =
-        s.data().and_then(|d| d.other("minecraft:lore"))
+    if let Some(lore_tag) = s.data().and_then(|d| d.other("minecraft:lore")) {
+        let lines = match lore_tag {
+            horizon_world::nbt::Tag::List(lines) => Some(lines.clone()),
+            // A string is one literal line, as ComponentSerialization decodes a string tag.
+            horizon_world::nbt::Tag::Compound(_) | horizon_world::nbt::Tag::String(_) => {
+                Some(vec![lore_tag.clone()])
+            }
+            _ => None,
+        };
+        if let Some(lines) = lines {
+            stack.added.push((
+                horizon_protocol::item::component::LORE,
+                horizon_protocol::item::Component::Lore(lines),
+            ));
+        }
+    }
+    if s.data()
+        .is_some_and(|d| d.other("!minecraft:lore").is_some())
     {
-        stack.added.push((
-            horizon_protocol::item::component::LORE,
-            horizon_protocol::item::Component::Lore(lines.clone()),
-        ));
+        stack.removed.push(horizon_protocol::item::component::LORE);
+    }
+    // The stack's custom rarity ("common", "uncommon", "rare", "epic" or 0..=3).
+    if let Some(r) = s.data().and_then(|d| d.other("minecraft:rarity")) {
+        let index = match r {
+            horizon_world::nbt::Tag::String(s) => match &*s.to_string_lossy() {
+                "common" => Some(0),
+                "uncommon" => Some(1),
+                "rare" => Some(2),
+                "epic" => Some(3),
+                _ => None,
+            },
+            horizon_world::nbt::Tag::Byte(b) if (0..=3).contains(b) => Some(*b as i32),
+            horizon_world::nbt::Tag::Short(s) if (0..=3).contains(s) => Some(*s as i32),
+            horizon_world::nbt::Tag::Int(i) if (0..=3).contains(i) => Some(*i),
+            _ => None,
+        };
+        if let Some(index) = index {
+            stack.added.push((
+                horizon_protocol::item::component::RARITY,
+                horizon_protocol::item::Component::Int(index),
+            ));
+        }
+    }
+    if s.data()
+        .is_some_and(|d| d.other("!minecraft:rarity").is_some())
+    {
+        stack
+            .removed
+            .push(horizon_protocol::item::component::RARITY);
     }
     // The component as loaded, so a translatable name stays one.
     if let Some(name) = s.data().and_then(|d| d.other("minecraft:item_name")) {
@@ -1238,6 +1280,24 @@ mod tests {
         assert_eq!(
             received.component(component::LORE),
             Some(&Component::Lore(lines))
+        );
+    }
+
+    #[test]
+    fn rarity_reaches_the_client() {
+        let mut item = ItemStack::new("minecraft:stick", 1);
+        item.data_mut()
+            .set_other("minecraft:rarity", Some(Tag::String("epic".into())));
+        let sent = stack_to_network(|_| 7, |_, _| None, &Some(item));
+        let mut writer = Writer::new();
+        horizon_protocol::item::Slot::write(&sent, &mut writer);
+        let mut reader = Reader::new(&writer.data);
+        let received = horizon_protocol::item::Slot::read(&mut reader)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            received.component(component::RARITY),
+            Some(&Component::Int(3))
         );
     }
 
