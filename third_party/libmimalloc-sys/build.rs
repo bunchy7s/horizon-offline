@@ -5,11 +5,12 @@ use std::path::{Path, PathBuf};
 fn main() {
     let mut build = cc::Build::new();
 
-    let version = if env::var("CARGO_FEATURE_V2").is_ok() {
-        "v2"
-    } else {
-        "v3"
-    };
+    // Horizon vendors only mimalloc v3 (THIRD_PARTY_NOTICES.md).
+    assert!(
+        env::var("CARGO_FEATURE_V2").is_err(),
+        "third_party/libmimalloc-sys holds only mimalloc v3: the v2 feature is not available"
+    );
+    let version = "v3";
 
     let cargo_manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     let include_root = Path::new(&cargo_manifest_dir)

@@ -181,7 +181,12 @@ size_t _mi_popcount_generic(size_t x);
 static inline size_t mi_popcount(size_t x) {
   #if mi_has_builtinz(popcount)
     return mi_builtinz(popcount)(x);
-  #elif defined(_MSC_VER) && (MI_ARCH_X64 || MI_ARCH_X86 || MI_ARCH_ARM64 || MI_ARCH_ARM32)
+  // Horizon (#7264): MSVC's __popcnt is the POPCNT instruction whatever the target, which x64
+  // CPUs before Nehalem (Core 2) and AMD K8 lack: the game died before main on them. x86/x64
+  // take the portable count below, as GCC builds without -mpopcnt do, so the release programs
+  // hold no POPCNT at all (tools/check_cpu_baseline.py). Upstream checks the CPUID bit at each
+  // call instead (microsoft/mimalloc#1291). Only arena bitmaps count bits, never malloc's fast path.
+  #elif defined(_MSC_VER) && (MI_ARCH_ARM64 || MI_ARCH_ARM32)
     return mi_msc_builtinz(__popcnt)(x);
   #elif MI_ARCH_X64 && defined(__BMI1__)
     return (size_t)_mm_popcnt_u64(x);
