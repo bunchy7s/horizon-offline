@@ -564,19 +564,21 @@ impl Goal for CrossbowAttack {
                     m.extra.using_item = 0;
                     m.extra.flag = false;
                     self.state = Crossbow::Charged;
+                    let weapon = m
+                        .extra
+                        .main_hand_stack()
+                        .cloned()
+                        .unwrap_or_else(|| ItemStack::new("minecraft:crossbow", 1));
+                    set_crossbow_charged(m, true);
+                    // The attack delay is drawn before the sound's pitch, as before.
+                    self.attack_delay = 20 + m.random.next_int_bound(20).unwrap_or(0);
                     let pitch = 1.0 / (m.random.next_float() * 0.5 + 1.0) + 0.2;
                     cx.events.push(MobEvent::CrossbowLoad {
                         mob: m.id,
                         at: m.center(),
                         pitch,
-                        weapon: m
-                            .extra
-                            .main_hand_stack()
-                            .cloned()
-                            .unwrap_or_else(|| ItemStack::new("minecraft:crossbow", 1)),
+                        weapon,
                     });
-                    set_crossbow_charged(m, true);
-                    self.attack_delay = 20 + m.random.next_int_bound(20).unwrap_or(0);
                 }
             }
             Crossbow::Charged => {
