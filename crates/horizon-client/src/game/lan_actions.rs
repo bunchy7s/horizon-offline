@@ -2927,9 +2927,9 @@ impl Game<'_> {
             );
             return;
         }
-        // The chat filter's `/unmute` (game/chat_filter.rs), on servers that filter.
-        if words[0] == "unmute" && host.hub.chat_filter_on() {
-            self.guest_unmute(host, conn, &words);
+        // The chat filter's mute commands (game/chat_filter.rs), on servers that filter.
+        if super::chat_filter::MUTE_COMMANDS.contains(&words[0]) && host.hub.chat_filter_on() {
+            self.guest_mute_command(host, conn, &words);
             return;
         }
         // A native mod's command, for every player its level allows,

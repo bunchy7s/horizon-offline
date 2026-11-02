@@ -120,14 +120,14 @@ fn the_second_hit_mutes_and_the_third_bans() {
     let mut g = guard(Config::default());
     let id = 7;
     assert_eq!(g.strike(id, "Ann", NOW), (1, Action::Refused));
-    assert_eq!(g.muted_until(id, NOW), None);
+    assert_eq!(g.muted(id, NOW), None);
     let until = NOW + 3 * MIN + 10 * MIN;
     assert_eq!(
         g.strike(id, "Ann", NOW + 3 * MIN),
         (2, Action::Muted { until })
     );
-    assert_eq!(g.muted_until(id, NOW + 4 * MIN), Some(until));
-    assert_eq!(g.muted_until(id, until), None);
+    assert_eq!(g.muted(id, NOW + 4 * MIN).unwrap().until, Some(until));
+    assert_eq!(g.muted(id, until), None);
     // The time spent muted doesn't count: 8 minutes after the mute ended is still within the window.
     assert_eq!(
         g.strike(id, "Ann", until + 8 * MIN),
@@ -190,13 +190,81 @@ fn mutes_survive_a_restart_and_unmute_lifts_them() {
     let (_, action) = g.strike(5, "Dee", now);
     assert!(matches!(action, Action::Muted { .. }));
     let (mut again, _) = Guard::load(Config::default(), &dir);
-    assert!(again.muted_until(5, now).is_some());
+    assert!(again.muted(5, now).is_some());
     assert_eq!(again.unmute("dee").as_deref(), Some("Dee"));
     assert_eq!(again.unmute("dee"), None);
-    assert_eq!(again.muted_until(5, now), None);
+    assert_eq!(again.muted(5, now), None);
+    // An operator's mutes are kept too, with who and why.
+    again.mute(6, "Eve", None, "Op", Some("spam".into()));
+    again.mute(7, "Fay", Some(now + MIN), "Op", None);
     let (reloaded, _) = Guard::load(Config::default(), &dir);
-    assert_eq!(reloaded.muted_until(5, now), None);
+    assert_eq!(reloaded.muted(5, now), None);
+    let names: Vec<_> = reloaded
+        .mutes(now)
+        .iter()
+        .map(|m| m.name.as_str())
+        .collect();
+    assert_eq!(names, ["Eve", "Fay"]);
+    let eve = reloaded.muted(6, now).unwrap();
+    assert_eq!(
+        (eve.until, eve.by.as_deref(), eve.reason.as_deref()),
+        (None, Some("Op"), Some("spam"))
+    );
+    assert_eq!(reloaded.mutes(now + MIN).len(), 1);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_mute_file_from_before_manual_mutes_still_loads() {
+    let saved: MutesFile = serde_json::from_str(
+        r#"{"mutes":[{"uuid":"00000000-0000-0000-0000-000000000005","name":"Dee","until":5}]}"#,
+    )
+    .unwrap();
+    assert_eq!(saved.mutes[0].until, Some(5));
+    assert_eq!(saved.mutes[0].by, None);
+}
+
+#[test]
+fn the_filter_never_shortens_an_operators_mute() {
+    let mut g = guard(Config::default());
+    g.mute(1, "Bo", None, "Op", None);
+    g.strike(1, "Bo", NOW);
+    g.strike(1, "Bo", NOW + MIN);
+    assert_eq!(
+        g.muted(1, NOW + 60 * MIN).unwrap().by.as_deref(),
+        Some("Op")
+    );
+    // A shorter one is replaced by the filter's.
+    g.mute(2, "Cy", Some(NOW + MIN), "Op", None);
+    g.strike(2, "Cy", NOW);
+    g.strike(2, "Cy", NOW);
+    assert_eq!(g.muted(2, NOW).unwrap().until, Some(NOW + 10 * MIN));
+}
+
+#[test]
+fn durations_read_and_print() {
+    assert_eq!(parse_duration("10m"), Some(10 * MIN));
+    assert_eq!(parse_duration("2h"), Some(120 * MIN));
+    assert_eq!(parse_duration("1d"), Some(24 * 60 * MIN));
+    assert_eq!(parse_duration("1w"), Some(7 * 24 * 60 * MIN));
+    assert_eq!(parse_duration("30s"), Some(30_000));
+    for bad in [
+        "",
+        "m",
+        "0m",
+        "-1m",
+        "1.5h",
+        "10",
+        "10x",
+        "99999999999999999w",
+    ] {
+        assert_eq!(parse_duration(bad), None, "{bad}");
+    }
+    assert_eq!(duration_text(61_000), "2 minutes");
+    assert_eq!(duration_text(MIN), "1 minute");
+    assert_eq!(duration_text(2 * 60 * MIN), "2 hours");
+    assert_eq!(duration_text(24 * 60 * MIN), "24 hours");
+    assert_eq!(duration_text(3 * 24 * 60 * MIN), "3 days");
 }
 
 #[test]
