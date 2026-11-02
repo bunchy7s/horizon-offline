@@ -5499,6 +5499,7 @@ impl Game<'_> {
 
     fn tick_remote_level(&mut self) -> Result<()> {
         self.ticks += 1;
+        self.repro_tick();
         // Hud.tick ends with ChatComponent.tick.
         self.ui.chat.tick(&self.gui.atlas, self.ticks);
         self.tick_sign_editor();

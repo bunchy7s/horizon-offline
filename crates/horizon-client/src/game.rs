@@ -142,6 +142,7 @@ mod hand;
 mod headless;
 mod ime;
 mod initial_spawn;
+mod input_trace;
 mod integrated;
 mod interactions;
 mod item_draw;
@@ -269,6 +270,7 @@ mod remote_stations;
 mod remote_vehicles;
 mod render_control;
 mod render_tick;
+mod repro;
 mod respawn_anchor;
 mod saves_control;
 mod saving;
@@ -2918,6 +2920,10 @@ struct Game<'a> {
     ui_wait: ui_control::UiWait,
     /// What happened, for `events` and `wait-for` (game/events.rs).
     events: events::Events,
+    /// Who caused each input event: a person, an agent or the game (game/input_trace.rs).
+    input_trace: input_trace::InputTrace,
+    /// A repro recording, export or replay (game/repro.rs).
+    repro: repro::Repro,
     /// The overworld's last `sky_darken` and its inputs (time, rain, thunder).
     sky_darken_memo: std::cell::Cell<Option<((i64, u32, u32), i32)>>,
     /// The last water plane `water_plane` found, kept while none is in reach.
@@ -7306,6 +7312,7 @@ impl Game<'_> {
             None => 0.0,
         };
         self.ticks += 1;
+        self.repro_tick();
         // An in-frame LAN host's player has the entity id its guests see it by.
         if !self.serving()
             && let (Some(host), Some(p)) = (&self.lan, self.player.as_mut())
@@ -12556,6 +12563,8 @@ impl Game<'_> {
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
+        // A repro recording is finished and bundled before the process may go away.
+        self.repro_on_exit();
         if self.title.is_some() || self.saved_for_exit {
             return Ok(());
         }
@@ -12582,6 +12591,9 @@ impl Game<'_> {
         Ok(())
     }
     fn close_world(&mut self) -> Result<()> {
+        // A recording cannot cross into another world, and a replay feeding the
+        // title screen is nonsense.
+        self.repro_world_closed();
         self.clear_waypoints();
         self.post_effects.clear();
         self.spectated_post_effect = None;
@@ -16879,7 +16891,7 @@ impl ApplicationHandler for Game<'_> {
         } else {
             None
         };
-        self.handle_window_event(event_loop, id, event);
+        self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
         if let Some((event, modifiers)) = key {
             self.native_input_key(&event, modifiers);
         }
@@ -16896,6 +16908,10 @@ impl ApplicationHandler for Game<'_> {
             && let DeviceEvent::MouseMotion { delta: (x, y) } = event
         {
             // MouseHandler.onMove with the pointer grabbed; applied once per frame.
+            self.note_input(
+                input_trace::InputOrigin::User,
+                input_trace::TraceKind::Motion { x, y },
+            );
             self.mouse.on_move(0.0, 0.0, x, y, true, true);
             self.last_input = Instant::now();
         }
@@ -16921,6 +16937,7 @@ impl Game<'_> {
         event_loop: &dyn EventLoopCtl,
         id: WindowId,
         mut event: WindowEvent,
+        origin: input_trace::InputOrigin,
     ) {
         // A headless game has no window: its events (the frame, the control socket's input)
         // carry `WindowId::dummy()`.
@@ -16943,6 +16960,9 @@ impl Game<'_> {
         {
             *button = MouseButton::Right;
         }
+        // Who caused it, before the event is handled: the trace wants the
+        // window's own keys, never the ones the socket made up.
+        self.trace_window_event(origin, &event);
         if let WindowEvent::KeyboardInput { event, .. } = &event
             && let PhysicalKey::Code(key) = event.physical_key
         {
@@ -18413,13 +18433,23 @@ impl Game<'_> {
                 // Offscreen frames don't wait for the window to be drawn: an
                 // occluded window (a locked macOS session) gets no redraws.
                 let id = w.id();
-                self.handle_window_event(event_loop, id, WindowEvent::RedrawRequested);
+                self.handle_window_event(
+                    event_loop,
+                    id,
+                    WindowEvent::RedrawRequested,
+                    input_trace::InputOrigin::Game,
+                );
             } else {
                 w.request_redraw();
             }
         } else if self.options.headless {
             // The headless loop paces the frames itself (`run_headless`).
-            self.handle_window_event(event_loop, WindowId::dummy(), WindowEvent::RedrawRequested);
+            self.handle_window_event(
+                event_loop,
+                WindowId::dummy(),
+                WindowEvent::RedrawRequested,
+                input_trace::InputOrigin::Game,
+            );
             return;
         }
         // A window the compositor hides gets no `RedrawRequested` at all, so
@@ -18852,6 +18882,8 @@ impl<'a> Game<'a> {
             flight: None,
             ui_wait: Default::default(),
             events: Default::default(),
+            input_trace: Default::default(),
+            repro: Default::default(),
             agent: agent::Agent::default(),
             view_frustum: None,
             entity_culler: None,
