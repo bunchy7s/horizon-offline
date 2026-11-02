@@ -50,6 +50,28 @@ agent's client needs one entry and one approval. The version that plays is alway
 launcher selected, so the game's tools always match the game. `horizon-ctl mcp` stays available
 on its own, for a game started by hand or by a script.
 
+## Protocol revisions
+
+All three servers share one implementation, `crates/horizon-mcp`, so they advertise and answer
+the same revisions. There are two of them.
+
+- `2026-07-28` is stateless: there is no handshake, and every request carries its version and
+  its capabilities in `_meta` (`io.modelcontextprotocol/protocolVersion`,
+  `io.modelcontextprotocol/clientCapabilities`). Every result says `resultType: "complete"`,
+  `tools/list` carries `ttlMs` and `cacheScope`, and each result names the server in
+  `_meta["io.modelcontextprotocol/serverInfo"]`. `server/discover` reports the versions,
+  capabilities and identity. `ping` no longer exists in this revision.
+- `2025-06-18` is the handshake revision, kept because the launcher's `game_*` tools talk to
+  whichever `horizon-ctl` the player has installed: an older one does not know the stateless
+  revision. A request with no `_meta` is answered in that revision's shapes, and `initialize`
+  still negotiates it.
+
+A server that serves both eras decides from the request itself, not from what came before it.
+A version the server does not serve is refused with `UnsupportedProtocolVersionError` (`-32022`)
+listing the ones it does, and a modern request missing its capabilities is malformed (`-32602`).
+A client that speaks both probes with `server/discover` first on stdio, then falls back to
+`initialize` when the answer is not a modern one.
+
 ## Inventory, before and after
 
 Before is `main` at 2026-10-23, before #1342, #1343, #1344, #1345 and #1353. After is with
