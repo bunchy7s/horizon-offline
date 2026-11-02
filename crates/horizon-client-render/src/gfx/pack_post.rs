@@ -25,6 +25,9 @@ use super::pack_uniforms::{self, FrameUniforms, PackInputs};
 
 const BUFFERS: usize = horizon_shaders::BUFFERS;
 
+#[cfg(test)]
+mod world_target_tests;
+
 /// The texture behind a pack sampler name.
 #[derive(Clone, Copy, PartialEq)]
 enum Source {
@@ -594,8 +597,8 @@ pub struct PackPost {
     blit_clears: Vec<usize>,
     /// Buffers cleared in passes of their own (more than the blit's eight attachments).
     other_clears: Vec<usize>,
-    /// The blit's bindings, for the world target of this size.
-    blit_group: Option<([u32; 2], wgpu::BindGroup)>,
+    /// Source views identify the world target, including replacements at the same size.
+    blit_group: Option<([wgpu::TextureView; 2], wgpu::BindGroup)>,
     /// Shows colortex0 when the pack has no `final` (OQ-5).
     copy: (wgpu::RenderPipeline, wgpu::BindGroupLayout),
     uniforms: FrameUniforms,
@@ -3888,7 +3891,11 @@ impl PackPost {
         }
 
         // The world into colortex0 and depthtex0, flipped to GL's rows, and the clears.
-        if self.blit_group.as_ref().is_none_or(|g| g.0 != size) {
+        if self
+            .blit_group
+            .as_ref()
+            .is_none_or(|g| g.0[0] != *world || g.0[1] != *world_depth)
+        {
             let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Shader pack world"),
                 layout: &self.blit.1,
@@ -3903,7 +3910,7 @@ impl PackPost {
                     },
                 ],
             });
-            self.blit_group = Some((size, group));
+            self.blit_group = Some(([world.clone(), world_depth.clone()], group));
         }
         {
             let mut attachments = vec![attach(
