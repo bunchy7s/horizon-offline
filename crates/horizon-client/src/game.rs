@@ -420,6 +420,10 @@ use winit::{
 /// The time a frame spends uploading chunk meshes when the player set no
 /// Chunk Updates or Upload Budget: a burst past it waits for the next frames.
 const AUTO_UPLOAD_TIME: Duration = Duration::from_millis(2);
+/// `AUTO_UPLOAD_TIME` while the view's terrain is still arriving (a world's
+/// open, a teleport): the meshes waiting then are the view itself, not edits
+/// to it, so a frame gives them more of its time to fill the view sooner.
+const AUTO_UPLOAD_TIME_ARRIVING: Duration = Duration::from_millis(6);
 /// A frame's finished meshes up to this many upload at once, unqueued.
 const AUTO_UPLOADS_AT_ONCE: usize = 8;
 
@@ -16700,9 +16704,14 @@ impl Game<'_> {
                 // AUTO_UPLOAD_TIME of this frame (at least one goes): a burst of
                 // finished meshes spreads over frames, nearest first.
                 let auto = !budgeted;
+                let auto_time = if arriving {
+                    AUTO_UPLOAD_TIME_ARRIVING
+                } else {
+                    AUTO_UPLOAD_TIME
+                };
                 let started = Instant::now();
                 while let Some((_, mesh)) = pending.last() {
-                    if auto && count > 0 && started.elapsed() >= AUTO_UPLOAD_TIME {
+                    if auto && count > 0 && started.elapsed() >= auto_time {
                         break;
                     }
                     let size = ((mesh.solid.len() + mesh.translucent.len())
