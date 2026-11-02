@@ -307,15 +307,24 @@ fn submit_quads(
         FoilType::Special => Foil::Special,
     };
     let _ = display;
-    // Quads of one layer mostly share a sprite: look its translucency up once.
+    // Quads of one layer mostly share a sprite: look its rect and its
+    // translucency up once.
     let mut last: Option<(&str, bool)> = None;
+    let mut last_rect: Option<(&str, Option<Rect>)> = None;
     for q in &baked.quads {
-        let Some(r) = sprites
-            .get(sprite_name(&q.material.sprite))
-            .or_else(|| sprites.get("misc/missingno"))
-            .or_else(|| sprites.get("horizon/missingno"))
-            .copied()
-        else {
+        let rect = match last_rect {
+            Some((sprite, rect)) if sprite == q.material.sprite => rect,
+            _ => {
+                let rect = sprites
+                    .get(sprite_name(&q.material.sprite))
+                    .or_else(|| sprites.get("misc/missingno"))
+                    .or_else(|| sprites.get("horizon/missingno"))
+                    .copied();
+                last_rect = Some((&q.material.sprite, rect));
+                rect
+            }
+        };
+        let Some(r) = rect else {
             continue;
         };
         // `getLayerColorSafe`: an untinted quad, or a tint index past the

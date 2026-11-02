@@ -414,15 +414,16 @@ impl Game<'_> {
         }
     }
     /// What a menu click's session did, applied to the world and its mob;
-    /// with the result of each trade made, for `merchant_traded`.
+    /// with the offer of each trade made (as it is after the trade), for
+    /// `merchant_traded`.
     pub(super) fn merchant_apply(
         &mut self,
         session: Box<merchant::Session>,
         mob: Option<u32>,
-    ) -> (Box<merchant::Session>, Vec<ItemStack>) {
+    ) -> (Box<merchant::Session>, Vec<MerchantOffer>) {
         let mut session = session;
-        let mut traded = Vec::new();
         let events = std::mem::take(&mut session.events);
+        let mut traded = Vec::new();
         let (villager, origin) = (session.villager, session.origin);
         if let Some(m) = mob.and_then(|id| self.mobs.iter_mut().find(|m| m.id == id)) {
             m.random = session.random.clone();
@@ -450,9 +451,7 @@ impl Game<'_> {
                     };
                     self.audio.play(sound, Some(origin), 1.0, pitch);
                 }
-                merchant::Event::Traded(index) => {
-                    traded.extend(session.offers.get(index).map(|o| o.result.clone()));
-                }
+                merchant::Event::Traded(_, offer) => traded.push(*offer),
                 merchant::Event::TradeSound => {
                     let sound = if villager {
                         "minecraft:entity.villager.yes"
@@ -465,16 +464,22 @@ impl Game<'_> {
         }
         (session, traded)
     }
-    /// `MerchantResultSlot.checkTakeAchievements` and `AbstractVillager.notifyTrade`
-    /// for each trade made: the statistic and the `villager_trade` trigger.
-    pub(super) fn merchant_traded(&mut self, mob: Option<u32>, results: &[ItemStack]) {
-        for result in results {
+    /// `MerchantResultSlot.onTake` for each trade made (`offers`, as each
+    /// was right after its trade): the statistic, `AbstractVillager.notifyTrade`'s
+    /// `villager_trade` trigger, then the mods' `native_trade_with_villager`
+    /// for a server's player (when the trader is still in the level).
+    pub(super) fn merchant_traded(&mut self, mob: Option<u32>, offers: &[MerchantOffer]) {
+        for offer in offers {
             self.stats.custom("traded_with_villager", 1);
-            let villager = mob
-                .and_then(|id| self.mobs.iter().find(|m| m.id == id))
-                .map(|m| self.mob_entity(m));
+            let merchant = mob.and_then(|id| self.mobs.iter().find(|m| m.id == id));
+            let kind = merchant.map(super::native_hooks::mob_kind);
+            let villager = merchant.map(|m| self.mob_entity(m));
             if let Some(villager) = villager {
-                self.trigger_trade(&villager, result);
+                self.trigger_trade(&villager, &offer.result);
+            }
+            // TradeWithVillagerEvent: on the server, in the player's turn.
+            if let (Some(id), Some(kind), Some(_)) = (mob, kind, self.lan_acting) {
+                self.native_trade_with_villager(id, &kind, offer);
             }
         }
     }
