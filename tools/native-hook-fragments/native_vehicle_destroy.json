@@ -4,7 +4,10 @@
       "name": "vehicle_destroy",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_vehicle_destroy",
       "neoforge": "none (NeoForge has no such event; Bukkit's VehicleDestroyEvent)",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "a boat or minecart about to be destroyed (`native_vehicle_destroy`).",

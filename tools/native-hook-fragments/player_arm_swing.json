@@ -4,7 +4,10 @@
       "name": "player_arm_swing",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_arm_swing",
       "neoforge": "none (NeoForge has no such event; Bukkit's PlayerAnimationEvent)",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A guest's server handled arm swing (`native_player_arm_swing`).",

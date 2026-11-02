@@ -2321,12 +2321,7 @@ impl Game<'_> {
                     host.hub
                         .select_bundle_item(conn, slot, p.index, &mut self.world);
                     let guest = &host.hub.guests[gi];
-                    self.native_player_bundle_item_select(
-                        guest.uuid,
-                        &guest.name,
-                        p.slot,
-                        p.index,
-                    );
+                    self.native_player_bundle_item_select(guest.uuid, &guest.name, p.slot, p.index);
                 }
             }
             S::ContainerClick(p) => {

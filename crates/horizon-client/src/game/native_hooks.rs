@@ -3138,7 +3138,7 @@ impl Game<'_> {
     /// A guest's client changed sneaking in its player input packet, after the hub applied the new state.
     /// The guest's state is swapped in. Server-side. @API:player_toggle_sneak@.
     pub(super) fn native_player_toggle_sneak(&mut self, player: u128, name: &str, sneaking: bool) {
-        let _ = (player, name, sneaking);
+        mod_api::dispatch_player_toggle_sneak(self, mod_api::mods(), player, name, sneaking);
     }
     /// A player finished editing a sign: `ServerGamePacketListenerImpl.updateSignText`
     /// has taken their update packet and every check has passed (they were
@@ -4874,34 +4874,34 @@ impl Game<'_> {
         damage: &mut f32,
         cancel: &mut bool,
     ) {
-        let _ = (kind, damage, cancel);
+        mod_api::dispatch_vehicle_damage(self, mod_api::mods(), kind, damage, cancel);
     }
     /// A boat or minecart was created at `pos`, after it joined the level.
     /// `kind` is the vehicle type. Server-side. @API:native_vehicle_create@.
     pub(super) fn native_vehicle_create(&mut self, kind: &str, pos: [f64; 3]) {
-        let _ = (kind, pos);
+        mod_api::dispatch_vehicle_create(self, mod_api::mods(), kind, pos);
     }
     /// A boat or minecart is about to be destroyed at `pos`. TNT minecarts
     /// that prime instead of breaking are not heard. Server-side.
     /// @API:native_vehicle_destroy@.
     pub(super) fn native_vehicle_destroy(&mut self, kind: &str, pos: [f64; 3]) {
-        let _ = (kind, pos);
+        mod_api::dispatch_vehicle_destroy(self, mod_api::mods(), kind, pos);
     }
     /// A guest sent the server's current `PlayerInput` flags, after they were applied to the hub. The guest's state is swapped in. Server-side. @API:player_input@.
     pub(super) fn native_player_input(&mut self, player: u128, name: &str, flags: i32) {
-        let _ = (player, name, flags);
+        mod_api::dispatch_player_input(self, mod_api::mods(), player, name, flags);
     }
     /// A guest's arm swing was handled by the server. `hand` is `mainhand`. Server-side. @API:player_arm_swing@.
     pub(super) fn native_player_arm_swing(&mut self, player: u128, name: &str, hand: &str) {
-        let _ = (player, name, hand);
+        mod_api::dispatch_player_arm_swing(self, mod_api::mods(), player, name, hand);
     }
     /// A guest's accepted movement made the server jump them from the ground. Server-side. @API:player_jump@.
     pub(super) fn native_player_jump(&mut self, player: u128, name: &str) {
-        let _ = (player, name);
+        mod_api::dispatch_player_jump(self, mod_api::mods(), player, name);
     }
     /// A guest was disconnected by a server kick, after the hub recorded the rendered `reason`. @API:player_kicked@.
     pub(super) fn native_player_kicked(&mut self, player: u128, name: &str, reason: &str) {
-        let _ = (player, name, reason);
+        mod_api::dispatch_player_kicked(self, mod_api::mods(), player, name, reason);
     }
     /// A server player's experience level changed, after the new level was applied. @API:player_level_change@.
     pub(super) fn native_player_level_change(
@@ -4911,7 +4911,7 @@ impl Game<'_> {
         from: i32,
         to: i32,
     ) {
-        let _ = (player, name, from, to);
+        mod_api::dispatch_player_level_change(self, mod_api::mods(), player, name, from, to);
     }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's

@@ -3504,6 +3504,30 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A boat or minecart was created at `pos`, after it joined the level.
+    /// `kind` is the vehicle type. Server-side. @API:native_vehicle_create@.
+    fn vehicle_create(&self, host: &mut dyn Host, event: &mut VehicleCreateEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A vehicle is about to take damage from a player's attack. `kind` is
+    /// `boat` or the minecart type; mods may change `damage` or set `cancel`
+    /// to leave its damage and wobble unchanged. The attack itself still
+    /// completes. Server-side. @API:native_vehicle_damage@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn vehicle_damage(&self, host: &mut dyn Host, event: &mut VehicleDamageEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A boat or minecart is about to be destroyed at `pos`. TNT minecarts
+    /// that prime instead of breaking are not heard. Server-side.
+    /// @API:native_vehicle_destroy@.
+    fn vehicle_destroy(&self, host: &mut dyn Host, event: &mut VehicleDestroyEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A boat or minecart (`kind`, `minecraft:oak_boat`) moved since the last
     /// tick (`VehicleMoveEvent`): `from` and `to` are its positions, heard
     /// after the tick moved it. Once a tick for each vehicle that carries a
@@ -3576,6 +3600,11 @@ pub trait Hooks: Send + Sync {
         host: &mut dyn Host,
         event: &mut PlayerAdvancementDoneEvent<'_>,
     ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A guest's arm swing was handled by the server. `hand` is `mainhand`. Server-side. @API:player_arm_swing@.
+    fn player_arm_swing(&self, host: &mut dyn Host, event: &mut PlayerArmSwingEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -3715,6 +3744,11 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A guest sent the server's current `PlayerInput` flags, after they were applied to the hub. The guest's state is swapped in. Server-side. @API:player_input@.
+    fn player_input(&self, host: &mut dyn Host, event: &mut PlayerInputEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A server player broke the item they were holding after durability
     /// damage removed it from the hand. @API:native_player_item_break@.
     fn player_item_break(&self, host: &mut dyn Host, event: &mut PlayerItemBreakEvent<'_>) {
@@ -3748,6 +3782,16 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A guest's accepted movement made the server jump them from the ground. Server-side. @API:player_jump@.
+    fn player_jump(&self, host: &mut dyn Host, event: &mut PlayerJumpEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A guest was disconnected by a server kick, after the hub recorded the rendered `reason`. @API:player_kicked@.
+    fn player_kicked(&self, host: &mut dyn Host, event: &mut PlayerKickedEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A server player launched a projectile item, after it was created.
     /// `item` is the projectile's held item. @API:player_launch_projectile@.
     fn player_launch_projectile(
@@ -3755,6 +3799,11 @@ pub trait Hooks: Send + Sync {
         host: &mut dyn Host,
         event: &mut PlayerLaunchProjectileEvent<'_>,
     ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player's experience level changed, after the new level was applied. @API:player_level_change@.
+    fn player_level_change(&self, host: &mut dyn Host, event: &mut PlayerLevelChangeEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -3993,6 +4042,12 @@ pub trait Hooks: Send + Sync {
         host: &mut dyn Host,
         event: &mut PlayerToggleEntityAgeLockEvent<'_>,
     ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A guest's client changed sneaking in its player input packet, after the hub applied the new state.
+    /// The guest's state is swapped in. Server-side. @API:player_toggle_sneak@.
+    fn player_toggle_sneak(&self, host: &mut dyn Host, event: &mut PlayerToggleSneakEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -11021,6 +11076,68 @@ pub fn dispatch_tnt_primed(
         }
     }
 }
+/// What [`Hooks::vehicle_create`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct VehicleCreateEvent<'a> {
+    pub kind: &'a str,
+    pub pos: [f64; 3],
+}
+pub fn dispatch_vehicle_create(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    kind: &str,
+    pos: [f64; 3],
+) {
+    let mut event = VehicleCreateEvent { kind, pos };
+    for mod_hook in mods {
+        mod_hook.vehicle_create(host, &mut event);
+    }
+}
+/// What [`Hooks::vehicle_damage`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct VehicleDamageEvent<'a> {
+    pub kind: &'a str,
+    pub damage: f32,
+}
+pub fn dispatch_vehicle_damage(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    kind: &str,
+    damage: &mut f32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = VehicleDamageEvent {
+        kind,
+        damage: *damage,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.vehicle_damage(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *damage = event.damage;
+}
+/// What [`Hooks::vehicle_destroy`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct VehicleDestroyEvent<'a> {
+    pub kind: &'a str,
+    pub pos: [f64; 3],
+}
+pub fn dispatch_vehicle_destroy(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    kind: &str,
+    pos: [f64; 3],
+) {
+    let mut event = VehicleDestroyEvent { kind, pos };
+    for mod_hook in mods {
+        mod_hook.vehicle_destroy(host, &mut event);
+    }
+}
 /// What [`Hooks::vehicle_moved`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct VehicleMovedEvent<'a> {
@@ -11174,6 +11291,25 @@ pub fn dispatch_player_advancement_done(
     };
     for mod_hook in mods {
         mod_hook.player_advancement_done(host, &mut event);
+    }
+}
+/// What [`Hooks::player_arm_swing`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerArmSwingEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub hand: &'a str,
+}
+pub fn dispatch_player_arm_swing(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    hand: &str,
+) {
+    let mut event = PlayerArmSwingEvent { player, name, hand };
+    for mod_hook in mods {
+        mod_hook.player_arm_swing(host, &mut event);
     }
 }
 /// What [`Hooks::player_attack_cooldown_reset`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11486,6 +11622,29 @@ pub fn dispatch_player_exp_cooldown_change(
         mod_hook.player_exp_cooldown_change(host, &mut event);
     }
 }
+/// What [`Hooks::player_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerInputEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub flags: i32,
+}
+pub fn dispatch_player_input(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    flags: i32,
+) {
+    let mut event = PlayerInputEvent {
+        player,
+        name,
+        flags,
+    };
+    for mod_hook in mods {
+        mod_hook.player_input(host, &mut event);
+    }
+}
 /// What [`Hooks::player_item_break`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerItemBreakEvent<'a> {
@@ -11574,6 +11733,46 @@ pub fn dispatch_player_item_held(
         }
     }
 }
+/// What [`Hooks::player_jump`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerJumpEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_jump(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+) {
+    let mut event = PlayerJumpEvent { player, name };
+    for mod_hook in mods {
+        mod_hook.player_jump(host, &mut event);
+    }
+}
+/// What [`Hooks::player_kicked`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerKickedEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub reason: &'a str,
+}
+pub fn dispatch_player_kicked(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    reason: &str,
+) {
+    let mut event = PlayerKickedEvent {
+        player,
+        name,
+        reason,
+    };
+    for mod_hook in mods {
+        mod_hook.player_kicked(host, &mut event);
+    }
+}
 /// What [`Hooks::player_launch_projectile`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerLaunchProjectileEvent<'a> {
@@ -11591,6 +11790,32 @@ pub fn dispatch_player_launch_projectile(
     let mut event = PlayerLaunchProjectileEvent { player, name, item };
     for mod_hook in mods {
         mod_hook.player_launch_projectile(host, &mut event);
+    }
+}
+/// What [`Hooks::player_level_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerLevelChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from: i32,
+    pub to: i32,
+}
+pub fn dispatch_player_level_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from: i32,
+    to: i32,
+) {
+    let mut event = PlayerLevelChangeEvent {
+        player,
+        name,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        mod_hook.player_level_change(host, &mut event);
     }
 }
 /// What [`Hooks::player_locale_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -12174,6 +12399,29 @@ pub fn dispatch_player_toggle_entity_age_lock(
     };
     for mod_hook in mods {
         mod_hook.player_toggle_entity_age_lock(host, &mut event);
+    }
+}
+/// What [`Hooks::player_toggle_sneak`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerToggleSneakEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub sneaking: bool,
+}
+pub fn dispatch_player_toggle_sneak(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    sneaking: bool,
+) {
+    let mut event = PlayerToggleSneakEvent {
+        player,
+        name,
+        sneaking,
+    };
+    for mod_hook in mods {
+        mod_hook.player_toggle_sneak(host, &mut event);
     }
 }
 /// What [`Hooks::player_trade`] is told. Fields may be added: the struct is `#[non_exhaustive]`.

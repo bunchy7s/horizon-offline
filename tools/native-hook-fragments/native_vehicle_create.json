@@ -4,7 +4,10 @@
       "name": "vehicle_create",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_vehicle_create",
       "neoforge": "none (NeoForge has no such event; Bukkit's VehicleCreateEvent)",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "a boat or minecart created (`native_vehicle_create`).",
