@@ -3435,6 +3435,19 @@ impl Game<'_> {
     ) {
         let _ = (player, name, entity_id, entity_name);
     }
+    /// A server player opened a sign for editing, after the editor state was
+    /// made. `front` selects the front or back side. Guest lookup helpers may
+    /// find nothing during packet handling. Server-side.
+    /// @API:player_open_sign@.
+    pub(super) fn native_player_open_sign(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        front: bool,
+    ) {
+        let _ = (player, name, pos, front);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
