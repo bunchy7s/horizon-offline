@@ -1212,6 +1212,11 @@ pub struct Mob {
     /// The packs' random texture variants it wears (`random_textures::choose`).
     pub random_textures: random_textures::Choice,
 }
+impl crate::entity_rules::EntityRules for Mob {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+}
 /// A mannequin's `description` and `hide_description` (`Mannequin.updateDescription`):
 /// the default `entity.minecraft.mannequin.label`, none at all, or a component.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -2497,6 +2502,9 @@ pub struct MobWorld<'a> {
     pub lid_openers: &'a HashMap<(i32, i32, i32), i32>,
     /// What a content mod's effects do, on a server (None on a client).
     pub mod_effects: Option<&'a dyn ModEffectTicks>,
+    /// The level's world border, whose walls stop a mob's moves
+    /// (`Entity.collectColliders`); None: nothing stops them there.
+    pub border: Option<&'a horizon_core::geometry::border::BorderGeometry>,
 }
 /// `MobEffectInstance.tickServer` for a content mod's effect: its
 /// `shouldApplyEffectTickThisTick` and `applyEffectTick`, which the game's

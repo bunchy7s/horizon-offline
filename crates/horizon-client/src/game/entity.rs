@@ -13,6 +13,7 @@ use super::{
     boats::Boat, fireworks::Rocket, minecarts::Minecart, tnt::PrimedTnt, trident::ThrownTrident,
 };
 use horizon_client::entities::{ArmorStand, ExperienceOrb, ItemEntity};
+use horizon_client::entity_rules::EntityRules;
 use horizon_client::mobs::{Mob, Species};
 use horizon_client::projectiles::Projectile;
 use horizon_core::geometry::{Aabb, Direction, Vec3};
@@ -47,7 +48,7 @@ pub(super) struct Blast {
     pub(super) spared: Option<u32>,
 }
 
-pub(super) trait Entity {
+pub(super) trait Entity: EntityRules {
     /// `Entity.getId`.
     fn id(&self) -> u32;
     fn position(&self) -> Vec3;
@@ -134,6 +135,51 @@ pub(super) trait Entity {
     fn is_supported_by(&self, _pos: BlockPos) -> bool {
         false
     }
+    /// `Entity.getEyeY`, where `updateFluidHeightAndDoFluidPushing` reads the
+    /// eye's fluid; the top of the box unless a kind sets it.
+    fn fluid_eye_y(&self) -> f64 {
+        self.bounds().max_position().y
+    }
+    /// `Entity.updateFluidHeightAndDoFluidPushing`: its water and lava heights
+    /// (`(0, 0)` for a kind that is not pushed by fluid), and the current of
+    /// each fluid added to its velocity. One body for every kind.
+    fn push_by_fluid(
+        &mut self,
+        world: &horizon_client::world::World,
+        fluids: &horizon_client::motion::FluidResources,
+    ) -> (f64, f64) {
+        if !self.is_pushed_by_fluid() {
+            return (0.0, 0.0);
+        }
+        let (bounds, at, eye) = (self.bounds(), self.position(), self.fluid_eye_y());
+        horizon_client::entities::update_entity_fluids(
+            bounds,
+            at,
+            eye,
+            self.velocity_mut(),
+            world,
+            fluids,
+        )
+    }
+    /// `BubbleColumnBlock.entityInside` through `applyEffectsFromBlocks`: a
+    /// column lifts or drags every kind alike.
+    fn push_by_bubble_column(
+        &mut self,
+        world: &horizon_client::world::World,
+        registry: &horizon_world::registry::BlockRegistry,
+        facts: &horizon_client::blocks::BlockFacts,
+        collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
+    ) -> bool {
+        let bounds = self.bounds();
+        horizon_client::motion::bubble_column_push(
+            world,
+            registry,
+            facts,
+            collision,
+            bounds,
+            self.velocity_mut(),
+        )
+    }
     /// `Entity.getPistonPushReaction`.
     fn get_piston_push_reaction(&self) -> PushReaction {
         PushReaction::PushPull
@@ -149,6 +195,11 @@ pub(super) trait Entity {
     /// cannot stays tracked, so its cooldown and process run out.
     fn can_use_portal(&self, _game: &Game<'_>) -> bool {
         true
+    }
+    /// A boat or minecart: the kinds whose portal pass opens the tick, before
+    /// they move (`AbstractMinecart.tick` handles its portal first).
+    fn is_vehicle(&self) -> bool {
+        false
     }
     /// Where it stood at the start of its tick, for the kinds that store it
     /// (None: `portals.before` has it).
@@ -500,6 +551,13 @@ impl Entity for ExperienceOrb {
 
 impl Entity for Boat {
     stored_motion!();
+    fn is_vehicle(&self) -> bool {
+        true
+    }
+    /// `Boat.getEyeY`: the top of the 0.5625 box.
+    fn fluid_eye_y(&self) -> f64 {
+        self.position.y + super::boats::HEIGHT
+    }
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((super::boats::WIDTH as f32, super::boats::HEIGHT as f32))
     }
@@ -529,6 +587,9 @@ impl Entity for Boat {
 
 impl Entity for Minecart {
     stored_motion!();
+    fn is_vehicle(&self) -> bool {
+        true
+    }
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((
             super::minecarts::WIDTH as f32,
@@ -616,6 +677,12 @@ impl Entity for ArmorStand {
     fn is_ignoring_block_triggers(&self) -> bool {
         self.marker
     }
+    /// A NoGravity stand is not swept for the blocks it stands in (plates,
+    /// fire): measured beside the real server, it never presses a plate nor
+    /// catches fire, and does again once `NoGravity` is cleared.
+    fn sweeps_blocks_inside(&self) -> bool {
+        !self.no_gravity
+    }
     fn pushed_by_explosion(&self) -> bool {
         false
     }
@@ -631,6 +698,10 @@ impl Entity for ArmorStand {
 
 impl Entity for PrimedTnt {
     stored_motion!();
+    /// `PrimedTnt` eye height: `0.98 * 0.85`.
+    fn fluid_eye_y(&self) -> f64 {
+        self.position.y + f64::from(0.98f32 * 0.85f32)
+    }
     /// `PrimedTnt` is 0.98 across.
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((0.98, 0.98))
@@ -780,5 +851,64 @@ impl Entity for ThrownTrident {
     /// `GameLevel::tick_blocks` sweeps tridents itself.
     fn sweeps_blocks_inside(&self) -> bool {
         false
+    }
+}
+
+impl EntityRules for Rocket {}
+impl EntityRules for ThrownTrident {}
+impl EntityRules for Boat {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `AbstractBoat.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
+    }
+}
+impl EntityRules for Minecart {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `AbstractMinecart.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        if self.in_water { 0.005 } else { 0.04 }
+    }
+}
+impl EntityRules for PrimedTnt {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `PrimedTnt.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
+    }
+}
+impl EntityRules for FallingBlock {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `FallingBlockEntity.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
+    }
+}
+
+#[cfg(test)]
+mod no_gravity_stand_tests {
+    use super::Entity as _;
+    use horizon_client::entities::ArmorStand;
+    use horizon_core::geometry::Vec3;
+
+    #[test]
+    fn a_no_gravity_stand_is_not_swept_for_the_blocks_it_is_in() {
+        let mut stand = ArmorStand::new(1, Vec3::new(0.5, 100.0, 0.5), 0.0);
+        // A resting stand presses a plate (measured beside the real server)...
+        assert!(stand.sweeps_blocks_inside() && stand.triggers_blocks());
+        // ...a NoGravity one does not, nor does a marker.
+        stand.no_gravity = true;
+        assert!(!stand.sweeps_blocks_inside());
+        stand.no_gravity = false;
+        stand.marker = true;
+        assert!(!stand.triggers_blocks());
     }
 }

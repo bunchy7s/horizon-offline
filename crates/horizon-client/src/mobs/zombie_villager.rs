@@ -229,6 +229,7 @@ mod tests {
             items: Some(&items),
             lid_openers: &lid_openers,
             mod_effects: None,
+            border: None,
         };
         for no_ai in [false, true] {
             let kind = std::sync::Arc::new(types.types["minecraft:zombie_villager"].clone());

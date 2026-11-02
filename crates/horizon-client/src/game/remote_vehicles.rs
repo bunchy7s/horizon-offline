@@ -162,6 +162,9 @@ impl Game<'_> {
         if passengers.contains(&me) {
             if self.riding != Some(vehicle_id) {
                 self.riding = Some(vehicle_id);
+                if let Some(c) = self.carts.iter_mut().find(|c| c.id == vehicle_id) {
+                    c.passenger_yaw_delta = 0.0;
+                }
                 if let Some(p) = self.player.as_mut() {
                     p.velocity = Vec3::ZERO;
                     p.fall_distance = 0.0;
@@ -185,6 +188,22 @@ impl Game<'_> {
                 }
             }
         }
+    }
+
+    /// Camera.alignWithEntity's NewMinecartBehavior branch: sample the
+    /// vehicle's curved path at this frame, then apply the player's seat
+    /// attachment. Camera's own eye-height interpolation still runs afterwards.
+    pub(super) fn remote_minecart_rider_position(&self, partial: f32) -> Option<[f64; 3]> {
+        if !self.minecart_improvements() {
+            return None;
+        }
+        let id = self.riding?;
+        self.carts
+            .iter()
+            .find(|c| c.id == id && c.kind == super::minecarts::CartKind::Rideable)?;
+        let (mut position, _, _) = self.remote_minecart_lerp(id, partial)?;
+        position[1] += super::minecarts::SEAT;
+        Some(position)
     }
 
     /// The local player's tick in its vehicle, in place of its own movement:
@@ -222,6 +241,17 @@ impl Game<'_> {
             // In front of a mob that shares the boat.
             Some(self.player_boat_seat(i))
         } else {
+            // Minecart.positionRider runs on the client after the cart tick.
+            // The offset belongs to the cart, so switching vehicles cannot
+            // transfer the previous vehicle's pending turn.
+            let rotate =
+                self.minecart_improvements() && self.settings.file.bool("rotateWithMinecart");
+            if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
+                c.passenger_yaw_delta = 0.0;
+                if rotate && c.kind == super::minecarts::CartKind::Rideable {
+                    c.rotate_passenger(&mut self.yaw);
+                }
+            }
             // A minecart: the server moves it, the rider sits in it.
             let cart = self.carts.iter().find(|c| c.id == id).map(|c| {
                 c.position

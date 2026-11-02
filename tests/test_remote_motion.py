@@ -44,7 +44,7 @@ impl MobIndex {
 struct Game {
     mobs: Vec<Entity>, mob_index: MobIndex, dropped: Vec<Entity>, falling: Vec<Entity>, tnts: Vec<Entity>, orbs: Vec<Entity>,
     creatures: Creatures, dragon_fireballs: Vec<Entity>, tridents: Vec<Entity>,
-    rockets: Vec<Entity>, remote: Option<Remote>,
+    rockets: Vec<Entity>, carts: Vec<Entity>, remote: Option<Remote>,
     potions: Potions, end: End,
 }
 impl Game {

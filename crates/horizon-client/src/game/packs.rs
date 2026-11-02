@@ -188,10 +188,7 @@ impl Game<'_> {
         // until those resources exist, then apply the latest selection once.
         // A reload already under its overlay finishes first (vanilla's
         // `pendingReload`, which `runTick` starts once the overlay is gone).
-        if reload_waits(
-            self.rest_loader.is_some() || self.world_loader.is_some(),
-            self.pack_reload.is_some(),
-        ) {
+        if reload_waits(self.rest_loader.is_some(), self.pack_reload.is_some()) {
             self.pending_pack_reload = true;
             return;
         }

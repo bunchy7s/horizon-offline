@@ -164,7 +164,7 @@ impl Game<'_> {
         if self.client_mod_command(command) {
             return true;
         }
-        let d = vanilla::game_dispatcher();
+        let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
         let parse = d.parse(command, &self.ui.registries);
         let result = match parse.executable() {
             Err(e) => {
@@ -295,8 +295,7 @@ impl Game<'_> {
     }
     /// `CommandSourceStack.broadcastToAdmins` for a command block or a command
     /// minecart called `name`: `[name: message]`, gray and italic, for every
-    /// operator when `send_command_feedback` (the world's host too: no player
-    /// ran the command) and for a dedicated server's console when
+    /// operator when `send_command_feedback` and for a dedicated server's console when
     /// `log_admin_commands`. Queued: `send_admin_feedback` sends it.
     pub(super) fn broadcast_source_to_admins(&mut self, name: Text, message: Text) {
         if message
@@ -308,19 +307,10 @@ impl Game<'_> {
         let line = Text::translate("chat.type.admin", &[name, message])
             .with_color(text::GRAY)
             .italic();
-        // Nobody else is in this game: its player is the only operator there is.
-        if self.lan.is_none()
-            && self.lan_acting.is_none()
-            && self.serving.is_none()
-            && self.options.dedicated.is_none()
-        {
-            self.system_message(line);
-            return;
-        }
         let ops = self.ui.rules.bool("send_command_feedback");
         let console = self.options.dedicated.is_some() && self.ui.rules.bool("log_admin_commands");
         if ops || console {
-            self.admin_feedback.push((line, ops, console, true));
+            self.admin_feedback.push((line, ops, console));
         }
     }
     /// CommandSourceStack.broadcastToAdmins (`sendSuccess` with `broadcast`)
@@ -364,7 +354,7 @@ impl Game<'_> {
         let line = Text::translate("chat.type.admin", &[who, message])
             .with_color(text::GRAY)
             .italic();
-        self.admin_feedback.push((line, ops, console, false));
+        self.admin_feedback.push((line, ops, console));
     }
     /// Player.getDisplayName: the name (team-formatted), suggesting a
     /// `/tell`, showing the player on hover, inserting the name.
@@ -1128,7 +1118,7 @@ impl Game<'_> {
         }
     }
     fn cmd_help(&mut self, ctx: &Context) -> R<i32> {
-        let d = vanilla::game_dispatcher();
+        let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
         let level = self.ui.registries.permission;
         match ctx.get("command") {
             None => {
@@ -1614,43 +1604,6 @@ impl Game<'_> {
             self.native_entity_teleport(self.dim.id(), entity as u32, from, to);
         }
     }
-    /// Teleport the local player into the command source's dimension. Unlike
-    /// portal travel, `/tp` keeps the coordinates given by the command.
-    fn teleport_player_to_dimension(
-        &mut self,
-        dimension: Dim,
-        pos: [f64; 3],
-        rotation: Option<[f32; 2]>,
-    ) -> R<()> {
-        let Some(mut player) = self.player.take() else {
-            return Ok(());
-        };
-        let from = self.dim;
-        if self.switch_level(dimension, player.position).is_err() {
-            self.player = Some(player);
-            return Err(err("command.failed", &[]));
-        }
-        let at = player.position;
-        self.trigger_dimension(from, dimension, [at.x, at.y, at.z]);
-        let target = Vec3::new(pos[0], pos[1], pos[2]);
-        player.position = target;
-        player.velocity = Vec3::ZERO;
-        player.fall_distance = 0.0;
-        player.ground.on_ground = false;
-        if let Some([yaw, pitch]) = rotation {
-            let pitch = pitch.clamp(-90.0, 90.0);
-            self.yaw = yaw;
-            self.pitch = pitch;
-            player.yaw = yaw;
-            player.head_yaw = yaw;
-            player.pitch = pitch;
-        }
-        self.travelling = Some((player, target));
-        self.portals.travel = None;
-        self.end_travel = false;
-        self.end_portal_travel = false;
-        Ok(())
-    }
 
     /// A server's player teleported into another level than theirs
     /// (ServerPlayer.teleport): queued to move after the command. False
@@ -1668,7 +1621,7 @@ impl Game<'_> {
             _ => None,
         };
         let at = self.target_level(t);
-        let Some(conn) = conn.filter(|_| at != level && self.options.dedicated.is_some()) else {
+        let Some(conn) = conn.filter(|_| at != level) else {
             return false;
         };
         self.level_teleports
@@ -1693,10 +1646,7 @@ impl Game<'_> {
     pub(super) fn network_entity_id(&self, t: Target) -> Option<i32> {
         let host = self.lan.as_ref();
         match t {
-            Target::Player => match self.lan_acting {
-                Some(conn) => host?.hub.guest(conn).map(|g| g.entity_id),
-                None => host.map(|h| h.host_entity),
-            },
+            Target::Player => host?.hub.guest(self.lan_acting?).map(|g| g.entity_id),
             Target::Guest(conn) => host?.hub.guest(conn).map(|g| g.entity_id),
             other => non_player_entity_id(other),
         }
@@ -1825,12 +1775,7 @@ impl Game<'_> {
             if self.teleport_across(t, source_level, pos, rotation) {
                 continue;
             }
-            let dimension = self.command_source.map_or(self.dim, |s| s.dimension);
-            if t == Target::Player && dimension != self.dim {
-                self.teleport_player_to_dimension(dimension, pos, rotation)?;
-            } else {
-                self.teleport_to(t, pos, rotation);
-            }
+            self.teleport_to(t, pos, rotation);
             // LookAt.perform after a successful teleportTo.
             if let Some(f) = facing {
                 self.send_player_look_at(t, anchored_eyes, f, facing_entity);
@@ -3622,27 +3567,16 @@ impl Game<'_> {
         }
         out
     }
-    /// ListPlayersCommand: every online player, the host of a hosted world
-    /// first and then the guests in join order, with the count and the max.
+    /// ListPlayersCommand: every online player in join order (a single-player
+    /// owner is one of them), with the count and the max.
     fn cmd_list(&mut self, ctx: &Context) -> R<i32> {
-        // A single-player owner is a placed guest of the in-process server, so
-        // it is the host and needs no entry of its own.
-        let owner_listed = self
-            .lan
-            .as_ref()
-            .is_some_and(|h| h.hub.singleplayer_owner.is_some());
-        // The host is online unless this is a dedicated server, which has none.
-        let host = (self.options.dedicated.is_none() && !owner_listed).then(|| match &self.lan {
-            Some(h) => (h.host_uuid, h.host_name.clone()),
-            None => (self.player_uuid(), PLAYER_NAME.to_owned()),
-        });
-        let guests = self
+        let players: Vec<(u128, String)> = self
             .lan
             .iter()
             .flat_map(|h| h.hub.guests.iter())
             .filter(|g| g.placed)
-            .map(|g| (g.uuid, g.name.clone()));
-        let players: Vec<(u128, String)> = host.into_iter().chain(guests).collect();
+            .map(|g| (g.uuid, g.name.clone()))
+            .collect();
         let max = self
             .lan
             .as_ref()

@@ -185,7 +185,7 @@ schedules ticks with its `ticks` through the level's `native_schedule_block_tick
 `native_schedule_fluid_tick(ticks, pos, fluid, delay)` (vanilla's `ScheduledTickAccess.scheduleTick`; false for an
 unknown name or a position that isn't loaded). It runs often, at least six times per `setBlock` that updates shapes
 (more for redstone wire's diagonals and knock-on updates): keep it short. A LAN guest shows vanilla's shape for a
-moment, until the server's update arrives. The deprecated in-frame path and chunk generation fire none. Bundles that
+moment, until the server's update arrives. Chunk generation fires none. Bundles that
 use it need `"hooks": 32`.
 
 API 33 adds random ticks a mod can handle through `native_random_tick`: on an authoritative server, each block
@@ -202,7 +202,7 @@ sends every write to players whatever the flags: `UPDATE_CLIENTS` (2), `UPDATE_I
 (8) change nothing yet. It writes at any loaded position, returns false off an authoritative server (the `Game` one too: a window that isn't a server), for a property or
 value the block doesn't have, a position that isn't loaded, or a property that already has the value (nothing is written:
 vanilla's `Level.setBlock` returns false for an unchanged state, as `native_set_block` does), and true when the block changed. Elsewhere, `Game::native_set_block_property_with(pos, key, value, flags)` does the same, as a brewing
-stand's tick sets its bottles with `flags::UPDATE_CLIENTS`. The deprecated in-frame path fires none. Bundles that use
+stand's tick sets its bottles with `flags::UPDATE_CLIENTS`. Bundles that use
 them need `"hooks": 33`.
 
 API 34 adds scheduled block ticks a mod can handle through `native_tick_block`: on an authoritative server, each due
@@ -210,7 +210,7 @@ scheduled tick of a block that is still there (`ServerLevel.tickBlock` → `Bloc
 position and state, before the block handles it. The hook may change the block with the level's
 `native_set_block_property` and the flags the block's own tick would write with (as in API 33: an observer's tick
 uses `flags::UPDATE_CLIENTS`) and set `handled` to skip the block's own tick. Without `handled`, the block then takes
-its own tick as it is now, if it is still the tick's block. The deprecated in-frame path fires none. Bundles that use
+its own tick as it is now, if it is still the tick's block. Bundles that use
 it need `"hooks": 34`.
 
 API 35 adds the commands a mod owns on the client: `native_commands` is asked for their names, so the chat box
@@ -566,9 +566,8 @@ refused it. A canceled hit on the ender dragon still counts as landed, as vanill
 whatever `reallyHurt` did: the arrow is spent and the melee effects run. A ghast's canceled hit by a fireball it was
 sent back counts as landed (`Ghast.hurtServer`). A negative amount hurts by 0 and a NaN or infinite one by
 `Float.MAX_VALUE`, as vanilla clamps them. It fires for the players, mobs and the ender dragon the game hurts. It has
-no `self`: the game is in the middle of the hit. It runs on the thread that ticks the world (the server thread; the
-window's on the deprecated in-frame path), so state a mod shares with its render thread hooks needs synchronising. On
-the in-frame path the window's player has id 0, or the host's id once the world is open to LAN. `/kill` and
+no `self`: the game is in the middle of the hit. It runs on the thread that ticks the world (the server thread), so
+state a mod shares with its render thread hooks needs synchronising. `/kill` and
 `native_kill_mob` don't reach it yet: they set the health to 0 instead of hurting with `minecraft:generic_kill` as
 vanilla does.
 
@@ -694,7 +693,7 @@ drops when a neighbour changes), and wherever else vanilla asks. `state` may not
 mod plant (a block whose template is a vanilla plant, such as a crop): the blocks it can stand on, which its
 template's `canSurvive` asks, so it is refused elsewhere and pops off when its ground changes. Answer only for your
 own blocks and leave the answer empty otherwise; the level is read-only. Both run on every shape update of such a
-block: keep them short. The deprecated in-frame path fires neither. Bundles that use them need
+block: keep them short. Bundles that use them need
 `"hooks": 70`.
 
 API 71 adds drawing mod block entities on the client. `native_block_entity_submit(pos, block, state, entity, draw)` runs once a frame
@@ -782,7 +781,7 @@ API 88 adds `native_client_resources_reloaded()` fires on the render thread afte
 
 API 89 adds `native_item_decorations(stack, x, y, batch)` appends custom GUI drawing after the default bar, cooldown shade and count have been painted for an item icon. The stack is the displayed stack, x/y are its icon's top-left in GUI units, the units the batch takes (no item-local translation remains active). Existing GUI helpers can draw badges, text and overlays. The shared path covers the hotbar, carried stacks, menu slots, recipe book and item tooltip icons, and the item icons of the advancement, beacon, stats and trading screens. `native_item_bar` still controls the bar separately; this hook does not suppress vanilla decorations. Bundles need "hooks": 89.
 
-API 90 adds using an item over time, as vanilla's `Item.getUseDuration`, `getUseAnimation` and `finishUsingItem` and NeoForge's `LivingEntityUseItemEvent.Start` and `.Finish`. `native_use_duration` answers a stack's use time: a mod's own item with no use of vanilla's that answers above 0 is used over time on a right click, until it is let go or the time runs out, on single player, LAN and in-frame alike. `native_use_animation` picks the first person pose of a use (eat, drink, bow, trident, brush), and `native_can_eat` decides whether a food can be eaten now. `native_living_entity_use_item_start` may change a use's duration or refuse it, on the server and where the window's client predicts the use, and on the server `native_living_entity_use_item_finish` may replace what the hand holds once the time ran out (consumables, potions and mods' items). Both take the using entity, None for a player, so mobs can fire them later, and the hand in use. Change the world only where this game runs the world, not on a server's client. Bundles that use them need `"hooks": 90`.
+API 90 adds using an item over time, as vanilla's `Item.getUseDuration`, `getUseAnimation` and `finishUsingItem` and NeoForge's `LivingEntityUseItemEvent.Start` and `.Finish`. `native_use_duration` answers a stack's use time: a mod's own item with no use of vanilla's that answers above 0 is used over time on a right click, until it is let go or the time runs out, on single player and LAN alike. `native_use_animation` picks the first person pose of a use (eat, drink, bow, trident, brush), and `native_can_eat` decides whether a food can be eaten now. `native_living_entity_use_item_start` may change a use's duration or refuse it, on the server and where the window's client predicts the use, and on the server `native_living_entity_use_item_finish` may replace what the hand holds once the time ran out (consumables, potions and mods' items). Both take the using entity, None for a player, so mobs can fire them later, and the hand in use. Change the world only where this game runs the world, not on a server's client. Bundles that use them need `"hooks": 90`.
 
 API 91 adds items and block state properties for drawing mod block entities: in `native_block_entity_submit`, `native_draw_item(draw,
 stack, display, owner_yaw, seed)` draws an item stack under `draw`'s pose as a campfire's or a shelf's
@@ -892,7 +891,7 @@ goat's ram. It does not fire for a sulfur cube with a block that a hit with a ca
 ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a hoglin's throw), nor yet for the ones
 Horizon makes another way: a mob's melee push from its attack knockback or a Knockback weapon, an armor stand's and the
 ender dragon's. It has no `self`: the game is in the middle of the hit. It runs on the thread that ticks the world (the
-server thread; the window's on the deprecated in-frame path), so state a mod shares with its render thread hooks needs
+server thread), so state a mod shares with its render thread hooks needs
 synchronising.
 
 Bundles that use it need `"hooks": 125`.
@@ -921,7 +920,7 @@ API 136 adds a projectile's impact, which a mod can cancel, through `native_proj
 
 API 137 adds an entity getting on or off a vehicle, which a mod can cancel, through `native_entity_mount` (NeoForge's `EntityMountEvent`): the rider's id and type (`minecraft:player`, `minecraft:zombie`), the vehicle's id and type (`minecraft:oak_boat`, `minecraft:horse`), whether it is mounting, and a `canceled` flag. Set `canceled` and the rider does not board, or keeps riding; a `/ride` that is canceled fails. It is told for a player boarding a boat, minecart, cushion or mount (pig, strider, horse and its kin, llama, nautilus, happy ghast) and getting off by their own input, `/ride`, a stab, a buck, a teleport or spectator mode, and for the mobs Horizon seats on a vehicle (jockeys, raiders on a ravager, `/ride`) and lets off one with `/ride` or a stab. It is not told for a rider whose vehicle is gone or dies, nor for riders loaded with a save. On the single player server thread and on a dedicated server. Bundles that use it need "hooks": 137.
 
-API 138 adds `native_interaction_key(button, key_mapping, hand, swing_hand, canceled)` fires while playing when an interaction key is about to act on the crosshair: button 0 the attack key (`key.attack`; when an attack is allowed, and each tick a held key keeps digging a block), 1 the use key (`key.use`; once for each hand tried, main first, before the hand's target and item), 2 pick block (`key.pickItem`; only with a block or entity aimed at). Set `canceled` to skip the action; a cancelled use ends the click, so the other hand gets no turn. A cancelled attack or use still swings `hand` unless the mod clears `swing_hand` (true on entry). A single player's window and a server's player (any window that plays on a server); the deprecated in-frame path is not covered. Bundles need "hooks": 138.
+API 138 adds `native_interaction_key(button, key_mapping, hand, swing_hand, canceled)` fires while playing when an interaction key is about to act on the crosshair: button 0 the attack key (`key.attack`; when an attack is allowed, and each tick a held key keeps digging a block), 1 the use key (`key.use`; once for each hand tried, main first, before the hand's target and item), 2 pick block (`key.pickItem`; only with a block or entity aimed at). Set `canceled` to skip the action; a cancelled use ends the click, so the other hand gets no turn. A cancelled attack or use still swings `hand` unless the mod clears `swing_hand` (true on entry). A single player's window and a server's player (any window that plays on a server). Bundles need "hooks": 138.
 
 API 139 adds `native_gui_layer_pre(layer, batch, canceled)` and `native_gui_layer_post(layer, batch)` fire around each vanilla HUD layer Horizon draws, in its paint order, so a mod places its own drawing below a layer (in `pre`) or above it (in `post`), NeoForge's `RegisterGuiLayersEvent` registerBelow/registerAbove, and hides a layer by setting `canceled` in `pre` (`RenderGuiLayerEvent.Pre`). Layer ids: `minecraft:crosshair`, `hotbar`, `effects`, `boss_overlay`, `vehicle_health` (riding a mount), `contextual_info_bar` (the jump bar, locator bar or experience bar with the level number), `player_health` (health, armor, food and air rows, one pass), `selected_item_name`, `sleep_overlay`, `overlay_message` (action bar), `title`, `scoreboard_sidebar`, `subtitle_overlay`, `chat` (the unfocused lines) and `tab_list`. F1 hides the layers it hides in vanilla, and then nothing fires for them. The camera overlays (drawn by the screen-effects pass) and the debug screen are not layers. A hidden layer still runs its game logic (the health rows' blink, the bubble pop sound) and `post` still fires. Bundles need "hooks": 139.
 
@@ -1583,10 +1582,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   every mod, so a later mod sees the value an earlier one set. It runs before `native_time_skip`, which hears the jump
   to the time chosen here and may still cancel it; the players wake either way. Bundles need
   `"hooks": @API:sleep_finished_time@`.
-- **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": @API:world_border_bounds_changed@`.
-- **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": @API:world_border_center_changed@`.
-- **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": @API:world_game_rule_change@`.
-- **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied. Bundles need `"hooks": @API:spawn_change@`.
+- **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": @API:native_world_border_bounds_changed@`.
+- **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": @API:native_world_border_center_changed@`.
+- **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": @API:native_world_game_rule_change@`.
+- **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied. Bundles need `"hooks": @API:native_spawn_change@`.
 - **`native_portal_create(dimension, pos)`**: a Nether portal built for dimension travel or the End arrival platform was completed in `dimension`; `pos` is its lower corner or platform origin. Bundles need `"hooks": @API:portal_create@`.
 - **`native_raid_spawn_wave(raid, pos, wave, raiders)`**: a raid wave is about to be spawned at `pos`; `raiders` is the count Horizon will spawn.
 - **`native_raid_state_change(raid, pos, state)`**: a raid at `pos` was triggered or changed to `victory`, `loss`, or `stopped`.
@@ -2033,8 +2032,8 @@ NeoForge mod's own `Slot` overrides them. `may_place` and `max_stack` come in wi
 of its `results` ([mods.md](mods.md#menu-types)), true elsewhere, and 99): change them for your own menu types.
 `max_stack` is kept to 1 to 99, and the item's own stack size still caps it. It runs inside a click, a drag or a
 shift-click (several times for one), with no level or player at hand: answer from the stack, and fast. It is asked
-only for a server's players (single player's server thread, LAN guests, a dedicated server), never in-frame
-(`--in-frame`), and vanilla's menus never ask it. As in vanilla (`AbstractContainerMenu.moveItemStackTo`), a
+only for a server's players (single player's server thread, LAN guests, a dedicated server), and vanilla's menus
+never ask it. As in vanilla (`AbstractContainerMenu.moveItemStackTo`), a
 shift-click tops up a slot (not a `results` one) that already holds the same item without asking `may_place`, only `max_stack`: to keep a
 slot from filling that way, lower `max_stack`.
 
@@ -2210,7 +2209,8 @@ Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `state_with_property`. `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
-`LevelWriteHost` adds random access and `native_set_block_property`. Whole-block writes wait for a
+`LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and
+`native_send_particles`. Whole-block writes wait for a
 later slice that creates block entities, as vanilla's `setBlock` does. The game owns
 the tick queue; mods do not pass it back to these helpers.
 For frame hooks, implement `RenderHooks` and return it from `Hooks::render`. The ordered
@@ -2235,10 +2235,14 @@ injections go at the head of the body, before the dispatch, so they still run fi
 
 ### Server attachments
 
-A mod can declare an `AttachmentType<T>` once and call its `get`, `set` and `remove`
-methods with the hook's host and a `Holder`. `T` is `Clone + Send + Sync + 'static`;
-`get` returns a clone and inserts the default on first access. `set` runs the optional
-codec before changing the value, returning an `AttachmentError` if it cannot encode.
+A mod can declare an `AttachmentType<T>` once and call its `get`, `set`, `remove`,
+`has` and `get_existing` methods with the hook's host and a `Holder`. `T` is
+`Clone + Send + Sync + 'static`; `get` returns a clone and inserts the default on
+first access. `has` and `get_existing` read without inserting (NeoForge's `hasData`
+and `getExistingData`): `has` says whether a value is stored, saved or set, even
+before it decodes, and `get_existing` returns `None` instead of the default. Neither
+adds anything to the holder's saved data. `set` runs the optional codec before
+changing the value, returning an `AttachmentError` if it cannot encode.
 Keys are the pair `(namespace, name)`; a key already decoded as another Rust type is
 an error. A missing or non-server holder is an error, not a new phantom holder.
 `AttachmentError` distinguishes `MissingHolder`, `TypeMismatch`, `Decode`, `Encode`,
@@ -2259,6 +2263,7 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
     copy_on_death: false,
 };
 // Inside a server hook with `host: &mut dyn Host`:
+if !COUNTER.has(host, Holder::Chunk([0, 0]))? { /* chunk carries no counter yet */ }
 let old = COUNTER.get(host, Holder::Chunk([0, 0]))?;
 COUNTER.set(host, Holder::Chunk([0, 0]), old + 1)?;
 Ok::<(), AttachmentError>(())
@@ -2281,13 +2286,14 @@ file, not `level.dat`.
 `copy_on_death` requires a codec. Player respawn copies opted-in entries via their
 encoded representation, including raw entries of an absent mod; other entries are
 removed. Living-entity conversion is not supported. This follows the default supplier,
-optional server-side persistence and player-respawn option of NeoForge 26.3's public
-`AttachmentType.Builder` contract, but not its holder-aware supplier, custom copy
-handler, conditional serialization or sync APIs.
+persistence and respawn option of NeoForge 26.3's public `AttachmentType.Builder`
+contract and `IAttachmentHolder`'s `hasData`/`getExistingData`, but not its
+holder-aware supplier, custom copy handler, conditional serialization or sync APIs.
 
 `Host` exposes the documented `Game` helpers listed under `helpers` in
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's
-receiver and documentation. Level services stay on the level hosts above.
+receiver and documentation; a helper without `self` (`config_dir`) takes
+`&self` in `Host`. Level services stay on the level hosts above.
 The following documented `Game` helpers are not in the trait yet:
 
 - `spawn_mob`, `mob`, `mobs`, `block_in_tag`, `item_in_tag`,

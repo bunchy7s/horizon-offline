@@ -130,6 +130,10 @@ path = "src/main.rs"
 name = "launch_api"
 path = "tests/launch_api.rs"
 
+[[test]]
+name = "mod_api_hooks"
+path = "tests/mod_api_hooks.rs"
+
 [lints]
 workspace = true
 
