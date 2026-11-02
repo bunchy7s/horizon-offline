@@ -573,6 +573,15 @@ impl Game<'_> {
         else {
             return;
         };
+        let Some((player, name)) = host
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.conn == conn)
+            .map(|g| (g.uuid, g.name.clone()))
+        else {
+            return;
+        };
         // An id the registry doesn't have fails the packet's codec.
         let mut powers: [Option<(i32, String)>; 2] = [None, None];
         for (k, id) in [primary, secondary].into_iter().enumerate() {
@@ -615,10 +624,17 @@ impl Game<'_> {
         if let Some(BlockEntity::Beacon(b)) =
             self.world.block_entities.get_mut(&(pos[0], pos[1], pos[2]))
         {
-            b.primary = primary;
-            b.secondary = secondary;
+            b.primary = primary.clone();
+            b.secondary = secondary.clone();
             select_sound = !b.sections.is_empty();
         }
+        self.native_player_change_beacon_effect(
+            player,
+            &name,
+            pos,
+            primary.as_deref().unwrap_or(""),
+            secondary.as_deref().unwrap_or(""),
+        );
         if select_sound {
             self.beacon_sound(pos, "minecraft:block.beacon.power_select");
         }

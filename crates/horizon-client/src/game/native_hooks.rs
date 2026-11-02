@@ -3274,6 +3274,20 @@ impl Game<'_> {
     ) {
         let _ = (player, name, entity_id, entity);
     }
+    /// A server player changed a beacon's selected effects, after they were
+    /// stored. Empty effect ids mean no effect. Helpers looking up the guest
+    /// through `self.lan` may find nothing during its packet. Server-side.
+    /// @API:player_change_beacon_effect@.
+    pub(super) fn native_player_change_beacon_effect(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        primary: &str,
+        secondary: &str,
+    ) {
+        let _ = (player, name, pos, primary, secondary);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
