@@ -3152,6 +3152,17 @@ impl Game<'_> {
         let _ = (dimension, pos, strength);
     }
 
+    /// A vault at `pos` changed to `state`. Its block state is updated.
+    /// Server-side. @API:native_vault_change_state@.
+    pub(super) fn native_vault_change_state(
+        &mut self,
+        dimension: &str,
+        pos: [i32; 3],
+        state: &str,
+    ) {
+        let _ = (dimension, pos, state);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
