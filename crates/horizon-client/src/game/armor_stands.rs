@@ -14,6 +14,7 @@ use horizon_client::{
 };
 use horizon_core::{
     geometry::{Aabb, Vec3},
+    position::BlockPos,
     random::RandomSource,
 };
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
@@ -805,11 +806,22 @@ impl Game<'_> {
                 binding: collision,
                 subject: None,
             };
+            let mut tops: Vec<BlockPos> = Vec::new();
             a.tick(&mut scene, facts, in_water, &mut |bounds, velocity| {
-                horizon_client::motion::bubble_column_push(
-                    world, registry, facts, collision, bounds, velocity,
+                horizon_client::motion::bubble_column_push_over(
+                    world,
+                    registry,
+                    facts,
+                    collision,
+                    bounds,
+                    velocity,
+                    |pos| tops.push(pos),
                 );
             });
+            for pos in tops {
+                self.bubble_column_particles(pos);
+            }
+            let a = &mut self.armor_stands[i];
             if in_water {
                 a.enchantment_fall_distance = 0.0;
             } else {
