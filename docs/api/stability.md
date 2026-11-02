@@ -72,7 +72,7 @@ Every preview and stable API has tests that run old users against the current co
 | Agent control | a transcript per protocol version: commands and the reply keys each must have |
 | Server | `api::ROUTES` against `route()` (generated reference); a `server.toml` from each release line parses to the same settings; golden replies per endpoint |
 | Launcher | the generated reference; golden `--json` output per command |
-| Launch | the generated reference, which holds `--launch-api`'s reply; every listed option is accepted; `horizon-prepare`'s `--progress json` lines (`progress_json_lines_keep_their_shape`) |
+| Launch | the generated reference, which holds `--launch-api`'s reply; every listed option is accepted; `horizon-prepare`'s `--progress json` lines (`progress_json_lines_keep_their_shape`), its `--launch-api` reply and options (`launch_api::tests`, `launch_api_options_are_in_the_help`) |
 | Data formats | a sample file of every version a reader accepts, read by today's reader |
 
 The generated references are the API's own diff: a pull request that changes an API changes its reference, and the
@@ -96,7 +96,7 @@ Deprecations and breaking changes are in bold. The release notes of the game rel
 | `horizon-server` commands, `server.toml` | stable | `horizon-server --version` |
 | Server control API | stable | `/api/v1` |
 | `horizon-launcher` commands and MCP tools | preview | none yet (unversioned) |
-| Launch API: `horizon-client`'s launch options, session JSON, exit codes; `horizon-prepare`'s output and progress | experimental | 0.1.0, `horizon-client --launch-api` |
+| Launch API: `horizon-client`'s launch options, session JSON, exit codes; `horizon-prepare`'s output and progress | experimental | 0.1.0, `horizon-client --launch-api` and `horizon-prepare --launch-api` |
 | Benchmark report | stable | `"version": 1` |
 | Telemetry batch and consent | stable | `"schema": 1`, consent `2` |
 | `horizon-graphics.txt`, `horizon-extras.txt`, `horizon-mods.txt` | preview | none |
