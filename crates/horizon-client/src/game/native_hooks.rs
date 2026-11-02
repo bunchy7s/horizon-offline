@@ -3687,6 +3687,11 @@ impl Game<'_> {
     pub(super) fn native_furnace_burn(&self, pos: [i32; 3], fuel: &str) {
         let _ = (pos, fuel);
     }
+    /// A furnace finished smelting `item` into `result` at `pos`. Server-side.
+    /// @API:furnace_smelt@.
+    pub(super) fn native_furnace_smelt(&self, pos: [i32; 3], item: &str, result: &str) {
+        let _ = (pos, item, result);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

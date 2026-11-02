@@ -1277,6 +1277,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   that look them up through `self.lan` may find nothing while a guest packet is being handled. Set `cancel` to
   keep the old slot; the client is sent that slot again.
 - **`native_furnace_burn(pos, fuel)`**: a furnace consumed `fuel` and started burning at `pos`.
+- **`native_furnace_smelt(pos, item, result)`**: a furnace finished smelting `item` into `result` at `pos`.
 - **`native_player_exp_change(player, name, amount)`**: a server player's experience points from an orb pickup are
   about to be added, after mending has taken its share. Change `amount` to change the points added; negative values
   become zero. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing

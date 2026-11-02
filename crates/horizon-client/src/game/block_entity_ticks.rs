@@ -216,24 +216,39 @@ impl Game<'_> {
     /// its block's `lit` following it.
     fn tick_furnace(&mut self, pos: Pos) -> Result<()> {
         let before = match self.world.block_entities.get(&pos) {
-            Some(BlockEntity::Furnace(f)) => (f.lit_remaining, f.items[1].clone()),
+            Some(BlockEntity::Furnace(f)) => (
+                f.lit_remaining,
+                f.items[1].clone(),
+                f.items[0].clone(),
+                f.items[2].clone(),
+            ),
             _ => return Ok(()),
         };
-        let Some(BlockEntity::Furnace(f)) = self.world.block_entities.get_mut(&pos) else {
-            return Ok(());
-        };
         let mut drops = Vec::new();
-        let lit = f.tick(
-            world_recipes!(self),
-            world_items!(self),
-            self.res.providers(),
-            &mut drops,
-        );
-        if before.0 == 0
-            && f.lit_remaining > 0
-            && let Some(fuel) = before.1
-        {
-            self.native_furnace_burn([pos.0, pos.1, pos.2], &fuel.item);
+        let (lit, burning, smelted) = {
+            let Some(BlockEntity::Furnace(f)) = self.world.block_entities.get_mut(&pos) else {
+                return Ok(());
+            };
+            let lit = f.tick(
+                world_recipes!(self),
+                world_items!(self),
+                self.res.providers(),
+                &mut drops,
+            );
+            let burning = (before.0 == 0 && f.lit_remaining > 0)
+                .then(|| before.1.as_ref().map(|fuel| fuel.item.to_string()))
+                .flatten();
+            let smelted = f.items[2]
+                .as_ref()
+                .filter(|after| after.count > before.3.as_ref().map_or(0, |before| before.count))
+                .map(|after| (before.2.clone(), after.item.to_string()));
+            (lit, burning, smelted)
+        };
+        if let Some(fuel) = burning {
+            self.native_furnace_burn([pos.0, pos.1, pos.2], &fuel);
+        }
+        if let Some((Some(item), result)) = smelted {
+            self.native_furnace_smelt([pos.0, pos.1, pos.2], &item.item, &result);
         }
         for stack in drops {
             self.campfire_drop(pos, stack);
