@@ -345,6 +345,33 @@ a version. Helpers (`native_text`, `native_player`…) have no hook entry; the c
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
 
+### The build's warnings
+
+Before it builds, the launcher reads the mods' `[[injection]]` lists and says three things in `native/build.log` that
+horizon-mixins only implies by its order. Two mods injecting at one place — the same function, kind, selector and
+ordinal; the places are the manifest's, horizon-mixins is the one that resolves a selector against the source:
+
+```
+warning: mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending).
+```
+
+Two mods wrapping one function at its head and its return, which run in that order whatever their priorities:
+
+```
+warning: mods alpha (HEAD), beta (RETURN) inject into hook `tick`: HEAD runs on entry, RETURN on return, whatever their priorities.
+```
+
+And a `cancellable = true` `HEAD` on a hook point:
+
+```
+warning: alpha's `stop` can cancel at hook `frame` HEAD: a Break skips the later injections and the function's body.
+```
+
+A raw `target` is not matched against the catalog — whether it names a hook point's function only the source knows —
+so the third warning names a `hook`, and `hook = "frame"` and `target = "…::native_frame"` are not told apart. Only
+`HEAD` is named: the interior kinds may carry `cancellable` too, but what a `Break` skips there is less than the body.
+A mod's `priority` defaults to 0, as horizon-mixins defaults it. Neither warning stops the build.
+
 ### The mod's crate
 
 A `[[crate]]` is a Cargo package of the bundle's, staged as `native-crates/<mod>/<crate>/` and added to the
