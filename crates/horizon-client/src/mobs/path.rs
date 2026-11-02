@@ -283,6 +283,28 @@ impl Path {
     pub fn same_as(&self, other: Option<&Path>) -> bool {
         other.is_some_and(|o| o.nodes == self.nodes)
     }
+    /// `PathNavigation.trimPath`: a node standing on a cauldron
+    /// (`BlockTags.CAULDRONS`) is raised onto its rim, and the node after it is
+    /// raised to the rim's height too when it is not above the cauldron, so a
+    /// route that ends on a cauldron (a leatherworker's job site) aims at the
+    /// top face instead of into the block.
+    pub fn raise_cauldron_nodes(&mut self, is_cauldron: impl Fn(i32, i32, i32) -> bool) {
+        for i in 0..self.nodes.len() {
+            let node = self.nodes[i];
+            if !is_cauldron(node.x, node.y, node.z) {
+                continue;
+            }
+            self.nodes[i].y = node.y + 1;
+            if let Some(&next) = self.nodes.get(i + 1)
+                && node.y >= next.y
+            {
+                self.nodes[i + 1] = PathNode {
+                    y: node.y + 1,
+                    ..next
+                };
+            }
+        }
+    }
 }
 
 struct Target {
