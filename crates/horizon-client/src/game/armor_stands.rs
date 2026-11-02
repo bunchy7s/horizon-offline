@@ -810,17 +810,23 @@ impl Game<'_> {
                 subject: None,
             };
             let mut tops: Vec<BlockPos> = Vec::new();
-            a.tick(&mut scene, facts, in_water, &mut |bounds, velocity| {
-                horizon_client::motion::bubble_column_push_over(
-                    world,
-                    registry,
-                    facts,
-                    collision,
-                    bounds,
-                    velocity,
-                    |pos| tops.push(pos),
-                );
-            });
+            a.tick(
+                &mut scene,
+                facts,
+                in_water,
+                &mut |bounds, velocity| {
+                    horizon_client::motion::bubble_column_push_over(
+                        world,
+                        registry,
+                        facts,
+                        collision,
+                        bounds,
+                        velocity,
+                        |pos| tops.push(pos),
+                    );
+                },
+                Some(self.border.geometry()),
+            );
             for pos in tops {
                 self.bubble_column_particles(pos);
             }

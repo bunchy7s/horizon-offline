@@ -1483,6 +1483,7 @@ impl ArmorStand {
         facts: &BlockFacts,
         in_water: bool,
         push: &mut dyn FnMut(Aabb, &mut Vec3),
+        border: Option<&BorderGeometry>,
     ) {
         self.previous = self.position;
         if self.marker {
@@ -1519,7 +1520,20 @@ impl ArmorStand {
             1.0
         };
         let mut velocity = wanted;
-        if let Ok(moved) = scene.resolve(self.bounds(), wanted, 0.0, self.on_ground) {
+        // Entity.collide: the world border's walls stop the stand too.
+        let moved = SceneCollisions {
+            world: scene.world,
+            binding: scene.binding,
+            subject: scene.subject,
+        }
+        .resolve_in_border(
+            self.bounds(),
+            wanted,
+            0.0,
+            self.on_ground,
+            border.map(|b| (b, [self.position.x, self.position.z])),
+        );
+        if let Ok(moved) = moved {
             self.position = Vec3::new(
                 self.position.x + moved.x,
                 self.position.y + moved.y,
@@ -2699,7 +2713,7 @@ mod armor_stand_motion_tests {
             binding: collision,
             subject: None,
         };
-        stand.tick(&mut scene, facts, false, &mut |_, _| {});
+        stand.tick(&mut scene, facts, false, &mut |_, _| {}, None);
     }
 
     #[test]
