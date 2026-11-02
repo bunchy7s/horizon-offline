@@ -3753,6 +3753,16 @@ impl Game<'_> {
     ) {
         let _ = (player, name, pos, result, cost);
     }
+    /// A grindstone result was prepared for a server player at `pos`. Change it before it is sent. @API:native_prepare_grindstone@.
+    pub(super) fn native_prepare_grindstone(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        result: &mut Option<ItemStack>,
+    ) {
+        let _ = (player, name, pos, result);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
