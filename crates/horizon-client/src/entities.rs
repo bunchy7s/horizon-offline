@@ -99,8 +99,8 @@ pub struct ItemEnvironmentTick {
     pub lava_hurt: bool,
 }
 impl ItemEnvironmentTick {
-    pub fn should_play_lava_hurt_sound(&self, tick: i32) -> bool {
-        self.lava_hurt && (!self.alive || tick % 10 == 0)
+    pub fn should_play_lava_hurt_sound(&self, tick: u32) -> bool {
+        self.lava_hurt && (!self.alive || tick.is_multiple_of(10))
     }
 }
 impl ItemEntity {
@@ -242,7 +242,7 @@ impl ItemEntity {
         // the item moves on the next wake-up (#4558).
         if !self.on_ground
             || horizontal > 1.0e-5
-            || (self.age as u32).wrapping_add(self.id).is_multiple_of(4)
+            || self.ticks.wrapping_add(self.id).is_multiple_of(4)
         {
             let mut scene = SceneCollisions {
                 world,
