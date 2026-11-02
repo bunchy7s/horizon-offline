@@ -4887,6 +4887,10 @@ impl Game<'_> {
     pub(super) fn native_vehicle_destroy(&mut self, kind: &str, pos: [f64; 3]) {
         let _ = (kind, pos);
     }
+    /// A guest sent the server's current `PlayerInput` flags, after they were applied to the hub. The guest's state is swapped in. Server-side. @API:player_input@.
+    pub(super) fn native_player_input(&mut self, player: u128, name: &str, flags: i32) {
+        let _ = (player, name, flags);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

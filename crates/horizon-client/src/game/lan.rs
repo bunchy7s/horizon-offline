@@ -2027,6 +2027,14 @@ impl Game<'_> {
                         });
                     }
                 }
+                HostEvent::Input { conn, flags } => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.as_guest(&mut host, conn, |game| {
+                            game.native_player_input(uuid, &name, flags);
+                        });
+                    }
+                }
                 HostEvent::MainHandChanged(conn, left) => {
                     if let Some(g) = host.hub.guest(conn) {
                         let (uuid, name) = (g.uuid, g.name.clone());

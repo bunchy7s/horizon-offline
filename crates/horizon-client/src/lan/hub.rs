@@ -178,7 +178,15 @@ pub enum HostEvent {
         filtering: bool,
     },
     /// A guest changed sneaking in a player input packet, already applied.
-    Sneak { conn: u32, sneaking: bool },
+    Sneak {
+        conn: u32,
+        sneaking: bool,
+    },
+    /// A loaded guest sent their current player input flags.
+    Input {
+        conn: u32,
+        flags: i32,
+    },
     /// A guest's client started (`flying`) or stopped flying (their abilities packet), applied to
     /// the guest already: the game tells the mods, which may refuse it.
     Flight {
@@ -3052,6 +3060,10 @@ impl Hub {
                     let g = &mut self.guests[i];
                     g.input = p.flags;
                     if g.client_loaded() {
+                        events.push(HostEvent::Input {
+                            conn,
+                            flags: i32::from(p.flags),
+                        });
                         let sneaking = p.flags & 32 != 0;
                         if g.sneaking != sneaking {
                             g.sneaking = sneaking;
