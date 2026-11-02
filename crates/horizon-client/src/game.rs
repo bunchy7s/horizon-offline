@@ -3889,6 +3889,8 @@ impl Game<'_> {
             previous: p,
             velocity: Vec3::new(velocity[0], velocity[1], velocity[2]),
             on_ground: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 0,
             pickup_delay,
             bob_offset: bob,

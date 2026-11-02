@@ -1036,6 +1036,8 @@ fn guests_see_each_other_and_the_world_entities() {
         equipment: Vec::new(),
         attributes: Vec::new(),
         precise: false,
+        vertical_collision: false,
+        horizontal_collision: false,
         needs_sync: false,
         leash: None,
         spectator: false,

@@ -2323,6 +2323,8 @@ impl Hub {
             equipment,
             attributes,
             precise: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             needs_sync: false,
             leash: None,
             spectator: false,
