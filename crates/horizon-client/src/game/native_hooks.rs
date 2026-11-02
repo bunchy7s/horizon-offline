@@ -3351,7 +3351,7 @@ impl Game<'_> {
     /// open inventory (hovering a slot and pressing the key, a menu click) and
     /// the host of a LAN world. @API:native_player_swap_hands@.
     pub(super) fn native_player_swap_hands(&mut self, player: u128, name: &str, cancel: &mut bool) {
-        let _ = (player, name, cancel);
+        mod_api::dispatch_player_swap_hands(self, mod_api::mods(), player, name, cancel);
     }
     /// `player` (`name`) opened a menu (NeoForge's `PlayerContainerEvent.Open`,
     /// posted when `ServerPlayer.openMenu` sets the new `containerMenu`): any
