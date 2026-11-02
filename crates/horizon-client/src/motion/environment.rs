@@ -107,7 +107,9 @@ impl MotionWorld<'_, '_, '_> {
             !self.player.client_side,
         ) {
             if drowning.bubbles > 0 {
-                self.player.events.push(MotionEvent::Drown(drowning.bubbles));
+                self.player
+                    .events
+                    .push(MotionEvent::Drown(drowning.bubbles));
             }
             if let Some(damage) = drowning.damage {
                 self.player.events.push(MotionEvent::Health(

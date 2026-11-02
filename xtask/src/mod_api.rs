@@ -627,7 +627,12 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
         let external = free_function_source(target);
         let free_path = external.as_ref().and_then(|(krate, path)| {
             let (module, _) = path.rsplit_once("::")?;
-            Some(root.join("crates").join(krate).join("src").join(format!("{}.rs", module.replace("::", "/"))))
+            Some(
+                root.join("crates")
+                    .join(krate)
+                    .join("src")
+                    .join(format!("{}.rs", module.replace("::", "/"))),
+            )
         });
         let (method, call) = if let Some((krate, path)) = external {
             let Some((module, function)) = path.rsplit_once("::") else {
@@ -814,9 +819,20 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
                 if !matches!(name, "living_heal" | "living_drown") {
                     return Err(format!("unsupported free-function placeholder for {name}"));
                 }
-                let passed = args.iter().chain(output.as_ref()).map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
+                let passed = args
+                    .iter()
+                    .chain(output.as_ref())
+                    .map(|(n, _)| n.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let call = format!("crate::native_client_hooks::{call}({passed});");
-                free_fills.push((path, Fill { native: native.clone(), call }));
+                free_fills.push((
+                    path,
+                    Fill {
+                        native: native.clone(),
+                        call,
+                    },
+                ));
             } else {
                 fills.push(Fill {
                     native: native.clone(),
@@ -956,7 +972,10 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
     );
     // A new hook's placeholder body becomes its dispatch call.
     if check && !free_fills.is_empty() {
-        return Err("free-function hook placeholder needs its forwarder; run cargo run -p xtask -- mod-api".into());
+        return Err(
+            "free-function hook placeholder needs its forwarder; run cargo run -p xtask -- mod-api"
+                .into(),
+        );
     }
     let filled = if fills.is_empty() {
         None

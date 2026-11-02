@@ -4292,7 +4292,8 @@ impl Game<'_> {
                 MotionEvent::Drown(bubbles) => {
                     if bubbles == 8 {
                         if let Some(g) = host.hub.guest(conn) {
-                            host.hub.entity_event(g.entity_id, super::combat::DROWN_EVENT, at);
+                            host.hub
+                                .entity_event(g.entity_id, super::combat::DROWN_EVENT, at);
                         }
                     } else {
                         super::combat::send_drown_particles(host, at, [0.0; 3], bubbles);

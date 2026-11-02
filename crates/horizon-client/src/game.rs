@@ -7517,7 +7517,8 @@ impl Game<'_> {
                 MotionEvent::Drown(bubbles) => {
                     if let Some(host) = &self.lan {
                         if bubbles == 8 {
-                            host.hub.entity_event(host.host_entity, combat::DROWN_EVENT, feet);
+                            host.hub
+                                .entity_event(host.host_entity, combat::DROWN_EVENT, feet);
                         } else {
                             combat::send_drown_particles(host, feet, player_velocity, bubbles);
                         }

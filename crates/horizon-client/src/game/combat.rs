@@ -187,7 +187,10 @@ pub(super) fn send_drown_particles(
         entity_data::Particle,
         packets::play::{self, Clientbound},
     };
-    let Some(id) = host.hub.registry_id("minecraft:particle_type", "minecraft:bubble") else {
+    let Some(id) = host
+        .hub
+        .registry_id("minecraft:particle_type", "minecraft:bubble")
+    else {
         return;
     };
     let seed = std::time::SystemTime::now()
