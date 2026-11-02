@@ -8,7 +8,7 @@
       "cancellable": true,
       "mod_api": {
         "contract": "cancel",
-        "out": "bool"
+        "out": "cancel"
       }
     }
   ],

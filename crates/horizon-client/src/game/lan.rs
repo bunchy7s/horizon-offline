@@ -2129,6 +2129,14 @@ impl Game<'_> {
                 .take()
                 .expect("the hub is back after the quiet commands");
         }
+        if !host.hub.native_advancement_grants.is_empty() {
+            self.lan = Some(host);
+            self.run_native_advancement_grants();
+            host = self
+                .lan
+                .take()
+                .expect("the hub is back after the advancement grants");
+        }
         if !host.hub.native_menu_events.is_empty() {
             self.lan = Some(host);
             self.run_native_menu_events();
@@ -2325,6 +2333,14 @@ impl Game<'_> {
                 .lan
                 .take()
                 .expect("the hub is back after the mod messages");
+        }
+        if !host.hub.native_advancement_grants.is_empty() {
+            self.lan = Some(host);
+            self.run_native_advancement_grants();
+            host = self
+                .lan
+                .take()
+                .expect("the hub is back after the advancement grants");
         }
         if !host.hub.native_menu_events.is_empty() {
             self.lan = Some(host);

@@ -7435,6 +7435,7 @@ impl Game<'_> {
             [player.velocity.x, player.velocity.y, player.velocity.z],
             [player.position.x, player.position.y, player.position.z],
         );
+        let mut jumped = false;
         if !riding {
             MotionWorld {
                 entities: &entity_collisions,
@@ -7447,7 +7448,7 @@ impl Game<'_> {
             .controlled_simulation_tick_with_sprint_window(keys, sprint_window)?;
             // Player.jumpFromGround: the jump statistic.
             if grounded && keys.jump && !player.flying && player.velocity.y > 0.2 {
-                self.award_custom_stat("jump", 1);
+                jumped = true;
             }
         }
         let events = std::mem::take(&mut player.events);
@@ -7462,6 +7463,9 @@ impl Game<'_> {
             player.dimensions.eye_height
         };
         self.eye += (camera_eye.unwrap_or(eye_height) - self.eye) * 0.5;
+        if jumped {
+            self.award_custom_stat("jump", 1);
+        }
         // `LivingEntity.baseTick` (Soul Speed) comes before `aiStep` (the
         // glide's wear): both draw from the level random.
         if let Some((at, velocity)) = self.tick_soul_speed() {
@@ -19389,6 +19393,7 @@ impl Game<'_> {
                         if let Some(host) = self.lan.as_mut() {
                             host.hub.reload_resources(sync);
                         }
+                        self.run_native_advancement_grants();
                     }
                     Err(e) => {
                         log::warn!("Horizon: the players are not sent the reloaded data: {e}")

@@ -199,8 +199,9 @@ impl Game<'_> {
     pub(super) fn award_stat(&mut self, ty: &str, key: &str, n: i32) {
         if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             let mut cancel = false;
-            let stat_type = format!("minecraft:{ty}");
-            self.native_player_stat_award(player, &name, &stat_type, key, n, &mut cancel);
+            namespaced(ty, |stat_type| {
+                self.native_player_stat_award(player, &name, stat_type, key, n, &mut cancel)
+            });
             if cancel {
                 return;
             }
@@ -314,17 +315,23 @@ impl Game<'_> {
             None if eye_in_water.fluid == horizon_client::blocks::Fluid::Water => {
                 self.award_custom_stat("walk_under_water_one_cm", total)
             }
-            None if in_water => self.award_custom_stat("walk_on_water_one_cm", horizontal),
+            None if in_water => {
+                if horizontal > 0 {
+                    self.award_custom_stat("walk_on_water_one_cm", horizontal)
+                }
+            }
             None if climbing => {
                 self.award_custom_stat("climb_one_cm", (d.y * 100.0).round() as i32)
             }
             None if on_ground => {
-                if sprinting {
-                    self.award_custom_stat("sprint_one_cm", horizontal)
-                } else if crouching {
-                    self.award_custom_stat("crouch_one_cm", horizontal)
-                } else {
-                    self.award_custom_stat("walk_one_cm", horizontal)
+                if horizontal > 0 {
+                    if sprinting {
+                        self.award_custom_stat("sprint_one_cm", horizontal)
+                    } else if crouching {
+                        self.award_custom_stat("crouch_one_cm", horizontal)
+                    } else {
+                        self.award_custom_stat("walk_one_cm", horizontal)
+                    }
                 }
             }
             None if gliding => self.award_custom_stat("aviate_one_cm", total),

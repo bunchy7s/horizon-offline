@@ -627,6 +627,24 @@ impl Game<'_> {
             self.native_player_advancement_progress(player, &name, advancement, criterion, granted);
         }
     }
+    /// The criteria `CriteriaTriggers.TICK` granted network players in the hub
+    /// (their first tick and a reload), told to the mods.
+    pub(super) fn run_native_advancement_grants(&mut self) {
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
+        for batch in std::mem::take(&mut host.hub.native_advancement_grants) {
+            for grant in batch.grants {
+                self.native_player_advancement_progress(
+                    batch.player,
+                    &batch.name,
+                    &grant.advancement,
+                    &grant.criterion,
+                    true,
+                );
+            }
+        }
+    }
     /// `PlayerAdvancements.progressChanged`, kept for a network player's client.
     fn progress_changed(&mut self, index: usize) {
         if self.lan_acting.is_some() {
