@@ -633,8 +633,12 @@ impl Launcher {
             }
             // A Java instance keeps the game it was made for.
             (Some(_), _) => {}
-            // The version and loader keep the earlier look for now.
-            (None, _) => body = body.child(self.java_choice_rows(cx)),
+            (None, _) => {
+                body = body.child(self.minecraft_versions(cx));
+                if kind == NewKind::Modded {
+                    body = body.child(self.loader_choice(cx));
+                }
+            }
         }
         let name = self
             .field(Field::InstanceName, tr("My instance"), 340., cx)
