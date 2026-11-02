@@ -3473,6 +3473,17 @@ impl Game<'_> {
     ) {
         let _ = (player, name, recipe);
     }
+    /// A server player stopped spectating `entity_id`, after their camera
+    /// returned to the player. Guest lookup helpers may find nothing.
+    /// @API:player_stop_spectating_entity@.
+    pub(super) fn native_player_stop_spectating_entity(
+        &mut self,
+        player: u128,
+        name: &str,
+        entity_id: i32,
+    ) {
+        let _ = (player, name, entity_id);
+    }
     /// A server applied `velocity` to a player, when syncing changed motion to
     /// that player's client. Guest lookup helpers may find nothing.
     /// @API:player_velocity@.
