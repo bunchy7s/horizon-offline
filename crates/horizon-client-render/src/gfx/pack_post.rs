@@ -423,7 +423,8 @@ pub(super) struct World<'a> {
     pub lightmap: wgpu::TextureView,
     /// Terrain's geometry, when the pack draws it.
     pub terrain: Option<Geometry<'a>>,
-    /// `mc_Entity` of each block sprite layer: (id, 1 for fluids or -1) pairs.
+    /// Of each block sprite layer, `mc_Entity` (id, then 1 for fluids or -1) and `at_midBlock.w`
+    /// (its block's light): three values a layer.
     pub block_ids: &'a [i32],
     /// The atlas of the sun and moon's sprites.
     pub celestial: Option<wgpu::TextureView>,
@@ -937,10 +938,11 @@ pub(super) struct ShadowView {
     pub unculled: Option<f32>,
 }
 
-/// Set 3 of flat terrain, read by the vertex stage: `mc_Entity`'s table (-1 pairs when empty)
-/// and, per arena page, the page's vertices (a vertex reads its quad's corners for its normal).
+/// Set 3 of flat terrain, read by the vertex stage: the sprite layers' table (`mc_Entity`'s id
+/// and fluid, `at_midBlock.w`; -1, -1, 0 when empty) and, per arena page, the page's vertices
+/// (a vertex reads its quad's corners for its normal).
 fn block_ids(device: &wgpu::Device, table: &[i32]) -> (wgpu::BindGroupLayout, wgpu::Buffer) {
-    let empty = [-1, -1];
+    let empty = [-1, -1, 0];
     let table = if table.is_empty() { &empty[..] } else { table };
     let buffer = wgpu::util::DeviceExt::create_buffer_init(
         device,
