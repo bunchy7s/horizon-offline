@@ -72,7 +72,7 @@ SpriteIconButton.extractLoadingStateIfLoading	skip:service		loading spinner only
 SpriteIconButton.Builder.sprite	skip:java		builder setter; Horizon draws its icon buttons with fixed sprites
 SpriteIconButton.Builder.build	skip:java		builder; no object is needed
 SpriteIconButton.CenteredIcon.extractContents	skip:service		FriendsButton (social)
-SpriteIconButton.TextAndIcon.extractContents	skip:other		no caller in 26.3
+SpriteIconButton.TextAndIcon.extractContents	port	crates/horizon-client/src/title.rs::Button::draw_label_at	the Accessibility screen's Music & Sounds, Accessibility Settings and Language buttons (AccessibilityOnboardingScreen): the label in x + 2 .. x + width - icon - 4 centred on the button's middle, the icon drawn in Title::draw
 StringWidget.setMaxWidth	port	crates/horizon-client-render/src/screen_draw.rs::string_widget	clips at max_width (CLAMPED)
 StringWidget.getWidth	port	crates/horizon-client-render/src/screen_draw.rs::label_width	the smaller of max width and text width
 StringWidget.visitLines	port	crates/horizon-client-render/src/screen_draw.rs::string_widget	gap: minor: SCROLLING overflow (scrolling text) is not ported; CLAMPED draws "..."

@@ -8181,9 +8181,26 @@ impl Game<'_> {
             self.stop_remote_mining();
         }
         if !ready {
+            // A screen's opening released the keys (`KeyMapping.releaseAll`).
+            self.hotbar_presses.clear();
             return;
         }
         // MultiPlayerGameMode.tick syncs the carried slot before keybinds.
+        self.remote_send_carried();
+        let (attack, use_item) = (self.left, self.right);
+        // A tick that clicks, attacks or uses acts with the slot its number
+        // keys select (`ensureHasSentCarriedItem` before the packets).
+        let acts = input.has_clicks() || attack || use_item;
+        input.tick(&mut RemoteInputWorld(self, acts), attack, use_item);
+        self.remote_queued_keys();
+        if let Some(r) = self.remote.as_mut() {
+            r.input = input;
+        }
+    }
+
+    /// `MultiPlayerGameMode.ensureHasSentCarriedItem`: the server hears of a
+    /// new selected slot before anything the slot acts with.
+    fn remote_send_carried(&mut self) {
         let carried_changed = self.remote.as_mut().is_some_and(|r| {
             if r.carried == Some(self.selected) {
                 false
@@ -8197,8 +8214,9 @@ impl Game<'_> {
                 slot: self.selected as i16,
             }));
         }
-        let (attack, use_item) = (self.left, self.right);
-        input.tick(&mut RemoteInputWorld(self), attack, use_item);
+    }
+
+    fn remote_queued_keys(&mut self) {
         // handleKeybinds' keybind polls: the queued presses act now, in tick
         // order, so no packet goes out between CLIENT_TICK_END and a pong.
         let pending = self
@@ -8228,9 +8246,6 @@ impl Game<'_> {
         }
         if self.clicks.miss_time > 0 {
             self.clicks.miss_time -= 1;
-        }
-        if let Some(r) = self.remote.as_mut() {
-            r.input = input;
         }
     }
 
@@ -8300,11 +8315,14 @@ impl Game<'_> {
         } else if let Some((i, distance)) = self.mob_hit()
             && self.before_block(distance)
         {
-            self.send(S::Attack(play::Attack {
-                id: self.mobs[i].id as i32,
-            }));
-            self.remote_player_attack(i);
-            self.reset_attack_strength();
+            // Minecraft.startAttack: an item's attack_range must hold the hit.
+            if self.held_range_allows(distance) {
+                self.send(S::Attack(play::Attack {
+                    id: self.mobs[i].id as i32,
+                }));
+                self.remote_player_attack(i);
+                self.reset_attack_strength();
+            }
         } else if !self.entity_targeted()
             && let Some(hit) = self.pick()
         {
@@ -8519,7 +8537,9 @@ impl Game<'_> {
         // `KeyMapping.releaseAll` clears key.use; without this the button still
         // reads held and a use would start again on the first tick back.
         self.right = false;
-        horizon_client::interaction_input::release_on_screen_open(&mut RemoteInputWorld(self));
+        horizon_client::interaction_input::release_on_screen_open(&mut RemoteInputWorld(
+            self, false,
+        ));
     }
     /// `MultiPlayerGameMode.releaseUsingItem`: sends `RELEASE_USE_ITEM` and
     /// runs the client half of `Item.releaseUsing` (a Riptide launch moves the
@@ -9818,7 +9838,8 @@ fn synced_local_use(
     }
 }
 
-struct RemoteInputWorld<'g, 'a>(&'g mut Game<'a>);
+/// The game as the tick's input sees it, and whether the tick acts.
+struct RemoteInputWorld<'g, 'a>(&'g mut Game<'a>, bool);
 
 struct RemoteUseWorld<'g, 'a>(&'g mut Game<'a>);
 
@@ -9836,10 +9857,16 @@ impl horizon_client::interaction_input::TargetUseWorld for RemoteUseWorld<'_, '_
 
 impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_, '_> {
     fn pick_hit_result(&mut self) {
-        self.0.tick_hit = Some(self.0.pick());
+        self.0.pick_tick_targets();
+        // MultiPlayerGameMode.ensureHasSentCarriedItem: an action this tick
+        // sends the slot the number keys chose first; otherwise the next
+        // tick's MultiPlayerGameMode.tick does.
+        if self.1 {
+            self.0.remote_send_carried();
+        }
     }
     fn release_hit_result(&mut self) {
-        self.0.tick_hit = None;
+        self.0.release_tick_targets();
     }
     fn using_item(&self) -> bool {
         self.0.using.is_some()

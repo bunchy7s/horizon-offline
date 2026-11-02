@@ -19,6 +19,30 @@ use std::{
     sync::Arc,
 };
 
+/// A recipe ingredient of a mod's own kind: the entry named a type in a
+/// namespace outside `minecraft:`, and the loader kept it for this call.
+/// The kind and the JSON the file wrote are here; fill `items` with the
+/// item ids the ingredient matches (item ids only: components are not
+/// checked here; a match-time hook follows separately). Duplicates are
+/// removed keeping first-seen order. The hook may be called more than
+/// once per recipe; the answer must be the same. An unclaimed kind
+/// leaves the list empty and the recipe fails, as an unknown kind does.
+/// API @API:ingredient@.
+#[inline(never)]
+pub fn native_ingredient(
+    kind: &str,
+    data: &serde_json::Map<String, Value>,
+    items: &mut Vec<String>,
+) {
+    let _ = (kind, data, items);
+}
+
+/// Keep first-seen order, drop the rest.
+fn dedup_keep_order(items: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    items.retain(|i| seen.insert(i.clone()));
+}
+
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
 #[derive(Clone, Debug)]
@@ -106,6 +130,14 @@ impl Ingredient {
                     .filter(|i| !gone.0.contains(*i))
                     .cloned()
                     .collect()
+            }
+            // A mod's own kind: the hook answers with the item list it
+            // matches; a bare type name is minecraft's own, not a mod's.
+            k if k.contains(':') && !k.starts_with("minecraft:") => {
+                let mut list = Vec::new();
+                native_ingredient(k, o, &mut list);
+                dedup_keep_order(&mut list);
+                return (!list.is_empty()).then(|| Self::of(list));
             }
             _ => return None,
         };
@@ -1913,6 +1945,23 @@ mod tests {
 
     /// NeoForge's standard ingredient shapes resolve to their flat item
     /// lists; a kind the loader doesn't know still fails the file.
+    #[test]
+    fn an_unclaimed_ingredient_kind_fails_and_dedup_keeps_order() {
+        let items = Items::for_tests(HashMap::new());
+        let json = |s: &str| serde_json::from_str::<Value>(s).unwrap();
+        assert!(
+            Ingredient::parse(&json(r#"{"type":"mymod:aspect","aspect":"fire"}"#), &items,)
+                .is_none()
+        );
+        assert!(
+            Ingredient::parse(&json(r#"{"type":"minecraft:future_shape"}"#), &items,).is_none()
+        );
+        assert!(Ingredient::parse(&json(r#"{"type":"aspect"}"#), &items,).is_none());
+        let mut list = vec!["b".to_string(), "a".to_string(), "b".to_string()];
+        dedup_keep_order(&mut list);
+        assert_eq!(list, vec!["b".to_string(), "a".to_string()]);
+    }
+
     #[test]
     fn neoforge_ingredient_shapes_parse() {
         let mut tags = HashMap::new();

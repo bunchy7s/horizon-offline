@@ -427,6 +427,7 @@ impl Game<'_> {
         let visually_swimming =
             p.pose == Pose::Swimming || (!p.fall_flying && p.pose == Pose::FallFlying);
         let in_water = p.fluids.was_touching_water;
+        let in_lava = p.is_in_lava();
         let (yaw, pitch) = (self.yaw, self.pitch);
         let main = self.inventory[self.selected].clone();
         let off = self.offhand.as_ref().map(|s| s.item.clone());
@@ -497,6 +498,9 @@ impl Game<'_> {
         m.extra.crouching = crouching;
         // Guests and server players take their pose from DATA_POSE, not here.
         m.extra.avatar_pose = pose;
+        // What custom entity model animations read of the fluids (`is_in_water`, crawling).
+        m.fluids.in_water = in_water;
+        m.fluids.in_lava = in_lava;
         m.extra.passenger = riding;
         m.extra.previous_velocity = m.velocity;
         m.velocity = velocity;

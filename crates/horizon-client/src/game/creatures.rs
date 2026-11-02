@@ -488,14 +488,15 @@ impl Game<'_> {
         }
     }
     /// `LivingEntity.hurtArmor` -> `LivingEntity.doHurtEquipment`, from the hit
-    /// `MobEvent::ArmorHurt` reported: every worn piece that wears when its
-    /// wearer is hurt loses `max(1, damage / 4)` durability, Unbreaking
-    /// applied, and at its maximum the slot empties and the equipment-break
-    /// event goes out (`LivingEntity.entityEventForEquipmentBreak`: 49 to 52
-    /// for the armour, 65 for the body). A fire hit leaves a fire-resistant
-    /// piece alone (`ItemStack.canBeHurtBy`).
+    /// `MobEvent::ArmorHurt` reported. Only `Horse` overrides `hurtArmor` for a
+    /// mob, and its override asks for the BODY slot alone, so the body piece is
+    /// the only one this wears: it loses `max(1, damage / 4)` durability,
+    /// Unbreaking applied, and at its maximum the slot empties and the break
+    /// event goes out (`LivingEntity.entityEventForEquipmentBreak`: 65 for the
+    /// body — 49 to 52 are the four armour slots, which only a player's own
+    /// pieces reach). A fire hit leaves a fire-resistant piece alone
+    /// (`ItemStack.canBeHurtBy`).
     fn hurt_mob_armor(&mut self, id: u32, damage: f32, kind: horizon_client::mobs::DamageKind) {
-        use horizon_client::mobs::drops;
         use horizon_world::player_inventory::EquipmentSlot;
         if damage <= 0.0 {
             return;
@@ -504,7 +505,6 @@ impl Game<'_> {
             return;
         };
         let at = [m.position.x, m.position.y, m.position.z];
-        let body_armour = drops::head_is_body(m.species());
         let amount = ((damage / 4.0) as u32).max(1);
         let name = damage_type(kind, false);
         let fire = self
@@ -514,9 +514,15 @@ impl Game<'_> {
             .id(name)
             .is_some_and(|d| self.motion.health.damage.in_tag(d, "minecraft:is_fire"));
         // A piece's maximum, or none when it may not lose durability at all.
+        // `doHurtEquipment` starts from the item's `equippable` component
+        // (`Equippable equippable = item.get(DataComponents.EQUIPPABLE)`), so a
+        // damageable item with no such component — a sword put in a horse's body
+        // slot by `/item replace` — never wears; `equip_damage_on_hurt` alone
+        // cannot say that, since it defaults to true when the component is absent.
         fn wearable(me: &Game<'_>, stack: &ItemStack, fire: bool, name: &str) -> Option<u32> {
             let info = me.res.items().get(&stack.item)?;
-            if !info.equip_damage_on_hurt
+            if info.equip_slot.is_none()
+                || !info.equip_damage_on_hurt
                 || info.max_damage == 0
                 || !horizon_client::stations::is_damageable(me.res.items(), stack)
                 || (fire && me.res.items().resists_fire(stack, name))
@@ -525,66 +531,39 @@ impl Game<'_> {
             }
             Some(info.max_damage)
         }
-        let mut broke: Vec<i8> = Vec::new();
-        // The four armour slots, then the body slot (`extra.head`).
-        let event_of = horizon_client::mobs::item_break::equipment_break_event;
-        for (index, slot) in [
-            (0usize, EquipmentSlot::Head),
-            (1, EquipmentSlot::Chest),
-            (2, EquipmentSlot::Legs),
-            (3, EquipmentSlot::Feet),
-        ] {
-            let Some(m) = self.mobs.iter().find(|m| m.id == id) else {
-                return;
-            };
-            let Some(stack) = m.extra.armor[index].clone() else {
-                continue;
-            };
-            let Some(max) = wearable(self, &stack, fire, name) else {
-                continue;
-            };
-            let loss = self.durability_loss(&stack, amount);
-            if loss == 0 {
-                continue;
-            }
-            let lost = stack.damage + loss;
+        let Some(body) = self
+            .mobs
+            .iter()
+            .find(|m| m.id == id)
+            .and_then(|m| m.item_by_slot(EquipmentSlot::Body))
+        else {
+            return;
+        };
+        let Some(max) = wearable(self, &body, fire, name) else {
+            return;
+        };
+        let loss = self.durability_loss(&body, amount);
+        if loss == 0 {
+            return;
+        }
+        let lost = body.damage + loss;
+        let broke = {
             let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
                 return;
             };
             if lost >= max {
-                m.extra.armor[index] = None;
-                broke.push(event_of(slot));
-            } else if let Some(worn) = m.extra.armor[index].as_mut() {
-                worn.damage = lost;
+                m.extra.head = None;
+                m.extra.body_damage = 0;
+                true
+            } else {
+                m.extra.body_damage = lost as i32;
+                false
             }
-        }
-        if body_armour {
-            let body = self
-                .mobs
-                .iter()
-                .find(|m| m.id == id)
-                .and_then(|m| m.item_by_slot(EquipmentSlot::Body));
-            if let Some(body) = body
-                && let Some(max) = wearable(self, &body, fire, name)
-            {
-                let loss = self.durability_loss(&body, amount);
-                if loss > 0 {
-                    let lost = body.damage + loss;
-                    let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
-                        return;
-                    };
-                    if lost >= max {
-                        m.extra.head = None;
-                        m.extra.body_damage = 0;
-                        broke.push(event_of(EquipmentSlot::Body));
-                    } else {
-                        m.extra.body_damage = lost as i32;
-                    }
-                }
-            }
-        }
-        for event in broke {
+        };
+        if broke {
             // LivingEntity.onEquippedItemBroken through the level's broadcast.
+            let event =
+                horizon_client::mobs::item_break::equipment_break_event(EquipmentSlot::Body);
             self.lan_entity_event(id as i32, event, at);
         }
     }

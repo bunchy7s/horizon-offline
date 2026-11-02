@@ -789,5 +789,6 @@
   "Export the server outside the launcher's managed folders.": "Експортуйте сервер позаду папок, которыmi керує лаунчер.",
   "{path} is not a folder to build into.": "{path} не є папкою для збірки.",
   "Could not copy the build: {error}": "Не вдалося скопіювати збірку: {error}",
-  "Could not move the build to {path}: {error}": "Не вдалося перемістити збірку у {path}: {error}"
+  "Could not move the build to {path}: {error}": "Не вдалося перемістити збірку у {path}: {error}",
+  "Native mods can use your microphone for voice chat when you enable it.": "Нативні моди можуть використовувати ваш мікрофон для голосового чату, коли ви це увімкнете."
 }

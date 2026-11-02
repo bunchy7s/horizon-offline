@@ -549,6 +549,24 @@ fn params(m: &Mob, s: &State, frame: &Frame, slots: &mut [f32]) {
             ((vx * fx + vz * fz) / len, (vx * -fz + vz * fx) / len)
         }
     };
+    // `Entity.isVisuallySwimming` (`Pose.SWIMMING`, id 3): a player's or mannequin's pose comes
+    // in `avatar_pose`, another mob's in `pose`. A drowned has no such pose, only the shared
+    // swimming flag (`extra.flag`).
+    let swim_pose = match &*m.kind.id {
+        "minecraft:player" | "minecraft:mannequin" => {
+            m.extra.avatar_pose == crate::pose::Pose::Swimming
+        }
+        _ => m.extra.pose == 3 || (m.species() == super::Species::Drowned && m.extra.flag),
+    };
+    // The arm the current swing moves: the main arm unless the swing named its hand.
+    let swinging = m.ai.swinging || m.extra.swing_right_arm.is_some();
+    let swing_right = m.extra.swing_right_arm.unwrap_or(!m.main_arm_left());
+    // `HumanoidArm`'s items: the main hand is on the main arm.
+    let (right_hand, left_hand) = if m.main_arm_left() {
+        (&m.extra.off_hand, &m.extra.main_hand)
+    } else {
+        (&m.extra.main_hand, &m.extra.off_hand)
+    };
     for (i, (_, p)) in PARAMS.iter().enumerate() {
         use Param::*;
         slots[i] = match p {
@@ -582,6 +600,8 @@ fn params(m: &Mob, s: &State, frame: &Frame, slots: &mut [f32]) {
             PlayerRotY => frame.player_rot[1],
             // Random models' rule (a later change); the model's own rule is 0 until then.
             RuleIndex => 0.0,
+            // A client knows only a wolf's anger end time (as a remaining time taken when it
+            // was synced, which doesn't count down) and never the start: 0 for now.
             AngerTime | AngerTimeStart => 0.0,
             Distance => (dx * dx + dy * dy + dz * dz).sqrt() as f32,
             MoveForward => forward,
@@ -589,6 +609,8 @@ fn params(m: &Mob, s: &State, frame: &Frame, slots: &mut [f32]) {
             // How deep the entity is in its fluid, which is what `fluid_depth_down` measures
             // once it touches the bottom.
             FluidDepth | FluidDepthDown => m.fluids.water.max(m.fluids.lava) as f32,
+            // Both need the blocks around the mob (the ground below, the fluid's surface
+            // above), which the draw doesn't have: 0 for now.
             HeightAboveGround | FluidDepthUp => 0.0,
             // The synced `Mob.isAggressive`, which a client's mobs have too.
             Aggressive => flag(m.ai.aggressive),
@@ -599,10 +621,14 @@ fn params(m: &Mob, s: &State, frame: &Frame, slots: &mut [f32]) {
             Hurt => flag(m.hurt_time > 0),
             InWater => flag(m.fluids.in_water),
             InLava => flag(m.fluids.in_lava),
+            // `isInWaterOrRain` without the rain: whether rain reaches the mob needs the
+            // weather and the sky above it, which the draw doesn't have.
             Wet => flag(m.fluids.in_water),
             Invisible => flag(m.invisible),
             OnGround => flag(m.on_ground),
             Riding => flag(m.extra.passenger),
+            // `Entity.isVehicle`: SetPassengers names its first rider.
+            Ridden => flag(m.extra.rider.is_some() || m.rider.is_some()),
             Climbing => flag(m.climbing),
             Jumping => flag(!m.on_ground && m.velocity.y > 0.0),
             Paused => flag(frame.paused),
@@ -611,14 +637,32 @@ fn params(m: &Mob, s: &State, frame: &Frame, slots: &mut [f32]) {
             ThirdPerson => flag(!frame.first_person && !frame.third_person_reversed),
             ThirdPersonReversed => flag(frame.third_person_reversed),
             RightHanded => flag(!m.main_arm_left()),
-            Sitting => flag(m.extra.sitting),
+            // The tamed animals' DATA_FLAGS_ID, and the species that keep their own.
+            Sitting => flag(match m.species() {
+                super::Species::Fox => super::fox::flag(m, super::fox::SITTING),
+                super::Species::Panda => super::panda::is_sitting(m),
+                super::Species::Camel | super::Species::CamelHusk => super::camel::sitting(m),
+                _ => m.extra.sitting,
+            }),
             Tamed => flag(m.extra.tame),
             Sprinting => flag(m.extra.sprinting),
             Sneaking => flag(m.extra.crouching),
-            // Not known to the draw yet: 0 until something reads them.
-            InHand | InItemFrame | InGround | OnHead | OnShoulder | Ridden | Blocking
-            | Crawling | Swimming | SwingingRight | SwingingLeft | FirstPersonHand | UsingItem
-            | HoldingRight | HoldingLeft | Hovered => 0.0,
+            // A player's `isBlocking`: the item in use blocks attacks.
+            Blocking => flag(m.extra.blocking),
+            // `isVisuallyCrawling`: the swimming pose out of water.
+            Crawling => flag(swim_pose && !m.fluids.in_water),
+            Swimming => flag(swim_pose),
+            // DATA_LIVING_ENTITY_FLAGS' using bit (the client counts the ticks).
+            UsingItem => flag(m.extra.using_item > 0),
+            SwingingRight => flag(swinging && swing_right),
+            SwingingLeft => flag(swinging && !swing_right),
+            HoldingRight => flag(right_hand.is_some()),
+            HoldingLeft => flag(left_hand.is_some()),
+            // Where the model is drawn (a held, framed or worn item, a shoulder): the draw
+            // doesn't pass it yet, so 0 until something reads them.
+            InHand | InItemFrame | InGround | OnHead | OnShoulder | FirstPersonHand | Hovered => {
+                0.0
+            }
         };
     }
 }
@@ -882,18 +926,68 @@ mod tests {
         m.extra.crouching = true;
         // The player's main hand option set to left.
         m.extra.main_hand_left = true;
+        m.extra.blocking = true;
+        // The swimming pose out of water: crawling.
+        m.extra.pose = 3;
+        m.extra.using_item = 3;
+        // Only the main hand holds something, and it is the left one.
+        m.extra.set_main_hand(Some("minecraft:stick".into()));
+        // A swing that names no hand moves the main arm: the left.
+        m.ai.swinging = true;
+        m.extra.rider = Some(7);
         let model = bone("root", vec![]);
         let animation = animate(
             &model,
             &[(
                 "root.tx",
                 "is_aggressive + is_sitting * 2 + is_tamed * 4 + is_sprinting * 8 \
-                 + is_sneaking * 16 + is_right_handed * 32",
+                 + is_sneaking * 16 + is_right_handed * 32 + is_blocking * 64 \
+                 + is_crawling * 128 + is_swimming * 256 + is_using_item * 512 \
+                 + is_holding_item_right * 1024 + is_holding_item_left * 2048 \
+                 + is_swinging_right_arm * 4096 + is_swinging_left_arm * 8192 \
+                 + is_ridden * 16384",
             )],
         );
         let mut poses = Poses::new(&model);
         animation.run_in(&Frame::default(), &m, &still(), &mut poses);
-        assert_eq!(poses.get("root")[0], 31.0);
+        assert_eq!(
+            poses.get("root")[0],
+            (31 + 64 + 128 + 256 + 512 + 2048 + 8192 + 16384) as f32
+        );
+    }
+
+    #[test]
+    fn the_swimming_pose_in_water_swims_without_crawling() {
+        let mut m = mob();
+        m.extra.pose = 3;
+        let model = bone("root", vec![]);
+        let animation = animate(&model, &[("root.tx", "is_swimming + is_crawling * 2")]);
+        let mut read = |in_water: bool| {
+            m.fluids.in_water = in_water;
+            let mut poses = Poses::new(&model);
+            animation.run_in(&Frame::default(), &m, &still(), &mut poses);
+            poses.get("root")[0]
+        };
+        assert_eq!([read(true), read(false)], [1.0, 3.0]);
+    }
+
+    #[test]
+    fn a_fox_sits_by_its_own_flags() {
+        let mut m = mob();
+        m.kind = std::sync::Arc::new(crate::mobs::MobType {
+            species: crate::mobs::Species::Fox,
+            ..(*m.kind).clone()
+        });
+        let model = bone("root", vec![]);
+        let animation = animate(&model, &[("root.tx", "is_sitting")]);
+        let mut sitting = |flags: i32| {
+            m.extra.ints[0] = flags;
+            let mut poses = Poses::new(&model);
+            animation.run_in(&Frame::default(), &m, &still(), &mut poses);
+            poses.get("root")[0]
+        };
+        assert_eq!(sitting(crate::mobs::fox::SITTING), 1.0);
+        assert_eq!(sitting(crate::mobs::fox::CROUCHING), 0.0);
     }
 
     #[test]

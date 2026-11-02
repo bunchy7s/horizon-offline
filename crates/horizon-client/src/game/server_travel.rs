@@ -670,8 +670,9 @@ impl Game<'_> {
             host.play.entry(trip.conn).or_default().portal.cooldown = 10;
             let g = &mut host.hub.guests[i];
             g.yaw = yaw;
-            // A new body at the exit: no fall distance or motion carried over.
-            g.motion = None;
+            // A new body at the exit: no fall distance or motion carried over,
+            // but the player's attributes (ServerPlayer.teleport keeps the entity).
+            g.new_body(true);
             let at = [position.x, position.y, position.z];
             if portal {
                 host.hub.land(i, at);
@@ -727,8 +728,9 @@ impl Game<'_> {
             let g = &mut host.hub.guests[i];
             let [yaw, pitch] = t.rotation.unwrap_or([g.yaw, g.pitch]);
             let origin = g.position;
-            // A new body there: no fall distance or motion carried over.
-            g.motion = None;
+            // A new body there: no fall distance or motion carried over, but
+            // the player's attributes (ServerPlayer.teleport keeps the entity).
+            g.new_body(true);
             let cooldown = host.play.get(&t.conn).map_or(0, |p| p.portal.cooldown);
             let ctx = self.server_ctx();
             host.hub

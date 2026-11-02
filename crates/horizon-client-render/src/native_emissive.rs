@@ -28,10 +28,18 @@ pub fn load(root: &Path, sprites: &mut Sprites) {
     }
 }
 
+/// A connected-texture tile's sprite name without `.png`: tiles outside `textures/` are named by
+/// their resource path (`Sprites::insert_file`, which only they use), block sprites by an id.
+fn tile_file(name: &str) -> Option<&str> {
+    name.strip_prefix("assets/")?;
+    name.strip_suffix(".png")
+}
+
 /// OptiFine's emissive overlays of the block sprites already loaded (what the terrain draws;
 /// items draw from the HUD atlas): for each
-/// `<ns>:block/<name>` whose `<name><suffix>.png` sits beside it, the overlay is loaded too and
-/// paired with it, first by name, at most [`MAX`] - [`NATIVE`] (native mods keep their share of
+/// `<ns>:block/<name>`, or connected-texture tile `assets/<ns>/.../<name>.png`, whose
+/// `<name><suffix>.png` sits beside it, the overlay is loaded too and paired with it, blocks
+/// first, then tiles, each by name, at most [`MAX`] - [`NATIVE`] (native mods keep their share of
 /// the table). A pack without such files adds nothing.
 pub fn load_optifine(root: &Path, sprites: &mut Sprites) -> Vec<(String, String)> {
     let suffix = horizon_optifine::emissive::suffix(root);
@@ -41,21 +49,34 @@ pub fn load_optifine(root: &Path, sprites: &mut Sprites) -> Vec<(String, String)
     for layer in sprites.layers.values() {
         *sharing.entry(*layer).or_default() += 1;
     }
-    let bases: Vec<String> = sprites
+    let mut bases: Vec<String> = sprites
         .layers
         .iter()
         .filter(|(name, layer)| {
             sharing[layer] == 1
-                && name
+                && (name
                     .split_once(':')
                     .is_some_and(|(_, p)| p.starts_with("block/") && !p.ends_with(&suffix))
+                    || tile_file(name).is_some_and(|stem| !stem.ends_with(&suffix)))
         })
         .map(|(name, _)| name.clone())
         .collect();
+    // Blocks before tiles: a pack's many tiles must not crowd vanilla blocks' overlays out.
+    bases.sort_by_key(|name| (tile_file(name).is_some(), name.clone()));
     let mut pairs = Vec::new();
     for base in bases {
-        let overlay = format!("{base}{suffix}");
-        let file = crate::atlas_sources::texture_path(root, &overlay, "textures");
+        // A tile is named by its file, a block sprite by its id.
+        let (overlay, file) = match tile_file(&base) {
+            Some(stem) => {
+                let overlay = format!("{stem}{suffix}.png");
+                (overlay.clone(), root.join(overlay))
+            }
+            None => {
+                let overlay = format!("{base}{suffix}");
+                let file = crate::atlas_sources::texture_path(root, &overlay, "textures");
+                (overlay, file)
+            }
+        };
         if !std::fs::metadata(&file).is_ok_and(|m| m.is_file()) {
             continue;
         }
@@ -71,7 +92,12 @@ pub fn load_optifine(root: &Path, sprites: &mut Sprites) -> Vec<(String, String)
             continue;
         }
         // A file that doesn't load would glow as the missing texture: no pair instead.
-        match sprites.try_insert(root, &overlay) {
+        let loaded = if overlay.starts_with("assets/") {
+            sprites.insert_file(root, &overlay)
+        } else {
+            sprites.try_insert(root, &overlay)
+        };
+        match loaded {
             Ok(_) => pairs.push((base, overlay)),
             Err(e) => log::warn!("Horizon: emissive overlay {overlay} skipped: {e}"),
         }
@@ -192,13 +218,40 @@ mod tests {
         let props = root.join("assets/minecraft/optifine/emissive.properties");
         std::fs::create_dir_all(props.parent().unwrap()).unwrap();
         std::fs::write(&props, "suffix.emissive=_glow").unwrap();
+        // Connected-texture tiles pair with the overlay beside them.
+        let tiles = root.join("assets/minecraft/optifine/ctm/lamp");
+        png(&tiles.join("0.png"), 230);
+        png(&tiles.join("0_glow.png"), 240);
+        png(&tiles.join("1.png"), 250);
+        // A tile outside `ctm/` (`tiles=~/glass/2`) is a tile all the same.
+        png(&root.join("assets/minecraft/optifine/glass/2.png"), 245);
+        png(
+            &root.join("assets/minecraft/optifine/glass/2_glow.png"),
+            246,
+        );
+        for tile in ["ctm/lamp/0", "ctm/lamp/1", "glass/2"] {
+            sprites
+                .insert_file(&root, &format!("assets/minecraft/optifine/{tile}.png"))
+                .unwrap();
+        }
         let pairs = load_optifine(&root, &mut sprites);
         assert_eq!(
             pairs,
-            [(
-                "minecraft:block/deepslate".into(),
-                "minecraft:block/deepslate_glow".into()
-            )]
+            // Blocks first, then tiles.
+            [
+                (
+                    "minecraft:block/deepslate".into(),
+                    "minecraft:block/deepslate_glow".into()
+                ),
+                (
+                    "assets/minecraft/optifine/ctm/lamp/0.png".into(),
+                    "assets/minecraft/optifine/ctm/lamp/0_glow.png".into()
+                ),
+                (
+                    "assets/minecraft/optifine/glass/2.png".into(),
+                    "assets/minecraft/optifine/glass/2_glow.png".into()
+                ),
+            ]
         );
         std::fs::remove_dir_all(&root).unwrap();
     }

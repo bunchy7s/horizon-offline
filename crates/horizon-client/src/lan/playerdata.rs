@@ -275,12 +275,19 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
     }
     // LivingEntity.addAdditionalSaveData: the live body's AttributeMap.pack,
     // or the list the file had while the player has no body yet.
-    if let Some(m) = guest.motion.as_deref() {
+    // A player between two bodies (a respawn, a change of level) saves what
+    // the next one takes over.
+    let attributes = guest
+        .motion
+        .as_deref()
+        .map(crate::motion::PlayerMotion::saved_attributes)
+        .or_else(|| guest.carried_attributes.clone());
+    if let Some(attributes) = attributes {
         let extra = level
             .player_extra
             .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
         if let horizon_world::nbt::Tag::Compound(map) = extra {
-            map.insert("attributes".into(), m.saved_attributes());
+            map.insert("attributes".into(), attributes);
         }
     }
     level.recipe_book = guest.recipe_book.clone();
@@ -541,6 +548,89 @@ mod tests {
         let assets = crate::assets::Assets::load(&root).ok()?;
         let resources = crate::motion::MotionResources::load(&root, &assets).ok()?;
         Some((assets, resources))
+    }
+
+    /// A body at scale 0.1 with a permanent +0.4 on its step height, such as
+    /// a command or a datapack gives.
+    fn small_body(resources: &crate::motion::MotionResources) -> crate::motion::PlayerMotion {
+        use horizon_world::attributes::{Modifier, Operation};
+        let mut m = crate::motion::PlayerMotion::new(resources, horizon_core::geometry::Vec3::ZERO)
+            .expect("a body");
+        let key = m.attributes.key("minecraft:scale").unwrap();
+        let handle = m.attributes.get_instance(Some(key)).unwrap().unwrap();
+        m.attributes
+            .edit(&handle, |a, o| a.set_base_value(0.1, o))
+            .unwrap();
+        let key = m.attributes.key("minecraft:step_height").unwrap();
+        let handle = m.attributes.get_instance(Some(key)).unwrap().unwrap();
+        let step = Modifier::new("test:step", 0.4, Operation::AddValue).unwrap();
+        m.attributes
+            .edit(&handle, |a, o| a.add_permanent(step, o))
+            .unwrap();
+        m
+    }
+
+    #[test]
+    fn a_new_body_takes_the_scale_of_the_old_one() {
+        // #3684: ServerPlayer.restoreFrom copies the base values to the body
+        // that follows a death (assignBaseValues) and, for the same player in
+        // another level, the permanent modifiers too (assignPermanentModifiers).
+        // The body Horizon made on a respawn or a level change started from
+        // the defaults: a player at /attribute scale 0.1 was 1.0 again.
+        let Some((_assets, resources)) = resources() else {
+            eprintln!("skipped: prepared resources unavailable");
+            return;
+        };
+        let next = |g: &Guest| {
+            let mut m =
+                crate::motion::PlayerMotion::new(&resources, horizon_core::geometry::Vec3::ZERO)
+                    .expect("a body");
+            m.apply_saved_attributes(g.carried_attributes.as_ref())
+                .unwrap();
+            m
+        };
+        for (restore_all, step) in [(false, 0.6), (true, 1.0)] {
+            let mut g = guest();
+            g.motion = Some(Box::new(small_body(&resources)));
+            g.new_body(restore_all);
+            assert!(g.motion.is_none());
+            let mut m = next(&g);
+            assert_eq!(m.attribute("minecraft:scale").unwrap(), 0.1);
+            assert!((m.attribute("minecraft:step_height").unwrap() - step).abs() < 1e-9);
+            // The tick that follows rebuilds the box at that scale.
+            m.refresh_attributes().unwrap();
+            assert_eq!(m.dimensions.width, 0.6 * 0.1);
+            assert_eq!(m.dimensions.height, 1.8 * 0.1);
+        }
+        // No body before: nothing to hand over.
+        let mut g = guest();
+        g.new_body(true);
+        assert!(g.carried_attributes.is_none());
+    }
+
+    #[test]
+    fn a_player_between_two_bodies_saves_the_attributes_the_next_one_takes() {
+        // #3684: logging out after a respawn, before the new body has ticked,
+        // must not write the file's older list over the scale.
+        let Some((_assets, resources)) = resources() else {
+            eprintln!("skipped: prepared resources unavailable");
+            return;
+        };
+        let mut g = guest();
+        g.motion = Some(Box::new(small_body(&resources)));
+        g.new_body(false);
+        let mut level = Level::default();
+        store(&g, &mut level, None);
+        let tag = level.player_tag();
+        let mut read = Level::default();
+        read.read_player(&tag);
+        read.player_extra = Some(tag);
+        let mut back =
+            crate::motion::PlayerMotion::new(&resources, horizon_core::geometry::Vec3::ZERO)
+                .expect("a body");
+        back.apply_saved_attributes(read.player_extra.as_ref().and_then(|t| t.get("attributes")))
+            .unwrap();
+        assert_eq!(back.attribute("minecraft:scale").unwrap(), 0.1);
     }
 
     #[test]

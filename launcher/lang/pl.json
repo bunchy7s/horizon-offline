@@ -789,5 +789,6 @@
   "Export the server outside the launcher's managed folders.": "Eksportuj serwer poza foldery zarządzane przez launcher.",
   "{path} is not a folder to build into.": "{path} nie jest folderem do kompilacji.",
   "Could not copy the build: {error}": "Nie można skopiować kompilacji: {error}",
-  "Could not move the build to {path}: {error}": "Nie można przenieść kompilacji do {path}: {error}"
+  "Could not move the build to {path}: {error}": "Nie można przenieść kompilacji do {path}: {error}",
+  "Native mods can use your microphone for voice chat when you enable it.": "Native mody mogą użyć Twojego mikrofonu do czatu głosowego, gdy to włączysz."
 }

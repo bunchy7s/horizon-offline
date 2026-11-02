@@ -789,5 +789,6 @@
   "Export the server outside the launcher's managed folders.": "Sunucuyu launcher tarafından yönetilen klasörlerin dışına aktarın.",
   "{path} is not a folder to build into.": "{path} derleme yapılacak klasör değil.",
   "Could not copy the build: {error}": "Build kopyalanamadı: {error}",
-  "Could not move the build to {path}: {error}": "Build {path} konumuna taşınamadı: {error}"
+  "Could not move the build to {path}: {error}": "Build {path} konumuna taşınamadı: {error}",
+  "Native mods can use your microphone for voice chat when you enable it.": "Yerel modlar, bunu etkinleştirdiğinizde sesli sohbet için mikrofonunuzu kullanabilir."
 }
