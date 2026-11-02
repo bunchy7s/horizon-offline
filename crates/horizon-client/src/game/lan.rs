@@ -1451,10 +1451,14 @@ impl Game<'_> {
         guest: &mut horizon_client::lan::guest::Guest,
     ) {
         self.guest_attachments_into(guest);
-        if guest.placed && host.owner.as_ref().is_some_and(|o| o.uuid == guest.uuid) {
-            playerdata::save_owner(guest, &mut self.level, &self.world_root);
-        } else if guest.placed {
-            playerdata::save(guest, &self.world_root);
+        if guest.placed {
+            if host.owner.as_ref().is_some_and(|o| o.uuid == guest.uuid) {
+                playerdata::save_owner(guest, &mut self.level, &self.world_root);
+            } else {
+                playerdata::save(guest, &self.world_root);
+            }
+            let directory = playerdata::directory(&self.world_root);
+            self.native_player_save_to_file(guest.uuid, &guest.name, &directory);
         }
         self.save_guest_records(host, guest);
     }
@@ -1673,11 +1677,18 @@ impl Game<'_> {
         let Some(host) = &self.lan else {
             return;
         };
+        let mut stored = None;
         if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == uuid && g.placed) {
             playerdata::store(g, &mut self.level, vehicle);
             self.save_guest_records(host, g);
+            stored = Some(g.name.clone());
         } else if let Some(saved) = host.owner.as_ref().and_then(|o| o.saved.as_ref()) {
             self.level.position = saved.position;
+        }
+        // PlayerEvent.SaveToFile for the owner's save into level.dat.
+        if let Some(name) = stored {
+            let directory = playerdata::directory(&self.world_root);
+            self.native_player_save_to_file(uuid, &name, &directory);
         }
     }
 

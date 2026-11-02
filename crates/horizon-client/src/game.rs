@@ -15310,6 +15310,8 @@ impl Game<'_> {
             for g in host.hub.guests.iter_mut().filter(|g| g.placed) {
                 self.guest_attachments_into(g);
                 horizon_client::lan::playerdata::save(g, &self.world_root);
+                let directory = horizon_client::lan::playerdata::directory(&self.world_root);
+                self.native_player_save_to_file(g.uuid, &g.name, &directory);
             }
             self.lan = Some(host);
         }

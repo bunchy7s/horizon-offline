@@ -5091,6 +5091,21 @@ impl Game<'_> {
     pub(super) fn native_player_respawned(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_respawned(self, mod_api::mods(), player, name);
     }
+    /// A player was saved to the world's store (NeoForge's
+    /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave, on
+    /// every autosave and when the server stops, once for each save of a
+    /// placed player, the owner of an integrated server included. `directory`
+    /// is the world's player directory (`players/data`): write your own file
+    /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
+    /// may be leaving, so no player's state is swapped in. Not cancellable.
+    pub(super) fn native_player_save_to_file(
+        &mut self,
+        player: u128,
+        name: &str,
+        directory: &Path,
+    ) {
+        let _ = (player, name, directory);
+    }
     /// A player was loaded from the world's save (NeoForge's
     /// `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`): their `.dat`
     /// has been read and applied, and they are not placed in a level yet.
