@@ -3960,10 +3960,13 @@ pub trait Hooks: Send + Sync {
     /// the clock to `wake_up_from_sleep`): `new_time` comes in as the next
     /// morning's day time and may be changed to wake everyone at another
     /// time. A time before `current` (the day time now) is refused, as
-    /// `setTimeAddition` refuses one, and the morning stays. On the server,
-    /// only when the `advance_time` rule is on; `native_time_skip` then
-    /// hears the jump to the time chosen here and may still cancel it. The
-    /// players wake and the weather clears either way.
+    /// `setTimeAddition` refuses one, and the morning stays. Unlike
+    /// NeoForge, which refuses a bad value as it is set, the check runs once
+    /// after every mod, so a later mod sees the value an earlier one left.
+    /// On the server, only when the `advance_time` rule is on;
+    /// `native_time_skip` then hears the jump to the time chosen here and
+    /// may still cancel it. The players wake and the weather resets as
+    /// usual either way.
     /// API @API:sleep_finished_time@.
     fn sleep_finished_time(&self, host: &mut dyn Host, event: &mut SleepFinishedTimeEvent<'_>) {
         let _ = host;
