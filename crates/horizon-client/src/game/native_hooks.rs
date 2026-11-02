@@ -4647,6 +4647,11 @@ impl Game<'_> {
     ) {
         let _ = (player, name, advancement, criterion);
     }
+    /// A server player released a drawn bow with `arrow` selected. The guest's
+    /// state is not swapped in during packet handling. @API:native_player_ready_arrow@.
+    pub(super) fn native_player_ready_arrow(&mut self, player: u128, name: &str, arrow: &str) {
+        let _ = (player, name, arrow);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

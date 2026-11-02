@@ -1847,6 +1847,13 @@ impl Game<'_> {
                             if let Some((slot, ticks)) = g.using.take()
                                 && let Some(stack) = g.stack_in(slot).cloned()
                             {
+                                if &*stack.item == "minecraft:bow"
+                                    && let Some(arrow) = g
+                                        .projectile_slot("minecraft:bow")
+                                        .and_then(|slot| g.stack_in(slot).map(|s| s.item.clone()))
+                                {
+                                    g.native_player_ready_arrow(uuid, &name, &arrow);
+                                }
                                 g.release_used_item(&stack, ticks, false);
                                 g.native_player_stop_using_item(uuid, &name);
                             }
