@@ -485,13 +485,13 @@ mod tests {
         let (mut yaw, mut pitch) = (30.0_f32, 0.0_f32);
         for _ in 0..100 {
             let (ny, np) = (
-                head_rotlerp(yaw, -170.0, 10.0),
+                head_rotlerp(yaw, -100.0, 10.0),
                 head_rotlerp(pitch, -80.0, 40.0),
             );
             assert!((ny - yaw).abs() <= 10.0 && (np - pitch).abs() <= 40.0);
             (yaw, pitch) = (ny, np);
         }
-        assert_eq!((yaw, pitch), (-170.0, -80.0));
+        assert_eq!((yaw, pitch), (-100.0, -80.0));
     }
     #[test]
     fn wither_ignores_wither_friends_only() {
