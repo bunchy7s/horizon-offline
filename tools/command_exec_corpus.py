@@ -1743,6 +1743,33 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def mob_max_health_bounds():
+    """Raw bases survive effective clamping without changing Health (#7413)."""
+    pig = '00000000-0000-0000-0000-000000000001'
+    attribute = f'/attribute {pig} minecraft:max_health'
+    ops = [*setup('/summon minecraft:pig 4 200 4 '
+                  '{UUID:[I;0,0,0,1],NoAI:1b,NoGravity:1b,PersistenceRequired:1b}')]
+    for base in (-1.75, 0, 20, 1025):
+        ops += [
+            cmd(f'{attribute} base set {base}'),
+            cmd(f'/data get entity {pig} Health'),
+            cmd(f'{attribute} get'),
+            cmd(f'{attribute} base get'),
+            cmd(f'{attribute} get 100'),
+            cmd(f'{attribute} base get 100'),
+        ]
+    ops += [
+        {'op': 'tick', 'n': 25},
+        cmd(f'/execute if entity {pig}'),
+        cmd(f'/data get entity {pig} Health'),
+        cmd(f'{attribute} base reset'),
+        cmd(f'{attribute} get'),
+        cmd(f'{attribute} base get'),
+        cmd(f'/data get entity {pig} Health'),
+        *setup(f'/kill {pig}'),
+    ]
+    return ops
+
 def forceload_query_order():
     """ForceLoadCommand sorts signed packed chunk IDs, not coordinate tuples (#7451)."""
     return [
@@ -1774,6 +1801,7 @@ def groups():
         ('blocks and border', world_blocks()),
         ('forceload query order', forceload_query_order()),
         ('entities', entities()),
+        ('mob max health bounds', mob_max_health_bounds()),
         ('wither spawn', wither_spawn()),
         ('riding teleport', riding_teleport()),
         ('mob riding', mob_riding()),
