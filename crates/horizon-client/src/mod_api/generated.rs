@@ -1812,7 +1812,11 @@ pub trait Hooks: Send + Sync {
     /// `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the
     /// ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a
     /// hoglin's throw), nor yet for the ones Horizon makes another way: a mob's melee push from
-    /// its attack knockback or a Knockback weapon, an armor stand's, the ender dragon's. It runs
+    /// its attack knockback or a Knockback weapon, the ender dragon's. An armor stand's sweep fires it.
+    /// `attacker` is the attacking entity's network id (falling back to the victim's last hurt-by
+    /// mob, or 0 when unknown); `attacker_main` and `attacker_off` are what it holds (a player's
+    /// selected and off-hand stacks, a mob's main hand), none when unknown, recorded only while a
+    /// native mod is loaded. It runs
     /// on the thread that ticks the world (the server thread): state
     /// shared with render thread hooks needs synchronising. No `self`: the game is in the middle
     /// of the hit. API 125.
@@ -7890,6 +7894,9 @@ pub struct LivingKnockbackEvent<'a> {
     pub damage_type: &'a str,
     pub causing: i32,
     pub direct: i32,
+    pub attacker: i32,
+    pub attacker_main: Option<&'a ItemStack>,
+    pub attacker_off: Option<&'a ItemStack>,
     pub strength: f64,
     pub x: f64,
     pub z: f64,
@@ -7901,6 +7908,9 @@ pub fn dispatch_living_knockback(
     damage_type: &str,
     causing: i32,
     direct: i32,
+    attacker: i32,
+    attacker_main: Option<&ItemStack>,
+    attacker_off: Option<&ItemStack>,
     strength: &mut f64,
     x: &mut f64,
     z: &mut f64,
@@ -7915,6 +7925,9 @@ pub fn dispatch_living_knockback(
         damage_type,
         causing,
         direct,
+        attacker,
+        attacker_main,
+        attacker_off,
         strength: *strength,
         x: *x,
         z: *z,

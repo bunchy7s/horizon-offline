@@ -1567,6 +1567,8 @@ impl Game<'_> {
         let mut hurt = false;
         let mut infested = false;
         let aim = self.attacker_aim(source.attacker);
+        // So `living_knockback` sees who hit and what they hold.
+        let _attacker = self.knockback_scope_for(source.attacker);
         if let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
             let hit = t.damage_aimed(amount, source, aim);
             hurt = hit;
@@ -1965,6 +1967,10 @@ impl Game<'_> {
                 } => match target {
                     // A player's source names no melee attacker, as its damage's doesn't.
                     Who::Player => {
+                        let _attacker = self.knockback_scope(match source.attacker {
+                            Some(Who::Mob(id)) => id as i32,
+                            _ => 0,
+                        });
                         let source = HurtSource {
                             damage_type: source_damage_type(source),
                             causing: 0,
@@ -3369,6 +3375,11 @@ impl Game<'_> {
         };
         // The causing entity for the death message.
         let owner = self.combat.projectile_owner.take();
+        let _attacker = self.knockback_scope(
+            attacker
+                .or(owner)
+                .map_or_else(horizon_client::health::knockback_attacker, |id| id as i32),
+        );
         if let Some(a) = attacker.or(owner) {
             self.note_attacker(damage_type, a);
         }
@@ -3487,7 +3498,7 @@ impl Game<'_> {
     /// `LivingEntity.knockback` on the player: pushed `power` away from the
     /// direction (`xd`, `zd`), less its knockback resistance, and up only from
     /// the ground.
-    /// The native knockback hook runs once the resistance is applied, with
+    /// The native knockback hook runs before resistance is applied, with
     /// `source`, the hit's.
     pub(super) fn knock_back_player(
         &mut self,
@@ -3496,6 +3507,14 @@ impl Game<'_> {
         zd: f64,
         source: HurtSource<'_>,
     ) {
+        let credit = match self.player_hurt_by() {
+            Some((Who::Mob(id), _)) => id as i32,
+            _ => 0,
+        };
+        let _attacker = self.knockback_scope(match horizon_client::health::knockback_attacker() {
+            0 => credit,
+            attacker => attacker,
+        });
         if let Some(p) = self.player.as_mut() {
             knock_back(p, &mut self.world.random, power, (xd, zd), source);
         }
@@ -4180,6 +4199,7 @@ impl Game<'_> {
         }
     }
     pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
+        let _attacker = self.knockback_scope_for(p.owner);
         // Projectile.onHitBlock: BlockState.onProjectileHit, for every
         // projectile (a wind charge out of the world's top has no face).
         if let Hit::Block { pos, at, face } = hit
@@ -7473,8 +7493,8 @@ mod knockback_tests {
         false
     }
 
-    /// `LivingEntity.knockback` on a player: the hook runs after the
-    /// knockback resistance and before the motion changes; a mod's strength or
+    /// `LivingEntity.knockback` on a player: the hook runs before the
+    /// knockback resistance and the motion changes; a mod's strength or
     /// direction pushes, a cancel pushes nothing, and without a mod in the way
     /// the push is vanilla's. Needs the prepared data in
     /// `.local/horizon-client/26.3`; skipped without it.

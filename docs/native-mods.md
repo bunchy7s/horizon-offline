@@ -920,7 +920,7 @@ ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's are
 Horizon makes another way: a mob's melee push from its attack knockback or a Knockback weapon, an armor stand's and the
 ender dragon's. It has no `self`: the game is in the middle of the hit. It runs on the thread that ticks the world (the
 server thread), so state a mod shares with its render thread hooks needs
-synchronising.
+synchronising. `attacker` is the attacking entity's network id (falling back to the victim's last hurt-by mob, or 0 when unknown) and `attacker_main` and `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand; none when unknown, recorded only while a native mod is loaded); an armor stand's sweep fires the hook too. These arguments were added to the hook after it first shipped, so a mixin injection that names `native_living_knockback` as a raw target must take them as well.
 
 Bundles that use it need `"hooks": 125`.
 
