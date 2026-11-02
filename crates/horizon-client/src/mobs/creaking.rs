@@ -399,3 +399,38 @@ pub fn is_creaking(m: &Mob) -> bool {
 pub fn can_use_portal(m: &Mob) -> bool {
     !heart_bound(m)
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn types() -> Option<crate::mobs::MobTypes> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return None;
+        }
+        Some(crate::mobs::MobTypes::load(&root).unwrap())
+    }
+    fn spawn(types: &crate::mobs::MobTypes, kind: &str) -> Mob {
+        let kind = std::sync::Arc::new(types.types.get(kind).unwrap().clone());
+        Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0)
+    }
+
+    /// `Creaking.canUsePortal`: the heart-bound creaking refuses a portal and
+    /// an unbound one does not; another mob is unaffected either way.
+    #[test]
+    fn a_heart_bound_creaking_does_not_use_a_portal() {
+        let Some(types) = types() else { return };
+        let mut c = spawn(&types, "minecraft:creaking");
+        assert!(can_use_portal(&c), "a creaking with no heart travels");
+        set_transient(&mut c, [0, 64, 0]);
+        assert!(heart_bound(&c));
+        assert!(
+            !can_use_portal(&c),
+            "a creaking bound to its heart must not leave it behind"
+        );
+        let z = spawn(&types, "minecraft:zombie");
+        assert!(can_use_portal(&z));
+    }
+}
