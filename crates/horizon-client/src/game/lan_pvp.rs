@@ -320,9 +320,9 @@ impl Game<'_> {
             if died {
                 match s.attacker {
                     Some(conn) => {
-                        self.as_guest(host, conn, |g| g.stats.custom("player_kills", 1));
+                        self.as_guest(host, conn, |g| g.award_custom_stat("player_kills", 1));
                     }
-                    None => self.stats.custom("player_kills", 1),
+                    None => self.award_custom_stat("player_kills", 1),
                 }
             }
         }

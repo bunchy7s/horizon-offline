@@ -957,6 +957,10 @@ pub struct Extra {
     pub swing_stab: bool,
     pub flag: bool,
     pub flag2: bool,
+    /// `AbstractHorse`'s `Bred` save flag: nothing sets it at runtime (no
+    /// vanilla code calls `setBred` outside `readAdditionalSaveData`), so only
+    /// a save or `/summon` gives it, and `followMommy` reads it.
+    pub bred: bool,
     /// `AbstractHorse.allowStandSliding`: the rider's jump sets it, and a
     /// horse still rearing then goes on with the rider's keys until the rear
     /// ends (`tick` clears it).
@@ -1534,6 +1538,16 @@ pub enum MobEvent {
         amount: f32,
         source: Damage,
     },
+    /// `Pufferfish.touch` on a mob (`Pufferfish.aiStep`): the hit, then, only
+    /// when `hurtServer` let it land, the fish's `entity.puffer_fish.sting`
+    /// and the poison it gives (`poison_ticks`, `60 * getPuffState()`).
+    PufferfishSting {
+        mob: u32,
+        target: u32,
+        amount: f32,
+        source: Damage,
+        poison_ticks: i32,
+    },
     /// `LivingEntity.stabAttack`'s `target.stopRiding()`: a spear knocks the
     /// target off its mount.
     StabDismount {
@@ -1944,6 +1958,8 @@ pub struct Seen {
     pub baby: bool,
     pub in_love: bool,
     pub tame: bool,
+    /// `AbstractHorse.isBred`: the `Bred` flag (`followMommy` reads it).
+    pub bred: bool,
     /// A tamed animal's owner (`getOwner`).
     pub owner: Option<[i32; 4]>,
     pub hostile: bool,
@@ -2145,6 +2161,7 @@ impl Mob {
                 m.extra.in_love > 0
             },
             tame: m.extra.tame,
+            bred: m.extra.bred,
             owner: m.extra.owner,
             hostile: m.hostile(),
             target: m.ai.target,

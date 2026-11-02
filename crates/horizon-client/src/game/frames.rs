@@ -136,6 +136,28 @@ impl Game<'_> {
         self.native_hanging_place(uuid, &name, kind, pos, &mut cancel);
         cancel
     }
+    /// Asks the mods whether a hanging entity of type `kind` at `pos` may
+    /// break (`native_hanging_break`): true when one cancelled it. A break by
+    /// a player is asked only for the acting guest, with them as the player;
+    /// a break by anything else is asked with none.
+    pub(super) fn hanging_break_cancelled(
+        &mut self,
+        kind: &str,
+        pos: [i32; 3],
+        by_player: bool,
+    ) -> bool {
+        let player = if by_player {
+            let Some(uuid) = self.lan_acting_uuid else {
+                return false;
+            };
+            Some(uuid)
+        } else {
+            None
+        };
+        let mut cancel = false;
+        self.native_hanging_break(player, kind, pos, &mut cancel);
+        cancel
+    }
     /// `ItemFrameItem.useOn`.
     pub(super) fn place_item_frame(&mut self, hit: &Hit, stack: &ItemStack) -> bool {
         let glow = match &*stack.item {
@@ -296,6 +318,12 @@ impl Game<'_> {
         }
         let with_frame = self.item_frames[i].item.is_none();
         let entity_id = self.item_frames[i].id;
+        if with_frame {
+            let (kind, pos) = (self.item_frames[i].kind(), self.item_frames[i].pos);
+            if self.hanging_break_cancelled(kind, pos, true) {
+                return true;
+            }
+        }
         let old_item = self.item_frames[i]
             .item
             .as_ref()
@@ -403,7 +431,11 @@ impl Game<'_> {
                 ((c[0] - blast[0]).powi(2) + (c[1] - blast[1]).powi(2) + (c[2] - blast[2]).powi(2))
                     .sqrt()
                     / diameter;
-            if dist > 1.0 || self.item_frames[i].fixed {
+            let (kind, pos) = (self.item_frames[i].kind(), self.item_frames[i].pos);
+            if dist > 1.0
+                || self.item_frames[i].fixed
+                || self.hanging_break_cancelled(kind, pos, false)
+            {
                 i += 1;
                 continue;
             }
@@ -432,7 +464,8 @@ impl Game<'_> {
             if self.item_frames[i].check_interval >= 100 {
                 self.item_frames[i].check_interval = 0;
                 let f = self.item_frames[i].clone();
-                if !self.frame_survives(&f) {
+                if !self.frame_survives(&f) && !self.hanging_break_cancelled(f.kind(), f.pos, false)
+                {
                     self.item_frames.remove(i);
                     self.audio
                         .play(&sound(&f, "break"), Some(center(&f)), 1.0, 1.0);
