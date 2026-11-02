@@ -1369,11 +1369,14 @@ impl Game<'_> {
         let count = Self::int(ctx, "count").unwrap_or(1);
         let targets = self.entities(ctx, "targets", true)?;
         let max_stack = self.items().get(&id).map_or(64, |i| i.max_stack) as i32;
-        if count > max_stack * 100 {
+        // A native mod's item can stack far past vanilla's 99: saturate rather
+        // than overflow on a size near i32::MAX.
+        let limit = max_stack.saturating_mul(100);
+        if count > limit {
             return Err(CommandError::new(Text::translate(
                 "commands.give.failed.toomanyitems",
                 &[
-                    Text::literal((max_stack * 100).to_string()),
+                    Text::literal(limit.to_string()),
                     self.item_display_name(&id),
                 ],
             )));

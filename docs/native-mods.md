@@ -721,7 +721,8 @@ API 79 adds `native_modify_default_components(item, components)`, in `horizon-wo
 components in `items.json`'s form, for any item, vanilla's included (NeoForge's `ModifyDefaultComponentsEvent`). Insert
 or replace a component to set it (`"minecraft:max_stack_size": 16`), remove it to take it away. The item table,
 loot, enchanting and item models all read the changed defaults, and stacks are saved and sent against them as
-against vanilla's. Asked for every item each time the game reads the defaults: answer the same each time. Client and
+against vanilla's. A `minecraft:max_stack_size` above vanilla's 99 is kept, up to `i32::MAX`. Asked for every item
+each time the game reads the defaults: answer the same each time. Client and
 server each ask their own mods, so both need the mod. Bundles that use it need `"hooks": 79`.
 
 API 80 adds the open screen hears of a mouse button going down (`native_screen_mouse_button_pressed_pre`) or up (`native_screen_mouse_button_released_pre`) before it acts, as vanilla's `ScreenEvent.MouseButtonPressed.Pre` and `.MouseButtonReleased.Pre`: the screen, the GLFW button (0 left, 1 right, 2 middle, 3 back, 4 forward; a button past those is the platform's own number, which differs between systems) and GLFW's modifier bits (shift 1, control 2, alt 4, super 8), with the pointer in `screen.mouse`. A cancelled press goes no further (no slot, screen button, drag or hotbar key); cancel a release only when its press was cancelled, or a drag it ended stays held. They fire on the window only, never on the title screen itself (Options and the pack list opened from it do fire), the connect and loading screens, the prompts, books and sign editors drawn over gameplay, or while a world loads or saves, and never for a gamepad or keyboard-focus click. Bundles need "hooks": 80.
@@ -1695,8 +1696,10 @@ bundle targets as `horizon_world::item_defaults::native_modify_default_component
 insert or replace a key to set a component (`"minecraft:max_stack_size": 16`), remove it to take the component away.
 Any item can be changed, vanilla's included. Write values as vanilla's codec writes them: nothing decodes them with it.
 Each table reads the fields it understands and takes a default for a field it can't read, but keeps the component, so a
-malformed `minecraft:food` still makes the item edible, with no nutrition. Only the stack size is kept to vanilla's
-1 to 99.
+malformed `minecraft:food` still makes the item edible, with no nutrition. A stack size above vanilla's 99 is kept: the
+data pack's own is held to `ExtraCodecs.intRange(1, 99)`, a mod's to 1 to `i32::MAX` (the count the wire and the save
+carry), and a value that is not a number leaves the data pack's own. Keep a stack above 99 to a server whose clients run
+the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot show it.
 
 - Every table that reads items' defaults reads them through it: the item table, loot, enchanting, item models,
   banners, pot sherds, item rarity in chat. Stacks are saved and sent as their difference from the changed defaults, as from vanilla's.

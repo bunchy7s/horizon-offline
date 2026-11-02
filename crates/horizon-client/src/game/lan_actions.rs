@@ -2455,12 +2455,15 @@ impl Game<'_> {
     /// What ServerboundSetCreativeModeSlotPacket asks of a stack. Its codec
     /// (`ItemStack.validatedStreamCodec`) encodes the stack with `ItemStack.CODEC`, whose count is
     /// 1 to 99: more fails the packet and disconnects the player, as vanilla's decoder error does.
-    /// handleSetCreativeModeSlot's `validData` then ignores a stack beyond its own stack size.
+    /// A native mod can raise an item's stack size past 99 (`item_defaults::MAX_STACK_SIZE`), so
+    /// the count is held to what the wire carries instead. handleSetCreativeModeSlot's `validData`
+    /// then ignores a stack beyond its own stack size.
     fn creative_stack_valid(&self, host: &mut LanHost, gi: usize, s: &ItemStack) -> bool {
-        if s.count > 99 {
+        let max = horizon_world::item_defaults::MAX_STACK_SIZE as u32;
+        if s.count > max {
             let g = &host.hub.guests[gi];
             let conn = g.conn;
-            let reason = format!("Invalid packet: count {} is not in 1..99", s.count);
+            let reason = format!("Invalid packet: count {} is not in 1..={max}", s.count);
             eprintln!("{} sent an invalid creative stack: {reason}", g.name);
             host.hub
                 .kick(conn, horizon_protocol::text::literal(&reason));
