@@ -259,9 +259,27 @@ fn a_mod_may_turn_native_once() {
     );
     assert!(r.errors.is_empty(), "{r:?}");
     assert!(r.notes.iter().any(|n| n.contains("turns native")), "{r:?}");
-    // Its .hmod versions are a WebAssembly mod's files; the new ones native.
-    assert_eq!(file_kind(&native, &native.versions[1]), Kind::Mod);
-    assert_eq!(file_kind(&native, &native.versions[0]), Kind::NativeMod);
+    // Its content-only .hmod versions are from before; the new ones native, and a .hmod
+    // holding native code is native too.
+    let none = Path::new("no-such-file");
+    assert_eq!(file_kind(&native, &native.versions[1], none), Kind::Mod);
+    assert_eq!(
+        file_kind(&native, &native.versions[0], none),
+        Kind::NativeMod
+    );
+    let unified = std::env::temp_dir().join(format!("unified-{}.hmod", std::process::id()));
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(&unified).unwrap());
+    zip.start_file(
+        super::super::native::MANIFEST,
+        zip::write::SimpleFileOptions::default(),
+    )
+    .unwrap();
+    zip.finish().unwrap();
+    assert_eq!(
+        file_kind(&native, &native.versions[1], &unified),
+        Kind::NativeMod
+    );
+    std::fs::remove_file(unified).unwrap();
     // And never back.
     let r = review(&[native], &[base], "ludovic111");
     assert!(

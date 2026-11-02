@@ -160,7 +160,7 @@ fn tr_error(key: &str, args: &[Text]) -> CommandError {
 }
 /// `String.format(Locale.ROOT, "%.2f", v)`.
 fn two_places(v: f64) -> String {
-    format!("{v:.2}")
+    super::percent_f(v, 2)
 }
 /// `Util.getFilenameFormattedDateTime` (`yyyy-MM-dd_HH.mm.ss`, local time).
 fn filename_date_time() -> String {

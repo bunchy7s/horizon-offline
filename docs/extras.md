@@ -176,6 +176,14 @@ and the container screen tests are unchanged).
 - `chatIndicator` off removes the coloured bar at the left of a line. It hides
   the bar only, never the message.
 
+### Scroll wheel changes settings (`wheelCyclesSettings`, default on)
+- On, the wheel works as in vanilla: over a button in the settings it changes the button's value
+  (`CycleButton.mouseScrolled`), and a button focused with the keyboard or a pad steps on the
+  wheel wherever the cursor is.
+- Off, the wheel only scrolls the list under the cursor, on every settings page, Video's included
+  (`OptionsUi::wheel`, `GraphicsUi::wheel`). Scrolling through a long page then can't change an
+  option that passes under the cursor (#5455). Client-only.
+
 ### Splitscreen (`splitscreen`, default off)
 
 **Options → Horizon Settings... → Splitscreen...** turns local joining on or off at once.
@@ -189,7 +197,20 @@ P1 is alone, turning it off restores the normal controller reader. Leaving it on
 alone keeps watching for joins without a compositor.
 
 `HORIZON_SPLIT=N` remains a testing shortcut to enable it and add N-1 players.
-The Setup map and joining P1 on an external server are separate follow-ups.
+The Setup map previews the monitors, windows and player views. Click a player (its name turns
+yellow) and choose a window or monitor, or drag its tile onto a window, a place among another
+window's players, or a monitor; then **Apply** to move the actual views. **Revert** and
+**Done** discard unapplied moves. An emptied window closes only on Apply. A player joining or
+leaving resets the draft so it cannot apply a move to the wrong seat. P1's pause-menu shortcut
+opens Setup; another player's shortcut opens their profiles.
+
+While a window has two or three players, a square at the bottom picks how they share it
+(two: Auto, side by side, top and bottom; three: one wide on top, one tall on the left, side
+by side); Apply saves it (`splitscreenTwo`, `splitscreenThree`). **Names** (top left,
+`splitscreenNames`, on by default) keeps each player's name in the corner of their view; off,
+it shows only for a moment when something changes. **Identify** makes every view say which
+window it is in. Controller pick-up in Setup and joining P1 on an external server follow
+separately.
 
 ## Shared rules
 

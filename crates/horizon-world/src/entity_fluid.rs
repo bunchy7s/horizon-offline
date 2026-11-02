@@ -335,3 +335,120 @@ impl EntityFluidInteraction {
         Ok(last.is_some())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A body the accumulator pushes: the player flag and the velocity it
+    /// reads are the only things `apply_to` asks for.
+    struct Body {
+        player: bool,
+        velocity: Vec3,
+        added: Vec3,
+    }
+    impl CurrentTarget for Body {
+        type Error = std::convert::Infallible;
+        fn is_player_class(&self) -> bool {
+            self.player
+        }
+        fn velocity(&mut self) -> Result<Vec3, Self::Error> {
+            Ok(self.velocity)
+        }
+        fn add_delta_movement(&mut self, delta: Vec3) -> Result<(), Self::Error> {
+            self.added = self.added.add_vector(delta);
+            Ok(())
+        }
+    }
+
+    /// `EntityFluidInteraction$CurrentAccumulator.applyTo`: a body that is not
+    /// a player takes the direction of the accumulated current, so two samples
+    /// of one block push as hard as one; a player takes their average, so the
+    /// push grows with the number of blocks and is halved by two of them.
+    #[test]
+    fn a_current_pushes_a_player_by_its_average_and_anything_else_by_its_direction() {
+        let mut acc = CurrentAccumulator::default();
+        acc.accumulate(Vec3::new(1.0, 0.0, 0.0));
+        let mut mob = Body {
+            player: false,
+            velocity: Vec3::ZERO,
+            added: Vec3::ZERO,
+        };
+        acc.apply_to(&mut mob, 0.014).unwrap();
+        assert!((mob.added.x - 0.014).abs() < 1e-12, "mob: {}", mob.added.x);
+        acc.accumulate(Vec3::new(1.0, 0.0, 0.0));
+        let mut mob = Body {
+            player: false,
+            velocity: Vec3::ZERO,
+            added: Vec3::ZERO,
+        };
+        acc.apply_to(&mut mob, 0.014).unwrap();
+        assert!(
+            (mob.added.x - 0.014).abs() < 1e-12,
+            "a second sample does not double a mob's push: {}",
+            mob.added.x
+        );
+        let mut player = Body {
+            player: true,
+            velocity: Vec3::ZERO,
+            added: Vec3::ZERO,
+        };
+        acc.apply_to(&mut player, 0.014).unwrap();
+        assert!(
+            (player.added.x - 0.014).abs() < 1e-12,
+            "the average of two (1,0,0) samples is (1,0,0): {}",
+            player.added.x
+        );
+    }
+
+    /// The same body with a single weak sample: the average is (0.5,0,0) for a
+    /// player, and a nearly still body gets the 0.0045 lift either way.
+    #[test]
+    fn a_weak_current_on_a_still_body_is_lifted_to_the_minimum() {
+        let mut acc = CurrentAccumulator::default();
+        // A tenth of a block a tick: 0.0014 once scaled, under the minimum.
+        acc.accumulate(Vec3::new(0.1, 0.0, 0.0));
+        let mut player = Body {
+            player: true,
+            velocity: Vec3::ZERO,
+            added: Vec3::ZERO,
+        };
+        acc.apply_to(&mut player, 0.014).unwrap();
+        assert!(
+            (player.added.x - 0.0045).abs() < 1e-12,
+            "{}",
+            player.added.x
+        );
+        // A body that is already moving on x or z takes the small push as it is.
+        let mut moving = Body {
+            player: true,
+            velocity: Vec3::new(0.05, 0.0, 0.0),
+            added: Vec3::ZERO,
+        };
+        acc.apply_to(&mut moving, 0.014).unwrap();
+        assert!(
+            (moving.added.x - 0.0014).abs() < 1e-12,
+            "{}",
+            moving.added.x
+        );
+    }
+
+    /// `applyTo` returns before reading the velocity with no samples, and when
+    /// the accumulated current is under the 1e-5 of a squared length.
+    #[test]
+    fn no_current_and_a_current_under_the_threshold_push_nothing() {
+        let mut body = Body {
+            player: false,
+            velocity: Vec3::ZERO,
+            added: Vec3::ZERO,
+        };
+        CurrentAccumulator::default()
+            .apply_to(&mut body, 0.014)
+            .unwrap();
+        assert_eq!(body.added, Vec3::ZERO);
+        let mut acc = CurrentAccumulator::default();
+        acc.accumulate(Vec3::new(0.001, 0.0, 0.0));
+        acc.apply_to(&mut body, 0.014).unwrap();
+        assert_eq!(body.added, Vec3::ZERO);
+    }
+}

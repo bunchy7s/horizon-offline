@@ -7,7 +7,7 @@ MenuType.register	skip:data		menu type registry bootstrap
 MerchantContainer.isEmpty	skip:java		container emptiness helper; Horizon checks the stacks it needs directly
 MerchantContainer.setItem	inline	crates/horizon-client/src/menu.rs::Menu::slot_changed	the store is the generic put; the payment update is merchant_update, run from slot_changed for every merchant slot
 MerchantMenu.quickMoveStack	inline	crates/horizon-client/src/menu.rs::Menu::quick_move	the Kind::Merchant arm; a result shift-click also queues the trade sound event
-MerchantMenu.playTradeSound	missing		player: a shift-click trade should play the villager yes sound; the menu queues Event::TradeSound and game/trading.rs drops it with an empty arm
+MerchantMenu.playTradeSound	port	crates/horizon-client/src/game/trading.rs::Game::merchant_apply	the TradeSound event plays entity.villager.yes or the wandering trader yes
 MerchantResultSlot.remove	port	crates/horizon-client/src/menu.rs::Menu::remove	gap: minor: the removeCount tally that feeds the crafted statistic is not kept
 MerchantResultSlot.mayPickup	port	crates/horizon-client/src/menu.rs::Menu::may_pickup	the Role::MerchantResult arm
 ResultSlot.remove	port	crates/horizon-client/src/menu.rs::Menu::remove	gap: minor: the removeCount tally for the crafted statistic is not kept
@@ -115,7 +115,7 @@ ItemStack.applyComponentsAndValidate	missing		unsure: a validated component patc
 ItemStack.getStyledHoverName	port	crates/horizon-client/src/game/stations.rs::Game::stack_hover_name	gap: minor: plain text; the rarity colour and italic style are not applied here
 ItemStack.addToTooltip	port	crates/horizon-client/src/item_tooltip.rs::lines	
 ItemStack.addUnitComponentToTooltip	inline	crates/horizon-client/src/game/stations.rs::Game::stack_tooltip_lines	unit lines such as unbreakable, gated by the tooltip display
-ItemStack.canPlaceOnBlockInAdventureMode	missing		player: in adventure mode a block can be placed only when the held item's can_place_on list allows it; Horizon does not read that component
+ItemStack.canPlaceOnBlockInAdventureMode	port	crates/horizon-client/src/game/game_mode.rs::Game::can_place_on_in_adventure	the can_place_on predicates gate a placement in adventure mode
 ItemStack.canBreakBlockInAdventureMode	missing		player: in adventure mode a block can be broken only when the held item's can_break list allows it; Horizon does not read that component
 ItemStack.getDamageSource	missing		unsure: a stack's damage_type component is not read when a weapon hits; no Horizon reader found
 ItemStackTemplate.fromNonEmptyStack	port	crates/horizon-items/src/item_data.rs::template_tag	stack to template tag
@@ -141,7 +141,7 @@ MapItem.lockMap	port	crates/horizon-client/src/menu.rs::Menu::map_crafted	the lo
 MapItem.useOn	missing		player: using a map on a banner block should toggle that banner's marker on the map; Horizon has no banner toggle
 MobBucketItem.emptyContents	port	crates/horizon-world/src/level/buckets.rs::Sim::bucket_empty	the MobWater and Nothing contents
 PotionItem.getDefaultInstance	skip:data		default stack data
-PotionItem.useOn	missing		player: a water bottle used on a block that turns to mud should make mud; no such conversion was found in potions.rs
+PotionItem.useOn	port	crates/horizon-client/src/game/potions.rs::Game::use_water_bottle_on_block	a water bottle poured on #convertible_to_mud makes mud and empties the bottle
 PotionItem.getName	port	crates/horizon-client/src/game/stations.rs::Game::stack_hover_name	potion name from the contents
 ProjectileItem.DispenseConfig.Builder.build	inline	crates/horizon-client/src/game/dispenser.rs::Game::dispense_projectile	per-item dispense config
 ProjectileWeaponItem.getHeldProjectile	port	crates/horizon-client/src/game/crossbow.rs::Game::projectile_slot	offhand first, then the held slot

@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "bell_ring",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_bell_ring",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event; Bukkit's BellRingEvent)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "Bell about to ring (`native_bell_ring`).",
+  "doc_summary": "A bell is about to ring: `native_bell_ring(dimension, player, pos, cancel)` is asked before the bell event and sound. Set `cancel` to stop the ring and its raider reveal. `player` is the acting server player when available. Bundles need \"hooks\": @API:bell_ring@."
+}

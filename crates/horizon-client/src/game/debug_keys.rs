@@ -710,6 +710,18 @@ impl Game<'_> {
                 self.toggle_debug_options();
                 true
             }
+            // Horizon's own: a repro recording for a bug report (game/repro.rs).
+            // Off unless the AI Agent page enables the shortcuts.
+            DebugAction::RecordSession if !self.settings.extras.repro_keys => false,
+            DebugAction::ExportRepro if !self.settings.extras.repro_keys => false,
+            DebugAction::RecordSession => {
+                self.toggle_recording_key();
+                true
+            }
+            DebugAction::ExportRepro => {
+                self.export_repro_key();
+                true
+            }
             // Screens and overlays Horizon does not draw yet (the profiler and
             // its chart, the texture dump): the keys are used up as in vanilla.
             DebugAction::DumpDynamicTextures
@@ -1115,6 +1127,11 @@ impl Game<'_> {
         }
         for b in &self.bolts {
             g.hitbox(b.at, (0.0, 0.0), 0.0, false, (0.0, 0.0));
+        }
+        // AreaEffectCloud.getDimensions: diameter follows synced radius,
+        // height is 0.5; EntityDimensions.scalable gives eyes at 85% height.
+        for c in &self.potions.clouds {
+            g.hitbox(c.at, (c.radius * 2.0, 0.5), 0.425, false, (0.0, 0.0));
         }
         // The dragon: 16 by 8, a living entity; its parts follow.
         if let Some(d) = &self.dragon {

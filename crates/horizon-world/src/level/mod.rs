@@ -115,6 +115,7 @@ mod portal;
 pub mod portal_travel;
 mod query;
 pub(crate) use query::data_2d;
+pub mod orientation;
 mod rails;
 mod redstone;
 pub mod removal;
@@ -317,10 +318,57 @@ pub enum Spread {
 
 /// The world as seen by block behaviour. Implemented by the game and tests.
 pub trait LevelAccess {
+    /// Whether a hopper may pick up this dropped item stack. The default allows.
+    fn allow_hopper_pickup_item(&self, _pos: BlockPos, _item: &str, _count: u32) -> bool {
+        true
+    }
     /// Whether `kind` may spread from `from` to `to`: a native mod may refuse
     /// (land claims), and the block at `to` stays as it is. Fire asks after
     /// its random draws, which a refusal doesn't change. The default allows.
     fn allow_spread(&self, _kind: Spread, _from: BlockPos, _to: BlockPos) -> bool {
+        true
+    }
+    fn allow_fluid_level_change(
+        &self,
+        _pos: BlockPos,
+        _fluid: &'static str,
+        _from: i32,
+        _to: i32,
+    ) -> bool {
+        true
+    }
+    fn allow_block_ignite(&self, _pos: BlockPos, _cause: &'static str) -> bool {
+        true
+    }
+    fn allow_block_burn(&self, _pos: BlockPos) -> bool {
+        true
+    }
+    fn allow_leaves_decay(&self, _pos: BlockPos) -> bool {
+        true
+    }
+    fn allow_moisture_change(&self, _pos: BlockPos, _from: i32, _to: i32) -> bool {
+        true
+    }
+    fn observe_sponge_absorb(&self, _pos: BlockPos) {}
+    fn allow_block_fade(&self, _pos: BlockPos, _from: BlockStateId, _to: BlockStateId) -> bool {
+        true
+    }
+    fn allow_block_form(&self, _pos: BlockPos, _from: BlockStateId, _to: BlockStateId) -> bool {
+        true
+    }
+    fn allow_note_play(&self, _pos: BlockPos, _instrument: &str, _note: i32) -> bool {
+        true
+    }
+    fn allow_bell_ring(&self, _pos: BlockPos) -> bool {
+        true
+    }
+    fn allow_cauldron_level_change(
+        &self,
+        _pos: BlockPos,
+        _from: i32,
+        _to: i32,
+        _reason: &'static str,
+    ) -> bool {
         true
     }
     /// Whether the piston at `piston` may push the blocks `push` one step
@@ -497,6 +545,10 @@ pub trait LevelAccess {
     /// heightmaps start there. The default, `max_y`, scans the whole column.
     fn world_surface(&self, _x: i32, _z: i32) -> i32 {
         self.max_y()
+    }
+    /// Whether the world's enabled features contain `minecraft:redstone_experiments`.
+    fn redstone_experiments(&self) -> bool {
+        false
     }
     /// Vanilla `level.random` (a `LegacyRandomSource`).
     fn random(&mut self) -> &mut LegacyRandom;
@@ -983,6 +1035,38 @@ impl Behaviours {
         block: BlockId,
     ) {
         self.sim(level, ticks).update_neighbors_at(pos, block);
+    }
+    /// `LecternBlock.updateBelow` after a page or book changes.
+    pub fn lectern_update_below<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) {
+        self.sim(level, ticks).lectern_update_below(pos, state);
+    }
+    /// `TrappedChestBlockEntity.signalOpenCount` after its opener count changes.
+    pub fn trapped_chest_update_neighbors<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) {
+        self.sim(level, ticks)
+            .trapped_chest_update_neighbors(pos, state);
+    }
+    /// `LightningRodBlock.updateNeighbours` after a strike.
+    pub fn lightning_rod_update_neighbors<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) {
+        self.sim(level, ticks)
+            .lightning_rod_update_neighbors(pos, state);
     }
     /// `Level.updateNeighbourForOutputSignal(pos, block)` for the block at
     /// `pos`: comparators beside it (or behind a conductor there) read their

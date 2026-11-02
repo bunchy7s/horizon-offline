@@ -265,6 +265,7 @@ pub(super) fn refused(
     horizon: &BTreeSet<Locked>,
     staged: Option<&BTreeSet<Locked>>,
     wanted: &[Wanted],
+    api_ids: &[&str],
 ) -> Option<String> {
     let why = |mod_id: &str, name: &str, version: &str| {
         format!("{mod_id} needs {name} {version}, which isn't in Horizon's Cargo.lock. A native mod's crate can use only the crates Horizon itself uses, in the versions its Cargo.lock has.")
@@ -283,7 +284,12 @@ pub(super) fn refused(
         .map(|w| w.mod_id.as_str())
         .collect();
     if mods.is_empty() {
-        mods = wanted.iter().map(|w| w.mod_id.as_str()).collect();
+        mods = wanted
+            .iter()
+            .map(|w| w.mod_id.as_str())
+            .chain(api_ids.iter().copied())
+            .collect();
+        mods.sort_unstable();
     }
     mods.dedup();
     Some(why(&mods.join(", "), &added.name, &added.version))
@@ -495,25 +501,34 @@ checksum = "def"
             "the workspace's own packages are left out"
         );
         let ok = [wants("bake", "serde_json", "1")];
-        assert_eq!(refused(&horizon, None, &ok), None);
-        assert_eq!(refused(&horizon, Some(&horizon), &ok), None);
+        assert_eq!(refused(&horizon, None, &ok, &[]), None);
+        assert_eq!(refused(&horizon, Some(&horizon), &ok, &[]), None);
         // Asked for by name, and not in the lock: refused before Cargo looks online.
-        let err = refused(&horizon, None, &[wants("bake", "rand", "0.9")]).unwrap();
+        let err = refused(&horizon, None, &[wants("bake", "rand", "0.9")], &[]).unwrap();
         assert!(
             err.starts_with("bake needs rand 0.9, which isn't in Horizon's Cargo.lock"),
             "{err}"
         );
         // In the lock, but the update had to change its version.
         let newer = LOCK.replace("1.0.140", "1.0.145");
-        let err = refused(&horizon, Some(&downloaded(&newer).unwrap()), &ok).unwrap();
+        let err = refused(&horizon, Some(&downloaded(&newer).unwrap()), &ok, &[]).unwrap();
         assert!(err.starts_with("bake needs serde_json 1.0.145,"), "{err}");
         // Pulled in by another crate: every mod with crates is named.
         let added = format!(
             "{LOCK}\n[[package]]\nname = \"ryu\"\nversion = \"1.0.20\"\nsource = \"registry+x\"\n"
         );
         let two = [wants("bake", "serde_json", "1"), wants("zoom", "itoa", "1")];
-        let err = refused(&horizon, Some(&downloaded(&added).unwrap()), &two).unwrap();
+        let err = refused(&horizon, Some(&downloaded(&added).unwrap()), &two, &[]).unwrap();
         assert!(err.starts_with("bake, zoom needs ryu 1.0.20,"), "{err}");
+        // API-only bundles are named even when no mixin crate was scanned.
+        let err = refused(
+            &horizon,
+            Some(&downloaded(&added).unwrap()),
+            &[],
+            &["trait_mod"],
+        )
+        .unwrap();
+        assert!(err.starts_with("trait_mod needs ryu 1.0.20,"), "{err}");
         // A feature that needs another crate: Cargo's --locked refusal, said plainly.
         let cargo = "error: cannot update the lock file /s/Cargo.lock because --locked was passed to prevent this".to_string();
         assert!(locked(cargo.clone()).starts_with("A native mod's crate needs a crate"));
@@ -521,7 +536,7 @@ checksum = "def"
         assert_eq!(locked("other".into()), "other");
         // Another checksum is another package.
         let other = LOCK.replace("\"abc\"", "\"abd\"");
-        assert!(refused(&horizon, Some(&downloaded(&other).unwrap()), &ok).is_some());
+        assert!(refused(&horizon, Some(&downloaded(&other).unwrap()), &ok, &[]).is_some());
     }
 
     #[test]
@@ -624,7 +639,7 @@ checksum = "def"
             [wants("bake", "gtnh-lv-compressor-eval-industrial-sim", "1")]
         );
         let horizon = downloaded(LOCK).unwrap();
-        let err = refused(&horizon, None, &wanted).unwrap();
+        let err = refused(&horizon, None, &wanted, &[]).unwrap();
         assert!(err.starts_with(
             "bake needs gtnh-lv-compressor-eval-industrial-sim 1, which isn't in Horizon's Cargo.lock"
         ));

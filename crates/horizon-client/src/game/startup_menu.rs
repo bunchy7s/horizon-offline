@@ -293,7 +293,7 @@ impl StartupMenu {
                 | KeyCode::ArrowUp
                 | KeyCode::ArrowDown),
             ) => {
-                title.arrow_key(key, viewport);
+                title.arrow_key(key, viewport, self.modifiers.shift_key());
             }
             _ => {
                 let cleared = !title.has_caret_field()
@@ -585,7 +585,11 @@ impl Loading {
                 Event::NativeSettings(_) | Event::NativeButton(..) => {}
                 // The startup menu runs before the game opens a control socket,
                 // and before its sound engine (no clicks, no volume previews).
-                Event::ButtonClick | Event::CopyAgentDetails | Event::Volume(..) => {}
+                Event::ButtonClick
+                | Event::CopyAgentDetails
+                | Event::ToggleRecording
+                | Event::ExportRepro
+                | Event::Volume(..) => {}
             }
         }
     }

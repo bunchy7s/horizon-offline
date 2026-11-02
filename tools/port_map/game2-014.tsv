@@ -16,7 +16,7 @@ JigsawBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTra
 JigsawBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	orientation property through the mirror table
 JigsawBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	orientation from clicked face and horizontal facing
 JigsawBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	a game master gets the jigsaw editor (game/jigsaw_edit.rs)
-JukeboxBlock.setPlacedBy	missing	-	minor: a jukebox item carrying a disc (creative Ctrl+pick) fills the block entity in Game::apply_placed_item but HAS_RECORD stays false, so no disc model shows
+JukeboxBlock.setPlacedBy	port	crates/horizon-client/src/game/jukebox.rs::Game::jukebox_placed	the item's block_entity_data RecordItem turns has_record on, after apply_placed_item filled the block entity
 JukeboxBlock.useWithoutItem	port	crates/horizon-client/src/game/jukebox.rs::Game::use_jukebox	takes the disc out through eject_record when one is in
 JukeboxBlock.ownSignal	port	crates/horizon-client/src/game/jukebox.rs::jukebox_signals	15 while a song plays
 JukeboxBlock.getAnalogOutputSignal	port	crates/horizon-client/src/game/jukebox.rs::jukebox_signals	comparator output of the song

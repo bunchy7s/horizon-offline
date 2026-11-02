@@ -183,8 +183,7 @@ pub fn component_nbt(v: &Value) -> Tag {
 
 impl SyncData {
     /// No registries, tags or recipes: enough for tests of the login phase.
-    #[cfg(test)]
-    pub(crate) fn empty() -> Self {
+    pub fn empty() -> Self {
         Self {
             builtin: Builtin::default(),
             dynamic: Dynamic::default(),
@@ -208,6 +207,13 @@ impl SyncData {
         resources: &Path,
         overlay: &horizon_world::loot::PackOverlay,
     ) -> Result<Self, String> {
+        use crate::spans::startup;
+        // The recipe book, the recipe sync and the advancements read the
+        // recipe folder: held here, they share one read of it.
+        let _recipe_files = startup::time("sync.recipe_folder", || {
+            horizon_world::json_folder::read(&resources.join("data/minecraft/recipe"))
+        });
+        let registries_step = startup::step("sync.registries");
         let builtin = Builtin::find(resources)
             .and_then(|p| Builtin::load(&p).ok())
             .ok_or("registries.json not found next to the resources")?;
@@ -248,12 +254,20 @@ impl SyncData {
         // The world's packs' dialogs joined the registry above
         // (`pack_entries`); their `minecraft:dialog` tags join the root's here,
         // for the Quick Actions key and `show_dialog`.
+        drop(registries_step);
+        let tags_step = startup::step("sync.tags");
         let mut tags = Self::load_tags(&root, &builtin, &dynamic);
         Self::merge_dialog_tags(&mut tags, &root, overlay, &builtin, &dynamic);
+        drop(tags_step);
         let content_identity = if resources.join(crate::content_identity::MARKER).exists()
             || horizon_protocol::item::custom::entries().next().is_some()
         {
-            Some(crate::content_identity::identity(resources).map_err(|error| error.to_string())?)
+            Some(
+                startup::time("sync.content_identity", || {
+                    crate::content_identity::identity(resources)
+                })
+                .map_err(|error| error.to_string())?,
+            )
         } else {
             None
         };
@@ -264,15 +278,24 @@ impl SyncData {
             registries,
             tags,
             features: vec!["minecraft:vanilla".to_owned()],
-            commands: super::commands::CommandTree::load(resources),
+            commands: startup::time("sync.commands", || {
+                super::commands::CommandTree::load(resources)
+            }),
             recipes: Vec::new(),
             advancements: {
-                let (recipes, groups) = super::recipes::network_recipes(resources, overlay);
-                super::advancements::ServerAdvancements::load(resources, overlay, recipes, groups)
+                let (recipes, groups) = startup::time("sync.network_recipes", || {
+                    super::recipes::network_recipes(resources, overlay)
+                });
+                startup::time("sync.advancements", || {
+                    super::advancements::ServerAdvancements::load(
+                        resources, overlay, recipes, groups,
+                    )
+                })
             },
         };
-        sync.recipes =
-            super::recipes::update_recipes(&sync.advancements.recipes, resources, &sync, overlay);
+        sync.recipes = startup::time("sync.update_recipes", || {
+            super::recipes::update_recipes(&sync.advancements.recipes, &sync)
+        });
         Ok(sync)
     }
 

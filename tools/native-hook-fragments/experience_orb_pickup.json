@@ -3,18 +3,29 @@
     {
       "name": "experience_orb_pickup_listened",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_experience_orb_pickup_listened",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "collect",
+        "out": "listened"
+      }
     },
     {
       "name": "experience_orb_pickup",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_experience_orb_pickup",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "mending_repair",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_mending_repair",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "a server player taking an experience orb (`native_experience_orb_pickup`, asked for through\n`native_experience_orb_pickup_listened`: cancel it, or change the orb's value and count) and the Mending repair\nproposed for the item it picked (`native_mending_repair`).",
