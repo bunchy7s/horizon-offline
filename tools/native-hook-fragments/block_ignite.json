@@ -4,7 +4,8 @@
       "name": "block_ignite",
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_ignite",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event; Bukkit's BlockIgniteEvent)"
     }
   ],
   "rust_summary": "Fire about to be placed (`native_block_ignite`).",

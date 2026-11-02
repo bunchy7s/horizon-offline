@@ -3,7 +3,7 @@
     {
       "name": "player_item_cooldown",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_item_cooldown",
-      "neoforge": "PlayerCooldownEvent",
+      "neoforge": "none (NeoForge has no such event; Paper's PlayerItemCooldownEvent)",
       "side": "server",
       "cancellable": true
     }

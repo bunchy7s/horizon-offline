@@ -4,7 +4,7 @@
       "name": "player_edit_book",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_edit_book",
       "side": "server",
-      "neoforge": "EditBookEvent",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerEditBookEvent)",
       "cancellable": true
     }
   ],

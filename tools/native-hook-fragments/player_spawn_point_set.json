@@ -4,7 +4,8 @@
       "name": "player_spawn_point_set",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_spawn_point_set",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerSpawnChangeEvent)"
     }
   ],
   "rust_summary": "A server player's respawn point about to change, cancellable (`native_player_spawn_point_set`).",

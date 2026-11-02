@@ -3,7 +3,7 @@
     {
       "name": "player_pick_item",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_pick_item",
-      "neoforge": "PickBlock",
+      "neoforge": "none (NeoForge has no such event; Paper's PlayerPickItemEvent)",
       "side": "server",
       "cancellable": true
     }

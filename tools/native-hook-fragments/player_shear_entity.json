@@ -4,7 +4,7 @@
       "name": "player_shear_entity",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_shear_entity",
       "side": "server",
-      "neoforge": "PlayerInteractEvent.EntityInteract",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerShearEntityEvent)",
       "cancellable": true
     }
   ],

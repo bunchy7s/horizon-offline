@@ -4,7 +4,8 @@
       "name": "block_burn",
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_burn",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event; Bukkit's BlockBurnEvent)"
     }
   ],
   "rust_summary": "Fire about to burn a block away (`native_block_burn`).",
