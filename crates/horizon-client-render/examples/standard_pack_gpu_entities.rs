@@ -201,7 +201,9 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     renderer.render(&frame)?;
     let expected = read(&out.join("cpu.png"));
     let matches = expected
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[..3] == [77, 77, 0])
         .count();
     assert!(
@@ -209,7 +211,9 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         "original entity-ID/hurt output, got {matches} pixels"
     );
     let white = expected
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[..3] == [88, 192, 0])
         .count();
     assert!(
@@ -217,7 +221,12 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         "original entity-ID/white-flash output, got {white} pixels"
     );
     assert_eq!(
-        expected.chunks_exact(4).filter(|p| p[0] == 99).count(),
+        expected
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|p| p[0] == 99)
+            .count(),
         0,
         "hidden caster is not camera-visible"
     );
