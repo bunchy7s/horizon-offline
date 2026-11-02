@@ -72,6 +72,7 @@ fn a_shader_pack_lights_the_faces_itself() {
         let mut mesher = Mesher {
             nether_shading: false,
             shader_pack_lighting,
+            separate_ao: false,
             assets: &assets,
             render: &render,
             tables: &tables,
@@ -96,6 +97,54 @@ fn a_shader_pack_lights_the_faces_itself() {
     };
     assert_eq!(colours(false).len(), 4);
     assert_eq!(colours(true).len(), 1);
+}
+
+#[test]
+#[ignore = "requires prepared 26.3 resources (HORIZON_MESH_TEST_RESOURCES or .local/horizon-client/26.3)"]
+fn separate_ao_passes_ao_in_alpha_without_darkening_rgb() {
+    let root = std::env::var_os("HORIZON_MESH_TEST_RESOURCES")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../.local/horizon-client/26.3")
+        });
+    let assets = Assets::load(&root).unwrap();
+    let facts = BlockFacts::load(&root, assets.registry).unwrap();
+    let biomes = Biomes::load(&root).unwrap();
+    let render = assets.reload(&root).unwrap();
+    let visibility = crate::models::load_visibility(&root, assets.registry).unwrap();
+    let tables = MeshTables::new(&assets, &render, &facts, visibility.clone()).unwrap();
+    let stone = assets.registry.default_state("minecraft:stone").unwrap().0;
+    let mut chunk = Chunk::empty(0, 0);
+    // Place stone with neighbouring blocks to create AO variations.
+    chunk.set(8, MIN_Y + 8, 8, stone);
+    chunk.set(9, MIN_Y + 8, 8, stone);
+    let mut region = [[None; 3]; 3];
+    region[1][1] = Some(&chunk);
+    let mut mesher = Mesher {
+        nether_shading: false,
+        shader_pack_lighting: true,
+        separate_ao: true,
+        assets: &assets,
+        render: &render,
+        tables: &tables,
+        biomes: &biomes,
+        visibility,
+        zoom: BiomeZoom::new(0),
+        blend_radius: 0,
+        smooth_lighting: true,
+        cutout_leaves: true,
+        translucent_layers: &[],
+        leaf_culling: LeafCullingMode::Off,
+    };
+    let mesh = mesher.mesh(&region, 0);
+    assert!(!mesh.solid.is_empty());
+    for v in &mesh.solid {
+        // RGB components should be pure un-darkened white (0xFFFFFF) because shader_pack_lighting is on.
+        assert_eq!(v.color & 0x00FF_FFFF, 0x00FF_FFFF);
+        // Alpha holds the AO factor, which must be non-zero.
+        assert!(v.color >> 24 > 0);
+    }
 }
 
 #[test]
@@ -149,6 +198,7 @@ fn reused_mesh_matches_fresh_geometry_across_sections_and_resource_reload() {
         let mut mesher = Mesher {
             nether_shading: false,
             shader_pack_lighting: false,
+            separate_ao: false,
             assets: &assets,
             render: &render,
             tables: &tables,
