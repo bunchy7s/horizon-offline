@@ -10,5 +10,5 @@
     }
   ],
   "rust_summary": "A player tunes a note block (`native_note_block_change`).",
-  "doc_summary": "A player tunes a note block: `native_note_block_change(context, new_note, cancel)`. Bundles need \"hooks\": @API:native_note_block_change@."
+  "doc_summary": "On the authoritative server, not in client prediction, a player tunes a note block: `native_note_block_change(context, new_note, cancel)`. The context holds the dimension, position, instrument and old note. `new_note` starts as vanilla's cycled note; values outside 0–24 keep vanilla's. Cancel leaves the note unchanged and prevents playback. Bundles need \"hooks\": @API:native_note_block_change@."
 }

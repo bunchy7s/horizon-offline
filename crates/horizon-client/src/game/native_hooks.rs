@@ -1172,8 +1172,11 @@ impl GameLevel<'_> {
         mod_api::dispatch_block_burn(self, mod_api::mods(), dimension, pos, cancel);
     }
 
-    /// A player is tuning a note block. Change `new_note` (0 through 24), or
-    /// cancel to keep the old note and prevent playback. API @API:native_note_block_change@.
+    /// A player is tuning a note block on the authoritative server, not in
+    /// client prediction. `context` gives its dimension, position, instrument
+    /// and old note; `new_note` starts as vanilla's cycled note. Set it to 0
+    /// through 24; an out-of-range value keeps vanilla's. Cancel to leave the
+    /// note unchanged and prevent playback. API @API:native_note_block_change@.
     #[inline(always)]
     pub(super) fn native_note_block_change(
         &self,
