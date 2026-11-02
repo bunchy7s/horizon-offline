@@ -1290,9 +1290,9 @@ impl Game<'_> {
         // entity, so a kill by a mob (a tame wolf credited to its owner)
         // leaves it out; ServerPlayer.awardKillScore counts the rest.
         if !killed_by_mob(m) {
-            self.stats.add("killed", &m.kind.id, 1);
+            self.award_stat("killed", &m.kind.id, 1);
         }
-        self.stats.custom("mob_kills", 1);
+        self.award_custom_stat("mob_kills", 1);
         self.score_player_killed(super::commands::Target::Mob(m.id));
         let view = self.mob_entity(m);
         let blow = m.last_damage.map(|(d, _)| self.damage_view(d));
@@ -2946,7 +2946,7 @@ impl Game<'_> {
                 super::commands::Target::Guest,
             );
             self.for_player(who, |g| {
-                g.stats.custom("animals_bred", 1);
+                g.award_custom_stat("animals_bred", 1);
                 g.trigger_bred(&parent, &partner_view, (!turtle).then_some(&child));
             });
         }
@@ -3883,7 +3883,7 @@ impl Game<'_> {
         if rang {
             let _ = self.process_level_events();
             if p.owner == Some(Who::Player) {
-                self.stats.custom("bell_ring", 1);
+                self.award_custom_stat("bell_ring", 1);
             }
         }
     }
@@ -4101,7 +4101,7 @@ impl Game<'_> {
             let _ = self.process_level_events();
             self.native_target_hit(self.dim.id(), pos, strength);
             if p.owner == Some(Who::Player) && (p.guest.is_none() || p.guest == self.lan_acting) {
-                self.stats.custom("target_hit", 1);
+                self.award_custom_stat("target_hit", 1);
                 let kind = if p
                     .arrow
                     .as_ref()
@@ -4734,7 +4734,7 @@ impl Game<'_> {
             // flies as: the splash happens where the hit was, a lingering
             // potion's cloud sits at the mob it hit (ThrownLingeringPotion),
             // and the potion that lands names the hurt it deals.
-            (ProjectileKind::Potion(stack), hit) => {
+            (ProjectileKind::Potion(stack, _), hit) => {
                 let block = match hit {
                     Hit::Block { pos, face, .. } => Some((
                         pos,
@@ -6111,7 +6111,7 @@ impl Game<'_> {
         if let Some(done) = self.use_spawn_egg_on_spawner(hit.pos, &spawner_id, data.as_ref()) {
             if done {
                 self.swing_arm();
-                self.stats.add("used", &stack.item, 1);
+                self.award_stat("used", &stack.item, 1);
                 self.consume_held();
             }
             return Ok(true);
@@ -6142,7 +6142,7 @@ impl Game<'_> {
         }
         self.apply_spawn_egg_entity_data(id, stack);
         self.post_block_game_event("minecraft:entity_place", p, Some(Who::Player), None);
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.swing_arm();
         if !self.creative
             && let Some(s) = self.held_mut().as_mut()

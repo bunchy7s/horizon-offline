@@ -3,7 +3,7 @@
 //! `AllowlistService`, `BanlistService`, `IpBanlistService` and `OperatorService` on the running server's lists. Players are found as
 //! `MinecraftPlayerListService.getUser` finds them, each change is logged as `JsonRpcLogger` logs it, and the
 //! players a change shuts out are disconnected. The supervisor answers with the lists, from their files.
-use super::{GAME_MODES, ServerState, log};
+use super::{GAME_MODES, ServerState, auto_save, log, set_auto_save};
 use crate::game::Game;
 use horizon_client::{
     command::vanilla::DIFFICULTIES,
@@ -49,6 +49,21 @@ impl Game<'_> {
         let entries = body["entries"].as_array().cloned().unwrap_or_default();
         let lists = state.lists.clone();
         match body["method"].as_str().unwrap_or_default() {
+            "serversettings/autosave" => {
+                return json!({ "value": auto_save(state) });
+            }
+            "serversettings/autosave/set" => {
+                let Some(enabled) = body["value"].as_bool() else {
+                    return json!({ "error": "autosave must be a boolean" });
+                };
+                rpc(format!(
+                    "Update autosave from {} to {}",
+                    auto_save(state),
+                    enabled
+                ));
+                set_auto_save(state, enabled);
+                return json!({ "value": auto_save(state) });
+            }
             "serversettings/motd" => {
                 return json!({
                     "value": self.lan.as_ref().map(|lan| lan.hub.lan.shared.motd()).unwrap_or_default()

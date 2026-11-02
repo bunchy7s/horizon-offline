@@ -262,7 +262,8 @@ mod tests {
             &collision,
             false,
             &fluids,
-            &[]
+            &[],
+            None
         ));
         assert_eq!(still.position.x, at.x);
         assert_eq!(still.velocity.x, 0.0);
@@ -275,7 +276,8 @@ mod tests {
             &collision,
             false,
             &fluids,
-            &[]
+            &[],
+            None
         ));
         // First push is damped by buoyancy before motion, second follows drag.
         assert!((carried.position.x - at.x - 0.014 * 0.99).abs() < 1e-12);
@@ -289,6 +291,7 @@ mod tests {
                 false,
                 &fluids,
                 &[],
+                None,
             );
         }
         assert!(carried.position.x > at.x + 0.5);

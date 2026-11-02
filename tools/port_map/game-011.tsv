@@ -17,7 +17,7 @@ AbstractHorse.fedFood	port	crates/horizon-client/src/game/mounts.rs::Game::feed_
 AbstractHorse.doPlayerRide	inline	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	clears eating and standing, turns the player to the mount and mounts; the block at the end of interact_mount
 AbstractHorse.isImmobile	port	crates/horizon-client/src/mobs/equine.rs::immobile	
 AbstractHorse.dropEquipment	inline	crates/horizon-client/src/mobs/drops.rs::die	the equine branch drops the inventory items and a donkey's or mule's chest
-AbstractHorse.followMommy	missing		minor: no Bred flag, so a bred foal is not pulled to its mother from 16 blocks; the FollowParent goal covers 8
+AbstractHorse.followMommy	inline	crates/horizon-client/src/mobs/equine.rs::ai_step	follow_mommy: a bred foal that is not eating keeps a path to the nearest bred AbstractHorse within 16 blocks and more than 2 away (createPath(entity, 0), which leaves the speed modifier alone); Bred is NBT-only in 26.3, so only a save or a summon gives it
 AbstractHorse.openMouth	inline	crates/horizon-client/src/game/mounts.rs::Game::feed_mount	gap: minor: sets the mouth animation to 1 once, it closes after 3 ticks; the mouth flag is not synced to a remote client
 AbstractHorse.setStanding	inline	crates/horizon-client/src/mobs/equine.rs::make_mad	the 20 tick rear; RandomStand::start and the jump in tick_mount_riding set the same counter
 AbstractHorse.standIfPossible	inline	crates/horizon-client/src/mobs/equine.rs::make_mad	rears only species that can; the hurt caller is missing (see hurtServer)
