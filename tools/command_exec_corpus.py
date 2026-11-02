@@ -801,6 +801,9 @@ def items_and_loot():
         cmd('/loot replace block 3 206 3 container.8 loot minecraft:blocks/cobblestone'),
         cmd('/loot replace entity @s hotbar.5 loot minecraft:blocks/glass'),
         cmd('/loot spawn 3 210 3 loot minecraft:blocks/stone'),
+        # NestedLootTable: the reward tables pick another table and roll it.
+        cmd('/loot spawn 3 210 3 loot minecraft:chests/trial_chambers/reward'),
+        cmd('/loot give @s loot minecraft:chests/trial_chambers/reward_ominous'),
         cmd('/loot give @s loot {pools:[{rolls:1,entries:[{type:"minecraft:item",name:"minecraft:apple",functions:[{type:"minecraft:set_count",count:4}]}]}]}'),
         cmd('/setblock 2 205 2 minecraft:stone'),
         cmd('/loot give @s mine 2 205 2'),

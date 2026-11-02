@@ -362,6 +362,14 @@ fn registry_order(root: &Path, order: &[Arc<str>]) -> Vec<Arc<str>> {
 }
 /// Item ids standing for a loot table's `minecraft:dynamic` entries.
 const DYNAMIC: &str = "#dynamic:";
+/// The item id standing for a chosen `minecraft:loot_table` entry, whose
+/// table then rolls in full (`NestedLootTable`).
+const NESTED: &str = "#loot_table";
+thread_local! {
+    /// The nested tables rolling now, outermost first: a table never rolls
+    /// inside itself (`LootContext.pushVisitedElement`).
+    static NESTED_ROLLS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
 pub struct Items {
     pub items: HashMap<Arc<str>, ItemInfo>,
     pub order: Vec<Arc<str>>,
@@ -1231,7 +1239,11 @@ impl Items {
             explosion_radius: None,
             this_entity: false,
         };
-        ctx.evaluate(table, random)
+        // LootTable.getRandomItemsRaw visits the table itself first.
+        NESTED_ROLLS.with(|v| v.borrow_mut().push(id.to_owned()));
+        let out = ctx.evaluate(table, random);
+        NESTED_ROLLS.with(|v| v.borrow_mut().pop());
+        out
     }
     /// The server random sequence a loot table draws from (`random_sequence`):
     /// vanilla's `LootContext.Builder.create` uses it instead of the level random.
@@ -1646,6 +1658,21 @@ impl LootContext<'_> {
                 ));
                 true
             }
+            // NestedLootTable: chosen by its weight like an item; `choose`
+            // then rolls its table (an id or inline) and applies its functions.
+            "minecraft:loot_table" => {
+                out.push((
+                    e["weight"].as_i64().unwrap_or(1) as i32,
+                    ItemStack {
+                        item: Arc::from(NESTED),
+                        count: 1,
+                        damage: 0,
+                        extra: None,
+                    },
+                    e.clone(),
+                ));
+                true
+            }
             "minecraft:empty" => {
                 out.push((
                     e["weight"].as_i64().unwrap_or(1) as i32,
@@ -1691,8 +1718,45 @@ impl LootContext<'_> {
             chosen
         };
         let (_, mut stack, modifiers) = candidates.swap_remove(pick);
+        if &*stack.item == NESTED {
+            self.nested(&modifiers, random, produced);
+            return;
+        }
         self.modifiers(&modifiers, &mut stack, random);
         produced.push(stack);
+    }
+    /// `NestedLootTable.createItemStack`: the entry's table rolls in full
+    /// (its pools and its own functions), then the entry's functions apply to
+    /// each stack. A table already rolling further out adds nothing.
+    fn nested<R: RandomSource>(
+        &self,
+        entry: &Value,
+        random: &mut R,
+        produced: &mut Vec<ItemStack>,
+    ) {
+        let (name, table) = match &entry["value"] {
+            Value::String(name) => (name.as_str(), self.items.loot.get(name.as_str())),
+            inline @ Value::Object(_) => ("<inline>", Some(inline)),
+            _ => return,
+        };
+        let Some(table) = table else { return };
+        let entered = NESTED_ROLLS.with(|v| {
+            let mut v = v.borrow_mut();
+            let fresh = !v.iter().any(|n| n == name);
+            if fresh {
+                v.push(name.to_owned());
+            }
+            fresh
+        });
+        if !entered {
+            return;
+        }
+        let stacks = self.evaluate(table, random);
+        NESTED_ROLLS.with(|v| v.borrow_mut().pop());
+        for mut stack in stacks {
+            self.modifiers(&entry["modifier"], &mut stack, random);
+            produced.push(stack);
+        }
     }
     /// An enchantment function's `options` (`HolderSet`): a tag, a list or
     /// one id; every enchantment when absent (`registryAccess().listElements`).
@@ -2204,6 +2268,40 @@ mod tests {
         assert!(items.item_in_tag("test:items", "test:apple"));
         assert!(!items.item_in_tag("test:items", "test:stone"));
         assert!(!items.item_in_tag("test:missing", "test:apple"));
+    }
+
+    /// `NestedLootTable`: a `loot_table` entry, by id or inline, rolls that
+    /// table in full and applies its own functions to each stack; a table
+    /// never rolls inside itself.
+    #[test]
+    fn loot_table_entries_roll_their_table() {
+        let mut items = Items::for_tests(HashMap::new());
+        let diamond = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]});
+        items.loot = Arc::new(
+            [
+                ("test:inner", diamond.clone()),
+                ("test:outer", json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:loot_table",
+                    "value":"test:inner","modifier":[{"type":"minecraft:set_count","count":3}]}]}]})),
+                ("test:inline", json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:loot_table",
+                    "value":diamond}]}]})),
+                ("test:loop", json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:loot_table",
+                    "value":"test:loop"}]},{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stick"}]}]})),
+            ]
+            .map(|(id, t)| (id.to_owned(), t))
+            .into_iter()
+            .collect(),
+        );
+        let roll = |id: &str| {
+            items
+                .loot_table(id, false, None, &mut LegacyRandom::new(1))
+                .into_iter()
+                .map(|s| format!("{} {}", s.item, s.count))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(roll("test:outer"), ["minecraft:diamond 3"]);
+        assert_eq!(roll("test:inline"), ["minecraft:diamond 1"]);
+        // `test:loop` is already rolling: its own entry adds nothing.
+        assert_eq!(roll("test:loop"), ["minecraft:stick 1"]);
     }
 
     /// `Blocks.wallVariant`: a wall block without a table of its own drops
