@@ -3588,6 +3588,18 @@ impl Game<'_> {
         let _ = (dimension, entity, from, to);
     }
 
+    /// A server entity finished its portal wait and is beginning to leave
+    /// `dimension` through `pos`. The destination follows the portal rules.
+    /// @API:native_entity_portal@.
+    pub(super) fn native_entity_portal(
+        &mut self,
+        dimension: &str,
+        entity: u32,
+        pos: [i32; 3],
+    ) {
+        let _ = (dimension, entity, pos);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
