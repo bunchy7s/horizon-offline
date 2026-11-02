@@ -876,8 +876,5 @@ mod tests {
             assert!(!can_be_leashed(&empty), "a cube with no block in it");
             assert!(can_be_leashed(&full), "a cube holding a block");
         });
-        if !ran {
-            return;
-        }
     }
 }
