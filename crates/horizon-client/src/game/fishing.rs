@@ -36,6 +36,7 @@ pub(super) struct Hook {
     pub(super) previous: Vec3,
     velocity: Vec3,
     state: State,
+    tick_count: i32,
     life: i32,
     on_ground: bool,
     nibble: i32,
@@ -68,9 +69,12 @@ fn segment_entry(start: Vec3, end: Vec3, bounds: Aabb) -> Option<f64> {
     let min = bounds.min_position();
     let max = bounds.max_position();
     let start = [start.x, start.y, start.z];
-    let delta = [end.x - start[0], end.y - start[1], end.z - start[2]];
     let min = [min.x, min.y, min.z];
     let max = [max.x, max.y, max.z];
+    if (0..3).all(|axis| start[axis] >= min[axis] && start[axis] < max[axis]) {
+        return None;
+    }
+    let delta = [end.x - start[0], end.y - start[1], end.z - start[2]];
     let mut entry: f64 = 0.0;
     let mut exit: f64 = 1.0;
     for axis in 0..3 {
@@ -90,16 +94,25 @@ fn segment_entry(start: Vec3, end: Vec3, bounds: Aabb) -> Option<f64> {
     }
     (entry <= 1.0 && exit >= 0.0).then_some(entry)
 }
+/// `ProjectileUtil.computeMargin`: the fishing hook's target-box margin grows
+/// to 0.3 blocks over its first eight ticks.
+fn entity_hit_margin(tick_count: i32) -> f64 {
+    f64::from((tick_count - 2).clamp(0, 6)) / 20.0
+}
 fn first_entity_hit(
     start: Vec3,
     end: Vec3,
+    margin: f64,
     targets: impl IntoIterator<Item = (u32, Aabb)>,
 ) -> Option<u32> {
     let mut hit = None;
     let mut hit_at = f64::INFINITY;
     for (id, target_bounds) in targets {
-        if let Some(at) = segment_entry(start, end, target_bounds)
-            && at < hit_at
+        if let Some(at) = segment_entry(
+            start,
+            end,
+            target_bounds.inflate(Vec3::new(margin, margin, margin)),
+        ) && at < hit_at
         {
             hit = Some(id);
             hit_at = at;
@@ -219,6 +232,7 @@ impl Game<'_> {
                 previous: start,
                 velocity: v,
                 state: State::Flying,
+                tick_count: 0,
                 life: 0,
                 on_ground: false,
                 nibble: 0,
@@ -615,6 +629,7 @@ impl Game<'_> {
         if !self.holds_rod() || d2 > 1024.0 {
             return;
         }
+        h.tick_count += 1;
         // The players it can catch, as they stand now (the host's own hook;
         // guests' hooks use the ones taken as their turns start).
         if self.lan_acting.is_none()
@@ -678,6 +693,7 @@ impl Game<'_> {
                 let hit = first_entity_hit(
                     h.position,
                     entity_end,
+                    entity_hit_margin(h.tick_count),
                     self.mobs
                         .iter()
                         .filter(|m| m.alive())
@@ -1162,6 +1178,7 @@ impl Hook {
             previous: at,
             velocity: Vec3::ZERO,
             state: State::Flying,
+            tick_count: 0,
             life: 0,
             on_ground: false,
             nibble: 0,
@@ -1457,7 +1474,7 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{first_entity_hit, pull_item, rebound};
+    use super::{entity_hit_margin, first_entity_hit, pull_item, rebound};
     use horizon_client::{entities::ItemEntity, items::ItemStack};
     use horizon_core::geometry::{Aabb, Vec3};
 
@@ -1510,12 +1527,44 @@ mod tests {
     }
 
     #[test]
+    fn a_flying_hook_uses_vanillas_growing_entity_hit_margin() {
+        let start = Vec3::ZERO;
+        let end = Vec3::new(1.0, 0.0, 0.0);
+        let target = Aabb::new(Vec3::new(0.5, 0.31, -0.1), Vec3::new(0.7, 0.5, 0.1));
+
+        assert_eq!(entity_hit_margin(2), 0.0);
+        assert_eq!(entity_hit_margin(8), 0.3);
+        assert_eq!(
+            first_entity_hit(start, end, entity_hit_margin(8), [(1, target)]),
+            None
+        );
+        let within_margin = Aabb::new(Vec3::new(0.5, 0.29, -0.1), Vec3::new(0.7, 0.5, 0.1));
+        assert_eq!(
+            first_entity_hit(start, end, entity_hit_margin(8), [(1, within_margin)]),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn a_flying_hook_does_not_hit_a_target_it_starts_inside() {
+        let target = Aabb::new(Vec3::new(-0.1, -0.1, -0.1), Vec3::new(0.7, 0.15, 0.1));
+
+        assert_eq!(
+            first_entity_hit(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), 0.0, [(1, target)]),
+            None
+        );
+    }
+
+    #[test]
     fn a_flying_hook_uses_the_first_target_along_its_path() {
         let start = Vec3::ZERO;
         let end = Vec3::new(1.0, 0.0, 0.0);
         let near = Aabb::new(Vec3::new(0.45, -0.1, -0.1), Vec3::new(0.7, 0.15, 0.1));
         let far = Aabb::new(Vec3::new(0.8, -0.1, -0.1), Vec3::new(0.95, 0.15, 0.1));
 
-        assert_eq!(first_entity_hit(start, end, [(2, far), (1, near)]), Some(1));
+        assert_eq!(
+            first_entity_hit(start, end, 0.0, [(2, far), (1, near)]),
+            Some(1)
+        );
     }
 }
