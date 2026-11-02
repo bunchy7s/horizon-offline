@@ -841,6 +841,8 @@ API 108 adds `native_server_data_loaded(reload)` fires once the server's data ta
 
 API 109 adds `native_compute_fov(partial, camera, degrees)` receives the computed world FOV after settings, ordinary FOV effects and zoom, before projection/Nausea. `camera` is its world position and `partial` the interpolation fraction. Mods can narrow or widen the angle; only finite values in 1..=179 degrees are accepted, otherwise the original computed angle is used. It runs for world rendering and near-plane overlays, not just once per frame. Hand/HUD FOV and the title panorama keep their existing paths. Bundles need "hooks": 109.
 
+`native_movement_input(forward, strafe, jump, sneak)` runs on the client each local player tick after input is read and before it is applied. Mods may change all four values; positive strafe is left. The server receives direction flags, not scalar magnitudes, so remote servers may correct modified movement. Bundles need "hooks": @API:movement_input@.
+
 API 110 adds mobs drawn by client mods: `native_mob_submit(mob, draw, drawn)` is asked each frame for every mob in view but players,
 with its id, kind, custom name and the frame's body and head turns and walk cycle; a mod draws a model of its own with the
 block entity drawing helpers under `draw`'s pose (at the feet, turned with the body) and sets `drawn` to leave out the vanilla
@@ -1943,7 +1945,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `minecraft:water`, `minecraft:lava` or `minecraft:powder_snow`; fish and axolotl buckets pour water) into `pos`,
   right before the fluid is placed. Set `cancel` and nothing is poured. The player's state is swapped in, so
   `native_tell` answers them. `native_fill_bucket` hears the same click without the player and the fluid; dispensers
-  and cauldrons are not heard.
+  and cauldrons are not heard. A fluid or mob bucket is also heard at the block beside the clicked face whenever that
+  block is not `pos`, since a block that refuses the fluid passes it there; the fluid may still go into `pos`.
 - **`native_player_bed_enter(player, name, pos, cancel)`**: a server player passed the sleep checks and is about to
   enter the bed at its head position. Set `cancel` to keep them out; helpers that look them up through `self.lan` may
   find nothing while a guest packet is handled.
@@ -2215,7 +2218,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   before any is hit; take out the ones to spare. Entities are hurt as before.
 - **`native_fill_bucket(stack, pos, canceled)`** and **`native_attack_entity(entity, kind, pos, canceled)`** (API 22):
   a player's bucket at a block, and their blow on an entity, with the acting player swapped in. Canceled, the bucket
-  does nothing and the blow does no harm.
+  does nothing and the blow does no harm. A fluid or mob bucket also asks about the block beside the clicked face
+  whenever that block is not its target, since a block that refuses the fluid passes it there; the fluid may still
+  stay in the target.
 
 ### Mobs
 

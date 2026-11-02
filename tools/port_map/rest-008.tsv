@@ -23,7 +23,7 @@ RegistrySetBuilder.BuildState.throwOnError	skip:data		bootstrap and datagen regi
 RegistrySetBuilder.BuildState.createBootstrap	skip:data		bootstrap and datagen registry-set building; Horizon reads registry data from tables
 RegistrySynchronization.packRegistries	inline	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	gap: minor: packs every registry SyncData holds; the synchronized-registry list is not checked here
 RegistrySynchronization.packRegistry	port	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	gap: minor: known_pack leaves out contents for every entry; vanilla checks each entry's known pack
-RegistrySynchronization.networkSafeRegistries	inline	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	gap: minor: unsure which registries count as networkable; decided when SyncData is built
+RegistrySynchronization.networkSafeRegistries	inline	crates/horizon-client/src/lan/data.rs::SyncData::registry_packets	the networkable set is `SYNCHRONIZED` (lan/data.rs:18: 32 registries, `RegistryDataLoader.SYNCHRONIZED_REGISTRIES` in vanilla's order) and registry_packets packs every one of them
 SectionPos.offset	inline	crates/horizon-client-render/src/light.rs::Region::slot	gap: minor: the light engine reaches neighbour sections by block coordinate; the SectionTracker walk is not checked
 SectionPos.sectionRelativePos	port	crates/horizon-core/src/position.rs::BlockPos::section_relative	
 SectionPos.relativeToBlockPos	port	crates/horizon-core/src/position.rs::SectionPos::relative_to_block	
@@ -31,7 +31,7 @@ SectionPos.blockToSection	port	crates/horizon-core/src/position.rs::BlockPos::se
 SectionPos.origin	inline	crates/horizon-client-render/src/gfx/resident.rs::origin	gap: minor: camera-relative origin; the block corner is the same sum without the camera
 SectionPos.asLong	port	crates/horizon-core/src/position.rs::SectionPos::pack	asLong(BlockPos): BlockPos::section then this pack; bit layout matches
 SectionPos.blocksInside	inline	crates/horizon-client/src/mobs/villager_brain.rs::chunk_pois	the POI scan visits every block of each section
-SectionPos.aroundChunk	missing		`mobs/villager_brain.rs::chunk_pois` reads the chunks it has, with no `ensureLoadedAndValid`: a search near an unloaded chunk sees fewer points of interest
+SectionPos.aroundChunk	inline	crates/horizon-client/src/mobs/villager_brain.rs::pois_in_range	the chunk window a POI sweep walks, radius/16 + 1 chunks each way; the pre-load half (ensureLoadedAndValid) has no counterpart: chunk_pois returns as soon as the chunk is not in the world
 SectionPos.betweenClosedStream	skip:java		Java stream over a 3-D section box; the loops in pois_in_range and chunk_pois do the iteration
 SectionPos.aroundAndAtBlockPos	port	crates/horizon-client-render/src/light.rs::LightChanges::dirty_sections	the sections within one block of a changed cell
 TypedInstance.is	skip:java		holder type checks; Horizon compares registry names
@@ -78,15 +78,15 @@ DataComponentInitializers.Initializer.add	skip:data		item default component init
 DataComponentInitializers.SingleComponentInitializer.asInitializer	skip:data		item default component initializers; Horizon reads item defaults from its tables
 DataComponentLookup.getOrCreateStorage	skip:java		cache
 DataComponentLookup.scanForComponents	skip:java		index build behind the lookup
-DataComponentLookup.findAll	missing		no component-driven item search: dyes are found by their `_dye` name and fuels by the table in `crafting.rs`/`furnace.rs`
-DataComponentLookup.ComponentStorage.findMatching	missing		a spawn egg is built from the entity type's id by name, with no component lookup
+DataComponentLookup.findAll	inline	crates/horizon-client/src/game/creatures.rs::Game::dye_color_mix_in_recipes	DyeColor.findColorMixInRecipes looks the two dyes up through the recipe components; this builds the two-dye grid and asks the recipe manager for it
+DataComponentLookup.ComponentStorage.findMatching	skip:other		how a spawn egg finds its entity type: the egg's id is the type's with _spawn_egg on the end (creatures.rs::Game::spawn_egg_allowed trims it), so no component is looked up
 DataComponentMap.makeCodecFromMap	skip:java		codec
 DataComponentMap.iterator	skip:java		iterator
 DataComponentMap.Builder.setUnchecked	skip:java		builder
 DataComponentMap.Builder.addAll	skip:java		builder
 DataComponentMap.Builder.buildFromMapTrusted	skip:java		builder
 DataComponentPatch.getFromPatchAndPrototype	skip:java		patch-or-default read; typed StackData fields plus the item table cover it
-DataComponentPatch.forget	missing		a block entity's implicit components are not stripped on placement: `block_entity_item.rs` merges the explicit ones over the implicit
+DataComponentPatch.forget	missing		a block entity's implicit components are not stripped on placement: block_entity_item.rs::place merges the explicit ones over the implicit
 DataComponentPatch.split	skip:java		added and removed parts kept as separate fields (protocol Stack.removed, StackData)
 DataComponentPatch.equals	skip:java		equality
 DataComponentPatch.toString	skip:debug		debug string
@@ -108,21 +108,21 @@ PatchedDataComponentMap.size	skip:java		generic component map; Horizon sets type
 PatchedDataComponentMap.asPatch	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
 PatchedDataComponentMap.copy	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
 PatchedDataComponentMap.equals	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
-TypedDataComponent.encodeValue	skip:java		codec
-AttributeModifiersPredicate.matches	missing		`advancements.rs::item` reads `items`, `count`, the `potion_contents` and `damage` components and the `enchantments` and `damage` predicates; a `minecraft:attribute_modifiers` predicate is ignored, so the criterion matches too broadly
-AttributeModifiersPredicate.EntryPredicate.test	missing		same as `matches`: no entry of an `attribute_modifiers` predicate is tested
-BundlePredicate.matches	missing		ignored by `advancements.rs::item`, so a bundle contents criterion matches any bundle
-ContainerPredicate.matches	missing		ignored by `advancements.rs::item`, so a container contents criterion matches too broadly
+TypedDataComponent.encodeValue	port	crates/horizon-protocol/src/item/hash.rs::Component::code	the component's own codec form, hashed; one arm per component kind, with the kinds that have no persistent codec (map_post_processing, creative_slot_lock) as the None
+AttributeModifiersPredicate.matches	missing		`advancements.rs::item` reads `items`, `count`, the `potion_contents` and `damage` components and the `enchantments` and `damage` predicates; a `minecraft:attribute_modifiers` predicate is ignored, so the criterion matches too broadly; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
+AttributeModifiersPredicate.EntryPredicate.test	missing		same as `matches`: no entry of an `attribute_modifiers` predicate is tested; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
+BundlePredicate.matches	missing		ignored by `advancements.rs::item`, so a bundle contents criterion matches any bundle; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
+ContainerPredicate.matches	missing		ignored by `advancements.rs::item`, so a container contents criterion matches too broadly; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
 net/minecraft/core/component/predicates/DamagePredicate#matches	inline	crates/horizon-client/src/advancements.rs::item	gap: minor: only the damage range; the durability range (max damage minus damage) is not checked
 DataComponentPredicate.Single.wrapCodec	skip:java		codec
 DataComponentPredicate.Type.unpackType	skip:java		codec helper
 EnchantmentsPredicate.matches	inline	crates/horizon-client/src/advancements.rs::item	the enchantments predicate inside item()
-FireworkExplosionPredicate.FireworkPredicate.test	missing		ignored by `advancements.rs::item`
-FireworksPredicate.matches	missing		ignored by `advancements.rs::item`, so a fireworks criterion matches any firework
-JukeboxPlayablePredicate.matches	missing		ignored by `advancements.rs::item`
+FireworkExplosionPredicate.FireworkPredicate.test	missing		ignored by `advancements.rs::item`; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
+FireworksPredicate.matches	missing		ignored by `advancements.rs::item`, so a fireworks criterion matches any firework; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
+JukeboxPlayablePredicate.matches	missing		ignored by `advancements.rs::item`; the one item predicate shipped data does use besides enchantments and map_id, in adventure/play_jukebox_in_meadows, where it is the only test of that match_tool
 PotionsPredicate.matches	port	crates/horizon-client/src/advancements.rs::potions	
-WritableBookPredicate.matches	missing		ignored by `advancements.rs::item`
-WrittenBookPredicate.matches	missing		ignored by `advancements.rs::item`
+WritableBookPredicate.matches	missing		ignored by `advancements.rs::item`; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
+WrittenBookPredicate.matches	missing		ignored by `advancements.rs::item`; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
 BoatDispenseItemBehavior.execute	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_boat	
 DefaultDispenseItemBehavior.dispense	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_default	the click and dispense events of dispense_default
 DefaultDispenseItemBehavior.addToInventoryOrDispense	port	crates/horizon-client/src/game/dispenser.rs::Game::consume_with_remainder	

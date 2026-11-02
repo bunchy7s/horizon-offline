@@ -403,6 +403,19 @@ impl Game<'_> {
         persistent: bool,
         scripted: bool,
     ) -> Option<u32> {
+        self.spawn_mob_reason(kind, at, persistent, scripted, !persistent)
+    }
+    /// `spawn_mob_for` with the spawn reason's NATURAL flag explicit: only a
+    /// natural spawn rolls the jockey mounts of zombie horses, husks and
+    /// drowned (`reinforcement` and spawner spawns pass `false`).
+    pub(super) fn spawn_mob_reason(
+        &mut self,
+        kind: &str,
+        at: [f64; 3],
+        persistent: bool,
+        scripted: bool,
+        natural: bool,
+    ) -> Option<u32> {
         let kind = if kind.contains(':') {
             kind.to_owned()
         } else {
@@ -437,7 +450,7 @@ impl Game<'_> {
         self.enchant_spawn_equipment(id);
         self.halloween_spawn_head(id);
         if !persistent && !scripted {
-            self.spawn_jockeys(id, true);
+            self.spawn_jockeys(id, natural);
         }
         Some(id)
     }
@@ -1053,9 +1066,9 @@ impl Game<'_> {
                         for e in &mut events[from..] {
                             if let MobEvent::Projectile(p) = e
                                 && let ProjectileKind::ShulkerBullet { target, .. } = &mut p.kind
-                                && *target == Who::Player
+                                && *target == Some(Who::Player)
                             {
-                                *target = Who::Mob(id);
+                                *target = Some(Who::Mob(id));
                             }
                         }
                     }
@@ -4777,7 +4790,16 @@ impl Game<'_> {
             // flies as: the splash happens where the hit was, a lingering
             // potion's cloud sits at the mob it hit (ThrownLingeringPotion),
             // and the potion that lands names the hurt it deals.
-            (ProjectileKind::Potion(stack, _), hit) => {
+            (kind @ (ProjectileKind::Potion(..) | ProjectileKind::ExperienceBottle), hit) => {
+                // A bottle flies as the bottle item (`getDefaultItem`).
+                let bottle;
+                let stack = match kind {
+                    ProjectileKind::Potion(stack, _) => stack,
+                    _ => {
+                        bottle = Box::new(ItemStack::new("minecraft:experience_bottle", 1));
+                        &bottle
+                    }
+                };
                 let block = match hit {
                     Hit::Block { pos, face, .. } => Some((
                         pos,
@@ -6492,12 +6514,15 @@ impl Game<'_> {
                 Vec::new()
             };
             let body = out.len();
-            // The GPU path: an ordinary mob, no outline, no layers the CPU path changes after
-            // drawing them (a player's, the HDR tiers below, the sulfur cube's shell).
+            // The GPU path: an ordinary mob, no layers the CPU path changes after drawing them
+            // (a player's, the HDR tiers below, the sulfur cube's shell). A glowing mob's
+            // silhouette is posed too (`SkinFrame::outline_since`), unless it is invisible:
+            // then only the outline draws.
+            let silhouette_on_gpu = outline.is_none() || !mob.invisible;
             let posable = skinning
                 && !is_player
                 && !layers_only
-                && outline.is_none()
+                && silhouette_on_gpu
                 && armor.is_empty()
                 && !matches!(
                     mob.species(),
@@ -6576,14 +6601,18 @@ impl Game<'_> {
             }
             // CustomHeadLayer (a pumpkin, skull or head item) included.
             if layers {
-                // Held items join the GPU path's draws unless an outline reads their vertices.
-                let skin = (skinning && outline.is_none()).then_some(&mut skinned);
+                // Held items join the GPU path's draws, their silhouette too.
+                let skin = (skinning && silhouette_on_gpu).then_some(&mut skinned);
                 self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
                 // `native_mob_layer`: a native mod's layer, over the vanilla ones.
                 self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
             }
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);
+                if let Some(((first, _, _), _)) = skinned {
+                    let color = horizon_client::mobs::render::abgr(rgb);
+                    self.skin_frame.borrow_mut().outline_since(first, color);
+                }
                 if mob.invisible {
                     out.truncate(entity_start);
                     continue;
