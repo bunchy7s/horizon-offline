@@ -25,9 +25,11 @@ def make_cases(build):
 
 
 def main():
-    scope = ('The real private FireChargeItem.playSound on a ServerLevel stand-in with a seeded LegacyRandomSource: '
-             'the sound event, volume, pitch ((nextFloat - nextFloat) * 0.2 + 1) and the random afterwards. '
-             'FireChargeItem.useOn\'s choice between lighting and placing fire is not exercised.')
+    scope = ('Real FireChargeItem.useOn and FlintAndSteelItem.useOn on a ServerLevel stand-in holding a campfire, a '
+             'candle or stone, with a seeded LegacyRandomSource: the sound event, volume, pitch ((nextFloat - nextFloat) '
+             '* 0.2 + 1 for the charge, nextFloat * 0.4 + 0.8 for the steel) and the random afterwards. Both items light '
+             'a campfire and a candle and place fire on stone; the block states they write, their game events and the '
+             'item damage are not compared.')
     harness.differential(
         'rust-fire-starter-sound-parity', 'VanillaFireStarterSoundOracle', 'fire_starter_sound_probe', make_cases,
         scope, sources=[lab.ROOT / 'crates/horizon-items/src/items.rs'])

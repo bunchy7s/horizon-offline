@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
-//! Runs tools/test_fire_starter_sound_parity.py's level random seeds through
-//! the fire charge's use sound (`horizon_client::items::fire_starter_pitch`).
+//! Runs tools/test_fire_starter_sound_parity.py's cases through the fire
+//! starter's use sound (`horizon_client::items::fire_starter_pitch`).
 use horizon_client::{
     Result,
     items::{fire_starter_pitch, fire_starter_sound},
@@ -16,12 +16,16 @@ pub fn main() -> Result<()> {
     let input = BufReader::new(File::open(&args[1])?);
     let mut out = BufWriter::new(File::create(&args[2])?);
     for line in input.lines() {
-        let mut random = LegacyRandom::new(line?.trim().parse()?);
-        let pitch = fire_starter_pitch(true, &mut random);
+        let line = line?;
+        let mut parts = line.trim().split(' ');
+        let fire_charge = parts.next() == Some("fire_charge");
+        parts.next(); // the block the use is made on: the sound does not read it
+        let mut random = LegacyRandom::new(parts.next().unwrap_or_default().parse()?);
+        let pitch = fire_starter_pitch(fire_charge, &mut random);
         writeln!(
             out,
             "{} {} {} {}",
-            fire_starter_sound(true),
+            fire_starter_sound(fire_charge),
             1.0f32.to_bits() as i32,
             pitch.to_bits() as i32,
             random.next_long()
