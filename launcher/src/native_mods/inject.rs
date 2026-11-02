@@ -455,6 +455,29 @@ mod tests {
         (root, bundle)
     }
 
+    fn compile_and_run(root: &Path, program: &str) {
+        let source = root.join("proof.rs");
+        let binary = root.join(format!("proof-bin{}", std::env::consts::EXE_SUFFIX));
+        fs::write(&source, program).unwrap();
+        let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let compiled = std::process::Command::new(compiler)
+            .args(["--edition", "2024"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&binary)
+            .output()
+            .unwrap();
+        assert!(
+            compiled.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
+        assert!(std::process::Command::new(binary)
+            .status()
+            .unwrap()
+            .success());
+    }
+
     #[test]
     fn owner_dispatch_and_cancel_are_generated_from_bindings() {
         let (root, bundle) = fixture("cancel", "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\ntrait_method = 'tick'\ncancellable = true\nbindings = [{ name = 'amount', ty = '&mut i32', value = '&mut *amount' }]\n");
@@ -503,26 +526,62 @@ mod tests {
             }}
         "#
         );
-        let source = root.join("proof.rs");
-        let binary = root.join(format!("proof-bin{}", std::env::consts::EXE_SUFFIX));
-        fs::write(&source, program).unwrap();
-        let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-        let compiled = std::process::Command::new(compiler)
-            .args(["--edition", "2024"])
-            .arg(&source)
-            .arg("-o")
-            .arg(&binary)
-            .output()
-            .unwrap();
-        assert!(
-            compiled.status.success(),
-            "{}",
-            String::from_utf8_lossy(&compiled.stderr)
+        compile_and_run(&root, &program);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn value_injection_returns_what_the_owner_changed() {
+        let (root, bundle) = fixture("value", "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'RETURN'\ntrait_method = 'total'\nbindings = [{ name = 'total', ty = 'i32', value = '$value' }, { name = 'calls', ty = '&mut u32', value = '&mut *calls' }]\n");
+        let injections = prepare(&[bundle], &root).unwrap();
+        let helper = fs::read_to_string(root.join("horizon-trait-injection-0.rs")).unwrap();
+        let stage_dir = root.join("stage/crates/horizon-client/src/mod_api");
+        fs::create_dir_all(&stage_dir).unwrap();
+        fs::write(
+            stage_dir.join("generated.rs"),
+            "pub trait Hooks: Send + Sync {\n}\n",
+        )
+        .unwrap();
+        stage(&root.join("stage"), &injections).unwrap();
+        let output = fs::read_to_string(stage_dir.join("generated.rs")).unwrap();
+        let program = format!(
+            r#"
+            mod mod_api {{
+                use std::sync::atomic::{{AtomicBool, Ordering}};
+                use std::sync::OnceLock;
+                {output}
+                struct Owner;
+                impl Hooks for Owner {{
+                    fn inject_example_total(&self, event: &mut InjectExampleTotalEvent) {{
+                        event.total = event.total * 2 + 1;
+                        event.calls += 1;
+                    }}
+                }}
+                struct Other;
+                impl Hooks for Other {{
+                    fn inject_example_total(&self, _: &mut InjectExampleTotalEvent) {{ panic!("wrong owner") }}
+                }}
+                pub static INSTALLED: AtomicBool = AtomicBool::new(false);
+                pub fn mods() -> &'static [Box<dyn Hooks>] {{
+                    static MODS: OnceLock<Vec<Box<dyn Hooks>>> = OnceLock::new();
+                    if !INSTALLED.load(Ordering::SeqCst) {{
+                        return &[];
+                    }}
+                    MODS.get_or_init(|| vec![Box::new(Owner), Box::new(Other)])
+                }}
+            }}
+            {helper}
+            fn main() {{
+                let mut calls = 0;
+                assert_eq!(horizon_trait_dispatch(20, &mut calls), 20);
+                assert_eq!(calls, 0);
+                mod_api::INSTALLED.store(true, std::sync::atomic::Ordering::SeqCst);
+                assert_eq!(horizon_trait_dispatch(20, &mut calls), 41);
+                assert_eq!(calls, 1);
+            }}
+        "#
         );
-        assert!(std::process::Command::new(binary)
-            .status()
-            .unwrap()
-            .success());
+        compile_and_run(&root, &program);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -669,12 +728,31 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_injection_is_rejected() {
-        let (root, bundle) = fixture("return", "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'RETURN'\ntrait_method = 'tick'\n");
-        assert!(prepare(&[bundle], &root)
-            .err()
-            .unwrap()
-            .contains("only HEAD"));
-        fs::remove_dir_all(root).unwrap();
+    fn trait_injection_kinds_are_checked() {
+        for (kind, extra, expected) in [
+            (
+                "AFTER_CALL",
+                "",
+                "supports HEAD, RETURN, MODIFY_ARG and MODIFY_EXPRESSION_VALUE",
+            ),
+            (
+                "RETURN",
+                "bindings = [{ name = 'amount', ty = 'i32', value = 'amount' }]\n",
+                "`$value` binding",
+            ),
+            (
+                "MODIFY_ARG",
+                "cancellable = true\nbindings = [{ name = 'points', ty = 'i32', value = '$value' }]\n",
+                "cancellable trait_method needs HEAD",
+            ),
+        ] {
+            let (root, bundle) = fixture(
+                "kinds",
+                &format!("[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = '{kind}'\ntrait_method = 'tick'\n{extra}"),
+            );
+            let error = prepare(&[bundle], &root).err().unwrap();
+            assert!(error.contains(expected), "{kind}: {error}");
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 }
