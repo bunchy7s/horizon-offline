@@ -2914,13 +2914,22 @@ impl Game<'_> {
             return Ok(());
         };
         let was_idle = b.brew_time <= 0;
+        let was_unfueled = b.fuel <= 0;
+        let fuel_item = was_unfueled
+            .then(|| b.items[4].as_ref().map(|s| s.item.clone()))
+            .flatten();
         let out = b.tick(
             &world_stations!(self).brewing,
             world_items!(self),
             self.res.providers(),
         );
+        let consumed_fuel = was_unfueled && b.fuel > 0;
         let started = was_idle && b.brew_time > 0;
         let ingredient = started.then(|| b.ingredient.clone()).flatten();
+        if consumed_fuel && let Some(item) = fuel_item {
+            let (x, y, z) = pos;
+            self.native_brewing_fuel([x, y, z], &item);
+        }
         if let Some(ingredient) = ingredient {
             let (x, y, z) = pos;
             self.native_brewing_start([x, y, z], &ingredient);

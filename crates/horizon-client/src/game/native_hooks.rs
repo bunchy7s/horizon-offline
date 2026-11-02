@@ -3140,6 +3140,10 @@ impl Game<'_> {
     pub(super) fn native_brewing_start(&self, pos: [i32; 3], ingredient: &str) {
         let _ = (pos, ingredient);
     }
+    /// A brewing stand at `pos` consumed `fuel` and gained brewing fuel. Server-side. @API:brewing_fuel@.
+    pub(super) fn native_brewing_fuel(&self, pos: [i32; 3], fuel: &str) {
+        let _ = (pos, fuel);
+    }
     /// A brewing stand finished brewing at `pos`, after its bottle contents
     /// were changed. Server-side. @API:brewing_complete@.
     pub(super) fn native_brewing_complete(&self, pos: [i32; 3]) {
