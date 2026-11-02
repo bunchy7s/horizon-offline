@@ -4859,6 +4859,18 @@ impl Game<'_> {
     pub(super) fn native_entity_unleash(&mut self, entity: u32, kind: &str) {
         mod_api::dispatch_entity_unleash(self, mod_api::mods(), entity, kind);
     }
+    /// A vehicle is about to take damage from a player's attack. `kind` is
+    /// `boat` or the minecart type; mods may change `damage` or set `cancel`
+    /// to leave its damage and wobble unchanged. The attack itself still
+    /// completes. Server-side. @API:native_vehicle_damage@.
+    pub(super) fn native_vehicle_damage(
+        &mut self,
+        kind: &str,
+        damage: &mut f32,
+        cancel: &mut bool,
+    ) {
+        let _ = (kind, damage, cancel);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

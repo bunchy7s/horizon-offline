@@ -1378,18 +1378,23 @@ impl Game<'_> {
     /// reason that destroys the boat (DISCARDED included), while the boat item
     /// itself only drops on the death path (`VehicleEntity.destroy`), not when
     /// a creative hit discards it. True when the boat was removed.
-    pub(super) fn hurt_boat(&mut self, i: usize, damage: f32, creative: bool) -> bool {
+    pub(super) fn hurt_boat(&mut self, i: usize, mut damage: f32, creative: bool) -> bool {
+        let mut cancel = false;
+        self.native_vehicle_damage("boat", &mut damage, &mut cancel);
+        if cancel {
+            return false;
+        }
         let b = &mut self.boats[i];
         b.hurt_dir = -b.hurt_dir;
         b.hurt_time = 10;
         b.damage += damage * 10.0;
         let destroyed = creative || b.damage > 40.0;
         if destroyed {
+            let at = [b.position.x, b.position.y, b.position.z];
             self.eject_boat_mobs(i, true);
             let id = self.boats[i].id;
             self.release_vehicle_container(id);
             let b = self.boats.remove(i);
-            let at = [b.position.x, b.position.y, b.position.z];
             // AbstractBoat.remove: a destroyed boat drops its lead.
             self.boat_removed(&b);
             // `AbstractChestBoat.remove` spills the chest through
