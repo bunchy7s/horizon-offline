@@ -24,6 +24,16 @@ use std::f32::consts::PI;
 // the current peek amount.
 pub const PEEK: usize = 0;
 pub const NO_COLOR: u8 = 16;
+/// `Direction.DOWN`'s 3D data value.
+const DOWN: u8 = 0;
+
+/// `Shulker.getDefaultDimensions`: a shell hanging from the block above
+/// grows `1 + currentPeekAmount` tall as its lid opens there. Width is
+/// untouched, and so is every other attach face.
+pub fn peek_height_scale(m: &Mob) -> Option<f32> {
+    let peek = m.anim.v[PEEK];
+    (m.extra.variant3 == DOWN && peek > 0.0).then_some(1.0 + peek)
+}
 
 pub fn register(m: &mut Mob) {
     m.no_gravity = true;

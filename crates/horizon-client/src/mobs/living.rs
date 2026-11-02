@@ -484,6 +484,13 @@ impl Mob {
             let s = self.extra.size as f32;
             (w, h, e) = (w * s, h * s, e * s);
         }
+        // Shulker.getDefaultDimensions: the last scale, over everything
+        // above, is the shell's lid opening under a block.
+        if k.species == super::Species::Shulker
+            && let Some(s) = super::shulker::peek_height_scale(self)
+        {
+            (h, e) = (h * s, e * s);
+        }
         (f64::from(w), f64::from(h), f64::from(e))
     }
     pub fn eye_height(&self) -> f64 {
