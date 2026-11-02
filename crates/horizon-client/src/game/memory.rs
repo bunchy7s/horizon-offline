@@ -8,6 +8,7 @@ use horizon_client::chunk::ColumnCensus;
 use horizon_client::fast_hash::FxHashSet;
 use horizon_client::world::World;
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 const MB: f64 = 1048576.0;
 
@@ -46,10 +47,42 @@ fn census_json(c: &ColumnCensus) -> Value {
     })
 }
 
+/// The sections of `worlds` that are also in `others` (by address), and
+/// their heap bytes: what one copy of them costs.
+fn shared<'a>(
+    worlds: impl IntoIterator<Item = &'a World>,
+    others: &FxHashSet<usize>,
+) -> (usize, usize) {
+    let mut seen = FxHashSet::default();
+    let (mut count, mut bytes) = (0, 0);
+    for world in worlds {
+        for chunk in world.chunks.values() {
+            for section in &chunk.sections {
+                let at = Arc::as_ptr(section) as usize;
+                if others.contains(&at) && seen.insert(at) {
+                    count += 1;
+                    bytes += section.heap_bytes();
+                }
+            }
+        }
+    }
+    (count, bytes)
+}
+
 impl Game<'_> {
+    fn all_worlds(&self) -> impl Iterator<Item = &World> {
+        std::iter::once(&self.world).chain(self.levels.parked_worlds())
+    }
     /// The census of this game's levels: the one in place and the parked ones.
     fn level_census(&self) -> ColumnCensus {
-        census(std::iter::once(&self.world).chain(self.levels.parked_worlds()))
+        census(self.all_worlds())
+    }
+    /// The addresses of this game's sections.
+    fn section_addresses(&self) -> FxHashSet<usize> {
+        self.all_worlds()
+            .flat_map(|w| w.chunks.values())
+            .flat_map(|c| c.sections.iter().map(|s| Arc::as_ptr(s) as usize))
+            .collect()
     }
 
     pub(super) fn memory_report(&self) -> Value {
@@ -60,7 +93,12 @@ impl Game<'_> {
         let server = self
             .integrated
             .as_ref()
-            .and_then(|i| i.call(|g| g.level_census()));
+            .and_then(|i| i.call(|g| (g.level_census(), g.section_addresses())));
+        // The window's sections the server thread holds too (lan/handoff.rs).
+        let shared = server.as_ref().map(|(_, at)| {
+            let (sections, bytes) = shared(self.all_worlds(), at);
+            json!({ "sections": sections, "mb": mb(bytes) })
+        });
         let renderer = self.renderer.as_ref().map(|r| {
             let [arenas, vertices] = r.section_vertex_bytes();
             let cpu: serde_json::Map<String, Value> = r
@@ -96,7 +134,8 @@ impl Game<'_> {
             },
             "render_distance": self.streaming.radius,
             "client_columns": census_json(&client),
-            "server_columns": server.as_ref().map(census_json),
+            "server_columns": server.as_ref().map(|(c, _)| census_json(c)),
+            "shared_with_server": shared,
             "far_tiles": self.lod.as_ref().map(|lod| {
                 let (active, cached) = lod.stats();
                 json!({ "active": active, "cached": cached })
