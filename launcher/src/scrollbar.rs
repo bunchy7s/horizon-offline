@@ -52,8 +52,12 @@ impl Scrollbar {
     /// Wrap the scroll container, reserving a narrow gutter so the bar never covers controls.
     pub fn wrap(&self, content: Stateful<Div>, theme: &Theme) -> Div {
         let state = self.clone();
-        let track_color = theme.well;
-        let thumb_color = theme.muted;
+        // Dark wears the glass look's thin bar: white at 14 % on no track (`scrollbar-color`).
+        let (track_color, thumb_color) = if theme.dark {
+            (gpui::transparent_black(), gpui::white().opacity(0.14))
+        } else {
+            (theme.well, theme.muted)
+        };
         div()
             .relative()
             .flex()

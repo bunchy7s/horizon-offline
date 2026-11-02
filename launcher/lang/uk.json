@@ -837,5 +837,13 @@
   "Horizon Launcher was removed.": "Horizon Launcher видалено.",
   "These could not be removed:": "Не вдалося видалити:",
   "Launch Horizon": "Запустити Horizon",
-  "Something went wrong.": "Щось пішло не так."
+  "Something went wrong.": "Щось пішло не так.",
+  "Instances": "Екземпляри",
+  "Join the Discord": "Приєднатися до Discord",
+  "Restart to update": "Перезапустити для оновлення",
+  "Duplicate…": "Дублювати…",
+  "Create a desktop shortcut": "Створити ярлик на робочому столі",
+  "Remove the desktop shortcut": "Прибрати ярлик з робочого столу",
+  "Click again to delete": "Натисніть ще раз, щоб видалити",
+  "Update available": "Доступне оновлення"
 }

@@ -837,5 +837,13 @@
   "Horizon Launcher was removed.": "Horizon Launcher was removed.",
   "These could not be removed:": "These could not be removed:",
   "Launch Horizon": "Launch Horizon",
-  "Something went wrong.": "Something went wrong."
+  "Something went wrong.": "Something went wrong.",
+  "Instances": "Örnekler",
+  "Join the Discord": "Discord'a katıl",
+  "Restart to update": "Güncellemek için yeniden başlat",
+  "Duplicate…": "Çoğalt…",
+  "Create a desktop shortcut": "Masaüstü kısayolu oluştur",
+  "Remove the desktop shortcut": "Masaüstü kısayolunu kaldır",
+  "Click again to delete": "Silmek için tekrar tıkla",
+  "Update available": "Güncelleme var"
 }

@@ -66,6 +66,7 @@ pub mod glass_icons {
         "copy-01",
         "dashboard-square-01",
         "delete-02",
+        "discord",
         "download-04",
         "earth",
         "favourite",

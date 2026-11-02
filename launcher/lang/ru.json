@@ -837,5 +837,13 @@
   "Horizon Launcher was removed.": "Horizon Launcher удалён.",
   "These could not be removed:": "Не удалось удалить:",
   "Launch Horizon": "Запустить Horizon",
-  "Something went wrong.": "Что-то пошло не так."
+  "Something went wrong.": "Что-то пошло не так.",
+  "Instances": "Сборки",
+  "Join the Discord": "Вступить в Discord",
+  "Restart to update": "Перезапустить для обновления",
+  "Duplicate…": "Дублировать…",
+  "Create a desktop shortcut": "Создать ярлык на рабочем столе",
+  "Remove the desktop shortcut": "Удалить ярлык с рабочего стола",
+  "Click again to delete": "Нажмите ещё раз, чтобы удалить",
+  "Update available": "Доступно обновление"
 }
