@@ -504,8 +504,9 @@ impl Game<'_> {
                             let mut t = super::trident::ThrownTrident::from_nbt(n);
                             t.id = self.take_entity_id();
                             // One that came through a portal keeps its cooldown.
-                            self.restore_portal_cooldown(t.id, &tag);
+                            let id = t.id;
                             self.tridents.push(t);
+                            self.remember(id, uuid, tag);
                         }
                     }
                     "minecraft:firework_rocket" => {
@@ -1581,10 +1582,11 @@ impl Game<'_> {
         i: usize,
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
-        let t = &self.tridents[i];
-        keys.contains(&chunk_of(t.position)).then(|| {
-            let (uuid, raw) = anon_uuid_raw(&self.persist, "minecraft:trident", t.position);
-            (chunk_of(t.position), t.to_nbt(uuid, raw.as_ref()))
+        let (id, at) = (self.tridents[i].id, self.tridents[i].position);
+        keys.contains(&chunk_of(at)).then(|| {
+            let uuid = self.uuid_for(id);
+            let tag = self.tridents[i].to_nbt(uuid, self.persist.raw.get(&id));
+            (chunk_of(at), tag)
         })
     }
     pub(super) fn save_tnt(
