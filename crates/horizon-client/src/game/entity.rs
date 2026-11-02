@@ -49,8 +49,6 @@ pub(super) struct Blast {
 }
 
 pub(super) trait Entity: EntityRules {
-    }
-pub(super) trait Entity {
     /// `Entity.getId`.
     fn id(&self) -> u32;
     fn position(&self) -> Vec3;
