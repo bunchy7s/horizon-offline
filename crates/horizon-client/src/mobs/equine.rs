@@ -677,6 +677,7 @@ pub fn ridden_step(m: &mut Mob) {
             m.velocity.x += f64::from(-0.4 * s * r.jump);
             m.velocity.z += f64::from(0.4 * c * r.jump);
         }
+        crate::motion::native_living_jump(m.id as i32, &m.kind.id);
         if let Some(rider) = m.rider.as_mut() {
             rider.jump = 0.0;
         }

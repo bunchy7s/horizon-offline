@@ -1397,6 +1397,7 @@ impl Mob {
         self.needs_sync = true;
         if self.species() == super::Species::Rabbit {
             super::rabbit::jump(self, w);
+            crate::motion::native_living_jump(self.id as i32, &self.kind.id);
             return;
         }
         if matches!(
@@ -1404,6 +1405,7 @@ impl Mob {
             super::Species::Slime | super::Species::MagmaCube | super::Species::SulfurCube
         ) {
             super::cube::jump(self);
+            crate::motion::native_living_jump(self.id as i32, &self.kind.id);
             return;
         }
         let power = self.jump_power();
@@ -1416,6 +1418,7 @@ impl Mob {
                 self.velocity.z += f64::from(trig::cos(angle)) * 0.2;
             }
         }
+        crate::motion::native_living_jump(self.id as i32, &self.kind.id);
     }
     pub fn jump_power(&self) -> f32 {
         self.kind.jump_strength as f32
