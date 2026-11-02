@@ -25,6 +25,7 @@ mod glass_home_mods;
 mod glass_home_packs;
 mod glass_home_tabs;
 mod glass_instance;
+mod glass_instance_java;
 mod glass_ui;
 mod home;
 mod home_tabs;
