@@ -1786,6 +1786,19 @@ impl Game<'_> {
             );
         }
     }
+    /// A mob's projectile enters the level.
+    fn launch_mob_projectile(&mut self, mut p: Projectile) {
+        self.next_entity += 1;
+        p.id = self.next_entity;
+        let (owner, at) = (p.owner, [p.position.x, p.position.y, p.position.z]);
+        // LlamaSpit.recreateFromPacket: the spit's burst on the client.
+        if p.kind == ProjectileKind::LlamaSpit {
+            let v = p.velocity;
+            self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
+        }
+        self.add_projectile(p);
+        self.projectile_event("minecraft:projectile_shoot", owner, at);
+    }
     pub(super) fn handle_mob_events(&mut self, events: Vec<MobEvent>) -> Result<()> {
         for e in events {
             match e {
@@ -2291,17 +2304,40 @@ impl Game<'_> {
                         }
                     }
                 }
-                MobEvent::Projectile(mut p) => {
-                    self.next_entity += 1;
-                    p.id = self.next_entity;
-                    let (owner, at) = (p.owner, [p.position.x, p.position.y, p.position.z]);
-                    // LlamaSpit.recreateFromPacket: the spit's burst on the client.
-                    if p.kind == ProjectileKind::LlamaSpit {
-                        let v = p.velocity;
-                        self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
+                MobEvent::Projectile(p) => self.launch_mob_projectile(p),
+                MobEvent::BowShot {
+                    mob,
+                    weapon,
+                    mut arrow,
+                } => {
+                    self.mob_bow_ammo(mob, &weapon, &mut arrow);
+                    self.launch_mob_projectile(arrow);
+                }
+                MobEvent::CrossbowShot { ammo, mut arrow } => {
+                    if &*ammo.item == "minecraft:firework_rocket" {
+                        // `CrossbowItem.createProjectile`: a rocket, from 0.15 under the eyes.
+                        let mut at = arrow.position;
+                        at.y -= f64::from(0.15f32) - 0.1;
+                        self.launch_angled_rocket(at, arrow.velocity, &ammo, arrow.owner);
+                    } else {
+                        Self::arrow_from_ammo(&ammo, &mut arrow);
+                        self.launch_mob_projectile(arrow);
                     }
-                    self.add_projectile(p);
-                    self.projectile_event("minecraft:projectile_shoot", owner, at);
+                }
+                MobEvent::CrossbowLoad {
+                    mob,
+                    weapon,
+                    at,
+                    pitch,
+                } => {
+                    if self.mob_crossbow_ammo(mob, &weapon) {
+                        self.audio.play(
+                            "minecraft:item.crossbow.loading_end",
+                            Some(at),
+                            1.0,
+                            pitch,
+                        );
+                    }
                 }
                 MobEvent::Spawn(mut m) => {
                     self.next_entity += 1;

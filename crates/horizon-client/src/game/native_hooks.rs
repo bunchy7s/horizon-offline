@@ -5108,6 +5108,58 @@ impl Game<'_> {
         mod_api::dispatch_entity_shoot_bow(self, mod_api::mods(), player, name, projectile, force);
     }
 
+    /// A player is about to nock `bow` with `hand` (`BowItem.use`, NeoForge's
+    /// `ArrowNockEvent`): `has_ammo` is whether `getProjectile` found ammunition
+    /// or the player is in creative. Set `cancel` to fail the use.
+    /// @API:arrow_nock@.
+    pub(super) fn native_arrow_nock(
+        &mut self,
+        player: u128,
+        name: &str,
+        bow: &ItemStack,
+        hand: Hand,
+        has_ammo: bool,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_arrow_nock(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            bow,
+            hand,
+            has_ammo,
+            cancel,
+        );
+    }
+
+    /// `LivingEntity.getProjectile(weapon)` (NeoForge's
+    /// `LivingGetProjectileEvent`) for a player (`player` and `name`) or a
+    /// mob (`entity`, `kind`): a skeleton or illusioner's shot, or the crossbow
+    /// load of a pillager or piglin. `projectile` is the vanilla
+    /// ammunition; replace it to choose another. A replaced stack is not taken
+    /// from the inventory. @API:living_get_projectile@.
+    pub(super) fn native_living_get_projectile(
+        &mut self,
+        player: Option<u128>,
+        name: &str,
+        entity: Option<u32>,
+        kind: &str,
+        weapon: &ItemStack,
+        projectile: &mut Option<ItemStack>,
+    ) {
+        mod_api::dispatch_living_get_projectile(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            entity,
+            kind,
+            weapon,
+            projectile,
+        );
+    }
+
     /// A guest's fall flying state changed on the server. The change has
     /// already been applied. 222.
     pub(super) fn native_entity_toggle_glide(&mut self, player: u128, name: &str, gliding: bool) {
@@ -6085,7 +6137,7 @@ impl Game<'_> {
     /// release; `native_entity_shoot_bow` reports a spawned arrow afterward
     /// with read-only force. Fires on the Game running the bow release, including
     /// LAN guests; a remote client's own release path is not covered. Crossbows
-    /// and `ArrowNockEvent` are not covered. 318.
+    /// are not covered; `native_arrow_nock` is the bow's start. 318.
     pub(super) fn native_arrow_loose(
         &mut self,
         stack: &ItemStack,
