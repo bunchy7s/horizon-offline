@@ -2149,7 +2149,10 @@ impl Game<'_> {
     /// Forgets the `gone` columns (and empties the set): their chunks (freed on a thread
     /// of their own when there are many), their sections in the renderer and their block
     /// entities, each store once for all of them.
-    fn forget_remote_columns(&mut self, gone: &mut horizon_client::fast_hash::FxHashSet<(i32, i32)>) {
+    fn forget_remote_columns(
+        &mut self,
+        gone: &mut horizon_client::fast_hash::FxHashSet<(i32, i32)>,
+    ) {
         if gone.is_empty() {
             return;
         }
