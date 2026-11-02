@@ -4826,6 +4826,12 @@ impl Game<'_> {
     pub(super) fn native_player_launch_projectile(&mut self, player: u128, name: &str, item: &str) {
         let _ = (player, name, item);
     }
+    /// A server explosion is about to begin at `center`, with `radius` (Bukkit's
+    /// `ExplosionPrimeEvent`). This is listen-only: the explosion proceeds as
+    /// usual. Server-side, including the single-player server. @API:native_explosion_prime@.
+    pub(super) fn native_explosion_prime(&mut self, center: [f64; 3], radius: f32) {
+        let _ = (center, radius);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
