@@ -2209,7 +2209,7 @@ impl Game<'_> {
         item: &str,
         buffer: &mut Option<ItemEnergyBuffer>,
     ) {
-        let _ = (item, buffer);
+        mod_api::dispatch_item_energy_buffer(self, mod_api::mods(), item, buffer);
     }
     /// A server tick of the block entity at `pos`, in vanilla's order among
     /// the others (`Level.tickBlockEntities`), when its `id` is yours: read
