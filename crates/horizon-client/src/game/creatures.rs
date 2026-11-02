@@ -4719,7 +4719,7 @@ impl Game<'_> {
             // flies as: the splash happens where the hit was, a lingering
             // potion's cloud sits at the mob it hit (ThrownLingeringPotion),
             // and the potion that lands names the hurt it deals.
-            (ProjectileKind::Potion(stack), hit) => {
+            (ProjectileKind::Potion(stack, _), hit) => {
                 let block = match hit {
                     Hit::Block { pos, face, .. } => Some((
                         pos,
