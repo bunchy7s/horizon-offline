@@ -1203,4 +1203,13 @@ pub trait Host {
     fn instance_dir(&self) -> PathBuf {
         unimplemented!("Host::instance_dir")
     }
+    /// The most recently extracted world frame's camera, if one exists.
+    fn camera(&self) -> Option<NativeCamera> {
+        unimplemented!("Host::camera")
+    }
+    /// Collision boxes in block-local coordinates with an empty collision context.
+    fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
+        let _ = pos;
+        unimplemented!("Host::block_collision")
+    }
 }

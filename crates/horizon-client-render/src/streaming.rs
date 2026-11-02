@@ -774,12 +774,23 @@ impl<G: ChunkGenerator> Source for Jobs<G> {
             };
             (kind, crate::spans::thread_cpu().unwrap_or_default())
         });
+        let _tag = horizon_threads::heap_tag(match &job.job {
+            Job::Generate(..) => "stream.generate",
+            Job::Decorate(..) => "stream.decorate",
+            Job::Finish(..) => "stream.finish",
+            Job::Light(..) => "stream.light",
+            Job::Mesh(..) => "stream.mesh",
+            _ => "stream.other",
+        });
         let done = self.locals.with(
             worker,
-            || WorkerLocal {
-                worker: self.generator.worker(),
-                faces: None,
-                mesh_scratch: MeshScratch::default(),
+            || {
+                let _tag = horizon_threads::heap_tag("stream.worker_state");
+                WorkerLocal {
+                    worker: self.generator.worker(),
+                    faces: None,
+                    mesh_scratch: MeshScratch::default(),
+                }
             },
             |local| self.run_job(job.job, local),
         );
@@ -1125,20 +1136,39 @@ impl Streaming {
             self.submit(None, 0, Job::Free(meshes));
         }
     }
-    /// A column the server unloaded (ClientboundForgetLevelChunkPacket).
-    pub fn forget(&mut self, world: &mut World, x: i32, z: i32) -> Option<Arc<Chunk>> {
-        self.lit.remove(&(x, z));
-        self.meshed.remove(&(x, z));
-        self.lighting.remove(&(x, z));
-        // By key, not by a pass over every pending section: a moved or
-        // shrunk storage forgets thousands of columns in one frame.
-        for sy in 0..world.layout().sections() as i32 {
-            self.meshing.remove(&(x, sy, z));
-            self.compile_started.remove(&(x, sy, z));
-            self.waiting.remove(&(x, sy, z));
+    /// The columns the server unloaded (ClientboundForgetLevelChunkPacket),
+    /// often thousands at once (a teleport or a moved view): their pending
+    /// sections go through [`forget_pending_sections`]. Returns the chunks
+    /// they held.
+    pub fn forget_columns(
+        &mut self,
+        world: &mut World,
+        gone: &FxHashSet<(i32, i32)>,
+    ) -> Vec<Arc<Chunk>> {
+        // Every column held (a far teleport): no pending section is left to keep, and a
+        // pass over them all (80,000 at render distance 32) took 1.7 ms of the frame.
+        if world.chunks.keys().all(|column| gone.contains(column)) {
+            self.meshing.clear();
+            self.compile_started.clear();
+            self.waiting.clear();
+        } else {
+            forget_pending_sections(
+                &mut self.meshing,
+                &mut self.compile_started,
+                &mut self.waiting,
+                gone,
+                world.layout().sections() as i32,
+            );
         }
-        world.dirty_sections.take_column(x, z);
-        world.chunks.remove(&(x, z))
+        let mut chunks = Vec::with_capacity(gone.len());
+        for &(x, z) in gone {
+            self.lit.remove(&(x, z));
+            self.meshed.remove(&(x, z));
+            self.lighting.remove(&(x, z));
+            world.dirty_sections.take_column(x, z);
+            chunks.extend(world.chunks.remove(&(x, z)));
+        }
+        chunks
     }
     /// Queue a job for the column `at`, nearest first: its distance (`distance`)
     /// times four plus `bias`, which orders a column's jobs. A job without a
@@ -2750,6 +2780,34 @@ fn whole_relight_columns(
     (columns, inline)
 }
 
+/// Drops the pending sections (`meshing`, `compile_started`, `waiting`) of
+/// the `gone` columns: one pass over each store when that is cheaper than a
+/// lookup per section of every column (a far teleport at render distance 32
+/// forgets ~3,700 columns, 1.7 ms of lookups), else by key.
+fn forget_pending_sections(
+    meshing: &mut FxHashMap<(i32, i32, i32), u64>,
+    compile_started: &mut FxHashMap<(i32, i32, i32), u64>,
+    waiting: &mut FxHashSet<(i32, i32, i32)>,
+    gone: &FxHashSet<(i32, i32)>,
+    sections: i32,
+) {
+    let lookups = gone.len().saturating_mul(sections.max(0) as usize);
+    if lookups > meshing.len() + compile_started.len() + waiting.len() {
+        let kept = |&(x, _, z): &(i32, i32, i32)| !gone.contains(&(x, z));
+        meshing.retain(|k, _| kept(k));
+        compile_started.retain(|k, _| kept(k));
+        waiting.retain(kept);
+    } else {
+        for &(x, z) in gone {
+            for sy in 0..sections {
+                meshing.remove(&(x, sy, z));
+                compile_started.remove(&(x, sy, z));
+                waiting.remove(&(x, sy, z));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2895,6 +2953,42 @@ mod tests {
                 .is_none()
         );
         assert!(waiting.elapsed() >= std::time::Duration::from_millis(10));
+    }
+
+    /// Whether the forgotten columns are few (looked up by key) or many
+    /// (one pass over each store), exactly their pending sections go.
+    #[test]
+    fn forgotten_columns_lose_their_pending_sections_either_way() {
+        let pending: Vec<(i32, i32, i32)> = (0..4)
+            .flat_map(|x| (0..3).map(move |sy| (x, sy, -x)))
+            .collect();
+        for gone in [
+            vec![(1, -1)],
+            (0..400)
+                .map(|x| (x, -x))
+                .filter(|&c| c != (2, -2))
+                .collect(),
+        ] {
+            let gone: FxHashSet<(i32, i32)> = gone.into_iter().collect();
+            let mut meshing: FxHashMap<_, u64> = pending.iter().map(|&k| (k, 1)).collect();
+            let mut started = meshing.clone();
+            let mut waiting: FxHashSet<_> = pending.iter().copied().collect();
+            forget_pending_sections(&mut meshing, &mut started, &mut waiting, &gone, 3);
+            let mut left: Vec<_> = waiting.into_iter().collect();
+            left.sort();
+            let expected: Vec<_> = pending
+                .iter()
+                .copied()
+                .filter(|&(x, _, z)| !gone.contains(&(x, z)))
+                .collect();
+            assert_eq!(left, expected, "{} gone", gone.len());
+            let mut left: Vec<_> = meshing.into_keys().collect();
+            left.sort();
+            assert_eq!(left, expected);
+            let mut left: Vec<_> = started.into_keys().collect();
+            left.sort();
+            assert_eq!(left, expected);
+        }
     }
 
     /// Edits in two neighbouring columns light those and the ten around

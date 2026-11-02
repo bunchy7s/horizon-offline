@@ -489,4 +489,10 @@ impl Host for super::Game<'_> {
     fn instance_dir(&self) -> PathBuf {
         self.native_instance_dir()
     }
+    fn camera(&self) -> Option<NativeCamera> {
+        self.native_camera()
+    }
+    fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
+        self.native_block_collision(pos)
+    }
 }
