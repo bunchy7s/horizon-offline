@@ -711,9 +711,15 @@ pub trait Hooks: Send + Sync {
     /// an arrival through a portal). `entity` is its ID and `kind` its type
     /// (`minecraft:item`). It is already in the level's lists, so helpers that
     /// take an entity ID find it. Set `canceled` to keep it out: it is taken
-    /// back out as if never added, and a `/summon` of it fails. 47 tells
-    /// item entities and experience orbs; later APIs add other kinds, so check
-    /// `kind`. Server-side.
+    /// back out as if never added, and a `/summon` of it fails. Tells every
+    /// kind in the game's entity lists (items, orbs, mobs, boats, minecarts,
+    /// armor stands, primed TNT, falling blocks, projectiles, rockets,
+    /// tridents), once each, in the order they were created; check `kind`. A
+    /// gameplay spawn is told when the next tick starts (a drop, an orb, a mob, a
+    /// `/summon` and a chunk's entities are told at once). A mod that
+    /// cancels one of the others sees it removed before it ticks again.
+    /// Not told: end crystals, the dragon, cushions, paintings, item frames and
+    /// the entities Horizon keeps without simulating. Server-side.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn entity_join_level(&self, host: &mut dyn Host, event: &mut EntityJoinLevelEvent<'_>) -> Flow {
@@ -1181,13 +1187,15 @@ pub trait Hooks: Send + Sync {
     /// it is. Once a frame on the window, never while playing with no screen;
     /// `&self`, so it reads and draws only. The Win and Options screens call
     /// it on their own path, after their drawing.
-    /// It does not fire on the title screen, which returns before its point,
-    /// nor for the screens drawn over gameplay after it (a server dialog, the
-    /// server pack, link and code-of-conduct prompts, a book, a sign editor):
-    /// those keep `Screen::Playing`, which it skips (the server pack prompt
-    /// hides an open screen too, and that screen does not fire under it),
-    /// and draw over what it drew, while vanilla's `ScreenEvent.Render.Post`
-    /// fires for them.
+    /// It does not fire for the screens drawn over gameplay after it (a
+    /// server dialog, the server pack, link and code-of-conduct prompts, a
+    /// book, a sign editor): those keep `Screen::Playing`, which it skips (the
+    /// server pack prompt hides an open screen too, and that screen does not
+    /// fire under it), and draw over what it drew, while vanilla's
+    /// `ScreenEvent.Render.Post` fires for them. The title's own screens
+    /// (`title`, `world_select`, `world_create`, `multiplayer`…) fire it too,
+    /// their `screen.id` from the title state machine and the whole window
+    /// their `rect` (API @API:native_instance_dir@), and no dialog or prompt over them.
     /// API 78.
     fn screen_render_post(&self, host: &dyn Host, event: &mut ScreenRenderPostEvent<'_>) {
         let _ = host;
@@ -1219,10 +1227,11 @@ pub trait Hooks: Send + Sync {
     /// alt 4, super 8). Set `canceled` and the press goes no further: no slot,
     /// no screen button, no drag, no hotbar key, no sort or header button.
     /// It fires before anything the screen does with the press, on the window
-    /// only, and only while a screen of the game's is open (Options and the
-    /// pack list opened from the title screen count, with no player and no
-    /// `menu`). It does not fire on the title screen itself, the connect and
-    /// loading screens, nor for a server
+    /// only, and while a screen of the game's or the title's is open (Options
+    /// and the pack list opened from the title screen count, with no player
+    /// and no `menu`; the title's own screens since API @API:native_instance_dir@, their
+    /// `screen.id` from the title state machine). It does not fire on the
+    /// connect and loading screens, nor for a server
     /// dialog, the server pack, link and code-of-conduct prompts, a book or a
     /// sign editor drawn over gameplay, nor while a world loads or saves: the
     /// click there stays the game's own. A gamepad click or a click the
@@ -1412,9 +1421,10 @@ pub trait Hooks: Send + Sync {
     /// changes either.
     /// It fires before the screen scrolls anything, for the window's wheel
     /// (horizon-ctl's `scroll-at` sends it through the window too), and
-    /// only while a screen of the game's is open (Options and the pack list
-    /// opened from the title screen count, with no player and no `menu`). It
-    /// does not fire on the title screen itself, the connect and loading
+    /// while a screen of the game's or the title's is open (Options and the
+    /// pack list opened from the title screen count, with no player and no
+    /// `menu`; the title's own since API @API:native_instance_dir@). It
+    /// does not fire on the connect and loading
     /// screens, nor for a server dialog, the server pack, link and
     /// code-of-conduct prompts, a book or a sign editor drawn over gameplay,
     /// nor while a world loads or saves: the scroll there stays the game's
@@ -1482,10 +1492,10 @@ pub trait Hooks: Send + Sync {
     /// It fires for the window's presses and their repeats, and for the
     /// control socket's `key` (a release fires nothing), after the window's
     /// own shortcuts have run — the fullscreen and screenshot keys, the debug
-    /// keys and the narrator — and only while a screen of the game's is open
-    /// (Options and the pack list opened from the title screen count, with no
-    /// player and no `menu`). It does not fire on the title screen itself, the
-    /// connect and loading screens, nor for a server dialog, the server pack,
+    /// keys and the narrator — and while a screen of the game's or the title's
+    /// is open (Options and the pack list opened from the title screen count,
+    /// with no player and no `menu`; the title's own since API @API:native_instance_dir@). It does
+    /// not fire on the connect and loading screens, nor for a server dialog, the server pack,
     /// link and code-of-conduct prompts, a book or a sign editor drawn over
     /// gameplay, nor while a world loads or saves: the key there stays the
     /// game's own. A cancelled press's release still runs, so a `native_key`
@@ -3040,6 +3050,15 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         None
     }
+    /// A dropped item reaches its lifetime on the server (`ItemEntity.tick`,
+    /// NeoForge's `ItemExpireEvent`). Every mod may set or add to `extra_life`,
+    /// in ticks, which starts at zero; a positive total keeps the item that much
+    /// longer, zero or less lets it expire. Extensions are capped at 32766
+    /// ticks. @API:item_expire@.
+    fn item_expire(&self, host: &mut dyn Host, event: &mut ItemExpireEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A dropped item entity was successfully added to the server level.
     /// @API:item_spawn@.
     fn item_spawn(&self, host: &mut dyn Host, event: &mut ItemSpawnEvent<'_>) {
@@ -3102,6 +3121,19 @@ pub trait Hooks: Send + Sync {
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn moisture_change(&self, level: &dyn LevelHost, event: &mut MoistureChangeEvent) -> Flow {
         let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A player took an anvil's result at `pos` and the levels, inputs and anvil wear are done (`AnvilCraftEvent.Post`); a broken anvil is already air. `craft` holds the inputs and the result as they were before. Not called when `native_anvil_craft_pre` cancelled. @API:native_anvil_craft_post@.
+    fn anvil_craft_post(&self, host: &mut dyn Host, event: &mut AnvilCraftPostEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player took an anvil's result at `pos` (`AnvilCraftEvent.Pre`), before the levels are charged, the inputs used up and the anvil worn. `craft` holds the inputs and the result as they were before. Set `cancel` to refuse the take: the result stays in its slot and the inputs, levels, inventory and cursor are as before the click. @API:native_anvil_craft_pre@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn anvil_craft_pre(&self, host: &mut dyn Host, event: &mut AnvilCraftPreEvent<'_>) -> Flow {
+        let _ = host;
         let _ = event;
         Flow::Continue
     }
@@ -3292,6 +3324,17 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A player's data was copied to their new player (NeoForge's
+    /// `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): `was_death` is
+    /// true after a death, false when they left the End after the credits
+    /// (`respawn` with `keepAllPlayerData`). The uuid stays the same, so the
+    /// old and the new player share `player`. Heard before the new player is
+    /// placed, on a server, with no player's state swapped in. Not
+    /// cancellable.
+    fn player_clone(&self, host: &mut dyn Host, event: &mut PlayerCloneEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// The command tree a server sends a player (NeoForge's and Paper's
     /// "commands sent to a player" stage): when they join and when their
     /// level changes (`/op`, `/deop`, the LAN settings). `names` are the
@@ -3422,6 +3465,18 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A player was loaded from the world's save (NeoForge's
+    /// `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`): their `.dat`
+    /// has been read and applied, and they are not placed in a level yet.
+    /// `directory` is the world's player directory (`players/data`): a mod
+    /// reads its own file there, named `<uuid>.<suffix>` as
+    /// `getPlayerFile(suffix)` names it. Heard once for each join, for the
+    /// owner of an integrated server as for anyone else, on a server, with no
+    /// player's state swapped in. Not cancellable.
+    fn player_load_from_file(&self, host: &mut dyn Host, event: &mut PlayerLoadFromFileEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A player whose login the server has accepted (NeoForge's
     /// `PlayerNegotiationEvent` stage): the name, whitelist, ban and
     /// server-full checks have passed and the player holds a place, but their
@@ -3441,6 +3496,18 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         Flow::Continue
+    }
+    /// A player was saved to the world's store (NeoForge's
+    /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the
+    /// world closes, when the dedicated server saves everyone, and for an
+    /// integrated server's owner when the world saves them. LAN guests are
+    /// not heard on integrated autosaves. Once for each save. `directory`
+    /// is the world's player directory (`players/data`): write your own file
+    /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
+    /// may be leaving, so no player's state is swapped in. Not cancellable.
+    fn player_save_to_file(&self, host: &mut dyn Host, event: &mut PlayerSaveToFileEvent<'_>) {
+        let _ = host;
+        let _ = event;
     }
     /// A server player's sprint started or stopped: their client sent
     /// `START_SPRINTING` or `STOP_SPRINTING` (the sprint key, a double tap
@@ -3611,6 +3678,21 @@ pub trait Hooks: Send + Sync {
         &self,
         host: &mut dyn Host,
         event: &mut PlayerAdvancementDoneEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A criterion of a server player's advancement was granted or revoked,
+    /// after its progress changed and before any completion rewards, except
+    /// the `minecraft:tick` criteria granted on a network player's first tick
+    /// or a reload, which are heard after that tick's rewards and packets. A
+    /// grant or revoke that changes nothing is not heard. `granted` is false for a
+    /// revoke. Helpers looking up the guest through `self.lan` may find
+    /// nothing during its packet. @API:player_advancement_progress@.
+    fn player_advancement_progress(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerAdvancementProgressEvent<'_>,
     ) {
         let _ = host;
         let _ = event;
@@ -3902,6 +3984,19 @@ pub trait Hooks: Send + Sync {
         host: &mut dyn Host,
         event: &mut PlayerSpawnPointSetEvent<'_>,
     ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A statistic is about to be awarded to a server player, before its count
+    /// and scoreboard criteria change. `stat_type` and `stat` are ids such as
+    /// `minecraft:mined` and `minecraft:stone`, and `value` the amount. Set
+    /// `cancel` to award nothing. Helpers looking up the guest through
+    /// `self.lan` may find nothing during its packet. Server-side.
+    /// @API:player_stat_award@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_stat_award(&self, host: &mut dyn Host, event: &mut PlayerStatAwardEvent<'_>) -> Flow {
         let _ = host;
         let _ = event;
         Flow::Continue
@@ -10110,6 +10205,30 @@ pub fn dispatch_item_energy_buffer(
         }
     }
 }
+/// What [`Hooks::item_expire`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemExpireEvent<'a> {
+    pub entity: u32,
+    pub stack: &'a ItemStack,
+    pub extra_life: i32,
+}
+pub fn dispatch_item_expire(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    stack: &ItemStack,
+    extra_life: &mut i32,
+) {
+    let mut event = ItemExpireEvent {
+        entity,
+        stack,
+        extra_life: *extra_life,
+    };
+    for mod_hook in mods {
+        mod_hook.item_expire(host, &mut event);
+    }
+    *extra_life = event.extra_life;
+}
 /// What [`Hooks::item_spawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ItemSpawnEvent<'a> {
@@ -10250,6 +10369,65 @@ pub fn dispatch_moisture_change(
     };
     for mod_hook in mods {
         if matches!(mod_hook.moisture_change(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::anvil_craft_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct AnvilCraftPostEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub craft: &'a horizon_client::menu::AnvilCraft,
+}
+pub fn dispatch_anvil_craft_post(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    craft: &horizon_client::menu::AnvilCraft,
+) {
+    let mut event = AnvilCraftPostEvent {
+        player,
+        name,
+        pos,
+        craft,
+    };
+    for mod_hook in mods {
+        mod_hook.anvil_craft_post(host, &mut event);
+    }
+}
+/// What [`Hooks::anvil_craft_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct AnvilCraftPreEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub craft: &'a horizon_client::menu::AnvilCraft,
+}
+pub fn dispatch_anvil_craft_pre(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    craft: &horizon_client::menu::AnvilCraft,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = AnvilCraftPreEvent {
+        player,
+        name,
+        pos,
+        craft,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.anvil_craft_pre(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }
@@ -10546,6 +10724,29 @@ pub fn dispatch_player_changed_dimension(
         mod_hook.player_changed_dimension(host, &mut event);
     }
 }
+/// What [`Hooks::player_clone`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerCloneEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub was_death: bool,
+}
+pub fn dispatch_player_clone(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    was_death: bool,
+) {
+    let mut event = PlayerCloneEvent {
+        player,
+        name,
+        was_death,
+    };
+    for mod_hook in mods {
+        mod_hook.player_clone(host, &mut event);
+    }
+}
 /// What [`Hooks::player_commands_sent`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerCommandsSentEvent<'a> {
@@ -10800,6 +11001,29 @@ pub fn dispatch_player_lectern_page_change(
         mod_hook.player_lectern_page_change(host, &mut event);
     }
 }
+/// What [`Hooks::player_load_from_file`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerLoadFromFileEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub directory: &'a std::path::Path,
+}
+pub fn dispatch_player_load_from_file(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    directory: &std::path::Path,
+) {
+    let mut event = PlayerLoadFromFileEvent {
+        player,
+        name,
+        directory,
+    };
+    for mod_hook in mods {
+        mod_hook.player_load_from_file(host, &mut event);
+    }
+}
 /// What [`Hooks::player_login`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerLoginEvent<'a> {
@@ -10828,6 +11052,29 @@ pub fn dispatch_player_login(
             *cancel = true;
             break;
         }
+    }
+}
+/// What [`Hooks::player_save_to_file`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerSaveToFileEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub directory: &'a std::path::Path,
+}
+pub fn dispatch_player_save_to_file(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    directory: &std::path::Path,
+) {
+    let mut event = PlayerSaveToFileEvent {
+        player,
+        name,
+        directory,
+    };
+    for mod_hook in mods {
+        mod_hook.player_save_to_file(host, &mut event);
     }
 }
 /// What [`Hooks::player_sprint`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11140,6 +11387,35 @@ pub fn dispatch_player_advancement_done(
     };
     for mod_hook in mods {
         mod_hook.player_advancement_done(host, &mut event);
+    }
+}
+/// What [`Hooks::player_advancement_progress`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerAdvancementProgressEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub advancement: &'a str,
+    pub criterion: &'a str,
+    pub granted: bool,
+}
+pub fn dispatch_player_advancement_progress(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    advancement: &str,
+    criterion: &str,
+    granted: bool,
+) {
+    let mut event = PlayerAdvancementProgressEvent {
+        player,
+        name,
+        advancement,
+        criterion,
+        granted,
+    };
+    for mod_hook in mods {
+        mod_hook.player_advancement_progress(host, &mut event);
     }
 }
 /// What [`Hooks::player_attack_cooldown_reset`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11863,6 +12139,42 @@ pub fn dispatch_player_spawn_point_set(
             mod_hook.player_spawn_point_set(host, &mut event),
             Flow::Cancel
         ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_stat_award`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerStatAwardEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub stat_type: &'a str,
+    pub stat: &'a str,
+    pub value: i32,
+}
+pub fn dispatch_player_stat_award(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    stat_type: &str,
+    stat: &str,
+    value: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerStatAwardEvent {
+        player,
+        name,
+        stat_type,
+        stat,
+        value,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_stat_award(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }

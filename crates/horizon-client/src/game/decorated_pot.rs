@@ -119,7 +119,7 @@ impl Game<'_> {
         };
         let stack = stack.clone();
         self.block_entity_event(pos, 1, WOBBLE_POSITIVE);
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         // consumeAndReturn(1): one item goes in (a creative player keeps theirs).
         let inserted = match &mut pot_item {
             Some(p) => {

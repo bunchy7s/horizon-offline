@@ -611,10 +611,37 @@ impl Game<'_> {
         for (ai, ci) in hits {
             let a = &tree.list[ai];
             let was = self.adv.progress.done(a);
-            self.adv.progress.grant(&a.id, &a.criteria[ci].name, &date);
+            let criterion = &a.criteria[ci].name;
+            if self.adv.progress.grant(&a.id, criterion, &date) {
+                self.advancement_progress(&a.id, criterion, true);
+            }
             self.progress_changed(ai);
             if !was && self.adv.progress.done(a) {
                 self.award(ai);
+            }
+        }
+    }
+    /// `PlayerAdvancements.award` / `revoke` after a criterion's progress changed.
+    fn advancement_progress(&mut self, advancement: &str, criterion: &str, granted: bool) {
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_advancement_progress(player, &name, advancement, criterion, granted);
+        }
+    }
+    /// The criteria `CriteriaTriggers.TICK` granted network players in the hub
+    /// (their first tick and a reload), told to the mods.
+    pub(super) fn run_native_advancement_grants(&mut self) {
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
+        for batch in std::mem::take(&mut host.hub.native_advancement_grants) {
+            for grant in batch.grants {
+                self.native_player_advancement_progress(
+                    batch.player,
+                    &batch.name,
+                    &grant.advancement,
+                    &grant.criterion,
+                    true,
+                );
             }
         }
     }
@@ -692,7 +719,7 @@ impl Game<'_> {
         match result {
             Ok(unlocked) => {
                 self.recipe_unlocked(&unlocked);
-                self.stats.add("used", &stack.item, 1);
+                self.award_stat("used", &stack.item, 1);
                 self.swing_arm();
                 true
             }
@@ -1962,6 +1989,7 @@ impl Game<'_> {
             let was = self.adv.progress.done(a);
             if self.adv.progress.grant(&a.id, c, &date) {
                 changed = true;
+                self.advancement_progress(&a.id, c, true);
                 self.progress_changed(index);
                 if !was && self.adv.progress.done(a) {
                     self.award(index);
@@ -1976,15 +2004,24 @@ impl Game<'_> {
         let a = &tree.list[index];
         self.progress_changed(index);
         match criterion {
-            Some(c) => self.adv.progress.revoke(&a.id, c),
+            Some(c) => self.revoke_criterion(&a.id, c),
             None => {
                 let mut any = false;
                 for c in &a.criteria {
-                    any |= self.adv.progress.revoke(&a.id, &c.name);
+                    any |= self.revoke_criterion(&a.id, &c.name);
                 }
                 any
             }
         }
+    }
+    /// `PlayerAdvancements.revoke(holder, criterion)`: the progress change and
+    /// the hook for it.
+    fn revoke_criterion(&mut self, advancement: &str, criterion: &str) -> bool {
+        let revoked = self.adv.progress.revoke(advancement, criterion);
+        if revoked {
+            self.advancement_progress(advancement, criterion, false);
+        }
+        revoked
     }
 }
 impl Game<'_> {

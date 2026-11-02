@@ -175,6 +175,13 @@ pub enum HostEvent {
     },
 }
 
+/// The criteria `CriteriaTriggers.TICK` granted one player.
+pub struct TickGrants {
+    pub player: u128,
+    pub name: String,
+    pub grants: Vec<super::advancements::CriterionGrant>,
+}
+
 /// What one player started and stopped tracking, in order, for the game to
 /// tell the mods.
 pub struct TrackingBatch {
@@ -201,6 +208,9 @@ pub struct Hub {
     /// The entities players started and stopped tracking, collected by
     /// `collect_tracking`, for the game to tell the mods.
     pub native_tracking: Vec<TrackingBatch>,
+    /// Criteria `CriteriaTriggers.TICK` granted to players, for the game to
+    /// tell the mods.
+    pub native_advancement_grants: Vec<TickGrants>,
     /// Players a native mod hid (`native_hide_player`), by UUID, on or off:
     /// only players of at least that permission level see them, in the
     /// player list, the world and their joining and leaving.
@@ -344,6 +354,19 @@ fn shoulder_meta(state: &mut EntityState, shoulders: [Option<i32>; 2]) {
             .defaults
             .push((index, serializer::OPTIONAL_UNSIGNED_INT, Value::Id(0)));
     }
+}
+
+/// The shoulder parrot slots that differ from what the player's client was
+/// last sent, as entity data: 0 for none, else the variant's id plus one.
+fn shoulder_changes(now: [Option<i32>; 2], sent: [Option<i32>; 2]) -> Vec<(u8, i32, Value)> {
+    (19..)
+        .zip(now.into_iter().zip(sent))
+        .filter(|(_, (now, sent))| now != sent)
+        .map(|(index, (now, _))| {
+            let id = now.map_or(0, |v| v + 1);
+            (index, serializer::OPTIONAL_UNSIGNED_INT, Value::Id(id))
+        })
+        .collect()
 }
 
 impl Hub {
@@ -547,6 +570,7 @@ impl Hub {
             mod_commands: (serde_json::Value::Null, None),
             native_menu_events: Vec::new(),
             native_tracking: Vec::new(),
+            native_advancement_grants: Vec::new(),
             hidden: Default::default(),
             teams: Vec::new(),
             nicknames: std::collections::HashMap::new(),
@@ -2610,6 +2634,11 @@ impl Hub {
                     g.send(&raw(ids::RECIPE_BOOK_ADD, add));
                 }
                 g.send(&raw(ids::UPDATE_ADVANCEMENTS, first.update_advancements));
+                self.native_advancement_grants.push(TickGrants {
+                    player: g.uuid,
+                    name: g.name.clone(),
+                    grants: first.granted,
+                });
                 g.advancements_visible = sync.advancements.visibility(&g.advancements);
                 g.advancements_changed.clear();
             } else {
@@ -2670,6 +2699,17 @@ impl Hub {
             g.send(&C::SetEntityData(play::SetEntityData {
                 id: g.entity_id,
                 values: vec![(0, serializer::BYTE, Value::Byte(shared))],
+            }));
+        }
+        // ServerEntity.sendDirtyEntityData: the parrots on the player's
+        // shoulders go to the player too, whose own model draws them.
+        let g = &mut self.guests[i];
+        if g.shoulders != g.sent_shoulders {
+            let values = shoulder_changes(g.shoulders, g.sent_shoulders);
+            g.sent_shoulders = g.shoulders;
+            g.send(&C::SetEntityData(play::SetEntityData {
+                id: g.entity_id,
+                values,
             }));
         }
         // Sent when the health or the food level changes, or the saturation
@@ -2744,6 +2784,7 @@ impl Hub {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as i64);
         for g in &mut self.guests {
+            let mut granted = Vec::new();
             // PlayerAdvancements.reload: isFirstPacket again, the progress
             // read against the new tree; a player whose advancements were
             // never loaded does that on their first tick.
@@ -2752,12 +2793,20 @@ impl Hub {
             }
             g.advancements_visible.clear();
             g.advancements_changed.clear();
-            if let Some(add) =
-                sync.advancements
-                    .reload(&sync, now, &mut g.advancements, &mut g.recipe_book)
-            {
+            if let Some(add) = sync.advancements.reload(
+                &sync,
+                now,
+                &mut g.advancements,
+                &mut g.recipe_book,
+                &mut granted,
+            ) {
                 g.send(&raw(ids::RECIPE_BOOK_ADD, add));
             }
+            self.native_advancement_grants.push(TickGrants {
+                player: g.uuid,
+                name: g.name.clone(),
+                grants: granted,
+            });
         }
         // broadcastAll(ClientboundUpdateTagsPacket).
         self.broadcast(&C::UpdateTags(sync.tags.clone()));
@@ -3804,6 +3853,7 @@ impl Hub {
         g.sent_xp = None;
         g.sent_air = (300, 0.0);
         g.sent_shared = 0;
+        g.sent_shoulders = [None; 2];
         let (cx, cz) = g.chunk();
         g.send(&C::SetChunkCacheCenter(play::SetChunkCacheCenter {
             x: cx,
@@ -3973,6 +4023,18 @@ fn listed_properties(
 mod tests {
     use super::*;
     use crate::fast_hash::FxHashSet;
+
+    /// The owner's own shoulder parrots are sent when a slot changes.
+    #[test]
+    fn the_owner_is_sent_the_shoulder_slots_that_changed() {
+        assert!(shoulder_changes([None; 2], [None; 2]).is_empty());
+        let landed = shoulder_changes([Some(1), None], [None; 2]);
+        assert_eq!(landed.len(), 1);
+        assert_eq!((landed[0].0, &landed[0].2), (19, &Value::Id(2)));
+        let left = shoulder_changes([None; 2], [Some(1), Some(4)]);
+        assert_eq!(left.len(), 2);
+        assert_eq!((left[1].0, &left[1].2), (20, &Value::Id(0)));
+    }
 
     /// The counts of what is stuck in a player are sent when set, and a
     /// count back at zero is sent as the default.

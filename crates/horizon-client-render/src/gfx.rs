@@ -1447,6 +1447,13 @@ fn instance_descriptor(
     }
     descriptor.backends = backends.with_env();
     let dx12 = cfg!(windows) && descriptor.backends.contains(wgpu::Backends::DX12);
+    // FXC spends about 2.6 s on every start compiling the pipelines (DXC about
+    // 1 s); what it compiled once is kept in the game folder and read back
+    // after that (third_party/wgpu-hal/src/dx12/disk_cache.rs).
+    #[cfg(windows)]
+    if dx12 {
+        wgpu::hal::dx12::disk_cache::set_file(dx12_shader_cache(&crate::logging::game_home()));
+    }
     if !cfg!(debug_assertions) && !dx12 {
         descriptor
             .flags
@@ -1460,6 +1467,11 @@ fn instance_descriptor(
     }
     descriptor
 }
+/// Where DX12 keeps the shaders it compiled, inside a game folder.
+pub fn dx12_shader_cache(home: &std::path::Path) -> std::path::PathBuf {
+    home.join("cache").join("dx12-shaders.bin")
+}
+
 /// The window's display connection, so the OpenGL backend creates its EGL
 /// display from the X11 or Wayland connection the window lives on. Without
 /// one, wgpu-hal falls back to `EGL_MESA_platform_surfaceless`, whose configs

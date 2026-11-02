@@ -190,6 +190,68 @@ fn operations_use_floor_semantics() {
 }
 
 #[test]
+fn division_wraps_minimum_integer_by_negative_one() {
+    let mut m = mock();
+    run(&mut m, "scoreboard objectives add poc dummy").unwrap();
+    run(&mut m, "scoreboard players set target poc -2147483648").unwrap();
+    run(&mut m, "scoreboard players set divisor poc -1").unwrap();
+    run(
+        &mut m,
+        "scoreboard players operation target poc /= divisor poc",
+    )
+    .unwrap();
+    assert_eq!(
+        run(&mut m, "scoreboard players get target poc").unwrap(),
+        i32::MIN
+    );
+    assert_eq!(
+        run(&mut m, "scoreboard players get divisor poc").unwrap(),
+        -1
+    );
+}
+
+#[test]
+fn remainder_handles_integer_boundaries() {
+    for (dividend, divisor, expected) in [
+        (i32::MAX - 1, i32::MAX, i32::MAX - 1),
+        (7, -3, -2),
+        (-7, 3, 2),
+        (i32::MIN, -1, 0),
+        (-1, i32::MIN, -1),
+        (1, i32::MIN, i32::MIN + 1),
+        (0, i32::MAX, 0),
+    ] {
+        let mut m = mock();
+        run(&mut m, "scoreboard objectives add boundary dummy").unwrap();
+        run(
+            &mut m,
+            &format!("scoreboard players set left boundary {dividend}"),
+        )
+        .unwrap();
+        run(
+            &mut m,
+            &format!("scoreboard players set right boundary {divisor}"),
+        )
+        .unwrap();
+        run(
+            &mut m,
+            "scoreboard players operation left boundary %= right boundary",
+        )
+        .unwrap();
+        assert_eq!(
+            run(&mut m, "scoreboard players get left boundary").unwrap(),
+            expected,
+            "{dividend} %= {divisor}"
+        );
+        assert_eq!(
+            run(&mut m, "scoreboard players get right boundary").unwrap(),
+            divisor
+        );
+    }
+    assert!(apply_operation("%=", 1, 0).is_err());
+}
+
+#[test]
 fn triggers() {
     let mut m = mock();
     run(&mut m, "scoreboard objectives add t trigger").unwrap();

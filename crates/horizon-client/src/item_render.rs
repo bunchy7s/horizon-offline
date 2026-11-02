@@ -1260,10 +1260,10 @@ mod tests {
         assert!((transform_normal(r, Vec3::Z) - Vec3::X).length() < 1e-6);
     }
 
-    /// Every vanilla item on the ground, turned, shaded and unshaded: the GPU path's
-    /// vertices (its jobs expanded as `entity_skin.wgsl` does) are the CPU path's, to
-    /// the bit and in the same order, for each state it takes. Needs the prepared
-    /// resources.
+    /// Every vanilla item on the ground, held in either hand, framed and worn on the
+    /// head, turned, shaded and unshaded: the GPU path's vertices (its jobs expanded as
+    /// `entity_skin.wgsl` does) are the CPU path's, to the bit and in the same order, for
+    /// each state it takes. Needs the prepared resources.
     #[test]
     fn items_posed_on_the_gpu_draw_what_the_cpu_draws() {
         use crate::gfx::entity_skin::{SkinFrame, expand};
@@ -1281,11 +1281,24 @@ mod tests {
             let view = StackView::new(id, 1);
             r.resolve(&view, DisplayContext::Ground, None, None, 7, &NoEnv)
         };
+        // Each display context's transforms (`ItemTransform`s) pose the same quads.
+        let contexts = [
+            DisplayContext::Ground,
+            DisplayContext::ThirdPersonRightHand,
+            DisplayContext::ThirdPersonLeftHand,
+            DisplayContext::Fixed,
+            DisplayContext::Head,
+        ];
         let states: Vec<_> = r
             .models
             .definitions
             .keys()
-            .map(|id| (id, resolve(id)))
+            .flat_map(|id| {
+                contexts.map(|context| {
+                    let view = StackView::new(id, 1);
+                    (id, r.resolve(&view, context, None, None, 7, &NoEnv))
+                })
+            })
             .collect();
         // Each sprite its own rect, so a run drawn with another's shows.
         let mut sprites: HashMap<String, Rect> = HashMap::new();

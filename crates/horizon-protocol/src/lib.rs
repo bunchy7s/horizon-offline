@@ -13,6 +13,7 @@ pub mod frame;
 pub mod hash_ops;
 pub mod ids;
 pub mod item;
+pub mod mod_list;
 pub mod mod_net;
 pub mod packets;
 pub mod quiet;

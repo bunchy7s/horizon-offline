@@ -677,10 +677,10 @@ pub fn mob_to_nbt(
         | "minecraft:trader_llama" => {
             map.insert("Tame".into(), Tag::Byte(i8::from(m.extra.tame)));
             map.insert("Temper".into(), Tag::Int(i32::from(m.extra.variant3)));
-            // AbstractHorse.addAdditionalSaveData; Horizon models neither.
-            for key in ["EatingHaystack", "Bred"] {
-                map.entry(key.into()).or_insert(Tag::Byte(0));
-            }
+            map.insert("Bred".into(), Tag::Byte(i8::from(m.extra.bred)));
+            // AbstractHorse.addAdditionalSaveData; Horizon does not model the
+            // eating haystack yet.
+            map.entry("EatingHaystack".into()).or_insert(Tag::Byte(0));
             if let Some(owner) = m.extra.owner {
                 map.insert("Owner".into(), Tag::IntArray(owner.to_vec()));
             }
@@ -1608,6 +1608,7 @@ pub fn mob_from_nbt(
     if crate::mobs::equine::is_equine(m.species()) {
         m.extra.tame = flag(tag, "Tame");
         m.extra.variant3 = number(tag.get("Temper")).unwrap_or(0).clamp(0, 100) as u8;
+        m.extra.bred = flag(tag, "Bred");
         m.extra.owner = crate::save::uuid_from_tag(tag.get("Owner"));
         let v = number(tag.get("Variant")).unwrap_or(0) as i32;
         m.extra.variant = (v & 0xFF).clamp(0, 6) as u8;
@@ -2033,7 +2034,10 @@ pub fn item_entity_to_nbt(e: &ItemEntity, uuid: [i32; 4], raw: Option<&Tag>) -> 
         ("Item", item_to_nbt(&e.stack)),
         ("Health", Tag::Short(e.health as i16)),
         ("Fire", Tag::Short(e.fire_ticks as i16)),
-        ("Age", Tag::Short(e.age.min(i16::MAX as u32) as i16)),
+        (
+            "Age",
+            Tag::Short(e.age.clamp(i16::MIN as i32, i16::MAX as i32) as i16),
+        ),
         (
             "PickupDelay",
             Tag::Short(e.pickup_delay.min(i16::MAX as u32) as i16),
@@ -2110,8 +2114,7 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
         on_ground: flag(tag, "OnGround"),
         vertical_collision: false,
         horizontal_collision: false,
-        // Age -32768 marks items that never despawn; Horizon counts upwards.
-        age: number(tag.get("Age")).unwrap_or(0).max(0) as u32,
+        age: number(tag.get("Age")).unwrap_or(0) as i32,
         pickup_delay: number(tag.get("PickupDelay")).unwrap_or(0).clamp(0, 32767) as u32,
         bob_offset,
         ticks: 0,
@@ -2236,7 +2239,7 @@ pub fn arrow_to_nbt(
     };
     let base = Base {
         // A spectral arrow is its own entity type.
-        id: if &*a.pickup_item.item == "minecraft:spectral_arrow" {
+        id: if a.spectral || &*a.pickup_item.item == "minecraft:spectral_arrow" {
             "minecraft:spectral_arrow"
         } else {
             "minecraft:arrow"
@@ -2301,7 +2304,8 @@ pub fn arrow_from_nbt(
     let owner = uuid_from_tag(tag.get("Owner"));
     let from_player = player.is_some() && owner == player;
     // `getDefaultPickupItem`: a `SpectralArrow` is picked up as its own item.
-    let default_item = if kind(tag).as_deref() == Some("minecraft:spectral_arrow") {
+    let spectral = kind(tag).as_deref() == Some("minecraft:spectral_arrow");
+    let default_item = if spectral {
         "minecraft:spectral_arrow"
     } else {
         "minecraft:arrow"
@@ -2330,6 +2334,7 @@ pub fn arrow_from_nbt(
     a.has_been_shot = flag(tag, "HasBeenShot");
     a.fire_ticks = number(tag.get("Fire")).unwrap_or(0) as i16 as i32;
     a.fall_distance = float(tag.get("fall_distance")).unwrap_or(0.0);
+    a.spectral = spectral;
     a.pickup_item = item;
     a.fired_from_weapon = tag.get("weapon").and_then(item_from_nbt);
     p.stuck = a.in_ground;
@@ -2424,7 +2429,7 @@ const THROWABLE_ITEMS: [&str; 6] = [
 fn throwable_item(kind: &ProjectileKind) -> Option<&str> {
     match kind {
         ProjectileKind::Thrown(t) => Some(t.item),
-        ProjectileKind::Potion(stack) => Some(&stack.item),
+        ProjectileKind::Potion(stack, _) => Some(&stack.item),
         _ => THROWABLE_ITEMS.iter().find(|id| **id == kind.id()).copied(),
     }
 }
@@ -2440,23 +2445,43 @@ pub fn throwable_kind(id: &str) -> Option<ProjectileKind> {
         "minecraft:snowball" => Some(ProjectileKind::Snowball),
         "minecraft:egg" => Some(ProjectileKind::Egg),
         "minecraft:ender_pearl" => Some(ProjectileKind::EnderPearl),
-        _ => Some(ProjectileKind::Potion(Box::new(
-            crate::items::ItemStack::new(id, 1),
-        ))),
+        // The entity type is the id; the `Item` read later may be another potion.
+        "minecraft:experience_bottle" => Some(ProjectileKind::ExperienceBottle),
+        _ => Some(ProjectileKind::Potion(
+            Box::new(crate::items::ItemStack::new(id, 1)),
+            id == "minecraft:lingering_potion",
+        )),
     }
 }
 
 /// Whether its chunk saves it: the kinds `arrow_to_nbt`, `fireball_to_nbt`
 /// and [`throwable_to_nbt`] write.
 pub fn saved_with_chunk(p: &Projectile) -> bool {
-    matches!(
-        p.kind,
+    // No wildcard: a kind added to `ProjectileKind` must say here whether its
+    // chunk saves it (`Entity.shouldBeSaved` is true for every projectile in
+    // vanilla), and a `true` needs a writer in `entity_chunks`.
+    match &p.kind {
         ProjectileKind::LargeFireball { .. }
-            | ProjectileKind::SmallFireball
-            | ProjectileKind::LlamaSpit
-            | ProjectileKind::ShulkerBullet { target: None, .. }
-    ) || (p.arrow.is_some() && matches!(p.kind, ProjectileKind::Arrow { .. }))
-        || throwable_item(&p.kind).is_some()
+        | ProjectileKind::SmallFireball
+        | ProjectileKind::WindCharge
+        | ProjectileKind::BreezeWindCharge
+        | ProjectileKind::Snowball
+        | ProjectileKind::Egg
+        | ProjectileKind::EnderPearl
+        | ProjectileKind::Potion(..)
+        | ProjectileKind::ExperienceBottle
+        | ProjectileKind::LlamaSpit
+        | ProjectileKind::ShulkerBullet { target: None, .. }
+        | ProjectileKind::Thrown(_) => true,
+        ProjectileKind::Arrow { .. } => p.arrow.is_some(),
+        // Not written yet: tridents save from their own list, and a bullet
+        // with a target would lose it.
+        ProjectileKind::Trident
+        | ProjectileKind::ShulkerBullet {
+            target: Some(_), ..
+        }
+        | ProjectileKind::WitherSkull { .. } => false,
+    }
 }
 
 /// `ThrowableItemProjectile.addAdditionalSaveData`: `Projectile`'s keys and
@@ -2487,7 +2512,7 @@ pub fn throwable_to_nbt(
     // effects); when there is none, `getItem`'s default is written.
     if tag.get("Item").is_none() {
         let stack = match &p.kind {
-            ProjectileKind::Potion(stack) => (**stack).clone(),
+            ProjectileKind::Potion(stack, _) => (**stack).clone(),
             _ => crate::items::ItemStack::new(item, 1),
         };
         put(&mut tag, "Item", item_to_nbt(&stack));
@@ -2501,7 +2526,7 @@ pub fn throwable_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<Project
     let mut kind = throwable_kind(&kind(tag)?)?;
     // `readAdditionalSaveData` sets the `Item` it flies as, potion effects
     // and all; a tag without one keeps `getItem`'s default.
-    if let ProjectileKind::Potion(stack) = &mut kind
+    if let ProjectileKind::Potion(stack, _) = &mut kind
         && let Some(item) = tag.get("Item").and_then(item_from_nbt)
     {
         **stack = item;
@@ -2813,12 +2838,25 @@ pub fn painting_to_nbt(p: &Painting, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
     put(&mut tag, "block_pos", Tag::IntArray(p.pos.to_vec()));
     tag
 }
+/// `BlockAttachedEntity.readAdditionalSaveData`: `block_pos` when saved; a
+/// summoned one has none, and `setPos` puts its block at the block holding
+/// the summon position.
+fn attached_block_pos(tag: &Tag) -> Option<[i32; 3]> {
+    match tag.get("block_pos") {
+        Some(Tag::IntArray(v)) if v.len() == 3 => Some([v[0], v[1], v[2]]),
+        _ => {
+            let at = position(tag)?;
+            Some([
+                at.x.floor() as i32,
+                at.y.floor() as i32,
+                at.z.floor() as i32,
+            ])
+        }
+    }
+}
 /// The block position, facing and variant of a saved painting.
 pub fn painting_from_nbt(tag: &Tag) -> Option<([i32; 3], u8, String)> {
-    let pos = match tag.get("block_pos") {
-        Some(Tag::IntArray(v)) if v.len() == 3 => [v[0], v[1], v[2]],
-        _ => return None,
-    };
+    let pos = attached_block_pos(tag)?;
     let facing = (number(tag.get("facing")).unwrap_or(0) & 3) as u8;
     Some((pos, facing, text(tag.get("variant"))?))
 }
@@ -2931,10 +2969,7 @@ pub fn item_frame_to_nbt(f: &ItemFrame, uuid: [i32; 4], raw: Option<&Tag>) -> Ta
     tag
 }
 pub fn item_frame_from_nbt(tag: &Tag, id: u32) -> Option<ItemFrame> {
-    let pos = match tag.get("block_pos") {
-        Some(Tag::IntArray(v)) if v.len() == 3 => [v[0], v[1], v[2]],
-        _ => return None,
-    };
+    let pos = attached_block_pos(tag)?;
     Some(ItemFrame {
         id,
         pos,
@@ -4970,7 +5005,10 @@ mod fireball_nbt_tests {
             assert_eq!(p.kind.id(), id);
             assert_eq!(
                 p.kind,
-                ProjectileKind::Potion(Box::new(crate::items::ItemStack::new(id, 1)))
+                ProjectileKind::Potion(
+                    Box::new(crate::items::ItemStack::new(id, 1)),
+                    id == "minecraft:lingering_potion"
+                )
             );
             assert!(saved_with_chunk(&p));
             let tag = throwable_to_nbt(&p, [1; 4], None, None).unwrap();
@@ -4992,7 +5030,7 @@ mod fireball_nbt_tests {
             ),
         ]);
         let p = throwable_from_nbt(&harming, None).unwrap();
-        let ProjectileKind::Potion(stack) = &p.kind else {
+        let ProjectileKind::Potion(stack, _) = &p.kind else {
             panic!("a potion");
         };
         assert_eq!(stack.potion(), Some("minecraft:harming"));
@@ -5014,6 +5052,67 @@ mod fireball_nbt_tests {
         ]);
         let p = throwable_from_nbt(&lingering, None).unwrap();
         assert_eq!(p.kind.id(), "minecraft:lingering_potion");
+    }
+
+    #[test]
+    fn wind_charges_in_flight_are_saved_and_read_back() {
+        // vanilla 26.3 saves them (`Entity.shouldBeSaved` is true; the round
+        // trip of a vanilla world lost all four before this).
+        for id in ["minecraft:wind_charge", "minecraft:breeze_wind_charge"] {
+            let saved = Tag::compound([
+                ("id", Tag::String(id.into())),
+                ("Pos", doubles(&[4.5, 80.0, 10.5])),
+                ("NoGravity", Tag::Byte(1)),
+                ("acceleration_power", Tag::Double(0.1_f64.to_bits())),
+            ]);
+            let p = fireball_from_nbt(&saved, None).unwrap();
+            assert_eq!(p.kind.id(), id);
+            assert!(saved_with_chunk(&p), "{id}");
+            let tag = fireball_to_nbt(&p, [1; 4], None, Some(&saved)).unwrap();
+            assert_eq!(kind(&tag).as_deref(), Some(id));
+            assert_eq!(tag.get("NoGravity"), Some(&Tag::Byte(1)));
+        }
+    }
+
+    #[test]
+    fn a_lingering_potion_keeps_its_type_whatever_item_it_flies_as() {
+        // `/summon minecraft:lingering_potion ~ ~ ~ {Item:{id:"minecraft:splash_potion"}}`
+        // is a `ThrownLingeringPotion` in vanilla and stays one when saved.
+        let tag = Tag::compound([
+            ("id", Tag::String("minecraft:lingering_potion".into())),
+            ("Pos", doubles(&[24.5, 80.0, 8.5])),
+            (
+                "Item",
+                item_to_nbt(&crate::items::ItemStack::new("minecraft:splash_potion", 1)),
+            ),
+        ]);
+        let p = throwable_from_nbt(&tag, None).unwrap();
+        assert_eq!(p.kind.id(), "minecraft:lingering_potion");
+        let back = throwable_to_nbt(&p, [1; 4], None, Some(&tag)).unwrap();
+        assert_eq!(kind(&back).as_deref(), Some("minecraft:lingering_potion"));
+        let item = back.get("Item").and_then(item_from_nbt).unwrap();
+        assert_eq!(&*item.item, "minecraft:splash_potion");
+    }
+
+    #[test]
+    fn a_summoned_painting_or_frame_has_no_block_pos_and_sits_at_its_position() {
+        // BlockAttachedEntity.setPos: the block holding the summon position.
+        let painting = Tag::compound([
+            ("id", Tag::String("minecraft:painting".into())),
+            ("Pos", doubles(&[28.5, 80.0, 6.5])),
+            ("variant", Tag::String("minecraft:kebab".into())),
+            ("facing", Tag::Byte(3)),
+        ]);
+        assert_eq!(
+            painting_from_nbt(&painting),
+            Some(([28, 80, 6], 3, "minecraft:kebab".to_string()))
+        );
+        let frame = Tag::compound([
+            ("id", Tag::String("minecraft:item_frame".into())),
+            ("Pos", doubles(&[-0.5, 80.0, 6.5])),
+            ("Facing", Tag::Byte(1)),
+        ]);
+        assert_eq!(item_frame_from_nbt(&frame, 1).unwrap().pos, [-1, 80, 6]);
     }
 
     #[test]
@@ -5049,11 +5148,12 @@ mod fireball_nbt_tests {
             let resaved = throwable_to_nbt(&away, [1; 4], away.owner_uuid, None).unwrap();
             assert_eq!(uuid_from_tag(resaved.get("Owner")), player);
         }
-        // the chunk saves arrows, fireballs and these, and so takes them with it.
+        // the chunk saves arrows, fireballs, wind charges and these, and so takes them with it.
         let kinds = [
             (ProjectileKind::SmallFireball, true),
             (ProjectileKind::Snowball, true),
-            (ProjectileKind::WindCharge, false),
+            (ProjectileKind::WindCharge, true),
+            (ProjectileKind::BreezeWindCharge, true),
             (ProjectileKind::Trident, false),
         ];
         for (kind, saved) in kinds {

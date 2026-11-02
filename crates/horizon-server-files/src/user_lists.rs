@@ -312,16 +312,39 @@ fn json_bool(v: &Json) -> bool {
     }
 }
 
+/// What happened to a list, for the one that watches it: what vanilla's `StoredUserList` tells its
+/// `NotificationService` (`playerOped`/`playerDeoped`, `playerAddedToAllowlist`/`playerRemovedFromAllowlist`,
+/// `playerBanned`/`playerUnbanned`, `ipBanned`/`ipUnbanned`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Change<E> {
+    /// An entry was added (or replaced by a different one).
+    Added(E),
+    /// An entry was removed; a `clear` says it once for each entry, in the map's order, before it empties.
+    Removed(E),
+}
+
 /// StoredUserList.
 pub struct UserList<E: Entry> {
     pub file: PathBuf,
     map: JavaHashMap<JKey, E>,
+    watcher: Option<Box<dyn Fn(Change<E>) + Send>>,
 }
 impl<E: Entry> UserList<E> {
     pub fn new(file: impl Into<PathBuf>) -> Self {
         Self {
             file: file.into(),
             map: JavaHashMap::default(),
+            watcher: None,
+        }
+    }
+    /// Has `watcher` told of every change from now on (`add`, `remove` and `clear`, not a `load`, and not the
+    /// expired entries `get` drops, as vanilla's don't).
+    pub fn watch(&mut self, watcher: impl Fn(Change<E>) + Send + 'static) {
+        self.watcher = Some(Box::new(watcher));
+    }
+    fn told(&self, change: Change<E>) {
+        if let Some(watcher) = &self.watcher {
+            watcher(change);
         }
     }
     /// The entries in the map's iteration order.
@@ -354,23 +377,29 @@ impl<E: Entry> UserList<E> {
         if self.map.get(&key).is_some_and(|old| entry.same(old)) {
             return false;
         }
-        self.map.put(key, entry);
+        self.map.put(key, entry.clone());
         if let Err(e) = self.save() {
             log::warn!("Could not save the list after adding a user. {e}");
         }
+        self.told(Change::Added(entry));
         true
     }
     pub fn remove(&mut self, user: &E::User) -> bool {
-        if self.map.remove(&JKey(E::key(user))).is_none() {
+        let Some(entry) = self.map.remove(&JKey(E::key(user))) else {
             return false;
-        }
+        };
         if let Err(e) = self.save() {
             log::warn!("Could not save the list after removing a user. {e}");
         }
+        self.told(Change::Removed(entry));
         true
     }
     /// StoredUserList.clear: no entry left; saves.
     pub fn clear(&mut self) {
+        let entries: Vec<E> = self.map.entries().map(|(_, e)| e.clone()).collect();
+        for entry in entries {
+            self.told(Change::Removed(entry));
+        }
         self.map.clear();
         if let Err(e) = self.save() {
             log::warn!("Could not save the list after removing a user. {e}");
@@ -446,6 +475,49 @@ mod tests {
             "2026-10-12 08:00:00 +0000"
         );
         assert_eq!(parse_date("forever"), None);
+    }
+
+    #[test]
+    fn a_watcher_hears_what_vanillas_notification_service_does() {
+        use std::sync::{Arc, Mutex};
+        let dir = std::env::temp_dir().join(format!("horizon-lists-watch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mut ops = OpList::new(dir.join("ops.json"));
+        let sink = heard.clone();
+        ops.watch(move |change| sink.lock().unwrap().push(change));
+        let op = |name: &str, level| OpEntry {
+            user: NameAndId::offline(name),
+            level,
+            bypasses_player_limit: false,
+        };
+        assert!(ops.add(op("Kim", 4)));
+        assert!(ops.add(op("Lee", 2)));
+        // A removal that finds nothing says nothing; one that finds an entry says which.
+        assert!(!ops.remove(&NameAndId::offline("Nobody")));
+        assert!(ops.remove(&NameAndId::offline("Kim")));
+        // A clear says it for each entry that is left, and the list is empty after.
+        ops.clear();
+        assert!(ops.is_empty());
+        assert_eq!(
+            *heard.lock().unwrap(),
+            [
+                Change::Added(op("Kim", 4)),
+                Change::Added(op("Lee", 2)),
+                Change::Removed(op("Kim", 4)),
+                Change::Removed(op("Lee", 2)),
+            ]
+        );
+        // A ban equal to the stored one is not added again, so nothing is said.
+        let mut bans = BanList::new(dir.join("banned-players.json"));
+        let said = Arc::new(Mutex::new(0));
+        let counter = said.clone();
+        bans.watch(move |_| *counter.lock().unwrap() += 1);
+        let ban = BanEntry::new(NameAndId::offline("Kim"), None, None, None);
+        assert!(bans.add(ban.clone()));
+        assert!(!bans.add(ban));
+        assert_eq!(*said.lock().unwrap(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

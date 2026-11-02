@@ -112,11 +112,23 @@ pub enum ProjectileKind {
     /// flies as (`ThrowableItemProjectile.getItem`). What it splashes is that
     /// stack's `potion_contents`, so a witch's potion and a summoned one are
     /// the same thing; its entity type is the stack's item.
-    Potion(Box<crate::items::ItemStack>),
+    ///
+    /// The `bool` is whether its entity type is `ThrownLingeringPotion`: the
+    /// type is the entity's own and `/summon` can pair either with any `Item`,
+    /// so it is kept next to the stack (a thrown potion's follows its item).
+    Potion(Box<crate::items::ItemStack>, bool),
+    /// `ThrownExperienceBottle`: its own entity type, gravity 0.07.
+    ExperienceBottle,
     /// a content mod's type.
     Thrown(&'static ThrownType),
 }
 impl ProjectileKind {
+    /// A thrown potion flying as `stack`: a lingering item makes the lingering
+    /// entity type, any other the splash one.
+    pub fn potion(stack: crate::items::ItemStack) -> Self {
+        let lingering = &*stack.item == "minecraft:lingering_potion";
+        Self::Potion(Box::new(stack), lingering)
+    }
     /// Wind charges take no push from an explosion (vanilla leaves their motion at 0).
     pub fn ignores_blast(&self) -> bool {
         matches!(self, Self::WindCharge | Self::BreezeWindCharge)
@@ -138,7 +150,8 @@ impl ProjectileKind {
             | Self::Egg
             | Self::EnderPearl
             | Self::LlamaSpit
-            | Self::Potion(_)
+            | Self::Potion(..)
+            | Self::ExperienceBottle
             | Self::Thrown(_) => 0.25,
             Self::SmallFireball
             | Self::WindCharge
@@ -164,29 +177,17 @@ impl ProjectileKind {
             Self::ShulkerBullet { .. } => "minecraft:shulker_bullet",
             Self::WitherSkull { .. } => "minecraft:wither_skull",
             // `ThrownSplashPotion`/`ThrownLingeringPotion`: the item names it.
-            Self::Potion(stack) => potion_entity_type(&stack.item),
+            Self::Potion(_, true) => "minecraft:lingering_potion",
+            Self::Potion(_, false) => "minecraft:splash_potion",
+            Self::ExperienceBottle => "minecraft:experience_bottle",
             Self::Thrown(t) => t.id,
         }
-    }
-}
-/// The entity type a thrown potion's item names: `ThrownSplashPotion` for a
-/// splash potion, `ThrownLingeringPotion` for a lingering one,
-/// `ThrownExperienceBottle` for a bottle.
-fn potion_entity_type(item: &str) -> &'static str {
-    if item == "minecraft:lingering_potion" {
-        "minecraft:lingering_potion"
-    } else if item == "minecraft:experience_bottle" {
-        "minecraft:experience_bottle"
-    } else {
-        "minecraft:splash_potion"
     }
 }
 /// `ThrownItemRenderer`'s sprite for a thrown potion.
 fn potion_sprite(item: &str) -> &'static str {
     if item == "minecraft:lingering_potion" {
         "item/lingering_potion"
-    } else if item == "minecraft:experience_bottle" {
-        "item/experience_bottle"
     } else {
         "item/splash_potion"
     }
@@ -325,7 +326,7 @@ impl crate::entity_rules::EntityRules for Projectile {
             | ProjectileKind::WitherSkull { .. } => 0.0,
             ProjectileKind::LlamaSpit => 0.06,
             // `ThrownExperienceBottle.getDefaultGravity` is 0.07.
-            ProjectileKind::Potion(stack) if &*stack.item == "minecraft:experience_bottle" => 0.07,
+            ProjectileKind::ExperienceBottle => 0.07,
             ProjectileKind::Potion { .. } => 0.05,
             ProjectileKind::ShulkerBullet { .. } => 0.04,
             _ => 0.03,
@@ -472,7 +473,7 @@ impl Projectile {
             || self
                 .arrow
                 .as_ref()
-                .is_some_and(|a| &*a.pickup_item.item == "minecraft:spectral_arrow")
+                .is_some_and(|a| a.spectral || &*a.pickup_item.item == "minecraft:spectral_arrow")
     }
     /// `Arrow.ID_EFFECT_COLOR` (`updateColor`): the opaque colour of the
     /// potion the arrow carries, from its tipped pickup item or the effect a
@@ -1015,7 +1016,11 @@ impl Projectile {
     /// (`ThrownItemRenderer`): the potion stack itself, or the type's item.
     pub fn drawn_item(&self) -> Option<crate::items::ItemStack> {
         match &self.kind {
-            ProjectileKind::Potion(stack) => Some((**stack).clone()),
+            ProjectileKind::Potion(stack, _) => Some((**stack).clone()),
+            ProjectileKind::ExperienceBottle => Some(crate::items::ItemStack::new(
+                "minecraft:experience_bottle",
+                1,
+            )),
             ProjectileKind::Thrown(t) => Some(crate::items::ItemStack::new(t.item, 1)),
             _ => None,
         }
@@ -1029,7 +1034,8 @@ impl Projectile {
             ProjectileKind::SmallFireball | ProjectileKind::LargeFireball { .. } => {
                 "item/fire_charge"
             }
-            ProjectileKind::Potion(stack) => potion_sprite(&stack.item),
+            ProjectileKind::Potion(stack, _) => potion_sprite(&stack.item),
+            ProjectileKind::ExperienceBottle => "item/experience_bottle",
             ProjectileKind::LlamaSpit => "entity/llama/llama_spit",
             // Drawn as `WindChargeModel` and `ShulkerBulletModel` by the game.
             ProjectileKind::WindCharge

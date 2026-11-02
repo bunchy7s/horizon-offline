@@ -6468,6 +6468,7 @@ impl Game<'_> {
         // collisions and the pull of the nearest player between the server's
         // updates; the server removes it on pickup.
         let (world, facts, collision) = (&self.world, self.res.facts(), self.collision);
+        let border = Some(self.border.geometry());
         let mut lava_random = None;
         let mut next_float = || {
             lava_random
@@ -6501,7 +6502,15 @@ impl Game<'_> {
                     l.steps -= 1;
                 }
                 let before = o.position;
-                let kept = o.tick(world, facts, collision, target, false, &mut next_float);
+                let kept = o.tick(
+                    world,
+                    facts,
+                    collision,
+                    target,
+                    false,
+                    &mut next_float,
+                    border,
+                );
                 // `tick` set `previous` to the stepped position: keep the
                 // pre-step one, as `xo` is in vanilla.
                 o.previous = old;
@@ -6519,11 +6528,12 @@ impl Game<'_> {
         // ItemEntity.tick runs on a client too: gravity, collisions and
         // friction move the item between the server's updates (every 20
         // ticks), and only the server removes it.
-        let (world, registry, facts, collision) = (
+        let (world, registry, facts, collision, border) = (
             &self.world,
             self.pack.assets.registry,
             self.res.facts(),
             self.collision,
+            Some(self.border.geometry()),
         );
         for d in self.dropped.iter_mut().filter(|_| running) {
             d.tick(
@@ -6535,6 +6545,7 @@ impl Game<'_> {
                 &self.res.motion().fluids,
                 // The server decides what an item rests on; this copy only moves between updates.
                 &[],
+                border,
             );
         }
         head_lerps.retain(|_, (_, steps)| *steps > 0);
@@ -7357,6 +7368,23 @@ impl Game<'_> {
                 // stand fits, before the server spawns it. This hand swings
                 // and the click ends.
                 self.with_hand(hand, Game::swing_arm);
+                return true;
+            } else if let Some(stack) = held
+                .as_ref()
+                .filter(|s| s.item.ends_with("_spawn_egg"))
+                .filter(|_| {
+                    self.may_build()
+                        || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos))
+                })
+            {
+                // SpawnEggItem.useOn on a client level: FAIL for a mob that
+                // cannot spawn (the click ends, no swing), else SUCCESS (swing).
+                // Either way no UseItem follows, so the server does not spawn
+                // a second mob from the fluid ray (ItemStack.useOn passes in
+                // adventure mode off can_place_on, which the filter above keeps).
+                if self.spawn_egg_allowed(&stack.item) {
+                    self.with_hand(hand, Game::swing_arm);
+                }
                 return true;
             } else if let Some(stack) = held.as_ref()
                 && (self.predict_item_on_block(stack, &hit, hand)

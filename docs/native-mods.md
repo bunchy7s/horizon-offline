@@ -537,8 +537,10 @@ API 47 adds `native_entity_join_level(dimension, entity, kind, pos, loaded_from_
 server level (NeoForge's `EntityJoinLevelEvent`, vanilla's `PersistentEntitySectionManager.addEntity`):
 `loaded_from_disk` is true when it comes back with its chunk, false for a fresh add (a drop, an orb, `/summon`, an
 arrival through a portal into another level). The entity is already in the level's lists when the hook runs; `canceled` takes it back
-out, and a `/summon` of it fails with vanilla's "duplicate UUIDs" message. It tells item entities and experience
-orbs so far; later APIs add other kinds, so check `kind`. Bundles that use it need `"hooks": 47`.
+out, and a `/summon` of it fails with vanilla's "duplicate UUIDs" message. It tells every kind in the game's entity
+lists (items, orbs, mobs, boats, minecarts, armor stands, primed TNT, falling blocks, projectiles, rockets, tridents),
+once each, in creation order, so check `kind`. A drop, an orb, a mob, a `/summon` and a chunk's entities are told at
+once; other gameplay spawns when the next tick starts, and a cancelled one is removed then. Bundles that use it need `"hooks": 47`.
 
 API 48 adds [a block's items](#a-blocks-items) for server mods, what a pipe or a machine needs to pull from other blocks: `native_container_slots`, `native_extract_item`
 and `native_move_items`, and `native_dimension` for a machine's tick to name its level. `native_insert_item` now goes one item at a time, so it no longer overfills a slot,
@@ -1043,7 +1045,8 @@ trusting native code is the player's decision, never an agent's.
 7. **Install**: a new version, `native-<commit>-<key>`, a copy of the starting version's folder (resources
    included, cloned on APFS, Btrfs and ReFS) with the built game in place of its own, and a `native-mods.json`
    saying which release or Nightly it started from (`base`) and which commit, mods, horizon-mixins and Rust made
-   it. The instance the mods are installed in plays it, the default **Horizon** instance included: the build
+   it. The game lists its `mods` with their versions in a crash report's details (`Native Mods: id version, …`;
+   they stay in the local report, not in crash telemetry). The instance the mods are installed in plays it, the default **Horizon** instance included: the build
    pins its version, as picking a version does. Updates of the launcher's version leave a pinned instance where
    it is, and their clean-up never removes a native build. An instance built before this (the **Native mods**
    instance the default home's mods used to go to) keeps its worlds and its build.
@@ -1438,6 +1441,23 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   the border. Canceling ends the effect: no
   teleport and no more attempts. Foxes eating chorus fruit are not heard. Bundles need
   `"hooks": @API:chorus_fruit_teleport@`.
+- **`native_player_clone(player, name, was_death)`**: a player's data was copied to their new player (NeoForge's
+  `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): after a death respawn (`was_death` true) and when a player
+  leaves the End after the credits (`was_death` false, vanilla's `keepAllPlayerData`). It is heard after the copy and
+  before the new player is placed, once each, on a server. The uuid stays the same, so `player` names the old and the
+  new player alike; no player's state is swapped in, so the helpers that look a player up may find nothing. It cannot
+  stop anything.
+- **`native_player_load_from_file(player, name, directory)`**: a joining player's saved state was read and applied
+  (NeoForge's `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`), before they are placed in a level: once for each
+  join on a server, for an integrated server's owner (loaded from the file `level.dat` names, else their own) as for
+  anyone else. `directory` is the world's `players/data` folder, created if missing; read your own file there, named `<uuid>.<suffix>`. It
+  is heard whether or not the player was in the world before (a new player has no file). No player's state is swapped
+  in. It cannot change or stop anything.
+- **`native_player_save_to_file(player, name, directory)`**: a placed player's data was saved (NeoForge's
+  `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the world closes, when the dedicated server saves
+  everyone, and for an integrated server's owner when the world saves their state into `level.dat`. `directory` is the
+  world's `players/data` folder, created if missing; write your own file there, named `<uuid>.<suffix>`, and never the player's `.dat`.
+  The player may be leaving, so no player's state is swapped in. It cannot change or stop anything.
 - **`native_player_commands_sent(player, name, names)`**: the command tree a player is sent, when they join and when
   their level changes (`/op`, `/deop`, the LAN settings). `names` are the root commands their client would get, vanilla's
   they may use and the mods'; remove a name and that client's tree lacks it, so its chat box neither completes nor
@@ -1487,6 +1507,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_edit_book(player, name, pages, signing, cancel)`**: A server player book-and-quill edit or signing packet is about to be applied. `pages` is its page count and `signing` says it has a title. Set `cancel` to drop the packet.
 - **`native_player_shear_entity(player, name, entity_id, off_hand, cancel)`**: A server player is about to shear a sheep, mooshroom, snow golem or bogged. The hook gives the mob entity id and whether the shears are in the off hand. Set `cancel` to leave the mob and shears unchanged.
 - **`native_player_advancement_done(player, name, advancement)`**: A server player completed an advancement after its progress was recorded. `advancement` is its identifier, such as `minecraft:story/mine_stone`; helpers looking up the guest through `self.lan` may find nothing during packet handling.
+- **`native_player_advancement_progress(player, name, advancement, criterion, granted)`**: A criterion of a server player's advancement was granted or revoked, after its progress changed and before any completion rewards, except the `minecraft:tick` criteria granted on a network player's first tick or a reload, which are heard after that tick's rewards and packets. `advancement` is its identifier, such as `minecraft:story/mine_stone`, and `granted` is false for a revoke. A grant or revoke that changes nothing is not heard; helpers looking up the guest through `self.lan` may find nothing during packet handling.
+- **`native_player_stat_award(player, name, stat_type, stat, value, cancel)`**: A statistic is about to be awarded to a server player, before its count and scoreboard criteria change. `stat_type` and `stat` are ids such as `minecraft:mined` and `minecraft:stone`, or `minecraft:custom` and `minecraft:walk_one_cm`, and `value` is the amount. Set `cancel` to award nothing. Helpers looking up the guest through `self.lan` may find nothing during packet handling.
 - **`native_player_riptide(player, name)`**: a server player launched with a riptide trident, after its velocity and spin are applied. The player's state is swapped in, though helpers that look them up through `self.lan` may find nothing during a guest packet.
 - **`native_player_fish(player, name, state, cancel)`**: a player's fishing rod, on a server: `state` 0 the cast, 1 a fish
   biting, 2 the reel-in of a bite (the catch), 3 the reel-in with nothing on the line, 4 the reel-in of a bobber hooked
@@ -1566,6 +1588,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_enchant_item(player, name, pos, item, levels)`**: a player applied an enchantment at `pos`; `item` is the finished item and `levels` the levels charged. Guest state is not swapped in.
 - **`native_prepare_item_enchant(player, name, pos, costs)`**: enchanting offers were calculated at `pos`; change the three offer costs before they are sent to the player's menu. Guest state is not swapped in.
 - **`native_prepare_anvil(player, name, pos, result, cost)`**: an anvil result was prepared for a player at `pos`; change the result or level cost before it is sent to their menu. Guest state is not swapped in.
+- **`native_anvil_craft_pre(player, name, pos, craft, cancel)`**: a player took an anvil's result at `pos` (NeoForge's `AnvilCraftEvent.Pre`), before the levels are charged, the inputs used up and the anvil worn. `craft` has the left and right inputs and the result as they were before. Set `cancel` to refuse the take and skip `native_anvil_craft_post`: the result stays in its slot and the inputs, levels, inventory and cursor are as before the click. Fires on the server only; the window's predicted take does not call it.
+- **`native_anvil_craft_post(player, name, pos, craft)`**: the levels, inputs and anvil wear of that take are done (NeoForge's `AnvilCraftEvent.Post`); a broken anvil is already air. `craft` is the same as in `native_anvil_craft_pre`. Not called when it cancelled.
 - **`native_prepare_grindstone(player, name, pos, result)`**: a grindstone result was prepared for a player at `pos`; change it before it is sent to their menu. Guest state is not swapped in.
 - **`native_prepare_smithing(player, name, pos, result)`**: a smithing result was prepared for a player at `pos`; change it before it is sent to their menu. Guest state is not swapped in.
 - **`native_prepare_item_craft(player, name, pos, result)`**: a crafting-grid result was prepared; `pos` is the crafting table, or None for the player's inventory grid. Change it before it is sent to the menu. Guest state is not swapped in.
@@ -2199,7 +2223,7 @@ anything else a mod may change, a game struct or a list, is a `&mut` field. A ca
 the return value; a collection hook's list is a field (`event.lines`). One event goes through every mod, so each
 sees the changes before it. Because no mod can build or match the whole
 struct, a later version can add a field without breaking any mod, as NeoForge's event objects do; the cost is that
-a mod's own tests can't build an event yet.
+a mod's own tests drive a hook through its dispatch function ([Testing a trait mod](#testing-a-trait-mod)).
 
 Hook methods take `&self` and require `Send + Sync`. The process-wide mod list is installed once, like mixin module statics. One mod instance serves both
 the window's game and the server-thread game. A hook can also fire again inside
@@ -2222,6 +2246,29 @@ renderer list is installed once alongside the mod list. `render_needs` collects 
 `world_drawn` observes the world pass and can encode drawing before the hand and HUD. Both
 run on the render thread while the frame is built, before any deferred GPU submission.
 The renderer module re-exports the game's wgpu types.
+
+### Testing a trait mod
+
+Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements
+only what its hook calls, and an unexpected call fails loudly. Drive the hook through
+`horizon_client::mod_api::dispatch_<hook>(&mut host, &mods, args…)`, which builds the event as the game does.
+If a `Host` method returns a game value a test can't build, a double can return `None` instead, as with
+`acting_player() -> Option<NativeServerPlayer>`. If the dispatch function itself takes an unconstructible value,
+such as `dispatch_perform_command`'s `&NativeServerPlayer`, test the logic beneath the hook instead. The level
+hosts are small enough to implement whole. NeoForge's GameTest is the in-game counterpart.
+
+```rust
+struct Stone;
+impl Host for Stone {
+    fn block(&self, _pos: [i32; 3]) -> String {
+        "minecraft:stone".to_string()
+    }
+}
+let mods = [Box::new(MyMod) as Box<dyn Hooks>];
+let mut claimed = false;
+dispatch_use_item_on(&mut Stone, &mods, &stack, [0, 64, 0], [0, 1, 0], &mut claimed);
+assert!(claimed);
+```
 
 ### Adding a hook
 

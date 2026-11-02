@@ -699,6 +699,35 @@ fn rolls_user_splash(text: &str, seed: u64, date: (u32, u32)) -> bool {
         .is_ok_and(|size| size > 0 && LegacyRandom::new(seed as i64).next_int_bound(size) == Ok(42))
 }
 
+impl Mode {
+    /// The id native mods see for this screen (`NativeScreenView.id`, the
+    /// screen hooks): one per variant, a hook's contract, so it stays the
+    /// same from release to release. A new variant must add one.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::Main => "title",
+            Self::Select { .. } => "world_select",
+            Self::Create { .. } => "world_create",
+            Self::CreateFlat { .. } => "world_create_flat",
+            Self::CreateBuffet { .. } => "world_create_buffet",
+            Self::Edit { .. } => "world_edit",
+            Self::Backup { .. } => "world_backup",
+            Self::BackupBeforeUpgrade { .. } => "world_backup_confirm",
+            Self::OptimizeConfirm { .. } => "world_optimize_confirm",
+            Self::Optimize { .. } => "world_optimize",
+            Self::LowDiskSpace { .. } => "low_disk_space",
+            Self::Delete { .. } => "world_delete",
+            Self::Recover { .. } => "world_recover",
+            Self::Recovered { .. } => "world_recovered",
+            Self::Error { .. } => "error",
+            Self::Multiplayer(screen) => screen.id(),
+            Self::MultiplayerWarning { .. } => "multiplayer_warning",
+            Self::Onboarding(_) => "onboarding",
+            Self::BanNotice(_) => "ban_notice",
+        }
+    }
+}
+
 impl Title {
     /// Names the player for the `<NAME> IS YOU` splash; `name` is only asked for when that splash was rolled.
     pub fn with_user(mut self, name: impl FnOnce() -> String) -> Self {
