@@ -1691,7 +1691,17 @@ impl Game<'_> {
                 None => None,
             };
         }
+        let player = (p.owner == Some(Who::Player)).then(|| {
+            horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid())
+        });
+        let name = if player.is_some() {
+            self.acting_player_name().to_owned()
+        } else {
+            String::new()
+        };
+        let (id, kind) = (p.id, p.kind.id());
         self.creatures.projectiles.push(p);
+        self.native_projectile_launch(player, &name, id, kind);
     }
     /// `Entity.sendBubbleColumnParticles` at the top of the column block `pos`: two
     /// splashes and two bubbles over it, which the level random places, shown here

@@ -3600,6 +3600,18 @@ impl Game<'_> {
         let _ = (dimension, entity, pos);
     }
 
+    /// A server projectile was added to the level. `player` is set only for
+    /// a player launch; other sources have an empty `name`. @API:native_projectile_launch@.
+    pub(super) fn native_projectile_launch(
+        &mut self,
+        player: Option<u128>,
+        name: &str,
+        entity: u32,
+        kind: &str,
+    ) {
+        let _ = (player, name, entity, kind);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
