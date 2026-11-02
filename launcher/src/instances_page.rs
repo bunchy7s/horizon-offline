@@ -120,7 +120,7 @@ impl Launcher {
     }
 
     /// A texture from the selected version's prepared files, its first frame, drawn as pixels.
-    fn texture_image(&mut self, name: &str, size: f32) -> Option<Arc<RenderImage>> {
+    pub(super) fn texture_image(&mut self, name: &str, size: f32) -> Option<Arc<RenderImage>> {
         let tag = self.selected().filter(|t| backend::is_prepared(t))?.clone();
         let scale = self.scale;
         self.instances
@@ -894,7 +894,7 @@ pub(super) fn java_line(j: &instances::JavaGame) -> String {
 }
 
 /// The first letter or digit of a name, for an icon without a picture.
-fn initial(name: &str) -> String {
+pub(super) fn initial(name: &str) -> String {
     name.chars()
         .find(|c| c.is_alphanumeric())
         .unwrap_or('?')

@@ -7,7 +7,7 @@ use crate::glass_ui::{self as ui, white, Tone};
 use crate::instances_page::java_line;
 use gpui::{anchored, canvas, deferred, point};
 use horizon_launcher::account::Player;
-use horizon_launcher::instances::{Instance, Kind as InstanceKind};
+use horizon_launcher::instances::{Icon, Instance, Kind as InstanceKind};
 use horizon_theme::glass::{fill, ink, radius};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -41,6 +41,61 @@ fn measure(rows: &Rc<RefCell<HashMap<String, Bounds<Pixels>>>>, id: String) -> i
 }
 
 impl Launcher {
+    /// An instance's icon (`InstanceIcon`), `size` square with no frame: Horizon's mark tile for
+    /// Horizon's own instance; else its picture or the block chosen for it, round at 26 %; else
+    /// its loader's or Minecraft's mark; else its initial on its colour (the accent when none was
+    /// chosen), as `ColorTile` draws it.
+    pub(super) fn glass_instance_icon(&mut self, i: &Instance, size: f32) -> AnyElement {
+        if i.kind == InstanceKind::Default && i.icon.is_none() {
+            return ui::mark_tile(size, self.look.accent_soft).into_any_element();
+        }
+        if let Some(picture) = self.instance_picture(i, size) {
+            return instance_icons::centred(picture, size, self.scale).into_any_element();
+        }
+        let r = px((size * 0.26).round());
+        let mut colour = self.look.accent;
+        match &i.icon {
+            Some(Icon::Colour(hex)) => {
+                colour = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or(colour);
+            }
+            Some(Icon::Texture(name)) => {
+                if let Some(image) = self.texture_image(name, size) {
+                    return gpui::img(image)
+                        .flex_none()
+                        .size(px(size))
+                        .rounded(r)
+                        .into_any_element();
+                }
+            }
+            None => {
+                if let Some(mark) = self.instance_mark(i, size) {
+                    return instance_icons::centred(mark, size, self.scale).into_any_element();
+                }
+            }
+        }
+        // Bricolage at the optical size a browser would pick for the letter.
+        let letter = (size * 0.46).round();
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(px(size))
+            .rounded(r)
+            .bg(ui::color(colour))
+            .font_family(if letter >= 40. {
+                horizon_theme::glass::DISPLAY_FONT
+            } else {
+                horizon_theme::glass::HEADING_FONT
+            })
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_size(px(letter))
+            .line_height(px(letter))
+            .text_color(gpui::white())
+            .child(instances_page::initial(&i.name))
+            .into_any_element()
+    }
+
     /// A sidebar row's state line and its dot (the mockup's `statusOf`), from what the launcher
     /// knows of the instance.
     fn row_state(&self, i: &Instance) -> (Tone, String) {
@@ -65,6 +120,11 @@ impl Launcher {
                         trf("{version} is not installed", &[("version", own)]),
                     ),
                     (None, None, None) => (Tone::Off, tr("No version installed").into()),
+                    // Following the launcher's version, which has a newer one waiting.
+                    (None, Some(_), None) if self.updates.horizon.is_some() => (
+                        Tone::Accent(self.look.accent_soft),
+                        tr("Update available").into(),
+                    ),
                     (None, Some(_), _) if !prepared => (Tone::Warn, tr("Needs preparing").into()),
                     (None, Some(tag), _) if self.native_build_of(tag).is_some() => {
                         let build = self.native_build_of(tag).unwrap_or_default();
@@ -131,13 +191,7 @@ impl Launcher {
                 InstanceKind::Pack => false,
             };
             let state = self.row_state(&i);
-            // Horizon's own instance wears the mockup's mark tile unless the player gave it a
-            // picture.
-            let icon = if i.kind == InstanceKind::Default && i.icon.is_none() {
-                ui::mark_tile(38., self.look.accent_soft).into_any_element()
-            } else {
-                self.instance_icon(&i, 38.)
-            };
+            let icon = self.glass_instance_icon(&i, 38.);
             let clicked = i.clone();
             let open = self
                 .row_menu

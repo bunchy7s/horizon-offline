@@ -48,12 +48,14 @@ fn hover_fill(id: &SharedString, r: f32, from: f32, to: f32) -> gpui::AnyElement
 }
 
 /// The state dot before a row's second line (`Dot`): live green, amber for busy (the mockup
-/// pulses it) and for a warning, white at 35 % for nothing yet.
+/// pulses it) and for a warning, the accent's soft shade (given) for an update, white at 35 % for
+/// nothing yet.
 #[derive(Clone, Copy, PartialEq)]
 pub enum Tone {
     Live,
     Busy,
     Warn,
+    Accent(u32),
     Off,
 }
 
@@ -61,6 +63,7 @@ pub fn dot(tone: Tone) -> Div {
     let c = match tone {
         Tone::Live => color(horizon_theme::glass::LIVE),
         Tone::Busy | Tone::Warn => color(horizon_theme::glass::WARN),
+        Tone::Accent(soft) => color(soft),
         Tone::Off => white(0.35),
     };
     div().flex_none().size(px(7.)).rounded_full().bg(c)
