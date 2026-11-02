@@ -7,7 +7,9 @@
 use super::{
     Game,
     commands::Target,
-    entity::{Entity as _, EntityHandle, ThunderHit, entity_lists_of, for_each_entity, with_entity},
+    entity::{
+        Entity as _, EntityHandle, ThunderHit, entity_lists_of, for_each_entity, with_entity,
+    },
 };
 use horizon_client::advancements::EntityView;
 use horizon_client::mobs::{Damage, DamageKind, MobEvent, SpawnSetup, Species};
