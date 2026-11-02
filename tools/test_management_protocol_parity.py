@@ -187,7 +187,25 @@ MESSAGES = [
     '{"jsonrpc":"2.0","id":106,"method":"minecraft:serversettings/max_players"}',
     '{"jsonrpc":"2.0","id":107,"method":"minecraft:serversettings/max_players/set","params":[30]}',
     '{"jsonrpc":"2.0","id":108,"method":"minecraft:serversettings/max_players"}',
+    # The game rules: the list, a rule set (and set again to the same value), an integer rule, and what doesn't fit.
+    '{"jsonrpc":"2.0","id":200,"method":"minecraft:gamerules"}',
+    '{"jsonrpc":"2.0","id":201,"method":"minecraft:gamerules/update","params":[{"key":"minecraft:pvp","value":false}]}',
+    '{"jsonrpc":"2.0","id":202,"method":"minecraft:gamerules/update","params":[{"key":"minecraft:pvp","value":false}]}',
+    '{"jsonrpc":"2.0","id":203,"method":"minecraft:gamerules/update",'
+    '"params":[{"key":"minecraft:random_tick_speed","value":5}]}',
+    '{"jsonrpc":"2.0","id":204,"method":"minecraft:gamerules/update",'
+    '"params":[{"key":"minecraft:random_tick_speed","value":-1}]}',
+    '{"jsonrpc":"2.0","id":205,"method":"minecraft:gamerules/update","params":[{"key":"minecraft:pvp","value":"yes"}]}',
+    '{"jsonrpc":"2.0","id":206,"method":"minecraft:gamerules/update","params":[{"key":"minecraft:nope","value":true}]}',
+    '{"jsonrpc":"2.0","id":207,"method":"minecraft:gamerules/update","params":[{"value":true}]}',
+    '{"jsonrpc":"2.0","id":208,"method":"minecraft:gamerules"}',
 ]
+# The notifications Horizon sends so far, which both servers must send for the same messages the same number of
+# times (the others, `server/saving`... depend on timing, or aren't sent yet).
+COMPARED_NOTIFICATIONS = {
+    f'minecraft:notification/{name}' for name in (
+        'gamerules/updated', 'operators/added', 'operators/removed', 'allowlist/added', 'allowlist/removed',
+        'bans/added', 'bans/removed', 'ip_bans/added', 'ip_bans/removed')}
 
 
 def management_properties(port, keystore):
@@ -322,6 +340,10 @@ def normal(text):
     value = json.loads(text)
     if isinstance(value, dict) and value.get('error', {}).get('code') == -32700:
         value['error'].pop('data', None)
+    # The game rules come in the order of a map keyed by identity in vanilla (it changes from run to run).
+    result = value.get('result') if isinstance(value, dict) else None
+    if isinstance(result, list) and result and all(isinstance(r, dict) and 'key' in r for r in result):
+        value['result'] = sorted(result, key=lambda rule: rule['key'])
     return value
 
 
@@ -482,6 +504,10 @@ def main():
         for message, v, h in zip(MESSAGES, vanilla['answers'], horizon['answers']):
             if v != h:
                 failures.append(f'{message}\n  vanilla {json.dumps(v)[:400]}\n  Horizon {json.dumps(h)[:400]}')
+        told = {side: sorted(n for n in sides[side]['notifications'] if n in COMPARED_NOTIFICATIONS)
+                for side in ('vanilla', 'horizon')}
+        if told['vanilla'] != told['horizon']:
+            failures.append(f"notifications: vanilla {told['vanilla']}\n  Horizon {told['horizon']}")
         if vanilla['saved_difficulty'] != horizon['saved_difficulty'] or vanilla['saved_difficulty'] != 'peaceful':
             failures.append(f"saved difficulty: vanilla {vanilla['saved_difficulty']!r}, Horizon {horizon['saved_difficulty']!r}")
         if not horizon['saved_config_difficulty']:

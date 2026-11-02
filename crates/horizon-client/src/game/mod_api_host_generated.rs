@@ -477,12 +477,6 @@ impl Host for super::Game<'_> {
     ) -> u32 {
         self.native_move_items(dimension, from, from_face, to, to_face, item, max)
     }
-    fn camera(&self) -> Option<NativeCamera> {
-        self.native_camera()
-    }
-    fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
-        self.native_block_collision(pos)
-    }
     fn hide_player(&mut self, uuid: u128, level: Option<u8>) -> bool {
         self.native_hide_player(uuid, level)
     }
@@ -494,5 +488,11 @@ impl Host for super::Game<'_> {
     }
     fn instance_dir(&self) -> PathBuf {
         self.native_instance_dir()
+    }
+    fn camera(&self) -> Option<NativeCamera> {
+        self.native_camera()
+    }
+    fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
+        self.native_block_collision(pos)
     }
 }

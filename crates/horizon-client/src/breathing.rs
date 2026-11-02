@@ -60,7 +60,7 @@ pub fn breathe(entity: u32, kind: &str, vanilla: Breath) -> Breath {
 /// from `LivingEntity.baseTick`), with vanilla's answers as the defaults: it
 /// drowns at -20 air, for 2 damage and 8 bubbles. Bubble count is read-only;
 /// changes to the event field do not affect the vanilla entity event. Asked on
-/// servers, for the entities `native_living_breathe` is. API @API:native_living_drown@.
+/// servers, for the entities `native_living_breathe` is. API 356.
 #[inline(never)]
 pub fn native_living_drown(
     entity: u32,

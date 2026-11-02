@@ -35,7 +35,7 @@ PackRepository.isAbleToClearAnyPack	port	crates/horizon-client-render/src/packs.
 PackRepository.addPack	inline	crates/horizon-client-render/src/packs.rs::SelectionModel::activate	gap: minor: vanilla appends by id with no position rules
 PackRepository.removePack	inline	crates/horizon-client-render/src/packs.rs::SelectionModel::activate	gap: minor: vanilla removes by id even when the pack is required; the screen never offers that
 PackRepository.getAvailablePacks	inline	crates/horizon-client-render/src/packs.rs::SelectionModel::rebuild	rebuild also adds required packs (vanilla and active downloaded server packs from Game::pack_infos)
-PackRepository.getRequestedFeatureFlags	missing		minor: no pack feature flags are read, so a pack's requested features are never checked
+PackRepository.getRequestedFeatureFlags	missing		no pack's `feature_flags` are read from its metadata: the only feature list is the world's own `enabled_features` (`world_loading.rs`), which the game rules, the datapack function filter and the command dispatcher read
 PackSource.decorateWithSource	port	crates/horizon-client-render/src/pack_screen.rs::PackInfo::extended_description	source label after the pack name (built-in, world, server)
 ServerPacksSource.createVanillaPackSource	port	crates/horizon-client-render/src/datapack.rs::DataPack::builtin	the built-in vanilla data source (id vanilla), used by functions.rs
 ServerPacksSource.createPackRepository	port	crates/horizon-client-render/src/datapack.rs::discover	gap: minor: finds world datapacks; the enable list is kept by functions.rs::reload_datapacks
@@ -104,15 +104,15 @@ IpBanList.remove	port	crates/horizon-client/src/game/dedicated.rs::Game::console
 IpBanList.clear	skip:server		only the JSON-RPC ban API calls clear (MinecraftBanListServiceImpl); Horizon has no JSON-RPC server
 IpBanListEntry.createIpInfo	port	crates/horizon-server-files/src/user_lists.rs::BanEntry::from_json	reads the ip field of an entry
 IpBanListEntry.serialize	port	crates/horizon-server-files/src/user_lists.rs::BanEntry::serialize	writes the ip field and the ban fields
-OldUsersConverter.readOldListFormat	missing		minor: reads the pre-1.7 flat ban and op lists; Horizon reads only its json files
-OldUsersConverter.lookupPlayers	missing		minor: name to uuid lookup for the old list conversion
-OldUsersConverter.convertUserBanlist	missing		minor: converts an old banned-players.txt when the server starts
-OldUsersConverter.convertIpBanlist	missing		minor: converts an old banned-ips.txt when the server starts
-OldUsersConverter.convertOpsList	missing		minor: converts an old ops.txt when the server starts
-OldUsersConverter.convertWhiteList	missing		minor: converts an old whitelist.txt when the server starts
-OldUsersConverter.convertMobOwnerIfNecessary	missing		minor: name owners on old tamed mobs are not turned into uuids; datafix handles OwnerUUID only
-OldUsersConverter.convertPlayers	missing		minor: old world/players .dat files are not moved to playerdata
+OldUsersConverter.readOldListFormat	missing		the server reads `ops.json`, `whitelist.json` and `banned-players.json` (`game/dedicated.rs:439-441`); the pre-1.7 text lists have no reader
+OldUsersConverter.lookupPlayers	missing		part of the old list conversion, which has no counterpart: names are resolved by the json lists' own uuids
+OldUsersConverter.convertUserBanlist	missing		no conversion of an old `banned-players.txt`: the ban list is `banned-players.json` (`game/dedicated.rs:441`)
+OldUsersConverter.convertIpBanlist	missing		no conversion of an old `banned-ips.txt`
+OldUsersConverter.convertOpsList	missing		no conversion of an old `ops.txt`: the op list is `ops.json` (`game/dedicated.rs:439`)
+OldUsersConverter.convertWhiteList	missing		no conversion of an old `whitelist.txt`: the whitelist is `whitelist.json` (`game/dedicated.rs:440`)
+OldUsersConverter.convertMobOwnerIfNecessary	missing		a name owner on an old tamed mob is not turned into a uuid; the datafix handles `OwnerUUID` only
+OldUsersConverter.convertPlayers	missing		old `world/players/*.dat` files are not moved into `playerdata`
 OldUsersConverter.ensureDirectoryExists	skip:other		helper of the file moves, which Horizon does not do
-OldUsersConverter.areOldUserlistsRemoved	missing		minor: no start-up refusal while old list files remain
-OldUsersConverter.renameOldFile	missing		minor: converted files are not renamed to .converted
+OldUsersConverter.areOldUserlistsRemoved	missing		the server does not refuse to start while old list files are still there
+OldUsersConverter.renameOldFile	missing		nothing renames a converted file to `.converted`
 OldUsersConverter.parseDate	port	crates/horizon-server-files/src/user_lists.rs::parse_date	parses the ban date format
