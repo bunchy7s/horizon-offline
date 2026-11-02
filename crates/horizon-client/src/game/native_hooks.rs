@@ -2387,6 +2387,24 @@ impl Game<'_> {
         );
     }
 
+    /// Before a visible item frame's item or map is drawn. Cancel hides the item, not the frame.
+    pub(super) fn native_render_item_in_frame(
+        &self,
+        entity_id: u32,
+        pos: [i32; 3],
+        stack: &ItemStack,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_render_item_in_frame(
+            self,
+            mod_api::mods(),
+            entity_id,
+            pos,
+            stack,
+            canceled,
+        );
+    }
+
     /// Final scaled third-person camera distance, before visual-shape collision clipping.
     /// `entity` includes its living scale/distance and optional mount scale/distance.
     /// Only finite requests in 0..=1024 blocks replace the vanilla distance.

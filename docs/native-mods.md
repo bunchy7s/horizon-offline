@@ -11,6 +11,10 @@ switch. The first install shows a trust notice, and every build waits behind a r
 after a review (its later releases are checked by machine); and they play in a game of their own, built for the
 instance they are installed in.
 
+## Item frame rendering
+
+`native_render_item_in_frame(entity_id, pos, stack, canceled)` runs before a visible item frame draws its item or map, including glow and invisible frames. Set `canceled` to hide the item without hiding the frame. Bundles need "hooks": @API:render_item_in_frame@.
+
 ## Villager farming
 
 Farmers recognize mod blocks made from farmland and `CropBlock` templates, including declarations from
