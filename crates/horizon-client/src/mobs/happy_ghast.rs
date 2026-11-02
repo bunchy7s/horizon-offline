@@ -574,7 +574,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld) {
         let wet = w.precipitation_at(x, y, z).is_some();
         let interval = if wet { 20 } else { 600 };
         if m.age.is_multiple_of(interval) {
-            m.health = (m.health + 1.0).min(m.attrs.max_health);
+            m.heal(1.0);
         }
     }
     still_tick(m, w);
@@ -666,5 +666,41 @@ mod tests {
     #[test]
     fn travel_speed_is_five_thirds_of_the_flying_speed() {
         assert!((f64::from(AIR_SPEED) - FLYING_SPEED * 5.0 / 3.0).abs() < 1e-7);
+    }
+
+    /// `HappyGhast.ageBoundaryReached` runs the setup at the age crossing, not
+    /// at the next tick: `DriedGhastBlock.spawnGhastling` makes its ghastling a
+    /// baby before `addFreshEntity`, and `AgeableMob.setAge` calls
+    /// `ageBoundaryReached` there. Without it the hatched ghastling joins the
+    /// level with the adult's three goals, its ground navigation and its brain
+    /// stopped, and only its first `aiStep` (`ensure_setup`) fixes that.
+    #[test]
+    fn a_hatched_ghastling_is_set_up_as_one_at_the_age_crossing() {
+        use crate::mobs::Species;
+        let mut t = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        t.species = Species::HappyGhast;
+        let mut m = Mob::new(
+            1,
+            std::sync::Arc::new(t),
+            horizon_core::geometry::Vec3::ZERO,
+            0.0,
+        );
+        // `Mob::new` registers the adult's goals (HappyGhastFloat, its tempt
+        // goal and FloatAround) for the age-zero ghast it makes.
+        assert_eq!(m.extra.scratch[0], 2, "an adult's setup at construction");
+        assert!(m.ai.goals.has("HappyGhastFloatGoal"));
+
+        crate::mobs::finalize::set_age(&mut m, -24000);
+
+        assert!(m.is_baby());
+        assert_eq!(m.extra.scratch[0], 1, "babyGhastSetup ran");
+        assert!(
+            !m.ai.goals.has("HappyGhastFloatGoal")
+                && !m.ai.goals.has("RandomFloatAroundGoal")
+                && !m.ai.goals.has("ForNonPathfinders"),
+            "a ghastling has no goals: its brain drives it"
+        );
+        assert_eq!(m.ai.nav.kind, crate::mobs::nav::NavKind::Flying);
+        assert!(m.ai.nav.can_float);
     }
 }

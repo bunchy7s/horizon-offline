@@ -13,6 +13,7 @@ use horizon_protocol::{
     packets::play::{self, Clientbound as C},
     registry::DimensionType,
 };
+use horizon_world::attachments::Holder;
 use std::sync::{
     Arc,
     mpsc::{self, TryRecvError},
@@ -112,6 +113,9 @@ impl ChunkFormat {
         // the server sent; nothing is relit.
         let (layers, above) = self.light(&p.light);
         horizon_client::light::light_from_layers(&mut chunk, &layers, above, self.has_skylight);
+        // From the single-player server thread: its own sections where they
+        // are the same.
+        horizon_client::lan::handoff::take(&mut chunk);
         Ok(chunk)
     }
 
@@ -303,6 +307,15 @@ impl Game<'_> {
             self.sync_block_entity(pos, None, state);
             // LevelChunk.replaceWithPacketData: the block entity loads its update tag.
             self.remote_block_entity_data([pos.0, pos.1, pos.2], info.kind, &info.tag);
+        }
+        if let Some(r) = self.remote.as_mut() {
+            r.attachments.retain(|holder, _| match *holder {
+                Holder::BlockEntity([bx, by, bz]) => {
+                    (bx >> 4, bz >> 4) != (x, z)
+                        || self.world.block_entities.contains_key(&(bx, by, bz))
+                }
+                _ => true,
+            });
         }
     }
 

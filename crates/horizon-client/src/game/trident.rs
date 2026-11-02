@@ -37,6 +37,8 @@ pub(super) struct ThrownTrident {
     pub(super) no_physics: bool,
     returning: u32,
     creative_only: bool,
+    /// `Entity.isNoGravity`: `AbstractArrow.applyGravity` then skips the pull.
+    pub(super) no_gravity: bool,
     /// The entity id a server sent as its owner (the one Loyalty returns it to).
     pub(super) owner: u32,
     /// The guest that threw it (`Projectile.getOwner`); `None` for the host.
@@ -66,6 +68,7 @@ impl ThrownTrident {
         t.shake = n.shake;
         t.dealt_damage = n.dealt_damage;
         t.creative_only = n.creative_only;
+        t.no_gravity = n.no_gravity;
         t
     }
     /// `AbstractArrow.addAdditionalSaveData` + `DealtDamage`.
@@ -85,6 +88,7 @@ impl ThrownTrident {
                 shake: self.shake,
                 dealt_damage: self.dealt_damage,
                 creative_only: self.creative_only,
+                no_gravity: self.no_gravity,
                 item: &self.stack,
             },
             uuid,
@@ -109,6 +113,7 @@ impl ThrownTrident {
             no_physics: false,
             returning: 0,
             creative_only: false,
+            no_gravity: false,
             owner: 0,
             guest: None,
         }
@@ -175,7 +180,7 @@ impl ThrownTrident {
         self.position = to;
         // A trident's water inertia (0.99) equals the air drag.
         self.velocity = self.velocity.scale(0.99);
-        if !self.no_physics {
+        if !self.no_physics && !self.no_gravity {
             self.velocity.y -= 0.05;
         }
     }
@@ -237,38 +242,6 @@ impl Game<'_> {
         let (at, top) = (p.position, p.bounds().max_position().y);
         water || self.in_rain(at, top)
     }
-    /// The living entities a spinning player can touch this tick, for
-    /// `LivingEntity.checkAutoSpinAttack` (none when not spinning).
-    pub(super) fn spin_targets(&self) -> Vec<(u32, Aabb)> {
-        let Some(p) = self
-            .player
-            .as_ref()
-            .filter(|p| p.auto_spin_attack_ticks > 0)
-        else {
-            return Vec::new();
-        };
-        // A spin moves a few blocks a tick at most.
-        let near = p.bounds().inflate(Vec3::new(16.0, 16.0, 16.0));
-        self.mobs
-            .iter()
-            .filter(|m| m.alive() && m.bounds().intersects(near))
-            .map(|m| (m.id, m.bounds()))
-            .collect()
-    }
-    /// `Player.doAutoAttackOnTouch`: the touched entity takes `Player.attack`
-    /// with the spin's damage; once the spin is over its damage is cleared.
-    pub(super) fn end_spin_attack(&mut self, hit: Option<u32>) {
-        if let Some(id) = hit
-            && let Some(index) = self.mobs.iter().position(|m| m.id == id)
-        {
-            self.attack_mob(index);
-        }
-        if let Some(p) = self.player.as_mut()
-            && p.auto_spin_attack_ticks <= 0
-        {
-            p.auto_spin_attack_dmg = 0.0;
-        }
-    }
     /// The `summon_entity` and `play_sound` effects of `channeling.json`: in a
     /// thunderstorm (`weather_check`) a spot that sees the sky (`can_see_sky`)
     /// gets a lightning bolt and the thunder sound.
@@ -284,6 +257,9 @@ impl Game<'_> {
             at[2].floor() as i32,
         );
         if self.world.light(x, y, z) >> 4 != 15 {
+            return;
+        }
+        if !self.lightning_strike_allowed(self.lan_acting_uuid, [x, y, z], "trident") {
             return;
         }
         self.spawn_bolt(at, false);
@@ -401,6 +377,11 @@ impl Game<'_> {
             if !server_client {
                 let sound = format!("minecraft:item.trident.riptide_{}", riptide.min(3));
                 self.audio.play(&sound, at, 1.0, 1.0);
+                if let (Some(player), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    self.native_player_riptide(player, &name);
+                }
             }
             return;
         }
@@ -450,6 +431,7 @@ impl Game<'_> {
             no_physics: false,
             returning: 0,
             creative_only: self.creative,
+            no_gravity: false,
             owner: 0,
             guest: self.lan_acting,
         });
@@ -757,9 +739,10 @@ impl Game<'_> {
                 if !t.in_ground {
                     // A trident's water inertia (0.99) equals the air drag; gravity 0.05.
                     let drag = 0.99;
+                    let gravity = if t.no_gravity { 0.0 } else { 0.05 };
                     t.velocity = Vec3::new(
                         t.velocity.x * drag,
-                        t.velocity.y * drag - 0.05,
+                        t.velocity.y * drag - gravity,
                         t.velocity.z * drag,
                     );
                     let h = (t.velocity.x * t.velocity.x + t.velocity.z * t.velocity.z).sqrt();

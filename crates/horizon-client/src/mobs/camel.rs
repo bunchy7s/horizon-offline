@@ -195,15 +195,29 @@ pub fn leash_offset(m: &Mob) -> [f64; 3] {
         f64::from(m.width() * 0.56),
     ]
 }
-/// `Camel.getPassengerAttachmentPoint` of the one rider Horizon seats, before
+/// `Camel.getPassengerAttachmentPoint` of the first (driver) seat, before
 /// the camel's yaw turns it: half a block ahead (scaled by `getAgeScale`, 0.6
-/// for a baby) at the body anchor, which sinks while the camel sits. The
-/// second seat (-0.7 behind, 0.2 more for an animal) is not used: nothing
-/// seats a second rider yet.
+/// for a baby) at the body anchor, which sinks while the camel sits.
 pub fn passenger_attachment(m: &Mob) -> [f64; 3] {
+    passenger_attachment_at(m, 0, 1, false)
+}
+/// `Camel.getPassengerAttachmentPoint` for the passenger at `index` of `count`
+/// (`getPassengers().indexOf`): with more than one aboard the second seat is
+/// 0.7 behind the middle, and an `Animal` sits 0.2 further ahead.
+pub fn passenger_attachment_at(m: &Mob, index: usize, count: usize, animal: bool) -> [f64; 3] {
     let scale = if m.is_baby() { 0.6 } else { 1.0 };
-    let height = body_anchor_y(m, true, m.height(), scale) as f32;
-    [0.0, f64::from(height), f64::from(0.5 * scale)]
+    let driver = index == 0;
+    let height = body_anchor_y(m, driver, m.height(), scale) as f32;
+    let mut offset = 0.5_f32;
+    if count > 1 {
+        if !driver {
+            offset = -0.7;
+        }
+        if animal {
+            offset += 0.2;
+        }
+    }
+    [0.0, f64::from(height), f64::from(offset * scale)]
 }
 /// `Camel.updateWalkAnimation`: the speed the legs go toward and how fast
 /// they get there (`WalkAnimationState.update`) for `distance` blocks moved.
@@ -419,6 +433,7 @@ pub fn dash(m: &mut Mob, amount: f32, events: &mut Vec<MobEvent>) -> bool {
     m.velocity.y += 1.4285 * a * 0.42;
     m.extra.anim_ticks = DASH_COOLDOWN;
     m.extra.flag2 = true;
+    crate::motion::native_living_jump(m.id, &m.kind.id);
     sound(m, voice(m, 3), events);
     true
 }
@@ -469,6 +484,21 @@ mod tests {
     use horizon_core::geometry::Vec3;
     use serde_json::json;
     use std::sync::Arc;
+
+    /// `Camel.getPassengerAttachmentPoint`: the second of two passengers sits
+    /// 0.7 behind the middle, 0.5 ahead for the driver, 0.2 more for an animal.
+    #[test]
+    fn the_second_passenger_sits_behind() {
+        with_test_world(&[], |_, types| {
+            let kind = std::sync::Arc::new(types.types["minecraft:camel_husk"].clone());
+            let m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            assert_eq!(passenger_attachment_at(&m, 0, 2, false)[2], 0.5);
+            assert!((passenger_attachment_at(&m, 1, 2, false)[2] + 0.7).abs() < 1e-6);
+            assert!((passenger_attachment_at(&m, 1, 2, true)[2] + 0.5).abs() < 1e-6);
+            assert!((passenger_attachment_at(&m, 0, 2, true)[2] - 0.7).abs() < 1e-6);
+            assert_eq!(passenger_attachment_at(&m, 0, 1, true)[2], 0.5);
+        });
+    }
 
     /// `CamelAi.RandomSitting.checkExtraStartConditions`: a camel sits down
     /// only with no controlling passenger and no lead. A husk on its back
@@ -561,7 +591,7 @@ mod tests {
                 ..Default::default()
             },
             model,
-            layers: HashMap::new(),
+            layers: Default::default(),
             texture: String::new(),
             brain: Brain::Passive,
             anim: Anim::Camel,

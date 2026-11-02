@@ -255,7 +255,7 @@ impl Game<'_> {
         // itemAttackInteraction: hurtEnemy (statistic, wear), and the
         // post-attack enchantments when the target was hurt.
         if let Some(stack) = self.held().cloned() {
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
             if hurt {
                 self.post_attack(index);
             }
@@ -263,8 +263,7 @@ impl Game<'_> {
         }
         // damageStatsAndHearts.
         let actual = old_health - self.mobs[index].health;
-        self.stats
-            .custom("damage_dealt", (actual * 10.0).round() as i32);
+        self.award_custom_stat("damage_dealt", (actual * 10.0).round() as i32);
         if actual > 2.0 {
             let indicator = horizon_client::particles::ParticleOptions::simple(
                 horizon_client::particles::ParticleType::DamageIndicator,

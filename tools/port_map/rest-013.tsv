@@ -10,8 +10,8 @@ Identifier.tryBySeparator	port	crates/horizon-world/src/identifier.rs::Identifie
 Identifier.withPath	port	crates/horizon-world/src/identifier.rs::Identifier::from_parts	no helper; callers rebuild the id with from_parts(namespace, path)
 Identifier.equals	skip:java		derived PartialEq on namespace and path
 Identifier.compareTo	port	crates/horizon-world/src/identifier.rs::Identifier::cmp	path first, then namespace
-Identifier.resolveAgainst	missing		unsure: no identifier-to-file-path guard found; callers join paths directly
-Identifier.toLanguageKey	skip:other		string helper; translation keys are built where a Text is made
+Identifier.resolveAgainst	missing		vanilla resolves namespace/path under a root and throws when the joined path normalises outside it; the resource and pack readers join the two onto their folder with no such check
+Identifier.toLanguageKey	inline	crates/horizon-client/src/title/buffet.rs::display_name	spelled out behind a 'biome.' prefix there (toLanguageKey("biome")); the namespace and path are joined by hand, and '/' is turned into '.' as well
 Identifier.toShortLanguageKey	skip:other		string helper; translation keys are built where a Text is made
 Identifier.toShortString	skip:other		string helper; the minecraft: prefix is stripped at each display site
 Identifier.readGreedy	port	crates/horizon-command/src/args.rs::read_identifier	reads id characters while they are allowed
@@ -44,7 +44,7 @@ RegistryOps.HolderLookupAdapter.lookup	skip:data		registry lookup adapter for da
 RegistryOps.HolderLookupAdapter.equals	skip:data		registry lookup adapter for data decoding
 ResourceKey.create	skip:java		interned key; Horizon uses plain identifiers
 ResourceKey.dependent	skip:data		derived registry key; the ids come from Horizon's tables
-ResourceManagerRegistryLoadTask.load	skip:data		registry loading from the resource manager
+ResourceManagerRegistryLoadTask.load	inline	crates/horizon-client/src/lan/data.rs::file_order	the registry's files are read from the prepared folder (walk) with a world's pack files over them (pack_entries), registered in the file order listMatchingResources keys them by (file_order); the element codec read is a serde_json parse
 Bootstrap.bootStrap	skip:data		startup bootstrap of the registries and data
 Bootstrap.checkTranslations	skip:debug		IDE-only translation check
 Bootstrap.checkGameruleTranslations	skip:debug		IDE-only game rule translation check
@@ -78,8 +78,8 @@ MinecraftServer.loadStatusIcon	inline	crates/horizon-client/src/game/dedicated.r
 MinecraftServer.processPacketsAndTick	port	crates/horizon-client/src/game/levels.rs::Game::tick_server	reads the network, then ticks the levels
 MinecraftServer.autoSave	inline	crates/horizon-client/src/game.rs::Game::tick	gap: minor: the save runs every 6000 ticks; /save-off is checked in the dedicated loop, where the check does nothing, so it does not stop the save
 MinecraftServer.logTickMethodTime	skip:server		tick timing log for the profiler
-MinecraftServer.computeNextAutosaveInterval	missing		minor: the save runs every 6000 ticks (game.rs tick), not 300 s scaled by the tick rate
-MinecraftServer.onTickRateChanged	missing		minor: the autosave interval does not follow /tick rate
+MinecraftServer.computeNextAutosaveInterval	port	crates/horizon-client/src/game.rs::Game::next_autosave_interval	Math.max(100, (int)(rate * 300.0F)) ticks counted down a tick at a time, at the tick rate or the measured rate while /tick sprint runs; twenty a second is still the six thousand a world autosaved on
+MinecraftServer.onTickRateChanged	port	crates/horizon-client/src/game.rs::Game::on_tick_rate_changed	/tick rate recomputes the wait and shortens the one already running when the new rate asks for less
 MinecraftServer.buildPlayerStatus	port	crates/horizon-client/src/lan/mod.rs::Shared::status_json	up to 12 sampled player names in the status JSON
 MinecraftServer.updateEffectiveRespawnData	inline	crates/horizon-client/src/game/initial_spawn.rs::Game::spawn_finder	gap: minor: no cached respawn data; the radius is clamped to the border when the spawn is found
 MinecraftServer.forceGameTimeSynchronization	port	crates/horizon-client/src/lan/hub.rs::Hub::sync_world	game time sent to guests with SetTime
@@ -87,12 +87,12 @@ MinecraftServer.fillSystemReport	skip:debug		system report for crash and debug o
 MinecraftServer.setDifficulty	port	crates/horizon-client/src/game/commands.rs::Game::cmd_difficulty	gap: player: LAN guests are not sent ChangeDifficulty when /difficulty changes; they get it on join, respawn or dimension change
 MinecraftServer.updateMobSpawningFlags	inline	crates/horizon-client/src/game/natural_spawning.rs::Game::spawn_natural	rules are read at each spawn; no cached spawn flag
 MinecraftServer.sendDifficultyUpdate	inline	crates/horizon-client/src/lan/hub.rs::Hub::place_new_player	gap: player: sent when a guest joins, respawns or changes dimension; see setDifficulty
-MinecraftServer.enforceGameTypeForPlayers	inline	crates/horizon-client/src/game/lan.rs::Game::lan_apply_settings	gap: player: guests already online keep their mode when force changes; the default applies at join (lan_guest_joined)
+MinecraftServer.enforceGameTypeForPlayers	inline	crates/horizon-client/src/game/lan.rs::enforce_guest_game_mode	applies the default mode to online players when force game mode is enabled
 MinecraftServer.executeIfPossible	skip:java		rejects tasks during shutdown
 MinecraftServer.reloadResources	port	crates/horizon-client/src/game/functions.rs::Game::cmd_reload	gap: minor: data packs only, via reload_datapacks
-MinecraftServer.configurePackRepository	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: picks the enabled packs and adds new ones; no feature-flag check and no safe mode
-MinecraftServer.configureRepositoryWithSelection	inline	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: sets the enabled list only; no forced features
-MinecraftServer.enableForcedFeaturePacks	missing		minor: Horizon's datapacks have no feature flags; a pack for a required feature is never forced on
+MinecraftServer.configurePackRepository	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: the enabled packs are picked and new ones added through datapack::enabled_ids, feature flags and all; no safe mode
+MinecraftServer.configureRepositoryWithSelection	inline	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: sets the enabled list only; the forced feature packs come from datapack::enabled_ids
+MinecraftServer.enableForcedFeaturePacks	inline	crates/horizon-client-render/src/datapack.rs::enabled_ids	the last loop forces on every feature pack whose flags the world enables, whatever the world's selection says; a pack's flags are its pack.mcmeta features.enabled
 MinecraftServer.getSelectedPacks	port	crates/horizon-client/src/game/functions.rs::Game::save_datapack_settings	gap: minor: writes the enabled and disabled lists; no feature check
 MinecraftServer.findRespawnDimension	inline	crates/horizon-client/src/game/server_travel.rs::Game::world_spawn_trip	gap: minor: always the Overworld; /setworldspawn keeps no dimension
 MinecraftServer.setRespawnData	port	crates/horizon-client/src/game/commands.rs::Game::cmd_setworldspawn	gap: minor: the new spawn is not sent to guests here; they get it on join
@@ -110,19 +110,19 @@ MinecraftServer.createProfiler	skip:server		profiler setup
 MinecraftServer.startRecordingMetrics	skip:server		metrics recording for the profiler
 MinecraftServer.createGameModeForPlayer	missing		minor: demo mode is not implemented; --demo is accepted and ignored (dedicated.rs preflight)
 MinecraftServer.stopTimeProfiler	skip:debug		debug profiler stop
-MinecraftServer.setAutoSave	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	gap: minor: the save-on/save-off flag is kept, but the tick's autosave does not read it
-MinecraftServer.isAutoSave	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	reads the same flag for the save-on reply only
+MinecraftServer.setAutoSave	port	crates/horizon-client/src/game/dedicated.rs::set_auto_save	changes the shared server-level save flag; the tick skips periodic saves while it is disabled
+MinecraftServer.isAutoSave	port	crates/horizon-client/src/game/dedicated.rs::auto_save	reads the shared server-level save flag
 MinecraftServer.storeChunkIoError	skip:debug		writes a chunk IO crash report
-MinecraftServer.reportChunkLoadFailure	missing		unsure: no chunk-load failure log or report found in save.rs or streaming.rs
-MinecraftServer.reportChunkSaveFailure	port	crates/horizon-client/src/save.rs::Persistent::save_finished	gap: minor: logs only; no debug report and no low-disk warning
-PlayerAdvancements.reload	missing		minor: /reload rebuilds datapack functions and settings only (cmd_reload); the advancement tree is kept for the session
+MinecraftServer.reportChunkLoadFailure	port	crates/horizon-client/src/chunk_io.rs::report_load_failure	logs, warns on low disk space and records the failed chunk for the toast; gap: no suppressed-exception store and no debug crash report
+MinecraftServer.reportChunkSaveFailure	port	crates/horizon-client/src/chunk_io.rs::report_save_failure	logs, warns on low disk space and records the failed chunk; gap: no suppressed-exception store and no debug crash report
+PlayerAdvancements.reload	port	crates/horizon-client/src/lan/advancements.rs::ServerAdvancements::reload	on /reload every guest loaded so far has its visible set cleared and its progress re-read against the new tree, then the tick advancements are granted and the reward recipes added; gap: the host's own progress is not reloaded
 PlayerAdvancements.registerListeners	skip:other		no per-criterion listener map; trigger() tests every criterion when an event fires
 PlayerAdvancements.checkForAutomaticTriggers	missing		minor: criteria-less advancements from data packs are not granted when a player loads
 PlayerAdvancements.asData	inline	crates/horizon-client/src/game/advancements.rs::Game::save_advancements	writes the progress that has any progress
 PlayerAdvancements.revoke	port	crates/horizon-client/src/game/advancements.rs::Game::revoke_advancement	revokes one criterion or all of them
 PlayerAdvancements.markForVisibilityUpdate	inline	crates/horizon-client/src/lan/advancements.rs::ServerAdvancements::update	visibility is recomputed for the whole tree on each update
 PlayerAdvancements.unregisterListeners	skip:other		no per-criterion listener map; trigger() tests every criterion when an event fires
-PlayerAdvancements.setSelectedTab	missing		unsure: the server keeps no selected advancement tab and sends no select-tab packet (only the SELECT_ADVANCEMENTS_TAB id exists)
+PlayerAdvancements.setSelectedTab	missing		the host keeps no selected advancement tab, and vanilla's only effect here is the ClientboundSelectAdvancementsTabPacket it sends when the tab changes; only the SELECT_ADVANCEMENTS_TAB id exists
 PlayerAdvancements.getOrStartProgress	skip:java		map get-or-create
 PlayerAdvancements.startProgress	skip:java		initialises progress for an advancement
 PlayerAdvancements.updateTreeVisibility	port	crates/horizon-client/src/advancements.rs::Tree::visible	gap: minor: returns the visible flags; the added and removed lists are built in lan/advancements.rs

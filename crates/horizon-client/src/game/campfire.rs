@@ -48,9 +48,10 @@ impl Game<'_> {
             _ => false,
         };
         if placed {
+            self.native_campfire_start(pos, &held.item);
             // ItemStack.consumeAndReturn: creative keeps the item.
             self.consume_held();
-            self.stats.custom("interact_with_campfire", 1);
+            self.award_custom_stat("interact_with_campfire", 1);
             self.post_block_game_event(
                 "minecraft:block_change",
                 pos,
@@ -102,6 +103,7 @@ impl Game<'_> {
                 .recipes()
                 .cook(KIND, &item)
                 .map_or_else(|| item.clone(), |r| r.result.clone());
+            self.native_block_cook([pos.0, pos.1, pos.2], &item.item, &result.item);
             self.campfire_drop(pos, result);
             self.mark_block_entity_updated(pos);
             self.post_block_game_event(

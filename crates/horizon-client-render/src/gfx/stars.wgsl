@@ -11,6 +11,10 @@ struct Stars {
     return stars.clip_from_sky * vec4(position, 1.0);
 }
 
+// The colour premultiplied, as the celestial blend (src alpha, one) would: the pipeline adds it.
+// The alpha is HDR output's mark (hdr.wgsl): stars are points of light, at the bright tier,
+// fully lifted wherever they show at all. Nothing else reads the frame's alpha.
 @fragment fn fs_stars() -> @location(0) vec4<f32> {
-    return stars.color;
+    let b = stars.color.a;
+    return vec4(stars.color.rgb * b, 0.175);
 }

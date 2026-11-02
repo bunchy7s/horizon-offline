@@ -110,7 +110,16 @@ pub(crate) fn prepare_with_models(
             .state(state)
             .ok_or("missing gallery registry state")?;
         let position = BlockPos::new((index % 4) as i32 * 4 - 7, 4, (index / 4) as i32 * 4 + 14);
-        let selected = catalog.collect(state, position)?;
+        // A state no definition binds (a pack's partial blockstate file
+        // without vanilla's below it) is left out, as the mesher skips it,
+        // instead of failing the whole pack.
+        let selected = match catalog.collect(state, position) {
+            Ok(selected) => selected,
+            Err(e) => {
+                log::warn!("Horizon: gallery block {name} has no model: {e}");
+                continue;
+            }
+        };
         states.push(json!({"block":actual.name,"properties":actual.properties,"state_id":state.0,
             "position":[position.x,position.y,position.z],
             "models":selected.iter().map(|(v,_)| json!({"model":v.model,"rotations":v.rotations,"uv_lock":v.uv_lock})).collect::<Vec<_>>()}));

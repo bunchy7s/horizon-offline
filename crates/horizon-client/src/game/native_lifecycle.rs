@@ -1,5 +1,5 @@
 //! Read-only lifecycle observations for native mods on authoritative servers.
-//! The deprecated in-frame path delivers no lifecycle events. A paused pass
+//! A paused pass
 //! observes nothing; a frozen world reports `world_running: false` except during a step.
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -61,6 +61,12 @@ impl NativeLifecycle {
                 .attempt
                 .as_ref()
                 .is_some_and(|a| a.session == OpenState::Ready && a.context() == *context)
+    }
+
+    /// The epoch of the world open now, from the start of its open to the end
+    /// of its close: what a mod's entity and level handles carry.
+    pub(super) fn epoch(&self) -> Option<NativeWorldEpoch> {
+        self.attempt.map(|a| NativeWorldEpoch::new(a.epoch))
     }
 
     /// The open starts: a fresh process-wide epoch, never reused.
@@ -352,38 +358,5 @@ mod tests {
         assert!(lifecycle.world_close_failed().is_some());
         assert!(lifecycle.world_close_failed().is_none());
         assert!(lifecycle.world_close_final().is_none());
-    }
-
-    #[test]
-    fn lifecycle_delivery_stays_off_the_deprecated_in_frame_path() {
-        let game = include_str!("../game.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .unwrap_or_default();
-        for site in [
-            "native_lifecycle_open_started()",
-            "native_lifecycle_world_ready()",
-            "native_lifecycle_world_closed()",
-            "native_lifecycle.begin_close()",
-        ] {
-            assert!(!game.contains(site), "in-frame site remains: {site}");
-        }
-        let saving = include_str!("saving.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .unwrap_or_default();
-        assert!(!saving.contains("native_lifecycle"));
-
-        let integrated = include_str!("integrated.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .unwrap_or_default();
-        let open = integrated
-            .find("self.native_lifecycle_open_started();")
-            .unwrap();
-        let load = integrated
-            .find("self.finish_open_world(opening.world?.finish()?)?;")
-            .unwrap();
-        assert!(open < load);
     }
 }

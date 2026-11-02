@@ -689,6 +689,11 @@ impl Mob {
     /// `IronGolem.canAttack`'s refusal of creepers. The callers check that
     /// the target is alive and can be seen as an enemy.
     pub fn spares_target(&self, w: &MobWorld, who: Who) -> bool {
+        // Dolphin.canAttack: a baby dolphin attacks nobody, so whatever hurt it
+        // is never taken as its target.
+        if self.species() == Species::Dolphin && self.is_baby() {
+            return true;
+        }
         match who {
             Who::Player => self.spares_players(w),
             Who::Mob(id) => {
@@ -2150,9 +2155,11 @@ impl Goal for Breed {
             return false;
         }
         let species = m.species();
-        // Wolf.canMate: both tame and standing.
+        // Wolf.canMate and Cat.canMate: both tame. The sitting pose sits on the
+        // partner side only, and only for a wolf (`wolf.isInSittingPose()`), so
+        // a tamed mob ordered to sit still walks off to breed.
         let tamable = matches!(species, Species::Wolf | Species::Cat);
-        if tamable && (!m.extra.tame || m.extra.sitting) {
+        if tamable && !m.extra.tame {
             return false;
         }
         // AbstractHorse.canMate is false and Mule keeps it: mules never breed.
@@ -2605,6 +2612,7 @@ impl Goal for EatBlock {
                 // The particles and the dirt `setBlock` are the same gate.
                 if cx.w.mob_griefing {
                     cx.events.push(MobEvent::SetBlockName {
+                        mob: Some(m.id),
                         pos: [x, y - 1, z],
                         name: "minecraft:dirt",
                         effect: true,

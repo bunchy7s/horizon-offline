@@ -62,7 +62,7 @@ UnquotedStringParseRule.parse	port	crates/horizon-command/src/snbt.rs::grammar	c
 net/minecraft/util/random/Weighted#codec	skip:java		codec; WeightedList::decode_inner reads data and weight per entry
 WeightedList.map	port	crates/horizon-assets/src/blockstate/choice.rs::Choice::map	keeps weights and maps values; used for variant model lists
 WeightedList.entryToNonEmptyListCodec	port	crates/horizon-world/src/worldgen/weighted.rs::WeightedList::build	rejects a list whose total weight is zero
-WeightedList.contains	missing		minor: unsure: canSpawnMobAt checks a pack's mob type is still in the mobs list at the new position; Horizon's group loop (spawn_selection.rs ~1079-1156) carries the entry and no membership test was found
+WeightedList.contains	inline	crates/horizon-client/src/mobs/spawn_selection.rs::valid_position_for_type	a group's entry must still be in the mobs list at a new position: the list is looked up there and scanned for the same spawner (canSpawnMobAt)
 WeightedList.equals	skip:java		equality of a Java collection
 WeightedList.hashCode	skip:java		hash of a Java collection
 WeightedList.Builder.add	skip:java		builder; WeightedList::new takes (value, weight) pairs
@@ -106,22 +106,22 @@ BiasedToBottomInt.sample	port	crates/horizon-world/src/worldgen/value_provider.r
 ClampedNormalFloat.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::FloatProvider::sample	ClampedNormal arm
 ClampedNormalInt.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::IntProvider::sample	ClampedNormal arm
 ConstantFloat.of	port	crates/horizon-world/src/worldgen/value_provider.rs::FloatProvider::from_json	Constant arm normalises -0.0 to 0.0 as vanilla's ZERO does
-FloatProviders.codec	missing		minor: unsure: min/max range check is per caller in Horizon (carver.rs:80-89 checks a few bounds); no generic check
-IntProviders.validateCodec	missing		minor: unsure: min/max range check is per caller in Horizon; no generic check
-IntProviders.validate	missing		minor: unsure: min/max range check is per caller in Horizon; no generic check
+FloatProviders.codec	missing		no codec wrapper to carry a field's range: a float provider is read without one, and the sites that need a bound check it themselves (worldgen/carver.rs:89-95 rejects a floor_level outside -1..1)
+IntProviders.validateCodec	missing		no codec wrapper to carry a field's range: the reading sites check what they need instead (worldgen/carver.rs:79-82 rejects a negative count)
+IntProviders.validate	missing		no provider-level check: vanilla rejects minInclusive < minValue or maxInclusive > maxValue against the range each field's codec names, and here only the few sites that care check (worldgen/carver.rs:79-82)
 MultipliedFloats.sample	missing		minor: unsure: SoundManager multiplies a wrapped sound's volume and pitch by the outer sound's; no nested product found in Horizon
 TrapezoidFloat.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::FloatProvider::sample	Trapezoid arm
 TrapezoidInt.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::IntProvider::sample	Trapezoid arm
 UniformFloat.of	port	crates/horizon-world/src/worldgen/value_provider.rs::FloatProvider::from_json	Uniform arm rejects max <= min
 VeryBiasedToBottomInt.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::IntProvider::sample	BiasedToBottom arm with the extra draw
-RegionStorageUpgrader.init	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	gap: minor: region folder and storage are set up per call; no progress object
-RegionStorageUpgrader.upgrade	port	crates/horizon-world/src/datafix/files.rs::upgrade_regions	gap: minor: no progress, cancel or recreate mode
-RegionStorageUpgrader.createStorage	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	gap: minor: in-place storage only; the recreate-region-files option is not ported
-RegionStorageUpgrader.getFilesToProcess	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	lists the .mca files; progress totals are not kept
-RegionStorageUpgrader.getAllChunkPositions	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	walks region files and their chunks
-RegionStorageUpgrader.processOnePosition	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	per-chunk fix through the closure; counts are not kept
-RegionStorageUpgrader.tryProcessOnePosition	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	gap: minor: every chunk is rewritten, not only the changed ones
-RegionStorageUpgrader.onFileFinished	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	rename of the staged file over the old one; recreate mode absent
+RegionStorageUpgrader.init	inline	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::init	the dimension's region folder is resolved and its chunk positions counted into the progress totals
+RegionStorageUpgrader.upgrade	port	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::upgrade	the per-file, per-chunk loop runs until the progress is canceled, counting converted and skipped chunks and setting dimension and total progress
+RegionStorageUpgrader.createStorage	inline	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::upgrade	the reader and writer region files are opened lazily per file; recreate_region_files writes into the new folder
+RegionStorageUpgrader.getFilesToProcess	inline	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::init	all_chunk_positions lists the .mca files and their chunks, and init adds them to the progress totals
+RegionStorageUpgrader.getAllChunkPositions	inline	crates/horizon-world/src/datafix/world_upgrader.rs::all_chunk_positions	walks each region file's header for the chunk positions it holds
+RegionStorageUpgrader.processOnePosition	inline	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::process_one_position	the per-chunk fix; a failed chunk is logged and counted as skipped
+RegionStorageUpgrader.tryProcessOnePosition	port	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::try_process_one_position	only a chunk whose tag changed is written back, or every chunk with recreate_region_files
+RegionStorageUpgrader.onFileFinished	inline	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::on_file_finished	the rewritten file replaces the old one, and close drops the recreate folder
 RegionStorageUpgrader.Builder.addTagModifier	skip:java		builder
 RegionStorageUpgrader.Builder.copy	skip:java		builder
 RegionStorageUpgrader.Builder.build	skip:java		builder
@@ -130,14 +130,14 @@ UpgradeProgress.incrementFinishedOperationsBy	skip:ui		progress counters for an 
 UpgradeProgress.reset	skip:ui		progress counters for an upgrade progress bar Horizon does not show
 UpgradeProgress.logProgress	skip:other		logs progress and sends JSON-RPC notifications; Horizon upgrades synchronously
 UpgradeProgress.FileFixStats.getProgress	skip:ui		progress fraction for the upgrade screen
-UpgradeStatusTranslator.translate	skip:ui		translatable status text for the upgrade screen
-UpgradeStatusTranslator.Messages.forStatus	skip:ui		translatable status text for the upgrade screen
+UpgradeStatusTranslator.translate	port	crates/horizon-world/src/datafix/world_upgrader.rs::status_key	failed, counting, no data fix type, then upgrading/finished by type; the key comes back as a string and the screen makes the Text
+UpgradeStatusTranslator.Messages.forStatus	inline	crates/horizon-world/src/datafix/world_upgrader.rs::status_key	the upgrading/finished pick is the last match arm there
 WorldUpgrader.getDataFixContextTag	port	crates/horizon-world/src/datafix/files.rs::generators	gap: minor: returns (dimension, generator type) pairs, not the context compound
-WorldUpgrader.verifyChunkPosAndEraseCache	missing		minor: Optimize World's cache erase (Heightmaps, isLightOn, BlockLight, SkyLight) is not in Horizon's datafix
-WorldUpgrader.verifyChunkPos	skip:other		only logs a warning for a chunk with a wrong stored position
+WorldUpgrader.verifyChunkPosAndEraseCache	port	crates/horizon-world/src/datafix/world_upgrader.rs::verify_chunk_pos_and_erase_cache	the chunk's position is checked and its Heightmaps, isLightOn, BlockLight and SkyLight are dropped, in the per-chunk upgrade step
+WorldUpgrader.verifyChunkPos	port	crates/horizon-world/src/datafix/world_upgrader.rs::verify_chunk_pos	warns when the stored xPos/zPos differ from the chunk's own position and reports no change
 WorldUpgrader.work	port	crates/horizon-world/src/datafix/files.rs::upgrade_world	gap: minor: no Optimize World pass and no progress; upgrade_world runs the file fixes then the data upgrade
 WorldUpgrader.upgradeLevels	inline	crates/horizon-world/src/datafix/files.rs::upgrade_world	per-dimension loop folded into upgrade_world
-LongJumpUtil.isClearTransition	missing		minor: unsure: only the frog and goat long jumps (LongJumpToRandomPos) call it; Horizon has no such jump (frog.rs has only Croak and ShootTongue)
+LongJumpUtil.isClearTransition	port	crates/horizon-client/src/mobs/breeze.rs::clear_transition	boxed steps of nine tenths the smaller side from one point to the next must all be clear, for the breeze's long jump
 Cushion.isAnchorBuried	inline	crates/horizon-client/src/cushion.rs::can_place	the resting-slab test; can_place returns false when the slab is covered
 FishingHook.calculateOpenWater	port	crates/horizon-client/src/game/fishing.rs::Game::calculate_open_water	
 AbstractContainerMenu.getRedstoneSignalFromBlockEntity	port	crates/horizon-client/src/game/machines.rs::container_signal	block entity containers for the comparator; 0 when there is none

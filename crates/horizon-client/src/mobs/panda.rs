@@ -866,6 +866,7 @@ impl Goal for PandaSit {
         if let Some(item) = m.extra.main_hand.clone() {
             let count = held_count(m);
             cx.events.push(MobEvent::DropItem {
+                mob: m.id,
                 item,
                 count,
                 at: [m.position.x, m.position.y, m.position.z],

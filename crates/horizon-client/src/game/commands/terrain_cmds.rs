@@ -7,7 +7,7 @@ use horizon_client::{
     text::Text,
     worldborder::MAX_SIZE,
 };
-use horizon_core::random::RandomSource;
+use horizon_core::{position::ChunkPos, random::RandomSource};
 
 fn num(n: impl std::fmt::Display) -> Text {
     Text::literal(n.to_string())
@@ -23,7 +23,7 @@ fn holder(text: Text) -> Holder {
     }
 }
 fn ticks_to_seconds(ticks: i64) -> String {
-    format!("{:.2}", ticks as f64 / 20.0)
+    super::percent_f(ticks as f64 / 20.0, 2)
 }
 
 impl Game<'_> {
@@ -41,7 +41,8 @@ impl Game<'_> {
         match id {
             "forceload.query" if ctx.get("pos").is_none() => {
                 let mut forced: Vec<(i32, i32)> = self.streaming.forced.iter().copied().collect();
-                forced.sort_unstable();
+                // ForceLoadCommand sorts its LongStream before formatting chunks.
+                forced.sort_unstable_by_key(|&(x, z)| ChunkPos::new(x, z).pack());
                 if forced.is_empty() {
                     self.command_failure(Text::translate("commands.forceload.added.none", &[dim]));
                     return Ok(0);
@@ -276,7 +277,14 @@ impl Game<'_> {
         }
     }
     pub(in crate::game) fn tick_worldborder(&mut self) {
+        let remaining = self.border.remaining_ticks();
         self.border.tick();
+        if remaining > 0
+            && self.border.remaining_ticks() == 0
+            && (self.serving.is_some() || self.options.dedicated.is_some())
+        {
+            self.native_world_border_bounds_change_finish();
+        }
         self.player_border();
         self.border_damage();
     }
@@ -312,7 +320,7 @@ impl Game<'_> {
         }
     }
     pub(super) fn cmd_worldborder(&mut self, id: &str, ctx: &Context) -> R<i32> {
-        let float2 = |v: f64| format!("{v:.2}");
+        let float2 = |v: f64| super::percent_f(v, 2);
         let double = match ctx.get("distance") {
             Some(Arg::Double(d)) => *d,
             _ => 0.0,
@@ -326,7 +334,7 @@ impl Game<'_> {
                 let size = self.border.size();
                 self.feedback(Text::translate(
                     "commands.worldborder.get",
-                    &[Text::literal(format!("{size:.0}"))],
+                    &[Text::literal(super::percent_f(size, 0))],
                 ));
                 Ok((size + 0.5).floor() as i32)
             }
@@ -346,7 +354,7 @@ impl Game<'_> {
                 if distance > MAX_SIZE {
                     return Err(err("commands.worldborder.set.failed.big", &[&"5.999997E7"]));
                 }
-                let shown = Text::literal(format!("{distance:.1}"));
+                let shown = Text::literal(super::percent_f(distance, 1));
                 if time > 0 {
                     self.border.lerp_to(distance, time);
                     let key = if distance > current {
@@ -365,6 +373,7 @@ impl Game<'_> {
                         &[shown],
                     ));
                 }
+                self.native_world_border_bounds_changed();
                 Ok((distance - current) as i32)
             }
             "worldborder.center" => {
@@ -382,6 +391,7 @@ impl Game<'_> {
                     ));
                 }
                 self.border.set_center([x, z]);
+                self.native_world_border_center_changed();
                 self.feedback(Text::translate(
                     "commands.worldborder.center.success",
                     &[Text::literal(float2(x)), Text::literal(float2(z))],
@@ -565,10 +575,11 @@ impl Game<'_> {
                 let p = self.block_pos_arg(ctx, "pos")?;
                 let state = self.world.block(p[0], p[1], p[2]);
                 let name = self.data_block_name(p);
-                let table = format!("minecraft:blocks/{}", name.trim_start_matches("minecraft:"));
-                if !world_items!(self).has_loot_table(&table) {
+                let Some(table) =
+                    world_items!(self).block_loot_table(self.pack.assets.registry, state)
+                else {
                     return Err(err("commands.drop.no_loot_table.block", &[&name]));
-                }
+                };
                 let tool = self.tool_stack(ctx)?;
                 let drops = match world_items!(self).loot_sequence(&table) {
                     Some(seq) => {

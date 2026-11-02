@@ -10,7 +10,7 @@ use horizon_client::{
     containers::BlockEntity,
     hud::{HudBatch, rgba},
     items::ItemStack,
-    signs::{ClickAction, DYE_TEXT, click_action, wood_type},
+    signs::{ClickAction, DYE_TEXT, click_action, editor_sprite},
     ui::EditBox,
 };
 use horizon_protocol::packets::play::{self, Clientbound as C, Serverbound as S};
@@ -58,14 +58,15 @@ impl Game<'_> {
         let Some(player) = self.player.as_ref() else {
             return true;
         };
-        let state = self.world.block(pos.0, pos.1, pos.2);
-        let Some(state) = self.pack.assets.registry.state(state) else {
+        let id = self.world.block(pos.0, pos.1, pos.2);
+        let Some(state) = self.pack.assets.registry.state(id) else {
             return true;
         };
+        let form = self.res.facts().get(id).sign_form();
         let prop = |key: &str| state.properties.get(key).map(String::as_str);
         // getYRotationDegrees: a wall sign's `Direction.toYRot`, a standing or
         // ceiling sign's rotation segment.
-        let y_rot = if state.name.contains("_wall_") {
+        let y_rot = if form.is_some_and(|f| f.wall) {
             match prop("facing") {
                 Some("west") => 90.0,
                 Some("north") => 180.0,
@@ -80,7 +81,7 @@ impl Game<'_> {
         };
         // getSignHitboxCenterPosition: only a wall sign's board is off-centre,
         // against the wall it hangs on.
-        let centre = if state.name.ends_with("_wall_sign") {
+        let centre = if form.is_some_and(|f| f.wall && !f.hanging) {
             match y_rot as i32 {
                 90 => (0.9375, 0.5),
                 180 => (0.5, 0.9375),
@@ -312,7 +313,7 @@ impl Game<'_> {
             self.sculk_actor(),
             Some(state),
         );
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.consume_held();
         self.trigger_block("minecraft:item_used_on_block", pos, stack);
         true
@@ -337,6 +338,9 @@ impl Game<'_> {
         self.keys.clear();
         self.right = false;
         self.capture(false);
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_open_sign(player, &name, [pos.0, pos.1, pos.2], front);
+        }
     }
     /// `AbstractSignEditScreen.tick`: the editor closes (and `removed` sends
     /// the text) once its sign is removed or the player's eyes are further
@@ -756,20 +760,16 @@ impl Game<'_> {
         });
         let tw = HudBatch::text_width(atlas, &title);
         batch.text(atlas, &title, (w - tw) / 2.0, 40.0, u32::MAX, true);
-        let name = self
-            .res
-            .facts()
-            .get(self.world.block(edit.pos.0, edit.pos.1, edit.pos.2))
-            .name
-            .clone();
-        let wood = wood_type(&name);
+        let facts = self.res.facts();
+        let block = facts.get(self.world.block(edit.pos.0, edit.pos.1, edit.pos.2));
+        let wood = facts.wood_type(&block.name).unwrap_or("oak");
         let cx = w / 2.0;
         let y = if sign.hanging {
             // HangingSignEditScreen: 16x16 texture scaled 4.5 at (0, -13).
             let s = 4.5;
             batch.sprite_scaled(
                 atlas,
-                &format!("gui/hanging_signs/{wood}"),
+                &editor_sprite("hanging_signs", wood),
                 cx - 8.0 * s,
                 125.0 - 13.0 - 8.0 * s,
                 16.0 * s,
@@ -780,9 +780,9 @@ impl Game<'_> {
         } else {
             // SignEditScreen: 24x26 texture scaled 3.9 at (0, 27); wall signs show 12 rows.
             let s = 3.9;
-            let wall = name.contains("_wall_");
+            let wall = block.sign_form().is_some_and(|f| f.wall);
             let rows = if wall { 12.0 } else { 26.0 };
-            if let Some(mut r) = atlas.sprites.get(&format!("gui/signs/{wood}")).copied() {
+            if let Some(mut r) = atlas.sprites.get(&editor_sprite("signs", wood)).copied() {
                 r.v1 = r.v0 + (r.v1 - r.v0) * rows / 26.0;
                 batch.rect_uv(
                     cx - 12.0 * s,

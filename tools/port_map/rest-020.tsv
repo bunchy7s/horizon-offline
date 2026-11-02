@@ -3,7 +3,7 @@ PlayerList.loadPlayerData	port	crates/horizon-client/src/lan/playerdata.rs::load
 PlayerList.save	port	crates/horizon-client/src/game/lan.rs::Game::save_guest	player file, advancements and statistics of a guest
 PlayerList.disconnectAllPlayersWithProfile	port	crates/horizon-client/src/lan/hub.rs::Hub::poll	kicks every connection of the uuid on NetEvent::Duplicate; the refusal of a second login is Shared::try_admit (lan/mod.rs)
 PlayerList.broadcastSystemToTeam	port	crates/horizon-client/src/lan/hub.rs::Hub::system_message_to	
-PlayerList.broadcastSystemToAllExceptTeam	missing		player: when a dead player's team hides death messages from its own team, players outside the team should read the death in chat; Horizon sends it to nobody
+PlayerList.broadcastSystemToAllExceptTeam	port	crates/horizon-client-core/src/scoreboard.rs::death_message_reaches	HideForOwnTeam sends the death message to everyone outside the dying player's team, checked before the LAN hub broadcasts it and before the local chat line
 PlayerList.getPlayerNamesArray	skip:server		the GS4 query reply's player list; RCON and query server code; Horizon has no RCON or GS4 query port
 PlayerList.op	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	the op arm: list add, reply, and sync_ops (permission level push to the hub)
 PlayerList.deop	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	the deop arm: list remove, reply, sync_ops and kick_unlisted_players
@@ -18,21 +18,21 @@ ProfileResolver.Cached.fetchByName	port	crates/horizon-client/src/game/dedicated
 ServerOpList.getUserList	skip:ui		tab-completion names only (DeOpCommands suggestions); the console has no completion
 ServerOpList.add	port	crates/horizon-server-files/src/user_lists.rs::UserList::add	gap: minor: the Opped reply and the permission push are in console_command's op arm
 ServerOpList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserList::remove	gap: minor: the Deopped reply, sync_ops and the kick are in console_command's deop arm
-ServerOpList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+ServerOpList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 ServerOpList.canBypassPlayerLimit	port	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	the bypasses_limit closure: an op entry with bypassesPlayerLimit; read by Shared::try_admit
 ServerOpListEntry.serialize	port	crates/horizon-server-files/src/user_lists.rs::OpEntry::serialize	level and bypassesPlayerLimit keys
 SleepStatus.areEnoughDeepSleeping	port	crates/horizon-client/src/game/lan_actions.rs::Game::enough_slept	counts players asleep for 100 ticks (sleep_counts) against sleepers_needed
-StoredUserList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+StoredUserList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 StoredUserList.removeExpired	port	crates/horizon-server-files/src/user_lists.rs::UserList::get	expired entries are dropped on each get, as vanilla
 UserBanList.getUserList	skip:ui		tab-completion names only (PardonCommand suggestions)
 UserBanList.add	port	crates/horizon-server-files/src/user_lists.rs::UserList::add	gap: minor: the banned notice and the kick are in console_command's ban arm
 UserBanList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserList::remove	gap: minor: the unbanned notice is in console_command's pardon arm
-UserBanList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+UserBanList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 UserBanListEntry.serialize	port	crates/horizon-server-files/src/user_lists.rs::BanEntry::serialize	the player's name and the ban fields
 UserBanListEntry.getDisplayName	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	the banlist arm prints the name; Horizon entries always carry one, so no Unknown-user fallback
 UserWhiteList.add	port	crates/horizon-server-files/src/user_lists.rs::UserList::add	gap: minor: the allowlist notice is in console_whitelist's add arm
 UserWhiteList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserList::remove	gap: minor: the notice is in console_whitelist's remove arm
-UserWhiteList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+UserWhiteList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 UserWhiteList.getUserList	skip:ui		tab-completion names only (WhitelistCommand suggestions)
 NetworkDataOutputStream.writeString	inline	crates/horizon-server/src/query.rs::string	UTF-8 and a NUL; the rest of NetworkDataOutputStream is the GS4 query server (the short is little-endian: `u16::to_le_bytes`)
 PktUtils.stringFromByteArray	inline	crates/horizon-server/src/rcon.rs::read_request	the payload up to its first NUL; the rest of PktUtils is the GS4 query server
@@ -72,7 +72,7 @@ ServerWaypointManager.remakeConnections	inline	crates/horizon-client/src/lan/way
 ServerWaypointManager.createConnection	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::create_connection	
 ServerWaypointManager.updateConnection	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::update_or_create	
 SoundEvent.create	skip:data		registry object construction; Horizon's sound_events.rs models sounds.json entries, not SoundEvent objects
-SoundEvent.getRange	missing		minor: no fixed-range sound events (fixed_range is not read anywhere); attenuation comes from the sounds.json value (Sound::attenuation_distance)
+SoundEvent.getRange	inline	crates/horizon-client/src/lan/containers.rs::Hub::broadcast_near	16*max(volume,1) is the whole formula: no 26.3 event sets a fixed range (SoundEvents never calls createFixedRangeEvent), and a player exactly on it is left out
 SoundEvents.register	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
 SoundEvents.registerForHolder	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
 SoundEvents.registerGoatHornSoundVariants	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer

@@ -105,6 +105,8 @@ pub struct RenderAssets {
     pub pbr_size: u32,
     /// OptiFine connected textures (empty without `optifine/ctm` files).
     pub connected: crate::connected::ConnectedTextures,
+    /// Fusion connected textures (empty without Fusion's connecting textures and models).
+    pub fusion: crate::fusion::FusionTextures,
 }
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
@@ -117,8 +119,7 @@ impl Assets {
         if manifest["data_version"].as_i64() != Some(i64::from(DATA_VERSION)) {
             return Err(invalid("resources do not match Horizon's pinned data version").into());
         }
-        let (registry, flags) =
-            BlockRegistry::from_facts_json_with_flags(File::open(root.join("facts.json"))?)?;
+        let (registry, flags) = horizon_world::level::data::load_registry_with_flags(root)?;
         let bundle: Value =
             serde_json::from_reader(BufReader::new(File::open(root.join("block-tags.json"))?))?;
         let mut definitions = TagDefinitions::default();
@@ -224,7 +225,7 @@ impl RenderAssets {
         } else {
             crate::model_library::ParsedModels::default()
         };
-        let models = if draws {
+        let mut models = if draws {
             crate::models::prepare_with_models(root, registry, &mut sprites, &parsed)?
         } else {
             crate::models::PreparedModels::default()
@@ -244,6 +245,11 @@ impl RenderAssets {
         for stage in 0..10 {
             sprites.insert(root, &format!("minecraft:block/destroy_stage_{stage}"))?;
         }
+        let fusion = if draws {
+            crate::fusion::FusionTextures::load(root, registry, &mut sprites, &mut models.catalog)
+        } else {
+            Default::default()
+        };
         let mut emissive = Vec::new();
         let connected = if draws {
             crate::native_emissive::load(root, &mut sprites);
@@ -304,6 +310,7 @@ impl RenderAssets {
             pbr_specular: sprites.specular,
             pbr_size: sprites.pbr_size,
             connected,
+            fusion,
         })
     }
 }

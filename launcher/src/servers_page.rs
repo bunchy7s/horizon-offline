@@ -898,26 +898,46 @@ impl Launcher {
         let selected = focused && self.servers.selected == Some(f);
         let invalid = self.servers.invalid.is_some_and(|(g, _)| g == f);
         self.servers.text(f).show(((width - 24.) / 7.5) as usize);
-        let field = div()
+        // Home's Add server line is in the glass look already; the other fields follow with
+        // their pages.
+        let glass = t.dark
+            && matches!(
+                f,
+                Field::ServerName
+                    | Field::ServerAddress
+                    | Field::InstanceModsFilter
+                    | Field::ConsoleSearch
+            );
+        let base = if glass {
+            // The mods filter and the log search sit by buttons: the mockup's small `FIELD`, as
+            // tall as they are.
+            crate::glass_ui::field(focused, invalid).when(
+                matches!(f, Field::InstanceModsFilter | Field::ConsoleSearch),
+                |d| d.h(px(36.)).px(px(12.)).rounded(px(10.)),
+            )
+        } else {
+            div()
+                .flex()
+                .items_center()
+                .h(px(theme::FIELD))
+                .px(px(12.))
+                .overflow_hidden()
+                .rounded(px(theme::RADIUS))
+                .border_1()
+                .border_color(if invalid {
+                    t.danger
+                } else if focused {
+                    t.accent
+                } else {
+                    t.rule
+                })
+                .bg(t.surface)
+                .text_size(px(theme::UI.px))
+        };
+        let field = base
             .id(SharedString::from(format!("field-{f:?}")))
             .track_focus(&handle)
-            .flex()
-            .items_center()
             .w(px(width))
-            .h(px(theme::FIELD))
-            .px(px(12.))
-            .overflow_hidden()
-            .rounded(px(theme::RADIUS))
-            .border_1()
-            .border_color(if invalid {
-                t.danger
-            } else if focused {
-                t.accent
-            } else {
-                t.rule
-            })
-            .bg(t.surface)
-            .text_size(px(theme::UI.px))
             .cursor_text()
             .child(line_edit::content(
                 self.servers.text(f),
@@ -1182,7 +1202,7 @@ impl Launcher {
                     super::partner::hide_button("partner-servers-hide", &t).on_click(cx.listener(
                         |this, _: &ClickEvent, _, cx| {
                             this.settings.partner_hidden = true;
-                            this.settings.save();
+                            this.save_settings();
                             cx.notify();
                         },
                     )),

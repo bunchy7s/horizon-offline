@@ -27,9 +27,12 @@ use naga::valid::{Capabilities, ValidationFlags, Validator};
 
 use crate::Preprocessed;
 
+mod anonymous_structs;
 mod atomic_vectors;
 mod geometry;
 mod image_parameters;
+mod integer_bounds;
+mod interface_blocks;
 mod ordering;
 mod rewrite;
 mod scan;
@@ -237,6 +240,18 @@ fn translate(
     } else {
         GBUFFERS_MATRICES.to_owned()
     };
+    // Struct types without a name get one (`anonymous_structs`), and interface blocks travel
+    // as plain varyings (`interface_blocks`).
+    let flat = |pp: &Preprocessed| {
+        let named = anonymous_structs::name(&pp.code);
+        let code = named.as_deref().unwrap_or(&pp.code);
+        interface_blocks::flatten(code)
+            .or(named)
+            .map(|code| Preprocessed { code, ..pp.clone() })
+    };
+    let (vertex_flat, fragment_flat) = (flat(vertex), flat(fragment));
+    let vertex = vertex_flat.as_ref().unwrap_or(vertex);
+    let fragment = fragment_flat.as_ref().unwrap_or(fragment);
     let mut v = Stage::scan(vertex, ShaderStage::Vertex);
     let mut f = Stage::scan(fragment, ShaderStage::Fragment);
     v.gbuffers = gbuffers.is_some();
@@ -616,6 +631,11 @@ fn resources(
 
 /// Translates a compute program (`.csh`).
 pub fn translate_compute(compute: &Preprocessed) -> Result<ComputeProgram, Vec<Error>> {
+    let named = anonymous_structs::name(&compute.code).map(|code| Preprocessed {
+        code,
+        ..compute.clone()
+    });
+    let compute = named.as_ref().unwrap_or(compute);
     let split = atomic_vectors::rewrite(compute);
     let compute = split.as_ref().unwrap_or(compute);
     let mut c = Stage::scan(compute, ShaderStage::Compute);
@@ -737,41 +757,160 @@ pub fn translate_compute(compute: &Preprocessed) -> Result<ComputeProgram, Vec<E
 /// `code` with `gl_WorkGroupSize` written as the constant its `layout(local_size_*)` declares:
 /// GLSL defines it so, and naga's HLSL writer has no such built-in.
 fn work_group_size(code: &str) -> Result<String, String> {
-    let tokens = crate::macros::lex(code);
-    if !tokens.contains(&"gl_WorkGroupSize") {
-        return Ok(code.to_owned());
-    }
-    let sig: Vec<&str> = tokens
-        .iter()
-        .copied()
-        .filter(|t| scan::significant(t))
+    let mut tokens: Vec<String> = crate::macros::lex(code)
+        .into_iter()
+        .map(str::to_owned)
         .collect();
-    // A size is one number, the whole of its `local_size_* = N`; 1 when not declared.
-    let size = |axis: &str| match sig.windows(4).find(|w| w[0] == axis && w[1] == "=") {
-        None => Ok(1),
-        Some(w) => w[2]
-            .trim_end_matches(['u', 'U'])
-            .parse::<u32>()
-            .ok()
-            .filter(|_| matches!(w[3], "," | ")"))
-            .ok_or_else(|| format!("`{axis}` is not a number gl_WorkGroupSize can take")),
-    };
-    let value = format!(
-        "uvec3({}u, {}u, {}u)",
-        size("local_size_x")?,
-        size("local_size_y")?,
-        size("local_size_z")?
-    );
-    Ok(tokens
-        .iter()
-        .map(|&t| {
-            if t == "gl_WorkGroupSize" {
-                value.as_str()
-            } else {
-                t
+    let mut sizes = [1u32; 3];
+    let axes = ["local_size_x", "local_size_y", "local_size_z"];
+    let sig: Vec<usize> = (0..tokens.len())
+        .filter(|&i| scan::significant(&tokens[i]))
+        .collect();
+    for (k, &at) in sig.iter().enumerate() {
+        let Some(axis) = axes.iter().position(|a| tokens[at] == *a) else {
+            continue;
+        };
+        if sig.get(k + 1).is_none_or(|&e| tokens[e] != "=") {
+            continue;
+        }
+        // The size's expression runs to the `,` or `)` that ends the qualifier.
+        let mut depth = 0usize;
+        let expr: Vec<usize> = sig[k + 2..]
+            .iter()
+            .copied()
+            .take_while(|&i| match tokens[i].as_str() {
+                "(" => {
+                    depth += 1;
+                    true
+                }
+                ")" if depth > 0 => {
+                    depth -= 1;
+                    true
+                }
+                "," | ")" if depth == 0 => false,
+                _ => true,
+            })
+            .collect();
+        let words: Vec<&str> = expr.iter().map(|&i| tokens[i].as_str()).collect();
+        let size = ConstantSize::eval(&words)
+            .ok_or_else(|| format!("`{}` is not a size Horizon can work out", axes[axis]))?;
+        sizes[axis] = size;
+        // naga takes a number there: the expression becomes its value.
+        if let (Some(&first), Some(&last)) = (expr.first(), expr.last()) {
+            tokens[first] = size.to_string();
+            for t in &mut tokens[first + 1..=last] {
+                t.retain(|c| c == '\n');
             }
-        })
-        .collect())
+        }
+    }
+    let value = format!("uvec3({}u, {}u, {}u)", sizes[0], sizes[1], sizes[2]);
+    for t in &mut tokens {
+        if t == "gl_WorkGroupSize" {
+            *t = value.clone();
+        }
+    }
+    Ok(tokens.concat())
+}
+
+/// A work group size given as an integer constant expression (GLSL 4.60, 4.4 and 4.4.1):
+/// numbers, `+ - * / %`, brackets, `min`, `max` and `gl_MaxComputeWorkGroupSize`, the minimum
+/// GLSL requires (`ivec3(1024, 1024, 64)`, 7.3); the translation knows no device.
+struct ConstantSize<'w> {
+    words: &'w [&'w str],
+    at: usize,
+}
+
+impl<'w> ConstantSize<'w> {
+    fn eval(words: &'w [&'w str]) -> Option<u32> {
+        let mut p = Self { words, at: 0 };
+        let v = p.sum()?;
+        (p.at == words.len())
+            .then_some(v)
+            .and_then(|v| u32::try_from(v).ok())
+    }
+
+    fn peek(&self) -> Option<&'w str> {
+        self.words.get(self.at).copied()
+    }
+
+    fn eat(&mut self, word: &str) -> bool {
+        let found = self.peek() == Some(word);
+        self.at += usize::from(found);
+        found
+    }
+
+    fn sum(&mut self) -> Option<i64> {
+        let mut v = self.product()?;
+        loop {
+            if self.eat("+") {
+                v = v.checked_add(self.product()?)?;
+            } else if self.eat("-") {
+                v = v.checked_sub(self.product()?)?;
+            } else {
+                return Some(v);
+            }
+        }
+    }
+
+    fn product(&mut self) -> Option<i64> {
+        let mut v = self.unary()?;
+        loop {
+            if self.eat("*") {
+                v = v.checked_mul(self.unary()?)?;
+            } else if self.eat("/") {
+                v = v.checked_div(self.unary()?)?;
+            } else if self.eat("%") {
+                v = v.checked_rem(self.unary()?)?;
+            } else {
+                return Some(v);
+            }
+        }
+    }
+
+    fn unary(&mut self) -> Option<i64> {
+        if self.eat("-") {
+            return self.unary()?.checked_neg();
+        }
+        if self.eat("+") {
+            return self.unary();
+        }
+        if self.eat("(") {
+            let v = self.sum()?;
+            return self.eat(")").then_some(v);
+        }
+        let word = self.peek()?;
+        self.at += 1;
+        match word {
+            "min" | "max" => {
+                if !self.eat("(") {
+                    return None;
+                }
+                let a = self.sum()?;
+                if !self.eat(",") {
+                    return None;
+                }
+                let b = self.sum()?;
+                if !self.eat(")") {
+                    return None;
+                }
+                Some(if word == "min" { a.min(b) } else { a.max(b) })
+            }
+            "gl_MaxComputeWorkGroupSize" => {
+                if !self.eat(".") {
+                    return None;
+                }
+                let axis = self.peek()?;
+                self.at += 1;
+                match axis {
+                    "x" => Some(1024),
+                    "y" => Some(1024),
+                    "z" => Some(64),
+                    _ => None,
+                }
+            }
+            number => number.trim_end_matches(['u', 'U']).parse().ok(),
+        }
+    }
 }
 
 /// The numbers of a constant's constructor, `const ivec3 name = ivec3(1, 2, 3);` → 1, 2, 3.
@@ -988,7 +1127,8 @@ fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Modul
             message,
         }]
     })?;
-    let text = specialized.as_str();
+    let bounded = integer_bounds::rewrite(&specialized);
+    let text = bounded.as_str();
     let at = |text: &str, span: naga::Span, message: String| {
         let start = span.to_range().map_or(0, |r| r.start);
         let line = text[..start.min(text.len())].matches('\n').count();
@@ -1025,21 +1165,25 @@ fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Modul
     };
     // naga's frontend refuses a few things GL takes: a scalar's swizzle (`f.x`, GLSL 4.20), a
     // matrix column's component written to (`m[1].y =`) and `min`/`max`/`clamp` of a `uint` and
-    // integer literals. Each refusal is rewritten where naga points, and the source parsed again.
+    // integer literals, and a function prototype declared again. Each refusal is rewritten where
+    // naga points, and the source parsed again.
     let mut text = std::borrow::Cow::Borrowed(text);
     let mut tries = 0;
-    let module = loop {
+    let mut module = loop {
         tries += 1;
         match Frontend::default().parse(&Options::from(stage.kind), &text) {
             Ok(m) => break m,
-            Err(e) => match (e.errors.iter())
-                .find_map(|e| scalar_swizzle(&text, e).or_else(|| unsigned_literals(&text, e)))
-            {
+            Err(e) => match e.errors.iter().find_map(|e| {
+                scalar_swizzle(&text, e)
+                    .or_else(|| unsigned_literals(&text, e))
+                    .or_else(|| repeated_prototype(&text, e))
+            }) {
                 Some(fixed) if tries < 256 => text = fixed.into(),
                 _ => return parse(&text),
             },
         }
     };
+    end_returns_give_zero(&mut module);
     Validator::new(ValidationFlags::all(), Capabilities::all())
         .subgroup_operations(naga::valid::SubgroupOperationSet::all())
         .subgroup_stages(naga::valid::ShaderStages::all())
@@ -1057,6 +1201,42 @@ fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Modul
             vec![at(&text, span, message)]
         })?;
     Ok(module)
+}
+
+/// GLSL lets a function that returns a value reach its end without a `return`: what it returns
+/// then is undefined (GLSL 4.60, 6.1). naga's frontend ends every body that can reach its end
+/// with a `return` of no value, which its validator refuses in such a function; those returns
+/// give the result type's zero instead.
+fn end_returns_give_zero(module: &mut naga::Module) {
+    fn fill(block: &mut naga::Block, zero: &mut dyn FnMut() -> naga::Handle<naga::Expression>) {
+        // The ends naga's frontend gives a `return` to (`naga::proc::ensure_block_returns`).
+        match block.last_mut() {
+            Some(naga::Statement::Block(b)) => fill(b, zero),
+            Some(naga::Statement::If { accept, reject, .. }) => {
+                fill(accept, zero);
+                fill(reject, zero);
+            }
+            Some(naga::Statement::Switch { cases, .. }) => {
+                for case in cases.iter_mut().filter(|c| !c.fall_through) {
+                    fill(&mut case.body, zero);
+                }
+            }
+            Some(naga::Statement::Return { value }) if value.is_none() => *value = Some(zero()),
+            _ => {}
+        }
+    }
+    for (_, f) in module.functions.iter_mut() {
+        let Some(ty) = f.result.as_ref().map(|r| r.ty) else {
+            continue;
+        };
+        let (body, expressions) = (&mut f.body, &mut f.expressions);
+        let mut made = None;
+        fill(body, &mut || {
+            *made.get_or_insert_with(|| {
+                expressions.append(naga::Expression::ZeroValue(ty), naga::Span::default())
+            })
+        });
+    }
 }
 
 /// `text` without the scalar swizzle naga's frontend refused (`e`, GLSL 4.20's `f.x`, `f.xx`): one
@@ -1129,6 +1309,33 @@ fn unsigned_literals(text: &str, e: &naga::front::glsl::Error) -> Option<String>
         i += 1;
     }
     changed.then(|| format!("{}{out}{}", &text[..r.start], &text[r.end..]))
+}
+
+/// `text` without the function prototype naga's frontend refused as declared before (`e`): GLSL
+/// lets a function be declared again (packs include the same helper's prototype from two
+/// files). The prototype and its `;` turn to spaces, keeping lines where they are; one with
+/// qualifiers before its type (naga's span starts at the type) is left alone.
+fn repeated_prototype(text: &str, e: &naga::front::glsl::Error) -> Option<String> {
+    if e.kind.to_string() != "Prototype already defined" {
+        return None;
+    }
+    let r = e.meta.to_range()?;
+    let end = r.end + text.get(r.end..)?.find(';')? + 1;
+    if !text.get(r.end..end - 1)?.trim().is_empty() {
+        return None;
+    }
+    let before = text.get(..r.start)?.trim_end();
+    let line = &before[before.rfind('\n').map_or(0, |n| n + 1)..];
+    let boundary =
+        before.is_empty() || before.ends_with([';', '}']) || line.trim_start().starts_with('#');
+    if !boundary {
+        return None;
+    }
+    let blank: String = text[r.start..end]
+        .chars()
+        .map(|c| if c == '\n' { '\n' } else { ' ' })
+        .collect();
+    Some(format!("{}{blank}{}", &text[..r.start], &text[end..]))
 }
 
 /// Where the operand that ends right before byte `end` begins: a name, a call or an index (with
@@ -1755,6 +1962,54 @@ mod tests {
         );
     }
 
+    /// `textureQueryLod` (GLSL 4.60, 8.9.1), which naga lacks, on 2D, 3D and integer samplers
+    /// and through a pack function that takes the sampler: every form reaches SPIR-V, and a
+    /// program that doesn't call it gets none of it.
+    #[test]
+    fn texture_query_lod_translates() {
+        let fsh = "#version 430\nuniform sampler2D colortex0;\nuniform sampler3D lut;\n\
+                   uniform usampler2D colortex5;\nout vec4 c;\n\
+                   float level(sampler2D s, vec2 uv) { return textureQueryLod(s, uv).x; }\n\
+                   void main() {\n    vec2 uv = gl_FragCoord.xy / 64.0;\n    \
+                   vec2 a = textureQueryLod(colortex0, uv);\n    \
+                   vec2 b = textureQueryLod(lut, vec3(uv, 0.5));\n    \
+                   vec2 d = textureQueryLod(colortex5, uv);\n    \
+                   c = vec4(a + b + d, level(colortex0, uv), 1.0);\n}\n";
+        let p = program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        let info = Validator::new(ValidationFlags::all(), Capabilities::all())
+            .validate(&p.fragment)
+            .unwrap();
+        let entry = &p.fragment.entry_points[0];
+        let pipeline = naga::back::spv::PipelineOptions {
+            shader_stage: entry.stage,
+            entry_point: entry.name.clone(),
+        };
+        naga::back::spv::write_vec(&p.fragment, &info, &Default::default(), Some(&pipeline))
+            .unwrap();
+        let plain = program(
+            &[
+                ("composite.vsh", VSH_120),
+                (
+                    "composite.fsh",
+                    "#version 120\nvoid main() { gl_FragColor = vec4(1.0); }\n",
+                ),
+            ],
+            Target::Buffers,
+        )
+        .unwrap();
+        assert!(
+            !plain
+                .fragment
+                .functions
+                .iter()
+                .any(|(_, f)| f.name.as_deref() == Some("hz_textureQueryLod"))
+        );
+    }
+
     /// A `return` with code after it in its block (Miniature's hand: `#ifdef GBUFFERS_HAND
     /// return 0.5 * diffuse; #endif` and the rest of the function), which naga's frontend
     /// leaves half-built.
@@ -1767,6 +2022,20 @@ mod tests {
                    if (dot(q, q) < 4.0 && d > 0.0 && v.z < 1.0) {\n        \
                    float s = texture2D(shadowtex1, v.st).x;\n        return d * s / shadowModelView[2].z;\n    }\n    \
                    return d;\n}\nvoid main() { gl_FragColor = vec4(f(0.5, vec3(1.0))); }\n";
+        program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
+    /// A non-void function whose only `return` has unreachable code after it and no trailing
+    /// return at the end of the block (which naga would otherwise end with `return;` without a value).
+    #[test]
+    fn early_return_without_trailing_return_translates() {
+        let fsh = "#version 120\n\
+                   vec3 exposure(vec3 color) {\n    return color * 3.5;\n    int x = 1;\n}\n\
+                   void main() { gl_FragColor = vec4(exposure(vec3(1.0)), 1.0); }\n";
         program(
             &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
             Target::Buffers,
@@ -1823,6 +2092,158 @@ mod tests {
             Target::Buffers,
         )
         .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
+    /// A vertex stage that redeclares `gl_PerVertex` and whose block instance shares its name
+    /// with a function's parameter: it still writes the position, and the
+    /// block still reaches the fragment stage.
+    #[test]
+    fn a_per_vertex_redeclaration_and_a_parameter_named_like_the_instance() {
+        let vsh = "#version 460\nout gl_PerVertex { vec4 gl_Position; };\n\
+                   float luma(vec3 v) { return dot(v, vec3(0.3, 0.6, 0.1)); }\n\
+                   out VertexData {\n    layout(location = 1, component = 0) vec2 coord;\n} v;\n\
+                   void main() { v.coord = vec2(luma(vec3(1.0))); gl_Position = vec4(0.0, 0.0, 0.5, 1.0); }\n";
+        let fsh = "#version 460\nin VertexData {\n    layout(location = 1, component = 0) vec2 coord;\n} v;\n\
+                   /* RENDERTARGETS: 0 */\nlayout(location = 0) out vec4 c;\n\
+                   void main() { c = vec4(v.coord, 0.0, 1.0); }\n";
+        program(
+            &[("composite.vsh", vsh), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
+    /// Interface blocks between the stages may give members their own interpolation (GLSL 4.60,
+    /// 4.3.9; Shrimple's gbuffers programs): a `flat` member arrives flat.
+    #[test]
+    fn interface_block_members_keep_their_qualifiers() {
+        let vsh = "#version 330 compatibility\nout VertexData {\n    flat int id;\n    vec2 uv;\n} vOut;\n\
+                   void main() { gl_Position = ftransform(); vOut.id = 3; vOut.uv = vec2(0.5); }\n";
+        let fsh = "#version 330 compatibility\nin VertexData {\n    flat int id;\n    vec2 uv;\n} vIn;\n\
+                   void main() { gl_FragData[0] = vec4(float(vIn.id), vIn.uv, 1.0); }\n";
+        let p = program(
+            &[("composite.vsh", vsh), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        let entry = &p.fragment.entry_points[0].function;
+        let mut flats = 0;
+        for arg in &entry.arguments {
+            let bindings: Vec<&naga::Binding> = match &p.fragment.types[arg.ty].inner {
+                naga::TypeInner::Struct { members, .. } => {
+                    members.iter().filter_map(|m| m.binding.as_ref()).collect()
+                }
+                _ => arg.binding.iter().collect(),
+            };
+            for b in bindings {
+                if let naga::Binding::Location {
+                    interpolation: Some(naga::Interpolation::Flat),
+                    ..
+                } = b
+                {
+                    flats += 1;
+                }
+            }
+        }
+        assert_eq!(flats, 1, "one flat input, `id`");
+    }
+
+    /// A function that returns a value may reach its end without a `return` (GLSL 4.60, 6.1:
+    /// the value is undefined): after a loop (Lux's `MaxIdx`), an `if` without `else`, a
+    /// `switch` without `default`; it returns zero there. A function ending in its own
+    /// `return` keeps it.
+    #[test]
+    fn functions_reaching_their_end_return_zero() {
+        let fsh = "#version 330\nuniform int k;\nout vec4 c;\n\
+                   struct S { float a; ivec2 b; };\n\
+                   float after_loop(float x) {\n    for (int i = 0; i < 4; i++) {\n        \
+                   if (x > float(i)) return float(i);\n    }\n}\n\
+                   vec3 after_if(float x) { if (x > 0.5) return vec3(x); }\n\
+                   int after_switch() { switch (k) { case 0: return 1; case 1: return 2; } }\n\
+                   S after_struct(float x) { if (x > 0.5) { return S(x, ivec2(k)); } }\n\
+                   float own(float x) { return x * 2.0; }\n\
+                   void main() {\n    float x = float(k) * 0.25;\n    \
+                   c = vec4(after_loop(x) + after_if(x).x, float(after_switch()), \
+                   after_struct(x).a, own(x));\n}\n";
+        let p = program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        let zero_returns = |name: &str| {
+            let (_, f) = (p.fragment.functions.iter())
+                .find(|(_, f)| f.name.as_deref() == Some(name))
+                .unwrap_or_else(|| panic!("{name} missing"));
+            fn count(f: &naga::Function, b: &naga::Block) -> usize {
+                b.iter()
+                    .map(|s| match s {
+                        naga::Statement::Return { value: Some(v) } => matches!(
+                            f.expressions[*v],
+                            naga::Expression::ZeroValue(t) if Some(t) == f.result.as_ref().map(|r| r.ty)
+                        )
+                        .into(),
+                        naga::Statement::Block(b) => count(f, b),
+                        naga::Statement::If { accept, reject, .. } => {
+                            count(f, accept) + count(f, reject)
+                        }
+                        naga::Statement::Switch { cases, .. } => {
+                            cases.iter().map(|c| count(f, &c.body)).sum()
+                        }
+                        naga::Statement::Loop { body, continuing, .. } => {
+                            count(f, body) + count(f, continuing)
+                        }
+                        _ => 0,
+                    })
+                    .sum()
+            }
+            count(f, &f.body)
+        };
+        for name in ["after_loop", "after_if", "after_switch", "after_struct"] {
+            assert!(zero_returns(name) > 0, "{name}: its end returns no zero");
+        }
+        assert_eq!(zero_returns("own"), 0, "own: its own return was replaced");
+    }
+
+    /// A function may be declared again (GLSL 4.60, 6.1), before or after its definition: Bloop
+    /// includes the same helper's prototype from two files.
+    #[test]
+    fn functions_declared_again_translate() {
+        let fsh = "#version 330\nuniform float k;\nout vec4 c;\n\
+                   float f(float x);\nfloat f(float x);\nvec2 g(vec2 v, float s);\n\
+                   float f(float x) { return x * 2.0; }\nfloat f(float x);\n\
+                   vec2 g(vec2 v, float s) { return v * s; }\nvec2 g(vec2 v,\n       float s);\n\
+                   void main() { c = vec4(f(k), g(vec2(k), 3.0), 1.0); }\n";
+        let p = program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        for name in ["f", "g"] {
+            assert!(
+                (p.fragment.functions.iter()).any(|(_, f)| f.name.as_deref() == Some(name)),
+                "{name} missing"
+            );
+        }
+    }
+
+    /// A prototype declared again leaves the lines after it where they were: an error below it
+    /// still names its own line.
+    #[test]
+    fn errors_after_a_prototype_declared_again_keep_their_line() {
+        let fsh = "#version 330\nout vec4 c;\nfloat f(float x);\nfloat f(float x\n);\n\
+                   float f(float x) { return x; }\nvoid main() { c = vec4(f(nowhere)); }\n";
+        let errors = program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .err()
+        .expect("`nowhere` is not declared");
+        assert!(
+            errors
+                .iter()
+                .all(|e| e.line == 7 && e.message.contains("nowhere")),
+            "{errors:?}"
+        );
     }
 
     /// `if (c) return; else ...` keeps its `else`: the statements the translation guards with
@@ -1933,6 +2354,20 @@ mod tests {
         }));
     }
 
+    /// A `shared` variable whose struct type has no name (GLSL 4.60, 4.1.8), as compute
+    /// programs keep their work group's tiles.
+    #[test]
+    fn a_shared_struct_without_a_type_name_compiles() {
+        let csh = "#version 460\nlayout(local_size_x = 8, local_size_y = 8) in;\n\
+                   shared struct {\n    uint sum;\n    uint tile[gl_WorkGroupSize.x][gl_WorkGroupSize.y];\n} lds;\n\
+                   layout(r32ui) uniform uimage2D colorimg4;\nvoid main() {\n    \
+                   lds.tile[gl_LocalInvocationID.x][gl_LocalInvocationID.y] = gl_LocalInvocationIndex;\n    \
+                   barrier();\n    imageStore(colorimg4, ivec2(gl_GlobalInvocationID.xy), uvec4(lds.tile[1][1]));\n}\n";
+        let pack = Pack::from_zip_bytes("P.zip", zip(&[("shaders/deferred_a.csh", csh)])).unwrap();
+        translate_compute(&preprocess(&pack, "deferred_a.csh", &Macros::standard()))
+            .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
     #[test]
     fn buffer_blocks_bind_at_their_binding() {
         let csh = "#version 430\nlayout(local_size_x = 1) in;\n\
@@ -1966,6 +2401,27 @@ mod tests {
             .unwrap_or_else(|e| panic!("{e:?}"));
     }
 
+    /// A stage's `#version` may come from a header it includes: the program is that version
+    /// (`shared` is a keyword in GLSL 4.30, not a name to rename).
+    #[test]
+    fn the_version_may_come_from_an_included_header() {
+        let csh = "#include \"/prelude/core.glsl\"\nlayout(local_size_x = 4) in;\n\
+                   shared uint counts[4];\nlayout(r32ui) uniform uimage2D colorimg4;\n\
+                   void main() {\n    counts[gl_LocalInvocationIndex] = 1u;\n    barrier();\n    \
+                   imageStore(colorimg4, ivec2(0), uvec4(counts[1]));\n}\n";
+        let pack = Pack::from_zip_bytes(
+            "P.zip",
+            zip(&[
+                ("shaders/deferred_a.csh", csh),
+                ("shaders/prelude/core.glsl", "#version 460 core\n"),
+            ]),
+        )
+        .unwrap();
+        let pp = preprocess(&pack, "deferred_a.csh", &Macros::standard());
+        assert_eq!(pp.version, Some((460, Some("core".into()))));
+        translate_compute(&pp).unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
     #[test]
     fn work_group_size_is_its_layout() {
         let csh = "#version 430\nlayout(local_size_x = 8, local_size_y = 4) in;\n\
@@ -1986,14 +2442,38 @@ mod tests {
                 .iter()
                 .any(|(_, e)| matches!(e, naga::Expression::Literal(naga::Literal::U32(8))))
         );
+        // A constant expression (GLSL 4.60, 4.4) is worked out, also where naga reads it.
         assert_eq!(
-            work_group_size("layout(local_size_x = 8 * 2) in;\nuvec3 s = gl_WorkGroupSize;"),
-            Err("`local_size_x` is not a number gl_WorkGroupSize can take".into())
+            work_group_size(
+                "layout(local_size_x = min(gl_MaxComputeWorkGroupSize.x, 256 * 2), local_size_y = (3 + 1) / 2) in;\n\
+                 uvec3 s = gl_WorkGroupSize;"
+            )
+            .as_deref(),
+            Ok("layout(local_size_x = 512, local_size_y = 2) in;\nuvec3 s = uvec3(512u, 2u, 1u);")
+        );
+        assert_eq!(
+            work_group_size("layout(local_size_x = SIZE) in;\nvoid main() {}"),
+            Err("`local_size_x` is not a size Horizon can work out".into())
         );
         assert!(
             work_group_size("layout(local_size_x = 16) in;\nuvec3 s = gl_WorkGroupSize;")
                 .is_ok_and(|c| c.contains("uvec3(16u, 1u, 1u)"))
         );
+    }
+
+    /// A work group size given as a constant expression (GLSL 4.60, 4.4 and 4.4.1), kept within
+    /// the implementation's: the program compiles with its value.
+    #[test]
+    fn a_work_group_size_may_be_a_constant_expression() {
+        let csh = "#version 460\nlayout(local_size_x = min(gl_MaxComputeWorkGroupSize.x, 256), \
+                   local_size_y = 1, local_size_z = 1) in;\n\
+                   layout(r32ui) uniform uimage2D colorimg4;\n\
+                   void main() { imageStore(colorimg4, ivec2(gl_GlobalInvocationID.xy), uvec4(1u)); }\n";
+        let pack = Pack::from_zip_bytes("P.zip", zip(&[("shaders/deferred_a.csh", csh)])).unwrap();
+        let c = translate_compute(&preprocess(&pack, "deferred_a.csh", &Macros::standard()))
+            .unwrap_or_else(|e| panic!("{e:?}"));
+        let entry = &c.module.entry_points[0];
+        assert_eq!(entry.workgroup_size, [256, 1, 1]);
     }
 
     #[test]
@@ -2403,6 +2883,22 @@ mod image_parameter_tests {
         )
         .unwrap();
         let result = translate_compute(&preprocess(&pack, "setup.csh", &Macros::standard()));
+        assert!(result.is_ok(), "{:?}", result.err());
+    }
+}
+
+#[cfg(test)]
+mod mixed_integer_bounds_tests {
+    #[test]
+    fn compute_clamp_with_signed_index_and_unsigned_bounds_compiles() {
+        let source = "#version 430\nlayout(local_size_x=1) in; layout(std430,binding=0) buffer Data{uint result;};void main(){int index=int(gl_LocalInvocationID.x);result=clamp(index,0u,47u);}";
+        let pack = crate::Pack::from_zip_bytes(
+            "integer-bounds.zip",
+            crate::pack::tests::zip(&[("shaders/setup.csh", source)]),
+        )
+        .unwrap();
+        let stage = crate::preprocess(&pack, "setup.csh", &crate::Macros::standard());
+        let result = crate::translate_compute(&stage);
         assert!(result.is_ok(), "{:?}", result.err());
     }
 }

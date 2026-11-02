@@ -1,8 +1,8 @@
-MessageArgument.getMessage	port	crates/horizon-client/src/game/commands.rs::Game::expand_selectors	gap: minor: plain text only, no chat signing or text filter
-MessageArgument.resolveChatMessage	port	crates/horizon-client/src/game/commands.rs::Game::cmd_say	gap: minor: no chat signing, decorator or text filter
-MessageArgument.resolveSignedMessage	missing		minor: signed chat (signature, ChatDecorator, text filter) is not ported; /say sends plain text
-MessageArgument.resolveDisguisedMessage	missing		minor: ChatDecorator for unsigned messages is not ported
-MessageArgument.filterPlainText	missing		minor: text filtering service is not ported
+MessageArgument.getMessage	port	crates/horizon-client/src/game/commands.rs::Game::expand_selectors	gap: minor: plain text only, no chat signing
+MessageArgument.resolveChatMessage	port	crates/horizon-client/src/game/commands.rs::Game::cmd_say	gap: minor: no chat signing or decorator; the text filter is chat_filter_command
+MessageArgument.resolveSignedMessage	missing		minor: no signed chat (signature, ChatDecorator); /say sends plain text, its arguments filtered by chat_filter_command
+MessageArgument.resolveDisguisedMessage	inline	crates/horizon-client/src/lan/hub.rs::Hub::say	the /say of a source with no player: a disguised chat of type say_command named after the source
+MessageArgument.filterPlainText	port	crates/horizon-client/src/game/chat_filter.rs::Game::chat_filter_command	the message arguments of a guest's command (/say, /me, /msg, /teammsg) through the server's text filter
 MessageArgument.Message.toComponent	port	crates/horizon-client/src/game/commands.rs::Game::expand_selectors	@-selector expansion into names
 NbtPathArgument.readUnquotedName	port	crates/horizon-client-core/src/nbt_path.rs::parse_node	unquoted node name read in the bare-name arm of parse_node
 NbtPathArgument.isAllowedInUnquotedName	inline	crates/horizon-client-core/src/nbt_path.rs::parse_node	the excluded-character set of parse_node's bare-name arm
@@ -59,7 +59,7 @@ TeamArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::s
 TimeArgument.time	skip:java		builder: Horizon names ArgType::Time in the command tree
 TimeArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	ArgType::Time arm
 BlockInput.test	port	crates/horizon-client/src/game/commands.rs::Game::block_matches	gap: minor: block-entity NBT of the input is not compared
-BlockInput.overwriteWithDefinedProperties	missing		unsure: vanilla BlockInput.place keeps neighbour-updated shape properties when the command sets only some; Horizon resolves the given state directly (Game::block_state)
+BlockInput.overwriteWithDefinedProperties	port	crates/horizon-client/src/game/commands.rs::Game::block_input_state	/setblock normalizes neighbour shapes, then reapplies explicit properties; strict skips normalization; gap: /fill still places resolved input directly
 BlockPredicateArgument.parse	port	crates/horizon-command/src/block.rs::parse	
 BlockPredicateArgument.BlockPredicate.test	port	crates/horizon-client/src/game/commands.rs::Game::block_matches	gap: minor: block-entity NBT is not compared
 BlockPredicateArgument.TagPredicate.test	port	crates/horizon-client/src/game/commands.rs::Game::block_matches	gap: minor: block-entity NBT is not compared
@@ -126,7 +126,7 @@ net/minecraft/commands/arguments/selector/EntitySelector#sortAndLimit	inline	cra
 EntitySelectorParser.allowSelectors	inline	crates/horizon-command/src/args.rs::ArgType::parse	reg.permission >= 2 at each selector call site
 EntitySelectorParser.createAabb	inline	crates/horizon-client/src/game/commands.rs::Game::select_in_level	dx, dy, dz box from the origin
 EntitySelectorParser.finalizePredicates	port	crates/horizon-client/src/game/commands.rs::Game::select_in_level	player: x_rotation and y_rotation are parsed but never filter the selection; the level filter is here
-EntitySelectorParser.createRotationPredicate	missing		player: x_rotation and y_rotation ranges are parsed but never applied, so @e[y_rotation=...] selects regardless of facing
+EntitySelectorParser.createRotationPredicate	inline	crates/horizon-client/src/game/commands.rs::rotation_in	x_rotation is the pitch and y_rotation the yaw, wrapped and compared with the wrapped range that runs through 180 when its minimum is above its maximum
 EntitySelectorParser.shouldInvertValue	port	crates/horizon-command/src/selector.rs::SelectorParser::should_invert	
 EntitySelectorParser.fillSelectorSuggestions	port	crates/horizon-command/src/selector.rs::SelectorParser::fill_selectors	
 EntitySelectorParser.suggestNameOrSelector	inline	crates/horizon-command/src/selector.rs::SelectorParser::fill_suggestions	

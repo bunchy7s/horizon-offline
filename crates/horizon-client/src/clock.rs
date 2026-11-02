@@ -311,10 +311,6 @@ pub struct FixedStep {
     /// (`ServerTickRateManager.updateStepTicks` broadcasts each one).
     step_changes: u32,
     step_requested: i32,
-    /// In-frame ticks dropped since the last overload warning (`drop_ticks`).
-    dropped: u32,
-    /// When the last overload warning was due, on the frame clock.
-    last_overload_warning: std::time::Duration,
 }
 
 impl Default for FixedStep {
@@ -332,8 +328,6 @@ impl Default for FixedStep {
             client: false,
             step_changes: 0,
             step_requested: 0,
-            dropped: 0,
-            last_overload_warning: std::time::Duration::ZERO,
         }
     }
 }
@@ -448,41 +442,6 @@ impl FixedStep {
     pub fn sprinting(&self) -> bool {
         self.manager.is_sprinting()
     }
-    /// Whether a frame that ran its world in the frame, and whose ticks so
-    /// far took `spent`, may run another one. Vanilla's world ticks on the
-    /// integrated server's thread, so a slow tick costs its frames nothing:
-    /// the server falls behind and says so (`MinecraftServer.runServer`'s
-    /// "Can't keep up!"). In the frame, a world whose ticks take longer than
-    /// their length falls behind every frame, so every frame ran the client
-    /// timer's ten: at 57 ms a tick, 1.7 FPS. So a frame stops once its
-    /// ticks have taken a tick's length: ticks of a few milliseconds keep the
-    /// full ten, and a world that cannot keep up runs one tick a frame,
-    /// slower but drawn. A sprint (`/tick sprint`) runs its own frame's worth.
-    pub fn tick_fits(&self, spent: std::time::Duration) -> bool {
-        self.sprinting() || spent < self.tick_duration()
-    }
-    /// The frame skips its remaining `ticks` (`tick_fits`): the world runs
-    /// slower than its tick rate. Returns vanilla's overload warning when one
-    /// is due: a second's worth of ticks behind, at most every ten seconds
-    /// (`OVERLOADED_THRESHOLD_NANOS`, `OVERLOADED_WARNING_INTERVAL_NANOS`).
-    pub fn drop_ticks(&mut self, ticks: u32) -> Option<String> {
-        self.dropped = self.dropped.saturating_add(ticks);
-        let tick = self.tick_duration();
-        let behind = tick * self.dropped;
-        let threshold = std::time::Duration::from_secs(1) + tick * 20;
-        let interval = std::time::Duration::from_secs(10) + tick * 100;
-        if behind <= threshold || self.now < self.last_overload_warning + interval {
-            return None;
-        }
-        let warning = format!(
-            "Can't keep up! Is the server overloaded? Running {}ms or {} ticks behind",
-            behind.as_millis(),
-            self.dropped
-        );
-        self.dropped = 0;
-        self.last_overload_warning = self.now;
-        Some(warning)
-    }
     /// `requestGameToSprint`: true when a sprint was already running.
     pub fn start_sprint(&mut self, ticks: u32) -> bool {
         self.manager
@@ -553,37 +512,6 @@ impl FixedStep {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_frame_stops_ticking_after_a_ticks_length() {
-        let clock = FixedStep::default();
-        let ms = std::time::Duration::from_millis;
-        // Ticks of 4 ms: the ten the timer allows fit in 50 ms.
-        assert!(clock.tick_fits(ms(4 * 9)));
-        // Ticks of 40 ms: the second one runs, not a third.
-        assert!(clock.tick_fits(ms(40)));
-        assert!(!clock.tick_fits(ms(80)));
-        // One tick longer than its length still runs, once a frame.
-        assert!(clock.tick_fits(ms(0)));
-        assert!(!clock.tick_fits(ms(120)));
-    }
-    #[test]
-    fn dropped_ticks_warn_once_a_second_behind_and_not_again_for_ten() {
-        let mut clock = FixedStep::default();
-        let s = std::time::Duration::from_secs;
-        clock.now = s(20);
-        assert_eq!(
-            clock.drop_ticks(40),
-            None,
-            "two seconds: not past 1 s + 20 ticks"
-        );
-        let warning = clock.drop_ticks(1).expect("past the threshold");
-        assert!(warning.contains("2050ms or 41 ticks behind"), "{warning}");
-        clock.now = s(25);
-        assert_eq!(clock.drop_ticks(100), None, "within ten seconds");
-        clock.now = s(36);
-        assert!(clock.drop_ticks(0).unwrap().contains("100 ticks behind"));
-    }
 
     #[test]
     fn timer_carries_fractions_and_caps_nothing_itself() {

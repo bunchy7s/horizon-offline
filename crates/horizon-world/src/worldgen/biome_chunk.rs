@@ -28,6 +28,10 @@ impl<E: std::fmt::Display> std::fmt::Display for BiomeFillError<E> {
 }
 impl<E: std::error::Error + 'static> std::error::Error for BiomeFillError<E> {}
 impl<T: Clone> BiomeChunk<T> {
+    /// The heap bytes of its quart cells.
+    pub fn heap_bytes(&self) -> usize {
+        self.sections.capacity() * std::mem::size_of::<[T; 64]>()
+    }
     /// A chunk's biome values use the same supported vertical bounds as terrain.
     /// Each section stores a dense 4×4×4 array; palette/network codecs are separate.
     pub fn new(

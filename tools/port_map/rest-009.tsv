@@ -30,19 +30,19 @@ RegistryFixedCodec.decode	skip:java		codec decode of fixed registry references
 CircleGizmo.emit	missing		minor: debug circle gizmo (F3 debug renderers only); gizmos.rs has no circle primitive
 GizmoStyle.hasStroke	skip:other		style predicate; Horizon debug lines always carry one width (gizmos.rs::Line), so there is no stroke to test
 Gizmos.addGizmo	skip:other		registration into vanilla's thread-local collector; Horizon's gizmos.rs::Gizmos holds the lines directly
-Gizmos.rect	missing		minor: debug rectangles (F3 debug renderers only); gizmos.rs draws cuboid edges only, no faces
-Gizmos.billboardTextOverBlock	missing		minor: debug text above a block (debug renderers only); gizmos.rs has no billboard text
+Gizmos.rect	inline	crates/horizon-client/src/game/debug_renderers.rs::Game::solid_face_shapes	the box-and-direction fill overload `SolidFaceRenderer` uses: one cuboid face's four corners from gizmos.rs::cuboid_fill_quads, filled with a plain colour; the four-corner overload has no caller
+Gizmos.billboardTextOverBlock	inline	crates/horizon-client/src/game/debug_renderers.rs::Game::debug_renderer_geometry	the frame's texts: centred billboard text above a block in its own colour, sized by gizmos.rs::billboard_text_unit (block and sky light, water amounts)
 Gizmos.billboardTextOverMob	missing		minor: debug text above a mob (debug renderers only); gizmos.rs has no billboard text
 Gizmos.TemporaryCollection.close	skip:other		restores vanilla's thread-local gizmo collector; Horizon has no collector stack
 LineGizmo.emit	port	crates/horizon-client/src/gizmos.rs::Gizmos::line	gap: minor: no alpha multiplier, so debug lines do not fade
 PointGizmo.emit	missing		minor: debug point gizmo (F3 debug renderers only); gizmos.rs has no point primitive
-RectGizmo.fromCuboidFace	missing		minor: face rectangle for debug rects (F3 debug renderers only); not ported
-RectGizmo.emit	missing		minor: filled and outlined debug quads (F3 debug renderers only); gizmos.rs has no quad primitive
+RectGizmo.fromCuboidFace	inline	crates/horizon-client/src/game/debug_renderers.rs::Game::solid_face_shapes	the four corners of one cuboid face, in gizmos.rs::cuboid_fill_quads' order (+X, -X, -Z, +Z, +Y, -Y), for the sturdy sides
+RectGizmo.emit	inline	crates/horizon-client/src/gizmos.rs::cuboid_fill_quads	the filled quad of a rect gizmo: cuboid_fill_quads' six faces, filled with a plain colour in debug_renderer_geometry
 SimpleGizmoCollector.add	skip:other		adds to vanilla's per-frame gizmo collector; Horizon has no collector object, gizmos.rs::Gizmos holds the lines
 SimpleGizmoCollector.drainGizmos	skip:other		per-frame hand-off and expiry of vanilla's collector; Horizon's debug gizmos have no expiry
 SimpleGizmoCollector.GizmoInstance.persistForMillis	missing		minor: debug gizmos that stay on screen for a set time (F3 debug renderers only); gizmos.rs has no expiry
 SimpleGizmoCollector.GizmoInstance.getAlphaMultiplier	missing		minor: fade-out of persisted debug gizmos; gizmos.rs has no fade
-TextGizmo.emit	missing		minor: debug text gizmo (F3 debug renderers only); gizmos.rs has no text primitive
+TextGizmo.emit	inline	crates/horizon-client/src/game/debug_renderers.rs::Game::debug_renderer_geometry	a text gizmo draws through the billboard text path, one font pixel at billboard_text_unit's world size
 TextGizmo.Style.withLeftAlignment	missing		minor: left-aligned debug label text (debug renderers only); no text style in gizmos.rs
 DeprecatedTranslationsInfo.loadFromJson	port	crates/horizon-client-core/src/lang.rs::apply_deprecated	parses and applies the deprecated list in one fn; vanilla throws on a bad file, Horizon ignores it
 DeprecatedTranslationsInfo.loadFromResource	inline	crates/horizon-client-core/src/lang.rs::Language::load	reads assets/minecraft/lang/deprecated.json from the first source that has it, then applies it

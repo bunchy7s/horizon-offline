@@ -4,7 +4,7 @@ SkullBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_en
 SkullBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	per-part component read; the skull's three parts come from the parts table
 SkullBlockEntity.removeComponentsFromTag	inline	crates/horizon-client/src/block_entity_item.rs::pick	the three keys are removed from the saved NBT inside pick's part loop
 SpawnerBlockEntity.triggerEvent	port	crates/horizon-client/src/mobs/spawner.rs::Spawner::client_event	event 1 resets the client spawn delay to the minimum; other events return false
-SpawnerBlockEntity.setEntityData	missing		minor: an op's spawn egg with an ENTITY_DATA component only sets the mob type on a spawner here (use_spawn_egg_on_spawner); the rest of the egg's entity data is dropped
+SpawnerBlockEntity.setEntityData	port	crates/horizon-client/src/mobs/spawner.rs::Spawner::set_entity_data	use_spawn_egg_on_spawner passes the egg's entity data, which is merged into the spawner's next data; the BlockUpdated event sets it changed
 StructureBlockEntity.updateBlockState	port	crates/horizon-client/src/game/structure_blocks.rs::Game::set_structure_mode	the mode is written to the block's mode property too
 StructureBlockEntity.usedBy	port	crates/horizon-client/src/game/block_editor.rs::Game::open_block_editor_if_editable	a game master's right click opens the structure block screen
 StructureBlockEntity.setStructureName	port	crates/horizon-client-render/src/structure_block.rs::StructureBlock::set_structure_name	the SET_STRUCTURE_BLOCK packet's name reaches the entity
@@ -16,13 +16,13 @@ StructureBlockEntity.placeStructureIfSameSize	port	crates/horizon-client/src/gam
 StructureBlockEntity.loadStructureInfo	port	crates/horizon-client/src/game/structure_blocks.rs::Game::load_structure_info	the template's size and author are read back
 StructureBlockEntity.placeStructure	port	crates/horizon-client/src/game/structure_blocks.rs::Game::place_structure	mirror, rotation, integrity, seed, strict and ignore entities come from the block entity; the redstone path is Game::trigger_structure_block
 StructureBlockEntity.getStructureTemplate	port	crates/horizon-world/src/worldgen/structure.rs::StructureResources::template	name lookup only; nothing calls it for a structure block
-StructureBlockEntity.unloadStructure	missing		minor: no structure block to unload a template from; templates in StructureResources are never dropped
+StructureBlockEntity.unloadStructure	inline	crates/horizon-client/src/game/structure_blocks.rs::Game::trigger_structure_block	the Corner arm drops the saved template (`structure_templates.remove`), so the next use reads the file
 StructureBlockEntity.isStructureLoadable	port	crates/horizon-client/src/game/structure_blocks.rs::Game::structure_loadable	the Load button reports whether the template exists
 StructureBlockEntity.renderMode	port	crates/horizon-client-render/src/structure_block.rs::StructureBlock::render_mode	a creative structure block shows its mode's outline
 StructureBlockEntity.getRenderableBox	port	crates/horizon-client-render/src/structure_block.rs::StructureBlock::renderable_box	the outline box of SAVE and LOAD modes
 TestInstanceBlockEntity.Data.withSize	skip:java		record copy-with builder; no behaviour of its own
-TestInstanceBlockEntity.Data.withStatus	missing		minor: test instance status never changes; Horizon has no game test runner (/test only reports no instances)
-TestInstanceBlockEntity.Data.withError	missing		minor: no game test runner, so no error message is ever set on a test instance block
+TestInstanceBlockEntity.Data.withStatus	port	crates/horizon-client/src/game/game_tests.rs::Game::set_test_status	setRunning and setSuccess write the status through it and mark the block entity updated; a new status clears the error message
+TestInstanceBlockEntity.Data.withError	port	crates/horizon-client/src/game/game_tests.rs::Game::set_test_status	setErrorMessage carries the text as the block entity's error_message, which the next status change clears
 TheEndGatewayBlockEntity.beamAnimationTick	port	crates/horizon-client-render/src/block_entity_anim.rs::EndGateway::tick	client ticker: age goes up and the teleport cooldown goes down
 TheEndGatewayBlockEntity.getSpawnPercent	inline	crates/horizon-client-render/src/block_entity_render.rs::gateway_beam	spawn percent is (age + partial) / 200, clamped, inside the beam function
 TheEndGatewayBlockEntity.getCooldownPercent	inline	crates/horizon-client-render/src/block_entity_render.rs::gateway_beam	cooldown percent is one minus the clamped cooldown over 40, inside the beam function
@@ -90,9 +90,9 @@ TreeGrower.getSurroundingBlockStates	inline	crates/horizon-world/src/level/growt
 TreeGrower.removeSaplings	inline	crates/horizon-world/src/level/growth.rs::Sim::grow_tree	the mega branch clears the four sapling blocks before placing
 TreeGrower.resetSaplings	inline	crates/horizon-world/src/level/growth.rs::Sim::grow_tree	restores the four blocks after a failed placement
 TreeGrower.isTwoByTwoSapling	inline	crates/horizon-world/src/level/growth.rs::Sim::two_by_two	all four blocks must be the sapling's own block
-MovingPistonBlock.destroy	missing		minor: breaking a moving piston does not remove the extended base piston next to it
-MovingPistonBlock.useWithoutItem	missing		minor: a right click on a moving piston with no block entity does not remove it
-MovingPistonBlock.getDrops	missing		minor: a moving piston drops nothing; vanilla drops the drops of the block it carries
+MovingPistonBlock.destroy	port	crates/horizon-world/src/level/update.rs::Sim::destroy_moving_piston_base	a removed moving piston removes the extended base behind it, and leaves an unextended one
+MovingPistonBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	the MovingPiston arm: a server-side click removes a moving piston whose block entity is gone, and one still in flight passes
+MovingPistonBlock.getDrops	port	crates/horizon-world/src/level/pistons.rs::dropped_state	the block the moving piston carries, or None (vanilla's empty list) when its block entity is gone; drop_resources calls it
 MovingPistonBlock.getBlockEntity	port	crates/horizon-world/src/level/pistons.rs::Sim::moving_piston	
 MovingPistonBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	rotation goes through the table built from block data
 MovingPistonBlock.createBlockStateDefinition	skip:data		state properties come from the block data tables
@@ -117,8 +117,8 @@ PistonMovingBlockEntity.getYOff	port	crates/horizon-world/src/piston_shape.rs::M
 PistonMovingBlockEntity.getZOff	port	crates/horizon-world/src/piston_shape.rs::MovingPistonState::interpolated_offset	the z part of the offset
 PistonMovingBlockEntity.moveEntityByPiston	port	crates/horizon-client/src/game/piston_push.rs::Game::move_pushed	moves a body along the push with the piston no-clip rule
 PistonMovingBlockEntity.moveStuckEntities	port	crates/horizon-client/src/game/piston_push.rs::Game::push_for_piston	the honey branch selects sticky passengers after the collided ones
-PistonMovingBlockEntity.loadAdditional	missing		minor: moving piston data is not read from the save; moving pistons are not persisted at all
-PistonMovingBlockEntity.saveAdditional	missing		minor: moving pistons are not written to the save, so a save taken mid-move leaves no entry for the moving_piston block
+PistonMovingBlockEntity.loadAdditional	port	crates/horizon-client/src/game/persist.rs::Game::moving_piston_from_nbt	a `minecraft:piston` entity whose block is still a moving piston: blockState, facing, progress, extending and source
+PistonMovingBlockEntity.saveAdditional	port	crates/horizon-client/src/game/persist.rs::Game::moving_piston_to_nbt	the moving piston of each moving_piston block as a `minecraft:piston` entity in attach_save_data
 PistonMovingBlockEntity.setLevel	skip:data		on load an unknown moved block becomes air; Horizon resolves moved states from the block registry
 PistonStructureResolver.isSticky	port	crates/horizon-world/src/level/pistons.rs::Sim::is_sticky_piston	
 PistonStructureResolver.canStickToEachOther	port	crates/horizon-world/src/level/pistons.rs::Sim::can_stick	
@@ -139,7 +139,7 @@ BlockBehaviour.Properties.ofLegacyCopy	skip:java		builder copy; values come from
 BlockBehaviour.Properties.mapColor	skip:java		builder setter; values come from block data
 BlockBehaviour.Properties.strength	skip:java		builder setter; values come from block data
 BlockBehaviour.Properties.offsetType	skip:java		builder setter; values come from block data
-StateHolder.findNextInCollection	missing		minor: cycling a block property to its next value (the debug stick's cycle) is not in Horizon
+StateHolder.findNextInCollection	port	crates/horizon-client/src/game/debug_stick.rs::relative_index	the next value in a property's list, wrapping to the first; the debug stick's cycle picks its value with it
 StateHolder.toString	skip:debug		string form of a state for logs and debug output
 StateHolder.valueIndex	skip:java		index lookup over a fixed array; Horizon keeps properties in a name-keyed map
 StateHolder.getNullableValue	port	crates/horizon-world/src/worldgen/structure/legacy.rs::PieceContext::property	returns None for a missing property

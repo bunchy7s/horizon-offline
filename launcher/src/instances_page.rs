@@ -116,11 +116,11 @@ impl Launcher {
         self.native_update = None;
         self.settings.instance =
             (instance.kind != InstanceKind::Default).then(|| instance.id.clone());
-        self.settings.save();
+        self.save_settings();
     }
 
     /// A texture from the selected version's prepared files, its first frame, drawn as pixels.
-    fn texture_image(&mut self, name: &str, size: f32) -> Option<Arc<RenderImage>> {
+    pub(super) fn texture_image(&mut self, name: &str, size: f32) -> Option<Arc<RenderImage>> {
         let tag = self.selected().filter(|t| backend::is_prepared(t))?.clone();
         let scale = self.scale;
         self.instances
@@ -278,6 +278,20 @@ impl Launcher {
             java: Default::default(),
         });
         self.servers.text(Field::InstanceVersion).set(String::new());
+    }
+
+    /// Opens the dialog for a copy of the selected instance, named after it.
+    pub(super) fn start_copy(&mut self) {
+        let Some(name) = self.selected_instance().map(|i| i.name.clone()) else {
+            return;
+        };
+        self.open_instance_dialog(None);
+        self.servers
+            .text(Field::InstanceName)
+            .set(format!("{name} copy"));
+        if let Some(d) = &mut self.instances.dialog {
+            d.copy = true;
+        }
     }
 
     /// Escape closes the dialog. Whether it did.
@@ -676,11 +690,7 @@ impl Launcher {
     pub(super) fn instance_row(&mut self, n: usize, cx: &mut Context<Self>) -> Option<Div> {
         let t = self.theme;
         let instance = self.selected_instance()?.clone();
-        let (home, edit, name) = (
-            instance.home.clone(),
-            instance.clone(),
-            instance.name.clone(),
-        );
+        let (home, edit) = (instance.home.clone(), instance.clone());
         // Under the name, wrapping: six actions don't fit beside it at the window's narrowest.
         let actions = div()
             .flex()
@@ -699,13 +709,7 @@ impl Launcher {
             .child(
                 button("instance-copy", "Copy…", Kind::Ghost, &t).on_click(cx.listener(
                     move |this, _: &ClickEvent, _, cx| {
-                        this.open_instance_dialog(None);
-                        this.servers
-                            .text(Field::InstanceName)
-                            .set(format!("{name} copy"));
-                        if let Some(d) = &mut this.instances.dialog {
-                            d.copy = true;
-                        }
+                        this.start_copy();
                         cx.notify();
                     },
                 )),
@@ -845,17 +849,20 @@ impl Launcher {
         )
     }
 
-    fn delete_instance(&mut self, id: &str) {
+    pub(super) fn delete_instance(&mut self, id: &str) {
         if self.client.is_some() || self.starting_client.is_some() {
             return;
         }
-        match instances::delete(id) {
-            Ok(_) => {
+        match instances::delete_with_selection(id) {
+            Ok((_, saved)) => {
                 self.instances.confirm_delete = None;
+                self.instances.delete_error = None;
                 // Play starts Horizon again; the window's copy of the settings says so too.
                 if self.settings.instance.as_deref() == Some(id) {
                     self.settings.instance = None;
-                    self.settings.save();
+                    self.save_settings();
+                } else if let Err(error) = saved {
+                    self.settings_save_error = Some(error);
                 }
                 self.reload_instances();
             }
@@ -879,7 +886,7 @@ pub(super) fn played_line(instance: &Instance) -> String {
 }
 
 /// A Java instance's line in the sidebar: "Java 1.21.4", and its loader ("· Fabric 0.16.9").
-fn java_line(j: &instances::JavaGame) -> String {
+pub(super) fn java_line(j: &instances::JavaGame) -> String {
     match &j.loader {
         Some(l) => format!("Java {} · {} {}", j.minecraft, l.kind.name(), l.version),
         None => format!("Java {}", j.minecraft),
@@ -887,7 +894,7 @@ fn java_line(j: &instances::JavaGame) -> String {
 }
 
 /// The first letter or digit of a name, for an icon without a picture.
-fn initial(name: &str) -> String {
+pub(super) fn initial(name: &str) -> String {
     name.chars()
         .find(|c| c.is_alphanumeric())
         .unwrap_or('?')

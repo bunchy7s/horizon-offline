@@ -720,6 +720,40 @@ fn classic_world_selection_is_silent_until_the_entry_launches() {
 }
 
 #[test]
+fn middle_clicking_a_world_selects_it_without_joining() {
+    let mut f = Fixture::new();
+    f.world("World", "World");
+    f.title.enter_singleplayer();
+    let size = (480.0, 262.0);
+    let enabled = |f: &Fixture, label: &str| {
+        f.title
+            .buttons(size.0, size.1)
+            .into_iter()
+            .find(|b| b.label == label)
+            .unwrap()
+            .enabled
+    };
+    assert!(!enabled(&f, "Edit"), "nothing is selected yet");
+    assert!(f.title.select_world_at(240.0, 60.0, size));
+    assert!(matches!(
+        f.title.mode,
+        Mode::Select {
+            selected: Some(0),
+            ..
+        }
+    ));
+    assert!(
+        enabled(&f, "Edit"),
+        "the selection callback reaches the footer"
+    );
+    // Again on the selected row: still only a selection, not a join.
+    assert!(f.title.select_world_at(240.0, 60.0, size));
+    assert!(matches!(f.title.mode, Mode::Select { .. }));
+    // Outside the rows (the footer) nothing is selected.
+    assert!(!f.title.select_world_at(240.0, 250.0, size));
+}
+
+#[test]
 fn a_world_open_elsewhere_stays_closed_behind_a_toast() {
     let mut f = Fixture::new();
     f.world("World", "World");
@@ -1039,6 +1073,65 @@ fn create_world_tabs_follow_vanilla_and_their_choices_reach_the_action() {
     // Cancel removes the folder (removeTempDataPackDir).
     f.title.escape();
     assert!(!dir.exists());
+}
+
+#[test]
+fn ctrl_digits_and_ctrl_tab_switch_the_create_world_tabs() {
+    use winit::keyboard::KeyCode;
+    let mut f = Fixture::new();
+    f.click("Singleplayer");
+    assert!(matches!(f.title.mode, Mode::Create { .. }));
+    let shown = |f: &Fixture| -> (usize, u8) {
+        let Mode::Create { focus, options, .. } = &f.title.mode else {
+            panic!("the Create World screen")
+        };
+        (options.tab, *focus)
+    };
+    // The screen opens on the Game tab with the name box focused.
+    assert_eq!(shown(&f), (0, 0));
+    // `TabNavigationBar.getNextTabIndex`: a digit is floorMod(key - 1, 10), so
+    // Ctrl+2 is the World tab, Ctrl+3 the More tab. The tab's fields are new
+    // widgets, so the name box that had the keys gives them up.
+    assert_eq!(
+        f.title.tab_bar_key(KeyCode::Digit2, true, false),
+        Some(true)
+    );
+    assert_eq!(shown(&f), (1, 2));
+    assert_eq!(
+        f.title.tab_bar_key(KeyCode::Numpad3, true, false),
+        Some(true)
+    );
+    assert_eq!(shown(&f), (2, 2));
+    // The same tab again changes nothing and plays no click sound.
+    assert_eq!(
+        f.title.tab_bar_key(KeyCode::Digit3, true, false),
+        Some(false)
+    );
+    // Ctrl+4..9 and Ctrl+0 ask for tabs past the third: Mth.clamp keeps the
+    // last tab, and none of them moves or sounds.
+    for key in [KeyCode::Digit4, KeyCode::Digit9, KeyCode::Digit0] {
+        assert_eq!(f.title.tab_bar_key(key, true, false), Some(false));
+        assert_eq!(shown(&f).0, 2);
+    }
+    // Ctrl+Tab steps one tab forward and Ctrl+Shift+Tab one back, wrapping.
+    assert_eq!(
+        f.title.tab_bar_key(KeyCode::Digit1, true, false),
+        Some(true)
+    );
+    assert_eq!(shown(&f).0, 0);
+    assert_eq!(f.title.tab_bar_key(KeyCode::Tab, true, false), Some(true));
+    assert_eq!(shown(&f).0, 1);
+    assert_eq!(f.title.tab_bar_key(KeyCode::Tab, true, true), Some(true));
+    assert_eq!(shown(&f).0, 0);
+    assert_eq!(f.title.tab_bar_key(KeyCode::Tab, true, true), Some(true));
+    assert_eq!(shown(&f).0, 2);
+    // Without Ctrl the bar leaves the key alone, so the digit still types.
+    assert_eq!(f.title.tab_bar_key(KeyCode::Digit2, false, false), None);
+    assert_eq!(shown(&f).0, 2);
+    // Only the Create World screen has a tab bar under these keys.
+    f.click("Cancel");
+    assert!(matches!(f.title.mode, Mode::Main));
+    assert_eq!(f.title.tab_bar_key(KeyCode::Digit2, true, false), None);
 }
 
 #[test]
@@ -2218,4 +2311,77 @@ fn a_create_world_tab_label_wider_than_its_tab_stays_inside_it() {
             "tab {tab} draws no label"
         );
     }
+}
+
+/// The ids native mods see for the title's screens (`Mode::id`, the screen
+/// hooks' `NativeScreenView.id`): one per screen, stable across releases.
+#[test]
+fn the_title_screens_have_their_own_ids() {
+    let mut f = Fixture::new();
+    assert_eq!(f.title.mode.id(), "title");
+    // An empty list opens Create New World (an empty list is why vanilla
+    // starts one), a world in it opens the list.
+    f.title.enter_singleplayer();
+    assert!(matches!(f.title.mode, Mode::Create { .. }));
+    assert_eq!(f.title.mode.id(), "world_create");
+    f.title.escape();
+    assert_eq!(f.title.mode.id(), "title");
+    f.world("World", "World");
+    f.select();
+    assert_eq!(f.title.mode.id(), "world_select");
+    f.click("Edit");
+    assert_eq!(f.title.mode.id(), "world_edit");
+}
+
+/// The multiplayer screens' ids, the ones the title's `Multiplayer` mode
+/// passes through.
+#[test]
+fn the_multiplayer_screens_have_their_own_ids() {
+    use crate::multiplayer::Screen as M;
+    assert_eq!(
+        M::Direct {
+            address: String::new()
+        }
+        .id(),
+        "direct_connect"
+    );
+    assert_eq!(
+        M::Edit {
+            index: None,
+            name: String::new(),
+            address: String::new(),
+            focus: 0,
+            packs: None,
+        }
+        .id(),
+        "add_server"
+    );
+    assert_eq!(
+        M::Edit {
+            index: Some(0),
+            name: String::new(),
+            address: String::new(),
+            focus: 0,
+            packs: None,
+        }
+        .id(),
+        "edit_server"
+    );
+    assert_eq!(
+        M::Friend {
+            code: String::new(),
+            relay: String::new(),
+            focus: 0,
+        }
+        .id(),
+        "friends_join"
+    );
+    assert_eq!(
+        M::Disconnected {
+            reason: String::new(),
+            retry: None,
+        }
+        .id(),
+        "disconnected"
+    );
 }

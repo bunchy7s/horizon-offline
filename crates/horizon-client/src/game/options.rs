@@ -121,8 +121,10 @@ impl Game<'_> {
         self.screen = Screen::Options;
         self.options_from_title = from_title;
         self.options_to_game = false;
+        let minecart_improvements = self.minecart_improvements();
         let ui = &mut self.ui.options;
         ui.open_at(!from_title && self.title.is_none(), page);
+        ui.minecart_improvements = minecart_improvements;
         let root = self.options.resources.clone();
         ui.languages = lang::available(&[&root]);
         self.refresh_pack_lists();
@@ -331,6 +333,9 @@ impl Game<'_> {
                     let text = self.agent_details();
                     self.clipboard.set(&text);
                 }
+                // The AI Agent page's repro buttons (game/repro.rs).
+                Event::ToggleRecording => self.toggle_recording_key(),
+                Event::ExportRepro => self.export_repro_key(),
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {
                     self.settings.save(&Self::options_path());
@@ -606,7 +611,7 @@ impl Game<'_> {
             }
             horizon_client::graphics::Pacing::Efficient => {
                 let mut clock = horizon_client::window::SleepingClock(self.frame_clock);
-                horizon_client::window::end_frame(&mut self.limiter, limit, &mut clock);
+                horizon_client::window::end_frame_on_grid(&mut self.limiter, limit, &mut clock);
             }
         }
     }

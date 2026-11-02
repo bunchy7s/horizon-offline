@@ -2,6 +2,7 @@
 //! breezes shoot, and the burst they make (`ServerExplosion` with
 //! `TRIGGER_BLOCK`: no damage, only knockback and the blocks that react).
 use super::Game;
+use super::entity::{Blast, Entity as _, for_each_entity_mut};
 use horizon_client::advancements::EntityView;
 use horizon_client::{
     Result,
@@ -74,7 +75,7 @@ impl Game<'_> {
         let pitch = 0.4 / (self.world.random.next_float() * 0.4 + 0.8);
         self.audio
             .play("minecraft:entity.wind_charge.throw", Some(eye), 0.5, pitch);
-        self.stats.add("used", "minecraft:wind_charge", 1);
+        self.award_stat("used", "minecraft:wind_charge", 1);
         self.swing_arm();
         if !self.creative
             && let Some(s) = self.held_mut().as_mut()
@@ -225,8 +226,10 @@ impl Game<'_> {
         multiplier: f32,
         breeze: bool,
         wind_charge: bool,
-        blocklike: bool,
+        blocks: &[[i32; 3]],
     ) -> Vec<(u32, [f64; 3])> {
+        // ServerExplosion.shouldAffectBlocklikeEntities
+        let blocklike = !breeze && !wind_charge && self.ui.rules.bool("mob_griefing");
         let diameter = f64::from(radius * 2.0);
         let distance = |p: [f64; 3]| {
             ((p[0] - center[0]).powi(2) + (p[1] - center[1]).powi(2) + (p[2] - center[2]).powi(2))
@@ -248,7 +251,7 @@ impl Game<'_> {
         // The player, then every other player in the level (LAN guests),
         // each swapped in as the player. In a guest's turn (a mace's wind
         // burst) the player is that guest.
-        let own = self.wind_push_player(center, radius, multiplier, breeze, wind_charge);
+        let own = self.wind_push_player(center, radius, multiplier, breeze, wind_charge, blocks);
         let mut pushed: Vec<_> = self.lan_acting.zip(own).into_iter().collect();
         if let Some(mut host) = self.lan.take() {
             let guests: Vec<u32> = host
@@ -260,7 +263,7 @@ impl Game<'_> {
                 .collect();
             for conn in guests {
                 let push = self.as_guest(&mut host, conn, |g| {
-                    g.wind_push_player(center, radius, multiplier, breeze, wind_charge)
+                    g.wind_push_player(center, radius, multiplier, breeze, wind_charge, blocks)
                 });
                 if let Some(Some(push)) = push {
                     pushed.push((conn, push));
@@ -269,231 +272,42 @@ impl Game<'_> {
             self.lan = Some(host);
         }
         let multiplier = f64::from(multiplier);
-        let mut mobs = std::mem::take(&mut self.mobs);
-        for m in mobs.iter_mut().filter(|m| m.alive()) {
-            let feet = [m.position.x, m.position.y, m.position.z];
+        // Every other entity takes `Entity.pushFromExplosion` alike: its
+        // distance is from its feet, its direction from its eyes. A kind sits
+        // out where its `ignoreExplosion` says (items and visible stands for a
+        // charge, vehicles for a mob's burst with mob griefing off).
+        let burst = Blast {
+            vehicles_ignore: breeze && !self.ui.rules.bool("mob_griefing"),
+            items_ignore: !blocklike,
+            spared: None,
+        };
+        let mut entities = self.take_entities();
+        for_each_entity_mut!(entities, entity => {
+            if entity.ignores_explosion(&burst) || !entity.pushed_by_wind() {
+                continue;
+            }
+            let feet = entity.position();
+            let feet = [feet.x, feet.y, feet.z];
             let dist = distance(feet) / diameter;
             if dist > 1.0 {
                 continue;
             }
-            let (w, h) = (m.kind.width / 2.0, f64::from(m.height()));
-            let exposure = self.seen_percent(
-                center,
-                [feet[0] - w, feet[1], feet[2] - w],
-                [feet[0] + w, feet[1] + h, feet[2] + w],
-            );
-            let eye = [feet[0], m.eye_y(), feet[2]];
-            let power = (1.0 - dist) * f64::from(exposure) * multiplier;
-            let dir = direction(eye);
-            m.velocity = Vec3::new(
-                m.velocity.x + dir[0] * power,
-                m.velocity.y + dir[1] * power,
-                m.velocity.z + dir[2] * power,
-            );
-        }
-        self.mobs = mobs;
-        // ArmorStand.ignoreExplosion: a visible stand feels only a burst that
-        // affects block-like entities (never a wind charge's).
-        if blocklike {
-            let mut stands = std::mem::take(&mut self.armor_stands);
-            for s in stands.iter_mut().filter(|s| !s.invisible) {
-                let feet = [s.position.x, s.position.y, s.position.z];
-                let dist = distance(feet) / diameter;
-                if dist > 1.0 {
-                    continue;
-                }
-                // EntityType.ARMOR_STAND's size, halved when small; a marker has none.
-                let (w, h, eye) = if s.marker {
-                    (0.0, 0.0, 0.0)
-                } else if s.small {
-                    (0.125, f64::from(0.9875f32), f64::from(0.9875f32))
-                } else {
-                    (0.25, f64::from(1.975f32), f64::from(1.7775f32))
-                };
-                let exposure = self.seen_percent(
-                    center,
-                    [feet[0] - w, feet[1], feet[2] - w],
-                    [feet[0] + w, feet[1] + h, feet[2] + w],
-                );
-                let power = (1.0 - dist) * f64::from(exposure) * multiplier;
-                let dir = direction([feet[0], feet[1] + eye, feet[2]]);
-                s.velocity = Vec3::new(
-                    s.velocity.x + dir[0] * power,
-                    s.velocity.y + dir[1] * power,
-                    s.velocity.z + dir[2] * power,
-                );
-            }
-            self.armor_stands = stands;
-        }
-        // Arrows and other projectiles (the charges themselves ignore it).
-        let push = |position: Vec3, velocity: &mut Vec3, game: &Game<'_>| {
-            let feet = [position.x, position.y, position.z];
-            let dist = distance(feet) / diameter;
-            if dist > 1.0 {
-                return;
-            }
-            let exposure = game.seen_percent(
-                center,
-                [feet[0] - 0.125, feet[1], feet[2] - 0.125],
-                [feet[0] + 0.125, feet[1] + 0.25, feet[2] + 0.125],
-            );
-            let power = (1.0 - dist) * f64::from(exposure) * multiplier;
-            let dir = direction(feet);
-            *velocity = Vec3::new(
-                velocity.x + dir[0] * power,
-                velocity.y + dir[1] * power,
-                velocity.z + dir[2] * power,
-            );
-        };
-        let mut projectiles = std::mem::take(&mut self.creatures.projectiles);
-        for p in projectiles.iter_mut().filter(|p| {
-            !p.stuck
-                && !matches!(
-                    p.kind,
-                    ProjectileKind::WindCharge | ProjectileKind::BreezeWindCharge
-                )
-        }) {
-            push(p.position, &mut p.velocity, self);
-        }
-        self.creatures.projectiles = projectiles;
-        let mut tnts = std::mem::take(&mut self.tnts);
-        for t in &mut tnts {
-            push(t.position, &mut t.velocity, self);
-        }
-        self.tnts = tnts;
-        // The rest of the entities in reach take `Entity.pushFromExplosion`
-        // alike: their distance is from their feet, their direction from their
-        // eyes (0.85 of the box height unless a type says otherwise).
-        let push_box =
-            |game: &Game<'_>, feet: Vec3, lo: [f64; 3], hi: [f64; 3], eye: f64, v: &mut Vec3| {
-                let feet = [feet.x, feet.y, feet.z];
-                let dist = distance(feet) / diameter;
-                if dist > 1.0 {
-                    return;
-                }
-                let exposure = game.seen_percent(center, lo, hi);
-                let power = (1.0 - dist) * f64::from(exposure) * multiplier;
-                let dir = direction([feet[0], feet[1] + eye, feet[2]]);
-                *v = Vec3::new(
-                    v.x + dir[0] * power,
-                    v.y + dir[1] * power,
-                    v.z + dir[2] * power,
-                );
-            };
-        // ItemEntity.ignoreExplosion: items feel only a burst that affects
-        // block-like entities (a mace's, never a wind charge's).
-        if blocklike {
-            let mut items = std::mem::take(&mut self.dropped);
-            for item in &mut items {
-                let p = item.position;
-                let half = 0.125;
-                push_box(
-                    self,
-                    p,
-                    [p.x - half, p.y, p.z - half],
-                    [p.x + half, p.y + 0.25, p.z + half],
-                    0.2125,
-                    &mut item.velocity,
-                );
-            }
-            self.dropped = items;
-        }
-        let mut orbs = std::mem::take(&mut self.orbs);
-        for o in &mut orbs {
-            let p = o.position;
-            push_box(
-                self,
-                p,
-                [p.x - 0.25, p.y, p.z - 0.25],
-                [p.x + 0.25, p.y + 0.5, p.z + 0.25],
-                f64::from(0.5f32 * 0.85f32),
-                &mut o.velocity,
-            );
-        }
-        self.orbs = orbs;
-        let mut falling = std::mem::take(&mut self.falling);
-        for f in &mut falling {
-            let b = horizon_client::falling_block::bounds(f.position);
+            let b = entity.explosion_box();
             let (lo, hi) = (b.min_position(), b.max_position());
-            let eye = f64::from((hi.y - lo.y) as f32 * 0.85f32);
-            push_box(
-                self,
-                f.position,
-                [lo.x, lo.y, lo.z],
-                [hi.x, hi.y, hi.z],
-                eye,
-                &mut f.velocity,
-            );
-        }
-        self.falling = falling;
-        // Firework rockets (0.25 wide, eyes at 0.85 of it), tridents in flight
-        // (0.5 wide, eyes at 0.13; like any arrow not pushed in the ground)
-        // take `Entity.pushFromExplosion` alike.
-        let mut rockets = std::mem::take(&mut self.rockets);
-        for r in &mut rockets {
-            let p = r.position;
-            push_box(
-                self,
-                p,
-                [p.x - 0.125, p.y, p.z - 0.125],
-                [p.x + 0.125, p.y + 0.25, p.z + 0.125],
-                0.2125,
-                &mut r.velocity,
-            );
-        }
-        self.rockets = rockets;
-        let mut tridents = std::mem::take(&mut self.tridents);
-        for t in tridents.iter_mut().filter(|t| !t.in_ground) {
-            let p = t.position;
-            push_box(
-                self,
-                p,
-                [p.x - 0.25, p.y, p.z - 0.25],
-                [p.x + 0.25, p.y + 0.5, p.z + 0.25],
-                f64::from(0.13_f32),
-                &mut t.velocity,
-            );
-        }
-        self.tridents = tridents;
-        // VehicleEntity.ignoreExplosion: a mob's burst (a breeze's) leaves
-        // boats and minecarts alone with mob griefing off.
-        if !(breeze && !self.ui.rules.bool("mob_griefing")) {
-            let mut boats = std::mem::take(&mut self.boats);
-            for b in &mut boats {
-                let bounds = b.bounds();
-                let (lo, hi) = (bounds.min_position(), bounds.max_position());
-                // EntityType.OAK_BOAT & co: eyeHeight is the full 0.5625.
-                push_box(
-                    self,
-                    b.position,
-                    [lo.x, lo.y, lo.z],
-                    [hi.x, hi.y, hi.z],
-                    0.5625,
-                    &mut b.velocity,
-                );
-            }
-            self.boats = boats;
-            let mut carts = std::mem::take(&mut self.carts);
-            for c in &mut carts {
-                let bounds = c.bounds();
-                let (lo, hi) = (bounds.min_position(), bounds.max_position());
-                let eye = f64::from((hi.y - lo.y) as f32 * 0.85f32);
-                push_box(
-                    self,
-                    c.position,
-                    [lo.x, lo.y, lo.z],
-                    [hi.x, hi.y, hi.z],
-                    eye,
-                    &mut c.velocity,
-                );
-            }
-            self.carts = carts;
-        }
+            let exposure = self.seen_percent(center, [lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
+            let power = (1.0 - dist) * f64::from(exposure) * multiplier;
+            let dir = direction([feet[0], feet[1] + entity.explosion_eye_height(), feet[2]]);
+            let mut push = [dir[0] * power, dir[1] * power, dir[2] * power];
+            let id = Some(entity.id());
+            self.native_explosion_knockback(self.dim.id(), center, blocks, id, &mut push);
+            entity.push_from_explosion(Vec3::new(push[0], push[1], push[2]));
+        });
+        self.restore_entities(entities);
         pushed
     }
-    /// `ServerExplosion.hurtEntities` for the player (not a spectator, nor a
-    /// creative player flying): the push, less with explosion knockback
-    /// resistance, and `ServerPlayer.onExplosionHit`. Returns the push.
+    /// `ServerExplosion.hurtEntities` for the player: the push, less
+    /// explosion knockback resistance, and `ServerPlayer.onExplosionHit`.
+    /// Returns the push for players eligible for the explosion packet.
     fn wind_push_player(
         &mut self,
         center: [f64; 3],
@@ -501,6 +315,7 @@ impl Game<'_> {
         multiplier: f32,
         breeze: bool,
         wind_charge: bool,
+        blocks: &[[i32; 3]],
     ) -> Option<[f64; 3]> {
         if self.spectator() {
             return None;
@@ -518,7 +333,8 @@ impl Game<'_> {
             + (feet[2] - center[2]).powi(2))
         .sqrt()
             / f64::from(radius * 2.0);
-        if dist > 1.0 || creative && p.flying {
+        let flying = creative && p.flying;
+        if dist > 1.0 {
             return None;
         }
         let w = f64::from(p.dimensions.width) / 2.0;
@@ -535,11 +351,12 @@ impl Game<'_> {
         );
         let power = (1.0 - dist) * f64::from(exposure) * f64::from(multiplier) * (1.0 - resistance);
         let l = (eye[0] * eye[0] + eye[1] * eye[1] + eye[2] * eye[2]).sqrt();
-        let push = if l < 1.0e-5 {
+        let mut push = if l < 1.0e-5 {
             [0.0; 3]
         } else {
             eye.map(|d| d / l * power)
         };
+        self.native_explosion_knockback(self.dim.id(), center, blocks, None, &mut push);
         let p = self.player.as_mut()?;
         p.velocity = Vec3::new(
             p.velocity.x + push[0],
@@ -565,7 +382,7 @@ impl Game<'_> {
             ..EntityView::default()
         });
         self.adv.marks.blast = Some(([at.x, at.y, at.z], cause));
-        Some(push)
+        (!flying).then_some(push)
     }
     /// The burst: knockback, the blocks that react, the gust and the sound.
     pub(super) fn wind_burst(
@@ -593,10 +410,7 @@ impl Game<'_> {
         let ctx = horizon_client::sculk::Context::default();
         self.post_game_event("minecraft:explode", center, ctx);
         let mut targets = self.wind_positions(center, radius);
-        // ServerExplosion.shouldAffectBlocklikeEntities
-        let blocklike = !breeze && !wind_charge && self.ui.rules.bool("mob_griefing");
-        let pushed =
-            self.wind_knockback(center, radius, multiplier, breeze, wind_charge, blocklike);
+        let pushed = self.wind_knockback(center, radius, multiplier, breeze, wind_charge, &targets);
         let block_count = targets.len();
         // Explosion.canTriggerBlocks: a breeze's charge needs mob griefing.
         if !breeze || self.ui.rules.bool("mob_griefing") {

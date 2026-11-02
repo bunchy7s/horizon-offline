@@ -1,0 +1,792 @@
+//! Mob models posed on the GPU (`gfx::entity_skin`): the store of models
+//! uploaded once, and the walk that turns one `render::draw` into the parts'
+//! matrices and jobs the shader expands into the very vertices `draw` would
+//! push, in its order.
+//!
+//! A model takes this path only when every polygon faces an axis: the
+//! normal matrix times an axis is one of its columns, exactly, so the shader's
+//! packed normals are the CPU's to the bit. Positions and UVs are the same
+//! sums in the same order (`Mat4::transform_point3`).
+
+use super::{ModelNormals, Part, anim::Poses};
+use crate::fast_hash::FxHashMap;
+use crate::gfx::entity_skin::{SkinFrame, SkinJob, SkinPart, SkinVertex};
+use horizon_assets::item_bake::BakedItemModel;
+use std::sync::Arc;
+
+/// A stored model: where its vertices start, and per part (pre-order) its
+/// own vertices and the end of its subtree, for the walk.
+struct Stored {
+    first: u32,
+    parts: Vec<StoredPart>,
+    /// The model's bounds in its parts' own space, per part: min and max of
+    /// its own vertices (none: no polygons).
+    bounds: Vec<Option<([f32; 3], [f32; 3])>>,
+    /// The model's render type culls back faces (the bat).
+    cull: bool,
+}
+
+#[derive(Clone, Copy)]
+struct StoredPart {
+    /// The part's first vertex, from the model's.
+    first: u32,
+    count: u32,
+    /// One past the last part of its subtree.
+    end: u32,
+}
+
+/// The models on the GPU, by the `Arc` they are drawn from. An entry holds
+/// its `Arc`, so the address is never reused while stored; models no one
+/// else holds any more are dropped by `begin`.
+#[derive(Default)]
+pub struct SkinModels {
+    stored: FxHashMap<usize, (Arc<Part>, Option<Stored>)>,
+    /// Item models, the same way (`item_render::ItemRenderState::submit_skinned`).
+    items: FxHashMap<usize, (Arc<BakedItemModel>, Option<StoredItem>)>,
+    vertices: u32,
+    /// Whether the layers improved transparency would draw in its stages are
+    /// posed here too (`gfx::Renderer::skins_tagged`; set each frame): the eyes
+    /// render type's (spiders', endermen's...) as [`SkinJob::FLAT`] draws, and
+    /// `entityTranslucent` layers (a horse's markings, a slime's outer cube).
+    pub tagged: bool,
+}
+
+/// A stored item model: its quads' vertices in order, by runs of quads that
+/// share a sprite and a tint, and its bounds.
+pub struct StoredItem {
+    pub runs: Vec<ItemRun>,
+    pub bounds: (glam::Vec3, glam::Vec3),
+}
+
+/// Consecutive quads of an item model with one sprite and tint index.
+pub struct ItemRun {
+    /// The run's first vertex in the store, and its vertex count.
+    pub first: u32,
+    pub count: u32,
+    /// Its first quad in the model.
+    pub quad: usize,
+    pub tint_index: i32,
+}
+
+/// Models whose store would grow past this restart it (a pack reload's
+/// models pile up otherwise).
+const STORE_LIMIT: u32 = 4 << 20;
+
+impl SkinModels {
+    /// Starts a frame: drops the models nothing else holds (their vertices
+    /// stay in the store until it restarts), restarts the store when it grew
+    /// too large or the renderer's (`stored`, its size) is out of step.
+    pub fn begin(&mut self, frame: &mut SkinFrame, stored: u32) {
+        if self.vertices > STORE_LIMIT || stored + frame.new_model.len() as u32 != self.vertices {
+            self.restart(frame);
+        }
+        self.stored
+            .retain(|_, (model, _)| Arc::strong_count(model) > 1);
+        self.items
+            .retain(|_, (model, _)| Arc::strong_count(model) > 1);
+        frame.clear_draws();
+    }
+
+    fn restart(&mut self, frame: &mut SkinFrame) {
+        self.stored.clear();
+        self.items.clear();
+        self.vertices = 0;
+        frame.new_model.clear();
+        frame.base = 0;
+        frame.reset = true;
+    }
+
+    fn entry(&mut self, model: &Arc<Part>, frame: &mut SkinFrame) -> Option<&Stored> {
+        let key = Arc::as_ptr(model) as usize;
+        let vertices = &mut self.vertices;
+        let (_, stored) = self.stored.entry(key).or_insert_with(|| {
+            // The renderer appends `new_model` to its store in order, so a
+            // model's first vertex is the store's size when it is added.
+            let before = frame.new_model.len();
+            let stored = flatten(model, *vertices, &mut frame.new_model);
+            *vertices += (frame.new_model.len() - before) as u32;
+            (model.clone(), stored)
+        });
+        stored.as_ref()
+    }
+
+    /// An item model's runs, stored on first sight; `None` when it has no
+    /// quads, or one that glows (`light_emission`) or is forced translucent.
+    pub fn item(
+        &mut self,
+        model: &Arc<BakedItemModel>,
+        frame: &mut SkinFrame,
+    ) -> Option<&StoredItem> {
+        let key = Arc::as_ptr(model) as usize;
+        let vertices = &mut self.vertices;
+        let (_, stored) = self.items.entry(key).or_insert_with(|| {
+            let before = frame.new_model.len();
+            let stored = flatten_item(model, *vertices, &mut frame.new_model);
+            *vertices += (frame.new_model.len() - before) as u32;
+            (model.clone(), stored)
+        });
+        stored.as_ref()
+    }
+}
+
+/// The model's quads as `item_render::submit_quads` reads them, appended to
+/// `out` (part 0, the layer's pose); `None` when a quad glows or is forced
+/// translucent (another material).
+fn flatten_item(
+    model: &BakedItemModel,
+    first: u32,
+    out: &mut Vec<SkinVertex>,
+) -> Option<StoredItem> {
+    use horizon_assets::model::Direction as D;
+    let other =
+        |q: &horizon_assets::bake::ModelQuad| q.light_emission != 0 || q.material.force_translucent;
+    if model.quads.is_empty() || model.quads.iter().any(other) {
+        return None;
+    }
+    let mut runs: Vec<ItemRun> = Vec::new();
+    let mut lo = glam::Vec3::INFINITY;
+    let mut hi = glam::Vec3::NEG_INFINITY;
+    for (i, q) in model.quads.iter().enumerate() {
+        let vertex = first + 4 * i as u32;
+        match runs.last_mut() {
+            Some(run)
+                if model.quads[run.quad].material.sprite == q.material.sprite
+                    && run.tint_index == q.tint_index =>
+            {
+                run.count += 4;
+            }
+            _ => runs.push(ItemRun {
+                first: vertex,
+                count: 4,
+                quad: i,
+                tint_index: q.tint_index,
+            }),
+        }
+        let axis = match q.facing {
+            D::East => 0,
+            D::Up => 1,
+            D::South => 2,
+            D::West => 3,
+            D::Down => 4,
+            D::North => 5,
+        };
+        for (pos, uv) in q.positions.iter().zip(q.uv) {
+            lo = lo.min(glam::Vec3::from_array(*pos));
+            hi = hi.max(glam::Vec3::from_array(*pos));
+            out.push(SkinVertex {
+                pos: *pos,
+                uv,
+                axis,
+                part: 0,
+            });
+        }
+    }
+    Some(StoredItem {
+        runs,
+        bounds: (lo, hi),
+    })
+}
+
+/// The model's vertices in pre-order (a part's polygons, then its children),
+/// appended to `out`; `None` when a polygon does not face an axis.
+fn flatten(model: &Part, first: u32, out: &mut Vec<SkinVertex>) -> Option<Stored> {
+    let start = out.len();
+    let mut parts = Vec::new();
+    let mut bounds = Vec::new();
+    fn walk(
+        part: &Part,
+        start: usize,
+        out: &mut Vec<SkinVertex>,
+        parts: &mut Vec<StoredPart>,
+        bounds: &mut Vec<Option<([f32; 3], [f32; 3])>>,
+    ) -> bool {
+        let index = parts.len();
+        let own = (out.len() - start) as u32;
+        parts.push(StoredPart {
+            first: own,
+            count: 0,
+            end: 0,
+        });
+        bounds.push(None);
+        let mut lo = [f32::INFINITY; 3];
+        let mut hi = [f32::NEG_INFINITY; 3];
+        for poly in &part.polygons {
+            let Some(axis) = axis(poly.normal) else {
+                return false;
+            };
+            for v in poly.vertices {
+                let pos = (glam::Vec3::new(v[0], v[1], v[2]) / 16.0).to_array();
+                for a in 0..3 {
+                    lo[a] = lo[a].min(pos[a]);
+                    hi[a] = hi[a].max(pos[a]);
+                }
+                out.push(SkinVertex {
+                    pos,
+                    uv: [v[3], v[4]],
+                    axis,
+                    part: index as u32,
+                });
+            }
+        }
+        parts[index].count = (out.len() - start) as u32 - own;
+        if !part.polygons.is_empty() {
+            bounds[index] = Some((lo, hi));
+        }
+        for child in &part.children {
+            if !walk(child, start, out, parts, bounds) {
+                return false;
+            }
+        }
+        parts[index].end = parts.len() as u32;
+        true
+    }
+    if !walk(model, start, out, &mut parts, &mut bounds) {
+        out.truncate(start);
+        return None;
+    }
+    Some(Stored {
+        first,
+        parts,
+        bounds,
+        cull: has_cull(model),
+    })
+}
+
+/// Whether the model's polygons cull back faces (all or none, set per model).
+fn has_cull(part: &Part) -> bool {
+    part.polygons.iter().any(|p| p.cull_back) || part.children.iter().any(has_cull)
+}
+
+/// 0..2 for +x, +y, +z, 3..5 for -x, -y, -z; `None` for any other normal.
+fn axis(n: [f32; 3]) -> Option<u32> {
+    let mut found = None;
+    for (a, &c) in n.iter().enumerate() {
+        if c == 1.0 || c == -1.0 {
+            if found.is_some() {
+                return None;
+            }
+            found = Some(a as u32 + if c < 0.0 { 3 } else { 0 });
+        } else if c != 0.0 {
+            return None;
+        }
+    }
+    found
+}
+
+/// One draw's parameters (`render::draw_scrolled`'s).
+#[derive(Clone, Copy)]
+pub struct Paint {
+    pub uv: [f32; 4],
+    pub scroll: f32,
+    pub color: u32,
+    pub light: u32,
+    pub overlay: u32,
+}
+
+/// Where a frame's posed draws go, and the bounds of the current mob's.
+pub struct Skin<'a> {
+    pub models: &'a mut SkinModels,
+    pub frame: &'a mut SkinFrame,
+    /// Camera-relative bounds of what this mob drew here (for culling).
+    pub bounds: Option<(glam::Vec3, glam::Vec3)>,
+    /// The last walk, for a draw that repeats it.
+    last: Option<Walked>,
+}
+
+/// One walk of [`Skin::draw`]: what it drew, and the jobs it pushed.
+struct Walked {
+    model: usize,
+    base: glam::Mat4,
+    poses: u64,
+    jobs: std::ops::Range<usize>,
+}
+
+impl<'a> Skin<'a> {
+    /// One entity's draws into `frame`.
+    pub fn new(models: &'a mut SkinModels, frame: &'a mut SkinFrame) -> Self {
+        Self {
+            models,
+            frame,
+            bounds: None,
+            last: None,
+        }
+    }
+
+    /// Grows the bounds of what this entity drew here by `lo..hi` posed by `m`.
+    pub fn grow_bounds(&mut self, m: glam::Mat4, (lo, hi): (glam::Vec3, glam::Vec3)) {
+        let center = m.transform_point3((lo + hi) * 0.5);
+        let half = (hi - lo) * 0.5;
+        let r = glam::Mat3::from_mat4(m);
+        let extent = r.x_axis.abs() * half.x + r.y_axis.abs() * half.y + r.z_axis.abs() * half.z;
+        let (a, b) = (center - extent, center + extent);
+        self.bounds = Some(match self.bounds {
+            Some((l, h)) => (l.min(a), h.max(b)),
+            None => (a, b),
+        });
+    }
+
+    /// Whether this model can be posed here (stored on first sight).
+    pub fn supports(&mut self, model: &Arc<Part>) -> bool {
+        self.models.entry(model, self.frame).is_some()
+    }
+
+    /// `render::draw_scrolled` on the GPU: false (nothing done) when the
+    /// model cannot take this path.
+    pub fn draw(
+        &mut self,
+        model: &Arc<Part>,
+        base: glam::Mat4,
+        poses: &Poses,
+        paint: Paint,
+    ) -> bool {
+        let key = Arc::as_ptr(model) as usize;
+        // A draw that repeats the last walk (a villager's type, profession and
+        // level over its body, a spider's eyes): the same model, matrix and
+        // poses give the same part matrices and parts left out, so its jobs
+        // are the last ones' over the same parts, with this paint.
+        if let Some(last) = &self.last
+            && last.model == key
+            && last.base == base
+            && last.poses == poses.version()
+        {
+            for i in last.jobs.clone() {
+                let job = self.frame.jobs[i];
+                self.frame.jobs.push(SkinJob {
+                    dst: self.frame.vertices,
+                    ..paint.job(job.first, job.count, job.part, job.cull)
+                });
+                self.frame.vertices += job.count;
+            }
+            return true;
+        }
+        let Some(stored) = self.models.entry(model, self.frame) else {
+            return false;
+        };
+        let jobs = self.frame.jobs.len();
+        let first_part = self.frame.parts.len() as u32;
+        self.frame.parts.resize(
+            self.frame.parts.len() + stored.parts.len(),
+            bytemuck::Zeroable::zeroed(),
+        );
+        let mut walk = Walk {
+            stored,
+            poses,
+            parts: &mut self.frame.parts[first_part as usize..],
+            jobs: &mut self.frame.jobs,
+            vertices: &mut self.frame.vertices,
+            bounds: &mut self.bounds,
+            first_part,
+            paint,
+            index: 0,
+        };
+        walk.part(model, base, ModelNormals::new(base));
+        // The walk's first job never extends an earlier draw's: those have
+        // other parts.
+        self.last = Some(Walked {
+            model: key,
+            base,
+            poses: poses.version(),
+            jobs: jobs..self.frame.jobs.len(),
+        });
+        true
+    }
+}
+
+impl Paint {
+    /// A job drawing `count` stored vertices from `first`, posed by the parts
+    /// from `part`, in this paint (`dst` left 0).
+    fn job(self, first: u32, count: u32, part: u32, cull: u32) -> SkinJob {
+        SkinJob {
+            first,
+            count,
+            part,
+            dst: 0,
+            rect: self.uv,
+            scroll: self.scroll,
+            color: self.color,
+            light: self.light,
+            overlay: self.overlay,
+            glint: u32::from(self.overlay == super::render::ARMOR_GLINT),
+            mode: SkinJob::MODEL,
+            cull,
+            spare: 0,
+        }
+    }
+}
+
+struct Walk<'a> {
+    stored: &'a Stored,
+    poses: &'a Poses,
+    parts: &'a mut [SkinPart],
+    jobs: &'a mut Vec<SkinJob>,
+    vertices: &'a mut u32,
+    bounds: &'a mut Option<(glam::Vec3, glam::Vec3)>,
+    first_part: u32,
+    paint: Paint,
+    /// The pre-order index of the part being walked.
+    index: u32,
+}
+
+impl Walk<'_> {
+    /// `render::draw_normals` without the vertices: the part's matrices, and
+    /// its polygons as (part of) a job.
+    fn part(&mut self, part: &Part, base: glam::Mat4, normals: ModelNormals) {
+        let index = self.index;
+        let stored = self.stored.parts[index as usize];
+        let p = self.poses.pose(part);
+        let m = super::render::posed(base, p);
+        if self.poses.is_hidden(part) || p[6] == 0.0 && p[7] == 0.0 && p[8] == 0.0 {
+            // The whole subtree is left out.
+            self.index = stored.end;
+            return;
+        }
+        let normals = normals.part(p);
+        let n = if normals.trusted {
+            normals.matrix
+        } else {
+            glam::Mat3::from_cols(
+                normals.matrix.x_axis.normalize_or_zero(),
+                normals.matrix.y_axis.normalize_or_zero(),
+                normals.matrix.z_axis.normalize_or_zero(),
+            )
+        };
+        self.parts[index as usize] = SkinPart {
+            matrix: m.to_cols_array(),
+            normal: n.to_cols_array(),
+        };
+        if !self.poses.skips(part) && stored.count > 0 {
+            self.emit(stored);
+            if let Some((lo, hi)) = self.stored.bounds[index as usize] {
+                let (lo, hi) = (glam::Vec3::from_array(lo), glam::Vec3::from_array(hi));
+                let center = m.transform_point3((lo + hi) * 0.5);
+                let half = (hi - lo) * 0.5;
+                let r = glam::Mat3::from_mat4(m);
+                let extent =
+                    r.x_axis.abs() * half.x + r.y_axis.abs() * half.y + r.z_axis.abs() * half.z;
+                let (a, b) = (center - extent, center + extent);
+                *self.bounds = Some(match *self.bounds {
+                    Some((l, h)) => (l.min(a), h.max(b)),
+                    None => (a, b),
+                });
+            }
+        }
+        self.index += 1;
+        for child in &part.children {
+            self.part(child, m, normals);
+        }
+    }
+
+    /// The part's vertices: extends the last job when they follow its own.
+    fn emit(&mut self, stored: StoredPart) {
+        let first = self.stored.first + stored.first;
+        let paint = self.paint;
+        if let Some(job) = self.jobs.last_mut()
+            && job.first + job.count == first
+            && job.part == self.first_part
+            && job.dst + job.count == *self.vertices
+        {
+            job.count += stored.count;
+        } else {
+            self.jobs.push(SkinJob {
+                dst: *self.vertices,
+                ..paint.job(
+                    first,
+                    stored.count,
+                    self.first_part,
+                    u32::from(self.stored.cull),
+                )
+            });
+        }
+        *self.vertices += stored.count;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gfx::entity_skin::expand;
+    use crate::mobs::{Mob, MobData, MobTypes, render};
+
+    /// Every vanilla mob, at a few ages and turns: the GPU path's vertices
+    /// (its jobs expanded as `entity_skin.wgsl` does) are the CPU path's, to
+    /// the bit and in the same order, for each mob it takes; the mobs it
+    /// leaves to the CPU draw exactly as before. Twice: with the eyes render
+    /// type's layers left to the CPU (improved transparency on), then posed
+    /// too with a horse's markings and a slime's outer cube (`SkinModels::tagged`).
+    /// Needs the prepared resources.
+    #[test]
+    fn posed_on_the_gpu_every_mob_draws_what_the_cpu_draws() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            eprintln!("no prepared resources: skipped");
+            return;
+        }
+        let types = MobTypes::load(&root).unwrap();
+        let data = MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: MobData::load_animations(&root),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            villager_hats: Default::default(),
+            cem: Default::default(),
+            random_textures: Default::default(),
+            emissive: Default::default(),
+            blinks: Default::default(),
+            pois: Default::default(),
+            species_placements: Default::default(),
+        };
+        // Every texture its own rect, so a swapped texture shows.
+        let atlas = |name: &str| {
+            let h = name
+                .bytes()
+                .fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)));
+            let u = (h % 61) as f32 / 64.0;
+            let v = (h / 61 % 61) as f32 / 64.0;
+            Some([u, v, u + 1.0 / 64.0, v + 1.0 / 32.0])
+        };
+        let camera = glam::DVec3::new(0.3, 62.0, -4.0);
+        let mut models = SkinModels::default();
+        let mut frame = SkinFrame::default();
+        let mut store: Vec<crate::gfx::entity_skin::SkinVertex> = Vec::new();
+        let (mut posed, mut kept) = (0, 0);
+        let mut ids: Vec<_> = types.types.keys().cloned().collect();
+        ids.sort();
+        // The mobs posed at least once, without and with the tagged layers.
+        let mut taken = [std::collections::BTreeSet::new(), Default::default()];
+        for eyes in [false, true] {
+            for (n, id) in ids.iter().enumerate() {
+                let kind = Arc::new(types.types[id].clone());
+                for (age, yaw) in [(0u32, 0.0f32), (37, 123.0), (412, -71.5)] {
+                    let at = horizon_core::geometry::Vec3::new(1.5 + n as f64 % 5.0, 64.0, 3.25);
+                    let mut m = Mob::new(n as u32 + 1, kind.clone(), at, yaw);
+                    m.previous = horizon_core::geometry::Vec3::new(at.x - 0.1, at.y, at.z + 0.05);
+                    m.age = age;
+                    m.limb_speed = 0.6;
+                    m.limb_position = age as f32 * 0.37;
+                    // A farmer: its type, profession and level layers repeat
+                    // the body's draw (`Skin::draw` reuses its walk).
+                    if matches!(
+                        id.as_str(),
+                        "minecraft:villager" | "minecraft:zombie_villager"
+                    ) {
+                        m.extra.variant2 = 5;
+                        m.extra.variant3 = 3;
+                    }
+                    // White field markings (`entityTranslucent`).
+                    if id == "minecraft:horse" {
+                        m.extra.variant2 = 2;
+                    }
+                    let mut cpu = Vec::new();
+                    render::render_with(&m, 0.4, camera, &atlas, 0x50a0, &data, &[], &mut cpu);
+                    models.begin(&mut frame, store.len() as u32);
+                    models.tagged = eyes;
+                    let mut gpu = Vec::new();
+                    let mut skin = Skin::new(&mut models, &mut frame);
+                    render::render_skinned(
+                        &m, 0.4, camera, &atlas, 0x50a0, &data, &mut gpu, &mut skin,
+                    );
+                    let bounds = skin.bounds;
+                    if frame.reset {
+                        store.clear();
+                    }
+                    assert_eq!(store.len() as u32, frame.base);
+                    store.extend_from_slice(&frame.new_model);
+                    frame.handed();
+                    if frame.jobs.is_empty() {
+                        kept += 1;
+                        assert_eq!(
+                            bytemuck::cast_slice::<_, u8>(&gpu),
+                            bytemuck::cast_slice::<_, u8>(&cpu),
+                            "{id} age {age}: the CPU path changed"
+                        );
+                        continue;
+                    }
+                    posed += 1;
+                    taken[usize::from(eyes)].insert(id.as_str());
+                    assert!(gpu.is_empty(), "{id}: a posed mob left vertices on the CPU");
+                    let expanded = expand(&store, &frame);
+                    assert_eq!(expanded.len(), cpu.len(), "{id} age {age}: vertex count");
+                    for (i, (a, b)) in expanded.iter().zip(&cpu).enumerate() {
+                        assert_eq!(
+                            bytemuck::bytes_of(a),
+                            bytemuck::bytes_of(b),
+                            "{id} age {age} vertex {i}: {a:?} != {b:?}"
+                        );
+                    }
+                    // The culling bounds hold every vertex.
+                    let (lo, hi) = bounds.expect("a posed mob has bounds");
+                    for v in &cpu {
+                        let p = glam::Vec3::from_array(v.pos);
+                        assert!(
+                            p.cmpge(lo - 1e-4).all() && p.cmple(hi + 1e-4).all(),
+                            "{id}: {p} outside {lo}..{hi}"
+                        );
+                    }
+                }
+            }
+        }
+        eprintln!("posed on the GPU: {posed} mob draws; kept on the CPU: {kept}");
+        assert!(posed > 2 * 3 * 40, "only {posed} draws took the GPU path");
+        let added: Vec<_> = taken[1].difference(&taken[0]).copied().collect();
+        eprintln!("posed only with the tagged layers: {added:?}");
+        for id in [
+            "minecraft:spider",
+            "minecraft:cave_spider",
+            "minecraft:enderman",
+            "minecraft:phantom",
+            "minecraft:copper_golem",
+            "minecraft:horse",
+            "minecraft:slime",
+        ] {
+            assert!(added.contains(&id), "{id} not posed with its tagged layers");
+        }
+        assert!(taken[0].is_subset(&taken[1]));
+    }
+
+    /// `BatModel` draws with `entityCutoutCull`: its zero-depth ears, wings and
+    /// feet put two quads in one place, and only culling tells them apart. The
+    /// bat's vertices ask for the shaded cull encoding, other mobs keep -127,
+    /// on both paths (the whole-mob test above holds them bit-equal).
+    #[test]
+    fn only_the_bat_asks_for_culled_back_faces() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            eprintln!("no prepared resources: skipped");
+            return;
+        }
+        let types = MobTypes::load(&root).unwrap();
+        for (id, w) in [
+            ("minecraft:bat", crate::mesher::SHADED_CULL_W),
+            ("minecraft:cow", -127),
+            ("minecraft:cat", -127),
+        ] {
+            let mut part = vec![&*types.types[id].model];
+            let mut seen = 0;
+            while let Some(p) = part.pop() {
+                for poly in &p.polygons {
+                    let n = poly.vertex_normal(ModelNormals::new(glam::Mat4::IDENTITY));
+                    assert_eq!(n[3], w, "{id}");
+                    seen += 1;
+                }
+                part.extend(&p.children);
+            }
+            assert!(seen > 0, "{id} has polygons");
+        }
+        // The GPU path flags the job, the CPU path the polygons.
+        let mut models = SkinModels::default();
+        let mut frame = SkinFrame::default();
+        for (id, cull) in [("minecraft:bat", 1), ("minecraft:cow", 0)] {
+            models.begin(&mut frame, 0);
+            let mut skin = Skin::new(&mut models, &mut frame);
+            assert!(skin.draw(
+                &types.types[id].model,
+                glam::Mat4::IDENTITY,
+                &Poses::default(),
+                Paint {
+                    uv: [0.0, 0.0, 1.0, 1.0],
+                    scroll: 0.0,
+                    color: u32::MAX,
+                    light: 0,
+                    overlay: 0
+                },
+            ));
+            assert!(frame.jobs.iter().all(|j| j.cull == cull), "{id}");
+            frame.clear_draws();
+        }
+    }
+
+    /// The armor stand's models (`ArmorStandRenderer`: the stand, the small
+    /// one, their armour layers) posed like a stand: turned arms and head, a
+    /// hidden part (scale 0, as a stand without arms or base plate), the
+    /// armour glint on one layer. The GPU path draws what the CPU path draws,
+    /// to the bit. Needs the prepared resources.
+    #[test]
+    fn armor_stand_models_pose_on_the_gpu_as_on_the_cpu() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            eprintln!("no prepared resources: skipped");
+            return;
+        }
+        let document = crate::mobs::EntityModelDocument::load(&root).unwrap();
+        let base = glam::Mat4::from_translation(glam::Vec3::new(2.5, -1.0, 6.25))
+            * glam::Mat4::from_rotation_y(2.1)
+            * glam::Mat4::from_scale(glam::Vec3::new(-1.0, -1.0, 1.0))
+            * glam::Mat4::from_translation(glam::Vec3::new(0.0, -1.501, 0.0));
+        let (mut models, mut frame) = (SkinModels::default(), SkinFrame::default());
+        let mut store = Vec::new();
+        let mut drawn = 0;
+        for model in ["armor_stand", "armor_stand_small"] {
+            for slot in ["main", "helmet", "chestplate", "leggings", "boots"] {
+                let key = format!("minecraft:{model}#{slot}");
+                let part = Arc::new(document.model(&key).unwrap_or_else(|| panic!("no {key}")));
+                let mut poses = Poses::new(&part);
+                for (name, turn) in [("head", [0.3, -0.7, 0.1]), ("left_arm", [-1.2, 0.4, 0.25])] {
+                    if poses.has(name) {
+                        poses.get(name)[3..6].copy_from_slice(&turn);
+                    }
+                }
+                for hidden in ["base_plate", "right_arm"] {
+                    if poses.has(hidden) {
+                        poses.get(hidden)[6..9].copy_from_slice(&[0.0; 3]);
+                    }
+                }
+                let overlay = if slot == "chestplate" {
+                    render::ARMOR_GLINT
+                } else {
+                    0
+                };
+                let uv = [0.125, 0.25, 0.1875, 0.28125];
+                let mut cpu = Vec::new();
+                render::draw(
+                    &part,
+                    base,
+                    &poses,
+                    uv,
+                    0xff80_c0ff,
+                    0x70a0,
+                    overlay,
+                    &mut cpu,
+                );
+                models.begin(&mut frame, store.len() as u32);
+                let mut gpu = Vec::new();
+                let mut skin = Skin::new(&mut models, &mut frame);
+                let paint = (uv, 0.0, 0xff80_c0ff, 0x70a0, overlay);
+                render::put(
+                    &mut Some(&mut skin),
+                    &part,
+                    base,
+                    &poses,
+                    paint.0,
+                    paint.1,
+                    paint.2,
+                    paint.3,
+                    paint.4,
+                    &mut gpu,
+                );
+                if frame.reset {
+                    store.clear();
+                }
+                store.extend_from_slice(&frame.new_model);
+                frame.handed();
+                assert!(gpu.is_empty(), "{key} stayed on the CPU");
+                let expanded = expand(&store, &frame);
+                assert_eq!(expanded.len(), cpu.len(), "{key}: vertex count");
+                assert!(!cpu.is_empty(), "{key} drew nothing");
+                for (i, (a, b)) in expanded.iter().zip(&cpu).enumerate() {
+                    assert_eq!(
+                        bytemuck::bytes_of(a),
+                        bytemuck::bytes_of(b),
+                        "{key} vertex {i}: {a:?} != {b:?}"
+                    );
+                }
+                drawn += 1;
+            }
+        }
+        assert_eq!(drawn, 10);
+    }
+}
