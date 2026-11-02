@@ -22,6 +22,8 @@ struct Stored {
     /// The model's bounds in its parts' own space, per part: min and max of
     /// its own vertices (none: no polygons).
     bounds: Vec<Option<([f32; 3], [f32; 3])>>,
+    /// The model's render type culls back faces (the bat).
+    cull: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -241,7 +243,13 @@ fn flatten(model: &Part, first: u32, out: &mut Vec<SkinVertex>) -> Option<Stored
         first,
         parts,
         bounds,
+        cull: has_cull(model),
     })
+}
+
+/// Whether the model's polygons cull back faces (all or none, set per model).
+fn has_cull(part: &Part) -> bool {
+    part.polygons.iter().any(|p| p.cull_back) || part.children.iter().any(has_cull)
 }
 
 /// 0..2 for +x, +y, +z, 3..5 for -x, -y, -z; `None` for any other normal.
@@ -415,7 +423,8 @@ impl Walk<'_> {
                 overlay: paint.overlay,
                 glint: u32::from(paint.overlay == super::render::ARMOR_GLINT),
                 item: 0,
-                spare: [0; 2],
+                cull: u32::from(self.stored.cull),
+                spare: 0,
             });
         }
         *self.vertices += stored.count;
@@ -531,6 +540,57 @@ mod tests {
         }
         eprintln!("posed on the GPU: {posed} mob draws; kept on the CPU: {kept}");
         assert!(posed > 3 * 40, "only {posed} draws took the GPU path");
+    }
+
+    /// `BatModel` draws with `entityCutoutCull`: its zero-depth ears, wings and
+    /// feet put two quads in one place, and only culling tells them apart. The
+    /// bat's vertices ask for the shaded cull encoding, other mobs keep -127,
+    /// on both paths (the whole-mob test above holds them bit-equal).
+    #[test]
+    fn only_the_bat_asks_for_culled_back_faces() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            eprintln!("no prepared resources: skipped");
+            return;
+        }
+        let types = MobTypes::load(&root).unwrap();
+        for (id, w) in [
+            ("minecraft:bat", crate::mesher::SHADED_CULL_W),
+            ("minecraft:cow", -127),
+            ("minecraft:cat", -127),
+        ] {
+            let mut part = vec![&*types.types[id].model];
+            let mut seen = 0;
+            while let Some(p) = part.pop() {
+                for poly in &p.polygons {
+                    let n = poly.vertex_normal(ModelNormals::new(glam::Mat4::IDENTITY));
+                    assert_eq!(n[3], w, "{id}");
+                    seen += 1;
+                }
+                part.extend(&p.children);
+            }
+            assert!(seen > 0, "{id} has polygons");
+        }
+        // The GPU path flags the job, the CPU path the polygons.
+        let mut models = SkinModels::default();
+        let mut frame = SkinFrame::default();
+        for (id, cull) in [("minecraft:bat", 1), ("minecraft:cow", 0)] {
+            models.begin(&mut frame, 0);
+            let mut skin = Skin {
+                models: &mut models,
+                frame: &mut frame,
+                bounds: None,
+            };
+            assert!(skin.draw(
+                &types.types[id].model,
+                glam::Mat4::IDENTITY,
+                &Poses::default(),
+                Paint { uv: [0.0, 0.0, 1.0, 1.0], scroll: 0.0, color: u32::MAX, light: 0, overlay: 0 },
+            ));
+            assert!(frame.jobs.iter().all(|j| j.cull == cull), "{id}");
+            frame.clear_draws();
+        }
     }
 
     /// The armor stand's models (`ArmorStandRenderer`: the stand, the small
