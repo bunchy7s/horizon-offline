@@ -3396,6 +3396,13 @@ impl Game<'_> {
     ) {
         let _ = (player, name, item, repair, experience);
     }
+    /// A server player completed a villager or wandering trader trade.
+    /// `entity_id` is the merchant network id. Helpers looking up the guest
+    /// through `self.lan` may find nothing during packet handling. Server-side.
+    /// @API:player_trade@.
+    pub(super) fn native_player_trade(&mut self, player: u128, name: &str, entity_id: u32) {
+        let _ = (player, name, entity_id);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

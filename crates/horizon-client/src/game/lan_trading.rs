@@ -283,6 +283,12 @@ impl Game<'_> {
         gm.merchant.session = session;
         if !traded.is_empty() {
             // The guest's own statistic and advancements.
+            if let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) {
+                let g = &host.hub.guests[gi];
+                if let Some(entity_id) = gm.merchant.mob {
+                    self.native_player_trade(g.uuid, &g.name, entity_id);
+                }
+            }
             self.as_guest(host, conn, |g| g.merchant_traded(gm.merchant.mob, &traded));
         }
         self.drop_guest_items(host, gi, dropped);
