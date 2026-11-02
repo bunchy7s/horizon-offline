@@ -8,7 +8,7 @@ Rect2i.contains	skip:ui		GUI hit test on a rectangle; Horizon's widgets hit-test
 RenderPipelines.register	skip:data		pipeline registry; Horizon creates its pipelines in gfx.rs
 RunningTrimmedMean.registerValueAndGetMean	skip:debug		frame-time smoothing helper; no vanilla caller in this source tree
 ScreenEffectRenderer.submit	port	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	gap: minor: the item activation is not built here (see renderItemActivationAnimation)
-ScreenEffectRenderer.renderItemActivationAnimation	missing		player: when a totem of undying saves the player, the totem does not pop up in front of the screen; Horizon only plays the totem particles and sound (game/totem.rs totem_event)
+ScreenEffectRenderer.renderItemActivationAnimation	port	crates/horizon-client/src/game.rs::itemActivation + tick_totem (game.rs:2205, 7139)	the totem flying up to the screen when it saves the player
 ScreenEffectRenderer.submitWater	inline	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	underwater overlay branch (misc/underwater)
 ScreenEffectRenderer.submitFire	inline	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	first-person fire overlay branch (block/fire_1, two quads)
 ScreenEffectRenderer.buildFireQuad	inline	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	the two fire quads' corners and offsets
