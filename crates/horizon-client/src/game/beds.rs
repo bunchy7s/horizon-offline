@@ -194,7 +194,8 @@ impl Game<'_> {
     }
     /// Where the sleeper lies (`setPosToBed`), when the bed gives it a shape.
     pub(super) fn sleeping_position(&self, head: [i32; 3]) -> Option<Vec3> {
-        self.sleep_height(head).map(|height| pos_to_bed(head, height))
+        self.sleep_height(head)
+            .map(|height| pos_to_bed(head, height))
     }
 }
 
@@ -223,7 +224,11 @@ mod tests {
             "the foot was replaced"
         );
         assert_eq!(
-            slept_on(straw, Some("head"), Some(("minecraft:red_bed", Some("foot")))),
+            slept_on(
+                straw,
+                Some("head"),
+                Some(("minecraft:red_bed", Some("foot")))
+            ),
             None,
             "the foot is another bed"
         );
@@ -243,13 +248,14 @@ mod tests {
     /// the block's own y; a shape with nothing in it has no height.
     #[test]
     fn the_height_is_the_top_of_the_shape() {
-        let bed = [[0.0, 0.0, 0.0, 1.0, 0.5625, 1.0]];
+        // The boxes are the pack's, in world space, as `outline_boxes` gives them.
+        let bed = [[10.0, 70.0, 5.0, 11.0, 70.5625, 6.0]];
         assert_eq!(shape_top(&bed, 70.0), Some(0.5625));
-        let pillow = [[0.0, 0.0, 0.0, 1.0, 0.6875, 1.0]];
+        let pillow = [[10.0, 70.0, 5.0, 11.0, 70.6875, 6.0]];
         assert_eq!(shape_top(&pillow, 70.0), Some(0.6875));
         let two = [
-            [0.0, 0.0, 0.0, 1.0, 0.5625, 1.0],
-            [0.0, 0.0, 0.0, 0.5, 0.25, 0.5],
+            [10.0, 70.0, 5.0, 11.0, 70.5625, 6.0],
+            [10.0, 70.0, 5.0, 10.5, 70.25, 5.5],
         ];
         assert_eq!(shape_top(&two, 70.0), Some(0.5625), "the tallest box");
         assert_eq!(shape_top(&[], 70.0), None, "a bed with no shape");
