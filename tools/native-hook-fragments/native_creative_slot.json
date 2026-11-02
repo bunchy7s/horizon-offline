@@ -4,7 +4,11 @@
       "name": "creative_slot",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_creative_slot",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ],
   "rust_summary": "a creative player setting a slot from the creative screen, cancellable (`native_creative_slot`).",

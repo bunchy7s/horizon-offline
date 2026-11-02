@@ -3,7 +3,10 @@
     {
       "name": "vehicle_moved",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_vehicle_moved",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "a boat or minecart a server player rides having moved (`native_vehicle_moved`).",

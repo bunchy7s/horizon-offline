@@ -2671,7 +2671,15 @@ impl Game<'_> {
         slot: &str,
         cancel: &mut bool,
     ) {
-        let _ = (player, name, stand_id, slot, cancel);
+        mod_api::dispatch_armor_stand_manipulate(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            stand_id,
+            slot,
+            cancel,
+        );
     }
     /// A boat or minecart (`kind`, `minecraft:oak_boat`) moved since the last
     /// tick (`VehicleMoveEvent`): `from` and `to` are its positions, heard
@@ -2692,7 +2700,7 @@ impl Game<'_> {
         from: [f64; 3],
         to: [f64; 3],
     ) {
-        let _ = (player, kind, from, to);
+        mod_api::dispatch_vehicle_moved(self, mod_api::mods(), player, kind, from, to);
     }
     /// A player opens one of the game's own menus (`ServerPlayer.openMenu`; the
     /// job of NeoForge's `PlayerContainerEvent.Open`, which comes after the
@@ -2718,7 +2726,7 @@ impl Game<'_> {
         pos: Option<[i32; 3]>,
         cancel: &mut bool,
     ) {
-        let _ = (player, name, kind, pos, cancel);
+        mod_api::dispatch_container_opened(self, mod_api::mods(), player, name, kind, pos, cancel);
     }
     /// A creative-mode player sets a slot of their inventory from the
     /// creative screen (`ServerGamePacketListenerImpl.handleSetCreativeModeSlot`):
@@ -2743,7 +2751,16 @@ impl Game<'_> {
         count: i32,
         cancel: &mut bool,
     ) {
-        let _ = (player, name, slot, item, count, cancel);
+        mod_api::dispatch_creative_slot(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            slot,
+            item,
+            count,
+            cancel,
+        );
     }
     /// A server player's game mode is about to change (NeoForge's
     /// `PlayerChangeGameModeEvent`): from `from` to `to` (0 survival, 1

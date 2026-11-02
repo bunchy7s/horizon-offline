@@ -5,7 +5,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_container_opened",
       "neoforge": "none (NeoForge's PlayerContainerEvent.Open fires after the menu is open and is not cancellable)",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ],
   "rust_summary": "a player opening one of the game's menus, cancellable (`native_container_opened`).",
