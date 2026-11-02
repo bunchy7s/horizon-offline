@@ -4523,6 +4523,14 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Declare categories for custom recipe types, with registered item icons.
+    /// Asked lazily once per recipe table by `native_recipe_book_category`.
+    /// Invalid declarations are logged and skipped; the first valid category
+    /// owns its id and type. This does not yet add tabs or book displays.
+    fn recipe_book_categories(&self, host: &dyn Host, event: &mut RecipeBookCategoriesEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// Additional first-person hand and item pose, including empty arms and maps.
     /// Add offsets in blocks and pitch, yaw and roll in degrees; multiply scale.
     /// API @API:render_hand_pose@.
@@ -13903,6 +13911,21 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
+}
+/// What [`Hooks::recipe_book_categories`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RecipeBookCategoriesEvent<'a> {
+    pub categories: &'a mut Vec<RecipeBookCategory>,
+}
+pub fn dispatch_recipe_book_categories(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    categories: &mut Vec<RecipeBookCategory>,
+) {
+    let mut event = RecipeBookCategoriesEvent { categories };
+    for mod_hook in super::entered(mods, "recipe_book_categories") {
+        mod_hook.recipe_book_categories(host, &mut event);
+    }
 }
 /// What [`Hooks::render_hand_pose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

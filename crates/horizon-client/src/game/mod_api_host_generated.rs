@@ -495,4 +495,7 @@ impl Host for super::Game<'_> {
     fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
         self.native_block_collision(pos)
     }
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        self.native_recipe_book_category(kind)
+    }
 }

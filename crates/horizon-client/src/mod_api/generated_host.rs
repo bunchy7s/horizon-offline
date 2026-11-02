@@ -1212,4 +1212,11 @@ pub trait Host {
         let _ = pos;
         unimplemented!("Host::block_collision")
     }
+    /// The validated category and icon of a custom recipe type, or None for
+    /// an undeclared/invalid type, before resources load, or outside a world.
+    /// Rebuilt when the recipe table changes. Does not unlock any recipes.
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        let _ = kind;
+        unimplemented!("Host::recipe_book_category")
+    }
 }
