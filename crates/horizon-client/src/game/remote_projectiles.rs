@@ -795,7 +795,10 @@ impl Game<'_> {
             out.push(json!({"id": c.id, "kind": "minecraft:end_crystal", "position": at(c.position), "show_bottom": c.show_bottom}));
         }
         for t in &self.tridents {
-            out.push(json!({"id": t.id, "kind": "minecraft:trident", "position": at(t.position)}));
+            out.push(json!({"id": t.id, "kind": "minecraft:trident", "position": at(t.position), "velocity": at(t.velocity)}));
+        }
+        for r in &self.rockets {
+            out.push(json!({"id": r.id, "kind": "minecraft:firework_rocket", "position": at(r.position), "velocity": at(r.velocity)}));
         }
         for p in &self.creatures.projectiles {
             out.push(json!({"id": p.id, "kind": format!("{:?}", p.kind).split([' ', '{']).next().unwrap_or(""), "position": at(p.position), "velocity": at(p.velocity),
@@ -915,11 +918,13 @@ mod tests {
 
     #[test]
     fn a_thrown_item_falls_and_drags_like_a_throwable_projectile() {
-        // ThrowableProjectile.tick: gravity 0.03, then the air drag 0.99.
+        // ThrowableProjectile.tick: gravity 0.03, then the air drag 0.99F
+        // (`getAirDrag`, a float widened to the double it scales by).
+        let drag = f64::from(0.99_f32);
         let mut p = thrown(ProjectileKind::Egg);
         remote_projectile_tick(&mut p, &Empty);
-        assert!((p.velocity.x - 1.5 * 0.99).abs() < 1e-9, "{p:?}");
-        assert!((p.velocity.y - (-0.03 * 0.99)).abs() < 1e-9, "{p:?}");
+        assert!((p.velocity.x - 1.5 * drag).abs() < 1e-9, "{p:?}");
+        assert!((p.velocity.y - (-0.03 * drag)).abs() < 1e-9, "{p:?}");
         // A wind charge keeps its speed: no gravity and no drag
         // (AbstractWindCharge: acceleration 0, inertia 1).
         let mut p = thrown(ProjectileKind::WindCharge);

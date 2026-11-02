@@ -467,6 +467,31 @@ pub fn leash_offset(m: &Mob) -> [f64; 3] {
     } else if m.species() == super::Species::Bee {
         // Bee.getLeashOffset: half the eye height, a fifth of the width ahead.
         [0.0, 0.5 * m.eye_height(), f64::from(m.width() * 0.2)]
+    } else if m.species() == super::Species::IronGolem {
+        // IronGolem.getLeashOffset: 0.875 of the eye height.
+        [
+            0.0,
+            f64::from(0.875_f32 * m.eye_height() as f32),
+            f64::from(m.width() * 0.4),
+        ]
+    } else if m.species() == super::Species::SnowGolem {
+        // SnowGolem.getLeashOffset: 0.75 of the eye height.
+        [
+            0.0,
+            f64::from(0.75_f32 * m.eye_height() as f32),
+            f64::from(m.width() * 0.4),
+        ]
+    } else if m.species() == super::Species::CopperGolem {
+        // CopperGolem.getLeashOffset: 0.75 of the eye height, on the centre
+        // rather than the default `bbWidth / 2` in front.
+        [0.0, f64::from(0.75_f32 * m.eye_height() as f32), 0.0]
+    } else if m.species() == super::Species::Fox {
+        // Fox.getLeashOffset: 0.55 of the eye height.
+        [
+            0.0,
+            f64::from(0.55_f32 * m.eye_height() as f32),
+            f64::from(m.width() * 0.4),
+        ]
     } else {
         [0.0, m.eye_height(), f64::from(m.width() * 0.4)]
     }
@@ -578,6 +603,33 @@ mod tests {
         assert!(near(p[1], [-lr, y, -fb + f]));
         assert!(near(p[2], [lr, y, -fb + f]));
         assert!(near(p[3], [lr, y, fb + f]));
+    }
+    /// `IronGolem`, `SnowGolem`, `CopperGolem` and `Fox.getLeashOffset`: the
+    /// rope hangs at a share of the eye height, and the copper golem's on the
+    /// centre instead of the default `bbWidth / 2` in front.
+    #[test]
+    fn a_golem_or_a_fox_hangs_its_lead_where_vanilla_does() {
+        let _ = crate::mobs::world::with_test_world(&[], |_, types| {
+            for (kind, factor, forwards) in [
+                ("minecraft:iron_golem", 0.875, 0.4),
+                ("minecraft:snow_golem", 0.75, 0.4),
+                ("minecraft:copper_golem", 0.75, 0.0),
+                ("minecraft:fox", 0.55, 0.4),
+            ] {
+                let m = Mob::new(
+                    1,
+                    std::sync::Arc::new(types.types[kind].clone()),
+                    Vec3::ZERO,
+                    0.0,
+                );
+                let o = leash_offset(&m);
+                let h = f64::from(factor * m.eye_height() as f32);
+                let z = f64::from(m.width() * forwards as f32);
+                assert!((o[1] - h).abs() < 1e-9, "{kind}: height {} vs {h}", o[1]);
+                assert!((o[2] - z).abs() < 1e-9, "{kind}: forward {} vs {z}", o[2]);
+                assert_eq!(o[0], 0.0, "{kind}: centred");
+            }
+        });
     }
     /// `Nautilus.canBeLeashed` and `ZombieNautilus.canBeLeashed`: an
     /// aggravated nautilus, one holding an `ANGRY_AT` or an `ATTACK_TARGET`

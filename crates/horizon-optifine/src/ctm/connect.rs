@@ -88,6 +88,34 @@ pub struct Axes {
 }
 
 impl Axes {
+    /// Where a quad's own texture points, from its corners' positions and UVs, snapped to the
+    /// block's axes (Continuity's `orient=texture`): a turned or mirrored model's face turns or
+    /// mirrors its neighbours too. `None` for a quad whose UVs don't span it.
+    pub fn texture(positions: &[[f32; 3]; 4], uv: &[[f32; 2]; 4]) -> Option<Self> {
+        let edge = |k: usize| [0, 1, 2].map(|c| positions[k][c] - positions[0][c]);
+        let step = |k: usize| [uv[k][0] - uv[0][0], uv[k][1] - uv[0][1]];
+        let (e1, e2, d1, d2) = (edge(1), edge(3), step(1), step(3));
+        // The edges in UV terms: e = du * (d/du) + dv * (d/dv), solved for the two gradients.
+        let det = d1[0] * d2[1] - d2[0] * d1[1];
+        if !det.is_finite() || det.abs() < 1e-6 {
+            return None;
+        }
+        let along_u = [0, 1, 2].map(|c| (e1[c] * d2[1] - e2[c] * d1[1]) / det);
+        let along_v = [0, 1, 2].map(|c| (e2[c] * d1[0] - e1[c] * d2[0]) / det);
+        // Only a direction close to one of the block's axes (within about 25°): a plant's 45°
+        // planes have none.
+        let snap = |v: [f32; 3]| {
+            let k = (0..3).max_by(|&a, &b| v[a].abs().total_cmp(&v[b].abs()))?;
+            let length = v.iter().map(|c| c * c).sum::<f32>().sqrt();
+            let mut out = [0; 3];
+            out[k] = if v[k] > 0.0 { 1 } else { -1 };
+            (v[k].abs() > 0.9 * length).then_some(out)
+        };
+        // v grows downward: the texture's up is against it.
+        let (right, up) = (snap(along_u)?, neg(snap(along_v)?));
+        (dot(right, up) == 0).then_some(Self { right, up })
+    }
+
     /// On a vanilla cube: `BlockElement`'s default UVs (OptiFine's `ctm`, Continuity's
     /// `orient=none`).
     pub const fn cube(face: Face) -> Self {
@@ -219,7 +247,7 @@ const TEMPLATE: [u8; 47] = [
 ];
 
 /// A mask without the corners whose sides don't both join.
-const fn reduce(mask: u8) -> u8 {
+pub(crate) const fn reduce(mask: u8) -> u8 {
     let mut out = mask & (U | R | D | L);
     let corners = [(UR, U | R), (DR, D | R), (DL, D | L), (UL, U | L)];
     let mut i = 0;
@@ -567,5 +595,58 @@ mod tests {
             })
             .count();
         assert!(differs > 20, "{differs}");
+    }
+
+    #[test]
+    fn a_quads_own_texture_directions() {
+        // A north face with the cube's UVs: its texture points as the cube's does.
+        let north = [
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+        ];
+        let standard = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        assert_eq!(
+            Axes::texture(&north, &standard),
+            Some(Axes::cube(Face::North))
+        );
+        // Mirrored (a vanilla pane face): right turns to east.
+        let mirrored = [[1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+        assert_eq!(
+            Axes::texture(&north, &mirrored),
+            Some(Axes {
+                right: EAST,
+                up: UP
+            })
+        );
+        // A top face turned a quarter (y=90): the texture's up points east, its right south.
+        let top = [
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0],
+        ];
+        let turned = [[0.0, 1.0], [0.0, 0.0], [1.0, 0.0], [1.0, 1.0]];
+        assert_eq!(
+            Axes::texture(&top, &turned),
+            Some(Axes {
+                right: SOUTH,
+                up: EAST
+            })
+        );
+        // UVs that don't span the quad, or that run diagonally across it.
+        assert_eq!(Axes::texture(&north, &[[0.5, 0.5]; 4]), None);
+        let diagonal = [[0.5, 0.0], [1.0, 0.5], [0.5, 1.0], [0.0, 0.5]];
+        assert_eq!(Axes::texture(&north, &diagonal), None);
+        assert_eq!(Axes::texture(&north, &[[f32::NAN; 2]; 4]), None);
+        // A plant's plane, turned 45° about y: no block axis to connect along.
+        let plant = [
+            [1.0, 1.0, 1.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 1.0],
+        ];
+        assert_eq!(Axes::texture(&plant, &standard), None);
     }
 }

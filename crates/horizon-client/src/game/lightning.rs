@@ -88,6 +88,9 @@ impl Game<'_> {
             let trap = self.ui.rules.bool("spawn_mobs")
                 && self.world.random.next_double() < difficulty * 0.01
                 && !below.ends_with("lightning_rod");
+            if !self.lightning_strike_allowed(None, pos, "weather") {
+                continue;
+            }
             if trap {
                 let at = [f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2])];
                 // ServerLevel.tickChunk: a trap horse waits for a player.
@@ -227,8 +230,9 @@ impl Game<'_> {
         let seed = r.next_long();
         let flashes = r.next_int_bound(3).unwrap_or(0) + 1;
         self.lightning_seen[0] += 1;
+        let id = self.take_entity_id();
         self.bolts.push(Bolt {
-            id: 0,
+            id,
             at,
             life: 2,
             flashes,
@@ -241,6 +245,16 @@ impl Game<'_> {
             fires: 0,
             cause: None,
         });
+    }
+    pub(super) fn lightning_strike_allowed(
+        &mut self,
+        player: Option<u128>,
+        pos: [i32; 3],
+        cause: &str,
+    ) -> bool {
+        let mut cancel = false;
+        self.native_lightning_strike(player, pos, cause, &mut cancel);
+        !cancel
     }
     /// `ClientLevel.addEntity` for a server's lightning bolt: on a client it
     /// only flashes, sounds and draws (`LightningBolt.tick` off the server).
@@ -293,6 +307,9 @@ impl Game<'_> {
                 b.can_survive(level, ticks, at, fire).then_some(fire)
             });
             if let Some(fire) = fire {
+                if !self.native_block_ignite_allowed(at, "lightning") {
+                    continue;
+                }
                 let _ = self.level_set(p, fire);
                 set += 1;
             }
@@ -476,12 +493,6 @@ impl Game<'_> {
                 Vec3::new(p[0] + w, p[1] + h, p[2] + w),
             ))
         };
-        let inside = move |p: [f64; 3]| {
-            (p[0] - at[0]).abs() <= 3.0
-                && (p[2] - at[2]).abs() <= 3.0
-                && p[1] >= at[1] - 3.0
-                && p[1] <= at[1] + 9.0
-        };
         let struck: Vec<(u32, EntityView)> = self
             .mobs
             .iter()
@@ -502,6 +513,7 @@ impl Game<'_> {
             from: Some(b.at),
         };
         let mut events = Vec::new();
+        let mut powered = Vec::new();
         let peaceful = self.ui.difficulty == 0;
         for m in self.mobs.iter_mut().filter(|m| m.alive()) {
             if !meets(
@@ -549,7 +561,10 @@ impl Game<'_> {
                     m.damage(f32::MAX, damage);
                     continue;
                 }
-                Species::Creeper => m.extra.charged = true,
+                Species::Creeper => {
+                    m.extra.charged = true;
+                    powered.push(m.id);
+                }
                 // CopperGolem.thunderHit (after Entity.thunderHit's fire and
                 // damage): once per bolt, an oxidized golem goes back one step
                 // and its weathering timer (or wax, -2) is reset to -1.
@@ -574,12 +589,18 @@ impl Game<'_> {
         if !events.is_empty() {
             let _ = self.handle_mob_events(events);
         }
-        // Cushion.thunderHit: a cushion in the box breaks and drops its item
+        for entity in powered {
+            self.native_creeper_power(entity, [at[0], at[1], at[2]]);
+        }
+        // Cushion.thunderHit: a cushion whose box meets the strike box breaks and drops its item
         // (the bolt is no player, so no creative spare). Last first, since
         // break_cushion removes the entry.
         for i in (0..self.cushions.len()).rev() {
-            let p = self.cushions[i].position;
-            if inside([p.x, p.y, p.z]) {
+            let (lo, hi) = self.cushions[i].bounds();
+            if strike.intersects(Aabb::new(
+                Vec3::new(lo[0], lo[1], lo[2]),
+                Vec3::new(hi[0], hi[1], hi[2]),
+            )) {
                 let before = self.dropped.len();
                 self.break_cushion(i, false);
                 b.spared.extend(self.dropped[before..].iter().map(|e| e.id));

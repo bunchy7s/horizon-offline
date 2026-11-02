@@ -1,0 +1,6 @@
+{
+  "hooks": [],
+  "rust_summary": "a server mod's line for the event stream and the Discord bridge (`native_server_event`).",
+  "doc_summary": "`native_server_event(name, uuid, message)` posts an `announce` event to a dedicated server's event stream (`GET /api/v1/events`); horizon-server's Discord bridge relays it, in gold, when `[discord] events` lists `announce` (off by default). False elsewhere and for an empty message. Bundles that use it need \"hooks\": @API:server_event@.",
+  "comments": ["crates/horizon-client/src/game/native_server.rs"]
+}
