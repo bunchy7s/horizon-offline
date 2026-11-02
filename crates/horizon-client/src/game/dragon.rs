@@ -3076,6 +3076,7 @@ impl Game<'_> {
             head_yaw: d.yaw,
             on_ground: false,
             velocity: [d.velocity.x, d.velocity.y, d.velocity.z],
+            minecart_steps: None,
             data: 0,
             meta,
             defaults: Vec::new(),

@@ -121,8 +121,10 @@ impl Game<'_> {
         self.screen = Screen::Options;
         self.options_from_title = from_title;
         self.options_to_game = false;
+        let minecart_improvements = self.minecart_improvements();
         let ui = &mut self.ui.options;
         ui.open_at(!from_title && self.title.is_none(), page);
+        ui.minecart_improvements = minecart_improvements;
         let root = self.options.resources.clone();
         ui.languages = lang::available(&[&root]);
         self.refresh_pack_lists();

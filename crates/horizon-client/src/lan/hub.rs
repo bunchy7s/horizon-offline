@@ -1199,11 +1199,12 @@ impl Hub {
         let packet = match &self.sync.commands {
             Some(tree) => {
                 let dedicated = self.config.dedicated && !self.config.integrated;
-                tree.packet_with(
+                tree.packet_with_features(
                     g.permission,
                     dedicated,
                     &self.sync.builtin,
                     &self.mod_commands.0,
+                    &self.sync.features,
                 )
             }
             None => play::Commands {
@@ -2267,6 +2268,7 @@ impl Hub {
             attributes,
             precise: false,
             needs_sync: false,
+            minecart_steps: None,
             leash: None,
             spectator: false,
             watching: false,

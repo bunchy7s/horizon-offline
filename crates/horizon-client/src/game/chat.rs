@@ -1303,7 +1303,8 @@ impl Game<'_> {
     }
     /// Load per-world command state when a world opens.
     pub(super) fn load_world_state(&mut self) {
-        self.ui.rules = GameRules::load(&self.world_root);
+        self.ui.rules =
+            GameRules::load_with_features(&self.world_root, &self.level.enabled_features);
         self.ui.clock = WorldClock::default();
         // PrimaryLevelData: the difficulty comes back from level.dat's difficulty_settings.
         self.ui.difficulty = self.level.difficulty_id();

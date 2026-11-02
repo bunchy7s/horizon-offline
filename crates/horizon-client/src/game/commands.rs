@@ -159,7 +159,7 @@ impl Game<'_> {
         if self.client_mod_command(command) {
             return true;
         }
-        let d = vanilla::game_dispatcher();
+        let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
         let parse = d.parse(command, &self.ui.registries);
         let result = match parse.executable() {
             Err(e) => {
@@ -1149,7 +1149,7 @@ impl Game<'_> {
         }
     }
     fn cmd_help(&mut self, ctx: &Context) -> R<i32> {
-        let d = vanilla::game_dispatcher();
+        let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
         let level = self.ui.registries.permission;
         match ctx.get("command") {
             None => {

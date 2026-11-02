@@ -3760,6 +3760,13 @@ impl Level {
                 })
                 .collect();
         }
+        if let Some(packs) = data.get("DataPacks") {
+            let ids = |key| match packs.get(key) {
+                Some(Tag::List(ids)) => ids.iter().filter_map(|id| text(Some(id))).collect(),
+                _ => Vec::new(),
+            };
+            level.data_packs = Some((ids("Enabled"), ids("Disabled")));
+        }
         let mut rules: BTreeMap<String, i32> = GAME_RULES
             .iter()
             .map(|(k, v)| ((*k).to_owned(), *v))
@@ -3773,6 +3780,26 @@ impl Level {
                     rules.insert(name, v as i32);
                 }
             }
+        }
+        // GameRules(enabledFeatures, map) removes disabled experimental rules
+        // and supplies their defaults when enabled but absent from saved data.
+        let minecart_rule = &crate::gamerules::MAX_MINECART_SPEED;
+        if level
+            .enabled_features
+            .iter()
+            .any(|f| f == crate::gamerules::MINECART_IMPROVEMENTS)
+        {
+            let crate::gamerules::Value::Int(default) = minecart_rule.default else {
+                unreachable!()
+            };
+            let value = rules
+                .entry(minecart_rule.name.to_owned())
+                .or_insert(default);
+            if !(minecart_rule.min..=minecart_rule.max).contains(value) {
+                *value = default;
+            }
+        } else {
+            rules.remove(minecart_rule.name);
         }
         level.game_rules = rules;
         // Seed: world_gen_settings.dat (26.3) or Data.WorldGenSettings.
@@ -4419,6 +4446,27 @@ impl Level {
                     Tag::Byte(i8::from(value != 0))
                 };
                 put(&mut rules, &format!("minecraft:{name}"), tag);
+            }
+            if self
+                .enabled_features
+                .iter()
+                .any(|f| f == crate::gamerules::MINECART_IMPROVEMENTS)
+            {
+                let rule = &crate::gamerules::MAX_MINECART_SPEED;
+                let crate::gamerules::Value::Int(default) = rule.default else {
+                    unreachable!()
+                };
+                let value = self
+                    .game_rules
+                    .get(rule.name)
+                    .copied()
+                    .filter(|v| (rule.min..=rule.max).contains(v))
+                    .unwrap_or(default);
+                put(
+                    &mut rules,
+                    &format!("minecraft:{}", rule.name),
+                    Tag::Int(value),
+                );
             }
             write_saved_data(dir, "game_rules", rules)?;
         }
