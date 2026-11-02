@@ -1821,6 +1821,8 @@ impl Game<'_> {
             e.velocity = [d.velocity.x, d.velocity.y, d.velocity.z];
             e.precise = d.needs_sync;
             e.needs_sync = d.needs_sync;
+            e.vertical_collision = d.vertical_collision;
+            e.horizontal_collision = d.horizontal_collision;
             // Entity.DATA_SHARED_FLAGS_ID: glowing 0x40 (the Glowing tag).
             if self.entity_glowing(d.id) {
                 e.meta.push((0, serializer::BYTE, Value::Byte(0x40)));

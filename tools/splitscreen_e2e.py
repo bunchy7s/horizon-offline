@@ -447,6 +447,57 @@ def scenario_setup_leave():
         g.quit()
 
 
+def scenario_controls():
+    print('controls: the 2-sharing layout square, dragging a player between windows, Names, Identify')
+    g = Game(2, saved_split=True)
+    def widgets():
+        return g.ctl(1, 'ui')['widgets']
+    def labels():
+        return [w['label'] for w in widgets()]
+    def enabled(label):
+        return next(w['enabled'] for w in widgets() if w['label'] == label)
+    def centre(label):
+        x, y, w, h = next(w['bounds'] for w in widgets() if w['label'] == label)
+        return x + w / 2, y + h / 2
+    try:
+        g.wait(lambda: g.ctl(2, 'state').get('player') is not None, 'P2 playing')
+        half = g.size(1)
+        whole = (2 * half[0], half[1])
+        g.ctl(1, 'options', 'horizon')
+        g.press(1, 'Splitscreen...')
+        g.wait(lambda: (g.ctl(1, 'state').get('menu') or {}).get('status') == 'active', 'Setup active')
+        # Two sharing a window: Auto (side by side here), Side by side, Top and bottom.
+        g.press(1, '2 sharing: Auto')
+        g.press(1, '2 sharing: Side by side')
+        g.press(1, 'Apply')
+        stacked = (whole[0], half[1] // 2)
+        check('top and bottom', g.settle([1, 2], [stacked, stacked]), [stacked, stacked])
+        g.press(1, '2 sharing: Top and bottom')
+        g.press(1, 'Apply')
+        check('auto: side by side again', g.settle([1, 2], [half, half]), [half, half])
+        # Drag P2 into a window of its own, then onto P1's tile: back in Window 1.
+        g.press(1, 'P2')
+        g.press(1, 'New window')
+        g.press(1, 'Apply')
+        check('P2 in its own window', g.settle([1], [whole]), [whole])
+        g.wait(lambda: 'P2' in labels() and not enabled('Apply'), 'the applied map')
+        (x2, y2), (x1, y1) = centre('P2'), centre('P1')
+        g.ctl(1, 'drag-at', str(x2), str(y2), str((x1 + x2) / 2), str((y1 + y2) / 2), str(x1), str(y1))
+        g.wait(lambda: enabled('Apply'), 'the drop makes a draft')
+        g.press(1, 'Apply')
+        check('dragged onto P1: both in Window 1', g.settle([1, 2], [half, half]), [half, half])
+        # Names on and off (saved), Identify.
+        g.press(1, 'Names: On')
+        g.wait(lambda: 'Names: Off' in labels(), 'Names: Off')
+        check('Names turns off', 'Names: Off' in labels(), True)
+        g.press(1, 'Names: Off')
+        g.wait(lambda: 'Names: On' in labels(), 'Names: On')
+        g.press(1, 'Identify')
+        g.press(1, 'Done')
+    finally:
+        g.quit()
+
+
 SCENARIOS = {
     'alone': scenario_alone,
     'join': scenario_join,
@@ -459,6 +510,7 @@ SCENARIOS = {
     'toggle': scenario_toggle,
     'setup': scenario_setup,
     'setup_leave': scenario_setup_leave,
+    'controls': scenario_controls,
 }
 
 

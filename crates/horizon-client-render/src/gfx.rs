@@ -525,6 +525,9 @@ const COMPACT_BUDGET: u64 = 32 << 20;
 /// A large translucent page starts to shrink (`Renderer::shrink_translucent`)
 /// this long after terrain last arrived, and `SHRINK_RETRY` after a try found
 /// no room.
+/// `Renderer::remove_columns` filters each store once rather than looking up every
+/// section key from this many keys, or from as many as there are resident sections.
+const BULK_REMOVAL_KEYS: usize = 256;
 const SHRINK_SETTLE: std::time::Duration = std::time::Duration::from_secs(1);
 const SHRINK_RETRY: std::time::Duration = std::time::Duration::from_secs(5);
 /// Not before then may a large translucent page start to shrink.
@@ -777,6 +780,7 @@ pub struct Renderer {
     solid_opaque: wgpu::RenderPipeline,
     solid_cutout: wgpu::RenderPipeline,
     translucent: wgpu::RenderPipeline,
+    translucent_mark: wgpu::RenderPipeline,
     /// Flat section draws (`flat`), where multi-draw is emulated.
     flat: Option<flat::Flat>,
     /// `flat` draws this frame's sections (off: the per-section draws).
@@ -1023,6 +1027,8 @@ pub struct Renderer {
     pack_atlas: Option<pack_atlas::PackAtlas>,
     /// The pack's terrain program reads flat draws' vertices (`pack_terrain_inputs`).
     pack_terrain_flat: bool,
+    /// OptiFine/Iris separate ambient occlusion: pass vertex alpha to hz_Color.a.
+    pub separate_ao: bool,
     pub hud: HudRenderer,
     /// Vanilla's menu background blur, made on first use.
     menu_blur: Option<crate::menu_blur::MenuBlur>,
@@ -2279,6 +2285,17 @@ impl Renderer {
             true,
             true,
             Some(alpha_blend),
+        );
+        let translucent_mark = pipeline(
+            "Terrain translucent HDR mark",
+            "vs_terrain",
+            "fs_translucent_mark",
+            &terrain_buffers,
+            tri,
+            Some(wgpu::Face::Back),
+            false,
+            true,
+            Some(flat::ALPHA_ONLY),
         );
         let sky = pipeline(
             "Sky",
@@ -3694,6 +3711,7 @@ impl Renderer {
             solid_opaque,
             solid_cutout,
             translucent,
+            translucent_mark,
             flat_on: flat.is_some(),
             cull_on: cull.is_some(),
             sides_on: true,
@@ -3844,6 +3862,7 @@ impl Renderer {
             pack_weather: None,
             pack_atlas: None,
             pack_terrain_flat: false,
+            separate_ao: false,
             hud,
             menu_blur: None,
             post_effects: None,
@@ -3881,6 +3900,31 @@ impl Renderer {
             pass.set_pipeline(&self.hdr_mark_pipeline);
             pass.draw_indexed(0..quads * 6, (first * 4) as i32, 0..1);
         }
+    }
+    /// HDR lighting on translucent terrain, over the draws that just blended it.
+    fn mark_translucent_terrain(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        flat: Option<&flat::Flat>,
+        solid_draws: u32,
+        translucent_draws: u32,
+    ) {
+        if self.hdr.as_ref().is_none_or(|h| !h.lighting) {
+            return;
+        }
+        match flat {
+            Some(flat) => {
+                pass.set_pipeline(&flat.translucent_mark);
+                flat.draw(pass, flat.translucent_calls(), |p| self.arena.buffer(p));
+                pass.set_bind_group(0, &self.group, &[]);
+            }
+            None => {
+                pass.set_pipeline(&self.translucent_mark);
+                pass.set_vertex_buffer(1, self.instances.slice(..));
+                self.draw_sections(pass, &self.indirect, 0, solid_draws, translucent_draws);
+            }
+        }
+        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
     }
     /// LevelRenderer.submitBlockOutline: the buffer holds `edges` per stroke, the black
     /// secondary stroke first when high contrast is on.
@@ -4094,6 +4138,17 @@ impl Renderer {
     }
     pub fn section_count(&self) -> usize {
         self.sections.len()
+    }
+    /// Whether the running native pack gives any block a `[[lights]]` colour.
+    pub fn has_light_colors(&self) -> bool {
+        self.native
+            .as_ref()
+            .is_some_and(|native| !native.light_colors.is_empty())
+    }
+    /// The running native pack's `[[lights]]` colour of the block `name`.
+    pub fn light_color(&self, name: &str) -> Option<[f32; 3]> {
+        let native = self.native.as_ref()?;
+        horizon_shader_api::manifest::light_color(&native.light_colors, name)
     }
     /// The running native pack's `[[particle_lights]]`.
     pub fn particle_lights(&self) -> Option<&[horizon_shader_api::manifest::ParticleLight]> {
@@ -4692,6 +4747,18 @@ impl Renderer {
         }
     }
     pub fn remove_columns(&mut self, columns: impl IntoIterator<Item = (i32, i32)>) {
+        let columns: Vec<(i32, i32)> = columns.into_iter().collect();
+        // Most of the view at once (a teleport at render distance 32 drops some 3700
+        // columns): a pass over each store instead of a lookup per section key, which
+        // took 10 ms of one frame. Far terrain fades the sections out instead.
+        let keys = columns.len() * self.layout.sections();
+        if self.lods.is_empty()
+            && self.lod_cutout.is_empty()
+            && keys >= self.sections.len().max(BULK_REMOVAL_KEYS)
+        {
+            self.remove_columns_at_once(&columns);
+            return;
+        }
         let mut released = Vec::new();
         let mut block_entities = false;
         for (x, z) in columns {
@@ -4721,6 +4788,35 @@ impl Renderer {
         if block_entities {
             self.block_entity_revision = next_block_entity_revision();
         }
+        self.release_meshes(released);
+    }
+    /// `remove_columns` for a large share of the resident sections: each store filtered
+    /// once by column.
+    fn remove_columns_at_once(&mut self, columns: &[(i32, i32)]) {
+        let gone: crate::fast_hash::FxHashSet<(i32, i32)> = columns.iter().copied().collect();
+        let complete = self.complete_column();
+        for &(x, z) in columns {
+            if self.detail_columns.remove(&(x, z)) == Some(complete) {
+                self.detail_revision += 1;
+            }
+            self.occlusion.remove_column(x, z);
+        }
+        let kept = |key: &SectionKey| !gone.contains(&(key.0, key.2));
+        let before = self.block_entities.len();
+        self.block_entities.retain(|key, _| kept(key));
+        if self.block_entities.len() != before {
+            self.block_entity_revision = next_block_entity_revision();
+        }
+        let before = self.light_blocks.len();
+        self.light_blocks.retain(|key, _| kept(key));
+        self.light_revision += (before - self.light_blocks.len()) as u64;
+        self.section_uploaded.retain(|key, _| kept(key));
+        let released = self.sections.remove_columns(&gone);
+        self.release_meshes(released);
+    }
+    /// Gives the removed sections' quads back to their arenas; the sections themselves
+    /// (their sort centres) drop on a thread of their own when there are many.
+    fn release_meshes(&mut self, released: Vec<SectionGpu>) {
         if let Some(flat) = &mut self.flat {
             for id in released.iter().filter_map(|s| s.flat_id) {
                 flat.remove(id);
@@ -4736,6 +4832,9 @@ impl Renderer {
             .release_all(released.iter().filter_map(|s| s.vertex_ranges(split).0));
         if let Some(arena) = &mut self.translucent_arena {
             arena.release_all(released.iter().filter_map(|s| s.vertex_ranges(true).1));
+        }
+        if released.len() >= BULK_REMOVAL_KEYS {
+            arena::free_later(released);
         }
     }
     /// Horizon's resolution scale (world pixels per window pixel) and FXAA.
@@ -5037,6 +5136,16 @@ impl Renderer {
         self.pack_post = None;
         self.native = None;
         self.pack_atlas = None;
+        self.separate_ao = false;
+    }
+    /// Sets whether shader pack terrain inputs pass vertex alpha to `hz_Color.a` (`separateAo=true`).
+    pub fn set_separate_ao(&mut self, separate_ao: bool) {
+        if self.separate_ao != separate_ao {
+            self.separate_ao = separate_ao;
+            if let Some(atlas) = &mut self.pack_atlas {
+                atlas.separate_ao = separate_ao;
+            }
+        }
     }
     /// Runs the sky, material and post stages of one of Horizon's own shader packs from now
     /// on (`None`: no pack), with its options' values; replaces a `shaders/` pack. Returns the
@@ -5119,7 +5228,7 @@ impl Renderer {
                 .iter()
                 .map(|t| t.depth_or_array_layers())
                 .sum();
-            self.pack_atlas = pack_atlas::PackAtlas::new(
+            let mut atlas = pack_atlas::PackAtlas::new(
                 &self.device,
                 &mut encoder,
                 &self.sprite_textures,
@@ -5127,6 +5236,10 @@ impl Renderer {
                 layers,
                 self.sprite_textures[0].width(),
             );
+            if let Some(atlas) = &mut atlas {
+                atlas.separate_ao = self.separate_ao;
+            }
+            self.pack_atlas = atlas;
             self.queue.submit([encoder.finish()]);
         }
         // Flat draws whenever the device has them (`render` keeps them on with a pack).
@@ -7884,6 +7997,7 @@ impl Renderer {
                         }
                         pass.set_bind_group(0, &self.group, &[]);
                     }
+                    self.mark_translucent_terrain(&mut pass, flat, solid_draws, translucent_draws);
                 }
                 Some(flat) => {
                     pass.set_pipeline(pack_flat.map_or(&flat.translucent, |p| &p.1));
@@ -7892,6 +8006,12 @@ impl Renderer {
                     });
                     pass.set_bind_group(0, &self.group, &[]);
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    self.mark_translucent_terrain(
+                        &mut pass,
+                        Some(flat),
+                        solid_draws,
+                        translucent_draws,
+                    );
                 }
                 None => {
                     pass.set_pipeline(translucent_pipeline);
@@ -7904,6 +8024,7 @@ impl Renderer {
                         solid_draws,
                         translucent_draws,
                     );
+                    self.mark_translucent_terrain(&mut pass, None, solid_draws, translucent_draws);
                 }
             }
             // LevelRenderer.executeTranslucentAfterTerrain: vanilla's

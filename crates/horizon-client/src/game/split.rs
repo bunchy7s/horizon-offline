@@ -745,10 +745,14 @@ impl ApplicationHandler for Split<'_> {
         if changed || self.views() != self.applied {
             self.relayout(event_loop);
         }
-        // Each player's badge: who it is, shown a moment when something changes for it.
+        // Each player's badge: who it is, always with Names on (P1's Setup), else a moment when
+        // something changes for it.
+        let names = self.host.settings.extras.splitscreen_names;
         self.host.split_hud.badge = Some("P1".into());
+        self.host.split_hud.names = names;
         for g in &mut self.guests {
             g.game.split_hud.badge = Some(g.name.clone().unwrap_or_else(|| "New player".into()));
+            g.game.split_hud.names = names;
         }
         let master = self.host.audio.master;
         for i in 0..self.guests.len() {

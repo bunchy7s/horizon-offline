@@ -289,7 +289,15 @@ impl<'a> Split<'a> {
             })
             .collect();
         let sizes: Vec<_> = self.surfaces.iter().map(|s| s.size).collect();
-        layout::place_ordered(&windows, &self.player_order(), &sizes, 0, 0)
+        // How 2 and 3 players share a window: P1's settings (Setup's layout squares).
+        let e = &self.host.settings.extras;
+        layout::place_ordered(
+            &windows,
+            &self.player_order(),
+            &sizes,
+            e.splitscreen_two,
+            e.splitscreen_three,
+        )
     }
 
     /// The players (indices) in the order they fill a window they share (`order`, by seat;
