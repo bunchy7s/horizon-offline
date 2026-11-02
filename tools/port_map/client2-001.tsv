@@ -87,7 +87,7 @@ LevelRenderer.executeDepthBoundsCull	inline	crates/horizon-client-render/src/gfx
 LevelRenderer.executeOitWaterMask	port	crates/horizon-client-render/src/gfx.rs::WATER_MASK_OVERLAY	the water mask overlay of the same pass
 LevelRenderer.extractSectionDrawGroups	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	section draws grouped per layer and arena page from the visible sections
 LevelRenderer.prepareChunkRenders	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	per-layer draw list built for the frame, reversed for translucent layers
-LevelRenderer.performTransientBlockRemovals	inline	crates/horizon-client/src/game.rs::add_transient_block	transient blocks are tracked and dropped by that list
+LevelRenderer.performTransientBlockRemovals	inline	crates/horizon-client/src/game/transient_blocks.rs::add_transient_block	transient blocks are tracked and dropped by that list
 LevelRenderer.prepareChunkRendersIndirect	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	indirect draw arguments written and multi-draw issued
 LevelRenderer.compileSections	port	crates/horizon-client-render/src/streaming.rs::Streaming::update	section meshing jobs queued for dirty sections nearest the camera
 LevelRenderer.submitEntities	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	entity models drawn with their batches
