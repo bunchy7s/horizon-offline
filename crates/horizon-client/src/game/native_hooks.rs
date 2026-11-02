@@ -3104,6 +3104,19 @@ impl Game<'_> {
     pub(super) fn native_crafter_craft(&self, pos: [i32; 3], recipe: &str) {
         let _ = (pos, recipe);
     }
+    /// A server player is about to open an inventory supplied by a block at
+    /// `pos`. Set `cancel` to leave the inventory closed. The player's state
+    /// is not swapped in. @API:native_inventory_block_start@.
+    pub(super) fn native_inventory_block_start(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, pos, cancel);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

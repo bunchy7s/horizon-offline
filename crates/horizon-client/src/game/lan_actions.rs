@@ -1246,6 +1246,14 @@ impl Game<'_> {
         if !horizon_client::containers::menu_reaches(brand, menu) {
             return false;
         }
+        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
+            return false;
+        };
+        let mut cancel = false;
+        self.native_inventory_block_start(uuid, &name, [pos.0, pos.1, pos.2], &mut cancel);
+        if cancel {
+            return false;
+        }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(host, conn);
         let hidden = self.native_hidden_slots(pos, items.len());
