@@ -850,41 +850,18 @@ impl Game<'_> {
             })
             .collect()
     }
-    /// The entities of the level in place a selector can find.
+    /// The entities of the level in place a selector can find: one walk over
+    /// the entity lists (a kind added there joins `@e` once it names its
+    /// `Target`), then the kinds that are not on the walk. An
+    /// unsorted selector lists them in that order.
     fn level_candidates(&self) -> Vec<Target> {
-        use horizon_client::projectiles::ProjectileKind as K;
+        use super::entity::{Entity as _, entity_lists_of, for_each_entity};
         let mut candidates = Vec::new();
-        candidates.extend(
-            self.mobs
-                .iter()
-                .filter(|m| m.death_time == 0)
-                .map(|m| Target::Mob(m.id)),
-        );
-        candidates.extend(self.dropped.iter().map(|i| Target::Item(i.id)));
-        candidates.extend(self.orbs.iter().map(|o| Target::Orb(o.id)));
-        candidates.extend(
-            self.creatures
-                .projectiles
-                .iter()
-                // The kinds /data can write (entity_nbt).
-                .filter(|p| {
-                    p.is_arrow()
-                        || horizon_client::entity_nbt::saved_with_chunk(p)
-                        || matches!(
-                            p.kind,
-                            K::LargeFireball { .. }
-                                | K::SmallFireball
-                                | K::WindCharge
-                                | K::BreezeWindCharge
-                        )
-                })
-                .map(|p| Target::Projectile(p.id)),
-        );
-        candidates.extend(self.armor_stands.iter().map(|a| Target::Stand(a.id)));
+        for_each_entity!(entity_lists_of!(self), entity => {
+            candidates.extend(entity.selector_target());
+        });
         candidates.extend(self.item_frames.iter().map(|f| Target::Frame(f.id)));
         candidates.extend(self.paintings.iter().map(|p| Target::Painting(p.id)));
-        candidates.extend(self.boats.iter().map(|b| Target::Boat(b.id)));
-        candidates.extend(self.carts.iter().map(|c| Target::Cart(c.id)));
         candidates.extend(self.others.iter().map(|o| Target::Other(o.id)));
         // The End crystals and the dragon (EndCrystal and EnderDragon
         // are entities of their own).
@@ -892,9 +869,6 @@ impl Game<'_> {
         if let Some(d) = &self.dragon {
             candidates.push(Target::Dragon(d.id));
         }
-        candidates.extend(self.tnts.iter().map(|t| Target::Tnt(t.id)));
-        candidates.extend(self.falling.iter().map(|f| Target::Falling(f.id)));
-        candidates.extend(self.rockets.iter().map(|r| Target::Rocket(r.id)));
         candidates.extend(self.ominous_spawners.iter().map(|s| Target::Spawner(s.id)));
         candidates
     }

@@ -16,8 +16,8 @@ use horizon_world::registry::BlockStateId;
 /// An `AreaEffectCloud` a server tracks: what its client tick reads.
 pub(super) struct RemoteCloud {
     id: u32,
-    at: [f64; 3],
-    radius: f32,
+    pub(super) at: [f64; 3],
+    pub(super) radius: f32,
     waiting: bool,
     particle: ParticleOptions,
 }

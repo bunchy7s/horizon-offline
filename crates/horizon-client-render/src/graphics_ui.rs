@@ -28,6 +28,8 @@ pub enum H {
     Preset,
     LodDistance,
     FarDetail,
+    BlueMapAutoDetect,
+    BlueMapRadius,
     CaveCulling,
     EntityCulling,
     LeafCulling,
@@ -190,6 +192,16 @@ pub fn rows(level: Level) -> Vec<Row> {
             render,
             lod,
             far,
+            h(
+                H::BlueMapAutoDetect,
+                None,
+                "On servers, finds their BlueMap web map for far terrain. Next join.",
+            ),
+            h(
+                H::BlueMapRadius,
+                None,
+                "How far around you BlueMap tiles are downloaded. Next join.",
+            ),
             v(
                 Opt::SimulationDistance,
                 Medium,
@@ -430,6 +442,8 @@ pub fn rows(level: Level) -> Vec<Row> {
     rows
 }
 
+/// BlueMap download radii, in chunks.
+const BLUE_MAP_RADII: [u32; 5] = [16, 32, 64, 128, 256];
 const UPLOAD_STEPS: [u32; 8] = [0, 256, 512, 1024, 2048, 4096, 8192, 16384];
 /// What the LOD Distance slider stops at, in chunks: off, then each doubling
 /// up to the whole world.
@@ -596,6 +610,11 @@ impl H {
                 n => labelled("LOD Distance", lang::tr("%s chunks", &[&n])),
             },
             H::FarDetail => labelled("Far Detail", g.far_detail.label()),
+            H::BlueMapAutoDetect => labelled("Find BlueMap", on_off(g.blue_map.auto_detect)),
+            H::BlueMapRadius => labelled(
+                "BlueMap Radius",
+                lang::tr("%s chunks", &[&g.blue_map.radius_chunks()]),
+            ),
             H::CaveCulling => labelled("Cave Culling", on_off(g.cave_culling)),
             H::EntityCulling => labelled("Entity Culling", g.entity_culling.label()),
             H::LeafCulling => labelled("Leaf Culling", g.leaf_culling.label()),
@@ -743,6 +762,10 @@ impl H {
             H::FarDetail => {
                 g.far_detail = step(&[FarDetail::Full, FarDetail::Reduced], g.far_detail, back)
             }
+            H::BlueMapAutoDetect => g.blue_map.auto_detect = !g.blue_map.auto_detect,
+            H::BlueMapRadius => {
+                g.blue_map.radius = step(&BLUE_MAP_RADII, g.blue_map.radius_chunks(), back)
+            }
             H::CaveCulling => g.cave_culling = !g.cave_culling,
             H::EntityCulling => {
                 g.entity_culling = step(&EntityCullingMode::ALL, g.entity_culling, back)
@@ -855,6 +878,7 @@ impl Item {
     pub fn switch(self, s: &Settings) -> Option<bool> {
         let g = &s.horizon;
         Some(match self {
+            Item::Horizon(H::BlueMapAutoDetect) => g.blue_map.auto_detect,
             Item::Horizon(H::CaveCulling) => g.cave_culling,
             Item::Horizon(H::CacheShulkerBoxes) => g.cache_shulker_boxes,
             Item::Horizon(H::CacheSigns) => g.cache_signs,
@@ -926,6 +950,8 @@ impl Item {
             self,
             Item::Horizon(
                 H::Preset
+                    | H::BlueMapAutoDetect
+                    | H::BlueMapRadius
                     | H::Overlay
                     | H::ScreenshotQuality
                     | H::Pacing
@@ -1894,6 +1920,31 @@ mod tests {
             Item::Vanilla(Opt::RenderDistance).label(&s).plain(),
             format!("Full Detail Distance: {near} chunks")
         );
+    }
+
+    #[test]
+    fn blue_map_settings_are_advanced_rendering_options() {
+        let mut s = Settings::default();
+        let find = Item::Horizon(H::BlueMapAutoDetect);
+        let radius = Item::Horizon(H::BlueMapRadius);
+        let advanced: Vec<_> = rows(Level::Advanced)
+            .into_iter()
+            .filter_map(|row| match row {
+                Row::Setting(setting) => Some(setting.item),
+                Row::Header(_) => None,
+            })
+            .collect();
+        assert!(advanced.contains(&find) && advanced.contains(&radius));
+        assert_eq!(find.switch(&s), Some(false), "off by default");
+        assert_eq!(radius.label(&s).plain(), "BlueMap Radius: 64 chunks");
+        find.cycle(&mut s, false, [854, 480]);
+        assert!(s.horizon.blue_map.auto_detect);
+        radius.cycle(&mut s, false, [854, 480]);
+        assert_eq!(s.horizon.blue_map.radius, 128);
+        radius.cycle(&mut s, true, [854, 480]);
+        radius.cycle(&mut s, true, [854, 480]);
+        assert_eq!(radius.label(&s).plain(), "BlueMap Radius: 32 chunks");
+        assert_eq!(s.horizon.preset, Preset::Custom);
     }
 
     #[test]
