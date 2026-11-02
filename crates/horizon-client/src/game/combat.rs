@@ -182,22 +182,34 @@ pub(super) fn send_drown_particles(
     velocity: [f64; 3],
     count: i32,
 ) {
-    use horizon_protocol::{entity_data::Particle, packets::play::{self, Clientbound}};
+    use horizon_core::random::{LegacyRandom, RandomSource};
+    use horizon_protocol::{
+        entity_data::Particle,
+        packets::play::{self, Clientbound},
+    };
     let Some(id) = host.hub.registry_id("minecraft:particle_type", "minecraft:bubble") else {
         return;
     };
-    let packet = Clientbound::LevelParticles(play::LevelParticles {
-        particle: Particle { id, data: None },
-        override_limiter: false,
-        always_show: false,
-        pos: at.map(|v| v - 1.0),
-        dist: [2.0; 3],
-        max_speed: velocity.map(|v| v as f32),
-        count,
-        randomization: 1,
-    });
-    for guest in host.hub.guests.iter().filter(|g| host.hub.here(g)) {
-        guest.send(&packet);
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as i64;
+    let mut random = LegacyRandom::new(seed);
+    for _ in 0..count {
+        let pos = at.map(|v| v + random.next_double() - random.next_double());
+        let packet = Clientbound::LevelParticles(play::LevelParticles {
+            particle: Particle { id, data: None },
+            override_limiter: false,
+            always_show: false,
+            pos,
+            dist: velocity.map(|v| v as f32),
+            max_speed: [1.0; 3],
+            count: 0,
+            randomization: 0,
+        });
+        for guest in host.hub.guests.iter().filter(|g| host.hub.here(g)) {
+            guest.send(&packet);
+        }
     }
 }
 
