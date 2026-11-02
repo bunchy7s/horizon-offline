@@ -2867,6 +2867,20 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A totem of undying saved the server player `player` (`name`): their
+    /// hurt would have killed them and the totem held in either hand fired
+    /// (`LivingEntity.checkTotemDeathProtection`; Bukkit's
+    /// `EntityResurrectEvent`), heard just before it is used up and its
+    /// effects apply. Listen only: whether the totem saves is decided inside
+    /// the health state machine, before a mod is asked, so a mod cannot veto
+    /// it from here. The player's state is swapped in, so
+    /// `native_acting_player`, `native_tell` and the item helpers reach them.
+    /// Once for each totem, on a server; the host of a LAN world's totem is
+    /// not heard. @API:native_player_totem@.
+    fn player_totem(&self, host: &mut dyn Host, event: &mut PlayerTotemEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A server player's client answered a resource pack in play (vanilla's
     /// `ServerboundResourcePackPacket`): `status` is `Action`'s number, 0
     /// successfully loaded, 1 declined, 2 failed download, 3 accepted, 4
@@ -2912,18 +2926,6 @@ pub trait Hooks: Send + Sync {
     /// (horse, pig...) or a vehicle carrying only a mob. Server-side, in the
     /// level the vehicle is in. @API:native_vehicle_moved@.
     fn vehicle_moved(&self, host: &mut dyn Host, event: &mut VehicleMovedEvent<'_>) {
-    }
-    /// A totem of undying saved the server player `player` (`name`): their
-    /// hurt would have killed them and the totem held in either hand fired
-    /// (`LivingEntity.checkTotemDeathProtection`; Bukkit's
-    /// `EntityResurrectEvent`), heard just before it is used up and its
-    /// effects apply. Listen only: whether the totem saves is decided inside
-    /// the health state machine, before a mod is asked, so a mod cannot veto
-    /// it from here. The player's state is swapped in, so
-    /// `native_acting_player`, `native_tell` and the item helpers reach them.
-    /// Once for each totem, on a server; the host of a LAN world's totem is
-    /// not heard. @API:native_player_totem@.
-    fn player_totem(&self, host: &mut dyn Host, event: &mut PlayerTotemEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -7835,14 +7837,6 @@ pub struct PlayerLoginEvent<'a> {
     pub reason: &'a mut Option<Text>,
 }
 pub fn dispatch_player_login(
-    }
-/// What [`Hooks::player_totem`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
-#[non_exhaustive]
-pub struct PlayerTotemEvent<'a> {
-    pub player: u128,
-    pub name: &'a str,
-}
-pub fn dispatch_player_totem(
     host: &mut dyn Host,
     mods: &[Box<dyn Hooks>],
     player: u128,
@@ -7941,6 +7935,23 @@ pub fn dispatch_player_teleported(
         mod_hook.player_teleported(host, &mut event);
     }
 }
+/// What [`Hooks::player_totem`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerTotemEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_totem(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+) {
+    let mut event = PlayerTotemEvent { player, name };
+    for mod_hook in mods {
+        mod_hook.player_totem(host, &mut event);
+    }
+}
 /// What [`Hooks::resource_pack_status`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ResourcePackStatusEvent<'a> {
@@ -8012,10 +8023,5 @@ pub fn dispatch_vehicle_moved(
     };
     for mod_hook in mods {
         mod_hook.vehicle_moved(host, &mut event);
-    }
-) {
-    let mut event = PlayerTotemEvent { player, name };
-    for mod_hook in mods {
-        mod_hook.player_totem(host, &mut event);
     }
 }
