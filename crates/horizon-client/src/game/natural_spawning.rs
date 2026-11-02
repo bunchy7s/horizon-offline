@@ -233,6 +233,19 @@ impl SpawnLevel for GameLevel<'_, '_> {
     }
 }
 impl NaturalLevel for GameLevel<'_, '_> {
+    fn potential_spawns(&self, category: Category, pos: [i32; 3], entries: &mut Vec<SpawnEntry>) {
+        let mut canceled = false;
+        self.game.native_potential_spawns(
+            self.game.dim.id(),
+            category.name(),
+            pos,
+            entries,
+            &mut canceled,
+        );
+        if canceled {
+            entries.clear();
+        }
+    }
     fn min_y(&self) -> i32 {
         self.w.world.bottom_y()
     }

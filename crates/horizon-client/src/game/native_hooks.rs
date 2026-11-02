@@ -4685,6 +4685,21 @@ impl Game<'_> {
         mod_api::dispatch_time_skip(self, mod_api::mods(), dimension, from, to, cause, cancel);
     }
 
+    /// Possible natural spawns at a server position (NeoForge's
+    /// `LevelEvent.PotentialSpawns`, `NaturalSpawner.mobsAt`). Mods may add or
+    /// remove entries, or cancel to make the list empty. Added entries must
+    /// be globally unique instances. @API:native_potential_spawns@.
+    pub(super) fn native_potential_spawns(
+        &self,
+        dimension: &str,
+        category: &str,
+        pos: [i32; 3],
+        entries: &mut Vec<horizon_client::biome::SpawnEntry>,
+        canceled: &mut bool,
+    ) {
+        let _ = (dimension, category, pos, entries, canceled);
+    }
+
     /// The world's spawn point changed to `pos` and `angle`. @API:native_spawn_change@.
     pub(super) fn native_spawn_change(&mut self, pos: [i32; 3], angle: [f32; 2]) {
         mod_api::dispatch_spawn_change(self, mod_api::mods(), pos, angle);

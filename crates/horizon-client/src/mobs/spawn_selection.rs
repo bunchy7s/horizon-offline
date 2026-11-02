@@ -301,6 +301,8 @@ fn spawns_far_from_player(s: Species, category: Category) -> bool {
 pub type MobType = (Species, f32, f32, Category);
 
 pub trait NaturalLevel: SpawnLevel {
+    /// Let server mods change the possible spawns at a position.
+    fn potential_spawns(&self, _category: Category, _pos: [i32; 3], _entries: &mut Vec<SpawnEntry>) {}
     fn min_y(&self) -> i32;
     /// `getMaxY()`: the highest buildable block.
     fn max_y(&self) -> i32;
@@ -1057,7 +1059,9 @@ pub fn spawn_category_for_position<L: NaturalLevel, R: RandomSource>(
                 {
                     None
                 } else {
-                    weighted_pick(mobs_at(l, category, x, y, z), random)
+                    let mut entries = mobs_at(l, category, x, y, z).to_vec();
+                    l.potential_spawns(category, [x, y, z], &mut entries);
+                    weighted_pick(&entries, random)
                 };
                 let Some(entry) = list else {
                     break;
