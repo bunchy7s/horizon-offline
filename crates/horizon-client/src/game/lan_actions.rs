@@ -3629,6 +3629,11 @@ impl Game<'_> {
     /// teleport the client there.
     fn wake_guest_from(&mut self, host: &mut LanHost, gi: usize, head: [i32; 3]) {
         let yaw = host.hub.guests[gi].yaw;
+        let (player, name) = {
+            let g = &host.hub.guests[gi];
+            (g.uuid, g.name.clone())
+        };
+        self.native_player_bed_leave(player, &name, head);
         let Some((stand, yaw)) = self.bed_wake_pose(head, yaw) else {
             return;
         };

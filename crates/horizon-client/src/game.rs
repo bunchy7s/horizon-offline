@@ -14271,6 +14271,9 @@ impl Game<'_> {
             self.pitch = 0.0;
             self.snap_player_model_pitch();
         }
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_bed_leave(player, &name, head);
+        }
     }
     fn tick_sleep(&mut self) {
         self.sleep_timer = tick_sleep_timer(self.sleep_timer, self.sleeping.is_some());

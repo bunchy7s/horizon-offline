@@ -2789,6 +2789,49 @@ impl Game<'_> {
     ) {
         let _ = (player, name, pos, cancel);
     }
+    /// while a guest packet is handled. @API:player_bed_leave@.
+    pub(super) fn native_player_bed_leave(&mut self, player: u128, name: &str, pos: [i32; 3]) {
+        let _ = (player, name, pos);
+    }
+    /// A server player's book edit or signing packet is about to be applied.
+    /// `pages` is its page count; `signing` means the packet has a title. Set
+    /// `cancel` to drop the edit. Helpers looking up the guest through
+    /// `self.lan` may find nothing during the packet. @API:player_edit_book@.
+    pub(super) fn native_player_edit_book(
+        &mut self,
+        player: u128,
+        name: &str,
+        pages: i32,
+        signing: bool,
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, pages, signing, cancel);
+    }
+    /// A player shearing a mob is about to do so. Set `cancel` to leave the
+    /// mob and shears unchanged. The guest's state is swapped in, though
+    /// helpers looking them up through `self.lan` may find nothing during a
+    /// guest packet. @API:player_shear_entity@.
+    pub(super) fn native_player_shear_entity(
+        &mut self,
+        player: u128,
+        name: &str,
+        entity_id: i32,
+        off_hand: bool,
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, entity_id, off_hand, cancel);
+    }
+    /// A server player completed an advancement, after progress was recorded.
+    /// Helpers looking up the guest through `self.lan` may find nothing during
+    /// its packet. @API:player_advancement_done@.
+    pub(super) fn native_player_advancement_done(
+        &mut self,
+        player: u128,
+        name: &str,
+        advancement: &str,
+    ) {
+        let _ = (player, name, advancement);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

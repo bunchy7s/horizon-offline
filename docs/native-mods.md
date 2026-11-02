@@ -1273,6 +1273,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_bed_enter(player, name, pos, cancel)`**: a server player passed the sleep checks and is about to
   enter the bed at its head position. Set `cancel` to keep them out; helpers that look them up through `self.lan` may
   find nothing while a guest packet is handled.
+- **`native_player_bed_leave(player, name, pos)`**: A server player woke or stood up from a bed, after their sleeping state changed. The head position is `pos`; helpers looking up the guest through `self.lan` may find nothing during guest packet handling.
 - **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and
   their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
   player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a
