@@ -1323,6 +1323,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   memory, fast.
 - **`native_block_ignite(dimension, pos, cause, cancel)`** (on `GameLevel`): fire is about to spread into `pos`
   from another fire block. Set `cancel` to leave the position unchanged. Other fire sources are not covered yet.
+- **`native_block_burn(dimension, pos, cancel)`** (on `GameLevel`): fire's burnout check is about to remove the block at
+  `pos`. Set `cancel` to keep it.
 - **`native_random_tick(ticks, dimension, pos, state, handled)`** (API 33, on `GameLevel`): a block `tickChunk`
   random-ticks, before its own `randomTick`. Change the block with the level's `native_set_block_property(ticks, pos,
   key, value, flags)`; set `handled` to skip the block's own random tick.

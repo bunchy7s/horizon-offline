@@ -326,6 +326,9 @@ pub trait LevelAccess {
     fn allow_block_ignite(&self, _pos: BlockPos, _cause: &'static str) -> bool {
         true
     }
+    fn allow_block_burn(&self, _pos: BlockPos) -> bool {
+        true
+    }
     /// Whether the piston at `piston` may push the blocks `push` one step
     /// `direction` and destroy `destroy` (`PistonBaseBlock.moveBlocks`, once
     /// the structure resolved). Refused, it moves nothing, as a structure

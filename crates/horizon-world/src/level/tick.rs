@@ -686,7 +686,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     let next = self.fire_state_with_age(pos, new_age);
                     self.set_block_and_update(pos, next);
                 }
-            } else if allowed {
+            } else if allowed && self.level.allow_block_burn(pos) {
                 self.remove_block(pos, false);
             }
             if allowed && !b.is_air(self.state(pos)) && b.instance_of(old, Class::Tnt) {

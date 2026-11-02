@@ -577,6 +577,18 @@ impl GameLevel<'_> {
         let _ = (dimension, pos, cause, cancel);
     }
 
+    /// On an authoritative server, fire is about to burn the block at `pos`
+    /// away. Set `cancel` to keep that block. @API:native_block_burn@.
+    #[inline(always)]
+    pub(super) fn native_block_burn(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        cancel: &mut bool,
+    ) {
+        let _ = (dimension, pos, cancel);
+    }
+
     /// On an authoritative server, the piston at `piston` is about to push
     /// the blocks at `push` one step `direction` (`[0, 1, 0]` is up; pulling
     /// when it retracts) and destroy those at `destroy`:
