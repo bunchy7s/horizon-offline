@@ -3612,6 +3612,18 @@ impl Game<'_> {
         let _ = (player, name, entity, kind);
     }
 
+    /// A player bow or crossbow launched an arrow with `force`, after the
+    /// projectile entered the level. @API:native_entity_shoot_bow@.
+    pub(super) fn native_entity_shoot_bow(
+        &mut self,
+        player: u128,
+        name: &str,
+        projectile: u32,
+        force: f32,
+    ) {
+        let _ = (player, name, projectile, force);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
