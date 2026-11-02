@@ -2002,6 +2002,12 @@ impl Game<'_> {
                         self.native_player_change_main_hand(uuid, &name, left);
                     }
                 }
+                HostEvent::LocaleChanged(conn, locale) => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.native_player_locale_change(uuid, &name, &locale);
+                    }
+                }
                 HostEvent::Packet(conn, packet) => {
                     self.lan_guest_packet(&mut host, conn, *packet);
                     if !host.commands.is_empty() {
