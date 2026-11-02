@@ -126,7 +126,7 @@ fn target_id(t: Target) -> Option<u32> {
 #[allow(dead_code)]
 impl Game<'_> {
     /// Whether this game simulates the level `dimension`.
-    fn native_entity_level(&self, dimension: &str) -> bool {
+    fn native_simulates_level(&self, dimension: &str) -> bool {
         (self.serving.is_some() || self.options.dedicated.is_some()) && dimension == self.dim.id()
     }
     /// Spawns an entity of `kind` (`minecraft:item_display`) at `pos` in the
@@ -143,7 +143,7 @@ impl Game<'_> {
         pos: [f64; 3],
         nbt: Compound,
     ) -> Option<u32> {
-        if !self.native_entity_level(dimension) || !position_ok(pos) {
+        if !self.native_simulates_level(dimension) || !position_ok(pos) {
             return None;
         }
         let chunk = ((pos[0].floor() as i32) >> 4, (pos[2].floor() as i32) >> 4);
@@ -195,7 +195,7 @@ impl Game<'_> {
         yaw: f32,
         pitch: f32,
     ) -> bool {
-        if !self.native_entity_level(dimension)
+        if !self.native_simulates_level(dimension)
             || !position_ok(pos)
             || !yaw.is_finite()
             || !pitch.is_finite()
@@ -221,7 +221,7 @@ impl Game<'_> {
         id: u32,
         display: &NativeDisplay,
     ) -> bool {
-        if !self.native_entity_level(dimension) || !display.valid() {
+        if !self.native_simulates_level(dimension) || !display.valid() {
             return false;
         }
         let is_display = self.others.iter().any(|o| {
@@ -250,7 +250,7 @@ impl Game<'_> {
     /// another dimension. Mobs go with `native_remove_mob`. API
     /// 59.
     pub(super) fn native_remove_entity(&mut self, dimension: &str, id: u32) -> bool {
-        if !self.native_entity_level(dimension) || !self.others.iter().any(|o| o.id == id) {
+        if !self.native_simulates_level(dimension) || !self.others.iter().any(|o| o.id == id) {
             return false;
         }
         self.others.retain(|o| o.id != id);

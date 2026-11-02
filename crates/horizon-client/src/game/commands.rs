@@ -2989,10 +2989,10 @@ impl Game<'_> {
         let old_level = self.experience.level;
         if add {
             if levels {
-                self.experience.level = (self.experience.level + amount).max(0);
-                if self.experience.level == 0 && amount < 0 {
-                    self.experience.progress = 0.0;
-                }
+                // Player.giveExperienceLevels handles the strict negative
+                // boundary and emits the level-change hook itself.
+                self.give_levels(amount);
+                return true;
             } else {
                 self.give_points(amount);
             }

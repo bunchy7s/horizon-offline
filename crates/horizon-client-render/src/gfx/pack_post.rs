@@ -380,6 +380,9 @@ struct Pass {
     image_copies: u64,
     /// The pack's images a compute pass's loads read as they were before it: copied first.
     snapshots: u64,
+    /// `scale.<program>` (scale, offset x, offset y): the pass draws only that part of its
+    /// buffers and keeps the rest.
+    viewport: Option<[f32; 3]>,
 }
 
 impl Pass {
@@ -890,6 +893,20 @@ fn target(format: wgpu::TextureFormat) -> Option<wgpu::ColorTargetState> {
         blend: None,
         write_mask: wgpu::ColorWrites::ALL,
     })
+}
+
+/// The viewport of `scale.<program>` (scale, offset x, offset y) on buffers of `size`, in whole
+/// pixels, at least one and inside them. Buffer rows are GL's, so the offsets count from GL's
+/// bottom-left corner as they are.
+fn viewport(size: [u32; 2], [scale, x, y]: [f32; 3]) -> [f32; 4] {
+    let [w, h] = size.map(|n| n as f32);
+    let (x, y) = ((x * w).floor().min(w - 1.0), (y * h).floor().min(h - 1.0));
+    [
+        x,
+        y,
+        (scale * w).floor().clamp(1.0, w - x),
+        (scale * h).floor().clamp(1.0, h - y),
+    ]
 }
 
 fn attach(
@@ -1555,6 +1572,7 @@ fn build_pass(
         compute: Vec::new(),
         sink,
         geometry: p.geometry_triangles,
+        viewport: (!final_pass && p.scale != [1.0, 0.0, 0.0]).then_some(p.scale),
         image_copies,
         snapshots: 0,
     })
@@ -1688,6 +1706,7 @@ fn build_compute(
         geometry: 0,
         image_copies,
         snapshots,
+        viewport: None,
     })
 }
 
@@ -3990,18 +4009,27 @@ impl PackPost {
                     .map(|t| &t[usize::from(self.main & 1 << i == 0)])
             };
             let mut attachments: Vec<Option<wgpu::RenderPassColorAttachment>> = Vec::new();
+            // A scaled pass keeps what its buffers hold outside its viewport.
+            let ops = if pass.viewport.is_some() {
+                wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }
+            } else {
+                overwrite
+            };
             if final_pass {
                 attachments.push(attach(screen, overwrite));
                 shown = true;
             } else if pass.sink {
-                attachments.push(attach(&targets.sink, overwrite));
+                attachments.push(attach(&targets.sink, ops));
             } else {
                 for &(location, buffer) in &pass.writes {
                     let l = location as usize;
                     if attachments.len() <= l {
                         attachments.resize(l + 1, None);
                     }
-                    attachments[l] = view(buffer).and_then(|v| attach(v, overwrite));
+                    attachments[l] = view(buffer).and_then(|v| attach(v, ops));
                 }
             }
             {
@@ -4017,6 +4045,10 @@ impl PackPost {
                     && let Some(g) = &self.buffers.group
                 {
                     rp.set_bind_group(4, g, &[]);
+                }
+                if let Some(scale) = pass.viewport {
+                    let [x, y, w, h] = viewport(out, scale);
+                    rp.set_viewport(x, y, w, h, 0.0, 1.0);
                 }
                 rp.draw(0..6, 0..1);
             }
@@ -4271,6 +4303,27 @@ mod tests {
         read.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         assert_eq!(&read.slice(..).get_mapped_range().unwrap()[..], &[0; 4]);
+    }
+
+    /// `scale.composite2 = 0.25 0.5 0.25` on a 1280×720 picture: Iris 1.11.7 draws x 640..960
+    /// and GL y 180..360 (a probe pack of our own). Rows are GL's here, so that is rows 180..360.
+    #[test]
+    fn a_scaled_pass_draws_its_part_from_gl_s_corner() {
+        assert_eq!(
+            viewport([1280, 720], [0.25, 0.5, 0.25]),
+            [640.0, 180.0, 320.0, 180.0]
+        );
+        assert_eq!(
+            viewport([1280, 720], [0.5, 0.0, 0.0]),
+            [0.0, 0.0, 640.0, 360.0]
+        );
+        // Whole pixels, at least one, and never past the buffer's edge.
+        assert_eq!(viewport([5, 3], [0.5, 0.0, 0.0]), [0.0, 0.0, 2.0, 1.0]);
+        assert_eq!(viewport([4, 4], [0.01, 0.0, 0.0]), [0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(
+            viewport([100, 100], [1.0, 0.5, 0.75]),
+            [50.0, 75.0, 50.0, 25.0]
+        );
     }
 
     #[test]
