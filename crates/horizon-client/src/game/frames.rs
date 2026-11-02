@@ -464,7 +464,8 @@ impl Game<'_> {
             if self.item_frames[i].check_interval >= 100 {
                 self.item_frames[i].check_interval = 0;
                 let f = self.item_frames[i].clone();
-                if !self.frame_survives(&f) && !self.hanging_break_cancelled(f.kind(), f.pos, false) {
+                if !self.frame_survives(&f) && !self.hanging_break_cancelled(f.kind(), f.pos, false)
+                {
                     self.item_frames.remove(i);
                     self.audio
                         .play(&sound(&f, "break"), Some(center(&f)), 1.0, 1.0);
