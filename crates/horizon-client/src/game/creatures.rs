@@ -4659,7 +4659,16 @@ impl Game<'_> {
                         to = Vec3::new(target[0], target[1], target[2]);
                     }
                 }
-                if p.owner == Some(Who::Player) && self.player.is_some() && !cancel {
+                // ThrownEnderpearl.isAllowedToTeleportOwner: an owner who is
+                // dead or asleep cannot take the pearl, so it is discarded
+                // where it lands (no teleport and no 5 damage).
+                let taken = self.player.as_ref().is_some_and(|pl| {
+                    horizon_client::projectiles::owner_can_take_pearl(
+                        !pl.health.dead_or_dying(),
+                        self.sleeping.is_some(),
+                    )
+                });
+                if p.owner == Some(Who::Player) && taken && !cancel {
                     // ThrownEnderpearl: 5% endermite where the player was
                     // (when monsters spawn), teleport, 5 damage.
                     if self.world.random.next_float() < 0.05

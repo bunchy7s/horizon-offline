@@ -233,6 +233,14 @@ pub struct Projectile {
     /// `Entity.noGravity` (`NoGravity` in its save): `getGravity` is 0.
     pub no_gravity: bool,
 }
+/// `ThrownEnderpearl.isAllowedToTeleportOwner(owner, level)` for an owner in
+/// the pearl's own dimension: vanilla reaches
+/// `LivingEntity.isAlive() && !LivingEntity.isSleeping()` (bytecode 26-45) and
+/// returns false otherwise, so a pearl whose owner died or went to bed is
+/// discarded where it lands: no teleport, no 5 damage, no endermite roll.
+pub fn owner_can_take_pearl(alive: bool, sleeping: bool) -> bool {
+    alive && !sleeping
+}
 /// What a projectile struck this tick.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Hit {
