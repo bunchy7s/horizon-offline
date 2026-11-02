@@ -487,6 +487,45 @@ pub trait Host {
     /// (`native-data/<id>/` in the build's version folder); None when the game's own path is
     /// unknown. API 41.
     fn built_data(&self, mod_id: &str) -> Option<PathBuf>;
+    /// Whether the player left mod `mod_id` on in Options > Mods. A mod
+    /// turned off does nothing (check this first in each hook) until the
+    /// launcher's next build leaves it out.
+    fn on(&self, mod_id: &str) -> bool;
+    /// The key the player chose for a mod's key `name`, else `default`
+    /// (`key.keyboard.z`), as the WebAssembly mods' keys were kept
+    /// (`key.<mod id>.<name>` in `horizon-mods.txt`).
+    fn mod_key(&self, mod_id: &str, name: &str, default: &str) -> String;
+    /// A mod's setting `key` (one file per key in `native_data_dir`).
+    fn setting(&self, mod_id: &str, key: &str) -> Option<String>;
+    /// Keeps a mod's setting `key`.
+    fn set_setting(&self, mod_id: &str, key: &str, value: &str);
+    /// Sets property `key` of the block at `pos` to `value`, as a furnace's
+    /// tick sets its `lit` (`Level.setBlock` with `UPDATE_ALL`: neighbours
+    /// and clients are told); true when the block changed, false when the
+    /// block has no such property or value, or the property already has
+    /// `value` (as `Level.setBlock` for an unchanged state). The block
+    /// entity stays. API 18.
+    fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str) -> bool;
+    /// `native_set_block_property` with `Level.setBlock`'s `flags`, as a
+    /// brewing stand's tick sets its bottles with `flags::UPDATE_CLIENTS`.
+    /// Players get the write whatever the flags (`flags`); false when this
+    /// window isn't a server, and in each case `native_set_block_property`
+    /// returns false. API 33.
+    fn set_block_property_with(
+        &mut self,
+        pos: [i32; 3],
+        key: &str,
+        value: &str,
+        flags: i32,
+    ) -> bool;
+    /// The game's `config/` folder beside `options.txt`, shared by every mod
+    /// as on Fabric and NeoForge: a mod names its own files in it
+    /// (`config/<id>.json`, or a folder of its own). The same folder on the
+    /// window, its server thread and a LAN host; a dedicated server's is in
+    /// its own folder, beside `server.properties`. Made when missing. No
+    /// `self`, so a mixin helper calls `Game::native_config_dir()` and a trait
+    /// mod `Host::config_dir`. API 26.
+    fn config_dir(&self) -> Result<PathBuf, String>;
     /// Shows the panel beside container screens with these items (at most
     /// 8192), as the game's own slots in pages, with a search box; the
     /// player's clicks, searches and keys over items come back as

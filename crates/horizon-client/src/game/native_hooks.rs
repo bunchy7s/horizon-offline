@@ -7038,8 +7038,8 @@ impl Game<'_> {
     /// (`config/<id>.json`, or a folder of its own). The same folder on the
     /// window, its server thread and a LAN host; a dedicated server's is in
     /// its own folder, beside `server.properties`. Made when missing. No
-    /// `self`, so it works from any hook (`Game::native_config_dir()`), the
-    /// level's too. API 26.
+    /// `self`, so a mixin helper calls `Game::native_config_dir()` and a trait
+    /// mod `Host::config_dir`. API 26.
     pub(super) fn native_config_dir() -> Result<PathBuf, String> {
         config_dir(&Self::game_dir())
     }

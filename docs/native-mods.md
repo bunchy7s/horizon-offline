@@ -2198,7 +2198,8 @@ handler, conditional serialization or sync APIs.
 
 `Host` exposes the documented `Game` helpers listed under `helpers` in
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's
-receiver and documentation. Level services stay on the level hosts above.
+receiver and documentation; a helper without `self` (`config_dir`) takes
+`&self` in `Host`. Level services stay on the level hosts above.
 The following documented `Game` helpers are not in the trait yet:
 
 - `spawn_mob`, `mob`, `mobs`, `block_in_tag`, `item_in_tag`,
