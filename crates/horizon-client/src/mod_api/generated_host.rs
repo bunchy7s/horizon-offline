@@ -665,6 +665,8 @@ pub trait Host {
         max: u32,
     ) -> u32;
     /// Draw a stack and its slot decorations, except the count, at `at`,
-    /// `size` GUI pixels square. False for an unknown item. API @API:item_stack@.
+    /// `size` GUI pixels square. False when nothing was drawn: an unknown item
+    /// or an empty stack (air, or a count of 0, as `ItemStack.isEmpty`).
+    /// API @API:item_stack@.
     fn item_stack(&self, batch: &mut HudBatch, stack: &ItemStack, at: [f32; 2], size: f32) -> bool;
 }
