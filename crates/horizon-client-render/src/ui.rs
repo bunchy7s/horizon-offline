@@ -932,8 +932,10 @@ pub fn menu_tooltip_position(
 /// `MenuTooltipPositioner.getOffset`: how far the tooltip keeps from the
 /// widget's top (or bottom) edge, from `MAX_DISTANCE_TO_WIDGET` 5 to
 /// `MAX_OVERLAP_WITH_WIDGET` 3 as the pointer nears the edge.
+/// The distance over the height is an int division in vanilla, so the lerp
+/// is `height - 3` until the pointer is a whole height away, then 5.
 fn widget_offset(at: i32, edge: i32, height: i32) -> i32 {
-    let d = (at - edge).unsigned_abs().min(height as u32) as f32 / height as f32;
+    let d = ((at - edge).unsigned_abs().min(height as u32) / height as u32) as f32;
     ((height as f32 - 3.0) + d * (5.0 - (height as f32 - 3.0))).round() as i32
 }
 fn tooltip_size(atlas: &HudAtlas, lines: &[Text]) -> (f32, f32) {
@@ -2166,21 +2168,27 @@ mod tests {
         let screen = (427, 240);
         let widget = [100, 100, 150, 20];
         let size = (80, 10);
-        // Pointer at the widget's top edge: the tooltip drops below it,
-        // 15 px from the top edge.
+        // Pointer at the widget's top edge: the tooltip drops 3 px, then
+        // `getOffset`'s int division gives `height - 3` = 17 more.
         assert_eq!(
             menu_tooltip_position(screen, (100, 100), widget, size),
-            (112, 118)
+            (112, 120)
         );
         // Near the right edge its left side mirrors to the pointer's left.
         assert_eq!(
             menu_tooltip_position(screen, (400, 100), widget, size),
-            (308, 118)
+            (308, 120)
         );
-        // A widget too close to the bottom: the tooltip goes above it.
+        // A whole widget height from the edge, the offset is 5.
+        assert_eq!(
+            menu_tooltip_position(screen, (100, 117), widget, size),
+            (112, 125)
+        );
+        // A widget too close to the bottom: the tooltip goes above it,
+        // 203 - (10 + 6) - 17.
         assert_eq!(
             menu_tooltip_position(screen, (100, 200), [100, 200, 150, 20], size),
-            (112, 180)
+            (112, 170)
         );
     }
 }
