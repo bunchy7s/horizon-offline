@@ -2636,6 +2636,26 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// The command tree a server sends a player (NeoForge's and Paper's
+    /// "commands sent to a player" stage): when they join and when their
+    /// level changes (`/op`, `/deop`, the LAN settings). `names` are the
+    /// root commands their client would get, vanilla's they may use and the
+    /// mods'; take a name out and that client gets the tree without it
+    /// (and without what it leads to), so it neither completes nor
+    /// highlights it. This hides the command from the client only: the
+    /// server still runs a typed one, `native_player_command` stops it.
+    /// For a player who is already on, their state is swapped in and the
+    /// helpers (`native_tell`...) work; for one who is joining it is not, and
+    /// their client has no world to tell yet. The tree the hub sends again by
+    /// itself (after a respawn or a change of level) keeps the last answer
+    /// and does not ask again; the integrated server's owner is not asked
+    /// when the world's cheats are switched. @API:native_player_commands_sent@.
+    ///
+    /// Every mod gets `event.names` in order and may add, change or remove names.
+    fn player_commands_sent(&self, host: &mut dyn Host, event: &mut PlayerCommandsSentEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A server player's fishing rod, with `state`: 0 the cast
     /// (`FishingRodItem.use` throwing the bobber), 1 a fish biting
     /// (`FishingHook.catchingFish`), 2 the reel-in of a bite, which gives the
@@ -2678,6 +2698,39 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A player whose login the server has accepted (NeoForge's
+    /// `PlayerNegotiationEvent` stage): the name, whitelist, ban and
+    /// server-full checks have passed and the player holds a place, but their
+    /// saved state is not loaded and they are not placed in a level yet. Set
+    /// `cancel` to refuse them: they are disconnected with `reason` (a plain
+    /// "Disconnected" if it is left unset) and nothing else of the join (the
+    /// join message, `native_player_logged_in`) happens. Once for each player
+    /// who joins, on a server. The player is not placed yet and their client
+    /// has no world to show a message in, so no player's state is swapped in
+    /// and `native_tell` reaches nobody: the refusal `reason` is the answer.
+    /// The checks that need no mod (name, whitelist, bans, a full server,
+    /// the proxy's forwarding) refuse earlier, on the connection, and this
+    /// hook does not hear those players. @API:native_player_login@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_login(&self, host: &mut dyn Host, event: &mut PlayerLoginEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player's sprint started or stopped: their client sent
+    /// `START_SPRINTING` or `STOP_SPRINTING` (the sprint key, a double tap
+    /// forward, or letting go) and the server's player is now `sprinting`
+    /// (vanilla's `setSprinting` in `handlePlayerCommand`). Heard only when it
+    /// changes. It cannot be stopped, and it hears what the client asks, not
+    /// what the server does: a sprint that ends by itself (a hit's knockback,
+    /// hunger, a wall) is not reported. The player's state is swapped in, so
+    /// the helpers and `native_tell` work. Once for each change, on a server.
+    /// @API:native_player_sprint@.
+    fn player_sprint(&self, host: &mut dyn Host, event: &mut PlayerSprintEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// `player` (`name`) pressed the swap-hands key: heard before the main and
     /// off hand items swap (the `SWAP_ITEM_WITH_OFFHAND` player action that
     /// `ServerGamePacketListenerImpl.handlePlayerAction` answers; Bukkit's
@@ -2707,6 +2760,20 @@ pub trait Hooks: Send + Sync {
     /// yet: ender pearls, chorus fruit, a spectator's teleport menu; portals
     /// and respawns are not teleports here. @API:native_player_teleported@.
     fn player_teleported(&self, host: &mut dyn Host, event: &mut PlayerTeleportedEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player's client answered a resource pack in play (vanilla's
+    /// `ServerboundResourcePackPacket`): `status` is `Action`'s number, 0
+    /// successfully loaded, 1 declined, 2 failed download, 3 accepted, 4
+    /// downloaded, 5 invalid URL, 6 failed reload, 7 discarded. Heard when the
+    /// packet arrives, after the server has handled it; it cannot be stopped.
+    /// The player's state is swapped in, so the helpers and `native_tell`
+    /// work. The pack a dedicated server offers in the configuration
+    /// (`resource-pack` in `server.properties`) is answered before the
+    /// player has joined, and those answers are not heard. Once for each
+    /// answer, on a server. @API:native_resource_pack_status@.
+    fn resource_pack_status(&self, host: &mut dyn Host, event: &mut ResourcePackStatusEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -7350,6 +7417,29 @@ pub fn dispatch_player_changed_dimension(
         mod_hook.player_changed_dimension(host, &mut event);
     }
 }
+/// What [`Hooks::player_commands_sent`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerCommandsSentEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub names: &'a mut Vec<String>,
+}
+pub fn dispatch_player_commands_sent(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    names: &mut Vec<String>,
+) {
+    let mut event = PlayerCommandsSentEvent {
+        player,
+        name,
+        names,
+    };
+    for mod_hook in mods {
+        mod_hook.player_commands_sent(host, &mut event);
+    }
+}
 /// What [`Hooks::player_fish`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerFishEvent<'a> {
@@ -7416,6 +7506,59 @@ pub fn dispatch_player_game_mode_changed(
         }
     }
 }
+/// What [`Hooks::player_login`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerLoginEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub reason: &'a mut Option<Text>,
+}
+pub fn dispatch_player_login(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    reason: &mut Option<Text>,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerLoginEvent {
+        player,
+        name,
+        reason,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_login(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_sprint`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerSprintEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub sprinting: bool,
+}
+pub fn dispatch_player_sprint(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    sprinting: bool,
+) {
+    let mut event = PlayerSprintEvent {
+        player,
+        name,
+        sprinting,
+    };
+    for mod_hook in mods {
+        mod_hook.player_sprint(host, &mut event);
+    }
+}
 /// What [`Hooks::player_swap_hands`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerSwapHandsEvent<'a> {
@@ -7467,5 +7610,28 @@ pub fn dispatch_player_teleported(
     };
     for mod_hook in mods {
         mod_hook.player_teleported(host, &mut event);
+    }
+}
+/// What [`Hooks::resource_pack_status`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ResourcePackStatusEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub status: i32,
+}
+pub fn dispatch_resource_pack_status(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    status: i32,
+) {
+    let mut event = ResourcePackStatusEvent {
+        player,
+        name,
+        status,
+    };
+    for mod_hook in mods {
+        mod_hook.resource_pack_status(host, &mut event);
     }
 }

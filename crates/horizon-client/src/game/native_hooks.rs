@@ -2854,7 +2854,7 @@ impl Game<'_> {
         cancel: &mut bool,
         reason: &mut Option<Text>,
     ) {
-        let _ = (player, name, cancel, reason);
+        mod_api::dispatch_player_login(self, mod_api::mods(), player, name, reason, cancel);
     }
     /// The command tree a server sends a player (NeoForge's and Paper's
     /// "commands sent to a player" stage): when they join and when their
@@ -2876,7 +2876,7 @@ impl Game<'_> {
         name: &str,
         names: &mut Vec<String>,
     ) {
-        let _ = (player, name, names);
+        mod_api::dispatch_player_commands_sent(self, mod_api::mods(), player, name, names);
     }
     /// A server player's sprint started or stopped: their client sent
     /// `START_SPRINTING` or `STOP_SPRINTING` (the sprint key, a double tap
@@ -2888,7 +2888,7 @@ impl Game<'_> {
     /// the helpers and `native_tell` work. Once for each change, on a server.
     /// @API:native_player_sprint@.
     pub(super) fn native_player_sprint(&mut self, player: u128, name: &str, sprinting: bool) {
-        let _ = (player, name, sprinting);
+        mod_api::dispatch_player_sprint(self, mod_api::mods(), player, name, sprinting);
     }
     /// A server player's client answered a resource pack in play (vanilla's
     /// `ServerboundResourcePackPacket`): `status` is `Action`'s number, 0
@@ -2901,7 +2901,7 @@ impl Game<'_> {
     /// player has joined, and those answers are not heard. Once for each
     /// answer, on a server. @API:native_resource_pack_status@.
     pub(super) fn native_resource_pack_status(&mut self, player: u128, name: &str, status: i32) {
-        let _ = (player, name, status);
+        mod_api::dispatch_resource_pack_status(self, mod_api::mods(), player, name, status);
     }
     /// A server player's fishing rod, with `state`: 0 the cast
     /// (`FishingRodItem.use` throwing the bobber), 1 a fish biting

@@ -3,7 +3,11 @@
     {
       "name": "player_commands_sent",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_commands_sent",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "collect",
+        "out": "names"
+      }
     }
   ],
   "rust_summary": "the root commands a player's command tree holds (`native_player_commands_sent`).",
