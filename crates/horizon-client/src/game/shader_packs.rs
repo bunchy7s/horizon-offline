@@ -318,8 +318,15 @@ impl Game<'_> {
         let status = self.pack_player_status();
         let (end_flash, end_flash_direction) = self.end_flash_for_pack(partial);
         let info = biome.map(|b| world_biomes!(self).get(b));
+        let dimension = self.remote.as_ref().map(|r| &r.dimension);
         PackInputs {
-            day_time: self.world.day_time,
+            // `Level.getDefaultClockTime`: 0 in a dimension type with no default clock (the
+            // Nether's has none), as Iris 1.11.7 reads `worldTime` there (probe pack).
+            day_time: if dimension.is_some_and(|d| d.default_clock.is_none()) {
+                0
+            } else {
+                self.world.day_time
+            },
             rain: lerp(self.world.weather.rain_level),
             thunder: lerp(self.world.weather.thunder_level),
             eye_in: match self.camera_fluid(camera.to_array()) {
@@ -365,6 +372,8 @@ impl Game<'_> {
             status,
             end_flash,
             end_flash_direction,
+            ambient_light: dimension.map_or(0.0, |d| d.ambient_light),
+            mood: self.ambience.moodiness,
         }
     }
 
