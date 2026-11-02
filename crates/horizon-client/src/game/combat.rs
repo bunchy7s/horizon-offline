@@ -174,12 +174,39 @@ impl CombatTracker {
         }
     }
 }
+/// Send a mod-adjusted bubble count using the vanilla particle packet, since
+/// entity event 67 always renders exactly eight bubbles on the client.
+pub(super) fn send_drown_particles(
+    host: &super::lan::LanHost,
+    at: [f64; 3],
+    velocity: [f64; 3],
+    count: i32,
+) {
+    use horizon_protocol::{entity_data::Particle, packets::play::{self, Clientbound}};
+    let Some(id) = host.hub.registry_id("minecraft:particle_type", "minecraft:bubble") else {
+        return;
+    };
+    let packet = Clientbound::LevelParticles(play::LevelParticles {
+        particle: Particle { id, data: None },
+        override_limiter: false,
+        always_show: false,
+        pos: at.map(|v| v - 1.0),
+        dist: [2.0; 3],
+        max_speed: velocity.map(|v| v as f32),
+        count,
+        randomization: 1,
+    });
+    for guest in host.hub.guests.iter().filter(|g| host.hub.here(g)) {
+        guest.send(&packet);
+    }
+}
+
 impl Game<'_> {
-    /// `LivingEntity.makeDrownParticles`: eight bubbles around the entity,
+    /// `LivingEntity.makeDrownParticles`: bubbles around the entity,
     /// moving with it.
-    pub(super) fn drown_particles(&mut self, at: [f64; 3], velocity: [f64; 3]) {
+    pub(super) fn drown_particles(&mut self, at: [f64; 3], velocity: [f64; 3], count: i32) {
         let bubble = ParticleOptions::simple(ParticleType::Bubble);
-        for _ in 0..8 {
+        for _ in 0..count {
             let mut triangle = || {
                 let r = self.particles.random();
                 r.next_double() - r.next_double()
@@ -204,7 +231,7 @@ impl Game<'_> {
             })
         };
         if let Some((at, v)) = body {
-            self.drown_particles(at, v);
+            self.drown_particles(at, v, 8);
         }
     }
     /// The display name of a mob: its custom name or its type's name.

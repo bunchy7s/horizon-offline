@@ -7514,13 +7514,15 @@ impl Game<'_> {
                         pitch,
                     );
                 }
-                MotionEvent::Drown => {
-                    // The guests see the entity event 67 too.
+                MotionEvent::Drown(bubbles) => {
                     if let Some(host) = &self.lan {
-                        host.hub
-                            .entity_event(host.host_entity, combat::DROWN_EVENT, feet);
+                        if bubbles == 8 {
+                            host.hub.entity_event(host.host_entity, combat::DROWN_EVENT, feet);
+                        } else {
+                            combat::send_drown_particles(host, feet, player_velocity, bubbles);
+                        }
                     }
-                    self.drown_particles(feet, player_velocity);
+                    self.drown_particles(feet, player_velocity, bubbles);
                 }
                 MotionEvent::BubbleColumnParticle { bubble, position } => {
                     // ServerLevel.sendParticles: SPLASH (speed 1) or BUBBLE

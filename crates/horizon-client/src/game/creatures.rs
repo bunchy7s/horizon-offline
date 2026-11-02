@@ -1744,14 +1744,18 @@ impl Game<'_> {
                 }
                 MobEvent::SquidCycle { mob, at } => self.lan_entity_event(mob as i32, 19, at),
                 MobEvent::RabbitHop { mob, at } => self.lan_entity_event(mob as i32, 1, at),
-                MobEvent::Drown { mob, at } => {
-                    self.lan_entity_event(mob as i32, super::combat::DROWN_EVENT, at);
+                MobEvent::Drown { mob, at, bubbles } => {
                     let v = self
                         .mobs
                         .iter()
                         .find(|m| m.id == mob)
                         .map_or([0.0; 3], |m| [m.velocity.x, m.velocity.y, m.velocity.z]);
-                    self.drown_particles(at, v);
+                    if bubbles == 8 {
+                        self.lan_entity_event(mob as i32, super::combat::DROWN_EVENT, at);
+                    } else if let Some(host) = &self.lan {
+                        super::combat::send_drown_particles(host, at, v, bubbles);
+                    }
+                    self.drown_particles(at, v, bubbles);
                 }
                 MobEvent::SunProtectionWear { mob } => self.wear_sun_protection(mob),
                 MobEvent::ArmorHurt { mob, amount, kind } => self.hurt_mob_armor(mob, amount, kind),
