@@ -77,6 +77,28 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
                     .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
             ),
         ),
+        "serversettings/use_allowlist" => game.allowlist_setting(client, "use_allowlist", None),
+        "serversettings/use_allowlist/set" => game.allowlist_setting(
+            client,
+            "use_allowlist",
+            Some(
+                argument
+                    .as_bool()
+                    .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
+            ),
+        ),
+        "serversettings/enforce_allowlist" => {
+            game.allowlist_setting(client, "enforce_allowlist", None)
+        }
+        "serversettings/enforce_allowlist/set" => game.allowlist_setting(
+            client,
+            "enforce_allowlist",
+            Some(
+                argument
+                    .as_bool()
+                    .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
+            ),
+        ),
         "allowlist" => Ok(lists.allowlist()),
         "bans" => Ok(lists.bans()),
         "ip_bans" => Ok(lists.ip_bans()),
@@ -308,6 +330,42 @@ struct Game<'a> {
 }
 
 impl Game<'_> {
+    /// `MinecraftServerSettingsServiceImpl.isUsingWhitelist`, `setUsingWhitelist`,
+    /// `isEnforceWhitelist` and `setEnforceWhitelist`.
+    fn allowlist_setting(
+        &self,
+        client: u32,
+        setting: &str,
+        value: Option<bool>,
+    ) -> Result<Value, Failure> {
+        let mut request = json!({
+            "method": format!("serversettings/{setting}")
+        });
+        if let Some(value) = value {
+            request["method"] = json!(format!("serversettings/{setting}/set"));
+            request["value"] = json!(value);
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        if let Some(value) = value {
+            let property = match setting {
+                "use_allowlist" => "whitelist",
+                "enforce_allowlist" => "enforce_whitelist",
+                _ => unreachable!("allowlist setting is validated by its callers"),
+            };
+            crate::config::update(
+                &self.shared.dir,
+                "properties",
+                property,
+                toml::Value::Boolean(value),
+            )
+            .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
+        }
+        Ok(reply["value"].clone())
+    }
+
     /// `MinecraftServerSettingsServiceImpl.isAutoSave`: read the game's live save flag.
     /// `MinecraftServerSettingsServiceImpl.setAutoSave`: update that flag and return its new value.
     fn autosave(&self, client: u32, value: Option<bool>) -> Result<Value, Failure> {
