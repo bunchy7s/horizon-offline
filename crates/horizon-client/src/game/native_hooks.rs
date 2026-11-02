@@ -4012,6 +4012,19 @@ impl Game<'_> {
         let _ = (entity, kind, pos);
     }
 
+    /// A mob changed a block at `pos`, after the new state was applied.
+    /// @API:native_entity_change_block@.
+    pub(super) fn native_entity_change_block(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        pos: [i32; 3],
+        from: &str,
+        to: &str,
+    ) {
+        let _ = (entity, kind, pos, from, to);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

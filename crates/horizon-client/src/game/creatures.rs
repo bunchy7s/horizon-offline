@@ -2369,6 +2369,7 @@ impl Game<'_> {
                 }
                 MobEvent::LevelEvent { id, pos, data } => self.level_event_at(id, pos, data),
                 MobEvent::SetBlockName {
+                    mob,
                     pos,
                     name,
                     effect,
@@ -2388,7 +2389,19 @@ impl Game<'_> {
                         self.level_event_at(2001, pos, state.0 as i32);
                     }
                     if let Some(state) = self.pack.assets.registry.default_state(name) {
+                        let old_name = self
+                            .res
+                            .facts()
+                            .get(self.world.block(pos[0], pos[1], pos[2]))
+                            .name
+                            .clone();
                         self.level_set_with_flags(pos, state, flags)?;
+                        if let Some(mob) = mob
+                            && let Some(m) = self.mobs.iter().find(|m| m.id == mob)
+                        {
+                            let kind = m.kind.id.clone();
+                            self.native_entity_change_block(mob, &kind, pos, &old_name, name);
+                        }
                     }
                 }
                 MobEvent::Infest {

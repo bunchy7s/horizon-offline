@@ -1723,6 +1723,7 @@ pub enum MobEvent {
     /// Replace a block by name (sheep turning grass to dirt), optionally with
     /// the destroy effect.
     SetBlockName {
+        mob: Option<u32>,
         pos: [i32; 3],
         name: &'static str,
         effect: bool,
