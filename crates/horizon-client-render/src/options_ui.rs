@@ -1308,6 +1308,10 @@ enum Act {
     /// Credits & Attribution's Credits button (WinScreen without the poem).
     Credits,
     CopyAgentDetails,
+    /// AI Agent: start or stop the repro recording.
+    ToggleRecording,
+    /// AI Agent: write the repro bundle now.
+    ExportRepro,
 }
 enum WKind {
     Button {
@@ -1435,6 +1439,10 @@ pub enum Event {
     Credits,
     /// Copy how an agent connects (the AI Agent page).
     CopyAgentDetails,
+    /// The AI Agent page's recording button: start or stop.
+    ToggleRecording,
+    /// The AI Agent page's export button.
+    ExportRepro,
     /// The narrator option changed (after its `Changed`): the option's
     /// `onValueUpdate`, `GameNarrator.updateNarratorStatus`.
     Narrator,
@@ -1515,6 +1523,8 @@ pub struct OptionsUi {
     pub split_setup: crate::split_ui::SplitUi,
     /// The AI Agent page's status lines (set by the game while it shows).
     pub agent_status: Vec<String>,
+    /// A repro recording is running: the AI Agent page's button says stop.
+    pub agent_recording: bool,
     /// Keyboard focus: the interactive target currently focused.
     focus: Option<FocusId>,
     /// The focus came from keyboard or pad navigation, so the mouse wheel steps it
@@ -1573,6 +1583,7 @@ impl Default for OptionsUi {
             calibration_fullscreen: None,
             split_setup: Default::default(),
             agent_status: Vec::new(),
+            agent_recording: false,
             focus: None,
             focus_from_keyboard: false,
             can_change_value: false,
@@ -2378,6 +2389,30 @@ impl OptionsUi {
                         Act::CopyAgentDetails,
                     )),
                 )];
+                rows.push(Row::Buttons(
+                    button(
+                        0.0,
+                        0.0,
+                        150.0,
+                        tr(if self.agent_recording {
+                            "horizon.agent.record_stop"
+                        } else {
+                            "horizon.agent.record_session"
+                        }),
+                        Act::ToggleRecording,
+                    ),
+                    Some(button(
+                        0.0,
+                        0.0,
+                        150.0,
+                        tr("horizon.agent.export_repro"),
+                        Act::ExportRepro,
+                    )),
+                ));
+                rows.push(Row::Buttons(
+                    self.extra_button(s, crate::extras::Item::ReproKeys),
+                    None,
+                ));
                 rows.extend(self.agent_status.iter().cloned().map(Row::Note));
                 rows
             }
@@ -3388,6 +3423,9 @@ impl OptionsUi {
             self.narrate_list(&widgets, list_key, (top, bottom), w, cursor);
         }
         let mut tooltip = None;
+        // The widget a keyboard-focused tooltip belongs to: `MenuTooltipPositioner`
+        // keeps it against that widget, not at the pointer.
+        let mut tooltip_rect: Option<[f32; 4]> = None;
         for (wd_idx, wd) in widgets.iter().enumerate() {
             if !visible(wd) {
                 continue;
@@ -3397,9 +3435,9 @@ impl OptionsUi {
                 .as_ref()
                 .is_some_and(|fid| matches_focus(fid, wd_idx, wd));
             let start = batch.vertices.len();
-            let hover = (ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
-                && (!wd.list || cursor.1 >= top && cursor.1 < bottom))
-                || is_focused;
+            let pointer_over = ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
+                && (!wd.list || cursor.1 >= top && cursor.1 < bottom);
+            let hover = pointer_over || is_focused;
             // A pack's option: its label within the widget (the name shortened), and on hover
             // the whole label when it was, then what the pack says of it.
             let shader = s.shader_options.as_ref();
@@ -3443,6 +3481,7 @@ impl OptionsUi {
                     .collect();
                 if !lines.is_empty() {
                     tooltip = Some(lines);
+                    tooltip_rect = (!pointer_over).then_some([wd.x, wd.y, wd.w, wd.h]);
                 }
             }
             if hover && let Some(tip) = tooltip_text(s, wd) {
@@ -3457,6 +3496,7 @@ impl OptionsUi {
                         .collect::<Vec<_>>(),
                     _ => atlas.font.split(&tip, 170.0),
                 });
+                tooltip_rect = (!pointer_over).then_some([wd.x, wd.y, wd.w, wd.h]);
             }
             match &wd.kind {
                 WKind::Button { label, active, .. } => {
@@ -3628,7 +3668,10 @@ impl OptionsUi {
             self.settings_search = search;
         }
         if let Some(lines) = tooltip {
-            ui::tooltip(batch, atlas, &lines, cursor);
+            match tooltip_rect {
+                Some(rect) => ui::tooltip_menu(batch, atlas, &lines, cursor, rect),
+                None => ui::tooltip(batch, atlas, &lines, cursor),
+            }
         }
     }
     /// Mouse press/drag. Returns events for the game.
@@ -4026,6 +4069,8 @@ impl OptionsUi {
                         }
                         Act::Credits => events.push(Event::Credits),
                         Act::CopyAgentDetails => events.push(Event::CopyAgentDetails),
+                        Act::ToggleRecording => events.push(Event::ToggleRecording),
+                        Act::ExportRepro => events.push(Event::ExportRepro),
                         Act::None => {}
                     }
                 }
@@ -4081,8 +4126,11 @@ impl OptionsUi {
         let slider = self.dragging.take().is_some() | self.shader_dragging.take().is_some();
         let graphics_slider = self.graphics.release();
         let calibration_slider = self.calibration.as_mut().is_some_and(|c| c.release());
+        let split_drop = self.split_setup.release();
         if slider || graphics_slider || calibration_slider {
             vec![Event::ButtonClick, Event::Changed]
+        } else if split_drop {
+            vec![Event::ButtonClick]
         } else {
             Vec::new()
         }
@@ -4968,6 +5016,8 @@ impl OptionsUi {
                         }
                         Act::Credits => events.push(Event::Credits),
                         Act::CopyAgentDetails => events.push(Event::CopyAgentDetails),
+                        Act::ToggleRecording => events.push(Event::ToggleRecording),
+                        Act::ExportRepro => events.push(Event::ExportRepro),
                         Act::None => {}
                     }
                     return events;

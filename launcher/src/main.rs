@@ -64,6 +64,7 @@ use gpui::{
 };
 use horizon_launcher::account::{self, Accounts, SignIn, SignInState};
 use horizon_launcher::backend::{self, Job, Msg, Release, Running, Settings, Updates};
+use horizon_launcher::build_import;
 use horizon_launcher::i18n::{self, tr, trf};
 use horizon_launcher::instances;
 use horizon_launcher::native_mods;
@@ -192,6 +193,10 @@ struct Launcher {
     disk: Vec<(String, u64)>,
     disk_for: Vec<String>,
     install_error: Option<(String, String)>,
+    /// Import a game build (`build_import`, on the Versions page): whether one is being copied in,
+    /// and why the last one failed.
+    importing_build: bool,
+    import_error: Option<String>,
     /// Native mods (`native_mods`, on the Mods page): the build's step while it runs, why it
     /// failed, and the warning before a build while it is open, with the mods it names.
     native_step: Option<String>,
@@ -469,6 +474,8 @@ impl Launcher {
             disk: Vec::new(),
             disk_for: Vec::new(),
             install_error: None,
+            importing_build: false,
+            import_error: None,
             native_step: None,
             native_started: None,
             native_done: None,
@@ -1030,6 +1037,15 @@ impl Launcher {
                     }
                 }
                 Msg::DiskUse(disk) => self.disk = disk,
+                Msg::Imported(result) => {
+                    self.importing_build = false;
+                    self.installed = backend::installed();
+                    match result {
+                        // `build_import::import` saved the selection; this keeps the window's copy.
+                        Ok(tag) => self.settings.selected = Some(tag),
+                        Err(e) => self.import_error = Some(e),
+                    }
+                }
                 Msg::Pruned(gone) => {
                     if !gone.is_empty() {
                         self.installed = backend::installed();
@@ -1300,6 +1316,43 @@ impl Launcher {
             let result = backend::remove_version(&tag);
             let _ = tx.send(Msg::Removed(tag, result));
         });
+    }
+
+    /// Asks for a game program (or a zip holding one) and installs it as its own version on a
+    /// thread: a version is thousands of files. `Msg::Imported` ends it.
+    fn import_build(&mut self, cx: &mut Context<Self>) {
+        // A removal still running could take the folder of the same program imported again.
+        if self.importing_build || !self.removing.is_empty() {
+            return;
+        }
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(tr("Import").into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(mut paths))) = paths.await else {
+                return;
+            };
+            let Some(path) = paths.pop() else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                // Another picker's import, or a removal, may have started meanwhile.
+                if this.importing_build || !this.removing.is_empty() {
+                    return;
+                }
+                this.importing_build = true;
+                this.import_error = None;
+                let tx = this.tx.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send(Msg::Imported(build_import::import(&path, None)));
+                });
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Prepares the selected version, its Minecraft files from the player's install or, for an
@@ -1694,6 +1747,7 @@ fn version_tag(tag: &str) -> Div {
         .font_weight(FontWeight::MEDIUM)
         .child(
             horizon_launcher::nightly::label(tag)
+                .or_else(|| build_import::label(tag))
                 .unwrap_or_else(|| tag.trim_start_matches('v').to_string()),
         )
 }
@@ -2611,7 +2665,11 @@ impl Launcher {
         // "Nightly · ba6344a", a release's tag: the menu lists the full tags.
         let label = self.selected().map_or_else(
             || tr("No version").into(),
-            |tag| horizon_launcher::nightly::label(tag).unwrap_or_else(|| tag.clone()),
+            |tag| {
+                horizon_launcher::nightly::label(tag)
+                    .or_else(|| build_import::label(tag))
+                    .unwrap_or_else(|| tag.clone())
+            },
         );
         // As tall as Play: "Version" over the tag, and a chevron.
         let n = t.night;
@@ -3994,8 +4052,9 @@ impl Launcher {
             )
     }
 
-    /// One installed native build on the Versions page: what it was built on, and Use and Remove.
-    fn native_build_row(
+    /// One installed build made here on the Versions page, a native build or an imported one:
+    /// what it was made from, and Use and Remove.
+    fn local_build_row(
         &self,
         tag: &str,
         on_disk: &dyn Fn(&String) -> Option<u64>,
@@ -4006,6 +4065,11 @@ impl Launcher {
         let mut meta = Vec::new();
         if let Some(about) = native_mods::about(tag) {
             meta.push(trf("Built on {base}", &[("base", &about.base)]));
+        }
+        if let Some(about) = build_import::about(tag) {
+            let base = horizon_launcher::nightly::label(&about.base).unwrap_or(about.base);
+            meta.push(trf("Game files from {base}", &[("base", &base)]));
+            meta.push(about.file);
         }
         if let Some(n) = on_disk(&tag.to_string()) {
             meta.push(trf("{size} on disk", &[("size", &megabytes(n))]));
@@ -4065,6 +4129,37 @@ impl Launcher {
             .children(error.map(|e| notice(e, &t)))
     }
 
+    /// The installed builds of one kind made here (`is`: native or imported) under their caption,
+    /// with a notice above them; None when there are none.
+    fn local_builds(
+        &self,
+        title: &str,
+        is: fn(&str) -> bool,
+        notice_: Option<&str>,
+        on_disk: &dyn Fn(&String) -> Option<u64>,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        let t = self.theme;
+        let tags: Vec<&String> = self
+            .installed
+            .iter()
+            .chain(&self.removing)
+            .filter(|v| is(v))
+            .collect();
+        (!tags.is_empty()).then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .child(caps(tr(title)).text_color(t.muted))
+                .children(notice_.map(|n| notice(n.to_string(), &t)))
+                .children(
+                    tags.into_iter()
+                        .map(|tag| self.local_build_row(tag, on_disk, cx)),
+                )
+        })
+    }
+
     fn versions_page(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let header = page_header(
@@ -4091,39 +4186,64 @@ impl Launcher {
                 .map(|(_, n)| *n)
         };
         let used: u64 = self.installed.iter().filter_map(on_disk).sum();
+        // The list's own action at the end of the line above it: a build the player has.
+        let import: AnyElement = if self.importing_build {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .w(px(180.))
+                .child(progress_bar(None, &t))
+                .child(
+                    text(theme::MICRO)
+                        .text_color(t.muted)
+                        .child(tr("Importing…")),
+                )
+                .into_any_element()
+        } else {
+            button("import-build", "Import a game build…", Kind::Secondary, &t)
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.import_build(cx)))
+                .into_any_element()
+        };
         let page = div()
             .flex()
             .flex_col()
             .gap(px(32.))
             .child(header)
-            .children((used > 0).then(|| {
-                text(theme::UI).text_color(t.muted).child(trf(
-                    "Installed versions use {size}.",
-                    &[("size", &megabytes(used))],
-                ))
-            }));
-        // Native-mods builds are made here, not downloaded: they are listed apart from the releases.
-        let native: Vec<String> = self
-            .installed
-            .iter()
-            .chain(&self.removing)
-            .filter(|v| native_mods::is_native(v))
-            .cloned()
-            .collect();
-        let page = page.when(!native.is_empty(), |page| {
-            page.child(
+            .child(
                 div()
                     .flex()
-                    .flex_col()
-                    .gap(px(8.))
-                    .child(caps(tr("Native mod builds")).text_color(t.muted))
-                    .children(
-                        native
-                            .iter()
-                            .map(|tag| self.native_build_row(tag, &on_disk, cx)),
-                    ),
+                    .items_center()
+                    .justify_between()
+                    .gap(px(16.))
+                    .child(text(theme::UI).text_color(t.muted).when(used > 0, |d| {
+                        d.child(trf(
+                            "Installed versions use {size}.",
+                            &[("size", &megabytes(used))],
+                        ))
+                    }))
+                    .child(import),
             )
-        });
+            .children(self.import_error.clone().map(|e| notice(e, &t)));
+        // Builds made here, not downloaded, are listed apart from the releases.
+        let page = page
+            .children(self.local_builds(
+                "Native mod builds",
+                native_mods::is_native,
+                None,
+                &on_disk,
+                cx,
+            ))
+            .children(self.local_builds(
+                "Imported builds",
+                build_import::is_imported,
+                Some(tr(
+                    "Unsigned: you picked these programs yourself, and Horizon can't \
+                    check where they came from. Updates never replace them.",
+                )),
+                &on_disk,
+                cx,
+            ));
         let releases = match &self.releases {
             Load::Loading => return page.child(centered(tr("Loading releases…"), &t)),
             Load::Failed(e) => {

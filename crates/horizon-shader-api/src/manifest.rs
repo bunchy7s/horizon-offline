@@ -199,6 +199,15 @@ impl Material {
 
 /// Whether the sprite or block `name` (`namespace:path`) fits `pattern`: the namespace
 /// defaults to `minecraft`, and each `*` matches any run of characters.
+/// The colour of the first of `lights` whose patterns match the block `name`
+/// (`Manifest::light_of`, for a copy of the entries).
+pub fn light_color(lights: &[LightColor], name: &str) -> Option<[f32; 3]> {
+    lights
+        .iter()
+        .find(|l| l.blocks.iter().any(|pattern| sprite_matches(pattern, name)))
+        .map(|l| l.color)
+}
+
 fn sprite_matches(pattern: &str, name: &str) -> bool {
     let pattern = match pattern.contains(':') {
         true => std::borrow::Cow::Borrowed(pattern),
@@ -851,10 +860,7 @@ impl Manifest {
     /// The `[[lights]]` colour of the block `name` (`namespace:path`): the first entry with a
     /// matching pattern.
     pub fn light_of(&self, name: &str) -> Option<[f32; 3]> {
-        self.lights
-            .iter()
-            .find(|l| l.blocks.iter().any(|pattern| sprite_matches(pattern, name)))
-            .map(|l| l.color)
+        light_color(&self.lights, name)
     }
 
     /// The pack targets its post passes write (`[[post]] output`), in the order first

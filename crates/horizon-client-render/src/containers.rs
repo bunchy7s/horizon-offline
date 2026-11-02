@@ -389,6 +389,9 @@ impl BlockEntity {
         if name == "minecraft:campfire" || name == "minecraft:soul_campfire" {
             return Some(Self::Campfire(Box::default()));
         }
+        if name == "minecraft:jukebox" {
+            return Some(Self::Jukebox(Jukebox::default()));
+        }
         if name == "minecraft:shelf" || name.ends_with("_shelf") {
             return Some(Self::Shelf(Box::default()));
         }
@@ -727,6 +730,20 @@ mod tests {
             _ => panic!("a jukebox"),
         }
         assert_eq!(entity.contents().len(), 1);
+    }
+
+    /// A placed jukebox gets its block entity (`JukeboxBlock.newBlockEntity`),
+    /// so the item's block entity data lands somewhere and the box can hold a
+    /// disc without a player putting one in.
+    #[test]
+    fn a_placed_jukebox_starts_as_an_empty_jukebox_entity() {
+        let entity = BlockEntity::for_block("minecraft:jukebox").expect("a jukebox");
+        assert_eq!(entity.id(), "minecraft:jukebox");
+        assert!(matches!(entity, BlockEntity::Jukebox(_)));
+        assert_eq!(entity.slots().len(), 1);
+        assert!(entity.slots()[0].is_none());
+        // Another block's name is not a jukebox.
+        assert!(BlockEntity::for_block("minecraft:stone").is_none());
     }
 
     /// A whole amount pays itself without a draw; a fraction is a chance of one more.
