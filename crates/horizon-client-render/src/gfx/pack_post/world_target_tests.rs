@@ -283,8 +283,10 @@ fn render(
         .chunks_exact(stride as usize)
         .flat_map(|row| {
             row[..size[0] as usize * 4]
-                .chunks_exact(4)
-                .map(|p| p.try_into().unwrap())
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .copied()
         })
         .collect()
 }
