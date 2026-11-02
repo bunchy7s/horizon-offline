@@ -437,6 +437,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 // DecoratedPotBlock.useWithoutItem: the wobble always succeeds.
                 Class::DecoratedPot => Success,
+                // MovingPistonBlock.useWithoutItem: a moving piston whose block
+                // entity is gone (`Level.getBlockEntity` null) is removed by the
+                // click on a server; one still in flight passes it on.
+                Class::MovingPiston => {
+                    if !self.level.is_client_side() && self.moving_piston(pos).is_none() {
+                        self.remove_block(pos, false);
+                        // CONSUME: the action is used, the arm does not swing.
+                        Consume
+                    } else {
+                        Pass
+                    }
+                }
                 // JukeboxBlock.useWithoutItem: ejecting a disc is SUCCESS (the
                 // insert is useItemOn). An empty jukebox passes.
                 Class::Jukebox if table.bool(state, p.has_record) => Success,

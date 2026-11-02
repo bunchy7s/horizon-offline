@@ -23,7 +23,7 @@ use horizon_client::{
     },
     mod_api::NativeLootDrops,
     particles::{ParticleOptions, ParticleType},
-    projectiles::{Hit, Projectile, ProjectileKind, ProjectileWorld},
+    projectiles::{Hit, Projectile, ProjectileKind, ProjectileWorld, clip_including_border},
     text::Text,
 };
 use horizon_core::{
@@ -95,6 +95,9 @@ pub(super) struct Creatures {
 pub(super) struct ProjWorld<'a, 'w> {
     pub w: &'a MobWorld<'w>,
     pub targets: Vec<(Who, Aabb)>,
+    /// The world border's [minX, minZ, maxX, maxZ], which stops the ray as a
+    /// block would (`clipIncludingBorder`); None: no border.
+    pub border: Option<[f64; 4]>,
 }
 impl ProjectileWorld for ProjWorld<'_, '_> {
     fn block_contacts(&self, entity: i32, kind: &str, from: Vec3, to: Vec3, bounds: Aabb) {
@@ -121,12 +124,17 @@ impl ProjectileWorld for ProjWorld<'_, '_> {
                 .ok()?;
             shape.clip(from, to, p)
         });
-        let hit = r.ok().flatten()?;
-        Some((
-            hit.location,
-            [hit.block.x, hit.block.y, hit.block.z],
-            hit.direction.normal(),
-        ))
+        let hit = r.ok().flatten().map(|hit| {
+            (
+                hit.location,
+                [hit.block.x, hit.block.y, hit.block.z],
+                hit.direction.normal(),
+            )
+        });
+        match self.border {
+            Some(bounds) => clip_including_border(hit, from, to, bounds),
+            None => hit,
+        }
     }
     /// Entity.updateFluidInteraction over the projectile's box, not the
     /// block at its feet (#3072).
@@ -1282,9 +1290,9 @@ impl Game<'_> {
         // entity, so a kill by a mob (a tame wolf credited to its owner)
         // leaves it out; ServerPlayer.awardKillScore counts the rest.
         if !killed_by_mob(m) {
-            self.stats.add("killed", &m.kind.id, 1);
+            self.award_stat("killed", &m.kind.id, 1);
         }
-        self.stats.custom("mob_kills", 1);
+        self.award_custom_stat("mob_kills", 1);
         self.score_player_killed(super::commands::Target::Mob(m.id));
         let view = self.mob_entity(m);
         let blow = m.last_damage.map(|(d, _)| self.damage_view(d));
@@ -2091,6 +2099,34 @@ impl Game<'_> {
                                 at,
                                 1.0,
                                 pitch,
+                            )])?;
+                        }
+                    }
+                }
+                MobEvent::PufferfishSting {
+                    mob,
+                    target,
+                    amount,
+                    source,
+                    poison_ticks,
+                } => {
+                    // Pufferfish.touch: the poison and
+                    // `playSound(PUFFER_FISH_STING, 1, 1)` sit inside the
+                    // `hurtServer` branch, so only a hit that landed poisons
+                    // and stings, at the fish's own position as
+                    // `Entity.playSound` puts it, and not when it is silent.
+                    let landed = self.mob_hits_mob(target, amount, source);
+                    if landed && let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
+                        t.add_effect("minecraft:poison", poison_ticks, 0);
+                    }
+                    if landed && let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
+                        let at = [m.position.x, m.position.y, m.position.z];
+                        if !m.silent {
+                            self.handle_mob_events(vec![MobEvent::Sound(
+                                "entity.puffer_fish.sting",
+                                at,
+                                1.0,
+                                1.0,
                             )])?;
                         }
                     }
@@ -2938,7 +2974,7 @@ impl Game<'_> {
                 super::commands::Target::Guest,
             );
             self.for_player(who, |g| {
-                g.stats.custom("animals_bred", 1);
+                g.award_custom_stat("animals_bred", 1);
                 g.trigger_bred(&parent, &partner_view, (!turtle).then_some(&child));
             });
         }
@@ -3575,10 +3611,16 @@ impl Game<'_> {
             arrow_targets_guests.extend(guests.iter().copied());
             let mut targets_guests = targets.clone();
             targets_guests.extend(guests);
-            let pw = ProjWorld { w: &w, targets };
+            let border = Some(self.border.bounds());
+            let pw = ProjWorld {
+                w: &w,
+                targets,
+                border,
+            };
             let pw_guests = ProjWorld {
                 w: &w,
                 targets: targets_guests,
+                border,
             };
             let guest_entities = self.lan_guest_entities();
             // ThrownEnderpearl.tick: a dead player's pearl is discarded in
@@ -3653,6 +3695,7 @@ impl Game<'_> {
                         p.tick(&ProjWorld {
                             w: if pvp_shot { pw_guests.w } else { pw.w },
                             targets,
+                            border,
                         })
                     }
                 };
@@ -3868,7 +3911,7 @@ impl Game<'_> {
         if rang {
             let _ = self.process_level_events();
             if p.owner == Some(Who::Player) {
-                self.stats.custom("bell_ring", 1);
+                self.award_custom_stat("bell_ring", 1);
             }
         }
     }
@@ -4086,7 +4129,7 @@ impl Game<'_> {
             let _ = self.process_level_events();
             self.native_target_hit(self.dim.id(), pos, strength);
             if p.owner == Some(Who::Player) && (p.guest.is_none() || p.guest == self.lan_acting) {
-                self.stats.custom("target_hit", 1);
+                self.award_custom_stat("target_hit", 1);
                 let kind = if p
                     .arrow
                     .as_ref()
@@ -4719,7 +4762,7 @@ impl Game<'_> {
             // flies as: the splash happens where the hit was, a lingering
             // potion's cloud sits at the mob it hit (ThrownLingeringPotion),
             // and the potion that lands names the hurt it deals.
-            (ProjectileKind::Potion(stack), hit) => {
+            (ProjectileKind::Potion(stack, _), hit) => {
                 let block = match hit {
                     Hit::Block { pos, face, .. } => Some((
                         pos,
@@ -6096,7 +6139,7 @@ impl Game<'_> {
         if let Some(done) = self.use_spawn_egg_on_spawner(hit.pos, &spawner_id, data.as_ref()) {
             if done {
                 self.swing_arm();
-                self.stats.add("used", &stack.item, 1);
+                self.award_stat("used", &stack.item, 1);
                 self.consume_held();
             }
             return Ok(true);
@@ -6127,7 +6170,7 @@ impl Game<'_> {
         }
         self.apply_spawn_egg_entity_data(id, stack);
         self.post_block_game_event("minecraft:entity_place", p, Some(Who::Player), None);
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.swing_arm();
         if !self.creative
             && let Some(s) = self.held_mut().as_mut()
@@ -7307,6 +7350,7 @@ mod pearl_tests {
         let pw = ProjWorld {
             w: &w,
             targets: Vec::new(),
+            border: None,
         };
         let pearl = |x: f64, y: f64, velocity: Vec3| {
             let mut p = Projectile::new(ProjectileKind::EnderPearl, Vec3::new(x, y, 1.5), None);

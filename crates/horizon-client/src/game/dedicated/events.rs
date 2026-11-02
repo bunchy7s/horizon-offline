@@ -21,11 +21,20 @@ static EVENTS: Mutex<Events> = Mutex::new(Events {
 
 /// Records one event: its kind, the player's name and UUID, and what else it says.
 pub(in crate::game) fn record(kind: &str, name: &str, uuid: u128, mut fields: Value) {
+    fields["name"] = name.into();
+    fields["uuid"] = horizon_protocol::crypto::uuid_string(uuid).into();
+    push(kind, fields);
+}
+
+/// Records an event of the server itself, with no player (`saving` and `saved`, around a world save).
+pub(in crate::game) fn record_server(kind: &str) {
+    push(kind, json!({}));
+}
+
+fn push(kind: &str, mut fields: Value) {
     let mut events = EVENTS.lock().unwrap_or_else(|e| e.into_inner());
     fields["seq"] = events.next.into();
     fields["type"] = kind.into();
-    fields["name"] = name.into();
-    fields["uuid"] = horizon_protocol::crypto::uuid_string(uuid).into();
     fields["time"] = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64)
@@ -52,6 +61,7 @@ pub(super) fn since(since: u64) -> Value {
 mod tests {
     use super::*;
 
+    // One test: the events are one process-wide list, so two tests recording at once would count each other's.
     #[test]
     fn events_are_numbered_and_read_from_a_number() {
         let first = since(u64::MAX)["next"].as_u64().unwrap();
@@ -65,5 +75,11 @@ mod tests {
         assert_eq!(events[1]["message"], "hi");
         assert_eq!(events[1]["uuid"], "00000000-0000-0000-0000-000000000001");
         assert_eq!(since(first + 1)["events"].as_array().unwrap().len(), 1);
+        // An event of the server itself (a world save) carries no player.
+        record_server("saving");
+        let event = &since(first + 2)["events"][0];
+        assert_eq!(event["type"], "saving");
+        assert_eq!(event["seq"].as_u64(), Some(first + 3));
+        assert!(event.get("name").is_none() && event.get("uuid").is_none());
     }
 }

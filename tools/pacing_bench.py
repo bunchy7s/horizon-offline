@@ -15,6 +15,12 @@ p99/p99.9, the worst frame, frames over 33 ms) in the situations where players s
                tab list arrive at once), recorded from `connect` until 5 s after the view is loaded: a game
                of its own, started on the title screen
     inventory  the inventory and the pause menu opened and closed 20 times each
+    mobs       68 mob types summoned one by one in view (NoAI), 0.6 s recorded after each: first-sight costs
+    items      50 item entities of different models, the same way
+    block_entities  34 block entities set one by one in view, the same way
+    screens    the creative inventory and its 12 tabs, then the survival inventory and its recipe book,
+               opened for the first time and once more
+    reload     F3+T, 15 s recorded
 
 One game per render distance, from a fresh world (seed 1234, creative), driven over horizon-ctl.
 The game runs with HORIZON_SPIKES so each slow frame logs its timed spans; the report keeps the
@@ -42,7 +48,32 @@ except ImportError:
     import perf_bench as pb
 
 WORK = lab.ROOT / ".local/pacing-bench"
-SCENARIOS = ["fly16", "ocean", "fly64", "elytra", "teleport", "nether", "portal", "inventory", "join"]
+SCENARIOS = ["fly16", "ocean", "fly64", "elytra", "teleport", "nether", "portal", "inventory", "mobs", "items",
+             "block_entities", "screens", "reload", "join"]
+
+# First sight: what each kind of thing costs the first frame it is on screen.
+MOBS = ["zombie", "skeleton", "creeper", "spider", "enderman", "cow", "pig", "sheep", "chicken", "horse", "donkey",
+        "villager", "iron_golem", "wolf", "cat", "fox", "bee", "axolotl", "frog", "allay", "warden", "wither",
+        "ghast", "blaze", "piglin", "hoglin", "strider", "shulker", "guardian", "elder_guardian", "squid",
+        "glow_squid", "dolphin", "turtle", "panda", "polar_bear", "llama", "camel", "sniffer", "armadillo", "breeze",
+        "bogged", "creaking", "slime", "magma_cube", "phantom", "vex", "evoker", "ravager", "witch", "drowned",
+        "husk", "stray", "zombie_villager", "parrot", "rabbit", "goat", "mooshroom", "ocelot", "salmon", "cod",
+        "tropical_fish", "pufferfish", "bat", "snow_golem", "wandering_trader", "armor_stand", "ender_dragon"]
+ITEMS = ["diamond_sword", "bow", "crossbow", "trident", "shield", "compass", "clock", "recovery_compass", "spyglass",
+         "elytra", "totem_of_undying", "player_head", "creeper_head", "white_banner", "red_bed", "chest",
+         "ender_chest", "shulker_box", "conduit", "decorated_pot", "filled_map", "potion", "splash_potion",
+         "tipped_arrow", "firework_rocket", "written_book", "leather_chestplate", "diamond_helmet", "turtle_helmet",
+         "carved_pumpkin", "oak_sign", "glass_pane", "iron_bars", "oak_fence", "torch", "lantern", "bell",
+         "enchanting_table", "anvil", "brewing_stand", "cauldron", "hopper", "campfire", "lectern", "mace",
+         "wolf_armor", "goat_horn", "bundle", "honey_bottle", "dragon_egg"]
+BLOCK_ENTITIES = ["chest", "trapped_chest", "ender_chest", "oak_sign", "oak_hanging_sign", "white_banner",
+                  "red_bed", "shulker_box", "player_head", "skeleton_skull", "dragon_head", "enchanting_table",
+                  "lectern", "bell", "conduit", "decorated_pot", "campfire", "soul_campfire", "beacon",
+                  "end_portal", "end_gateway", "brewing_stand", "spawner", "trial_spawner", "vault",
+                  "chiseled_bookshelf", "suspicious_sand", "creaking_heart",
+                  "sculk_shrieker", "sculk_catalyst", "jukebox", "piston", "copper_golem_statue",
+                  "oak_shelf"]
+
 SPIKE_RE = re.compile(r"slow frame ([\d.]+) ms")
 GAP_RE = re.compile(r", ([\d.]+) ms before it")
 
@@ -90,9 +121,11 @@ def record(control, action, seconds):
 def scenario(name, control, distance):
     frames, cpu = [], []
 
-    def add(result):
+    def add(result, step=None):
         frames.extend(result[0])
         cpu.extend(result[1])
+        if step:
+            print(f"  {name} {step}: worst frame {max(result[0], default=0):.1f} ms", flush=True)
 
     if name in ("fly16", "ocean"):
         _, start, end, pitch = next(s for s in pb.SCENES if s[0] == {"fly16": "village"}.get(name, name))
@@ -137,6 +170,54 @@ def scenario(name, control, distance):
             dimension = str(control("state").get("dimension"))
             if not dimension.endswith("the_nether"):
                 raise RuntimeError(f"the portal at {x} {y} {z} led to {dimension}, not the Nether")
+    elif name in ("mobs", "items", "block_entities"):
+        # Hovering in the air facing south; each thing appears 6-12 blocks ahead, in a new spot.
+        x, y, z = 6000, 200, 6000
+        control(f"command execute in minecraft:overworld run tp @s {x} {y} {z} 0 10")
+        control(f"fly {x} {y} {z} {x} {y} {z} 0.1 10")
+        pb.wait_loaded(control, lambda p: True, 300, pb.view_chunks(distance))
+        time.sleep(2)
+        things = {"mobs": MOBS, "items": ITEMS, "block_entities": BLOCK_ENTITIES}[name]
+        for i, thing in enumerate(things):
+            at = (x - 12 + (i % 8) * 3, y - 1 + (i // 8) % 3 * 2, z + 6 + i // 24 * 4)
+            if name == "mobs":
+                command = f"summon minecraft:{thing} {at[0]} {at[1]} {at[2]} {{NoAI:1b,NoGravity:1b,Silent:1b}}"
+            elif name == "items":
+                command = (f"summon minecraft:item {at[0]} {at[1]} {at[2]} "
+                           f"{{NoGravity:1b,PickupDelay:32767,Age:-32768,Item:{{id:\"minecraft:{thing}\",count:1}}}}")
+            else:
+                command = f"setblock {at[0]} {at[1]} {at[2]} minecraft:{thing}"
+            # Through chat, as a player types it: `command` waits on the server thread in the frame.
+            add(record(control, lambda: control(f"chat /{command}"), 0.6))
+    elif name == "screens":
+        # First opens: the creative inventory and each of its tabs, then (in survival) the inventory
+        # and its recipe book; each opened a second time to compare. Tabs and the recipe book button
+        # are clicked where vanilla puts them at GUI scale 3 of 1280x720 (gui 427x240).
+        left, top = (427 - 195) // 2, (240 - 136) // 2
+        tabs = [(left + 27 * i + 13, top - 12) for i in range(6)] + \
+               [(left + 27 * i + 13, top + 136 + 12) for i in range(6)]
+        for n in (1, 2):
+            add(record(control, lambda: control("key e tap"), 1), f"creative inventory, open {n}")
+            for i, (tx, ty) in enumerate(tabs):
+                add(record(control, lambda: control(f"click-at {tx} {ty}"), 0.6), f"tab {i}, open {n}")
+            control("key esc tap")
+            time.sleep(0.5)
+        control("chat /gamemode survival")
+        time.sleep(1)
+        for n in (1, 2):
+            add(record(control, lambda: control("key e tap"), 1), f"inventory, open {n}")
+            add(record(control, lambda: control("click-at 239 107"), 1), f"recipe book shown, open {n}")
+            add(record(control, lambda: control("click-at 239 107"), 0.6), f"recipe book hidden, open {n}")
+            control("key esc tap")
+            time.sleep(0.5)
+        control("chat /gamemode creative")
+    elif name == "reload":
+        # F3+T: every resource reloaded, as a player presses it.
+        def reload():
+            control("key f3 down")
+            control("key t tap")
+            control("key f3 up")
+        add(record(control, reload, 15), "F3+T")
     elif name == "inventory":
         def spam():
             for _ in range(20):

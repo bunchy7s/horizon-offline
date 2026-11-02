@@ -258,6 +258,87 @@ impl Game<'_> {
     }
 }
 
+/// Entities joining the level (`native_entity_join_level`), for every kind in
+/// the entity walk. Kept out of `native_hooks.rs`, whose lines may not hold macros.
+impl Game<'_> {
+    /// Tells `native_entity_join_level` once for every entity added since the
+    /// last call, of any kind, in the order they were created (ids count up
+    /// from one counter). A mod that cancels takes the entity back out here,
+    /// before it ticks again, and `/summon` of it fails (`joins_canceled`).
+    /// `loaded_from_disk` is for the entities that came with a chunk. Returns
+    /// whether `watch` (an id, or 0) is still in the level. Walks the lists
+    /// with static dispatch and allocates nothing but the kind name of an
+    /// entity it announces; nothing runs when no mod is loaded or on a client
+    /// of a server (which tells nothing).
+    pub(super) fn native_joins_flush(&mut self, loaded_from_disk: bool, watch: u32) -> bool {
+        use super::entity::Entity;
+        if self.remote.is_some() || crate::mod_api::mods().is_empty() {
+            return true;
+        }
+        for t in &mut self.tnts {
+            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
+        }
+        for f in &mut self.falling {
+            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut f.id);
+        }
+        for p in &mut self.creatures.projectiles {
+            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut p.id);
+        }
+        for t in &mut self.tridents {
+            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
+        }
+        for r in &mut self.rockets {
+            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut r.id);
+        }
+        let mut kept = true;
+        while let Some((handle, id)) = self.next_unannounced() {
+            self.persist.joined_mark = id;
+            let (kind, at) = super::entity::with_entity!(self, handle, e => {
+                (e.native_type(), e.position())
+            });
+            let mut canceled = false;
+            let dimension = self.dim.id();
+            self.native_entity_join_level(
+                dimension,
+                id,
+                &kind,
+                [at.x, at.y, at.z],
+                loaded_from_disk,
+                &mut canceled,
+            );
+            if canceled {
+                self.persist.joins_canceled += 1;
+                self.forget_entity(id);
+                // Handles are indexes: the entity is taken out before any
+                // other change to its list.
+                self.discard_entity(handle);
+                kept &= id != watch;
+            }
+        }
+        kept
+    }
+    /// The entity with the lowest id above the last one announced, by handle.
+    fn next_unannounced(&self) -> Option<(super::entity::EntityHandle, u32)> {
+        let mark = self.persist.joined_mark;
+        let mut best: Option<(super::entity::EntityHandle, u32)> = None;
+        for handle in self.entity_handles() {
+            let id = {
+                use super::entity::Entity;
+                super::entity::with_entity!(self, handle, e => e.id())
+            };
+            if id > mark && best.is_none_or(|(_, b)| id < b) {
+                best = Some((handle, id));
+            }
+        }
+        best
+    }
+    /// Entities that were moved, not added (a portal's arrival keeps being
+    /// silent): everything now in the level counts as announced.
+    pub(super) fn native_joins_skip(&mut self) {
+        self.persist.joined_mark = self.persist.joined_mark.max(self.next_entity);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

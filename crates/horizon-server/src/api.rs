@@ -342,6 +342,8 @@ pub struct Shared {
     /// The event stream's events (events.rs), and the streams' wake-up.
     pub events: Mutex<crate::events::Events>,
     pub event_added: std::sync::Condvar,
+    /// The management protocol's connections, which its notifications go to (management.rs).
+    pub management: crate::management::Clients,
 }
 
 impl Shared {
@@ -372,6 +374,7 @@ impl Shared {
             update: Mutex::new(Updates::default()),
             events: Mutex::default(),
             event_added: std::sync::Condvar::new(),
+            management: crate::management::Clients::default(),
         })
     }
 

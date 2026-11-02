@@ -711,9 +711,15 @@ pub trait Hooks: Send + Sync {
     /// an arrival through a portal). `entity` is its ID and `kind` its type
     /// (`minecraft:item`). It is already in the level's lists, so helpers that
     /// take an entity ID find it. Set `canceled` to keep it out: it is taken
-    /// back out as if never added, and a `/summon` of it fails. 47 tells
-    /// item entities and experience orbs; later APIs add other kinds, so check
-    /// `kind`. Server-side.
+    /// back out as if never added, and a `/summon` of it fails. Tells every
+    /// kind in the game's entity lists (items, orbs, mobs, boats, minecarts,
+    /// armor stands, primed TNT, falling blocks, projectiles, rockets,
+    /// tridents), once each, in the order they were created; check `kind`. A
+    /// gameplay spawn is told when the next tick starts (a drop, an orb, a mob, a
+    /// `/summon` and a chunk's entities are told at once). A mod that
+    /// cancels one of the others sees it removed before it ticks again.
+    /// Not told: end crystals, the dragon, cushions, paintings, item frames and
+    /// the entities Horizon keeps without simulating. Server-side.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn entity_join_level(&self, host: &mut dyn Host, event: &mut EntityJoinLevelEvent<'_>) -> Flow {
@@ -3212,6 +3218,23 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// An item frame (`minecraft:item_frame`, `minecraft:glow_item_frame`) or
+    /// a painting (`minecraft:painting`), `kind` its entity type and `pos` the
+    /// block it hangs in, is about to break: a server player's hit
+    /// (`player`, their state swapped in, so `native_tell` answers them), a
+    /// blast, or the wall it hangs on gone (`player` None for both). Where
+    /// `BlockAttachedEntity.hurtServer` and its survival check would kill
+    /// it, before anything drops or sounds. Set `cancel` and it stays, as it
+    /// was. A hit that only takes the item out of a frame does not break the
+    /// frame and is not asked. The game's own player's hit is not asked, nor
+    /// is `/kill`. @API:native_hanging_break@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn hanging_break(&self, host: &mut dyn Host, event: &mut HangingBreakEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// A server player places a hanging entity: an item frame
     /// (`minecraft:item_frame`, `minecraft:glow_item_frame`), a painting
     /// (`minecraft:painting`) or a leash knot (`minecraft:leash_knot`, when a
@@ -3272,6 +3295,17 @@ pub trait Hooks: Send + Sync {
         host: &mut dyn Host,
         event: &mut PlayerChangedDimensionEvent<'_>,
     ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player's data was copied to their new player (NeoForge's
+    /// `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): `was_death` is
+    /// true after a death, false when they left the End after the credits
+    /// (`respawn` with `keepAllPlayerData`). The uuid stays the same, so the
+    /// old and the new player share `player`. Heard before the new player is
+    /// placed, on a server, with no player's state swapped in. Not
+    /// cancellable.
+    fn player_clone(&self, host: &mut dyn Host, event: &mut PlayerCloneEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -3405,6 +3439,18 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A player was loaded from the world's save (NeoForge's
+    /// `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`): their `.dat`
+    /// has been read and applied, and they are not placed in a level yet.
+    /// `directory` is the world's player directory (`players/data`): a mod
+    /// reads its own file there, named `<uuid>.<suffix>` as
+    /// `getPlayerFile(suffix)` names it. Heard once for each join, for the
+    /// owner of an integrated server as for anyone else, on a server, with no
+    /// player's state swapped in. Not cancellable.
+    fn player_load_from_file(&self, host: &mut dyn Host, event: &mut PlayerLoadFromFileEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A player whose login the server has accepted (NeoForge's
     /// `PlayerNegotiationEvent` stage): the name, whitelist, ban and
     /// server-full checks have passed and the player holds a place, but their
@@ -3424,6 +3470,18 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         Flow::Continue
+    }
+    /// A player was saved to the world's store (NeoForge's
+    /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the
+    /// world closes, when the dedicated server saves everyone, and for an
+    /// integrated server's owner when the world saves them. LAN guests are
+    /// not heard on integrated autosaves. Once for each save. `directory`
+    /// is the world's player directory (`players/data`): write your own file
+    /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
+    /// may be leaving, so no player's state is swapped in. Not cancellable.
+    fn player_save_to_file(&self, host: &mut dyn Host, event: &mut PlayerSaveToFileEvent<'_>) {
+        let _ = host;
+        let _ = event;
     }
     /// A server player's sprint started or stopped: their client sent
     /// `START_SPRINTING` or `STOP_SPRINTING` (the sprint key, a double tap
@@ -3594,6 +3652,21 @@ pub trait Hooks: Send + Sync {
         &self,
         host: &mut dyn Host,
         event: &mut PlayerAdvancementDoneEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A criterion of a server player's advancement was granted or revoked,
+    /// after its progress changed and before any completion rewards, except
+    /// the `minecraft:tick` criteria granted on a network player's first tick
+    /// or a reload, which are heard after that tick's rewards and packets. A
+    /// grant or revoke that changes nothing is not heard. `granted` is false for a
+    /// revoke. Helpers looking up the guest through `self.lan` may find
+    /// nothing during its packet. @API:player_advancement_progress@.
+    fn player_advancement_progress(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerAdvancementProgressEvent<'_>,
     ) {
         let _ = host;
         let _ = event;
@@ -3885,6 +3958,19 @@ pub trait Hooks: Send + Sync {
         host: &mut dyn Host,
         event: &mut PlayerSpawnPointSetEvent<'_>,
     ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A statistic is about to be awarded to a server player, before its count
+    /// and scoreboard criteria change. `stat_type` and `stat` are ids such as
+    /// `minecraft:mined` and `minecraft:stone`, and `value` the amount. Set
+    /// `cancel` to award nothing. Helpers looking up the guest through
+    /// `self.lan` may find nothing during its packet. Server-side.
+    /// @API:player_stat_award@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_stat_award(&self, host: &mut dyn Host, event: &mut PlayerStatAwardEvent<'_>) -> Flow {
         let _ = host;
         let _ = event;
         Flow::Continue
@@ -10410,6 +10496,32 @@ pub fn dispatch_food_level_changed(
     }
     *to = event.to;
 }
+/// What [`Hooks::hanging_break`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct HangingBreakEvent<'a> {
+    pub player: Option<u128>,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_hanging_break(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: Option<u128>,
+    kind: &str,
+    pos: [i32; 3],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = HangingBreakEvent { player, kind, pos };
+    for mod_hook in mods {
+        if matches!(mod_hook.hanging_break(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::hanging_place`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct HangingPlaceEvent<'a> {
@@ -10501,6 +10613,29 @@ pub fn dispatch_player_changed_dimension(
     };
     for mod_hook in mods {
         mod_hook.player_changed_dimension(host, &mut event);
+    }
+}
+/// What [`Hooks::player_clone`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerCloneEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub was_death: bool,
+}
+pub fn dispatch_player_clone(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    was_death: bool,
+) {
+    let mut event = PlayerCloneEvent {
+        player,
+        name,
+        was_death,
+    };
+    for mod_hook in mods {
+        mod_hook.player_clone(host, &mut event);
     }
 }
 /// What [`Hooks::player_commands_sent`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -10757,6 +10892,29 @@ pub fn dispatch_player_lectern_page_change(
         mod_hook.player_lectern_page_change(host, &mut event);
     }
 }
+/// What [`Hooks::player_load_from_file`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerLoadFromFileEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub directory: &'a std::path::Path,
+}
+pub fn dispatch_player_load_from_file(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    directory: &std::path::Path,
+) {
+    let mut event = PlayerLoadFromFileEvent {
+        player,
+        name,
+        directory,
+    };
+    for mod_hook in mods {
+        mod_hook.player_load_from_file(host, &mut event);
+    }
+}
 /// What [`Hooks::player_login`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerLoginEvent<'a> {
@@ -10785,6 +10943,29 @@ pub fn dispatch_player_login(
             *cancel = true;
             break;
         }
+    }
+}
+/// What [`Hooks::player_save_to_file`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerSaveToFileEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub directory: &'a std::path::Path,
+}
+pub fn dispatch_player_save_to_file(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    directory: &std::path::Path,
+) {
+    let mut event = PlayerSaveToFileEvent {
+        player,
+        name,
+        directory,
+    };
+    for mod_hook in mods {
+        mod_hook.player_save_to_file(host, &mut event);
     }
 }
 /// What [`Hooks::player_sprint`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11097,6 +11278,35 @@ pub fn dispatch_player_advancement_done(
     };
     for mod_hook in mods {
         mod_hook.player_advancement_done(host, &mut event);
+    }
+}
+/// What [`Hooks::player_advancement_progress`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerAdvancementProgressEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub advancement: &'a str,
+    pub criterion: &'a str,
+    pub granted: bool,
+}
+pub fn dispatch_player_advancement_progress(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    advancement: &str,
+    criterion: &str,
+    granted: bool,
+) {
+    let mut event = PlayerAdvancementProgressEvent {
+        player,
+        name,
+        advancement,
+        criterion,
+        granted,
+    };
+    for mod_hook in mods {
+        mod_hook.player_advancement_progress(host, &mut event);
     }
 }
 /// What [`Hooks::player_attack_cooldown_reset`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11820,6 +12030,42 @@ pub fn dispatch_player_spawn_point_set(
             mod_hook.player_spawn_point_set(host, &mut event),
             Flow::Cancel
         ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_stat_award`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerStatAwardEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub stat_type: &'a str,
+    pub stat: &'a str,
+    pub value: i32,
+}
+pub fn dispatch_player_stat_award(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    stat_type: &str,
+    stat: &str,
+    value: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerStatAwardEvent {
+        player,
+        name,
+        stat_type,
+        stat,
+        value,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_stat_award(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }
