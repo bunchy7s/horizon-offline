@@ -14829,14 +14829,14 @@ impl Game<'_> {
         // it ends without failing, for every save: the command, the autosave, the pause.
         let dedicated = self.options.dedicated.is_some();
         if dedicated {
-            dedicated::events::record_server("saving");
+            dedicated::events::record_server("saving", serde_json::json!({}));
         }
         self.save_level(wait)?;
         self.save_parked_levels(wait)?;
         self.save_game_metadata()?;
         self.native_world_saved(wait);
         if dedicated {
-            dedicated::events::record_server("saved");
+            dedicated::events::record_server("saved", serde_json::json!({}));
         }
         Ok(())
     }

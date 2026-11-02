@@ -197,6 +197,16 @@ fn png_size(path: &Path) -> Option<(u32, u32)> {
         .then(|| (field(16), field(20)))
 }
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+    // A prepared root's folder: from its data file, without listing the disk.
+    if let Some(files) = horizon_core::prepared_files::files_under(dir) {
+        out.extend(
+            files
+                .iter()
+                .filter(|file| file.ends_with(".png"))
+                .map(|file| dir.join(file)),
+        );
+        return;
+    }
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };

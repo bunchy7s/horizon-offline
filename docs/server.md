@@ -512,7 +512,11 @@ runtime or new dependency. Server-sent events can replace the polling later if a
     (when the supervisor or the game's own `stop` begins the shutdown, once per run), `server/saving` and
     `server/saved` (around every world save of the running game: `save-all`, the autosave, the pause when
     empty; a save the game makes while it stops is after the last one the supervisor hears of), and
-    `players/joined` and `players/left` (from the game's typed events, within a quarter of a second);
+    `players/joined` and `players/left` (from the game's typed events, within a quarter of a second), and
+    `operators/*`, `allowlist/*`, `bans/*` and `ip_bans/*` `added`/`removed`: each of the game's lists tells a
+    watcher what `add`, `remove` and `clear` do, as vanilla's `StoredUserList` tells its `NotificationService`,
+    so a change by the console, a command in the game or the protocol itself is told alike (`clear` once per
+    entry); the event stream carries them as `operators_added`, `bans_removed`... too;
   - planned: `serversettings/*` and `gamerules`, the other notifications and the heartbeat.
 
 ## 9. Benchmark plan (bots against vanilla and Paper)
