@@ -67,7 +67,9 @@ impl Scrollbar {
             .child(
                 content
                     .track_scroll(&self.handle)
-                    .mr(px(GUTTER))
+                    // The glass look's bar lies over the page's own margin, as an overlay
+                    // scrollbar does; the old look keeps a gutter for its track.
+                    .mr(px(if theme.dark { 0. } else { GUTTER }))
                     // Nested scroll areas must not also move the page behind them.
                     .on_scroll(|_, _, cx| cx.stop_propagation()),
             )

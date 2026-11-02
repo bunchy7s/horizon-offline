@@ -332,3 +332,110 @@ pub fn mark_tile(size: f32, accent_soft: u32) -> Div {
                 .child(bar(1., 7., 14., 1., color(accent_soft))),
         )
 }
+
+/// A big square button with one icon (`BIG_ICON`): 56 px, white at 8 %, 13 % under the pointer;
+/// the glyph white at 80 %, white under the pointer.
+pub fn big_icon(id: impl Into<SharedString>, name: &'static str, t: &Theme) -> Stateful<Div> {
+    let id = id.into();
+    let group = SharedString::from(format!("{id}-group"));
+    let glyph = icon(name, 21., white(ink::STRONG))
+        .group_hover(group.clone(), |s| s.text_color(white(ink::FULL)));
+    keyboard(
+        div()
+            .id(id)
+            .group(group)
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(px(56.))
+            .rounded(px(radius::LARGE))
+            .bg(white(fill::BUTTON))
+            .hover(|s| s.bg(white(0.13)))
+            .cursor_pointer()
+            .child(glyph),
+        t,
+    )
+}
+
+/// A menu row with a note under its label (`MENU_ITEM`): 14 px medium over 12 px at 55 %, white
+/// at 7 % under the pointer; at 40 % when `locked`. A mark (a tick) can follow on the right.
+pub fn menu_item(
+    id: impl Into<SharedString>,
+    label: SharedString,
+    note: String,
+    locked: bool,
+    t: &Theme,
+) -> Stateful<Div> {
+    let id = id.into();
+    let d = div()
+        .id(id.clone())
+        .relative()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(12.))
+        .w_full()
+        .px(px(12.))
+        .py(px(8.))
+        .rounded(px(radius::CONTROL))
+        .when(!locked, |d| {
+            d.cursor_pointer()
+                .child(hover_fade(&id, layer(radius::CONTROL), |d, a| {
+                    d.bg(white(0.07 * a))
+                }))
+        })
+        .child(
+            div()
+                .relative()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    text(14., FontWeight::MEDIUM, ink::FULL)
+                        .line_height(px(21.))
+                        .child(label),
+                )
+                .child(
+                    text(12., FontWeight::NORMAL, ink::QUIET)
+                        .line_height(px(18.))
+                        .truncate()
+                        .child(note),
+                ),
+        );
+    if locked {
+        return d.opacity(0.4);
+    }
+    keyboard(track_hover(d, id), t)
+}
+
+/// A quiet button (`QUIET`): white at 8 %, 14 % under the pointer, 14 px medium, `h` tall.
+pub fn quiet(
+    id: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    h: f32,
+    t: &Theme,
+) -> Stateful<Div> {
+    keyboard(
+        div()
+            .id(id.into())
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .gap(px(8.))
+            .h(px(h))
+            .px(px(14.))
+            .rounded(px(radius::CONTROL))
+            .bg(white(fill::BUTTON))
+            .hover(|s| s.bg(white(0.14)))
+            .cursor_pointer()
+            .font_family(horizon_theme::glass::FONT)
+            .text_size(px(14.))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(white(ink::FULL))
+            .child(label.into()),
+        t,
+    )
+}
