@@ -99,7 +99,7 @@ ServerPlayer.respawnEntityOnShoulder	port	crates/horizon-client/src/game/shoulde
 ServerPlayer.trackStartFallingPosition	port	crates/horizon-client/src/game/advancements.rs::Game::tick_marks	the fall start and the lava ride feed `DistanceTrigger` (`fall_from_height`, `ride_entity_in_lava`)
 ServerPlayer.trackEnteredOrExitedLavaOnVehicle	port	crates/horizon-client/src/game/advancements.rs::Game::tick_marks	the fall start and the lava ride feed `DistanceTrigger` (`fall_from_height`, `ride_entity_in_lava`)
 ServerPlayer.updateScoreForCriteria	port	crates/horizon-client/src/game/scoreboard.rs::Game::tick_scoreboard	health, food, air, armor, xp and level objectives
-ServerPlayer.tellNeutralMobsThatIDied	port	crates/horizon-client/src/game/creatures.rs::Game::tell_neutral_mobs_player_died	the mobs angry at the dead player within 32 blocks across and 10 up are forgiven, under forgive_dead_players
+ServerPlayer.tellNeutralMobsThatIDied	missing		player: wolves, bees, piglins and other mobs that were angry at the player stay angry after the player dies and respawns (vanilla forgives them with forgive_dead_players)
 ServerPlayer.handleTeamKill	inline	crates/horizon-client/src/game/scoreboard.rs::Game::score_player_killed	teamkill and killedByTeam objectives
 ServerPlayer.hurtServer	port	crates/horizon-client/src/game/lan_pvp.rs::Game::pvp_land	pvp rule and team friendly fire gate the damage
 ServerPlayer.addPostEffect	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_posteffect	gap: minor: one list shared by every target, nothing is sent to guests (an empty list at join) and no post shader is drawn
