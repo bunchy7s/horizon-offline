@@ -1413,6 +1413,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   thunder. Set `cancel` to keep the previous thunder state and timer.
 - **`native_lightning_strike(player, pos, cause, cancel)`**: a weather, Channeling-trident, or `/summon` lightning bolt
   is about to be created. Set `cancel` to prevent the bolt and its effects; `cause` names the creation path.
+- **`native_time_skip(dimension, from, to, cause, cancel)`**: the server clock is about to jump after enough players
+  sleep or through `/time set`, `/time add`, or `/time set <marker>`. Set `cancel` to keep the old time.
 - **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and
   their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
   player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a
