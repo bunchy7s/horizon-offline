@@ -272,6 +272,25 @@ fn start_jumping(m: &mut Mob) {
     }
 }
 
+/// `Rabbit.playAttackSound`: only the killer bunny bites with a sound, at
+/// volume 1 and a pitch drawn from its own random. The pitch is an argument of
+/// `playSound`, so its two draws are made even for a silent rabbit.
+pub fn attack_sound(m: &mut Mob, events: &mut Vec<MobEvent>) {
+    if m.extra.variant != EVIL {
+        return;
+    }
+    let pitch = (m.random.next_float() - m.random.next_float()) * 0.2 + 1.0;
+    if m.silent {
+        return;
+    }
+    events.push(MobEvent::Sound(
+        "entity.rabbit.attack",
+        [m.position.x, m.position.y, m.position.z],
+        1.0,
+        pitch,
+    ));
+}
+
 /// Rabbit.customServerAiStep: start a hop toward the current path waypoint;
 /// `target` is where the rabbit's target stands, if it has one.
 pub fn server_ai_step(m: &mut Mob, target: Option<Vec3>) {
