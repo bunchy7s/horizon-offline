@@ -191,29 +191,48 @@ pub(super) struct LanHost {
     pub(super) states: lan::entity::States,
 }
 
-impl LanHost {
+impl Game<'_> {
     /// `PlayerList.remove`: `player.awardStat(Stats.LEAVE_GAME)` before the
-    /// player is saved. Once per guest, however often they are saved.
-    pub(super) fn award_leave_game(&mut self, conn: u32) {
-        if let Some(play) = self.play.get_mut(&conn)
-            && !play.left_game
-        {
-            play.left_game = true;
+    /// player is saved, heard by native mods first. Once per guest, however
+    /// often they are saved.
+    pub(super) fn award_leave_game(
+        &mut self,
+        host: &mut LanHost,
+        conn: u32,
+        player: u128,
+        name: &str,
+    ) {
+        let Some(play) = host.play.get_mut(&conn) else {
+            return;
+        };
+        if std::mem::replace(&mut play.left_game, true) {
+            return;
+        }
+        let mut cancel = false;
+        self.native_player_stat_award(
+            player,
+            name,
+            "minecraft:custom",
+            "minecraft:leave_game",
+            1,
+            &mut cancel,
+        );
+        if !cancel && let Some(play) = host.play.get_mut(&conn) {
             play.stats.custom("leave_game", 1);
         }
     }
 
     /// `PlayerList.removeAll`: every player who joined leaves with the world.
-    pub(super) fn award_leave_game_to_all(&mut self) {
-        let conns: Vec<u32> = self
+    pub(super) fn award_leave_game_to_all(&mut self, host: &mut LanHost) {
+        let players: Vec<(u32, u128, String)> = host
             .hub
             .guests
             .iter()
             .filter(|g| g.placed)
-            .map(|g| g.conn)
+            .map(|g| (g.conn, g.uuid, g.name.clone()))
             .collect();
-        for conn in conns {
-            self.award_leave_game(conn);
+        for (conn, player, name) in players {
+            self.award_leave_game(host, conn, player, &name);
         }
     }
 }
@@ -1334,7 +1353,7 @@ impl Game<'_> {
         let Some(mut host) = self.lan.take() else {
             return;
         };
-        host.award_leave_game_to_all();
+        self.award_leave_game_to_all(&mut host);
         self.save_leaving_guests(&mut host);
         host.hub.disconnect_all();
         // Give the writer threads a moment to flush the disconnect packets.
@@ -1883,7 +1902,7 @@ impl Game<'_> {
                     }
                     self.lan_crafting_left(&mut host, &mut guest);
                     if guest.placed {
-                        host.award_leave_game(guest.conn);
+                        self.award_leave_game(&mut host, guest.conn, guest.uuid, &guest.name);
                     }
                     // PlayerList.remove: the vehicle it alone rides goes too.
                     self.take_parent_vehicle(&mut host, &mut guest);
@@ -2006,6 +2025,14 @@ impl Game<'_> {
                 .lan
                 .take()
                 .expect("the hub is back after the quiet commands");
+        }
+        if !host.hub.native_advancement_grants.is_empty() {
+            self.lan = Some(host);
+            self.run_native_advancement_grants();
+            host = self
+                .lan
+                .take()
+                .expect("the hub is back after the advancement grants");
         }
         if !host.hub.native_menu_events.is_empty() {
             self.lan = Some(host);
@@ -2197,6 +2224,14 @@ impl Game<'_> {
                 .lan
                 .take()
                 .expect("the hub is back after the mod messages");
+        }
+        if !host.hub.native_advancement_grants.is_empty() {
+            self.lan = Some(host);
+            self.run_native_advancement_grants();
+            host = self
+                .lan
+                .take()
+                .expect("the hub is back after the advancement grants");
         }
         if !host.hub.native_menu_events.is_empty() {
             self.lan = Some(host);

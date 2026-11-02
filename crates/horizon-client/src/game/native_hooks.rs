@@ -3574,6 +3574,57 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_advancement_done(self, mod_api::mods(), player, name, advancement);
     }
+    /// A criterion of a server player's advancement was granted or revoked,
+    /// after its progress changed and before any completion rewards, except
+    /// the `minecraft:tick` criteria granted on a network player's first tick
+    /// or a reload, which are heard after that tick's rewards and packets. A
+    /// grant or revoke that changes nothing is not heard. `granted` is false for a
+    /// revoke. Helpers looking up the guest through `self.lan` may find
+    /// nothing during its packet. @API:player_advancement_progress@.
+    pub(super) fn native_player_advancement_progress(
+        &mut self,
+        player: u128,
+        name: &str,
+        advancement: &str,
+        criterion: &str,
+        granted: bool,
+    ) {
+        mod_api::dispatch_player_advancement_progress(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            advancement,
+            criterion,
+            granted,
+        );
+    }
+    /// A statistic is about to be awarded to a server player, before its count
+    /// and scoreboard criteria change. `stat_type` and `stat` are ids such as
+    /// `minecraft:mined` and `minecraft:stone`, and `value` the amount. Set
+    /// `cancel` to award nothing. Helpers looking up the guest through
+    /// `self.lan` may find nothing during its packet. Server-side.
+    /// @API:player_stat_award@.
+    pub(super) fn native_player_stat_award(
+        &mut self,
+        player: u128,
+        name: &str,
+        stat_type: &str,
+        stat: &str,
+        value: i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_player_stat_award(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            stat_type,
+            stat,
+            value,
+            cancel,
+        );
+    }
     /// A server player's experience points are about to increase from an orb pickup,
     /// after mending has taken its share. Change `amount` to change the points
     /// added. The player's state is not swapped in, so helpers that look them up

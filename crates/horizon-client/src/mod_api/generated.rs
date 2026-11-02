@@ -3621,6 +3621,21 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A criterion of a server player's advancement was granted or revoked,
+    /// after its progress changed and before any completion rewards, except
+    /// the `minecraft:tick` criteria granted on a network player's first tick
+    /// or a reload, which are heard after that tick's rewards and packets. A
+    /// grant or revoke that changes nothing is not heard. `granted` is false for a
+    /// revoke. Helpers looking up the guest through `self.lan` may find
+    /// nothing during its packet. @API:player_advancement_progress@.
+    fn player_advancement_progress(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerAdvancementProgressEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
     /// A server player reset their attack strength by swinging (`handlePunch`).
     /// The swing and reset have already happened. The player's state is not
     /// swapped in, and helpers looking them up through `self.lan` may find
@@ -3908,6 +3923,19 @@ pub trait Hooks: Send + Sync {
         host: &mut dyn Host,
         event: &mut PlayerSpawnPointSetEvent<'_>,
     ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A statistic is about to be awarded to a server player, before its count
+    /// and scoreboard criteria change. `stat_type` and `stat` are ids such as
+    /// `minecraft:mined` and `minecraft:stone`, and `value` the amount. Set
+    /// `cancel` to award nothing. Helpers looking up the guest through
+    /// `self.lan` may find nothing during its packet. Server-side.
+    /// @API:player_stat_award@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_stat_award(&self, host: &mut dyn Host, event: &mut PlayerStatAwardEvent<'_>) -> Flow {
         let _ = host;
         let _ = event;
         Flow::Continue
@@ -11148,6 +11176,35 @@ pub fn dispatch_player_advancement_done(
         mod_hook.player_advancement_done(host, &mut event);
     }
 }
+/// What [`Hooks::player_advancement_progress`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerAdvancementProgressEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub advancement: &'a str,
+    pub criterion: &'a str,
+    pub granted: bool,
+}
+pub fn dispatch_player_advancement_progress(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    advancement: &str,
+    criterion: &str,
+    granted: bool,
+) {
+    let mut event = PlayerAdvancementProgressEvent {
+        player,
+        name,
+        advancement,
+        criterion,
+        granted,
+    };
+    for mod_hook in mods {
+        mod_hook.player_advancement_progress(host, &mut event);
+    }
+}
 /// What [`Hooks::player_attack_cooldown_reset`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct PlayerAttackCooldownResetEvent<'a> {
@@ -11869,6 +11926,42 @@ pub fn dispatch_player_spawn_point_set(
             mod_hook.player_spawn_point_set(host, &mut event),
             Flow::Cancel
         ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_stat_award`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerStatAwardEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub stat_type: &'a str,
+    pub stat: &'a str,
+    pub value: i32,
+}
+pub fn dispatch_player_stat_award(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    stat_type: &str,
+    stat: &str,
+    value: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerStatAwardEvent {
+        player,
+        name,
+        stat_type,
+        stat,
+        value,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_stat_award(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }

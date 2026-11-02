@@ -3941,8 +3941,8 @@ impl Game<'_> {
         // THROW and a creative tab's drop included.
         self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
         // Player.drop: the drop statistics.
-        self.stats.add("dropped", &thrown.item, thrown.count as i32);
-        self.stats.custom("drop", 1);
+        self.award_stat("dropped", &thrown.item, thrown.count as i32);
+        self.award_custom_stat("drop", 1);
         let player = self.native_acting_id();
         self.native_item_dropped(player, &thrown.item, thrown.count);
         self.throw_from_eyes(thrown, eye, true);
@@ -4169,7 +4169,7 @@ impl Game<'_> {
                 let thrower = item.thrower;
                 match self.give(item.stack.clone()) {
                     None => {
-                        self.stats.add("picked_up", &kind, before as i32);
+                        self.award_stat("picked_up", &kind, before as i32);
                         if let Some(thrower) = thrower {
                             self.trigger_thrown_picked_up_by_player(&item.stack, thrower);
                         }
@@ -4188,8 +4188,7 @@ impl Game<'_> {
                     }
                     Some(rest) => {
                         if rest.count < before {
-                            self.stats
-                                .add("picked_up", &kind, (before - rest.count) as i32);
+                            self.award_stat("picked_up", &kind, (before - rest.count) as i32);
                             if let Some(thrower) = thrower {
                                 self.trigger_thrown_picked_up_by_player(&rest, thrower);
                             }
@@ -4420,7 +4419,7 @@ impl Game<'_> {
         });
         // NoteBlock.attack awards the statistic.
         if note {
-            self.stats.custom("play_noteblock", 1);
+            self.award_custom_stat("play_noteblock", 1);
         }
         self.process_level_events()
     }
@@ -5205,7 +5204,7 @@ impl Game<'_> {
                     PlayerEffect::DropItem(_) => {}
                     PlayerEffect::EatCake => {
                         // CakeBlock.eat
-                        self.stats.custom("eat_cake_slice", 1);
+                        self.award_custom_stat("eat_cake_slice", 1);
                         if let Some(p) = self.player.as_mut() {
                             let food = &mut p.health.food;
                             food.food = (food.food + 2).min(20);
@@ -5420,7 +5419,7 @@ impl Game<'_> {
         } else if &*name == "minecraft:ender_chest" {
             self.open_ender_chest(key);
             // EnderChestBlock.useWithoutItem
-            self.stats.custom("open_enderchest", 1);
+            self.award_custom_stat("open_enderchest", 1);
             self.anger_piglins(true);
             if self.container_opener_event(key, true) {
                 self.container_edge_sound(key, true);
@@ -5459,7 +5458,7 @@ impl Game<'_> {
                 _ => "",
             };
             if !stat.is_empty() {
-                self.stats.custom(stat, 1);
+                self.award_custom_stat(stat, 1);
             }
             // Opening a piglin-guarded container angers the piglins who see it.
             if self.guarded_by_piglins(&name) {
@@ -5740,7 +5739,7 @@ impl Game<'_> {
         if wears && per_block > 0 && max > 0 {
             self.damage_held(per_block);
         }
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
     }
     fn break_block(&mut self, pos: [i32; 3]) -> Result<()> {
         self.lan_break_pos = Some(pos);
@@ -5849,7 +5848,7 @@ impl Game<'_> {
                     .correct_for_drops(held.as_ref(), &facts.name);
             if harvest {
                 // Block.playerDestroy: the mined statistic, the exhaustion and the drops.
-                self.stats.add("mined", &facts.name, 1);
+                self.award_stat("mined", &facts.name, 1);
                 if let Some(p) = self.player.as_mut() {
                     p.cause_food_exhaustion(0.005);
                 }
@@ -6228,7 +6227,7 @@ impl Game<'_> {
                     && result == horizon_world::level::InteractionResult::Success
                     && let Some(used) = held.as_ref()
                 {
-                    self.stats.add("used", &used.item, 1);
+                    self.award_stat("used", &used.item, 1);
                     self.consume_held();
                 }
                 // FlowerPotBlock.useItemOn: the plant is potted, used up, and counted.
@@ -6236,8 +6235,8 @@ impl Game<'_> {
                     && result == horizon_world::level::InteractionResult::Success
                     && let Some(used) = held.as_ref()
                 {
-                    self.stats.add("used", &used.item, 1);
-                    self.stats.custom("pot_flower", 1);
+                    self.award_stat("used", &used.item, 1);
+                    self.award_custom_stat("pot_flower", 1);
                     self.consume_held();
                     if let (Some(player), Some(name)) =
                         (self.lan_acting_uuid, self.lan_acting_name.clone())
@@ -6256,8 +6255,8 @@ impl Game<'_> {
                         .name
                         .clone();
                     match &*name {
-                        "minecraft:note_block" => self.stats.custom("tune_noteblock", 1),
-                        "minecraft:bell" => self.stats.custom("bell_ring", 1),
+                        "minecraft:note_block" => self.award_custom_stat("tune_noteblock", 1),
+                        "minecraft:bell" => self.award_custom_stat("bell_ring", 1),
                         "minecraft:lever" => self.lever_puff(hit.pos),
                         _ => {}
                     }
@@ -6497,7 +6496,7 @@ impl Game<'_> {
             // BlockItem.useOn: a consumable that could not be placed is used,
             // which ItemStack.useOn counts as a use of the item.
             if self.start_eating(&info) {
-                self.stats.add("used", &stack.item, 1);
+                self.award_stat("used", &stack.item, 1);
             } else {
                 // BlockItem.place's FAIL.
                 self.use_failed = true;
@@ -6544,7 +6543,7 @@ impl Game<'_> {
         }
         self.process_level_events()?;
         // BlockItem.place: the used statistic and the placed_block trigger.
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.trigger_block("minecraft:placed_block", target, &stack);
         self.native_place_block(&stack, target, state);
         self.check_wither_spawn(target)?;
@@ -6638,7 +6637,7 @@ impl Game<'_> {
             let group = horizon_client::cooldowns::group(stack, None);
             self.add_cooldown(group, instrument.use_ticks());
         }
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
     }
     fn apply_consume_effect(&mut self, effect: &horizon_client::items::ConsumeEffect) {
         use horizon_client::items::ConsumeEffect;
@@ -6872,7 +6871,7 @@ impl Game<'_> {
             0.8,
             pitch,
         );
-        self.stats.add("used", &item, 1);
+        self.award_stat("used", &item, 1);
     }
     /// `LivingEntity.releaseUsingItem` (`Item.releaseUsing`) for `stack`,
     /// used for `ticks`, its hand acting: a bow or a trident lets go (not
@@ -10297,7 +10296,7 @@ impl Game<'_> {
                 // (native_item_crafted).
                 let player = self.native_acting_id();
                 self.native_item_crafted(player, &format!("minecraft:{recipe}"), &taken);
-                self.stats.add("crafted", &made.0, made.1 as i32);
+                self.award_stat("crafted", &made.0, made.1 as i32);
                 self.award_crafted(&[(format!("minecraft:{recipe}"), ingredients)]);
                 if !shift || crafted >= 64 {
                     break;
@@ -11365,8 +11364,7 @@ impl Game<'_> {
                 mob.kind.width,
                 mob.kind.height,
             );
-            self.stats
-                .custom("damage_dealt", (actual * 10.0).round() as i32);
+            self.award_custom_stat("damage_dealt", (actual * 10.0).round() as i32);
             if crit {
                 self.critical_hit(
                     self.lan_acting,
@@ -12080,7 +12078,7 @@ impl Game<'_> {
         }
         self.close_container();
         if self.remote.is_none() {
-            self.stats.custom("leave_game", 1);
+            self.award_custom_stat("leave_game", 1);
         }
         self.lan_close(false);
         self.free_player_beds()?;
@@ -12482,7 +12480,7 @@ impl Game<'_> {
             return Ok(false);
         }
         if let Some(stat) = result.stat {
-            self.stats.custom(stat, 1);
+            self.award_custom_stat(stat, 1);
         }
         if let Some(block) = result.block
             && let Ok(new) = registry.resolve(&block)
@@ -12617,7 +12615,7 @@ impl Game<'_> {
             self.audio.play(&sound, Some(at), 1.0, 1.0);
         }
         // ItemStack.useOn: a use that acted counts as one of the item.
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.damage_held(damage);
         self.post_block_game_event("minecraft:block_change", pos, self.sculk_actor(), Some(new));
         Ok(true)
@@ -12714,7 +12712,7 @@ impl Game<'_> {
                 let broken = stack.item.clone();
                 let gone = stack.clone();
                 *cell = None;
-                self.stats.add("broken", &broken, 1);
+                self.award_stat("broken", &broken, 1);
                 // LivingEntity.onEquippedItemBroken: the sound and the crumbs.
                 self.player_equipment_broke(
                     horizon_world::player_inventory::EquipmentSlot::MainHand,
@@ -12805,7 +12803,7 @@ impl Game<'_> {
             self.process_level_events()?;
             // `player.awardStat(Stats.ITEM_USED.get(this))`,
             // `getPickupSound` and `level.gameEvent(player, FLUID_PICKUP)`.
-            self.stats.add("used", "minecraft:bucket", 1);
+            self.award_stat("used", "minecraft:bucket", 1);
             let sound = if filled == "minecraft:lava_bucket" {
                 "minecraft:item.bucket.fill_lava"
             } else {
@@ -12925,7 +12923,7 @@ impl Game<'_> {
                     self.sculk_actor(),
                     Some(state),
                 );
-                self.stats.add("used", &stack.item, 1);
+                self.award_stat("used", &stack.item, 1);
                 if !self.creative {
                     self.consume_held();
                 }
@@ -14126,7 +14124,7 @@ impl Game<'_> {
             self.snap_player_model_pitch();
         }
         self.occupy_bed(head);
-        self.stats.custom("sleep_in_bed", 1);
+        self.award_custom_stat("sleep_in_bed", 1);
         self.trigger_player("minecraft:slept_in_bed");
         self.stats.reset("custom", "minecraft:time_since_rest");
     }
@@ -18976,6 +18974,7 @@ impl Game<'_> {
                         if let Some(host) = self.lan.as_mut() {
                             host.hub.reload_resources(sync);
                         }
+                        self.run_native_advancement_grants();
                     }
                     Err(e) => {
                         log::warn!("Horizon: the players are not sent the reloaded data: {e}")
