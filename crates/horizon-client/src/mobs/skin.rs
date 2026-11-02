@@ -586,7 +586,13 @@ mod tests {
                 &types.types[id].model,
                 glam::Mat4::IDENTITY,
                 &Poses::default(),
-                Paint { uv: [0.0, 0.0, 1.0, 1.0], scroll: 0.0, color: u32::MAX, light: 0, overlay: 0 },
+                Paint {
+                    uv: [0.0, 0.0, 1.0, 1.0],
+                    scroll: 0.0,
+                    color: u32::MAX,
+                    light: 0,
+                    overlay: 0
+                },
             ));
             assert!(frame.jobs.iter().all(|j| j.cull == cull), "{id}");
             frame.clear_draws();
