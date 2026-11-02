@@ -538,7 +538,8 @@ impl Game<'_> {
         boxes.retain(|b| b.intersects(near));
         boxes
     }
-    /// Entity.move for a cart: collisions zero the blocked components.
+    /// Entity.move for a cart: collisions zero the blocked components, the world border's walls
+    /// among them (`CollisionGetter.borderCollision`, asked for every entity).
     fn move_cart(&self, c: &mut Minecart, delta: Vec3) {
         let scene = SceneCollisions {
             world: &self.world,
@@ -549,7 +550,7 @@ impl Game<'_> {
         let mut scene = horizon_client::collisions::EntityCollisions {
             blocks: scene,
             entities: &entities,
-            border: None,
+            border: Some((self.border.geometry(), [c.position.x, c.position.z])),
         };
         if let Ok(moved) = scene.resolve(c.bounds(), delta, 0.0, c.on_ground) {
             c.position = Vec3::new(

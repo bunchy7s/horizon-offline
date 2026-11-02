@@ -3,15 +3,8 @@
 use super::{Game, lan::LanHost};
 use horizon_client::{
     items::ItemStack,
-    lan::{
-        hub::HostState,
-        waypoints::{self, HIDING_HEADS, Icon, PLAYER_RANGE},
-    },
+    lan::waypoints::{self, HIDING_HEADS, Icon, PLAYER_RANGE},
 };
-
-/// The host player's connection id in the waypoint managers: its packets
-/// go to this client's locator bar rather than to a guest.
-const HOST_CONN: u32 = u32::MAX;
 
 /// `waypoint_transmit_range`: hidden by crouching, invisibility or a head worn.
 fn transmit_range(crouching: bool, invisible: bool, head: Option<&ItemStack>) -> f64 {
@@ -35,38 +28,8 @@ impl Game<'_> {
     /// level: a player who changes level leaves the old one's manager
     /// (`ServerLevel.removePlayerImmediately`: untracked for everyone there)
     /// and joins the new one's (`addDuringTeleport`).
-    pub(super) fn lan_update_waypoints(&mut self, host: &mut LanHost, state: Option<&HostState>) {
+    pub(super) fn lan_update_waypoints(&mut self, host: &mut LanHost) {
         let mut players: Vec<(&str, waypoints::Player)> = Vec::new();
-        if let Some(h) = state {
-            let icon = self
-                .cmds
-                .waypoint_icons
-                .get(&super::commands::Target::Player)
-                .map(|i| Icon {
-                    style: i.style.clone(),
-                    color: i.color,
-                })
-                .unwrap_or_default();
-            players.push((
-                self.dim.id(),
-                waypoints::Player {
-                    uuid: h.uuid,
-                    conn: Some(HOST_CONN),
-                    position: h.position,
-                    spectator: self.spectator(),
-                    transmit_range: transmit_range(
-                        h.sneaking,
-                        self.potions.effects.get("invisibility").is_some(),
-                        h.equipment[5].as_ref(),
-                    ),
-                    receive_range: PLAYER_RANGE,
-                    first_tick: false,
-                    view_distance: host.hub.config.view_distance,
-                    team: self.waypoint_team(&h.name),
-                    icon,
-                },
-            ));
-        }
         let mut respawned = Vec::new();
         for g in host.hub.guests.iter().filter(|g| g.placed) {
             // PlayerList.respawn makes a new ServerPlayer.
@@ -127,12 +90,7 @@ impl Game<'_> {
             }
         }
         for (conn, packet) in out {
-            if conn == HOST_CONN {
-                // The host's own connection: its locator bar.
-                if let horizon_protocol::packets::play::Clientbound::TrackedWaypoint(w) = &packet {
-                    self.handle_waypoint(w);
-                }
-            } else if let Some(g) = host.hub.guest(conn) {
+            if let Some(g) = host.hub.guest(conn) {
                 g.send(&packet);
             }
         }

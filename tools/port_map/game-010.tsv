@@ -22,13 +22,13 @@ PathNavigation.getGroundY	inline	crates/horizon-client/src/mobs/nav.rs::Mob::nav
 PathNavigation.shouldTargetNextNodeInDirection	port	crates/horizon-client/src/mobs/nav.rs::Mob::should_target_next_node	
 PathNavigation.trimPath	missing		minor: path nodes on a cauldron are not raised one block, so a route ending on a cauldron (leatherworker job site) aims into the block
 PathNavigation.isClearForMovementBetween	port	crates/horizon-client/src/mobs/world.rs::MobWorld::clear_between	collider clip from start to the target raised by half the height, optionally stopped by fluids
-PathNavigation.shouldRecomputePath	inline	crates/horizon-client/src/mobs/nav.rs::Mob::should_recompute_path, crates/horizon-client/src/mobs.rs::blocks_changed	called for every block write that changes a collision shape, when the mobs tick (`World::path_writes`); the recompute happens at the start of the mob's next navigation tick, not inside sendBlockUpdated
+PathNavigation.shouldRecomputePath	inline	crates/horizon-client/src/mobs/nav.rs::Mob::should_recompute_path	called for every block write that changes a collision shape (`mobs.rs::blocks_changed`, `World::path_writes`); the recompute happens at the start of the mob's next navigation tick, not inside sendBlockUpdated
 WallClimberNavigation.createPath	port	crates/horizon-client/src/mobs/nav.rs::Mob::create_path_to	WallClimber kind remembers climb_to before the ground path
 WallClimberNavigation.tick	inline	crates/horizon-client/src/mobs/nav.rs::Mob::nav_tick	WallClimber branch: with no path it keeps steering at climb_to until within the body width
 WaterBoundPathNavigation.createPathFinder	inline	crates/horizon-client/src/mobs/nav.rs::Navigation::evaluator	Evaluator::Swim with breach for the dolphin; can_pass_doors stays true (minor)
 WaterBoundPathNavigation.canUpdatePath	port	crates/horizon-client/src/mobs/nav.rs::Mob::can_update_path	breach (dolphin) or in liquid
 WaterBoundPathNavigation.getTempMobPos	port	crates/horizon-client/src/mobs/nav.rs::Mob::temp_mob_pos	x, half the height up, z
-AdultSensor.doTick	inline	crates/horizon-client/src/mobs/animal_brain.rs::tick_sensors (axolotl), crates/horizon-client/src/mobs/armadillo.rs::BabyFollowAdult (armadillo)	goal stand-in for the armadillo brain (no tick parity: the probe has no armadillo brain): the baby follows the nearest visible adult 5 to 17 blocks away
+AdultSensor.doTick	inline	crates/horizon-client/src/mobs/animal_brain.rs::tick_sensors	goal stand-in for the armadillo brain, `armadillo.rs::BabyFollowAdult` (no tick parity: the probe has no armadillo brain): the baby follows the nearest visible adult 5 to 17 blocks away
 AdultSensor.setNearestVisibleAdult	inline	crates/horizon-client/src/mobs/animal_brain.rs::tick_sensors	closest visible adult of the same species into nearest_visible_adult
 AdultSensorAnyType.setNearestVisibleAdult	port	crates/horizon-client/src/mobs/animal_brain.rs::sense_adult	closest visible adult of a #followable_friendly_mobs species (happy ghast)
 AxolotlAttackablesSensor.isMatchingEntity	port	crates/horizon-client/src/mobs/animal_brain.rs::sense_axolotl_attackables	within 8 blocks, in water, always-hostile or hunt target tag, alive and not playing dead
@@ -109,20 +109,20 @@ Bat.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_n
 Bat.checkBatSpawnRules	inline	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Bat arm: below the surface, coin flip, light against nextInt(4), bats_spawnable_on, mob rules
 Dolphin.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	S::Dolphin arm: full air, pitch 0, baby chance 0.1
 Dolphin.defineSynchedData	skip:java		synched fields: got_fish is extra.flag and moistness extra.counter
-Dolphin.addAdditionalSaveData	missing		minor: GotFish and Moistness are not written, a saved dolphin forgets the fish it was fed
-Dolphin.readAdditionalSaveData	missing		minor: GotFish and Moistness are not read, a loaded dolphin starts with no fish and full moistness
+Dolphin.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	GotFish and Moistness
+Dolphin.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	GotFish and Moistness, 2400 when absent
 Dolphin.registerGoals	port	crates/horizon-client/src/mobs/aquatic.rs::register	gap: player: no MoveToItemGoal and PlayWithItemsGoal (dolphins ignore items thrown in the water), no FollowPlayerRiddenEntityGoal for boats or nautiluses, no AvoidEntity of guardians, and HurtByTarget does not skip guardians
 Dolphin.createAttributes	skip:data		attributes come from the entity tables
-Dolphin.canAttack	missing		minor: a baby dolphin that is hurt can still pick the attacker as target
-Dolphin.pickUpItem	missing		player: a dolphin never picks up an item dropped in the water (pick_up_loot is set but nothing takes the item)
+Dolphin.canAttack	port	crates/horizon-client/src/mobs/goals.rs::spares_target	a baby dolphin takes nobody as its target
+Dolphin.pickUpItem	port	crates/horizon-client/src/game/foxes.rs::Game::tick_dolphins	the game finds the first allowed item in the water within 8 blocks and takes it
 Dolphin.handleEntityEvent	port	crates/horizon-client-render/src/particles.rs::entity_event_burst	event 38: seven happy villager particles about the dolphin
 Dolphin.closeToNextPos	inline	crates/horizon-client/src/mobs/dolphin.rs::SwimToTreasure::tick	nav target within 12 blocks (144 squared) of the dolphin
 Dolphin.DolphinSwimWithPlayerGoal.canContinueToUse	port	crates/horizon-client/src/mobs/dolphin.rs::SwimWithPlayer::can_continue	player still swimming and within 16 blocks
-Dolphin.ItemGoal.drop	missing		player: a dolphin holding an item (from a dispenser) never throws it back with the 40 tick pickup delay
-Dolphin.ItemGoal.dropItem	missing		player: the held item is never dropped by the dolphin
-Dolphin.MoveToItemGoal.canUse	missing		player: dolphins do not notice items floating within 8 blocks
-Dolphin.MoveToItemGoal.stop	missing		player: no item to drop after playing, no cooldown
-Dolphin.MoveToItemGoal.start	missing		player: dolphins do not swim to floating items or play the play sound
+Dolphin.ItemGoal.drop	port	crates/horizon-client/src/mobs/dolphin.rs::drop_item	thrown from the eye along the view with a pickup delay of 40
+Dolphin.ItemGoal.dropItem	port	crates/horizon-client/src/mobs/dolphin.rs::drop_item	the item in the mouth, false when there is none
+Dolphin.MoveToItemGoal.canUse	port	crates/horizon-client/src/mobs/dolphin.rs::MoveToItem::can_use	an item at `set_item_at` within 8 blocks
+Dolphin.MoveToItemGoal.stop	port	crates/horizon-client/src/mobs/dolphin.rs::MoveToItem::stop	drops what it holds and rests for up to 100 ticks
+Dolphin.MoveToItemGoal.start	port	crates/horizon-client/src/mobs/dolphin.rs::MoveToItem::start	swims to it and plays the play sound
 AbstractChestedHorse.dropEquipment	port	crates/horizon-client/src/mobs/drops.rs::die	the stored items and then a chest drop, chested cleared
 AbstractChestedHorse.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	ChestedHorse and Items for llamas, donkeys and mules
 AbstractChestedHorse.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	ChestedHorse and Items, 15 slots

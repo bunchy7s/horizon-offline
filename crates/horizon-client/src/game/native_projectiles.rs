@@ -46,8 +46,7 @@ fn projectile_type(p: &Projectile) -> &'static str {
 
 impl Game<'_> {
     /// Whether this game is a server that flies projectiles for the mods (the
-    /// server thread or a dedicated server, never the deprecated in-frame path
-    /// nor a client) and a mod asked to hear their impacts
+    /// server thread or a dedicated server, never a client) and a mod asked to hear their impacts
     /// (`native_hears_projectile_impacts`). Without one, the tick keeps no copy
     /// of its projectiles: it costs nothing.
     pub(super) fn native_hears_impacts(&self) -> bool {
@@ -77,7 +76,7 @@ impl Game<'_> {
                 .into_iter()
                 .find(|&(c, _)| c == conn)
                 .map_or(0, |(_, id)| id),
-            None => self.lan.as_ref().map_or(0, |host| host.host_entity as u32),
+            None => 0,
         }
     }
 
@@ -166,15 +165,12 @@ impl Game<'_> {
                     let (entity, kind) = self.native_impact_entity(id);
                     (Some(entity), kind, [0; 3], [0; 3], at)
                 }
+                // A server's players are hit as their entities, never as `Player`.
                 Hit::Entity {
-                    who: Who::Player,
-                    at,
+                    who: Who::Player, ..
                 } => {
-                    let Some(host) = self.lan.as_ref().map(|h| h.host_entity as u32) else {
-                        canceled.push(false);
-                        continue;
-                    };
-                    (Some(host), "minecraft:player".into(), [0; 3], [0; 3], at)
+                    canceled.push(false);
+                    continue;
                 }
                 Hit::None => {
                     canceled.push(false);
@@ -286,7 +282,11 @@ impl Game<'_> {
             horizon_client::arrows::tick_through(&mut p, &scene, &targets)
         } else {
             let w = self.mob_world_base(&[]);
-            p.tick_through(&ProjWorld { w: &w, targets })
+            p.tick_through(&ProjWorld {
+                w: &w,
+                targets,
+                border: Some(self.border.bounds()),
+            })
         };
         if shooter.is_some() {
             p.owner = Some(Who::Player);
