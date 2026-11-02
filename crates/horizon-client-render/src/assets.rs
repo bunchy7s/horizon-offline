@@ -119,8 +119,7 @@ impl Assets {
         if manifest["data_version"].as_i64() != Some(i64::from(DATA_VERSION)) {
             return Err(invalid("resources do not match Horizon's pinned data version").into());
         }
-        let (registry, flags) =
-            BlockRegistry::from_facts_json_with_flags(File::open(root.join("facts.json"))?)?;
+        let (registry, flags) = horizon_world::level::data::load_registry_with_flags(root)?;
         let bundle: Value =
             serde_json::from_reader(BufReader::new(File::open(root.join("block-tags.json"))?))?;
         let mut definitions = TagDefinitions::default();
