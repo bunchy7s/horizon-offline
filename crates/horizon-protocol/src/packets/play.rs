@@ -2761,6 +2761,38 @@ mod tests {
         );
     }
 
+    /// ServerboundRecipeBookSeenRecipePacket is one `RecipeDisplayId`, a
+    /// VarInt: display 300 is the two bytes `AC 02`, and a byte list that
+    /// stops early is not a display id.
+    #[test]
+    fn a_seen_recipe_is_one_varint_display_id() {
+        let payload = [0xAC, 0x02];
+        let seen = Serverbound::RecipeBookSeenRecipe(RecipeBookSeenRecipe { recipe: 300 });
+        assert_eq!(
+            Serverbound::decode(
+                crate::ids::play::serverbound::RECIPE_BOOK_SEEN_RECIPE,
+                &payload
+            )
+            .unwrap(),
+            seen
+        );
+        assert_eq!(&seen.encode()[1..], payload);
+        assert!(
+            Serverbound::decode(
+                crate::ids::play::serverbound::RECIPE_BOOK_SEEN_RECIPE,
+                &payload[..1]
+            )
+            .is_err()
+        );
+        // Without the variant the packet was `Unknown`, which the server's
+        // dispatch has no arm for; an id still without one reads that way.
+        assert!(matches!(
+            Serverbound::decode(crate::ids::play::serverbound::SEEN_ADVANCEMENTS, &payload)
+                .unwrap(),
+            Serverbound::Unknown(crate::ids::play::serverbound::SEEN_ADVANCEMENTS, _)
+        ));
+    }
+
     fn spawn() -> SpawnInfo {
         SpawnInfo {
             dimension_type: 0,
