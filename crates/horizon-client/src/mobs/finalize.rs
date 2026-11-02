@@ -2171,6 +2171,12 @@ pub fn variant_index(s: Species, name: &str) -> u8 {
         // Fox.Variant, read from a `minecraft:fox/variant` component; the save
         // keeps the same two names under `Type`.
         Species::Fox => ["red", "snow"].iter().position(|v| *v == name),
+        // Horse.Variant and Llama.Variant, the coat colours their
+        // `.../variant` components carry; a trader llama inherits the llama's.
+        Species::Horse => super::equine::VARIANT_NAMES.iter().position(|v| *v == name),
+        Species::Llama | Species::TraderLlama => {
+            super::llama::VARIANTS.iter().position(|v| *v == name)
+        }
         _ => ["temperate", "warm", "cold"]
             .iter()
             .position(|v| *v == name),
@@ -2193,9 +2199,28 @@ pub fn species_variant_component(s: Species, variant: u8) -> Option<(&'static st
         Species::Mooshroom => "minecraft:mooshroom/variant",
         Species::Chicken => "minecraft:chicken/variant",
         Species::ZombieNautilus => "minecraft:zombie_nautilus/variant",
+        Species::Horse => "minecraft:horse/variant",
+        Species::Llama | Species::TraderLlama => "minecraft:llama/variant",
         _ => return None,
     };
     Some((component, format!("minecraft:{}", variant_name(s, variant))))
+}
+/// Whether the mob's save keeps its variant under `variant` — the registry
+/// id `VariantUtils.writeVariant` stores — rather than under its own key (a
+/// fox's and a mooshroom's `Type`) or a packed int (a horse's and a llama's
+/// `Variant`). Only these seven classes call `writeVariant`, so reporting the
+/// component does not mean the save carries the name.
+pub fn saves_variant_name(s: Species) -> bool {
+    matches!(
+        s,
+        Species::Wolf
+            | Species::Cat
+            | Species::Frog
+            | Species::Pig
+            | Species::Cow
+            | Species::Chicken
+            | Species::ZombieNautilus
+    )
 }
 /// The `*_sound_variant` registry of a species, in registry order.
 pub fn sound_variants(s: Species) -> &'static [&'static str] {
@@ -2259,6 +2284,13 @@ pub fn variant_name(s: Species, index: u8) -> &'static str {
             .copied()
             .unwrap_or("temperate"),
         Species::Mooshroom => ["red", "brown"].get(i).copied().unwrap_or("red"),
+        Species::Horse => super::equine::VARIANT_NAMES
+            .get(i)
+            .copied()
+            .unwrap_or("white"),
+        Species::Llama | Species::TraderLlama => {
+            super::llama::VARIANTS.get(i).copied().unwrap_or("creamy")
+        }
         _ => ["temperate", "warm", "cold"]
             .get(i)
             .copied()
@@ -2319,6 +2351,60 @@ mod tests {
         // Variant.DEFAULT is red: an unknown name, or an index past brown.
         assert_eq!(variant_index(Species::Mooshroom, "minecraft:temperate"), 0);
         assert_eq!(variant_name(Species::Mooshroom, 2), "red");
+    }
+    /// `Horse.get(DataComponents.HORSE_VARIANT)` and
+    /// `Llama.get(DataComponents.LLAMA_VARIANT)`: the coat colour a horse or a
+    /// llama reports, and the names a `.../variant` component carries.
+    #[test]
+    fn a_horse_and_a_llama_report_their_variant_component() {
+        for (species, component, names) in [
+            (
+                Species::Horse,
+                "minecraft:horse/variant",
+                &crate::mobs::equine::VARIANT_NAMES[..],
+            ),
+            (
+                Species::Llama,
+                "minecraft:llama/variant",
+                &crate::mobs::llama::VARIANTS[..],
+            ),
+            (
+                Species::TraderLlama,
+                "minecraft:llama/variant",
+                &crate::mobs::llama::VARIANTS[..],
+            ),
+        ] {
+            for (index, name) in names.iter().enumerate() {
+                let index = index as u8;
+                let name = format!("minecraft:{name}");
+                assert_eq!(
+                    species_variant_component(species, index),
+                    Some((component, name.clone())),
+                    "{species:?} {index}"
+                );
+                assert_eq!(variant_index(species, &name), index, "{name}");
+                assert_eq!(format!("minecraft:{}", variant_name(species, index)), name);
+            }
+        }
+        // Horse.Variant.WHITE and Llama.Variant.CREAMY are the defaults.
+        assert_eq!(variant_index(Species::Horse, "minecraft:temperate"), 0);
+        assert_eq!(variant_index(Species::Llama, "minecraft:temperate"), 0);
+        assert_eq!(variant_name(Species::Horse, 7), "white");
+        assert_eq!(variant_name(Species::TraderLlama, 4), "creamy");
+        // Only `VariantUtils.writeVariant` species save the name; a horse and
+        // a llama save a packed `Variant` int, a fox and a mooshroom `Type`.
+        for species in [Species::Wolf, Species::Cat, Species::Chicken, Species::Pig] {
+            assert!(saves_variant_name(species), "{species:?}");
+        }
+        for species in [
+            Species::Horse,
+            Species::Llama,
+            Species::TraderLlama,
+            Species::Fox,
+            Species::Mooshroom,
+        ] {
+            assert!(!saves_variant_name(species), "{species:?}");
+        }
     }
     /// #2269: the offspring of a spawn egg used on a mob is a baby of that
     /// kind (`SpawnEggItem.spawnOffspringFromSpawnEgg`), and only the mob's

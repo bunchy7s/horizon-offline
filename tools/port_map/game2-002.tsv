@@ -4,7 +4,7 @@ ItemFrame.recalculateBoundingBox	inline	crates/horizon-client/src/entities.rs::I
 ItemFrame.shouldDamageDropItem	inline	crates/horizon-client/src/game/explosion.rs::Game::explosion_hurt_entities	a blast breaks a frame in reach and drops its item (`explosion_breaks_frames`)
 ItemFrame.canHurtWhenFixed	port	crates/horizon-client/src/game/frames.rs::attack_frame	a fixed frame refuses a non-creative hit (attack_ticks reset, no break) and lets a creative player break it
 ItemFrame.hurtClient	inline	crates/horizon-client/src/game/frames.rs::Game::attack_frame	gap: minor: no separate client-side fixed-frame gate; the creative exception is missing
-ItemFrame.removeFramedMap	inline	crates/horizon-client/src/game/maps.rs::Game::lan_map_updates	frame map markers come from item_frames each tick, so a removed frame needs no step
+ItemFrame.removeFramedMap	port	crates/horizon-client/src/game/maps.rs::Game::remove_framed_map	the map the frame holds forgets the frame (`MapItemSavedData.removedFromFrame`: the decoration and the frames entry); drop_frame_items calls it when the frame breaks, and skips it only when the drops are off and a player caused the break, which is vanilla's null `causedBy`
 ItemFrame.getSlot	inline	crates/horizon-client/src/game/commands/items.rs::Game::slot_get	slots_named maps container.0 and contents on a frame to Slot::Frame; slot_get reads the frame's item and slot_set writes it
 ItemFrame.onSyncedDataUpdated	skip:other		network data-sync hook; the item is read from the frame field on demand
 ItemFrame.setRotation	inline	crates/horizon-client/src/game/frames.rs::Game::interact_frame	the rotate-by-one step; the neighbour update is in frame_output_changed
