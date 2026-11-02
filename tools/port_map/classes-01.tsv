@@ -149,7 +149,7 @@ PlayerEnderChestContainer.startOpen	port	crates/horizon-client/src/game/storage.
 PlayerEnderChestContainer.stillValid	inline	crates/horizon-client/src/game/storage.rs::Game::tick_container_reach	closes the chest when the player walks away
 PlayerEnderChestContainer.stopOpen	port	crates/horizon-client/src/game/storage.rs::Game::close_ender_chest	
 PlayerEnderChestContainer.storeAsSlots	skip:java		saves the ender chest as slots; Horizon writes ender_items
-RecipeCraftingHolder.setRecipeUsed	port	crates/horizon-client/src/containers.rs::recipe_used_key	the recipe a block last crafted is kept under that key and saved (save.rs, furnace.rs)
+RecipeCraftingHolder.setRecipeUsed	port	crates/horizon-client-render/src/containers.rs::recipe_used_key	the recipe a block last crafted is kept under that key and saved (save.rs, furnace.rs)
 RemoteSlot.Synchronized.matches	skip:java		compares a slot with its last synced copy; Horizon sends the slot when it changes
 ResultContainer.isEmpty	port	crates/horizon-client/src/menu.rs::Menu::has_item	the result slot is empty when it has no item
 ShulkerBoxMenu.quickMoveStack	port	crates/horizon-client/src/game/storage.rs::Game::container_quick_move	
