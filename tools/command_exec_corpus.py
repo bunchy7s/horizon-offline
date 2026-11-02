@@ -11,15 +11,25 @@ depend on world generation.
 """
 
 
-def cmd(command, record=True):
+def cmd(command, record=True, expect_result=None):
     op = {'op': 'cmd', 'cmd': command}
     if not record:
         op['record'] = False
+    if expect_result is not None:
+        op['expect_result'] = expect_result
     return op
 
 
 def setup(*commands):
     return [cmd(c, False) for c in commands]
+
+
+def predicate_selector_fixtures(group_names):
+    if 'selector missing predicates' not in group_names:
+        return {}
+    sheep = {'type': 'minecraft:entity_properties', 'entity': 'this',
+             'predicate': {'minecraft:entity_type': 'minecraft:sheep'}}
+    return {'h124_selector:sheep': sheep, 'minecraft:h124_selector_sheep': sheep}
 
 
 BASE = (0, 200, 0)
@@ -552,6 +562,36 @@ def scores():
         cmd('/bossbar remove harness:bar'),
         cmd('/bossbar remove harness:bar'),
     ]
+
+
+def selector_missing_predicates():
+    """Missing named predicates reject both signs before negation (#7794)."""
+    missing = 'h124_missing_873b04b1:absent'
+    missing_default = 'h124_missing_default_873b04b1'
+    defined = ('h124_selector:sheep', 'minecraft:h124_selector_sheep', 'h124_selector_sheep')
+    ops = setup('/tick freeze')
+    for i, kind in enumerate(('sheep', 'cow', 'pig', 'chicken')):
+        custom = ',CustomName:{text:"Named pig"}' if kind == 'pig' else ''
+        ops += setup(f'/summon minecraft:{kind} {6 + i * 2}.5 220 4.5 '
+                     f'{{Tags:["h124","h124_{kind}"],NoAI:1b,NoGravity:1b,'
+                     f'PersistenceRequired:1b{custom}}}')
+    for kind in ('sheep', 'cow', 'pig', 'chicken'):
+        base = f'@e[tag=h124_{kind}'
+        ops.append(cmd(f'/execute if entity {base}]', expect_result=1))
+        for predicate in (missing, missing_default):
+            for sign in ('', '!'):
+                ops.append(cmd(f'/execute if entity {base},predicate={sign}{predicate}]'))
+        for predicate in defined:
+            ops += [cmd(f'/execute if entity {base},predicate={predicate}]',
+                        expect_result=1 if kind == 'sheep' else None),
+                    cmd(f'/execute if entity {base},predicate=!{predicate}]',
+                        expect_result=1 if kind != 'sheep' else None)]
+        ops += [cmd(f'/execute if entity {base},predicate={defined[0]},predicate=!{missing}]'),
+                cmd(f'/execute if entity {base},predicate=!{missing},predicate={defined[0]}]')]
+    ops += [cmd(f'/execute if entity @e[tag=h124,predicate={defined[0]}]', expect_result=1),
+            cmd(f'/execute if entity @e[tag=h124,predicate=!{defined[0]}]', expect_result=3),
+            cmd(f'/execute if entity @e[tag=h124_unrelated,predicate=!{missing}]')]
+    return ops + setup('/kill @e[tag=h124]', '/tick unfreeze')
 
 
 def execute():
@@ -1830,6 +1870,7 @@ def groups():
         ('camel riders', camel_riders()),
         ('scores, teams and bossbars', scores()),
         ('execute', execute()),
+        ('selector missing predicates', selector_missing_predicates()),
         ('levels', levels()),
         ('end portal entities', end_portal_entities()),
         ('items and loot', items_and_loot()),
