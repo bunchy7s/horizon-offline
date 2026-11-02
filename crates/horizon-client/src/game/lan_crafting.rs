@@ -424,6 +424,8 @@ impl Game<'_> {
         {
             return;
         }
+        let (player, name) = (g.uuid, g.name.clone());
+        self.native_player_recipe_book_click(player, &name, &id, p.use_max);
         let creative = g.creative();
         let placed = if p.container == 0 {
             let crafting = host.play.entry(conn).or_default();

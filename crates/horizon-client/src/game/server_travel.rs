@@ -286,13 +286,15 @@ impl Game<'_> {
             && self.gateway_available(g)
         {
             if self.portals.player.cooldown == 0 {
-                let Some(player) = host.hub.guest(conn) else { return };
+                let Some(player) = host.hub.guest(conn) else {
+                    return;
+                };
                 let (id, name) = (player.uuid, player.name.clone());
                 let mut cancel = false;
-                self.native_player_teleport_end_gateway(
-                    id, &name, g, &mut cancel,
-                );
-                if cancel { return; }
+                self.native_player_teleport_end_gateway(id, &name, g, &mut cancel);
+                if cancel {
+                    return;
+                }
                 if !self.server_player_portal_allowed(host, conn, self.dim, "end_gateway") {
                     return;
                 }
