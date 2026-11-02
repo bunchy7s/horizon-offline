@@ -677,6 +677,11 @@ impl Lists<'_> {
     }
 }
 
+/// `ServerStateService.status`, as `server/status` answers it (and the heartbeat carries it).
+pub fn status(shared: &Shared) -> Value {
+    Game { shared }.status()
+}
+
 /// The notification a change of one of the lists is, from the game's typed event (`operators_added`,
 /// `bans_removed`...): `JsonRpcNotificationService`'s `playerOped`/`playerDeoped` (an `OperatorDto`),
 /// `playerAddedToAllowlist`/`playerRemovedFromAllowlist` and `playerUnbanned` (a `PlayerDto`), `playerBanned`

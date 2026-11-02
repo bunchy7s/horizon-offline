@@ -115,6 +115,24 @@ fn activity_due(shared: &Shared, now: Instant) -> bool {
     due
 }
 
+/// `ManagementServer.scheduleHeartbeat`: `NotificationService.statusHeartbeat` every `seconds` (the first
+/// after as many), with the server's status as `server/status` answers it, up or not. Nothing is computed
+/// while no client is connected.
+fn heartbeat(shared: Arc<Shared>, seconds: u64) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("management-heartbeat".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_secs(seconds));
+                if !shared.management.sockets.lock().unwrap().is_empty() {
+                    let status = crate::management_methods::status(&shared);
+                    notify(&shared, "notification/server/status", Some(status));
+                }
+            }
+        })
+        .map(drop)
+}
+
 /// `NotificationService.serverShuttingDown`, which `DedicatedServer.stopServer` sends first of all.
 pub fn stopping(shared: &Shared) {
     if !shared.management.stopping_told.swap(true, Ordering::SeqCst) {
@@ -130,6 +148,8 @@ struct Settings {
     allowed_origins: Vec<String>,
     /// TLS, unless `management-server-tls-enabled=false`.
     tls: Option<management_tls::Tls>,
+    /// `status-heartbeat-interval`: seconds between the status notifications, none when 0.
+    heartbeat: u64,
 }
 
 /// `SecurityConfig.isValid`: 40 letters and digits.
@@ -150,6 +170,7 @@ fn settings(dir: &Path) -> Result<Option<Settings>, String> {
     if !p.management_server_enabled {
         return Ok(None);
     }
+    let heartbeat = p.status_heartbeat_interval.max(0) as u64;
     let mut secret = p.management_server_secret;
     if generated {
         secret = generate_secret_key(&mut SystemEntropy::default());
@@ -207,6 +228,7 @@ fn settings(dir: &Path) -> Result<Option<Settings>, String> {
             .map(str::to_owned)
             .collect(),
         tls,
+        heartbeat,
     }))
 }
 
@@ -254,6 +276,9 @@ fn serve(
 ) -> std::io::Result<()> {
     let (outbox, queue) = mpsc::channel::<String>();
     *shared.management.outbox.lock().unwrap() = Some(outbox);
+    if settings.heartbeat > 0 {
+        heartbeat(shared.clone(), settings.heartbeat)?;
+    }
     let carrier = shared.clone();
     std::thread::Builder::new()
         .name("management-notify".into())
@@ -579,6 +604,7 @@ mod tests {
             secret: SECRET.into(),
             allowed_origins: vec!["http://localhost:3000".into()],
             tls: None,
+            heartbeat: 0,
         }
     }
 
@@ -947,9 +973,15 @@ mod tests {
     }
 
     #[test]
-    fn a_login_is_an_activity_notification_and_a_second_one_inside_thirty_seconds_is_lost() {
+    fn a_login_is_an_activity_notification_and_the_heartbeat_carries_the_status() {
         let shared = shared();
-        let address = listen_on(shared.clone(), settings());
+        let address = listen_on(
+            shared.clone(),
+            Settings {
+                heartbeat: 1,
+                ..settings()
+            },
+        );
         let mut client = upgrade(address);
         registered(&shared, 1);
         game_event(
@@ -966,12 +998,12 @@ mod tests {
             next_text(&mut client),
             r#"{"jsonrpc":"2.0","method":"minecraft:notification/server/activity"}"#
         );
-        // The second login came inside the thirty seconds, so the next frame is the one that follows it.
-        started(&shared);
-        assert_eq!(
-            next_text(&mut client),
-            r#"{"jsonrpc":"2.0","method":"minecraft:notification/server/started"}"#
-        );
+        // The second login came inside the thirty seconds, so the next frame is the heartbeat, a second
+        // after the start: the status of a game that isn't up.
+        let beat: Value = serde_json::from_str(&next_text(&mut client)).unwrap();
+        assert_eq!(beat["method"], "minecraft:notification/server/status");
+        assert_eq!(beat["params"][0]["started"], false);
+        assert!(beat["params"][0]["version"]["name"].is_string());
     }
 
     #[test]
@@ -1000,6 +1032,7 @@ mod tests {
             "notification/ip_bans/removed",
             "notification/gamerules/updated",
             "notification/server/activity",
+            "notification/server/status",
         ] {
             assert!(
                 names.contains(&format!("minecraft:{sent}").as_str()),
