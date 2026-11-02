@@ -575,10 +575,11 @@ impl Game<'_> {
                 let p = self.block_pos_arg(ctx, "pos")?;
                 let state = self.world.block(p[0], p[1], p[2]);
                 let name = self.data_block_name(p);
-                let table = format!("minecraft:blocks/{}", name.trim_start_matches("minecraft:"));
-                if !world_items!(self).has_loot_table(&table) {
+                let Some(table) =
+                    world_items!(self).block_loot_table(self.pack.assets.registry, state)
+                else {
                     return Err(err("commands.drop.no_loot_table.block", &[&name]));
-                }
+                };
                 let tool = self.tool_stack(ctx)?;
                 let drops = match world_items!(self).loot_sequence(&table) {
                     Some(seq) => {

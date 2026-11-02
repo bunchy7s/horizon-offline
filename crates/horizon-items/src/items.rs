@@ -2256,6 +2256,32 @@ mod tests {
         assert_eq!(table(0), None);
     }
 
+    #[test]
+    fn content_mod_blocks_keep_their_namespace_in_loot_table_ids() {
+        let facts = br#"{"defaults":{"minecraft:air":0,"loot_repro:glowing_amethyst":1},
+            "states":[
+            ["air",true,false,"","minecraft:air"],
+            ["amethyst",false,false,"","loot_repro:glowing_amethyst"]
+        ]}"#;
+        let registry = BlockRegistry::from_facts_json(&facts[..]).unwrap();
+        let mut items = Items::for_tests(HashMap::new());
+        items.loot = Arc::new(
+            [(
+                "loot_repro:blocks/glowing_amethyst".to_owned(),
+                json!({"pools": []}),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        assert_eq!(
+            items
+                .block_loot_table(&registry, BlockStateId(1))
+                .as_deref(),
+            Some("loot_repro:blocks/glowing_amethyst")
+        );
+    }
+
     fn ctx<'a>(
         items: &'a Items,
         held: Option<&'a ItemStack>,
