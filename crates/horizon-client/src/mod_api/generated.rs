@@ -2656,6 +2656,23 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// `player` (`name`) pressed the swap-hands key: heard before the main and
+    /// off hand items swap (the `SWAP_ITEM_WITH_OFFHAND` player action that
+    /// `ServerGamePacketListenerImpl.handlePlayerAction` answers; Bukkit's
+    /// `PlayerSwapHandItemsEvent`), not for a spectator. Set `cancel` to keep
+    /// the items where they are: the player's client, which swapped them at
+    /// once, gets its slots back. The player's state is swapped in, so
+    /// `native_acting_player`, `native_tell` and the item helpers reach them.
+    /// Once for each press, on a server. Not heard: the same swap made in an
+    /// open inventory (hovering a slot and pressing the key, a menu click) and
+    /// the host of a LAN world. @API:native_player_swap_hands@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_swap_hands(&self, host: &mut dyn Host, event: &mut PlayerSwapHandsEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
 }
 /// What [`Hooks::frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -7323,6 +7340,30 @@ pub fn dispatch_player_game_mode_changed(
             mod_hook.player_game_mode_changed(host, &mut event),
             Flow::Cancel
         ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_swap_hands`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerSwapHandsEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_swap_hands(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerSwapHandsEvent { player, name };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_swap_hands(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }

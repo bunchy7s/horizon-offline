@@ -3340,6 +3340,19 @@ impl Game<'_> {
             previous,
         );
     }
+    /// `player` (`name`) pressed the swap-hands key: heard before the main and
+    /// off hand items swap (the `SWAP_ITEM_WITH_OFFHAND` player action that
+    /// `ServerGamePacketListenerImpl.handlePlayerAction` answers; Bukkit's
+    /// `PlayerSwapHandItemsEvent`), not for a spectator. Set `cancel` to keep
+    /// the items where they are: the player's client, which swapped them at
+    /// once, gets its slots back. The player's state is swapped in, so
+    /// `native_acting_player`, `native_tell` and the item helpers reach them.
+    /// Once for each press, on a server. Not heard: the same swap made in an
+    /// open inventory (hovering a slot and pressing the key, a menu click) and
+    /// the host of a LAN world. @API:native_player_swap_hands@.
+    pub(super) fn native_player_swap_hands(&mut self, player: u128, name: &str, cancel: &mut bool) {
+        mod_api::dispatch_player_swap_hands(self, mod_api::mods(), player, name, cancel);
+    }
     /// `player` (`name`) opened a menu (NeoForge's `PlayerContainerEvent.Open`,
     /// posted when `ServerPlayer.openMenu` sets the new `containerMenu`): any
     /// menu, vanilla or a mod's. `menu` is the menu type's name

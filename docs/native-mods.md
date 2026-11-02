@@ -1305,6 +1305,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
   player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a
   registered command no mod takes answers as vanilla's unknown command.
+- **`native_player_swap_hands(player, name, cancel)`**: a player pressed the swap-hands key (not a spectator), heard
+  before the main and off hand items swap. Set `cancel` and they stay where they are; the player's client, which swapped
+  them at once, gets its slots back. The player's state is swapped in, so `native_acting_player`, `native_tell` and the item
+  helpers reach them. Not heard: the same swap from an open inventory (hovering a slot and pressing the key) and the host of a LAN world.
 - Helpers: `native_server_players()` (uuid, name, level, dimension, position and game mode of each player on);
   `native_tell(uuid, text)`, a system line to one player, also the acting player inside their hook;
   `native_broadcast(text)`, to every player and the server's
