@@ -378,9 +378,10 @@ mod tests {
             None,
             &fluids,
         ));
-        // Current pushes the orb, underwater drag damps before motion, then air drag (0.98).
+        // Current pushes the orb, underwater drag damps before motion, then air
+        // drag: `ExperienceOrb.tick`'s `0.98F`, a float widened to double.
         assert!((carried.position.x - at.x - 0.014 * 0.99).abs() < 1e-12);
-        assert!((carried.velocity.x - (0.014 * 0.99 * 0.98)).abs() < 1e-12);
+        assert!((carried.velocity.x - 0.014 * 0.99 * f64::from(0.98_f32)).abs() < 1e-12);
         for _ in 0..20 {
             carried.tick(
                 &world,
