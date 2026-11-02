@@ -183,7 +183,7 @@ impl Launcher {
                             .child(tr("Got it"))
                             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                                 this.settings.ping_notice_seen = true;
-                                this.settings.save();
+                                this.save_settings();
                                 cx.notify();
                             })),
                     ),

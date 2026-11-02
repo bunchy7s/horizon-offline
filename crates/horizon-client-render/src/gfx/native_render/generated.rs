@@ -11,6 +11,11 @@ pub trait RenderHooks: Send + Sync {
     fn render_needs(&self, event: &mut RenderNeedsEvent<'_>) {
         let _ = event;
     }
+    /// The first-person hand is drawn (see [`HandDrawn`]), on every frame [`native_world_drawn`]
+    /// runs, with no hand too. API @API:hand_drawn@.
+    fn hand_drawn(&self, event: &mut HandDrawnEvent<'_, '_>) {
+        let _ = event;
+    }
 }
 /// What [`RenderHooks::world_drawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -32,5 +37,16 @@ pub fn dispatch_render_needs(mods: &[&dyn RenderHooks], needs: &mut RenderNeeds)
     let mut event = RenderNeedsEvent { needs };
     for mod_hook in mods {
         mod_hook.render_needs(&mut event);
+    }
+}
+/// What [`RenderHooks::hand_drawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct HandDrawnEvent<'a, 'b> {
+    pub hand: &'a mut HandDrawn<'b>,
+}
+pub fn dispatch_hand_drawn(mods: &[&dyn RenderHooks], hand: &mut HandDrawn<'_>) {
+    let mut event = HandDrawnEvent { hand };
+    for mod_hook in mods {
+        mod_hook.hand_drawn(&mut event);
     }
 }

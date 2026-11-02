@@ -30,7 +30,7 @@ impl Launcher {
         let toggle = switch("dev-offline", self.settings.dev_offline, &t).on_click(cx.listener(
             |this, _: &ClickEvent, _, cx| {
                 this.settings.dev_offline = !this.settings.dev_offline;
-                this.settings.save();
+                this.save_settings();
                 cx.notify();
             },
         ));

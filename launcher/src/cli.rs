@@ -1599,7 +1599,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             if let Some(key) = key {
                 let value = value.ok_or("settings KEY VALUE: the value is missing")?;
                 set_setting(&mut settings, &key, &value)?;
-                settings.save();
+                settings.save()?;
                 horizon_launcher::proxy::announce(settings.proxy.clone());
             }
             let all = settings_json(&settings);
@@ -1615,7 +1615,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             let mut settings = backend::Settings::load();
             if let Some(line) = args {
                 settings.game_args = line;
-                settings.save();
+                settings.save()?;
             }
             let line = settings.game_args;
             if as_json {
@@ -1677,7 +1677,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
         Cmd::DesktopEntry { remove } => {
             let mut settings = backend::Settings::load();
             settings.desktop_entry = Some(!remove);
-            settings.save();
+            settings.save()?;
             if remove {
                 horizon_launcher::desktop::remove()?;
                 println!("Removed Horizon from the applications menu.");
@@ -2273,7 +2273,15 @@ fn github_native(
             .collect::<Result<Vec<_>, _>>()
     });
     github_mods::discard(found);
-    for o in done? {
+    let done = done?;
+    // The window's trust notice, once. Nothing is turned on: native mods are always on.
+    let mut settings = backend::Settings::load();
+    if !settings.native_mods_noticed {
+        eprintln!("{}", native_status::NOTICE);
+        settings.native_mods_noticed = true;
+        settings.save()?;
+    }
+    for o in done {
         println!(
             "Installed {} {} from GitHub ({}), sha256 {}.",
             o.id,
@@ -2281,13 +2289,6 @@ fn github_native(
             o.label(),
             o.sha256
         );
-    }
-    // The window's trust notice, once. Nothing is turned on: native mods are always on.
-    let mut settings = backend::Settings::load();
-    if !settings.native_mods_noticed {
-        eprintln!("{}", native_status::NOTICE);
-        settings.native_mods_noticed = true;
-        settings.save();
     }
     println!("Build it next: horizon-launcher native-build --trust-native-code");
     println!(
@@ -2575,6 +2576,14 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                 Some(target) => java_instance::install(&*source, target, &p, &home, &line)?,
                 None => installed::install(&*source, &p, everything, &home, &line)?,
             };
+            // The first native mod: the window's trust notice, once.
+            let mut settings = backend::Settings::load();
+            let native = done.iter().any(|e| native_status::is_native_file(&e.file));
+            if native && !settings.native_mods_noticed {
+                eprintln!("{}", native_status::NOTICE);
+                settings.native_mods_noticed = true;
+                settings.save()?;
+            }
             if as_json {
                 json(done.iter().map(entry_json).collect());
             }
@@ -2583,14 +2592,6 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                 for s in &e.skipped {
                     println!("  not ported: {s}");
                 }
-            }
-            // The first native mod: the window's trust notice, once.
-            let mut settings = backend::Settings::load();
-            let native = done.iter().any(|e| native_status::is_native_file(&e.file));
-            if native && !settings.native_mods_noticed {
-                eprintln!("{}", native_status::NOTICE);
-                settings.native_mods_noticed = true;
-                settings.save();
             }
         }
         ModsCmd::Update { project, check, .. } => {

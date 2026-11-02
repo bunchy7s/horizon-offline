@@ -519,8 +519,10 @@ pub fn mob_to_nbt(
         }
     }
     let species = m.species();
-    // MushroomCow saves its variant under `Type` (below), not `variant`.
-    if species != crate::mobs::Species::Mooshroom
+    // `VariantUtils.writeVariant`: only the species that store the name. A
+    // mooshroom saves `Type` (below), a fox `Type`, a horse and a llama a
+    // packed `Variant` int, so those report the component but save no name.
+    if crate::mobs::finalize::saves_variant_name(species)
         && let Some((_, variant)) =
             crate::mobs::finalize::species_variant_component(species, m.extra.variant)
     {
@@ -1643,7 +1645,7 @@ pub fn mob_from_nbt(
             m.extra.vector[0] = 0.7;
         }
     }
-    if crate::mobs::finalize::species_variant_component(m.species(), 0).is_some()
+    if crate::mobs::finalize::saves_variant_name(m.species())
         && let Some(v) = text(tag.get("variant"))
     {
         m.extra.variant = crate::mobs::finalize::variant_index(m.species(), &v);
@@ -2701,6 +2703,7 @@ pub struct TridentSave<'a> {
     pub shake: u32,
     pub dealt_damage: bool,
     pub creative_only: bool,
+    pub no_gravity: bool,
     pub item: &'a crate::items::ItemStack,
 }
 pub fn trident_to_nbt(t: &TridentSave, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
@@ -2730,6 +2733,12 @@ pub fn trident_to_nbt(t: &TridentSave, uuid: [i32; 4], raw: Option<&Tag>) -> Tag
     ] {
         put(&mut tag, key, value);
     }
+    // Entity.saveWithoutId writes NoGravity only when set.
+    if t.no_gravity {
+        put(&mut tag, "NoGravity", Tag::Byte(1));
+    } else if let Tag::Compound(map) = &mut tag {
+        map.remove(&"NoGravity".into());
+    }
     tag
 }
 /// (position, motion, yaw, pitch, in ground, life, shake, dealt damage,
@@ -2744,6 +2753,7 @@ pub struct TridentNbt {
     pub shake: u32,
     pub dealt_damage: bool,
     pub creative_only: bool,
+    pub no_gravity: bool,
     pub item: crate::items::ItemStack,
 }
 pub fn trident_from_nbt(tag: &Tag) -> Option<TridentNbt> {
@@ -2758,6 +2768,7 @@ pub fn trident_from_nbt(tag: &Tag) -> Option<TridentNbt> {
         shake: number(tag.get("shake")).unwrap_or(0).max(0) as u32,
         dealt_damage: flag(tag, "DealtDamage"),
         creative_only: number(tag.get("pickup")) == Some(2),
+        no_gravity: flag(tag, "NoGravity"),
         item: tag
             .get("item")
             .and_then(item_from_nbt)
@@ -3443,12 +3454,16 @@ mod tests {
                 shake: 3,
                 dealt_damage: true,
                 creative_only: true,
+                no_gravity: true,
                 item: &trident,
             },
             [1, 2, 3, 4],
             None,
         );
         let t = trident_from_nbt(&tag).unwrap();
+        // `Entity.saveWithoutId` writes NoGravity only when set.
+        assert!(t.no_gravity);
+        assert!(matches!(tag.get("NoGravity"), Some(Tag::Byte(1))));
         assert_eq!((t.in_ground, t.life, t.shake), (true, 9, 3));
         assert_eq!((t.dealt_damage, t.creative_only), (true, true));
         assert_eq!((t.yaw, t.pitch), (10.0, 20.0));
@@ -3956,6 +3971,14 @@ pub fn apply_item_components(m: &mut Mob, stack: &crate::items::ItemStack) {
         // alone, so a spawn egg carrying one hatches that variant.
         crate::mobs::Species::Fox => (Some("minecraft:fox/variant"), None),
         crate::mobs::Species::Frog => (Some("minecraft:frog/variant"), None),
+        // Horse.applyImplicitComponent: `setVariant` sets the coat colour and
+        // keeps the markings the spawn picked (`getTypeVariant() & -256`),
+        // which Horizon keeps in `extra.variant2` and leaves alone here.
+        crate::mobs::Species::Horse => (Some("minecraft:horse/variant"), None),
+        // Llama.applyImplicitComponent, which a trader llama inherits.
+        crate::mobs::Species::Llama | crate::mobs::Species::TraderLlama => {
+            (Some("minecraft:llama/variant"), None)
+        }
         _ => (None, None),
     };
     if let Some(name) = variant.and_then(|id| text(components.other(id))) {
@@ -4853,6 +4876,69 @@ mod item_component_tests {
             .set_other("minecraft:fox/variant", Some(string("minecraft:temperate")));
         apply_item_components(&mut fox, &egg);
         assert_eq!(fox.extra.variant, 0, "unknown names read as red");
+    }
+
+    /// `Horse.applyImplicitComponent` and `Llama.applyImplicitComponent`: the
+    /// `.../variant` component sets the coat colour. A horse's markings are
+    /// the other half of the packed variant its spawn picked and stay.
+    #[test]
+    fn a_horse_or_llama_spawn_egg_picks_its_variant_component() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return;
+        }
+        let data = crate::mobs::MobTypes::load(&root).unwrap();
+        let spawn = |kind: &str, id: u32| {
+            Mob::new(
+                id,
+                Arc::new(data.types[kind].clone()),
+                Vec3::new(0.0, 4.0, 0.0),
+                0.0,
+            )
+        };
+        // A black horse (Horse.Variant.BLACK, 4) with a white field (markings
+        // 2), as a spawn in a plains leaves it.
+        let mut horse = spawn("minecraft:horse", 1);
+        (horse.extra.variant, horse.extra.variant2) = (4, 2);
+        let mut egg = crate::items::ItemStack::new("minecraft:horse_spawn_egg", 1);
+        egg.data_mut().set_other(
+            "minecraft:horse/variant",
+            Some(string("minecraft:dark_brown")),
+        );
+        apply_item_components(&mut horse, &egg);
+        assert_eq!(horse.extra.variant, 6, "Horse.Variant.DARK_BROWN");
+        assert_eq!(
+            horse.extra.variant2, 2,
+            "the markings the spawn picked stay"
+        );
+        // `Horse.get(DataComponents.HORSE_VARIANT)` reports it back.
+        let (id, variant) = crate::mobs::finalize::variant_component(&horse).unwrap();
+        assert_eq!(
+            (id, variant.as_str()),
+            ("minecraft:horse/variant", "minecraft:dark_brown")
+        );
+        // The save keeps the packed `Variant` int and gains no `variant` name,
+        // which only `VariantUtils.writeVariant` species store.
+        let tag = mob_to_nbt(&horse, [1, 2, 3, 4], None, None);
+        assert_eq!(tag.get("variant"), None);
+        assert!(
+            matches!(tag.get("Variant"), Some(Tag::Int(v)) if *v == 6 | 2 << 8),
+            "colour 6 and markings 2 packed"
+        );
+        // A llama, as a spawn in a plains leaves it: creamy.
+        let mut egg = crate::items::ItemStack::new("minecraft:llama_spawn_egg", 1);
+        egg.data_mut()
+            .set_other("minecraft:llama/variant", Some(string("minecraft:gray")));
+        let mut llama = spawn("minecraft:llama", 2);
+        assert_eq!(llama.extra.variant, 0);
+        apply_item_components(&mut llama, &egg);
+        assert_eq!(llama.extra.variant, 3, "Llama.Variant.GRAY");
+        // TraderLlama inherits the llama's arm.
+        let mut trader = spawn("minecraft:trader_llama", 3);
+        apply_item_components(&mut trader, &egg);
+        assert_eq!(trader.extra.variant, 3, "the trader llama reads it too");
     }
 
     /// `EntityType.updateCustomEntityTag`: the egg's `entity_data` on the mob it
