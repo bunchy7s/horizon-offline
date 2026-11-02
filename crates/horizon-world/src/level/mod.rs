@@ -115,6 +115,7 @@ mod portal;
 pub mod portal_travel;
 mod query;
 pub(crate) use query::data_2d;
+pub mod orientation;
 mod rails;
 mod redstone;
 pub mod removal;
@@ -544,6 +545,10 @@ pub trait LevelAccess {
     /// heightmaps start there. The default, `max_y`, scans the whole column.
     fn world_surface(&self, _x: i32, _z: i32) -> i32 {
         self.max_y()
+    }
+    /// Whether the world's enabled features contain `minecraft:redstone_experiments`.
+    fn redstone_experiments(&self) -> bool {
+        false
     }
     /// Vanilla `level.random` (a `LegacyRandomSource`).
     fn random(&mut self) -> &mut LegacyRandom;
@@ -1030,6 +1035,38 @@ impl Behaviours {
         block: BlockId,
     ) {
         self.sim(level, ticks).update_neighbors_at(pos, block);
+    }
+    /// `LecternBlock.updateBelow` after a page or book changes.
+    pub fn lectern_update_below<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) {
+        self.sim(level, ticks).lectern_update_below(pos, state);
+    }
+    /// `TrappedChestBlockEntity.signalOpenCount` after its opener count changes.
+    pub fn trapped_chest_update_neighbors<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) {
+        self.sim(level, ticks)
+            .trapped_chest_update_neighbors(pos, state);
+    }
+    /// `LightningRodBlock.updateNeighbours` after a strike.
+    pub fn lightning_rod_update_neighbors<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        state: BlockStateId,
+    ) {
+        self.sim(level, ticks)
+            .lightning_rod_update_neighbors(pos, state);
     }
     /// `Level.updateNeighbourForOutputSignal(pos, block)` for the block at
     /// `pos`: comparators beside it (or behind a conductor there) read their

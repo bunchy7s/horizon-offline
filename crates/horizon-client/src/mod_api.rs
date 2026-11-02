@@ -16,10 +16,10 @@ pub use crate::first_person::Hand;
 pub use crate::fog::{FogData, FogType};
 pub use crate::game::native_block_entity_draw::{BlockEntityDraw, CubeFace};
 pub use crate::game::{
-    NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeDataMapType,
-    NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem, NativeHit,
-    NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent, NativePlayerRender,
-    NativeShake,
+    ItemEnergyBuffer, NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks,
+    NativeDataMapType, NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem,
+    NativeHit, NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent,
+    NativePlayerRender, NativeShake,
 };
 pub use crate::gfx::native_render::{
     RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent, wgpu,
@@ -27,7 +27,9 @@ pub use crate::gfx::native_render::{
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
+pub use crate::merchant::MerchantOffer;
 pub use crate::music::{Music, MusicLayer};
+pub use crate::particles::{ParticleOptions, ParticleType};
 pub use crate::text::Text;
 pub use horizon_assets::item_model::DisplayContext;
 pub use horizon_core::{
@@ -49,7 +51,8 @@ pub use horizon_world::{
 pub use serde_json;
 use serde_json::{Map, Value};
 use std::time::Duration;
-pub use winit::event::KeyEvent;
+/// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
+pub use winit;
 
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
@@ -185,6 +188,9 @@ pub struct NativeScreen {
     /// The mod draws the title and the "Inventory" label itself
     /// (`native_screen_draw`); Horizon leaves them out.
     pub own_labels: bool,
+    /// The mod draws its own background (`native_screen_draw`), so Horizon
+    /// leaves out the plain panel and the slot frames.
+    pub own_background: bool,
 }
 
 /// A native mod as Options > Mods lists it (`native_mods`).
@@ -450,6 +456,25 @@ pub trait LevelTicksHost: LevelHost {
 pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
     /// Change a block property through `native_set_block_property`.
     fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str, flags: i32) -> bool;
+    /// Play a sound for nearby players through `native_play_sound`.
+    fn play_sound(
+        &mut self,
+        sound: &str,
+        at: [f64; 3],
+        source: usize,
+        volume: f32,
+        pitch: f32,
+    ) -> bool;
+    /// `ServerLevel.sendParticles` through `native_send_particles`.
+    fn send_particles(
+        &mut self,
+        options: &ParticleOptions,
+        state: Option<BlockStateId>,
+        at: [f64; 3],
+        spread: [f64; 3],
+        speed: f64,
+        count: i32,
+    ) -> bool;
 }
 
 macro_rules! level_attachment_host {

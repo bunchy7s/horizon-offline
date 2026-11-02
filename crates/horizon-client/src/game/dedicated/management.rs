@@ -89,6 +89,22 @@ impl Game<'_> {
                 self.set_default_game_mode(state.game_mode);
                 return json!({ "value": GAME_MODES[state.game_mode as usize] });
             }
+            "serversettings/force_game_mode" => {
+                return json!({ "value": state.force_game_mode });
+            }
+            "serversettings/force_game_mode/set" => {
+                let Some(force) = body["value"].as_bool() else {
+                    return json!({ "error": "force game mode must be a boolean" });
+                };
+                rpc(format!(
+                    "Update force game mode from {} to {}",
+                    state.force_game_mode, force
+                ));
+                self.store_property("force-gamemode", force.to_string());
+                state.force_game_mode = force;
+                self.set_force_game_mode(force);
+                return json!({ "value": state.force_game_mode });
+            }
             "serversettings/difficulty" => {
                 return json!({ "value": DIFFICULTIES[self.level.difficulty_id() as usize] });
             }

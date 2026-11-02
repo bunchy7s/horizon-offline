@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "chorus_fruit_teleport",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_chorus_fruit_teleport",
+      "neoforge": "EntityTeleportEvent.ChorusFruit",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a server player who ate chorus fruit is about to try a random spot (`native_chorus_fruit_teleport`).",
+  "doc_summary": "a server player's `teleport_randomly` consume effect (chorus fruit) is about to try a spot: `native_chorus_fruit_teleport(player, name, from, target, cancel)`, once per attempt (up to 16). A mod may move `target`; the game still looks down from it for ground to land on. `cancel` ends the effect with no teleport and no more attempts. Foxes are not heard. Bundles need \"hooks\": @API:chorus_fruit_teleport@."
+}

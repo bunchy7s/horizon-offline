@@ -1,6 +1,6 @@
 //! `/recipe`, `/damage`, `/rotate`, `/swing`, `/playsound`, `/stopsound`,
 //! `/particle`, `/attribute`, `/ride` and `/spreadplayers`.
-use super::{Arg, Context, Game, R, Target, err};
+use super::{Arg, Context, Game, R, Target, err, wrap_degrees};
 use horizon_client::{
     mobs::{Damage, DamageKind, Who},
     scoreboard_cmd::{Holder, Tracker},
@@ -376,23 +376,8 @@ impl Game<'_> {
             let Some(p) = self.target_position(t) else {
                 continue;
             };
-            let d = [pos[0] - p[0], pos[1] - p[1], pos[2] - p[2]];
-            let dist2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-            let (at, v) = if dist2 > f64::from(range) * f64::from(range) {
-                if min_volume <= 0.0 {
-                    continue;
-                }
-                let dist = dist2.sqrt();
-                (
-                    [
-                        p[0] + d[0] / dist * 2.0,
-                        p[1] + d[1] / dist * 2.0,
-                        p[2] + d[2] / dist * 2.0,
-                    ],
-                    min_volume,
-                )
-            } else {
-                (pos, volume)
+            let Some((at, v)) = playsound_placement(pos, p, range, volume, min_volume) else {
+                continue;
             };
             // The connection is sent the sound; the window's own player
             // plays it.
@@ -1499,7 +1484,7 @@ impl Game<'_> {
                     num(points.len()),
                     float(centre_f[0]),
                     float(centre_f[1]),
-                    Text::literal(format!("{min_distance:.2}")),
+                    Text::literal(super::percent_f(min_distance, 2)),
                 ],
             ));
         }
@@ -1553,7 +1538,7 @@ impl Game<'_> {
                 num(points.len()),
                 float(centre_f[0]),
                 float(centre_f[1]),
-                Text::literal(format!("{average:.2}")),
+                Text::literal(super::percent_f(average, 2)),
             ],
         ));
         Ok(points.len() as i32)
@@ -1612,11 +1597,124 @@ fn text_error(key: &str, args: &[Text]) -> horizon_client::command::CommandError
     horizon_client::command::CommandError::new(Text::translate(key, args))
 }
 
-/// `Entity.lookAt`: yaw and pitch from `from` towards `to`.
-fn look_at(from: [f64; 3], to: [f64; 3]) -> [f32; 2] {
+/// `PlaySoundCommand.playSound`: the point and the volume one target hears the
+/// sound at. A target past `range` hears nothing unless `minVolume` is above
+/// zero, and then the point moves two blocks from the target towards the sound
+/// and the volume is `minVolume`; a target exactly at `range` still hears it
+/// (the command's test is `>`, unlike `PlayerList.broadcast`'s `<`).
+fn playsound_placement(
+    pos: [f64; 3],
+    target: [f64; 3],
+    range: f32,
+    volume: f32,
+    min_volume: f32,
+) -> Option<([f64; 3], f32)> {
+    let d = [pos[0] - target[0], pos[1] - target[1], pos[2] - target[2]];
+    let dist2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+    // PlaySoundCommand compares against Mth.square(float range): the square
+    // rounds in float and only then widens, so a point between that square and
+    // the double square is out of range in vanilla.
+    if dist2 <= f64::from(range * range) {
+        return Some((pos, volume));
+    }
+    if min_volume <= 0.0 {
+        return None;
+    }
+    let dist = dist2.sqrt();
+    Some((
+        [
+            target[0] + d[0] / dist * 2.0,
+            target[1] + d[1] / dist * 2.0,
+            target[2] + d[2] / dist * 2.0,
+        ],
+        min_volume,
+    ))
+}
+
+/// `Entity.lookAt`: yaw and pitch from `from` towards `to`, the yaw wrapped
+/// to -180..180 as `Mth.wrapDegrees` does.
+pub(super) fn look_at(from: [f64; 3], to: [f64; 3]) -> [f32; 2] {
     let (dx, dy, dz) = (to[0] - from[0], to[1] - from[1], to[2] - from[2]);
     let horizontal = (dx * dx + dz * dz).sqrt();
-    let pitch = (-(dy.atan2(horizontal).to_degrees())) as f32;
-    let yaw = (dz.atan2(dx).to_degrees() - 90.0) as f32;
-    [yaw.rem_euclid(360.0), pitch]
+    // `Entity.lookAt` turns radians to degrees with the float constant
+    // `57.2957763671875`, not `Math.toDegrees`.
+    let pitch = wrap_degrees((-(dy.atan2(horizontal) * 57.295_776_367_187_5)) as f32);
+    let yaw = (dz.atan2(dx) * 57.295_776_367_187_5) as f32 - 90.0;
+    [wrap_degrees(yaw), pitch]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{look_at, playsound_placement};
+
+    fn assert_angle(got: f32, want: f32) {
+        assert!((got - want).abs() < 1.0e-4, "{got} is not {want}");
+    }
+
+    /// `Entity.lookAt` wraps the yaw with `Mth.wrapDegrees`, so a target to
+    /// the north-west turns the entity to 135 degrees, not to -225, and a
+    /// target due north leaves -180 rather than 180.
+    #[test]
+    fn a_facing_target_wraps_the_yaw_to_180() {
+        let at = [0.0, 64.0, 0.0];
+        assert_angle(look_at(at, [-1.0, 64.0, -1.0])[0], 135.0);
+        assert_angle(look_at(at, [0.0, 64.0, -1.0])[0], -180.0);
+        assert_angle(look_at(at, [1.0, 64.0, 0.0])[0], -90.0);
+        assert_angle(look_at(at, [0.0, 64.0, 1.0])[0], 0.0);
+        assert_angle(look_at(at, [-1.0, 64.0, 0.0])[0], 90.0);
+        // The pitch is the elevation, unchanged; its own wrap is a no-op.
+        assert_angle(look_at(at, [0.0, 65.0, 1.0])[1], -45.0);
+    }
+
+    /// `PlaySoundCommand.playSound`: inside the range the point and volume are
+    /// the command's own, exactly on it still is, past it there is nothing
+    /// without a minimum volume, and with one the point is two blocks from the
+    /// target towards the sound and the volume is that minimum.
+    #[test]
+    fn a_target_past_the_range_hears_it_two_blocks_away() {
+        let pos = [0.0, 64.0, 0.0];
+        let near = [0.0, 64.0, 15.0];
+        assert_eq!(
+            playsound_placement(pos, near, 16.0, 3.0, 0.0),
+            Some((pos, 3.0))
+        );
+        let on_the_edge = [16.0, 64.0, 0.0];
+        assert_eq!(
+            playsound_placement(pos, on_the_edge, 16.0, 3.0, 0.0),
+            Some((pos, 3.0))
+        );
+        let far = [0.0, 64.0, 32.0];
+        assert_eq!(playsound_placement(pos, far, 16.0, 3.0, 0.0), None);
+        assert_eq!(
+            playsound_placement(pos, far, 16.0, 3.0, 0.5),
+            Some(([0.0, 64.0, 30.0], 0.5))
+        );
+    }
+
+    /// The range is squared as a float, as `Mth.square(getRange(volume))` is:
+    /// a point between that square and the double one is past the range in
+    /// vanilla, so it gets the `minVolume` placement rather than full volume.
+    #[test]
+    fn the_range_square_rounds_as_a_float() {
+        let volume = 1.1f32;
+        let range = 16.0 * volume;
+        let float_square = f64::from(range * range);
+        let double_square = f64::from(range) * f64::from(range);
+        assert!(float_square < double_square);
+        let dist2 = (float_square + double_square) / 2.0;
+        let pos = [0.0, 64.0, 0.0];
+        let target = [dist2.sqrt(), 64.0, 0.0];
+        assert_eq!(
+            playsound_placement(pos, target, range, volume, 0.0),
+            None,
+            "past the float range"
+        );
+        let moved = playsound_placement(pos, target, range, volume, 0.7);
+        let Some((point, heard)) = moved else {
+            panic!("minVolume should place it");
+        };
+        assert_eq!(heard, 0.7);
+        assert!((point[0] - (target[0] - 2.0)).abs() < 1e-9, "{point:?}");
+        assert_eq!(point[1..], [64.0, 0.0]);
+    }
 }

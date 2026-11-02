@@ -1,6 +1,6 @@
 //! The player's `CombatTracker`: the damage taken lately, who dealt it and
 //! where the player fell from, turned into the vanilla death message.
-use super::{Game, chat::PLAYER_NAME, commands::Target};
+use super::{Game, commands::Target};
 use horizon_client::{
     health::HealthEvent,
     mobs::{Mob, Species},
@@ -254,12 +254,6 @@ impl Game<'_> {
             .pending_direct
             .push((damage_type.to_owned(), name));
     }
-    /// `LivingEntity.handleDamageEvent` for the player: the hurt sound of the
-    /// source's `DamageEffects` (`Player.getHurtSound`).
-    pub(super) fn player_hurt_sound(&mut self, sound: &str, at: [f64; 3]) {
-        // Player.getVoicePitch: always 1.0.
-        self.audio.play(sound, Some(at), 1.0, 1.0);
-    }
     /// `CombatTracker.recordDamage` for the motion events of this tick.
     pub(super) fn record_combat(&mut self, events: &[MotionEvent]) {
         self.recheck_combat();
@@ -384,57 +378,6 @@ impl Game<'_> {
             damage.in_tag(id, tag) || damage.in_tag(id, &format!("minecraft:{tag}"))
         })
     }
-    /// The killing blow as advancement predicates see it (`DamageSource` of the
-    /// last combat entry): its type and the causing entity. The projectile
-    /// damage types have the projectile as direct entity, not the shooter.
-    pub(super) fn combat_killing_blow(&self) -> Option<horizon_client::advancements::DamageView> {
-        use horizon_client::advancements::{DamageView, EntityView};
-        let e = self.combat.entries.last()?;
-        let source = e.attacker.as_ref().and_then(|(id, _)| {
-            self.mobs
-                .iter()
-                .find(|m| m.id == *id)
-                .map(|m| self.mob_entity(m))
-        });
-        let projectile = match e.damage_type.as_str() {
-            // The rocket is the direct entity of its `fireworks` damage.
-            "minecraft:fireworks" => Some("minecraft:firework_rocket"),
-            t @ ("minecraft:arrow"
-            | "minecraft:trident"
-            | "minecraft:mob_projectile"
-            | "minecraft:fireball"
-            | "minecraft:unattributed_fireball"
-            | "minecraft:wither_skull"
-            | "minecraft:wind_charge"
-            | "minecraft:thrown"
-            | "minecraft:spit") => Some(t),
-            _ => None,
-        };
-        let direct = match projectile {
-            Some(kind) => Some(EntityView {
-                kind: kind.to_owned(),
-                ..Default::default()
-            }),
-            None => source.clone(),
-        };
-        Some(DamageView {
-            kind: e.damage_type.clone(),
-            direct,
-            source,
-            is_direct: projectile.is_none(),
-            original: e.damage,
-            actual: e.damage,
-            blocked: false,
-        })
-    }
-    /// The type of the mob that dealt the killing blow (`killed_by`).
-    pub(super) fn combat_killer_kind(&self) -> Option<String> {
-        let (id, _) = self.combat.entries.last()?.attacker.clone()?;
-        self.mobs
-            .iter()
-            .find(|m| m.id == id)
-            .map(|m| m.kind.id.clone())
-    }
     /// `CombatTracker.getMostSignificantFall`.
     fn most_significant_fall(&self) -> Option<usize> {
         let (mut result, mut alternative) = (None, None);
@@ -497,10 +440,6 @@ impl Game<'_> {
         e.item
             .clone()
             .or_else(|| self.mob_main_hand_name(e.attacker.as_ref()?.0))
-    }
-    /// `CombatTracker.getDeathMessage`.
-    pub(super) fn combat_death_message(&mut self) -> Text {
-        self.combat_death_message_for(Text::literal(PLAYER_NAME))
     }
     /// `CombatTracker.getDeathMessage` for a player whose display name is
     /// `me`: a server's guest is not `PLAYER_NAME`.

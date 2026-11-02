@@ -1366,6 +1366,29 @@ def tnt_minecart_rails():
     ]
 
 
+def minecart_drag():
+    """AbstractMinecart's drags are floats widened to double: getAirDrag (0.95F) off the rails, and
+    applyNaturalSlowdown's 0.95F in water. Positions and motions are compared to the last bit."""
+    return [
+        # A cart sent back by the stone at the track's end leaves the rails at x 0 and flies on.
+        *setup('/fill 0 209 0 12 209 0 minecraft:redstone_block', '/fill 0 210 0 9 210 0 minecraft:powered_rail',
+               '/setblock 10 210 0 minecraft:stone'),
+        cmd('/summon minecraft:minecart 1.5 210.0625 0.5 {Motion:[0.1d,0.0d,0.0d],Tags:["drag"]}'),
+        {'op': 'tick', 'n': 60},
+        cmd('/data get entity @e[tag=drag,limit=1] Pos'),
+        cmd('/data get entity @e[tag=drag,limit=1] Motion'),
+        *setup('/kill @e[type=!player]', '/fill 0 205 0 15 215 1 minecraft:air'),
+        # Waterlogged rails: the cart slows by 0.95F a tick more.
+        *setup('/fill 0 209 4 12 209 4 minecraft:stone', '/fill 0 210 4 12 210 4 minecraft:rail[waterlogged=true]'),
+        cmd('/summon minecraft:minecart 1.5 210.0625 4.5 {Motion:[0.3d,0.0d,0.0d],Tags:["wet"]}'),
+        {'op': 'tick', 'n': 20},
+        cmd('/data get entity @e[tag=wet,limit=1] Pos'),
+        cmd('/data get entity @e[tag=wet,limit=1] Motion'),
+        *setup('/kill @e[type=!player]', '/fill 0 205 3 15 215 5 minecraft:air'),
+        {'op': 'tick', 'n': 5},
+    ]
+
+
 def ender_dragon():
     """`/kill` on the fight's dragon ends the fight (#3319): `EnderDragon.kill` removes it and calls
     `EnderDragonFight.setDragonKilled`, so no new dragon takes its place, the exit portal opens and the
@@ -1578,6 +1601,78 @@ def experience_orb_stuck():
     ]
 
 
+def summoned_potions():
+    """`ThrowableItemProjectile.getItem`/`readAdditionalSaveData` and
+    `AbstractThrownPotion.getDefaultGravity`: a summoned splash or lingering
+    potion is the projectile its type is, not an entity nothing ticks. It
+    flies with the gravity 0.05 of its type (a bare one as a splash potion
+    with no effects), `Motion` is in its compound, and what it splashes on
+    landing are the effects of its `Item`'s `potion_contents` (#6642)."""
+    ops = [*setup('/kill @e[type=minecraft:splash_potion]',
+                  '/kill @e[type=minecraft:lingering_potion]',
+                  '/fill 0 196 0 20 200 20 minecraft:stone')]
+    # A bare summon flies as the default splash potion: no effects, and the
+    # tick's gravity and drag move it off where it was placed.
+    ops += [
+        cmd('/summon minecraft:splash_potion 4.5 206 4.5'),
+        cmd('/data get entity @e[type=minecraft:splash_potion,limit=1] Item'),
+        cmd('/data get entity @e[type=minecraft:splash_potion,limit=1] Motion'),
+        cmd('/data get entity @e[type=minecraft:splash_potion,limit=1] Pos'),
+        {'op': 'tick', 'n': 3},
+        cmd('/data get entity @e[type=minecraft:splash_potion,limit=1] Pos'),
+        cmd('/data get entity @e[type=minecraft:splash_potion,limit=1] Motion'),
+        {'op': 'tick', 'n': 30},
+        cmd('/execute if entity @e[type=minecraft:splash_potion]'),
+    ]
+    # A harming potion landing on a pig hurts it for the potion's 6, and the
+    # potion is gone: ThrownSplashPotion.onHitAsPotion over the stack. The pig
+    # stands on the stone at y 201 (a summon at y 200 is inside it).
+    ops += [
+        *setup('/kill @e[type=!player]'),
+        {'op': 'tick', 'n': 25},
+        *setup('/summon minecraft:pig 4.5 201 4.5 {NoAI:1b,Silent:1b,PersistenceRequired:1b}'),
+        {'op': 'tick', 'n': 5},
+        cmd('/data get entity @e[type=minecraft:pig,limit=1] Health'),
+        *setup('/summon minecraft:splash_potion 4.5 206 4.5 '
+               '{Item:{id:"minecraft:splash_potion",count:1,components:'
+               '{"minecraft:potion_contents":{potion:"minecraft:harming"}}}}'),
+        {'op': 'tick', 'n': 40},
+        cmd('/data get entity @e[type=minecraft:pig,limit=1] Health'),
+        cmd('/execute if entity @e[type=minecraft:splash_potion]'),
+    ]
+    # A lingering potion leaves its cloud where it lands, and the cloud puts
+    # the potion's poison on the pig standing in it
+    # (ThrownLingeringPotion.onHitAsPotion). The duration is left out of the
+    # check: how the cloud's age and the mob's effect tick interleave is not
+    # what this covers.
+    ops += [
+        *setup('/kill @e[type=!player]'),
+        {'op': 'tick', 'n': 25},
+        *setup('/summon minecraft:pig 8.5 201 8.5 '
+               '{Tags:["poisoned"],NoAI:1b,Silent:1b,PersistenceRequired:1b}',
+               '/summon minecraft:lingering_potion 8.5 206 8.5 '
+               '{Item:{id:"minecraft:lingering_potion",count:1,components:'
+               '{"minecraft:potion_contents":{potion:"minecraft:poison"}}}}'),
+        cmd('/data get entity @e[type=minecraft:lingering_potion,limit=1] Motion'),
+        {'op': 'tick', 'n': 40},
+        cmd('/execute if entity @e[type=minecraft:lingering_potion]'),
+        cmd('/execute if entity @e[tag=poisoned,limit=1,nbt='
+            '{active_effects:[{id:"minecraft:poison"}]}]'),
+        # A bare lingering potion has empty contents, so its cloud, ten blocks
+        # from the poison one, puts nothing on its own pig.
+        *setup('/summon minecraft:pig 18.5 201 18.5 '
+               '{Tags:["bare"],NoAI:1b,Silent:1b,PersistenceRequired:1b}',
+               '/summon minecraft:lingering_potion 18.5 206 18.5'),
+        {'op': 'tick', 'n': 40},
+        cmd('/execute if entity @e[tag=poisoned,limit=1,nbt='
+            '{active_effects:[{id:"minecraft:poison"}]}]'),
+        cmd('/execute if entity @e[tag=bare,limit=1,nbt='
+            '{active_effects:[{id:"minecraft:poison"}]}]'),
+    ]
+    ops += [*setup('/kill @e[type=!player]'), {'op': 'tick', 'n': 25}]
+    return ops
+
+
 def groups():
     return [
         ('setup', group_setup()),
@@ -1606,10 +1701,12 @@ def groups():
         ('wither breaks', wither_breaks()),
         ('tnt minecart rails', tnt_minecart_rails()),
         ('creative shulker drops', creative_shulker_drops()),
+        ('minecart drag', minecart_drag()),
         ('ender dragon', ender_dragon()),
         ('place structure', place_structure()),
         ('tame wolf kills', tame_wolf_kills()),
         ('experience orb fall', experience_orb_fall()),
         ('piglin pickups', piglin_pickups()),
         ('experience orb stuck', experience_orb_stuck()),
+        ('summoned potions', summoned_potions()),
     ]

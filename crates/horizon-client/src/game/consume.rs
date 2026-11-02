@@ -311,6 +311,33 @@ impl TeleportConsumeWorld for Teleporter<'_, '_> {
     fn position(&mut self) -> Result<Vec3, Infallible> {
         Ok(self.at())
     }
+    fn teleport_allowed(&mut self, target: &mut Vec3) -> Result<bool, Infallible> {
+        // EntityTeleportEvent.ChorusFruit: only a server's player is heard.
+        let (Some(uuid), Some(name)) = (self.0.lan_acting_uuid, self.0.lan_acting_name.clone())
+        else {
+            return Ok(true);
+        };
+        let from = self.at();
+        let mut to = [target.x, target.y, target.z];
+        let mut cancel = false;
+        self.0.native_chorus_fruit_teleport(
+            uuid,
+            &name,
+            [from.x, from.y, from.z],
+            &mut to,
+            &mut cancel,
+        );
+        // Keep the mod's spot inside the level as vanilla's own draw is (a
+        // huge y would walk down a long way); one that is not a number keeps
+        // the draw.
+        if to.iter().all(|v| v.is_finite()) {
+            let shape = self.0.level_shapes.get(self.0.dim.id());
+            let high = shape.min_y + shape.logical_height - 1;
+            let y = to[1].clamp(f64::from(shape.min_y), f64::from(high));
+            *target = Vec3::new(to[0], y, to[2]);
+        }
+        Ok(!cancel)
+    }
     fn random_teleport(&mut self, target: Vec3) -> Result<bool, Infallible> {
         Ok(self
             .0

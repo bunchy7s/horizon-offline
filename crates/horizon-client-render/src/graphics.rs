@@ -543,6 +543,9 @@ pub struct Graphics {
     pub lod_distance: u32,
     /// How finely far terrain is drawn; Full unless the player picks Reduced.
     pub far_detail: FarDetail,
+    /// Far terrain from servers' BlueMap web maps; no server has one unless
+    /// the player names it (`blueMap:` lines) or turns on auto-detect.
+    pub blue_map: crate::bluemap::Settings,
     /// Skip sections hidden behind closed ones (vanilla's occlusion graph).
     pub cave_culling: bool,
     /// Skip drawing entities hidden behind opaque terrain, synchronously or asynchronously.
@@ -551,6 +554,20 @@ pub struct Graphics {
     /// vanilla's fancy leaves. Ignored with a resource pack that may replace
     /// the vanilla leaf models ([`Graphics::leaf_culling_effective`]).
     pub leaf_culling: LeafCullingMode,
+    /// Cache settled shulker-box models.
+    pub cache_shulker_boxes: bool,
+    /// Cache sign-text geometry.
+    pub cache_signs: bool,
+    /// Cache decorated pots outside their wobble animation.
+    pub cache_decorated_pots: bool,
+    /// Cache bells while they are not ringing.
+    pub cache_bells: bool,
+    /// Cache closed chests, including copper variants.
+    pub cache_chests: bool,
+    /// Cache banner poles while leaving their flags animated.
+    pub cache_banners: bool,
+    /// Cache copper-golem statue models.
+    pub cache_copper_golem_statues: bool,
     /// Meshed sections uploaded per frame; 0 uploads all that are ready.
     pub chunk_updates: u32,
     /// Section mesh bytes uploaded per frame, in KiB; 0 is unlimited.
@@ -627,9 +644,18 @@ impl Default for Graphics {
             preset: Preset::Custom,
             lod_distance: 0,
             far_detail: FarDetail::Full,
+            blue_map: crate::bluemap::Settings::default(),
             cave_culling: true,
             entity_culling: EntityCullingMode::Off,
             leaf_culling: LeafCullingMode::Off,
+            cache_shulker_boxes: false,
+            // Sign text has used its renderer cache independently of the new model caches.
+            cache_signs: true,
+            cache_decorated_pots: false,
+            cache_bells: false,
+            cache_chests: false,
+            cache_banners: false,
+            cache_copper_golem_statues: false,
             chunk_updates: 0,
             upload_budget_kib: 0,
             texture_budget_mib: 0,
@@ -670,6 +696,14 @@ impl Graphics {
         let mut g: Self = fs::read_to_string(dir.join(FILE))
             .map(|t| Self::parse(&t))
             .unwrap_or_default();
+        g.blue_map.servers = match fs::read_to_string(dir.join(crate::bluemap::SERVERS_FILE)) {
+            Ok(text) => crate::bluemap::Settings::parse_servers(&text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => {
+                log::warn!("{}: {e}; no BlueMap is named", crate::bluemap::SERVERS_FILE);
+                Vec::new()
+            }
+        };
         if fs::remove_file(dir.join(HDR_MARKER)).is_ok() && g.hdr {
             g.hdr = false;
             g.save(dir);
@@ -698,9 +732,38 @@ impl Graphics {
                     g.lod_distance = number(g.lod_distance).min(crate::lod::MAX_CHUNKS)
                 }
                 "farDetail" => g.far_detail = FarDetail::parse(value),
+                "blueMapRadius" => {
+                    if let Some(radius) = crate::bluemap::Settings::parse_radius(value) {
+                        g.blue_map.radius = radius;
+                    }
+                }
+                "blueMapAutoDetect" => g.blue_map.auto_detect = flag(g.blue_map.auto_detect),
                 "caveCulling" => g.cave_culling = flag(g.cave_culling),
                 "entityCulling" => g.entity_culling = EntityCullingMode::parse(value),
                 "leafCulling" => g.leaf_culling = LeafCullingMode::parse(value),
+                "blockEntityCache" => {
+                    let enabled = flag(false);
+                    g.cache_shulker_boxes = enabled;
+                    g.cache_signs = enabled;
+                    g.cache_decorated_pots = enabled;
+                    g.cache_bells = enabled;
+                    g.cache_chests = enabled;
+                    g.cache_banners = enabled;
+                    g.cache_copper_golem_statues = enabled;
+                }
+                "blockEntityCacheShulkerBoxes" => {
+                    g.cache_shulker_boxes = flag(g.cache_shulker_boxes)
+                }
+                "blockEntityCacheSigns" => g.cache_signs = flag(g.cache_signs),
+                "blockEntityCacheDecoratedPots" => {
+                    g.cache_decorated_pots = flag(g.cache_decorated_pots)
+                }
+                "blockEntityCacheBells" => g.cache_bells = flag(g.cache_bells),
+                "blockEntityCacheChests" => g.cache_chests = flag(g.cache_chests),
+                "blockEntityCacheBanners" => g.cache_banners = flag(g.cache_banners),
+                "blockEntityCacheCopperGolemStatues" => {
+                    g.cache_copper_golem_statues = flag(g.cache_copper_golem_statues)
+                }
                 "chunkUpdates" => g.chunk_updates = number(g.chunk_updates).min(512),
                 "uploadBudgetKiB" => g.upload_budget_kib = number(g.upload_budget_kib).min(65536),
                 "textureBudgetMiB" => {
@@ -766,14 +829,21 @@ impl Graphics {
         g
     }
     pub fn serialize(&self) -> String {
-        format!(
-            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nleafCulling:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiBrightness:{}\nhdrKey:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nbatchTranslucent:{}\n",
+        let mut text = format!(
+            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nleafCulling:{}\nblockEntityCacheShulkerBoxes:{}\nblockEntityCacheSigns:{}\nblockEntityCacheDecoratedPots:{}\nblockEntityCacheBells:{}\nblockEntityCacheChests:{}\nblockEntityCacheBanners:{}\nblockEntityCacheCopperGolemStatues:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiBrightness:{}\nhdrKey:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nbatchTranslucent:{}\n",
             self.preset.name(),
             self.lod_distance,
             self.far_detail.name(),
             bool_text(self.cave_culling),
             self.entity_culling.name(),
             self.leaf_culling.name(),
+            bool_text(self.cache_shulker_boxes),
+            bool_text(self.cache_signs),
+            bool_text(self.cache_decorated_pots),
+            bool_text(self.cache_bells),
+            bool_text(self.cache_chests),
+            bool_text(self.cache_banners),
+            bool_text(self.cache_copper_golem_statues),
             self.chunk_updates,
             self.upload_budget_kib,
             self.texture_budget_mib,
@@ -810,7 +880,9 @@ impl Graphics {
             self.api.name(),
             self.shader_pack,
             bool_text(self.translucent_batching),
-        )
+        );
+        text += &self.blue_map.serialize();
+        text
     }
     /// Binds Horizon's graphics key `name` (`HDR_KEY`); false for another name.
     pub fn set_key(&mut self, name: &str, value: String) -> bool {
@@ -937,9 +1009,22 @@ mod tests {
             preset: Preset::Balanced,
             lod_distance: 256,
             far_detail: FarDetail::Reduced,
+            blue_map: crate::bluemap::Settings {
+                radius: 40,
+                auto_detect: true,
+                // In their own file (`bluemap::SERVERS_FILE`).
+                servers: Vec::new(),
+            },
             cave_culling: false,
             entity_culling: EntityCullingMode::Synchronous,
             leaf_culling: LeafCullingMode::SolidAggressive,
+            cache_shulker_boxes: true,
+            cache_signs: true,
+            cache_decorated_pots: true,
+            cache_bells: true,
+            cache_chests: true,
+            cache_banners: true,
+            cache_copper_golem_statues: true,
             chunk_updates: 12,
             upload_budget_kib: 4096,
             texture_budget_mib: 1536,
@@ -985,6 +1070,13 @@ mod tests {
         assert_eq!(
             Graphics::parse("entityCulling:false\n").entity_culling,
             EntityCullingMode::Off
+        );
+        // A map named here (a shared instance's, a pack's) is no map.
+        assert!(
+            Graphics::parse("blueMap:play.example.net https://map.example.net\n")
+                .blue_map
+                .servers
+                .is_empty()
         );
         assert_eq!(Graphics::parse(""), Graphics::default());
         // Translucent Batching is on, in files from before it too; only false turns it off,

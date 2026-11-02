@@ -1,6 +1,6 @@
 ServerPlayerGameMode.changeGameModeForPlayer	port	crates/horizon-client/src/game/commands.rs::Game::set_game_mode	same-mode check, mode switch, abilities; a LAN guest goes through Hub::set_game_mode which also broadcasts PlayerInfo UPDATE_GAME_MODE
 ServerPlayerGameMode.setGameModeForPlayer	port	crates/horizon-client/src/game/game_mode.rs::Game::set_mode	previous mode kept, GameType.updatePlayerAbilities applied
-ServerPlayerGameMode.isInRangeOfGround	missing		minor: spectator to creative near the ground keeps flying (set_mode always sets flying); vanilla stops flying within 1 block of the ground
+ServerPlayerGameMode.isInRangeOfGround	port	crates/horizon-world/src/world_movement.rs::in_range_of_ground	the body and the block under it are free of colliders, so a game mode change to spectator stops flying when the player stands on the ground (game/game_mode.rs set_mode, lan/hub.rs); entity colliders stay out
 ServerPlayerGameMode.incrementDestroyProgress	inline	crates/horizon-client/src/game/lan_actions.rs::Game::guest_dig_feedback	gap: minor: crack stage is the client formula (progress*10 - 1), so other players' cracks on a guest's block run one stage behind the server value
 ServerPlayerGameMode.debugLogging	skip:debug		DEBUG_BLOCK_BREAK logging
 ServerPlayerGameMode.abortDestroyBlock	inline	crates/horizon-client/src/game/lan_actions.rs::Game::lan_guest_packet	the abort action clears the guest's crack for everyone; no separate check of a mismatched destroy position
@@ -23,8 +23,8 @@ ThreadedLevelLightEngine.waitForPendingTasks	skip:java		future that completes wh
 ThrottlingChunkTaskDispatcher.popTasks	skip:other		caps chunk tasks in flight; Horizon schedules chunk work on its own worker pool
 ThrottlingChunkTaskDispatcher.getDebugStatus	skip:debug		
 Ticket.toString	skip:debug		
-Ticket.decreaseTicksLeft	missing		minor: only player and forced tickets exist; timed tickets (ender pearl 40, portal 300, post teleport 5 ticks) are not modelled
-Ticket.isTimedOut	missing		minor: no timed tickets, so nothing expires
+Ticket.decreaseTicksLeft	inline	crates/horizon-client/src/game/end.rs::Game::keep_gateway_destinations	an End portal ticket (300, ThrownEnderpearl.placePortalTicket) counts down once a tick while its pearl waits; the ender pearl 40 and post-teleport 5 tickets are not modelled
+Ticket.isTimedOut	inline	crates/horizon-client/src/game/end.rs::Game::keep_gateway_destinations	the portal ticket is dropped when its count reaches 0 (vanilla waits for a negative tick); no other ticket type times out
 WorldGenRegion.<init>	port	crates/horizon-world/src/worldgen/feature_region.rs::TerrainRegion::new	the region is a set of chunks around the centre
 WorldGenRegion.hasChunk	port	crates/horizon-world/src/worldgen/feature_region.rs::TerrainRegion::chunk	a chunk is there when it is in the region's index, not by the step's dependency distance
 WorldGenRegion.warnIfReadOutsideWriteZone	skip:debug		logs an unsafe terrain read
@@ -58,7 +58,7 @@ DifficultyInstance.calculateDifficulty	port	crates/horizon-client/src/mobs/spawn
 InteractionHand.asArm	inline	crates/horizon-client/src/mobs/ai.rs::Mob::swing_hand	off_hand != main arm left; the player's first person hand does the same in game.rs hand_geometry
 InteractionResult.Success.heldItemTransformedTo	skip:java		result builder; Horizon replaces the held item in place where the item is used
 ItemStackWithSlot.isValidInContainer	port	crates/horizon-client-core/src/block_entity_nbt.rs::items	slots outside 0..size are dropped when items load
-LockCode.canUnlock	missing		minor: a lock on a container is kept in the NBT but never checked, so any player opens a command-locked chest
+LockCode.canUnlock	port	crates/horizon-client/src/advancements.rs::can_unlock	checked when a container opens (game/advancements.rs container_locked_for from lan_actions.rs): a spectator opens any container, otherwise the main hand must match the lock predicate
 RandomSequences.createSequence	port	crates/horizon-items/src/random_sequences.rs::create	
 RandomSequences.DirtyMarkingRandomSource.nextInt	skip:java		marks the saved data dirty on each draw; Horizon saves every sequence
 RandomSequences.DirtyMarkingRandomSource.equals	skip:java		wrapper equality

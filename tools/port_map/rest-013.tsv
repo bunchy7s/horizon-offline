@@ -78,8 +78,8 @@ MinecraftServer.loadStatusIcon	inline	crates/horizon-client/src/game/dedicated.r
 MinecraftServer.processPacketsAndTick	port	crates/horizon-client/src/game/levels.rs::Game::tick_server	reads the network, then ticks the levels
 MinecraftServer.autoSave	inline	crates/horizon-client/src/game.rs::Game::tick	gap: minor: the save runs every 6000 ticks; /save-off is checked in the dedicated loop, where the check does nothing, so it does not stop the save
 MinecraftServer.logTickMethodTime	skip:server		tick timing log for the profiler
-MinecraftServer.computeNextAutosaveInterval	missing		minor: the save runs every 6000 ticks (game.rs tick), not 300 s scaled by the tick rate
-MinecraftServer.onTickRateChanged	missing		minor: the autosave interval does not follow /tick rate
+MinecraftServer.computeNextAutosaveInterval	port	crates/horizon-client/src/game.rs::Game::next_autosave_interval	Math.max(100, (int)(rate * 300.0F)) ticks counted down a tick at a time, at the tick rate or the measured rate while /tick sprint runs; twenty a second is still the six thousand a world autosaved on
+MinecraftServer.onTickRateChanged	port	crates/horizon-client/src/game.rs::Game::on_tick_rate_changed	/tick rate recomputes the wait and shortens the one already running when the new rate asks for less
 MinecraftServer.buildPlayerStatus	port	crates/horizon-client/src/lan/mod.rs::Shared::status_json	up to 12 sampled player names in the status JSON
 MinecraftServer.updateEffectiveRespawnData	inline	crates/horizon-client/src/game/initial_spawn.rs::Game::spawn_finder	gap: minor: no cached respawn data; the radius is clamped to the border when the spawn is found
 MinecraftServer.forceGameTimeSynchronization	port	crates/horizon-client/src/lan/hub.rs::Hub::sync_world	game time sent to guests with SetTime
@@ -87,7 +87,7 @@ MinecraftServer.fillSystemReport	skip:debug		system report for crash and debug o
 MinecraftServer.setDifficulty	port	crates/horizon-client/src/game/commands.rs::Game::cmd_difficulty	gap: player: LAN guests are not sent ChangeDifficulty when /difficulty changes; they get it on join, respawn or dimension change
 MinecraftServer.updateMobSpawningFlags	inline	crates/horizon-client/src/game/natural_spawning.rs::Game::spawn_natural	rules are read at each spawn; no cached spawn flag
 MinecraftServer.sendDifficultyUpdate	inline	crates/horizon-client/src/lan/hub.rs::Hub::place_new_player	gap: player: sent when a guest joins, respawns or changes dimension; see setDifficulty
-MinecraftServer.enforceGameTypeForPlayers	inline	crates/horizon-client/src/game/lan.rs::Game::lan_apply_settings	gap: player: guests already online keep their mode when force changes; the default applies at join (lan_guest_joined)
+MinecraftServer.enforceGameTypeForPlayers	inline	crates/horizon-client/src/game/lan.rs::enforce_guest_game_mode	applies the default mode to online players when force game mode is enabled
 MinecraftServer.executeIfPossible	skip:java		rejects tasks during shutdown
 MinecraftServer.reloadResources	port	crates/horizon-client/src/game/functions.rs::Game::cmd_reload	gap: minor: data packs only, via reload_datapacks
 MinecraftServer.configurePackRepository	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: picks the enabled packs and adds new ones; no feature-flag check and no safe mode
@@ -115,7 +115,7 @@ MinecraftServer.isAutoSave	inline	crates/horizon-client/src/game/dedicated.rs::G
 MinecraftServer.storeChunkIoError	skip:debug		writes a chunk IO crash report
 MinecraftServer.reportChunkLoadFailure	missing		unsure: no chunk-load failure log or report found in save.rs or streaming.rs
 MinecraftServer.reportChunkSaveFailure	port	crates/horizon-client/src/save.rs::Persistent::save_finished	gap: minor: logs only; no debug report and no low-disk warning
-PlayerAdvancements.reload	missing		minor: /reload rebuilds datapack functions and settings only (cmd_reload); the advancement tree is kept for the session
+PlayerAdvancements.reload	port	crates/horizon-client/src/lan/advancements.rs::ServerAdvancements::reload	on /reload every guest loaded so far has its visible set cleared and its progress re-read against the new tree, then the tick advancements are granted and the reward recipes added; gap: the host's own progress is not reloaded
 PlayerAdvancements.registerListeners	skip:other		no per-criterion listener map; trigger() tests every criterion when an event fires
 PlayerAdvancements.checkForAutomaticTriggers	missing		minor: criteria-less advancements from data packs are not granted when a player loads
 PlayerAdvancements.asData	inline	crates/horizon-client/src/game/advancements.rs::Game::save_advancements	writes the progress that has any progress

@@ -7,13 +7,19 @@ use crate::{
     mesher::SectionMesh,
 };
 use glam::{DVec3, Vec3};
-use std::time::{Duration, Instant};
+use std::{
+    collections::VecDeque,
+    time::{Duration, Instant},
+};
 
 /// Finished tile meshes not uploaded yet, the tiles they replace (removed
 /// once every mesh is in) and the columns they leave out.
 #[derive(Default)]
 pub(super) struct Pending {
     meshes: FxHashMap<TileKey, SectionMesh>,
+    /// The order they go up in: as handed over (`Lod::update`: finer tiles
+    /// first, so no tile clipped around a finer one is drawn before it).
+    order: VecDeque<TileKey>,
     removed: FxHashSet<TileKey>,
     cutout: Option<FxHashSet<(i32, i32)>>,
 }
@@ -30,7 +36,9 @@ impl Pending {
     ) {
         for (key, mesh) in meshes {
             self.removed.remove(&key);
-            self.meshes.insert(key, mesh);
+            if self.meshes.insert(key, mesh).is_none() {
+                self.order.push_back(key);
+            }
         }
         for key in removed {
             self.meshes.remove(&key);
@@ -330,7 +338,10 @@ impl Renderer {
             .copied()
             .collect();
         while let Some(pending) = &mut self.lod_pending {
-            let Some(&key) = pending.meshes.keys().next() else {
+            // Keys meshed again keep their place; removed ones are skipped.
+            let next = std::iter::from_fn(|| pending.order.pop_front())
+                .find(|key| pending.meshes.contains_key(key));
+            let Some(key) = next else {
                 let pending = self.lod_pending.take().expect("pending tiles");
                 // A tile fades in over the ones it replaces. One over nothing
                 // shows whole: its hidden chunks would open holes to the sky
@@ -498,7 +509,16 @@ mod tests {
         let mut removed: Vec<_> = pending.removed.iter().map(|k| k.x).collect();
         removed.sort_unstable();
         assert_eq!((meshes, removed), (vec![1, 3], vec![2, 4]));
-        assert!(pending.cutout.is_some_and(|c| c.contains(&(0, 0))));
+        assert!(pending.cutout.as_ref().is_some_and(|c| c.contains(&(0, 0))));
+        // They go up in the order handed over, each once.
+        pending.add(vec![(key(1), SectionMesh::default())], vec![], None);
+        let order: Vec<_> = pending
+            .order
+            .iter()
+            .filter(|k| pending.meshes.contains_key(k))
+            .map(|k| k.x)
+            .collect();
+        assert_eq!(order, [1, 3]);
     }
 
     #[test]

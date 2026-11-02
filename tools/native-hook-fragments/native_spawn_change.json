@@ -11,5 +11,5 @@
     }
   ],
   "rust_summary": "The world spawn point changes (`native_spawn_change`).",
-  "doc_summary": "`native_spawn_change(pos, angle)` is told after `/setworldspawn` moves the world's spawn point, with its block position and rotation. Bundles need \"hooks\": @API:spawn_change@."
+  "doc_summary": "`native_spawn_change(pos, angle)` is told after `/setworldspawn` moves the world's spawn point, with its block position and rotation. Bundles need \"hooks\": @API:native_spawn_change@."
 }

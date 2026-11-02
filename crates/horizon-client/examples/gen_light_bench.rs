@@ -5,7 +5,7 @@
 //!
 //!     cargo run --release -p horizon-client-lib --example gen_light_bench -- \
 //!         .local/horizon-client/26.3 [--seed 1234] [--center CX CZ] [--radius 12]
-//!         [--threads 1,2,4,8] [--period-ms 2] [--loading] [--repeat 1] [--json]
+//!         [--threads 1,2,4,8] [--period-ms 2] [--repeat 1] [--json]
 //!
 //! For each run it prints the wall time until every column within the radius
 //! (the area Streaming finishes) was lit, columns finished and lit per second, the process's CPU seconds per
@@ -16,8 +16,7 @@
 //! covers the blocks and light of the columns within the radius: an A/B pair of
 //! builds, and every worker count, must print the same one.
 //! `--period-ms` is how long the coordinator sleeps between updates (the
-//! server thread runs one per 50 ms tick and pumps between ticks); `--loading`
-//! orders work ring by ring, as under the level loading screen.
+//! server thread runs one per 50 ms tick and pumps between ticks).
 //!
 //! `--simulate PROTO,DECORATE,FINISH` (milliseconds) swaps the generator for
 //! one whose jobs sleep that long and make empty columns: what is left is the
@@ -117,13 +116,11 @@ fn run<G: ChunkGenerator>(
     radius: i32,
     threads: usize,
     period: Duration,
-    loading: bool,
 ) -> Result<Run, Error> {
     let mut streaming = Streaming::new(Arc::new(generator), context.clone(), threads);
     streaming.mesh = false;
     streaming.center = center;
     streaming.radius = radius;
-    streaming.loading = loading;
     let mut world = World::new(BlockStateId(0), 0);
     let view: Vec<(i32, i32)> = (center.0 - radius - 1..=center.0 + radius + 1)
         .flat_map(|x| (center.1 - radius - 1..=center.1 + radius + 1).map(move |z| (x, z)))
@@ -215,7 +212,6 @@ fn main() -> Result<(), Error> {
     let radius: i32 = flag(&args, "--radius", 12);
     let repeat: usize = flag(&args, "--repeat", 1);
     let period = Duration::from_millis(flag(&args, "--period-ms", 2));
-    let loading = args.iter().any(|a| a == "--loading");
     let json = args.iter().any(|a| a == "--json");
     let simulate: Option<Vec<f64>> = args
         .iter()
@@ -291,7 +287,7 @@ fn main() -> Result<(), Error> {
         render,
     });
     let terrain = || VanillaTerrain::new(&root.join("worldgen"), assets.registry, &biomes, seed);
-    let go = |center, radius, n, loading| -> Result<Run, Error> {
+    let go = |center, radius, n| -> Result<Run, Error> {
         match &simulate {
             Some(ms) => {
                 let ms = |i: usize| Duration::from_secs_f64(ms[i] / 1e3);
@@ -300,18 +296,18 @@ fn main() -> Result<(), Error> {
                     decorate: ms(1),
                     finish: ms(2),
                 };
-                run(generator, &context, center, radius, n, period, loading)
+                run(generator, &context, center, radius, n, period)
             }
-            None => run(terrain()?, &context, center, radius, n, period, loading),
+            None => run(terrain()?, &context, center, radius, n, period),
         }
     };
     // Warm the shared generator data and the code away from the measured area.
-    go((center.0 + 4000, center.1), 2, n, false)?;
+    go((center.0 + 4000, center.1), 2, n)?;
     let pool = horizon_threads::jobs::pool().threads();
     if pool != n {
         eprintln!("the worker pool has {pool} threads, not {n} (HORIZON_JOB_THREADS?)");
     }
-    let r = go(center, radius, n, loading)?;
+    let r = go(center, radius, n)?;
     let busy: f64 = r.jobs.iter().map(|j| j.1 as f64).sum::<f64>() / 1e9;
     println!(
         "workers {n:2}: {:.2} s ({:.2} s to half), {} columns ({} lit), {:.1} columns/s, {:.1} lit/s, \

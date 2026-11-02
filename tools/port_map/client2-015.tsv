@@ -17,8 +17,8 @@ WorldOptionsScreen.extractMenuBackground	port	crates/horizon-client/src/game/lan
 WorldOptionsScreen.extractRenderState	port	crates/horizon-client/src/game/lan_screen.rs::Game::draw_options_view	header and footer separators and the widgets
 WorldOptionsScreen.onGamemasterPermissionChanged	port	crates/horizon-client/src/game/lan_screen.rs::Game::remote_world_options_permission	losing permission on a server closes the screen; gap: minor: the default and personal modes are not reset as updatePermissionDependentButtons does
 WorldOptionsScreen.updatePermissionDependentButtons	inline	crates/horizon-client/src/game/lan_screen.rs::Game::world_options_click	the Cheats arm resets default and personal mode to the saved default when commands turn off; gap: minor: the remote permission path does not do this
-WorldOptionsScreen.updatePersonalGameModeButton	missing		minor: a personal mode changed while the options are open is not shown; Horizon reads the modes once when the screen opens
-WorldOptionsScreen.onDefaultGameModeChanged	missing		minor: a default mode changed while the options are open is not shown; Horizon reads the modes once when the screen opens
+WorldOptionsScreen.updatePersonalGameModeButton	inline	crates/horizon-client/src/game/lan_screen.rs::WorldOptions::buttons	the personal mode button is rebuilt from the live personal mode every frame and labelled in WorldOptions::label, so a mode changed while the screen is open shows without a callback
+WorldOptionsScreen.onDefaultGameModeChanged	inline	crates/horizon-client/src/game/lan_screen.rs::WorldOptions::buttons	the default mode button is rebuilt from the live default mode every frame and labelled in WorldOptions::label, so a default changed while the screen is open shows without a callback
 WorldOptionsScreen.hasSettingsChanges	inline	crates/horizon-client/src/game/lan_screen.rs::WorldOptions::changed	compares every setting against the values read at open
 WorldOptionsScreen.lanPortChanged	inline	crates/horizon-client/src/game/lan_screen.rs::WorldOptions::snapshot	the port is part of the snapshot only while LAN is on
 WorldOptionsScreen.changeMultiplayerScope	inline	crates/horizon-client/src/game/lan_screen.rs::Game::apply_world_options	closes LAN and reopens it on the new port when the scope or port changed
@@ -30,14 +30,14 @@ WorldOptionsScreen.DifficultyButtons.create	inline	crates/horizon-client/src/gam
 WorldOptionsScreen.DifficultyButtons.refresh	port	crates/horizon-client/src/game/lan_screen.rs::WorldOptions::server_difficulty	a server's difficulty and lock update the screen; gap: minor: it also resets the baseline, so Apply no longer sees the change
 WorldOptionsScreen.DifficultyButtons.isDifficultyLocked	inline	crates/horizon-client/src/game/lan_screen.rs::Game::open_world_options	locked when the level is locked or hardcore; the lock button's enabled state is in WorldOptions::active
 StatsScreen.onStatsUpdated	inline	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	the lists are rebuilt from the stored values on every draw; the AwardStats arm in remote.rs only stores them
-StatsScreen.setTabActiveStateAndTooltip	missing		player: an empty Items or Mobs tab stays selectable with no 'No statistics found' tooltip
+StatsScreen.setTabActiveStateAndTooltip	port	crates/horizon-client/src/game/stats_screen.rs::stats_tab_active	the Items and Mobs tabs are selectable only with rows; hovering an empty tab draws its gui.stats.none_found tooltip (split at 170) in Game::draw_stats
 StatsScreen.repositionElements	skip:ui		layout only: tab bar placement and header height
 StatsScreen.keyPressed	missing		minor: no keyboard tab switching on the statistics screen; Escape still closes it
 StatsScreen.extractRenderState	inline	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	footer separator is drawn with the tab bar in draw_stats
 StatsScreen.extractMenuBackground	inline	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	background drawn at the start of draw_stats
 StatsScreen.GeneralStatisticsList.Entry.getValueText	port	crates/horizon-client/src/game/stats_screen.rs::format	value text by the stat's format (time, distance, tenths, plain)
 StatsScreen.GeneralStatisticsList.Entry.extractContent	port	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	General rows: name left, value right
-StatsScreen.GeneralStatisticsList.Entry.getNarration	skip:other		narration text for screen readers; Horizon has no narrator output
+StatsScreen.GeneralStatisticsList.Entry.getNarration	inline	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	narrator.select(<label> <value>) built as the general list's hovered row text
 StatsScreen.ItemStatisticsList.<init>	port	crates/horizon-client/src/game/stats_screen.rs::Game::stat_items	items with a non-zero count in any column, block items included
 StatsScreen.ItemStatisticsList.getColumn	inline	crates/horizon-client/src/game/stats_screen.rs::Game::stat_items	the column index selects COLUMNS directly
 StatsScreen.ItemStatisticsList.getColumnIndex	inline	crates/horizon-client/src/game/stats_screen.rs::Game::stats_click	the sort state keeps the column index, so no reverse lookup is needed
@@ -49,10 +49,10 @@ StatsScreen.ItemStatisticsList.HeaderEntry.StatSortButton.extractContents	inline
 StatsScreen.ItemStatisticsList.ItemRow.extractContent	port	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	item slot and the block and item stat cells per row
 StatsScreen.ItemStatisticsList.ItemRow.extractStat	inline	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	cell value right-aligned in its column
 StatsScreen.ItemStatisticsList.ItemRow.ItemRowWidget.extractWidgetRenderState	inline	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	slot background and item icon
-StatsScreen.ItemStatisticsList.ItemRow.ItemRowWidget.extractTooltip	missing		player: hovering an item in the Items tab shows no item tooltip
+StatsScreen.ItemStatisticsList.ItemRow.ItemRowWidget.extractTooltip	port	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	the hovered item row draws its stack tooltip at the slot's corner (draw_stack_tooltip)
 StatsScreen.ItemStatisticsList.ItemRowComparator.compare	inline	crates/horizon-client/src/game/stats_screen.rs::Game::stat_items	orders by the sorted column; gap: minor: non-block items count as 0 in block columns (vanilla -1), and ties are not broken by item id
 StatsScreen.MobsStatisticsList.MobRow.extractContent	port	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	mob name, kills and killed-by lines
-StatsScreen.MobsStatisticsList.MobRow.getNarration	skip:other		narration text for screen readers; Horizon has no narrator output
+StatsScreen.MobsStatisticsList.MobRow.getNarration	inline	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	narrator.select(joinForNarration(kills, killed by)) built as the mobs list's hovered row text
 StatsScreen.StatisticsTab.doLayout	skip:ui		layout only: list size and position
 AdvancementTab.copyPosition	inline	crates/horizon-client/src/game/advancements_screen.rs::Game::adv_cache	a rebuilt tree keeps adv_ui.scroll; tab bounds are recomputed in adv_view
 AdvancementTab.extractTab	port	crates/horizon-client/src/game/advancements_screen.rs::Game::draw_advancements	tab sprite per position (first, middle, last) and selected state
@@ -94,16 +94,16 @@ AdvancementsScreen.extractWindow	port	crates/horizon-client/src/game/advancement
 AdvancementsScreen.extractTooltips	port	crates/horizon-client/src/game/advancements_screen.rs::Game::draw_advancements	tab title tooltips; the card tooltip comes from adv_draw_hover
 AdvancementsScreen.onAdvancementsUpdated	port	crates/horizon-client/src/game/advancements_screen.rs::Game::adv_cache	a changed tree rebuilds the positions; tabs and progress are read in adv_view and at draw time
 AdvancementsScreen.getAdvancementWidget	skip:java		lookup of a widget by node; Horizon indexes positions by tree index
-DebugOptionsScreen.init	missing		minor: no F3+F6 debug entry editor; the F3 overlay footer still says 'To edit: press [F3+F6]' (debug_overlay.rs)
-DebugOptionsScreen.addProfileButton	missing		minor: no debug profile buttons (default and performance)
-DebugOptionsScreen.repositionElements	missing		minor: layout of the missing debug entry editor
-DebugOptionsScreen.CategoryEntry.extractContent	missing		minor: category headings of the missing debug entry editor
-DebugOptionsScreen.OptionEntry.<init>	missing		minor: per-entry always, overlay and never buttons of the missing editor
+DebugOptionsScreen.init	port	crates/horizon-client/src/game/debug_options.rs::Game::debug_options_header	init's vertical layout (HEADER 61, FOOTER 33, the title row and warning), the search box and scroll made in Game::toggle_debug_options, the footer in footer()
+DebugOptionsScreen.addProfileButton	port	crates/horizon-client/src/game/debug_options.rs::footer	the two profile buttons (Default, Performance) are the first two footer buttons; clicking one loads that profile in Game::debug_options_click
+DebugOptionsScreen.repositionElements	port	crates/horizon-client/src/game/debug_options.rs::Game::draw_debug_options	the header, the list between HEADER and h - FOOTER and the footer placed from the screen size each frame
+DebugOptionsScreen.CategoryEntry.extractContent	port	crates/horizon-client/src/game/debug_options.rs::rows	a Row::Category before each category's entries, drawn as the heading row by Game::draw_debug_options
+DebugOptionsScreen.OptionEntry.<init>	port	crates/horizon-client/src/game/debug_options.rs::button_xs	the three 60-wide Off / In Overlay / Always buttons of an entry row at their content offsets
 DebugOptionsScreen.OptionEntry.narrateButton	skip:other		narration text for screen readers
-DebugOptionsScreen.OptionEntry.setValue	missing		minor: sets an entry's status in the missing editor
-DebugOptionsScreen.OptionEntry.extractContent	missing		minor: draws the entry row of the missing editor
-DebugOptionsScreen.OptionEntry.refreshEntry	missing		minor: refreshes the buttons of the missing editor
-DebugOptionsScreen.OptionList.updateSearch	missing		minor: search filter of the missing debug entry editor
+DebugOptionsScreen.OptionEntry.setValue	port	crates/horizon-client/src/game/debug_options.rs::Game::debug_options_click	a press on a status button sets it through debug_entries.set_status, with the click sound
+DebugOptionsScreen.OptionEntry.extractContent	port	crates/horizon-client/src/game/debug_options.rs::Game::draw_debug_options	the entry's path and its three status buttons, the current one highlighted
+DebugOptionsScreen.OptionEntry.refreshEntry	port	crates/horizon-client/src/game/debug_options.rs::Game::draw_debug_options	the row is redrawn from debug_entries.status every frame, so set_status needs no refresh
+DebugOptionsScreen.OptionList.updateSearch	port	crates/horizon-client/src/game/debug_options.rs::rows	the list is rebuilt from debug_entries::search(search box) on every draw, click and scroll
 GameModeSwitcherScreen.getDefaultSelected	port	crates/horizon-client/src/game_mode_switcher.rs::GameModeSwitcher::new	previous mode, else the opposite of the current one
 GameModeSwitcherScreen.init	port	crates/horizon-client/src/game/gamemode_switcher.rs::Game::open_gamemode_switcher	opens with the selection state; slot positions are computed in draw
 GameModeSwitcherScreen.extractRenderState	port	crates/horizon-client/src/game/gamemode_switcher.rs::Game::draw_gamemode_switcher	title, help line, slots, selection and hover
@@ -123,7 +123,7 @@ DialogControlSet.addInput	port	crates/horizon-client/src/dialog_screen.rs::input
 DialogControlSet.createDialogButton	port	crates/horizon-client/src/dialog_screen.rs::Layout::new	button width from the dialog; gap: minor: no button tooltips
 DialogControlSet.bindAction	port	crates/horizon-client/src/dialog.rs::Action::click	reads the inputs' current values into the action when clicked
 DialogControlSet.createActionButton	port	crates/horizon-client/src/game/dialogs.rs::Game::dialog_click	button press runs the action through run_dialog_action
-DialogListDialogScreen.createDialogClickAction	missing		player: a dialog list shows no entry buttons; only its exit button is drawn
+DialogListDialogScreen.createDialogClickAction	port	crates/horizon-client/src/dialog.rs::Dialog::set_list	each listed dialog is a button whose action is Click::ShowDialog; game/dialogs.rs run_dialog_action opens it
 DialogScreen.repositionElements	skip:ui		layout only: body scroll height and warning clamp, both in Layout::new
 DialogScreen.createTitleWithWarningButton	skip:ui		layout only: title row, warning button 10 px right of the title in Layout::new
 DialogScreen.makeSureWarningButtonIsInBounds	port	crates/horizon-client/src/dialog_screen.rs::Layout::in_bounds	moves the warning button on screen when it is off
@@ -138,12 +138,12 @@ WaitingForResponseScreen.init	port	crates/horizon-client/src/dialog_screen.rs::w
 WaitingForResponseScreen.tick	port	crates/horizon-client/src/dialog_screen.rs::waiting_button	Back shows after a second with a countdown label, works after five seconds
 DialogBodyHandlers.createBodyElement	port	crates/horizon-client/src/dialog_screen.rs::Layout::new	gap: player: item bodies are dropped (Body::Item gives no element)
 DialogBodyHandlers.bootstrap	skip:data		registers body handlers
-DialogBodyHandlers.runActionOnParent	missing		player: clicking text in a dialog message or item description does nothing; dialog_click only tests fields, checkboxes and buttons
-DialogBodyHandlers.ItemHandler.createControls	missing		player: an item body (icon and description) is not drawn in a dialog
+DialogBodyHandlers.runActionOnParent	port	crates/horizon-client/src/game/dialogs.rs::Game::dialog_click	a press on a message or description line reads the hovered style (dialog_screen::line_style_at) and runs its click event
+DialogBodyHandlers.ItemHandler.createControls	port	crates/horizon-client/src/dialog_screen.rs::item	the item widget with its description 2 to the right, centred on each other vertically
 DialogBodyHandlers.PlainMessageHandler.createControls	port	crates/horizon-client/src/dialog_screen.rs::message	centred wrapped text; gap: player: text clicks do nothing
 InputControlHandlers.createHandler	port	crates/horizon-client/src/dialog_screen.rs::input	dispatch by control type; unknown types are dropped
 InputControlHandlers.bootstrap	skip:data		registers input handlers
 InputControlHandlers.BooleanHandler.addControl	port	crates/horizon-client/src/dialog_screen.rs::input	checkbox with its label; toggled in dialog_click
-InputControlHandlers.NumberRangeHandler.addControl	missing		player: a number-range input (slider) in a dialog has no control
-InputControlHandlers.SingleOptionHandler.addControl	missing		player: a single-option input in a dialog has no control
+InputControlHandlers.NumberRangeHandler.addControl	port	crates/horizon-client/src/dialog_screen.rs::input	Control::NumberRange lays out a 20 high Part::Slider of the input's width
+InputControlHandlers.SingleOptionHandler.addControl	port	crates/horizon-client/src/dialog_screen.rs::input	Control::SingleOption lays out a 20 high Part::Cycle of the input's width
 InputControlHandlers.TextInputHandler.addControl	port	crates/horizon-client/src/dialog_screen.rs::input	gap: player: multiline inputs are drawn as one 20 px line and the line limit is not used
