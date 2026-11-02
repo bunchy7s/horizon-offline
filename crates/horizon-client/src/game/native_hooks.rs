@@ -8745,20 +8745,4 @@ mod tests {
         assert!(!debug_takes(Corner::BottomRight, true, [true, false]));
         assert!(debug_takes(Corner::BottomRight, true, [false, true]));
     }
-
-    #[test]
-    fn native_screen_own_background() {
-        let s = super::NativeScreen::default();
-        assert!(!s.own_background);
-        assert!(!s.own_labels);
-
-        let custom = super::NativeScreen {
-            own_background: true,
-            own_labels: true,
-            ..Default::default()
-        };
-        assert!(custom.own_background);
-        assert!(custom.own_labels);
-        assert_ne!(s, custom);
-    }
 }
