@@ -1982,7 +1982,7 @@ fn a_moving_piston_without_a_block_entity_is_removed_by_a_click() {
     );
 }
 
-/// `MovingPistonBlock.destroy`: a moving piston that goes away takes the
+/// `MovingPistonBlock.destroy`: a moving piston a player breaks takes the
 /// extended piston base behind it with it; an unextended base stays.
 #[test]
 fn breaking_a_moving_piston_removes_its_extended_base() {
@@ -1994,8 +1994,13 @@ fn breaking_a_moving_piston_removes_its_extended_base() {
     // The head at (1, 1, 0) faces east, so its base is at (0, 1, 0).
     w.put(BlockPos::new(0, 1, 0), extended);
     w.put(BlockPos::new(1, 1, 0), moving);
-    w.b()
-        .destroy_block(&mut w.level, &mut w.ticks, BlockPos::new(1, 1, 0), false);
+    w.f.behaviours.player_destroy_block(
+        &mut w.level,
+        &mut w.ticks,
+        BlockPos::new(1, 1, 0),
+        false,
+        true,
+    );
     assert_eq!(
         w.get(BlockPos::new(0, 1, 0)),
         air,
@@ -2003,12 +2008,49 @@ fn breaking_a_moving_piston_removes_its_extended_base() {
     );
     w.put(BlockPos::new(5, 1, 0), retracted);
     w.put(BlockPos::new(6, 1, 0), moving);
-    w.b()
-        .destroy_block(&mut w.level, &mut w.ticks, BlockPos::new(6, 1, 0), false);
+    w.f.behaviours.player_destroy_block(
+        &mut w.level,
+        &mut w.ticks,
+        BlockPos::new(6, 1, 0),
+        false,
+        true,
+    );
     assert_eq!(
         w.get(BlockPos::new(5, 1, 0)),
         retracted,
         "an unextended base is left alone"
+    );
+}
+
+/// `LevelChunk.setBlockState` over a moving piston only runs the block
+/// entity's `finalTick`: `MovingPistonBlock.destroy`, which removes the
+/// extended base, is `ServerPlayerGameMode.destroyBlock`'s alone. `/setblock`,
+/// `/fill` and `Level.destroyBlock` over the head leave a headless piston.
+#[test]
+fn replacing_a_moving_piston_leaves_its_extended_base() {
+    let mut w = world!();
+    let moving = w.id("moving_piston", &[("facing", "east"), ("type", "normal")]);
+    let extended = w.id("piston", &[("facing", "east"), ("extended", "true")]);
+    let air = w.id("air", &[]);
+    // /setblock ~ ~ ~ air on the head: the extended base stays.
+    w.put(BlockPos::new(0, 1, 0), extended);
+    w.put(BlockPos::new(1, 1, 0), moving);
+    w.set(BlockPos::new(1, 1, 0), air);
+    assert_eq!(w.get(BlockPos::new(1, 1, 0)), air);
+    assert_eq!(
+        w.get(BlockPos::new(0, 1, 0)),
+        extended,
+        "a setBlock over the head leaves a headless extended piston"
+    );
+    // Level.destroyBlock (explosions, decay) is not a player break either.
+    w.put(BlockPos::new(4, 1, 0), extended);
+    w.put(BlockPos::new(5, 1, 0), moving);
+    w.b()
+        .destroy_block(&mut w.level, &mut w.ticks, BlockPos::new(5, 1, 0), false);
+    assert_eq!(
+        w.get(BlockPos::new(4, 1, 0)),
+        extended,
+        "destroyBlock over the head leaves a headless extended piston"
     );
 }
 
