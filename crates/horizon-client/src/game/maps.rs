@@ -40,7 +40,6 @@ pub(super) struct Decoration {
 }
 /// A map as a native mod sees it when `native_map_decorations` is asked.
 // Native mods read it; nothing in Horizon does.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct NativeMapInfo<'a> {
     /// The map's id (`map_<id>`).

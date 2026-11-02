@@ -406,7 +406,7 @@ pub fn native_menu_slot_rules(
     may_place: &mut bool,
     max_stack: &mut u32,
 ) {
-    let _ = (menu, slot, stack, may_place, max_stack);
+    crate::native_client_hooks::menu_slot_rules(menu, slot, stack, may_place, max_stack);
 }
 
 /// An index outside the slot list: vanilla's `IndexOutOfBoundsException`.
@@ -3457,6 +3457,31 @@ pub(crate) mod tests {
             chest.click(env, 0, 0, Input::QuickMove).unwrap();
             assert!(chest.equipped.is_empty());
         });
+    }
+
+    #[test]
+    fn installed_slot_rules_change_mod_menu_placement() {
+        let installed =
+            crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
+                menu_slot_rules: |menu, slot, _, may_place, max_stack| {
+                    if menu == "test:rules" && slot == 0 {
+                        *may_place = false;
+                        *max_stack = 7;
+                    }
+                },
+                living_breathe: |_, _, _, _, _| {},
+                ingredient: |_, _, _| {},
+            });
+        assert!(installed.is_ok());
+        let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
+            id: "test:rules",
+            slots: 1,
+            data_slots: 0,
+            results: vec![],
+        })));
+        let menu = Menu::new(kind);
+        let stack = ItemStack::new("minecraft:stone", 1);
+        assert_eq!(menu.mod_slot(0, &stack), (false, 7));
     }
 
     /// A mod menu type: three slots, then a result (slot 3).

@@ -33,7 +33,7 @@ pub fn native_ingredient(
     data: &serde_json::Map<String, Value>,
     items: &mut Vec<String>,
 ) {
-    let _ = (kind, data, items);
+    crate::native_client_hooks::ingredient(kind, data, items);
 }
 
 /// Keep first-seen order, drop the rest.

@@ -2,7 +2,11 @@
   "hooks": [
     {
       "name": "player_game_mode_changed",
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_game_mode_changed"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_game_mode_changed",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ],
   "rust_summary": "a server player's game mode about to change, cancellable (`native_player_game_mode_changed`).",
