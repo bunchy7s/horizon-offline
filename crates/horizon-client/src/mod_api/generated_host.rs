@@ -1203,6 +1203,15 @@ pub trait Host {
     fn instance_dir(&self) -> PathBuf {
         unimplemented!("Host::instance_dir")
     }
+    /// The most recently extracted world frame's camera, if one exists.
+    fn camera(&self) -> Option<NativeCamera> {
+        unimplemented!("Host::camera")
+    }
+    /// Collision boxes in block-local coordinates with an empty collision context.
+    fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
+        let _ = pos;
+        unimplemented!("Host::block_collision")
+    }
     /// For a client mod: what each block (`minecraft:grass_block`, `oak_log[axis=x]`; properties left out take the
     /// block's default) draws on each of its six sides, as the mesher bakes its model: each face's sprite (array and
     /// layer, as `WorldDrawn::block_sprites` cuts them), where it lies on the side, how its texture runs across it,

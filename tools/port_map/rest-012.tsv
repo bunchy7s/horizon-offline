@@ -93,16 +93,16 @@ ClientboundTakeItemEntityPacket.write	port	crates/horizon-protocol/src/buf.rs::w
 DebugEntityNameGenerator.getEntityName	skip:debug		debug name for entities
 ServerboundBlockEntityTagQueryPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! BlockEntityTagQuery {transaction VarInt, pos Pos}
 ServerboundEntityTagQueryPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! EntityTagQuery {transaction VarInt, entity VarInt}
-ServerboundJigsawGeneratePacket.write	missing		minor: no jigsaw generate packet; the client has no jigsaw screen (only block_entity_nbt reads jigsaw data)
+ServerboundJigsawGeneratePacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! JigsawGenerate {pos Pos, levels VarInt, keep_jigsaws Bool}; the jigsaw screen's Generate button builds it (jigsaw_edit.rs::JigsawEditor::generate_packet)
 ServerboundMovePlayerPacket.packFlags	inline	crates/horizon-client/src/player_sync.rs::PositionSender::update	on-ground and horizontal-collision bits set when the move is sent
 ServerboundPlayerActionPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! PlayerAction {action VarInt, pos, direction UByte, sequence VarInt}
 ServerboundPlayerCommandPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! PlayerCommand {id, action, data VarInt}
 ServerboundSeenAdvancementsPacket.write	missing		minor: the advancement tab the player opened is not sent; Horizon has no seen_advancements packet (ids.rs only)
-ServerboundSetCommandMinecartPacket.write	missing		minor: minecart command block edits are not sent; Horizon has no such packet (ids.rs only)
-ServerboundSetCommandMinecartPacket.getCommandBlock	missing		minor: minecart command block edits are not sent; Horizon has no such packet (ids.rs only)
-ServerboundSetJigsawBlockPacket.write	missing		minor: jigsaw block edits are not sent; no packet and no jigsaw screen in the client
-ServerboundSetStructureBlockPacket.<init>	missing		minor: structure block settings are not sent; no packet and no structure block screen in the client
-ServerboundSetStructureBlockPacket.write	missing		minor: structure block settings are not sent; no packet and no structure block screen in the client
+ServerboundSetCommandMinecartPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SetCommandMinecart {entity VarInt, command Str, track_output Bool}; the cart's edit screen sends it (command_minecarts.rs::Game::set_command_minecart)
+ServerboundSetCommandMinecartPacket.getCommandBlock	inline	crates/horizon-client/src/game/command_minecarts.rs::Game::apply_cart_command	the packet's command and track-output flag go into the cart, with handleSetCommandMinecart's onUpdated and chat note, in one fn
+ServerboundSetJigsawBlockPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SetJigsawBlock {pos Pos, name/target/pool Ident, final_state Str, joint Str, selection and placement priority VarInt}; the jigsaw screen sends it (jigsaw_edit.rs::JigsawEditor::set_packet)
+ServerboundSetStructureBlockPacket.<init>	port	crates/horizon-client/src/game/structure_edit.rs::StructureEditor::packet	the constructor takes the block and the update type: the edit boxes supply the typed fields, the block its mode, mirror, rotation and flags
+ServerboundSetStructureBlockPacket.write	port	crates/horizon-protocol/src/packets/play.rs::SetStructureBlock::write	pos, update type and mode, the name, each offset and size as a byte, mirror and rotation, data, integrity, seed, then the four flags in one byte
 VecDelta.Stepped.hasDeltaX	skip:other		no callers in vanilla
 VecDelta.Stepped.hasDeltaZ	skip:other		no callers in vanilla
 VecDelta.Stepped.tryEncode	missing		minor: the LAN host sends only linear deltas (send_changes); no stepped path is encoded

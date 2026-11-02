@@ -2709,6 +2709,7 @@ struct Game<'a> {
     waypoints: horizon_client::locator_bar::ClientWaypoints,
     /// The camera the last frame drew from (position, yaw, pitch, fov), for the locator bar.
     locator_camera: Option<([f64; 3], f32, f32, f32)>,
+    native_camera_frame: Option<horizon_client::mod_api::NativeCamera>,
     /// `LocalPlayer.postEffects`: the chains the server has the screen run
     /// (`ClientboundPostEffectsPacket`), in order.
     post_effects: Vec<String>,
@@ -10811,10 +10812,18 @@ impl Game<'_> {
                     );
             }
             // Mod block entities: their mods draw them (`native_block_entity_submit`),
-            // culled by the bounds they give.
-            let mods = r
-                .visible_block_entities(self.settings.chunk_fade)
-                .filter(|(_, state)| !self.res.block_entity_render().renders(*state));
+            // culled by the bounds they give. A world without any (`has_mods`) has none
+            // to find among its other unrendered block entities (furnaces, hoppers...).
+            let mods = self
+                .world
+                .block_entities
+                .has_mods()
+                .then(|| {
+                    r.visible_block_entities(self.settings.chunk_fade)
+                        .filter(|(_, state)| !self.res.block_entity_render().renders(*state))
+                })
+                .into_iter()
+                .flatten();
             let untemplated = self.untemplated_mod_block_entities(camera);
             self.mod_block_entity_geometry(
                 mods.chain(untemplated.iter()),
@@ -12892,7 +12901,17 @@ impl Game<'_> {
             let target = self.bucket_target(content, &hit);
             let mut canceled = false;
             self.native_fill_bucket(stack, target, &mut canceled);
-            if canceled || self.bucket_empty_cancelled(stack, target) {
+            // `mayUseItemAt(blockPos2)`: a block that refuses the fluid passes
+            // it to the block beside, so a mod hears that block too (powder
+            // snow places like a block and never goes there).
+            let beside_too = content != BucketContent::Powder && hit.beside() != target;
+            if !canceled && beside_too {
+                self.native_fill_bucket(stack, hit.beside(), &mut canceled);
+            }
+            if canceled
+                || self.bucket_empty_cancelled(stack, target)
+                || beside_too && self.bucket_empty_cancelled(stack, hit.beside())
+            {
                 return Ok(UseResult::Fail);
             }
             let pos = BlockPos::new(target[0], target[1], target[2]);
@@ -15349,6 +15368,32 @@ impl Game<'_> {
         let distance = (terrain_distance * 16) as f32;
         let depth_far =
             horizon_client::camera::depth_far(terrain_distance, self.settings.cloud_range);
+        // Only native mods read it: no matrices or allocation per frame without one.
+        let mods_read_camera = !horizon_client::mod_api::mods().is_empty();
+        self.native_camera_frame = (mods_read_camera && !title).then(|| {
+            let partial = camera_alpha as f32;
+            horizon_client::mod_api::NativeCamera {
+                position: camera.to_array(),
+                eye_height: self.view.eye_height_old
+                    + (self.view.eye_height - self.view.eye_height_old) * partial,
+                partial_tick: partial,
+                yaw,
+                pitch,
+                fov_degrees,
+                near: 0.05,
+                far: depth_far,
+                view: (bob * spin * horizon_client::camera::view_matrix(yaw, pitch))
+                    .to_cols_array(),
+                projection: glam::Mat4::perspective_rh(
+                    fov_degrees.to_radians(),
+                    size[0] as f32 / size[1].max(1) as f32,
+                    depth_far,
+                    0.05,
+                )
+                .to_cols_array(),
+                dimension: self.dim.id().to_string(),
+            }
+        });
         self.view_frustum = self
             .renderer
             .as_ref()
@@ -18459,6 +18504,7 @@ impl<'a> Game<'a> {
             waypoint_styles: prepared.waypoint_styles,
             waypoints: Default::default(),
             locator_camera: None,
+            native_camera_frame: None,
             post_effects: Vec::new(),
             spectated_post_effect: None,
             experience_display: Default::default(),

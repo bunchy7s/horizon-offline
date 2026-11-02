@@ -4512,10 +4512,28 @@ pub trait Hooks: Send + Sync {
     fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
         let _ = event;
     }
+    /// Player FOV scale, after vanilla effects and before zoom and easing.
+    /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
+    fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
         let _ = host;
         let _ = event;
+    }
+    /// Before a visible item frame's item or map is drawn. Cancel hides the item, not the frame.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn render_item_in_frame(
+        &self,
+        host: &dyn Host,
+        event: &mut RenderItemInFrameEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
     }
 }
 /// What [`Hooks::frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -13804,6 +13822,30 @@ pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
         mod_hook.living_jump(&mut event);
     }
 }
+/// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ComputeFovModifierEvent<'a> {
+    pub player: &'a horizon_client::camera::FovPlayer,
+    pub base: f32,
+    pub modifier: f32,
+}
+pub fn dispatch_compute_fov_modifier(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: &horizon_client::camera::FovPlayer,
+    base: f32,
+    modifier: &mut f32,
+) {
+    let mut event = ComputeFovModifierEvent {
+        player,
+        base,
+        modifier: *modifier,
+    };
+    for mod_hook in super::entered(mods, "compute_fov_modifier") {
+        mod_hook.compute_fov_modifier(host, &mut event);
+    }
+    *modifier = event.modifier;
+}
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct MovementInputEvent {
@@ -13833,4 +13875,37 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
+}
+/// What [`Hooks::render_item_in_frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RenderItemInFrameEvent<'a> {
+    pub entity_id: u32,
+    pub pos: [i32; 3],
+    pub stack: &'a ItemStack,
+}
+pub fn dispatch_render_item_in_frame(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity_id: u32,
+    pos: [i32; 3],
+    stack: &ItemStack,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = RenderItemInFrameEvent {
+        entity_id,
+        pos,
+        stack,
+    };
+    for mod_hook in super::entered(mods, "render_item_in_frame") {
+        if matches!(
+            mod_hook.render_item_in_frame(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
 }
