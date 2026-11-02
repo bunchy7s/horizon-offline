@@ -1920,8 +1920,15 @@ pub fn speed_bonus(m: &Mob) -> f64 {
 }
 /// The ambient, hurt and death sounds of species that pick them by state
 /// (`getHurtSound` / `getDeathSound` overrides); the type's otherwise.
+/// `Goat.getAmbientSound`, `Goat.getHurtSound`, and `Goat.getDeathSound`
+/// select the screaming voices from the goat's saved flag.
 pub fn voice_sounds(m: &Mob) -> [&'static str; 3] {
     match m.species() {
+        Species::Goat if m.extra.screaming => [
+            "entity.goat.screaming.ambient",
+            "entity.goat.screaming.hurt",
+            "entity.goat.screaming.death",
+        ],
         Species::Nautilus | Species::ZombieNautilus => super::nautilus::sounds(m),
         Species::SulfurCube => super::sulfur_cube::sounds(m),
         Species::Armadillo => super::armadillo::sounds(m),
