@@ -247,6 +247,18 @@ pub fn register_dedicated(d: &mut Dispatcher, root: usize) {
     d.suggests(t, Suggests::BannedIps);
     d.executes(t, "pardon-ip");
 
+    // SaveAllCommand (`flush` too), SaveOffCommand, SaveOnCommand, StopCommand
+    let save_all = d.literal(root, "save-all");
+    d.requires(save_all, OWNERS);
+    d.executes(save_all, "save-all");
+    let flush = d.literal(save_all, "flush");
+    d.executes(flush, "save-all");
+    for name in ["save-off", "save-on", "stop"] {
+        let n = d.literal(root, name);
+        d.requires(n, OWNERS);
+        d.executes(n, name);
+    }
+
     let ban = d.literal(root, "ban");
     d.requires(ban, ADMINS);
     let t = d.argument(ban, "targets", ArgType::GameProfile);
