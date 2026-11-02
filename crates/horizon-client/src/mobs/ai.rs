@@ -637,6 +637,9 @@ pub fn tick(
             endermite_lifetime(m);
         }
         ageable_step(m, w, level_random, events);
+        if m.species() == Species::Chicken {
+            farm::chicken_egg_step(m, events);
+        }
         // AbstractHorse.tick runs the stand counter down with or without AI.
         if super::equine::is_equine(m.species())
             && !super::camel::is_camel(m.species())
