@@ -655,29 +655,29 @@ impl Dragon {
             Vec3::new(p.x + 8.0, p.y + 8.0, p.z + 8.0),
         )
     }
-    fn explosion_push(&mut self, center: [f64; 3], radius: f32, exposure: f32) {
+    fn explosion_knockback(
+        &self,
+        center: [f64; 3],
+        radius: f32,
+        exposure: f32,
+    ) -> Option<[f64; 3]> {
         let diameter = f64::from(radius * 2.0);
         let p = self.position;
         let at = |y: f64| [p.x - center[0], y - center[1], p.z - center[2]];
         let len = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
         let dist = len(at(p.y)) / diameter;
         if dist > 1.0 {
-            return;
+            return None;
         }
         // The dragon's eye is 0.85 of its 8 block height, in floats.
         let away = at(p.y + f64::from(8.0f32 * 0.85f32));
         let l = len(away);
         // `Vec3.normalize` gives zero below 1.0E-5F, then `scale(power)`.
         if l < 9.999_999_747_378_752e-6 {
-            return;
+            return Some([0.0; 3]);
         }
-        let dir = [away[0] / l, away[1] / l, away[2] / l];
         let power = (1.0 - dist) * f64::from(exposure);
-        self.velocity = Vec3::new(
-            self.velocity.x + dir[0] * power,
-            self.velocity.y + dir[1] * power,
-            self.velocity.z + dir[2] * power,
-        );
+        Some(away.map(|d| d / l * power))
     }
     /// `DragonHoldingPatternPhase.onCrystalDestroyed`: strafe `player` if
     /// the dragon can attack them (`EnderDragon.canAttack`, on Peaceful too).
@@ -3234,7 +3234,12 @@ impl Crystal {
 impl Game<'_> {
     /// `ServerExplosion.hurtEntities`: crystals in reach are removed without
     /// another blast; explosions always hurt dragons.
-    pub(super) fn explosion_hits_special(&mut self, center: [f64; 3], radius: f32) {
+    pub(super) fn explosion_hits_special(
+        &mut self,
+        center: [f64; 3],
+        radius: f32,
+        blocks: &[[i32; 3]],
+    ) {
         let diameter = f64::from(radius * 2.0);
         let in_reach = |p: Vec3| {
             ((p.x - center[0]).powi(2) + (p.y - center[1]).powi(2) + (p.z - center[2]).powi(2))
@@ -3269,8 +3274,20 @@ impl Game<'_> {
         for (part, amount) in hits {
             self.hurt_dragon(part, amount, true, by, DamageKind::Explosion);
         }
-        if let Some(d) = self.dragon.as_mut().filter(|d| d.alive()) {
-            d.explosion_push(center, radius, exposure);
+        let Some((id, mut push)) = self
+            .dragon
+            .as_ref()
+            .and_then(|d| Some((d.id, d.explosion_knockback(center, radius, exposure)?)))
+        else {
+            return;
+        };
+        self.native_explosion_knockback(self.dim.id(), center, blocks, Some(id), &mut push);
+        if let Some(d) = self.dragon.as_mut() {
+            d.velocity = Vec3::new(
+                d.velocity.x + push[0],
+                d.velocity.y + push[1],
+                d.velocity.z + push[2],
+            );
         }
     }
 }
@@ -4662,13 +4679,14 @@ mod tests {
         d.position = Vec3::new(0.0, 70.0, 0.0);
         d.velocity = Vec3::ZERO;
         // Power 5 right under the dragon: it is thrown up, away from the blast.
-        d.explosion_push([0.0, 66.0, 0.0], 5.0, 1.0);
-        assert!(d.velocity.y > 0.0 && d.velocity.x == 0.0 && d.velocity.z == 0.0);
-        let up = d.velocity.y;
+        let push = d.explosion_knockback([0.0, 66.0, 0.0], 5.0, 1.0).unwrap();
+        assert!(push[1] > 0.0 && push[0] == 0.0 && push[2] == 0.0);
         // Out of reach or fully covered: no push.
-        d.explosion_push([0.0, 40.0, 0.0], 5.0, 1.0);
-        d.explosion_push([0.0, 66.0, 0.0], 5.0, 0.0);
-        assert_eq!(d.velocity.y, up);
+        assert_eq!(d.explosion_knockback([0.0, 40.0, 0.0], 5.0, 1.0), None);
+        assert_eq!(
+            d.explosion_knockback([0.0, 66.0, 0.0], 5.0, 0.0),
+            Some([0.0; 3])
+        );
     }
 
     #[test]
