@@ -3,7 +3,8 @@
     {
       "name": "entity_change_block",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_change_block",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A mob changed a block (`native_entity_change_block`).",

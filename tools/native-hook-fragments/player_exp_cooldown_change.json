@@ -3,7 +3,8 @@
     {
       "name": "player_exp_cooldown_change",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_exp_cooldown_change",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "XP orb pickup cooldown changed for a server player (`native_player_exp_cooldown_change`).",

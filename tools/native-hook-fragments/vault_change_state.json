@@ -3,7 +3,8 @@
     {
       "name": "vault_change_state",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_vault_change_state",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A vault block changes state (`native_vault_change_state`).",

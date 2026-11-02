@@ -3,7 +3,8 @@
     {
       "name": "prepare_anvil",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_anvil",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "Anvil result prepared (`native_prepare_anvil`).",

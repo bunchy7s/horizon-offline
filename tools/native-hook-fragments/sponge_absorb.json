@@ -3,7 +3,8 @@
     {
       "name": "sponge_absorb",
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_sponge_absorb",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A sponge absorbs water (`native_sponge_absorb`).",

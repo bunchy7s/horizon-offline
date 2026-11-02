@@ -3,7 +3,8 @@
     {
       "name": "player_stop_spectating_entity",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_stop_spectating_entity",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A spectator stopped watching an entity (`native_player_stop_spectating_entity`).",

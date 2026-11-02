@@ -3612,12 +3612,7 @@ impl Game<'_> {
     /// A server entity finished its portal wait and is beginning to leave
     /// `dimension` through `pos`. The destination follows the portal rules.
     /// @API:native_entity_portal@.
-    pub(super) fn native_entity_portal(
-        &mut self,
-        dimension: &str,
-        entity: u32,
-        pos: [i32; 3],
-    ) {
+    pub(super) fn native_entity_portal(&mut self, dimension: &str, entity: u32, pos: [i32; 3]) {
         let _ = (dimension, entity, pos);
     }
 
@@ -3647,12 +3642,7 @@ impl Game<'_> {
 
     /// A guest's fall flying state changed on the server. The change has
     /// already been applied. @API:native_entity_toggle_glide@.
-    pub(super) fn native_entity_toggle_glide(
-        &mut self,
-        player: u128,
-        name: &str,
-        gliding: bool,
-    ) {
+    pub(super) fn native_entity_toggle_glide(&mut self, player: u128, name: &str, gliding: bool) {
         let _ = (player, name, gliding);
     }
 
@@ -3670,35 +3660,19 @@ impl Game<'_> {
 
     /// A dropped item entity was successfully added to the server level.
     /// @API:native_item_spawn@.
-    pub(super) fn native_item_spawn(
-        &mut self,
-        entity: u32,
-        item: &str,
-        count: i32,
-        pos: [f64; 3],
-    ) {
+    pub(super) fn native_item_spawn(&mut self, entity: u32, item: &str, count: i32, pos: [f64; 3]) {
         let _ = (entity, item, count, pos);
     }
 
     /// A mob became tamed after its owner and persistent state were set.
     /// @API:native_entity_tame@.
-    pub(super) fn native_entity_tame(
-        &mut self,
-        entity: u32,
-        kind: &str,
-        owner: Option<u128>,
-    ) {
+    pub(super) fn native_entity_tame(&mut self, entity: u32, kind: &str, owner: Option<u128>) {
         let _ = (entity, kind, owner);
     }
 
     /// Two mobs completed a breeding action. `child` is absent when vanilla
     /// lays an egg instead of creating a baby. @API:native_entity_breed@.
-    pub(super) fn native_entity_breed(
-        &mut self,
-        parent: u32,
-        partner: u32,
-        child: Option<u32>,
-    ) {
+    pub(super) fn native_entity_breed(&mut self, parent: u32, partner: u32, child: Option<u32>) {
         let _ = (parent, partner, child);
     }
 

@@ -3,7 +3,8 @@
     {
       "name": "entity_enter_love_mode",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_enter_love_mode",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A mob entered love mode (`native_entity_enter_love_mode`).",

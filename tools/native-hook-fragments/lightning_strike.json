@@ -4,7 +4,8 @@
       "name": "lightning_strike",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_lightning_strike",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A server lightning bolt is about to be created, cancellable (`native_lightning_strike`).",

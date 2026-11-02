@@ -3,7 +3,8 @@
     {
       "name": "target_hit",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_target_hit",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A projectile hits a target block (`native_target_hit`).",

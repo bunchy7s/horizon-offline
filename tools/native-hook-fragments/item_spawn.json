@@ -3,7 +3,8 @@
     {
       "name": "item_spawn",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_item_spawn",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A dropped item entity entered the level (`native_item_spawn`).",

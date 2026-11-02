@@ -3,7 +3,8 @@
     {
       "name": "player_unleash_entity",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_unleash_entity",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A server player's action removed an entity's leash (`native_player_unleash_entity`).",

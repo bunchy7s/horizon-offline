@@ -3,7 +3,8 @@
     {
       "name": "entity_breed",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_breed",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "Two mobs completed a breeding action (`native_entity_breed`).",

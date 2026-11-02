@@ -3,7 +3,8 @@
     {
       "name": "player_pickup_arrow",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_pickup_arrow",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A server player picked up an arrow (`native_player_pickup_arrow`).",

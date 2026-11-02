@@ -3,7 +3,8 @@
     {
       "name": "player_swap_with_equipment_slot",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_swap_with_equipment_slot",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A server player swapped with an equipment slot (`native_player_swap_with_equipment_slot`).",

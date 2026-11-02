@@ -4,7 +4,7 @@
       "name": "player_lectern_page_change",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_lectern_page_change",
       "side": "server",
-      "neoforge": "PlayerLecternPageChange"
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A server player changed a lectern page (`native_player_lectern_page_change`).",

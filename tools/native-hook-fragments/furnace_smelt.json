@@ -3,7 +3,8 @@
     {
       "name": "furnace_smelt",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_furnace_smelt",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A furnace finishes smelting an item (`native_furnace_smelt`).",

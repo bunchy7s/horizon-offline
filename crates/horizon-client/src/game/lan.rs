@@ -2873,12 +2873,7 @@ impl Game<'_> {
             let to_pose = g.pose();
             m.extra.avatar_pose = to_pose;
             if from_pose != to_pose {
-                self.native_entity_pose_change(
-                    g.uuid,
-                    &g.name,
-                    from_pose.name(),
-                    to_pose.name(),
-                );
+                self.native_entity_pose_change(g.uuid, &g.name, from_pose.name(), to_pose.name());
             }
             m.extra.sprinting = g.sprinting;
             // Entity.DATA_POSE and the shared and living flags the others

@@ -3,7 +3,8 @@
     {
       "name": "firework_explode",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_firework_explode",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A firework rocket completed explosion effects (`native_firework_explode`).",

@@ -3,7 +3,8 @@
     {
       "name": "entity_portal",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_portal",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A server entity begins a portal transfer (`native_entity_portal`).",

@@ -3,7 +3,8 @@
     {
       "name": "player_locale_change",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_locale_change",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "Server player changed client language (`native_player_locale_change`).",

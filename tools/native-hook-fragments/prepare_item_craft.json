@@ -3,7 +3,8 @@
     {
       "name": "prepare_item_craft",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_item_craft",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "Crafting-grid result prepared (`native_prepare_item_craft`).",

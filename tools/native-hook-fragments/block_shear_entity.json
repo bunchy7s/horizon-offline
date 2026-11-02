@@ -3,7 +3,8 @@
     {
       "name": "block_shear_entity",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_shear_entity",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A dispenser shears an entity (`native_block_shear_entity`).",

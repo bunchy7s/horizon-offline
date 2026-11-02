@@ -3,7 +3,8 @@
     {
       "name": "exp_bottle",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_exp_bottle",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "An experience bottle broke and awarded experience (`native_exp_bottle`).",

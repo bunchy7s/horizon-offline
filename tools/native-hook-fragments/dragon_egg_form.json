@@ -4,7 +4,8 @@
       "name": "dragon_egg_form",
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_dragon_egg_form",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "The Ender Dragon fight placing its first egg (`native_dragon_egg_form`).",

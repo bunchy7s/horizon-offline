@@ -1699,9 +1699,8 @@ impl Game<'_> {
                 None => None,
             };
         }
-        let player = (p.owner == Some(Who::Player)).then(|| {
-            horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid())
-        });
+        let player = (p.owner == Some(Who::Player))
+            .then(|| horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()));
         let name = if player.is_some() {
             self.acting_player_name().to_owned()
         } else {

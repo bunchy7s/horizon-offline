@@ -3,7 +3,8 @@
     {
       "name": "entity_enter_block",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_enter_block",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A bee entered a beehive (`native_entity_enter_block`).",

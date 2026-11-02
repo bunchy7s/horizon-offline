@@ -3,7 +3,8 @@
     {
       "name": "player_egg_throw",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_egg_throw",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A server player threw an egg (`native_player_egg_throw`).",

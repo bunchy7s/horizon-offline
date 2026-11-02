@@ -3,7 +3,8 @@
     {
       "name": "raid_state_change",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_raid_state_change",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A raid is triggered or reaches a terminal state (`native_raid_state_change`).",

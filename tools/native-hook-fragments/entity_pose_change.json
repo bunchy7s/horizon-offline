@@ -3,7 +3,8 @@
     {
       "name": "entity_pose_change",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_pose_change",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A guest player's synchronized pose changed (`native_entity_pose_change`).",

@@ -4,7 +4,7 @@
       "name": "player_item_frame_change",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_item_frame_change",
       "side": "server",
-      "neoforge": "PlayerItemFrameChange"
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A server player changed an item frame (`native_player_item_frame_change`).",

@@ -3,7 +3,8 @@
     {
       "name": "entities_load",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entities_load",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "Saved entity records finished loading into a chunk (`native_entities_load`).",

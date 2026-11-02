@@ -3,7 +3,8 @@
     {
       "name": "furnace_burn",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_furnace_burn",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A furnace consumes fuel and begins burning (`native_furnace_burn`).",

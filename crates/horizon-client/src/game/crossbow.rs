@@ -260,12 +260,7 @@ impl Game<'_> {
                     self.acting_player_name().to_owned(),
                     self.next_entity,
                 );
-                self.native_entity_shoot_bow(
-                    player,
-                    &name,
-                    projectile,
-                    power as f32,
-                );
+                self.native_entity_shoot_bow(player, &name, projectile, power as f32);
             }
             self.player_projectile_shot();
             let pitch = if index == 0 {

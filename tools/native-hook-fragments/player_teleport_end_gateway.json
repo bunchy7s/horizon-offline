@@ -4,7 +4,8 @@
       "name": "player_teleport_end_gateway",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_teleport_end_gateway",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "Player about to travel through an End gateway, cancellable (`native_player_teleport_end_gateway`).",

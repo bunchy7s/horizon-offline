@@ -3,7 +3,8 @@
     {
       "name": "portal_create",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_portal_create",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A Nether portal or End arrival platform is created (`native_portal_create`).",

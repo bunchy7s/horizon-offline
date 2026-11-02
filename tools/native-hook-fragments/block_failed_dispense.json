@@ -3,7 +3,8 @@
     {
       "name": "block_failed_dispense",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_failed_dispense",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A dispenser fails to dispense an item (`native_block_failed_dispense`).",

@@ -3,7 +3,8 @@
     {
       "name": "creeper_ignite",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_creeper_ignite",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A player ignited a creeper (`native_creeper_ignite`).",

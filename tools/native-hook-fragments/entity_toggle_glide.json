@@ -3,7 +3,8 @@
     {
       "name": "entity_toggle_glide",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_toggle_glide",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A guest player's fall flying state changed (`native_entity_toggle_glide`).",

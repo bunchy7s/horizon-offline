@@ -3,7 +3,8 @@
     {
       "name": "brewing_fuel",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_brewing_fuel",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "Brewing stand consumed fuel (`native_brewing_fuel`).",

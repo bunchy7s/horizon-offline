@@ -3,7 +3,8 @@
     {
       "name": "prepare_smithing",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_smithing",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "Smithing result prepared (`native_prepare_smithing`).",

@@ -3,7 +3,8 @@
     {
       "name": "prepare_item_enchant",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_item_enchant",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "Enchanting offers calculated (`native_prepare_item_enchant`).",

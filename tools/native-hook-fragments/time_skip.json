@@ -4,7 +4,8 @@
       "name": "time_skip",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_time_skip",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "The server clock is about to jump, cancellable (`native_time_skip`).",

@@ -3,7 +3,8 @@
     {
       "name": "player_loom_pattern_select",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_loom_pattern_select",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A server player selected a loom pattern (`native_player_loom_pattern_select`).",

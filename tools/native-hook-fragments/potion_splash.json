@@ -3,7 +3,8 @@
     {
       "name": "potion_splash",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_potion_splash",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A thrown potion applied its hit effects (`native_potion_splash`).",

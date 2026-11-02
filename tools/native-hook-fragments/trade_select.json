@@ -3,7 +3,8 @@
     {
       "name": "trade_select",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_trade_select",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "Player selected a villager trade (`native_trade_select`).",

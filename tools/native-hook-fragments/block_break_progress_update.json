@@ -3,7 +3,8 @@
     {
       "name": "block_break_progress_update",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_break_progress_update",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A guest's block-breaking progress changes (`native_block_break_progress_update`).",

@@ -3,7 +3,8 @@
     {
       "name": "player_attack_cooldown_reset",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_attack_cooldown_reset",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A server player's attack strength was reset by a punch (`native_player_attack_cooldown_reset`).",

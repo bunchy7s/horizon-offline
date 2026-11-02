@@ -3,7 +3,8 @@
     {
       "name": "player_stonecutter_recipe_select",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_stonecutter_recipe_select",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A server player selected a stonecutter recipe (`native_player_stonecutter_recipe_select`).",

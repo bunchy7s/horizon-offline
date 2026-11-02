@@ -4,7 +4,8 @@
       "name": "inventory_block_start",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_inventory_block_start",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A guest is about to open a block inventory (`native_inventory_block_start`).",

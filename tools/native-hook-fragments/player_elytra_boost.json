@@ -3,7 +3,8 @@
     {
       "name": "player_elytra_boost",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_elytra_boost",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A server player used a firework rocket to boost while gliding (`native_player_elytra_boost`).",

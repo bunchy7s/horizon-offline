@@ -3,7 +3,8 @@
     {
       "name": "player_deep_sleep",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_deep_sleep",
-      "side": "server"
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A server player reaches deep sleep (`native_player_deep_sleep`).",

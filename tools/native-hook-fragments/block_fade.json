@@ -4,7 +4,8 @@
       "name": "block_fade",
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_fade",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "A block fades (`native_block_fade`).",

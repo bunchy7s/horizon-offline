@@ -4,7 +4,7 @@
       "name": "player_item_mend",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_item_mend",
       "side": "server",
-      "neoforge": "PlayerItemMend"
+      "neoforge": "none (NeoForge has no such event)"
     }
   ],
   "rust_summary": "An orb repaired a server player's item through Mending (`native_player_item_mend`).",
