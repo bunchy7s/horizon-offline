@@ -391,7 +391,7 @@ pub struct MobType {
     pub model: Arc<Part>,
     /// Every baked layer of this entity's models keyed by `model#layer`
     /// (e.g. `sheep#wool`, `zombie_baby#main`).
-    pub layers: HashMap<String, Arc<Part>>,
+    pub layers: crate::fast_hash::FxHashMap<String, Arc<Part>>,
     pub texture: String,
     pub brain: Brain,
     pub anim: Anim,
@@ -465,7 +465,7 @@ impl MobTypes {
             };
             let defaults = exact.get(&id).cloned().unwrap_or_default();
             let attr = |k: &str| defaults.get(&format!("minecraft:{k}")).copied();
-            let mut layers = HashMap::new();
+            let mut layers = crate::fast_hash::FxHashMap::default();
             if let Some(all) = models.as_object() {
                 for prefix in def.layer_prefixes() {
                     let start = format!("minecraft:{prefix}#");
@@ -3983,7 +3983,7 @@ pub(crate) mod sensor_scan_tests {
                 ..Default::default()
             },
             model: Arc::new(Part::parse("root", &json!({}))),
-            layers: HashMap::new(),
+            layers: Default::default(),
             texture: String::new(),
             brain: Brain::Passive,
             anim: Anim::Rabbit,

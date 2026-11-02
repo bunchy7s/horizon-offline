@@ -4518,6 +4518,19 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
+    /// `entity` (None for a player, whom `native_acting_player` names):
+    /// `ServerExplosion.hurtEntities`, after the knockback is calculated. Change `knockback_velocity` to change
+    /// what is added to the entity's velocity; a player's client is sent the
+    /// same. Wind bursts too, except dragons and end crystals. End crystals
+    /// are also omitted from ordinary blasts: Horizon removes them without a
+    /// velocity to change. Server-side. @API:explosion_knockback@.
+    ///
+    /// Every mod gets `event.knockback_velocity` in order and may add, change or remove knockback_velocity.
+    fn explosion_knockback(&self, host: &mut dyn Host, event: &mut ExplosionKnockbackEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// Item `item` (`mod_id:name`) holds items (`Capabilities.Item.ITEM`): set
     /// `slots` when the item is yours, for a backpack, a storage cell or a
     /// toolbox. Clamped to 1..=256, `ItemContainerContents`' limit; 0 leaves
@@ -13894,6 +13907,35 @@ pub fn dispatch_compute_fov_modifier(
         mod_hook.compute_fov_modifier(host, &mut event);
     }
     *modifier = event.modifier;
+}
+/// What [`Hooks::explosion_knockback`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ExplosionKnockbackEvent<'a> {
+    pub dimension: &'a str,
+    pub center: [f64; 3],
+    pub blocks: &'a [[i32; 3]],
+    pub entity: Option<u32>,
+    pub knockback_velocity: &'a mut [f64; 3],
+}
+pub fn dispatch_explosion_knockback(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    center: [f64; 3],
+    blocks: &[[i32; 3]],
+    entity: Option<u32>,
+    knockback_velocity: &mut [f64; 3],
+) {
+    let mut event = ExplosionKnockbackEvent {
+        dimension,
+        center,
+        blocks,
+        entity,
+        knockback_velocity,
+    };
+    for mod_hook in super::entered(mods, "explosion_knockback") {
+        mod_hook.explosion_knockback(host, &mut event);
+    }
 }
 /// What [`Hooks::item_container`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

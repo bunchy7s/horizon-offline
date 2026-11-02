@@ -6192,6 +6192,31 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_explosion_detonate(self, mod_api::mods(), dimension, center, blocks);
     }
+    /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
+    /// `entity` (None for a player, whom `native_acting_player` names):
+    /// `ServerExplosion.hurtEntities`, after the knockback is calculated. Change `knockback_velocity` to change
+    /// what is added to the entity's velocity; a player's client is sent the
+    /// same. Wind bursts too, except dragons and end crystals. End crystals
+    /// are also omitted from ordinary blasts: Horizon removes them without a
+    /// velocity to change. Server-side. @API:explosion_knockback@.
+    pub(super) fn native_explosion_knockback(
+        &mut self,
+        dimension: &str,
+        center: [f64; 3],
+        blocks: &[[i32; 3]],
+        entity: Option<u32>,
+        knockback_velocity: &mut [f64; 3],
+    ) {
+        mod_api::dispatch_explosion_knockback(
+            self,
+            mod_api::mods(),
+            dimension,
+            center,
+            blocks,
+            entity,
+            knockback_velocity,
+        );
+    }
     /// A player fills (`stack` an empty bucket) or empties a bucket at `pos`:
     /// `BucketItem.use`, where it asks `Level.mayInteract`. Set `canceled`
     /// and the bucket does nothing. Server-side, for every player of the

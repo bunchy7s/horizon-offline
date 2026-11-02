@@ -6560,11 +6560,7 @@ impl Game<'_> {
                 let mut models = self.skin_models.borrow_mut();
                 let mut frame = self.skin_frame.borrow_mut();
                 let mark = frame.mark();
-                let mut skin = horizon_client::mobs::skin::Skin {
-                    models: &mut models,
-                    frame: &mut frame,
-                    bounds: None,
-                };
+                let mut skin = horizon_client::mobs::skin::Skin::new(&mut models, &mut frame);
                 horizon_client::mobs::render::render_skinned(
                     mob,
                     alpha as f32,
