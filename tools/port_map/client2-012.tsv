@@ -5,13 +5,13 @@ ContainerEventHandler.mouseScrolled	port	crates/horizon-client-render/src/pack_s
 ContainerEventHandler.keyPressed	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::shortcut	gap: minor: only Ctrl+A/C/V/X here; Backspace is PackScreen::erase
 ContainerEventHandler.keyReleased	skip:other		no widget in the pack screen acts on key release
 ContainerEventHandler.charTyped	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::type_text	typed text goes to the search box when it has focus
-ContainerEventHandler.preeditUpdated	missing		minor: no IME composition (preedit) anywhere in Horizon
-ContainerEventHandler.getBorderForArrowNavigation	missing		minor: arrow keys do not move focus; pack screen focus is set by clicks (PackScreen::set_focus)
-ContainerEventHandler.getCurrentFocusPath	missing		minor: no focus path; PackScreen::focus is read only inside the screen
-ContainerEventHandler.nextFocusPath	missing		minor: Tab and arrow keys do not move focus between search, lists and buttons
-ContainerEventHandler.handleTabNavigation	missing		minor: Tab does not move focus (same gap as nextFocusPath)
-ContainerEventHandler.handleArrowNavigation	missing		minor: arrow keys do not move focus (same gap)
-ContainerEventHandler.nextFocusPathVaguelyInDirection	missing		minor: no directional focus search (same gap)
+ContainerEventHandler.preeditUpdated	port	crates/horizon-client/src/game.rs::ime_preedit	WindowEvent::Ime(Preedit) feeds the focused field's composition text
+ContainerEventHandler.getBorderForArrowNavigation	port	crates/horizon-client/src/game/key_focus.rs::edge	the screen border an arrow key is measured against
+ContainerEventHandler.getCurrentFocusPath	inline	crates/horizon-client/src/game/key_focus.rs::drawn_targets	the drawn targets of the open screen are the focus path, resolved per screen
+ContainerEventHandler.nextFocusPath	port	crates/horizon-client/src/game/key_focus.rs::nav_of + act	a nav key moves focus to the next drawn target, with the screen context deciding what passes on
+ContainerEventHandler.handleTabNavigation	port	crates/horizon-client/src/game/key_focus.rs::tab_order + tab_step	Tab and Shift+Tab step through the focusable targets in drawing order
+ContainerEventHandler.handleArrowNavigation	port	crates/horizon-client/src/game/key_focus.rs::act	the four directions pick the nearest target that way
+ContainerEventHandler.nextFocusPathVaguelyInDirection	inline	crates/horizon-client/src/game/key_focus.rs::act	the same directional search, without vanilla's vague fallback
 SpectatorGui.extractPage	port	crates/horizon-client/src/spectator_menu.rs::SpectatorGui::hotbar	the nine-slot page with its frame and selection
 SpectatorGui.extractSlot	inline	crates/horizon-client/src/spectator_menu.rs::SpectatorGui::hotbar	icon and key label drawn in the hotbar loop
 MenuTabBar.extractWidgetRenderState	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	header separators and tab row drawn inside draw_create
