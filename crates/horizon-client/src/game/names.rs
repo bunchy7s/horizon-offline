@@ -107,12 +107,16 @@ impl Game<'_> {
         let viewer = self.player_team();
         let mut tags = Vec::new();
         let players = self.other_players();
+        let player_ids: std::collections::HashSet<u32> =
+            players.iter().map(|(player, _)| player.id).collect();
         let named = self.mobs.iter().filter_map(|m| {
+            if player_ids.contains(&m.id) {
+                return None;
+            }
             // A mannequin with no name still shows its description.
             let name = match &m.custom_name {
                 Some(name) => name.clone(),
-                None if m.species() == horizon_client::mobs::Species::Mannequin => String::new(),
-                None => return None,
+                None => String::new(),
             };
             // The tag's 64 block distance is measured to the entity: copy the
             // name only for a mob the frame can show it on.
@@ -180,7 +184,20 @@ impl Game<'_> {
             let name_shown = sb::name_shown(team, viewer, view)
                 && (player || m.name_visible || Some(m.id) == target)
                 && (player || m.custom_name.is_some());
-            if !name_shown {
+            let mut visible = name_shown;
+            let mut text = None;
+            self.native_render_name_tag(
+                m.id,
+                if player {
+                    "minecraft:player"
+                } else {
+                    &m.kind.id
+                },
+                name_shown,
+                &mut visible,
+                &mut text,
+            );
+            if !visible {
                 if let Some(text) = description {
                     let l = self.world.light(
                         m.position.x.floor() as i32,
@@ -211,6 +228,9 @@ impl Game<'_> {
                 None => member,
             }
             .resolve_legacy();
+            let shown = text
+                .map(|text| Text::literal(text).resolve_legacy())
+                .unwrap_or(shown);
             let mut lines = Vec::new();
             // EntityRenderer.extractNameTags: the score shows within the
             // below-name distance (10), under the name.
@@ -242,12 +262,6 @@ impl Game<'_> {
         // Armor stands name themselves: an invisible one with a visible name
         // is a hologram (its model is skipped, its name tag is not).
         for a in &self.armor_stands {
-            let Some(name) = &a.custom_name else {
-                continue;
-            };
-            if !a.name_visible {
-                continue;
-            }
             let height = match (a.marker, a.small) {
                 (true, _) => 0.0,
                 (false, true) => 0.9875,
@@ -268,14 +282,29 @@ impl Game<'_> {
                 is_camera: false,
                 is_vehicle: false,
             };
-            if !sb::name_shown(team, viewer, view) {
+            let name_shown =
+                a.custom_name.is_some() && a.name_visible && sb::name_shown(team, viewer, view);
+            let mut visible = name_shown;
+            let mut text = None;
+            self.native_render_name_tag(
+                a.id,
+                "minecraft:armor_stand",
+                name_shown,
+                &mut visible,
+                &mut text,
+            );
+            if !visible {
                 continue;
             }
+            let name = a.custom_name.clone().unwrap_or_else(Text::empty);
             let shown = match team {
                 Some(t) => t.formatted_name(name.clone()),
                 None => name.clone(),
             }
             .resolve_legacy();
+            let shown = text
+                .map(|text| Text::literal(text).resolve_legacy())
+                .unwrap_or(shown);
             let mut lines = Vec::new();
             let mut lift = 0.0;
             let holder = self.persist.uuids.get(&a.id).map(|u| uuid_text(*u));
@@ -302,19 +331,31 @@ impl Game<'_> {
         }
         // ItemFrameRenderer.shouldShowName/getNameTag: only the targeted
         // frame's custom-named item, with the HUD visible (also glow frames).
-        if !self.ui.hide_gui
-            && let Some((i, distance)) = self.frame_hit()
-            && self.before_block(distance)
-            && self.mob_hit().is_none_or(|(_, d)| d > distance)
-            && let Some(name) = self.item_frames[i]
-                .item
-                .as_ref()
-                .and_then(|item| item.custom_name())
-        {
-            let frame = &self.item_frames[i];
+        let targeted_frame = self
+            .frame_hit()
+            .filter(|(_, distance)| {
+                self.before_block(*distance) && self.mob_hit().is_none_or(|(_, d)| d > *distance)
+            })
+            .map(|(index, _)| index);
+        for (index, frame) in self.item_frames.iter().enumerate() {
             let (lo, hi) = frame.bounds();
             let center = glam::DVec3::from_array(std::array::from_fn(|a| (lo[a] + hi[a]) / 2.0));
             if center.distance_squared(camera) < 64.0 * 64.0 {
+                let name = frame.item.as_ref().and_then(|item| item.custom_name());
+                let name_shown =
+                    !self.ui.hide_gui && targeted_frame == Some(index) && name.is_some();
+                let mut visible = name_shown;
+                let mut text = None;
+                self.native_render_name_tag(
+                    frame.id,
+                    frame.kind(),
+                    name_shown,
+                    &mut visible,
+                    &mut text,
+                );
+                if !visible {
+                    continue;
+                }
                 // NAME_TAG is at the entity height (0.5), then the name
                 // submitter lifts it 0.5. ItemFrameRenderer offsets rendering
                 // 0.3 toward its facing and -0.25 vertically.
@@ -326,7 +367,10 @@ impl Game<'_> {
                             0.75,
                             f64::from(step[2] as f32 * 0.3),
                         ),
-                    lines: vec![(Text::literal(name).resolve_legacy(), 0.0)],
+                    lines: vec![(
+                        Text::literal(text.or(name).unwrap_or_default()).resolve_legacy(),
+                        0.0,
+                    )],
                     light: self.world.light(
                         center.x.floor() as i32,
                         center.y.floor() as i32,

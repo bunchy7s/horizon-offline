@@ -4508,6 +4508,11 @@ pub trait Hooks: Send + Sync {
     fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
         let _ = event;
     }
+    /// Name tag visibility and optional replacement text. API @API:render_name_tag@.
+    fn render_name_tag(&self, host: &dyn Host, event: &mut RenderNameTagEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
 }
 /// What [`Hooks::frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -13794,4 +13799,34 @@ pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
     for mod_hook in super::entered(mods, "living_jump") {
         mod_hook.living_jump(&mut event);
     }
+}
+/// What [`Hooks::render_name_tag`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RenderNameTagEvent<'a> {
+    pub entity_id: u32,
+    pub kind: &'a str,
+    pub vanilla_visible: bool,
+    pub visible: bool,
+    pub text: &'a mut Option<String>,
+}
+pub fn dispatch_render_name_tag(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity_id: u32,
+    kind: &str,
+    vanilla_visible: bool,
+    visible: &mut bool,
+    text: &mut Option<String>,
+) {
+    let mut event = RenderNameTagEvent {
+        entity_id,
+        kind,
+        vanilla_visible,
+        visible: *visible,
+        text,
+    };
+    for mod_hook in super::entered(mods, "render_name_tag") {
+        mod_hook.render_name_tag(host, &mut event);
+    }
+    *visible = event.visible;
 }
