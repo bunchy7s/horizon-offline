@@ -706,6 +706,7 @@ impl Game<'_> {
                     }
                 }
             }
+            self.native_portal_create("minecraft:the_end", origin);
             // Direction.WEST.toYRot().
             return Ok(Some((target, Some(90.0))));
         }

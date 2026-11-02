@@ -429,6 +429,13 @@ impl Game<'_> {
         });
         let _ = self.process_level_events();
         if let Some(exit) = created {
+            let dim = if to_nether {
+                "minecraft:the_nether"
+            } else {
+                "minecraft:overworld"
+            };
+            let corner = exit.min_corner;
+            self.native_portal_create(dim, [corner.x, corner.y, corner.z]);
             // A portal built for the entity: the ticket goes on the chunk it
             // arrives in (`TeleportTransition.PLACE_PORTAL_TICKET`).
             let (at, _) = self.arrival(plan, exit);

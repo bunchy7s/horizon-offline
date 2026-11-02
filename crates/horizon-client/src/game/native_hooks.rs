@@ -3879,6 +3879,14 @@ impl Game<'_> {
     /// The server world's border center changed. @API:native_world_border_center_changed@.
     pub(super) fn native_world_border_center_changed(&mut self) {}
 
+    /// A Nether portal was built for a dimension travel, or an End platform
+    /// was made for an arrival. `pos` is the lower corner of the Nether
+    /// portal rectangle or the End platform origin. The completed blocks are
+    /// already in the world. @API:native_portal_create@.
+    pub(super) fn native_portal_create(&mut self, dimension: &str, pos: [i32; 3]) {
+        let _ = (dimension, pos);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
