@@ -1328,9 +1328,10 @@ pub(super) fn posed(base: glam::Mat4, p: [f32; 9]) -> glam::Mat4 {
         ))
         * glam::Mat4::from_scale(glam::Vec3::new(p[6], p[7], p[8]))
 }
-/// `draw_scrolled` through the GPU path when the mob takes it (`skin`).
+/// `draw_scrolled` through the GPU path when the mob takes it (`skin`), on
+/// the CPU otherwise.
 #[allow(clippy::too_many_arguments)]
-fn put(
+pub fn put(
     skin: &mut Option<&mut super::skin::Skin>,
     part: &std::sync::Arc<Part>,
     base: glam::Mat4,

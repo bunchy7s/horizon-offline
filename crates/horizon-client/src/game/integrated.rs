@@ -715,12 +715,12 @@ impl Game<'_> {
         self.finish_open_world(opening.world?.finish()?)?;
         drop(open_step);
         if let Some(sync) = opening.sync {
-            sync.adopt(&self.pack_files());
+            startup::time("server.sync_adopt", || sync.adopt(&self.pack_files()));
         }
         let saved = Box::new(self.level.clone());
         // IntegratedServer runs the server mods; the window the client mods.
         self.mods.dev = self.options.dev_mods.clone();
-        self.start_mods();
+        startup::time("server.start_mods", || self.start_mods());
         // Math.max(2, options.renderDistance): past vanilla's 32 when the
         // window's render distance is (Horizon's options go to 64).
         let view_distance = self.settings.render_distance.max(2);

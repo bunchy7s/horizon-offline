@@ -10791,6 +10791,7 @@ impl Game<'_> {
         self.drain_transient_block_queue();
         self.prepare_entity_culling(camera);
         self.prepare_trims();
+        self.begin_skinning();
         self.mark_entity(out.len(), "minecraft:entity_flame");
         // One scan for both passes that draw them (block entities below and the
         // overlay near the end of this function).
@@ -18257,6 +18258,14 @@ impl Game<'_> {
                             self.perf.title_shown();
                         } else if self.screen == Screen::Playing && self.player.is_some() {
                             self.perf.frame(elapsed.as_secs_f32() * 1000.0);
+                            if startup::filling() {
+                                let mut fill: Vec<(&'static str, usize)> =
+                                    self.streaming.stages().to_vec();
+                                fill.push(("resident", self.world.chunks.len()));
+                                fill.push(("uploads", self.pending_uploads.len()));
+                                fill.push(("backlog", self.remote_backlog()));
+                                startup::counters("world.fill", &fill);
+                            }
                             if startup::on() {
                                 startup::view_filled(
                                     self.world.chunks.len(),
