@@ -90,7 +90,7 @@ fn a_tall_column_streams_lights_and_meshes_to_its_top() {
         while quiet < 40 {
             assert!(Instant::now() < deadline, "streaming never settled");
             let (uploads, _) = streaming.update(world);
-            let idle = uploads.is_empty() && streaming.pending() == 0;
+            let idle = uploads.is_empty() && !streaming.busy();
             meshes.extend(uploads);
             thread::sleep(Duration::from_millis(5));
             quiet = if idle { quiet + 1 } else { 0 };
@@ -129,6 +129,7 @@ fn a_tall_column_streams_lights_and_meshes_to_its_top() {
         let mut mesher = Mesher {
             nether_shading: false,
             shader_pack_lighting: false,
+            separate_ao: false,
             zoom: BiomeZoom::new(0),
             blend_radius: 2,
             smooth_lighting: true,

@@ -19,20 +19,28 @@ pub const HDR_MARKER: &str = "horizon-hdr-pending";
 pub struct Reported {
     pub paper_white: u32,
     pub peak: u32,
+    /// The display's darkest black, in hundredths of a nit.
+    pub black: u32,
 }
 
-static REPORTED: [AtomicU32; 2] = [AtomicU32::new(0), AtomicU32::new(0)];
+static REPORTED: [AtomicU32; 3] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 
 /// Sets what the system reports (the renderer, when it opens its surface).
 pub fn report(reported: Option<Reported>) {
-    let (paper_white, peak) = reported.map_or((0, 0), |r| (r.paper_white, r.peak));
+    let (paper_white, peak, black) =
+        reported.map_or((0, 0, 0), |r| (r.paper_white, r.peak, r.black));
     REPORTED[0].store(paper_white, Ordering::Relaxed);
     REPORTED[1].store(peak, Ordering::Relaxed);
+    REPORTED[2].store(black, Ordering::Relaxed);
 }
 /// What the system reports, if it does.
 pub fn reported() -> Option<Reported> {
-    let [paper_white, peak] = REPORTED.each_ref().map(|n| n.load(Ordering::Relaxed));
-    (peak > 0).then_some(Reported { paper_white, peak })
+    let [paper_white, peak, black] = REPORTED.each_ref().map(|n| n.load(Ordering::Relaxed));
+    (peak > 0).then_some(Reported {
+        paper_white,
+        peak,
+        black,
+    })
 }
 
 /// Simple-level presets. `Custom` leaves every option as the player set it.
@@ -546,6 +554,20 @@ pub struct Graphics {
     /// vanilla's fancy leaves. Ignored with a resource pack that may replace
     /// the vanilla leaf models ([`Graphics::leaf_culling_effective`]).
     pub leaf_culling: LeafCullingMode,
+    /// Cache settled shulker-box models.
+    pub cache_shulker_boxes: bool,
+    /// Cache sign-text geometry.
+    pub cache_signs: bool,
+    /// Cache decorated pots outside their wobble animation.
+    pub cache_decorated_pots: bool,
+    /// Cache bells while they are not ringing.
+    pub cache_bells: bool,
+    /// Cache closed chests, including copper variants.
+    pub cache_chests: bool,
+    /// Cache banner poles while leaving their flags animated.
+    pub cache_banners: bool,
+    /// Cache copper-golem statue models.
+    pub cache_copper_golem_statues: bool,
     /// Meshed sections uploaded per frame; 0 uploads all that are ready.
     pub chunk_updates: u32,
     /// Section mesh bytes uploaded per frame, in KiB; 0 is unlimited.
@@ -585,8 +607,9 @@ pub struct Graphics {
     /// HDR peak brightness the world's highlights reach, in nits; 0 is Auto:
     /// what the system reports for the display ([`Graphics::peak_nits`]).
     pub hdr_peak: u32,
-    /// HDR black level: the display's darkest black, in hundredths of a nit (0 for
-    /// an OLED's true black). Shadows are lifted onto it, and the HDR metadata says it.
+    /// HDR black level: the display's darkest black, in hundredths of a nit; 0 is Auto:
+    /// what the system reports, else true black. Shadows are lifted onto it, and the HDR
+    /// metadata says it.
     pub hdr_black_level: u32,
     /// HDR brightness of the HUD and menus, in percent of paper white (25..=100); the
     /// first-person hand stays at the world's.
@@ -625,6 +648,14 @@ impl Default for Graphics {
             cave_culling: true,
             entity_culling: EntityCullingMode::Off,
             leaf_culling: LeafCullingMode::Off,
+            cache_shulker_boxes: false,
+            // Sign text has used its renderer cache independently of the new model caches.
+            cache_signs: true,
+            cache_decorated_pots: false,
+            cache_bells: false,
+            cache_chests: false,
+            cache_banners: false,
+            cache_copper_golem_statues: false,
             chunk_updates: 0,
             upload_budget_kib: 0,
             texture_budget_mib: 0,
@@ -710,6 +741,29 @@ impl Graphics {
                 "caveCulling" => g.cave_culling = flag(g.cave_culling),
                 "entityCulling" => g.entity_culling = EntityCullingMode::parse(value),
                 "leafCulling" => g.leaf_culling = LeafCullingMode::parse(value),
+                "blockEntityCache" => {
+                    let enabled = flag(false);
+                    g.cache_shulker_boxes = enabled;
+                    g.cache_signs = enabled;
+                    g.cache_decorated_pots = enabled;
+                    g.cache_bells = enabled;
+                    g.cache_chests = enabled;
+                    g.cache_banners = enabled;
+                    g.cache_copper_golem_statues = enabled;
+                }
+                "blockEntityCacheShulkerBoxes" => {
+                    g.cache_shulker_boxes = flag(g.cache_shulker_boxes)
+                }
+                "blockEntityCacheSigns" => g.cache_signs = flag(g.cache_signs),
+                "blockEntityCacheDecoratedPots" => {
+                    g.cache_decorated_pots = flag(g.cache_decorated_pots)
+                }
+                "blockEntityCacheBells" => g.cache_bells = flag(g.cache_bells),
+                "blockEntityCacheChests" => g.cache_chests = flag(g.cache_chests),
+                "blockEntityCacheBanners" => g.cache_banners = flag(g.cache_banners),
+                "blockEntityCacheCopperGolemStatues" => {
+                    g.cache_copper_golem_statues = flag(g.cache_copper_golem_statues)
+                }
                 "chunkUpdates" => g.chunk_updates = number(g.chunk_updates).min(512),
                 "uploadBudgetKiB" => g.upload_budget_kib = number(g.upload_budget_kib).min(65536),
                 "textureBudgetMiB" => {
@@ -776,13 +830,20 @@ impl Graphics {
     }
     pub fn serialize(&self) -> String {
         let mut text = format!(
-            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nleafCulling:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiBrightness:{}\nhdrKey:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nbatchTranslucent:{}\n",
+            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nleafCulling:{}\nblockEntityCacheShulkerBoxes:{}\nblockEntityCacheSigns:{}\nblockEntityCacheDecoratedPots:{}\nblockEntityCacheBells:{}\nblockEntityCacheChests:{}\nblockEntityCacheBanners:{}\nblockEntityCacheCopperGolemStatues:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiBrightness:{}\nhdrKey:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nbatchTranslucent:{}\n",
             self.preset.name(),
             self.lod_distance,
             self.far_detail.name(),
             bool_text(self.cave_culling),
             self.entity_culling.name(),
             self.leaf_culling.name(),
+            bool_text(self.cache_shulker_boxes),
+            bool_text(self.cache_signs),
+            bool_text(self.cache_decorated_pots),
+            bool_text(self.cache_bells),
+            bool_text(self.cache_chests),
+            bool_text(self.cache_banners),
+            bool_text(self.cache_copper_golem_statues),
             self.chunk_updates,
             self.upload_budget_kib,
             self.texture_budget_mib,
@@ -849,6 +910,14 @@ impl Graphics {
             0 => reported().map_or(1000, |r| r.peak),
             n => n,
         }
+    }
+    /// The black level, in nits: the player's, or on Auto what the system reports, else 0.
+    pub fn black_level_nits(&self) -> f32 {
+        let hundredths = match self.hdr_black_level {
+            0 => reported().map_or(0, |r| r.black),
+            n => n,
+        };
+        hundredths as f32 / 100.0
     }
     /// Worker threads for chunk generation and meshing.
     pub fn worker_threads(&self) -> usize {
@@ -949,6 +1018,13 @@ mod tests {
             cave_culling: false,
             entity_culling: EntityCullingMode::Synchronous,
             leaf_culling: LeafCullingMode::SolidAggressive,
+            cache_shulker_boxes: true,
+            cache_signs: true,
+            cache_decorated_pots: true,
+            cache_bells: true,
+            cache_chests: true,
+            cache_banners: true,
+            cache_copper_golem_statues: true,
             chunk_updates: 12,
             upload_budget_kib: 4096,
             texture_budget_mib: 1536,

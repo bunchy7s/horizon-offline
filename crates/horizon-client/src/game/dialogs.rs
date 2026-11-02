@@ -4,6 +4,7 @@
 //! connecting screen in configuration), its inputs, and the actions its
 //! buttons send back.
 use super::Game;
+use super::remote_chat::Behind;
 use horizon_client::{
     Result,
     clipboard::EditShortcut,
@@ -34,6 +35,9 @@ struct Open {
     /// The multiline input the pointer is selecting in.
     selecting: Option<usize>,
 }
+
+/// A dialog a clicked command closed, kept for its confirmation's no.
+pub(super) struct ClosedDialog(Box<Open>);
 
 /// A text input's control: `EditBox`, or `MultiLineEditBox` for a multiline one.
 enum Field {
@@ -252,6 +256,12 @@ impl Game<'_> {
         }
     }
 
+    /// The confirmation's no: the dialog again, with what was typed in it.
+    pub(super) fn reopen_dialog(&mut self, dialog: ClosedDialog) {
+        self.dialogs.open = Some(*dialog.0);
+        self.dialogs.waiting = None;
+    }
+
     /// `DialogScreen.runAction`: the click event, then the screen the dialog's
     /// `after_action` leaves.
     fn run_dialog_action(&mut self, click: Option<Click>, after: AfterAction) -> Result<()> {
@@ -266,6 +276,14 @@ impl Game<'_> {
             }
             return Ok(());
         }
+        // openSendConfirmationWindow's `currentScreen`: a command that asks
+        // first still has this dialog to go back to.
+        let closing = match (&click, &after) {
+            (Some(Click::RunCommand(_)), AfterAction::Close | AfterAction::WaitForResponse) => {
+                self.dialogs.open.take()
+            }
+            _ => None,
+        };
         match after {
             AfterAction::None => {}
             AfterAction::Close => self.dialogs.open = None,
@@ -284,6 +302,11 @@ impl Game<'_> {
                 // In configuration there is nothing to run it (vanilla warns).
                 if self.player.is_some() {
                     self.send_unattended_command(&command);
+                    if let Some(open) = closing {
+                        self.command_prompt_returns_to(Behind::Dialog(ClosedDialog(Box::new(
+                            open,
+                        ))));
+                    }
                 } else {
                     log::warn!(
                         "Horizon: commands are not supported in configuration, trying to run '{command}'"
@@ -493,6 +516,22 @@ impl Game<'_> {
             match part {
                 Part::Line(text, x, y) => {
                     batch.text_styled(atlas, &text, x, y, u32::MAX, true);
+                    // AbstractStringWidget: only the styled glyph under the
+                    // pointer requests a hand, not the whole message widget.
+                    if (!clipped || in_area(cursor.1))
+                        && let Some(style) = horizon_client::dialog_screen::line_style_at(
+                            &atlas.font,
+                            &text,
+                            x,
+                            y,
+                            cursor,
+                        )
+                    {
+                        widgets::widget_cursor(style.click.is_some(), true);
+                        if let Some(hover) = style.hover {
+                            tooltip = Some(*hover);
+                        }
+                    }
                 }
                 Part::Field { input, rect } => {
                     let focused = open.focus == Some(input);
@@ -801,20 +840,15 @@ impl Game<'_> {
                 }
                 // AbstractStringWidget.setComponentClickHandler: the click event
                 // of the styled text under a centred message line.
-                Part::Line(line, x, y)
-                    if text_click.is_none()
-                        && cursor.0 >= x
-                        && (0.0..9.0).contains(&(cursor.1 - y)) =>
-                {
-                    let content = line.resolve_legacy();
-                    let mut left = cursor.0 - x;
-                    for (c, style) in content.chars() {
-                        left -= self.gui.atlas.font.advance(c, style);
-                        if left < 0.0 {
-                            text_click = style.click.clone();
-                            break;
-                        }
-                    }
+                Part::Line(line, x, y) if text_click.is_none() => {
+                    text_click = horizon_client::dialog_screen::line_style_at(
+                        &self.gui.atlas.font,
+                        &line,
+                        x,
+                        y,
+                        cursor,
+                    )
+                    .and_then(|style| style.click);
                 }
                 _ => {}
             }
@@ -828,6 +862,7 @@ impl Game<'_> {
                 Some(ClickEvent::RunCommand(command)) => Click::RunCommand(command),
                 Some(ClickEvent::CopyToClipboard(value)) => Click::CopyToClipboard(value),
                 Some(ClickEvent::ShowDialog(dialog)) => Click::ShowDialog(dialog),
+                Some(ClickEvent::Custom { id, payload }) => Click::Custom { id, payload },
                 Some(ClickEvent::OpenFile(_)) | None => return Ok(()),
             };
             let after = open.dialog.after_action;

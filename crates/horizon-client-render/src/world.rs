@@ -52,6 +52,8 @@ impl DirtySections {
     }
 }
 pub struct World {
+    /// Server-owned mod data attached to this dimension.
+    pub attachments: horizon_world::attachments::Attachments,
     /// The level's build range and skylight (its dimension type); its
     /// chunks hold `shape.column()`.
     pub shape: LevelShape,
@@ -200,6 +202,7 @@ impl World {
             loaded_entities: Vec::new(),
             loaded_chunks: Vec::new(),
             modified: FxHashSet::default(),
+            attachments: Default::default(),
             block_entities: Default::default(),
             chest_openers: FxHashMap::default(),
             block_names: FxHashMap::default(),

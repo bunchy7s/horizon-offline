@@ -79,22 +79,37 @@ class StampTests(unittest.TestCase):
         path = self.fragment("helper")
         fragment = json.loads(path.read_text())
         fragment["hooks"] = []
+        fragment["helpers"] = [{"name": "helper", "target": "target::helper"}]
         path.write_text(json.dumps(fragment))
         self.assertFalse(stamp.stamp(False))
         self.assertIn("NATIVE_HOOKS_API: u32 = 8;", (self.root / stamp.SOURCE).read_text())
         self.assertEqual(json.loads((self.root / stamp.CATALOG).read_text())["hooks"], [])
+        self.assertEqual(json.loads((self.root / stamp.CATALOG).read_text())["helpers"], fragment["helpers"])
 
     def test_catalog_facts_travel_with_the_hook(self):
         self.git("add", ".")
         self.git("commit", "-qm", "base")
         path = self.fragment("served")
         fragment = json.loads(path.read_text())
-        fragment["hooks"][0].update({"side": "server", "cancellable": True, "other": 1})
+        contract = {"kind": "listen", "receiver": "game"}
+        fragment["hooks"][0].update(
+            {"side": "server", "cancellable": True, "mod_api": contract, "other": 1})
         path.write_text(json.dumps(fragment))
         self.assertFalse(stamp.stamp(False))
         hooks = json.loads((self.root / stamp.CATALOG).read_text())["hooks"]
         self.assertEqual(hooks, [{"name": "served", "version": 1, "target": "target::served",
-                                  "side": "server", "cancellable": True}])
+                                  "side": "server", "cancellable": True, "mod_api": contract}])
+
+    def test_markers_are_stamped_in_the_mod_api_files(self):
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        self.fragment("drops")
+        for path in stamp.MOD_API:
+            (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / path).write_text("/// Since API @API:drops@.\n")
+        self.assertFalse(stamp.stamp(False))
+        for path in stamp.MOD_API:
+            self.assertEqual((self.root / path).read_text(), "/// Since API 8.\n")
 
     def test_duplicate_fails_before_writes(self):
         self.git("add", ".")

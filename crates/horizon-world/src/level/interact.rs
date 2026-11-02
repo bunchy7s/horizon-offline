@@ -235,8 +235,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 Class::Note => {
                     let next = table.cycle(state, p.note);
+                    if !self.note_play_allowed(pos, next) {
+                        return Success;
+                    }
                     self.set_block_and_update(pos, next);
-                    self.note_play(pos, next);
+                    self.note_play_unchecked(pos, next);
                     Success
                 }
                 Class::RedstoneWire => self.wire_use(pos, state, player),
@@ -486,13 +489,19 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             return InteractionResult::Pass;
         }
         self.set_block_and_update(pos, next);
+        let orientation = self.initial_orientation(None, Some(Direction::Up));
         for direction in horizontal {
             let relative = super::update::rel(pos, direction);
             if connected(state, direction) != connected(next, direction)
                 && self.is_redstone_conductor(self.state(relative), relative)
             {
                 let block = b.block(next);
-                self.update_neighbors_at_except(relative, block, direction.opposite());
+                self.update_neighbors_at_except_oriented(
+                    relative,
+                    block,
+                    direction.opposite(),
+                    orientation.map(|o| o.with_front(direction)),
+                );
             }
         }
         InteractionResult::Success

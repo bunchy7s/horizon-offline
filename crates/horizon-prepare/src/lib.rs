@@ -16,6 +16,7 @@ pub mod exporters;
 mod files;
 mod inventory;
 pub mod java;
+pub mod launch_api;
 mod pool;
 pub mod pyjson;
 mod sounds;
