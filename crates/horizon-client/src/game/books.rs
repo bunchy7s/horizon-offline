@@ -829,6 +829,9 @@ impl Game<'_> {
         self.audio
             .play("minecraft:item.book.put", Some(at), 1.0, 1.0);
         self.container_changed(key);
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_insert_lectern_book(player, &name, pos, &book.item);
+        }
         true
     }
     /// `LecternBlock.openScreen`: reading the lectern's book.
