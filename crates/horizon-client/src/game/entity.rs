@@ -14,6 +14,7 @@ use super::{
     boats::Boat, fireworks::Rocket, minecarts::Minecart, tnt::PrimedTnt, trident::ThrownTrident,
 };
 use horizon_client::entities::{ArmorStand, ExperienceOrb, ItemEntity};
+use horizon_client::entity_rules::EntityRules;
 use horizon_client::mobs::{Mob, Species};
 use horizon_client::projectiles::Projectile;
 use horizon_core::geometry::{Aabb, Direction, Vec3};
@@ -50,7 +51,7 @@ pub(super) struct Blast {
     pub(super) spared: Option<u32>,
 }
 
-pub(super) trait Entity {
+pub(super) trait Entity: EntityRules {
     /// `Entity.getId`.
     fn id(&self) -> u32;
     fn position(&self) -> Vec3;
@@ -144,6 +145,51 @@ pub(super) trait Entity {
     /// `Entity.isSupportedBy`.
     fn is_supported_by(&self, _pos: BlockPos) -> bool {
         false
+    }
+    /// `Entity.getEyeY`, where `updateFluidHeightAndDoFluidPushing` reads the
+    /// eye's fluid; the top of the box unless a kind sets it.
+    fn fluid_eye_y(&self) -> f64 {
+        self.bounds().max_position().y
+    }
+    /// `Entity.updateFluidHeightAndDoFluidPushing`: its water and lava heights
+    /// (`(0, 0)` for a kind that is not pushed by fluid), and the current of
+    /// each fluid added to its velocity. One body for every kind.
+    fn push_by_fluid(
+        &mut self,
+        world: &horizon_client::world::World,
+        fluids: &horizon_client::motion::FluidResources,
+    ) -> (f64, f64) {
+        if !self.is_pushed_by_fluid() {
+            return (0.0, 0.0);
+        }
+        let (bounds, at, eye) = (self.bounds(), self.position(), self.fluid_eye_y());
+        horizon_client::entities::update_entity_fluids(
+            bounds,
+            at,
+            eye,
+            self.velocity_mut(),
+            world,
+            fluids,
+        )
+    }
+    /// `BubbleColumnBlock.entityInside` through `applyEffectsFromBlocks`: a
+    /// column lifts or drags every kind alike.
+    fn push_by_bubble_column(
+        &mut self,
+        world: &horizon_client::world::World,
+        registry: &horizon_world::registry::BlockRegistry,
+        facts: &horizon_client::blocks::BlockFacts,
+        collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
+    ) -> bool {
+        let bounds = self.bounds();
+        horizon_client::motion::bubble_column_push(
+            world,
+            registry,
+            facts,
+            collision,
+            bounds,
+            self.velocity_mut(),
+        )
     }
     /// `Entity.getPistonPushReaction`.
     fn get_piston_push_reaction(&self) -> PushReaction {
@@ -447,16 +493,11 @@ impl Entity for Mob {
             || (self.species() == Species::Warden
                 && horizon_client::mobs::warden::digging_or_emerging(self))
     }
-    /// The kind's own box, not the baby's or the slime's.
-    fn explosion_box(&self) -> Aabb {
-        let (feet, half) = (self.position, self.kind.width / 2.0);
-        Aabb::new(
-            Vec3::new(feet.x - half, feet.y, feet.z - half),
-            Vec3::new(feet.x + half, feet.y + self.kind.height, feet.z + half),
-        )
-    }
+    /// `getEyeHeight` of the mob as it stands: a baby's, a slime's or a
+    /// phantom's own scaled eye height, not the adult kind's. The blast's box
+    /// is its real `bounds`, so it needs no override.
     fn explosion_eye_height(&self) -> f64 {
-        self.kind.eye_height
+        self.eye_height()
     }
     /// `Entity.push` sets `needsSync`.
     fn push_from_explosion(&mut self, push: Vec3) {
@@ -577,6 +618,10 @@ impl Entity for Boat {
         game.save_boat(index, keys)
     }
     stored_motion!();
+    /// `Boat.getEyeY`: the top of the 0.5625 box.
+    fn fluid_eye_y(&self) -> f64 {
+        self.position.y + super::boats::HEIGHT
+    }
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((super::boats::WIDTH as f32, super::boats::HEIGHT as f32))
     }
@@ -729,6 +774,10 @@ impl Entity for PrimedTnt {
         game.save_tnt(index, keys)
     }
     stored_motion!();
+    /// `PrimedTnt` eye height: `0.98 * 0.85`.
+    fn fluid_eye_y(&self) -> f64 {
+        self.position.y + f64::from(0.98f32 * 0.85f32)
+    }
     /// `PrimedTnt` is 0.98 across.
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((0.98, 0.98))
@@ -906,5 +955,44 @@ impl Entity for ThrownTrident {
     /// `GameLevel::tick_blocks` sweeps tridents itself.
     fn sweeps_blocks_inside(&self) -> bool {
         false
+    }
+}
+
+impl EntityRules for Rocket {}
+impl EntityRules for ThrownTrident {}
+impl EntityRules for Boat {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `AbstractBoat.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
+    }
+}
+impl EntityRules for Minecart {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `AbstractMinecart.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        if self.in_water { 0.005 } else { 0.04 }
+    }
+}
+impl EntityRules for PrimedTnt {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `PrimedTnt.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
+    }
+}
+impl EntityRules for FallingBlock {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `FallingBlockEntity.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
     }
 }

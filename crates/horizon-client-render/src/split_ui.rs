@@ -1,5 +1,6 @@
 //! Setup's monitor map and draft window choices. Apply is consumed by the game adapter.
 use crate::{
+    gamepad::Button as PadButton,
     graphics_style::STYLE,
     hud::{HudAtlas, HudBatch, rgba},
     lang,
@@ -48,12 +49,28 @@ pub struct SplitUi {
     /// Names: the names in the views' corners are shown (the game sets it), and pressed.
     pub names_shown: bool,
     pub toggle_names: bool,
+    /// P1 has a controller (the game sets it), and Give Up Pad pressed: it's offered to join.
+    pub p1_pad: bool,
+    pub give_up_pad: bool,
     edit: Option<Draft>,
     selected: Option<usize>,
     /// A tile held by the mouse: whose, and where the pointer is (`None` until it moves).
     drag: Option<(usize, Option<(f32, f32)>)>,
-    /// The screen's size at the last press: where a drag's release lands.
-    size: (f32, f32),
+    /// A player picked up with the controller (A), moved with the bumpers.
+    held: Option<Held>,
+    /// Dropped or put back: the player whose tile the controller's focus goes to.
+    refocus: Option<usize>,
+    /// The screen's size: at the last draw (the options screen sets it) or press.
+    pub(crate) size: (f32, f32),
+}
+
+/// A player picked up with the controller: where it could go, the one picked so far, and the
+/// draft with it there (the map shows it).
+struct Held {
+    player: usize,
+    spots: Vec<(String, Drop)>,
+    at: Option<usize>,
+    preview: Option<Draft>,
 }
 
 /// Where a dragged player goes: a place (`Spot`), or a place among a window's players.
@@ -73,6 +90,8 @@ enum Target {
     Identify,
     /// The players' names in their views' corners, on or off.
     Names,
+    /// P1's controller freed and offered to join (handed to a friend).
+    GiveUpPad,
     Revert,
     Apply,
     Done,
@@ -124,9 +143,113 @@ impl SplitUi {
         self.selected = None;
         self.apply = None;
         self.drag = None;
+        self.held = None;
     }
+    /// The draft shown: with a held player where the controller put it, else the changes so
+    /// far, else the arrangement now.
     fn draft(&self) -> Option<&Draft> {
-        self.edit.as_ref().or(self.live.as_ref())
+        let preview = self.held.as_ref().and_then(|h| h.preview.as_ref());
+        preview.or(self.edit.as_ref()).or(self.live.as_ref())
+    }
+
+    /// The controller (`pad_menu`), A at `at`: on a player's tile, picks it up. True when it did
+    /// (the press is taken).
+    pub fn pad_pick_up(&mut self, at: (f32, f32)) -> bool {
+        let (w, h) = self.size;
+        let hit = self
+            .buttons(w, h)
+            .into_iter()
+            .rev()
+            .find(|([x, y, bw, bh], _, _, active)| *active && ui::hovered(at, *x, *y, *bw, *bh));
+        let Some((_, _, Target::Player(i), _)) = hit else {
+            return false;
+        };
+        self.selected = Some(i);
+        let spots = self.stops(i);
+        self.held = Some(Held {
+            player: i,
+            spots,
+            at: None,
+            preview: None,
+        });
+        true
+    }
+
+    /// The controller while a player is held: the bumpers or left and right cycle where it goes,
+    /// as when joining (the map shows it there), A drops it there (into the draft), B puts it
+    /// back. True when the button was taken: every button, while one is held.
+    pub fn pad_button(&mut self, button: PadButton) -> bool {
+        let Some(held) = &self.held else {
+            return false;
+        };
+        let player = held.player;
+        match button {
+            PadButton::LeftBumper
+            | PadButton::RightBumper
+            | PadButton::DPadLeft
+            | PadButton::DPadRight => {
+                let n = held.spots.len();
+                if n == 0 {
+                    return true;
+                }
+                let back = matches!(button, PadButton::LeftBumper | PadButton::DPadLeft);
+                let next = match held.at {
+                    None if back => n - 1,
+                    None => 0,
+                    Some(k) if back => (k + n - 1) % n,
+                    Some(k) => (k + 1) % n,
+                };
+                let (player, drop) = (held.player, held.spots[next].1.clone());
+                let open = self.open_now();
+                let preview = self.edit.clone().or(self.live.clone()).map(|mut draft| {
+                    match drop {
+                        Drop::At(spot) => draft.place_player(player, spot),
+                        Drop::Place(n, k) => {
+                            draft.place_player(player, Spot::Window(n));
+                            draft.put_at(player, k);
+                        }
+                    }
+                    draft.drop_empty(&open);
+                    draft
+                });
+                if let Some(held) = &mut self.held {
+                    held.at = Some(next);
+                    held.preview = preview;
+                }
+            }
+            PadButton::South => {
+                let held = self.held.take().expect("held");
+                // One highlight after: the focus on the player where it landed, not selected too.
+                (self.selected, self.refocus) = (None, Some(held.player));
+                match held.at.map(|k| held.spots[k].1.clone()) {
+                    Some(Drop::At(spot)) => self.place(held.player, spot),
+                    Some(Drop::Place(n, k)) => self.place_at(held.player, n, k),
+                    None => {}
+                }
+            }
+            PadButton::East => {
+                (self.selected, self.refocus) = (None, Some(player));
+                self.held = None;
+            }
+            // While one is held, the focus stays put: A drops, it presses nothing else.
+            _ => {}
+        }
+        true
+    }
+
+    /// Whether a player is held (the controller's left and right cycle it).
+    pub fn holding(&self) -> bool {
+        self.held.is_some()
+    }
+
+    /// The tile of the player just dropped or put back, for the controller's focus. Taken once.
+    pub fn take_refocus(&mut self) -> Option<[f32; 4]> {
+        let i = self.refocus.take()?;
+        let (w, h) = self.size;
+        self.buttons(w, h)
+            .into_iter()
+            .find(|b| b.2 == Target::Player(i))
+            .map(|b| b.0)
     }
     fn map(&self, w: f32, h: f32) -> split_map::Map {
         if self.idle {
@@ -270,8 +393,18 @@ impl SplitUi {
             Target::Switch,
             !self.on || self.names.len() <= 1,
         );
+        // P1's controller handed to a friend: it's offered to join.
+        let give_up = (
+            [90.0, 6.0, 80.0, 20.0],
+            tr("give_up_pad", &[]),
+            Target::GiveUpPad,
+            true,
+        );
         if !self.on || self.idle {
             let mut out = vec![switch];
+            if self.on && self.p1_pad {
+                out.push(give_up);
+            }
             row(&mut out, h - 27.0, vec![done]);
             return out;
         }
@@ -329,6 +462,9 @@ impl SplitUi {
             true,
         );
         out.extend([switch, names]);
+        if self.p1_pad {
+            out.push(give_up);
+        }
         // A square for how 2 (or 3) players share a window, while a window has that many (drawn
         // as the layout; the label is for the control socket and the tests).
         let mut footer = Vec::new();
@@ -373,6 +509,7 @@ impl SplitUi {
             Target::Switch => tr("help.switch", &[]),
             Target::Identify => tr("help.identify", &[]),
             Target::Names => tr("help.names", &[]),
+            Target::GiveUpPad => tr("help.give_up_pad", &[]),
             Target::Revert if *active => tr("help.revert", &[]),
             Target::Apply if *active => tr("help.apply", &[]),
             Target::Revert | Target::Apply => tr("help.unchanged", &[]),
@@ -542,7 +679,9 @@ impl SplitUi {
         ([x, y, bw, bh], label, target, active): &Button,
     ) {
         let (mut x, mut y, mut bw, mut bh) = (*x, *y, *bw, *bh);
-        let hover = *active && ui::hovered(cursor, x, y, bw, bh);
+        // While a player is held, only its tile is lit: the controller's pointer stays where
+        // the pick-up was, over whichever tile is there now.
+        let hover = *active && self.held.is_none() && ui::hovered(cursor, x, y, bw, bh);
         let selected = matches!(target, Target::Player(i) if Some(*i) == self.selected);
         if matches!(target, Target::Player(_)) {
             (x, y, bw, bh) = (x + 1.0, y + 1.0, (bw - 2.0).max(4.0), (bh - 2.0).max(4.0));
@@ -571,6 +710,16 @@ impl SplitUi {
             *active,
             hover || selected,
         );
+        // The held player: "< Name >", the arrows lit, for left and right.
+        if matches!(target, Target::Player(i) if self.held.as_ref().is_some_and(|h| h.player == *i))
+        {
+            let (half, cx) = (HudBatch::text_width(atlas, label) / 2.0, x + bw / 2.0);
+            let ty = (y + (bh - 8.0) / 2.0).floor();
+            let lit = rgba(255, 255, 85, 255);
+            let lw = HudBatch::text_width(atlas, "<");
+            batch.text(atlas, "<", (cx - half - 4.0 - lw).floor(), ty, lit, true);
+            batch.text(atlas, ">", (cx + half + 4.0).ceil(), ty, lit, true);
+        }
         // A layout's square: its panes, in a 14 x 10 window; Auto a letter. Its name for the
         // control socket, which lists widgets by what they say.
         if glyph.is_some() {
@@ -601,7 +750,19 @@ impl SplitUi {
         buttons: &[Button],
     ) {
         let (w, h) = (batch.width, batch.height);
+        let held = self.held.as_ref().map(|h| {
+            let who = self
+                .names
+                .get(h.player)
+                .cloned()
+                .unwrap_or_else(|| tr("this_player", &[]));
+            match h.at {
+                Some(k) => tr("note.held_at", &[&who, &h.spots[k].0]),
+                None => tr("note.held", &[&who]),
+            }
+        });
         let note = match self.selected {
+            _ if held.is_some() => held.unwrap_or_default(),
             None => tr("note.select", &[]),
             Some(_) if self.edit.is_some() => tr("note.apply", &[]),
             Some(i) => tr(
@@ -651,6 +812,10 @@ impl SplitUi {
     /// A press at `(x, y)` on a screen `w` x `h`, or the mouse moving with it held (`drag`).
     pub fn click(&mut self, (x, y): (f32, f32), (w, h): (f32, f32), drag: bool) -> Click {
         self.size = (w, h);
+        // The mouse takes over from a player held with the controller.
+        if !drag {
+            self.held = None;
+        }
         if drag {
             if let Some((_, at)) = &mut self.drag {
                 *at = Some((x, y));
@@ -690,6 +855,7 @@ impl SplitUi {
             }
             Target::Identify => self.identify = true,
             Target::Names => self.toggle_names = true,
+            Target::GiveUpPad => self.give_up_pad = true,
             Target::Revert => self.edit = None,
             Target::Apply => {
                 // Windows emptied in the draft close now, not as players moved.
@@ -1237,6 +1403,133 @@ mod tests {
         // Alone: neither.
         assert_eq!(labels(&screen(1)).count(), 0);
     }
+
+    fn centre(ui: &SplitUi, label: &str) -> (f32, f32) {
+        let [x, y, w, h] = rect(ui, label);
+        (x + w / 2.0, y + h / 2.0)
+    }
+
+    #[test]
+    fn a_controller_picks_a_player_up_moves_it_and_drops_it() {
+        let mut ui = screen(2);
+        ui.size = SIZE;
+        assert!(ui.pad_pick_up(centre(&ui, "P2")));
+        // Nothing moves until the bumpers do; then the map shows it there: the places in Window 1
+        // first, then a new window.
+        assert_eq!(ui.draft().unwrap().players, [1, 1]);
+        for _ in 0..3 {
+            assert!(ui.pad_button(PadButton::RightBumper));
+        }
+        assert_eq!(ui.draft().unwrap().players, [1, 2]);
+        assert_eq!(ui.edit, None);
+        // Right again: filling the TV; A drops it there, into the draft.
+        assert!(ui.pad_button(PadButton::RightBumper));
+        assert!(ui.pad_button(PadButton::South));
+        let draft = ui.edit.as_ref().unwrap();
+        assert_eq!(draft.players, [1, 2]);
+        assert_eq!(draft.windows[1].placement, Placement::Fill("TV".into()));
+        // Not held any more: the buttons go back to the menu.
+        assert!(!ui.pad_button(PadButton::RightBumper));
+    }
+
+    #[test]
+    fn a_controller_moves_a_player_to_a_place_among_the_others() {
+        let mut ui = screen(2);
+        ui.size = SIZE;
+        assert!(ui.pad_pick_up(centre(&ui, "P2")));
+        let stops: Vec<String> = ui
+            .held
+            .as_ref()
+            .unwrap()
+            .spots
+            .iter()
+            .map(|s| s.0.clone())
+            .collect();
+        assert_eq!(
+            &stops[..3],
+            ["Window 1 (1 of 2)", "Window 1 (2 of 2)", "New window"]
+        );
+        assert!(
+            !stops.iter().any(|s| s.starts_with("Swap")),
+            "no swaps: it joins"
+        );
+        // RB to the first place: before P1.
+        assert!(ui.pad_button(PadButton::RightBumper));
+        assert!(ui.pad_button(PadButton::South));
+        assert_eq!(ui.edit.as_ref().unwrap().order, [1, 0]);
+    }
+
+    #[test]
+    fn idle_replaces_preview_but_keeps_the_switch_and_pad_handoff() {
+        let mut ui = screen(1);
+        ui.on = true;
+        ui.idle = true;
+        ui.p1_pad = true;
+        assert_eq!(ui.status_lines().unwrap()[0], "Splitscreen idle");
+        assert!(ui.map(SIZE.0, SIZE.1).2.is_empty());
+        let buttons = ui.buttons(SIZE.0, SIZE.1);
+        assert!(buttons.iter().any(|b| b.2 == Target::GiveUpPad));
+        assert!(
+            !buttons
+                .iter()
+                .any(|b| matches!(b.2, Target::Player(_) | Target::Apply | Target::Revert))
+        );
+        press(&mut ui, "Give Up Pad");
+        assert!(ui.give_up_pad);
+        ui.idle = false;
+        assert!(ui.status_lines().is_none());
+        assert_eq!(ui.map(SIZE.0, SIZE.1).2.len(), 1);
+        ui.on = false;
+        assert_eq!(ui.status_lines().unwrap()[0], "Splitscreen is off.");
+    }
+
+    #[test]
+    fn give_up_pad_shows_only_while_p1_has_one() {
+        let mut ui = screen(1);
+        ui.on = true;
+        let shown = |ui: &SplitUi| {
+            ui.buttons(SIZE.0, SIZE.1)
+                .iter()
+                .any(|b| b.2 == Target::GiveUpPad)
+        };
+        assert!(!shown(&ui));
+        ui.p1_pad = true;
+        assert!(shown(&ui));
+        press(&mut ui, "Give Up Pad");
+        assert!(ui.give_up_pad);
+    }
+
+    #[test]
+    fn b_puts_a_held_player_back() {
+        let mut ui = screen(2);
+        ui.size = SIZE;
+        assert!(ui.pad_pick_up(centre(&ui, "P2")));
+        ui.pad_button(PadButton::RightBumper);
+        assert!(ui.pad_button(PadButton::East));
+        assert_eq!(ui.edit, None);
+        assert_eq!(ui.draft().unwrap().players, [1, 1]);
+    }
+
+    #[test]
+    fn dropped_or_put_back_one_highlight_and_the_focus_follows() {
+        let mut ui = screen(2);
+        ui.size = SIZE;
+        assert!(ui.pad_pick_up(centre(&ui, "P2")));
+        assert!(ui.pad_button(PadButton::RightBumper)); // to a new window
+        assert!(ui.pad_button(PadButton::South));
+        // Not selected (the focus is its highlight), and the focus goes to its new tile.
+        assert_eq!(ui.selected, None);
+        assert_eq!(ui.take_refocus(), Some(rect(&ui, "P2")));
+        assert_eq!(ui.take_refocus(), None);
+        // Put back: the same.
+        assert!(ui.pad_pick_up(centre(&ui, "P2")));
+        assert!(ui.pad_button(PadButton::East));
+        assert_eq!(
+            (ui.selected, ui.take_refocus()),
+            (None, Some(rect(&ui, "P2")))
+        );
+    }
+
     #[test]
     fn locale_switch_and_pack_overrides_keep_the_same_draft() {
         // The language table is process-wide. Run this test alone in a child so

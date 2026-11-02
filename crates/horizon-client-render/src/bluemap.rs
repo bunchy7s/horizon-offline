@@ -654,7 +654,8 @@ enum Slot {
     Missing,
     Waiting,
     /// Not cached, and out of reach or the server down when looked up:
-    /// wanted when that changes (`State::reach`), drawn without meanwhile.
+    /// wanted when that changes (`State::reach`); level 1's are stood in
+    /// for by the coarser levels meanwhile (`BlueMap::chunk`).
     Unreached,
 }
 /// What the map knows of the server, and what it wants from it.
@@ -810,7 +811,8 @@ impl BlueMap {
         state.taken_at = Some(Instant::now());
         std::mem::take(&mut state.changed)
     }
-    /// A chunk's columns from the finest level.
+    /// A chunk's columns from the finest level, the coarser levels standing
+    /// in where its tile is out of reach (`coarser_column`).
     pub fn chunk(&self, cx: i32, cz: i32) -> Found<Columns> {
         let (map, generation) = {
             let state = self.inner.state.lock().unwrap();
@@ -825,23 +827,27 @@ impl BlueMap {
         // The chunk's pixels and a ring around (their tops bound its depth).
         let mut last = None;
         let mut ring = [None; 18 * 18];
+        // Columns whose finest tile is out of reach (not one the server has
+        // none of): the coarser levels, which reach farther, stand in.
+        let mut unreached = [false; 256];
         for (i, slot) in ring.iter_mut().enumerate() {
             let (dx, dz) = ((i % 18) as i32 - 1, (i / 18) as i32 - 1);
             let inside = (0..16).contains(&dx) && (0..16).contains(&dz);
-            match self
-                .inner
-                .pixel(&map, &mut last, 1, cx * 16 + dx, cz * 16 + dz)
-            {
+            let (x, z) = (cx * 16 + dx, cz * 16 + dz);
+            match self.inner.pixel(&map, &mut last, 1, x, z) {
                 Found::Ready(pixel) => *slot = Some(pixel).filter(|p| p.color >> 24 != 0),
                 // A neighbour on its way only bounds the depth when here.
                 Found::Waiting if inside => return Found::Waiting,
+                Found::Absent if inside => {
+                    unreached[(dz * 16 + dx) as usize] = self.inner.unreached(&map, 1, x, z)
+                }
                 _ => {}
             }
         }
-        if !ring
-            .iter()
-            .enumerate()
-            .any(|(i, p)| p.is_some() && (1..17).contains(&(i % 18)) && (1..17).contains(&(i / 18)))
+        if !unreached.contains(&true)
+            && !ring.iter().enumerate().any(|(i, p)| {
+                p.is_some() && (1..17).contains(&(i % 18)) && (1..17).contains(&(i / 18))
+            })
         {
             return Found::Absent;
         }
@@ -855,7 +861,25 @@ impl BlueMap {
                 .fold(i32::from(pixel.height) + 1, i32::min);
             Some((pixel, low))
         });
-        let columns = Arc::new(self.inner.palette.columns(pixels));
+        let mut columns = self.inner.palette.columns(pixels);
+        let mut found = pixels.iter().any(Option::is_some);
+        for (i, column) in columns.iter_mut().enumerate() {
+            if unreached[i] {
+                let (x, z) = (cx * 16 + (i % 16) as i32, cz * 16 + (i / 16) as i32);
+                match self.coarser_column(x, z) {
+                    Found::Ready(coarse) => {
+                        *column = coarse;
+                        found = true;
+                    }
+                    Found::Waiting => return Found::Waiting,
+                    Found::Absent => {}
+                }
+            }
+        }
+        if !found {
+            return Found::Absent;
+        }
+        let columns = Arc::new(columns);
         let mut state = self.inner.state.lock().unwrap();
         // Built from tiles since replaced: drawn this once, not kept.
         if state.generation != generation {
@@ -874,9 +898,30 @@ impl BlueMap {
             return Found::Absent;
         };
         let level = map.lowres.level_for(width);
-        let (x, z) = (x + width / 2, z + width / 2);
+        self.column_at(&map, level, x + width / 2, z + width / 2, width)
+    }
+    /// Block (x, z)'s column from the finest of the coarser levels (2 and
+    /// up) that has it: drawn while level 1 is on its way or out of reach
+    /// (`chunk`, and the sampler's `coarser`).
+    pub fn coarser_column(&self, x: i32, z: i32) -> Found<Column> {
+        let Some(map) = self.inner.state.lock().unwrap().map.clone() else {
+            return Found::Absent;
+        };
+        let mut found = Found::Absent;
+        for level in 2..=map.lowres.levels {
+            match self.column_at(&map, level, x, z, map.lowres.scale(level)) {
+                Found::Ready(column) => return Found::Ready(column),
+                Found::Waiting => found = Found::Waiting,
+                Found::Absent => {}
+            }
+        }
+        found
+    }
+    /// The column of `level`'s pixel at block (x, z), its depth bound by the
+    /// pixels `width` blocks each way.
+    fn column_at(&self, map: &MapInfo, level: u8, x: i32, z: i32, width: i32) -> Found<Column> {
         let mut last = None;
-        let pixel = match self.inner.pixel(&map, &mut last, level, x, z) {
+        let pixel = match self.inner.pixel(map, &mut last, level, x, z) {
             Found::Ready(pixel) => pixel,
             Found::Waiting => return Found::Waiting,
             Found::Absent => return Found::Absent,
@@ -885,7 +930,7 @@ impl BlueMap {
         let low = [(-width, 0), (width, 0), (0, -width), (0, width)]
             .into_iter()
             .filter_map(
-                |(dx, dz)| match self.inner.pixel(&map, &mut last, level, x + dx, z + dz) {
+                |(dx, dz)| match self.inner.pixel(map, &mut last, level, x + dx, z + dz) {
                     Found::Ready(p) if p.color >> 24 != 0 => Some(i32::from(p.height) + 1),
                     _ => None,
                 },
@@ -998,6 +1043,15 @@ impl Inner {
             .join(crate::server_terrain::server_folder(&map.id))
             .join(level.to_string())
             .join(format!("{x}_{z}"))
+    }
+    /// Whether block (x, z)'s tile of `level` is out of reach (`Slot::Unreached`).
+    fn unreached(&self, map: &MapInfo, level: u8, x: i32, z: i32) -> bool {
+        let (tx, _) = map.lowres.locate(0, level, x);
+        let (tz, _) = map.lowres.locate(1, level, z);
+        matches!(
+            self.state.lock().unwrap().tiles.get(&(level, tx, tz)),
+            Some(Slot::Unreached)
+        )
     }
     fn pixel(&self, map: &MapInfo, last: &mut Last, level: u8, x: i32, z: i32) -> Found<Pixel> {
         let level = level.min(map.lowres.levels);
@@ -1355,18 +1409,33 @@ impl Worker {
         }
         let slot = tile.map_or(Slot::Missing, |t| Slot::Ready(Arc::new(t)));
         state.tiles.insert(key, slot);
+        // Chunks are made of level 1, their depth read a pixel around, and
+        // of the coarser levels where level 1 is out of reach, theirs read a
+        // cell around: any level makes the chunks over it again.
+        let margin = if level > 1 {
+            map.lowres.scale(level)
+        } else {
+            0
+        };
         let (x0, x1) = map.lowres.span(0, level, x);
         let (z0, z1) = map.lowres.span(1, level, z);
-        // Only level 1 makes chunks; their depth reads a pixel around.
+        let (x0, x1) = (x0.saturating_sub(margin), x1.saturating_add(margin));
+        let (z0, z1) = (z0.saturating_sub(margin), z1.saturating_add(margin));
         state.generation += 1;
-        if level == 1 {
-            state.chunks.retain(|&(cx, cz), _| {
-                cx * 16 > x1 || (cx + 1) * 16 < x0 || cz * 16 > z1 || (cz + 1) * 16 < z0
-            });
-        }
+        state.chunks.retain(|&(cx, cz), _| {
+            cx * 16 > x1 || (cx + 1) * 16 < x0 || cz * 16 > z1 || (cz + 1) * 16 < z0
+        });
+        // A coarser level also stands in for chunk-wide cells whose finest
+        // tile is on its way (`coarser_column`): those are sampled again too.
+        let (min, max) = map.lowres.widths(level);
+        let widths = if level > 1 {
+            (1, max.max(16))
+        } else {
+            (min, max)
+        };
         state.announce(Change {
             area: [x0, z0, x1, z1],
-            widths: map.lowres.widths(level),
+            widths,
         });
         REQUEST_GAP.saturating_sub(started.elapsed())
     }
@@ -1799,8 +1868,9 @@ mod tests {
         // A wide cell reads the coarsest level, here not cached either.
         assert_eq!(map.reduced_column(40 * 16, 40 * 16, 1024), Found::Waiting);
         assert!(queued((3, 1, 1)));
-        // Out of reach, not looked up on disk again; wanted once in reach.
-        assert_eq!(map.chunk(60, 40), Found::Absent);
+        // Out of level 1's reach, not looked up on disk again (wanted once
+        // in reach); the coarsest level stands in, and it is on its way.
+        assert_eq!(map.chunk(60, 40), Found::Waiting);
         assert!(matches!(
             map.inner.state.lock().unwrap().tiles.get(&(1, 30, 20)),
             Some(Slot::Unreached)
@@ -1869,6 +1939,78 @@ mod tests {
         assert_eq!(details[0].1, columns);
         assert_eq!(details[1].1[0].surface.map(|s| s.height), Some(71));
         assert_eq!(details[2].1[0], Column::default());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The finest level on its way: a chunk-sized cell is drawn from a
+    /// coarser one meanwhile, and sampled again once it comes.
+    #[test]
+    fn coarser_levels_stand_in_for_the_finest_on_its_way() {
+        use crate::{server_terrain::ServerTerrain, streaming::LodSource};
+        let dir = scratch("coarser");
+        let maps = dir.join("map");
+        std::fs::create_dir_all(&maps).unwrap();
+        std::fs::write(maps.join("settings.json"), br#"{"maps":["world"]}"#).unwrap();
+        std::fs::write(maps.join("world.json"), br#"{"lowres":{}}"#).unwrap();
+        // The finest coarser level wins: level 3 is lower.
+        for (level, height) in [(2, 70), (3, 50)] {
+            let green = |_: usize, _: usize| Pixel {
+                color: 0xFF57_7133,
+                height,
+                block_light: 0,
+            };
+            let tiles = maps.join(format!("world/{level}"));
+            std::fs::create_dir_all(&tiles).unwrap();
+            std::fs::write(tiles.join("0_0.png"), tile_png(&LOWRES, green)).unwrap();
+        }
+        let map = Arc::new(BlueMap::new(
+            "http://map.example.net",
+            "minecraft:overworld",
+            Vec::new(),
+            maps,
+            256,
+            palette(),
+        ));
+        map.set_center(3, 3);
+        assert_eq!(map.chunk(0, 0), Found::Waiting);
+        let Found::Ready(coarse) = map.coarser_column(3, 3) else {
+            panic!("level 2 is cached")
+        };
+        assert_eq!(coarse.spans.last().map(|s| s.max), Some(71));
+        let terrain = ServerTerrain::new(dir.join("chunks"), Some(map));
+        let mut sampler = terrain.clone().sampler();
+        assert!(!sampler.waited());
+        for width in [1, 4, 16] {
+            assert_eq!(
+                sampler
+                    .reduced_column(0, 0, width)
+                    .spans
+                    .last()
+                    .map(|s| s.max),
+                Some(71)
+            );
+            // Stood in for: drawn, and sampled again once level 1 comes.
+            assert!(!sampler.waited());
+        }
+        // On its way with no coarser level cached there either: a hole, so
+        // the sample isn't drawn.
+        // (Level 2 and 3 are cached only east of 0.)
+        assert_eq!(sampler.reduced_column(-100, 3, 1), Column::default());
+        assert!(sampler.waited());
+        // Level 1 out of reach there (past 256 blocks), level 3 cached: the
+        // coarser level, and nothing waited for.
+        assert_eq!(
+            sampler
+                .reduced_column(400, 3, 1)
+                .spans
+                .last()
+                .map(|s| s.max),
+            Some(51)
+        );
+        assert!(!sampler.waited());
+        // Nowhere near any level: nothing to stand in, and not waited for.
+        assert_eq!(sampler.reduced_column(-4000, 0, 1), Column::default());
+        assert!(!sampler.waited());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

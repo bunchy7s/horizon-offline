@@ -24,8 +24,8 @@ ChatComponent.DrawingBackgroundGraphicsAccess.handleTag	port	crates/horizon-clie
 ChatComponent.DrawingFocusedGraphicsAccess.updateLocalMousePos	inline	crates/horizon-client-render/src/chat.rs::Chat::line_at	the mouse mapped into line space inside line_at
 ChatComponent.DrawingFocusedGraphicsAccess.updatePose	skip:ui		pose bookkeeping; the mouse mapping is done in Chat::line_at
 ChatComponent.DrawingFocusedGraphicsAccess.handleMessage	port	crates/horizon-client-render/src/chat.rs::Chat::style_at	gap: player: no pointing-hand cursor over clickable chat text; only widgets set the cursor (widgets.rs:28)
-ChatComponent.DrawingFocusedGraphicsAccess.isMouseOver	inline	crates/horizon-client-render/src/chat.rs::Chat::indicator_at	the rectangle test of the indicator bar; tag icons are not drawn
-ChatComponent.DrawingFocusedGraphicsAccess.handleTagIcon	missing		minor: no tag icons; Horizon never tags a message as modified, so the Modified icon never shows
+ChatComponent.DrawingFocusedGraphicsAccess.isMouseOver	inline	crates/horizon-client-render/src/chat.rs::Chat::focused_tags	the cursor test of the tag bar and its icons, folded into the tag lookup
+ChatComponent.DrawingFocusedGraphicsAccess.handleTagIcon	port	crates/horizon-client-render/src/chat.rs::Chat::focused_tags	the modified-message tags under the cursor: the tooltip of the bar or icon, and the icons of the message the cursor is over
 ChatComponent.DrawingFocusedGraphicsAccess.showTooltip	port	crates/horizon-client/src/game/chat.rs::Game::draw_chat_screen	gap: minor: every indicator shows the systemSinglePlayer text as its tooltip
 Checkbox.adjustWidth	missing		minor: the checkbox width is never capped or its label wrapped; dialog_screen.rs:137 sets the width to the full label
 Checkbox.overflowsRowLimit	missing		minor: no tooltip for a label that wraps past two rows; Horizon dialog labels never wrap
@@ -64,7 +64,7 @@ ContainerObjectSelectionList.Entry.updateNarration	skip:other		narration text; n
 CycleButton.extractContents	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::draw	option button sprite and its label
 CycleButton.onPress	port	crates/horizon-client-render/src/options_ui.rs::Opt::cycle	click cycles forward; the back flag comes from the caller
 CycleButton.getCycledValue	skip:other		only feeds the narration of the next value
-CycleButton.mouseScrolled	missing		player: the mouse wheel over an option button does not change its value; OptionsUi::scroll_at only scrolls the list
+CycleButton.mouseScrolled	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::wheel	the wheel over a cycle button takes its step (up goes back) and the list stays put; a blocked row falls through to the page
 CycleButton.updateValue	inline	crates/horizon-client-render/src/options_ui.rs::Opt::cycle	labels are read live from Settings (Opt::label), so no cached message needs updating
 CycleButton.createLabelForValue	port	crates/horizon-client-render/src/options_ui.rs::Opt::label	value label or full name, from the setting
 CycleButton.updateWidgetNarration	skip:other		narration text; no narrator in Horizon
@@ -80,7 +80,7 @@ DebugScreenOverlay.formatChart	port	crates/horizon-client/src/game/debug_keys.rs
 DebugScreenOverlay.formatKeybind	inline	crates/horizon-client/src/game/debug_keys.rs::Game::debug_chart_lines	the key closure inside debug_chart_lines
 DebugScreenOverlay.getServerLevel	missing		minor: F3 draws no chunk or level lines; draw_debug_overlay has no chunk data
 DebugScreenOverlay.getLevel	missing		minor: F3 draws no chunk or level lines; draw_debug_overlay has no chunk data
-DebugScreenOverlay.getServerChunk	missing		minor: F3 draws no server chunk line
+DebugScreenOverlay.getServerChunk	port	crates/horizon-client/src/game/debug_lines.rs::Game::server_debug_lines	the integrated server's half of the F3 lines for the dimension at the feet: heightmaps, local difficulty, spawn counts and the chunk source's counts
 DebugScreenOverlay.getClientChunk	missing		minor: F3 draws no client chunk line
 DebugScreenOverlay.showDebugScreen	port	crates/horizon-client/src/game/debug_keys.rs::Game::draw_debug_overlay	debug on and (HUD shown or a screen open)
 DebugScreenOverlay.showProfilerChart	missing		minor: no profiler chart; the profiling chart key is used up and draws nothing (debug_keys.rs:662)
@@ -96,8 +96,8 @@ EditBox.createNarrationMessage	skip:other		narration text; no narrator in Horizo
 EditBox.getHighlighted	port	crates/horizon-client-render/src/ui.rs::EditBox::selected_text	the text between cursor and highlight
 EditBox.moveCursorTo	port	crates/horizon-client-render/src/ui.rs::EditBox::set_cursor	sets the cursor and keeps the highlight unless extending
 EditBox.setCursorPosition	port	crates/horizon-client-render/src/ui.rs::EditBox::set_cursor	clamps and scrolls to the cursor
-EditBox.canConsumeInput	missing		minor: unsure: no editable flag on the box; whether a box takes typed input is the caller's focus routing
-EditBox.preeditUpdated	missing		minor: no IME composition; Horizon has no preedit input
+EditBox.canConsumeInput	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::typing	whether the focused widget is a text field taking the keys; the narrator and the screens route typing through the same check
+EditBox.preeditUpdated	port	crates/horizon-client-render/src/preedit.rs::set_preedit	the composition is kept once for the focused field and drawn by the overlay, the field reporting its caret each frame
 EditBox.selectWord	port	crates/horizon-client-render/src/ui.rs::EditBox::click	a double click selects the word (the double flag)
 EditBox.applyFormat	port	crates/horizon-client-render/src/ui.rs::EditBox::draw	the format text passed to draw
 EditBox.updateTextPosition	port	crates/horizon-client-render/src/ui.rs::EditBox::text_x	text_x of the shown part; text_y is its sibling
@@ -118,12 +118,12 @@ FocusableTextWidget.keyPressed	missing		minor: unsure: keyboard does not activat
 FocusableTextWidget.builder	skip:java		builder
 FriendsButton.refreshIncomingRequestCount	skip:service		Microsoft friend requests; Horizon's friends use its own invite codes (multiplayer.rs:90)
 FriendsButton.extractContents	skip:service		draws the request badge; Horizon has no incoming request count
-IMEPreeditOverlay.extractRenderState	missing		minor: no IME composition overlay; Horizon has no preedit input
+IMEPreeditOverlay.extractRenderState	port	crates/horizon-client-render/src/preedit.rs::draw_overlay	the composition text under the caret with the focused block underlined, drawn over everything; without one the caret is the text input area
 ImageButton.extractContents	port	crates/horizon-client/src/game/recipe_book.rs::Game::draw_book_panel	tab buttons drawn with their sprite; the other vanilla ImageButton screens are not in Horizon
 ImageWidget.texture	skip:java		factory
 ImageWidget.Sprite.extractWidgetRenderState	skip:other		picture of a popup or social tab; Horizon's lock popup has no picture
 ImageWidget.Texture.extractWidgetRenderState	skip:other		picture of a popup or social tab; Horizon's lock popup has no picture
-ItemDisplayWidget.extractWidgetRenderState	missing		player: a dialog's item body is not drawn (dialog_screen.rs Body::Item gives no element)
+ItemDisplayWidget.extractWidgetRenderState	port	crates/horizon-client/src/game/dialogs.rs::Game::draw_dialog	a dialog's item body draws the item at its corner, then its decorations, and its tooltip under the cursor
 ItemDisplayWidget.updateWidgetNarration	skip:other		narration text; no narrator in Horizon
 LoadingDotsWidget.extractWidgetRenderState	port	crates/horizon-client/src/multiplayer.rs::Screen::draw	the scanning label and the animated dots under it on the LAN row
 LockIconButton.createNarrationMessage	skip:other		narration text; no narrator in Horizon
@@ -131,11 +131,11 @@ LockIconButton.extractContents	port	crates/horizon-client/src/game/lan_screen.rs
 LogoRenderer.extractRenderState	port	crates/horizon-client/src/title.rs::Title::draw	logo top 44 rows and edition banner; gap: minor: no easter-egg logo variant
 MultiLineEditBox.updateWidgetNarration	skip:other		narration text; no narrator in Horizon
 MultiLineEditBox.onClick	port	crates/horizon-client-render/src/screen_draw.rs::TextField::click	click places the cursor; gap: minor: no double-click word select
-MultiLineEditBox.onDrag	missing		minor: unsure: TextField has no drag selection in screen_draw.rs
+MultiLineEditBox.onDrag	port	crates/horizon-client-render/src/multiline_edit.rs::MultiLineEdit::drag	the selection follows the pointer, or the held scroll bar does
 MultiLineEditBox.charTyped	port	crates/horizon-client-render/src/screen_draw.rs::TextField::insert_text	typed text replaces the selection or goes at the cursor
-MultiLineEditBox.preeditUpdated	missing		minor: no IME composition; Horizon has no preedit input
+MultiLineEditBox.preeditUpdated	port	crates/horizon-client-render/src/preedit.rs::set_preedit	the composition is kept once for the focused field and drawn by the overlay, the box reporting its caret each frame
 MultiLineEditBox.extractContents	port	crates/horizon-client-render/src/screen_draw.rs::TextField::draw	placeholder, lines, caret and selection highlight
-MultiLineEditBox.extractDecorations	missing		minor: no character count under a limited box; TextField has no limit
+MultiLineEditBox.extractDecorations	port	crates/horizon-client-render/src/multiline_edit.rs::MultiLineEdit::draw	a limited box prints its character count under the box, right-aligned to it
 MultiLineEditBox.scrollToCursor	port	crates/horizon-client-render/src/screen_draw.rs::TextField::scroll_to	keeps the cursor line in view
 MultiLineEditBox.seekCursorScreen	port	crates/horizon-client-render/src/screen_draw.rs::TextField::click	maps the pointer to a cursor position
 MultiLineEditBox.setFocused	inline	crates/horizon-client-render/src/screen_draw.rs::TextField::draw	gap: minor: focus does not restart the caret blink here; the caller passes the blink clock

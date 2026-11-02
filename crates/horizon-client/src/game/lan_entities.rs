@@ -40,6 +40,7 @@ fn state(id: u32, kind: &str, position: [f64; 3], yaw: f32, on_ground: bool) -> 
         head_yaw: 0.0,
         on_ground,
         velocity: [0.0; 3],
+        minecart_steps: None,
         data: 0,
         meta: Vec::new(),
         defaults: Vec::new(),
@@ -52,6 +53,7 @@ fn state(id: u32, kind: &str, position: [f64; 3], yaw: f32, on_ground: bool) -> 
         leash: None,
         spectator: false,
         watching: false,
+        hidden: None,
     }
 }
 
@@ -155,10 +157,11 @@ impl Game<'_> {
     /// Boats, minecarts, armor stands, item frames, paintings and the
     /// entities kept unsimulated, as guests track them.
     pub(super) fn lan_object_states(
-        &self,
+        &mut self,
         host_entity: Option<i32>,
         hub: &mut Hub,
         out: &mut States,
+        drain_minecart_steps: bool,
     ) {
         let guests: Vec<(u128, i32)> = hub
             .guests
@@ -193,10 +196,21 @@ impl Game<'_> {
             e.defaults.push((13, serializer::INT, Value::Int(0)));
             out.push(e);
         }
-        for c in &self.carts {
+        let improvements = self.minecart_improvements();
+        for c in &mut self.carts {
             let p = c.position;
             let mut e = state(c.id, c.kind.id(), [p.x, p.y, p.z], c.yaw, c.on_ground());
+            e.pitch = c.pitch;
             e.velocity = [c.velocity.x, c.velocity.y, c.velocity.z];
+            if improvements {
+                // Joining another dimension only takes a spawn snapshot; its
+                // regular tracking tick still owns the unsent steps.
+                e.minecart_steps = Some(if drain_minecart_steps {
+                    std::mem::take(&mut c.lerp_steps)
+                } else {
+                    Vec::new()
+                });
+            }
             e.meta = vehicle_meta(c.hurt_time, c.hurt_dir, c.damage);
             match c.kind {
                 // MinecartFurnace.DATA_ID_FUEL.
