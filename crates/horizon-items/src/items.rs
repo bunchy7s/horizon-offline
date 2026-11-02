@@ -517,33 +517,18 @@ pub(crate) fn load_tag_lists(
     overlay: &PackOverlay,
 ) -> Result<HashMap<String, Vec<String>>> {
     let mut raw: HashMap<String, Vec<String>> = HashMap::new();
-    fn walk(
-        dir: &Path,
-        base: &Path,
-        namespace: &str,
-        raw: &mut HashMap<String, Vec<String>>,
-    ) -> Result<()> {
-        for entry in fs::read_dir(dir)?.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                walk(&p, base, namespace, raw)?;
-            } else if p.extension().is_some_and(|e| e == "json") {
-                let name = format!(
-                    "{namespace}:{}",
-                    p.strip_prefix(base)?
-                        .with_extension("")
-                        .to_string_lossy()
-                        .replace('\\', "/")
-                );
-                let v: Value = serde_json::from_slice(&fs::read(&p)?)?;
-                let values = v["values"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|e| e.as_str().or_else(|| e["id"].as_str()).map(str::to_owned))
-                    .collect();
-                raw.insert(name, values);
-            }
+    /// Through `json_folder`: from the prepared data file, and read once for
+    /// the tables a load builds from the same tags.
+    fn walk(dir: &Path, namespace: &str, raw: &mut HashMap<String, Vec<String>>) -> Result<()> {
+        for file in &horizon_world::json_folder::read(dir)?.files {
+            let v: Value = serde_json::from_slice(file.bytes()?)?;
+            let values = v["values"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.as_str().or_else(|| e["id"].as_str()).map(str::to_owned))
+                .collect();
+            raw.insert(format!("{namespace}:{}", file.name), values);
         }
         Ok(())
     }
@@ -551,7 +536,7 @@ pub(crate) fn load_tag_lists(
     for namespace in crate::content_namespaces::tag_namespaces(root) {
         let dir = root.join(format!("data/{namespace}/tags/{kind}"));
         if dir.exists() {
-            walk(&dir, &dir, &namespace, &mut raw)?;
+            walk(&dir, &namespace, &mut raw)?;
         }
     }
     // The packs' entries join the game's own, in pack order; a `replace`
