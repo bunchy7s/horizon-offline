@@ -15,9 +15,14 @@ use std::{
     sync::Arc,
 };
 
-/// `PlayerDataStorage`'s player directory (`players/data`).
+/// `PlayerDataStorage`'s player directory (`players/data`), created on first use
+/// as its constructor does with `mkdirs`.
 pub fn directory(world: &Path) -> PathBuf {
-    world.join("players").join("data")
+    let dir = world.join("players").join("data");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        log::warn!("Horizon: {} is not created: {e}", dir.display());
+    }
+    dir
 }
 
 pub fn path(world: &Path, uuid: u128) -> PathBuf {
