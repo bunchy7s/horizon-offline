@@ -1453,7 +1453,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let top = info.top;
         let below_pos = below(top);
         if info.freezes_below {
-            self.set_block_and_update(below_pos, b.default_of(b.named.ice));
+            let from = self.state(below_pos);
+            let to = b.default_of(b.named.ice);
+            if self.level.allow_block_form(below_pos, from, to) {
+                self.set_block_and_update(below_pos, to);
+            }
         }
         if !self.level.is_raining() {
             return;
@@ -1464,10 +1468,16 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             if b.is_block(state, b.named.snow) {
                 let layers = b.table.int(state, p.layers);
                 if layers < max_height.min(8) {
-                    self.set_block_and_update(top, b.table.set_int(state, p.layers, layers + 1));
+                    let to = b.table.set_int(state, p.layers, layers + 1);
+                    if self.level.allow_block_form(top, state, to) {
+                        self.set_block_and_update(top, to);
+                    }
                 }
             } else {
-                self.set_block_and_update(top, b.default_of(b.named.snow));
+                let to = b.default_of(b.named.snow);
+                if self.level.allow_block_form(top, state, to) {
+                    self.set_block_and_update(top, to);
+                }
             }
         }
         if info.kind != PrecipitationKind::None {

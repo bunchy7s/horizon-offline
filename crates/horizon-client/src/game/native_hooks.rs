@@ -625,6 +625,21 @@ impl GameLevel<'_> {
         let _ = (dimension, pos, from, to, cancel);
     }
 
+    /// Precipitation is about to form or add to a block at `pos`. `from` and
+    /// `to` are block state IDs. Set `cancel` to keep the old state. Server-side.
+    /// @API:native_block_form@.
+    #[inline(always)]
+    pub(super) fn native_block_form(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        from: BlockStateId,
+        to: BlockStateId,
+        cancel: &mut bool,
+    ) {
+        let _ = (dimension, pos, from, to, cancel);
+    }
+
     /// The Ender Dragon fight is about to place its first dragon egg at `pos`.
     /// Set `cancel` to leave the block unchanged. Server-side. @API:native_dragon_egg_form@.
     #[inline(always)]
