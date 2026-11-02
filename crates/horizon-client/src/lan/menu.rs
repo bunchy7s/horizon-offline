@@ -814,6 +814,39 @@ mod tests {
         })
     }
 
+    /// A double-click's collect walks the slots in the direction the button
+    /// picks: `doClick`'s PICKUP_ALL arm starts at slot 0 with a step of +1 for
+    /// button 0, and at the last slot with -1 for button 1, which is the
+    /// button the screen sends for a double-click (`mouseReleased`).
+    #[test]
+    fn pickup_all_walks_from_the_buttons_side() {
+        let rules = SwapRules;
+        let mut g = guest();
+        let mut chest = vec![None; 5];
+        chest[0] = Some(ItemStack::new("minecraft:stone", 5));
+        chest[1] = Some(ItemStack::new("minecraft:stone", 5));
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        // One stone short of a full stack: the right double-click takes it
+        // from the last matching slot.
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 63));
+        click(&mut view, &mut drag, 0, 1, input::PICKUP_ALL, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        assert_eq!(view.get(1).map(|s| s.count), Some(4));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
+        // The left one takes it from the first.
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 63));
+        click(&mut view, &mut drag, 0, 0, input::PICKUP_ALL, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(4));
+        assert_eq!(view.get(1).map(|s| s.count), Some(4));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
+    }
+
     /// A guest's chest clicks run `BundleItem`'s overrides: a carried
     /// bundle takes a slot's stack and drops its first one into an empty
     /// slot; a stack clicked onto a bundle goes in, as far as it fits.
