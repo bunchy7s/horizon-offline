@@ -982,10 +982,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             } else if !b.in_set(self.above_state(pos), &b.tags.maintains_farmland) {
                 self.turn_to_base_block(pos, state);
             }
-        } else if moisture < 7 {
-            if self.level.allow_moisture_change(pos, moisture, 7) {
-                self.set_block(pos, b.table.set_int(state, b.props.moisture, 7), 2);
-            }
+        } else if moisture < 7 && self.level.allow_moisture_change(pos, moisture, 7) {
+            self.set_block(pos, b.table.set_int(state, b.props.moisture, 7), 2);
         }
     }
     /// `SaplingBlock.advanceTree`.
