@@ -2981,6 +2981,9 @@ struct Game<'a> {
     /// The world was saved for the application ending (`save_for_exit`).
     saved_for_exit: bool,
     pending_save: Option<saving::ClosingSave>,
+    /// The last world frame reached the swap chain. A window the compositor
+    /// stops showing gets no frames, and the event loop must not spin on it.
+    frame_drawn: bool,
     /// The world list's icon in progress (`GameRenderer.tryTakeScreenshotIfNeeded`):
     /// `None` without a local world, or once the save has its icon.png.
     world_icon: Option<WorldIcon>,
@@ -15985,6 +15988,8 @@ impl Game<'_> {
             }
             None => Err("renderer".into()),
         };
+        // A frame the surface refused (occluded, lost, timed out) is `Ok(false)`.
+        self.frame_drawn = matches!(result, Ok(true));
         // Restore storage even when rendering fails (for example, a lost surface).
         self.entity_vertices = entities;
         *self.entity_spans.get_mut() = entity_spans;
@@ -18384,7 +18389,18 @@ impl Game<'_> {
             self.handle_window_event(event_loop, WindowId::dummy(), WindowEvent::RedrawRequested);
             return;
         }
-        event_loop.set_control_flow(ControlFlow::Poll);
+        // A window the compositor hides gets no `RedrawRequested` at all, so
+        // polling would spin the loop with nothing to draw and pin a core.
+        // Once a requested frame fails to reach the swap chain, wait for the
+        // next event instead; a resize or occlusion change wakes the loop and
+        // the frame that follows sets the pace back to polling.
+        if self.frame_drawn {
+            event_loop.set_control_flow(ControlFlow::Poll);
+        } else {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(16),
+            ));
+        }
     }
 }
 /// clouds.png as filled cells (`CloudRenderer.prepare`: alpha 10 or more).
@@ -18861,6 +18877,7 @@ impl<'a> Game<'a> {
             text_selection: Default::default(),
             saved_for_exit: false,
             pending_save: None,
+            frame_drawn: true,
             world_icon: None,
             forced_hit: None,
             tick_hit: None,
