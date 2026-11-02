@@ -159,6 +159,17 @@ fn non_player_entity_id(t: Target) -> Option<i32> {
     i32::try_from(id).ok()
 }
 impl Game<'_> {
+    /// `native_player_level_change` for a level that was `from` before an experience change.
+    pub(super) fn native_player_level_changed(&mut self, from: i32) {
+        let to = self.experience.level;
+        if from != to
+            && !horizon_client::mod_api::mods().is_empty()
+            && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            self.native_player_level_change(player, &name, from, to);
+        }
+    }
+
     /// Commands.performCommand for a line without its slash.
     pub(super) fn run_command(&mut self, command: &str) -> bool {
         if self.client_mod_command(command) {
@@ -2736,6 +2747,7 @@ impl Game<'_> {
         Ok(count)
     }
     /// Player.giveExperiencePoints including negative amounts.
+    /// The caller reports the level change to the mods.
     fn give_points(&mut self, amount: i32) {
         let e = &mut self.experience;
         e.progress += amount as f32 / horizon_client::entities::Experience::needed(e.level) as f32;
@@ -2921,6 +2933,7 @@ impl Game<'_> {
     /// ExperienceCommand's add and set on the player in place: false when
     /// the points to set do not fit the level.
     fn change_experience(&mut self, add: bool, levels: bool, amount: i32) -> bool {
+        let old_level = self.experience.level;
         if add {
             if levels {
                 self.experience.level = (self.experience.level + amount).max(0);
@@ -2939,6 +2952,7 @@ impl Game<'_> {
             }
             self.experience.progress = amount as f32 / needed as f32;
         }
+        self.native_player_level_changed(old_level);
         true
     }
     /// `GameRules.set` as the `/gamerule` command and the management protocol call it: the rule changes, the

@@ -79,6 +79,16 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
                     .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
             ),
         ),
+        "serversettings/max_players" => game.max_players(client, None),
+        "serversettings/max_players/set" => game.max_players(
+            client,
+            Some(
+                argument
+                    .as_i64()
+                    .and_then(|value| usize::try_from(value).ok())
+                    .ok_or_else(|| invalid_params(format!("Not a number: {argument}")))?,
+            ),
+        ),
         "serversettings/use_allowlist" => game.allowlist_setting(client, "use_allowlist", None),
         "serversettings/use_allowlist/set" => game.allowlist_setting(
             client,
@@ -423,6 +433,29 @@ impl Game<'_> {
         Ok(reply["value"].clone())
     }
 
+    /// `MinecraftServerSettingsServiceImpl.getMaxPlayers` and `setMaxPlayers`.
+    fn max_players(&self, client: u32, value: Option<usize>) -> Result<Value, Failure> {
+        let mut request = json!({ "method": "serversettings/max_players" });
+        if let Some(value) = value {
+            request["method"] = json!("serversettings/max_players/set");
+            request["value"] = json!(value);
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        if let Some(value) = value {
+            crate::config::update(
+                &self.shared.dir,
+                "server",
+                "max_players",
+                toml::Value::Integer(value as i64),
+            )
+            .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
+        }
+        Ok(reply["value"].clone())
+    }
+
     /// `MinecraftServerSettingsServiceImpl.getGameMode` and `setGameMode`.
     fn game_mode(&self, client: u32, value: Option<&str>) -> Result<Value, Failure> {
         let mut request = json!({ "method": "serversettings/game_mode" });
@@ -675,6 +708,11 @@ impl Lists<'_> {
             .map(|b| ban(("ip", json!(b.user)), &b.reason, &b.source, b.expires))
             .collect()
     }
+}
+
+/// `ServerStateService.status`, as `server/status` answers it (and the heartbeat carries it).
+pub fn status(shared: &Shared) -> Value {
+    Game { shared }.status()
 }
 
 /// The notification a change of one of the lists is, from the game's typed event (`operators_added`,

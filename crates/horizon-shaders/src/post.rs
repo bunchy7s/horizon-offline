@@ -1190,7 +1190,7 @@ fn diagnostics(pp: &Preprocessed) -> Vec<String> {
     located(pp, &pp.diagnostics)
 }
 
-/// `pp`'s warnings (conditions read as false), located.
+/// `pp`'s warnings (conditions read as false, unbalanced conditionals), located.
 fn warnings(pp: &Preprocessed) -> Vec<String> {
     located(pp, &pp.warnings)
 }

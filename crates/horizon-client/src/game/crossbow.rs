@@ -105,7 +105,7 @@ impl Game<'_> {
         }
     }
     /// `Player.getProjectile` for `weapon` (`projectile_slot`).
-    fn projectile_slot(&self, weapon: &str) -> Option<usize> {
+    pub(super) fn projectile_slot(&self, weapon: &str) -> Option<usize> {
         let hands = [OFFHAND_SLOT, self.selected].map(|slot| (slot, self.stack_in(slot)));
         projectile_slot(weapon, hands, &self.inventory)
     }
