@@ -45,6 +45,8 @@ mod profile_heads;
 mod screenshots_page;
 mod scrollbar;
 mod servers_page;
+#[cfg(windows)]
+mod setup_page;
 mod shell;
 mod shortcut_page;
 mod skin_page;
@@ -4938,6 +4940,12 @@ fn main() {
         eprintln!("Could not restore the launcher's terminal streams: {error}");
         std::process::exit(1);
     }
+    // Windows setup: `setup --quiet` / `uninstall --quiet` run here without a window, and never
+    // reach the CLI parser below (so neither the MCP tools nor the completions list them).
+    #[cfg(windows)]
+    if let Some(code) = horizon_launcher::installer::run_quiet() {
+        std::process::exit(code);
+    }
     perf::process_started();
     backend::exe_path();
     #[cfg(windows)]
@@ -4974,6 +4982,12 @@ fn main() {
                 })
             });
             cx.set_menus(menus());
+            // The setup exe (and `horizon-launcher.exe uninstall`) opens its own window instead.
+            #[cfg(windows)]
+            if let Some(mode) = horizon_launcher::installer::window_mode() {
+                setup_page::open(mode, cx);
+                return;
+            }
             let bounds = Bounds::centered(None, size(px(1180.), px(760.)), cx);
             cx.open_window(
                 WindowOptions {
