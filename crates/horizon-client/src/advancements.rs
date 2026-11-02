@@ -1425,6 +1425,29 @@ mod tests {
                     && matches!(id, "minecraft:fireball" | "minecraft:arrow"))
         }
     }
+    /// A `recipe_crafted` criterion names `minecraft:x`; the craft hands
+    /// the recipe book and the trigger the same whole id (`award_crafted`
+    /// qualifies). The bare name the crafting copy uses never matched —
+    /// the second half of #7186.
+    #[test]
+    fn a_recipe_crafted_criterion_matches_the_whole_id_only() {
+        let w = Flat;
+        let criterion = serde_json::json!({"recipes": "minecraft:folder_recipe"});
+        assert!(
+            !id_matches(&criterion["recipes"], "recipe", "folder_recipe", &w),
+            "the crafting copy's bare name never matched the criterion"
+        );
+        assert!(
+            id_matches(
+                &criterion["recipes"],
+                "recipe",
+                &crate::crafting::qualified("folder_recipe"),
+                &w
+            ),
+            "the whole id award_crafted passes matches"
+        );
+    }
+
     /// `LockCode.canUnlock` for a chest with
     /// `lock:{items:"minecraft:gold_ingot"}`: a gold ingot opens it, an empty
     /// hand or another item does not, and a spectator always does.

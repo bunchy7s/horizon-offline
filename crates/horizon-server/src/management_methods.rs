@@ -41,6 +41,8 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
                     .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
             ),
         ),
+        "gamerules" => game.gamerules(client, None),
+        "gamerules/update" => game.gamerules(client, Some(argument)),
         "serversettings/motd" => game.motd(client, None),
         "serversettings/motd/set" => game.motd(
             client,
@@ -75,6 +77,16 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
                 argument
                     .as_bool()
                     .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
+            ),
+        ),
+        "serversettings/max_players" => game.max_players(client, None),
+        "serversettings/max_players/set" => game.max_players(
+            client,
+            Some(
+                argument
+                    .as_i64()
+                    .and_then(|value| usize::try_from(value).ok())
+                    .ok_or_else(|| invalid_params(format!("Not a number: {argument}")))?,
             ),
         ),
         "serversettings/use_allowlist" => game.allowlist_setting(client, "use_allowlist", None),
@@ -366,6 +378,23 @@ impl Game<'_> {
         Ok(reply["value"].clone())
     }
 
+    /// `GameRulesService.get` and `update`: the game's rules as typed rules, or the one `update` set.
+    fn gamerules(&self, client: u32, update: Option<&Value>) -> Result<Value, Failure> {
+        let mut request = json!({ "method": "gamerules" });
+        if let Some(update) = update {
+            request["method"] = json!("gamerules/update");
+            request["value"] = update.clone();
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(invalid) = reply["invalid"].as_str() {
+            return Err(invalid_params(invalid));
+        }
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        Ok(reply["value"].clone())
+    }
+
     /// `MinecraftServerSettingsServiceImpl.isAutoSave`: read the game's live save flag.
     /// `MinecraftServerSettingsServiceImpl.setAutoSave`: update that flag and return its new value.
     fn autosave(&self, client: u32, value: Option<bool>) -> Result<Value, Failure> {
@@ -398,6 +427,29 @@ impl Game<'_> {
                 "properties",
                 "force-gamemode",
                 toml::Value::Boolean(value),
+            )
+            .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
+        }
+        Ok(reply["value"].clone())
+    }
+
+    /// `MinecraftServerSettingsServiceImpl.getMaxPlayers` and `setMaxPlayers`.
+    fn max_players(&self, client: u32, value: Option<usize>) -> Result<Value, Failure> {
+        let mut request = json!({ "method": "serversettings/max_players" });
+        if let Some(value) = value {
+            request["method"] = json!("serversettings/max_players/set");
+            request["value"] = json!(value);
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        if let Some(value) = value {
+            crate::config::update(
+                &self.shared.dir,
+                "server",
+                "max_players",
+                toml::Value::Integer(value as i64),
             )
             .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
         }
@@ -658,6 +710,11 @@ impl Lists<'_> {
     }
 }
 
+/// `ServerStateService.status`, as `server/status` answers it (and the heartbeat carries it).
+pub fn status(shared: &Shared) -> Value {
+    Game { shared }.status()
+}
+
 /// The notification a change of one of the lists is, from the game's typed event (`operators_added`,
 /// `bans_removed`...): `JsonRpcNotificationService`'s `playerOped`/`playerDeoped` (an `OperatorDto`),
 /// `playerAddedToAllowlist`/`playerRemovedFromAllowlist` and `playerUnbanned` (a `PlayerDto`), `playerBanned`
@@ -682,6 +739,11 @@ pub fn list_notification(kind: &str, event: &Value) -> Option<(&'static str, Val
         "bans_added" => (
             "notification/bans/added",
             ban(("player", player()), &reason, source, expires),
+        ),
+        // `MinecraftServer.onGameRuleChanged`: the rule as a typed rule (the event's own `type` is its kind).
+        "gamerule" => (
+            "notification/gamerules/updated",
+            json!({ "key": event["key"], "type": event["valueType"], "value": event["value"] }),
         ),
         "bans_removed" => ("notification/bans/removed", player()),
         "ip_bans_added" => (
@@ -783,6 +845,17 @@ mod tests {
         assert_eq!(
             note("ip_bans_removed", json!({ "ip": "10.0.0.1" })),
             ("notification/ip_bans/removed", json!("10.0.0.1"))
+        );
+        // A game rule changed: the rule as a typed rule, whose `type` the event keeps as `valueType`.
+        assert_eq!(
+            note(
+                "gamerule",
+                json!({ "key": "minecraft:pvp", "valueType": "boolean", "value": false })
+            ),
+            (
+                "notification/gamerules/updated",
+                json!({ "key": "minecraft:pvp", "type": "boolean", "value": false })
+            )
         );
         assert!(list_notification("kick", &event(json!({}))).is_none());
     }

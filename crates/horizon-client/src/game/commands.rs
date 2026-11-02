@@ -159,6 +159,17 @@ fn non_player_entity_id(t: Target) -> Option<i32> {
     i32::try_from(id).ok()
 }
 impl Game<'_> {
+    /// `native_player_level_change` for a level that was `from` before an experience change.
+    pub(super) fn native_player_level_changed(&mut self, from: i32) {
+        let to = self.experience.level;
+        if from != to
+            && !horizon_client::mod_api::mods().is_empty()
+            && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            self.native_player_level_change(player, &name, from, to);
+        }
+    }
+
     /// Commands.performCommand for a line without its slash.
     pub(super) fn run_command(&mut self, command: &str) -> bool {
         if self.client_mod_command(command) {
@@ -2175,7 +2186,8 @@ impl Game<'_> {
             if self.ui.difficulty == 0 && t.category == "monster" {
                 return Err(err("commands.summon.failed.peaceful", &[]));
             }
-            self.spawn_mob_spawned(&short, pos);
+            self.spawn_mob_spawned(&short, pos)
+                .ok_or_else(|| err("commands.summon.failed.uuid", &[]))?;
             name = Text::translate(&entity_name_key(&kind), &[]);
         } else {
             match short.as_str() {
@@ -2250,7 +2262,11 @@ impl Game<'_> {
                         let empty = horizon_world::nbt::Tag::Compound(Default::default());
                         cart.spawner = Some(Box::new(Spawner::load(&empty)));
                     }
+                    let id = cart.id;
                     self.carts.push(cart);
+                    if !self.native_joins_flush(false, id) {
+                        return Err(err("commands.summon.failed.uuid", &[]));
+                    }
                     name = Text::translate(&format!("entity.minecraft.{k}"), &[]);
                 }
                 // SummonCommand.createEntity: any other type from an empty compound.
@@ -2731,6 +2747,7 @@ impl Game<'_> {
         Ok(count)
     }
     /// Player.giveExperiencePoints including negative amounts.
+    /// The caller reports the level change to the mods.
     fn give_points(&mut self, amount: i32) {
         let e = &mut self.experience;
         e.progress += amount as f32 / horizon_client::entities::Experience::needed(e.level) as f32;
@@ -2916,6 +2933,7 @@ impl Game<'_> {
     /// ExperienceCommand's add and set on the player in place: false when
     /// the points to set do not fit the level.
     fn change_experience(&mut self, add: bool, levels: bool, amount: i32) -> bool {
+        let old_level = self.experience.level;
         if add {
             if levels {
                 self.experience.level = (self.experience.level + amount).max(0);
@@ -2934,7 +2952,29 @@ impl Game<'_> {
             }
             self.experience.progress = amount as f32 / needed as f32;
         }
+        self.native_player_level_changed(old_level);
         true
+    }
+    /// `GameRules.set` as the `/gamerule` command and the management protocol call it: the rule changes, the
+    /// world follows it, and a dedicated server tells the event stream (`MinecraftServer.onGameRuleChanged`
+    /// tells the management protocol's clients).
+    pub(super) fn set_game_rule(&mut self, rule: &gamerules::Rule, value: Value) {
+        self.ui.rules.set(rule.name, value);
+        self.sync_rules();
+        if self.options.dedicated.is_some() {
+            let (value_type, json) = match value {
+                Value::Bool(b) => ("boolean", serde_json::json!(b)),
+                Value::Int(i) => ("integer", serde_json::json!(i)),
+            };
+            super::dedicated::events::record_server(
+                "gamerule",
+                serde_json::json!({
+                    "key": format!("minecraft:{}", rule.name),
+                    "valueType": value_type,
+                    "value": json,
+                }),
+            );
+        }
     }
     fn cmd_gamerule(&mut self, ctx: &Context) -> R<i32> {
         let Some(name) = ctx.literals.get(1).cloned() else {
@@ -2958,8 +2998,7 @@ impl Game<'_> {
         if current == value {
             return Err(err("commands.gamerule.not_set", &[&rule.name, &value]));
         }
-        self.ui.rules.set(rule.name, value);
-        self.sync_rules();
+        self.set_game_rule(rule, value);
         self.feedback(Text::tr("commands.gamerule.set", &[&rule.name, &value]));
         Ok(match value {
             Value::Bool(b) => i32::from(b),

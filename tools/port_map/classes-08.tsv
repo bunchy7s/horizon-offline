@@ -1,4 +1,4 @@
-ExperimentalRedstoneWireEvaluator	port	crates/horizon-world/src/level/redstone/experimental.rs::Sim::experimental_wire_update	two queues and insertion-ordered power changes with oriented neighbor notifications
+ExperimentalRedstoneWireEvaluator	home	crates/horizon-world/src/level/redstone/experimental.rs	the two-queue evaluator, Evaluator in that file, is what Sim::experimental_wire_update drives: wires found with their orientation, power written in first-discovery order
 InstantNeighborUpdater	skip:other		never instantiated in vanilla 26.3; Level always uses CollectingNeighborUpdater
 NeighborUpdater.executeShapeUpdate	port	crates/horizon-world/src/level/update.rs::Sim::execute	Shape arm: wire skip flag, then update_shape and update_or_destroy
 NeighborUpdater.executeUpdate	port	crates/horizon-world/src/level/hooks.rs::Sim::neighbor_changed	per-block neighbour change dispatch
@@ -31,7 +31,7 @@ LevelStorageSource.isNewLevelIdAcceptable	port	crates/horizon-client/src/title.r
 LevelStorageSource.levelExists	inline	crates/horizon-client/src/title.rs::Title::target_folder	folder-exists check
 LevelStorageSource.loadLevelSummaries	port	crates/horizon-client/src/title.rs::list_worlds	
 LevelStorageSource.makeLevelSummary	inline	crates/horizon-client/src/title.rs::list_worlds	per-folder name, version, mode and last played
-LevelStorageSource.parseFeatureFlagsFromSummary	missing		unsure: list_worlds does not read enabled_features, so experimental worlds are not flagged
+LevelStorageSource.parseFeatureFlagsFromSummary	port	crates/horizon-client/src/save.rs::Level::read_summary	the summary read goes through read_root, which parses WorldDataConfiguration's enabled_features; gap: minor: the world list still shows no experimental marker for them
 LevelStorageSource.parseValidator	skip:other		symlink allow-list (allowed_symlinks.txt); Horizon does not read that file
 LevelStorageSource.readDataConfig	port	crates/horizon-client/src/save.rs::Level::read	DataPacks and enabled_features are read with the level (data_packs, enabled_features), and datapack::enabled_ids layers the world's own packs over the bundle with them
 LevelSummary.backupStatus	inline	crates/horizon-client/src/title.rs::should_backup	FILE_FIXING_REQUIRED when the world needs its files fixed or comes from a newer version; UPGRADE_TO_SNAPSHOT never applies to a stable build

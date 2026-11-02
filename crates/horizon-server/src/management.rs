@@ -21,7 +21,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 /// The connections that have upgraded, and the queue that carries notifications to them, which
@@ -34,7 +34,12 @@ pub struct Clients {
     /// `server/stopping` went out for this run of the game: a stop comes from the supervisor and from the
     /// game's own `stop`, and one run says it once.
     stopping_told: AtomicBool,
+    /// When `server/activity` last went out.
+    activity_told: Mutex<Option<Instant>>,
 }
+
+/// `MinecraftServer.SERVER_ACTIVITY_MONITOR_SECONDS_BETWEEN_NOTIFICATIONS`.
+const ACTIVITY_EVERY: Duration = Duration::from_secs(30);
 
 /// A connection in `Clients` for as long as this lives.
 struct Registered<'a>(&'a Shared, u32);
@@ -83,6 +88,13 @@ pub fn game_event(shared: &Shared, kind: &str, event: &Value) {
         "leave" => ("notification/players/left", player()),
         "saving" => ("notification/server/saving", None),
         "saved" => ("notification/server/saved", None),
+        // `ServerActivityMonitor.reportLoginActivity`: a login attempt, told at most once in thirty seconds.
+        "login_activity" => {
+            if activity_due(shared, Instant::now()) {
+                notify(shared, "notification/server/activity", None);
+            }
+            return;
+        }
         // A change of a list, whoever made it: the console, a command in the game, the protocol's own methods.
         _ => match crate::management_methods::list_notification(kind, event) {
             Some((method, params)) => (method, Some(params)),
@@ -90,6 +102,35 @@ pub fn game_event(shared: &Shared, kind: &str, event: &Value) {
         },
     };
     notify(shared, method, params);
+}
+
+/// `ServerActivityMonitor.processWithRateLimit`: an activity is told when thirty seconds have gone by since the
+/// last one told, and is lost otherwise (the monitor clears its flag whatever it did).
+fn activity_due(shared: &Shared, now: Instant) -> bool {
+    let mut told = shared.management.activity_told.lock().unwrap();
+    let due = told.is_none_or(|last| now.saturating_duration_since(last) >= ACTIVITY_EVERY);
+    if due {
+        *told = Some(now);
+    }
+    due
+}
+
+/// `ManagementServer.scheduleHeartbeat`: `NotificationService.statusHeartbeat` every `seconds` (the first
+/// after as many), with the server's status as `server/status` answers it, up or not. Nothing is computed
+/// while no client is connected.
+fn heartbeat(shared: Arc<Shared>, seconds: u64) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("management-heartbeat".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_secs(seconds));
+                if !shared.management.sockets.lock().unwrap().is_empty() {
+                    let status = crate::management_methods::status(&shared);
+                    notify(&shared, "notification/server/status", Some(status));
+                }
+            }
+        })
+        .map(drop)
 }
 
 /// `NotificationService.serverShuttingDown`, which `DedicatedServer.stopServer` sends first of all.
@@ -107,6 +148,8 @@ struct Settings {
     allowed_origins: Vec<String>,
     /// TLS, unless `management-server-tls-enabled=false`.
     tls: Option<management_tls::Tls>,
+    /// `status-heartbeat-interval`: seconds between the status notifications, none when 0.
+    heartbeat: u64,
 }
 
 /// `SecurityConfig.isValid`: 40 letters and digits.
@@ -127,6 +170,7 @@ fn settings(dir: &Path) -> Result<Option<Settings>, String> {
     if !p.management_server_enabled {
         return Ok(None);
     }
+    let heartbeat = p.status_heartbeat_interval.max(0) as u64;
     let mut secret = p.management_server_secret;
     if generated {
         secret = generate_secret_key(&mut SystemEntropy::default());
@@ -184,6 +228,7 @@ fn settings(dir: &Path) -> Result<Option<Settings>, String> {
             .map(str::to_owned)
             .collect(),
         tls,
+        heartbeat,
     }))
 }
 
@@ -231,6 +276,9 @@ fn serve(
 ) -> std::io::Result<()> {
     let (outbox, queue) = mpsc::channel::<String>();
     *shared.management.outbox.lock().unwrap() = Some(outbox);
+    if settings.heartbeat > 0 {
+        heartbeat(shared.clone(), settings.heartbeat)?;
+    }
     let carrier = shared.clone();
     std::thread::Builder::new()
         .name("management-notify".into())
@@ -556,6 +604,7 @@ mod tests {
             secret: SECRET.into(),
             allowed_origins: vec!["http://localhost:3000".into()],
             tls: None,
+            heartbeat: 0,
         }
     }
 
@@ -911,6 +960,53 @@ mod tests {
     }
 
     #[test]
+    fn an_activity_is_told_once_in_thirty_seconds_and_otherwise_lost() {
+        let shared = shared();
+        let start = Instant::now();
+        assert!(activity_due(&shared, start));
+        assert!(!activity_due(&shared, start + Duration::from_secs(29)));
+        // The one lost at 29 s is not told later: the next login after thirty seconds is.
+        assert!(!activity_due(&shared, start + Duration::from_secs(29)));
+        assert!(activity_due(&shared, start + Duration::from_secs(30)));
+        assert!(!activity_due(&shared, start + Duration::from_secs(59)));
+        assert!(activity_due(&shared, start + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn a_login_is_an_activity_notification_and_the_heartbeat_carries_the_status() {
+        let shared = shared();
+        let address = listen_on(
+            shared.clone(),
+            Settings {
+                heartbeat: 1,
+                ..settings()
+            },
+        );
+        let mut client = upgrade(address);
+        registered(&shared, 1);
+        game_event(
+            &shared,
+            "login_activity",
+            &json!({ "type": "login_activity" }),
+        );
+        game_event(
+            &shared,
+            "login_activity",
+            &json!({ "type": "login_activity" }),
+        );
+        assert_eq!(
+            next_text(&mut client),
+            r#"{"jsonrpc":"2.0","method":"minecraft:notification/server/activity"}"#
+        );
+        // The second login came inside the thirty seconds, so the next frame is the heartbeat, a second
+        // after the start: the status of a game that isn't up.
+        let beat: Value = serde_json::from_str(&next_text(&mut client)).unwrap();
+        assert_eq!(beat["method"], "minecraft:notification/server/status");
+        assert_eq!(beat["params"][0]["started"], false);
+        assert!(beat["params"][0]["version"]["name"].is_string());
+    }
+
+    #[test]
     fn every_notification_sent_is_one_discover_lists() {
         let listed = schema::discover();
         let names: Vec<&str> = listed["methods"]
@@ -934,6 +1030,9 @@ mod tests {
             "notification/bans/removed",
             "notification/ip_bans/added",
             "notification/ip_bans/removed",
+            "notification/gamerules/updated",
+            "notification/server/activity",
+            "notification/server/status",
         ] {
             assert!(
                 names.contains(&format!("minecraft:{sent}").as_str()),
