@@ -81,6 +81,16 @@ pub fn local() -> Vec<Entry> {
     LOCAL.get().cloned().unwrap_or_default()
 }
 
+/// The entries the other side compares (`side = "both"`): what a join sends. Client-only
+/// and server-only mods stay private, since any server can ask for the list.
+pub fn shared(entries: &[Entry]) -> Vec<Entry> {
+    entries
+        .iter()
+        .filter(|e| e.side == Side::Both)
+        .cloned()
+        .collect()
+}
+
 /// A list as a payload.
 pub fn encode(entries: &[Entry]) -> Vec<u8> {
     let cut = |s: &str| -> String { s.chars().take(MAX_TEXT).collect() };
@@ -212,6 +222,19 @@ mod tests {
             sha256: Some([hash; 32]),
             side,
         }
+    }
+
+    #[test]
+    fn only_shared_mods_are_sent() {
+        let list = [
+            entry("ruby", "1.0", 1, Side::Both),
+            entry("minimap", "2.0", 2, Side::Client),
+            entry("admin", "3.0", 3, Side::Server),
+        ];
+        let sent = shared(&list);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].id, "ruby");
+        assert!(compare(&list, &sent).is_empty());
     }
 
     #[test]

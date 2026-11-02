@@ -1011,7 +1011,9 @@ fn login_and_configure(
             c,
             cfg::Clientbound::CustomPayload(cfg::CustomPayload {
                 channel: horizon_protocol::mod_list::CHANNEL.into(),
-                data: horizon_protocol::mod_list::encode(&server_mods),
+                data: horizon_protocol::mod_list::encode(&horizon_protocol::mod_list::shared(
+                    &server_mods,
+                )),
             }),
         )?;
         send(c, cfg::Clientbound::Ping(cfg::Ping { id: 1 }))?;
@@ -1033,8 +1035,9 @@ fn login_and_configure(
         let difference = horizon_protocol::mod_list::compare(&server_mods, &client_mods);
         if !difference.is_empty() {
             let text = difference.reason();
-            let reason =
-                horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(text.as_str()));
+            let reason = horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(
+                text.as_str(),
+            ));
             let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
             lost(shared, &format!("{name} ({})", uuid_string(uuid)), &text);
             return Ok(None);
