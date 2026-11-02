@@ -190,6 +190,27 @@ fn operations_use_floor_semantics() {
 }
 
 #[test]
+fn division_wraps_minimum_integer_by_negative_one() {
+    let mut m = mock();
+    run(&mut m, "scoreboard objectives add poc dummy").unwrap();
+    run(&mut m, "scoreboard players set target poc -2147483648").unwrap();
+    run(&mut m, "scoreboard players set divisor poc -1").unwrap();
+    run(
+        &mut m,
+        "scoreboard players operation target poc /= divisor poc",
+    )
+    .unwrap();
+    assert_eq!(
+        run(&mut m, "scoreboard players get target poc").unwrap(),
+        i32::MIN
+    );
+    assert_eq!(
+        run(&mut m, "scoreboard players get divisor poc").unwrap(),
+        -1
+    );
+}
+
+#[test]
 fn triggers() {
     let mut m = mock();
     run(&mut m, "scoreboard objectives add t trigger").unwrap();
