@@ -610,6 +610,21 @@ impl GameLevel<'_> {
         let _ = (dimension, pos);
     }
 
+    /// A block at `pos` is about to fade from `from` to `to` because of
+    /// melting or coral death. Set `cancel` to keep it. Server-side.
+    /// @API:native_block_fade@.
+    #[inline(always)]
+    pub(super) fn native_block_fade(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        from: BlockStateId,
+        to: BlockStateId,
+        cancel: &mut bool,
+    ) {
+        let _ = (dimension, pos, from, to, cancel);
+    }
+
     /// The Ender Dragon fight is about to place its first dragon egg at `pos`.
     /// Set `cancel` to leave the block unchanged. Server-side. @API:native_dragon_egg_form@.
     #[inline(always)]

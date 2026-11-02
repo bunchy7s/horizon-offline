@@ -668,11 +668,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// `IceBlock.melt`.
     pub(crate) fn ice_melt(&mut self, pos: BlockPos, state: BlockStateId) {
         let b = self.b;
+        let target = if self.level.dimension() == super::Dimension::Nether {
+            b.air()
+        } else {
+            b.default_of(b.named.water)
+        };
+        if !self.level.allow_block_fade(pos, state, target) {
+            return;
+        }
         if self.level.dimension() == super::Dimension::Nether {
             self.remove_block(pos, false);
         } else {
-            let water = b.default_of(b.named.water);
-            self.set_block_and_update(pos, water);
+            self.set_block_and_update(pos, target);
             self.neighbor_changed_at(pos, b.named.water);
             self.game_event_state(pos, "minecraft:block_destroy", state);
         }

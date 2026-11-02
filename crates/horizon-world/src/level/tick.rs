@@ -80,7 +80,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 Class::Coral => {
                     if !self.coral_scan_for_water(pos) {
                         if let Some(dead) = b.data(state).link {
-                            self.set_block(pos, b.default_of(dead), 2);
+                            let next = b.default_of(dead);
+                            if self.level.allow_block_fade(pos, state, next) {
+                                self.set_block(pos, next, 2);
+                            }
                         }
                     }
                 }
@@ -92,7 +95,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                             if class == Class::CoralWallFan {
                                 next = b.table.set_dir(next, p.facing, b.facing(state));
                             }
-                            self.set_block(pos, next, 2);
+                            if self.level.allow_block_fade(pos, state, next) {
+                                self.set_block(pos, next, 2);
+                            }
                         }
                     }
                 }
@@ -393,6 +398,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 Class::SnowLayer => {
                     if self.level.block_light(pos) > 11 {
+                        if !self.level.allow_block_fade(pos, state, b.air()) {
+                            continue;
+                        }
                         self.drop_resources(state, pos);
                         self.remove_block(pos, false);
                         self.game_event(pos, "minecraft:block_destroy");

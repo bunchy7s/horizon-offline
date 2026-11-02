@@ -345,6 +345,9 @@ pub trait LevelAccess {
         true
     }
     fn observe_sponge_absorb(&self, _pos: BlockPos) {}
+    fn allow_block_fade(&self, _pos: BlockPos, _from: BlockStateId, _to: BlockStateId) -> bool {
+        true
+    }
     fn allow_note_play(&self, _pos: BlockPos, _instrument: &str, _note: i32) -> bool {
         true
     }

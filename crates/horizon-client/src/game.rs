@@ -1231,6 +1231,13 @@ impl LevelAccess for GameLevel<'_> {
             self.native_sponge_absorb(self.dimension, pos);
         }
     }
+    fn allow_block_fade(&self, pos: BlockPos, from: BlockStateId, to: BlockStateId) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_block_fade(self.dimension, pos, from, to, &mut cancel);
+        }
+        !cancel
+    }
     fn allow_note_play(&self, pos: BlockPos, instrument: &str, note: i32) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
