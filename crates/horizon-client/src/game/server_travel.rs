@@ -128,6 +128,17 @@ pub(super) struct LevelTeleport {
     pub rotation: Option<[f32; 2]>,
 }
 
+/// A teleport a command made inside a level: told to the mods once it has
+/// reached the hub (`native_player_teleported`).
+pub(super) struct TeleportNote {
+    pub conn: u32,
+    pub uuid: u128,
+    pub name: String,
+    pub from: [f64; 3],
+    pub to: [f64; 3],
+    pub dimension: String,
+}
+
 /// A player's box: Player's standing dimensions.
 const WIDTH: f64 = 0.6;
 const HEIGHT: f64 = 1.8;
@@ -708,6 +719,29 @@ impl Game<'_> {
         self.set_portal_cooldown(id);
     }
 
+    /// Tells the mods of the teleports a command made inside a level, with
+    /// each player's state swapped in: where the move has reached the hub.
+    pub(super) fn flush_teleport_notes(&mut self, host: &mut LanHost) {
+        for note in std::mem::take(&mut self.teleport_notes) {
+            let TeleportNote {
+                conn,
+                uuid,
+                name,
+                from,
+                to,
+                dimension,
+            } = note;
+            // In place when it is their turn already (as_guest finds them swapped in).
+            if self.lan_acting == Some(conn) {
+                self.native_player_teleported(uuid, &name, from, to, &dimension);
+            } else {
+                self.as_guest(host, conn, |g| {
+                    g.native_player_teleported(uuid, &name, from, to, &dimension);
+                });
+            }
+        }
+    }
+
     /// The players the command just run sends to another level
     /// (`ServerPlayer.teleport` from TeleportCommand): a Respawn packet
     /// keeping all data and the teleport, with no portal sound. The server
@@ -725,6 +759,7 @@ impl Game<'_> {
                 log::error!("could not open {}: {e}", t.dim.id());
                 continue;
             }
+            let (uuid, name) = (host.hub.guests[i].uuid, host.hub.guests[i].name.clone());
             let g = &mut host.hub.guests[i];
             let [yaw, pitch] = t.rotation.unwrap_or([g.yaw, g.pitch]);
             let origin = g.position;
@@ -735,7 +770,12 @@ impl Game<'_> {
             let ctx = self.server_ctx();
             host.hub
                 .change_level(i, t.at, yaw, Some(pitch), false, cooldown, &ctx);
-            self.as_guest(host, t.conn, |g| g.trigger_dimension(source, t.dim, origin));
+            self.as_guest(host, t.conn, |g| {
+                g.trigger_dimension(source, t.dim, origin);
+                // The mods hear the teleport into another level, with the
+                // player's state swapped in.
+                g.native_player_teleported(uuid, &name, origin, t.at, t.dim.id());
+            });
             self.server_trips.retain(|trip| !trip.is(t.conn));
             self.server_trips.push(Trip {
                 conn: t.conn,

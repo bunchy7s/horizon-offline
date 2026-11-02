@@ -1,0 +1,12 @@
+{
+  "hooks": [
+    {
+      "name": "player_teleported",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_teleported",
+      "neoforge": "none (EntityTeleportEvent.TeleportCommand fires before the move and can cancel it; this hook is told after the move)",
+      "side": "server"
+    }
+  ],
+  "rust_summary": "a server player teleported by a command (`native_player_teleported`).",
+  "doc_summary": "a server player teleported: `native_player_teleported(player, name, from, to, dimension)` is heard after `/tp` or `/teleport` has moved a player inside their level or into another one (NeoForge's `EntityTeleportEvent`), with their state swapped in. `from` and `to` are their feet before and after, `dimension` the level they are in now. It cannot stop the move; ender pearls, chorus fruit and a spectator's teleport menu are not heard yet, portals and respawns are not teleports here. Bundles that use it need `\"hooks\": @API:native_player_teleported@`."
+}

@@ -1483,6 +1483,10 @@ impl Game<'_> {
                 if let Some(conn) = self.lan_acting {
                     self.server_trips.retain(|trip| !trip.is(conn));
                 }
+                let from = self
+                    .player
+                    .as_ref()
+                    .map(|p| [p.position.x, p.position.y, p.position.z]);
                 if let Some(p) = self.player.as_mut() {
                     p.position = v;
                     p.velocity = Vec3::new(0.0, 0.0, 0.0);
@@ -1493,6 +1497,24 @@ impl Game<'_> {
                 if let Some([yaw, pitch]) = rotation {
                     self.yaw = yaw;
                     self.pitch = pitch.clamp(-90.0, 90.0);
+                }
+                // A server player's teleport is told to the mods once their
+                // move is in the hub (`leave_guest`).
+                if let (Some(conn), Some(uuid), Some(name), Some(from)) = (
+                    self.lan_acting,
+                    self.lan_acting_uuid,
+                    self.lan_acting_name.clone(),
+                    from,
+                ) {
+                    self.teleport_notes
+                        .push(super::server_travel::TeleportNote {
+                            conn,
+                            uuid,
+                            name,
+                            from,
+                            to: pos,
+                            dimension: self.dim.id().to_owned(),
+                        });
                 }
             }
             Target::Mob(id) => {
