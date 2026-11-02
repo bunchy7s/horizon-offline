@@ -855,6 +855,16 @@ struct Hit {
     face: [i32; 3],
     point: [f64; 3],
 }
+impl Hit {
+    /// The block the clicked face leads to (`pos.relative(direction)`).
+    fn beside(&self) -> [i32; 3] {
+        [
+            self.pos[0] + self.face[0],
+            self.pos[1] + self.face[1],
+            self.pos[2] + self.face[2],
+        ]
+    }
+}
 /// What a falling block's tick did (`FallingBlockEntity.tick`).
 enum FallStep {
     Falling,
@@ -12844,24 +12854,29 @@ impl Game<'_> {
         }
     }
     /// `BucketItem.use`'s place position: a water bucket fills the clicked
-    /// block itself when that block is a liquid container (a waterloggable
-    /// stair, slab, fence, ...); every other bucket empties into the block the
-    /// clicked face leads to. `SolidBucketItem` places like a block item, into
-    /// a replaceable clicked block.
+    /// block itself when that block can hold it (`canBlockContainFluid`: a
+    /// waterloggable stair, slab, fence, ..., but not a double slab, kelp or
+    /// seagrass); every other bucket empties into the block the clicked face
+    /// leads to. `SolidBucketItem` places like a block item, into a
+    /// replaceable clicked block.
     pub(super) fn bucket_target(&self, content: BucketContent, hit: &Hit) -> [i32; 3] {
         let clicked = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
+        let behaviours = self.res.behaviours();
         if content == BucketContent::Powder {
             if self.res.facts().get(clicked).replaceable {
                 return hit.pos;
             }
-        } else if content.is_water() && self.res.behaviours().is_liquid_container(clicked) {
+        } else if content.is_water()
+            && behaviours.is_liquid_container(clicked)
+            && behaviours.can_place_liquid(
+                clicked,
+                horizon_world::fluid::FluidKind::Water,
+                self.creative,
+            )
+        {
             return hit.pos;
         }
-        [
-            hit.pos[0] + hit.face[0],
-            hit.pos[1] + hit.face[1],
-            hit.pos[2] + hit.face[2],
-        ]
+        hit.beside()
     }
     /// The cauldron at `pos`, and whether water is above it
     /// (`CauldronInteractions.isUnderWater`).
@@ -13313,18 +13328,24 @@ impl Game<'_> {
                 return Ok(UseResult::Fail);
             }
             let pos = BlockPos::new(target[0], target[1], target[2]);
-            // `Player.isShiftKeyDown`: only air takes a fluid under Shift.
+            let [x, y, z] = hit.beside();
+            let beside = Some(BlockPos::new(x, y, z));
+            // `Player.isShiftKeyDown`: a block that refuses the fluid (any
+            // non-air block under Shift) passes it to the block beside, where
+            // Shift no longer counts.
             let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
             let creative = self.creative;
             let emptied = self.with_level(|b, level, ticks| {
-                b.bucket_empty(level, ticks, pos, content, sound, sneaking, creative)
+                b.bucket_empty(
+                    level, ticks, pos, beside, content, sound, sneaking, creative,
+                )
             });
             self.process_level_events()?;
-            if !emptied {
+            let Some(emptied) = emptied else {
                 return Ok(UseResult::Fail);
-            }
+            };
             if self.dim == Dim::Nether && content.is_water() {
-                self.evaporation_smoke(target);
+                self.evaporation_smoke([emptied.x, emptied.y, emptied.z]);
             }
             // `BucketItem.emptyContents` uses `playSound(player, …)`: the
             // actor's client already played the empty / evaporate sound from
