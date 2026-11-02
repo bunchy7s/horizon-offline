@@ -50,7 +50,8 @@ pub use horizon_world::{
 pub use serde_json;
 use serde_json::{Map, Value};
 use std::time::Duration;
-pub use winit::event::KeyEvent;
+/// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
+pub use winit;
 
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
