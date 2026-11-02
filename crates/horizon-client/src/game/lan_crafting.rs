@@ -206,6 +206,12 @@ impl Game<'_> {
                 .filter(|&s| menu.slot(s) != before[s].as_ref())
                 .collect::<Vec<_>>()
         });
+        let guest = &host.hub.guests[gi];
+        let (uuid, name) = (guest.uuid, guest.name.clone());
+        let mut result = menu.slot(0).cloned();
+        self.native_prepare_item_craft(uuid, &name, None, &mut result);
+        let env = self.menu_env();
+        menu.set_slot(&env, 0, result);
         let g = &mut host.hub.guests[gi];
         for k in 0..4 {
             g.craft_grid[k] = menu.slot(1 + k).cloned();
@@ -528,6 +534,12 @@ impl Game<'_> {
                     .filter(|&s| menu.slot(s) != before[s].as_ref())
                     .collect::<Vec<_>>()
             });
+            let guest = &host.hub.guests[gi];
+            let (uuid, name) = (guest.uuid, guest.name.clone());
+            let mut result = menu.slot(0).cloned();
+            self.native_prepare_item_craft(uuid, &name, Some(pos), &mut result);
+            let env = self.menu_env();
+            menu.set_slot(&env, 0, result);
             agreed = p.state == state
                 && host.hub.click_agreed(
                     gi,

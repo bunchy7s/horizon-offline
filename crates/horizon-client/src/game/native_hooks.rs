@@ -3773,6 +3773,16 @@ impl Game<'_> {
     ) {
         let _ = (player, name, pos, result);
     }
+    /// A crafting-grid result was prepared for a server player; `pos` is the crafting table, or None for the inventory grid. Change `result` before it is sent. @API:native_prepare_item_craft@.
+    pub(super) fn native_prepare_item_craft(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: Option<[i32; 3]>,
+        result: &mut Option<ItemStack>,
+    ) {
+        let _ = (player, name, pos, result);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
