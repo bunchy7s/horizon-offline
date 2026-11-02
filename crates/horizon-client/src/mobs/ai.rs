@@ -2346,9 +2346,12 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     let from = [m.position.x, m.position.y, m.position.z];
     let source = Damage::mob(m.id, from);
     let first_event = cx.events.len();
+    // `CaveSpider`, `Husk` and `WitherSkeleton.doHurtTarget` all test
+    // `target instanceof LivingEntity`, so the effect reaches a mob the hit
+    // lands on and not only the player.
     match m.species() {
         // CaveSpider.doHurtTarget: poison for 7 s on normal, 15 s on hard.
-        Species::CaveSpider if who == Who::Player && cx.w.difficulty.base >= 2 => {
+        Species::CaveSpider if cx.w.difficulty.base >= 2 => {
             cx.events.push(MobEvent::EffectPlayer {
                 effect: "minecraft:poison",
                 ticks: if cx.w.difficulty.base == 2 { 7 } else { 15 } * 20,
@@ -2357,7 +2360,7 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
         }
         // Husk.doHurtTarget: hunger for 140 ticks per whole point of the
         // local difficulty, only with an empty main hand.
-        Species::Husk if who == Who::Player && m.extra.main_hand.is_none() => {
+        Species::Husk if m.extra.main_hand.is_none() => {
             let ticks = 140 * cx.w.difficulty.effective as i32;
             if ticks > 0 {
                 cx.events.push(MobEvent::EffectPlayer {
@@ -2367,7 +2370,7 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
                 })
             }
         }
-        Species::WitherSkeleton if who == Who::Player => cx.events.push(MobEvent::EffectPlayer {
+        Species::WitherSkeleton => cx.events.push(MobEvent::EffectPlayer {
             effect: "minecraft:wither",
             ticks: 200,
             amplifier: 0,
@@ -2415,33 +2418,45 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
             seconds: 2,
         });
     }
+    // The effect picked above goes with the hit: it applies only when the
+    // target takes damage (a shield-blocked hit gives none), for a mob as for
+    // the player, since those `doHurtTarget`s take any `LivingEntity`.
+    let effect = cx.events[first_event..]
+        .iter()
+        .position(|e| matches!(e, MobEvent::EffectPlayer { .. }))
+        .and_then(|k| match cx.events.remove(first_event + k) {
+            MobEvent::EffectPlayer {
+                effect,
+                ticks,
+                amplifier,
+            } => Some((effect, ticks, amplifier)),
+            _ => None,
+        });
     match who {
-        // The effect picked above goes with the hit: it applies only when
-        // the player takes damage (a shield-blocked hit gives none).
-        Who::Player => {
-            let effect = cx.events[first_event..]
-                .iter()
-                .position(|e| matches!(e, MobEvent::EffectPlayer { .. }))
-                .map(|k| cx.events.remove(first_event + k));
-            cx.events.push(match effect {
-                Some(MobEvent::EffectPlayer {
-                    effect,
-                    ticks,
-                    amplifier,
-                }) => MobEvent::AttackPlayerWithEffect {
-                    amount,
-                    from,
-                    effect,
-                    ticks,
-                    amplifier,
-                },
-                _ => MobEvent::AttackPlayer(amount, from),
-            });
-        }
-        Who::Mob(id) => cx.events.push(MobEvent::AttackMob {
-            target: id,
-            amount,
-            source,
+        Who::Player => cx.events.push(match effect {
+            Some((effect, ticks, amplifier)) => MobEvent::AttackPlayerWithEffect {
+                amount,
+                from,
+                effect,
+                ticks,
+                amplifier,
+            },
+            None => MobEvent::AttackPlayer(amount, from),
+        }),
+        Who::Mob(id) => cx.events.push(match effect {
+            Some((effect, ticks, amplifier)) => MobEvent::AttackMobWithEffect {
+                target: id,
+                amount,
+                source,
+                effect,
+                ticks,
+                amplifier,
+            },
+            None => MobEvent::AttackMob {
+                target: id,
+                amount,
+                source,
+            },
         }),
     }
     // Mob.doHurtTarget ends with playAttackSound once the hit landed.
@@ -2975,6 +2990,126 @@ mod poison_effect_tests {
         assert_eq!(pig.effective_gravity(), 0.01);
         pig.velocity.y = 0.5;
         assert_eq!(pig.effective_gravity(), full);
+    }
+}
+
+#[cfg(test)]
+mod hit_effect_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+    use std::sync::Arc;
+
+    /// The effects of a cave spider's bite, a bare-handed husk's blow and a
+    /// wither skeleton's hit go to the `LivingEntity` the hit landed on:
+    /// `doHurtTarget` tests `target instanceof LivingEntity`, not `Player`.
+    /// Biting a mob carries the effect with the hit — poison for 140 ticks on
+    /// normal, hunger for 140 (effective difficulty 1.5), wither for 200 —
+    /// where the mob is hit 2. Without the fix each of these is a plain
+    /// `AttackMob` and the mob keeps no effect at all (0 ticks).
+    #[test]
+    fn a_melee_effect_rides_the_hit_onto_a_mob() {
+        let cases = [
+            ("minecraft:cave_spider", "minecraft:poison", 140),
+            ("minecraft:husk", "minecraft:hunger", 140),
+            ("minecraft:wither_skeleton", "minecraft:wither", 200),
+        ];
+        let mut carried: Vec<(&str, Option<(u32, &'static str, i32, i32)>)> = Vec::new();
+        let mut strays: Vec<(&str, bool, bool)> = Vec::new();
+        let ran = with_test_world(&[], |w, types| {
+            for (kind, _, _) in cases {
+                let mut m = Mob::new(
+                    1,
+                    Arc::new(types.types[kind].clone()),
+                    Vec3::new(0.5, 64.0, 0.5),
+                    0.0,
+                );
+                let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+                let mut cx = Cx {
+                    w,
+                    lr: &mut lr,
+                    events: &mut events,
+                };
+                do_hurt_target(&mut m, Who::Mob(2), &mut cx);
+                carried.push((
+                    kind,
+                    events.iter().find_map(|e| match e {
+                        MobEvent::AttackMobWithEffect {
+                            target,
+                            effect,
+                            ticks,
+                            amplifier,
+                            ..
+                        } => Some((*target, *effect, *ticks, *amplifier)),
+                        _ => None,
+                    }),
+                ));
+                strays.push((
+                    kind,
+                    events
+                        .iter()
+                        .any(|e| matches!(e, MobEvent::EffectPlayer { .. })),
+                    events
+                        .iter()
+                        .any(|e| matches!(e, MobEvent::AttackMob { .. })),
+                ));
+            }
+        });
+        if !ran {
+            return;
+        }
+        let expected: Vec<(&str, Option<(u32, &'static str, i32, i32)>)> = cases
+            .iter()
+            .map(|(kind, effect, ticks)| (*kind, Some((2, *effect, *ticks, 0))))
+            .collect();
+        assert_eq!(carried, expected);
+        for (kind, on_player, effectless) in strays {
+            assert!(!on_player, "{kind} left its effect on the player");
+            assert!(!effectless, "{kind} sent a second, effectless hit");
+        }
+    }
+
+    /// On easy the cave spider's poison timer is 0, so nothing rides the hit:
+    /// the mob it bites takes the damage alone (`AttackMob`, no effect).
+    #[test]
+    fn an_easy_cave_spiders_bite_carries_no_effect() {
+        let mut out: Option<Vec<String>> = None;
+        let ran = with_test_world(&[], |w, types| {
+            let mut easy = w.clone();
+            easy.difficulty = super::super::spawning::LocalDifficulty::new(1, 18000, 0, 0.0);
+            let mut m = Mob::new(
+                1,
+                Arc::new(types.types["minecraft:cave_spider"].clone()),
+                Vec3::new(0.5, 64.0, 0.5),
+                0.0,
+            );
+            let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+            let mut cx = Cx {
+                w: &easy,
+                lr: &mut lr,
+                events: &mut events,
+            };
+            do_hurt_target(&mut m, Who::Mob(2), &mut cx);
+            out = Some(
+                events
+                    .iter()
+                    .filter(|e| {
+                        matches!(
+                            e,
+                            MobEvent::AttackMob { .. } | MobEvent::AttackMobWithEffect { .. }
+                        )
+                    })
+                    .map(|e| match e {
+                        MobEvent::AttackMob { target, .. } => format!("plain {target}"),
+                        MobEvent::AttackMobWithEffect { effect, .. } => format!("effect {effect}"),
+                        _ => unreachable!(),
+                    })
+                    .collect(),
+            );
+        });
+        if !ran {
+            return;
+        }
+        assert_eq!(out, Some(vec!["plain 2".to_owned()]));
     }
 }
 

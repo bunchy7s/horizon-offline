@@ -43,6 +43,10 @@ the same grid.
 the MIT license (`crates/horizon-theme/icons/glass/LICENSE-hugeicons.txt`), exported with a 1.6
 stroke in `currentColor`.
 
+`crates/horizon-theme/icons/glass/discord.svg` is Discord's logo as drawn by
+[Simple Icons](https://github.com/simple-icons/simple-icons) 13.21.0 (CC0 1.0). The logo is Discord's
+trademark, used only on the button that opens Horizon's Discord server.
+
 ## AMD FidelityFX SDK (FSR 3.1 frame generation)
 
 `crates/horizon-client-render/src/gfx/frame_gen/optical_flow.wgsl` and `interpolation.wgsl` are
@@ -57,19 +61,17 @@ trademarks; Horizon is not affiliated with AMD.
 
 ## Mod loader logos
 
-The launcher shows the logo of the mod loader an instance plays with.
+The launcher shows the logo of the mod loader an instance plays with, and offers the logos as
+instance icons.
 
-- `launcher/assets/logos/quilt.png` is the Quilt mini icon (`brand/128png/quilt_mini_icon_transparent.png`)
-  from [QuiltMC/art](https://github.com/QuiltMC/art), by the Quilt Project, dedicated to the public
-  domain under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
-- `launcher/assets/logos/neoforge.png` is NeoForged's icon (`art/neoforged_icon_16x16.png`) from
-  [neoforged/.github](https://github.com/neoforged/.github/tree/main/art), © the NeoForged team,
-  created by Ridanisaurus, under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). It is
-  unmodified (the launcher scales it up by whole pixels).
-- Fabric's and Forge's icons are not shipped: neither publishes a license for its logo. The launcher
-  fetches them from their own sites when an instance needs them
-  ([fabric-loader's icon](https://github.com/FabricMC/fabric-loader/blob/master/src/main/resources/assets/fabricloader/icon.png),
-  [files.minecraftforge.net's](https://files.minecraftforge.net/)).
+- `launcher/assets/logos/{fabric,quilt,neoforge,forge}.png` are the loaders' logos as the launcher
+  mockup on [playhorizon.dev/launcher](https://playhorizon.dev/launcher) shows them (horizon-site
+  `public/media/launcher/*.webp`, converted to PNG), each its project's own mark:
+  [Fabric](https://fabricmc.net/), [Quilt](https://quiltmc.org/) (its art is
+  [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)),
+  [NeoForged](https://neoforged.net/) (its art, by Ridanisaurus, is
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)) and
+  [Minecraft Forge](https://minecraftforge.net/). They name the loader an instance runs.
 
 Each logo belongs to its project. Showing it says which loader an instance runs; it does not mean
 the project endorses Horizon.
