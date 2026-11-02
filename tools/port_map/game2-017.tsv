@@ -128,7 +128,7 @@ SignBlockEntity.createCommandSourceStack	port	crates/horizon-client/src/game/sig
 SignBlockEntity.markUpdated	port	crates/horizon-client/src/game/trial_spawner.rs::Game::mark_block_entity_updated	
 SignBlockEntity.setWaxed	port	crates/horizon-client/src/game/sign_edit.rs::Game::use_sign_applicator	honeycomb wax
 SignBlockEntity.playerIsTooFarAwayToEdit	port	crates/horizon-client/src/game/sign_edit.rs::Game::lan_sign_update	reach check when a guest writes
-SignBlockEntity.tick	missing		minor: unsure: no per-tick clearing of the edit permission; the reach check only happens when a guest writes
+SignBlockEntity.tick	inline	crates/horizon-client/src/game/sign_edit.rs::Game::lan_sign_update	the edit permission is not cleared on a tick: `lan_sign_update` re-checks `playerIsTooFarAwayToEdit` on every write and drops the guest's `sign_editing` when it is out of reach, so a guest that walks away keeps the flag until its next write
 SignBlockEntity.removeComponentsFromTag	port	crates/horizon-client/src/block_entity_item.rs::pick	front, back and waxed left out of the item data
 SignText.load	port	crates/horizon-client-render/src/signs.rs::SignData::decode	
 SignText.validateLineCounts	skip:java		codec check of four lines; Horizon fixes the array size
