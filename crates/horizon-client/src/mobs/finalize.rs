@@ -2467,7 +2467,13 @@ mod tests {
         set_base(&mut m, Attr::AttackDamage, 7.0);
         // Refresh through another attribute's change and a modifier.
         set_base(&mut m, Attr::MaxHealth, 30.0);
-        add_modifier(&mut m, Attr::MovementSpeed, "test:x", 0.5, Op::AddMultipliedTotal);
+        add_modifier(
+            &mut m,
+            Attr::MovementSpeed,
+            "test:x",
+            0.5,
+            Op::AddMultipliedTotal,
+        );
         assert_eq!(base_value(&m, Attr::MovementSpeed), 0.5);
         assert_eq!(m.attrs.speed, 0.75);
         remove_modifier(&mut m, Attr::MovementSpeed, "test:x");
