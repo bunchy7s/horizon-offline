@@ -7,7 +7,7 @@ UnconfiguredPipelineHandler.Outbound.write	skip:other		Netty guard for packets s
 VarInt.getByteSize	port	crates/horizon-protocol/src/buf.rs::varint_size	
 VarLong.getByteSize	skip:java		byte-size helper with no caller here; Horizon writes varlongs and measures the buffer
 Varint21FrameDecoder.copyVarint	inline	crates/horizon-protocol/src/frame.rs::split	the 3-byte length read and the 'length wider than 21 bits' error
-Varint21FrameDecoder.decode	port	crates/horizon-protocol/src/frame.rs::split	gap: minor: a zero frame length is not rejected (vanilla throws 'Frame length cannot be zero')
+Varint21FrameDecoder.decode	port	crates/horizon-protocol/src/frame.rs::split	the length prefix is read by frame::header, which refuses a zero frame as corrupted, and split cuts the frame at it
 ChatType.bind	port	crates/horizon-client/src/lan/hub/chat.rs::Hub::handle_chat	the bound takes the chat type and the sender's display name
 ChatTypeDecoration.incomingDirectMessage	skip:data		chat_type registry bootstrap; the msg decorations come from the chat_type data
 ChatTypeDecoration.outgoingDirectMessage	skip:data		chat_type registry bootstrap; the msg decorations come from the chat_type data
@@ -44,7 +44,7 @@ FilterMask.equals	skip:java		value equality
 FilterMask.hashCode	skip:java		hashing
 FormattedText.of	skip:java		adapter from a String to FormattedText
 FormattedText.getString	port	crates/horizon-client-core/src/text.rs::Text::plain	
-HoverEvent.Action.filterForSerialization	port	crates/horizon-client-core/src/component.rs::object_style	gap: minor: show_entity is accepted by vanilla and dropped here
+HoverEvent.Action.filterForSerialization	port	crates/horizon-client-core/src/component.rs::object_style	show_text, show_item and show_entity are kept; a show_entity hover draws its tooltip in chat with advanced item tooltips on
 HoverEvent.EntityTooltipInfo.getTooltipLines	port	crates/horizon-client/src/game/chat.rs::Game::entity_tooltip_lines	the name when the event has one, then the entity type and the uuid, for a show_entity hover
 HoverEvent.EntityTooltipInfo.equals	skip:java		value equality
 HoverEvent.EntityTooltipInfo.hashCode	skip:java		hashing
