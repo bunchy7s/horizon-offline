@@ -1261,33 +1261,31 @@ mod tests {
     }
 
     /// The same through `send_changes`: a slow item stopped by a wall would
-    /// have its resting point rounded to the delta grid, so it goes out as a
-    /// position sync; one that hit nothing keeps the quantised delta.
+    /// have its resting point rounded to the delta grid, so at its next update
+    /// (an item's is every 20 ticks) it goes out as a position sync carrying
+    /// the exact point; one that hit nothing keeps the quantised delta.
     #[test]
     fn a_slow_item_stopped_by_a_wall_syncs_its_exact_position() {
-        let mut stopped = state(0.0);
-        stopped.kind = "minecraft:item".into();
-        let mut s = added(&stopped);
-        changes(&mut s, &stopped);
-        stopped.position = [0.3, 64.0, 0.3];
-        stopped.horizontal_collision = true;
-        stopped.needs_sync = true;
-        let out = changes(&mut s, &stopped);
+        let stop = |collision: bool| {
+            let mut e = state(0.0);
+            e.kind = "minecraft:item".into();
+            let mut s = added(&e);
+            changes(&mut s, &e);
+            e.position = [0.3, 64.0, 0.3];
+            e.horizontal_collision = collision;
+            for _ in 0..19 {
+                assert!(changes(&mut s, &e).is_empty());
+            }
+            changes(&mut s, &e)
+        };
+        let out = stop(true);
         assert!(
             matches!(&out[..], [play::Clientbound::EntityPositionSync(p)]
                 if p.path.end() == [0.3, 64.0, 0.3]),
             "{out:?}"
         );
-        let mut moving = state(0.0);
-        moving.kind = "minecraft:item".into();
-        let mut s = added(&moving);
-        changes(&mut s, &moving);
-        moving.position = [0.3, 64.0, 0.3];
-        moving.needs_sync = true;
-        assert!(matches!(
-            changes(&mut s, &moving)[..],
-            [play::Clientbound::MoveEntityPos(_)]
-        ));
+        let out = stop(false);
+        assert!(matches!(&out[..], [play::Clientbound::MoveEntityPos(_)]));
     }
 
     #[test]
