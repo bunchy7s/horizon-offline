@@ -844,6 +844,9 @@ A mod particle may opt into declarative behaviour in that same particle JSON (no
   "textures": ["mymod:spark"],
   "horizon:behaviour": {
     "velocity": [0.0, 0.15, 0.0],
+    "velocity_jitter": [0.02, 0.0, 0.02],
+    "animation": "loop",
+    "frame_ticks": 3,
     "gravity": 0.5,
     "friction": 0.96,
     "lifetime": 40,
@@ -853,9 +856,15 @@ A mod particle may opt into declarative behaviour in that same particle JSON (no
 }
 ```
 
+`animation` chooses how the particle walks through its sprites: `age` (default, first to last over its
+lifetime), `loop` (cycles every `frame_ticks` ticks, 1..200, only valid with `loop`), `random` (one random
+sprite, kept) or `first` (the first sprite, kept).
+
 Every field is optional. Omit `horizon:behaviour` (or use `{}`) to keep the existing behaviour,
 including its random draws, unchanged. `velocity` replaces the initial randomized velocity with
-an exact vector in blocks/tick; omit it to retain the spawn's default spread. Each component must
+an exact vector in blocks/tick, plus the velocity the spawn call passed; omit it to retain the spawn's default spread. `velocity_jitter` adds a random
+offset per axis, uniform in `-j..=j` (0..16 each, drawn from the particle's seeded generator, so the same
+seed gives the same particle); declaring it alone starts from zero plus the spawn velocity. Each component must
 be finite and within -16..16. `gravity` is the vanilla multiplier: each tick subtracts
 `0.04 * gravity` from vertical velocity before moving (negative rises; range -100..100).
 After movement, `friction` multiplies all velocity components (0..1); normal block collisions

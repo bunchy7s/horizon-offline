@@ -343,10 +343,28 @@ enum DripStage {
     Land,
 }
 
+/// How a mod particle walks through its sprite set.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ModAnimation {
+    /// Over its lifetime, first to last sprite (the default).
+    Age,
+    /// Cycles the sprites every `frame_ticks`.
+    Loop,
+    /// One random sprite, kept.
+    Random,
+    /// The first sprite, kept.
+    First,
+}
 #[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct ModBehaviour {
     velocity: Option<[f64; 3]>,
+    /// Random extra velocity, each axis uniform in `-jitter..=jitter`.
+    velocity_jitter: Option<[f64; 3]>,
+    animation: Option<ModAnimation>,
+    /// Ticks per frame of the `loop` animation.
+    frame_ticks: Option<u16>,
     gravity: Option<f32>,
     friction: Option<f32>,
     lifetime: Option<i32>,
@@ -359,6 +377,12 @@ impl ModBehaviour {
         if behaviour
             .velocity
             .is_some_and(|v| v.iter().any(|c| !c.is_finite() || c.abs() > 16.0))
+            || behaviour
+                .velocity_jitter
+                .is_some_and(|v| v.iter().any(|c| !(0.0..=16.0).contains(c)))
+            || behaviour.frame_ticks.is_some_and(|v| {
+                !(1..=200).contains(&v) || behaviour.animation != Some(ModAnimation::Loop)
+            })
             || behaviour
                 .gravity
                 .is_some_and(|v| !v.is_finite() || v.abs() > 100.0)
@@ -380,9 +404,20 @@ impl ModBehaviour {
         Some(behaviour)
     }
 
-    fn apply(self, particle: &mut Particle) {
-        if let Some(velocity) = self.velocity {
-            particle.velocity = velocity;
+    /// `spawn` is the velocity the spawn call passed; a declared velocity is added to it,
+    /// with the jitter drawn from `random`.
+    fn apply(self, particle: &mut Particle, spawn: [f64; 3], random: &mut LegacyRandom) {
+        if self.velocity.is_some() || self.velocity_jitter.is_some() {
+            let base = self.velocity.unwrap_or([0.0; 3]);
+            let jitter = self.velocity_jitter.unwrap_or([0.0; 3]);
+            for axis in 0..3 {
+                let spread = if jitter[axis] > 0.0 {
+                    f64::from(random.next_float() * 2.0 - 1.0) * jitter[axis]
+                } else {
+                    0.0
+                };
+                particle.velocity[axis] = base[axis] + spawn[axis] + spread;
+            }
         }
         if let Some(gravity) = self.gravity {
             particle.gravity = gravity;
@@ -392,6 +427,11 @@ impl ModBehaviour {
         }
         if let Some(lifetime) = self.lifetime {
             particle.lifetime = lifetime;
+        }
+        match self.animation {
+            Some(ModAnimation::Loop) => particle.frame_ticks = self.frame_ticks.unwrap_or(2),
+            Some(ModAnimation::Random | ModAnimation::First) => particle.set = None,
+            Some(ModAnimation::Age) | None => {}
         }
         if self.size.is_some() || self.alpha.is_some() {
             let size = self.size.unwrap_or([particle.size; 2]);
@@ -437,6 +477,8 @@ pub struct Particle {
     sprite: Sprite,
     /// Age-driven sprite set (`setSpriteFromAge`).
     set: Option<u32>,
+    /// A mod particle's `loop` animation: ticks per sprite, 0 for none.
+    frame_ticks: u16,
     /// Sub-rectangle of the sprite (u0, v0, u1, v1) in 0..1.
     pub uv: [f32; 4],
     size_curve: Size,
@@ -783,6 +825,7 @@ impl Particle {
             behaviour: Behaviour::Base,
             no_render: false,
             pre_tick: false,
+            frame_ticks: 0,
             random: LegacyRandom::new(0),
         }
     }
@@ -1809,8 +1852,12 @@ impl ParticleEngine {
                 return;
             };
             let lifetime = p.lifetime.max(1);
-            let index = (p.age.max(0) as i64 * (sprites.len() as i64 - 1) / i64::from(lifetime))
-                .clamp(0, sprites.len() as i64 - 1);
+            let index = if p.frame_ticks > 0 {
+                (p.age.max(0) as i64 / i64::from(p.frame_ticks)) % sprites.len() as i64
+            } else {
+                (p.age.max(0) as i64 * (sprites.len() as i64 - 1) / i64::from(lifetime))
+                    .clamp(0, sprites.len() as i64 - 1)
+            };
             p.sprite = Sprite::Index(sprites[index as usize]);
         }
     }
@@ -1842,7 +1889,10 @@ impl ParticleEngine {
                 sprites[r.next_int_bound(sprites.len() as i32).unwrap_or(0) as usize],
             );
             if let Some(behaviour) = behaviour {
-                behaviour.apply(&mut q);
+                behaviour.apply(&mut q, v, &mut r);
+                if behaviour.animation == Some(ModAnimation::First) {
+                    q.sprite = Sprite::Index(sprites[0]);
+                }
             }
             return Some(q);
         }
@@ -4635,9 +4685,11 @@ mod tests {
             [0.0; 3],
         );
         let original = particle.clone();
-        ModBehaviour::parse(&json!({}))
-            .unwrap()
-            .apply(&mut particle);
+        ModBehaviour::parse(&json!({})).unwrap().apply(
+            &mut particle,
+            [0.0; 3],
+            &mut LegacyRandom::new(1),
+        );
         assert_eq!(particle.velocity, original.velocity);
         assert_eq!(particle.lifetime, original.lifetime);
         assert_eq!(particle.gravity, original.gravity);
@@ -4645,6 +4697,64 @@ mod tests {
         assert_eq!(particle.size, original.size);
         assert_eq!(particle.rgba, original.rgba);
         assert_eq!(particle.behaviour, original.behaviour);
+    }
+
+    #[test]
+    fn mod_velocity_adds_the_spawn_velocity_and_jitters_deterministically() {
+        use serde_json::json;
+        let mut base = Particle::blank(ParticleType::Smoke, [0.0; 3]);
+        ModBehaviour::parse(&json!({"velocity": [0.5, 0.0, 0.0]}))
+            .unwrap()
+            .apply(&mut base, [0.25, 1.0, -1.0], &mut LegacyRandom::new(1));
+        assert_eq!(base.velocity, [0.75, 1.0, -1.0]);
+        let jitter = ModBehaviour::parse(&json!({"velocity_jitter": [0.5, 0.0, 0.25]})).unwrap();
+        let mut first = Particle::blank(ParticleType::Smoke, [0.0; 3]);
+        let mut second = Particle::blank(ParticleType::Smoke, [0.0; 3]);
+        jitter.apply(&mut first, [1.0, 2.0, 3.0], &mut LegacyRandom::new(9));
+        jitter.apply(&mut second, [1.0, 2.0, 3.0], &mut LegacyRandom::new(9));
+        assert_eq!(first.velocity, second.velocity);
+        assert!((0.5..=1.5).contains(&first.velocity[0]));
+        assert_eq!(first.velocity[1], 2.0);
+        assert!((2.75..=3.25).contains(&first.velocity[2]));
+        for invalid in [
+            json!({"velocity_jitter": [-0.1, 0, 0]}),
+            json!({"velocity_jitter": [17, 0, 0]}),
+            json!({"frame_ticks": 2}),
+            json!({"animation": "age", "frame_ticks": 2}),
+            json!({"animation": "loop", "frame_ticks": 0}),
+            json!({"animation": "loop", "frame_ticks": 201}),
+            json!({"animation": "spin"}),
+        ] {
+            assert!(ModBehaviour::parse(&invalid).is_none(), "{invalid}");
+        }
+        assert!(ModBehaviour::parse(&json!({"animation": "loop", "frame_ticks": 3})).is_some());
+    }
+
+    #[test]
+    fn mod_animation_modes_pick_their_sprites() {
+        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        engine.set_sprites.push(vec![10, 11, 12]);
+        let mut looping = Particle::blank(ParticleType::Smoke, [0.0; 3]);
+        looping.set = Some(0);
+        ModBehaviour::parse(&serde_json::json!({"animation": "loop", "frame_ticks": 2}))
+            .unwrap()
+            .apply(&mut looping, [0.0; 3], &mut LegacyRandom::new(1));
+        let mut seen = Vec::new();
+        for age in 0..8 {
+            looping.age = age;
+            engine.sprite_from_age(&mut looping);
+            seen.push(match looping.sprite {
+                Sprite::Index(i) => i,
+                Sprite::Named(_) => u32::MAX,
+            });
+        }
+        assert_eq!(seen, [10, 10, 11, 11, 12, 12, 10, 10]);
+        let mut kept = Particle::blank(ParticleType::Smoke, [0.0; 3]);
+        kept.set = Some(0);
+        ModBehaviour::parse(&serde_json::json!({"animation": "first"}))
+            .unwrap()
+            .apply(&mut kept, [0.0; 3], &mut LegacyRandom::new(1));
+        assert_eq!(kept.set, None);
     }
 
     #[test]
@@ -4710,7 +4820,7 @@ mod tests {
             "lifetime": 2, "size": [0.25, 0.75], "alpha": [1, 0]
         }))
         .unwrap()
-        .apply(&mut particle);
+        .apply(&mut particle, [0.0; 3], &mut LegacyRandom::new(1));
         assert_eq!(particle.size, 0.25);
         assert_eq!(particle.rgba[3], 1.0);
         engine.tick_particle(&mut particle, &level);
@@ -4745,7 +4855,7 @@ mod tests {
         let mut particle = Particle::blank(ParticleType::Smoke, [0.0; 3]);
         ModBehaviour::parse(&serde_json::json!({"alpha": [0.5, 0]}))
             .unwrap()
-            .apply(&mut particle);
+            .apply(&mut particle, [0.0; 3], &mut LegacyRandom::new(1));
         particle.sprite = Sprite::Index(0);
         engine.particles.push(particle);
         let mut vertices = Vec::new();
