@@ -960,9 +960,48 @@ impl ObservedScreen {
     }
 }
 
+fn observed_overlay_id(overlays: &[(bool, &'static str)]) -> Option<&'static str> {
+    overlays.iter().find_map(|(open, id)| open.then_some(*id))
+}
+
 impl Game<'_> {
+    fn observed_screen_view(&self) -> Option<NativeScreenView<'_>> {
+        let book = match &self.book {
+            Some(super::books::BookScreen::Edit { signing: true, .. }) => Some("book_sign"),
+            Some(super::books::BookScreen::Edit { .. }) => Some("book_edit"),
+            Some(super::books::BookScreen::View {
+                lectern: Some(_), ..
+            }) => Some("lectern"),
+            Some(super::books::BookScreen::View { .. }) => Some("book_view"),
+            None => None,
+        };
+        let overlay = observed_overlay_id(&[
+            (self.command_prompt.is_some(), "command_prompt"),
+            (self.link_prompt.is_some(), "link_prompt"),
+            (self.code_of_conduct.is_some(), "code_of_conduct"),
+            (self.server_packs.prompt.is_some(), "server_pack_prompt"),
+            (self.dialog_open(), "dialog"),
+            (book.is_some(), book.unwrap_or("book_view")),
+            (self.sign_edit.is_some(), "sign_editor"),
+        ]);
+        let Some(id) = overlay else {
+            return self.screen_view_now();
+        };
+        let renderer = self.renderer.as_ref()?;
+        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+        Some(NativeScreenView {
+            id,
+            menu: None,
+            title: None,
+            rect: [0.0, 0.0, batch.width, batch.height],
+            slots: 0,
+            mouse: self.native_cursor(),
+            partial_tick: self.clock.fraction() as f32,
+        })
+    }
+
     pub(super) fn observe_screen(&mut self) {
-        let current = self.screen_view_now().map(|view| ObservedScreen {
+        let current = self.observed_screen_view().map(|view| ObservedScreen {
             id: view.id,
             menu: view.menu.map(str::to_owned),
             title: view.title.cloned(),
@@ -9391,6 +9430,22 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn observed_overlay_prefers_first_open_screen() {
+        assert_eq!(
+            super::observed_overlay_id(&[(false, "sign"), (false, "book")]),
+            None
+        );
+        assert_eq!(
+            super::observed_overlay_id(&[(false, "sign"), (true, "book")]),
+            Some("book")
+        );
+        assert_eq!(
+            super::observed_overlay_id(&[(true, "sign"), (true, "book")]),
+            Some("sign")
+        );
+    }
+
     #[test]
     fn vanished_mobs_are_reported_by_kind() {
         use std::collections::HashSet;
