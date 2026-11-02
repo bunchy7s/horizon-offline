@@ -1053,7 +1053,8 @@ trusting native code is the player's decision, never an agent's.
 7. **Install**: a new version, `native-<commit>-<key>`, a copy of the starting version's folder (resources
    included, cloned on APFS, Btrfs and ReFS) with the built game in place of its own, and a `native-mods.json`
    saying which release or Nightly it started from (`base`) and which commit, mods, horizon-mixins and Rust made
-   it. The instance the mods are installed in plays it, the default **Horizon** instance included: the build
+   it. The game lists its `mods` with their versions in a crash report's details (`Native Mods: id version, …`;
+   they stay in the local report, not in crash telemetry). The instance the mods are installed in plays it, the default **Horizon** instance included: the build
    pins its version, as picking a version does. Updates of the launcher's version leave a pinned instance where
    it is, and their clean-up never removes a native build. An instance built before this (the **Native mods**
    instance the default home's mods used to go to) keeps its worlds and its build.
@@ -1595,6 +1596,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_enchant_item(player, name, pos, item, levels)`**: a player applied an enchantment at `pos`; `item` is the finished item and `levels` the levels charged. Guest state is not swapped in.
 - **`native_prepare_item_enchant(player, name, pos, costs)`**: enchanting offers were calculated at `pos`; change the three offer costs before they are sent to the player's menu. Guest state is not swapped in.
 - **`native_prepare_anvil(player, name, pos, result, cost)`**: an anvil result was prepared for a player at `pos`; change the result or level cost before it is sent to their menu. Guest state is not swapped in.
+- **`native_anvil_craft_pre(player, name, pos, craft, cancel)`**: a player took an anvil's result at `pos` (NeoForge's `AnvilCraftEvent.Pre`), before the levels are charged, the inputs used up and the anvil worn. `craft` has the left and right inputs and the result as they were before. Set `cancel` to refuse the take and skip `native_anvil_craft_post`: the result stays in its slot and the inputs, levels, inventory and cursor are as before the click. Fires on the server only; the window's predicted take does not call it.
+- **`native_anvil_craft_post(player, name, pos, craft)`**: the levels, inputs and anvil wear of that take are done (NeoForge's `AnvilCraftEvent.Post`); a broken anvil is already air. `craft` is the same as in `native_anvil_craft_pre`. Not called when it cancelled.
 - **`native_prepare_grindstone(player, name, pos, result)`**: a grindstone result was prepared for a player at `pos`; change it before it is sent to their menu. Guest state is not swapped in.
 - **`native_prepare_smithing(player, name, pos, result)`**: a smithing result was prepared for a player at `pos`; change it before it is sent to their menu. Guest state is not swapped in.
 - **`native_prepare_item_craft(player, name, pos, result)`**: a crafting-grid result was prepared; `pos` is the crafting table, or None for the player's inventory grid. Change it before it is sent to the menu. Guest state is not swapped in.
@@ -2252,6 +2255,73 @@ renderer list is installed once alongside the mod list. `render_needs` collects 
 run on the render thread while the frame is built, before any deferred GPU submission.
 The renderer module re-exports the game's wgpu types.
 
+### The typed API from mixin code
+
+A helper is compiled inside its target, as a [Sponge Mixin](https://github.com/SpongePowered/Mixin/wiki) handler is merged
+into its target class, so it can use the typed API. On a `Game` method, bind the game and coerce it to `dyn Host`:
+
+```toml
+[[injection]]
+id = "count"
+target = "horizon_client::game::Game<'_>::tick_mobs"
+kind = "HEAD"
+helper = "count.rs"
+bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
+```
+
+```rust
+fn count(game: &mut crate::game::Game<'_>) {
+    let host: &mut dyn horizon_client::mod_api::Host = game;
+    let holder = horizon_client::mod_api::Holder::Level;
+    if let Ok(old) = crate::game::example::COUNTER.get(&mut *host, holder) {
+        let _ = crate::game::example::COUNTER.set(host, holder, old + 1);
+    }
+}
+```
+
+`COUNTER` is the `AttachmentType<i32>` of [Server attachments](#server-attachments), kept in a `[[module]]` of the
+bundle (horizon-mixins' README): one with `file = "crates/horizon-client/src/game.rs"` and `name = "example"` is
+`crate::game::example`. `Game` is not an `AttachmentHost` itself, so the `dyn Host` coercion is the step that matters;
+any `Host` helper works on `host` too.
+
+On a `GameLevel` method that takes `&mut self` (`native_random_tick`, `native_tick_block`, `native_perform_bonemeal`,
+`native_is_bonemeal_success`), bind `{ name = "level", ty = "&mut dyn crate::mod_api::LevelRandomHost", value = "&mut *self" }`
+for attachments and `random()`. Scheduling and `set_block_property` stay on the `LevelTicksHost` and `LevelWriteHost` the
+hook points pass; `is_bonemeal_success` gets only a `LevelRandomHost`.
+
+A trait injection gives the mod's `[api]` crate the same `Host` at that method. The `[api]` crate depends on
+horizon-client's library, not on the game executable that helpers and modules are compiled into, so it declares its
+own `AttachmentType<i32>` with the same `namespace` and `name`: the pair is the key, so both statics read one value.
+
+```toml
+[[injection]]
+id = "count"
+target = "horizon_client::game::Game<'_>::tick_mobs"
+kind = "HEAD"
+trait_method = "count"
+bindings = [{ name = "host", ty = "&mut dyn crate::mod_api::Host", value = "&mut *self" }]
+```
+
+```rust
+fn inject_example_count(&self, event: &mut InjectExampleCountEvent<'_>) {
+    let _ = COUNTER.get(&mut *event.host, Holder::Level);
+}
+```
+
+The `[api]` crate reads `event.host` at any `Game` method horizon-mixins can inject into at HEAD (its README lists the
+limits). `hook` and `hook_version` work in place of `target`.
+
+The helper runs in every `Game` that calls its target, and attachments answer `MissingHolder` outside the server's game,
+as they do in hooks.
+
+A catalog hook's trait method, event and return are part of its `hook_version` contract ([Named hook
+points](#named-hook-points), [Mods on the hook points](#mods-on-the-hook-points)). Later Horizons only add event fields
+(`#[non_exhaustive]`), trait methods with default bodies, and `Host` methods. So a mod whose `[api]` package uses only catalog
+hooks (trait methods, or injections by `hook`) and `Host` can set `"hooks"` in its `.hnmod`'s `horizon-native.json` to the
+`NATIVE_HOOKS_API` it was made on.
+A raw `target` like `tick_mobs` is not a hook point and may change in any commit: such a mod pins `horizon_revision` and
+leaves `hooks` out.
+
 ### Testing a trait mod
 
 Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements
@@ -2318,12 +2388,14 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
     }),
     copy_on_death: false,
 };
-// Inside a server hook with `host: &mut dyn Host`:
+// Inside a server hook, or mixin code, with `host: &mut dyn Host`:
 if !COUNTER.has(host, Holder::Chunk([0, 0]))? { /* chunk carries no counter yet */ }
 let old = COUNTER.get(host, Holder::Chunk([0, 0]))?;
 COUNTER.set(host, Holder::Chunk([0, 0]), old + 1)?;
 Ok::<(), AttachmentError>(())
 ```
+
+For mixin code, see [The typed API from mixin code](#the-typed-api-from-mixin-code).
 
 Use `Holder::Level`, `Holder::Chunk([x, z])`, `Holder::BlockEntity([x, y, z])`,
 `Holder::Entity(id)`, or `Holder::Player(uuid)`. Entity IDs cover mobs, item

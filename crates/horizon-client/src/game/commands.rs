@@ -2175,7 +2175,8 @@ impl Game<'_> {
             if self.ui.difficulty == 0 && t.category == "monster" {
                 return Err(err("commands.summon.failed.peaceful", &[]));
             }
-            self.spawn_mob_spawned(&short, pos);
+            self.spawn_mob_spawned(&short, pos)
+                .ok_or_else(|| err("commands.summon.failed.uuid", &[]))?;
             name = Text::translate(&entity_name_key(&kind), &[]);
         } else {
             match short.as_str() {
@@ -2250,7 +2251,11 @@ impl Game<'_> {
                         let empty = horizon_world::nbt::Tag::Compound(Default::default());
                         cart.spawner = Some(Box::new(Spawner::load(&empty)));
                     }
+                    let id = cart.id;
                     self.carts.push(cart);
+                    if !self.native_joins_flush(false, id) {
+                        return Err(err("commands.summon.failed.uuid", &[]));
+                    }
                     name = Text::translate(&format!("entity.minecraft.{k}"), &[]);
                 }
                 // SummonCommand.createEntity: any other type from an empty compound.
@@ -2936,6 +2941,27 @@ impl Game<'_> {
         }
         true
     }
+    /// `GameRules.set` as the `/gamerule` command and the management protocol call it: the rule changes, the
+    /// world follows it, and a dedicated server tells the event stream (`MinecraftServer.onGameRuleChanged`
+    /// tells the management protocol's clients).
+    pub(super) fn set_game_rule(&mut self, rule: &gamerules::Rule, value: Value) {
+        self.ui.rules.set(rule.name, value);
+        self.sync_rules();
+        if self.options.dedicated.is_some() {
+            let (value_type, json) = match value {
+                Value::Bool(b) => ("boolean", serde_json::json!(b)),
+                Value::Int(i) => ("integer", serde_json::json!(i)),
+            };
+            super::dedicated::events::record_server(
+                "gamerule",
+                serde_json::json!({
+                    "key": format!("minecraft:{}", rule.name),
+                    "valueType": value_type,
+                    "value": json,
+                }),
+            );
+        }
+    }
     fn cmd_gamerule(&mut self, ctx: &Context) -> R<i32> {
         let Some(name) = ctx.literals.get(1).cloned() else {
             return Ok(0);
@@ -2958,8 +2984,7 @@ impl Game<'_> {
         if current == value {
             return Err(err("commands.gamerule.not_set", &[&rule.name, &value]));
         }
-        self.ui.rules.set(rule.name, value);
-        self.sync_rules();
+        self.set_game_rule(rule, value);
         self.feedback(Text::tr("commands.gamerule.set", &[&rule.name, &value]));
         Ok(match value {
             Value::Bool(b) => i32::from(b),

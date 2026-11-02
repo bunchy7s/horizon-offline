@@ -691,7 +691,7 @@ impl Game<'_> {
             self.spin_attack_geometry(m, camera, alpha as f32, packed, out);
             self.shoulder_parrots_geometry(m, camera, alpha as f32, packed, out);
             self.stuck_in_body_geometry(m, self.own_entity_id(), camera, alpha as f32, packed, out);
-            self.held_item_geometry(m, camera, alpha, packed, true, out);
+            self.held_item_geometry(m, camera, alpha, packed, true, None, out);
             // CustomHeadLayer: a pumpkin, skull or other head item.
             self.head_item_geometry(m, camera, alpha, packed, true, out);
             // `native_mob_layer`: a native mod's layer, over the vanilla ones.
@@ -802,7 +802,7 @@ impl Game<'_> {
         self.player_elytra_geometry(&m, chest, camera, 1.0, 240 | 240 << 8, &mut verts);
         let wings = wings_start..verts.len();
         self.shoulder_parrots_geometry(&m, camera, 1.0, 240 | 240 << 8, &mut verts);
-        self.held_item_geometry(&m, camera, 1.0, 240 | 240 << 8, false, &mut verts);
+        self.held_item_geometry(&m, camera, 1.0, 240 | 240 << 8, false, None, &mut verts);
         self.head_item_geometry(&m, camera, 1.0, 240 | 240 << 8, false, &mut verts);
         let height = if m.extra.crouching { 1.5 } else { 1.8 };
         // PictureInPictureRenderer: the box centre, (size, size, -size);

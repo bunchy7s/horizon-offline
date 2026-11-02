@@ -492,6 +492,32 @@ impl Game<'_> {
         }
         Some((mark, skin.bounds))
     }
+    /// [`Self::submit_item_world`] of `state` under `pose` on the GPU path, its draws counted
+    /// with an entity's (`skinned`: its mark and bounds, `cull_skinned`'s); false, with
+    /// nothing drawn, when the state cannot take it.
+    pub(super) fn skin_item_into(
+        &self,
+        state: &ItemRenderState,
+        pose: glam::Mat4,
+        light: u32,
+        skinned: &mut super::creatures::Skinned,
+    ) -> bool {
+        let lights = diffuse_lights(self.dim == Dim::Nether);
+        let Some((mark, bounds)) = self.submit_item_skinned(state, &[pose], light, lights) else {
+            return false;
+        };
+        *skinned = Some(match skinned.take() {
+            Some((first, before)) => (
+                first,
+                match (before, bounds) {
+                    (Some((a, b)), Some((c, d))) => Some((a.min(c), b.max(d))),
+                    (one, other) => one.or(other),
+                },
+            ),
+            None => (mark, bounds),
+        });
+        true
+    }
     /// `ItemEntityRenderer.submit` for every dropped item.
     pub(super) fn dropped_item_geometry(
         &self,

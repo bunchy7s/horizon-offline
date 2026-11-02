@@ -117,6 +117,18 @@ fn walk(
     seen: &mut HashSet<PathBuf>,
     out: &mut Vec<String>,
 ) {
+    // A prepared root's folder: from its data file, without listing the disk.
+    if depth == 0
+        && let Some(files) = horizon_core::prepared_files::files_under(dir)
+    {
+        out.extend(
+            files
+                .into_iter()
+                .filter(|file| endings.iter().any(|end| file.ends_with(end)))
+                .map(|file| format!("{rel}/{file}")),
+        );
+        return;
+    }
     // Links are followed (overlay folders are links into the packs and vanilla), so a link back
     // to a parent would loop: each real folder is read once, and never deeper than MAX_DEPTH.
     if depth > MAX_DEPTH || !fs::canonicalize(dir).is_ok_and(|real| seen.insert(real)) {
