@@ -5557,9 +5557,7 @@ impl Game<'_> {
     fn fall_step(&mut self, f: &mut FallingBlock, entity_drops: bool) -> Result<FallStep> {
         f.previous = f.position;
         f.age = f.age.wrapping_add(1);
-        if !f.no_gravity {
-            f.velocity.y -= 0.04;
-        }
+        f.velocity.y -= horizon_client::entity_rules::EntityRules::get_gravity(f);
         let mut wanted = f.velocity;
         // Entity.move: a cobweb it was in scales this move, which then
         // starts from rest.
@@ -11532,11 +11530,19 @@ impl Game<'_> {
         // attack strength scales the base damage.
         let enchant_bonus = self.enchanted_damage(target_kind, damage) - damage;
         let mut amount = damage * (0.2 + scale * scale * 0.8);
+        // Player.attack decides the critical hit only for a hit with base or
+        // enchantment damage: checked before the mace's smash bonus is added.
+        let damaging = amount > 0.0 || enchant_bonus * scale > 0.0;
         // Item.getAttackDamageBonus (a mace's smash), before the critical hit.
         amount += self.smash_damage_bonus(target_kind);
-        let crit = living && self.critical_attack(scale);
+        let vanilla_crit = living && self.critical_attack(scale);
+        let mut crit = vanilla_crit;
+        let mut multiplier = if vanilla_crit { 1.5 } else { 1.0 };
+        if living && damaging {
+            self.native_critical_hit(target_kind, vanilla_crit, &mut crit, &mut multiplier);
+        }
         if crit {
-            amount *= 1.5;
+            amount *= multiplier;
         }
         // Enchantment damage (sharpness, smite, bane) scaled by the attack strength.
         amount += enchant_bonus * scale;
@@ -11615,16 +11621,18 @@ impl Game<'_> {
     /// strength, then strong or weak, or the sweep around the vehicle's
     /// box `area`. Before the hit resets the charge (`Player.onAttack`).
     pub(super) fn vehicle_attack_sounds(&mut self, area: Aabb, magic: Option<i32>) {
-        self.attack_effects(area, None, mace::Spared::Nothing, magic);
+        self.attack_effects(area, None, false, mace::Spared::Nothing, magic);
     }
     /// `Player.attack` after a target that is not a mob took the hit:
     /// the sprint knockback sound, a living target's critical hit (`living`:
-    /// its entity id, which makes the hit critical when the player falls),
-    /// the sweep around the target's box `area` and the strong or weak sound.
+    /// its entity id; `crit`: whether `melee_damage` decided the hit critical,
+    /// mods' `critical_hit` included), the sweep around the target's box `area`
+    /// and the strong or weak sound.
     pub(super) fn attack_effects(
         &mut self,
         area: Aabb,
         living: Option<i32>,
+        crit: bool,
         spared: mace::Spared,
         magic: Option<i32>,
     ) {
@@ -11636,7 +11644,7 @@ impl Game<'_> {
             self.audio
                 .play("minecraft:entity.player.attack.knockback", from, 1.0, 1.0);
         }
-        let crit = living.is_some() && self.critical_attack(scale);
+        let crit = living.is_some() && crit;
         let sweep = self.sweep_attack_position(scale, crit);
         if let Some(at) = sweep {
             self.sweep_attack(at, from, Some((area, spared)), scale);
