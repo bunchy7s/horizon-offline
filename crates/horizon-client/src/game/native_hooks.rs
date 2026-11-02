@@ -3473,6 +3473,12 @@ impl Game<'_> {
     ) {
         let _ = (player, name, recipe);
     }
+    /// A server player filled an empty map, after the filled map and its saved
+    /// data were created. Guest lookup helpers may find nothing during packet
+    /// handling. Server-side. @API:player_map_filled@.
+    pub(super) fn native_player_map_filled(&mut self, player: u128, name: &str, map_id: i32) {
+        let _ = (player, name, map_id);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

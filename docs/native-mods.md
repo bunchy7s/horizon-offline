@@ -1373,6 +1373,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_open_sign(player, name, pos, front)`**: a server player opened the sign editor at `pos` for the front or back side, after the editor state was made. Guest lookup helpers may not find the guest during packet handling.
 - **`native_player_pickup_arrow(player, name, entity_id, item)`**: a server player picked up an arrow after it was removed and its pickup was applied. `item` is the pickup item id. Guest lookup helpers may not find the guest during packet handling.
 - **`native_player_stonecutter_recipe_select(player, name, recipe)`**: a server player selected stonecutter recipe button `recipe`, after the menu accepted it. Guest lookup helpers may not find the guest during packet handling.
+- **`native_player_map_filled(player, name, map_id)`**: a server player filled an empty map, after the filled map and its saved map data were created. Guest lookup helpers may not find the guest during packet handling.
 - **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and
   their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
   player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a
