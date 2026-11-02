@@ -156,6 +156,19 @@ fn display_offset(kind: CartKind) -> f64 {
 /// `MinecartFurnace.calculateNewPushAlong`: the push turned onto the
 /// movement's direction, at the push's own length (3D, so it holds from tick
 /// to tick while the movement has a vertical part).
+/// `AbstractMinecart.push(entity)` for a non-cart `entity` at `feet`: the
+/// push the cart at `cart` loses (the entity gets a quarter of it back).
+fn cart_push_from(feet: Vec3, cart: Vec3) -> Option<(f64, f64)> {
+    let (xa, za) = (feet.x - cart.x, feet.z - cart.z);
+    let dd = xa * xa + za * za;
+    if dd < f64::from(1.0e-4f32) {
+        return None;
+    }
+    let d = dd.sqrt();
+    let pow = (1.0 / d).min(1.0);
+    let k = f64::from(0.1f32) * 0.5;
+    Some((xa / d * pow * k, za / d * pow * k))
+}
 fn push_along(push: Vec3, movement: Vec3) -> Vec3 {
     if push.horizontal_distance_squared() > 1.0e-4 && movement.horizontal_distance_squared() > 0.001
     {
@@ -1130,6 +1143,47 @@ impl Game<'_> {
                 za = za / d * pow * f64::from(0.1f32) * 0.5;
                 c.velocity.x -= xa;
                 c.velocity.z -= za;
+            }
+        }
+        self.push_carts_from_mobs();
+    }
+    /// `AbstractMinecart.push(mob)` from each mob walking into a cart
+    /// (`LivingEntity.pushEntities` -> `doPush`): the cart gets the push and
+    /// the mob a quarter of it back (`Entity.push`, which needs the mob to be
+    /// pushable and to carry no one). Bats push nothing (`Bat.pushEntities`).
+    fn push_carts_from_mobs(&mut self) {
+        let teams = self.mob_teams();
+        // (mob index, feet, box)
+        let pushers: Vec<(usize, Vec3, Aabb)> = self
+            .mobs
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| {
+                !m.removed
+                    && m.alive()
+                    && m.species() != Species::Bat
+                    && pushable_by(teams.of(Who::Mob(m.id)), None, true)
+            })
+            .map(|(j, m)| (j, m.position, m.bounds()))
+            .collect();
+        drop(teams);
+        for (j, feet, bb) in pushers {
+            for c in &mut self.carts {
+                // hasPassenger(mob): a mob in this cart never pushes it.
+                if self.mobs[j].extra.mount == Some(c.id) || !bb.intersects(c.bounds()) {
+                    continue;
+                }
+                let Some((xa, za)) = cart_push_from(feet, c.position) else {
+                    continue;
+                };
+                c.velocity.x -= xa;
+                c.velocity.z -= za;
+                let m = &mut self.mobs[j];
+                if m.pushable() && m.rider.is_none() && m.extra.rider.is_none() {
+                    m.velocity.x += xa / 4.0;
+                    m.velocity.z += za / 4.0;
+                    m.needs_sync = true;
+                }
             }
         }
     }
@@ -2283,6 +2337,14 @@ fn tnt_ignites_by_collision(horizontal_collision: bool, speed_sqr: f64) -> bool 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn mob_walking_into_a_cart_pushes_it_by_a_twentieth() {
+        // Issue #6776: a villager at x=0.13 next to a cart at x=0.5 east-west.
+        let (xa, za) =
+            super::cart_push_from(Vec3::new(0.13, 0.0, 0.0), Vec3::new(0.5, 0.0, 0.0)).unwrap();
+        assert!((xa + 0.05).abs() < 1e-6 && za == 0.0, "{xa} {za}");
+        assert!(super::cart_push_from(Vec3::ZERO, Vec3::ZERO).is_none());
+    }
     /// The collision detonation of a TNT minecart needs both the collision and
     /// a cart that was still moving: a nudge below a tenth of a block a tick
     /// does not set it off, and a fast cart on an open track does not either.
