@@ -2399,6 +2399,7 @@ struct Game<'a> {
     /// `horizon-ctl gpu-passes`: time Horizon's own passes on the GPU with F3 shut.
     gpu_passes: bool,
     screen: Screen,
+    observed_screen: Option<native_hooks::ObservedScreen>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     /// Avoid an endless rebuild loop if the new device is lost as well.
@@ -2708,6 +2709,7 @@ struct Game<'a> {
     waypoints: horizon_client::locator_bar::ClientWaypoints,
     /// The camera the last frame drew from (position, yaw, pitch, fov), for the locator bar.
     locator_camera: Option<([f64; 3], f32, f32, f32)>,
+    native_camera_frame: Option<horizon_client::mod_api::NativeCamera>,
     /// `LocalPlayer.postEffects`: the chains the server has the screen run
     /// (`ClientboundPostEffectsPacket`), in order.
     post_effects: Vec<String>,
@@ -3782,13 +3784,13 @@ impl Game<'_> {
     /// Item entity `i` leaves the level (`Entity.discard`); mods hear it.
     pub(super) fn remove_dropped(&mut self, i: usize) -> ItemEntity {
         let e = self.dropped.remove(i);
-        self.native_entities_left("minecraft:item", &[e.id]);
+        self.native_entity_left(e.id);
         e
     }
     /// Experience orb `i` leaves the level (`Entity.discard`); mods hear it.
     pub(super) fn remove_orb(&mut self, i: usize) -> ExperienceOrb {
         let o = self.orbs.remove(i);
-        self.native_entities_left("minecraft:experience_orb", &[o.id]);
+        self.native_entity_left(o.id);
         o
     }
     /// The item entity `spawn_item` just added, unless a native mod kept it
@@ -6013,9 +6015,8 @@ impl Game<'_> {
             if entity && hand == Hand::Off && self.with_hand(hand, |g| g.interact_entity(None))? {
                 return Ok(Some(hand));
             }
-            // A client of a server never hits a fence knot with its crosshair:
-            // `LeadItem.useOn` and `LeashFenceKnotEntity.interact` reach the
-            // server as a click on the fence block.
+            // A click on the fence block: `LeadItem.useOn`. A client whose crosshair
+            // met the knot first sends Interact with the knot's id instead.
             if on_block && self.with_hand(hand, Game::interact_knot) {
                 return Ok(Some(hand));
             }
@@ -6061,8 +6062,7 @@ impl Game<'_> {
             || self.interact_boat(target)
             || self.interact_cart(target)
             || self.interact_mob(target)?
-            // Knots are reached only through the crosshair pick for now: a
-            // guest's Interact naming a knot's id is a known gap.
+            // A guest's Interact naming a knot's id goes to `use_knot` before this.
             || target.is_none() && self.interact_knot())
     }
     /// `ItemStack.applyAfterUseComponentSideEffects`: a used stack with a
@@ -7325,6 +7325,9 @@ impl Game<'_> {
         if running {
             horizon_client::spans::time("tick_lan_packets", || self.tick_lan_packets());
             horizon_client::spans::time("tick_blocks", || self.tick_blocks())?;
+            // What the blocks spawned (a dispensed minecart, a lit TNT, a
+            // placed boat) joins before the entities tick.
+            self.native_joins_flush(false, 0);
         }
         if running {
             horizon_client::spans::time("tick_paintings", || self.tick_paintings());
@@ -7356,34 +7359,35 @@ impl Game<'_> {
                 self.handle_entity_portals();
                 self.handle_end_gateway_portals();
             });
-            let before = self.dropped_ids();
             horizon_client::spans::time("tick_items", || self.tick_items());
             if self.remote.is_none() {
                 self.hoppers_catch_items();
             }
             // Merged, burnt, despawned or picked up.
-            self.native_items_left_since(&before);
+            self.native_leaves_flush();
+            self.native_joins_flush(false, 0);
             horizon_client::spans::time("touch_arrows", || self.touch_arrows());
         }
         horizon_client::spans::time("spawn_loaded_entities", || self.spawn_loaded_entities());
         // The ride the player's file names, once the vehicle is in the world.
         self.restore_root_vehicle();
         if running {
-            let mobs_before = self.mob_ids();
             horizon_client::spans::time("tick_mobs", || self.tick_mobs())?;
             // Dead, despawned or gone into a hive.
-            self.native_mobs_left_since(&mobs_before);
+            self.native_leaves_flush();
             horizon_client::spans::time("recheck_golem_openers", || self.recheck_golem_openers());
             self.tick_mod_container_viewers();
-            let before = self.orb_ids();
             horizon_client::spans::time("tick_experience", || self.tick_experience());
             // Merged, despawned or picked up.
-            self.native_orbs_left_since(&before);
+            self.native_leaves_flush();
             horizon_client::spans::time("entity_portals", || {
                 self.find_entity_portals();
                 self.resolve_arrivals();
             });
         }
+        // The rest of the tick's spawns join, and what left is told of.
+        self.native_joins_flush(false, 0);
+        self.native_leaves_flush();
         horizon_client::spans::time("tick_lan", || self.tick_lan(false));
         self.tick_friends();
         horizon_client::spans::time("tick_hand", || self.tick_hand());
@@ -10806,10 +10810,18 @@ impl Game<'_> {
                     );
             }
             // Mod block entities: their mods draw them (`native_block_entity_submit`),
-            // culled by the bounds they give.
-            let mods = r
-                .visible_block_entities(self.settings.chunk_fade)
-                .filter(|(_, state)| !self.res.block_entity_render().renders(*state));
+            // culled by the bounds they give. A world without any (`has_mods`) has none
+            // to find among its other unrendered block entities (furnaces, hoppers...).
+            let mods = self
+                .world
+                .block_entities
+                .has_mods()
+                .then(|| {
+                    r.visible_block_entities(self.settings.chunk_fade)
+                        .filter(|(_, state)| !self.res.block_entity_render().renders(*state))
+                })
+                .into_iter()
+                .flatten();
             let untemplated = self.untemplated_mod_block_entities(camera);
             self.mod_block_entity_geometry(
                 mods.chain(untemplated.iter()),
@@ -12887,7 +12899,17 @@ impl Game<'_> {
             let target = self.bucket_target(content, &hit);
             let mut canceled = false;
             self.native_fill_bucket(stack, target, &mut canceled);
-            if canceled || self.bucket_empty_cancelled(stack, target) {
+            // `mayUseItemAt(blockPos2)`: a block that refuses the fluid passes
+            // it to the block beside, so a mod hears that block too (powder
+            // snow places like a block and never goes there).
+            let beside_too = content != BucketContent::Powder && hit.beside() != target;
+            if !canceled && beside_too {
+                self.native_fill_bucket(stack, hit.beside(), &mut canceled);
+            }
+            if canceled
+                || self.bucket_empty_cancelled(stack, target)
+                || beside_too && self.bucket_empty_cancelled(stack, hit.beside())
+            {
                 return Ok(UseResult::Fail);
             }
             let pos = BlockPos::new(target[0], target[1], target[2]);
@@ -13576,6 +13598,29 @@ impl Game<'_> {
             if canceled {
                 continue;
             }
+            let (mut x, mut y, mut z, mut pitch, mut yaw, mut roll, mut pose_scale) =
+                (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+            self.native_render_hand_pose(
+                hand,
+                item.as_ref(),
+                a,
+                attack,
+                inverse_height,
+                &mut x,
+                &mut y,
+                &mut z,
+                &mut pitch,
+                &mut yaw,
+                &mut roll,
+                &mut pose_scale,
+            );
+            // No mod moved the hand (always so without one): no matrices to build.
+            let pose = [x, y, z, pitch, yaw, roll, pose_scale];
+            let to_world = if pose == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0] {
+                to_world
+            } else {
+                to_world * native_hooks::hand_pose_matrix(pose)
+            };
             // The main hand on its arm, the off hand on the other one.
             let left = self.settings.main_hand_left != (hand == Hand::Off);
             let Some(stack) = item else {
@@ -14303,7 +14348,7 @@ impl Game<'_> {
         let lines = vec![(horizon_client::text::Text::literal(text), u32::MAX)];
         let (x, y, w, h) =
             Self::tooltip_geometry(atlas, &lines, (x, y), (batch.width, batch.height), [0.0; 2]);
-        Self::tooltip_box(batch, atlas, x, y, w, h);
+        self.tooltip_box(batch, None, x, y, w, h);
         Self::tooltip_text(batch, atlas, &lines, x, y);
     }
     /// `CreativeModeInventoryScreen.getTooltipFromContainerItem`: the lines
@@ -15002,6 +15047,7 @@ impl Game<'_> {
         if self.renderer.as_mut().is_some_and(|r| r.display_changed()) {
             self.apply_ui_settings();
         }
+        self.observe_screen();
         // Minecraft.doWorldLoad: the LevelLoadingScreen while single player's
         // server starts, with the server's chunk map and progress.
         if let Some(starting) = &self.integrated_starting {
@@ -15344,6 +15390,32 @@ impl Game<'_> {
         let distance = (terrain_distance * 16) as f32;
         let depth_far =
             horizon_client::camera::depth_far(terrain_distance, self.settings.cloud_range);
+        // Only native mods read it: no matrices or allocation per frame without one.
+        let mods_read_camera = !horizon_client::mod_api::mods().is_empty();
+        self.native_camera_frame = (mods_read_camera && !title).then(|| {
+            let partial = camera_alpha as f32;
+            horizon_client::mod_api::NativeCamera {
+                position: camera.to_array(),
+                eye_height: self.view.eye_height_old
+                    + (self.view.eye_height - self.view.eye_height_old) * partial,
+                partial_tick: partial,
+                yaw,
+                pitch,
+                fov_degrees,
+                near: 0.05,
+                far: depth_far,
+                view: (bob * spin * horizon_client::camera::view_matrix(yaw, pitch))
+                    .to_cols_array(),
+                projection: glam::Mat4::perspective_rh(
+                    fov_degrees.to_radians(),
+                    size[0] as f32 / size[1].max(1) as f32,
+                    depth_far,
+                    0.05,
+                )
+                .to_cols_array(),
+                dimension: self.dim.id().to_string(),
+            }
+        });
         self.view_frustum = self
             .renderer
             .as_ref()
@@ -18277,6 +18349,7 @@ impl<'a> Game<'a> {
             debug: false,
             gpu_passes: false,
             screen: Screen::Playing,
+            observed_screen: None,
             window: None,
             renderer: None,
             last_device_recovery: None,
@@ -18454,6 +18527,7 @@ impl<'a> Game<'a> {
             waypoint_styles: prepared.waypoint_styles,
             waypoints: Default::default(),
             locator_camera: None,
+            native_camera_frame: None,
             post_effects: Vec::new(),
             spectated_post_effect: None,
             experience_display: Default::default(),

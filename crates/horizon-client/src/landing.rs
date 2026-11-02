@@ -27,7 +27,7 @@ use std::{collections::BTreeMap, fs, path::Path};
 
 /// A living entity is about to handle a fall (`LivingFallEvent`). Mods may
 /// change the distance and damage multiplier, or cancel fall handling.
-/// @API:native_living_fall@.
+/// 357.
 #[inline(never)]
 pub fn native_living_fall(
     entity: u32,

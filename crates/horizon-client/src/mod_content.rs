@@ -2033,8 +2033,25 @@ fn link(target: &Path, at: &Path) -> std::io::Result<()> {
         }
         Ok(())
     } else {
-        fs::copy(target, at).map(|_| ())
+        link_file(target, at, |target, at| fs::hard_link(target, at))
     }
+}
+/// A file of the overlay where symlinks need a privilege: a hard link to the base's file, which costs a name where
+/// a copy costs the file's bytes (the base is ~28,000 files, 0.6 GiB), or a copy when no link can be made (another
+/// volume, a filesystem without links, the NTFS limit on links to one file). A link shares the base file's data,
+/// which is safe because the overlay is only ever replaced name by name (`Overlay::write` removes the name before it
+/// writes), never written in place. A symlink is copied through, as before: linked, it would stay a symlink.
+#[cfg(any(not(unix), test))]
+fn link_file(
+    target: &Path,
+    at: &Path,
+    hard_link: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let symlink = fs::symlink_metadata(target).is_ok_and(|m| m.file_type().is_symlink());
+    if !symlink && hard_link(target, at).is_ok() {
+        return Ok(());
+    }
+    fs::copy(target, at).map(|_| ())
 }
 
 /// A tag file's JSON text with `more` appended to its values (no repeats).
@@ -2230,7 +2247,7 @@ fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>) -> Result<()> {
         overlay.write(name, &bytes)
     };
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let threads = horizon_threads::worker_count();
     std::thread::scope(|scope| {
         let workers: Vec<_> = (0..threads.min(TABLE_THREADS))
             .map(|_| {
