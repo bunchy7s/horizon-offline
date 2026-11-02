@@ -7517,6 +7517,42 @@ CHECKS += ['fishing']
 CHECK_FNS.update(fishing=check_fishing)
 
 
+def check_fishing_tnt(host, guest, out):
+    """A fishing hook cast at a primed TNT hooks it (Projectile.canHitEntity: PrimedTnt.isPickable),
+    and reeling in pulls the TNT toward the player (#6601)."""
+    apart(host, guest)
+    hx, hy, hz = (int(v // 1) for v in pos_of(host))
+    host('command', command='weather clear')
+    x, z = hx, hz + 5
+    host('command', command=f'fill {x - 1} {hy - 1} {z - 1} {x + 14} {hy - 1} {z + 1} minecraft:stone')
+    host('command', command=f'fill {x - 1} {hy} {z - 1} {x + 14} {hy + 4} {z + 1} minecraft:air')
+    host('command', command='gamemode survival')
+    host('command', command='clear @s')
+    host('command', command='item replace entity @s weapon.mainhand with minecraft:fishing_rod')
+    host('command', command=f'tp @s {x + 0.5} {hy} {z + 0.5} -90 0')
+    try:
+        host('command', command=f'summon minecraft:tnt {x + 4.5} {hy} {z + 0.5} {{fuse:2000s}}')
+        host.wait(20)
+        host.raw('look-at', f'{x + 4.5:.2f}', f'{hy + 0.5:.2f}', f'{z + 0.5:.2f}')
+        host.raw('use-item')
+        host.wait(60)
+        host.shot(out, 'fishing-tnt')
+        host.raw('use-item')
+        motion = server_reply(host, 'data get entity @e[type=minecraft:tnt,limit=1] Motion')
+    finally:
+        host('command', command='kill @e[type=minecraft:tnt]')
+        host('command', command='clear @s')
+    # FishingHook.pullEntity pushes 0.1 of the way to the owner, 4 blocks west (-0.4); ground friction
+    # eats most of it before the read, but an unhooked TNT's x motion stays 0.
+    pulled = float(re.search(r'\[(-?[0-9.eE-]+)d', motion).group(1))
+    assert pulled < 0, f'reeling in did not pull the hooked primed TNT toward the player: {motion}'
+    return {'motion': motion}
+
+
+CHECKS += ['fishing-tnt']
+CHECK_FNS['fishing-tnt'] = check_fishing_tnt
+
+
 def check_maps(host, guest, out):
     """MapItem.update for each player, on the server: a map the player makes and holds reveals the
     terrain around them and shows their marker, which reach their client in

@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_attack_cooldown_reset",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_attack_cooldown_reset",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A server player's attack strength was reset by a punch (`native_player_attack_cooldown_reset`).",
+  "doc_summary": "A server player's main-hand punch swing and attack-strength reset have happened: `native_player_attack_cooldown_reset(player, name)`. Helpers looking up the player through `self.lan` may find nothing during a guest packet. Bundles need \"hooks\": @API:player_attack_cooldown_reset@."
+}

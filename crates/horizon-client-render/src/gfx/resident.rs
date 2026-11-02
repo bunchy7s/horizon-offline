@@ -55,6 +55,22 @@ impl<T> Resident<T> {
     pub fn len(&self) -> usize {
         self.items.len()
     }
+    /// Heap bytes of its own lists and maps, not counting what a `T` points
+    /// to (`horizon-ctl memory`). A hash map entry costs its pair and a
+    /// control byte.
+    pub fn heap_bytes(&self) -> usize {
+        use std::mem::size_of;
+        self.items.capacity() * size_of::<(SectionKey, T)>()
+            + self.bounds.capacity() * size_of::<Option<[Vec3; 2]>>()
+            + self.slots.capacity() * (size_of::<(SectionKey, u32)>() + 1)
+            + self.columns.capacity() * size_of::<Column>()
+            + self
+                .columns
+                .iter()
+                .map(|c| c.sections.capacity() * size_of::<(i32, u32)>())
+                .sum::<usize>()
+            + self.column_index.capacity() * (size_of::<((i32, i32), u32)>() + 1)
+    }
     pub fn contains(&self, key: SectionKey) -> bool {
         self.slots.contains_key(&key)
     }

@@ -425,6 +425,10 @@ impl EntityFluidTickWorld for MotionWorld<'_, '_, '_> {
         self.player.fluids.first_tick
     }
     fn water_splash(&mut self) -> Result<()> {
+        // `Player.doWaterSplashEffect`: spectators skip the effect (and its random draws).
+        if self.player.spectator {
+            return Ok(());
+        }
         water_splash::water_splash(self, 1_000_000).map_err(|e| e.to_string())?;
         Ok(())
     }

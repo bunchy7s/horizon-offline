@@ -617,6 +617,21 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if !fluid.is_source() {
             let new_fluid = self.new_liquid(kind, pos, state);
             let delay = self.spread_delay(kind, pos, fluid, new_fluid);
+            if new_fluid != fluid {
+                let name = match kind {
+                    FluidKind::Water | FluidKind::FlowingWater => "water",
+                    FluidKind::Lava | FluidKind::FlowingLava => "lava",
+                    FluidKind::Empty => return,
+                };
+                if !self.level.allow_fluid_level_change(
+                    pos,
+                    name,
+                    i32::from(fluid.amount()),
+                    i32::from(new_fluid.amount()),
+                ) {
+                    return;
+                }
+            }
             if new_fluid.kind() == FluidKind::Empty {
                 fluid = new_fluid;
                 state = self.b.air();
@@ -718,6 +733,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         .into_iter()
                         .any(|d| self.lava_flammable(rel(test, d)))
                     {
+                        if !self.level.allow_block_ignite(test, "lava") {
+                            return;
+                        }
                         let fire = self.fire_state_for(test);
                         self.set_block_and_update(test, fire);
                         return;
@@ -739,6 +757,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     return;
                 }
                 if self.is_empty_block(above(test)) && self.lava_flammable(test) {
+                    if !self.level.allow_block_ignite(above(test), "lava") {
+                        continue;
+                    }
                     let fire = self.fire_state_for(test);
                     self.set_block_and_update(above(test), fire);
                 }
