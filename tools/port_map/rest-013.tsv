@@ -115,7 +115,7 @@ MinecraftServer.isAutoSave	inline	crates/horizon-client/src/game/dedicated.rs::G
 MinecraftServer.storeChunkIoError	skip:debug		writes a chunk IO crash report
 MinecraftServer.reportChunkLoadFailure	missing		unsure: no chunk-load failure log or report found in save.rs or streaming.rs
 MinecraftServer.reportChunkSaveFailure	port	crates/horizon-client/src/save.rs::Persistent::save_finished	gap: minor: logs only; no debug report and no low-disk warning
-PlayerAdvancements.reload	missing		minor: /reload rebuilds datapack functions and settings only (cmd_reload); the advancement tree is kept for the session
+PlayerAdvancements.reload	port	crates/horizon-client/src/lan/advancements.rs::ServerAdvancements::reload	on /reload every guest loaded so far has its visible set cleared and its progress re-read against the new tree, then the tick advancements are granted and the reward recipes added; gap: the host's own progress is not reloaded
 PlayerAdvancements.registerListeners	skip:other		no per-criterion listener map; trigger() tests every criterion when an event fires
 PlayerAdvancements.checkForAutomaticTriggers	missing		minor: criteria-less advancements from data packs are not granted when a player loads
 PlayerAdvancements.asData	inline	crates/horizon-client/src/game/advancements.rs::Game::save_advancements	writes the progress that has any progress
