@@ -9,7 +9,7 @@
 //! here with the rider's input (`ServerPlayer.getLastClientMoveIntent`).
 //! Sneaking gets out (`Player.rideTick`: `wantsToStopRiding`), and the client
 //! is teleported where the player lands (`ServerPlayer.dismountTo`).
-use super::{Game, Keys, lan::LanHost, minecarts::SEAT};
+use super::{Dim, Game, Keys, lan::LanHost, minecarts::SEAT};
 use horizon_client::collisions::SceneCollisions;
 use horizon_client::lan::hub::no_blocks_in;
 use horizon_client::mobs::equine;
@@ -38,7 +38,116 @@ fn corners(b: Aabb) -> ([f64; 3], [f64; 3]) {
     ([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z])
 }
 
+/// A boat or minecart a server player rode, followed for
+/// `native_vehicle_moved`.
+pub(super) struct WatchedVehicle {
+    id: u32,
+    dim: Dim,
+    /// The server player it carries now.
+    rider: Option<u128>,
+    /// Where the hook last heard of it.
+    at: [f64; 3],
+    /// Ticks it has stood still.
+    still: u32,
+}
+
 impl Game<'_> {
+    /// Where the boat or minecart `id` of this level is.
+    fn watched_vehicle_position(&self, id: u32) -> Option<[f64; 3]> {
+        let at = |v: Vec3| [v.x, v.y, v.z];
+        self.boats
+            .iter()
+            .find(|b| b.id == id)
+            .map(|b| at(b.position))
+            .or_else(|| {
+                self.carts
+                    .iter()
+                    .find(|c| c.id == id)
+                    .map(|c| at(c.position))
+            })
+    }
+
+    /// `VehicleMoveEvent` for the boats and minecarts server players ride
+    /// (and left less than ten seconds ago): once a tick, after they moved.
+    pub(super) fn tick_vehicle_watch(&mut self) {
+        let riders: Vec<(u32, u32, u128)> = self.lan.as_ref().map_or_else(Vec::new, |h| {
+            h.hub
+                .guests
+                .iter()
+                .filter_map(|g| Some((g.vehicle?, g.conn, g.uuid)))
+                .collect()
+        });
+        if riders.is_empty() && self.watched_vehicles.is_empty() {
+            return;
+        }
+        let dim = self.dim;
+        for &(id, _, uuid) in &riders {
+            let Some(at) = self.watched_vehicle_position(id) else {
+                continue;
+            };
+            match self.watched_vehicles.iter_mut().find(|w| w.id == id) {
+                Some(w) => (w.dim, w.rider) = (dim, Some(uuid)),
+                None => self.watched_vehicles.push(WatchedVehicle {
+                    id,
+                    dim,
+                    rider: Some(uuid),
+                    at,
+                    still: 0,
+                }),
+            }
+        }
+        let mut kept = Vec::new();
+        // (rider's connection and UUID, vehicle type, from, to)
+        let mut moved = Vec::new();
+        for mut w in std::mem::take(&mut self.watched_vehicles) {
+            // Another level's vehicle is told of on that level's tick.
+            if w.dim != dim {
+                kept.push(w);
+                continue;
+            }
+            // Broken, or gone from this level.
+            let Some(now) = self.watched_vehicle_position(w.id) else {
+                continue;
+            };
+            let rider = riders.iter().find(|r| r.0 == w.id);
+            w.rider = rider.map(|r| r.2);
+            if now != w.at {
+                let from = std::mem::replace(&mut w.at, now);
+                w.still = 0;
+                let kind = self.target_type(
+                    self.level_entity(w.id as i32)
+                        .unwrap_or(super::commands::Target::Boat(w.id)),
+                );
+                moved.push((rider.map(|r| (r.1, r.2)), kind, from, now));
+            } else {
+                w.still += 1;
+                if w.rider.is_none() && w.still > 200 {
+                    continue;
+                }
+            }
+            kept.push(w);
+        }
+        self.watched_vehicles = kept;
+        // The rider's state is swapped in for the call, so the helpers reach
+        // them; a vehicle nobody rides is told of with nobody swapped in.
+        for (rider, kind, from, to) in moved {
+            let Some((conn, uuid)) = rider else {
+                self.native_vehicle_moved(None, &kind, from, to);
+                continue;
+            };
+            let Some(mut host) = self.lan.take() else {
+                continue;
+            };
+            let hook = |game: &mut Self| game.native_vehicle_moved(Some(uuid), &kind, from, to);
+            if self.lan_acting == Some(conn) {
+                hook(self);
+            } else {
+                self.as_guest(&mut host, conn, hook);
+            }
+            self.lan = Some(host);
+        }
+    }
+
     /// The box of a boat, minecart, armor stand, item frame or painting, and
     /// the point an interact packet's location is measured from (the
     /// client's `remote_object_hit` uses the same points).

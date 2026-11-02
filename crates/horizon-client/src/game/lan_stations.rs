@@ -69,6 +69,10 @@ impl Game<'_> {
         let Some((menu_type, kind, _)) = menu_of(station.kind) else {
             return false;
         };
+        // The mods may stop the menu; the click is spent.
+        if !self.guest_may_open(host, conn, menu_type, Some(station.pos)) {
+            return true;
+        }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(host, conn);
         let title = horizon_protocol::text::translatable(station.kind.title_key(), &[]);
@@ -149,6 +153,9 @@ impl Game<'_> {
     /// `LecternBlock.openScreen` for a guest: `minecraft:lectern` over the
     /// block entity, with its book and page.
     pub(super) fn lan_open_lectern(&mut self, host: &mut LanHost, conn: u32, key: (i32, i32, i32)) {
+        if !self.guest_may_open(host, conn, "minecraft:lectern", Some([key.0, key.1, key.2])) {
+            return;
+        }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(host, conn);
         let title = horizon_protocol::text::translatable("container.lectern", &[]);

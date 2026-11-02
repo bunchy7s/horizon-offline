@@ -1253,6 +1253,26 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `number`, `boolean`, `player`, `item`, `block_pos`. The usages of one command merge into one tree, which every
   player receives after vanilla's (filtered by their level, as vanilla's is), so their chat box completes and colours
   it. A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
+- **`native_armor_stand_manipulate(player, name, stand_id, slot, cancel)`**: a player takes an item from an armor stand or
+  puts one on it, heard after the stand's disabled-slot checks and before anything moves. `slot` is `mainhand`,
+  `offhand`, `feet`, `legs`, `chest` or `head`. Set `cancel` and nothing changes (the click is spent). The player's
+  state is swapped in; `player` is their UUID. Not told of a click that changes nothing; breaking or blasting a stand and
+  a dispenser armouring one are other ways its equipment moves and are not covered.
+- **`native_vehicle_moved(player, kind, from, to)`**: a boat or minecart that carries a server player (`player`, its UUID)
+  moved since the last tick, heard once a tick after the move with its positions before and after. The rider's state is
+  swapped in, so `native_acting_player`, `native_tell` and the item helpers reach them. A vehicle a player rode and left is
+  still told of, with no `player` and nobody swapped in, until it has stood still for ten seconds. Mounts (horses...) and
+  vehicles nobody ever rode are not covered. It only hears and costs one position compare a tick for each watched vehicle.
+- **`native_container_opened(player, name, kind, pos, cancel)`**: a player is about to open one of the game's own menus
+  (a chest, furnace, crafting table, villager, anvil, lectern, a horse's inventory...). `kind` is the menu type
+  (`minecraft:generic_9x3`, `minecraft:merchant`...), `pos` the block it belongs to, none for a villager, a mount or a
+  vehicle's chest. Heard after the checks that refuse the menu (a locked chest), before the open menu closes. Set
+  `cancel` and nothing opens. The player's state is swapped in, so `native_acting_player`, `native_tell` and the item
+  helpers reach them. Menus a mod opens (`native_open_menu`) are not heard.
+- **`native_creative_slot(player, name, slot, item, count, cancel)`**: a creative-mode player sets a slot from the creative
+  screen (`slot` is the inventory menu's slot; below 0 is a stack thrown out of the screen), with the `item` (`minecraft:air`
+  for an emptied slot) and `count`. Heard after vanilla's checks, before the slot changes. Set `cancel` and the packet is
+  ignored. The player's state is swapped in. Stacks a creative player gets other ways (pick block, `/give`) are not heard.
 - **`native_player_game_mode_changed(player, name, from, to, cancel)`**: a server player's game mode is about to change
   (0 survival, 1 creative, 2 adventure, 3 spectator, as `NativeServerPlayer.game_mode`): the `/gamemode` command, the
   F3+F4 switcher's packet and a hardcore world's respawn into spectator, once per change to a different mode. The mode a
