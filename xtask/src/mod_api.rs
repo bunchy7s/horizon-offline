@@ -880,10 +880,33 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
     let mut host_traits = String::new();
     let mut host_impl = String::new();
     let mut names = HashSet::new();
-    for helper in catalog["helpers"]
+    let mut helpers = catalog["helpers"]
         .as_array()
         .ok_or("catalog helpers must be an array")?
+        .clone();
+    let mut fragments = fs::read_dir(root.join("tools/native-hook-fragments"))
+        .map_err(|e| e.to_string())?
+        .map(|entry| entry.map(|entry| entry.path()).map_err(|e| e.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    fragments.sort();
+    for path in fragments
+        .into_iter()
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
     {
+        let fragment: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).map_err(|e| e.to_string())?)
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+        if let Some(pending) = fragment.get("helpers") {
+            helpers.extend(
+                pending
+                    .as_array()
+                    .ok_or("fragment helpers must be an array")?
+                    .iter()
+                    .cloned(),
+            );
+        }
+    }
+    for helper in &helpers {
         let name = helper["name"].as_str().ok_or("helper name missing")?;
         if !names.insert(name) {
             return Err(format!("duplicate helper {name}"));

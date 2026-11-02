@@ -664,4 +664,7 @@ pub trait Host {
         item: Option<&str>,
         max: u32,
     ) -> u32;
+    /// Draw a stack and its slot decorations, except the count, at `at`,
+    /// `size` GUI pixels square. False for an unknown item. API @API:item_stack@.
+    fn item_stack(&self, batch: &mut HudBatch, stack: &ItemStack, at: [f32; 2], size: f32) -> bool;
 }
