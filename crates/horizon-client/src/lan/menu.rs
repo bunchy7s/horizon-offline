@@ -1179,4 +1179,170 @@ mod tests {
             Some("minecraft:shield")
         );
     }
+
+    /// Rules that refuse a pickup in some menu slots and can stop drops.
+    struct StrictRules {
+        items: Items,
+        refuse: &'static [usize],
+        drops: bool,
+    }
+    impl StrictRules {
+        fn new(refuse: &'static [usize]) -> Self {
+            Self {
+                items: Items::for_tests(Default::default()),
+                refuse,
+                drops: true,
+            }
+        }
+    }
+    impl Rules for StrictRules {
+        fn items(&self) -> &Items {
+            &self.items
+        }
+        fn max_stack(&self, _: &str) -> u32 {
+            64
+        }
+        fn armor_index(&self, item: &str) -> Option<usize> {
+            (item == "minecraft:diamond_chestplate").then_some(1)
+        }
+        fn may_pickup(&self, slot: usize, _: &ItemStack) -> bool {
+            !self.refuse.contains(&slot)
+        }
+        fn can_drop_items(&self) -> bool {
+            self.drops
+        }
+    }
+
+    /// `Slot.mayPickup`: a pickup and a quick move leave a slot's stack alone
+    /// when the menu's rules refuse it there, while the slot next to it still
+    /// gives its own stack up.
+    #[test]
+    fn guest_pickup_and_quick_move_need_the_slots_consent() {
+        let rules = StrictRules::new(&[0]);
+        let mut g = guest();
+        let mut chest = vec![
+            Some(ItemStack::new("minecraft:stone", 5)),
+            Some(ItemStack::new("minecraft:dirt", 2)),
+        ];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        // The refused slot takes no click and gives nothing to the cursor.
+        click(&mut view, &mut drag, 0, 0, input::PICKUP, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        assert_eq!(view.guest.carried, None);
+        // A quick move out of it takes nothing with it either.
+        click(&mut view, &mut drag, 0, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        assert!(view.get(2).is_none());
+        // The slot next to it takes both clicks.
+        click(&mut view, &mut drag, 1, 0, input::PICKUP, &rules);
+        assert!(view.get(1).is_none());
+        assert_eq!(
+            view.guest.carried.as_ref().map(|s| (&*s.item, s.count)),
+            Some(("minecraft:dirt", 2))
+        );
+        let back = view.guest.carried.take();
+        view.set(1, back);
+        click(&mut view, &mut drag, 1, 0, input::QUICK_MOVE, &rules);
+        // A container's quick move fills the inventory from its end.
+        assert_eq!(
+            view.get(37).as_ref().map(|s| &*s.item),
+            Some("minecraft:dirt")
+        );
+    }
+
+    /// `doClick`'s PICKUP_ALL arm returns when the clicked slot holds a stack
+    /// it may pick up, so a double-click collects from an empty slot, or from
+    /// one that refuses, only.
+    #[test]
+    fn guest_pickup_all_starts_from_an_empty_or_refusing_slot() {
+        let rules = StrictRules::new(&[]);
+        let mut g = guest();
+        let mut chest = vec![Some(ItemStack::new("minecraft:stone", 5)), None];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        // One stone short of a full stack, over a slot that holds stone.
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 63));
+        click(&mut view, &mut drag, 0, 1, input::PICKUP_ALL, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(63));
+        // The empty slot next to it does collect that one stone.
+        click(&mut view, &mut drag, 1, 1, input::PICKUP_ALL, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(4));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
+        // A refusing slot is where a collect may start: the stone comes from
+        // the slot that allows it, the refused one is left alone.
+        let refusing = StrictRules::new(&[0]);
+        view.set(0, Some(ItemStack::new("minecraft:stone", 5)));
+        view.set(1, Some(ItemStack::new("minecraft:stone", 5)));
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 63));
+        click(&mut view, &mut drag, 0, 1, input::PICKUP_ALL, &refusing);
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        assert_eq!(view.get(1).map(|s| s.count), Some(4));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
+    }
+
+    /// `Player.canDropItems`: a client that has dropped too fast sends THROW
+    /// clicks the menu does not act on.
+    #[test]
+    fn guest_throw_needs_can_drop_items() {
+        let mut rules = StrictRules::new(&[]);
+        rules.drops = false;
+        let mut g = guest();
+        let mut chest = vec![Some(ItemStack::new("minecraft:stone", 5))];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        let (drops, _) = click(&mut view, &mut drag, 0, 0, input::THROW, &rules);
+        assert!(drops.is_empty());
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        rules.drops = true;
+        let (drops, _) = click(&mut view, &mut drag, 0, 0, input::THROW, &rules);
+        assert_eq!(drops.iter().fold(0, |n, s| n + s.count), 1);
+        assert_eq!(view.get(0).map(|s| s.count), Some(4));
+    }
+
+    /// `ArmorSlot.mayPickup`: a survival guest cannot take cursed armour off;
+    /// a creative one can, by a click and by a shift-click.
+    #[test]
+    fn guest_survival_cannot_remove_cursed_armour() {
+        let rules = StrictRules::new(&[]);
+        for (game_mode, taken) in [
+            (crate::lan::guest::SURVIVAL, false),
+            (crate::lan::guest::CREATIVE, true),
+        ] {
+            for mode in [input::PICKUP, input::QUICK_MOVE] {
+                let mut g = guest();
+                let mut cursed = ItemStack::new("minecraft:diamond_chestplate", 1);
+                cursed.set_crafting_enchantments(vec![("minecraft:binding_curse".into(), 1)]);
+                g.armor[1] = Some(cursed);
+                g.game_mode = game_mode;
+                let mut drag = None;
+                let mut view = View {
+                    guest: &mut g,
+                    container: None,
+                    shulker: false,
+                    hidden: &[],
+                };
+                // Menu slot 6 is the chest slot.
+                click(&mut view, &mut drag, 6, 0, mode, &rules);
+                assert_eq!(view.get(6).is_some(), !taken);
+                assert_eq!(view.guest.carried.is_some() || view.get(9).is_some(), taken);
+            }
+        }
+    }
 }
