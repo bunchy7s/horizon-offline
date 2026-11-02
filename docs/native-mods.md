@@ -1393,7 +1393,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_load_from_file(player, name, directory)`**: a joining player's saved state was read and applied
   (NeoForge's `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`), before they are placed in a level: once for each
   join on a server, for an integrated server's owner (loaded from the file `level.dat` names, else their own) as for
-  anyone else. `directory` is the world's `players/data` folder; read your own file there, named `<uuid>.<suffix>`. It
+  anyone else. `directory` is the world's `players/data` folder, created if missing; read your own file there, named `<uuid>.<suffix>`. It
   is heard whether or not the player was in the world before (a new player has no file). No player's state is swapped
   in. It cannot change or stop anything.
 - **`native_player_save_to_file(player, name, directory)`**: a placed player's data was saved (NeoForge's
