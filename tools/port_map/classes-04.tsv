@@ -132,7 +132,7 @@ BannerPatternLayers.removeLast	inline	crates/horizon-client/src/cauldron.rs::int
 BannerPatternLayers.Builder	skip:java		builder for banner pattern layers
 BannerPatterns	skip:data		registry bootstrap
 BarrelBlockEntity.loadAdditional	port	crates/horizon-client-core/src/block_entity_nbt.rs::canonical	gap: minor: canonical NBT form only, no load step of its own
-BarrelBlockEntity.recheckOpen	missing		unsure: player: a barrel lid may stay open after a player walks away; only golem openers are rechecked on a timer
+BarrelBlockEntity.recheckOpen	missing		the lid's periodic recheck of whether its viewers are still there; Horizon draws no barrel lid at all (containers.rs holds its 27 slots), so nothing rechecks one, where a golem's openers are rechecked on a timer
 BarrelBlockEntity.saveAdditional	port	crates/horizon-client-core/src/block_entity_nbt.rs::canonical	gap: minor: canonical NBT form only
 BarrelBlockEntity.startOpen	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::barrel_openers_changed	
 BarrelBlockEntity.stopOpen	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::barrel_openers_changed	
@@ -204,7 +204,7 @@ ImposterProtoChunk	skip:other		wrapper so the vanilla status pipeline can read a
 LinearPalette	skip:java		palette storage; Horizon's chunk.rs keeps block ids in plain arrays
 PalettedContainerFactory	skip:java		factory for palette storage; Horizon's chunk.rs keeps block ids in plain arrays
 SingleValuePalette	skip:java		palette storage; Horizon's chunk.rs keeps block ids in plain arrays
-UpgradeData	missing		unsure: minor: block upgrades of old chunks on load are not ported
+UpgradeData	missing		the block upgrades an old chunk takes when it loads (the Sides bits a save carries); the datafix writes and keeps UpgradeData (datafix/chunk_leaves.rs) but no load path applies the upgrades
 ChunkDependencies.getRadiusOf	inline	crates/horizon-client-render/src/streaming.rs::Ranges::margins	fixed margins instead of a per-status radius
 ChunkPyramid.Builder	skip:java		builder for the status pyramid; Horizon uses fixed margins
 ChunkStatusTasks.buildTerrain	inline	crates/horizon-world/src/worldgen/generator.rs::Pipeline::generate_with_context	terrain pass
