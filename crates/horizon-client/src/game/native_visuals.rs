@@ -27,7 +27,7 @@ impl Game<'_> {
             });
         // Held and dropped items whose block the pack's `[[lights]]` colour shine in that colour,
         // as far as their dynamic light reaches.
-        if let Some(renderer) = self.renderer.as_ref() {
+        if let Some(renderer) = self.renderer.as_ref().filter(|r| r.has_light_colors()) {
             for (source, item) in self.dynamic_light_sources(alpha) {
                 let Some(color) = item.and_then(|i| renderer.light_color(&i)) else {
                     continue;

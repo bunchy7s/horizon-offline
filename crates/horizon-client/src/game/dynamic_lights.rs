@@ -31,7 +31,8 @@ impl Game<'_> {
             if on_fire && BURNING > level {
                 (BURNING, None)
             } else {
-                (level, item.map(str::to_owned))
+                // Only a lit source names its item: nothing is allocated for a dark one.
+                (level, item.filter(|_| level > 0).map(str::to_owned))
             }
         };
         if let Some(p) = &self.player
