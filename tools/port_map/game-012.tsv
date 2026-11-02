@@ -21,7 +21,7 @@ Fox.getHeadRollAngle	port	crates/horizon-client/src/mobs/fox.rs::pose	head_roll_
 Fox.setTarget	missing		minor: only clears the defending flag, which is never set
 Fox.playAmbientSound	port	crates/horizon-client/src/mobs/ai.rs::play_ambient	ticked in #3512; `Fox.playAmbientSound` is cited at crates/horizon-client/src/mobs/ai.rs:1095 (in a comment, so `where` names the enclosing fn)
 Fox.getAmbientSound	port	crates/horizon-client/src/mobs/ai.rs::play_ambient	ticked in #3512; `Fox.getAmbientSound` is cited at crates/horizon-client/src/mobs/ai.rs:1093 (in a comment, so `where` names the enclosing fn)
-Fox.getLeashOffset	missing		minor: a lead hangs at the default offset (eye height), not at 0.55 of it
+Fox.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	0.55 of the eye height
 Fox.FoxAlertableEntitiesSelector.test	inline	crates/horizon-client/src/mobs/fox.rs::alertable	gap: minor: any other mob counts even when asleep or sneaking, and a trusted mob is not skipped (no trust)
 Fox.FoxEatBerriesGoal.onReachedTarget	inline	crates/horizon-client/src/mobs/fox.rs::EatBerries::tick	after 40 ticks at the bush, picks when mob griefing is on
 Fox.FoxEatBerriesGoal.pickGlowBerry	port	crates/horizon-client/src/mobs/fox.rs::EatBerries::pick	CaveVines.use: one glow berry, berries off, pick sound with 0.8 to 1.2 pitch
@@ -90,7 +90,7 @@ CopperGolem.createAttributes	skip:data		attributes come from entity-types.json
 CopperGolem.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	weather state and golem state
 CopperGolem.canTurnToStatue	inline	crates/horizon-client/src/mobs/copper_golem.rs::update_weathering	oxidized, standing in air, 0.0058 chance per tick on the level random
 CopperGolem.playHeadSpinSound	port	crates/horizon-client/src/mobs/copper_golem.rs::ai_step	gap: minor: local spin sound by oxidation level, but a silent golem still plays it
-CopperGolem.getLeashOffset	missing		minor: a lead hangs at the default offset, not 0.75 of the eye height with no forward shift
+CopperGolem.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	0.75 of the eye height on the centre, no forwards shift
 CopperGolemAi.initCoreActivity	port	crates/horizon-client/src/mobs/animal_brain.rs::copper_golem_package	InteractWithDoor sits in the golem's core activity, so its path through a closed wooden door no longer stops at the door
 CopperGolemAi.initIdleActivity	port	crates/horizon-client/src/mobs/animal_brain.rs::copper_golem_package	transport between chests, look at player, then stroll (2 blocks) or do nothing while the transport cooldown runs
 CopperGolemAi.getTargetReachedInteractions	inline	crates/horizon-client/src/mobs/transport_items.rs::reached_interaction	pickup, pickup nothing, place, place nothing from what the chest holds and what the golem carries
@@ -105,12 +105,12 @@ IronGolem.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::m
 IronGolem.hurtServer	port	crates/horizon-client/src/mobs.rs::Mob::damage_with	golem::crackiness is read before the hit and compared after; a changed level plays entity.iron_golem.damage at 1.0/1.0
 IronGolem.isPlayerCreated	inline	crates/horizon-client/src/mobs/goals.rs::Mob::spares_players	the flag is extra.player_created; spares_players reads it, and entity_nbt.rs writes and reads it
 IronGolem.setPlayerCreated	inline	crates/horizon-client/src/game/golems.rs::Game::check_golem_spawn	sets extra.player_created on the golem built from blocks; mob_from_nbt sets it on load
-IronGolem.getLeashOffset	missing		minor: a lead hangs at the default offset, not 0.875 of the eye height
+IronGolem.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	0.875 of the eye height, the default width/2 forwards
 SnowGolem.registerGoals	port	crates/horizon-client/src/mobs/golem.rs::register_snow	gap: minor: stroll uses the 0.001 water-avoiding probability, vanilla 1.0000001E-5
 SnowGolem.shear	port	crates/horizon-client/src/game/creatures.rs::Game::interact_shear_mob	shear sound, pumpkin off, shearing loot table at eye height
 SnowGolem.hasPumpkin	inline	crates/horizon-client/src/game/creatures.rs::Game::interact_shear_mob	extra.sheared is the inverse; synced as DATA_PUMPKIN_ID in lan.rs and remote_mob_data.rs
 SnowGolem.setPumpkin	inline	crates/horizon-client/src/game/creatures.rs::Game::interact_shear_mob	sets extra.sheared (shears, dispenser); nothing puts a pumpkin back, as in vanilla
-SnowGolem.getLeashOffset	missing		minor: a lead hangs at the default offset, not 0.75 of the eye height
+SnowGolem.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	0.75 of the eye height
 HappyGhast.setServerStillTimeout	inline	crates/horizon-client/src/mobs/happy_ghast.rs::still_tick	gap: minor: the timeout is extra.counter (10 when a player stands on top, 10 on dismount, 0 on boarding); the one-off position sync to tracking players is not sent, lan.rs only marks the entity precise
 HappyGhast.registerGoals	port	crates/horizon-client/src/mobs/happy_ghast.rs::setup	adult goals: float, tempt (harness and food for a bare adult, food otherwise), float around within 16
 HappyGhast.adultGhastSetup	port	crates/horizon-client/src/mobs/happy_ghast.rs::setup	adult half: ghast move control, happy ghast look control, goals, brain stopped
