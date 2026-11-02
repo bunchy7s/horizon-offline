@@ -228,6 +228,7 @@ impl Game<'_> {
         wind_charge: bool,
         blocks: &[[i32; 3]],
     ) -> Vec<(u32, [f64; 3])> {
+        // ServerExplosion.shouldAffectBlocklikeEntities
         let blocklike = !breeze && !wind_charge && self.ui.rules.bool("mob_griefing");
         let diameter = f64::from(radius * 2.0);
         let distance = |p: [f64; 3]| {
@@ -297,15 +298,17 @@ impl Game<'_> {
             let power = (1.0 - dist) * f64::from(exposure) * multiplier;
             let dir = direction([feet[0], feet[1] + entity.explosion_eye_height(), feet[2]]);
             let mut push = [dir[0] * power, dir[1] * power, dir[2] * power];
-            self.native_explosion_knockback(self.dim.id(), center, blocks, Some(entity.id()), &mut push);
+            let id = Some(entity.id());
+            self.native_explosion_knockback(self.dim.id(), center, blocks, id, &mut push);
             entity.push_from_explosion(Vec3::new(push[0], push[1], push[2]));
         });
         self.restore_entities(entities);
         pushed
     }
     /// `ServerExplosion.hurtEntities` for the player (not a spectator, nor a
-    /// creative player flying): the push, less with explosion knockback
-    /// resistance, and `ServerPlayer.onExplosionHit`. Returns the push.
+    /// creative player flying, though mods hear their push): the push, less
+    /// with explosion knockback resistance, and `ServerPlayer.onExplosionHit`.
+    /// Returns the push.
     fn wind_push_player(
         &mut self,
         center: [f64; 3],
@@ -331,7 +334,8 @@ impl Game<'_> {
             + (feet[2] - center[2]).powi(2))
         .sqrt()
             / f64::from(radius * 2.0);
-        if dist > 1.0 || creative && p.flying {
+        let flying = creative && p.flying;
+        if dist > 1.0 {
             return None;
         }
         let w = f64::from(p.dimensions.width) / 2.0;
@@ -354,6 +358,9 @@ impl Game<'_> {
             eye.map(|d| d / l * power)
         };
         self.native_explosion_knockback(self.dim.id(), center, blocks, None, &mut push);
+        if flying {
+            return None;
+        }
         let p = self.player.as_mut()?;
         p.velocity = Vec3::new(
             p.velocity.x + push[0],
@@ -407,8 +414,7 @@ impl Game<'_> {
         let ctx = horizon_client::sculk::Context::default();
         self.post_game_event("minecraft:explode", center, ctx);
         let mut targets = self.wind_positions(center, radius);
-        let pushed =
-            self.wind_knockback(center, radius, multiplier, breeze, wind_charge, &targets);
+        let pushed = self.wind_knockback(center, radius, multiplier, breeze, wind_charge, &targets);
         let block_count = targets.len();
         // Explosion.canTriggerBlocks: a breeze's charge needs mob griefing.
         if !breeze || self.ui.rules.bool("mob_griefing") {

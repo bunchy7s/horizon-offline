@@ -7,7 +7,7 @@
       "side": "server",
       "cancellable": false,
       "mod_api": {
-        "contract": "replace",
+        "contract": "collect",
         "out": "knockback_velocity"
       }
     }

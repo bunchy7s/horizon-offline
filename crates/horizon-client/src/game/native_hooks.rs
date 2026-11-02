@@ -5293,8 +5293,11 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_explosion_detonate(self, mod_api::mods(), dimension, center, blocks);
     }
-    /// Server explosion knockback for `entity` (None for the acting player).
-    /// Replace the velocity added to its existing velocity. API @API:native_explosion_knockback@.
+    /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
+    /// `entity` (None for the acting player): `ServerExplosion.hurtEntities`,
+    /// after the knockback is calculated. Change `knockback_velocity` to change
+    /// what is added to the entity's velocity; a player's client is sent the
+    /// same. Wind bursts too. Server-side. @API:native_explosion_knockback@.
     pub(super) fn native_explosion_knockback(
         &mut self,
         dimension: &str,

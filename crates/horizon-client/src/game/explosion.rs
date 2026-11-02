@@ -148,12 +148,15 @@ fn blast_direction(center: [f64; 3], origin: [f64; 3]) -> [f64; 3] {
     }
 }
 
+/// The blast as `native_explosion_knockback` tells it: its centre and the
+/// blocks it is about to break.
 struct ExplosionHookContext<'a> {
     center: [f64; 3],
     blocks: &'a [[i32; 3]],
 }
 
-/// An entity in the blast's reach: distance, exposure, and knockback.
+/// An entity in the blast's reach: how far (as a share of the blast's
+/// diameter), how much of it the rays see, and the knockback.
 struct Hit {
     dist: f64,
     exposure: f32,
@@ -487,10 +490,12 @@ impl Game<'_> {
                 }
             }
         }
-        if !spectator && !(creative && flying) {
+        if !spectator {
             let mut push = [dir[0] * power, dir[1] * power, dir[2] * power];
             self.native_explosion_knockback(self.dim.id(), center, blocks, None, &mut push);
-            if let Some(p) = self.player.as_mut() {
+            if !(creative && flying)
+                && let Some(p) = self.player.as_mut()
+            {
                 p.velocity = Vec3::new(
                     p.velocity.x + push[0],
                     p.velocity.y + push[1],
@@ -557,7 +562,7 @@ impl Game<'_> {
         if radius < 1.0e-5 {
             return Vec::new();
         }
-        self.explosion_hits_special(center, radius);
+        self.explosion_hits_special(center, radius, blocks);
         let diameter = f64::from(radius * 2.0);
         let damage = |dist: f64, exposure: f32| {
             let pow = (1.0 - dist) * f64::from(exposure);
@@ -655,7 +660,11 @@ impl Game<'_> {
                 let entity = with_entity!(self, handle, e => e.id());
                 let mut velocity = [push.x, push.y, push.z];
                 self.native_explosion_knockback(
-                    self.dim.id(), center, blocks, Some(entity), &mut velocity,
+                    self.dim.id(),
+                    center,
+                    blocks,
+                    Some(entity),
+                    &mut velocity,
                 );
                 let push = Vec3::new(velocity[0], velocity[1], velocity[2]);
                 match handle {
@@ -887,7 +896,8 @@ impl Game<'_> {
         let mut targets = self.exploded_positions(center, radius, resists);
         let dimension = self.dim.id();
         self.native_explosion_detonate(dimension, center, &mut targets);
-        let pushed = self.explosion_hurt_entities(center, radius, damage_type, interaction, &targets);
+        let pushed =
+            self.explosion_hurt_entities(center, radius, damage_type, interaction, &targets);
         if interaction != BlockInteraction::Keep {
             // Util.shuffle(list, level.random)
             for i in (2..=targets.len()).rev() {
