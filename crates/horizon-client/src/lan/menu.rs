@@ -1136,4 +1136,46 @@ mod tests {
             Some("minecraft:shield")
         );
     }
+
+    /// `AbstractContainerMenu.isContainerClickButton`: a pickup and a quick
+    /// move exist for buttons 0 and 1 only, so a modified client's other
+    /// buttons take nothing out of a slot, move nothing to the hotbar and
+    /// drop nothing from the cursor. The other modes are not buttons' business.
+    #[test]
+    fn guest_clicks_with_a_button_other_than_0_or_1_move_nothing() {
+        let rules = ItemRules(Items::for_tests(Default::default()));
+        let mut g = guest();
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: None,
+            shulker: false,
+            hidden: &[],
+        };
+        // Menu slot 9 stands for inventory index 9, 36 for the hotbar's first.
+        view.guest.inventory[9] = Some(ItemStack::new("minecraft:diamond", 3));
+        click(&mut view, &mut drag, 9, 2, input::PICKUP, &rules);
+        assert_eq!(view.guest.carried, None);
+        assert_eq!(view.get(9).map(|s| s.count), Some(3));
+        click(&mut view, &mut drag, 9, 2, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(9).map(|s| s.count), Some(3));
+        assert!(view.get(36).is_none());
+        // A click outside the window drops nothing either.
+        view.guest.carried = Some(ItemStack::new("minecraft:dirt", 5));
+        let (drops, changed) = click(&mut view, &mut drag, -999, 2, input::PICKUP, &rules);
+        assert!(drops.is_empty() && changed.is_empty());
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(5));
+        // Button 1 still takes half of the stack.
+        view.guest.carried = None;
+        click(&mut view, &mut drag, 9, 1, input::PICKUP, &rules);
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(2));
+        assert_eq!(view.get(9).map(|s| s.count), Some(1));
+        // THROW reads its button as "one or the whole stack", not as a
+        // primary or secondary action.
+        view.guest.carried = None;
+        view.guest.inventory[9] = Some(ItemStack::new("minecraft:diamond", 4));
+        let (drops, _) = click(&mut view, &mut drag, 9, 2, input::THROW, &rules);
+        assert_eq!(drops.iter().fold(0, |n, s| n + s.count), 4);
+        assert!(view.get(9).is_none());
+    }
 }
