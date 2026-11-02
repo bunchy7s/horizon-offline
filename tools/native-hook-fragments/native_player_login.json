@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "player_login",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_login",
+      "neoforge": "none (Bukkit's PlayerLoginEvent; NeoForge's PlayerNegotiationEvent is not cancellable)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a joining player the mods may refuse (`native_player_login`).",
+  "doc_summary": "a joining player the mods may refuse: `native_player_login(player, name, cancel, reason)` is heard once for each player a server has accepted (name, whitelist, bans and player limit checked), before their saved state is loaded and before they are placed in a level (NeoForge's `PlayerNegotiationEvent`). A mod sets `cancel` to disconnect them with `reason` (\"Disconnected\" when it stays unset); no join message and no `native_player_logged_in` follow. Bundles that use it need `\"hooks\": @API:native_player_login@`."
+}

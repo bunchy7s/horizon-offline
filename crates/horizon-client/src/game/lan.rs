@@ -1708,8 +1708,8 @@ impl Game<'_> {
             host.hub.config.guest_commands = effective;
             host.hub.config.force_game_mode = force;
             enforce_guest_game_mode(host, &self.world, self.collision);
-            host.hub.resend_commands();
         }
+        self.resend_commands_filtered();
     }
 
     pub(super) fn lan_port(&self) -> Option<u16> {
@@ -1884,6 +1884,27 @@ impl Game<'_> {
                     }
                 }
                 HostEvent::Joined(conn) => {
+                    // The mods may refuse the login before the player is placed.
+                    if let Some((uuid, name)) =
+                        host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
+                    {
+                        let mut cancel = false;
+                        let mut reason = None;
+                        self.native_player_login(uuid, &name, &mut cancel, &mut reason);
+                        if cancel {
+                            let reason = match reason {
+                                Some(text) => {
+                                    horizon_client::lan::data::component_nbt(&text.component())
+                                }
+                                None => horizon_protocol::text::translatable(
+                                    "multiplayer.disconnect.generic",
+                                    &[],
+                                ),
+                            };
+                            host.hub.kick(conn, reason);
+                            continue;
+                        }
+                    }
                     self.lan_guest_joined(&mut host, conn, state, entities, spawn);
                     if self.options.dedicated.is_some()
                         && let Some(g) = host.hub.guest(conn)
@@ -2381,6 +2402,8 @@ impl Game<'_> {
             g.dimension = in_place;
         }
         self.load_guest_records(host, conn);
+        // The mods say which commands the newcomer's tree keeps.
+        self.native_filter_commands(host, Some(conn));
         let mut theirs = States::default();
         let entities = if elsewhere {
             if let Err(e) = self.enter_level(Some(host), level) {

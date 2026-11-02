@@ -1236,7 +1236,7 @@ impl Game<'_> {
             .iter()
             .map(|e| (e.user.id, e.level as u8))
             .collect();
-        host.hub.resend_commands();
+        self.resend_commands_filtered();
     }
 
     /// A player on the server, by name.

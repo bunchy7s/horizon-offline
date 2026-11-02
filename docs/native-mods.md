@@ -1309,6 +1309,22 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   (NeoForge's `EntityTeleportEvent`). The player's state is swapped in, so `native_tell` and the acting-player helpers
   work. Not heard yet: ender pearls, chorus fruit, a spectator's teleport menu; portals and respawns are not teleports
   here.
+- **`native_player_commands_sent(player, name, names)`**: the command tree a player is sent, when they join and when
+  their level changes (`/op`, `/deop`, the LAN settings). `names` are the root commands their client would get, vanilla's
+  they may use and the mods'; remove a name and that client's tree lacks it, so its chat box neither completes nor
+  colours it. This hides the command from the client only, a typed one still runs (stop it with
+  `native_player_command`). For a player already on, their state is swapped in and `native_tell` works; a joining
+  player has no world yet, so nothing can be told them. The tree the hub re-sends by itself (after a respawn or a change
+  of level) reuses the last answer.
+- **`native_player_sprint(player, name, sprinting)`**: a server player's client started or stopped sprinting (the sprint
+  key, a double tap forward, letting go), once for each change, after the server's player took it. It only hears. It
+  reports what the client asks, not what the server does: a sprint that ends by itself (a hit's knockback, hunger, a
+  wall) is not heard. The player's state is swapped in, so `native_tell` and the acting-player helpers work.
+- **`native_resource_pack_status(player, name, status)`**: a server player's client answered a resource pack while
+  playing (`ServerboundResourcePackPacket`): `status` is `Action`'s number (0 loaded, 1 declined, 2 failed download,
+  3 accepted, 4 downloaded, 5 invalid URL, 6 failed reload, 7 discarded). It only hears. The pack a dedicated server
+  offers during the configuration is answered before the player has joined and is not heard. The player's state is
+  swapped in, so `native_tell` works.
 - **`native_player_fish(player, name, state, cancel)`**: a player's fishing rod, on a server: `state` 0 the cast, 1 a fish
   biting, 2 the reel-in of a bite (the catch), 3 the reel-in with nothing on the line, 4 the reel-in of a bobber hooked
   to an entity or item. Set `cancel` and nothing is thrown (0), the fish gets away and the wait starts over (1), or the

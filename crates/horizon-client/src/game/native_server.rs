@@ -892,6 +892,49 @@ impl Game<'_> {
         host.native_commands = Some(levels);
     }
 
+    /// Asks the mods what root commands each player's tree keeps
+    /// (`native_player_commands_sent`) and stores the answer in the hub,
+    /// which sends the trees without what the mods took out: for `only`, or
+    /// for every placed player.
+    pub(super) fn native_filter_commands(&mut self, host: &mut LanHost, only: Option<u32>) {
+        let players: Vec<(u32, u128, String)> = host
+            .hub
+            .guests
+            .iter()
+            .filter(|g| only.map_or(g.placed, |conn| g.conn == conn))
+            .map(|g| (g.conn, g.uuid, g.name.clone()))
+            .collect();
+        for (conn, uuid, name) in players {
+            let names = host.hub.command_names(conn);
+            let mut kept = names.clone();
+            let placed = host.hub.guest(conn).is_some_and(|g| g.placed);
+            if !placed {
+                // A joining player has no world yet: nothing can be told them.
+                self.native_player_commands_sent(uuid, &name, &mut kept);
+            } else if self.lan_acting == Some(conn) {
+                self.native_player_commands_sent(uuid, &name, &mut kept);
+            } else {
+                self.as_guest(host, conn, |g| {
+                    g.native_player_commands_sent(uuid, &name, &mut kept);
+                });
+            }
+            if let Some(g) = host.hub.guest_mut(conn) {
+                g.hidden_commands = names.into_iter().filter(|n| !kept.contains(n)).collect();
+            }
+        }
+    }
+
+    /// `Hub::resend_commands` with the mods' say on each tree.
+    pub(super) fn resend_commands_filtered(&mut self) {
+        let Some(mut host) = self.lan.take() else {
+            return;
+        };
+        host.hub.refresh_permissions();
+        self.native_filter_commands(&mut host, None);
+        host.hub.resend_commands();
+        self.lan = Some(host);
+    }
+
     /// The level a guest needs for a mod's command (`line`, without its
     /// slash), when a mod registered it.
     pub(super) fn native_command_level(host: &LanHost, line: &str) -> Option<u8> {
