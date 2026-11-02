@@ -5781,6 +5781,20 @@ impl Game<'_> {
         if self.integrated.is_none() && self.server_address().is_some() {
             keys.analog = None;
         }
+        let [mut strafe, mut forward] = keys.direction();
+        let original = [strafe, forward];
+        self.native_movement_input(&mut forward, &mut strafe, &mut keys.jump, &mut keys.shift);
+        if [strafe, forward] != original {
+            if forward != original[1] {
+                keys.forward = forward > 0.0;
+                keys.backward = forward < 0.0;
+            }
+            if strafe != original[0] {
+                keys.left = strafe > 0.0;
+                keys.right = strafe < 0.0;
+            }
+            keys.analog = Some([strafe, forward]);
+        }
         let input = u8::from(keys.forward)
             | u8::from(keys.backward) << 1
             | u8::from(keys.left) << 2

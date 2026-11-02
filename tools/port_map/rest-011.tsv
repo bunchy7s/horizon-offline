@@ -89,7 +89,7 @@ SignedMessageValidator.KeyBased.validate	port	crates/horizon-protocol/src/secure
 SignedMessageValidator.KeyBased.updateAndValidate	port	crates/horizon-protocol/src/secure_chat.rs::MessageValidator::update_and_validate	a failed message breaks the chain: nothing more is accepted
 Style.create	skip:java		builder from optionals; Style is a plain struct
 Style.checkEmptyAfterChange	skip:java		canonical empty style instance
-Style.withShadowColor	missing		minor: Style has no shadow colour, so a component's shadow_color is dropped
+Style.withShadowColor	port	crates/horizon-client-core/src/component.rs::shadow_color	the style's shadow colour is kept on Style (text.rs:92) as packed ARGB, read from a packed int or a normalized RGBA array and written back out
 Style.withBold	port	crates/horizon-client-core/src/text.rs::Text::bold	gap: minor: sets true only; a null or false setter is not kept
 Style.withItalic	port	crates/horizon-client-core/src/text.rs::Text::italic	gap: minor: sets true only; a null or false setter is not kept
 Style.withUnderlined	port	crates/horizon-client-core/src/text.rs::Text::underlined	gap: minor: sets true only; a null or false setter is not kept
