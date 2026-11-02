@@ -15290,12 +15290,17 @@ impl Game<'_> {
         self.save_schedule();
         self.save_warden_tracker();
         self.sync_level();
-        self.store_owner();
+        let stored_owner = self.store_owner();
         write_level_for_role(
             &mut self.level,
             &self.world_root,
             self.options.execution_role,
         )?;
+        // PlayerEvent.SaveToFile for the owner, once level.dat is written.
+        if let Some((uuid, name)) = stored_owner {
+            let directory = horizon_client::lan::playerdata::directory(&self.world_root);
+            self.native_player_save_to_file(uuid, &name, &directory);
+        }
         // PlayerList.saveAll: every placed player saves with the server, to
         // their own file (`PlayerDataStorage.save`); the owner is also in the
         // file level.dat names, which is the one it loads from

@@ -1654,29 +1654,19 @@ impl Game<'_> {
         host.play.entry(conn).or_default().stats = stats;
     }
     /// The integrated server's owner into the world's player, for `Level::write`.
-    pub(super) fn store_owner(&mut self) {
-        let Some(uuid) = self
-            .lan
-            .as_ref()
-            .and_then(|h| h.owner.as_ref())
-            .map(|o| o.uuid)
-        else {
-            return;
-        };
-        let Some((riding, dim, others)) = self.lan.as_ref().and_then(|h| {
+    /// Returns the owner's uuid and name when they were stored.
+    pub(super) fn store_owner(&mut self) -> Option<(u128, String)> {
+        let uuid = self.lan.as_ref().and_then(|h| h.owner.as_ref())?.uuid;
+        let (riding, dim, others) = self.lan.as_ref().and_then(|h| {
             let g = h.hub.guests.iter().find(|g| g.uuid == uuid && g.placed)?;
             let others = self.ridden_by_others(&h.hub.guests, &g.dimension, Some(uuid), true);
             Some((g.vehicle, g.dimension.clone(), others))
-        }) else {
-            return;
-        };
+        })?;
         // The vehicle the owner rides (`ServerPlayer.saveParentVehicle`).
         let vehicle = self
             .parent_vehicle_in(None, &dim, riding, &others, false)
             .map(|(tag, _)| tag);
-        let Some(host) = &self.lan else {
-            return;
-        };
+        let host = self.lan.as_ref()?;
         let mut stored = None;
         if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == uuid && g.placed) {
             playerdata::store(g, &mut self.level, vehicle);
@@ -1685,11 +1675,7 @@ impl Game<'_> {
         } else if let Some(saved) = host.owner.as_ref().and_then(|o| o.saved.as_ref()) {
             self.level.position = saved.position;
         }
-        // PlayerEvent.SaveToFile for the owner's save into level.dat.
-        if let Some(name) = stored {
-            let directory = playerdata::directory(&self.world_root);
-            self.native_player_save_to_file(uuid, &name, &directory);
-        }
+        stored.map(|name| (uuid, name))
     }
 
     /// The world's default game mode (`defaultgamemode`).

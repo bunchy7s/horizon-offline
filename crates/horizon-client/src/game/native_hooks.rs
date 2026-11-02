@@ -5102,7 +5102,7 @@ impl Game<'_> {
         &mut self,
         player: u128,
         name: &str,
-        directory: &Path,
+        directory: &std::path::Path,
     ) {
         let _ = (player, name, directory);
     }
@@ -5118,7 +5118,7 @@ impl Game<'_> {
         &mut self,
         player: u128,
         name: &str,
-        directory: &Path,
+        directory: &std::path::Path,
     ) {
         let _ = (player, name, directory);
     }
