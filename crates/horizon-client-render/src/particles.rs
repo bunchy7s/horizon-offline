@@ -3377,6 +3377,9 @@ impl ParticleEngine {
     /// `ClientExplosionTracker.tick`: throws up to 512 debris particles across all
     /// explosions tracked in this tick, weighted by each explosion's block count.
     fn tick_explosions(&mut self, level: &ParticleLevel) {
+        self.tick_explosions_with(&|b| level.facts.is_air(level.world.block(b[0], b[1], b[2])));
+    }
+    fn tick_explosions_with(&mut self, is_air: &dyn Fn([i32; 3]) -> bool) {
         if self.tracked_explosions.is_empty() {
             return;
         }
@@ -3423,11 +3426,11 @@ impl ParticleEngine {
                 explosion.center[1] + local[1],
                 explosion.center[2] + local[2],
             ];
-            if !level.facts.is_air(level.world.block(
+            if !is_air([
                 at[0].floor() as i32,
                 at[1].floor() as i32,
                 at[2].floor() as i32,
-            )) {
+            ]) {
                 continue;
             }
             let speed =
@@ -4727,5 +4730,28 @@ mod tests {
         // Zero block count explosions are not queued.
         engine.track_explosion([0.0; 3], 1.0, 0);
         assert_eq!(engine.tracked_explosions.len(), 2);
+    }
+    #[test]
+    fn explosion_tracker_caps_debris_at_512_across_multiple_explosions() {
+        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        // Queue two explosions near camera: 400 blocks and 300 blocks (total 700).
+        engine.track_explosion([0.0, 0.0, 0.0], 4.0, 400);
+        engine.track_explosion([2.0, 0.0, 2.0], 5.0, 300);
+        assert_eq!(engine.tracked_explosions.len(), 2);
+
+        // In pure air, total particles spawned must be capped at 512.
+        engine.tick_explosions_with(&|_| true);
+        assert_eq!(engine.pending.len(), 512);
+        assert!(engine.tracked_explosions.is_empty());
+    }
+    #[test]
+    fn explosion_tracker_emits_debris_only_in_air() {
+        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        engine.track_explosion([0.0, 64.0, 0.0], 4.0, 100);
+
+        // When no blocks are air, zero debris particles are emitted.
+        engine.tick_explosions_with(&|_| false);
+        assert_eq!(engine.pending.len(), 0);
+        assert!(engine.tracked_explosions.is_empty());
     }
 }

@@ -665,7 +665,8 @@ impl Game<'_> {
     }
 
     /// `ClientboundExplodePacket` without a push, or None while not serving.
-    /// The client plays the explosion sound and tracks explosion debris.
+    /// The sound is the level's, which the players hear already, so it isn't
+    /// played from the packet.
     fn explosion_packet(
         &self,
         center: [f64; 3],
@@ -708,7 +709,7 @@ impl Game<'_> {
                 None => (-1, Some((sound.into(), None))),
             },
             block_particles,
-            play_sound: true,
+            play_sound: false,
         })
     }
 
