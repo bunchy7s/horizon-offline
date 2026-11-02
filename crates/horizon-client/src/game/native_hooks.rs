@@ -1001,6 +1001,10 @@ impl Game<'_> {
     }
 
     pub(super) fn observe_screen(&mut self) {
+        // Free with no native mod: the snapshot clones the title and menu.
+        if mod_api::mods().is_empty() {
+            return;
+        }
         let current = self.observed_screen_view().map(|view| ObservedScreen {
             id: view.id,
             menu: view.menu.map(str::to_owned),
