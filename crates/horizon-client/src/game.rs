@@ -8102,6 +8102,10 @@ impl Game<'_> {
                     self.settings.file.bool("hideSplashTexts"),
                 );
             }
+            // ScreenEvent.Render.Post over the title's own screens: a mod draws
+            // over them here (a pack browser over Create New World, say), and the
+            // toasts still come after, as over any screen.
+            self.fire_title_screen_render_post(&mut batch);
             self.draw_toasts(&mut batch, false);
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
@@ -8445,6 +8449,21 @@ impl Game<'_> {
         // slot_count mirrors slots() without allocating; keep them in step.
         debug_assert_eq!(self.slot_count(), self.slots().len());
         let view = self.screen_view(batch, screen);
+        self.native_screen_render_post(batch, &view);
+    }
+    /// `native_screen_render_post` (`ScreenEvent.Render.Post`) for the title's
+    /// own screen (`title`, `world_select`, `world_create`, `multiplayer`…),
+    /// once a frame, after it has drawn and before the toasts. Not when a
+    /// screen of the game's own is over the title (Options draws and fires
+    /// its own), nor while a dialog, a prompt or a connect or load hides it.
+    /// Client only, read-only: what a mod draws is its own.
+    fn fire_title_screen_render_post(&self, batch: &mut HudBatch) {
+        if self.screen != Screen::Playing || self.screen_over_playing() || self.remote_loading() {
+            return;
+        }
+        let Some(view) = self.title_screen_view(batch) else {
+            return;
+        };
         self.native_screen_render_post(batch, &view);
     }
     /// `CreativeModeInventoryScreen.hasPermissions` (`canUseGameMasterBlocks`
@@ -14836,14 +14855,14 @@ impl Game<'_> {
         // it ends without failing, for every save: the command, the autosave, the pause.
         let dedicated = self.options.dedicated.is_some();
         if dedicated {
-            dedicated::events::record_server("saving");
+            dedicated::events::record_server("saving", serde_json::json!({}));
         }
         self.save_level(wait)?;
         self.save_parked_levels(wait)?;
         self.save_game_metadata()?;
         self.native_world_saved(wait);
         if dedicated {
-            dedicated::events::record_server("saved");
+            dedicated::events::record_server("saved", serde_json::json!({}));
         }
         Ok(())
     }
@@ -16817,14 +16836,19 @@ impl Game<'_> {
         // the screen that is open then (`ScreenEvent.CharacterTyped.Pre`).
         // Options keeps its text on the key: its own key path routes a key's
         // text between its boxes and its key-bind capture, and no key that
-        // carries text closes that screen or moves its focus.
+        // carries text closes that screen or moves its focus. The title's
+        // screens keep theirs for the same reason: their key path types into
+        // the world name, the seed and a server's address.
         let mut typed: Option<String> = None;
         if let WindowEvent::KeyboardInput {
             event: key_event, ..
         } = &mut event
             && key_event.state == ElementState::Pressed
         {
-            if self.screen_hooks_open() && self.screen != Screen::Options {
+            if self.screen_hooks_open()
+                && self.screen != Screen::Options
+                && !control::title_owns_text(&self.screen, self.title.is_some())
+            {
                 typed = key_event.text.take().map(|text| text.to_string());
             }
             let canceled = match key_event.physical_key {

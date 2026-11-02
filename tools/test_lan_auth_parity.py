@@ -23,7 +23,7 @@ def main():
     classes, dependencies, oracle = oh.compile_oracle(
         build, 'VanillaLanAuthOracle', jars, client_libraries(), lock['minecraft']['java_major'])
     oh.java_run(build, classes, dependencies, 'VanillaLanAuthOracle', [], 'vanilla')
-    oh.run_logged(['cargo', 'test', '-p', 'horizon-client', '--lib',
+    oh.run_logged(['cargo', 'test', '-p', 'horizon-client-lib', '--lib',
                    'net::tests::lan_login_continues_after_authentication_failure', '--', '--nocapture'],
                   build, 'rust', timeout=180)
     pattern = r'lan_auth=(LAN|OTHER):(true|false):(true|false)'
