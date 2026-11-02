@@ -1292,7 +1292,8 @@ impl Game<'_> {
                 let mut n = 2 + self.world.random.next_int_bound(3).unwrap_or(0);
                 let mut cancel = false;
                 let mut count = n as u32;
-                self.native_mob_split(m.id, &m.kind.id, size, size / 2, &mut count, &mut cancel);
+                let kind = super::native_hooks::mob_kind(m);
+                self.native_mob_split(m.id, &kind, size, size / 2, &mut count, &mut cancel);
                 n = if cancel { 0 } else { count.min(64) as _ };
                 for k in 0..n {
                     let off = |kk: i32| (f64::from(kk % 2) - 0.5) * f64::from(size) / 4.0;
@@ -2997,7 +2998,7 @@ impl Game<'_> {
             let kind = if mule {
                 "minecraft:mule".to_owned()
             } else {
-                p.kind.id.clone()
+                super::native_hooks::mob_kind(&p)
             };
             let conn = self
                 .love_cause
