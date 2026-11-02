@@ -540,6 +540,7 @@ pub fn snow_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         );
         if here.name.as_ref() == "minecraft:air" && below.full_collision && !ice {
             events.push(MobEvent::SetBlockName {
+                mob: Some(m.id),
                 pos: [xx, y, zz],
                 name: "minecraft:snow",
                 effect: false,

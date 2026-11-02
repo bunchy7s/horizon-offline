@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "furnace_smelt",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_furnace_smelt",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A furnace finishes smelting an item (`native_furnace_smelt`).",
+  "doc_summary": "A furnace finishes smelting `item` into `result` at `pos` (`native_furnace_smelt`). Bundles need \"hooks\": @API:furnace_smelt@."
+}
