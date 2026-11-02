@@ -683,6 +683,7 @@ impl Game<'_> {
                 self.mount_mob(rider, id);
             }
         }
+        self.native_raid_spawn_wave(raid_id, pos, wave, spawns.len());
     }
     /// `Raid.joinRaid` for a new raider: placed at the block's centre one
     /// above, finalized for an event, its raid buffs applied.

@@ -3887,6 +3887,18 @@ impl Game<'_> {
         let _ = (dimension, pos);
     }
 
+    /// A raid wave is about to be spawned at `pos`; `wave` is its one-based
+    /// wave number and `raiders` is the count Horizon will spawn. @API:native_raid_spawn_wave@.
+    pub(super) fn native_raid_spawn_wave(
+        &mut self,
+        raid: i32,
+        pos: [i32; 3],
+        wave: i32,
+        raiders: usize,
+    ) {
+        let _ = (raid, pos, wave, raiders);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
