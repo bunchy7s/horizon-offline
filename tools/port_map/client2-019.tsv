@@ -68,7 +68,7 @@ CreateWorldScreen.tryApplyNewDataPacks	port	crates/horizon-client/src/title.rs::
 CreateWorldScreen.applyNewPackConfig	inline	crates/horizon-client/src/title.rs::creation_packs	the selected ids are applied at creation rather than validated into a separate config object
 CreateWorldScreen.createDefaultLoadConfig	skip:data		builds the datapack load config; Horizon loads no datapack set at creation
 CreateWorldScreen.removeTempDataPackDir	inline	crates/horizon-client/src/title.rs:831	the temp folder's cleanup on leaving the create screen
-CreateWorldScreen.copyBetweenDirs	port	crates/horizon-client/src/datapack.rs::copy_pack	a dropped pack is copied into the temp folder
+CreateWorldScreen.copyBetweenDirs	port	crates/horizon-client-render/src/datapack.rs::copy_pack	a dropped pack is copied into the temp folder
 CreateWorldScreen.createNewWorldDirectory	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	makes the world folder and writes level.dat; gap: minor: datapack files not copied in
 CreateWorldScreen.createTempDataPackDirFromExistingWorld	port	crates/horizon-client/src/title.rs:3644	Re-Create reopens the world's own data pack selection
 CreateWorldScreen.getDataPackSelectionSettings	inline	crates/horizon-client/src/title.rs::Mode::Create { options }	options.pack_dir and options.data_packs are the selection settings
