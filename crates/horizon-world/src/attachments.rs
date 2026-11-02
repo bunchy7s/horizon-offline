@@ -593,7 +593,10 @@ mod tests {
         let mut map = Attachments::default();
         assert_eq!(map.get(&broken), Err(AttachmentError::InvalidSyncPolicy));
         assert_eq!(map.set(&broken, 1), Err(AttachmentError::InvalidSyncPolicy));
-        assert_eq!(map.mark_sync(&broken), Err(AttachmentError::InvalidSyncPolicy));
+        assert_eq!(
+            map.mark_sync(&broken),
+            Err(AttachmentError::InvalidSyncPolicy)
+        );
         assert!(map.take_sync_changes().is_empty());
     }
     #[test]

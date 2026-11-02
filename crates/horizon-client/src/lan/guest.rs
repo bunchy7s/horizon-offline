@@ -502,7 +502,8 @@ impl Guest {
     pub fn reads_attachment_sync(&self) -> bool {
         self.placed && self.brand == "horizon"
     }
-    /// A holder's synced attachments, if the guest reads them.
+    /// A holder's synced attachments, if the guest reads them; a message too big
+    /// for one payload goes in halves.
     pub fn send_attachment_sync(&self, message: &attachment_sync::Message) {
         if !self.reads_attachment_sync() {
             return;
@@ -512,6 +513,21 @@ impl Guest {
                 channel: attachment_sync::CHANNEL.into(),
                 data,
             })),
+            // One change is the unit that cannot be sent; the others still can.
+            Err(e) if message.changes.len() > 1 => {
+                let (first, rest) = message.changes.split_at(message.changes.len() / 2);
+                self.send_attachment_sync(&attachment_sync::Message {
+                    holder: message.holder,
+                    replace: message.replace,
+                    changes: first.to_vec(),
+                });
+                self.send_attachment_sync(&attachment_sync::Message {
+                    holder: message.holder,
+                    replace: false,
+                    changes: rest.to_vec(),
+                });
+                log::debug!("Horizon: attachment sync split: {e}");
+            }
             Err(e) => log::debug!("Horizon: attachment sync not sent: {e}"),
         }
     }

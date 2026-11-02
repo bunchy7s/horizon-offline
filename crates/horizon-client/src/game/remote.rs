@@ -2284,7 +2284,9 @@ impl Game<'_> {
         }
     }
     /// Keep the renderable block entities (chests, furnaces) in step with blocks.
-    /// `previous`: the block's state before, when it changed.
+    /// `previous`: the block's state before, when it changed. A column sent again has
+    /// none, and keeps its block entities' synced attachments: the server does not send
+    /// them again (`remote_chunk` drops those of block entities the column lost).
     pub(super) fn sync_block_entity(
         &mut self,
         pos: (i32, i32, i32),
@@ -2302,12 +2304,16 @@ impl Game<'_> {
                     e.id() == entity.id() && !(other_block && matches!(e, BlockEntity::Mod(_)))
                 });
                 if !same {
-                    self.forget_block_entity_attachments(pos);
+                    if previous.is_some() {
+                        self.forget_block_entity_attachments(pos);
+                    }
                     self.world.block_entities.insert(pos, entity);
                 }
             }
             None => {
-                self.forget_block_entity_attachments(pos);
+                if previous.is_some() {
+                    self.forget_block_entity_attachments(pos);
+                }
                 self.world.block_entities.remove(&pos);
             }
         }

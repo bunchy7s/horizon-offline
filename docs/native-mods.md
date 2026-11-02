@@ -2197,14 +2197,18 @@ players who track the holder: guests who were sent a chunk for a chunk or block 
 who track an entity for an entity, the player and those tracking them for a player, and
 everyone in the level for the level. A client also gets all of a holder's synced values
 when it starts seeing it: a chunk sent (with its block entities), a level joined or
-re-entered, an entity tracked, and its own player. The wire form is the codec's compound,
-so `sync` requires a codec. On a client, `Host::attachments` returns a copy of what the
-server synced, which `get` decodes; `set` and `remove` change only that copy, which is
-dropped when the chunk, entity or player goes. Only Horizon clients are sent values. A change whose namespace or name is over 256
-characters, or that would take a message past 1 MiB, is left out of it; the holder's others
-are still sent.
-A client keeps no copy for the level hosts (`LevelRandomHost`): they stay server-only
-there, though their changes on a server are synced.
+re-entered, an entity tracked, and its own player. Far columns get none. With no native
+mod loaded nothing is sent. The wire form is the codec's compound, so `sync` requires
+a codec.
+
+Only Horizon clients are sent values. A change whose namespace or name is over 256
+characters, whose value cannot be written or that alone takes a message past 1 MiB
+is not sent; the holder's others are, in more messages when they do not fit in one.
+
+On a client, `Host::attachments` returns a copy of what the server synced, which `get`
+decodes; `set` and `remove` change only that copy, which is dropped when the chunk,
+entity or player goes. A client keeps no copy for the level hosts (`LevelRandomHost`):
+they stay server-only there, though their changes on a server are synced.
 
 `copy_on_death` requires a codec. Player respawn copies opted-in entries via their
 encoded representation, including raw entries of an absent mod; other entries are

@@ -31,9 +31,8 @@ fn recipients(hub: &Hub, holder: Holder) -> impl Iterator<Item = &Guest> {
 
 impl Game<'_> {
     /// The messages that give a player `holder`'s synced attachments whole: its
-    /// own, and for a chunk those of its block entities. A player holder with
-    /// none still gives one, to drop what the client holds; other holders
-    /// with none give no message.
+    /// own, and for a chunk those of its block entities; a holder with none
+    /// gives no message.
     fn attachment_snapshot(&mut self, holder: Holder) -> Vec<Message> {
         let changes = match holder {
             // Read in place: a chunk lent to a mod is copied and saved.
@@ -68,7 +67,7 @@ impl Game<'_> {
         }
         holders
             .into_iter()
-            .filter(|(holder, changes)| !changes.is_empty() || matches!(holder, Holder::Player(_)))
+            .filter(|(_, changes)| !changes.is_empty())
             .map(|(holder, changes)| Message {
                 holder,
                 replace: true,

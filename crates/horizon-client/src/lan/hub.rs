@@ -224,6 +224,23 @@ pub struct AttachmentSnapshot {
     pub holder: Holder,
 }
 
+/// Queues `holders` as snapshots for `player`; with no mod loaded there is
+/// nothing to sync, so none are queued.
+fn queue_snapshots(
+    snapshots: &mut Vec<AttachmentSnapshot>,
+    player: u128,
+    holders: impl IntoIterator<Item = Holder>,
+) {
+    if crate::mod_api::mods().is_empty() {
+        return;
+    }
+    snapshots.extend(
+        holders
+            .into_iter()
+            .map(|holder| AttachmentSnapshot { player, holder }),
+    );
+}
+
 /// Moves a guest's tracking events into `out`, one batch, and the entities it
 /// started tracking into `snapshots`.
 fn take_tracking(
@@ -234,10 +251,11 @@ fn take_tracking(
     let events = g.tracker.take_events();
     if !events.is_empty() {
         let started = events.iter().filter(|e| e.start);
-        snapshots.extend(started.map(|e| AttachmentSnapshot {
-            player: g.uuid,
-            holder: Holder::Entity(e.entity as u32),
-        }));
+        queue_snapshots(
+            snapshots,
+            g.uuid,
+            started.map(|e| Holder::Entity(e.entity as u32)),
+        );
         out.push(TrackingBatch {
             player: g.uuid,
             name: g.name.clone(),
@@ -1367,16 +1385,11 @@ impl Hub {
     fn send_level_info(&mut self, i: usize, ctx: &TickCtx, load_start: bool) {
         let spawn = ctx.spawn;
         let g = &self.guests[i];
-        self.attachment_snapshots.extend([
-            AttachmentSnapshot {
-                player: g.uuid,
-                holder: Holder::Level,
-            },
-            AttachmentSnapshot {
-                player: g.uuid,
-                holder: Holder::Player(g.uuid),
-            },
-        ]);
+        queue_snapshots(
+            &mut self.attachment_snapshots,
+            g.uuid,
+            [Holder::Level, Holder::Player(g.uuid)],
+        );
         g.send(&C::InitializeBorder(super::border::initialize(ctx.border)));
         g.send(&self.time_packet(ctx.world, ctx.clock_rate));
         g.send(&self.default_spawn(spawn));
@@ -1887,18 +1900,18 @@ impl Hub {
                 .rev()
                 .map(|idx| g.chunk_queue.remove(idx))
                 .collect();
+            // Far columns are terrain only: no snapshot.
+            queue_snapshots(
+                &mut self.attachment_snapshots,
+                g.uuid,
+                seen.iter().map(|&(x, z)| Holder::Chunk([x, z])),
+            );
             // A far chunk the save doesn't have leaves the queue unsent.
             seen.extend(far.into_iter().rev().filter_map(|(idx, sent)| {
                 let key = g.far_queue.remove(idx);
                 sent.then_some(key)
             }));
-            for key in seen {
-                self.attachment_snapshots.push(AttachmentSnapshot {
-                    player: g.uuid,
-                    holder: Holder::Chunk([key.0, key.1]),
-                });
-                g.sent_chunks.insert(key);
-            }
+            g.sent_chunks.extend(seen);
         }
     }
 

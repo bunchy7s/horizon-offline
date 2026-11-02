@@ -8,7 +8,7 @@
 //! removal.
 use horizon_world::{
     attachments::{AttachmentSync, Holder},
-    nbt::{JavaString, Tag},
+    nbt::{self, Tag},
 };
 
 use crate::{
@@ -34,9 +34,9 @@ pub struct Message {
     pub changes: Vec<AttachmentSync>,
 }
 
-/// A message's payload; an error for a holder it cannot write. A change with a
-/// name past [`MAX_NAME`], or one that would take the payload past
-/// [`MAX_PAYLOAD`], is left out, so it cannot block the holder's others.
+/// A message's payload; an error for a holder it cannot write, a name past
+/// [`MAX_NAME`], a value that is not an encodable compound, or a payload past
+/// [`MAX_PAYLOAD`] (the sender splits the changes and tries again).
 pub fn encode(message: &Message) -> Result<Vec<u8>> {
     let mut w = Writer::new();
     match message.holder {
@@ -60,34 +60,30 @@ pub fn encode(message: &Message) -> Result<Vec<u8>> {
         _ => return Err(Error::new("attachment sync: unknown holder")),
     }
     w.bool(message.replace);
-    let mut body = Writer::new();
-    let mut count = 0;
+    w.varint(message.changes.len() as i32);
     for change in &message.changes {
-        // A name that is not UTF-16 or is too long leaves out only this change.
-        let name = |name: &JavaString| {
-            name.to_string()
-                .ok()
-                .filter(|n| n.encode_utf16().count() <= MAX_NAME)
-        };
-        let (Some(namespace), Some(name)) = (name(&change.namespace), name(&change.name)) else {
-            continue;
-        };
-        let mut entry = Writer::new();
-        entry.string(&namespace);
-        entry.string(&name);
+        for name in [&change.namespace, &change.name] {
+            let name = name
+                .to_string()
+                .map_err(|_| Error::new("attachment sync: name is not UTF-16"))?;
+            if name.encode_utf16().count() > MAX_NAME {
+                return Err(Error::new(format!("attachment sync: name {name} is too long")));
+            }
+            w.string(&name);
+        }
         match &change.value {
-            Some(value) => entry.nbt(&Tag::Compound(value.clone())),
-            None => entry.nbt(&Tag::End),
+            Some(value) => {
+                let tag = Tag::Compound(value.clone());
+                let bytes = nbt::write_network(&tag, nbt::Limits::default())
+                    .map_err(|e| Error::new(format!("attachment sync: value: {e}")))?;
+                w.bytes(&bytes);
+            }
+            None => w.bytes(&[0]),
         }
-        // The count's varint is at most five bytes.
-        if w.data.len() + 5 + body.data.len() + entry.data.len() > MAX_PAYLOAD {
-            continue;
-        }
-        body.data.extend(entry.data);
-        count += 1;
     }
-    w.varint(count);
-    w.data.extend(body.data);
+    if w.data.len() > MAX_PAYLOAD {
+        return Err(Error::new("attachment sync: payload too big"));
+    }
     Ok(w.data)
 }
 
@@ -187,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn encode_leaves_out_a_name_decode_would_refuse() {
+    fn encode_refuses_a_change_the_client_would_not_read_as_sent() {
         let mut message = Message {
             holder: Holder::Level,
             replace: false,
@@ -196,7 +192,19 @@ mod tests {
         message.changes[0].name = "n".repeat(MAX_NAME).as_str().into();
         assert!(decode(&encode(&message).unwrap()).is_ok());
         message.changes[0].name = "n".repeat(MAX_NAME + 1).as_str().into();
-        let sent = decode(&encode(&message).unwrap()).unwrap();
-        assert_eq!(sent.changes, changes()[1..]);
+        assert!(encode(&message).is_err(), "name");
+        message.changes[0].name = "pool".into();
+        let mut deep = Tag::Int(0);
+        for _ in 0..600 {
+            deep = Tag::Compound([("v".into(), deep)].into());
+        }
+        let Tag::Compound(deep) = deep else {
+            unreachable!()
+        };
+        message.changes[0].value = Some(deep);
+        assert!(encode(&message).is_err(), "unwritable value");
+        let big = Tag::ByteArray(vec![0; MAX_PAYLOAD]);
+        message.changes[0].value = Some([("big".into(), big)].into());
+        assert!(encode(&message).is_err(), "payload");
     }
 }
