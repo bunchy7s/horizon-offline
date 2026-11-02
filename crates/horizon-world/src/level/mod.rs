@@ -317,6 +317,10 @@ pub enum Spread {
 
 /// The world as seen by block behaviour. Implemented by the game and tests.
 pub trait LevelAccess {
+    /// Whether a hopper may pick up this dropped item stack. The default allows.
+    fn allow_hopper_pickup_item(&self, _pos: BlockPos, _item: &str, _count: u32) -> bool {
+        true
+    }
     /// Whether `kind` may spread from `from` to `to`: a native mod may refuse
     /// (land claims), and the block at `to` stays as it is. Fire asks after
     /// its random draws, which a refusal doesn't change. The default allows.

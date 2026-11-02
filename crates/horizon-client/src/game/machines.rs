@@ -15,7 +15,10 @@ use horizon_client::{
     world::World,
 };
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
-use horizon_world::{level::Behaviours, registry::BlockStateId};
+use horizon_world::{
+    level::{Behaviours, LevelAccess},
+    registry::BlockStateId,
+};
 use std::sync::Arc;
 
 type Pos = (i32, i32, i32);
@@ -826,7 +829,18 @@ impl Game<'_> {
         let mut taken = false;
         if !full {
             let stack = self.dropped[i].stack.clone();
-            match self.add_item(None, &view, stack, None) {
+            let allowed = self.with_level(|_, level, _| {
+                level.allow_hopper_pickup_item(
+                    BlockPos::new(pos.0, pos.1, pos.2),
+                    &stack.item,
+                    stack.count,
+                )
+            });
+            match allowed
+                .then(|| self.add_item(None, &view, stack, None))
+                .flatten()
+            {
+                None if !allowed => {}
                 None => {
                     self.remove_dropped(i);
                     taken = true;

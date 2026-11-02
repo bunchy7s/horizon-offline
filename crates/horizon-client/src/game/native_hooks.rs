@@ -526,6 +526,18 @@ pub(super) use horizon_world::level::flags;
 pub(crate) const NATIVE_HOOKS_API: u32 = 153;
 
 impl GameLevel<'_> {
+    /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side. @API:native_hopper_pickup_item@.
+    #[inline(always)]
+    pub(super) fn native_hopper_pickup_item(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        item: &str,
+        count: u32,
+        cancel: &mut bool,
+    ) {
+        let _ = (dimension, pos, item, count, cancel);
+    }
     /// A broken block is about to drop `experience` points at `pos`. The
     /// vanilla block drop rule has been checked; change the amount before its
     /// orbs are awarded. Server-side. @API:native_block_exp@.

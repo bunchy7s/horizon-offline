@@ -1153,6 +1153,13 @@ impl GameLevel<'_> {
     }
 }
 impl LevelAccess for GameLevel<'_> {
+    fn allow_hopper_pickup_item(&self, pos: BlockPos, item: &str, count: u32) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_hopper_pickup_item(self.dimension, pos, item, count, &mut cancel);
+        }
+        !cancel
+    }
     fn observe_block_changed(&self, pos: BlockPos, old: BlockStateId, new: BlockStateId) {
         if self.native_authoritative {
             self.native_block_changed(self.dimension, pos, old, new);
