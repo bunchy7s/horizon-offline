@@ -519,4 +519,21 @@ impl Host for super::Game<'_> {
     fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
         self.native_entity_level(entity)
     }
+    fn living(&self, entity: EntityRef) -> Option<LivingRef> {
+        self.native_living(entity)
+    }
+    fn living_equipment(&self, living: LivingRef, slot: EquipmentSlot) -> Option<ItemStack> {
+        self.native_living_equipment(living, slot)
+    }
+    fn living_hand_item(&self, living: LivingRef, hand: Hand) -> Option<ItemStack> {
+        self.native_living_hand_item(living, hand)
+    }
+    fn living_set_equipment(
+        &mut self,
+        living: LivingRef,
+        slot: EquipmentSlot,
+        stack: Option<ItemStack>,
+    ) -> bool {
+        self.native_living_set_equipment(living, slot, stack)
+    }
 }

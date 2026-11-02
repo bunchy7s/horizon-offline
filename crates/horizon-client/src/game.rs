@@ -212,6 +212,7 @@ mod native_inventories;
 mod native_item_energy;
 mod native_item_fluids;
 mod native_lifecycle;
+mod native_living_refs;
 mod native_menus;
 mod native_mob_draw;
 mod native_mobs;
