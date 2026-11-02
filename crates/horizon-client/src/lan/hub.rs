@@ -1992,7 +1992,7 @@ impl Hub {
             // A far chunk the save doesn't have leaves the queue unsent.
             seen.extend(far.into_iter().rev().filter_map(|(idx, sent)| {
                 let key = g.far_queue.remove(idx);
-                if sent && self.sync_attachments {
+                if sent && self.sync_attachments && g.brand == "horizon" {
                     g.far_sent_chunks.insert(key);
                 }
                 sent.then_some(key)
