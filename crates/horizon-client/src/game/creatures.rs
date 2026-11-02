@@ -1744,7 +1744,7 @@ impl Game<'_> {
                 }
                 MobEvent::SquidCycle { mob, at } => self.lan_entity_event(mob as i32, 19, at),
                 MobEvent::RabbitHop { mob, at } => self.lan_entity_event(mob as i32, 1, at),
-                MobEvent::Drown { mob, at, .. } => {
+                MobEvent::Drown { mob, at } => {
                     self.lan_entity_event(mob as i32, super::combat::DROWN_EVENT, at);
                     let v = self
                         .mobs

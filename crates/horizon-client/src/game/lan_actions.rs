@@ -4289,7 +4289,7 @@ impl Game<'_> {
                 }
                 // LivingEntity.baseTick's entity event 67, to every client
                 // around, the guest's own included; this window draws it too.
-                MotionEvent::Drown(_) => {
+                MotionEvent::Drown => {
                     if let Some(g) = host.hub.guest(conn) {
                         host.hub
                             .entity_event(g.entity_id, super::combat::DROWN_EVENT, at);

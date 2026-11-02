@@ -1041,13 +1041,10 @@ fn base_tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
             };
             let breath = breathe(m.id, &m.kind.id, vanilla);
             if let Some(drowning) = drown(m.id, &m.kind.id, &mut m.air, breath, true) {
-                if drowning.bubbles > 0 {
-                    events.push(MobEvent::Drown {
-                        mob: m.id,
-                        at: [m.position.x, m.position.y, m.position.z],
-                        bubbles: drowning.bubbles,
-                    });
-                }
+                events.push(MobEvent::Drown {
+                    mob: m.id,
+                    at: [m.position.x, m.position.y, m.position.z],
+                });
                 if let Some(damage) = drowning.damage {
                     m.damage(damage, Damage::of(DamageKind::Drown));
                 }

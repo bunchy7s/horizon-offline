@@ -80,10 +80,9 @@ pub fn native_living_drown(
     );
 }
 
-/// A drowning tick as the mods left it: the damage and bubble count.
+/// A drowning tick as the mods left it.
 pub struct Drowning {
     pub damage: Option<f32>,
-    pub bubbles: i32,
 }
 
 /// `breath` applied to `air` (`apply`), then `LivingEntity.baseTick`'s
@@ -108,7 +107,6 @@ pub fn drown(
     *air = 0;
     Some(Drowning {
         damage: (damage > 0.0).then_some(damage),
-        bubbles: 8,
     })
 }
 

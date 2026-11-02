@@ -7514,7 +7514,7 @@ impl Game<'_> {
                         pitch,
                     );
                 }
-                MotionEvent::Drown(_) => {
+                MotionEvent::Drown => {
                     if let Some(host) = &self.lan {
                         host.hub
                             .entity_event(host.host_entity, combat::DROWN_EVENT, feet);

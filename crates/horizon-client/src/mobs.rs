@@ -1259,7 +1259,6 @@ pub enum MobEvent {
     Drown {
         mob: u32,
         at: [f64; 3],
-        bubbles: i32,
     },
     /// `Mob.burnUndead` in daylight on a mob wearing something in its
     /// `sunProtectionSlot`: the item loses up to 1 durability (the game knows

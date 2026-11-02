@@ -267,7 +267,7 @@ pub enum MotionEvent {
     },
     /// Entity event 67 (`LivingEntity.makeDrownParticles`): eight bubbles
     /// around a drowning player.
-    Drown(i32),
+    Drown,
 }
 #[derive(Clone)]
 pub struct PlayerMotion {
