@@ -183,11 +183,23 @@ where
         max_step: f32,
         on_ground: bool,
     ) -> Result<Vec3> {
+        let context = CollisionContext::position(bounds.min_position().y);
+        self.resolve_with_context(bounds, movement, max_step, on_ground, context)
+    }
+    /// [`Self::resolve`] with the entity's captured collision context.
+    pub fn resolve_with_context(
+        &mut self,
+        bounds: Aabb,
+        movement: Vec3,
+        max_step: f32,
+        on_ground: bool,
+        context: CollisionContext<'_>,
+    ) -> Result<Vec3> {
         Ok(resolve_world_movement(
             self,
             MovementRequest {
                 entity: EntityIdentity(0),
-                context: CollisionContext::position(bounds.min_position().y),
+                context,
                 bounds,
                 movement,
                 max_step,
@@ -223,23 +235,12 @@ impl SceneCollisions<'_, '_> {
         border: Option<(&BorderGeometry, [f64; 2])>,
     ) -> Result<Vec3> {
         let context = self.context(bounds);
-        let mut scene = EntityCollisions {
+        EntityCollisions {
             blocks: self,
             entities: &[],
             border,
-        };
-        Ok(resolve_world_movement(
-            &mut scene,
-            MovementRequest {
-                entity: EntityIdentity(0),
-                context,
-                bounds,
-                movement,
-                max_step,
-                on_ground,
-                candidate_budget: 1_000_000,
-            },
-        )?)
+        }
+        .resolve_with_context(bounds, movement, max_step, on_ground, context)
     }
     /// Resolve movement with the entity's captured collision context. Most
     /// callers only need the position context; entities such as falling blocks

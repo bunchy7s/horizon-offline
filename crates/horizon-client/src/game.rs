@@ -4062,6 +4062,7 @@ impl Game<'_> {
                 no_physics,
                 &self.res.motion().fluids,
                 &nearby,
+                Some(self.border.geometry()),
             );
             cells.moved(i, item.previous, item.position);
             // Entity.handleOnAboveBubbleColumn: the server sends the particles of
@@ -13244,6 +13245,7 @@ impl Game<'_> {
                 target,
                 self.remote.is_none(),
                 &mut next_float,
+                Some(self.border.geometry()),
             )
         });
         self.orbs = orbs;
