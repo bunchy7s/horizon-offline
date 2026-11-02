@@ -325,6 +325,7 @@ impl Game<'_> {
                 on_ground: false,
                 owner: None,
                 guest: None,
+                power: 4.0,
             }),
             // FallingBlockEntity.recreateFromPacket: the block state is the data.
             "minecraft:falling_block" => self.falling.push(FallingBlock {

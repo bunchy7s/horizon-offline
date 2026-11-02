@@ -34,6 +34,7 @@ mod modpacks_page;
 mod mods_page;
 mod mods_project;
 mod multiplayer_page;
+mod native_log_page;
 mod new_instance;
 mod owner_page;
 mod packs_page;
@@ -44,6 +45,8 @@ mod profile_heads;
 mod screenshots_page;
 mod scrollbar;
 mod servers_page;
+#[cfg(windows)]
+mod setup_page;
 mod shell;
 mod shortcut_page;
 mod skin_page;
@@ -219,6 +222,8 @@ struct Launcher {
     /// The mods of a build made for other Horizon versions (`native_mods::MISMATCH`): the build
     /// waits for "Build anyway".
     native_mismatch: Option<String>,
+    /// The top bar's Build log panel (`native_log_page.rs`).
+    native_log: native_log_page::NativeLog,
     confirm_remove: Option<String>,
     picker_open: bool,
     /// Where the accent picker's hue strip is on screen (`themes_page.rs`), to map a click to a
@@ -485,6 +490,7 @@ impl Launcher {
             native_update: None,
             native_builds: Default::default(),
             native_mismatch: None,
+            native_log: Default::default(),
             confirm_remove: None,
             picker_open: false,
             hue_area: std::rc::Rc::new(std::cell::Cell::new(None)),
@@ -656,6 +662,7 @@ impl Launcher {
         }
         self.picker_open = false;
         self.language_menu = false;
+        self.mods.browse.sort_menu = false;
         self.account_menu = false;
     }
 
@@ -739,6 +746,9 @@ impl Launcher {
         self.native_confirm = None;
         self.native_error = None;
         self.native_mismatch = None;
+        // This attempt's own log, starting empty: an open panel shows it rather than the last
+        // attempt's (`native_log_page`).
+        self.native_log_reset();
         let instance = instances::selected();
         self.native_for = Some(instance.id.clone());
         let plays = self.version_of(&instance).cloned();
@@ -747,12 +757,15 @@ impl Launcher {
             None => native_mods::base_for(plays.as_deref(), &self.installed, false),
         };
         let Some(base) = base else {
-            self.native_error = Some(tr("Install Horizon first.").into());
+            let error = tr("Install Horizon first.").to_string();
+            self.native_log_preflight(&error);
+            self.native_error = Some(error);
             return;
         };
         let folder = match self.native_mods_to_build() {
             Ok((folder, _)) => folder,
             Err(e) => {
+                self.native_log_preflight(&e);
                 self.native_error = Some(e);
                 return;
             }
@@ -1070,6 +1083,8 @@ impl Launcher {
                     self.native_done = result.is_ok().then_some(last).flatten();
                     self.installed = backend::installed();
                     self.reload_instances();
+                    // A build attempt ended: an open panel reads the log it left.
+                    self.native_log.stale = true;
                     match result.map_err(|e| match e.strip_prefix(native_mods::MISMATCH) {
                         Some(list) => Ok(list.to_owned()),
                         None => Err(e),
@@ -1212,6 +1227,7 @@ impl Launcher {
         changed |= self.servers_tick();
         changed |= self.mods_tick();
         changed |= self.github_tick();
+        changed |= self.native_log_read(cx);
         if let Some(sign_in) = &self.sign_in {
             if let Some(state) = sign_in_change(&mut self.sign_in_state, sign_in.state()) {
                 if let SignInState::Done(Ok(ref account)) = state {
@@ -2314,7 +2330,13 @@ impl Launcher {
     fn topbar(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let n = t.night;
-        let mut nav = div().flex().flex_none().items_center().gap(px(4.));
+        let mut nav = div()
+            .flex()
+            .flex_1()
+            .min_w_0()
+            .flex_wrap()
+            .items_center()
+            .gap(px(4.));
         for (page, label, _) in Page::ALL {
             if page == Page::Settings {
                 continue;
@@ -2399,11 +2421,23 @@ impl Launcher {
             this.go(Page::Settings);
             cx.notify();
         }));
+        // The last native build's log, when there is one (`native_log_page`).
+        let build_log = self.native_log.available.then(|| {
+            tab_action("topbar-native-log", "Build log", &t).on_click(cx.listener(
+                |this, _: &ClickEvent, _, cx| {
+                    this.native_log_open();
+                    cx.notify();
+                },
+            ))
+        });
         div()
             .flex()
             .flex_none()
             .items_center()
-            .h(px(theme::TOPBAR))
+            .min_h(px(theme::TOPBAR))
+            .py(px(8.))
+            .flex_wrap()
+            .min_w_0()
             .pl(px(theme::PAGE_GUTTER - 14.))
             .pr(px(12.))
             .border_b_1()
@@ -2416,6 +2450,7 @@ impl Launcher {
                     .flex_none()
                     .items_center()
                     .gap(px(8.))
+                    .children(build_log)
                     .child(account)
                     .child(settings),
             )
@@ -4646,6 +4681,7 @@ impl Render for Launcher {
                             window.focus_next(cx);
                         }
                     }
+                    "escape" if this.native_log_escape() => {}
                     "escape" if this.servers_escape() => {}
                     "escape" if this.instance_escape() => {}
                     "escape" if this.screenshot_escape() => {}
@@ -4718,6 +4754,9 @@ impl Render for Launcher {
         root = root.children(self.import_note(cx));
         if let Some(dialog) = self.instance_dialog(cx) {
             root = root.child(dialog);
+        }
+        if let Some(panel) = self.native_log_panel(cx) {
+            root = root.child(panel);
         }
         if self.page == Page::Play {
             if let Some(viewer) = self.screenshot_viewer(cx) {
@@ -4901,6 +4940,12 @@ fn main() {
         eprintln!("Could not restore the launcher's terminal streams: {error}");
         std::process::exit(1);
     }
+    // Windows setup: `setup --quiet` / `uninstall --quiet` run here without a window, and never
+    // reach the CLI parser below (so neither the MCP tools nor the completions list them).
+    #[cfg(windows)]
+    if let Some(code) = horizon_launcher::installer::run_quiet() {
+        std::process::exit(code);
+    }
     perf::process_started();
     backend::exe_path();
     #[cfg(windows)]
@@ -4937,6 +4982,12 @@ fn main() {
                 })
             });
             cx.set_menus(menus());
+            // The setup exe (and `horizon-launcher.exe uninstall`) opens its own window instead.
+            #[cfg(windows)]
+            if let Some(mode) = horizon_launcher::installer::window_mode() {
+                setup_page::open(mode, cx);
+                return;
+            }
             let bounds = Bounds::centered(None, size(px(1180.), px(760.)), cx);
             cx.open_window(
                 WindowOptions {

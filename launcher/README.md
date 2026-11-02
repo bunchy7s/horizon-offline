@@ -312,6 +312,16 @@ labelled `feature`) with `horizon-launcher-linux-x86_64.tar.gz`,
 `horizon-launcher-macos-x64.zip` (Intel Macs) and `horizon-launcher-windows-x64.zip`, never marked latest. The version is built in from the tag
 (`HORIZON_LAUNCHER_VERSION`); `Cargo.toml`'s version is only what local builds report.
 
+Windows also publishes `horizon-launcher-setup.exe`: the launcher's own binary under another name, which opens
+a per-user setup instead of the window (no administrator). It copies itself to
+`%LOCALAPPDATA%\Programs\Horizon Launcher\horizon-launcher.exe`, makes the Start menu shortcut (and the
+desktop one if asked) and an entry in *Apps & features*, then starts the copy. `horizon-launcher-setup.exe
+setup --quiet [--dir <folder>] [--desktop-shortcut]` does the same without a window, and
+`horizon-launcher.exe uninstall` (or `... uninstall --quiet [--remove-data]`) takes it all away again: the
+shortcuts, the registry entries and the install folder. The game's folders are never touched, and the
+launcher's data folder only with `--remove-data`. An installed launcher keeps updating itself, so the
+uninstaller at that path is always the newest one.
+
 ## Command line
 
 Generate shell completions without opening the window:
