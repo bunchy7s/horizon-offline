@@ -907,14 +907,32 @@ impl Launcher {
                     | Field::ServerAddress
                     | Field::InstanceModsFilter
                     | Field::ConsoleSearch
+                    | Field::InstanceName
+                    | Field::InstanceGroup
+                    | Field::InstanceVersion
             );
         let base = if glass {
             // The mods filter and the log search sit by buttons: the mockup's small `FIELD`, as
             // tall as they are.
-            crate::glass_ui::field(focused, invalid).when(
-                matches!(f, Field::InstanceModsFilter | Field::ConsoleSearch),
-                |d| d.h(px(36.)).px(px(12.)).rounded(px(10.)),
-            )
+            crate::glass_ui::field(focused, invalid)
+                .when(
+                    matches!(f, Field::InstanceModsFilter | Field::ConsoleSearch),
+                    |d| d.h(px(36.)).px(px(12.)).rounded(px(10.)),
+                )
+                // The instance dialog's are the large `FIELD_LG`: 48 px, 15 px text, white at 6 %,
+                // 10 % while typed in.
+                .when(
+                    !invalid
+                        && matches!(
+                            f,
+                            Field::InstanceName | Field::InstanceGroup | Field::InstanceVersion
+                        ),
+                    |d| {
+                        d.h(px(48.))
+                            .text_size(px(15.))
+                            .bg(crate::glass_ui::white(if focused { 0.1 } else { 0.06 }))
+                    },
+                )
         } else {
             div()
                 .flex()

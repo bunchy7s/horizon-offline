@@ -59,3 +59,20 @@ Limits, checked when an item is read (`Item::parse`); an item past one is refuse
 | Reach | 24 pixels from the bone's pivot, animations included | items stay near their wearer |
 
 Unknown fields are refused, so a file never carries anything the game would silently ignore.
+
+## What other players wear (`horizon_cosmetics::Cosmetics`)
+
+The game asks Horizon's cosmetics service (HTTPS, JSON) what the players in view wear, and draws
+from its answers. The frame never waits on the network: it reads a cache, and a thread of its own
+does the asking.
+
+- **One request for the players in view**: `POST /v1/worn` with up to 64 UUIDs
+  (`{"players": ["<uuid hex>", …]}`) answers `{"ttl": seconds, "players": {"<uuid hex>": [{"id",
+  "hash"}, …]}}`; a player who wears nothing is left out. Only the UUIDs of players the game draws
+  are sent, nothing else about them or the server.
+- **Cached for the service's TTL** (kept within 1 minute to 1 hour). Past it the last answer stays
+  drawn while the player is asked for again. The 4096 players seen most recently are remembered.
+- **Item files** come from `GET /v1/items/<id>?hash=<hash>` once and are kept on disk under their
+  hash (they never change for one); a file past the limits is left out and not asked for again.
+- **Offline**: a request that fails leaves every answer as it was, and the next one waits 15 s, then
+  30 s, doubling up to 10 minutes. A player whose item didn't arrive is asked for again after 15 s.

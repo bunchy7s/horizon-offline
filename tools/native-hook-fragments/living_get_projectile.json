@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "living_get_projectile",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_get_projectile",
+      "side": "both",
+      "neoforge": "net.neoforged.neoforge.event.entity.living.LivingGetProjectileEvent (NeoForge.EVENT_BUS, not cancellable)",
+      "mod_api": {
+        "contract": "collect",
+        "out": "projectile"
+      }
+    }
+  ],
+  "rust_summary": "The ammunition a bow or crossbow shooter finds (`native_living_get_projectile`).",
+  "doc_summary": "The ammunition `LivingEntity.getProjectile(weapon)` returns for a player or a mob (skeleton, illusioner, pillager, piglin): `native_living_get_projectile(player, name, entity, kind, weapon, projectile)` hands every mod the event with `projectile` set to the vanilla ammunition (the held or inventory stack, a mob's held projectile or a new arrow, a creative player's default arrow, empty when a survival player has none). A mod reads it, and sets or empties it. It is asked for the bow's start and release, the crossbow's start and draw, a skeleton's or illusioner's shot, a pillager's or piglin's crossbow load, and the client's prediction of the use. A replaced stack is not taken from the inventory: the hook owns it. A mob's shot uses the stack's arrow item and effect; an emptied stack leaves a mob's crossbow uncharged. `entity` is the mob's id, empty for a player. Bundles need \"hooks\": @API:living_get_projectile@."
+}
