@@ -17,7 +17,7 @@ GroundPathNavigation.canUpdatePath	port	crates/horizon-client/src/mobs/nav.rs::M
 GroundPathNavigation.getTempMobPos	port	crates/horizon-client/src/mobs/nav.rs::Mob::temp_mob_pos	x, surface_y, z
 GroundPathNavigation.createPath	port	crates/horizon-client/src/mobs/nav.rs::Mob::create_path_to	unloaded chunk gives no path, then the surface search (surface_position) unless below_surface
 GroundPathNavigation.getSurfaceY	port	crates/horizon-client/src/mobs/nav.rs::Mob::surface_y	floats up through water up to 16 blocks when the mob can float, else floor(y + 0.5)
-GroundPathNavigation.trimPath	missing		player: avoid_sun is set by the skeleton's RestrictSun goal but nothing truncates the path at the first sunlit node, so skeletons chasing you by day walk out into the sun instead of stopping in the shade
+GroundPathNavigation.trimPath	port	crates/horizon-client/src/mobs/nav.rs::Mob::trim_path	with avoid_sun on a ground or wall-climbing mob: the mob standing under sky keeps its path, otherwise the nodes are cut at the first one that can see the sky
 PathNavigation.getGroundY	inline	crates/horizon-client/src/mobs/nav.rs::Mob::nav_tick	target y is the floor level under the node unless the block below is air
 PathNavigation.shouldTargetNextNodeInDirection	port	crates/horizon-client/src/mobs/nav.rs::Mob::should_target_next_node	
 PathNavigation.trimPath	missing		minor: path nodes on a cauldron are not raised one block, so a route ending on a cauldron (leatherworker job site) aims into the block
@@ -68,7 +68,7 @@ TargetingConditions.test	port	crates/horizon-client/src/mobs/goals.rs::Mob::play
 DefaultRandomPos.generateRandomPosTowardDirection	port	crates/horizon-client/src/mobs/goals.rs::Mob::default_check	Mob::toward builds the position, default_check does limits, home, stable and malus
 GoalUtils.mobRestricted	port	crates/horizon-client/src/mobs/goals.rs::Mob::restricted	home within radius + distance + 1, then isRestricted
 GoalUtils.hasMalus	inline	crates/horizon-client/src/mobs/goals.rs::Mob::default_check	path type malus must be 0, also in land_up_out_of_solid
-LandRandomPos.getPosTowards	missing		player: iron golems wander anywhere; GolemRandomStrollInVillageGoal and MoveBackToVillageGoal are not registered, so a golem does not drift toward villagers who want it or back to the village
+LandRandomPos.getPosTowards	port	crates/horizon-client/src/mobs/goals.rs::Mob::land_random_pos_towards	the direction from the mob to the point, then the ten tries within a quarter turn of it; gap: player: the golem goals that call it (GolemRandomStrollInVillageGoal, MoveBackToVillageGoal) are not registered, so a golem still wanders anywhere
 LandRandomPos.getPosInDirection	inline	crates/horizon-client/src/mobs/goals.rs::Mob::land_random_pos_away	only the away direction is wired; the toward call has no user
 LandRandomPos.movePosUpOutOfSolid	port	crates/horizon-client/src/mobs/goals.rs::Mob::land_up_out_of_solid	up out of solid, then no water and no malus
 RandomPos.generateRandomDirection	port	crates/horizon-client/src/mobs/goals.rs::Mob::random_direction	
