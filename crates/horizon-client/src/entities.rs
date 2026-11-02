@@ -12,7 +12,7 @@ use crate::{
     world::World,
 };
 use horizon_core::{
-    geometry::{Aabb, Direction, Vec3, VoxelShape},
+    geometry::{Aabb, Direction, Vec3, VoxelShape, border::BorderGeometry},
     position::BlockPos,
 };
 use horizon_world::{
@@ -261,6 +261,7 @@ impl ItemEntity {
         no_physics: bool,
         fluids: &crate::motion::FluidResources,
         entity_boxes: &[Aabb],
+        border: Option<&BorderGeometry>,
     ) -> bool {
         self.ticks += 1;
         self.previous = self.position;
@@ -292,7 +293,7 @@ impl ItemEntity {
         // (`applyEffectsFromBlocksForLastMovements`), so lift builds up and
         // the item moves on the next wake-up (#4558).
         if !self.on_ground || horizontal > 1.0e-5 || (self.age + self.id).is_multiple_of(4) {
-            let mut scene = SceneCollisions {
+            let scene = SceneCollisions {
                 world,
                 binding: collision,
                 subject: None,
@@ -308,17 +309,14 @@ impl ItemEntity {
             // Entity.move with noPhysics: straight through, the ground as it was.
             let moved = if no_physics {
                 wanted
-            } else if entity_boxes.is_empty() {
-                scene
-                    .resolve(self.bounds(), wanted, 0.0, self.on_ground)
-                    .unwrap_or(Vec3::ZERO)
             } else {
                 // `Entity.collide`: the entities that `canBeCollidedWith` the item stop it
-                // too (a boat, a minecart, a shulker, a happy ghast held still).
+                // too (a boat, a minecart, a shulker, a happy ghast held still), and
+                // so does the world border (`Entity.collectColliders`).
                 crate::collisions::EntityCollisions {
                     blocks: scene,
                     entities: entity_boxes,
-                    border: None,
+                    border: border.map(|b| (b, [self.position.x, self.position.z])),
                 }
                 .resolve(self.bounds(), wanted, 0.0, self.on_ground)
                 .unwrap_or(Vec3::ZERO)
@@ -852,6 +850,7 @@ impl ExperienceOrb {
         player: Option<[f64; 3]>,
         server: bool,
         next_float: &mut dyn FnMut() -> f32,
+        border: Option<&BorderGeometry>,
     ) -> bool {
         self.ticks += 1;
         self.previous = self.position;
@@ -916,8 +915,10 @@ impl ExperienceOrb {
         // `double fallSpeed = getDeltaMovement().y`, taken after the stuck
         // push and before the move.
         let wanted = self.velocity;
+        // Entity.collide: the world border's walls stop the orb too.
+        let border = border.map(|b| (b, [self.position.x, self.position.z]));
         let moved = scene
-            .resolve(bounds, wanted, 0.0, self.on_ground)
+            .resolve_in_border(bounds, wanted, 0.0, self.on_ground, border)
             .unwrap_or(Vec3::ZERO);
         self.position = Vec3::new(
             self.position.x + moved.x,
@@ -1955,6 +1956,73 @@ mod merge_tests {
 }
 
 #[cfg(test)]
+mod world_border_tests {
+    use super::*;
+
+    /// `Entity.collectColliders` (#7080): the world border's wall stops an
+    /// item and an experience orb as it stops the player. A border of size
+    /// 10 around (20, 20) has its east wall at x = 25; each body starts at
+    /// x = 24 on the flat ground of the test scene, moving 1.5 east.
+    #[test]
+    fn the_world_border_stops_items_and_experience_orbs() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let fluids = crate::motion::FluidResources::new(&assets, &facts).unwrap();
+        let collision = crate::collisions::load(&root, assets.registry).unwrap();
+        let world = World::test_scene(&assets, &render, 3).unwrap();
+        let border = BorderGeometry::new([20.0, 20.0], 10.0, 29_999_984).unwrap();
+        for bordered in [false, true] {
+            let border = bordered.then_some(&border);
+            let mut item = super::honey_slide_tests::falling_item(24.0, 4.0, 20.5, 1.5, 0.0, 0.0);
+            item.tick(
+                &world,
+                assets.registry,
+                &facts,
+                &collision,
+                false,
+                &fluids,
+                &[],
+                border,
+            );
+            let mut orb = ExperienceOrb {
+                no_gravity: false,
+                id: 2,
+                position: Vec3::new(24.0, 4.0, 20.5),
+                previous: Vec3::new(24.0, 4.0, 20.5),
+                velocity: Vec3::new(1.5, 0.0, 0.0),
+                value: 1,
+                age: 0,
+                on_ground: true,
+                count: 1,
+                ticks: 0,
+                health: 5,
+            };
+            orb.tick(&world, &facts, &collision, None, true, &mut || 0.0, border);
+            for (what, east) in [
+                ("item", item.bounds().max_position().x),
+                ("orb", orb.bounds().max_position().x),
+            ] {
+                if bordered {
+                    assert!(
+                        (east - 25.0).abs() < 1.0e-7,
+                        "the {what} stops on the wall at x = 25, got {east}"
+                    );
+                } else {
+                    assert!(east > 25.0, "no border: the {what} goes on, got {east}");
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod honey_slide_tests {
     use super::*;
 
@@ -1995,6 +2063,7 @@ mod honey_slide_tests {
                 false,
                 &fluids,
                 &[],
+                None,
             );
             ys.push(item.velocity.y);
         }
@@ -2059,6 +2128,7 @@ mod honey_slide_tests {
                 false,
                 &fluids,
                 &[],
+                None,
             );
         }
         assert!(
@@ -2355,6 +2425,7 @@ mod slime_bounce_tests {
             false,
             &fluids,
             &[],
+            None,
         );
         assert_eq!(falling.position.y, 4.0);
         assert!(falling.velocity.y > 0.0);
@@ -2373,6 +2444,7 @@ mod slime_bounce_tests {
             false,
             &fluids,
             &[],
+            None,
         );
         assert!(!falling.needs_sync);
     }
@@ -2465,6 +2537,7 @@ mod entity_collision_tests {
                     false,
                     &fluids,
                     boxes,
+                    None,
                 );
             }
             item.position.y
@@ -2513,6 +2586,7 @@ mod entity_collision_tests {
                     false,
                     &fluids,
                     &[],
+                    None,
                 );
             }
             item.position.x
