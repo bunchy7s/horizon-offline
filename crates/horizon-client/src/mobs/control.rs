@@ -410,6 +410,13 @@ impl Mob {
                 }
             }
         }
+        // Goat.setYHeadRot: the head is clamped to `getMaxHeadYRot` (15
+        // degrees) from the body on every set, so a standing goat cannot
+        // swivel it further than a walking one.
+        if self.species() == Species::Goat {
+            self.head_yaw =
+                rotate_if_necessary(self.head_yaw, self.body_yaw, self.kind.max_head_y_rot);
+        }
     }
     fn look_angles(&self, at: [f64; 3]) -> (Option<f32>, Option<f32>) {
         let (xd, yd, zd) = (
@@ -466,4 +473,47 @@ impl Mob {
 /// Entity.rotlerp used by Mob.lookAt (clamped turn, no wrap of the result).
 fn rotate_toward_max(from: f32, to: f32, max: f32) -> f32 {
     from + wrap(to - from).clamp(-max, max)
+}
+
+#[cfg(test)]
+mod goat_head_tests {
+    use super::*;
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    fn mob(species: Species) -> Mob {
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = species;
+        // Mob.getMaxHeadYRot: 15 for a goat (Goat.getMaxHeadYRot), 75 otherwise.
+        kind.max_head_y_rot = if species == Species::Goat { 15.0 } else { 75.0 };
+        Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0)
+    }
+
+    /// `Goat.setYHeadRot`: whatever the look control asks for, a goat's head
+    /// stays within `getMaxHeadYRot` (15 degrees) of its body, standing still
+    /// or walking; another mob turns as far as it likes.
+    #[test]
+    fn a_goats_head_stays_within_fifteen_degrees_of_its_body() {
+        let turned = |species: Species| {
+            let mut m = mob(species);
+            m.body_yaw = 0.0;
+            // A target 40 blocks to the side: a quarter turn away.
+            m.ai.look.kind = LookKind::Default;
+            m.ai.look.wanted = [40.0, 1.0, 0.0];
+            m.ai.look.y_max_rot_speed = 1000.0;
+            m.ai.look.x_max_rot_angle = 40.0;
+            m.ai.look.cooldown = 20;
+            m.look_control_tick();
+            wrap(m.head_yaw - m.body_yaw)
+        };
+        let goat = turned(Species::Goat);
+        assert!(
+            goat.abs() <= 15.0 + 1.0e-3,
+            "the goat's head turned {goat} degrees from its body"
+        );
+        assert!(
+            turned(Species::Cow).abs() > 15.0,
+            "a cow is not held to the goat's 15 degrees"
+        );
+    }
 }

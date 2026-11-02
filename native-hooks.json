@@ -317,6 +317,34 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_built_data"
     },
     {
+      "name": "on",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_on"
+    },
+    {
+      "name": "mod_key",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_mod_key"
+    },
+    {
+      "name": "setting",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_setting"
+    },
+    {
+      "name": "set_setting",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_set_setting"
+    },
+    {
+      "name": "set_block_property",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_set_block_property"
+    },
+    {
+      "name": "set_block_property_with",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_set_block_property_with"
+    },
+    {
+      "name": "config_dir",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_config_dir"
+    },
+    {
       "name": "panel_items",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_panel_items"
     },

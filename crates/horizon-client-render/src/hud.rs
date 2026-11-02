@@ -132,7 +132,7 @@ pub const PACK_ICON_SIZE: u32 = 128;
 /// size of the largest trim texture.
 pub const TRIM_SLOTS: usize = 32;
 pub fn decode(path: &Path) -> Result<(u32, u32, Vec<u8>)> {
-    decode_bytes(&fs::read(path)?)
+    decode_bytes(&horizon_core::prepared_files::read(path)?)
 }
 /// A PNG in memory as RGBA pixels.
 pub fn decode_bytes(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
@@ -184,9 +184,10 @@ fn within_budget(files: &[&PathBuf], budget: u64) -> HashSet<PathBuf> {
 }
 /// A PNG's width and height, from its header alone.
 fn png_size(path: &Path) -> Option<(u32, u32)> {
-    use std::io::Read;
-    let mut header = [0u8; 24];
-    fs::File::open(path).ok()?.read_exact(&mut header).ok()?;
+    let header: [u8; 24] = horizon_core::prepared_files::read_head(path, 24)
+        .ok()?
+        .try_into()
+        .ok()?;
     let field = |at: usize| u32::from_be_bytes(header[at..at + 4].try_into().unwrap_or_default());
     (header[..8] == *b"\x89PNG\r\n\x1a\n" && header[12..16] == *b"IHDR")
         .then(|| (field(16), field(20)))
@@ -365,7 +366,8 @@ fn cit_sprite(root: &Path, id: &str) -> Option<(PackedImage, Option<TextureFlags
             return None;
         }
     };
-    let mcmeta = fs::read_to_string(path.with_extension("png.mcmeta")).ok();
+    let mcmeta =
+        horizon_core::prepared_files::read_to_string(&path.with_extension("png.mcmeta")).ok();
     let animation = animation_of(mcmeta.as_deref());
     // Only an animation is cut to its first frame: a still CIT texture is drawn whole, and
     // armour layers are twice as wide as they are tall.
@@ -463,7 +465,10 @@ fn atlas_sprites(root: &Path, packed: &[PackedImage]) -> (Vec<PackedImage>, Vec<
                         // Animated strips keep their first frame and animate,
                         // like the packed files.
                         if path.starts_with("block/") || path.starts_with("item/") {
-                            let mcmeta = fs::read_to_string(file.with_extension("png.mcmeta")).ok();
+                            let mcmeta = horizon_core::prepared_files::read_to_string(
+                                &file.with_extension("png.mcmeta"),
+                            )
+                            .ok();
                             let animation = animation_of(mcmeta.as_deref());
                             animated = animation.is_some();
                             first_frame(image, animation.as_ref())
@@ -960,7 +965,9 @@ impl HudAtlas {
             let image = decode(path)
                 .map_err(|e| log::warn!("skipped GUI texture {}: {e}", path.display()))
                 .ok()?;
-            let mcmeta = fs::read_to_string(path.with_extension("png.mcmeta")).ok();
+            let mcmeta =
+                horizon_core::prepared_files::read_to_string(&path.with_extension("png.mcmeta"))
+                    .ok();
             let animation = animation_of(mcmeta.as_deref());
             // An animated strip keeps its first frame.
             let frames = name.starts_with("block/") || name.starts_with("item/");
