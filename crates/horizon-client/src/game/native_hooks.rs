@@ -3044,6 +3044,10 @@ impl Game<'_> {
     ) {
         let _ = (dimension, pos, item, target);
     }
+    /// A brewing stand at `pos` began brewing `ingredient`, after fuel and the timer were set. Server-side. @API:brewing_start@.
+    pub(super) fn native_brewing_start(&self, pos: [i32; 3], ingredient: &str) {
+        let _ = (pos, ingredient);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

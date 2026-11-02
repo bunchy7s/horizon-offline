@@ -2910,11 +2910,18 @@ impl Game<'_> {
         let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
             return Ok(());
         };
+        let was_idle = b.brew_time <= 0;
         let out = b.tick(
             &world_stations!(self).brewing,
             world_items!(self),
             self.res.providers(),
         );
+        let started = was_idle && b.brew_time > 0;
+        let ingredient = started.then(|| b.ingredient.clone()).flatten();
+        if let Some(ingredient) = ingredient {
+            let (x, y, z) = pos;
+            self.native_brewing_start([x, y, z], &ingredient);
+        }
         if out != brewing::BrewTick::default() {
             let (x, y, z) = pos;
             self.world.modified.insert((x >> 4, z >> 4));
