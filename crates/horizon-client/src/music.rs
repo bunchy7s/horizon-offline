@@ -2,11 +2,16 @@
 //! `Minecraft.getSituationalMusic`, with the `minecraft:audio/background_music`
 //! and `minecraft:audio/music_volume` environment attributes of dimension
 //! types and biomes (a biome value overrides its dimension's).
+use crate::options_ui::{MusicGroup, MusicTrack};
 use crate::sound_engine::{InstanceId, MUSIC, PlayResult, SoundEngine, SoundInstance, Sounds};
-use crate::sound_events::Sentinel;
+use crate::sound_events::{Sentinel, SoundRegistry};
 use horizon_core::random::{LegacyRandom, RandomSource};
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs,
+    path::Path,
+};
 
 /// `Music`: a sound event and the delay range (ticks) before it starts.
 #[derive(Clone, Debug, PartialEq)]
@@ -78,7 +83,84 @@ impl Music {
         ))
     }
 }
-/// `BackgroundMusic`: the attribute value.
+/// The Music page's groups: each built-in situation's own tracks first, then
+/// every other `music.` event's tracks that no earlier group listed, under
+/// its dimension's biomes. A track several pools share is listed once, from
+/// the first pool that names it, so "play now" always has a pool that plays
+/// it and no track is left without a row.
+pub fn track_groups(registry: &SoundRegistry) -> Vec<MusicGroup> {
+    let mut groups: Vec<MusicGroup> = Vec::new();
+    let mut listed: Vec<String> = Vec::new();
+    let builtin = Music::builtin();
+    for (label, music) in &builtin {
+        let tracks = registry.tracks(&music.sound);
+        if tracks.is_empty() {
+            continue;
+        }
+        listed.extend(tracks.iter().cloned());
+        groups.push(MusicGroup {
+            label: (*label).to_owned(),
+            tracks: tracks
+                .into_iter()
+                .map(|id| MusicTrack {
+                    event: music.sound.clone(),
+                    id,
+                })
+                .collect(),
+        });
+    }
+    // `music_disc.*` (records) do not start with "music.".
+    let mut events: Vec<&String> = registry
+        .names()
+        .filter(|event| event.starts_with("minecraft:music."))
+        .collect();
+    events.sort();
+    // Keyed by the heading's rank, so the dimensions keep their order however
+    // the event ids sort.
+    let mut rest: BTreeMap<u8, (&'static str, Vec<MusicTrack>)> = BTreeMap::new();
+    for event in events {
+        if builtin.iter().any(|(_, music)| music.sound == *event) {
+            continue;
+        }
+        let tracks: Vec<MusicTrack> = registry
+            .tracks(event)
+            .into_iter()
+            .filter(|id| !listed.contains(id))
+            .map(|id| MusicTrack {
+                event: event.clone(),
+                id,
+            })
+            .collect();
+        if tracks.is_empty() {
+            continue;
+        }
+        listed.extend(tracks.iter().map(|track| track.id.clone()));
+        let (rank, label) = biome_group(event);
+        rest.entry(rank)
+            .or_insert_with(|| (label, Vec::new()))
+            .1
+            .extend(tracks);
+    }
+    groups.extend(rest.into_values().map(|(label, tracks)| MusicGroup {
+        label: label.to_owned(),
+        tracks,
+    }));
+    groups
+}
+/// The heading a biome-only pool's tracks go under: vanilla plays these
+/// tracks in several biomes, so no heading names a single one.
+fn biome_group(event: &str) -> (u8, &'static str) {
+    let path = event.strip_prefix("minecraft:").unwrap_or(event);
+    if path.starts_with("music.overworld.") {
+        (1, "Overworld biomes")
+    } else if path.starts_with("music.nether.") {
+        (2, "Nether biomes")
+    } else if path.starts_with("music.end.") {
+        (3, "End biomes")
+    } else {
+        (4, "Other music")
+    }
+}
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BackgroundMusic {
     pub default: Option<Music>,
@@ -798,6 +880,64 @@ mod tests {
         assert_eq!(bg.select(true, true).unwrap().sound, "c");
         assert_eq!(bg.select(true, false).unwrap().sound, "b");
         assert_eq!(bg.select(false, false).unwrap().sound, "a");
+    }
+
+    #[test]
+    fn the_music_page_lists_every_track_once_from_a_pool_that_plays_it() {
+        let mut registry = SoundRegistry::default();
+        registry.add_file(
+            "minecraft",
+            br#"{
+                "music.game": {"sounds": ["music/game/shared", "music/game/second"]},
+                "music.menu": {"sounds": ["music/menu/one"]},
+                "music.overworld.forest": {"sounds": ["music/game/shared", "music/game/bromeliad"]},
+                "music.overworld.swamp": {"sounds": ["music/game/bromeliad", "music/game/aerie"]},
+                "music.nether.warped_forest": {"sounds": ["music/game/rubedo"]},
+                "music_disc.cat": {"sounds": ["records/cat"]},
+                "note": {"sounds": ["block/note/harp"]}
+            }"#,
+            &|_, _| true,
+        );
+        let groups = track_groups(&registry);
+        let summary: Vec<(&str, Vec<&str>)> = groups
+            .iter()
+            .map(|group| {
+                (
+                    group.label.as_str(),
+                    group
+                        .tracks
+                        .iter()
+                        .map(|track| track.id.rsplit('/').next().unwrap())
+                        .collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                ("Menu", vec!["one"]),
+                ("Overworld", vec!["shared", "second"]),
+                // A biome pool's own track, from the pool that plays it.
+                ("Overworld biomes", vec!["bromeliad", "aerie"]),
+                ("Nether biomes", vec!["rubedo"]),
+            ]
+        );
+        // Each row plays from a pool that has the track; no track repeats.
+        let mut seen = Vec::new();
+        for group in &groups {
+            for track in &group.tracks {
+                assert!(!seen.contains(&track.id), "{} listed twice", track.id);
+                seen.push(track.id.clone());
+                assert!(
+                    registry.tracks(&track.event).contains(&track.id),
+                    "{} does not play {}",
+                    track.event,
+                    track.id
+                );
+            }
+        }
+        // Records and other events are not music.
+        assert!(seen.iter().all(|id| !id.contains("records/")));
     }
 
     /// The overworld pool, two tracks, and a menu track.

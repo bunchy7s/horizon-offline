@@ -1464,15 +1464,21 @@ pub enum Event {
     /// A Music page row: play this track of this event now.
     PlayMusicTrack(String, String),
 }
-/// One situation's built-in tracks, for the Music page.
+/// A row of the Music page: the track, and the pool it is played from.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MusicTrack {
+    /// The music event the track belongs to (`minecraft:music.game`).
+    pub event: String,
+    /// The sound id (`minecraft:music/game/calm1`).
+    pub id: String,
+}
+/// One group of rows on the Music page: a situation, or a dimension's biomes.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MusicGroup {
-    /// The heading the page shows ("Overworld").
-    pub label: &'static str,
-    /// The music event the tracks belong to (`minecraft:music.game`).
-    pub event: String,
-    /// The sound ids, in `sounds.json` order.
-    pub tracks: Vec<String>,
+    /// The heading the page shows ("Overworld", "Nether biomes").
+    pub label: String,
+    /// The rows, in `sounds.json` order.
+    pub tracks: Vec<MusicTrack>,
 }
 /// `SliderableValueSet.applyValueImmediately`: these apply 600 ms after
 /// the last change (`OptionInstanceSliderButton.delayedApplyAt`).
@@ -1814,6 +1820,8 @@ enum Row {
     Big(Opt),
     Pair(Opt, Option<Opt>),
     Header(&'static str),
+    /// A heading the page makes at run time (the Music page's groups).
+    Heading(String),
     /// A line of grey text (a path).
     Note(String),
     Buttons(Widget, Option<Widget>),
@@ -2520,17 +2528,20 @@ impl OptionsUi {
                 rows.extend(pairs(&[Opt::ShowSubtitles, Opt::DirectionalAudio]));
                 rows.extend(pairs(&[Opt::MusicFrequency, Opt::MusicToast]));
                 rows.push(Row::Big(Opt::SoundDevice));
-                // Horizon's own music page: the built-in tracks, by situation.
-                rows.push(Row::Buttons(
-                    button(
-                        0.0,
-                        0.0,
-                        310.0,
-                        tr("horizon.pages.open.music"),
-                        Act::Push(Page::Music),
-                    ),
-                    None,
-                ));
+                // Horizon's music page (an extra): the built-in tracks, by
+                // situation, once it is on in Horizon Extras.
+                if s.extras.music_page {
+                    rows.push(Row::Buttons(
+                        button(
+                            0.0,
+                            0.0,
+                            310.0,
+                            tr("horizon.pages.open.music"),
+                            Act::Push(Page::Music),
+                        ),
+                        None,
+                    ));
+                }
                 rows
             }
             Page::Music => {
@@ -2539,24 +2550,24 @@ impl OptionsUi {
                 }
                 let mut rows = Vec::new();
                 for group in &self.music_groups {
-                    rows.push(Row::Header(group.label));
+                    rows.push(Row::Heading(group.label.clone()));
                     for track in &group.tracks {
                         // Left: the track, played now. Right: whether its pool
                         // still picks it (vanilla until one is turned off).
-                        let on = !s.extras.music_off.iter().any(|off| off == track);
+                        let on = !s.extras.music_off.contains(&track.id);
                         let play = button(
                             0.0,
                             0.0,
                             150.0,
-                            Text::literal(track_name(track).to_owned()),
-                            Act::PlayMusicTrack(group.event.clone(), track.clone()),
+                            Text::literal(track_name(&track.id).to_owned()),
+                            Act::PlayMusicTrack(track.event.clone(), track.id.clone()),
                         );
                         let toggle = button(
                             0.0,
                             0.0,
                             150.0,
                             on_off(on),
-                            Act::MusicTrackOn(track.clone(), on),
+                            Act::MusicTrackOn(track.id.clone(), on),
                         );
                         rows.push(Row::Buttons(play, Some(toggle)));
                     }
@@ -2759,6 +2770,33 @@ impl OptionsUi {
                 Vec::new()
             }
         }
+    }
+    /// A section heading of a list (`Row::Header`, `Row::Heading`), at `y`.
+    fn heading_row(&self, out: &mut Vec<Widget>, label: Text, y: &mut f32, w: f32, top: f32) {
+        let padding = if *y + self.scroll <= top + 2.0 {
+            0.0
+        } else {
+            18.0
+        };
+        let label = label.with_style(&Style {
+            bold: Some(true),
+            underlined: Some(true),
+            ..Style::default()
+        });
+        out.push(Widget {
+            x: 0.0,
+            y: *y + 2.0 + padding + 4.0,
+            w,
+            h: 9.0,
+            kind: WKind::Text {
+                text: label,
+                color: u32::MAX,
+                centered: true,
+            },
+            list: false,
+            row: 0,
+        });
+        *y += padding + 18.0;
     }
     /// Build every widget of the current page.
     fn layout(&mut self, s: &Settings, w: f32, h: f32) -> (Vec<Widget>, f32, f32, f32) {
@@ -3219,30 +3257,12 @@ impl OptionsUi {
                     rows.begin(&out, y);
                     match row {
                         Row::Header(key) => {
-                            let padding = if y + self.scroll <= top + 2.0 {
-                                0.0
-                            } else {
-                                18.0
-                            };
-                            let label = tr(key).with_style(&Style {
-                                bold: Some(true),
-                                underlined: Some(true),
-                                ..Style::default()
-                            });
-                            out.push(Widget {
-                                x: 0.0,
-                                y: y + 2.0 + padding + 4.0,
-                                w,
-                                h: 9.0,
-                                kind: WKind::Text {
-                                    text: label,
-                                    color: u32::MAX,
-                                    centered: true,
-                                },
-                                list: false,
-                                row: 0,
-                            });
-                            y += padding + 18.0;
+                            let label = tr(key);
+                            self.heading_row(&mut out, label, &mut y, w, top);
+                        }
+                        Row::Heading(text) => {
+                            let label = Text::literal(text);
+                            self.heading_row(&mut out, label, &mut y, w, top);
                         }
                         Row::Note(text) => {
                             out.push(Widget {
@@ -7582,16 +7602,26 @@ mod tests {
     }
 
     #[test]
-    fn music_and_sounds_opens_the_music_page() {
+    fn the_music_page_button_follows_the_extra() {
         let atlas = atlas();
         let size = (960.0, 540.0);
         let mut s = Settings::default();
         let mut ui = OptionsUi::default();
         ui.show(Page::Sound);
-        // The button is the last row: scroll the list to its end first.
+        let open = |ui: &mut OptionsUi, s: &Settings| {
+            let (widgets, ..) = ui.layout(s, size.0, size.1);
+            widgets.into_iter().find(
+                |w| matches!(&w.kind, WKind::Button { act, .. } if *act == Act::Push(Page::Music)),
+            )
+        };
+        // The extra is off by default: Music & Sounds is vanilla's page.
+        assert!(open(&mut ui, &s).is_none());
+        s.extras.music_page = true;
+        assert!(open(&mut ui, &s).is_some(), "Music... once the extra is on");
+        // It is the last row: scroll the list to its end before clicking it.
         ui.scroll(&s, size, -1000.0);
         let (widgets, ..) = ui.layout(&s, size.0, size.1);
-        let open = widgets
+        let open_button = widgets
             .into_iter()
             .find(
                 |w| matches!(&w.kind, WKind::Button { act, .. } if *act == Act::Push(Page::Music)),
@@ -7600,8 +7630,8 @@ mod tests {
         let events = ui.click(
             &mut s,
             &atlas,
-            open.x + open.w / 2.0,
-            open.y + open.h / 2.0,
+            open_button.x + open_button.w / 2.0,
+            open_button.y + open_button.h / 2.0,
             size,
             [854, 480],
             false,
@@ -7618,11 +7648,16 @@ mod tests {
         let mut s = Settings::default();
         let mut ui = OptionsUi {
             music_groups: vec![MusicGroup {
-                label: "Overworld",
-                event: "minecraft:music.game".into(),
+                label: "Overworld".into(),
                 tracks: vec![
-                    "minecraft:music/game/calm1".into(),
-                    "minecraft:music/game/haggstrom".into(),
+                    MusicTrack {
+                        event: "minecraft:music.game".into(),
+                        id: "minecraft:music/game/calm1".into(),
+                    },
+                    MusicTrack {
+                        event: "minecraft:music.overworld.forest".into(),
+                        id: "minecraft:music/game/bromeliad".into(),
+                    },
                 ],
             }],
             ..OptionsUi::default()
@@ -7636,7 +7671,8 @@ mod tests {
                 .expect("button");
             (w.x + w.w / 2.0, w.y + w.h / 2.0)
         };
-        // The left of a row plays that track now.
+        // The left of a row plays that track now, from its own pool (a biome
+        // pool's track plays from that pool).
         let calm1 = "minecraft:music/game/calm1";
         let (x, y) = at(
             &mut ui,
@@ -7647,6 +7683,17 @@ mod tests {
         assert!(events.contains(&Event::PlayMusicTrack(
             "minecraft:music.game".into(),
             calm1.into()
+        )));
+        let bromeliad = "minecraft:music/game/bromeliad";
+        let (x, y) = at(
+            &mut ui,
+            &s,
+            &Act::PlayMusicTrack("minecraft:music.overworld.forest".into(), bromeliad.into()),
+        );
+        let events = ui.click(&mut s, &atlas, x, y, size, [854, 480], false, false);
+        assert!(events.contains(&Event::PlayMusicTrack(
+            "minecraft:music.overworld.forest".into(),
+            bromeliad.into()
         )));
         // The right of a row turns it off, and the game saves that on `Changed`.
         let (x, y) = at(&mut ui, &s, &Act::MusicTrackOn(calm1.into(), true));

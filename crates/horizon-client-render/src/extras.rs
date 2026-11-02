@@ -142,6 +142,10 @@ pub struct Extras {
     /// leave every pool they play in (`musicOff`, empty by default: vanilla's
     /// random selection).
     pub music_off: Vec<String>,
+    /// The Music page: the Music... button on Music & Sounds, playing a
+    /// built-in track and leaving the off ones out (`musicPage`, off by
+    /// default: vanilla plays exactly as before).
+    pub music_page: bool,
 }
 impl Default for Extras {
     fn default() -> Self {
@@ -186,6 +190,7 @@ impl Default for Extras {
             splitscreen_names: true,
             wheel_cycles_settings: true,
             music_off: Vec::new(),
+            music_page: false,
         }
     }
 }
@@ -279,6 +284,7 @@ impl Extras {
                         .map(str::to_owned)
                         .collect()
                 }
+                "musicPage" => e.music_page = flag(e.music_page),
                 _ => {}
             }
         }
@@ -286,7 +292,7 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\nmusicOff:{}\n",
+            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\nmusicOff:{}\nmusicPage:{}\n",
             bool_text(self.fullbright),
             bool_text(self.dynamic_lights),
             bool_text(self.zoom),
@@ -332,6 +338,7 @@ impl Extras {
             bool_text(self.splitscreen_names),
             bool_text(self.wheel_cycles_settings),
             self.music_off.join(","),
+            bool_text(self.music_page),
         )
     }
     /// Binds the extra key `name` (`SORT_KEY`); false for
@@ -459,6 +466,8 @@ pub enum Item {
     HideBlockParticles,
     AutoReconnect,
     UiSoundReserve,
+    /// The Music... page on Music & Sounds (`Music page`).
+    MusicPage,
     MouseTweaks,
     MouseTweaksWheel,
     Sort,
@@ -501,6 +510,7 @@ pub fn rows() -> Vec<Result<Item, &'static str>> {
         Ok(AutoReconnect),
         Err("horizon.extras.header.sound"),
         Ok(UiSoundReserve),
+        Ok(MusicPage),
         Err("horizon.extras.header.menus"),
         Ok(WheelCyclesSettings),
     ]
@@ -515,6 +525,7 @@ impl Item {
             Item::HideBlockParticles => "horizon.extras.hide_block_particles",
             Item::AutoReconnect => "horizon.extras.auto_reconnect",
             Item::UiSoundReserve => "horizon.extras.ui_sound_reserve",
+            Item::MusicPage => "horizon.extras.music_page",
             Item::MouseTweaks => "horizon.extras.mouse_tweaks",
             Item::MouseTweaksWheel => "horizon.extras.mouse_tweaks_wheel",
             Item::Sort => "horizon.extras.sort",
@@ -538,6 +549,7 @@ impl Item {
             Item::HideBlockParticles => "horizon.extras.hide_block_particles.tooltip",
             Item::AutoReconnect => "horizon.extras.auto_reconnect.tooltip",
             Item::UiSoundReserve => "horizon.extras.ui_sound_reserve.tooltip",
+            Item::MusicPage => "horizon.extras.music_page.tooltip",
             Item::MouseTweaks => "horizon.extras.mouse_tweaks.tooltip",
             Item::MouseTweaksWheel => "horizon.extras.mouse_tweaks_wheel.tooltip",
             Item::Sort => "horizon.extras.sort.tooltip",
@@ -570,6 +582,7 @@ impl Item {
             Item::HideBlockParticles => "Hide block-break particles",
             Item::AutoReconnect => "Auto-reconnect",
             Item::UiSoundReserve => "Keep channels for UI sounds",
+            Item::MusicPage => "Music page",
             Item::MouseTweaks => "Mouse Tweaks controls",
             Item::MouseTweaksWheel => "Scroll wheel moves items",
             Item::Sort => "Sort buttons",
@@ -594,7 +607,7 @@ impl Item {
             ChatIndicator => ChatAnimation,
             Fullbright | DynamicLights | OwnNameTag | HideBlockParticles | MouseTweaks | Sort
             | AutoReconnect | NoAi | AgentControl | ReproKeys | DiscordPresence | Splitscreen
-            | ChatAnimation | WheelCyclesSettings => {
+            | ChatAnimation | WheelCyclesSettings | MusicPage => {
                 return None;
             }
         })
@@ -617,6 +630,9 @@ impl Item {
             }
             Item::UiSoundReserve => {
                 "Sounds in the world leave 16 of the 247 sound channels free, so a flood of them (a big explosion) can't silence menu clicks."
+            }
+            Item::MusicPage => {
+                "Music & Sounds gets a Music... page: play any built-in track now, or turn one off so the game stops picking it. Nothing changes until you turn a track off."
             }
             Item::MouseTweaks => {
                 "Right-drag places one per slot, left-drag gathers the held item, Shift + left-drag moves every slot."
@@ -660,6 +676,7 @@ impl Item {
         match self {
             Item::Fullbright => Some(Cost::None),
             Item::UiSoundReserve => Some(Cost::None),
+            Item::MusicPage => Some(Cost::None),
             Item::DynamicLights => Some(Cost::Low),
             Item::ChatAnimation => Some(Cost::None),
             Item::OwnNameTag
@@ -681,6 +698,7 @@ impl Item {
             Item::HideBlockParticles => e.hide_block_particles,
             Item::AutoReconnect => e.auto_reconnect,
             Item::UiSoundReserve => e.ui_sound_reserve,
+            Item::MusicPage => e.music_page,
             Item::MouseTweaks => e.mouse_tweaks,
             Item::MouseTweaksWheel => e.mouse_tweaks_wheel,
             Item::Sort => e.sort,
@@ -715,6 +733,7 @@ impl Item {
             Item::HideBlockParticles => e.hide_block_particles = !e.hide_block_particles,
             Item::AutoReconnect => e.auto_reconnect = !e.auto_reconnect,
             Item::UiSoundReserve => e.ui_sound_reserve = !e.ui_sound_reserve,
+            Item::MusicPage => e.music_page = !e.music_page,
             Item::MouseTweaks => e.mouse_tweaks = !e.mouse_tweaks,
             Item::MouseTweaksWheel => e.mouse_tweaks_wheel = !e.mouse_tweaks_wheel,
             Item::Sort => e.sort = !e.sort,
@@ -749,6 +768,7 @@ mod tests {
         assert!(!d.zoom && !d.fps && !d.keystrokes && !d.minimap && !d.auto_reconnect);
         assert!(!d.mouse_tweaks && !d.sort && !d.own_name_tag && !d.ui_sound_reserve);
         assert!(!d.hide_block_particles);
+        assert!(!d.music_page && d.music_off.is_empty());
         assert!(d.discord_presence && d.wheel_cycles_settings);
         assert_eq!(Extras::parse(""), d);
         assert_eq!(Extras::parse(&d.serialize()), d);
@@ -796,6 +816,9 @@ mod tests {
             "minecraft:music/game/calm1".into(),
             "minecraft:music.menu".into(),
         ];
+        assert!(!e.music_page);
+        Item::MusicPage.cycle(&mut e, false);
+        assert_eq!(Item::MusicPage.switch(&e), Some(true));
         assert_eq!(Extras::parse(&e.serialize()), e);
     }
 
