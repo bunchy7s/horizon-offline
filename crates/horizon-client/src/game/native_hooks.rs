@@ -3856,6 +3856,13 @@ impl Game<'_> {
         let _ = (dimension, from, to, cause, cancel);
     }
 
+    /// The server world's border bounds changed, either immediately or when
+    /// its timed size change was requested. @API:native_world_border_bounds_changed@.
+    pub(super) fn native_world_border_bounds_changed(&mut self) {}
+
+    /// The server world's border center changed. @API:native_world_border_center_changed@.
+    pub(super) fn native_world_border_center_changed(&mut self) {}
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
