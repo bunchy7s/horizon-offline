@@ -180,7 +180,13 @@ impl Mob {
     }
     fn can_update_path(&self) -> bool {
         match self.ai.nav.kind {
-            NavKind::Ground | NavKind::WallClimber => self.on_ground || self.is_in_liquid(),
+            // GroundPathNavigation.canUpdatePath: onGround() || isInLiquid() ||
+            // isPassenger(). A mob riding a vehicle keeps making and following
+            // paths where it sits (`create_path_raw` and `recompute_path` refuse
+            // without this).
+            NavKind::Ground | NavKind::WallClimber => {
+                self.on_ground || self.is_in_liquid() || self.extra.mount.is_some()
+            }
             NavKind::Water { breach } => breach || self.is_in_liquid(),
             NavKind::Flying | NavKind::Amphibious { .. } => true,
         }
