@@ -103,6 +103,7 @@ impl Game<'_> {
                 .recipes()
                 .cook(KIND, &item)
                 .map_or_else(|| item.clone(), |r| r.result.clone());
+            self.native_block_cook([pos.0, pos.1, pos.2], &item.item, &result.item);
             self.campfire_drop(pos, result);
             self.mark_block_entity_updated(pos);
             self.post_block_game_event(
