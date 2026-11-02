@@ -936,7 +936,7 @@ impl Game<'_> {
         {
             return false;
         }
-        self.suck_item_entities(hopper, min, max)
+        self.suck_item_entities(Some(pos), hopper, min, max)
     }
     /// The container half of `HopperBlockEntity.suckInItems`: one item from the
     /// container at `above`, through its bottom face; with no block container
@@ -1104,7 +1104,13 @@ impl Game<'_> {
     }
     /// The item half of `HopperBlockEntity.suckInItems` (`getItemsAtAndAbove`):
     /// adds the item entities that meet the box, until one is taken whole.
-    fn suck_item_entities(&mut self, hopper: &View, min: [f64; 3], max: [f64; 3]) -> bool {
+    fn suck_item_entities(
+        &mut self,
+        hopper_pos: Option<Pos>,
+        hopper: &View,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> bool {
         let mut i = 0;
         while i < self.dropped.len() {
             let b = self.dropped[i].bounds();
@@ -1117,6 +1123,19 @@ impl Game<'_> {
                 && hi.z > min[2];
             if inside {
                 let stack = self.dropped[i].stack.clone();
+                let allowed = hopper_pos.is_none_or(|pos| {
+                    self.with_level(|_, level, _| {
+                        level.allow_hopper_pickup_item(
+                            BlockPos::new(pos.0, pos.1, pos.2),
+                            &stack.item,
+                            stack.count,
+                        )
+                    })
+                });
+                if !allowed {
+                    i += 1;
+                    continue;
+                }
                 match self.add_item(None, hopper, stack, None) {
                     None => {
                         self.remove_dropped(i);
@@ -1150,6 +1169,7 @@ impl Game<'_> {
         let took = match self.suck_from_container(above, at, &view) {
             Some(took) => took,
             None => self.suck_item_entities(
+                None,
                 &view,
                 [p.x - 0.5, p.y + 11.0 / 16.0, p.z - 0.5],
                 [p.x + 0.5, p.y + 2.0, p.z + 0.5],
@@ -1160,6 +1180,7 @@ impl Game<'_> {
             let b = cart.bounds();
             let (lo, hi) = (b.min_position(), b.max_position());
             self.suck_item_entities(
+                None,
                 &view,
                 [lo.x - 0.25, lo.y, lo.z - 0.25],
                 [hi.x + 0.25, hi.y, hi.z + 0.25],
