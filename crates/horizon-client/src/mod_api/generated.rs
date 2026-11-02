@@ -3954,6 +3954,21 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Enough players have slept through the night in level `dimension`
+    /// and the clock is about to move to the morning (NeoForge's
+    /// `SleepFinishedTimeEvent`, vanilla's `ServerLevel.tick` when it moves
+    /// the clock to `wake_up_from_sleep`): `new_time` comes in as the next
+    /// morning's day time and may be changed to wake everyone at another
+    /// time. A time before `current` (the day time now) is refused, as
+    /// `setTimeAddition` refuses one, and the morning stays. On the server,
+    /// only when the `advance_time` rule is on; `native_time_skip` then
+    /// hears the jump to the time chosen here and may still cancel it. The
+    /// players wake and the weather clears either way.
+    /// API @API:sleep_finished_time@.
+    fn sleep_finished_time(&self, host: &mut dyn Host, event: &mut SleepFinishedTimeEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A sponge at `pos` absorbed water and became wet. Server-side.
     /// @API:native_sponge_absorb@.
     fn sponge_absorb(&self, level: &dyn LevelHost, event: &mut SpongeAbsorbEvent) {
@@ -11937,6 +11952,30 @@ pub fn dispatch_sculk_bloom(
     for mod_hook in mods {
         mod_hook.sculk_bloom(host, &mut event);
     }
+}
+/// What [`Hooks::sleep_finished_time`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct SleepFinishedTimeEvent<'a> {
+    pub dimension: &'a str,
+    pub current: i64,
+    pub new_time: i64,
+}
+pub fn dispatch_sleep_finished_time(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    current: i64,
+    new_time: &mut i64,
+) {
+    let mut event = SleepFinishedTimeEvent {
+        dimension,
+        current,
+        new_time: *new_time,
+    };
+    for mod_hook in mods {
+        mod_hook.sleep_finished_time(host, &mut event);
+    }
+    *new_time = event.new_time;
 }
 /// What [`Hooks::sponge_absorb`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

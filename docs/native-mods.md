@@ -1515,6 +1515,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   is about to be created. Set `cancel` to prevent the bolt and its effects; `cause` names the creation path.
 - **`native_time_skip(dimension, from, to, cause, cancel)`**: the server clock is about to jump after enough players
   sleep or through `/time set`, `/time add`, or `/time set <marker>`. Set `cancel` to keep the old time.
+- **`native_sleep_finished_time(dimension, current, new_time)`**: enough players slept through the night and the
+  `advance_time` rule is on (NeoForge's `SleepFinishedTimeEvent`). `new_time` comes in as the next morning's day time;
+  set another to wake everyone then. A time before `current` is refused and the morning stays. It runs before
+  `native_time_skip`, which hears the jump to the time chosen here and may still cancel it; the players wake either way.
 - **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": @API:world_border_bounds_changed@`.
 - **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": @API:world_border_center_changed@`.
 - **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": @API:world_game_rule_change@`.

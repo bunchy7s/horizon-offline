@@ -4408,6 +4408,26 @@ impl Game<'_> {
         mod_api::dispatch_lightning_strike(self, mod_api::mods(), player, pos, cause, cancel);
     }
 
+    /// Enough players have slept through the night in level `dimension`
+    /// and the clock is about to move to the morning (NeoForge's
+    /// `SleepFinishedTimeEvent`, vanilla's `ServerLevel.tick` when it moves
+    /// the clock to `wake_up_from_sleep`): `new_time` comes in as the next
+    /// morning's day time and may be changed to wake everyone at another
+    /// time. A time before `current` (the day time now) is refused, as
+    /// `setTimeAddition` refuses one, and the morning stays. On the server,
+    /// only when the `advance_time` rule is on; `native_time_skip` then
+    /// hears the jump to the time chosen here and may still cancel it. The
+    /// players wake and the weather clears either way.
+    /// API @API:sleep_finished_time@.
+    pub(super) fn native_sleep_finished_time(
+        &mut self,
+        dimension: &str,
+        current: i64,
+        new_time: &mut i64,
+    ) {
+        mod_api::dispatch_sleep_finished_time(self, mod_api::mods(), dimension, current, new_time);
+    }
+
     /// The overworld clock is about to jump, from sleep or `/time`. Set
     /// `cancel` to keep `from`. @API:native_time_skip@.
     pub(super) fn native_time_skip(

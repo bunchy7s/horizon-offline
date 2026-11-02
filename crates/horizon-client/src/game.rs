@@ -14706,7 +14706,14 @@ impl Game<'_> {
         if self.enough_slept() {
             if self.ui.rules.bool("advance_time") {
                 let t = self.world.day_time;
-                let target = t + 24000 - t.rem_euclid(24000);
+                let mut target = t + 24000 - t.rem_euclid(24000);
+                // SleepFinishedTimeEvent: the mods may move the wake-up time,
+                // never before now (`setTimeAddition` refuses a lower one).
+                let mut asked = target;
+                self.native_sleep_finished_time(self.dim.id(), t, &mut asked);
+                if asked >= t {
+                    target = asked;
+                }
                 let mut cancel = false;
                 self.native_time_skip(self.dim.id(), t, target, "sleep", &mut cancel);
                 if !cancel {
