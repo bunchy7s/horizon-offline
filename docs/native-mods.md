@@ -1432,6 +1432,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `to`; `to` is air when it broke.
 - **`native_block_break_progress_update(player, name, pos, progress)`**: a guest's crack animation at `pos` reached
   progress stage 0 through 9.
+- **`native_block_lock_check(player, name, pos, locked)`**: a guest checks the lock on the container at `pos`;
+  `locked` starts with vanilla's result and may be changed. The guest's state is not swapped in.
 - **`native_note_play(dimension, player, pos, instrument, note, cancel)`** (on `GameLevel`): a note block is about to
   sound when punched, used, or powered. Set `cancel` to silence it; when used to tune it, the note remains unchanged.
 - **`native_bell_ring(dimension, player, pos, cancel)`** (on `GameLevel`): a bell is about to ring. Set `cancel` to

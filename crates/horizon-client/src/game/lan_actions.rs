@@ -1202,10 +1202,15 @@ impl Game<'_> {
             Slots::Block(k) => [Some(*k), None],
             _ => [None, None],
         };
-        let locked = halves
-            .iter()
-            .flatten()
-            .any(|&k| self.container_locked_for(k, spectator, hand.as_ref()));
+        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
+            return false;
+        };
+        let mut locked = false;
+        for key in halves.iter().flatten().copied() {
+            let mut check = self.container_locked_for(key, spectator, hand.as_ref());
+            self.native_block_lock_check(uuid, &name, [key.0, key.1, key.2], &mut check);
+            locked |= check;
+        }
         if locked {
             host.hub.send_to(
                 conn,
@@ -1246,9 +1251,6 @@ impl Game<'_> {
         if !horizon_client::containers::menu_reaches(brand, menu) {
             return false;
         }
-        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
-            return false;
-        };
         let mut cancel = false;
         self.native_inventory_block_start(uuid, &name, [pos.0, pos.1, pos.2], &mut cancel);
         if cancel {

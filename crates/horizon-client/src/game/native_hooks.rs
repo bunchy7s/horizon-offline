@@ -3211,6 +3211,19 @@ impl Game<'_> {
         let _ = (player, name, pos, progress);
     }
 
+    /// A guest's block inventory lock check at `pos`. `locked` is the
+    /// vanilla result and may be changed. The guest's state is not swapped in.
+    /// @API:native_block_lock_check@.
+    pub(super) fn native_block_lock_check(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        locked: &mut bool,
+    ) {
+        let _ = (player, name, pos, locked);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
