@@ -73,16 +73,16 @@ LanguageSelectScreen.LanguageSelectionList.Entry.extractContent	port	crates/hori
 LanguageSelectScreen.LanguageSelectionList.Entry.keyPressed	missing		minor: unsure: no Enter-to-select on language rows found in OptionsUi::key
 LanguageSelectScreen.LanguageSelectionList.Entry.mouseClicked	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::click	gap: minor: a second click on the chosen language finishes the page, which stands in for double-click; click selects
 MouseSettingsScreen.options	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	MOUSE_OPTIONS in vanilla order
-OnlineOptionsScreen	missing		player: Options > Online is greyed out in Horizon, so friends list, friend requests, in-game friend notifications, server listing and Realms notifications cannot be set
+OnlineOptionsScreen	home	crates/horizon-client-render/src/options_ui.rs	Page::Online: friends notifications, presence sharing, server listing and Realms notifications (no Xbox or friends-list entries)
 OptionsScreen.init	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	gap: player: the Online button is greyed out and Skin Customisation opens no page; main page rows
-OptionsScreen.createOnlineButton	missing		player: the Online button is greyed out, so Options > Online cannot be opened
+OptionsScreen.createOnlineButton	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	the Online button on the options page pushes Page::Online
 OptionsScreen.openScreenButton	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::click	sub-page buttons push their page (Act::Push)
 OptionsSubScreen.init	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::push	opening a page resets its scroll, search and page state
 OptionsSubScreen.addContents	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	the page's rows
 OptionsSubScreen.addFooter	inline	crates/horizon-client-render/src/options_ui.rs::OptionsUi::layout	Done button at the bottom of each page
 OptionsSubScreen.repositionElements	skip:ui		layout only: rows are laid out from the window size each frame
 OptionsSubScreen.onClose	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::back	Done and Escape leave the page and apply its results
-SkinCustomizationScreen.addOptions	missing		player: Skin Customisation opens no page in Horizon: no cape, jacket, sleeve, pants or main hand options
+SkinCustomizationScreen.addOptions	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	Page::Skin: the seven skin layers and Main Hand as paired options
 SoundOptionsScreen.addOptions	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	gap: minor: no sound device, directional audio or music toast rows; master and per-source volumes, subtitles, music frequency
 SoundOptionsScreen.getAllSoundOptionsExceptMaster	port	crates/horizon-client-render/src/options_ui.rs::OptionsUi::list_rows	per-source volume rows (Volume(1..))
 UnsupportedGraphicsWarningScreen	missing		minor: no GPU warn list in Horizon, so the unsupported-graphics warning never appears when Improved Transparency is turned on
