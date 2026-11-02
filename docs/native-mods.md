@@ -2940,3 +2940,5 @@ The following catalog hooks are not in the trait yet:
 - Newer upstream hooks `biome_colors`, `camera_distance`, `compute_fog_color`, `compute_fov`,
   `data_pack_files`, `mob_submit`, `mouse_button_pre`, `mouse_button_post`, `player_respawned`
   and `server_data_loaded` will join a later slice.
+
+The client `tooltip_color` hook changes the background and top and bottom border gradient colours as mutable ARGB `u32` values; it does not change text colours. It covers solid-fill item tooltips (including creative, recipe book, chat, trading and bundle-selected item names), screen text boxes, and native panel tooltips. The stack is `None` for text-only boxes, including recipe-book item lines where the stack is discarded before drawing. Sprite-based screen tooltips (including options and title screens) use a separate renderer and are not covered; no texture hook is offered.

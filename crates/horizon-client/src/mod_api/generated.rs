@@ -4508,6 +4508,12 @@ pub trait Hooks: Send + Sync {
     fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
         let _ = event;
     }
+    /// Change a tooltip box's background and border gradient colors, as ARGB.
+    /// Stack is None for tooltips not associated with an item.
+    fn tooltip_color(&self, host: &dyn Host, event: &mut TooltipColorEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
 }
 /// What [`Hooks::frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -13794,4 +13800,33 @@ pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
     for mod_hook in super::entered(mods, "living_jump") {
         mod_hook.living_jump(&mut event);
     }
+}
+/// What [`Hooks::tooltip_color`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TooltipColorEvent<'a> {
+    pub stack: Option<&'a ItemStack>,
+    pub background: u32,
+    pub border_top: u32,
+    pub border_bottom: u32,
+}
+pub fn dispatch_tooltip_color(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: Option<&ItemStack>,
+    background: &mut u32,
+    border_top: &mut u32,
+    border_bottom: &mut u32,
+) {
+    let mut event = TooltipColorEvent {
+        stack,
+        background: *background,
+        border_top: *border_top,
+        border_bottom: *border_bottom,
+    };
+    for mod_hook in super::entered(mods, "tooltip_color") {
+        mod_hook.tooltip_color(host, &mut event);
+    }
+    *background = event.background;
+    *border_top = event.border_top;
+    *border_bottom = event.border_bottom;
 }
