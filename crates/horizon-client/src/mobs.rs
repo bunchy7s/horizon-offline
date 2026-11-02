@@ -119,6 +119,8 @@ pub struct Polygon {
     pub vertices: [[f32; 5]; 4],
     /// The model's render type culls back faces (`entityCutoutCull`: the bat).
     pub cull_back: bool,
+    /// This face overlaps an oppositely wound face at the same position.
+    pub cull_backface: bool,
 }
 impl Polygon {
     fn vertex_normal(&self, pose: ModelNormals) -> [i8; 4] {
@@ -129,13 +131,18 @@ impl Polygon {
             n.normalize_or_zero()
         };
         let packed = n.to_array().map(|v| (v.clamp(-1.0, 1.0) * 127.0) as i8);
-        let w = if self.cull_back {
+        let w = if self.cull_back || self.cull_backface {
             crate::mesher::SHADED_CULL_W
         } else {
             -127
         };
         [packed[0], packed[1], packed[2], w]
     }
+}
+
+/// Whether two faces have opposite, non-zero normals.
+fn opposite_normals(a: &Polygon, b: &Polygon) -> bool {
+    a.normal.iter().zip(b.normal).all(|(a, b)| *a == -b) && a.normal.iter().any(|n| *n != 0.0)
 }
 
 /// ModelPart uses a separate normal stack: uniform scaling keeps normal lengths,
@@ -252,7 +259,7 @@ impl Part {
         for (i, x) in pose.iter().enumerate().take(9) {
             p[i] = *x;
         }
-        let polygons = v["polygons"]
+        let mut polygons: Vec<Polygon> = v["polygons"]
             .as_array()
             .into_iter()
             .flatten()
@@ -288,9 +295,42 @@ impl Part {
                     ),
                     vertices: [verts[0], verts[1], verts[2], verts[3]],
                     cull_back: false,
+                    cull_backface: false,
                 })
             })
             .collect();
+        // Group faces by their sorted 3D corners, ignoring UVs and winding.
+        // This avoids comparing every polygon against every other polygon.
+        let mut face_groups: HashMap<[[u32; 3]; 4], Vec<usize>> = HashMap::new();
+        for (index, polygon) in polygons.iter().enumerate() {
+            let mut key: [[u32; 3]; 4] = std::array::from_fn(|vertex| {
+                std::array::from_fn(|axis| {
+                    let coordinate = polygon.vertices[vertex][axis];
+                    if coordinate == 0.0 {
+                        0
+                    } else {
+                        coordinate.to_bits()
+                    }
+                })
+            });
+            key.sort_unstable();
+            face_groups.entry(key).or_default().push(index);
+        }
+
+        let mut cull_backface = vec![false; polygons.len()];
+        for indices in face_groups.values() {
+            for (position, &i) in indices.iter().enumerate() {
+                for &j in indices.iter().skip(position + 1) {
+                    if opposite_normals(&polygons[i], &polygons[j]) {
+                        cull_backface[i] = true;
+                        cull_backface[j] = true;
+                    }
+                }
+            }
+        }
+        for (polygon, cull) in polygons.iter_mut().zip(cull_backface) {
+            polygon.cull_backface = cull;
+        }
         let mut children: Vec<Part> = v["children"]
             .as_object()
             .into_iter()
@@ -3603,6 +3643,45 @@ mod lighting_tests {
                 -1.0, -1.0, 1.0
             )))),
             [-127, 0, 0, -127]
+        );
+    }
+
+    #[test]
+    fn coincident_opposite_faces_keep_uvs_and_cull_the_back_side() {
+        let part = Part::parse(
+            "leg",
+            &json!({
+                "polygons": [
+                    [
+                        [-1, 0, -1, 0.0, 0.0],
+                        [-1, 0,  1, 0.25, 0.0],
+                        [ 1, 0,  1, 0.25, 0.25],
+                        [ 1, 0, -1, 0.0, 0.25]
+                    ],
+                    [
+                        [ 1, 0, -1, 0.5, 0.0],
+                        [ 1, 0,  1, 0.75, 0.0],
+                        [-1, 0,  1, 0.75, 0.25],
+                        [-1, 0, -1, 0.5, 0.25]
+                    ]
+                ],
+                "normals": [[0, 1, 0], [0, -1, 0]]
+            }),
+        );
+
+        assert!(part.polygons.iter().all(|p| p.cull_backface));
+        assert_ne!(
+            part.polygons[0].vertices[0][3],
+            part.polygons[1].vertices[0][3]
+        );
+        let pose = ModelNormals::new(Mat4::IDENTITY);
+        assert_eq!(
+            part.polygons[0].vertex_normal(pose),
+            [0, 127, 0, crate::mesher::SHADED_CULL_W]
+        );
+        assert_eq!(
+            part.polygons[1].vertex_normal(pose),
+            [0, -127, 0, crate::mesher::SHADED_CULL_W]
         );
     }
 

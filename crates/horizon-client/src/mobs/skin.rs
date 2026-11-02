@@ -213,6 +213,7 @@ fn flatten(model: &Part, first: u32, out: &mut Vec<SkinVertex>) -> Option<Stored
             let Some(axis) = axis(poly.normal) else {
                 return false;
             };
+            let axis = axis | if poly.cull_backface { 0x8000_0000 } else { 0 };
             for v in poly.vertices {
                 let pos = (glam::Vec3::new(v[0], v[1], v[2]) / 16.0).to_array();
                 for a in 0..3 {
@@ -440,6 +441,25 @@ mod tests {
     use super::*;
     use crate::gfx::entity_skin::expand;
     use crate::mobs::{Mob, MobData, MobTypes, render};
+
+    #[test]
+    fn flatten_encodes_backface_culling_in_the_axis_high_bit() {
+        let model = crate::mobs::Part {
+            name: "root".into(),
+            pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            polygons: vec![crate::mobs::Polygon {
+                normal: [0.0, 1.0, 0.0],
+                vertices: [[0.0; 5]; 4],
+                cull_back: false,
+                cull_backface: true,
+            }],
+            children: Vec::new(),
+        };
+        let mut vertices = Vec::new();
+        assert!(flatten(&model, 0, &mut vertices).is_some());
+        assert_eq!(vertices.len(), 4);
+        assert!(vertices.iter().all(|v| v.axis == 0x8000_0001));
+    }
 
     /// Every vanilla mob, at a few ages and turns: the GPU path's vertices
     /// (its jobs expanded as `entity_skin.wgsl` does) are the CPU path's, to

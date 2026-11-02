@@ -7,7 +7,8 @@
 // layouts are the Rust ones byte for byte.
 
 // A model vertex (7 words): position / 16, model UV, the face's normal as an
-// axis (0..2 = +x, +y, +z; 3..5 = -x, -y, -z), the part's index in the model.
+// axis (0..2 = +x, +y, +z; 3..5 = -x, -y, -z; high bit = back-face culling),
+// the part's index in the model.
 const MODEL_WORDS: u32 = 7u;
 // A posed part (25 words): the geometry matrix (16, by columns), then the
 // normal matrix (9, by columns), its columns already normalized when the
@@ -61,10 +62,10 @@ fn scroll_u(u: f32, scroll: f32) -> f32 {
 }
 
 // `Polygon::vertex_normal`'s packing: clamped, times 127, cut toward zero.
-fn pack(n: vec3<f32>) -> u32 {
+fn pack(n: vec3<f32>, cull_backface: bool) -> u32 {
     let b = vec3<i32>(clamp(n, vec3(-1.0), vec3(1.0)) * 127.0);
     return (u32(b.x) & 0xffu) | ((u32(b.y) & 0xffu) << 8u) | ((u32(b.z) & 0xffu) << 16u)
-        | (u32(-127 & 0xff) << 24u);
+        | (select(0x81u, 0x82u, cull_backface) << 24u);
 }
 
 @compute @workgroup_size(64)
@@ -95,7 +96,9 @@ fn skin(
         let v = (first + k) * MODEL_WORDS;
         let p = vec3(f(model[v]), f(model[v + 1u]), f(model[v + 2u]));
         let uv = vec2(f(model[v + 3u]), f(model[v + 4u]));
-        let axis = model[v + 5u];
+        let encoded_axis = model[v + 5u];
+        let cull_backface = (encoded_axis & 0x80000000u) != 0u;
+        let axis = encoded_axis & 0x7fffffffu;
         let part = first_part + model[v + 6u];
         // glam's Mat4::transform_point3, in its order, each operation rounded.
         var pos = r3(vec3(part_f(part, 0u), part_f(part, 1u), part_f(part, 2u)) * p.x);
@@ -110,7 +113,7 @@ fn skin(
         }
         // An item's colour by axis, shaded on the CPU, and `mesher::CULL_BACK`.
         var vertex_color = color;
-        var normal = pack(n);
+        var normal = pack(n, cull_backface);
         if cull {
             // `mesher::SHADED_CULL_W` (-126) in the normal's w byte.
             normal = (normal & 0x00ffffffu) | (u32(-126 & 0xff) << 24u);

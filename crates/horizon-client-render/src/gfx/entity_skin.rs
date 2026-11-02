@@ -423,9 +423,11 @@ fn expand_jobs(
             let part = &frame.parts[(job.part + v.part) as usize];
             let m = glam::Mat4::from_cols_array(&part.matrix);
             let pos = m.transform_point3(glam::Vec3::from_array(v.pos));
-            let c = (v.axis % 3) as usize * 3;
+            let cull_backface = v.axis & 0x8000_0000 != 0;
+            let axis = v.axis & 0x7fff_ffff;
+            let c = (axis % 3) as usize * 3;
             let column = glam::Vec3::from_slice(&part.normal[c..c + 3]);
-            let n = if v.axis >= 3 { -column } else { column };
+            let n = if axis >= 3 { -column } else { column };
             let packed = n.to_array().map(|v| (v.clamp(-1.0, 1.0) * 127.0) as i8);
             let u = if job.scroll == 0.0 {
                 v.uv[0]
@@ -434,12 +436,12 @@ fn expand_jobs(
             };
             let r = job.rect;
             let (color, normal) = if job.mode == SkinJob::ITEM {
-                let color = part.normal[v.axis as usize].to_bits();
+                let color = part.normal[axis as usize].to_bits();
                 (color, crate::mesher::CULL_BACK)
             } else if job.mode == SkinJob::FLAT {
                 (job.color, [0; 4])
             } else {
-                let w = if job.cull != 0 {
+                let w = if job.cull != 0 || cull_backface {
                     crate::mesher::SHADED_CULL_W
                 } else {
                     -127
@@ -484,7 +486,8 @@ mod tests {
                 out.push(SkinVertex {
                     pos,
                     uv: [corner as f32 / 3.0, 0.125 * axis as f32 + 0.0625],
-                    axis,
+                    // Exercise the culling flag on one complete face.
+                    axis: axis | if axis == 2 { 0x8000_0000 } else { 0 },
                     part,
                 });
             }
