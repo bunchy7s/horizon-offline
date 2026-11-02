@@ -37,7 +37,7 @@ StatsScreen.extractRenderState	inline	crates/horizon-client/src/game/stats_scree
 StatsScreen.extractMenuBackground	inline	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	background drawn at the start of draw_stats
 StatsScreen.GeneralStatisticsList.Entry.getValueText	port	crates/horizon-client/src/game/stats_screen.rs::format	value text by the stat's format (time, distance, tenths, plain)
 StatsScreen.GeneralStatisticsList.Entry.extractContent	port	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	General rows: name left, value right
-StatsScreen.GeneralStatisticsList.Entry.getNarration	skip:other		narration text for screen readers; Horizon has no narrator output
+StatsScreen.GeneralStatisticsList.Entry.getNarration	inline	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	narrator.select(<label> <value>) built as the general list's hovered row text
 StatsScreen.ItemStatisticsList.<init>	port	crates/horizon-client/src/game/stats_screen.rs::Game::stat_items	items with a non-zero count in any column, block items included
 StatsScreen.ItemStatisticsList.getColumn	inline	crates/horizon-client/src/game/stats_screen.rs::Game::stat_items	the column index selects COLUMNS directly
 StatsScreen.ItemStatisticsList.getColumnIndex	inline	crates/horizon-client/src/game/stats_screen.rs::Game::stats_click	the sort state keeps the column index, so no reverse lookup is needed
@@ -52,7 +52,7 @@ StatsScreen.ItemStatisticsList.ItemRow.ItemRowWidget.extractWidgetRenderState	in
 StatsScreen.ItemStatisticsList.ItemRow.ItemRowWidget.extractTooltip	port	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	the hovered item row draws its stack tooltip at the slot's corner (draw_stack_tooltip)
 StatsScreen.ItemStatisticsList.ItemRowComparator.compare	inline	crates/horizon-client/src/game/stats_screen.rs::Game::stat_items	orders by the sorted column; gap: minor: non-block items count as 0 in block columns (vanilla -1), and ties are not broken by item id
 StatsScreen.MobsStatisticsList.MobRow.extractContent	port	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	mob name, kills and killed-by lines
-StatsScreen.MobsStatisticsList.MobRow.getNarration	skip:other		narration text for screen readers; Horizon has no narrator output
+StatsScreen.MobsStatisticsList.MobRow.getNarration	inline	crates/horizon-client/src/game/stats_screen.rs::Game::draw_stats	narrator.select(joinForNarration(kills, killed by)) built as the mobs list's hovered row text
 StatsScreen.StatisticsTab.doLayout	skip:ui		layout only: list size and position
 AdvancementTab.copyPosition	inline	crates/horizon-client/src/game/advancements_screen.rs::Game::adv_cache	a rebuilt tree keeps adv_ui.scroll; tab bounds are recomputed in adv_view
 AdvancementTab.extractTab	port	crates/horizon-client/src/game/advancements_screen.rs::Game::draw_advancements	tab sprite per position (first, middle, last) and selected state
