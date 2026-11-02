@@ -130,6 +130,10 @@ name = "horizon-client"
 path = "src/main.rs"
 
 [[test]]
+name = "datapack_biome_sync"
+path = "tests/datapack_biome_sync.rs"
+
+[[test]]
 name = "launch_api"
 path = "tests/launch_api.rs"
 

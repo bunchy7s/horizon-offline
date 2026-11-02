@@ -898,7 +898,7 @@ impl Game<'_> {
         let player_type = super::perspective::player_type(&root);
         let mut streaming = Streaming::new(
             Arc::new(NoTerrain),
-            self.pack.context.clone(),
+            self.worker_context(),
             self.res.threads(),
         );
         streaming.remote = true;
@@ -1163,7 +1163,7 @@ impl Game<'_> {
         self.adv = Default::default();
         self.stats = Default::default();
         self.score.board = Default::default();
-        self.streaming = Streaming::new(Arc::new(NoTerrain), self.pack.context.clone(), 1);
+        self.streaming = Streaming::new(Arc::new(NoTerrain), self.worker_context(), 1);
         self.streaming.paused = true;
         self.world = World::new(self.res.facts().air, 0);
         self.player = None;
@@ -2030,6 +2030,35 @@ impl Game<'_> {
         }
     }
     fn set_registries(&mut self, registries: Arc<Dynamic>) {
+        // The server's biomes the game lacks (a world data pack's) join the
+        // game's table, from the data it sent: colours, meshing and the
+        // chunk format all go through that table. The window's own server
+        // thread set the world's table already.
+        if self.integrated.is_none()
+            && let Some(list) = registries.registries.get("minecraft:worldgen/biome")
+        {
+            let known = self.res.biomes();
+            let files: Vec<(&str, serde_json::Value)> = list
+                .iter()
+                .filter(|(name, _)| !known.contains(name))
+                .filter_map(|(name, data)| {
+                    Some((
+                        name.as_str(),
+                        horizon_client::scoreboard::tag_to_json(data.as_ref()?),
+                    ))
+                })
+                .collect();
+            if !files.is_empty() {
+                log::info!(
+                    "Horizon: the server has {} biomes the game lacks",
+                    files.len()
+                );
+                let table = known.with_packs(files.iter().map(|(n, v)| (*n, v)));
+                self.world_biomes = Some(Arc::new(table));
+                let context = self.worker_context();
+                self.streaming.reload_resources(&mut self.world, context);
+            }
+        }
         let biomes: Vec<u16> = registries
             .registries
             .get("minecraft:worldgen/biome")
@@ -2110,7 +2139,7 @@ impl Game<'_> {
             self.stop_sounds_for_new_level();
             let mut streaming = Streaming::new(
                 Arc::new(NoTerrain),
-                self.pack.context.clone(),
+                self.worker_context(),
                 self.res.threads(),
             );
             streaming.remote = true;

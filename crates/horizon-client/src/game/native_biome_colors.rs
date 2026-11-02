@@ -4,7 +4,6 @@
 //! game runs.
 
 use super::Game;
-use horizon_client::streaming::WorkerContext;
 use std::sync::Arc;
 
 // Native mods call it; nothing in Horizon does.
@@ -17,22 +16,18 @@ impl Game<'_> {
     /// slow fade) and once when the player joins, not every frame: a rebuild
     /// takes the workers a few seconds. API 107.
     pub(super) fn native_refresh_biome_colors(&mut self) {
-        let base = self.res.biomes().clone();
+        let base = world_biomes!(self).clone();
         let biomes = base
             .with_colors(|biome, colors| self.native_biome_colors(biome, colors))
             .map_or(base, Arc::new);
         if Arc::ptr_eq(&biomes, &self.pack.context.biomes) {
             return;
         }
-        let old = &self.pack.context;
-        let context = Arc::new(WorkerContext {
-            assets: old.assets.clone(),
-            render: old.render.clone(),
-            tables: old.tables.clone(),
-            biomes,
-            light: old.light.clone(),
-        });
-        self.pack.context = context.clone();
+        let context = self.pack.context_with(biomes);
+        // A world's own table stays with that world, not the pack.
+        if self.world_biomes.is_none() {
+            self.pack.context = context.clone();
+        }
         self.clear_lod();
         self.streaming.reload_resources(&mut self.world, context);
     }
