@@ -117,6 +117,8 @@ pub enum ArrowEvent {
     Block {
         pos: BlockPos,
         reaction: BlockReaction,
+        /// The arrow's owner (`Projectile.getOwner`), who owns a TNT it primes.
+        owner: Option<Who>,
     },
     /// The SPLASH and PROJECTILE_SHOOT game events.
     SplashEvent,
@@ -982,7 +984,11 @@ impl Ticker<'_, '_, '_, '_> {
         if self.st.on_fire()
             && let Some(reaction) = self.block_reaction(state)
         {
-            self.st.events.push(ArrowEvent::Block { pos, reaction });
+            self.st.events.push(ArrowEvent::Block {
+                pos,
+                reaction,
+                owner: self.p.owner,
+            });
         }
         let v = self.p.velocity;
         let offset = f64::from(0.05f32);
