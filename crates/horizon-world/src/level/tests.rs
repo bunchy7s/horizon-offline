@@ -1979,6 +1979,8 @@ fn a_moving_piston_without_a_block_entity_is_removed_by_a_click() {
         w.get(in_flight),
         moving,
         "a moving piston in flight keeps its block"
+    );
+}
 
 /// `MovingPistonBlock.destroy`: a moving piston that goes away takes the
 /// extended piston base behind it with it; an unextended base stays.
