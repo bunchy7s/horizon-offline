@@ -92,7 +92,7 @@ Owner: [ludovic111](https://github.com/ludovic111) · Tracking: [#3914](https://
 
 <details><summary>Technical</summary>
 
-Since [#1514](https://github.com/horizon-rust/horizon/issues/1514) single player runs on the server thread (`game/integrated.rs`) and the window joins it as a client; `--in-frame` keeps the old path. The open `[server-thread]` issues list the gaps. In review: breeding's advancement and statistic ([#3873](https://github.com/horizon-rust/horizon/issues/3873)), the client's menu when the server replaces the player ([#3841](https://github.com/horizon-rust/horizon/issues/3841)), splashes when falling in water ([#3621](https://github.com/horizon-rust/horizon/issues/3621)). [docs/server-levels.md](docs/server-levels.md).
+Since [#1514](https://github.com/horizon-rust/horizon/issues/1514) single player runs on the server thread (`game/integrated.rs`) and the window joins it as a client. The open `[server-thread]` issues list the gaps. In review: breeding's advancement and statistic ([#3873](https://github.com/horizon-rust/horizon/issues/3873)), the client's menu when the server replaces the player ([#3841](https://github.com/horizon-rust/horizon/issues/3841)), splashes when falling in water ([#3621](https://github.com/horizon-rust/horizon/issues/3621)). [docs/server-levels.md](docs/server-levels.md).
 
 </details>
 
@@ -234,11 +234,11 @@ Client-of-a-server fixes in `game/remote*.rs` and `horizon-protocol`: mobs' aggr
 
 #### One single-player path: remove the in-frame world
 
-Single player will have one way to run, the server thread, so every fix works everywhere and there are fewer bugs. The older in-frame mode goes once everything passes without it.
+Single player has one way to run, the server thread, so every fix works everywhere and there are fewer bugs. The older in-frame mode is removed.
 
 <details><summary>Technical</summary>
 
-`--in-frame` (also `--no-server-thread` and `HORIZON_SERVER_THREAD=0`) still ticks the world inside the window's `Game`, and most harnesses test that path. Delete it once `lan_e2e --server-thread` and the parity harnesses pass on the server thread, which also halves the bug surface. See also 'Single player as a server' and [docs/server-levels.md](docs/server-levels.md).
+`--in-frame` (also `--no-server-thread` and `HORIZON_SERVER_THREAD=0`) ticked the world inside the window's `Game`. [#6473](https://github.com/horizon-rust/horizon/issues/6473) removes it with the code only it reached (the window's world loader and player tick, its portal travel and loading screen, the in-frame LAN host); the harnesses run on the server thread. See also 'Single player as a server' and [docs/server-levels.md](docs/server-levels.md).
 
 </details>
 
@@ -634,16 +634,6 @@ A spike with ray-traced sun shadows, off by default, is a draft ([#1180](https:/
 
 </details>
 
-#### HDR monitors
-
-Output for HDR monitors: brighter highlights and richer colour where your screen supports it.
-
-<details><summary>Technical</summary>
-
-Issue [#1441](https://github.com/horizon-rust/horizon/issues/1441). Needs a surface format and a tone-mapping path per backend, and tests on real HDR screens on Windows, macOS and Linux.
-
-</details>
-
 #### MSAA, anisotropic filtering, exclusive fullscreen
 
 More graphics options: multisample anti-aliasing, anisotropic filtering and an exclusive fullscreen mode. Today Horizon has FXAA and borderless fullscreen.
@@ -904,6 +894,7 @@ Armour and tools in End city chests should come enchanted, as in vanilla.
 - **Discord Rich Presence** (v0.2.58): Your Discord profile can show that you are playing Horizon, with a switch to turn it off. [#1787](https://github.com/horizon-rust/horizon/issues/1787) · [#1788](https://github.com/horizon-rust/horizon/issues/1788)
 - **Server dialogs and login screens** (v0.2.67): Servers that show dialogs, such as the register and login screens of AuthMe, will work in Horizon. [#1720](https://github.com/horizon-rust/horizon/issues/1720) · [#1734](https://github.com/horizon-rust/horizon/issues/1734) · [#1735](https://github.com/horizon-rust/horizon/issues/1735)
 - **Microsoft sign-in** (launcher@0.2.17): Sign in with your Microsoft account in the launcher to play on online-mode servers. [docs/microsoft-account.md](docs/microsoft-account.md) · [#2879](https://github.com/horizon-rust/horizon/issues/2879)
+- **HDR monitors** (v0.2.74): Output for HDR monitors: brighter highlights and richer colour where your screen supports it. [#1441](https://github.com/horizon-rust/horizon/issues/1441) · [#2021](https://github.com/horizon-rust/horizon/issues/2021) · [#2292](https://github.com/horizon-rust/horizon/issues/2292)
 - **OpenGL for old computers** (v0.2.63): Horizon now starts on old PCs whose graphics card has no Vulkan or DirectX 12 driver: it switches to OpenGL by itself, and Options > Graphics can pick OpenGL by hand. [#1917](https://github.com/horizon-rust/horizon/issues/1917) · [#1920](https://github.com/horizon-rust/horizon/issues/1920) · [#1936](https://github.com/horizon-rust/horizon/issues/1936)
 - **Server resource packs** (v0.2.48): Servers can send you their resource pack: Horizon asks, downloads it and applies it, like vanilla. [#1562](https://github.com/horizon-rust/horizon/issues/1562) · [#1569](https://github.com/horizon-rust/horizon/issues/1569) · [#1570](https://github.com/horizon-rust/horizon/issues/1570)
 - **Single player on its own server thread** (v0.2.39): Single player runs on a server thread, as vanilla does, so the world keeps ticking smoothly while the window draws. [#1514](https://github.com/horizon-rust/horizon/issues/1514) · [docs/server-levels.md](docs/server-levels.md)

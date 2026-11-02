@@ -2168,6 +2168,9 @@ pub fn variant_index(s: Species, name: &str) -> u8 {
         Species::ZombieNautilus => super::nautilus::VARIANTS.iter().position(|v| *v == name),
         // MushroomCow.Variant: red is the codec's default, brown the other.
         Species::Mooshroom => ["red", "brown"].iter().position(|v| *v == name),
+        // Fox.Variant, read from a `minecraft:fox/variant` component; the save
+        // keeps the same two names under `Type`.
+        Species::Fox => ["red", "snow"].iter().position(|v| *v == name),
         _ => ["temperate", "warm", "cold"]
             .iter()
             .position(|v| *v == name),

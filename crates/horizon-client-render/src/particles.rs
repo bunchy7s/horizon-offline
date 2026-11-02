@@ -996,7 +996,14 @@ impl ParticleLevel<'_> {
             binding: self.collision,
             subject: None,
         };
-        match scene.resolve(bb, Vec3::new(d[0], d[1], d[2]), 0.0, false) {
+        let movement = Vec3::new(d[0], d[1], d[2]);
+        // `Entity.collideBoundingBox(null, ...)`: no entity shapes, no border. Where no
+        // block of the swept box's cells can collide, it finds no shape and the
+        // movement stands, as the resolution below would return it.
+        if scene.cells_without_collision(bb.expand_towards(movement)) {
+            return d;
+        }
+        match scene.resolve(bb, movement, 0.0, false) {
             Ok(v) => [v.x, v.y, v.z],
             Err(_) => d,
         }
@@ -1158,7 +1165,9 @@ impl ParticleEngine {
         }
         let dir = root.join("assets/minecraft/particles");
         for &ty in ParticleType::ALL {
-            let Ok(bytes) = std::fs::read(dir.join(format!("{}.json", ty.name()))) else {
+            let Ok(bytes) =
+                horizon_core::prepared_files::read(&dir.join(format!("{}.json", ty.name())))
+            else {
                 continue;
             };
             let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {

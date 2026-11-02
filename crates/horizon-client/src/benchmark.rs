@@ -116,6 +116,39 @@ impl Control {
     }
 }
 
+/// The wait before a scene's flight, spent timing Horizon's own render passes on the GPU:
+/// `gpu_pass.<scene>.<pass>_ms`, where a slow GPU spends its frame. The timing is off again for
+/// the flight, whose frames it would slow. False, having waited for nothing, on Metal: its passes
+/// overlap on the GPU, so their times add up to more than the frame.
+fn time_passes(control: &Control, scene: &str, report: &mut Report) -> Result<bool, String> {
+    if report
+        .hardware
+        .gpu
+        .as_ref()
+        .is_some_and(|g| g.backend == "metal")
+    {
+        return Ok(false);
+    }
+    control.call("gpu-passes on")?;
+    let held = control.call(&format!("bench {}", SETTLE.as_secs_f64()));
+    control.call("gpu-passes off")?;
+    for (pass, ms) in held?["gpu_passes"].as_object().into_iter().flatten() {
+        let pass: String = pass
+            .trim()
+            .chars()
+            .map(|c| match c {
+                'a'..='z' | '0'..='9' => c,
+                'A'..='Z' => c.to_ascii_lowercase(),
+                _ => '_',
+            })
+            .collect();
+        if let Some(ms) = ms.as_f64() {
+            report.metric(&format!("gpu_pass.{scene}.{pass}_ms"), &[ms]);
+        }
+    }
+    Ok(true)
+}
+
 fn run(control: &Control, setup: Setup) -> Result<PathBuf, String> {
     let scenes =
         scenes(&setup.scenario).ok_or_else(|| format!("unknown scenario {}", setup.scenario))?;
@@ -204,7 +237,9 @@ fn run(control: &Control, setup: Setup) -> Result<PathBuf, String> {
                 &[chunks / load.as_secs_f64()],
             );
         }
-        thread::sleep(SETTLE);
+        if !time_passes(control, name, &mut report)? {
+            thread::sleep(SETTLE);
+        }
         let [ex, ey, ez] = end;
         let begin = Instant::now();
         let flight = control.call(&format!(
@@ -497,6 +532,60 @@ mod tests {
         );
         drop(control);
         let _ = server.join();
+    }
+
+    /// The wait before a flight times the passes and turns the timing off again before the
+    /// flight; the report gets one metric per pass. Not on Metal.
+    #[test]
+    fn the_wait_times_the_passes_but_not_the_flight() {
+        let time_on = |backend: &str| {
+            let (tx, rx) = mpsc::channel::<Request>();
+            let server = thread::spawn(move || {
+                let mut lines = Vec::new();
+                while let Ok(request) = rx.recv() {
+                    let reply = if request.line.starts_with("bench ") {
+                        serde_json::json!({
+                            "frames": 120,
+                            "gpu_passes": {"World": 1.5, "World after culling": 0.25, "HUD": 0.01},
+                        })
+                    } else {
+                        serde_json::json!({ "ok": true })
+                    };
+                    let _ = request.reply.send(reply.to_string());
+                    lines.push(request.line);
+                }
+                lines
+            });
+            let hardware = horizon_bench::Hardware {
+                gpu: Some(horizon_bench::Gpu {
+                    backend: backend.into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let mut report = Report::with_hardware(Kind::Game, App::default(), hardware);
+            let control = Control(tx);
+            let timed = time_passes(&control, "forest", &mut report).expect("the wait runs");
+            drop(control);
+            (timed, server.join().unwrap(), report.metrics)
+        };
+
+        let (timed, lines, metrics) = time_on("vulkan");
+        assert!(timed);
+        assert_eq!(lines, ["gpu-passes on", "bench 2", "gpu-passes off"]);
+        let mean = |name: &str| metrics.get(name).map(|s| s.mean);
+        assert_eq!(mean("gpu_pass.forest.world_ms"), Some(1.5));
+        assert_eq!(mean("gpu_pass.forest.world_after_culling_ms"), Some(0.25));
+        assert_eq!(mean("gpu_pass.forest.hud_ms"), Some(0.01));
+        assert_eq!(metrics.len(), 3);
+
+        let (timed, lines, metrics) = time_on("metal");
+        assert!(!timed);
+        assert!(
+            lines.is_empty(),
+            "Metal's overlapping passes are not timed: {lines:?}"
+        );
+        assert!(metrics.is_empty());
     }
 
     #[test]

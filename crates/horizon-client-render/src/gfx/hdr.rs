@@ -645,6 +645,7 @@ mod tests {
             include_str!("../hdr.wgsl"),
             include_str!("../terrain.wgsl"),
             include_str!("../hdr_stats.wgsl"),
+            include_str!("stars.wgsl"),
             &entity,
         ] {
             let module = naga::front::wgsl::parse_str(source).unwrap();

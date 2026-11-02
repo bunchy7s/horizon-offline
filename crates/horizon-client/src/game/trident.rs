@@ -237,38 +237,6 @@ impl Game<'_> {
         let (at, top) = (p.position, p.bounds().max_position().y);
         water || self.in_rain(at, top)
     }
-    /// The living entities a spinning player can touch this tick, for
-    /// `LivingEntity.checkAutoSpinAttack` (none when not spinning).
-    pub(super) fn spin_targets(&self) -> Vec<(u32, Aabb)> {
-        let Some(p) = self
-            .player
-            .as_ref()
-            .filter(|p| p.auto_spin_attack_ticks > 0)
-        else {
-            return Vec::new();
-        };
-        // A spin moves a few blocks a tick at most.
-        let near = p.bounds().inflate(Vec3::new(16.0, 16.0, 16.0));
-        self.mobs
-            .iter()
-            .filter(|m| m.alive() && m.bounds().intersects(near))
-            .map(|m| (m.id, m.bounds()))
-            .collect()
-    }
-    /// `Player.doAutoAttackOnTouch`: the touched entity takes `Player.attack`
-    /// with the spin's damage; once the spin is over its damage is cleared.
-    pub(super) fn end_spin_attack(&mut self, hit: Option<u32>) {
-        if let Some(id) = hit
-            && let Some(index) = self.mobs.iter().position(|m| m.id == id)
-        {
-            self.attack_mob(index);
-        }
-        if let Some(p) = self.player.as_mut()
-            && p.auto_spin_attack_ticks <= 0
-        {
-            p.auto_spin_attack_dmg = 0.0;
-        }
-    }
     /// The `summon_entity` and `play_sound` effects of `channeling.json`: in a
     /// thunderstorm (`weather_check`) a spot that sees the sky (`can_see_sky`)
     /// gets a lightning bolt and the thunder sound.
@@ -284,6 +252,9 @@ impl Game<'_> {
             at[2].floor() as i32,
         );
         if self.world.light(x, y, z) >> 4 != 15 {
+            return;
+        }
+        if !self.lightning_strike_allowed(self.lan_acting_uuid, [x, y, z], "trident") {
             return;
         }
         self.spawn_bolt(at, false);
@@ -401,6 +372,11 @@ impl Game<'_> {
             if !server_client {
                 let sound = format!("minecraft:item.trident.riptide_{}", riptide.min(3));
                 self.audio.play(&sound, at, 1.0, 1.0);
+                if let (Some(player), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    self.native_player_riptide(player, &name);
+                }
             }
             return;
         }

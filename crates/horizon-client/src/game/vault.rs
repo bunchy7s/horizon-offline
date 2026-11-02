@@ -167,7 +167,7 @@ impl Game<'_> {
         };
         if taken > 0 {
             // awardStat(ITEM_USED), then stackToInsert.consume(count, player).
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
             for _ in 0..taken {
                 self.consume_held();
             }
@@ -206,7 +206,9 @@ impl Game<'_> {
             .properties
             .insert("vault_state".into(), state.name().into());
         let id = self.pack.assets.registry.resolve(&block)?;
-        self.level_set([key.0, key.1, key.2], id)
+        self.level_set([key.0, key.1, key.2], id)?;
+        self.native_vault_change_state(self.dim.id(), [key.0, key.1, key.2], state.name());
+        Ok(())
     }
     /// `VaultRenderer`: the display item of every vault near the camera that
     /// shows one, turning above its floor.

@@ -11,7 +11,7 @@ came out empty, its loot table lost on the next save.
 The vanilla 26.3 server writes a flat world with a seeded loot chest beside the world spawn, then
 rolls the chest itself in a copy of that world (`execute if items` unpacks it). Horizon opens the
 untouched world in a new process, so nothing was loaded before the world, and must hold the same
-items in the same slots. Both single-player paths: the default server thread and in-frame.
+items in the same slots.
 
   test_spawn_loot_parity.py [--bin-dir DIR] [--keep]
 """
@@ -35,7 +35,7 @@ RESOURCES = ROOT / '.local' / 'horizon-client' / '26.3'
 RUN = ROOT / '.local' / 'spawn-loot'
 CHEST = (2, -60, 1)
 LOOT = '{LootTable:"minecraft:chests/simple_dungeon",LootTableSeed:42L}'
-MODES = {'server thread': [], 'in-frame': ['--in-frame']}
+MODES = {'server thread': []}
 
 
 def vanilla_world():

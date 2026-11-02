@@ -26,10 +26,6 @@ def run_game(command, **kwargs):
     """Run a headless game fixture with the same isolation as real-client tests."""
     with tempfile.TemporaryDirectory(prefix='hz-fixture-') as root:
         kwargs['env'] = game_environment(kwargs.pop('env', os.environ), root)
-        if any(key in kwargs['env'] for key in
-               ('HORIZON_DISPENSE_FIXTURE', 'HORIZON_SCULK_FIXTURE')):
-            # These compare seeded rule/callback traces, not the client/server boundary.
-            command = [*command, '--in-frame']
         return subprocess.run(command, **kwargs)
 
 

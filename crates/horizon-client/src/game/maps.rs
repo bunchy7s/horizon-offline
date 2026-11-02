@@ -40,7 +40,6 @@ pub(super) struct Decoration {
 }
 /// A map as a native mod sees it when `native_map_decorations` is asked.
 // Native mods read it; nothing in Horizon does.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct NativeMapInfo<'a> {
     /// The map's id (`map_<id>`).
@@ -1131,6 +1130,9 @@ impl Game<'_> {
             self.consume_held();
             self.give_or_drop_stack(filled);
         }
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_map_filled(player, &name, id);
+        }
         let at = [p.x, p.y, p.z];
         self.audio.play(
             "minecraft:ui.cartography_table.take_result",
@@ -1176,7 +1178,7 @@ impl Game<'_> {
             return true;
         }
         self.trigger_block("minecraft:item_used_on_block", hit.pos, stack);
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.swing_arm();
         true
     }
@@ -1222,7 +1224,7 @@ impl Game<'_> {
             self.consume_held();
             self.give_or_drop_stack(locked);
         }
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.swing_arm();
         true
     }

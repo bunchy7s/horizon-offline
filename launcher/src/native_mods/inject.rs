@@ -1,4 +1,4 @@
-//! Trait-backed HEAD injections, generated in the incoming copy and staged game.
+//! Trait-backed injections, generated in the incoming copy and staged game.
 use super::{api, Bundle, MANIFEST};
 use quote::{format_ident, quote};
 use std::{
@@ -14,7 +14,18 @@ pub(super) struct Injection {
     /// The bindings' struct, as each catalog hook's (`InjectExampleTickEvent`).
     event: syn::Ident,
     parameters: Vec<(syn::Ident, syn::Type)>,
-    cancellable: bool,
+    contract: Contract,
+}
+
+/// What a trait method may do with its event.
+enum Contract {
+    /// HEAD: observe and change `&mut` bindings.
+    Listen,
+    /// Cancellable HEAD on a unit target, where `Flow::Cancel` returns early.
+    Cancel,
+    /// RETURN, MODIFY_ARG or MODIFY_EXPRESSION_VALUE: the ident names the `$value` binding,
+    /// which is moved into the event and returned after the call.
+    Value(syn::Ident),
 }
 
 /// Turns a binding's type into its event field's: a `&mut` primitive scalar becomes the value,
@@ -136,12 +147,6 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
                 if target_crate != "horizon_client" {
                     return Err(format!("trait injection target {target:?} is in crate {target_crate:?}; only horizon-client targets are supported"));
                 }
-                if table.get("kind").and_then(toml::Value::as_str) != Some("HEAD") {
-                    return Err(format!(
-                        "{}: trait_method supports only HEAD injections",
-                        path.display()
-                    ));
-                }
                 if table.contains_key("helper") {
                     return Err(format!(
                         "{}: trait_method cannot also specify helper",
@@ -165,6 +170,7 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
                 };
                 let mut parameters = Vec::new();
                 let mut seen = HashSet::new();
+                let mut value = None;
                 if let Some(bindings) = table.get("bindings") {
                     for binding in bindings.as_array().ok_or("bindings must be an array")? {
                         let binding = binding.as_table().ok_or("binding must be a table")?;
@@ -183,9 +189,40 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
                             .ok_or("binding needs a type")?;
                         let ty: syn::Type =
                             syn::parse_str(ty).map_err(|e| format!("invalid binding type: {e}"))?;
+                        if binding.get("value").and_then(toml::Value::as_str) == Some("$value") {
+                            value = Some(ident.clone());
+                        }
                         parameters.push((ident, ty));
                     }
                 }
+                let kind = table
+                    .get("kind")
+                    .and_then(toml::Value::as_str)
+                    .unwrap_or_default();
+                let contract = match (kind, cancellable) {
+                    ("HEAD", false) => Contract::Listen,
+                    ("HEAD", true) => Contract::Cancel,
+                    ("RETURN" | "MODIFY_ARG" | "MODIFY_EXPRESSION_VALUE", false) => {
+                        Contract::Value(value.ok_or_else(|| {
+                            format!(
+                                "{}: a {kind} trait_method needs a `$value` binding",
+                                path.display()
+                            )
+                        })?)
+                    }
+                    (_, true) => {
+                        return Err(format!(
+                            "{}: cancellable trait_method needs HEAD",
+                            path.display()
+                        ));
+                    }
+                    _ => {
+                        return Err(format!(
+                            "{}: trait_method supports HEAD, RETURN, MODIFY_ARG and MODIFY_EXPRESSION_VALUE",
+                            path.display()
+                        ));
+                    }
+                };
                 let event = format_ident!(
                     "{}Event",
                     name.split('_')
@@ -201,7 +238,7 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
                     name: ident,
                     event,
                     parameters,
-                    cancellable,
+                    contract,
                 };
                 let helper_path = format!("horizon-trait-injection-{index}.rs");
                 let helper_file = bundle.dir.join(&helper_path);
@@ -251,27 +288,34 @@ impl Injection {
             .zip(&scalars)
             .filter(|(_, scalar)| **scalar)
             .map(|((n, _), _)| quote!(*#n = event.#n;));
-        let call = quote! {{
+        let call = quote! {
             let mut event = crate::mod_api::#event { #(#inits),* };
-            let result = owner.#name(&mut event);
+            let _flow = owner.#name(&mut event);
             #(#write_back)*
-            result
-        }};
+        };
         // Before the mods are installed (an injection into code `main_with` runs first), or
-        // with fewer mods than the build had, the injection does nothing.
-        let (output, result, absent) = if self.cancellable {
-            (
+        // with fewer mods than the build had, the injection does nothing or passes the value on.
+        let (output, result, absent) = match &self.contract {
+            Contract::Listen => (quote!(), call, quote!()),
+            Contract::Cancel => (
                 quote!(-> core::ops::ControlFlow<()>),
                 quote! {
-                    if #call == crate::mod_api::Flow::Cancel {
+                    #call
+                    if _flow == crate::mod_api::Flow::Cancel {
                         return core::ops::ControlFlow::Break(());
                     }
                     core::ops::ControlFlow::Continue(())
                 },
                 quote!(core::ops::ControlFlow::Continue(())),
-            )
-        } else {
-            (quote!(), quote!(#call;), quote!())
+            ),
+            Contract::Value(value) => {
+                let ty = self
+                    .parameters
+                    .iter()
+                    .find(|(n, _)| n == value)
+                    .map(|(_, t)| t);
+                (quote!(-> #ty), quote!(#call event.#value), quote!(#value))
+            }
         };
         quote! {
             fn horizon_trait_dispatch(#(#params),*) #output {
@@ -287,10 +331,9 @@ impl Injection {
     fn declaration(&self) -> String {
         let name = &self.name;
         let event = &self.event;
-        let (output, default) = if self.cancellable {
-            (quote!(-> Flow), quote!(Flow::Continue))
-        } else {
-            (quote!(), quote!())
+        let (output, default) = match self.contract {
+            Contract::Cancel => (quote!(-> Flow), quote!(Flow::Continue)),
+            Contract::Listen | Contract::Value(_) => (quote!(), quote!()),
         };
         let elided = match self.lifetimes().0 {
             (_, true) => quote!(<'_, '_>),
@@ -306,7 +349,14 @@ impl Injection {
         let (types, scalars) = self
             .parameters
             .iter()
-            .map(|(_, ty)| lifetimes.field(ty))
+            .map(|(name, ty)| match &self.contract {
+                Contract::Value(value) if name == value => {
+                    let mut field = ty.clone();
+                    lifetimes.visit_type_mut(&mut field);
+                    (field, false)
+                }
+                _ => lifetimes.field(ty),
+            })
             .unzip();
         ((lifetimes.a, lifetimes.b), types, scalars)
     }
@@ -405,6 +455,29 @@ mod tests {
         (root, bundle)
     }
 
+    fn compile_and_run(root: &Path, program: &str) {
+        let source = root.join("proof.rs");
+        let binary = root.join(format!("proof-bin{}", std::env::consts::EXE_SUFFIX));
+        fs::write(&source, program).unwrap();
+        let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let compiled = std::process::Command::new(compiler)
+            .args(["--edition", "2024"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&binary)
+            .output()
+            .unwrap();
+        assert!(
+            compiled.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
+        assert!(std::process::Command::new(binary)
+            .status()
+            .unwrap()
+            .success());
+    }
+
     #[test]
     fn owner_dispatch_and_cancel_are_generated_from_bindings() {
         let (root, bundle) = fixture("cancel", "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\ntrait_method = 'tick'\ncancellable = true\nbindings = [{ name = 'amount', ty = '&mut i32', value = '&mut *amount' }]\n");
@@ -453,26 +526,62 @@ mod tests {
             }}
         "#
         );
-        let source = root.join("proof.rs");
-        let binary = root.join(format!("proof-bin{}", std::env::consts::EXE_SUFFIX));
-        fs::write(&source, program).unwrap();
-        let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-        let compiled = std::process::Command::new(compiler)
-            .args(["--edition", "2024"])
-            .arg(&source)
-            .arg("-o")
-            .arg(&binary)
-            .output()
-            .unwrap();
-        assert!(
-            compiled.status.success(),
-            "{}",
-            String::from_utf8_lossy(&compiled.stderr)
+        compile_and_run(&root, &program);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn value_injection_returns_what_the_owner_changed() {
+        let (root, bundle) = fixture("value", "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'RETURN'\ntrait_method = 'total'\nbindings = [{ name = 'total', ty = 'i32', value = '$value' }, { name = 'calls', ty = '&mut u32', value = '&mut *calls' }]\n");
+        let injections = prepare(&[bundle], &root).unwrap();
+        let helper = fs::read_to_string(root.join("horizon-trait-injection-0.rs")).unwrap();
+        let stage_dir = root.join("stage/crates/horizon-client/src/mod_api");
+        fs::create_dir_all(&stage_dir).unwrap();
+        fs::write(
+            stage_dir.join("generated.rs"),
+            "pub trait Hooks: Send + Sync {\n}\n",
+        )
+        .unwrap();
+        stage(&root.join("stage"), &injections).unwrap();
+        let output = fs::read_to_string(stage_dir.join("generated.rs")).unwrap();
+        let program = format!(
+            r#"
+            mod mod_api {{
+                use std::sync::atomic::{{AtomicBool, Ordering}};
+                use std::sync::OnceLock;
+                {output}
+                struct Owner;
+                impl Hooks for Owner {{
+                    fn inject_example_total(&self, event: &mut InjectExampleTotalEvent) {{
+                        event.total = event.total * 2 + 1;
+                        event.calls += 1;
+                    }}
+                }}
+                struct Other;
+                impl Hooks for Other {{
+                    fn inject_example_total(&self, _: &mut InjectExampleTotalEvent) {{ panic!("wrong owner") }}
+                }}
+                pub static INSTALLED: AtomicBool = AtomicBool::new(false);
+                pub fn mods() -> &'static [Box<dyn Hooks>] {{
+                    static MODS: OnceLock<Vec<Box<dyn Hooks>>> = OnceLock::new();
+                    if !INSTALLED.load(Ordering::SeqCst) {{
+                        return &[];
+                    }}
+                    MODS.get_or_init(|| vec![Box::new(Owner), Box::new(Other)])
+                }}
+            }}
+            {helper}
+            fn main() {{
+                let mut calls = 0;
+                assert_eq!(horizon_trait_dispatch(20, &mut calls), 20);
+                assert_eq!(calls, 0);
+                mod_api::INSTALLED.store(true, std::sync::atomic::Ordering::SeqCst);
+                assert_eq!(horizon_trait_dispatch(20, &mut calls), 41);
+                assert_eq!(calls, 1);
+            }}
+        "#
         );
-        assert!(std::process::Command::new(binary)
-            .status()
-            .unwrap()
-            .success());
+        compile_and_run(&root, &program);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -526,7 +635,7 @@ mod tests {
             super::super::inject_cache::key(
                 "revision",
                 "mixins",
-                super::super::Profile::Fast,
+                super::super::Profile::Performance,
                 std::slice::from_ref(&bundle),
             )
             .unwrap()
@@ -546,7 +655,7 @@ mod tests {
             super::super::inject_cache::key(
                 "revision",
                 "mixins",
-                super::super::Profile::Fast,
+                super::super::Profile::Performance,
                 std::slice::from_ref(&bundle),
             )
             .unwrap()
@@ -564,7 +673,7 @@ mod tests {
             super::super::inject_cache::key(
                 "revision",
                 "mixins",
-                super::super::Profile::Fast,
+                super::super::Profile::Performance,
                 std::slice::from_ref(&bundle),
             )
             .unwrap()
@@ -583,7 +692,7 @@ mod tests {
         let a = super::super::version_for(
             "0123456789012345678901234567890123456789",
             "mixins",
-            super::super::Profile::Fast,
+            super::super::Profile::Performance,
             super::super::Target::Client,
             &[first.clone(), second.clone()],
         )
@@ -591,7 +700,7 @@ mod tests {
         let b = super::super::version_for(
             "0123456789012345678901234567890123456789",
             "mixins",
-            super::super::Profile::Fast,
+            super::super::Profile::Performance,
             super::super::Target::Client,
             &[second, first],
         )
@@ -619,12 +728,31 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_injection_is_rejected() {
-        let (root, bundle) = fixture("return", "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'RETURN'\ntrait_method = 'tick'\n");
-        assert!(prepare(&[bundle], &root)
-            .err()
-            .unwrap()
-            .contains("only HEAD"));
-        fs::remove_dir_all(root).unwrap();
+    fn trait_injection_kinds_are_checked() {
+        for (kind, extra, expected) in [
+            (
+                "AFTER_CALL",
+                "",
+                "supports HEAD, RETURN, MODIFY_ARG and MODIFY_EXPRESSION_VALUE",
+            ),
+            (
+                "RETURN",
+                "bindings = [{ name = 'amount', ty = 'i32', value = 'amount' }]\n",
+                "`$value` binding",
+            ),
+            (
+                "MODIFY_ARG",
+                "cancellable = true\nbindings = [{ name = 'points', ty = 'i32', value = '$value' }]\n",
+                "cancellable trait_method needs HEAD",
+            ),
+        ] {
+            let (root, bundle) = fixture(
+                "kinds",
+                &format!("[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = '{kind}'\ntrait_method = 'tick'\n{extra}"),
+            );
+            let error = prepare(&[bundle], &root).err().unwrap();
+            assert!(error.contains(expected), "{kind}: {error}");
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 }

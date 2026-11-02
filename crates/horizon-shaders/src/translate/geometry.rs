@@ -12,7 +12,7 @@
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
-use super::scan::significant;
+use super::scan::{QUALIFIERS, STORAGE, significant};
 use super::{Error, GbuffersInputs, Program, Target};
 use crate::Preprocessed;
 use crate::macros::lex;
@@ -158,22 +158,9 @@ fn classify(tokens: &[&str], range: std::ops::Range<usize>) -> Statement {
             }
             k += 1;
         }
-        let quals = [
-            "in",
-            "out",
-            "attribute",
-            "varying",
-            "flat",
-            "smooth",
-            "noperspective",
-            "centroid",
-            "invariant",
-            "highp",
-            "mediump",
-            "lowp",
-            "const",
-        ];
-        while k < words.len() && quals.contains(&words[k]) {
+        // Every qualifier the translator knows (`sample`, `precise`...), in any order (GLSL
+        // 4.60, 4.12): one it missed would be taken for the type, and the type for a name.
+        while k < words.len() && (STORAGE.contains(&words[k]) || QUALIFIERS.contains(&words[k])) {
             k += 1;
         }
         match words.get(k) {
@@ -246,8 +233,14 @@ fn combine(
             message,
         }]
     };
-    let gs_tokens = lex(&geometry.code);
-    let vs_tokens = lex(&vertex.code);
+    // Interface blocks first become plain varyings (`interface_blocks`), the vertex stage's
+    // `out` block and the geometry stage's `in` array alike: what follows reads declarations
+    // of one type each. The geometry stage's input blocks read as `hz_in_<block>_<member>`,
+    // apart from its output blocks, which may have the same names.
+    let gs_code = super::interface_blocks::flatten_as(&geometry.code, "in_");
+    let vs_code = super::interface_blocks::flatten(&vertex.code);
+    let gs_tokens = lex(gs_code.as_deref().unwrap_or(&geometry.code));
+    let vs_tokens = lex(vs_code.as_deref().unwrap_or(&vertex.code));
     let gs = statements(&gs_tokens);
     let vs = statements(&vs_tokens);
 
@@ -429,8 +422,12 @@ fn combine(
     }
     main.push_str("        hz_vs_main();\n");
     for (name, _) in &vs_outs {
-        if gs_ins.iter().any(|(n, _)| n == name) {
-            writeln!(main, "        {name}[hz_i] = hz_vs_{name};").unwrap();
+        let block = name.strip_prefix("hz_").map(|m| format!("hz_in_{m}"));
+        if let Some((input, _)) = gs_ins
+            .iter()
+            .find(|(n, _)| n == name || Some(n) == block.as_ref())
+        {
+            writeln!(main, "        {input}[hz_i] = hz_vs_{name};").unwrap();
         }
     }
     main.push_str("        hz_gl_in[hz_i].p = hz_vs_Position;\n    }\n    hz_gs_main();\n");
@@ -583,17 +580,8 @@ mod tests {
     use crate::pack::tests::zip;
     use crate::{Macros, Pack, preprocess};
 
-    #[test]
-    fn a_geometry_stage_folds_into_the_vertex_stage() {
-        let vsh = "#version 430\nout vec3 vPos;\nout vec4 vColor;\nvoid main() {\n    \
-                   vPos = gl_Vertex.xyz;\n    vColor = gl_Color * float(gl_InstanceID + 1);\n    \
-                   gl_Position = ftransform();\n}\n";
-        let gsh = "#version 430\nlayout(triangles) in;\nlayout(triangle_strip, max_vertices = 4) out;\n\
-                   in vec3 vPos[];\nin vec4 vColor[];\nout vec4 gColor;\nvoid main() {\n    \
-                   for (int i = 0; i < 3; i++) {\n        gColor = vColor[i];\n        \
-                   gl_Position = gl_in[i].gl_Position;\n        EmitVertex();\n    }\n    \
-                   gl_Position = vec4(vPos[0], 1.0);\n    EmitVertex();\n    EndPrimitive();\n}\n";
-        let fsh = "#version 430\nin vec4 gColor;\nvoid main() {\n    gl_FragData[0] = gColor;\n}\n";
+    /// `vsh`, `gsh` and `fsh` (a pack's shadow program) folded and translated.
+    fn fold(vsh: &str, gsh: &str, fsh: &str) -> Result<(Program, u32), Vec<Error>> {
         let pack = Pack::from_zip_bytes(
             "P.zip",
             zip(&[
@@ -617,17 +605,71 @@ mod tests {
                 .into(),
             index: "uint(@)".into(),
         };
-        let (program, triangles) = translate_geometry(
+        translate_geometry(
             &pp("shadow.vsh"),
             &pp("shadow.gsh"),
             &pp("shadow.fsh"),
             &inputs,
         )
-        .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
+    #[test]
+    fn a_geometry_stage_folds_into_the_vertex_stage() {
+        let vsh = "#version 430\nout vec3 vPos;\nout vec4 vColor;\nvoid main() {\n    \
+                   vPos = gl_Vertex.xyz;\n    vColor = gl_Color * float(gl_InstanceID + 1);\n    \
+                   gl_Position = ftransform();\n}\n";
+        let gsh = "#version 430\nlayout(triangles) in;\nlayout(triangle_strip, max_vertices = 4) out;\n\
+                   in vec3 vPos[];\nin vec4 vColor[];\nout vec4 gColor;\nvoid main() {\n    \
+                   for (int i = 0; i < 3; i++) {\n        gColor = vColor[i];\n        \
+                   gl_Position = gl_in[i].gl_Position;\n        EmitVertex();\n    }\n    \
+                   gl_Position = vec4(vPos[0], 1.0);\n    EmitVertex();\n    EndPrimitive();\n}\n";
+        let fsh = "#version 430\nin vec4 gColor;\nvoid main() {\n    gl_FragData[0] = gColor;\n}\n";
+        let (program, triangles) = fold(vsh, gsh, fsh).unwrap_or_else(|e| panic!("{e:?}"));
         // A strip of four corners is two triangles.
         assert_eq!(triangles, 2);
         assert_eq!(program.vertex.entry_points.len(), 1);
         assert_eq!(program.fragment.entry_points.len(), 1);
+    }
+
+    /// Stages that pass their varyings in interface blocks (GLSL 4.60, 4.3.9), members with
+    /// their own qualifiers: the vertex stage's `out` block, the geometry stage's `in` block
+    /// array and `out` block, the fragment stage's `in` block. The geometry stage's two blocks
+    /// share a name, as an input and an output block may (4.3.9).
+    #[test]
+    fn interface_blocks_pass_between_the_stages() {
+        let vsh = "#version 430\nuniform float far;\n\
+                   out VertexData {\n    vec4 color;\n    flat float id;\n    vec2 uv;\n} vOut;\n\
+                   void main() {\n    vOut.color = gl_Color;\n    vOut.id = far;\n    \
+                   vOut.uv = gl_Vertex.xy;\n    gl_Position = ftransform();\n}\n";
+        let gsh = "#version 430\nlayout(triangles) in;\nlayout(triangle_strip, max_vertices = 3) out;\n\
+                   in VertexData {\n    vec4 color;\n    flat float id;\n    vec2 uv;\n} vIn[];\n\
+                   out VertexData {\n    vec4 color;\n    flat float id;\n} gOut;\n\
+                   void main() {\n    for (int i = 0; i < 3; i++) {\n        \
+                   gOut.color = vIn[i].color * vIn[i].uv.x;\n        gOut.id = vIn[0].id;\n        \
+                   gl_Position = gl_in[i].gl_Position;\n        EmitVertex();\n    }\n    \
+                   EndPrimitive();\n}\n";
+        let fsh = "#version 430\nuniform float far;\n\
+                   in VertexData {\n    vec4 color;\n    flat float id;\n} gIn;\n\
+                   void main() {\n    gl_FragData[0] = gIn.color * gIn.id / far;\n}\n";
+        let (program, triangles) = fold(vsh, gsh, fsh).unwrap_or_else(|e| panic!("{e:?}"));
+        assert_eq!(triangles, 1);
+        assert_eq!(program.fragment.entry_points.len(), 1);
+    }
+
+    /// An output qualified `sample` declares no variable named after its type (GLSL 4.60, 4.3).
+    #[test]
+    fn sample_outputs_rename_no_type() {
+        let vsh = "#version 430\nuniform float far;\n\
+                   out sample float vDepth;\nvoid main() {\n    vDepth = far;\n    \
+                   gl_Position = ftransform();\n}\n";
+        let gsh = "#version 430\nlayout(triangles) in;\nlayout(triangle_strip, max_vertices = 3) out;\n\
+                   in float vDepth[];\nout float gDepth;\nvoid main() {\n    \
+                   for (int i = 0; i < 3; i++) {\n        gDepth = vDepth[i];\n        \
+                   gl_Position = gl_in[i].gl_Position;\n        EmitVertex();\n    }\n    \
+                   EndPrimitive();\n}\n";
+        let fsh = "#version 430\nuniform float far;\nin float gDepth;\n\
+                   void main() {\n    gl_FragData[0] = vec4(gDepth / far);\n}\n";
+        fold(vsh, gsh, fsh).unwrap_or_else(|e| panic!("{e:?}"));
     }
 
     #[test]

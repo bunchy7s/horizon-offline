@@ -12,7 +12,8 @@ use std::{collections::BTreeSet, fs, io, path::Path, path::PathBuf};
 // Version 3 could omit untouched vanilla directories on Windows (#1649, #1688).
 // Version 5 read every vanilla file to stamp it on Windows.
 // Version 6 stamps vanilla's files by their metadata on Windows too.
-const VERSION: u32 = 6;
+// Version 7 stacks blockstate files (every pack's definition, bottom first).
+const VERSION: u32 = 7;
 
 #[derive(Default, Serialize, Deserialize)]
 pub(super) struct Dependencies {

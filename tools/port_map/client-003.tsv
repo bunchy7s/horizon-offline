@@ -11,7 +11,7 @@ ServerList.swap	port	crates/horizon-client/src/multiplayer.rs::Screen::click	arr
 ServerList.set	missing		minor: no write-back of one saved entry by name and address (only the code-of-conduct save uses it)
 ServerStatusPinger.pingServer	port	crates/horizon-client/src/multiplayer.rs::ping_all	gap: minor: no unknown-host message; one thread per server with a 5 s timeout
 ServerStatusPinger.onPingFailed	port	crates/horizon-client/src/multiplayer.rs::ping_all	failed ping stores Ping::Failed, shown as can't-connect in the row
-ServerStatusPinger.pingLegacyServer	missing		player: a server that answers only the old legacy ping shows as incompatible with its version and player count in vanilla; Horizon shows it as unreachable
+ServerStatusPinger.pingLegacyServer	port	crates/horizon-client/src/net.rs::ping_legacy	the pre-1.7 ping is tried when the status handshake fails (multiplayer.rs)
 ServerStatusPinger.tick	skip:other		Horizon pings on plain threads, so there are no connections to tick
 ServerStatusPinger.removeAll	skip:other		pings are not cancelled on screen close; threads end on their own timeout
 SessionSearchTrees.rebuildAfterLanguageChange	skip:java		creative search reads names at query time, so there are no trees to rebuild
@@ -34,18 +34,18 @@ ChatListener.logPlayerMessage	skip:service		feeds the chat log that chat reports
 ChatListener.logSystemMessage	skip:service		feeds the chat log that chat reports read
 ChatListener.handleSystemMessage	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	gap: minor: hide-matched-names and friend filtering are not applied to system lines
 ChatListener.guessChatUUID	skip:service		social lookup of a name in a system line, used only for blocking and hiding
-ChatListener.isSenderLocalPlayer	missing		minor: only feeds the trust level check
+ChatListener.isSenderLocalPlayer	inline	crates/horizon-client/src/game/remote.rs::Game::chat_trust	the local player's own message on their own server is secure
 ChatLog.codec	skip:java		serializer of the chat log
 ChatLog.loggedChatEvents	skip:service		chat log for chat reports
 ChatLog.push	skip:service		chat log for chat reports
 ChatLog.lookup	skip:service		chat log for chat reports
-ChatTrustLevel.evaluate	missing		player: no Not Secure or Modified marking on chat lines, and Only Show Secure Chat does nothing (see createTag)
-ChatTrustLevel.isModified	missing		minor: only feeds the Modified marking
-ChatTrustLevel.containsModifiedStyle	missing		minor: only feeds the Modified marking
-ChatTrustLevel.createTag	missing		player: no grey Not Secure bar or Modified tag on player chat lines
+ChatTrustLevel.evaluate	port	crates/horizon-client/src/game/remote.rs::Game::chat_trust	secure, modified (signed content gone or the font changed) or not secure (unsigned or expired)
+ChatTrustLevel.isModified	inline	crates/horizon-client/src/game/remote.rs::Game::chat_trust	the signed content is not in the line, or the replacement uses another font
+ChatTrustLevel.containsModifiedStyle	inline	crates/horizon-client/src/game/remote.rs::Game::chat_trust	the font check over the replacement component
+ChatTrustLevel.createTag	port	crates/horizon-client/src/game/remote.rs::ChatTrust::tag	secure has no tag; modified keeps the signed content, not secure and error have theirs
 GuiMessage.splitLines	port	crates/horizon-client-render/src/chat.rs::Chat::add_lines	gap: minor: no width reserved for a tag icon; Horizon draws no icon tags
-GuiMessageTag.chatModified	missing		minor: no Modified tag text or icon (needs the trust check)
-GuiMessageTag.Icon.extractRenderState	missing		minor: the chat_modified icon is never drawn
+GuiMessageTag.chatModified	port	crates/horizon-client-render/src/chat.rs::Tag::modified	the modified tooltip with the original content in grey
+GuiMessageTag.Icon.extractRenderState	port	crates/horizon-client-render/src/chat.rs::Chat::focused_tags	the chat_modified icon is drawn at the end of a message while chat is focused
 LoggedChatMessage.Player.toContentComponent	skip:service		chat report view of a logged line
 LoggedChatMessage.Player.toNarrationComponent	skip:service		chat report view of a logged line
 LoggedChatMessage.Player.toHeadingComponent	skip:service		chat report view of a logged line
@@ -126,7 +126,7 @@ ChickenRenderer.bakeModels	skip:data		models are loaded from Horizon's assets
 ChickenRenderer.submit	port	crates/horizon-client/src/mobs/render.rs::body	adult, baby and cold model choice
 ChickenRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::body	texture by variant and age
 ChickenRenderer.extractRenderState	port	crates/horizon-client/src/mobs/anim.rs::setup	wing flap and flap speed; the variant is read in render.rs::body
-CodRenderer.setupRotations	missing		player: a cod out of water is not turned onto its side and in water does not sway; salmon and tropical fish share this
+CodRenderer.setupRotations	port	crates/horizon-client/src/mobs/aquatic.rs::rotations	cod, salmon and tropical fish wiggle by 4.3 degrees and flop on land; the pufferfish bobs instead
 CopperGolemRenderer.extractRenderState	port	crates/horizon-client/src/mobs/copper_golem.rs::anim	chest and idle animation states; the weathering texture comes from texture()
 CowRenderer.bakeModels	skip:data		models are loaded from Horizon's assets
 CowRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::body	variant texture, baby texture for babies
@@ -143,8 +143,8 @@ DisplayRenderer.getShadowStrength	port	crates/horizon-client/src/shadows.rs::dis
 DisplayRenderer.submit	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	gap: player: only text displays are drawn; block and item displays are not
 DisplayRenderer.calculateOrientation	port	crates/horizon-client/src/text_display.rs::TextDisplayData::matrix	billboard orientation (fixed, horizontal, vertical, center)
 DisplayRenderer.extractRenderState	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	interpolation progress and the entity yaw and pitch are read there
-DisplayRenderer.BlockDisplayRenderer.extractRenderState	missing		player: block display entities are invisible; the remote path tracks only text displays
-DisplayRenderer.ItemDisplayRenderer.extractRenderState	missing		player: item display entities are invisible
-DisplayRenderer.ItemDisplayRenderer.submitInner	missing		player: item displays draw nothing
+DisplayRenderer.BlockDisplayRenderer.extractRenderState	inline	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::show	DATA_BLOCK_STATE_ID read into the display state
+DisplayRenderer.ItemDisplayRenderer.extractRenderState	inline	crates/horizon-client/src/game/text_displays.rs::RemoteTextDisplay::show	DATA_ITEM_STACK and DATA_ITEM_DISPLAY_ID read into the display state
+DisplayRenderer.ItemDisplayRenderer.submitInner	port	crates/horizon-client/src/game/text_displays.rs::Game::block_item_display_geometry	the item under the display's transformation, in its display context
 DisplayRenderer.TextDisplayRenderer.extractRenderState	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	render state comes from the text display's metadata
 DisplayRenderer.TextDisplayRenderer.submitInner	port	crates/horizon-client/src/game/text_displays.rs::Game::text_display_geometry	text, background and opacity

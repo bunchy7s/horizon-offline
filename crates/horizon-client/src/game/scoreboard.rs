@@ -453,17 +453,6 @@ impl Game<'_> {
             }
         }
     }
-    /// `ServerPlayer.die`: the death count.
-    pub(super) fn score_player_died(&mut self) {
-        let display = self.player_display_comp();
-        let me = self.acting_player_name().to_owned();
-        let board = &mut self.score.board;
-        board.for_all_objectives_with(sb::CRITERIA_DEATH_COUNT, &me, Some(&display), |v| {
-            v.wrapping_add(1)
-        });
-        // A respawned player has everything to record again.
-        self.score.recorded = Recorded::default();
-    }
     /// `ServerPlayer.awardKillScore`: total kills and the team kill counts.
     pub(super) fn score_player_killed(&mut self, victim: Target) {
         let victim_name = self.holder_name(victim);

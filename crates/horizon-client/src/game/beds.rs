@@ -97,7 +97,7 @@ impl Game<'_> {
         let back = self.dim;
         for (dim, head) in std::mem::take(&mut self.player_beds) {
             self.enter_level(None, dim)?;
-            // The in-frame game has only the level it is in.
+            // A client holds no other levels (`enter_level`).
             if self.dim == dim {
                 self.set_bed_occupied(head, false);
             }

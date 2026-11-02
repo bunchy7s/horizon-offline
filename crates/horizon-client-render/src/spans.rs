@@ -6,7 +6,7 @@
 //! or a core on a busy machine) shows apart from one that worked. Costs two
 //! clock reads per span when enabled and a relaxed load otherwise.
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
@@ -14,6 +14,10 @@ use std::{
 static ENABLED: AtomicBool = AtomicBool::new(false);
 thread_local! {
     static SPANS: RefCell<Vec<Span>> = const { RefCell::new(Vec::new()) };
+    /// Spans recorded on this thread alone, wall time only ([`record_here`]).
+    static HERE: Cell<bool> = const { Cell::new(false) };
+    /// How many timed spans the thread is inside: the next span's [`Span::depth`].
+    static DEPTH: Cell<u8> = const { Cell::new(0) };
 }
 
 /// A named timing: wall milliseconds and the thread's CPU milliseconds in it.
@@ -22,6 +26,8 @@ pub struct Span {
     pub name: &'static str,
     pub ms: f32,
     pub cpu_ms: f32,
+    /// How many timed spans it ran inside (0: none): `tick_mobs` is inside `tick`.
+    pub depth: u8,
 }
 
 pub fn enable(on: bool) {
@@ -31,19 +37,49 @@ pub fn enable(on: bool) {
 pub fn enabled() -> bool {
     ENABLED.load(Ordering::Relaxed)
 }
+/// Record this thread's spans even with spans off, their wall time only (no CPU clock read):
+/// what the render thread's slow frames spent their time in, for the opt-in performance
+/// statistics (`telemetry::Session::frame`). The thread takes them every frame ([`take`]).
+pub fn record_here(on: bool) {
+    HERE.with(|h| h.set(on));
+}
+/// Whether this thread records spans: all of them on, or [`record_here`].
+#[inline]
+pub fn recording_here() -> bool {
+    ENABLED.load(Ordering::Relaxed) || HERE.with(Cell::get)
+}
+/// The thread's CPU time when spans are on for every thread (`HORIZON_SPIKES`): only they
+/// print it.
+#[inline]
+fn cpu_if_enabled() -> Option<Duration> {
+    if ENABLED.load(Ordering::Relaxed) {
+        thread_cpu()
+    } else {
+        None
+    }
+}
 /// Run `f`, recording its duration under `name` when spans are enabled.
 #[inline]
 pub fn time<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
-    if !ENABLED.load(Ordering::Relaxed) {
+    if !recording_here() {
         return f();
     }
-    let (started, cpu) = (Instant::now(), thread_cpu());
+    let depth = DEPTH.with(|d| d.replace(d.get().saturating_add(1)));
+    let (started, cpu) = (Instant::now(), cpu_if_enabled());
     let out = f();
     let ms = started.elapsed().as_secs_f32() * 1000.0;
-    let cpu_ms = thread_cpu()
-        .zip(cpu)
+    let cpu_ms = cpu
+        .and_then(|start| Some((thread_cpu()?, start)))
         .map_or(ms, |(end, start)| (end - start).as_secs_f32() * 1000.0);
-    SPANS.with(|s| s.borrow_mut().push(Span { name, ms, cpu_ms }));
+    DEPTH.with(|d| d.set(depth));
+    SPANS.with(|s| {
+        s.borrow_mut().push(Span {
+            name,
+            ms,
+            cpu_ms,
+            depth,
+        })
+    });
     out
 }
 /// Consecutive steps of one function timed as spans: each [`Laps::lap`] records the time since
@@ -52,7 +88,7 @@ pub struct Laps(Option<(Instant, Option<Duration>)>);
 /// Start timing the steps of a function (see [`Laps`]).
 #[inline]
 pub fn laps() -> Laps {
-    Laps(enabled().then(|| (Instant::now(), thread_cpu())))
+    Laps(recording_here().then(|| (Instant::now(), cpu_if_enabled())))
 }
 impl Laps {
     /// Record the step that just ended under `name`, and start the next.
@@ -61,12 +97,21 @@ impl Laps {
         let Some((started, cpu)) = &mut self.0 else {
             return;
         };
-        let (now, now_cpu) = (Instant::now(), thread_cpu());
+        let now = Instant::now();
+        let now_cpu = cpu.and_then(|_| thread_cpu());
         let ms = (now - *started).as_secs_f32() * 1000.0;
         let cpu_ms = now_cpu
             .zip(*cpu)
             .map_or(ms, |(end, start)| (end - start).as_secs_f32() * 1000.0);
-        SPANS.with(|s| s.borrow_mut().push(Span { name, ms, cpu_ms }));
+        let depth = DEPTH.with(Cell::get);
+        SPANS.with(|s| {
+            s.borrow_mut().push(Span {
+                name,
+                ms,
+                cpu_ms,
+                depth,
+            })
+        });
         (*started, *cpu) = (now, now_cpu);
     }
 }
@@ -83,11 +128,62 @@ pub fn thread_cpu() -> Option<Duration> {
     horizon_threads::thread_cpu()
 }
 
+/// The frame's spans as they were recorded, each after the spans inside it; clears them.
+pub fn take_raw() -> Vec<Span> {
+    SPANS.with(|s| std::mem::take(&mut *s.borrow_mut()))
+}
 /// The frame's spans, summed by name, slowest first; clears them.
 pub fn take() -> Vec<Span> {
-    let spans = SPANS.with(|s| std::mem::take(&mut *s.borrow_mut()));
+    merge(&take_raw())
+}
+/// What a frame spent its time in, from its spans as recorded ([`take_raw`]): the slowest of
+/// the outermost spans (summed by name, as a frame can tick several times), then the slowest
+/// span inside it while that one took at least half of it, and so on. The path of names
+/// (`tick/tick_mobs`) and the last one's milliseconds; `None` without spans.
+pub fn culprit(raw: &[Span]) -> Option<(String, f32)> {
+    // The spans directly inside each one: recorded just before it, one level deeper.
+    let mut inside: Vec<Vec<usize>> = vec![Vec::new(); raw.len()];
+    let mut outer: Vec<usize> = Vec::new();
+    for (i, span) in raw.iter().enumerate() {
+        while let Some(&j) = outer.last()
+            && raw[j].depth > span.depth
+        {
+            outer.pop();
+            inside[i].push(j);
+        }
+        outer.push(i);
+    }
+    let slowest = |group: &[usize]| {
+        let mut sums: Vec<(&'static str, f32, Vec<usize>)> = Vec::new();
+        for &i in group {
+            match sums.iter_mut().find(|s| s.0 == raw[i].name) {
+                Some(sum) => {
+                    sum.1 += raw[i].ms;
+                    sum.2.push(i);
+                }
+                None => sums.push((raw[i].name, raw[i].ms, vec![i])),
+            }
+        }
+        sums.into_iter().max_by(|a, b| a.1.total_cmp(&b.1))
+    };
+    let (name, mut ms, mut at) = slowest(&outer)?;
+    let mut path = name.to_owned();
+    loop {
+        let next: Vec<usize> = at.iter().flat_map(|&i| inside[i].iter().copied()).collect();
+        match slowest(&next) {
+            Some((name, inner_ms, spans)) if inner_ms >= ms * 0.5 => {
+                path.push('/');
+                path.push_str(name);
+                (ms, at) = (inner_ms, spans);
+            }
+            _ => return Some((path, ms)),
+        }
+    }
+}
+/// Spans summed by name, slowest first.
+pub fn merge(spans: &[Span]) -> Vec<Span> {
     let mut sums: Vec<Span> = Vec::new();
-    for span in spans {
+    for &span in spans {
         match sums.iter_mut().find(|s| s.name == span.name) {
             Some(sum) => {
                 sum.ms += span.ms;
@@ -255,6 +351,30 @@ pub mod startup {
         }
     }
 
+    /// Whether a world's view is still filling (between [`arm`] and the
+    /// `world.view_full` mark).
+    #[inline]
+    pub fn filling() -> bool {
+        on() && FILLING.load(Ordering::Relaxed)
+    }
+
+    /// Values at this moment, as a counter track named `name` (Perfetto draws
+    /// each value as a line): what the view waits on while it fills.
+    pub fn counters(name: &'static str, values: &[(&'static str, usize)]) {
+        if !on() {
+            return;
+        }
+        let args: Vec<String> = values
+            .iter()
+            .map(|(k, v)| format!(r#""{k}":{v}"#))
+            .collect();
+        write(format_args!(
+            r#""ph":"C","name":"{name}","ts":{},"args":{{{}}}"#,
+            micros(Instant::now()),
+            args.join(",")
+        ));
+    }
+
     /// Called each frame in a world: marks `world.view_full` the first frame
     /// after [`arm`] where nothing waits to load, generate, light, mesh or
     /// upload and the resident columns cover perf_bench's share of the view
@@ -285,21 +405,25 @@ mod tests {
                     name: "tick",
                     ms: 2.0,
                     cpu_ms: 2.0,
+                    depth: 0,
                 },
                 Span {
                     name: "submit",
                     ms: 30.0,
                     cpu_ms: 0.2,
+                    depth: 0,
                 },
                 Span {
                     name: "tick",
                     ms: 3.0,
                     cpu_ms: 2.9,
+                    depth: 0,
                 },
                 Span {
                     name: "hud",
                     ms: 0.3,
                     cpu_ms: 0.3,
+                    depth: 0,
                 },
             ]);
         });
@@ -309,12 +433,73 @@ mod tests {
             Span {
                 name: "submit",
                 ms: 30.0,
-                cpu_ms: 0.2
+                cpu_ms: 0.2,
+                depth: 0,
             }
         );
         assert_eq!((spans[1].name, spans[1].ms), ("tick", 5.0));
         assert_eq!(super::describe(&spans), "submit 30.0/0.2, tick 5.0");
         assert!(super::take().is_empty());
+    }
+
+    /// A thread that records on its own keeps its spans with spans off, each with how many
+    /// spans it ran inside, after them.
+    #[test]
+    fn a_recording_thread_keeps_its_spans_and_their_nesting() {
+        std::thread::spawn(|| {
+            super::record_here(true);
+            super::time("tick", || {
+                super::time("tick_mobs", || ());
+                super::time("tick_items", || ());
+            });
+            super::time("renderer", || ());
+            let raw = super::take_raw();
+            let seen: Vec<_> = raw.iter().map(|s| (s.name, s.depth)).collect();
+            assert_eq!(
+                seen,
+                [
+                    ("tick_mobs", 1),
+                    ("tick_items", 1),
+                    ("tick", 0),
+                    ("renderer", 0)
+                ]
+            );
+        })
+        .join()
+        .unwrap();
+    }
+
+    /// A slow frame is put down to the slowest outer span, then to the span inside it that took
+    /// at least half of it; repeated spans (several ticks a frame) add up.
+    #[test]
+    fn a_frame_is_put_down_to_the_step_that_took_most_of_it() {
+        let span = |name, ms, depth| Span {
+            name,
+            ms,
+            cpu_ms: ms,
+            depth,
+        };
+        let frame = [
+            span("tick_mobs", 90.0, 1),
+            span("tick_items", 5.0, 1),
+            span("tick", 100.0, 0),
+            span("tick_mobs", 90.0, 1),
+            span("tick", 100.0, 0),
+            span("r_uploads", 120.0, 1),
+            span("renderer", 150.0, 0),
+        ];
+        assert_eq!(
+            super::culprit(&frame),
+            Some(("tick/tick_mobs".to_owned(), 180.0))
+        );
+        // Spread over many steps: the outer span alone.
+        let spread = [
+            span("tick_mobs", 40.0, 1),
+            span("tick_items", 40.0, 1),
+            span("tick", 300.0, 0),
+        ];
+        assert_eq!(super::culprit(&spread), Some(("tick".to_owned(), 300.0)));
+        assert_eq!(super::culprit(&[]), None);
     }
 
     /// Laps record the steps between them while spans are on, and nothing while off.

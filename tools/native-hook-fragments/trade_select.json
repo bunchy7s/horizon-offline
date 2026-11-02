@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "trade_select",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_trade_select",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "Player selected a villager trade (`native_trade_select`).",
+  "doc_summary": "A player selected a trade: `native_trade_select(player, name, villager, index)` is heard after the trading menu updates; `villager` is the entity id when known. The player's state is not swapped in. Bundles need \"hooks\": @API:trade_select@."
+}

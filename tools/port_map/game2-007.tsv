@@ -16,14 +16,14 @@ AbstractBoat.isUnderwater	inline	crates/horizon-client/src/game/boats.rs::Game::
 AbstractBoat.floatBoat	inline	crates/horizon-client/src/game/boats.rs::Game::tick_boat	buoyancy, friction and the first-water-touch snap are in tick_boat
 AbstractBoat.controlBoat	inline	crates/horizon-client/src/game/boats.rs::Game::tick_boat	steering, acceleration and paddle flags in the controlled branch of tick_boat
 AbstractBoat.getDismountLocationForPassenger	port	crates/horizon-client/src/game/boats.rs::Game::boat_dismount_target	gap: minor: no dismount pose check; the floor and water tests are there
-AbstractBoat.clampRotation	inline	crates/horizon-client/src/game/boats.rs::Game::tick_riding	the rider's yaw is clamped to 105 degrees off the boat; mobs get the head clamp in boat_passengers.rs seat_boat_mobs
+AbstractBoat.clampRotation	inline	crates/horizon-client/src/game/remote_vehicles.rs::Game::remote_ride	the rider's yaw is clamped to 105 degrees off the boat; mobs get the head clamp in boat_passengers.rs seat_boat_mobs
 AbstractBoat.calculatePassengerBodyYRot	inline	crates/horizon-client/src/game/boat_passengers.rs::Game::seat_boat_mobs	animal turned 90 or 270 degrees when the boat is full
 AbstractBoat.onPassengerTurned	inline	crates/horizon-client/src/game/boats.rs::Game::tick_riding	the rider's turn is clamped each tick
 AbstractBoat.remove	inline	crates/horizon-client/src/game/boats.rs::Game::hurt_boat	destroyed boats eject mobs and drop the boat; gap: minor: no leash drop, since boats cannot be leashed here
 AbstractBoat.checkFallDamage	missing		minor: boats keep no fall distance; boats take no fall damage either way
 AbstractBoat.getPaddleState	port	crates/horizon-client/src/game/boats.rs::Boat::rowing_time	paddle flag, set only while a rider drives
-AbstractBoat.getControllingPassenger	inline	crates/horizon-client/src/game/boats.rs::Game::tick_riding	the riding player is the controller; mobs never steer
-AbstractBoat.setInput	inline	crates/horizon-client/src/game/boats.rs::Game::tick_riding	input flags are copied from the keys each tick
+AbstractBoat.getControllingPassenger	inline	crates/horizon-client/src/game/boat_passengers.rs::Game::boat_contacts	a riding player is the controller; mobs never steer
+AbstractBoat.setInput	inline	crates/horizon-client/src/game/lan_vehicles.rs::Game::guest_paddle_boat	the paddle packet's flags are the controller's input
 AbstractBoat.isUnderWater	port	crates/horizon-client/src/game/boats.rs::Boat::under_water	
 AbstractBoat.modifyPassengerFluidInteractionBox	inline	crates/horizon-client/src/motion/fluids.rs::MotionWorld::interaction_box	the ridden boat (RiddenBoat) is set on clients in remote.rs and for served players in lan_actions.rs; the passenger box keeps only the part above the boat's top
 AbstractChestBoat.remove	inline	crates/horizon-client/src/game/boats.rs::Game::hurt_boat	a destroyed chest boat spills its 27 slots
@@ -39,7 +39,7 @@ AbstractMinecart.animateHurt	port	crates/horizon-client/src/game/minecarts.rs::G
 AbstractMinecart.getCurrentBlockPosOrRailBelow	port	crates/horizon-client/src/game/minecarts.rs::Game::rail_block	the rail one block below counts; the experimental y offset is not used
 AbstractMinecart.comeOffTrack	port	crates/horizon-client/src/game/minecarts.rs::Game::come_off_track	clamps speed, halves it on the ground, moves and drags in the air
 AbstractMinecart.move	port	crates/horizon-client/src/game/minecarts.rs::Game::move_cart	collision movement only; gap: minor: no push or pickup during the move, which push_carts and the cart tick do instead
-AbstractMinecart.applyEffectsFromBlocks	inline	crates/horizon-client/src/game/minecarts.rs::Game::cart_lava_tick	lava is applied there; gap: minor: other block effects on a cart (cobweb, berry bush, bubble column) are not applied
+AbstractMinecart.applyEffectsFromBlocks	inline	crates/horizon-client/src/game/minecarts.rs::Game::cart_lava_tick	lava is applied there; gap: minor: other block effects on a cart (cobweb, berry bush) are not applied; under minecart_improvements, NewMinecartBehavior.moveAlongTrack applies block effects twice per step, and Horizon keeps the old order
 AbstractMinecart.getRedstoneDirection	skip:other		used only by the experimental NewMinecartBehavior; Horizon runs the old track behaviour
 AbstractMinecart.applyNaturalSlowdown	port	crates/horizon-client/src/game/minecarts.rs::Game::natural_slowdown	slowdown per ride state, the furnace push and water
 AbstractMinecart.readAdditionalSaveData	port	crates/horizon-client/src/game/minecarts.rs::Minecart::from_nbt	flipped and HasTicked read back; gap: minor: a custom display block and offset are not kept

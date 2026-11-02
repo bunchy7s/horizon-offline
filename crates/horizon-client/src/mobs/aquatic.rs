@@ -2,7 +2,7 @@
 //! tropical fish and pufferfish (`AbstractFish`, puffing), and dolphins
 //! (breathing, smooth swimming).
 use super::{
-    Mob, MobEvent, MobWorld, Species,
+    Damage, Mob, MobEvent, MobWorld, Species, Who,
     anim::{Poses, State},
     control::MoveKind,
     goals::{
@@ -333,6 +333,9 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                     m.sound("entity.puffer_fish.sting", events);
                 }
             }
+            if m.species() == S::Pufferfish {
+                sting_touching_mobs(m, w, events);
+            }
         }
         S::Dolphin => {
             // Dolphin.tick: moisture out of water, hop on land.
@@ -364,6 +367,65 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         _ => {}
     }
 }
+
+/// `EntityTypeTags.NOT_SCARY_FOR_PUFFERFISH`: the mobs a pufferfish leaves
+/// alone, its own kind and the water mobs it shares a tank with.
+pub fn not_scary_for_pufferfish(s: Species) -> bool {
+    matches!(
+        s,
+        Species::Cod
+            | Species::Salmon
+            | Species::TropicalFish
+            | Species::Pufferfish
+            | Species::Squid
+            | Species::GlowSquid
+            | Species::Dolphin
+            | Species::Turtle
+            | Species::Guardian
+            | Species::ElderGuardian
+            | Species::Tadpole
+            | Species::Nautilus
+            | Species::ZombieNautilus
+            | Species::SulfurCube
+    )
+}
+
+/// `Pufferfish.aiStep` after `AbstractFish.aiStep`: a puffed pufferfish stings
+/// every mob that touches it, not only the player. The query is `Mob.class`
+/// in its own box inflated by 0.3, filtered by `TARGETING_CONDITIONS` (alive
+/// and not `#not_scary_for_pufferfish`; invisibility and line of sight are
+/// not tested), and each one takes `Pufferfish.touch`: `doTeamsAllowDamage`,
+/// then a `mobAttack` hit for `getPuffState() + 1`. The poison and the sting
+/// sound follow a hit that landed, which only the game layer knows.
+fn sting_touching_mobs(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+    if !m.alive() || m.extra.size <= 0 {
+        return;
+    }
+    let area = m.bounds().inflate(Vec3::new(0.3, 0.3, 0.3));
+    let own = w.teams.of(Who::Mob(m.id));
+    let stung: Vec<u32> = w
+        .others_near(area)
+        .filter(|o| {
+            o.id != m.id
+                && o.alive
+                && !not_scary_for_pufferfish(o.species)
+                && o.bounds.intersects(area)
+                && crate::scoreboard::teams_allow_damage(own, w.teams.of(Who::Mob(o.id)))
+        })
+        .map(|o| o.id)
+        .collect();
+    let from = [m.position.x, m.position.y, m.position.z];
+    for target in stung {
+        events.push(MobEvent::PufferfishSting {
+            mob: m.id,
+            target,
+            amount: 1.0 + m.extra.size as f32,
+            source: Damage::mob(m.id, from),
+            poison_ticks: 60 * m.extra.size,
+        });
+    }
+}
+
 /// Squid.aiStep: tentacle cycle, propulsion and body rotation.
 fn squid_ai_step(m: &mut Mob) {
     squid_step(m, false);
@@ -881,23 +943,7 @@ impl Goal for PufferfishPuff {
         let mob = cx.w.others_near(area).any(|s| {
             s.id != m.id
                 && s.alive
-                && !matches!(
-                    s.species,
-                    Species::Cod
-                        | Species::Salmon
-                        | Species::TropicalFish
-                        | Species::Pufferfish
-                        | Species::Squid
-                        | Species::GlowSquid
-                        | Species::Dolphin
-                        | Species::Turtle
-                        | Species::Guardian
-                        | Species::ElderGuardian
-                        | Species::Tadpole
-                        | Species::Nautilus
-                        | Species::ZombieNautilus
-                        | Species::SulfurCube
-                )
+                && !not_scary_for_pufferfish(s.species)
                 && area.intersects(s.bounds)
         });
         player || mob
@@ -1097,5 +1143,87 @@ mod school_tests {
         let mut m = cod(1);
         let start = FollowFlockLeader::next_start_tick(&mut m);
         assert!((100..=110).contains(&start));
+    }
+}
+
+#[cfg(test)]
+mod pufferfish_sting_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+    use std::sync::Arc;
+
+    /// What a pufferfish puffed to `puff` stings in one `ai_step`, as
+    /// `(target, damage)`, with `others` standing `x` blocks east of it.
+    fn stings(puff: i32, others: &[(&str, f64)]) -> Option<Vec<(u32, f32)>> {
+        let mut built = None;
+        with_test_world(&[], |_, types| {
+            let mob = |id: u32, name: &str, at: Vec3| {
+                Mob::new(id, Arc::new(types.types[name].clone()), at, 0.0)
+            };
+            let mut fish = mob(1, "minecraft:pufferfish", Vec3::new(0.5, 64.0, 0.5));
+            fish.extra.size = puff;
+            let seen: Vec<_> = others
+                .iter()
+                .enumerate()
+                .map(|(i, (name, x))| {
+                    mob(i as u32 + 2, name, Vec3::new(0.5 + x, 64.0, 0.5)).seen(None)
+                })
+                .collect();
+            built = Some((fish, seen));
+        });
+        let (mut fish, seen) = built?;
+        let mut events = Vec::new();
+        with_test_world(&seen, |w, _| ai_step(&mut fish, w, &mut events));
+        Some(
+            events
+                .iter()
+                .filter_map(|e| match e {
+                    MobEvent::PufferfishSting {
+                        mob: 1,
+                        target,
+                        amount,
+                        source,
+                        poison_ticks,
+                    } => {
+                        assert_eq!(source.attacker, Some(Who::Mob(1)));
+                        assert_eq!(
+                            *poison_ticks,
+                            60 * puff,
+                            "Pufferfish.touch's POISON lasts 60 * getPuffState()"
+                        );
+                        Some((*target, *amount))
+                    }
+                    _ => None,
+                })
+                .collect(),
+        )
+    }
+
+    /// `Pufferfish.aiStep`: a puffed pufferfish stings every mob whose box
+    /// meets its own (inflated by 0.3), not only the player, for
+    /// `getPuffState() + 1`.
+    #[test]
+    fn a_puffed_pufferfish_stings_the_mobs_that_touch_it() {
+        let Some(half) = stings(1, &[("minecraft:zombie", 0.5)]) else {
+            return;
+        };
+        assert_eq!(half, vec![(2, 2.0)], "puff state 1 stings for 1 + 1");
+        let full = stings(2, &[("minecraft:zombie", 0.5)]).unwrap();
+        assert_eq!(full, vec![(2, 3.0)], "puff state 2 stings for 1 + 2");
+        assert!(
+            stings(0, &[("minecraft:zombie", 0.5)]).unwrap().is_empty(),
+            "a deflated pufferfish stings nobody"
+        );
+        assert!(
+            stings(2, &[("minecraft:zombie", 1.5)]).unwrap().is_empty(),
+            "a zombie a block away never touches it"
+        );
+        // `#not_scary_for_pufferfish`: its tank mates are left alone.
+        assert!(
+            stings(2, &[("minecraft:cod", 0.4), ("minecraft:squid", 0.3)])
+                .unwrap()
+                .is_empty(),
+            "a cod and a squid are not scary"
+        );
     }
 }

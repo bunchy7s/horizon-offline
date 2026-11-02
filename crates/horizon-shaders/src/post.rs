@@ -23,6 +23,10 @@ use crate::{GbuffersInputs, Macros, Pack, Preprocessed, Program, Properties, Tar
 /// Which group of 2.1 a program belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Group {
+    /// Compute initialization at load and after target resize.
+    Setup,
+    /// Composite-style work before shadow rendering.
+    Begin,
     Prepare,
     Deferred,
     Composite,
@@ -191,7 +195,9 @@ pub const CELESTIAL_BLEND: Blend = [
     Factor::OneMinusSrcAlpha,
 ];
 
-const GROUPS: [(Group, &str); 4] = [
+const GROUPS: [(Group, &str); 6] = [
+    (Group::Setup, "setup"),
+    (Group::Begin, "begin"),
     (Group::Prepare, "prepare"),
     (Group::Deferred, "deferred"),
     (Group::Composite, "composite"),
@@ -431,6 +437,57 @@ pub struct Post {
     pub config: Config,
     /// Programs skipped and why, as `program: message` or `file:line: message`.
     pub notes: Vec<String>,
+}
+
+impl Post {
+    /// Every program that loaded: the passes', what draws the game's geometry, the shadow
+    /// pass's and its composites.
+    fn every_program(&self) -> impl Iterator<Item = &PostProgram> {
+        let draws = [
+            &self.terrain,
+            &self.water,
+            &self.sky,
+            &self.sky_textured,
+            &self.entities,
+            &self.block,
+            &self.entities_translucent,
+            &self.particles,
+            &self.damaged_block,
+            &self.clouds,
+            &self.weather,
+            &self.hand,
+            &self.shadow,
+            &self.shadow_water,
+            &self.shadow_entities,
+            &self.shadow_block,
+        ];
+        self.programs
+            .iter()
+            .chain(draws.into_iter().flatten())
+            .chain(&self.shadow_comp)
+    }
+
+    /// The fewest bytes each storage buffer (`bufferObject.<n>`, set 4) needs for every stage
+    /// that binds it: its block's size as the stage lays it out (std430). OpenGL binds a smaller buffer and leaves what lies
+    /// past its end undefined; wgpu refuses to draw or dispatch with one.
+    pub fn buffer_minimums(&self) -> std::collections::BTreeMap<u32, u64> {
+        let mut sizes = std::collections::BTreeMap::new();
+        for p in self.every_program() {
+            let stages = p.program.iter().flat_map(|s| [&s.vertex, &s.fragment]);
+            for module in stages.chain(p.compute.iter().map(|(_, c)| &c.module)) {
+                for (_, var) in module.global_variables.iter() {
+                    if let (naga::AddressSpace::Storage { .. }, Some(b)) = (var.space, &var.binding)
+                        && b.group == 4
+                    {
+                        let size = u64::from(module.types[var.ty].inner.size(module.to_ctx()));
+                        let least = sizes.entry(b.binding).or_insert(0);
+                        *least = size.max(*least);
+                    }
+                }
+            }
+        }
+        sizes
+    }
 }
 
 /// The folder a dimension reads its programs from: `world<id>` when the pack has it, else the
@@ -861,7 +918,7 @@ impl Loader<'_> {
             f => format!("{f}/{name}.{ext}"),
         };
         let (vsh, fsh) = (path("vsh"), path("fsh"));
-        if !self.pack.exists(&fsh) || !self.pack.exists(&vsh) {
+        if group == Group::Setup || !self.pack.exists(&fsh) || !self.pack.exists(&vsh) {
             let on = enabled(
                 self.properties,
                 self.folder,
@@ -872,9 +929,14 @@ impl Loader<'_> {
             // A program of compute stages only (`.csh` without `.vsh` and `.fsh`).
             let composite = matches!(
                 group,
-                Group::Prepare | Group::Deferred | Group::Composite | Group::ShadowComp
+                Group::Setup
+                    | Group::Begin
+                    | Group::Prepare
+                    | Group::Deferred
+                    | Group::Composite
+                    | Group::ShadowComp
             );
-            if !on || !composite || !self.pack.exists(&path("csh")) {
+            if !on || !composite {
                 return None;
             }
             let compute = self.compute(&name);
@@ -957,7 +1019,9 @@ impl Loader<'_> {
             }
         };
         let compute = match group {
-            Group::Prepare
+            Group::Setup
+            | Group::Begin
+            | Group::Prepare
             | Group::Deferred
             | Group::Composite
             | Group::Final
@@ -1328,6 +1392,41 @@ mod tests {
         );
     }
 
+    /// A storage buffer declared smaller than the block a stage binds it as: the block's size
+    /// as the stage lays it out is what the buffer needs (std430 rounds a block to its
+    /// largest member's alignment), the most of every stage and program that binds it.
+    #[test]
+    fn storage_buffers_need_their_blocks_size() {
+        let compute = "#version 430\nlayout(local_size_x = 1) in;\n\
+                       layout(std430, binding = 0) buffer Sums { vec4 a; vec4 b; float c; } sums;\n\
+                       layout(std430, binding = 1) buffer Cells { uint count; uvec4 cells[3]; } grid;\n\
+                       void main() {\n    sums.c = sums.a.x + float(grid.count + grid.cells[0].x);\n}\n";
+        let fsh = "#version 430\nlayout(std430, binding = 0) buffer Sums { vec4 a; } sums;\n\
+                   uniform sampler2D colortex0;\nvarying vec2 uv;\n\
+                   void main() {\n/* DRAWBUFFERS:3 */\n\
+                   gl_FragData[0] = texture2D(colortex0, uv) + sums.a;\n}\n";
+        let pack = Pack::from_zip_bytes(
+            "t",
+            zip(&[
+                ("shaders/composite.vsh", VSH),
+                ("shaders/composite.fsh", fsh),
+                ("shaders/composite.csh", compute),
+            ]),
+        )
+        .unwrap();
+        let macros = Macros::standard();
+        let properties = Properties::parse("bufferObject.0 = 40\nbufferObject.1 = 4\n", &macros);
+        let post = load_post(&pack, "", &properties, &macros, &GameInputs::default());
+        assert!(post.notes.is_empty(), "{:?}", post.notes);
+        assert_eq!(post.programs[0].compute.len(), 1);
+        // `Sums`: 36 bytes rounded to vec4's 16; `Cells`: a uint padded to the array's 16,
+        // then three elements.
+        assert_eq!(
+            post.buffer_minimums(),
+            std::collections::BTreeMap::from([(0, 48), (1, 64)])
+        );
+    }
+
     #[test]
     fn buffer_sizes_are_bounded() {
         let relative = BufferSize::parse("0.5 0.25").unwrap();
@@ -1677,6 +1776,36 @@ mod tests {
         assert_eq!(
             post.config.buffers[2].format,
             crate::Format::parse("RGBA16F").unwrap()
+        );
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    #[test]
+    fn setup_and_begin_compute_load_before_prepare_even_with_only_a_suffix() {
+        let compute = "#version 430\nlayout(local_size_x=1) in; void main(){}";
+        let zip = crate::pack::tests::zip(&[
+            ("shaders/setup.csh", compute),
+            ("shaders/begin_a.csh", compute),
+            ("shaders/prepare.csh", compute),
+        ]);
+        let pack = Pack::from_zip_bytes("lifecycle.zip", zip).unwrap();
+        let post = load_post(
+            &pack,
+            "",
+            &Properties::default(),
+            &Macros::standard(),
+            &GameInputs::default(),
+        );
+        assert!(post.notes.is_empty(), "{:?}", post.notes);
+        assert_eq!(
+            post.programs
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>(),
+            ["setup", "begin", "prepare"]
         );
     }
 }

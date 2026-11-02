@@ -1302,10 +1302,7 @@ fn nibbles(light: &Light, sky: bool) -> Vec<u8> {
     let mut out = vec![0u8; 2048];
     for (i, byte) in out.iter_mut().enumerate() {
         let value = |j: usize| {
-            let v = match light {
-                Light::Uniform(v) => *v,
-                Light::Full(a) => a[j],
-            };
+            let v = light.get(j);
             if sky { v >> 4 } else { v & 15 }
         };
         *byte = value(2 * i) | value(2 * i + 1) << 4;
@@ -1331,10 +1328,10 @@ pub fn encode_with(
     // Sky layers below the highest section with light other than 15 are
     // written (even all-zero ones): vanilla derives missing layers from the
     // layer above them.
-    let top_sky = chunk.sections.iter().rposition(|s| match &s.light {
-        Light::Uniform(v) => v >> 4 != 15,
-        Light::Full(a) => a.iter().any(|v| v >> 4 != 15),
-    });
+    let top_sky = chunk
+        .sections
+        .iter()
+        .rposition(|s| s.light.any_not(0xF0, 0xF0));
     for (si, section) in chunk.sections.iter().enumerate() {
         let y = (chunk.min_y() >> 4) + si as i32;
         if !shape.has_section(y) {
@@ -1396,10 +1393,7 @@ pub fn encode_with(
             ("biomes", Tag::compound(biome_tag)),
         ];
         if chunk.lit {
-            let block_lit = match &section.light {
-                Light::Uniform(v) => v & 15 != 0,
-                Light::Full(a) => a.iter().any(|v| v & 15 != 0),
-            };
+            let block_lit = section.light.any(15);
             if block_lit {
                 entries.push(("BlockLight", Tag::ByteArray(nibbles(&section.light, false))));
             }
@@ -1604,6 +1598,19 @@ pub fn decode_with(
         return None;
     }
     decode_column(root, registry, biomes, tables, layout)
+}
+/// A full chunk with the light saved with it (`isLightOn`), as far terrain
+/// reads another client's cache of a server; `None` without its light.
+pub fn decode_lit(
+    root: &NamedTag,
+    registry: &BlockRegistry,
+    biomes: &Biomes,
+    layout: ColumnLayout,
+    sky_light: bool,
+) -> Option<Chunk> {
+    let mut chunk = decode_with(root, registry, biomes, None, layout)?;
+    load_light(&root.tag, &mut chunk, sky_light);
+    chunk.light_loaded.then_some(chunk)
 }
 /// `decode_with` whatever the chunk's status, into a chunk of `layout`
 /// (sections outside it are left out).
@@ -3760,6 +3767,13 @@ impl Level {
                 })
                 .collect();
         }
+        if let Some(packs) = data.get("DataPacks") {
+            let ids = |key| match packs.get(key) {
+                Some(Tag::List(ids)) => ids.iter().filter_map(|id| text(Some(id))).collect(),
+                _ => Vec::new(),
+            };
+            level.data_packs = Some((ids("Enabled"), ids("Disabled")));
+        }
         let mut rules: BTreeMap<String, i32> = GAME_RULES
             .iter()
             .map(|(k, v)| ((*k).to_owned(), *v))
@@ -3773,6 +3787,26 @@ impl Level {
                     rules.insert(name, v as i32);
                 }
             }
+        }
+        // GameRules(enabledFeatures, map) removes disabled experimental rules
+        // and supplies their defaults when enabled but absent from saved data.
+        let minecart_rule = &crate::gamerules::MAX_MINECART_SPEED;
+        if level
+            .enabled_features
+            .iter()
+            .any(|f| f == crate::gamerules::MINECART_IMPROVEMENTS)
+        {
+            let crate::gamerules::Value::Int(default) = minecart_rule.default else {
+                unreachable!()
+            };
+            let value = rules
+                .entry(minecart_rule.name.to_owned())
+                .or_insert(default);
+            if !(minecart_rule.min..=minecart_rule.max).contains(value) {
+                *value = default;
+            }
+        } else {
+            rules.remove(minecart_rule.name);
         }
         level.game_rules = rules;
         // Seed: world_gen_settings.dat (26.3) or Data.WorldGenSettings.
@@ -4419,6 +4453,27 @@ impl Level {
                     Tag::Byte(i8::from(value != 0))
                 };
                 put(&mut rules, &format!("minecraft:{name}"), tag);
+            }
+            if self
+                .enabled_features
+                .iter()
+                .any(|f| f == crate::gamerules::MINECART_IMPROVEMENTS)
+            {
+                let rule = &crate::gamerules::MAX_MINECART_SPEED;
+                let crate::gamerules::Value::Int(default) = rule.default else {
+                    unreachable!()
+                };
+                let value = self
+                    .game_rules
+                    .get(rule.name)
+                    .copied()
+                    .filter(|v| (rule.min..=rule.max).contains(v))
+                    .unwrap_or(default);
+                put(
+                    &mut rules,
+                    &format!("minecraft:{}", rule.name),
+                    Tag::Int(value),
+                );
             }
             write_saved_data(dir, "game_rules", rules)?;
         }
@@ -7444,5 +7499,179 @@ mod tests {
         // 1.18's height fix: an Overworld chunk older than the new heights blends with them.
         assert!(chunk.tag.get("blending_data").is_some());
         let _ = std::fs::remove_dir_all(&world);
+    }
+
+    /// A chunk as Bobby leaves it on disk, its palettes in both shapes: a
+    /// list of names, and compounds where a name without properties is
+    /// wrapped as `{"": name}` (a mixed list), read back summarized by far
+    /// terrain and kept in its own folder.
+    #[test]
+    fn far_terrain_reads_and_keeps_bobby_chunks() {
+        use crate::server_terrain::{Bobby, DecodeChunk, ServerTerrain};
+        let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let assets = crate::assets::Assets::load(&root).expect("assets");
+        let biomes = Arc::new(Biomes::load(&root).expect("biomes"));
+        let facts = crate::blocks::BlockFacts::load(&root, assets.registry).expect("facts");
+        let dir = std::env::temp_dir().join(format!("horizon-bobby-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let (own, bobby) = (dir.join("own"), dir.join("bobby"));
+        fs::create_dir_all(&bobby).unwrap();
+        let name = |s: &str| Tag::String(s.into());
+        let biome = Tag::compound([("palette", Tag::List(vec![name("minecraft:plains")]))]);
+        let section = |y: i8, states: Tag| {
+            Tag::compound([
+                ("Y", Tag::Byte(y)),
+                ("block_states", states),
+                ("biomes", biome.clone()),
+                ("SkyLight", Tag::ByteArray(vec![0xff; 2048])),
+            ])
+        };
+        // y 48..64 stone; y 64 an upright oak log, air above.
+        let stone = Tag::compound([("palette", Tag::List(vec![name("minecraft:stone")]))]);
+        let log = Tag::compound([
+            ("id", name("minecraft:oak_log")),
+            ("properties", Tag::compound([("axis", name("y"))])),
+        ]);
+        let mut data = vec![0i64; 256];
+        data[..16].fill(0x1111_1111_1111_1111);
+        let logs = Tag::compound([
+            ("palette", Tag::List(vec![name("minecraft:air"), log])),
+            ("data", Tag::LongArray(data)),
+        ]);
+        let chunk = |version: i32| NamedTag {
+            name: "".into(),
+            tag: Tag::compound([
+                ("isLightOn", Tag::Byte(1)),
+                ("Status", name("full")),
+                ("zPos", Tag::Int(5)),
+                ("block_entities", Tag::List(Vec::new())),
+                ("yPos", Tag::Int(-4)),
+                ("DataVersion", Tag::Int(version)),
+                ("xPos", Tag::Int(-2)),
+                (
+                    "sections",
+                    Tag::List(vec![section(3, stone.clone()), section(4, logs.clone())]),
+                ),
+                ("age", Tag::Long(1_793_576_311_368)),
+            ]),
+        };
+        let region = bobby.join("r.-1.0.mca");
+        let mut file = RegionFile::open_writable(&region, true).unwrap();
+        let record = ChunkRecord::from_nbt(
+            &chunk(DATA_VERSION),
+            Compression::Zlib,
+            0,
+            Limits::default(),
+        );
+        file.write(ChunkPos::new(-2, 5), &record.unwrap()).unwrap();
+        let record = ChunkRecord::from_nbt(
+            &chunk(DATA_VERSION - 1),
+            Compression::Zlib,
+            0,
+            Limits::default(),
+        );
+        file.write(ChunkPos::new(-1, 5), &record.unwrap()).unwrap();
+        drop(file);
+        let before = fs::read(&region).unwrap();
+        let registry = assets.registry;
+        let decode: DecodeChunk =
+            Box::new(move |root| decode_lit(root, registry, &biomes, ColumnLayout::VANILLA, true));
+        let terrain =
+            ServerTerrain::with_bobby(own.clone(), None, Some(Bobby::new(bobby, decode, &facts)));
+        let mut upright = registry
+            .state(registry.default_state("minecraft:oak_log").unwrap())
+            .unwrap()
+            .clone();
+        upright.properties.insert("axis".into(), "y".into());
+        let upright = registry.id(&upright).unwrap();
+        let stone = registry.default_state("minecraft:stone").unwrap();
+        let columns = terrain.chunk(-2, 5).expect("Bobby's chunk");
+        for column in columns.iter() {
+            let surface = column.surface.expect("a surface");
+            assert_eq!((surface.height, surface.state), (65, upright));
+            assert!(
+                column
+                    .spans
+                    .as_slice()
+                    .iter()
+                    .any(|span| span.state == stone)
+            );
+        }
+        // Another game version's chunk is none.
+        assert_eq!(terrain.chunk(-1, 5), None);
+        drop(terrain);
+        assert_eq!(
+            fs::read(&region).unwrap(),
+            before,
+            "Bobby's folder is only read"
+        );
+        assert_eq!(ServerTerrain::new(own, None).chunk(-2, 5), Some(columns));
+        let _ = fs::remove_dir_all(&dir);
+    }
+    /// A cache Bobby really wrote (`HORIZON_TEST_BOBBY`, its `.bobby`: the
+    /// fork's bobby-observe run, three local servers): found as the client
+    /// would find it, and every chunk of its Overworld folders decodes.
+    #[test]
+    fn far_terrain_reads_a_real_bobby_cache() {
+        use crate::server_terrain::{Bobby, DecodeChunk, ServerTerrain, bobby_level_dir};
+        let (Some(resources), Some(cache)) = (
+            std::env::var_os("HORIZON_TEST_RESOURCES"),
+            std::env::var_os("HORIZON_TEST_BOBBY"),
+        ) else {
+            return;
+        };
+        let resources = PathBuf::from(resources);
+        let cache = PathBuf::from(cache);
+        let assets = crate::assets::Assets::load(&resources).expect("assets");
+        let biomes = Arc::new(Biomes::load(&resources).expect("biomes"));
+        let facts = crate::blocks::BlockFacts::load(&resources, assets.registry).expect("facts");
+        let registry = assets.registry;
+        let levels = [
+            ("127.0.0.1", -9030034075591913594),
+            ("127.0.0.1", 4696776658964135993),
+            ("localhost:25566", -7181178862026813658),
+        ];
+        for (address, seed) in levels {
+            let dir = bobby_level_dir(&cache, address, seed, "minecraft:overworld")
+                .unwrap_or_else(|| panic!("{address} {seed}: no folder"));
+            let mut chunks = Vec::new();
+            for entry in fs::read_dir(&dir).unwrap().flatten() {
+                if entry.path().extension().is_some_and(|e| e == "mca") {
+                    let file = RegionFile::open(entry.path()).unwrap();
+                    chunks.extend(file.chunks().map(|(pos, _)| pos));
+                }
+            }
+            assert!(
+                chunks.len() > 100,
+                "{address} {seed}: {} chunks",
+                chunks.len()
+            );
+            let own = std::env::temp_dir()
+                .join(format!("horizon-real-bobby-{seed}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&own);
+            let biomes = biomes.clone();
+            let decode: DecodeChunk = Box::new(move |root| {
+                decode_lit(root, registry, &biomes, ColumnLayout::VANILLA, true)
+            });
+            let terrain =
+                ServerTerrain::with_bobby(own.clone(), None, Some(Bobby::new(dir, decode, &facts)));
+            let read = chunks
+                .iter()
+                .filter(|pos| {
+                    terrain
+                        .chunk(pos.x, pos.z)
+                        .is_some_and(|columns| columns.iter().all(|c| c.surface.is_some()))
+                })
+                .count();
+            assert_eq!(
+                read,
+                chunks.len(),
+                "{address} {seed}: chunks read with a surface"
+            );
+            let _ = fs::remove_dir_all(&own);
+        }
     }
 }
