@@ -37,6 +37,8 @@ pub(super) struct ThrownTrident {
     pub(super) no_physics: bool,
     returning: u32,
     creative_only: bool,
+    /// `Entity.isNoGravity`: `AbstractArrow.applyGravity` then skips the pull.
+    pub(super) no_gravity: bool,
     /// The entity id a server sent as its owner (the one Loyalty returns it to).
     pub(super) owner: u32,
     /// The guest that threw it (`Projectile.getOwner`); `None` for the host.
@@ -66,6 +68,7 @@ impl ThrownTrident {
         t.shake = n.shake;
         t.dealt_damage = n.dealt_damage;
         t.creative_only = n.creative_only;
+        t.no_gravity = n.no_gravity;
         t
     }
     /// `AbstractArrow.addAdditionalSaveData` + `DealtDamage`.
@@ -85,6 +88,7 @@ impl ThrownTrident {
                 shake: self.shake,
                 dealt_damage: self.dealt_damage,
                 creative_only: self.creative_only,
+                no_gravity: self.no_gravity,
                 item: &self.stack,
             },
             uuid,
@@ -109,6 +113,7 @@ impl ThrownTrident {
             no_physics: false,
             returning: 0,
             creative_only: false,
+            no_gravity: false,
             owner: 0,
             guest: None,
         }
@@ -175,7 +180,7 @@ impl ThrownTrident {
         self.position = to;
         // A trident's water inertia (0.99) equals the air drag.
         self.velocity = self.velocity.scale(0.99);
-        if !self.no_physics {
+        if !self.no_physics && !self.no_gravity {
             self.velocity.y -= 0.05;
         }
     }
@@ -426,6 +431,7 @@ impl Game<'_> {
             no_physics: false,
             returning: 0,
             creative_only: self.creative,
+            no_gravity: false,
             owner: 0,
             guest: self.lan_acting,
         });
@@ -733,9 +739,10 @@ impl Game<'_> {
                 if !t.in_ground {
                     // A trident's water inertia (0.99) equals the air drag; gravity 0.05.
                     let drag = 0.99;
+                    let gravity = if t.no_gravity { 0.0 } else { 0.05 };
                     t.velocity = Vec3::new(
                         t.velocity.x * drag,
-                        t.velocity.y * drag - 0.05,
+                        t.velocity.y * drag - gravity,
                         t.velocity.z * drag,
                     );
                     let h = (t.velocity.x * t.velocity.x + t.velocity.z * t.velocity.z).sqrt();

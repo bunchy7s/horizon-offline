@@ -719,6 +719,9 @@ impl ChunkGenerator for VanillaTerrain {
     fn idle(&self, worker: &mut GeneratorWorker) {
         worker.release();
     }
+    fn all_idle(&self) {
+        self.generator.release_caches();
+    }
     fn lod_surface(
         &self,
         worker: &mut GeneratorWorker,
@@ -854,6 +857,21 @@ impl ChunkGenerator for VanillaTerrain {
         match proto.downcast_ref::<VanillaProto>() {
             Some(VanillaProto::Ready(chunk)) => Some(self.block_column(chunk)),
             _ => None,
+        }
+    }
+    fn cache_census(&self) -> Vec<(&'static str, usize, Option<usize>)> {
+        let c = self.generator.cache_census();
+        vec![
+            ("biome_chunks", c.biome_chunks, Some(c.biome_bytes)),
+            ("carver_biomes", c.carver_entries, None),
+            ("start_chunks", c.start_chunks, None),
+            ("start_lists", c.start_lists, None),
+        ]
+    }
+    fn proto_heap_bytes(&self, proto: &Proto) -> ([usize; 6], [usize; 16]) {
+        match proto.downcast_ref::<VanillaProto>() {
+            Some(VanillaProto::Ready(chunk)) => (chunk.heap_bytes(), chunk.terrain.storage_bits()),
+            _ => ([0; 6], [0; 16]),
         }
     }
     fn non_air_sections(&self, proto: &Proto) -> Option<crate::section_mask::SectionMask> {
