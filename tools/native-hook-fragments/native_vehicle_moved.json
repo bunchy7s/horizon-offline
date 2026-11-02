@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "vehicle_moved",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_vehicle_moved",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a boat or minecart a server player rides having moved (`native_vehicle_moved`).",
+  "doc_summary": "a boat or minecart moving: `native_vehicle_moved(player, kind, from, to)` is heard once a tick for each boat or minecart that carries a server player (and for one a server player left, for ten seconds after it stood still), with the vehicle's type and its position before and after (`VehicleMoveEvent`), on a server, with the rider's state swapped in. `player` is the rider's UUID, none for a vehicle that carries nobody now. It only hears. Bundles that use it need `\"hooks\": @API:native_vehicle_moved@`."
+}

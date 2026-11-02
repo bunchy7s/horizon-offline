@@ -2570,6 +2570,74 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A player takes an item from an armor stand or puts one on it
+    /// (`ArmorStand.interactAt`, after the stand's disabled-slot checks and
+    /// `swapItem`'s take/put locks, before anything moves): `stand_id` is the
+    /// stand's `Entity.getId` and `slot` the one the click reached
+    /// (`mainhand`, `offhand`, `feet`, `legs`, `chest` or `head`). Set
+    /// `cancel` and nothing changes: neither the stand nor the player's hand,
+    /// and the click is spent. The player's state is swapped in for the call;
+    /// `player` is the UUID the helpers take. Not told of a click that changes
+    /// nothing (an empty hand on an empty slot). Not covered, other ways a
+    /// stand's equipment moves: breaking or blasting the stand (its items
+    /// drop), a dispenser putting armour on one, a mod's own changes.
+    /// Server-side, for every player of the world.
+    /// @API:native_armor_stand_manipulate@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn armor_stand_manipulate(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ArmorStandManipulateEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A player opens one of the game's own menus (`ServerPlayer.openMenu`; the
+    /// job of NeoForge's `PlayerContainerEvent.Open`, which comes after the
+    /// menu is open and cannot stop it): `kind` is the menu type
+    /// (`minecraft:generic_9x3`, `minecraft:furnace`, `minecraft:crafting`,
+    /// `minecraft:merchant`, `minecraft:anvil`, `minecraft:lectern`...; a
+    /// horse's inventory is `minecraft:horse_inventory`) and `pos` the block
+    /// it belongs to, none for a villager, a mount or a vehicle's chest.
+    /// Heard after the checks that refuse the menu (a locked container, a
+    /// spectator) and before the menu that was open closes. Set `cancel` and
+    /// nothing opens: the open menu stays as it was and the click is spent.
+    /// The player's state is swapped in for the call, as for
+    /// `native_perform_command`, so `native_acting_player`, `native_tell` and
+    /// the item helpers reach them. Not heard: a menu a mod opens
+    /// (`native_open_menu`), the inventory screen, and the editors (sign,
+    /// book, command block). Server-side, for every player of the world.
+    /// @API:native_container_opened@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn container_opened(&self, host: &mut dyn Host, event: &mut ContainerOpenedEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A creative-mode player sets a slot of their inventory from the
+    /// creative screen (`ServerGamePacketListenerImpl.handleSetCreativeModeSlot`):
+    /// `slot` is the inventory menu's slot (5 to 8 armour, 9 to 35 the
+    /// inventory, 36 to 44 the hotbar, 45 the off hand; below 0 is a stack
+    /// thrown out of the screen, which is dropped) and `item` (`minecraft:air`
+    /// for an emptied slot) and `count` what is put there. Heard once the
+    /// packet passed vanilla's checks (a creative player, a real slot, a valid
+    /// stack) and before the slot changes or the stack drops. Set `cancel`
+    /// and the packet is ignored. The player's state is swapped in for the
+    /// call, as for `native_perform_command`, so `native_acting_player`,
+    /// `native_tell` and the item helpers reach them. Not heard: stacks a
+    /// creative player gets other ways (middle-click pick block, `/give`).
+    /// Server-side, for every player of the world.
+    /// @API:native_creative_slot@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn creative_slot(&self, host: &mut dyn Host, event: &mut CreativeSlotEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// The food level of the server player `player` (`name`) is about to change
     /// from `from` to `to` (Bukkit's `FoodLevelChangeEvent`):
     /// eating, hunger and saturation effects, the exhaustion that costs a
@@ -2774,6 +2842,22 @@ pub trait Hooks: Send + Sync {
     /// player has joined, and those answers are not heard. Once for each
     /// answer, on a server. @API:native_resource_pack_status@.
     fn resource_pack_status(&self, host: &mut dyn Host, event: &mut ResourcePackStatusEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A boat or minecart (`kind`, `minecraft:oak_boat`) moved since the last
+    /// tick (`VehicleMoveEvent`): `from` and `to` are its positions, heard
+    /// after the tick moved it. Once a tick for each vehicle that carries a
+    /// server player, whose state is then swapped in (as for
+    /// `native_perform_command`: `native_acting_player`, `native_tell` and
+    /// the item helpers reach them; `player` is their UUID), and for one a
+    /// server player rode and left, until it has stood still for ten
+    /// seconds (`player` is none, nobody is swapped in). It only hears.
+    /// Cheap when nothing moves: one position compare a tick for each watched
+    /// vehicle. Not heard: a vehicle moved before anyone rode it, a mount
+    /// (horse, pig...) or a vehicle carrying only a mob. Server-side, in the
+    /// level the vehicle is in. @API:native_vehicle_moved@.
+    fn vehicle_moved(&self, host: &mut dyn Host, event: &mut VehicleMovedEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -7323,6 +7407,111 @@ pub fn dispatch_item_crafted(
         mod_hook.item_crafted(host, &mut event);
     }
 }
+/// What [`Hooks::armor_stand_manipulate`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ArmorStandManipulateEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub stand_id: i32,
+    pub slot: &'a str,
+}
+pub fn dispatch_armor_stand_manipulate(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    stand_id: i32,
+    slot: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ArmorStandManipulateEvent {
+        player,
+        name,
+        stand_id,
+        slot,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.armor_stand_manipulate(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::container_opened`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ContainerOpenedEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub kind: &'a str,
+    pub pos: Option<[i32; 3]>,
+}
+pub fn dispatch_container_opened(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    kind: &str,
+    pos: Option<[i32; 3]>,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ContainerOpenedEvent {
+        player,
+        name,
+        kind,
+        pos,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.container_opened(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::creative_slot`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CreativeSlotEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub slot: i32,
+    pub item: &'a str,
+    pub count: i32,
+}
+pub fn dispatch_creative_slot(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    slot: i32,
+    item: &str,
+    count: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = CreativeSlotEvent {
+        player,
+        name,
+        slot,
+        item,
+        count,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.creative_slot(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::food_level_changed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct FoodLevelChangedEvent<'a> {
@@ -7633,5 +7822,31 @@ pub fn dispatch_resource_pack_status(
     };
     for mod_hook in mods {
         mod_hook.resource_pack_status(host, &mut event);
+    }
+}
+/// What [`Hooks::vehicle_moved`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct VehicleMovedEvent<'a> {
+    pub player: Option<u128>,
+    pub kind: &'a str,
+    pub from: [f64; 3],
+    pub to: [f64; 3],
+}
+pub fn dispatch_vehicle_moved(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: Option<u128>,
+    kind: &str,
+    from: [f64; 3],
+    to: [f64; 3],
+) {
+    let mut event = VehicleMovedEvent {
+        player,
+        kind,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        mod_hook.vehicle_moved(host, &mut event);
     }
 }

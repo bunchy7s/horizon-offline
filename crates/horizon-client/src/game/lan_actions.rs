@@ -1122,6 +1122,31 @@ impl Game<'_> {
         self.creative = self.mode == GameMode::Creative;
     }
 
+    /// Whether the mods let the guest open the menu `kind` (`native_container_opened`),
+    /// heard with the guest's state swapped in. Asked before the menu that
+    /// was open closes.
+    pub(super) fn guest_may_open(
+        &mut self,
+        host: &mut LanHost,
+        conn: u32,
+        kind: &str,
+        pos: Option<[i32; 3]>,
+    ) -> bool {
+        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
+            return true;
+        };
+        let mut cancel = false;
+        let mut hook =
+            |game: &mut Self| game.native_container_opened(uuid, &name, kind, pos, &mut cancel);
+        // The guest whose turn it is is in place already.
+        if self.lan_acting == Some(conn) {
+            hook(self);
+        } else {
+            self.as_guest(host, conn, hook);
+        }
+        !cancel
+    }
+
     /// Hand a container the guest opened over (ServerPlayer.openMenu);
     /// false when it is not one a guest can open.
     fn lan_open_container(&mut self, host: &mut LanHost, conn: u32, pos: (i32, i32, i32)) -> bool {
@@ -1270,6 +1295,10 @@ impl Game<'_> {
         if !horizon_client::containers::menu_reaches(brand, menu) {
             return false;
         }
+        // The mods may stop the menu; the click is spent.
+        if !self.guest_may_open(host, conn, menu, Some([pos.0, pos.1, pos.2])) {
+            return true;
+        }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(host, conn);
         let hidden = self.native_hidden_slots(pos, items.len());
@@ -1318,6 +1347,10 @@ impl Game<'_> {
         else {
             return false;
         };
+        // The mods may stop the menu; the click is spent.
+        if !self.guest_may_open(host, conn, menu, None) {
+            return true;
+        }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(host, conn);
         host.hub
@@ -2077,6 +2110,9 @@ impl Game<'_> {
                 if !self.creative_stack_valid(host, gi, &stack) {
                     return;
                 }
+                if !self.guest_may_set_creative_slot(host, conn, i32::from(p.slot), Some(&stack)) {
+                    return;
+                }
                 let play = host.play.entry(conn).or_default();
                 if play.creative_drops >= 1480 {
                     eprintln!(
@@ -2099,6 +2135,12 @@ impl Game<'_> {
                     .as_ref()
                     .is_some_and(|s| !self.creative_stack_valid(host, gi, s))
                 {
+                    return;
+                }
+                if !self.guest_may_set_creative_slot(host, conn, i32::from(p.slot), item.as_ref()) {
+                    // The creative client already holds the stack it sent: treat that as
+                    // what it was told, so the next broadcast sends the real slot back.
+                    host.hub.guests[gi].menu_sent[p.slot as usize] = item;
                     return;
                 }
                 let slot = p.slot as usize;
@@ -2509,6 +2551,32 @@ impl Game<'_> {
                 }),
             );
         }
+    }
+
+    /// Whether the mods let a creative player set `slot` to `stack`
+    /// (`native_creative_slot`), heard with the guest's state swapped in.
+    fn guest_may_set_creative_slot(
+        &mut self,
+        host: &mut LanHost,
+        conn: u32,
+        slot: i32,
+        stack: Option<&ItemStack>,
+    ) -> bool {
+        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
+            return true;
+        };
+        let (item, count) = stack.map_or(("minecraft:air", 0), |s| (&*s.item, s.count as i32));
+        let mut cancel = false;
+        let mut hook = |game: &mut Self| {
+            game.native_creative_slot(uuid, &name, slot, item, count, &mut cancel)
+        };
+        // The guest whose turn it is is in place already.
+        if self.lan_acting == Some(conn) {
+            hook(self);
+        } else {
+            self.as_guest(host, conn, hook);
+        }
+        !cancel
     }
 
     /// What ServerboundSetCreativeModeSlotPacket asks of a stack. Its codec

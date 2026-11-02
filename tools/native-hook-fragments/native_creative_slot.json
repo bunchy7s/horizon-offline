@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "creative_slot",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_creative_slot",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a creative player setting a slot from the creative screen, cancellable (`native_creative_slot`).",
+  "doc_summary": "a creative player setting a slot: `native_creative_slot(player, name, slot, item, count, cancel)` is heard when the creative screen sets an inventory slot, or throws a stack out (a slot below 0), after the packet passed vanilla's checks and before the slot changes, on a server, with the player's state swapped in. A mod sets `cancel` and the packet is ignored. Bundles that use it need `\"hooks\": @API:native_creative_slot@`."
+}
