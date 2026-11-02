@@ -4,10 +4,10 @@ FeatureRendererMap	skip:java		type-indexed lookup table of feature renderers
 FlameFeatureRenderer.buildGroup	port	crates/horizon-client/src/fire_render.rs::flames	loop over burning entities
 FlameFeatureRenderer.prepare	port	crates/horizon-client/src/fire_render.rs::flames	two alternating fire sprites stacked up the entity
 FlameFeatureRenderer.fireVertex	inline	crates/horizon-client/src/fire_render.rs::flames	vertex push folded into flames
-GizmoFeatureRenderer.buildGroup	port	crates/horizon-client/src/gizmos.rs::camera_relative	gap: minor: only lines are drawn; quads, triangle fans, points and texts are not
-GizmoFeatureRenderer.buildTexts	missing		minor: debug gizmo text labels are not drawn; Gizmos has no text kind
+GizmoFeatureRenderer.buildGroup	port	crates/horizon-client/src/gizmos.rs::camera_relative	gap: minor: lines, cuboid fills and billboard texts are drawn; points and triangle fans have no kind
+GizmoFeatureRenderer.buildTexts	inline	crates/horizon-client/src/game/debug_renderers.rs::Game::debug_renderer_geometry	the debug renderers' billboard texts become centred quads at billboard_text_unit scale, without a background; the game-test markers draw theirs the same way, and a text from any other gizmo source has no kind
 GizmoFeatureRenderer.buildTriangleFans	missing		minor: debug triangle fans are not drawn; Gizmos has no fan kind
-GizmoFeatureRenderer.buildQuads	missing		minor: debug filled quads are not drawn; cuboid gizmos are edges only
+GizmoFeatureRenderer.buildQuads	inline	crates/horizon-client/src/game/debug_renderers.rs::Game::debug_renderer_geometry	the colour fill of a cuboid gizmo becomes four vertices per quad, for the debug renderers that fill; no free quad is submitted anywhere
 GizmoFeatureRenderer.buildPoints	missing		minor: debug points are not drawn; Gizmos has no point kind
 ItemFeatureRenderer.buildGroup	port	crates/horizon-client/src/item_render.rs::ItemRenderState::submit	loop over item submits
 ItemFeatureRenderer.prepareSubmit	port	crates/horizon-client/src/item_render.rs::ItemRenderState::submit	layer loop, quads or special model
@@ -29,7 +29,7 @@ ShadowFeatureRenderer.prepare	port	crates/horizon-client/src/shadows.rs::shadow	
 ShadowFeatureRenderer.shadowVertex	inline	crates/horizon-client/src/shadows.rs::shadow	vertex push folded into shadow
 ShapeOutlineFeatureRenderer.buildGroup	port	crates/horizon-client-render/src/gfx.rs::outline_vertices	block selection outline edges as line vertices
 TextFeatureRenderer.buildGroup	skip:other		dispatch over text and background submits; each kind is covered below or by Horizon's text draw
-TextFeatureRenderer.renderText	missing		minor: unsure: no outlined-text path found (font.rs, hud.rs, names.rs); the outline colour of a text submit is not drawn
+TextFeatureRenderer.renderText	port	crates/horizon-client-render/src/block_entity_render.rs::draw_text	the outline as the eight one-pixel offsets NORMAL under the text POLYGON_OFFSET; both share a mesh here, so the text is lifted 0.05 of a font pixel instead of z-fighting
 TextFeatureRenderer.GlyphRenderer.acceptRenderable	skip:other		glyph sink for the text pass; Horizon's font pass draws the glyphs
 FeatureRenderPhase.Output.acceptFeatureGroup	skip:other		phase plumbing: hands sorted groups to the renderer pass
 SimpleFeatureRenderPhase	skip:other		submit, sort, shuffle (debug only) and clear of feature submits; Horizon sorts its own draws
@@ -51,9 +51,9 @@ WaterFogEnvironment.setupFog	port	crates/horizon-client-render/src/fog.rs::setup
 DrawableGizmoPrimitives.addPoint	missing		minor: debug points are not drawn; Gizmos has no point kind
 DrawableGizmoPrimitives.addLine	port	crates/horizon-client/src/gizmos.rs::Gizmos::line	
 DrawableGizmoPrimitives.addTriangleFan	missing		minor: debug triangle fans are not drawn
-DrawableGizmoPrimitives.addQuad	missing		minor: debug filled quads are not drawn
-DrawableGizmoPrimitives.addText	missing		minor: debug gizmo text labels are not drawn
-DrawableGizmoPrimitives.submit	port	crates/horizon-client/src/game.rs::Game::render	gap: minor: lines of both lists go to camera_relative in Game::render; only lines are drawn
+DrawableGizmoPrimitives.addQuad	inline	crates/horizon-client/src/gizmos.rs::cuboid_fill_quads	a cuboid's six fill quads, which the debug renderers push into their fill list; there is no general quad kind
+DrawableGizmoPrimitives.addText	inline	crates/horizon-client/src/gizmos.rs::billboard_text_unit	one font pixel's world size for a text scale, which the debug renderers' and game-test markers' billboard text quads are built at (name_tag_quads)
+DrawableGizmoPrimitives.submit	port	crates/horizon-client/src/game.rs::Game::render	gap: minor: lines of both lists go to camera_relative in Game::render; the fills and texts of the debug renderers are built as vertices in debug_renderers::Game::debug_renderer_geometry instead
 BundleSelectedItemSpecialRenderer.update	port	crates/horizon-assets/src/item_model.rs::Resolve::node	bundle selected item layers via the BundleSelectedItem arm
 CompositeModel.update	port	crates/horizon-assets/src/item_model.rs::Resolve::node	composite arm: each child in order
 CompositeModel.Unbaked.resolveDependencies	port	crates/horizon-assets/src/item_model.rs::ItemModelNode::dependencies	
