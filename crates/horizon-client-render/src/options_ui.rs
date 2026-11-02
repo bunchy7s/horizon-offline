@@ -4185,7 +4185,8 @@ impl OptionsUi {
         }
         let plain = self.resource_error.is_none()
             && !(self.pack_screen.is_some() && self.stack.last() == Some(&Page::Packs));
-        if !plain {
+        // The "Scroll wheel changes settings" extra off: the wheel only scrolls.
+        if !plain || !s.extras.wheel_cycles_settings {
             self.scroll_at(s, size, cursor, amount);
             return Vec::new();
         }
@@ -7268,6 +7269,55 @@ mod tests {
         let events = ui.wheel(&mut s, size, cursor, framebuffer, -1.0);
         assert_ne!(s.view_bobbing, before, "a keyboard-focused option cycles");
         assert!(events.contains(&Event::ButtonClick));
+        assert!(events.contains(&Event::Changed));
+    }
+
+    #[test]
+    fn the_wheel_only_scrolls_with_the_extra_off() {
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        ui.show(Page::Video);
+        let framebuffer = [854, 480];
+        let size = (427.0, 240.0);
+        let (widgets, top, bottom, content) = ui.layout(&s, size.0, size.1);
+        assert!(
+            content > bottom - top,
+            "the video page scrolls at this size"
+        );
+        let (opt, over) = widgets
+            .iter()
+            .find_map(|wd| match wd.kind {
+                WKind::Button {
+                    act: Act::Cycle(opt),
+                    ..
+                } if !wd.list || (wd.y >= top && wd.y + wd.h <= bottom) => {
+                    Some((opt, (wd.x + 5.0, wd.y + 5.0)))
+                }
+                _ => None,
+            })
+            .expect("a visible cycle button");
+
+        s.extras.wheel_cycles_settings = false;
+        let before = format!("{s:?}");
+        let start = ui.scroll;
+        let events = ui.wheel(&mut s, size, over, framebuffer, -1.0);
+        assert_eq!(format!("{s:?}"), before, "the hovered option stays put");
+        assert!(!events.contains(&Event::Changed));
+        assert!(
+            ui.scroll > start,
+            "the list scrolls under the cursor instead"
+        );
+        // Keyboard focus doesn't take the wheel either.
+        ui.focus = Some(FocusId::Cycle(opt));
+        ui.focus_from_keyboard = true;
+        ui.wheel(&mut s, size, over, framebuffer, -1.0);
+        assert_eq!(format!("{s:?}"), before);
+
+        // On (the default), vanilla's CycleButton.mouseScrolled again.
+        s.extras.wheel_cycles_settings = true;
+        let before = format!("{s:?}");
+        let events = ui.wheel(&mut s, size, over, framebuffer, -1.0);
+        assert_ne!(format!("{s:?}"), before, "{opt:?} cycles");
         assert!(events.contains(&Event::Changed));
     }
 
