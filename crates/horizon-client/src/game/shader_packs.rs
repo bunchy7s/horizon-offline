@@ -354,6 +354,13 @@ impl Game<'_> {
                 sky.cloud_color[3],
                 sky.cloud_height,
             ),
+            // Vanilla's drift in float, times its 0.030000001F blocks a tick.
+            cloud_time: horizon_client::clouds::drift(
+                self.world.game_time,
+                f64::from(partial),
+                self.pack.clouds.0,
+            ) as f32
+                * 0.030_000_001,
             mod_params: self.native_shader_params_now(partial),
             status,
             end_flash,
