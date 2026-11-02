@@ -8,6 +8,7 @@ pub struct NativeClientHooks {
     pub menu_slot_rules: fn(&str, usize, &ItemStack, &mut bool, &mut u32),
     pub living_breathe: fn(u32, &str, &mut bool, &mut i32, &mut i32),
     pub living_fall: fn(i32, &str, &mut f64, &mut f32, &mut bool),
+    pub living_jump: fn(i32, &str),
     pub ingredient: fn(&str, &Map<String, Value>, &mut Vec<String>),
 }
 
@@ -51,6 +52,12 @@ pub(crate) fn living_fall(
 ) {
     if let Some(hooks) = HOOKS.get() {
         (hooks.living_fall)(entity, kind, distance, multiplier, cancel);
+    }
+}
+
+pub(crate) fn living_jump(entity: i32, kind: &str) {
+    if let Some(hooks) = HOOKS.get() {
+        (hooks.living_jump)(entity, kind);
     }
 }
 

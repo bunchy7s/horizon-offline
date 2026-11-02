@@ -43,6 +43,12 @@ use std::{
     sync::Arc,
 };
 
+/// A living entity jumped (`LivingEvent.LivingJumpEvent`). @API:native_living_jump@.
+#[inline(never)]
+pub fn native_living_jump(entity: i32, kind: &str) {
+    crate::native_client_hooks::living_jump(entity, kind);
+}
+
 pub(crate) mod environment;
 mod fluids;
 pub use fluids::{
@@ -1953,6 +1959,7 @@ impl MotionWorld<'_, '_, '_> {
     }
     pub fn jump_from_ground(&mut self) -> Result<()> {
         living_motion::jump_from_ground(self)?;
+        native_living_jump(self.player.entity_id, "minecraft:player");
         self.player
             .events
             .push(MotionEvent::Health(crate::health::HealthEvent::Statistic {

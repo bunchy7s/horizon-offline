@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "living_jump",
+      "target": "horizon_client::motion::native_living_jump",
+      "neoforge": "LivingEvent.LivingJumpEvent",
+      "side": "both",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a living entity jumping (`native_living_jump`).",
+  "doc_summary": "a living entity jumping (`native_living_jump`). Bundles need \"hooks\": @API:native_living_jump@."
+}
