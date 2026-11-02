@@ -16,6 +16,8 @@ address. The script then checks, from both sides, what a guest's game used to ge
              dimension change, a death and respawn); the inventory opens as its own menu, items kept;
 - crafting:  the guest crafts planks in the inventory's 2x2 grid and opens a crafting table, which
              leaves the host's screen and mouse look alone;
+- datapack-recipe: (--server-thread) a crafting recipe from the world's data pack shows its result in the
+             table of the host's window and of a guest, and taking it crafts (#6733);
 - spawned:   the host and a guest new to the world join on different spots (PlayerSpawnFinder), and the
              guest opens a crafting table, a chest, a furnace and a stonecutter where it joined;
 - sign:      a sign the guest places doesn't open a sign editor on the host;
@@ -11859,6 +11861,77 @@ def check_scale_body(host, guest, out):
 
 CHECKS += ['scale-body']
 CHECK_FNS['scale-body'] = check_scale_body
+
+
+def check_datapack_recipe(host, guest, out):
+    """A crafting recipe from the world's data pack shows its result in the crafting table of the
+    host's window and of a guest (#6733). Vanilla's CraftingMenu.slotChangedCraftingGrid sets the
+    result on the server and ClientboundContainerSetSlotPacket sends slot 0: the window shows the
+    server's, not a result of its own recipes. The world reopens to load the pack."""
+    if not SERVER_THREAD:
+        return {'skipped': "the reopen is the server thread's"}
+    pack = host.work / 'saves' / 'Lan' / 'datapacks' / 'repro'
+    (pack / 'data/repro/recipe').mkdir(parents=True, exist_ok=True)
+    (pack / 'pack.mcmeta').write_text('{"pack":{"description":"repro","min_format":[121,0],"max_format":[121,0]}}')
+    (pack / 'data/repro/recipe/dirt_to_diamond.json').write_text(
+        '{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:dirt"],"result":{"id":"minecraft:diamond"}}')
+    seen = {}
+    try:
+        host.raw('disconnect')
+        for attempt in range(60):
+            time.sleep(1)
+            try:
+                host.raw('open', 'Lan')
+                break
+            except Failed:
+                if attempt == 59:
+                    raise
+        host('wait_ready', seconds=400)
+        port = host.raw('lan', 'open', 0, 'commands')['port']
+        back_to_game(guest)
+        guest.raw('connect', f'127.0.0.1:{port}', GUEST_NAME)
+        guest.raw('wait-for', 'loaded', '--timeout', 300)
+        guest.wait(20)
+        for game in (host, guest):
+            game('command', command='gamemode survival')
+            game('command', command='clear @s')
+            game('command', command='give @s minecraft:dirt 4')
+            x, y, z = (int(v // 1) for v in pos_of(game))
+            table = (x, y, z + 2)
+            game('command', command=f'setblock {table[0]} {table[1]} {table[2]} minecraft:crafting_table')
+            game.wait(10)
+            grab(game)
+            game.raw('interact', *table)
+            game.raw('wait-for', 'screen', 'inventory', '--timeout', 10)
+            game.wait(5)
+            slot = next(s['slot'] for s in game('inventory')['hotbar'] if s and s.get('item') == 'minecraft:dirt')
+            game.raw('click-slot', slot)
+            game.raw('click-slot', 100, 'right')
+            game.raw('click-slot', slot)
+            game.wait(10)
+            case = {'result': result_of(game)}
+            game.shot(out, f'datapack-recipe-{game.name}')
+            game.raw('click-slot', 200)
+            game.wait(10)
+            case['carried'] = held(game)
+            case['emptied'] = result_of(game)
+            game.raw('key', 'esc', 'tap')
+            game.wait(5)
+            game('command', command=f'setblock {table[0]} {table[1]} {table[2]} minecraft:air')
+            seen[game.name] = case
+    finally:
+        back_to_game(host)
+        back_to_game(guest)
+        shutil.rmtree(pack, ignore_errors=True)
+    for name, case in seen.items():
+        assert case['result'] == ('minecraft:diamond', 1), f'{name}: the pack recipe shows {case}'
+        assert case['carried'] == ('minecraft:diamond', 1), f'{name}: taking the result gave {case}'
+        assert case['emptied'] == (None, None), f'{name}: the result stays after the grid is used up: {case}'
+    return seen
+
+
+CHECKS += ['datapack-recipe']
+CHECK_FNS['datapack-recipe'] = check_datapack_recipe
 
 
 if __name__ == '__main__':
