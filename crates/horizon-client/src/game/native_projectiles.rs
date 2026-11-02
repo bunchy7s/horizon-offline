@@ -282,7 +282,11 @@ impl Game<'_> {
             horizon_client::arrows::tick_through(&mut p, &scene, &targets)
         } else {
             let w = self.mob_world_base(&[]);
-            p.tick_through(&ProjWorld { w: &w, targets })
+            p.tick_through(&ProjWorld {
+                w: &w,
+                targets,
+                border: Some(self.border.bounds()),
+            })
         };
         if shooter.is_some() {
             p.owner = Some(Who::Player);

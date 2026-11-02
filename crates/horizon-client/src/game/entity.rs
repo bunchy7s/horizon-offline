@@ -8,6 +8,7 @@
 //! no vtable. A new kind is one line in `entity_lists!` and one `impl Entity`.
 
 use super::commands::Target;
+use super::persist::ChunkKey;
 use super::{FallingBlock, Game};
 use super::{
     boats::Boat, fireworks::Rocket, minecarts::Minecart, tnt::PrimedTnt, trident::ThrownTrident,
@@ -18,7 +19,9 @@ use horizon_client::mobs::{Mob, Species};
 use horizon_client::projectiles::Projectile;
 use horizon_core::geometry::{Aabb, Direction, Vec3};
 use horizon_core::position::BlockPos;
+use horizon_world::nbt::Tag;
 use horizon_world::{level::data::PushReaction, piston_push};
+use std::collections::{HashMap, HashSet};
 
 /// What `Entity.thunderHit` does to a kind: it sets the entity on fire and
 /// calls `hurtServer(lightning_bolt, 5)`, so a kind whose `hurtServer` does
@@ -58,6 +61,14 @@ pub(super) trait Entity: EntityRules {
     /// What a selector finds this entity as (`@e`), or `None` for one it cannot
     /// name yet. Required, so a new kind states which.
     fn selector_target(&self) -> Option<Target>;
+    /// Saves entity `index` of this kind into its chunk's entity list: the
+    /// chunk and the NBT when it lies in `keys` and is saved with its chunk.
+    /// Required, so a new kind states how it saves.
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)>;
 
     fn on_ground(&self) -> bool {
         false
@@ -407,7 +418,47 @@ macro_rules! with_entity_mut {
 }
 pub(super) use with_entity_mut;
 
+macro_rules! save_lists {
+    (($game:expr, $keys:expr, $out:expr)
+     $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
+        $(for i in 0..$game$(.$list)+.len() {
+            if let Some((key, tag)) = <$ty as $crate::game::entity::Entity>::save_nbt($game, i, $keys) {
+                $out.entry(key).or_default().push(tag);
+            }
+        })*
+    };
+}
+pub(crate) use save_lists;
+
+/// Saves every entity of every list in `entity_lists!` into `$out` by chunk,
+/// each through its own `Entity::save_nbt`: one loop per list, static dispatch,
+/// nothing allocated beyond the tags. A kind added to the lists cannot be left
+/// out, since `save_nbt` has no default.
+macro_rules! save_entities_of_every_kind {
+    ($game:expr, $keys:expr, $out:expr) => {
+        $crate::game::entity::entity_lists!(save_lists, $game, $keys, $out)
+    };
+}
+
+impl Game<'_> {
+    /// Saves every entity of every kind that lies in `keys` into `out`, by chunk.
+    pub(super) fn save_every_entity(
+        &mut self,
+        keys: &HashSet<ChunkKey>,
+        out: &mut HashMap<ChunkKey, Vec<Tag>>,
+    ) {
+        save_entities_of_every_kind!(self, keys, out);
+    }
+}
+
 impl Entity for Mob {
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_mob(index, keys)
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((self.width(), self.height()))
@@ -483,6 +534,13 @@ impl Entity for Mob {
 }
 
 impl Entity for ItemEntity {
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_item(index, keys)
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((0.25, 0.25))
@@ -518,6 +576,13 @@ impl Entity for ItemEntity {
 }
 
 impl Entity for ExperienceOrb {
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_orb(index, keys)
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((0.5, 0.5))
@@ -550,6 +615,13 @@ impl Entity for ExperienceOrb {
 }
 
 impl Entity for Boat {
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_boat(index, keys)
+    }
     stored_motion!();
     fn is_vehicle(&self) -> bool {
         true
@@ -586,6 +658,13 @@ impl Entity for Boat {
 }
 
 impl Entity for Minecart {
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_cart(index, keys)
+    }
     stored_motion!();
     fn is_vehicle(&self) -> bool {
         true
@@ -632,6 +711,13 @@ fn armor_stand_size(stand: &ArmorStand) -> (f64, f64) {
 }
 
 impl Entity for ArmorStand {
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_armor_stand(index, keys)
+    }
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Stand(self.id))
@@ -697,6 +783,13 @@ impl Entity for ArmorStand {
 }
 
 impl Entity for PrimedTnt {
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_tnt(index, keys)
+    }
     stored_motion!();
     /// `PrimedTnt` eye height: `0.98 * 0.85`.
     fn fluid_eye_y(&self) -> f64 {
@@ -731,6 +824,13 @@ impl Entity for PrimedTnt {
 }
 
 impl Entity for FallingBlock {
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_falling(index, keys)
+    }
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Falling(self.id))
@@ -741,6 +841,13 @@ impl Entity for FallingBlock {
 }
 
 impl Entity for Projectile {
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_projectile(index, keys)
+    }
     stored_motion!();
     /// Arrows and the thrown items and fireballs a chunk saves.
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -794,6 +901,13 @@ impl Entity for Projectile {
 }
 
 impl Entity for Rocket {
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_rocket(index, keys)
+    }
     stored_motion!();
     /// A rocket that carries its owner stays.
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -819,6 +933,13 @@ impl Entity for Rocket {
 }
 
 impl Entity for ThrownTrident {
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_trident(index, keys)
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((0.5, 0.5))
