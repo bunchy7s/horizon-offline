@@ -874,5 +874,12 @@
   "No servers saved in this instance.": "Nenhum servidor salvo nesta instância.",
   "1 server in {name}": "1 servidor em {name}",
   "{count} servers in {name}": "{count} servidores em {name}",
-  "Click again to remove": "Clique de novo para remover"
+  "Click again to remove": "Clique de novo para remover",
+  "Resource pack · on": "Pacote de recursos · ligado",
+  "Resource pack · off": "Pacote de recursos · desligado",
+  "Shader pack · on": "Pacote de shaders · ligado",
+  "Shader pack · off": "Pacote de shaders · desligado",
+  "1 pack in {name}": "1 pacote em {name}",
+  "{count} packs in {name}": "{count} pacotes em {name}",
+  "No resource packs. Find them on the Mods page under Modrinth.": "Nenhum pacote de recursos. Encontre alguns na página Mods, em Modrinth."
 }

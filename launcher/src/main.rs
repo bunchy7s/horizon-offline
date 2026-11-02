@@ -21,6 +21,7 @@ mod github_mods_page;
 mod glass;
 mod glass_home;
 mod glass_home_lists;
+mod glass_home_packs;
 mod glass_home_tabs;
 mod glass_ui;
 mod home;

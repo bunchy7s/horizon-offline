@@ -70,8 +70,15 @@ impl Launcher {
                 self.glass_multiplayer(cx)
                     .map(IntoElement::into_any_element),
             ),
-            HomeTab::Packs => split(self.packs_section(cx)),
-            HomeTab::Screenshots => split(self.screenshots_section(cx)),
+            HomeTab::Packs => (
+                None,
+                self.glass_packs(cx).map(IntoElement::into_any_element),
+            ),
+            HomeTab::Screenshots => (
+                None,
+                self.glass_screenshots(cx)
+                    .map(IntoElement::into_any_element),
+            ),
             HomeTab::Console => split(self.console_section(cx)),
         };
         div()
