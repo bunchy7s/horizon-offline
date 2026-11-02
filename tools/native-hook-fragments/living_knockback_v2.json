@@ -10,5 +10,5 @@
     }
   ],
   "rust_summary": "living_knockback_v2: raw knockback with the attacker's entity id, including armor-stand sweeps.",
-  "doc_summary": "living_knockback_v2: raw strength before resistance, attacker network id (0 if unknown), and armor-stand sweeps. The unchanged v1 hook runs first on its existing paths; cancellation from either wins. Resolve held items through the attacker id where available. Bundles need hooks API @API:living_knockback_v2@."
+  "doc_summary": "living_knockback_v2: raw strength before resistance, attacker network id (0 if unknown), and armor-stand sweeps. The unchanged v1 hook runs first on its existing paths; cancellation from either wins. Bundles need hooks API @API:living_knockback_v2@."
 }

@@ -182,9 +182,8 @@ impl Game<'_> {
     /// `LivingEntity.hurtServer` of the mob at `index` by the player's hit:
     /// the weapon's `armor_effectiveness` enchantments (Breach) thin its armor.
     pub(super) fn hurt_by_player(&mut self, index: usize, amount: f32, source: Damage) -> bool {
-        let _attacker = horizon_client::health::knockback_from(
-            self.player.as_ref().map_or(0, |p| p.entity_id),
-        );
+        let _attacker =
+            horizon_client::health::knockback_from(self.player.as_ref().map_or(0, |p| p.entity_id));
         let held = self.held().cloned();
         let aim = self.attacker_aim(source.attacker);
         let kind = self.mobs[index].kind.id.clone();
@@ -552,7 +551,8 @@ impl Game<'_> {
                 if horizon_client::health::knockback_canceled(
                     horizon_client::health::Hurting::ArmorStand(id as i32, source),
                     &mut knock,
-                ) || knock.strength <= 0.0 {
+                ) || knock.strength <= 0.0
+                {
                     continue;
                 }
                 let (mut kx, mut kz) = (knock.x, knock.z);

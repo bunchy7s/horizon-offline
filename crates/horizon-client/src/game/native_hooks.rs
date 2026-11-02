@@ -7100,7 +7100,14 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_living_knockback_v2(
-            mod_api::mods(), entity, kind, attacker, strength, x, z, canceled,
+            mod_api::mods(),
+            entity,
+            kind,
+            attacker,
+            strength,
+            x,
+            z,
+            canceled,
         );
     }
     /// Whether a mod hears projectiles' impacts (`native_projectile_impact`):
@@ -7226,7 +7233,15 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
             Some(Who::Mob(id)) => id as i32,
             _ => horizon_client::health::knockback_attacker(),
         },
-        _ => horizon_client::health::knockback_attacker(),
+        Hurting::Player(_, source)
+        | Hurting::Dragon(_, source)
+        | Hurting::ArmorStand(_, source) => {
+            if source.causing != 0 {
+                source.causing
+            } else {
+                horizon_client::health::knockback_attacker()
+            }
+        }
     };
     let stand = matches!(&pushed, Hurting::ArmorStand(..));
     let (entity, kind, source) = hurt_server_args(pushed);
@@ -7238,22 +7253,22 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
     let mut canceled = false;
     if !stand {
         Game::native_living_knockback(
-        entity,
-        kind,
-        damage_type,
-        causing,
-        direct,
-        &mut knock.strength,
-        &mut knock.x,
-        &mut knock.z,
-        &mut canceled,
+            entity,
+            kind,
+            damage_type,
+            causing,
+            direct,
+            &mut knock.strength,
+            &mut knock.x,
+            &mut knock.z,
+            &mut canceled,
         );
     }
     let mut canceled_v2 = false;
     Game::native_living_knockback_v2(
         entity,
         kind,
-        if attacker != 0 { attacker } else { causing },
+        attacker,
         &mut knock.strength,
         &mut knock.x,
         &mut knock.z,

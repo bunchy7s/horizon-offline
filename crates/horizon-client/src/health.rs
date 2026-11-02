@@ -45,6 +45,7 @@ pub enum Hurting<'a> {
     Mob(&'a crate::mobs::Mob, &'a crate::mobs::Damage),
     /// The ender dragon, by its entity id.
     Dragon(i32, HurtSource<'a>),
+    /// An armor stand, by its entity id, for sweep knockback.
     ArmorStand(i32, HurtSource<'a>),
 }
 /// The game's native damage hook (`native_living_incoming_damage`), set once by the
@@ -74,10 +75,12 @@ thread_local! {
     static KNOCKBACK_ATTACKER: Cell<i32> = const { Cell::new(0) };
 }
 
+/// The entity behind the synchronous attack, or 0 outside an attack scope.
 pub fn knockback_attacker() -> i32 {
     KNOCKBACK_ATTACKER.get()
 }
 
+/// Restore the previous attacker on return or unwind, including nested guest actions.
 pub fn knockback_from(entity: i32) -> impl Drop {
     struct Restore(i32);
     impl Drop for Restore {
@@ -968,6 +971,27 @@ impl ServerPlayerHurtWorld for Environment<'_> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn knockback_attacker_scopes_restore_on_return_and_unwind() {
+        assert_eq!(super::knockback_attacker(), 0);
+        {
+            let _outer = super::knockback_from(7);
+            let panic = std::panic::catch_unwind(|| {
+                let _inner = super::knockback_from(9);
+                assert_eq!(super::knockback_attacker(), 9);
+                panic!("test unwind");
+            });
+            assert!(panic.is_err());
+            assert_eq!(super::knockback_attacker(), 7);
+            assert_eq!(
+                std::thread::spawn(super::knockback_attacker)
+                    .join()
+                    .unwrap(),
+                0
+            );
+        }
+        assert_eq!(super::knockback_attacker(), 0);
+    }
+    #[test]
     fn a_hit_in_the_hurt_cooldown_knocks_nobody_back() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
@@ -1230,8 +1254,8 @@ mod tests {
         }
     }
 
-    /// `LivingEntity.knockback`: the hook runs once the knockback resistance
-    /// took its share and before the motion changes; a mod's strength or
+    /// `LivingEntity.knockback`: the hook runs before knockback resistance
+    /// takes its share and before motion changes; a mod's strength or
     /// direction is what pushes, a cancel pushes nothing, and with no mod in
     /// the way the push is vanilla's. Expected values are worked out by hand
     /// from vanilla's formula: the horizontal speed halves and the push is
@@ -1277,6 +1301,7 @@ mod tests {
         // A stronger push the other way: twice the strength, x turned around.
         let turned = push(9102, 0.0);
         assert_eq!(velocity(&turned), (0.8, 0.4, 0.0));
+        assert_eq!(velocity(&push(9102, 0.5)), (0.4, 0.4, 0.0));
         // Numbers that are not finite are put back as the game made them.
         assert_eq!(velocity(&push(9103, 0.0)), (-0.4, 0.4, 0.0));
         // Before the resistance (`LivingKnockBackEvent`): the hook is handed the raw 0.4, and

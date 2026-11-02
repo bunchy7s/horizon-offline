@@ -1739,6 +1739,18 @@ The catalog does not cover helper methods or arbitrary private game code.
 Injections name them with `hook` and `hook_version` ("Named hook points" above); raw
 targets and the `hooks` metadata continue to work as before.
 
+### Knockback hook versions
+
+The pending `living_knockback_v2` hook keeps `living_knockback` version 1 unchanged,
+as `menu_button_v2` does for its older hook. Both receive raw strength before knockback
+resistance. V2 runs after v1 on its existing paths, and additionally covers armor-stand
+sweeps; cancellation from either prevents motion. Its `attacker` is the attacker's network
+entity id, falling back to a known last hurt-by mob, or 0 when unknown. The synchronous
+damage code has no world handle to resolve held-item snapshots. Mob melee, player hits,
+sweeps and spears use the shared knockback path; direct velocity pushes (explosions,
+Punch arrows, hoglin throws) are not `LivingEntity.knockback` and do not fire it.
+The fragment assigns the new API number when stamped; the existing hook stays version 1.
+
 ### Reading server blocks (draft)
 
 A native server tick hook can call `native_server_block` with its context, a dimension id and a block position. It returns the block name and state properties from a loaded chunk. It does not load a chunk or open a dimension. Reads outside that hook, from a stale context, from unavailable dimensions or outside the world bounds return an error.
