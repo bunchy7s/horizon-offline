@@ -2141,11 +2141,13 @@ const PORTAL_FACES: [[[f32; 3]; 4]; 6] = [
 ];
 /// `AbstractEndPortalRenderer.submitCube`: position-only quads (the portal
 /// shader projects its textures from the screen; uv, colour and light are unused).
+/// `rendertype_end_portal` culls back faces, as `entitySolid` does, so the cube's
+/// two Y faces are one-sided: only the one facing the camera draws.
 fn portal_cube(m: Mat4, faces: &[Direction], layer: u32, out: &mut Vec<Vertex>) {
     for &d in faces {
         for c in PORTAL_FACES[d as usize] {
             out.push(Vertex {
-                normal: [0; 4],
+                normal: CULL_BACK,
                 pos: m.transform_point3(Vec3::from(c)).to_array(),
                 uv: [0.0; 2],
                 layer,
@@ -2716,6 +2718,35 @@ mod tests {
         assert_eq!(first_line("\u{6771}", 3.0, &advance), "\u{6771}");
         assert_eq!(first_line("ab\ncd", 100.0, &advance), "ab");
     }
+    /// `rendertype_end_portal` culls back faces, and `AbstractEndPortalRenderer`
+    /// submits the unit cube's two Y faces. Both are wound outward, so of each
+    /// face only the side looking at the camera draws: the portal shows one
+    /// surface from above and one from below, never both at once.
+    #[test]
+    fn the_end_portal_cube_is_one_sided() {
+        let mut out = Vec::new();
+        portal_cube(
+            Mat4::IDENTITY,
+            &[Direction::Down, Direction::Up],
+            END_PORTAL_LAYER,
+            &mut out,
+        );
+        // `TheEndPortalBlockEntity.shouldRenderFace` keeps the Y faces only.
+        assert_eq!(out.len(), 8, "the cube submits both Y faces");
+        assert!(
+            out.iter().all(|v| v.normal == CULL_BACK),
+            "rendertype_end_portal culls back faces"
+        );
+        // Each face is wound outward, so the shader's `!front` discard keeps the
+        // camera-facing side of it and drops the other.
+        let facing = |quad: &[Vertex]| {
+            let p = |i: usize| Vec3::from(quad[i].pos);
+            (p(1) - p(0)).cross(p(2) - p(0))
+        };
+        assert!(facing(&out[..4]).y < 0.0, "the Down face looks down");
+        assert!(facing(&out[4..]).y > 0.0, "the Up face looks up");
+    }
+
     /// `DecoratedPotRenderer` submits every part with `RenderTypes.entitySolid`,
     /// whose pipeline culls back faces. The pot's `top` and `bottom` are flat
     /// boxes, so without that cull both sides of each plane are drawn and they
