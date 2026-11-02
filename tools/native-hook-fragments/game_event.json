@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "game_event",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_game_event",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A vanilla world game event fired (`native_game_event`).",
+  "doc_summary": "A generic world game event fired at `pos`: `native_game_event(event, pos)` reports its registered event id and position, whether or not vibration listeners are nearby. Bundles need \"hooks\": @API:game_event@."
+}

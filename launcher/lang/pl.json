@@ -83,6 +83,11 @@
   "Classic arms": "Klasyczne ramiona",
   "Versions": "Wersje",
   "Release build: slower to build, slightly faster game": "Kompilacja release: dłuższa, gra nieco szybsza",
+  "Performance build": "Kompilacja wydajnościowa",
+  "Dev build": "Kompilacja dev",
+  "Release build": "Kompilacja release",
+  "The everyday build for playing with mods": "Codzienny build do grania z modami",
+  "For developing a mod: about 6× faster to rebuild a mod edit, game logic up to about twice as slow": "Do tworzenia moda: zmiany w modzie kompilują się około 6× szybciej, logika gry działa do około dwóch razy wolniej",
   "Horizon mods": "Mody Horizon",
   "Friends over the internet · Tailscale": "Znajomi przez internet · Tailscale",
   "Landscape": "Krajobraz",
@@ -790,5 +795,15 @@
   "{path} is not a folder to build into.": "{path} nie jest folderem do kompilacji.",
   "Could not copy the build: {error}": "Nie można skopiować kompilacji: {error}",
   "Could not move the build to {path}: {error}": "Nie można przenieść kompilacji do {path}: {error}",
-  "Native mods can use your microphone for voice chat when you enable it.": "Native mody mogą użyć Twojego mikrofonu do czatu głosowego, gdy to włączysz."
+  "Native mods can use your microphone for voice chat when you enable it.": "Native mody mogą użyć Twojego mikrofonu do czatu głosowego, gdy to włączysz.",
+  "Import a game build…": "Importuj kompilację gry…",
+  "Importing…": "Importowanie…",
+  "Imported builds": "Zaimportowane kompilacje",
+  "Unsigned: you picked these programs yourself, and Horizon can't check where they came from. Updates never replace them.": "Niepodpisane: te programy wybrano samodzielnie i Horizon nie może sprawdzić, skąd pochodzą. Aktualizacje nigdy ich nie zastępują.",
+  "Game files from {base}": "Pliki gry z {base}",
+  "Imported · {date}": "Zaimportowano · {date}",
+  "{file} is not a Horizon game for this computer.": "{file} nie jest grą Horizon dla tego komputera.",
+  "Install a release or Nightly first: an imported build plays with its game files.": "Najpierw zainstaluj wydanie lub Nightly: zaimportowana kompilacja korzysta z jego plików gry.",
+  "{file} holds no {program}.": "{file} nie zawiera {program}.",
+  "Could not import the build: {error}": "Nie udało się zaimportować kompilacji: {error}"
 }

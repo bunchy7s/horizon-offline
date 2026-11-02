@@ -164,6 +164,10 @@ pub enum HostEvent {
     /// A guest left (state to save, entities to drop).
     Left(Box<Guest>),
     Packet(u32, Box<S>),
+    /// A guest changed the dominant hand in their client options.
+    MainHandChanged(u32, bool),
+    /// A guest changed their client language option.
+    LocaleChanged(u32, String),
     /// A guest's client started (`flying`) or stopped flying (their abilities packet), applied to
     /// the guest already: the game tells the mods, which may refuse it.
     Flight {
@@ -1162,12 +1166,40 @@ impl Hub {
 
     /// The permissions changed: tell everyone their level and commands again.
     pub fn resend_commands(&mut self) {
+        self.refresh_permissions();
         for i in 0..self.guests.len() {
-            self.guests[i].permission = self.default_permission(self.guests[i].uuid);
             if self.guests[i].placed {
                 self.send_permission_level(i);
             }
         }
+    }
+
+    /// Every guest's level from the operator list and the settings, the first
+    /// half of [`Hub::resend_commands`].
+    pub fn refresh_permissions(&mut self) {
+        for i in 0..self.guests.len() {
+            self.guests[i].permission = self.default_permission(self.guests[i].uuid);
+        }
+    }
+
+    /// The names of the root commands the tree `conn`'s player would get
+    /// holds (before the mods take any out), in the tree's order.
+    pub fn command_names(&self, conn: u32) -> Vec<String> {
+        let Some(g) = self.guest(conn) else {
+            return Vec::new();
+        };
+        let packet = self.commands_packet(g.permission);
+        packet
+            .nodes
+            .get(packet.root as usize)
+            .map(|root| {
+                root.children
+                    .iter()
+                    .filter_map(|&c| packet.nodes.get(c as usize))
+                    .map(|n| n.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Whether vanilla's command tree has a command of this name.
@@ -1196,11 +1228,31 @@ impl Hub {
     /// Commands.sendCommands: the command tree for this player.
     fn send_commands(&self, i: usize) {
         let g = &self.guests[i];
-        let packet = match &self.sync.commands {
+        let mut packet = self.commands_packet(g.permission);
+        // What the mods took out is not in the tree the client gets.
+        if !g.hidden_commands.is_empty() {
+            let hidden: Vec<i32> = packet
+                .nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, n)| n.kind == 1 && g.hidden_commands.contains(&n.name))
+                .map(|(i, _)| i as i32)
+                .collect();
+            let root = packet.root as usize;
+            if let Some(root) = packet.nodes.get_mut(root) {
+                root.children.retain(|c| !hidden.contains(c));
+            }
+        }
+        g.send(&C::Commands(packet));
+    }
+
+    /// The command tree a player of this permission level gets.
+    fn commands_packet(&self, permission: u8) -> play::Commands {
+        match &self.sync.commands {
             Some(tree) => {
                 let dedicated = self.config.dedicated && !self.config.integrated;
                 tree.packet_with(
-                    g.permission,
+                    permission,
                     dedicated,
                     &self.sync.builtin,
                     &self.mod_commands.0,
@@ -1219,8 +1271,7 @@ impl Hub {
                 }],
                 root: 0,
             },
-        };
-        g.send(&C::Commands(packet));
+        }
     }
 
     /// ServerGamePacketListenerImpl.teleport: move the client and wait for its confirmation.
@@ -1767,14 +1818,20 @@ impl Hub {
             })
             .collect();
         let uses = &mut columns.uses;
+        let chunks = &columns.chunks;
         for (i, taken, far, batch) in batches {
             let g = &mut self.guests[i];
             let size = batch.len();
+            // The single-player window shares the sections it is sent (handoff.rs).
+            let memory = g.address == super::conn::MEMORY_ADDRESS;
             if size > 0 {
                 g.batch_quota -= size as f32;
                 g.send(&C::ChunkBatchStart(horizon_protocol::packets::Empty));
                 g.sender.send_many(batch.into_iter().map(|body| match body {
                     Body::Level(j) => {
+                        if memory {
+                            super::handoff::offer(chunks[j]);
+                        }
                         uses[j] -= 1;
                         if uses[j] == 0 {
                             std::mem::take(&mut encoded[j])
@@ -2939,11 +2996,19 @@ impl Hub {
                 }
                 S::ClientInformation(info) => {
                     let g = &mut self.guests[i];
+                    let old_main_hand = g.info.main_hand;
+                    let old_language = g.info.language.clone();
                     // PlayerModelPart.HAT (bit 6): the tab list shows the hat layer.
                     let was_hat = g.info.model_customisation & 0x40 != 0;
                     g.view_distance =
                         i32::from(info.view_distance).clamp(2, self.config.view_distance);
                     g.info = info;
+                    if g.info.main_hand != old_main_hand {
+                        events.push(HostEvent::MainHandChanged(conn, g.info.main_hand == 0));
+                    }
+                    if g.info.language != old_language {
+                        events.push(HostEvent::LocaleChanged(conn, g.info.language.clone()));
+                    }
                     g.center = None;
                     let hat = g.info.model_customisation & 0x40 != 0;
                     let uuid = g.uuid;
@@ -2976,7 +3041,15 @@ impl Hub {
                     events.push(HostEvent::Packet(conn, Box::new(S::PlayerCommand(p))));
                 }
                 S::PlayerCommand(p) => match p.action {
-                    1 | 2 => self.set_sprinting(i, p.action == 1),
+                    1 | 2 => {
+                        let sprinting = p.action == 1;
+                        let changed = self.guests[i].sprinting != sprinting;
+                        self.set_sprinting(i, sprinting);
+                        // The game tells the mods of a change.
+                        if changed {
+                            events.push(HostEvent::Packet(conn, Box::new(S::PlayerCommand(p))));
+                        }
+                    }
                     // STOP_SLEEPING.
                     0 => self.wake(i),
                     _ => {}

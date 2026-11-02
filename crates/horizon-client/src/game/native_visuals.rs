@@ -14,9 +14,10 @@ impl Game<'_> {
     pub(super) fn native_frame_visuals(
         &self,
         camera: glam::DVec3,
+        alpha: f64,
         lines: &mut Vec<gizmos::Line>,
     ) -> Vec<dynamic_light::Colored> {
-        let particle_lights = self
+        let mut particle_lights = self
             .renderer
             .as_ref()
             .and_then(|r| r.particle_lights())
@@ -24,6 +25,26 @@ impl Game<'_> {
                 self.particles
                     .lights(entries, self.clock.camera_fraction() as f32)
             });
+        // Held and dropped items whose block the pack's `[[lights]]` colour shine in that colour,
+        // as far as their dynamic light reaches.
+        if let Some(renderer) = self.renderer.as_ref().filter(|r| r.has_light_colors()) {
+            for (source, item) in self.dynamic_light_sources(alpha) {
+                let Some(color) = item.and_then(|i| renderer.light_color(&i)) else {
+                    continue;
+                };
+                let top = color[0].max(color[1]).max(color[2]);
+                if source.level == 0 || top <= 0.0 {
+                    continue;
+                }
+                let [r, g, b] = color.map(|c| (c / top * 255.0).round() as u32);
+                particle_lights.push((
+                    source.at.to_array(),
+                    r << 16 | g << 8 | b,
+                    f32::from(source.level),
+                    1.0,
+                ));
+            }
+        }
         let Some(player) = self.native_player() else {
             return dynamic_light::select_colored(particle_lights.into_iter(), camera);
         };

@@ -868,7 +868,77 @@ pub fn tooltip(batch: &mut HudBatch, atlas: &HudAtlas, lines: &[Text], cursor: (
     if lines.is_empty() {
         return;
     }
-    crate::widgets::frame_tooltip(lines);
+    let (w, h) = tooltip_size(atlas, lines);
+    let mut x = cursor.0 + 12.0;
+    let mut y = cursor.1 - 12.0;
+    if x + w > batch.width {
+        x = (cursor.0 - 24.0 - w).max(4.0);
+    }
+    if y + h + 3.0 > batch.height {
+        y = batch.height - h - 3.0;
+    }
+    tooltip_box(batch, atlas, lines, x, y, w, h);
+}
+/// `WidgetTooltipHolder.createTooltipPositioner`'s focused branch
+/// (`MenuTooltipPositioner`): a widget with the keyboard focus keeps the
+/// pointer where it is, and its tooltip stays against the widget at `rect`.
+pub fn tooltip_menu(
+    batch: &mut HudBatch,
+    atlas: &HudAtlas,
+    lines: &[Text],
+    cursor: (f32, f32),
+    rect: [f32; 4],
+) {
+    if lines.is_empty() {
+        return;
+    }
+    let (w, h) = tooltip_size(atlas, lines);
+    let (x, y) = menu_tooltip_position(
+        (batch.width as i32, batch.height as i32),
+        (cursor.0 as i32, cursor.1 as i32),
+        rect.map(|v| v as i32),
+        (w.ceil() as i32, h.ceil() as i32),
+    );
+    tooltip_box(batch, atlas, lines, x as f32, y as f32, w, h);
+}
+/// `MenuTooltipPositioner.positionTooltip`: the tooltip's top left with the
+/// pointer at `cursor`, the widget it belongs to at `rect`, and the screen.
+/// `MARGIN` 5 and `MOUSE_OFFSET_X` 12 on the horizontal, and the
+/// `MAX_OVERLAP_WITH_WIDGET` 3 and `MAX_DISTANCE_TO_WIDGET` 5 of the vertical
+/// offset from the widget's top or bottom edge.
+pub fn menu_tooltip_position(
+    screen: (i32, i32),
+    cursor: (i32, i32),
+    rect: [i32; 4],
+    size: (i32, i32),
+) -> (i32, i32) {
+    let [_, y, _, height] = rect;
+    let height = height.max(1);
+    let mut pos = (cursor.0 + 12, cursor.1);
+    if pos.0 + size.0 > screen.0 - 5 {
+        pos.0 = (cursor.0 - 12 - size.0).max(9);
+    }
+    pos.1 += 3;
+    // `bottom() + 3 + getOffset(0, 0, height)` is the widget's edge, `height`
+    // further down; below that the tooltip goes under it, else over it.
+    let below = size.1 + 6;
+    if y + 2 * height + below <= screen.1 - 5 {
+        pos.1 += widget_offset(pos.1, y, height);
+    } else {
+        pos.1 -= below + widget_offset(pos.1, y + height, height);
+    }
+    pos
+}
+/// `MenuTooltipPositioner.getOffset`: how far the tooltip keeps from the
+/// widget's top (or bottom) edge, from `MAX_DISTANCE_TO_WIDGET` 5 to
+/// `MAX_OVERLAP_WITH_WIDGET` 3 as the pointer nears the edge.
+/// The distance over the height is an int division in vanilla, so the lerp
+/// is `height - 3` until the pointer is a whole height away, then 5.
+fn widget_offset(at: i32, edge: i32, height: i32) -> i32 {
+    let d = ((at - edge).unsigned_abs().min(height as u32) / height as u32) as f32;
+    ((height as f32 - 3.0) + d * (5.0 - (height as f32 - 3.0))).round() as i32
+}
+fn tooltip_size(atlas: &HudAtlas, lines: &[Text]) -> (f32, f32) {
     let w = lines
         .iter()
         .map(|l| atlas.font.width_text(l))
@@ -878,14 +948,18 @@ pub fn tooltip(batch: &mut HudBatch, atlas: &HudAtlas, lines: &[Text], cursor: (
     } else {
         10.0 * lines.len() as f32
     };
-    let mut x = cursor.0 + 12.0;
-    let mut y = cursor.1 - 12.0;
-    if x + w > batch.width {
-        x = (cursor.0 - 24.0 - w).max(4.0);
-    }
-    if y + h + 3.0 > batch.height {
-        y = batch.height - h - 3.0;
-    }
+    (w, h)
+}
+fn tooltip_box(
+    batch: &mut HudBatch,
+    atlas: &HudAtlas,
+    lines: &[Text],
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+) {
+    crate::widgets::frame_tooltip(lines);
     nine_slice(
         batch,
         atlas,
@@ -2085,5 +2159,36 @@ mod tests {
         let mut v = "stone".to_string();
         assert!(!delete_words(&mut v, 1));
         assert_eq!(v, "stone");
+    }
+    /// `MenuTooltipPositioner.positionTooltip`: the pointer's 12 px offset,
+    /// the 5 px screen margin, and the 3 to 5 px the tooltip keeps from the
+    /// widget's top or bottom edge.
+    #[test]
+    fn a_menu_tooltip_stays_by_its_widget() {
+        let screen = (427, 240);
+        let widget = [100, 100, 150, 20];
+        let size = (80, 10);
+        // Pointer at the widget's top edge: the tooltip drops 3 px, then
+        // `getOffset`'s int division gives `height - 3` = 17 more.
+        assert_eq!(
+            menu_tooltip_position(screen, (100, 100), widget, size),
+            (112, 120)
+        );
+        // Near the right edge its left side mirrors to the pointer's left.
+        assert_eq!(
+            menu_tooltip_position(screen, (400, 100), widget, size),
+            (308, 120)
+        );
+        // A whole widget height from the edge, the offset is 5.
+        assert_eq!(
+            menu_tooltip_position(screen, (100, 117), widget, size),
+            (112, 125)
+        );
+        // A widget too close to the bottom: the tooltip goes above it,
+        // 203 - (10 + 6) - 17.
+        assert_eq!(
+            menu_tooltip_position(screen, (100, 200), [100, 200, 150, 20], size),
+            (112, 170)
+        );
     }
 }

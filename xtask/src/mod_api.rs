@@ -1025,6 +1025,9 @@ mod tests {
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
         pub(super) struct Corners;
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+        pub(super) struct ItemEnergyBuffer;
+        pub(super) struct Suggestion;
         pub(super) struct HudBatch;
         pub(super) struct BiomeColors;
         pub(super) struct UseAnimation;
