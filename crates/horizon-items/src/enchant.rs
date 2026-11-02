@@ -8,7 +8,6 @@ use horizon_core::random::{LegacyRandom, RandomSource};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    fs,
     path::Path,
     sync::Arc,
 };
@@ -87,36 +86,23 @@ fn string_list(v: &Value) -> Vec<String> {
     }
 }
 fn read_tag_dir(dir: &Path) -> HashMap<String, Vec<String>> {
-    fn walk(dir: &Path, base: &Path, out: &mut HashMap<String, Vec<String>>) {
-        let Ok(entries) = fs::read_dir(dir) else {
-            return;
-        };
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                walk(&p, base, out);
-            } else if p.extension().is_some_and(|x| x == "json")
-                && let Ok(rel) = p.strip_prefix(base)
-                && let Ok(bytes) = fs::read(&p)
-                && let Ok(v) = serde_json::from_slice::<Value>(&bytes)
-            {
-                let name = format!(
-                    "minecraft:{}",
-                    rel.with_extension("").to_string_lossy().replace('\\', "/")
-                );
-                let values = v["values"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|e| e.as_str().or_else(|| e["id"].as_str()).map(str::to_owned))
-                    .collect();
-                out.insert(name, values);
-            }
-        }
-    }
-    let mut out = HashMap::new();
-    walk(dir, dir, &mut out);
-    out
+    let Ok(folder) = horizon_world::json_folder::read(dir) else {
+        return HashMap::new();
+    };
+    folder
+        .files
+        .iter()
+        .filter_map(|file| {
+            let v = serde_json::from_slice::<Value>(file.bytes().ok()?).ok()?;
+            let values = v["values"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.as_str().or_else(|| e["id"].as_str()).map(str::to_owned))
+                .collect();
+            Some((format!("minecraft:{}", file.name), values))
+        })
+        .collect()
 }
 /// Expand a tag keeping first-seen order (`TagLoader` builds a linked set).
 fn expand_ordered(
@@ -197,44 +183,42 @@ impl Enchantments {
         let damage_tags = unordered(read_tag_dir(&data.join("tags/damage_type")));
         // The registry lists entries sorted by id, like the data-pack loader.
         let mut files: BTreeMap<String, Value> = BTreeMap::new();
-        if let Ok(entries) = fs::read_dir(data.join("enchantment")) {
-            for e in entries.flatten() {
-                let p = e.path();
-                if let (Some(stem), Ok(bytes)) =
-                    (p.file_stem().and_then(|s| s.to_str()), fs::read(&p))
-                    && let Ok(v) = serde_json::from_slice(&bytes)
-                {
-                    files.insert(format!("minecraft:{stem}"), v);
+        // The folder's own files, not its subfolders'.
+        if let Ok(folder) = horizon_world::json_folder::read(&data.join("enchantment")) {
+            for file in folder.files.iter().filter(|f| !f.name.contains('/')) {
+                if let Ok(v) = serde_json::from_slice(file.bytes().unwrap_or_default()) {
+                    files.insert(format!("minecraft:{}", file.name), v);
                 }
             }
         }
-        let lang: HashMap<String, String> = fs::read(root.join("assets/minecraft/lang/en_us.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice::<HashMap<String, String>>(&b).ok())
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|(k, _)| {
-                k.starts_with("enchantment.")
-                    || k.starts_with("attribute.")
-                    || k.starts_with("item.modifiers.")
-                    || k.starts_with("effect.")
-                    || k.starts_with("item.minecraft.potion")
-                    || k.starts_with("item.minecraft.splash_potion")
-                    || k.starts_with("item.minecraft.lingering_potion")
-                    || k.starts_with("item.minecraft.tipped_arrow")
-                    || k.starts_with("item.minecraft.firework_rocket.")
-                    || k.starts_with("item.minecraft.firework_star.")
-                    || k.starts_with("trim_")
-                    || k.starts_with("potion.")
-                    || k.starts_with("container.")
-                    || k.starts_with("merchant.")
-                    || k.starts_with("entity.minecraft.")
-                    || k.starts_with("gui.recipebook.")
-                    || k.starts_with("gui.togglable_slot")
-                    || k.starts_with("block.minecraft.banner.")
-                    || k.starts_with("recipe.toast.")
-            })
-            .collect();
+        let lang: HashMap<String, String> =
+            horizon_core::prepared_files::read(&root.join("assets/minecraft/lang/en_us.json"))
+                .ok()
+                .and_then(|b| serde_json::from_slice::<HashMap<String, String>>(&b).ok())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|(k, _)| {
+                    k.starts_with("enchantment.")
+                        || k.starts_with("attribute.")
+                        || k.starts_with("item.modifiers.")
+                        || k.starts_with("effect.")
+                        || k.starts_with("item.minecraft.potion")
+                        || k.starts_with("item.minecraft.splash_potion")
+                        || k.starts_with("item.minecraft.lingering_potion")
+                        || k.starts_with("item.minecraft.tipped_arrow")
+                        || k.starts_with("item.minecraft.firework_rocket.")
+                        || k.starts_with("item.minecraft.firework_star.")
+                        || k.starts_with("trim_")
+                        || k.starts_with("potion.")
+                        || k.starts_with("container.")
+                        || k.starts_with("merchant.")
+                        || k.starts_with("entity.minecraft.")
+                        || k.starts_with("gui.recipebook.")
+                        || k.starts_with("gui.togglable_slot")
+                        || k.starts_with("block.minecraft.banner.")
+                        || k.starts_with("recipe.toast.")
+                })
+                .collect();
         let mut list = Vec::new();
         for (id, v) in &files {
             let exclusive = match &v["exclusive_set"] {

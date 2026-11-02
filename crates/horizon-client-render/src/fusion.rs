@@ -53,7 +53,10 @@ fn namespaced(reference: &str) -> String {
 
 fn read_model(root: &Path, name: &str) -> Option<Json> {
     let (ns, path) = name.split_once(':')?;
-    let text = fs::read_to_string(root.join(format!("assets/{ns}/models/{path}.json"))).ok()?;
+    let text = horizon_core::prepared_files::read_to_string(
+        &root.join(format!("assets/{ns}/models/{path}.json")),
+    )
+    .ok()?;
     Json::parse(&text).ok()
 }
 
@@ -186,7 +189,7 @@ fn connecting_textures(root: &Path) -> HashMap<String, Meta> {
                 let Some(png) = path.to_str().and_then(|p| p.strip_suffix(".png.mcmeta")) else {
                     continue;
                 };
-                let Ok(text) = fs::read_to_string(&path) else {
+                let Ok(text) = horizon_core::prepared_files::read_to_string(&path) else {
                     continue;
                 };
                 if !text.contains("fusion") {
