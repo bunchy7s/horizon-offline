@@ -122,6 +122,14 @@ impl Game<'_> {
             && !host.hub.guests[gi].spectator()
         {
             self.guest_menu_op(host, gi, &mut gs.menu, op);
+            if gs.kind == StationKind::Anvil {
+                let guest = &host.hub.guests[gi];
+                let (uuid, name) = (guest.uuid, guest.name.clone());
+                let mut result = gs.menu.slot(2).cloned();
+                self.native_prepare_anvil(uuid, &name, gs.pos, &mut result, &mut gs.menu.data[0]);
+                let env = self.menu_env();
+                gs.menu.set_slot(&env, 2, result);
+            }
             self.lan_station_sounds(&mut gs);
             if let Some(amount) = gs.menu.ground.take() {
                 self.grindstone_taken(gs.pos, amount);
