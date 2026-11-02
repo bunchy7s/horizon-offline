@@ -15,8 +15,9 @@ const MODEL_WORDS: u32 = 7u;
 const PART_WORDS: u32 = 25u;
 // A job (16 words): first model vertex, vertex count, first part, first output
 // vertex, the texture rect (4 floats), scroll, colour, light, overlay,
-// whether the overlay is the armour glint (its model UV in `glint_uv`), 3 spare
-// (0: the last one is `keep`'s).
+// whether the overlay is the armour glint (its model UV in `glint_uv`), whether
+// it draws an item's quads (`SkinJob::item`), 2 spare (0: the last one is
+// `keep`'s).
 const JOB_WORDS: u32 = 16u;
 // `mesher::Vertex` (11 words): pos (3), uv (2), layer, color, light, normal
 // (4 x i8), glint_uv (2).
@@ -87,6 +88,7 @@ fn skin(
     let light = jobs[j + 10u];
     let overlay = jobs[j + 11u];
     let glint = jobs[j + 12u] != 0u;
+    let item = jobs[j + 13u] != 0u;
     keep = jobs[j + 15u];
     for (var k = lane; k < count; k += 64u) {
         let v = (first + k) * MODEL_WORDS;
@@ -105,6 +107,13 @@ fn skin(
         if axis >= 3u {
             n = -n;
         }
+        // An item's colour by axis, shaded on the CPU, and `mesher::CULL_BACK`.
+        var vertex_color = color;
+        var normal = pack(n);
+        if item {
+            vertex_color = parts[part * PART_WORDS + 16u + axis];
+            normal = 1u << 24u;
+        }
         let o = (dst + k) * VERTEX_WORDS;
         out[o] = bitcast<u32>(pos.x);
         out[o + 1u] = bitcast<u32>(pos.y);
@@ -112,9 +121,9 @@ fn skin(
         out[o + 3u] = bitcast<u32>(rect.x + r(r(rect.z - rect.x) * scroll_u(uv.x, scroll)));
         out[o + 4u] = bitcast<u32>(rect.y + r(r(rect.w - rect.y) * uv.y));
         out[o + 5u] = overlay;
-        out[o + 6u] = color;
+        out[o + 6u] = vertex_color;
         out[o + 7u] = light;
-        out[o + 8u] = pack(n);
+        out[o + 8u] = normal;
         if glint {
             out[o + 9u] = bitcast<u32>(uv.x);
             out[o + 10u] = bitcast<u32>(uv.y);

@@ -20,8 +20,9 @@ sent the same things over TLS, and every answer is compared exactly:
   `server/stop`;
 - the TLS version each server agrees on.
 
-A parse error's `data` is Gson's message in vanilla and serde's in Horizon: left out. The notifications vanilla
-sends meanwhile (`server/started`, `server/saving`...) are set aside: Horizon doesn't send them yet.
+A parse error's `data` is Gson's message in vanilla and serde's in Horizon: left out. The notifications the
+servers send meanwhile (`server/stopping`...) are set aside, and their names are kept in each side's report
+(`notifications`); Horizon sends `server/started` and `server/stopping` so far, not yet the rest.
 """
 import base64
 import json
