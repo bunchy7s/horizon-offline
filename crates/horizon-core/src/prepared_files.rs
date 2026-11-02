@@ -207,6 +207,24 @@ pub fn find(path: &Path) -> Option<(Arc<PreparedFiles>, String)> {
     })
 }
 
+/// `path`'s bytes: from its prepared root's data file when that holds it,
+/// where a file the data file doesn't have is missing (`NotFound`, without
+/// asking the disk: a texture's `.mcmeta` or LabPBR maps, mostly absent);
+/// else from the disk.
+pub fn read(path: &Path) -> io::Result<Vec<u8>> {
+    match find(path) {
+        Some((files, rel)) if holds_file(&rel) => files
+            .read(&rel)
+            .unwrap_or_else(|| Err(io::ErrorKind::NotFound.into())),
+        _ => fs::read(path),
+    }
+}
+
+/// [`read`] as UTF-8 text.
+pub fn read_to_string(path: &Path) -> io::Result<String> {
+    String::from_utf8(read(path)?).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
 /// Write `root`'s file from its folders: through a temporary file renamed
 /// into place, so a reader sees the old file or the new one. Nothing is
 /// written for a root without `horizon-resources.json`.
@@ -455,6 +473,26 @@ mod tests {
         let (_, rel) = find(&root.join("data/minecraft/recipe")).unwrap();
         assert_eq!(rel, "data/minecraft/recipe");
         assert!(find(&root.join("worldgen/structure")).is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Under a root with a file, a file it holds reads from it and a file it
+    /// doesn't is missing even when the disk has one now; a file outside its
+    /// folders, or a sound, reads from the disk.
+    #[test]
+    fn read_takes_the_file_for_what_it_holds() {
+        let root = root("read");
+        write(&root).unwrap();
+        let stick = root.join("data/minecraft/recipe/stick.json");
+        fs::write(&stick, b"changed on disk").unwrap();
+        assert_eq!(read(&stick).unwrap(), b"{\"stick\":1}");
+        let added = root.join("assets/minecraft/textures/block/stone_n.png");
+        fs::write(&added, b"added after").unwrap();
+        assert_eq!(read(&added).unwrap_err().kind(), io::ErrorKind::NotFound);
+        assert_eq!(read(&root.join("facts.json")).unwrap(), b"{}");
+        let sound = root.join("assets/minecraft/sounds/ambient/cave1.ogg");
+        assert_eq!(read(&sound).unwrap(), b"OggS");
+        assert_eq!(read_to_string(&stick).unwrap(), "{\"stick\":1}");
         let _ = fs::remove_dir_all(&root);
     }
 }
