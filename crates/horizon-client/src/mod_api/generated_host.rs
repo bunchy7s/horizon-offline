@@ -1263,6 +1263,56 @@ pub trait Host {
         let _ = entity;
         unimplemented!("Host::entity_level")
     }
+    /// The block state at `pos` (`Level.getBlockState`) as `/setblock` takes
+    /// it: `minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]`.
+    /// None for a chunk that isn't loaded or a `y` outside the world. API
+    /// @API:level_reads@.
+    fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        let _ = level;
+        let _ = pos;
+        unimplemented!("Host::level_block_state")
+    }
+    /// The block at `pos` without its properties: `minecraft:oak_stairs`.
+    /// None as for `block_state`. API @API:level_reads@.
+    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        let _ = level;
+        let _ = pos;
+        unimplemented!("Host::level_block")
+    }
+    /// Property `key` of the block state at `pos` (`BlockState.getValue`):
+    /// `east` for `facing`. None for a block without it, or as for
+    /// `block_state`. API @API:level_reads@.
+    fn level_block_property(&self, level: LevelRef, pos: [i32; 3], key: &str) -> Option<String> {
+        let _ = level;
+        let _ = pos;
+        let _ = key;
+        unimplemented!("Host::level_block_property")
+    }
+    /// Whether the chunk holding `pos` is loaded (`Level.isLoaded`): a block
+    /// read or write there finds the world. API @API:level_reads@.
+    fn level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
+        let _ = level;
+        let _ = pos;
+        unimplemented!("Host::level_is_loaded")
+    }
+    /// The lowest block `y` and the height of the level
+    /// (`LevelHeightAccessor.getMinY`, `getHeight`). API @API:level_reads@.
+    fn level_height(&self, level: LevelRef) -> Option<(i32, i32)> {
+        let _ = level;
+        unimplemented!("Host::level_height")
+    }
+    /// The ticks the server has run (`Level.getGameTime`), shared by every
+    /// level as in vanilla. API @API:level_reads@.
+    fn level_game_time(&self, level: LevelRef) -> Option<i64> {
+        let _ = level;
+        unimplemented!("Host::level_game_time")
+    }
+    /// The time of day in ticks (`Level.getOverworldClockTime`), shared by
+    /// every level; it keeps counting past 24000. API @API:level_reads@.
+    fn level_day_time(&self, level: LevelRef) -> Option<i64> {
+        let _ = level;
+        unimplemented!("Host::level_day_time")
+    }
 }
 impl EntityRef {
     /// The entity's position (`Entity.position`): its feet, the middle of
@@ -1294,5 +1344,45 @@ impl EntityRef {
     /// The level the entity is in (`Entity.level`). API @API:entity_handles@.
     pub fn level(self, host: &dyn Host) -> Option<LevelRef> {
         host.entity_level(self)
+    }
+}
+impl LevelRef {
+    /// The block state at `pos` (`Level.getBlockState`) as `/setblock` takes
+    /// it: `minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]`.
+    /// None for a chunk that isn't loaded or a `y` outside the world. API
+    /// @API:level_reads@.
+    pub fn block_state(self, host: &dyn Host, pos: [i32; 3]) -> Option<String> {
+        host.level_block_state(self, pos)
+    }
+    /// The block at `pos` without its properties: `minecraft:oak_stairs`.
+    /// None as for `block_state`. API @API:level_reads@.
+    pub fn block(self, host: &dyn Host, pos: [i32; 3]) -> Option<String> {
+        host.level_block(self, pos)
+    }
+    /// Property `key` of the block state at `pos` (`BlockState.getValue`):
+    /// `east` for `facing`. None for a block without it, or as for
+    /// `block_state`. API @API:level_reads@.
+    pub fn block_property(self, host: &dyn Host, pos: [i32; 3], key: &str) -> Option<String> {
+        host.level_block_property(self, pos, key)
+    }
+    /// Whether the chunk holding `pos` is loaded (`Level.isLoaded`): a block
+    /// read or write there finds the world. API @API:level_reads@.
+    pub fn is_loaded(self, host: &dyn Host, pos: [i32; 3]) -> bool {
+        host.level_is_loaded(self, pos)
+    }
+    /// The lowest block `y` and the height of the level
+    /// (`LevelHeightAccessor.getMinY`, `getHeight`). API @API:level_reads@.
+    pub fn height(self, host: &dyn Host) -> Option<(i32, i32)> {
+        host.level_height(self)
+    }
+    /// The ticks the server has run (`Level.getGameTime`), shared by every
+    /// level as in vanilla. API @API:level_reads@.
+    pub fn game_time(self, host: &dyn Host) -> Option<i64> {
+        host.level_game_time(self)
+    }
+    /// The time of day in ticks (`Level.getOverworldClockTime`), shared by
+    /// every level; it keeps counting past 24000. API @API:level_reads@.
+    pub fn day_time(self, host: &dyn Host) -> Option<i64> {
+        host.level_day_time(self)
     }
 }

@@ -2312,6 +2312,9 @@ a dimension.
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
+- `level.block_state(host, pos)` (`minecraft:oak_stairs[facing=east,…]`, as `/setblock` takes it), `block` (the name
+  alone), `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time`
+  read any level the server has loaded, not only the one in place. A block in a chunk that isn't loaded reads as `None`.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
