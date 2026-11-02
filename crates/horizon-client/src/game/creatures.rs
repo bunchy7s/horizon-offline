@@ -6492,12 +6492,15 @@ impl Game<'_> {
                 Vec::new()
             };
             let body = out.len();
-            // The GPU path: an ordinary mob, no outline, no layers the CPU path changes after
-            // drawing them (a player's, the HDR tiers below, the sulfur cube's shell).
+            // The GPU path: an ordinary mob, no layers the CPU path changes after drawing them
+            // (a player's, the HDR tiers below, the sulfur cube's shell). A glowing mob's
+            // silhouette is posed too (`SkinFrame::outline_since`), unless it is invisible:
+            // then only the outline draws.
+            let silhouette_on_gpu = outline.is_none() || !mob.invisible;
             let posable = skinning
                 && !is_player
                 && !layers_only
-                && outline.is_none()
+                && silhouette_on_gpu
                 && armor.is_empty()
                 && !matches!(
                     mob.species(),
@@ -6576,14 +6579,18 @@ impl Game<'_> {
             }
             // CustomHeadLayer (a pumpkin, skull or head item) included.
             if layers {
-                // Held items join the GPU path's draws unless an outline reads their vertices.
-                let skin = (skinning && outline.is_none()).then_some(&mut skinned);
+                // Held items join the GPU path's draws, their silhouette too.
+                let skin = (skinning && silhouette_on_gpu).then_some(&mut skinned);
                 self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
                 // `native_mob_layer`: a native mod's layer, over the vanilla ones.
                 self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
             }
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);
+                if let Some(((first, _, _), _)) = skinned {
+                    let color = horizon_client::mobs::render::abgr(rgb);
+                    self.skin_frame.borrow_mut().outline_since(first, color);
+                }
                 if mob.invisible {
                     out.truncate(entity_start);
                     continue;
