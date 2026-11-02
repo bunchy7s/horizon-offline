@@ -947,6 +947,16 @@ impl Font {
             .sum::<f32>()
             .ceil()
     }
+    /// `Font.width(FormattedCharSequence)` of a sequence a component built
+    /// with `FormattedCharSequence.forward`: every character is a glyph, a
+    /// `§` included (`StringDecomposer.iterate`, not `iterateFormatted`).
+    pub fn width_drawn(&self, t: &Text) -> f32 {
+        crate::bidi::visual(t)
+            .chars()
+            .map(|(c, s)| self.advance(c, s))
+            .sum::<f32>()
+            .ceil()
+    }
     /// `StringSplitter.splitLines`: each line and whether it continues a
     /// wrapped one. A line breaks at a `\n`, or once a character overflows
     /// `max_width` (never the first visible one) at the last space so far, or

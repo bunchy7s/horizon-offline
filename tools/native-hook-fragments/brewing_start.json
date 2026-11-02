@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "brewing_start",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_brewing_start",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A brewing stand starts a brew (`native_brewing_start`).",
+  "doc_summary": "A brewing stand starts brewing after it consumes fuel and sets its timer. Bundles need \"hooks\": @API:brewing_start@."
+}

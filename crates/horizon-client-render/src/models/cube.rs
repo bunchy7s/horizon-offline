@@ -119,6 +119,7 @@ mod tests {
                             layer: 7,
                             opaque: true,
                             translucent: false,
+                            fusion: None,
                         })
                         .collect();
                         let Some(styles) = cube_styles(&faces) else {
@@ -153,6 +154,7 @@ mod tests {
                     layer: 0,
                     opaque: true,
                     translucent: false,
+                    fusion: None,
                 })
                 .collect();
         faces[0].opaque = false;

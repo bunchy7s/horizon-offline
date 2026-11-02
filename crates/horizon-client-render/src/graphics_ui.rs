@@ -33,6 +33,13 @@ pub enum H {
     CaveCulling,
     EntityCulling,
     LeafCulling,
+    CacheShulkerBoxes,
+    CacheSigns,
+    CacheDecoratedPots,
+    CacheBells,
+    CacheChests,
+    CacheBanners,
+    CacheCopperGolemStatues,
     ChunkUpdates,
     UploadBudget,
     Sky,
@@ -219,12 +226,48 @@ pub fn rows(level: Level) -> Vec<Row> {
             h(
                 H::EntityCulling,
                 None,
-                "Hides models behind opaque blocks. Async checks off-thread; entities tick.",
+                "Hides entities behind opaque blocks.",
             ),
             h(
                 H::LeafCulling,
                 Saves,
                 "Draws or drops leaf faces inside canopies. Off keeps vanilla's fancy leaves.",
+            ),
+            Row::Header("Block Entities"),
+            h(
+                H::CacheShulkerBoxes,
+                Saves,
+                "Reuses settled boxes; lid movement stays animated.",
+            ),
+            h(
+                H::CacheSigns,
+                Saves,
+                "Reuses sign text until text, light, or font changes.",
+            ),
+            h(
+                H::CacheDecoratedPots,
+                Saves,
+                "Reuses still pots; break wobble and sherd changes redraw.",
+            ),
+            h(
+                H::CacheBells,
+                Saves,
+                "Reuses still bells; ringing stays animated.",
+            ),
+            h(
+                H::CacheChests,
+                Saves,
+                "Reuses closed chests; moving lids stay animated.",
+            ),
+            h(
+                H::CacheBanners,
+                Saves,
+                "Reuses poles; flags and pattern layers still update.",
+            ),
+            h(
+                H::CacheCopperGolemStatues,
+                Saves,
+                "Reuses statue geometry until its block state changes.",
             ),
             Row::Header("Quality"),
             v(
@@ -484,6 +527,11 @@ fn description(item: Item, s: &Settings, text: &'static str) -> &'static str {
         (Item::Horizon(H::HdrPeak | H::HdrPaperWhite), Setup::Automatic | Setup::Changed) => {
             "Set up for your display. Leave on Auto unless it looks wrong."
         }
+        (Item::Horizon(H::EntityCulling), _) => match s.horizon.entity_culling {
+            EntityCullingMode::Off => "No entity occlusion culling.",
+            EntityCullingMode::Synchronous => "CPU occlusion test runs this frame.",
+            EntityCullingMode::Asynchronous => "Occlusion checks run on a worker thread.",
+        },
         (Item::Horizon(H::LeafCulling), _) => match s.horizon.leaf_culling {
             LeafCullingMode::Off => "Every leaf face. Vanilla's fancy leaves.",
             LeafCullingMode::Solid => {
@@ -570,6 +618,15 @@ impl H {
             H::CaveCulling => labelled("Cave Culling", on_off(g.cave_culling)),
             H::EntityCulling => labelled("Entity Culling", g.entity_culling.label()),
             H::LeafCulling => labelled("Leaf Culling", g.leaf_culling.label()),
+            H::CacheShulkerBoxes => labelled("Shulker Boxes", on_off(g.cache_shulker_boxes)),
+            H::CacheSigns => labelled("Signs", on_off(g.cache_signs)),
+            H::CacheDecoratedPots => labelled("Decorated Pots", on_off(g.cache_decorated_pots)),
+            H::CacheBells => labelled("Bells", on_off(g.cache_bells)),
+            H::CacheChests => labelled("Chests", on_off(g.cache_chests)),
+            H::CacheBanners => labelled("Banners", on_off(g.cache_banners)),
+            H::CacheCopperGolemStatues => {
+                labelled("Copper Golem Statues", on_off(g.cache_copper_golem_statues))
+            }
             H::ChunkUpdates => match g.chunk_updates {
                 0 => labelled("Chunk Updates", "Unlimited"),
                 n => labelled("Chunk Updates", lang::tr("%s per frame", &[&n])),
@@ -625,24 +682,21 @@ impl H {
             H::HdrPaperWhite => match g.hdr_paper_white {
                 0 => labelled(
                     "Paper White",
-                    lang::tr("Auto (%s nits)", &[&g.paper_white_nits()]),
+                    lang::tr("Auto (%s)", &[&g.paper_white_nits()]),
                 ),
-                n => labelled("Paper White", lang::tr("%s nits", &[&n])),
+                n => labelled("Paper White", n.to_string()),
             },
             H::HdrPeak => match g.hdr_peak {
-                0 => labelled(
-                    "Peak Brightness",
-                    lang::tr("Auto (%s nits)", &[&g.peak_nits()]),
-                ),
-                n => labelled("Peak Brightness", lang::tr("%s nits", &[&n])),
+                0 => labelled("Peak Brightness", lang::tr("Auto (%s)", &[&g.peak_nits()])),
+                n => labelled("Peak Brightness", n.to_string()),
             },
-            H::HdrBlackLevel => labelled(
-                "Black Level",
-                lang::tr(
-                    "%s nits",
-                    &[&format!("{:.2}", g.hdr_black_level as f32 / 100.0)],
+            H::HdrBlackLevel => match g.hdr_black_level {
+                0 => labelled(
+                    "Black Level",
+                    lang::tr("Auto (%s)", &[&format!("{:.2}", g.black_level_nits())]),
                 ),
-            ),
+                n => labelled("Black Level", format!("{:.2}", n as f32 / 100.0)),
+            },
             H::HdrUiBrightness => labelled("UI Brightness", format!("{}%", g.hdr_ui_brightness)),
             H::HdrKey => {
                 Text::translate("Shortcut: %s", &[crate::keybinds::display_name(&g.hdr_key)])
@@ -718,6 +772,15 @@ impl H {
             }
             H::LeafCulling => {
                 g.leaf_culling = step(&LeafCullingMode::ALL, g.leaf_culling, back);
+            }
+            H::CacheShulkerBoxes => g.cache_shulker_boxes = !g.cache_shulker_boxes,
+            H::CacheSigns => g.cache_signs = !g.cache_signs,
+            H::CacheDecoratedPots => g.cache_decorated_pots = !g.cache_decorated_pots,
+            H::CacheBells => g.cache_bells = !g.cache_bells,
+            H::CacheChests => g.cache_chests = !g.cache_chests,
+            H::CacheBanners => g.cache_banners = !g.cache_banners,
+            H::CacheCopperGolemStatues => {
+                g.cache_copper_golem_statues = !g.cache_copper_golem_statues
             }
             H::Sky => g.sky = !g.sky,
             H::Fog => g.fog = !g.fog,
@@ -817,6 +880,13 @@ impl Item {
         Some(match self {
             Item::Horizon(H::BlueMapAutoDetect) => g.blue_map.auto_detect,
             Item::Horizon(H::CaveCulling) => g.cave_culling,
+            Item::Horizon(H::CacheShulkerBoxes) => g.cache_shulker_boxes,
+            Item::Horizon(H::CacheSigns) => g.cache_signs,
+            Item::Horizon(H::CacheDecoratedPots) => g.cache_decorated_pots,
+            Item::Horizon(H::CacheBells) => g.cache_bells,
+            Item::Horizon(H::CacheChests) => g.cache_chests,
+            Item::Horizon(H::CacheBanners) => g.cache_banners,
+            Item::Horizon(H::CacheCopperGolemStatues) => g.cache_copper_golem_statues,
             Item::Horizon(H::Sky) => g.sky,
             Item::Horizon(H::Fog) => g.fog,
             Item::Horizon(H::Weather) => g.weather,
@@ -1319,6 +1389,11 @@ impl GraphicsUi {
         framebuffer: [i32; 2],
         amount: f32,
     ) -> Vec<Action> {
+        // The "Scroll wheel changes settings" extra off: the wheel only scrolls.
+        if !s.extras.wheel_cycles_settings {
+            self.scroll(level, s, h, amount);
+            return Vec::new();
+        }
         // Horizon improvement: focused slider/cycle intercepts wheel first.
         if amount != 0.0
             && self.can_change_value
@@ -1961,8 +2036,8 @@ mod tests {
         item.cycle(&mut s, true, [854, 480]);
         assert_eq!(s.horizon.leaf_culling, LeafCullingMode::Hollow);
 
-        // The three culling settings share one group, below Rendering's chunk
-        // updates and above Quality.
+        // The culling group is followed by the separate block-entity cache
+        // group, then Quality.
         let rows = rows(Level::Advanced);
         let culling = rows
             .iter()
@@ -1982,6 +2057,27 @@ mod tests {
         ));
         assert!(matches!(
             rows.get(culling + 4),
+            Some(Row::Header("Block Entities"))
+        ));
+        for (offset, cache) in [
+            H::CacheShulkerBoxes,
+            H::CacheSigns,
+            H::CacheDecoratedPots,
+            H::CacheBells,
+            H::CacheChests,
+            H::CacheBanners,
+            H::CacheCopperGolemStatues,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(matches!(
+                rows.get(culling + 5 + offset),
+                Some(Row::Setting(setting)) if setting.item == Item::Horizon(cache)
+            ));
+        }
+        assert!(matches!(
+            rows.get(culling + 12),
             Some(Row::Header("Quality"))
         ));
 
@@ -2213,6 +2309,15 @@ mod tests {
         let actions = ui.wheel(Level::Advanced, &mut s, cursor, size, fb, 1.0);
         assert_eq!(actions, vec![Action::ButtonClick, Action::Changed]);
         assert_eq!(s.horizon.far_detail, FarDetail::Reduced);
+        // With the "Scroll wheel changes settings" extra off, it scrolls instead.
+        s.extras.wheel_cycles_settings = false;
+        let scroll_before = ui.scroll.amount;
+        let actions = ui.wheel(Level::Advanced, &mut s, cursor, size, fb, -1.0);
+        assert!(actions.is_empty());
+        assert_eq!(s.horizon.far_detail, FarDetail::Reduced);
+        assert!(ui.scroll.amount > scroll_before);
+        s.extras.wheel_cycles_settings = true;
+        ui.scroll.amount = scroll_before;
 
         // 2. Wheel over a slider: Chunk Updates scrolls the page, doesn't change slider value
         s.horizon.chunk_updates = 16;
@@ -2278,6 +2383,114 @@ mod tests {
                     "{h:?} step backward from {i}"
                 );
             }
+        }
+    }
+    /// Horizon's graphics captions are English sentences that the language table keys by
+    /// themselves, so a caption, description or value that is not in `en_us.json` shows in
+    /// English in every language. Every text the three pages show, with each setting cycled
+    /// through its values (#1927).
+    #[test]
+    fn every_graphics_text_is_in_the_language_table() {
+        let (_, missed) = lang::scoped(lang::Language::load(&[], "de_de"), || {
+            for hdr in [false, true] {
+                let mut s = Settings::default();
+                s.horizon.hdr = hdr;
+                s.horizon.taa = true;
+                for level in [Level::Simple, Level::Advanced, Level::Hdr] {
+                    for _ in 0..8 {
+                        for row in extra_rows(level, &s) {
+                            match row {
+                                Row::Header(name) => {
+                                    lang::get(name);
+                                }
+                                Row::Setting(row) => {
+                                    row.item.label(&s);
+                                    let text = description(row.item, &s, row.text);
+                                    lang::get(text);
+                                    lang::get(row.cost.label());
+                                    if let Some(why) = row.item.blocked(&s) {
+                                        lang::get(why);
+                                    }
+                                }
+                            }
+                        }
+                        for row in extra_rows(level, &s) {
+                            if let Row::Setting(Setting {
+                                item: Item::Horizon(h),
+                                ..
+                            }) = row
+                            {
+                                h.cycle(&mut s, false);
+                            }
+                        }
+                    }
+                }
+            }
+            for button in ["Advanced...", "Simple...", "Done"] {
+                lang::get(button);
+            }
+        });
+        // `labelled` also looks up values that are already words in the language ("An") or
+        // numbers with a unit ("12 chunks", "Auto (8)"); those are not keys, and "FSR 3.1" is
+        // a name.
+        let missed: Vec<_> = missed
+            .into_iter()
+            .filter(|m| !m.starts_with(|c: char| c.is_ascii_digit()) && !m.starts_with("Auto ("))
+            .filter(|m| !["An", "Aus", "FSR 3.1", "key.keyboard.unknown"].contains(&m.as_str()))
+            .collect();
+        assert_eq!(missed, Vec::<String>::new());
+    }
+    /// Leaf Culling, Frame Generation and Shadow Cache came with English captions only (#1927).
+    #[test]
+    fn newer_graphics_settings_are_translated() {
+        let mut s = Settings::default();
+        s.horizon.leaf_culling = LeafCullingMode::Hollow;
+        s.horizon.entity_culling = EntityCullingMode::Asynchronous;
+        for (code, leaf, entity, leaf_text) in [
+            (
+                "de_de",
+                "Laub-Culling: Hohl",
+                "Objekt-Culling: Asynchron",
+                "Lässt Flächen zwischen Blättern weg: schneller, aber Lücken sind durchsichtig.",
+            ),
+            (
+                "pl_pl",
+                "Pomijanie liści: Puste",
+                "Pomijanie bytów: Asynchroniczne",
+                "Pomija ściany między liśćmi: szybciej, ale luki są przezroczyste.",
+            ),
+            (
+                "uk_ua",
+                "Відсікання листя: Порожнє",
+                "Відсік. сутностей: Асинхронно",
+                "Прибирає грані між листям: швидше, але прогалини прозорі.",
+            ),
+            (
+                "zh_cn",
+                "树叶剔除: 镂空",
+                "实体剔除: 异步",
+                "省略树叶之间的面：更快，但缝隙会透视。",
+            ),
+            (
+                "fr_fr",
+                "Occlusion feuillage: Creux",
+                "Occlusion des entités: Asynchrone",
+                "Supprime les faces entre feuilles : plus rapide, mais on voit à travers les trous.",
+            ),
+        ] {
+            let (shown, _) = lang::scoped(lang::Language::load(&[], code), || {
+                let item = |h| Item::Horizon(h);
+                (
+                    item(H::LeafCulling).label(&s).plain(),
+                    item(H::EntityCulling).label(&s).plain(),
+                    lang::get(description(item(H::LeafCulling), &s, "")),
+                )
+            });
+            assert_eq!(
+                shown,
+                (leaf.into(), entity.into(), leaf_text.into()),
+                "{code}"
+            );
         }
     }
 }

@@ -79,6 +79,48 @@ def cases(count):
                         'chatOnly': True, 'opacity': 0.5, 'mouse': [0, 0], 'blink': 0,
                         'actions': [{'type': 'type', 'text': text}]
                                    + [{'type': 'key', 'key': key} for key in keys]})
+    # The box holds 256 characters: a longer paste is cut there, in the middle
+    # of a selection the room left by the selection is kept, and once full no
+    # key adds anything.
+    for text, keys in [('a' * 300, ['end', 'backspace']),
+                       ('b' * 255 + 'cdefghij', ['left', 'left', 'ctrl+a', 'delete', 'down']),
+                       ('c' * 256, ['home', 'delete', 'right', 'end', 'backspace']),
+                       ('/' + 'd' * 300, ['end', 'ctrl+backspace', 'tab'])]:
+        out.append({'width': 320, 'height': 240, 'initial': '', 'history': [], 'autoSuggest': True,
+                    'chatOnly': True, 'opacity': 0.5, 'mouse': [0, 0], 'blink': 0,
+                    'actions': [{'type': 'type', 'text': text}]
+                               + [{'type': 'key', 'key': key} for key in keys]})
+    # Characters the box never takes (the section sign, DEL, control codes)
+    # beside ones it does, and a value that already holds a `§`: the box draws
+    # its value as the literal component vanilla builds from it, so the code
+    # is a character on the screen, not a format.
+    for text in ['ab\u00a7cd\u007f' + 'e\u0001f\u001fg\u00c9h', '\u00a7', 'x' * 250 + '\u00a7y' * 20]:
+        out.append({'width': 427, 'height': 240, 'initial': '\u00a7z', 'history': [], 'autoSuggest': False,
+                    'chatOnly': False, 'opacity': 1.0, 'mouse': [10, 30], 'blink': 400,
+                    'actions': [{'type': 'type', 'text': text}, {'type': 'key', 'key': 'left'}]})
+    # A command typed with a colour code in it, as a command block's editor
+    # opens with: the code is drawn, the text after it keeps its own colour.
+    for initial in ['/say \u00a7chello', '/tellraw @a {"text":"\u00a7lbold"}', '\u00a7']:
+        out.append({'width': 640, 'height': 360, 'initial': initial, 'history': [], 'autoSuggest': True,
+                    'chatOnly': True, 'opacity': 0.5, 'mouse': [0, 0], 'blink': 0,
+                    'actions': [{'type': 'key', 'key': 'left'}, {'type': 'key', 'key': 'left'},
+                                {'type': 'key', 'key': 'end'}]})
+    # A long value with codes in it, past the box's width: the box scrolls to
+    # the cursor and the drawn window keeps the codes it contains.
+    for keys in ([], ['home'], ['end'], ['shift+home'], ['ctrl+a'], ['home', 'shift+end']):
+        out.append({'width': 320, 'height': 240, 'initial': '\u00a7a' + 'x' * 100 + '\u00a7b' + 'y' * 100,
+                    'history': [], 'autoSuggest': True, 'chatOnly': True, 'opacity': 0.5, 'mouse': [0, 0],
+                    'blink': 0, 'actions': [{'type': 'key', 'key': 'end'}]
+                                            + [{'type': 'key', 'key': key} for key in keys]})
+    # A history entry longer than the box is recalled cut to its length, and
+    # the draft typed before going back through the history is not lost when
+    # the history is walked forward again.
+    out.append({'width': 640, 'height': 360, 'initial': '', 'history': ['h' * 300, '/time set day'],
+                'autoSuggest': True, 'chatOnly': True, 'opacity': 0.5, 'blink': 0,
+                'mouse': [0, 0],
+                'actions': [{'type': 'type', 'text': 'draft'}, {'type': 'key', 'key': 'up'},
+                            {'type': 'key', 'key': 'up'}, {'type': 'key', 'key': 'home'},
+                            {'type': 'key', 'key': 'down'}, {'type': 'key', 'key': 'down'}]})
     return out
 
 

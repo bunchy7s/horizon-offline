@@ -3,6 +3,7 @@
 
 pub mod active_effect_tick;
 pub mod active_effects;
+pub mod attachments;
 pub mod attribute_health;
 pub mod attribute_map;
 pub mod attribute_updates;
@@ -76,6 +77,7 @@ pub mod item_use_catalog;
 pub mod item_use_lifecycle;
 pub mod item_use_start;
 pub mod java_hash_map;
+pub mod json_folder;
 pub mod lazy_json;
 pub mod level;
 pub mod liquid_collision;
@@ -94,6 +96,7 @@ pub mod movement_properties;
 pub mod movement_restitution;
 pub mod movement_statistics;
 pub mod movement_support;
+pub mod native_load_hooks;
 pub mod nbt;
 pub mod object_open_map;
 pub mod object_open_set;

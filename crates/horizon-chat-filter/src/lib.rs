@@ -239,8 +239,19 @@ impl Action {
 pub struct Mute {
     pub uuid: String,
     pub name: String,
-    /// Epoch milliseconds.
-    pub until: i64,
+    /// Epoch milliseconds; `None`: until `/unmute`.
+    pub until: Option<i64>,
+    /// The operator who muted them (`/mute`, `/tempmute`); `None`: the filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl Mute {
+    pub fn active(&self, now: i64) -> bool {
+        self.until.is_none_or(|until| until > now)
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -312,12 +323,38 @@ impl Guard {
         )
     }
 
-    /// When the player's mute ends, if they are muted at `now`.
-    pub fn muted_until(&self, uuid: u128, now: i64) -> Option<i64> {
-        self.mutes
-            .get(&uuid)
-            .map(|m| m.until)
-            .filter(|&until| until > now)
+    /// The player's mute, if they are muted at `now`.
+    pub fn muted(&self, uuid: u128, now: i64) -> Option<&Mute> {
+        self.mutes.get(&uuid).filter(|m| m.active(now))
+    }
+
+    /// The mutes in force at `now`, by name.
+    pub fn mutes(&self, now: i64) -> Vec<&Mute> {
+        let mut mutes: Vec<&Mute> = self.mutes.values().filter(|m| m.active(now)).collect();
+        mutes.sort_by(|a, b| a.name.cmp(&b.name));
+        mutes
+    }
+
+    /// An operator's `/mute` (`until` `None`) or `/tempmute`: replaces the player's mute.
+    pub fn mute(
+        &mut self,
+        uuid: u128,
+        name: &str,
+        until: Option<i64>,
+        by: &str,
+        reason: Option<String>,
+    ) {
+        self.mutes.insert(
+            uuid,
+            Mute {
+                uuid: uuid_string(uuid),
+                name: name.to_owned(),
+                until,
+                by: Some(by.to_owned()),
+                reason,
+            },
+        );
+        self.save();
     }
 
     /// A hit by the player at `now`: the hit's number in the window, and what it leads to.
@@ -343,15 +380,24 @@ impl Guard {
             let until = now + i64::from(c.mute_minutes) * MINUTE;
             // The window starts again when the mute ends.
             s.counts_until = until + window;
-            self.mutes.insert(
-                uuid,
-                Mute {
-                    uuid: uuid_string(uuid),
-                    name: name.to_owned(),
-                    until,
-                },
-            );
-            self.save();
+            // An operator's longer mute stays.
+            if !self
+                .mutes
+                .get(&uuid)
+                .is_some_and(|m| m.until.is_none_or(|u| u >= until))
+            {
+                self.mutes.insert(
+                    uuid,
+                    Mute {
+                        uuid: uuid_string(uuid),
+                        name: name.to_owned(),
+                        until: Some(until),
+                        by: None,
+                        reason: None,
+                    },
+                );
+                self.save();
+            }
             Action::Muted { until }
         } else {
             Action::Refused
@@ -377,7 +423,7 @@ impl Guard {
             return;
         };
         let now = now_millis();
-        self.mutes.retain(|_, m| m.until > now);
+        self.mutes.retain(|_, m| m.active(now));
         let mut mutes: Vec<Mute> = self.mutes.values().cloned().collect();
         mutes.sort_by(|a, b| a.name.cmp(&b.name));
         if let Ok(text) = serde_json::to_string_pretty(&MutesFile { mutes }) {
@@ -422,6 +468,34 @@ pub fn append_log(path: &Path, line: &str) -> std::io::Result<()> {
         .append(true)
         .open(path)?;
     writeln!(f, "{line}")
+}
+
+/// `/tempmute`'s duration in milliseconds: a positive whole number and a unit, `s`, `m`, `h`, `d` or
+/// `w` (`10m`, `2h`, `1d`).
+pub fn parse_duration(text: &str) -> Option<i64> {
+    let unit = match text.chars().last()? {
+        's' => 1_000,
+        'm' => MINUTE,
+        'h' => 60 * MINUTE,
+        'd' => 24 * 60 * MINUTE,
+        'w' => 7 * 24 * 60 * MINUTE,
+        _ => return None,
+    };
+    let count: i64 = text[..text.len() - 1].parse().ok()?;
+    (count > 0).then(|| count.checked_mul(unit)).flatten()
+}
+
+/// `millis` for players, rounded up: minutes up to an hour, hours up to two days, then days.
+pub fn duration_text(millis: i64) -> String {
+    let up = |unit: i64| (millis + unit - 1) / unit;
+    let (count, unit) = if millis <= 60 * MINUTE {
+        (up(MINUTE), "minute")
+    } else if millis <= 48 * 60 * MINUTE {
+        (up(60 * MINUTE), "hour")
+    } else {
+        (up(24 * 60 * MINUTE), "day")
+    };
+    format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
 }
 
 pub fn now_millis() -> i64 {

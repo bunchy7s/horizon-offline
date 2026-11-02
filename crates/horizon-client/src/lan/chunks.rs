@@ -187,55 +187,11 @@ struct Encoded {
     non_air: bool,
     /// LevelChunkSection.write, and its block entity blocks.
     wire: Option<(Arc<[u8]>, Entities)>,
-    /// The section's light as the wire's two DataLayers, when not uniform:
-    /// made by the warm-up threads and taken by the body that sends it.
-    /// Not kept once sent: two layers per lit section of every column the
-    /// level holds cost more memory than repacking them costs time.
-    light: Option<Arc<Layers>>,
 }
 
 /// A section's blocks that have a block entity type, as (index, state) in
 /// index order (y, then z, then x).
 type Entities = Arc<[(u16, u32)]>;
-
-/// One section's light as DataLayers (two blocks per byte, the even one in
-/// the low nibble), and whether each holds any light.
-struct Layers {
-    sky: Vec<u8>,
-    block: Vec<u8>,
-    sky_any: bool,
-    block_any: bool,
-}
-impl Layers {
-    fn of(light: &Light) -> Self {
-        let (mut sky, mut block) = (vec![0u8; 2048], vec![0u8; 2048]);
-        let (sky_any, block_any) = match light {
-            Light::Uniform(v) => {
-                let (sk, bl) = (v >> 4, v & 15);
-                sky.fill(sk | sk << 4);
-                block.fill(bl | bl << 4);
-                (sk != 0, bl != 0)
-            }
-            Light::Full(a) => {
-                for ((pair, sky), block) in
-                    a.as_chunks::<2>().0.iter().zip(&mut sky).zip(&mut block)
-                {
-                    let [even, odd] = *pair;
-                    *sky = even >> 4 | (odd & 0xF0);
-                    *block = (even & 15) | odd << 4;
-                }
-                let all = a.iter().fold(0u8, |acc, &v| acc | v);
-                (all & 0xF0 != 0, all & 15 != 0)
-            }
-        };
-        Self {
-            sky,
-            block,
-            sky_any,
-            block_any,
-        }
-    }
-}
 
 /// `Paletted::from_values`' palette (distinct values in first-seen order)
 /// and each entry's index in it, from a list palette's stored ids (`raw`
@@ -378,7 +334,7 @@ struct Warm {
     next: AtomicUsize,
     done: Vec<OnceLock<Warmed>>,
 }
-type Warmed = ((Arc<[u8]>, Entities), Option<Arc<Layers>>);
+type Warmed = (Arc<[u8]>, Entities);
 impl Warm {
     /// Take work until none is left.
     fn run(&self) {
@@ -401,8 +357,7 @@ impl Warm {
             let Some(s) = self.sections.get(i) else {
                 return;
             };
-            let light = matches!(s.light, Light::Full(_)).then(|| Arc::new(Layers::of(&s.light)));
-            let _ = self.done[i].set((self.coder.wire(s), light));
+            let _ = self.done[i].set(self.coder.wire(s));
         }
     }
 }
@@ -461,13 +416,29 @@ impl ChunkEncoder {
         biome_names: &[String],
         biome_registry: &[String],
     ) -> Self {
+        Self::with_signs(
+            states.into_iter().map(|(name, fluid)| (name, fluid, None)),
+            builtin,
+            biome_names,
+            biome_registry,
+        )
+    }
+
+    /// The encoder with each state's sign form from its template's class: mod
+    /// signs reuse vanilla's sign block entity types.
+    pub fn with_signs(
+        states: impl IntoIterator<Item = (Arc<str>, bool, Option<crate::blocks::SignForm>)>,
+        builtin: &Builtin,
+        biome_names: &[String],
+        biome_registry: &[String],
+    ) -> Self {
         let types = builtin.get("minecraft:block_entity_type");
         let blocks = builtin.get("minecraft:block");
         let mut flags = Vec::new();
         let mut entity_types = Vec::new();
         let mut mod_entities = Vec::new();
         let mut block_ids = Vec::new();
-        for (name, has_fluid) in states {
+        for (name, has_fluid, sign) in states {
             let air = matches!(
                 &*name,
                 "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
@@ -480,12 +451,13 @@ impl ChunkEncoder {
                 }
             }
             // A mod block's block entity type is named after the block
-            // (`mod_content`: registries.json).
-            let modded = !name.starts_with("minecraft:");
+            // (`mod_content`: registries.json), unless it is one of vanilla's.
+            let vanilla = sign.map(crate::blocks::SignForm::block_entity_type);
+            let modded = !name.starts_with("minecraft:") && vanilla.is_none();
             let t = if modded {
                 Some(&*name)
             } else {
-                block_entity_type(&name)
+                vanilla.or_else(|| block_entity_type(&name))
             }
             .and_then(|t| types.and_then(|ids| ids.id(t)))
             .unwrap_or(-1);
@@ -585,7 +557,6 @@ impl ChunkEncoder {
                 section: Arc::downgrade(section),
                 non_air: self.non_air(section),
                 wire: None,
-                light: None,
             })
     }
 
@@ -845,12 +816,8 @@ impl ChunkEncoder {
         }
         let mut cache = self.cache.lock().unwrap();
         for (s, done) in job.sections.iter().zip(&job.done) {
-            if let Some((wire, light)) = done.get() {
-                let e = self.entry(&mut cache, s);
-                e.wire = Some(wire.clone());
-                if light.is_some() {
-                    e.light = light.clone();
-                }
+            if let Some(wire) = done.get() {
+                self.entry(&mut cache, s).wire = Some(wire.clone());
             }
         }
     }
@@ -905,7 +872,7 @@ impl ChunkEncoder {
         // Light section b holds the column's section first + b - 1.
         let lights: Vec<(usize, SectionLight)> = (1..=self.sections.len())
             .filter(|&b| changed.contains(first + b - 1))
-            .map(|b| (b, self.section_light(&chunk.sections[first + b - 1])))
+            .map(|b| (b, SectionLight::of(&chunk.sections[first + b - 1])))
             .collect();
         horizon_protocol::packets::play::Clientbound::LightUpdate(
             horizon_protocol::packets::play::LightUpdate {
@@ -1038,26 +1005,16 @@ impl ChunkEncoder {
 
     /// ClientboundLightUpdatePacketData: the light layers of the sections
     /// that exist around the column (`around`: the non-air sections of it
-    /// and its neighbours), made as they are sent (`section_light`).
+    /// and its neighbours), written from the sections' own light.
     fn light_data(&self, chunk: &Chunk, around: SectionMask) -> LightData {
         light_data_of(&self.light_sections(chunk, around), self.sky)
     }
 
     fn light_sections(&self, chunk: &Chunk, around: SectionMask) -> Vec<(usize, SectionLight)> {
-        light_sections(&chunk.sections[self.sections.clone()], around, |s| {
-            self.section_light(s)
-        })
-    }
-
-    /// A section's light: the layers the warm-up threads made for it, taken,
-    /// or made now.
-    fn section_light(&self, s: &Arc<Section>) -> SectionLight {
-        if let Light::Uniform(v) = s.light {
-            return SectionLight::Uniform(v);
-        }
-        SectionLight::Layers(
-            self.cached(s, |e| e.light.take())
-                .unwrap_or_else(|| Arc::new(Layers::of(&s.light))),
+        light_sections(
+            &chunk.sections[self.sections.clone()],
+            around,
+            SectionLight::of,
         )
     }
 }
@@ -1247,35 +1204,51 @@ pub fn pot_tag(chunk: &Chunk, pos: (i32, i32, i32)) -> Option<Tag> {
 /// layer is sent, or marked empty when all dark; the others are left out.
 #[cfg(test)]
 fn light_data(sections: &[Arc<Section>], around: SectionMask) -> LightData {
-    let lights = light_sections(sections, around, |s| {
-        SectionLight::Layers(Arc::new(Layers::of(&s.light)))
-    });
+    let lights = light_sections(sections, around, SectionLight::of);
     light_data_of(&lights, true)
 }
 
-/// A light section's two DataLayers, or one value everywhere, which is
-/// quicker to write than to keep.
+/// A light section's two DataLayers, written from a resident section's own
+/// light (a layer it keeps is already a DataLayer), or one value everywhere.
 enum SectionLight {
-    Layers(Arc<Layers>),
+    /// A section, and whether its sky and its block layer hold any light.
+    Of(Arc<Section>, bool, bool),
     /// Sky light in the high nibble, block light in the low one.
     Uniform(u8),
 }
 impl SectionLight {
+    fn of(section: &Arc<Section>) -> Self {
+        match section.light {
+            Light::Uniform(v) => Self::Uniform(v),
+            ref light => Self::Of(section.clone(), light.any(0xF0), light.any(15)),
+        }
+    }
     /// Whether the sky and the block layer hold any light.
     fn any(&self) -> (bool, bool) {
         match self {
-            Self::Layers(l) => (l.sky_any, l.block_any),
+            Self::Of(_, sky, block) => (*sky, *block),
             Self::Uniform(v) => (v >> 4 != 0, v & 15 != 0),
         }
     }
     /// Append the sky or the block layer's 2048 bytes.
     fn put(&self, sky: bool, out: &mut Vec<u8>) {
+        let fill = |out: &mut Vec<u8>, n: u8| out.resize(out.len() + 2048, n | n << 4);
         match self {
-            Self::Layers(l) => out.extend_from_slice(if sky { &l.sky } else { &l.block }),
-            Self::Uniform(v) => {
-                let n = if sky { v >> 4 } else { v & 15 };
-                out.resize(out.len() + 2048, n | n << 4);
-            }
+            Self::Uniform(v) => fill(out, if sky { v >> 4 } else { v & 15 }),
+            Self::Of(section, ..) => match &section.light {
+                Light::Uniform(v) => fill(out, if sky { v >> 4 } else { v & 15 }),
+                Light::Sky(layer, _) if sky => out.extend_from_slice(&layer[..]),
+                Light::Sky(_, block) => fill(out, *block),
+                Light::Block(layer, _) if !sky => out.extend_from_slice(&layer[..]),
+                Light::Block(_, sky_light) => fill(out, *sky_light),
+                Light::Full(a) => out.extend(a.as_chunks::<2>().0.iter().map(|&[even, odd]| {
+                    if sky {
+                        even >> 4 | (odd & 0xF0)
+                    } else {
+                        (even & 15) | odd << 4
+                    }
+                })),
+            },
         }
     }
 }
@@ -1509,6 +1482,100 @@ mod tests {
         encoder.mod_update_tag = None;
         let infos = encoder.encode(&chunk, &block_entities).chunk.block_entities;
         assert_eq!(infos[0].tag, Tag::End);
+    }
+
+    /// A mod's sign is of vanilla's block entity type, as its block is on
+    /// `BlockEntityType.SIGN`'s list, and goes out with its text. Another mod
+    /// block's type stays its own, and a sign block entity on it stays out.
+    #[test]
+    fn a_mods_sign_goes_out_with_vanillas_type_and_its_text() {
+        use crate::blocks::SignForm;
+
+        let builtin = Builtin::parse(
+            r#"{"minecraft:block_entity_type": {"entries": {
+                "minecraft:sign": {"protocol_id": 7},
+                "minecraft:hanging_sign": {"protocol_id": 8},
+                "test:notice": {"protocol_id": 49},
+                "test:lantern": {"protocol_id": 50},
+                "test:casing": {"protocol_id": 51}}}}"#,
+        )
+        .unwrap();
+        let states = [
+            "minecraft:air",
+            "test:notice",
+            "test:lantern",
+            "test:casing",
+        ]
+        .map(|n| (Arc::<str>::from(n), false));
+        let states = states.map(|(name, fluid)| {
+            let form = match &*name {
+                "test:notice" => Some(SignForm {
+                    hanging: false,
+                    wall: false,
+                }),
+                "test:lantern" => Some(SignForm {
+                    hanging: true,
+                    wall: true,
+                }),
+                _ => None,
+            };
+            (name, fluid, form)
+        });
+        let encoder = ChunkEncoder::with_signs(states, &builtin, &[], &[]);
+        let (notice, lantern, casing) = ((1, MIN_Y + 2, 3), (5, MIN_Y + 2, 5), (9, MIN_Y + 2, 9));
+        let mut chunk = Chunk::empty(0, 0);
+        chunk.set(notice.0, notice.1, notice.2, 1);
+        chunk.set(lantern.0, lantern.1, lantern.2, 2);
+        chunk.set(casing.0, casing.1, casing.2, 3);
+        let mut sign = crate::signs::SignData::default();
+        sign.front.lines[0] = "Hello".into();
+        let hanging = crate::signs::SignData {
+            hanging: true,
+            ..Default::default()
+        };
+        let block_entities = HashMap::from([
+            (notice, BlockEntity::Sign(sign.clone())),
+            (lantern, BlockEntity::Sign(hanging.clone())),
+            (casing, BlockEntity::Sign(sign.clone())),
+        ]);
+        let infos = encoder.encode(&chunk, &block_entities).chunk.block_entities;
+        let sent = |kind: i32| infos.iter().find(|i| i.kind == kind).map(|i| &i.tag);
+        assert_eq!(sent(7), Some(&Tag::compound(sign.encode())));
+        assert_eq!(sent(8), Some(&Tag::compound(hanging.encode())));
+        assert_eq!(infos.len(), 2, "the casing is no sign: {infos:?}");
+        // The same encoder supplies the type and fresh tag for incremental
+        // BlockEntityData packets, even after the chunk's section was cached.
+        sign.back.lines[0] = "Back".into();
+        sign.front.color = 9;
+        sign.back.glowing = true;
+        sign.waxed = true;
+        let entity = BlockEntity::Sign(sign);
+        assert_eq!(encoder.entity_type(1), Some(7));
+        assert_eq!(encoder.entity_type(2), Some(8));
+        let tag = encoder.update_tag(notice, &entity).unwrap();
+        let mut nbt = match tag {
+            Tag::Compound(fields) => fields,
+            _ => panic!("sign update is not a compound"),
+        };
+        nbt.insert("id".into(), Tag::String("minecraft:sign".into()));
+        for (axis, value) in ["x", "y", "z"]
+            .into_iter()
+            .zip([notice.0, notice.1, notice.2])
+        {
+            nbt.insert(axis.into(), Tag::Int(value));
+        }
+        let (_, loaded) = crate::save::decode_block_entity(&Tag::Compound(nbt)).unwrap();
+        assert!(
+            matches!((&loaded, &entity), (BlockEntity::Sign(a), BlockEntity::Sign(b)) if a == b)
+        );
+        let changed = HashMap::from([(notice, entity)]);
+        for encoder in [encoder.detached(), encoder] {
+            let sent = encoder.encode(&chunk, &changed).chunk.block_entities;
+            assert_eq!(
+                sent.iter().find(|i| i.kind == 7).unwrap().tag,
+                encoder.update_tag(notice, &changed[&notice]).unwrap()
+            );
+        }
     }
 
     fn encoder() -> ChunkEncoder {
