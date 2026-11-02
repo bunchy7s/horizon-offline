@@ -82,10 +82,6 @@ impl Game<'_> {
         let Some(body) = self.apply_totem() else {
             return;
         };
-        if let Some(host) = &self.lan {
-            host.hub
-                .entity_event(host.host_entity, TOTEM_EVENT, body.at);
-        }
         self.totem_event(body, true);
     }
     /// Entity event 35 from a server, for this client's own player or an

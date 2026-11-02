@@ -204,8 +204,6 @@
   "Mesh data sent to the GPU per frame. Lower is smoother while loading.": "Дані сітки до GPU за кадр. Менше — плавніше завантаження.",
   "Frame rate and frame times over the game, with a graph.": "Частота та час кадрів поверх гри, з графіком.",
   "horizon.multiplayer.finding_friend": "Шукаємо світ друга…",
-  "horizon.loading.opening_world": "Відкриття світу",
-  "horizon.loading.cancelling_world": "Скасування",
   "horizon.multiplayer.not_signed_in": "Цей сервер працює в онлайн-режимі. Увійдіть за допомогою акаунта Microsoft у лаунчері Horizon, щоб приєднатися.",
   "horizon.multiplayer.invalid_address": "Недійсна адреса сервера: %s",
   "horizon.multiplayer.connected_friend_direct": "Пряме з'єднання з другом встановлено…",

@@ -74,42 +74,6 @@ fn antenna_block_matrix(head: glam::Mat4, flowerbed_shift: bool) -> glam::Mat4 {
 pub(super) const APPARITION_TICKS: i32 = 30;
 
 impl Game<'_> {
-    /// `CustomHeadLayer` for a pumpkin worn by a LAN guest drawn on the
-    /// in-frame host, whose model has no worn stacks for `head_item_geometry`.
-    pub(super) fn player_pumpkin_geometry(
-        &self,
-        mob: &Mob,
-        stack: Option<&ItemStack>,
-        camera: glam::DVec3,
-        alpha: f64,
-        light: u32,
-        out: &mut Vec<Vertex>,
-    ) {
-        let Some(stack) = stack.filter(|s| &*s.item == "minecraft:carved_pumpkin") else {
-            return;
-        };
-        let Some(head) =
-            render::part_transform(mob, alpha as f32, camera, self.res.mob_data(), "head")
-        else {
-            return;
-        };
-        let pose = head
-            * glam::Mat4::from_translation(glam::Vec3::new(0.0, -0.25, 0.0))
-            * glam::Mat4::from_rotation_y(std::f32::consts::PI)
-            * glam::Mat4::from_scale(glam::Vec3::new(0.625, -0.625, -0.625));
-        let owner = super::item_draw::owner_at(
-            [mob.position.x, mob.position.y, mob.position.z],
-            mob.body_yaw,
-            &mob.kind.id,
-        );
-        let state = self.resolve_item(
-            stack,
-            horizon_assets::item_model::DisplayContext::Head,
-            Some(&owner),
-            mob.id as i32 + 5,
-        );
-        self.submit_item_world(&state, pose, light, out);
-    }
     /// Count the elder guardian's apparition down.
     pub(super) fn tick_apparition(&mut self) {
         self.creatures.elder_apparition = (self.creatures.elder_apparition - 1).max(0);

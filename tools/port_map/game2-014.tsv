@@ -117,7 +117,7 @@ MushroomBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::mushr
 MushroomBlock.canSpread	inline	crates/horizon-world/src/level/tick.rs::Sim::mushroom_random_tick	at most four of the same mushroom in the 9x3x9 box, counted in the tick
 MushroomBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	mushroom arm
 NetherPortalBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	portal breaks when the frame is incomplete
-NetherPortalBlock.getPortalTransitionTime	port	crates/horizon-client/src/game/nether_portal.rs::Game::tick_nether_portal	gap: minor: creative and default delay rules by invulnerability; the delay counter is in the same fn
+NetherPortalBlock.getPortalTransitionTime	port	crates/horizon-client/src/game/server_travel.rs::Game::handle_server_portal	creative and default delay game rules by invulnerability; the delay counter is in the same fn
 NetherPortalBlock.getExitPortal	port	crates/horizon-client/src/game/nether_portal.rs::Game::nether_exit_portal	gap: minor: the Nether exit only; the End variant is Game::end_portal_exit
 NetherPortalBlock.getDimensionTransitionFromExit	port	crates/horizon-client/src/game/nether_portal.rs::Game::portal_plan	
 NetherPortalBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	portal ambient sound and particles

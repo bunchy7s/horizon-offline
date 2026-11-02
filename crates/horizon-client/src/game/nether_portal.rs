@@ -10,7 +10,6 @@
 //! cooldowns follow their level; shared `Arrival`s hold each traveller's
 //! saved compound until its destination chunks are loaded.
 use super::{Dim, Game, Screen};
-use horizon_client::Result;
 use horizon_client::fast_hash::FxHashMap;
 use horizon_client::nether_portal::{ENTITY_DELAY, PortalState};
 use horizon_core::{
@@ -80,8 +79,6 @@ struct Arrival {
 pub(super) struct Portals {
     /// The player's.
     pub(super) player: PortalState,
-    /// The player's travel, while the destination loads.
-    pub(super) travel: Option<Plan>,
     /// `LocalPlayer.portalProcess.isInsidePortalThisTick`.
     client_inside: bool,
     /// Items and mobs, by entity id.
@@ -476,25 +473,6 @@ impl Game<'_> {
 
     // ---- the player ----
 
-    /// `NetherPortalBlock.entityInside` for the player: `canUsePortal`, then
-    /// `setAsInsidePortal` (and the client's own, which drives the effect).
-    pub(super) fn player_inside_nether_portal(&mut self, pos: BlockPos) {
-        let alive = self
-            .player
-            .as_ref()
-            .is_some_and(|p| !p.health.dead_or_dying());
-        if !alive || self.riding.is_some() || self.sleeping.is_some() {
-            return;
-        }
-        // The client's LocalPlayer has the same cooldown (the Respawn
-        // packet's spawn info): standing in the arrival portal, its overlay
-        // fades instead of building up again.
-        let cooling = self.portals.player.cooldown > 0;
-        self.portals.player.set_inside(pos, PLAYER_DELAY);
-        if !cooling {
-            self.portals.client_inside = true;
-        }
-    }
     /// The same on a server's client: `Entity.canUsePortal` (alive, not a
     /// passenger), then only the client's `setAsInsidePortal`, which drives
     /// the confusion effect (`client_portal_effect`). On a server's client
@@ -512,62 +490,6 @@ impl Game<'_> {
         } else {
             self.portals.client_inside = true;
         }
-    }
-    /// `ServerPlayer.handlePortal` (not while changing dimension: there is no
-    /// player then). Players wait `players_nether_portal_default_delay`
-    /// ticks, or the creative delay with invulnerable abilities.
-    pub(super) fn tick_nether_portal(&mut self) -> Result<()> {
-        // A server's portals are its own.
-        if self.remote.is_some() {
-            return Ok(());
-        }
-        let Some(p) = self.player.as_ref() else {
-            return Ok(());
-        };
-        if self.travelling.is_some() {
-            return Ok(());
-        }
-        let allowed = !p.health.dead_or_dying() && self.riding.is_none() && self.sleeping.is_none();
-        let rule = if p.invulnerable {
-            "players_nether_portal_creative_delay"
-        } else {
-            "players_nether_portal_default_delay"
-        };
-        let transition = self.ui.rules.int(rule).max(0);
-        let Some(entry) = self
-            .portals
-            .player
-            .handle(allowed, transition, PLAYER_DELAY)
-        else {
-            return Ok(());
-        };
-        self.player_through_nether_portal(entry)
-    }
-    /// `Entity.handlePortal` once the player's portal process at `entry`
-    /// finished: `NetherPortalBlock.getPortalDestination`, then
-    /// `teleportToPortalDestination` (`isAllowedToEnterPortal`).
-    pub(super) fn player_through_nether_portal(&mut self, entry: BlockPos) -> Result<()> {
-        let Some(p) = self.player.as_ref() else {
-            return Ok(());
-        };
-        let plan = self.portal_plan(
-            entry,
-            p.position,
-            p.dimensions.width,
-            p.dimensions.height,
-            true,
-        );
-        if !self.may_enter(plan.dim) {
-            return Ok(());
-        }
-        self.portals.travel = Some(plan);
-        self.end_portal_travel = false;
-        self.enter_dimension(plan.dim)?;
-        let centre = self.arrival_centre(&plan);
-        if let Some((_, target)) = self.travelling.as_mut() {
-            *target = centre;
-        }
-        Ok(())
     }
     /// Where to wait for the destination of `plan` to load, once its level
     /// is open: the portal its points of interest lead to, or the
@@ -591,52 +513,6 @@ impl Game<'_> {
             f64::from(centre.y),
             f64::from(centre.z) + 0.5,
         )
-    }
-    /// The player's arrival once the destination has loaded around the
-    /// approximate exit: the waiting entities first, then the exit portal
-    /// (found or built), the position in it, the turned yaw and motion, and
-    /// `TeleportTransition.PLAY_PORTAL_SOUND` (level event 1032).
-    pub(super) fn arrive_through_nether_portal(
-        &mut self,
-        mut player: horizon_client::motion::PlayerMotion,
-        target: Vec3,
-    ) -> Result<()> {
-        self.resolve_arrivals();
-        let plan = self.portals.travel.take();
-        let Some(plan) = plan else {
-            // A command teleport can change dimensions without going through
-            // a portal. It has no portal placement, rotation, or sound effect.
-            player.position = target;
-            player.velocity = Vec3::ZERO;
-            player.fall_distance = 0.0;
-            self.previous_position = target;
-            self.player = Some(player);
-            self.pad.player_replaced();
-            self.sway = Default::default();
-            self.apply_equipment();
-            return Ok(());
-        };
-        let exit = self.nether_exit_portal(&plan);
-        let (position, rotation) = match exit {
-            Some(exit) => self.arrival(&plan, exit),
-            None => (target, 0.0),
-        };
-        player.position = position;
-        // Relative.ROTATION and Relative.DELTA: the yaw turns, the motion
-        // turns with it.
-        player.yaw += rotation;
-        player.head_yaw += rotation;
-        self.yaw += rotation;
-        player.velocity = rotate_y(player.velocity, -rotation);
-        self.previous_position = player.position;
-        self.player = Some(player);
-        self.pad.player_replaced();
-        self.sway = Default::default();
-        self.apply_equipment();
-        let pitch = self.world.random.next_float() * 0.4 + 0.8;
-        self.audio
-            .play("minecraft:block.portal.travel", None, 0.25, pitch);
-        Ok(())
     }
     /// `LocalPlayer.handlePortalTransitionEffect`: whether the confusion
     /// effect grows this tick. Entering a portal closes screens other than
@@ -809,7 +685,7 @@ impl Game<'_> {
     /// server players only, whom it carries along.
     /// `Entity.canUsePortal(false)` for a primed TNT: it carries no mob.
     fn tnt_can_use_portal(&self, id: u32) -> bool {
-        // Id 0: not tracked yet (the in-frame path), nothing to key its portal state by.
+        // Id 0: not tracked yet, nothing to key its portal state by.
         id != 0 && !self.mobs.iter().any(|m| m.extra.mount == Some(id))
     }
     fn vehicle_can_use_portal(&self, id: u32) -> bool {

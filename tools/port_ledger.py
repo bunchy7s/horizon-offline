@@ -15,9 +15,9 @@ no port.
 Both sides' call graphs then show where a port exists but is not wired like vanilla, the kind of bug a
 method-by-method reading misses:
 
-- seam: a vanilla method ported on both paths (the in-frame game and the server-client side,
-  game/remote*.rs, or the server, game/lan*.rs), one of which reaches the port of a callee and the other
-  doesn't;
+- seam: a vanilla method ported on more than one path (the shared game code, the server-client side,
+  game/remote*.rs, or the server's network side, game/lan*.rs), one of which reaches the port of a callee
+  and another doesn't;
 - callee: a ported vanilla method whose ported callee no Rust counterpart reaches;
 - client: a vanilla effect only the client's copy draws (`addParticle`, `playLocalSound`,
   `itemUsed`, a `isClientSide()` branch) whose port nothing on the server-client side (game/remote*.rs)
@@ -1716,14 +1716,14 @@ def build(sources, jars, jobs):
         return seen
 
     def side(fid):
-        """Which path a port runs on: the server-client side (game/remote*.rs), the server
-        (game/lan*.rs, src/lan/), or the in-frame game."""
+        """Which path a port runs on: the server-client side (game/remote*.rs), the server's network
+        side (game/lan*.rs, src/lan/), or the shared game code the server runs for its players."""
         f = fns[fid]["file"]
         if re.search(r"/game/remote[^/]*\.rs$", f):
             return "client"
         if re.search(r"/game/lan[^/]*\.rs$|/src/lan/", f):
             return "server"
-        return "frame"
+        return "game"
 
     def callee_port_names(c):
         """Names of the fns that port vanilla method c: those whose doc opens with it, else a fn with the
@@ -1785,11 +1785,8 @@ def build(sources, jars, jobs):
                 for i in miss:
                     peers = [h for h in hit if side(clusters[h][0]) != side(clusters[i][0]) and ccover[h] & ccover[i]]
                     if peers:
-                        # Singleplayer runs as a client of the integrated server, so a gap on the
-                        # in-frame path rarely shows; it sorts after the others.
                         gaps.append({"kind": "seam", "vanilla": k, "callee": callee, "fn": clusters[i][0],
-                                     "cluster": clusters[i], "sibling": clusters[peers[0]][0],
-                                     "old_path": side(clusters[i][0]) == "frame"})
+                                     "cluster": clusters[i], "sibling": clusters[peers[0]][0]})
             elif not hit and len(targets) <= 3 and substantial(callee):
                 gaps.append({"kind": "callee", "vanilla": k, "callee": callee, "fn": fids[0]})
         if m["client"] and not any(reached_from_remote(fid) for fid in fids):
@@ -2102,7 +2099,7 @@ def gap_text(led, g):
         rest = [led["fns"][f]["name"] for f in g.get("cluster", [])[1:]]
         with_rest = f" (with {', '.join(rest)})" if rest else ""
         return (f"seam: {fn_ref(led, g['fn'])}{with_rest} ports {name(g['vanilla'])} but never reaches the port of "
-                f"{name(g['callee'])}; {fn_ref(led, g['sibling'])} does" + (" (old in-frame path)" if g.get("old_path") else ""))
+                f"{name(g['callee'])}; {fn_ref(led, g['sibling'])} does")
     if g["kind"] == "callee":
         return f"callee: {name(g['vanilla'])} calls {name(g['callee'])}; {fn_ref(led, g['fn'])} doesn't reach its port"
     if g["kind"] == "client":
@@ -2130,7 +2127,7 @@ GAP_ORDER = {"map": -1, "seam": 0, "client": 1, "drift": 2, "class": 3, "callee"
 
 def gap_rank(g):
     """Best leads first: by kind, the live path before the old one, then the classes with the most ported neighbours."""
-    return (GAP_ORDER.get(g["kind"], 9), g.get("old_path", False), -g.get("package_ported", 0), -len(g.get("ids", ())),
+    return (GAP_ORDER.get(g["kind"], 9), -g.get("package_ported", 0), -len(g.get("ids", ())),
             g.get("vanilla") or g.get("vanilla_class") or g.get("file", ""))
 
 
@@ -2705,7 +2702,7 @@ def cmd_report(led):
         lines.append(f"| {p} | {c['total']} | " + " | ".join(str(c[k]) for k in COVERAGE_COLS) + f" | {found_pct(c):.0f} |")
     counts = Counter(g["kind"] for g in led["gaps"])
     lines += ["", "## Gaps", "", ", ".join(f"{k}: {v}" for k, v in counts.most_common()), ""]
-    for kind, title in (("seam", "Ported on both paths (in-frame and server-client), wired on only one"),
+    for kind, title in (("seam", "Ported on more than one path, wired on only one"),
                         ("client", "Client-only effects the server-client path never reaches"),
                         ("drift", "Ports that never name a sound, particle, item or constant vanilla uses"),
                         ("class", "Whole classes nothing ports, next to ported neighbours"),

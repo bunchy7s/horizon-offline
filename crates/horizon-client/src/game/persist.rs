@@ -1543,14 +1543,6 @@ impl Game<'_> {
             log::warn!("Horizon: failed to save entities: {e}");
         }
     }
-    /// Leaving a dimension: its entities are saved with it.
-    pub(super) fn save_dimension_entities(&mut self) -> Result<()> {
-        self.spawn_loaded_entities();
-        let keys: HashSet<(i32, i32)> = self.world.chunks.keys().copied().collect();
-        let chunks = self.entity_chunks(&keys, true);
-        self.persist = EntityMemory::default();
-        self.save.save_entities(chunks)
-    }
 }
 /// Only a mob is finalized; another entity drops the request.
 fn strip_finalize(tag: &mut Tag) {

@@ -712,17 +712,6 @@ impl Game<'_> {
     /// (`Projectile.canHitEntity`), the host and the guests in the level.
     pub(super) fn refresh_hook_targets(&mut self, host: &LanHost) {
         let mut targets = Vec::new();
-        if self.options.dedicated.is_none()
-            && !self.spectator()
-            && let Some(p) = self.player.as_ref()
-            && !p.health.dead_or_dying()
-        {
-            targets.push(HookTarget {
-                id: host.host_entity as u32,
-                conn: None,
-                bounds: p.bounds(),
-            });
-        }
         for g in &host.hub.guests {
             if host.hub.here(g) && g.loaded && !g.dead && !g.spectator() {
                 targets.push(HookTarget {
@@ -747,9 +736,7 @@ impl Game<'_> {
                     p.velocity = p.velocity.add_vector(delta);
                 }
             };
-            if id == host.host_entity as u32 {
-                push(self);
-            } else if let Some(conn) = host
+            if let Some(conn) = host
                 .hub
                 .guests
                 .iter()
@@ -1083,17 +1070,13 @@ impl Hook {
 }
 
 impl Game<'_> {
-    /// The hooks guests track: the host's and each guest's in the level.
+    /// The hooks guests track: each player's in the level.
     pub(super) fn lan_hook_states(
         &self,
-        host_entity: Option<i32>,
         play: &HashMap<u32, GuestPlay>,
         hub: &Hub,
         out: &mut States,
     ) {
-        if let (Some(h), Some(owner)) = (&self.hook, host_entity) {
-            h.track(owner, out);
-        }
         for g in hub.guests.iter().filter(|g| hub.here(g)) {
             if let Some(h) = play.get(&g.conn).and_then(|p| p.hook.as_ref()) {
                 h.track(g.entity_id, out);

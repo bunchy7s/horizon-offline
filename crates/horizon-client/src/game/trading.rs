@@ -478,55 +478,6 @@ impl Game<'_> {
             }
         }
     }
-    /// `Villager.customServerAiStep`: the TRADE reputation event of the last
-    /// trade, a tick later; the prices follow the new reputation.
-    pub(super) fn merchant_tick(&mut self) {
-        // `AbstractVillager.stillValid`: the trade screen closes once the trader
-        // is gone or dead, or the player is more than 4 blocks past their reach.
-        if self.remote.is_none()
-            && self.screen == super::Screen::Inventory
-            && let Some(id) = self
-                .station
-                .as_ref()
-                .and_then(|s| s.merchant.as_ref())
-                .and_then(|m| m.mob)
-            && let Some(eye) = self.eye_position()
-        {
-            let valid = self.mobs.iter().find(|m| m.id == id).is_some_and(|m| {
-                let (lo, hi) = (m.bounds().min_position(), m.bounds().max_position());
-                let d = [
-                    eye[0] - eye[0].clamp(lo.x, hi.x),
-                    eye[1] - eye[1].clamp(lo.y, hi.y),
-                    eye[2] - eye[2].clamp(lo.z, hi.z),
-                ];
-                let range = self.entity_reach + 4.0;
-                m.alive() && d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < range * range
-            });
-            if !valid {
-                self.close_container();
-                self.screen = super::Screen::Playing;
-                self.capture(true);
-                return;
-            }
-        }
-        let Some(m) = self.station.as_mut().and_then(|s| s.merchant.as_mut()) else {
-            return;
-        };
-        if !m.session.villager || !m.session.last_traded {
-            return;
-        }
-        m.session.last_traded = false;
-        let Some(id) = m.mob else { return };
-        self.villager_traded(id);
-        let reputation = self.villager_reputation(id);
-        self.menu_session(|menu, env, _| {
-            let s = menu.merchant.as_mut()?;
-            s.reputation = reputation;
-            s.update_special_prices();
-            menu.merchant_update(env);
-            Some(true)
-        });
-    }
     /// `MerchantMenu.tryMoveItems` for the selected offer (the select trade packet).
     fn try_move_items(&mut self, index: usize) {
         if self.remote.is_some() {

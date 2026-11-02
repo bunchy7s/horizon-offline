@@ -718,8 +718,8 @@ impl Game<'_> {
         // The Chat option's Hidden level takes the server's messages too.
         self.local_chat_line(text, Some(SYSTEM_INDICATOR), ChatSource::Server);
     }
-    /// A player's chat line on the window's own chat: a LAN guest's message
-    /// while the host runs in-frame (`HostEvent::Chat`). `ChatListener`
+    /// A player's chat line on the window's own chat: a guest's message on
+    /// the server's own chat (`HostEvent::Chat`). `ChatListener`
     /// checks `canReceivePlayerMessages` for these, so Commands Only and
     /// Hidden drop them; command feedback (`/list`, `/tp`) is a system
     /// message and takes the system-message permission instead.
@@ -902,7 +902,6 @@ impl Game<'_> {
                 self.ticks,
                 focused,
             );
-            self.lan_host_chat(&message);
         }
     }
     pub(super) fn chat_scroll(&mut self, amount: f32) {
@@ -1378,45 +1377,6 @@ impl Game<'_> {
         ]);
         if let Err(e) = horizon_client::save::write_dat(&path, root) {
             log::warn!("the world clocks were not written: {e}");
-        }
-    }
-    /// Death message in chat (CombatTracker.getDeathMessage, as far as the
-    /// cause is known to the client).
-    pub(super) fn death_message(&mut self) {
-        let cause = self.ui.death_cause.take();
-        let player = self.native_acting_id();
-        self.native_player_died(player, cause.as_deref());
-        self.ui.died_at = Some(std::time::Instant::now());
-        self.ui.death_text = None;
-        self.ui.death_confirm = None;
-        if !self.ui.rules.bool("show_death_messages") {
-            return;
-        }
-        let Some(p) = self.player.as_ref() else {
-            return;
-        };
-        let below_world = p.position.y < f64::from(self.world.bottom_y() - 64);
-        let name = self.player_display_text();
-        let message = match cause {
-            Some(key) => Text::translate(&key, &[name]),
-            None if below_world => Text::translate("death.attack.outOfWorld", &[name]),
-            None => self.combat_death_message(),
-        };
-        self.ui.death_text = Some(message.clone());
-        // ServerPlayer.die: the team's death message visibility decides who
-        // hears it, the dying player's own chat included (the death screen
-        // still shows it).
-        let board = &self.score.board;
-        if let Some(host) = &self.lan {
-            host.hub.system_message_to(
-                horizon_client::lan::data::component_nbt(&message.component()),
-                |other| {
-                    horizon_client::scoreboard::death_message_reaches(board, PLAYER_NAME, other)
-                },
-            );
-        }
-        if horizon_client::scoreboard::death_message_reaches(board, PLAYER_NAME, PLAYER_NAME) {
-            self.system_message(message);
         }
     }
     /// F1 hides the HUD (see `hud`); the screenshot key still works.

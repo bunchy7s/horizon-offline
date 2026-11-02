@@ -92,7 +92,7 @@ Owner: [ludovic111](https://github.com/ludovic111) · Tracking: [#3914](https://
 
 <details><summary>Technical</summary>
 
-Since [#1514](https://github.com/horizon-rust/horizon/issues/1514) single player runs on the server thread (`game/integrated.rs`) and the window joins it as a client; `--in-frame` keeps the old path. The open `[server-thread]` issues list the gaps. In review: breeding's advancement and statistic ([#3873](https://github.com/horizon-rust/horizon/issues/3873)), the client's menu when the server replaces the player ([#3841](https://github.com/horizon-rust/horizon/issues/3841)), splashes when falling in water ([#3621](https://github.com/horizon-rust/horizon/issues/3621)). [docs/server-levels.md](docs/server-levels.md).
+Since [#1514](https://github.com/horizon-rust/horizon/issues/1514) single player runs on the server thread (`game/integrated.rs`) and the window joins it as a client. The open `[server-thread]` issues list the gaps. In review: breeding's advancement and statistic ([#3873](https://github.com/horizon-rust/horizon/issues/3873)), the client's menu when the server replaces the player ([#3841](https://github.com/horizon-rust/horizon/issues/3841)), splashes when falling in water ([#3621](https://github.com/horizon-rust/horizon/issues/3621)). [docs/server-levels.md](docs/server-levels.md).
 
 </details>
 
@@ -234,11 +234,11 @@ Client-of-a-server fixes in `game/remote*.rs` and `horizon-protocol`: mobs' aggr
 
 #### One single-player path: remove the in-frame world
 
-Single player will have one way to run, the server thread, so every fix works everywhere and there are fewer bugs. The older in-frame mode goes once everything passes without it.
+Single player has one way to run, the server thread, so every fix works everywhere and there are fewer bugs. The older in-frame mode is removed.
 
 <details><summary>Technical</summary>
 
-`--in-frame` (also `--no-server-thread` and `HORIZON_SERVER_THREAD=0`) still ticks the world inside the window's `Game`, and most harnesses test that path. Delete it once `lan_e2e --server-thread` and the parity harnesses pass on the server thread, which also halves the bug surface. See also 'Single player as a server' and [docs/server-levels.md](docs/server-levels.md).
+`--in-frame` (also `--no-server-thread` and `HORIZON_SERVER_THREAD=0`) ticked the world inside the window's `Game`. [#6473](https://github.com/horizon-rust/horizon/issues/6473) removes it with the code only it reached (the window's world loader and player tick, its portal travel and loading screen, the in-frame LAN host); the harnesses run on the server thread. See also 'Single player as a server' and [docs/server-levels.md](docs/server-levels.md).
 
 </details>
 

@@ -42,7 +42,6 @@ def main():
     parser.add_argument("--ctl", type=Path, default=ROOT / "target/fast/horizon-ctl")
     parser.add_argument("--resources", type=Path, default=ROOT / ".local/horizon-client/26.3")
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--in-frame", action="store_true", help="DEPRECATED, never use: unsupported, will be removed soon")
     args = parser.parse_args()
     output = args.output or Path(tempfile.mkdtemp(prefix="bundle-tooltip-"))
     output.mkdir(parents=True, exist_ok=True)
@@ -68,8 +67,7 @@ def main():
     results = []
     try:
         ctl("launch", "--game", args.game.resolve(), "--world", output / "world",
-            "--creative", "--offscreen", "--wait", "--resources", args.resources.resolve(),
-            *(["--in-frame"] if args.in_frame else []), timeout=120)
+            "--creative", "--offscreen", "--wait", "--resources", args.resources.resolve(), timeout=120)
         state = ctl("state")
         px, _, pz = state["player"]["block_pos"]
         x, z = (px // 16) * 16 + 8, (pz // 16) * 16 + 8
@@ -105,7 +103,7 @@ def main():
             ctl("quit")
         except (RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError):
             pass
-    report = {"mode": "in-frame" if args.in_frame else "server-thread", "results": results}
+    report = {"results": results}
     (output / "results.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
     assert len(results) == 2 and all(r["pass"] for r in results), "Missing bundle component tooltip"

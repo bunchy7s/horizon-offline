@@ -143,8 +143,8 @@ PortalShape.getDistanceUntilEdgeAboveFrame	port	crates/horizon-world/src/level/p
 PortalShape.calculateHeight	inline	crates/horizon-world/src/level/portal.rs::Sim::find_portal_shape	height rows loop and the 3 to 21 check are inline
 PortalShape.hasTopFrame	inline	crates/horizon-world/src/level/portal.rs::Sim::find_portal_shape	the top frame row check is inline
 PortalShape.getDistanceUntilTop	inline	crates/horizon-world/src/level/portal.rs::Sim::find_portal_shape	rows loop counts portal blocks as it goes, inline
-TeleportTransition.playPortalSound	inline	crates/horizon-client/src/game/nether_portal.rs::Game::arrive_through_nether_portal	level event 1032 is sent on arrival
-TeleportTransition.withRotation	inline	crates/horizon-client/src/game/nether_portal.rs::Game::arrive_through_nether_portal	the turned yaw and motion are applied on arrival
-TeleportTransition.withPosition	inline	crates/horizon-client/src/game/nether_portal.rs::Game::arrive_through_nether_portal	the exit position is applied on arrival
+TeleportTransition.playPortalSound	inline	crates/horizon-client/src/lan/hub.rs::Hub::land	level event 1032 is sent on arrival
+TeleportTransition.withRotation	inline	crates/horizon-client/src/lan/hub.rs::Hub::change_level	the turned yaw is applied with the level change
+TeleportTransition.withPosition	inline	crates/horizon-client/src/lan/hub.rs::Hub::land	the exit position is applied on arrival
 TeleportTransition.transitionAsPassenger	port	crates/horizon-client/src/game/server_travel.rs::Game::carry_riders_through_portals	riders travel with the vehicle and ride it again on arrival
 DefaultRedstoneWireEvaluator.calculateTargetStrength	inline	crates/horizon-world/src/level/redstone.rs::Sim::wire_update_power	the 15 shortcut and the max with the incoming signal are inline
