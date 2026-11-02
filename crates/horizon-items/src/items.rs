@@ -1724,6 +1724,37 @@ impl LootContext<'_> {
                     };
                     stack.count = (base + n).max(0) as u32;
                 }
+                // SetItemDamageFunction.run: check damageability before the
+                // float provider, so ineligible stacks do not draw randomness.
+                "minecraft:set_damage" => {
+                    let component = |id| stack.data().and_then(|data| data.other(id));
+                    if stack.count == 0
+                        || component("minecraft:unbreakable").is_some()
+                        || component("!minecraft:max_damage").is_some()
+                        || component("!minecraft:damage").is_some()
+                    {
+                        continue;
+                    }
+                    let max = match component("minecraft:max_damage") {
+                        Some(horizon_world::nbt::Tag::Int(value)) => {
+                            u32::try_from(*value).unwrap_or(0)
+                        }
+                        _ => self
+                            .items
+                            .get(&stack.item)
+                            .map_or(0, |info| info.max_damage),
+                    };
+                    if max == 0 {
+                        continue;
+                    }
+                    let base = if f["add"].as_bool() == Some(true) {
+                        1.0 - stack.damage as f32 / max as f32
+                    } else {
+                        0.0
+                    };
+                    let remaining = (Self::number(&f["damage"], random) + base).clamp(0.0, 1.0);
+                    stack.damage = ((1.0 - remaining) * max as f32).floor() as u32;
+                }
                 "minecraft:apply_bonus" => {
                     let level =
                         self.enchantment_level(f["enchantment"].as_str().unwrap_or("")) as i32;
