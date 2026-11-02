@@ -1613,7 +1613,9 @@ mod tests {
         );
         std::fs::write(&fragment, shipped_fragment).unwrap();
         super::generate(&root, false).unwrap();
-        assert_eq!(std::fs::read_to_string(&hooks).unwrap(), shipped);
+        // The generator writes LF; a Windows checkout (core.autocrlf) has CRLF.
+        let lf = |s: &str| s.replace("\r\n", "\n");
+        assert_eq!(lf(&std::fs::read_to_string(&hooks).unwrap()), lf(&shipped));
         for generated in [
             "crates/horizon-client/src/mod_api/generated.rs",
             "crates/horizon-client-render/src/gfx/native_render/generated.rs",
