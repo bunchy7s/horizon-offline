@@ -1897,6 +1897,39 @@ impl Game<'_> {
         };
         super::view_vector(d.yaw, pitch).map(|v| v)
     }
+    /// `getHeadLookVector(1).normalize()`, which the phases' `doClientTick`s
+    /// take (a look the dragon has never turned from stays the zero vector).
+    fn dragon_look_normalised(&self) -> [f64; 3] {
+        let look = self.dragon_look();
+        let norm = (look[0] * look[0] + look[1] * look[1] + look[2] * look[2]).sqrt();
+        if norm < 1.0e-5 {
+            [0.0; 3]
+        } else {
+            [look[0] / norm, look[1] / norm, look[2] / norm]
+        }
+    }
+    /// `EnderDragon.tick` runs the current phase's `doClientTick` on a client,
+    /// and the host's own fight is its own client: the landing and flaming
+    /// phases breathe their fan of dragon breath from the head here. A server's
+    /// client does the same in `remote_dragon_phase_tick`. The jitter comes from
+    /// the world's random: the dragon's own stream is the fight's (`Mob.baseTick`'s
+    /// ambient roll, the crystal scan, its growls), and vanilla's client copy
+    /// never draws on the server copy's.
+    fn host_dragon_breath_puffs(&mut self) {
+        let look = self.dragon_look_normalised();
+        let Some(d) = self.dragon.as_ref() else {
+            return;
+        };
+        let head = d.parts[0].0;
+        let head = [head.x, head.y + PART_SIZES[0].1 * 0.5, head.z];
+        let motion = [d.velocity.x, d.velocity.y, d.velocity.z];
+        let phase = d.phase.clone();
+        let puffs = breath_puffs(&phase, look, head, motion, &mut self.world.random);
+        let breath = ParticleOptions::simple(ParticleType::DragonBreath);
+        for (p, v) in puffs {
+            self.particles.add(&breath, p, v);
+        }
+    }
     /// `EnderDragon.aiStep` (and `tickDeath`) for the dragon.
     fn tick_dragon(&mut self) {
         let Some(d) = self.dragon.as_mut() else {
@@ -2036,6 +2069,7 @@ impl Game<'_> {
             );
         }
         self.place_dragon_parts();
+        self.host_dragon_breath_puffs();
         self.dragon_contacts();
         // The chunks the dragon passes through re-save their entity lists.
         if let Some(d) = &self.dragon {
@@ -2569,6 +2603,67 @@ impl DragonFireball {
             self.position.y + v.y,
             self.position.z + v.z,
         );
+    }
+}
+/// `DragonLandingPhase.doClientTick` and `DragonSittingFlamingPhase.doClientTick`:
+/// the dragon-breath particles one tick of `doClientTick` spawns at the head, as
+/// (position, velocity) pairs. `look` is `EnderDragon.getHeadLookVector(1)`
+/// normalised, `head` the head part's centre (`getY(0.5)`), `motion` the
+/// dragon's `getDeltaMovement`, and `random` the stream the jitter comes from.
+/// Both phases rotate `look` by a quarter turn and throw the result away, so
+/// every puff of a fan leaves along the same line; a flaming dragon walks down
+/// that line in six steps.
+fn breath_puffs(
+    phase: &Phase,
+    look: [f64; 3],
+    head: [f64; 3],
+    motion: [f64; 3],
+    random: &mut LegacyRandom,
+) -> Vec<([f64; 3], [f64; 3])> {
+    // A puff's start: the head's centre jittered by `nextGaussian() / 2`.
+    let jitter = |random: &mut LegacyRandom| {
+        [
+            head[0] + random.next_gaussian() / 2.0,
+            head[1] + random.next_gaussian() / 2.0,
+            head[2] + random.next_gaussian() / 2.0,
+        ]
+    };
+    match phase {
+        // Eight a tick, along `-look * 0.08F` (0.3 for the vertical part) plus
+        // the dragon's own motion.
+        Phase::Landing { .. } => (0..8)
+            .map(|_| {
+                (
+                    jitter(random),
+                    [
+                        -look[0] * f64::from(0.08_f32) + motion[0],
+                        -look[1] * f64::from(0.3_f32) + motion[1],
+                        -look[2] * f64::from(0.08_f32) + motion[2],
+                    ],
+                )
+            })
+            .collect(),
+        // Every second tick of the first ten: eight starts, each a fan of six
+        // puffs down the look line, the vertical part of the speed once.
+        Phase::Flaming { ticks } if ticks % 2 == 0 && *ticks < 10 => {
+            let mut puffs = Vec::with_capacity(48);
+            for _ in 0..8 {
+                let at = jitter(random);
+                for j in 0..6 {
+                    let j = f64::from(j);
+                    puffs.push((
+                        at,
+                        [
+                            -look[0] * f64::from(0.08_f32) * j,
+                            -look[1] * f64::from(0.6_f32),
+                            -look[2] * f64::from(0.08_f32) * j,
+                        ],
+                    ));
+                }
+            }
+            puffs
+        }
+        _ => Vec::new(),
     }
 }
 pub(super) struct Breath {
@@ -3768,13 +3863,7 @@ impl Game<'_> {
     /// away in vanilla, so every puff leaves along the same line), the third
     /// puffs an explosion every 10 ticks and the last growls on every tick.
     fn remote_dragon_phase_tick(&mut self) {
-        let look = self.dragon_look();
-        let norm = (look[0] * look[0] + look[1] * look[1] + look[2] * look[2]).sqrt();
-        let look = if norm < 1.0e-5 {
-            [0.0; 3]
-        } else {
-            [look[0] / norm, look[1] / norm, look[2] / norm]
-        };
+        let look = self.dragon_look_normalised();
         let Some(d) = self.dragon.as_mut() else {
             return;
         };
@@ -3782,51 +3871,20 @@ impl Game<'_> {
         let head_y = head.y + PART_SIZES[0].1 * 0.5;
         let motion = d.velocity;
         let at = [d.position.x, d.position.y, d.position.z];
-        let mut puffs: Vec<([f64; 3], [f64; 3])> = Vec::new();
+        // `flameTicks`: the client copy's own counter, advanced before it is read.
+        if let Phase::Flaming { ticks } = &mut d.phase {
+            *ticks += 1;
+        }
+        let puffs = breath_puffs(
+            &d.phase,
+            look,
+            [head.x, head_y, head.z],
+            [motion.x, motion.y, motion.z],
+            &mut d.random,
+        );
         let mut emitter = None;
         let mut growl = None;
         match &mut d.phase {
-            Phase::Landing { .. } => {
-                for _ in 0..8 {
-                    let r = &mut d.random;
-                    let p = [
-                        head.x + r.next_gaussian() / 2.0,
-                        head_y + r.next_gaussian() / 2.0,
-                        head.z + r.next_gaussian() / 2.0,
-                    ];
-                    puffs.push((
-                        p,
-                        [
-                            -look[0] * f64::from(0.08_f32) + motion.x,
-                            -look[1] * f64::from(0.3_f32) + motion.y,
-                            -look[2] * f64::from(0.08_f32) + motion.z,
-                        ],
-                    ));
-                }
-            }
-            Phase::Flaming { ticks } => {
-                *ticks += 1;
-                if *ticks % 2 == 0 && *ticks < 10 {
-                    for _ in 0..8 {
-                        let r = &mut d.random;
-                        let p = [
-                            head.x + r.next_gaussian() / 2.0,
-                            head_y + r.next_gaussian() / 2.0,
-                            head.z + r.next_gaussian() / 2.0,
-                        ];
-                        for j in 0..6 {
-                            puffs.push((
-                                p,
-                                [
-                                    -look[0] * f64::from(0.08_f32) * f64::from(j),
-                                    -look[1] * f64::from(0.6_f32),
-                                    -look[2] * f64::from(0.08_f32) * f64::from(j),
-                                ],
-                            ));
-                        }
-                    }
-                }
-            }
             Phase::Dying { time, .. } => {
                 if *time % 10 == 0 {
                     let r = &mut d.random;
@@ -4091,6 +4149,107 @@ mod tests {
             path: None,
             target: None,
             clockwise: false,
+        }
+    }
+
+    /// `DragonLandingPhase.doClientTick`: eight puffs a tick from the head,
+    /// along `getHeadLookVector(1)` (a quarter turn of it is thrown away in
+    /// vanilla) plus the dragon's own motion.
+    #[test]
+    fn a_landing_dragon_breathes_eight_puffs_from_its_head() {
+        let look = [0.0, -0.6, 0.8];
+        let head = [10.0, 70.5, -3.0];
+        let motion = [0.25, -0.05, 0.5];
+        let mut random = LegacyRandom::new(7);
+        let puffs = breath_puffs(
+            &Phase::Landing { target: None },
+            look,
+            head,
+            motion,
+            &mut random,
+        );
+        assert_eq!(puffs.len(), 8);
+        let speed = [
+            -look[0] * f64::from(0.08_f32) + motion[0],
+            -look[1] * f64::from(0.3_f32) + motion[1],
+            -look[2] * f64::from(0.08_f32) + motion[2],
+        ];
+        for (at, v) in puffs {
+            assert_eq!(v, speed);
+            // The head's centre, jittered by `nextGaussian() / 2`.
+            for a in 0..3 {
+                assert!(
+                    (at[a] - head[a]).abs() < 2.0,
+                    "puff {} off the head: {at:?}",
+                    a
+                );
+            }
+        }
+    }
+
+    /// `DragonSittingFlamingPhase.doClientTick`: on the even ticks of the first
+    /// ten, eight starts each breathe a fan of six puffs down the look line.
+    #[test]
+    fn a_flaming_dragon_breathes_a_fan_on_every_second_tick() {
+        let look = [0.6, -0.0, 0.8];
+        let head = [0.0, 65.5, 4.0];
+        for (tick, want) in [(1, 0), (2, 48), (3, 0), (4, 48), (8, 48), (9, 0), (10, 0)] {
+            let mut random = LegacyRandom::new(11);
+            let puffs = breath_puffs(
+                &Phase::Flaming { ticks: tick },
+                look,
+                head,
+                [0.0; 3],
+                &mut random,
+            );
+            assert_eq!(puffs.len(), want, "flame tick {tick}");
+        }
+        let mut random = LegacyRandom::new(11);
+        let puffs = breath_puffs(
+            &Phase::Flaming { ticks: 2 },
+            look,
+            head,
+            [0.0; 3],
+            &mut random,
+        );
+        for (i, (at, v)) in puffs.iter().enumerate() {
+            let j = (i % 6) as f64;
+            // Six puffs leave from each of the eight starts.
+            assert_eq!(at, &puffs[i - i % 6].0);
+            assert_eq!(
+                *v,
+                [
+                    -look[0] * f64::from(0.08_f32) * j,
+                    -look[1] * f64::from(0.6_f32),
+                    -look[2] * f64::from(0.08_f32) * j,
+                ]
+            );
+        }
+    }
+
+    /// No other phase has a `doClientTick` that breathes.
+    #[test]
+    fn only_the_landing_and_flaming_phases_breathe() {
+        let mut random = LegacyRandom::new(3);
+        for phase in [
+            flying(),
+            Phase::Scanning { time: 5 },
+            Phase::Hover { target: None },
+            Phase::Takeoff {
+                first: false,
+                path: None,
+                target: None,
+            },
+            Phase::Attacking { ticks: 3 },
+            Phase::Dying {
+                target: None,
+                time: 0,
+            },
+        ] {
+            assert!(
+                breath_puffs(&phase, [0.0, -1.0, 0.0], [0.0; 3], [0.0; 3], &mut random).is_empty(),
+                "{phase:?}"
+            );
         }
     }
 

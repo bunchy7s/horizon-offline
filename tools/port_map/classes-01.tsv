@@ -14,12 +14,12 @@ DragonHoldingPatternPhase.strafePlayer	inline	crates/horizon-client/src/game/dra
 DragonLandingApproachPhase.doServerTick	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_phase	LandingApproach arm; gap: minor: no collision re-target
 DragonLandingApproachPhase.findNewTarget	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_phase	LandingApproach arm: path to the node by the nearest enemy to the egg, last node is the podium
 DragonLandingApproachPhase.navigateToNextPathNode	port	crates/horizon-client/src/game/dragon.rs::Game::next_target	
-DragonLandingPhase.doClientTick	missing		player: while the dragon comes down to land its head breathes a fan of dragon-breath particles; none are spawned
+DragonLandingPhase.doClientTick	inline	crates/horizon-client/src/game/dragon.rs::Game::host_dragon_breath_puffs	the fan of dragon breath at the head: eight a tick along getHeadLookVector(1) plus the dragon's motion, from the fight's own client; a server's client breathes it in remote_dragon_phase_tick
 DragonLandingPhase.doServerTick	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_phase	Landing arm: sets flame count 0 and goes to Scanning on reaching the podium
 DragonLandingPhase.getTurnSpeed	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_dragon	Landing turn min(rot,40)/rot, the one turn formula that differs from the default
 DragonSittingAttackingPhase.doClientTick	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_phase	gap: player: the growl is played once at the start of the 40 ticks; vanilla replays it on every client tick
 DragonSittingAttackingPhase.doServerTick	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_phase	Attacking arm: 40 ticks then Flaming
-DragonSittingFlamingPhase.doClientTick	missing		player: during the first 10 ticks of a flame attack the head breathes dragon-breath particles in a fan; none are spawned
+DragonSittingFlamingPhase.doClientTick	inline	crates/horizon-client/src/game/dragon.rs::Game::host_dragon_breath_puffs	on flame ticks 2, 4, 6 and 8: eight starts, each six puffs down the look line, from the fight's own client; remote_dragon_phase_tick for a server's client
 DragonSittingFlamingPhase.doServerTick	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_phase	Flaming arm: the flame cloud at tick 10, 200 ticks, flame count 4 leads to Takeoff
 DragonSittingScanningPhase.doServerTick	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_phase	Scanning arm; gap: minor: turns every tick, vanilla skips the turn while the target is within 10 degrees of the facing
 DragonTakeoffPhase.doServerTick	inline	crates/horizon-client/src/game/dragon.rs::Game::tick_phase	Takeoff arm: first tick finds a new target, later ticks go to Holding once 10 blocks from the podium
