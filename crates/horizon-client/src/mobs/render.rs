@@ -935,6 +935,10 @@ fn humanoid_armor(m: &Mob, v: &mut Vec<Layer>) {
     if super::equine::is_equine(m.species()) || avatar(m) {
         return;
     }
+    let e = &m.extra;
+    if e.head.is_none() && e.chest.is_none() && e.legs.is_none() && e.feet.is_none() {
+        return;
+    }
     let (model, _) = body(m);
     let Some(base) = model.strip_suffix("#main") else {
         return;
@@ -1886,7 +1890,8 @@ fn render_visible(
         }
         atlas(emissive.overlay(drawn)?)
     };
-    let mut poses = Poses::new(&model);
+    let mut poses = Poses::pooled();
+    poses.reset(&model);
     anim::setup(m, &s, &mut poses, &data.animations);
     if let Some(animation) = body_animation {
         animation.run(m, &s, &mut poses);
@@ -1989,7 +1994,7 @@ fn render_visible(
     }
     // One Poses refilled for every layer (armour draws up to seven): it keeps
     // its maps' capacity.
-    let mut layer_poses = Poses::default();
+    let mut layer_poses = Poses::pooled();
     let body_keys = [model_key.as_str(), cem_key];
     for (i, layer) in all_layers.iter().enumerate() {
         let custom = cem.layer(&layer.model);
@@ -2010,10 +2015,16 @@ fn render_visible(
         let Some((drawn, uv)) = sprite(texture).or_else(|| Some((texture, atlas(texture)?))) else {
             continue;
         };
-        layer_poses.reset(&part);
-        anim::setup(m, &s, &mut layer_poses, &data.animations);
-        if let Some(animation) = custom.and_then(|c| c.animation.as_ref()) {
-            animation.run(m, &s, &mut layer_poses);
+        if custom.is_none() && custom_body.is_none() && std::sync::Arc::ptr_eq(&part, &model) {
+            // A layer over the body's own model (a villager's type, profession
+            // and level, a spider's eyes): `setupAnim` gives the body's poses.
+            layer_poses.copy_from(&poses);
+        } else {
+            layer_poses.reset(&part);
+            anim::setup(m, &s, &mut layer_poses, &data.animations);
+            if let Some(animation) = custom.and_then(|c| c.animation.as_ref()) {
+                animation.run(m, &s, &mut layer_poses);
+            }
         }
         if matches!(m.species(), Species::Villager | Species::ZombieVillager)
             && let Some((folder, variant)) = layer
@@ -2592,7 +2603,7 @@ mod tests {
             ambient_interval: 80,
             flags: Flags::default(),
             model,
-            layers: std::collections::HashMap::new(),
+            layers: Default::default(),
             texture: String::new(),
             brain: Brain::Passive,
             anim: Anim::Camel,
