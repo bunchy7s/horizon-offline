@@ -3986,6 +3986,11 @@ impl Game<'_> {
         let _ = (item, pos);
     }
 
+    /// A firework rocket completed its explosion effects. @API:native_firework_explode@.
+    pub(super) fn native_firework_explode(&mut self, entity: u32, pos: [f64; 3], bursts: usize) {
+        let _ = (entity, pos, bursts);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
