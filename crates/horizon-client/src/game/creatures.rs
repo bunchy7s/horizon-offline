@@ -3988,6 +3988,7 @@ impl Game<'_> {
         });
         if let Some(strength) = hit {
             let _ = self.process_level_events();
+            self.native_target_hit(self.dim.id(), pos, strength);
             if p.owner == Some(Who::Player) && (p.guest.is_none() || p.guest == self.lan_acting) {
                 self.stats.custom("target_hit", 1);
                 let kind = if p

@@ -3146,6 +3146,12 @@ impl Game<'_> {
         let _ = (dimension, pos);
     }
 
+    /// A projectile hit the target block at `pos`, which now has `strength`
+    /// output power. Server-side. @API:native_target_hit@.
+    pub(super) fn native_target_hit(&mut self, dimension: &str, pos: [i32; 3], strength: i32) {
+        let _ = (dimension, pos, strength);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

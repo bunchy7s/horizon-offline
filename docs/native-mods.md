@@ -1421,6 +1421,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_sculk_bloom(dimension, pos)`**: after a sculk catalyst at `pos` takes experience, its block has entered
   the blooming state.
 - **`native_sponge_absorb(dimension, pos)`** (on `GameLevel`): a sponge at `pos` has absorbed water and become wet.
+- **`native_target_hit(dimension, pos, strength)`**: a projectile hit the target block at `pos`, which now has the
+  reported redstone output `strength`.
 - **`native_note_play(dimension, player, pos, instrument, note, cancel)`** (on `GameLevel`): a note block is about to
   sound when punched, used, or powered. Set `cancel` to silence it; when used to tune it, the note remains unchanged.
 - **`native_bell_ring(dimension, player, pos, cancel)`** (on `GameLevel`): a bell is about to ring. Set `cancel` to
