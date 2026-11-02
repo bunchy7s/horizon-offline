@@ -3681,6 +3681,12 @@ impl Game<'_> {
         let _ = (parent, partner, child);
     }
 
+    /// A furnace at `pos` began cooking `item` (its cooking timer advanced
+    /// from zero). Server-side.
+    /// @API:furnace_start_smelt@.
+    pub(super) fn native_furnace_start_smelt(&self, pos: [i32; 3], item: &str) {
+        let _ = (pos, item);
+    }
     /// A furnace at `pos` consumed fuel and began or resumed burning it.
     /// `fuel` is the item consumed from its fuel slot. Server-side.
     /// @API:furnace_burn@.

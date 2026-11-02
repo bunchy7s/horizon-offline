@@ -218,6 +218,7 @@ impl Game<'_> {
         let before = match self.world.block_entities.get(&pos) {
             Some(BlockEntity::Furnace(f)) => (
                 f.lit_remaining,
+                f.cooking_timer,
                 f.items[1].clone(),
                 f.items[0].clone(),
                 f.items[2].clone(),
@@ -225,7 +226,7 @@ impl Game<'_> {
             _ => return Ok(()),
         };
         let mut drops = Vec::new();
-        let (lit, burning, smelted) = {
+        let (lit, burning, smelted, smelting) = {
             let Some(BlockEntity::Furnace(f)) = self.world.block_entities.get_mut(&pos) else {
                 return Ok(());
             };
@@ -236,14 +237,21 @@ impl Game<'_> {
                 &mut drops,
             );
             let burning = (before.0 == 0 && f.lit_remaining > 0)
-                .then(|| before.1.as_ref().map(|fuel| fuel.item.to_string()))
+                .then(|| before.2.as_ref().map(|fuel| fuel.item.to_string()))
                 .flatten();
             let smelted = f.items[2]
                 .as_ref()
-                .filter(|after| after.count > before.3.as_ref().map_or(0, |before| before.count))
-                .map(|after| (before.2.clone(), after.item.to_string()));
-            (lit, burning, smelted)
+                .filter(|after| after.count > before.4.as_ref().map_or(0, |before| before.count))
+                .map(|after| (before.3.clone(), after.item.to_string()));
+            let started = before.1 == 0 && f.cooking_timer > 0;
+            let smelting = started
+                .then(|| f.items[0].as_ref().map(|item| item.item.to_string()))
+                .flatten();
+            (lit, burning, smelted, smelting)
         };
+        if let Some(item) = smelting {
+            self.native_furnace_start_smelt([pos.0, pos.1, pos.2], &item);
+        }
         if let Some(fuel) = burning {
             self.native_furnace_burn([pos.0, pos.1, pos.2], &fuel);
         }
