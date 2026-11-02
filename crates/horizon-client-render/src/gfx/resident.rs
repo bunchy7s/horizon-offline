@@ -147,6 +147,17 @@ impl<T> Resident<T> {
     /// Removes every section of the `gone` columns, the others keeping their order: one
     /// pass over the store, where `remove` moves a slot and looks its column up for each.
     pub fn remove_columns(&mut self, gone: &FxHashSet<(i32, i32)>) -> Vec<T> {
+        // Every column (a far teleport): emptied, without a lookup per section.
+        if self.columns.iter().all(|c| gone.contains(&(c.x, c.z))) {
+            self.bounds.clear();
+            self.slots.clear();
+            self.columns.clear();
+            self.column_index.clear();
+            return std::mem::take(&mut self.items)
+                .into_iter()
+                .map(|(_, value)| value)
+                .collect();
+        }
         let items = std::mem::take(&mut self.items);
         let bounds = std::mem::take(&mut self.bounds);
         self.slots.clear();
@@ -533,7 +544,18 @@ mod tests {
                 ((seed >> 4) % 6) as i32 - 1,
                 ((seed >> 8) % 5) as i32 - 2,
             );
-            if (seed >> 12).is_multiple_of(97) {
+            if (seed >> 12).is_multiple_of(389) {
+                // Every column at once (a far teleport), and one that holds nothing.
+                let gone: FxHashSet<(i32, i32)> = (-2..=3)
+                    .flat_map(|x| (-2..=2).map(move |z| (x, z)))
+                    .collect();
+                let mut removed = r.remove_columns(&gone);
+                let mut expected: Vec<u32> = model.drain().map(|(_, v)| v).collect();
+                removed.sort_unstable();
+                expected.sort_unstable();
+                assert_eq!(removed, expected);
+                assert!(r.columns.is_empty() && r.column_index.is_empty());
+            } else if (seed >> 12).is_multiple_of(97) {
                 // Whole columns at once: the column of `key` and the next one along x.
                 let gone: FxHashSet<(i32, i32)> =
                     [(key.0, key.2), (key.0 + 1, key.2)].into_iter().collect();

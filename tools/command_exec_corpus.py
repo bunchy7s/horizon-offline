@@ -836,6 +836,31 @@ def items_and_loot():
 
 def world_misc():
     return [
+        # BlockInput.place calculates neighbour shapes before setting the block,
+        # then reapplies only properties explicitly supplied by the command.
+        cmd('/setblock 4 219 4 minecraft:stone'),
+        cmd('/setblock 4 220 4 minecraft:note_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=harp]'),
+        cmd('/setblock 4 219 4 minecraft:gold_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=bell]'),
+        cmd('/setblock 4 219 4 minecraft:stone'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block[instrument=flute,note=7]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=flute,note=7]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block[note=7]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum,note=7]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block strict'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=harp]'),
+        # Even an unchanged input state must be normalized before comparison.
+        cmd('/setblock 4 220 4 minecraft:note_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        # An unsupported shape falling back to air retains the requested block.
+        cmd('/setblock 6 220 4 minecraft:poppy'),
+        cmd('/execute if block 6 220 4 minecraft:poppy'),
         cmd('/setblock 1 210 1 minecraft:stone keep'),
         cmd('/setblock 1 210 1 minecraft:dirt keep'),
         cmd('/setblock 1 210 1 minecraft:dirt destroy'),
@@ -1745,6 +1770,26 @@ def mob_max_health_bounds():
     ]
     return ops
 
+def forceload_query_order():
+    """ForceLoadCommand sorts signed packed chunk IDs, not coordinate tuples (#7451)."""
+    return [
+        *setup('/forceload remove all'),
+        cmd('/forceload query'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload add 32 0'),
+        cmd('/forceload query'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload add -16 0'),
+        cmd('/forceload add 0 -16'),
+        # Java 26.3: [0,-1], [2,0], [-1,0]. These replies say nothing
+        # about whether the force-loaded chunks have finished loading.
+        cmd('/forceload query'),
+        cmd('/forceload remove 32 0'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload remove all'),
+        cmd('/forceload query'),
+    ]
+
 
 def groups():
     return [
@@ -1754,6 +1799,7 @@ def groups():
         ('game state', game_state()),
         ('player state', player_state()),
         ('blocks and border', world_blocks()),
+        ('forceload query order', forceload_query_order()),
         ('entities', entities()),
         ('mob max health bounds', mob_max_health_bounds()),
         ('wither spawn', wither_spawn()),

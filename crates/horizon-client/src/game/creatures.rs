@@ -403,6 +403,19 @@ impl Game<'_> {
         persistent: bool,
         scripted: bool,
     ) -> Option<u32> {
+        self.spawn_mob_reason(kind, at, persistent, scripted, !persistent)
+    }
+    /// `spawn_mob_for` with the spawn reason's NATURAL flag explicit: only a
+    /// natural spawn rolls the jockey mounts of zombie horses, husks and
+    /// drowned (`reinforcement` and spawner spawns pass `false`).
+    pub(super) fn spawn_mob_reason(
+        &mut self,
+        kind: &str,
+        at: [f64; 3],
+        persistent: bool,
+        scripted: bool,
+        natural: bool,
+    ) -> Option<u32> {
         let kind = if kind.contains(':') {
             kind.to_owned()
         } else {
@@ -437,7 +450,7 @@ impl Game<'_> {
         self.enchant_spawn_equipment(id);
         self.halloween_spawn_head(id);
         if !persistent && !scripted {
-            self.spawn_jockeys(id, true);
+            self.spawn_jockeys(id, natural);
         }
         Some(id)
     }
