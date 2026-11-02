@@ -618,8 +618,8 @@ impl Game<'_> {
                 seed,
             );
             let glowing = self.entity_glowing(item.id);
-            // Posed on the GPU when every layer can be (the outline reads the CPU's vertices).
-            let skinned = (skinning && !glowing)
+            // Posed on the GPU when every layer can be, its silhouette too when it glows.
+            let skinned = skinning
                 .then(|| self.submit_item_skinned(&state, &copies, vertex_light(packed), lights))
                 .flatten();
             if skinned.is_none() {
@@ -630,6 +630,10 @@ impl Game<'_> {
             if glowing {
                 let rgb = super::glowing::team_color(self.mob_team(item.id));
                 self.mark_outline(&out[entity_start..], rgb);
+                if let Some(((first, _, _), _)) = skinned {
+                    let color = horizon_client::mobs::render::abgr(rgb);
+                    self.skin_frame.borrow_mut().outline_since(first, color);
+                }
             } else {
                 self.cull_skinned(out, entity_start, skinned);
             }
