@@ -3403,6 +3403,13 @@ impl Game<'_> {
     pub(super) fn native_player_trade(&mut self, player: u128, name: &str, entity_id: u32) {
         let _ = (player, name, entity_id);
     }
+    /// A server player's shield was disabled by a blocked melee hit. The
+    /// shield cooldown is set immediately after this call. Helpers looking up
+    /// the guest through `self.lan` may find nothing during packet handling.
+    /// Server-side. @API:player_shield_disable@.
+    pub(super) fn native_player_shield_disable(&mut self, player: u128, name: &str, ticks: u32) {
+        let _ = (player, name, ticks);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

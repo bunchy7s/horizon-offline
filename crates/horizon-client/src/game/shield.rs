@@ -261,6 +261,10 @@ impl Game<'_> {
             0
         };
         if ticks > 0 {
+            if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+            {
+                self.native_player_shield_disable(player, &name, ticks);
+            }
             let item = self
                 .using
                 .and_then(|(slot, _)| self.stack_in(slot))
