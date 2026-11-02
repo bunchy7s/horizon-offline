@@ -3461,6 +3461,18 @@ impl Game<'_> {
     ) {
         let _ = (player, name, entity_id, item);
     }
+    /// A server player selected a stonecutter recipe, after the menu accepted
+    /// its button. `recipe` is the zero-based button index. Guest lookup
+    /// helpers may find nothing during packet handling. Server-side.
+    /// @API:player_stonecutter_recipe_select@.
+    pub(super) fn native_player_stonecutter_recipe_select(
+        &mut self,
+        player: u128,
+        name: &str,
+        recipe: i32,
+    ) {
+        let _ = (player, name, recipe);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

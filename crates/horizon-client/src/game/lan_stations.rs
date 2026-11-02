@@ -440,19 +440,25 @@ impl Game<'_> {
         }
         let identity = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()));
         let mut selected = false;
-        let opened = host
+        let kind = host
             .play
             .get(&conn)
             .and_then(|p| p.station.as_ref())
-            .is_some_and(|s| s.window == window && s.kind == StationKind::Loom);
+            .filter(|s| s.window == window)
+            .map(|s| s.kind);
         self.lan_station_op(host, conn, Some(window), |menu, env| {
             selected = menu.button(env, id);
         });
-        if opened
-            && selected
-            && let Some((player, name)) = identity
-        {
-            self.native_player_loom_pattern_select(player, &name, id);
+        if selected && let Some((player, name)) = identity {
+            match kind {
+                Some(StationKind::Loom) => {
+                    self.native_player_loom_pattern_select(player, &name, id);
+                }
+                Some(StationKind::Stonecutter) => {
+                    self.native_player_stonecutter_recipe_select(player, &name, id);
+                }
+                _ => {}
+            }
         }
     }
 
