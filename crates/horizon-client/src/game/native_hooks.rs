@@ -2868,6 +2868,28 @@ impl Game<'_> {
     ) {
         let _ = (player, name, advancement);
     }
+    /// guest packet. @API:player_shear_entity@.
+    pub(super) fn native_player_shear_entity(
+        &mut self,
+        player: u128,
+        name: &str,
+        entity_id: i32,
+        off_hand: bool,
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, entity_id, off_hand, cancel);
+    }
+    /// A server player completed an advancement, after progress was recorded.
+    /// Helpers looking up the guest through `self.lan` may find nothing during
+    /// its packet. @API:player_advancement_done@.
+    pub(super) fn native_player_advancement_done(
+        &mut self,
+        player: u128,
+        name: &str,
+        advancement: &str,
+    ) {
+        let _ = (player, name, advancement);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

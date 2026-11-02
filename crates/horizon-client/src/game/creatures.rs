@@ -3,7 +3,7 @@
 //! breeding, conversions, drops), projectiles, player interactions
 //! (feeding, shearing, milking, spawn eggs, throwing) and rendering.
 use super::{
-    Dim, Game, InteractTarget, dispenser, native_mob_draw::NativePlayerRender,
+    Dim, Game, Hand, InteractTarget, dispenser, native_mob_draw::NativePlayerRender,
     native_projectiles::Impact, view_vector,
 };
 use horizon_assets::item_model::DisplayContext;
@@ -4881,6 +4881,34 @@ impl Game<'_> {
         }
         if self.name_mob(index) {
             return Ok(true);
+        }
+        if self
+            .held()
+            .is_some_and(|stack| &*stack.item == "minecraft:shears")
+        {
+            let mob = &self.mobs[index];
+            let shearable = match mob.species() {
+                Species::Sheep => !mob.extra.sheared && !mob.is_baby(),
+                Species::Mooshroom => !mob.is_baby(),
+                Species::SnowGolem | Species::Bogged => mob.alive() && !mob.extra.sheared,
+                _ => false,
+            };
+            if shearable
+                && let (Some(player), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+            {
+                let mut cancel = false;
+                self.native_player_shear_entity(
+                    player,
+                    &name,
+                    mob.id as i32,
+                    self.hand == Hand::Off,
+                    &mut cancel,
+                );
+                if cancel {
+                    return Ok(true);
+                }
+            }
         }
         if self.spawn_egg_offspring(index) {
             self.swing_arm();
