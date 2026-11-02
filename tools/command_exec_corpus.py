@@ -1718,6 +1718,27 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def forceload_query_order():
+    """ForceLoadCommand sorts signed packed chunk IDs, not coordinate tuples (#7451)."""
+    return [
+        *setup('/forceload remove all'),
+        cmd('/forceload query'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload add 32 0'),
+        cmd('/forceload query'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload add -16 0'),
+        cmd('/forceload add 0 -16'),
+        # Java 26.3: [0,-1], [2,0], [-1,0]. These replies say nothing
+        # about whether the force-loaded chunks have finished loading.
+        cmd('/forceload query'),
+        cmd('/forceload remove 32 0'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload remove all'),
+        cmd('/forceload query'),
+    ]
+
+
 def groups():
     return [
         ('setup', group_setup()),
@@ -1726,6 +1747,7 @@ def groups():
         ('game state', game_state()),
         ('player state', player_state()),
         ('blocks and border', world_blocks()),
+        ('forceload query order', forceload_query_order()),
         ('entities', entities()),
         ('wither spawn', wither_spawn()),
         ('riding teleport', riding_teleport()),

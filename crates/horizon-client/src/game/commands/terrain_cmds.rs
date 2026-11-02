@@ -7,7 +7,7 @@ use horizon_client::{
     text::Text,
     worldborder::MAX_SIZE,
 };
-use horizon_core::random::RandomSource;
+use horizon_core::{position::ChunkPos, random::RandomSource};
 
 fn num(n: impl std::fmt::Display) -> Text {
     Text::literal(n.to_string())
@@ -41,7 +41,8 @@ impl Game<'_> {
         match id {
             "forceload.query" if ctx.get("pos").is_none() => {
                 let mut forced: Vec<(i32, i32)> = self.streaming.forced.iter().copied().collect();
-                forced.sort_unstable();
+                // ForceLoadCommand sorts its LongStream before formatting chunks.
+                forced.sort_unstable_by_key(|&(x, z)| ChunkPos::new(x, z).pack());
                 if forced.is_empty() {
                     self.command_failure(Text::translate("commands.forceload.added.none", &[dim]));
                     return Ok(0);
