@@ -3347,6 +3347,38 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// An entity that can't breathe and has no air (`LivingDrownEvent`, posted
+    /// from `LivingEntity.baseTick`), with vanilla's answers as the defaults: it
+    /// drowns at -20 air, for 2 damage and 8 bubbles. Bubble count is read-only;
+    /// changes to the event field do not affect the vanilla entity event. Asked on
+    /// servers, for the entities `native_living_breathe` is. API @API:native_living_drown@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn living_drown(&self, event: &mut LivingDrownEvent<'_>) -> Flow {
+        let _ = event;
+        Flow::Continue
+    }
+    /// A living entity is about to handle a fall (`LivingFallEvent`). Mods may
+    /// change the distance and damage multiplier, or cancel fall handling.
+    /// @API:native_living_fall@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn living_fall(&self, event: &mut LivingFallEvent<'_>) -> Flow {
+        let _ = event;
+        Flow::Continue
+    }
+    /// A living entity is about to heal. Mods may change the amount or cancel.
+    /// `entity` identifies the affected entity. @API:native_living_heal@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn living_heal(&self, event: &mut LivingHealEvent) -> Flow {
+        let _ = event;
+        Flow::Continue
+    }
+    /// A living entity jumped (`LivingEvent.LivingJumpEvent`). @API:native_living_jump@.
+    fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
+        let _ = event;
+    }
     /// `player` (`name`) changed dimension (NeoForge's
     /// `PlayerChangedDimensionEvent`): `from` and `to` are dimension ids
     /// (`minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`).
@@ -11054,6 +11086,116 @@ pub fn dispatch_item_damaged(
         }
     }
     *amount = event.amount;
+}
+/// What [`Hooks::living_drown`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingDrownEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub is_drowning: bool,
+    pub damage_amount: f32,
+    pub bubble_count: i32,
+}
+pub fn dispatch_living_drown(
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    is_drowning: &mut bool,
+    damage_amount: &mut f32,
+    bubble_count: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LivingDrownEvent {
+        entity,
+        kind,
+        is_drowning: *is_drowning,
+        damage_amount: *damage_amount,
+        bubble_count,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.living_drown(&mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *is_drowning = event.is_drowning;
+    *damage_amount = event.damage_amount;
+}
+/// What [`Hooks::living_fall`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingFallEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub distance: f64,
+    pub multiplier: f32,
+}
+pub fn dispatch_living_fall(
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    distance: &mut f64,
+    multiplier: &mut f32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LivingFallEvent {
+        entity,
+        kind,
+        distance: *distance,
+        multiplier: *multiplier,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.living_fall(&mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *distance = event.distance;
+    *multiplier = event.multiplier;
+}
+/// What [`Hooks::living_heal`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingHealEvent {
+    pub entity: u32,
+    pub amount: f32,
+}
+pub fn dispatch_living_heal(
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    amount: &mut f32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LivingHealEvent {
+        entity,
+        amount: *amount,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.living_heal(&mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *amount = event.amount;
+}
+/// What [`Hooks::living_jump`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingJumpEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+}
+pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
+    let mut event = LivingJumpEvent { entity, kind };
+    for mod_hook in mods {
+        mod_hook.living_jump(&mut event);
+    }
 }
 /// What [`Hooks::player_changed_dimension`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
