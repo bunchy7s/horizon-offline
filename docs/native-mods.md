@@ -2523,6 +2523,13 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   colour target (copy it out before sampling it), the world's reversed depth and its size, the camera's position and
   its matrices with and without TAA's jitter, the frame's camera-relative entity quads with their runs by entity, the
   entity atlas and the shared quad index buffer. Not called on the title screen's panorama.
+- `native_hand_drawn(hand)`: the first-person hand and held item are drawn, after `native_world_drawn` and before
+  entity outlines, post effects, screen effects and the HUD, on every frame `native_world_drawn` runs. `HandDrawn`
+  holds the device, queue and encoder, the frame's colour target with the hand in it, the hand's camera-relative
+  quads (empty when no hand drew: third person, F1, a shader pack's own hand), the hand's clip matrix (its own field
+  of view and the view bob, no jitter), the camera, the entity atlas and the quad index buffer. The hand's depth isn't
+  kept: draw its quads into a depth of your own. A motion blur can match the hand's quads with last frame's for the
+  swing, attack, equip and bob motion, and blur the picture with the hand in it.
 - `native_render_needs(needs)`: set `entity_spans` to have the entity geometry split into runs by entity without a
   shader pack (each run's id is stable from frame to frame: a hash of the entity type's name, a block entity's state),
   and `world_depth` to keep the world pass's depth when nothing else needs it. Set what you need and leave the rest:
