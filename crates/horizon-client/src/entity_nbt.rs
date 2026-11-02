@@ -27,7 +27,7 @@ fn string(s: &str) -> Tag {
 }
 /// Entity type ID (`id`).
 pub fn kind(tag: &Tag) -> Option<String> {
-    text(tag.get("id"))
+    horizon_client_core::identifier::normalize_id(&text(tag.get("id"))?)
 }
 pub fn position(tag: &Tag) -> Option<Vec3> {
     read_doubles::<3>(tag.get("Pos")).map(|p| Vec3::new(p[0], p[1], p[2]))
@@ -2238,7 +2238,12 @@ pub fn arrow_to_nbt(
         return None;
     };
     let base = Base {
-        id: "minecraft:arrow",
+        // A spectral arrow is its own entity type.
+        id: if a.spectral || &*a.pickup_item.item == "minecraft:spectral_arrow" {
+            "minecraft:spectral_arrow"
+        } else {
+            "minecraft:arrow"
+        },
         uuid,
         position: p.position,
         motion: p.velocity,
@@ -2298,10 +2303,17 @@ pub fn arrow_from_nbt(
     let position = position(tag)?;
     let owner = uuid_from_tag(tag.get("Owner"));
     let from_player = player.is_some() && owner == player;
+    // `getDefaultPickupItem`: a `SpectralArrow` is picked up as its own item.
+    let spectral = kind(tag).as_deref() == Some("minecraft:spectral_arrow");
+    let default_item = if spectral {
+        "minecraft:spectral_arrow"
+    } else {
+        "minecraft:arrow"
+    };
     let item = tag
         .get("item")
         .and_then(item_from_nbt)
-        .unwrap_or_else(|| crate::items::ItemStack::new("minecraft:arrow", 1));
+        .unwrap_or_else(|| crate::items::ItemStack::new(default_item, 1));
     let kind = ProjectileKind::Arrow {
         base_damage: float(tag.get("damage")).unwrap_or(2.0),
         critical: flag(tag, "crit"),
@@ -2322,6 +2334,7 @@ pub fn arrow_from_nbt(
     a.has_been_shot = flag(tag, "HasBeenShot");
     a.fire_ticks = number(tag.get("Fire")).unwrap_or(0) as i16 as i32;
     a.fall_distance = float(tag.get("fall_distance")).unwrap_or(0.0);
+    a.spectral = spectral;
     a.pickup_item = item;
     a.fired_from_weapon = tag.get("weapon").and_then(item_from_nbt);
     p.stuck = a.in_ground;
@@ -2403,12 +2416,13 @@ fn put_projectile(tag: &mut Tag, p: &Projectile, owner: Option<[i32; 4]>) {
 
 /// The thrown item projectiles Horizon saves: each entity type's id is also
 /// the item it saves when none was loaded (`getDefaultItem`).
-const THROWABLE_ITEMS: [&str; 5] = [
+const THROWABLE_ITEMS: [&str; 6] = [
     "minecraft:snowball",
     "minecraft:egg",
     "minecraft:ender_pearl",
     "minecraft:splash_potion",
     "minecraft:lingering_potion",
+    "minecraft:experience_bottle",
 ];
 /// The item a throwable flies as: its stack (a potion's), the mod type's
 /// item, or the item its entity type is named after.
@@ -2432,6 +2446,7 @@ pub fn throwable_kind(id: &str) -> Option<ProjectileKind> {
         "minecraft:egg" => Some(ProjectileKind::Egg),
         "minecraft:ender_pearl" => Some(ProjectileKind::EnderPearl),
         // The entity type is the id; the `Item` read later may be another potion.
+        "minecraft:experience_bottle" => Some(ProjectileKind::ExperienceBottle),
         _ => Some(ProjectileKind::Potion(
             Box::new(crate::items::ItemStack::new(id, 1)),
             id == "minecraft:lingering_potion",
@@ -2454,12 +2469,17 @@ pub fn saved_with_chunk(p: &Projectile) -> bool {
         | ProjectileKind::Egg
         | ProjectileKind::EnderPearl
         | ProjectileKind::Potion(..)
+        | ProjectileKind::ExperienceBottle
+        | ProjectileKind::LlamaSpit
+        | ProjectileKind::ShulkerBullet { target: None, .. }
         | ProjectileKind::Thrown(_) => true,
         ProjectileKind::Arrow { .. } => p.arrow.is_some(),
-        // Not written yet: tridents save from their own list.
+        // Not written yet: tridents save from their own list, and a bullet
+        // with a target would lose it.
         ProjectileKind::Trident
-        | ProjectileKind::LlamaSpit
-        | ProjectileKind::ShulkerBullet { .. }
+        | ProjectileKind::ShulkerBullet {
+            target: Some(_), ..
+        }
         | ProjectileKind::WitherSkull { .. } => false,
     }
 }
@@ -2520,6 +2540,59 @@ pub fn throwable_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<Project
     p.owner_uuid = owner;
     p.no_gravity = flag(tag, "NoGravity");
     Some(p)
+}
+
+/// `LlamaSpit` and `ShulkerBullet` as `/summon` or a chunk loads them:
+/// `Projectile`'s `Owner`, `LeftOwner`, `NoGravity` and the motion. A bullet
+/// loaded without a `Target` has none, so it falls (`ShulkerBullet.tick`).
+pub fn spit_or_bullet_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<Projectile> {
+    let kind = match kind(tag)?.as_str() {
+        "minecraft:llama_spit" => ProjectileKind::LlamaSpit,
+        "minecraft:shulker_bullet" => ProjectileKind::ShulkerBullet {
+            target: None,
+            dir: None,
+            steps: 0,
+            delta: [0.0; 3],
+            seed: 0,
+        },
+        _ => return None,
+    };
+    let owner = owner_uuid(tag);
+    let from_player = player.is_some() && owner == player;
+    let mut p = Projectile::new(kind, position(tag)?, from_player.then_some(Who::Player));
+    p.velocity = motion(tag);
+    [p.yaw, p.pitch] = rotation(tag);
+    p.left_owner = flag(tag, "LeftOwner");
+    p.owner_uuid = owner;
+    p.no_gravity = flag(tag, "NoGravity");
+    Some(p)
+}
+
+/// The save of [`spit_or_bullet_from_nbt`]'s kinds: `Projectile`'s keys.
+pub fn spit_or_bullet_to_nbt(
+    p: &Projectile,
+    uuid: [i32; 4],
+    owner: Option<[i32; 4]>,
+    raw: Option<&Tag>,
+) -> Option<Tag> {
+    if !matches!(
+        p.kind,
+        ProjectileKind::LlamaSpit | ProjectileKind::ShulkerBullet { target: None, .. }
+    ) {
+        return None;
+    }
+    let base = Base {
+        id: p.kind.id(),
+        uuid,
+        position: p.position,
+        motion: p.velocity,
+        rotation: [p.yaw, p.pitch],
+        on_ground: false,
+        fall_distance: 0.0,
+    };
+    let mut tag = base.tag(raw);
+    put_projectile(&mut tag, p, owner);
+    Some(tag)
 }
 
 /// `Projectile`'s `Owner`.
@@ -3310,6 +3383,31 @@ mod tnt_power_tests {
 mod tests {
     use super::*;
     use crate::items::ItemStack;
+
+    #[test]
+    fn mob_loading_accepts_default_namespace_and_preserves_custom_namespaces() {
+        let cow = crate::mobs::sensor_scan_tests::kind();
+        let types = [
+            ("minecraft:cow".into(), cow.clone()),
+            ("test:cow".into(), cow),
+        ]
+        .into();
+        let pos = || {
+            Tag::List(
+                [4.5_f64, 220.0, 6.5]
+                    .map(|v| Tag::Double(v.to_bits()))
+                    .to_vec(),
+            )
+        };
+        for id in ["cow", ":cow", "minecraft:cow", "test:cow"] {
+            let tag = Tag::compound([("id", string(id)), ("Pos", pos()), ("NoAI", Tag::Byte(1))]);
+            let mob = mob_from_nbt(&tag, &types, 7, None).expect(id);
+            assert_eq!(mob.position, Vec3::new(4.5, 220.0, 6.5));
+            assert!(mob.no_ai);
+        }
+        let unknown = Tag::compound([("id", string("other:cow")), ("Pos", pos())]);
+        assert!(mob_from_nbt(&unknown, &types, 8, None).is_none());
+    }
 
     /// A saved rocket and trident come back with their own Life, LifeTime,
     /// flags and position (the keys vanilla's addAdditionalSaveData writes).
@@ -5287,6 +5385,72 @@ mod mod_thrown_nbt_tests {
         // a type no mod declares now is not a thrown kind.
         assert!(throwable_kind("gone:bolt").is_none());
     }
+    fn summoned(id: &str, extra: &[(&str, Tag)]) -> Tag {
+        let mut c = vec![
+            ("id", Tag::String(id.into())),
+            ("Pos", doubles(&[0.5, 110.0, 0.5])),
+            ("Motion", doubles(&[0.0, 0.0, 0.0])),
+        ];
+        c.extend(extra.iter().cloned());
+        Tag::compound(c)
+    }
+
+    /// Four summoned kinds had no loader and stayed inert (a spectral arrow,
+    /// a shulker bullet, a llama's spit and an experience bottle never fell).
+    #[test]
+    fn summoned_projectiles_of_every_kind_load_and_honour_no_gravity() {
+        use crate::entity_rules::EntityRules;
+        let flag = ("NoGravity", Tag::Byte(1));
+        let arrow = arrow_from_nbt(&summoned("minecraft:spectral_arrow", &[]), None, |_| None)
+            .unwrap()
+            .0;
+        assert!(arrow.is_spectral_arrow() && !arrow.no_gravity);
+        let held = arrow_from_nbt(
+            &summoned("minecraft:spectral_arrow", std::slice::from_ref(&flag)),
+            None,
+            |_| None,
+        )
+        .unwrap()
+        .0;
+        assert!(held.no_gravity);
+        // ...and it is saved as the entity type it is.
+        let saved = arrow_to_nbt(&arrow, [1; 4], None, None, None).unwrap();
+        assert_eq!(kind(&saved).as_deref(), Some("minecraft:spectral_arrow"));
+        let plain = arrow_from_nbt(&summoned("minecraft:arrow", &[]), None, |_| None)
+            .unwrap()
+            .0;
+        let saved = arrow_to_nbt(&plain, [1; 4], None, None, None).unwrap();
+        assert_eq!(kind(&saved).as_deref(), Some("minecraft:arrow"));
+
+        for id in ["minecraft:llama_spit", "minecraft:shulker_bullet"] {
+            let p = spit_or_bullet_from_nbt(&summoned(id, &[]), None).unwrap();
+            assert_eq!(p.kind.id(), id);
+            assert!(!p.no_gravity && p.position == Vec3::new(0.5, 110.0, 0.5));
+            let held =
+                spit_or_bullet_from_nbt(&summoned(id, std::slice::from_ref(&flag)), None).unwrap();
+            assert!(held.no_gravity);
+        }
+        assert!(spit_or_bullet_from_nbt(&summoned("minecraft:arrow", &[]), None).is_none());
+        // a spit and a target-less bullet are saved and selectable (`/data`, `@e`).
+        let spit = spit_or_bullet_from_nbt(&summoned("minecraft:llama_spit", &[]), None).unwrap();
+        assert!(saved_with_chunk(&spit));
+        let saved = spit_or_bullet_to_nbt(&spit, [1; 4], None, None).unwrap();
+        assert_eq!(kind(&saved).as_deref(), Some("minecraft:llama_spit"));
+
+        // A summoned experience bottle flies as the bottle item, with a bottle's gravity.
+        let bottle =
+            throwable_from_nbt(&summoned("minecraft:experience_bottle", &[]), None).unwrap();
+        assert_eq!(bottle.kind.id(), "minecraft:experience_bottle");
+        assert!(!bottle.no_gravity && (bottle.get_gravity() - 0.07).abs() < 1e-12);
+        let held =
+            throwable_from_nbt(&summoned("minecraft:experience_bottle", &[flag]), None).unwrap();
+        assert!(held.no_gravity && held.get_gravity() == 0.0);
+        let saved = throwable_to_nbt(&bottle, [1; 4], None, None).unwrap();
+        assert_eq!(kind(&saved).as_deref(), Some("minecraft:experience_bottle"));
+        let item = saved.get("Item").and_then(item_from_nbt).unwrap();
+        assert_eq!(&*item.item, "minecraft:experience_bottle");
+    }
+
     #[test]
     fn no_gravity_survives_save_and_load_for_orbs() {
         // Entity.saveWithoutId / load: NoGravity round-trips on a kind that

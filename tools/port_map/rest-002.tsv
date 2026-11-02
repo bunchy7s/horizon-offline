@@ -19,7 +19,7 @@ MobEffectsPredicate.matches	inline	crates/horizon-client/src/advancements.rs::en
 MobEffectsPredicate.Builder.and	skip:java		builder for effect predicates in code
 MobEffectsPredicate.MobEffectInstancePredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	gap: minor: ambient and visible flags are not checked; amplifier and duration are
 NbtPredicate.matches	missing		minor: custom_data and entity NBT predicates are not read; no vanilla advancement uses them
-SingleComponentItemPredicate.matches	inline	crates/horizon-client/src/advancements.rs::item	gap: minor: only enchantments, damage and potion contents are read; other components are ignored
+SingleComponentItemPredicate.matches	inline	crates/horizon-client/src/advancements.rs::item	gap: minor: enchantments, damage and potion contents are read from components and predicates; adventure/play_jukebox_in_meadows asks for minecraft:jukebox_playable, which is ignored, so any tool passes that match_tool test
 SlotsPredicate.matches	missing		minor: slot-range item test is not read; no vanilla advancement uses it
 SlotsPredicate.matchSlots	missing		minor: helper of SlotsPredicate.matches; not read
 StatePropertiesPredicate.matches	port	crates/horizon-client/src/advancements.rs::block	the state property test of block()
@@ -32,8 +32,8 @@ StatePropertiesPredicate.RangedMatcher.match	inline	crates/horizon-client/src/ad
 TagPredicate.codec	skip:java		codec
 TagPredicate.is	skip:java		builder
 TagPredicate.isNot	skip:java		builder
-TagPredicate.matches	inline	crates/horizon-client/src/advancements.rs::id_matches	gap: minor: the #tag form is read; the negated expected=false form is not kept
-CubeMobPredicate.matches	missing		minor: type_specific/cube_mob (slime size) is not read; no vanilla advancement uses it
+TagPredicate.matches	inline	crates/horizon-client/src/advancements.rs::damage_source	each of the damage type's tags compared against the predicate's expected flag; DamageSourcePredicate.matches is the only caller (adventure/blowback asks for #minecraft:is_projectile with expected true)
+CubeMobPredicate.matches	inline	crates/horizon-world/src/loot.rs::Context::entity_matches	the loot reader's minecraft:type_specific/cube_mob arm, the size bounds against the mob's own size; entity() in advancements.rs has no arm for it and answers false, so an advancement asking for one never matches
 DistanceToPlayerPredicate.matches	port	crates/horizon-client/src/advancements.rs::distance	the distance key of entity(): from the player to the entity
 EntityEquipmentPredicate.captainPredicate	skip:data		datagen builder for the raid captain predicate (VanillaAdventureAdvancements)
 EntityEquipmentPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	the equipment key: the seven slots
@@ -55,7 +55,7 @@ EntityTagPredicate.containsAllOf	missing		minor: helper of entity_tags; not read
 EntityTypePredicate.of	skip:java		builder from an entity type or tag
 EntityTypePredicate.matches	port	crates/horizon-client/src/advancements.rs::id_matches	the type key of entity(): an id or #tag
 FishingHookPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	the type_specific/fishing_hook arm: open-water test
-LightningBoltPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	gap: minor: blocks_set_on_fire is checked against 0, not the bolt's own count; the lightning trigger never fires
+LightningBoltPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	the minecraft:type_specific/lightning arm: blocks_set_on_fire against the bolt's own count (game/lightning.rs fills it from the fires the bolt set) and entity_struck against the mobs around it
 MovementAffectedByPredicate.matches	missing		minor: movement_affected_by key is not read; no vanilla advancement uses it
 MovementPredicate.matches	missing		minor: movement key (speed, fall distance) is not read; no vanilla advancement uses it
 PassengerPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	the `passenger` key: any passenger of the vehicle matches the nested predicate
@@ -66,8 +66,8 @@ PlayerPredicate.Builder.checkAdvancementDone	skip:java		builder
 PlayerPredicate.Builder.checkAdvancementCriterions	skip:java		builder
 PlayerPredicate.Builder.build	skip:java		builder
 PlayerPredicate.StatMatcher.createTypedCodec	skip:java		codec
-RaiderPredicate.matches	missing		minor: type_specific/raider is not read in entity(); no vanilla advancement uses it
-SheepPredicate.matches	missing		minor: type_specific/sheep is not read; no vanilla advancement uses it
+RaiderPredicate.matches	inline	crates/horizon-world/src/loot.rs::Context::entity_matches	the loot reader's minecraft:type_specific/raider arm: captain matches, and has_raid matches no raid running here; the advancement reader answers false for the key
+SheepPredicate.matches	inline	crates/horizon-world/src/loot.rs::Context::entity_matches	the loot reader's minecraft:type_specific/sheep arm, the sheared flag; the advancement reader answers false for the key
 SteppingOnPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	gap: minor: no on-ground test; the block is read 0.5 below the feet
 TargetedEntityPredicate.matches	missing		minor: targeted_entity key is not read; no vanilla advancement uses it
 TeamPredicate.matches	missing		minor: team key is not read though scoreboard teams exist; no vanilla advancement uses it
