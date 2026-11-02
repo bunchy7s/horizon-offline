@@ -6,11 +6,15 @@
 //!
 //! The summaries live in Anvil region files (`r.X.Z.mca`, one NBT record a
 //! chunk), under `server-terrain/<server>/<hashed seed>/<namespace>/<level>/`.
-//! Past what it has, the server's BlueMap may fill in (`bluemap`).
+//! A chunk it doesn't have may be in the player's Bobby cache of the same
+//! level (`Bobby`), only ever read; past both, the server's BlueMap may fill
+//! in (`bluemap`).
 use crate::{
+    blocks::BlockFacts,
     bluemap::{BlueMap, Found},
+    chunk::Chunk,
     fast_hash::FxHashMap,
-    lod::{Column, Span, Spans, Surface},
+    lod::{Column, Span, Spans, Surface, state_kinds, summarize},
     streaming::{LodDetail, LodSampler, LodSource},
 };
 use horizon_core::position::ChunkPos;
@@ -70,6 +74,67 @@ pub fn level_dir(root: &Path, address: &str, hashed_seed: i64, level: &str) -> P
         .join(level_path(level))
 }
 
+/// The official launcher's game folder (`HORIZON_MINECRAFT_DIR` if set),
+/// where Bobby keeps its cache (`.bobby`): as
+/// `horizon_prepare::artifacts::minecraft_dir` finds it, which this crate
+/// can't depend on.
+pub fn minecraft_dir() -> PathBuf {
+    let home = || {
+        let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+        std::env::var_os(var).map_or_else(|| PathBuf::from("."), PathBuf::from)
+    };
+    if let Some(dir) = std::env::var_os("HORIZON_MINECRAFT_DIR").filter(|d| !d.is_empty()) {
+        let dir = PathBuf::from(dir);
+        if let Ok(rest) = dir.strip_prefix("~") {
+            return home().join(rest);
+        }
+        return dir;
+    }
+    if cfg!(target_os = "macos") {
+        home().join("Library/Application Support/minecraft")
+    } else if cfg!(windows) {
+        std::env::var_os("APPDATA")
+            .map_or_else(home, PathBuf::from)
+            .join(".minecraft")
+    } else {
+        home().join(".minecraft")
+    }
+}
+
+/// Bobby's folder of a level under `root` (`.bobby`), as Bobby leaves it on
+/// disk: `<address as typed, ':' as '_'>/<hashed seed>/<namespace>/<path>`.
+/// Names are compared without case, and `host` and `host_25565` both stand
+/// for the default port: neither was seen, so both are taken.
+pub fn bobby_level_dir(
+    root: &Path,
+    address: &str,
+    hashed_seed: i64,
+    level: &str,
+) -> Option<PathBuf> {
+    let typed = address.trim().replace(':', "_");
+    let bare = typed.strip_suffix("_25565").unwrap_or(&typed);
+    if bare.is_empty() {
+        return None;
+    }
+    let names = [bare.to_owned(), format!("{bare}_25565")];
+    let mut servers: Vec<PathBuf> = std::fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| names.iter().any(|n| n.eq_ignore_ascii_case(name)))
+        })
+        .map(|entry| entry.path())
+        .collect();
+    servers.sort();
+    servers
+        .into_iter()
+        .map(|server| server.join(hashed_seed.to_string()).join(level_path(level)))
+        .find(|dir| dir.is_dir())
+}
+
 /// `<namespace>/<path>` of a level key.
 fn level_path(level: &str) -> PathBuf {
     let (namespace, path) = level.split_once(':').unwrap_or(("minecraft", level));
@@ -104,25 +169,61 @@ type Regions = FxHashMap<(i32, i32), Option<Region>>;
 #[derive(Default)]
 struct State {
     regions: Regions,
+    /// Bobby's, opened read-only.
+    bobby: Regions,
     /// `None`: the chunk isn't stored.
     chunks: FxHashMap<(i32, i32), Option<Columns>>,
 }
 
+/// A saved full chunk with its stored light, or `None` (`save::decode_lit`
+/// in the game).
+pub type DecodeChunk = Box<dyn Fn(&NamedTag) -> Option<Chunk> + Send + Sync>;
+
+/// The chunks the player's Bobby kept of the same level: vanilla chunk NBT
+/// in region files, as Bobby leaves them on disk. Only ever read; a chunk
+/// far terrain needs from there is kept in the level's own folder.
+pub struct Bobby {
+    dir: PathBuf,
+    decode: DecodeChunk,
+    /// `lod::state_kinds`, to summarize its chunks as loaded ones are.
+    kinds: Vec<u8>,
+}
+
+impl Bobby {
+    pub fn new(dir: PathBuf, decode: DecodeChunk, facts: &BlockFacts) -> Self {
+        Self {
+            dir,
+            decode,
+            kinds: state_kinds(facts),
+        }
+    }
+}
+
 /// One level's stored terrain, shared by the far-terrain threads. A chunk
-/// it doesn't have comes from the server's BlueMap, if the player named it
-/// or Find BlueMap found it.
+/// it doesn't have comes from Bobby's cache, else the server's BlueMap, if
+/// the player named it or Find BlueMap found it.
 pub struct ServerTerrain {
     dir: PathBuf,
     blue_map: Option<Arc<BlueMap>>,
+    bobby: Option<Bobby>,
     state: Mutex<State>,
     warned: std::sync::atomic::AtomicBool,
 }
 
 impl ServerTerrain {
     pub fn new(dir: PathBuf, blue_map: Option<Arc<BlueMap>>) -> Arc<Self> {
+        Self::with_bobby(dir, blue_map, None)
+    }
+
+    pub fn with_bobby(
+        dir: PathBuf,
+        blue_map: Option<Arc<BlueMap>>,
+        bobby: Option<Bobby>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             dir,
             blue_map,
+            bobby,
             state: Mutex::default(),
             warned: Default::default(),
         })
@@ -152,8 +253,8 @@ impl ServerTerrain {
         self.kept(x, z, side).1
     }
 
-    /// How many of the `side` × `side` chunks from `(x, z)` are stored, and
-    /// the one nearest their middle (`nearest`).
+    /// How many of the `side` × `side` chunks from `(x, z)` are stored here
+    /// or in Bobby's cache, and the one nearest their middle (`nearest`).
     fn kept(&self, x: i32, z: i32, side: i32) -> (usize, Option<(i32, i32)>) {
         let mut state = self.state.lock().unwrap();
         let middle = (x * 2 + side, z * 2 + side);
@@ -161,8 +262,15 @@ impl ServerTerrain {
         let mut best: Option<(i64, (i32, i32))> = None;
         for rz in z >> 5..=(z + side - 1) >> 5 {
             for rx in x >> 5..=(x + side - 1) >> 5 {
-                let present = region(&mut state.regions, &self.dir, (rx, rz))
+                let mut present = region(&mut state.regions, &self.dir, (rx, rz))
                     .map_or([false; 1024], |r| r.present);
+                if let Some(bobby) = &self.bobby
+                    && let Some(theirs) = read_only(&mut state.bobby, &bobby.dir, (rx, rz))
+                {
+                    for (here, there) in present.iter_mut().zip(theirs.present) {
+                        *here |= there;
+                    }
+                }
                 for (i, _) in present.iter().enumerate().filter(|(_, p)| **p) {
                     let (cx, cz) = (rx * 32 + (i % 32) as i32, rz * 32 + (i / 32) as i32);
                     if cx < x || cz < z || cx >= x + side || cz >= z + side {
@@ -183,23 +291,12 @@ impl ServerTerrain {
         (count, best.map(|(_, chunk)| chunk))
     }
 
-    /// A stored chunk's columns.
+    /// A stored chunk's columns, else Bobby's (kept here from then on).
     pub fn chunk(&self, x: i32, z: i32) -> Option<Columns> {
-        let key = (x >> 5, z >> 5);
-        let here = {
-            let mut state = self.state.lock().unwrap();
-            if let Some(known) = state.chunks.get(&(x, z)) {
-                return known.clone();
-            }
-            read(region(&mut state.regions, &self.dir, key), x, z)
-        };
-        // A record of another game version or layout is none.
-        let columns = here.and_then(|record| {
-            record
-                .nbt(Limits::default())
-                .ok()
-                .and_then(|root| decode(&root.tag))
-        });
+        if let Some(known) = self.state.lock().unwrap().chunks.get(&(x, z)) {
+            return known.clone();
+        }
+        let columns = self.stored(x, z).or_else(|| self.bobby_chunk(x, z));
         let mut state = self.state.lock().unwrap();
         // Stored by another thread meanwhile (`write`): that, newer than
         // what was read here.
@@ -208,6 +305,51 @@ impl ServerTerrain {
         }
         remember(&mut state, (x, z), columns.clone());
         columns
+    }
+
+    /// The chunk's record in the level's own folder; one of another game
+    /// version or layout is none.
+    fn stored(&self, x: i32, z: i32) -> Option<Columns> {
+        let record = {
+            let mut state = self.state.lock().unwrap();
+            read(
+                region(&mut state.regions, &self.dir, (x >> 5, z >> 5)),
+                x,
+                z,
+            )
+        }?;
+        record
+            .nbt(Limits::default())
+            .ok()
+            .and_then(|root| decode(&root.tag))
+    }
+
+    /// A chunk in Bobby's cache, summarized and kept here. One of another
+    /// game version, or that doesn't decode, is none.
+    fn bobby_chunk(&self, x: i32, z: i32) -> Option<Columns> {
+        let bobby = self.bobby.as_ref()?;
+        let (record, kept) = {
+            let mut state = self.state.lock().unwrap();
+            let key = (x >> 5, z >> 5);
+            let kept =
+                region(&mut state.regions, &self.dir, key).is_some_and(|r| r.present[slot(x, z)]);
+            (
+                read(read_only(&mut state.bobby, &bobby.dir, key), x, z),
+                kept,
+            )
+        };
+        let record = record?;
+        let root = record.nbt(Limits::default()).ok()?;
+        if root.tag.get("DataVersion") != Some(&Tag::Int(DATA_VERSION)) {
+            return None;
+        }
+        let chunk = (bobby.decode)(&root).filter(|chunk| (chunk.x, chunk.z) == (x, z))?;
+        let columns = summarize(&chunk, &bobby.kinds);
+        // Not over a chunk the server sent while this one was decoded.
+        if let Err(e) = self.write((x, z), &columns, Some(kept)) {
+            self.warn_once(&e);
+        }
+        Some(columns)
     }
 
     /// A chunk couldn't be kept (disk full, a folder it can't write): said
@@ -220,16 +362,29 @@ impl ServerTerrain {
 
     /// Keep a chunk's columns, unless they are what is stored already.
     pub fn store(&self, key: (i32, i32), columns: &Columns) -> std::io::Result<()> {
-        if self
-            .chunk(key.0, key.1)
-            .is_some_and(|old| *old == **columns)
-        {
+        let known = self.state.lock().unwrap().chunks.get(&key).cloned();
+        let old = known.unwrap_or_else(|| {
+            let old = self.stored(key.0, key.1);
+            let mut state = self.state.lock().unwrap();
+            if !state.chunks.contains_key(&key) {
+                remember(&mut state, key, old.clone());
+            }
+            old
+        });
+        if old.is_some_and(|old| *old == **columns) {
             return Ok(());
         }
-        self.write(key, columns)
+        self.write(key, columns, None)
     }
 
-    fn write(&self, (x, z): (i32, i32), columns: &Columns) -> std::io::Result<()> {
+    /// `kept`: whether the chunk's record was in the folder before; the
+    /// columns aren't written over one another thread kept meanwhile.
+    fn write(
+        &self,
+        (x, z): (i32, i32),
+        columns: &Columns,
+        kept: Option<bool>,
+    ) -> std::io::Result<()> {
         let root = NamedTag {
             name: "".into(),
             tag: encode(x, z, columns),
@@ -237,6 +392,14 @@ impl ServerTerrain {
         let record = ChunkRecord::from_nbt(&root, Compression::Zlib, now(), Limits::default())?;
         let mut state = self.state.lock().unwrap();
         let key = (x >> 5, z >> 5);
+        if let Some(kept) = kept
+            && (matches!(state.chunks.get(&(x, z)), Some(Some(_)))
+                || (!kept
+                    && region(&mut state.regions, &self.dir, key)
+                        .is_some_and(|r| r.present[slot(x, z)])))
+        {
+            return Ok(());
+        }
         if region(&mut state.regions, &self.dir, key).is_none() {
             std::fs::create_dir_all(&self.dir)?;
             let file = RegionFile::open_writable(region_path(&self.dir, key), true)?;
@@ -256,12 +419,26 @@ fn region_path(dir: &Path, (rx, rz): (i32, i32)) -> PathBuf {
 
 /// A region of `dir`, opened on first use.
 fn region<'a>(regions: &'a mut Regions, dir: &Path, key: (i32, i32)) -> Option<&'a mut Region> {
+    open(regions, key, || {
+        RegionFile::open_writable(region_path(dir, key), false)
+    })
+}
+
+/// A region of Bobby's `dir`, opened for reading only.
+fn read_only<'a>(regions: &'a mut Regions, dir: &Path, key: (i32, i32)) -> Option<&'a mut Region> {
+    open(regions, key, || RegionFile::open(region_path(dir, key)))
+}
+
+fn open(
+    regions: &mut Regions,
+    key: (i32, i32),
+    file: impl FnOnce() -> std::io::Result<RegionFile>,
+) -> Option<&mut Region> {
     if !regions.contains_key(&key) {
         if regions.len() >= MAX_REGIONS {
             regions.clear();
         }
-        let file = RegionFile::open_writable(region_path(dir, key), false);
-        regions.insert(key, file.ok().map(Region::new));
+        regions.insert(key, file().ok().map(Region::new));
     }
     regions.get_mut(&key)?.as_mut()
 }
@@ -662,6 +839,159 @@ mod tests {
             other.reduced_column(-16, 32, 16),
             Column::reduced(&columns, 0, 0, 16)
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn bobby_folders_follow_the_address_as_typed() {
+        let root = scratch("bobby-folders");
+        for dir in [
+            "127.0.0.1/-9030034075591913594/minecraft/overworld",
+            "127.0.0.1/-9030034075591913594/minecraft/the_nether",
+            "127.0.0.1/4696776658964135993/minecraft/overworld",
+            "localhost_25566/-7181178862026813658/minecraft/overworld",
+            "Play.Example.net_25565/5/minecraft/overworld",
+        ] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        let find = |address: &str, seed: i64, level: &str| {
+            bobby_level_dir(&root, address, seed, level)
+                .map(|dir| dir.strip_prefix(&root).unwrap().to_owned())
+        };
+        let overworld = "minecraft:overworld";
+        let first = Some(PathBuf::from(
+            "127.0.0.1/-9030034075591913594/minecraft/overworld",
+        ));
+        assert_eq!(find("127.0.0.1", -9030034075591913594, overworld), first);
+        assert_eq!(
+            find("127.0.0.1:25565", -9030034075591913594, overworld),
+            first
+        );
+        assert_eq!(
+            find("127.0.0.1", -9030034075591913594, "minecraft:the_nether"),
+            Some(PathBuf::from(
+                "127.0.0.1/-9030034075591913594/minecraft/the_nether"
+            ))
+        );
+        assert_eq!(
+            find("127.0.0.1", 4696776658964135993, overworld),
+            Some(PathBuf::from(
+                "127.0.0.1/4696776658964135993/minecraft/overworld"
+            ))
+        );
+        let other_port = Some(PathBuf::from(
+            "localhost_25566/-7181178862026813658/minecraft/overworld",
+        ));
+        assert_eq!(
+            find("localhost:25566", -7181178862026813658, overworld),
+            other_port
+        );
+        assert_eq!(
+            find("LocalHost:25566", -7181178862026813658, overworld),
+            other_port
+        );
+        assert_eq!(
+            find("play.example.net", 5, overworld),
+            Some(PathBuf::from(
+                "Play.Example.net_25565/5/minecraft/overworld"
+            ))
+        );
+        // Another world behind the address, another dimension, another port.
+        assert_eq!(find("127.0.0.1", 1111, overworld), None);
+        assert_eq!(
+            find("127.0.0.1", -9030034075591913594, "minecraft:the_end"),
+            None
+        );
+        assert_eq!(find("localhost", -7181178862026813658, overworld), None);
+        assert_eq!(
+            find("localhost:25567", -7181178862026813658, overworld),
+            None
+        );
+        assert_eq!(find("", 0, overworld), None);
+        assert_eq!(
+            bobby_level_dir(&root.join("none"), "127.0.0.1", 0, overworld),
+            None
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A Bobby-shaped region of chunk records, written with `version`.
+    fn bobby_region(dir: &Path, chunks: &[(i32, i32)], version: i32) {
+        std::fs::create_dir_all(dir).unwrap();
+        let (rx, rz) = (chunks[0].0 >> 5, chunks[0].1 >> 5);
+        let mut file = RegionFile::open_writable(region_path(dir, (rx, rz)), true).unwrap();
+        for &(x, z) in chunks {
+            let root = NamedTag {
+                name: "".into(),
+                tag: Tag::compound([
+                    ("DataVersion", Tag::Int(version)),
+                    ("Status", Tag::String("full".into())),
+                    ("xPos", Tag::Int(x)),
+                    ("zPos", Tag::Int(z)),
+                ]),
+            };
+            let record = ChunkRecord::from_nbt(&root, Compression::Zlib, 0, Limits::default());
+            file.write(ChunkPos::new(x, z), &record.unwrap()).unwrap();
+        }
+    }
+
+    /// Stone from y 60 to 70 in every column (the game decodes vanilla chunk NBT
+    /// with `save::decode_lit`; its palettes are tested there).
+    fn stone(root: &NamedTag) -> Option<Chunk> {
+        let (Some(Tag::Int(x)), Some(Tag::Int(z))) = (root.tag.get("xPos"), root.tag.get("zPos"))
+        else {
+            return None;
+        };
+        let mut chunk = Chunk::empty(*x, *z);
+        for i in 0..256 {
+            for y in 60..70 {
+                chunk.set(i & 15, y, i >> 4, 1);
+            }
+        }
+        Some(chunk)
+    }
+
+    #[test]
+    fn chunks_only_bobby_has_are_read_once_and_kept() {
+        let dir = scratch("server-terrain-bobby");
+        let (own, theirs) = (dir.join("own"), dir.join("bobby"));
+        bobby_region(&theirs, &[(-3, 5), (-2, 5), (-1, 6)], DATA_VERSION);
+        bobby_region(&theirs.join("old"), &[(-3, 5)], DATA_VERSION - 1);
+        let region = region_path(&theirs, (-1, 0));
+        let before = std::fs::read(&region).unwrap();
+        // State 0 air, state 1 a kept block (`lod::state_kinds`).
+        let bobby = |dir: &Path| Bobby {
+            dir: dir.to_owned(),
+            decode: Box::new(stone),
+            kinds: vec![4, 1],
+        };
+        let terrain = ServerTerrain::with_bobby(own.clone(), None, Some(bobby(&theirs)));
+        // Counted for wide cells before they are read.
+        assert_eq!(terrain.kept(-4, 4, 4), (3, Some((-3, 5))));
+        let expected = summarize(
+            &stone(&NamedTag {
+                name: "".into(),
+                tag: Tag::compound([("xPos", Tag::Int(-2)), ("zPos", Tag::Int(5))]),
+            })
+            .unwrap(),
+            &[4, 1],
+        );
+        assert!(expected[0].surface.is_some());
+        assert_eq!(terrain.chunk(-2, 5), Some(expected.clone()));
+        assert_eq!(terrain.chunk(-2, 6), None);
+        let mut sampler = terrain.clone().sampler();
+        assert_eq!(sampler.column(-2 * 16 + 3, 5 * 16), expected[3]);
+        drop(sampler);
+        drop(terrain);
+        // Kept in the level's own folder; Bobby's left as it was.
+        let kept = ServerTerrain::new(own.clone(), None);
+        assert_eq!(kept.chunk(-2, 5), Some(expected));
+        assert_eq!(kept.chunk(-3, 5), None);
+        assert_eq!(std::fs::read(&region).unwrap(), before);
+        // Another game version's chunk is none.
+        let old =
+            ServerTerrain::with_bobby(dir.join("own-old"), None, Some(bobby(&theirs.join("old"))));
+        assert_eq!(old.chunk(-3, 5), None);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
