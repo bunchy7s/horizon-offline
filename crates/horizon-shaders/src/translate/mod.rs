@@ -1025,16 +1025,19 @@ fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Modul
     };
     // naga's frontend refuses a few things GL takes: a scalar's swizzle (`f.x`, GLSL 4.20), a
     // matrix column's component written to (`m[1].y =`) and `min`/`max`/`clamp` of a `uint` and
-    // integer literals. Each refusal is rewritten where naga points, and the source parsed again.
+    // integer literals, and a function prototype declared again. Each refusal is rewritten where
+    // naga points, and the source parsed again.
     let mut text = std::borrow::Cow::Borrowed(text);
     let mut tries = 0;
     let module = loop {
         tries += 1;
         match Frontend::default().parse(&Options::from(stage.kind), &text) {
             Ok(m) => break m,
-            Err(e) => match (e.errors.iter())
-                .find_map(|e| scalar_swizzle(&text, e).or_else(|| unsigned_literals(&text, e)))
-            {
+            Err(e) => match e.errors.iter().find_map(|e| {
+                scalar_swizzle(&text, e)
+                    .or_else(|| unsigned_literals(&text, e))
+                    .or_else(|| repeated_prototype(&text, e))
+            }) {
                 Some(fixed) if tries < 256 => text = fixed.into(),
                 _ => return parse(&text),
             },
@@ -1129,6 +1132,33 @@ fn unsigned_literals(text: &str, e: &naga::front::glsl::Error) -> Option<String>
         i += 1;
     }
     changed.then(|| format!("{}{out}{}", &text[..r.start], &text[r.end..]))
+}
+
+/// `text` without the function prototype naga's frontend refused as declared before (`e`): GLSL
+/// lets a function be declared again (packs include the same helper's prototype from two
+/// files). The prototype and its `;` turn to spaces, keeping lines where they are; one with
+/// qualifiers before its type (naga's span starts at the type) is left alone.
+fn repeated_prototype(text: &str, e: &naga::front::glsl::Error) -> Option<String> {
+    if e.kind.to_string() != "Prototype already defined" {
+        return None;
+    }
+    let r = e.meta.to_range()?;
+    let end = r.end + text.get(r.end..)?.find(';')? + 1;
+    if !text.get(r.end..end - 1)?.trim().is_empty() {
+        return None;
+    }
+    let before = text.get(..r.start)?.trim_end();
+    let line = &before[before.rfind('\n').map_or(0, |n| n + 1)..];
+    let boundary =
+        before.is_empty() || before.ends_with([';', '}']) || line.trim_start().starts_with('#');
+    if !boundary {
+        return None;
+    }
+    let blank: String = text[r.start..end]
+        .chars()
+        .map(|c| if c == '\n' { '\n' } else { ' ' })
+        .collect();
+    Some(format!("{}{blank}{}", &text[..r.start], &text[end..]))
 }
 
 /// Where the operand that ends right before byte `end` begins: a name, a call or an index (with
@@ -1823,6 +1853,48 @@ mod tests {
             Target::Buffers,
         )
         .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
+    /// A function may be declared again (GLSL 4.60, 6.1), before or after its definition: Bloop
+    /// includes the same helper's prototype from two files.
+    #[test]
+    fn functions_declared_again_translate() {
+        let fsh = "#version 330\nuniform float k;\nout vec4 c;\n\
+                   float f(float x);\nfloat f(float x);\nvec2 g(vec2 v, float s);\n\
+                   float f(float x) { return x * 2.0; }\nfloat f(float x);\n\
+                   vec2 g(vec2 v, float s) { return v * s; }\nvec2 g(vec2 v,\n       float s);\n\
+                   void main() { c = vec4(f(k), g(vec2(k), 3.0), 1.0); }\n";
+        let p = program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        for name in ["f", "g"] {
+            assert!(
+                (p.fragment.functions.iter()).any(|(_, f)| f.name.as_deref() == Some(name)),
+                "{name} missing"
+            );
+        }
+    }
+
+    /// A prototype declared again leaves the lines after it where they were: an error below it
+    /// still names its own line.
+    #[test]
+    fn errors_after_a_prototype_declared_again_keep_their_line() {
+        let fsh = "#version 330\nout vec4 c;\nfloat f(float x);\nfloat f(float x\n);\n\
+                   float f(float x) { return x; }\nvoid main() { c = vec4(f(nowhere)); }\n";
+        let errors = program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .err()
+        .expect("`nowhere` is not declared");
+        assert!(
+            errors
+                .iter()
+                .all(|e| e.line == 7 && e.message.contains("nowhere")),
+            "{errors:?}"
+        );
     }
 
     /// `if (c) return; else ...` keeps its `else`: the statements the translation guards with
