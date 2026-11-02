@@ -4,7 +4,11 @@
       "name": "tnt_primed",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_tnt_primed",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ],
   "rust_summary": "TNT about to be lit, cancellable (`native_tnt_primed`).",

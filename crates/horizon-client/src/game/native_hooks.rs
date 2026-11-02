@@ -2822,7 +2822,7 @@ impl Game<'_> {
         pos: [i32; 3],
         cancel: &mut bool,
     ) {
-        let _ = (player, pos, cancel);
+        mod_api::dispatch_tnt_primed(self, mod_api::mods(), player, pos, cancel);
     }
     /// A server player's fishing rod, with `state`: 0 the cast
     /// (`FishingRodItem.use` throwing the bobber), 1 a fish biting
