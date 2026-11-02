@@ -338,6 +338,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 Class::Leaves => {
                     if !b.table.bool(state, p.persistent) && b.table.int(state, p.distance) == 7 {
+                        if !self.level.allow_leaves_decay(pos) {
+                            continue;
+                        }
                         self.drop_resources(state, pos);
                         self.remove_block(pos, false);
                     }

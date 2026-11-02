@@ -338,6 +338,9 @@ pub trait LevelAccess {
     fn allow_block_burn(&self, _pos: BlockPos) -> bool {
         true
     }
+    fn allow_leaves_decay(&self, _pos: BlockPos) -> bool {
+        true
+    }
     fn allow_note_play(&self, _pos: BlockPos, _instrument: &str, _note: i32) -> bool {
         true
     }

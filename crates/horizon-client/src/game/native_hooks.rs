@@ -576,6 +576,18 @@ impl GameLevel<'_> {
         let _ = (dimension, pos, fluid, from, to, cancel);
     }
 
+    /// A non-persistent leaf block at distance 7 is about to decay at `pos`.
+    /// Set `cancel` to keep it. Server-side. @API:native_leaves_decay@.
+    #[inline(always)]
+    pub(super) fn native_leaves_decay(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        cancel: &mut bool,
+    ) {
+        let _ = (dimension, pos, cancel);
+    }
+
     /// The Ender Dragon fight is about to place its first dragon egg at `pos`.
     /// Set `cancel` to leave the block unchanged. Server-side. @API:native_dragon_egg_form@.
     #[inline(always)]
