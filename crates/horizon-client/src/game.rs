@@ -3806,6 +3806,8 @@ impl Game<'_> {
         velocity: [f64; 3],
         pickup_delay: u32,
     ) {
+        let item = stack.item.clone();
+        let count = stack.count as i32;
         self.next_entity += 1;
         let p = Vec3::new(position[0], position[1], position[2]);
         // ItemEntity.bobOffs comes from the entity's own random, not the level's.
@@ -3832,6 +3834,8 @@ impl Game<'_> {
         // ServerLevel.addFreshEntity.
         if !self.native_entity_joins(self.next_entity, "minecraft:item", position, false) {
             self.dropped.pop();
+        } else {
+            self.native_item_spawn(self.next_entity, &item, count, position);
         }
     }
     /// The block entity at `pos` saved with its id and position

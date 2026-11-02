@@ -3647,6 +3647,18 @@ impl Game<'_> {
         let _ = (player, name, from, to);
     }
 
+    /// A dropped item entity was successfully added to the server level.
+    /// @API:native_item_spawn@.
+    pub(super) fn native_item_spawn(
+        &mut self,
+        entity: u32,
+        item: &str,
+        count: i32,
+        pos: [f64; 3],
+    ) {
+        let _ = (entity, item, count, pos);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
