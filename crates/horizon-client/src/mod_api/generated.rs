@@ -4512,6 +4512,24 @@ pub trait Hooks: Send + Sync {
     fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
         let _ = event;
     }
+    /// Two animals bred and a baby is about to be made (NeoForge's
+    /// `BabyEntitySpawnEvent`, vanilla's `Animal.spawnChildFromBreeding`):
+    /// `parent` and `partner` are entity ids, `player` the UUID of the
+    /// player who fed them into love (0 when none), `kind` the baby's type
+    /// (a horse and a donkey have a mule). Set `cancel` for no baby: the
+    /// parents still rest and lose their love (their ages were already set
+    /// to 6000), but there is no baby, no experience, no `animals_bred`
+    /// statistic, no advancement and no heart particles, as NeoForge
+    /// returns before `finalizeSpawnChildFromBreeding`. Not fired for
+    /// turtles, frogs and sniffers (an egg, no baby), villagers or
+    /// armadillos' own paths. On the server. API @API:baby_entity_spawn@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn baby_entity_spawn(&self, host: &mut dyn Host, event: &mut BabyEntitySpawnEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
@@ -4533,6 +4551,20 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         None
+    }
+    /// A slime or magma cube is dying and about to split into smaller ones
+    /// (NeoForge's `MobSplitEvent`, vanilla's `Slime.remove`): `parent` is
+    /// its entity id, `kind` its type, `size` its size, `child_size` the
+    /// size of the children (half of it) and `count` how many vanilla drew
+    /// (2 to 4). A mod may change `count` (0 spawns none, at most 64) or set
+    /// `cancel` to spawn no children. Only for a parent above size 1; the
+    /// split's random draw is made first. On the server. API @API:mob_split@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn mob_split(&self, host: &mut dyn Host, event: &mut MobSplitEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
     }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
@@ -13871,6 +13903,39 @@ pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
         mod_hook.living_jump(&mut event);
     }
 }
+/// What [`Hooks::baby_entity_spawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BabyEntitySpawnEvent<'a> {
+    pub parent: u32,
+    pub partner: u32,
+    pub player: u128,
+    pub kind: &'a str,
+}
+pub fn dispatch_baby_entity_spawn(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    parent: u32,
+    partner: u32,
+    player: u128,
+    kind: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BabyEntitySpawnEvent {
+        parent,
+        partner,
+        player,
+        kind,
+    };
+    for mod_hook in super::entered(mods, "baby_entity_spawn") {
+        if matches!(mod_hook.baby_entity_spawn(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ComputeFovModifierEvent<'a> {
@@ -13916,6 +13981,43 @@ pub fn dispatch_item_container(
             break;
         }
     }
+}
+/// What [`Hooks::mob_split`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MobSplitEvent<'a> {
+    pub parent: u32,
+    pub kind: &'a str,
+    pub size: i32,
+    pub child_size: i32,
+    pub count: u32,
+}
+pub fn dispatch_mob_split(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    parent: u32,
+    kind: &str,
+    size: i32,
+    child_size: i32,
+    count: &mut u32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = MobSplitEvent {
+        parent,
+        kind,
+        size,
+        child_size,
+        count: *count,
+    };
+    for mod_hook in super::entered(mods, "mob_split") {
+        if matches!(mod_hook.mob_split(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *count = event.count;
 }
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
