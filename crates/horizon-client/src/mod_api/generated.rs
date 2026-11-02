@@ -4518,6 +4518,22 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Item `item` (`mod_id:name`) holds items (`Capabilities.Item.ITEM`): set
+    /// `slots` when the item is yours, for a backpack, a storage cell or a
+    /// toolbox. Clamped to 1..=256, `ItemContainerContents`' limit; 0 leaves
+    /// the item without slots, and vanilla's items have none. Asked at each
+    /// call of the item container helpers (`native_item_container_slots`,
+    /// `native_item_container_insert`, `native_item_container_extract`, in
+    /// `native_item_container.rs`). The contents are kept in the stack's
+    /// `minecraft:container`, as a shulker box item keeps them.
+    /// API @API:item_container@.
+    ///
+    /// Return `Some` to set `slots`; the first mod returning `Some` wins.
+    fn item_container(&self, host: &dyn Host, event: &mut ItemContainerEvent<'_>) -> Option<u32> {
+        let _ = host;
+        let _ = event;
+        None
+    }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
         let _ = host;
@@ -13873,6 +13889,28 @@ pub fn dispatch_compute_fov_modifier(
         mod_hook.compute_fov_modifier(host, &mut event);
     }
     *modifier = event.modifier;
+}
+/// What [`Hooks::item_container`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemContainerEvent<'a> {
+    pub item: &'a str,
+}
+pub fn dispatch_item_container(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    item: &str,
+    slots: &mut Option<u32>,
+) {
+    if slots.is_some() {
+        return;
+    }
+    let mut event = ItemContainerEvent { item };
+    for mod_hook in super::entered(mods, "item_container") {
+        if let Some(replacement) = mod_hook.item_container(host, &mut event) {
+            *slots = Some(replacement);
+            break;
+        }
+    }
 }
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
