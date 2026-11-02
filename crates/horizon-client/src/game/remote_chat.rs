@@ -180,7 +180,7 @@ impl Game<'_> {
     /// (isLocalPlayer), and only when the key pair changed: a new session
     /// (random id, chain from link 0) the server hears of at once.
     fn update_chat_session(&mut self) {
-        let Some(account) = auth::current() else {
+        let Some(account) = self.auth() else {
             return;
         };
         let Some(r) = self.remote.as_mut() else {
