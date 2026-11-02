@@ -13596,8 +13596,13 @@ impl Game<'_> {
                 &mut roll,
                 &mut pose_scale,
             );
-            let to_world =
-                to_world * native_hooks::hand_pose_matrix([x, y, z, pitch, yaw, roll, pose_scale]);
+            // No mod moved the hand (always so without one): no matrices to build.
+            let pose = [x, y, z, pitch, yaw, roll, pose_scale];
+            let to_world = if pose == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0] {
+                to_world
+            } else {
+                to_world * native_hooks::hand_pose_matrix(pose)
+            };
             // The main hand on its arm, the off hand on the other one.
             let left = self.settings.main_hand_left != (hand == Hand::Off);
             let Some(stack) = item else {
